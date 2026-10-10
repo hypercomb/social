@@ -19,7 +19,13 @@ is slow.
   1. **the page's publish domains** — the `host:<zone>` marks worn by the
      nearest branch at or above the page, every one of them, primary first:
      the same write doors a publish of that branch uses;
-  2. **your hosts pool** — the PRIMARY of `community:hosts`: the host you
+  2. **the meeting host** (2026-10-09) — the host a meeting link names
+     (`&host=`), kept in this tab's `hc:mesh-zone.host`. It is the room's own
+     choice, so it outranks your pool and is never passed over. Only a link
+     that names one sets it: a meeting point typed in the selector names
+     none (its domain was a guess, and a relay that takes no uploads would
+     have stranded every tile as a name);
+  3. **your hosts pool** — the PRIMARY of `community:hosts`: the host you
      added FIRST. A fresh install seeds `hypercomb.com` there, and nothing
      else. Adding a host to follow it never moves where your tiles go;
      removing the hosts ahead of one makes it the primary. A pool host that
@@ -27,7 +33,7 @@ is slow.
      never taken an upload and stays silent while your relay answers (a page
      where a heap should be, an upload blocked at its CORS preflight) — is
      passed over for the next one;
-  3. **the relay you meet at** — only when 1 and 2 have nothing usable, and
+  4. **the relay you meet at** — only when 1–3 have nothing usable, and
      only when its `hc:host` card says participants `all` or `zones`. A
      relay that sends no card hosts nobody.
 
@@ -408,6 +414,28 @@ quota, a target is missing, or the tab reloaded.
   neither fire nor cancel the joined tab's will.
 - A reload, a discarded tab and the Update pill keep the join. Closing the tab
   leaves. iOS may drop session storage when it kills a tab; tap the link again.
+- **The tab's meeting, whole, is the tab's too** (2026-10-09):
+  `sessionStorage['hc:mesh-zone']` = `{ room, secret, relay?, host?, code? }`,
+  written at join beside `hc:mesh-session`. A reload resumes in the tab's own
+  room at the tab's own meeting point; the origin-wide `hc:room` / `hc:secret`
+  only pre-fill a NEW tab. A joined tab dials only `relay` (with `code`, see
+  "The access code" below), so another tab's list, or a `/domain` change,
+  never moves it (`/domain` edits the page's own list, saved for every tab,
+  and never that tab's meeting point). A meeting point this page may not dial
+  (a loopback one opened from a real host) is not swapped for the default
+  relay: the tab meets nowhere and the connection says `refused:
+  'unreachable'`. A room store `set()` with an unchanged value is a no-op —
+  no write and no `change` — so nothing announces a spurious `{left}`.
+- **The {left} goes out on the socket it came in on.** A join into another
+  room at another meeting point moves the socket while the old room's `{left}`
+  is still being signed; the old socket stays open, deaf, for 2 s and carries
+  it there (nostr-mesh `#drain`), instead of the new point where nobody in the
+  old room listens. The outbound queue keys a replaceable event by its slot
+  AND its address, so the next room's `{alive}` never replaces it.
+- A page's first walk after a reload waits (at most 600 ms, beside its other
+  reads) for the relay to replay what this tab said there, so a full entry is
+  never re-said as a bare name. A join made in this page has said nothing
+  there and waits on no replay at all: nothing is added to a join.
 - Visited pages are not persisted, because where a person went is not
   recorded. After a reload the current page republishes at once. Other pages
   refresh when revisited, or lapse at their 90 s TTL.
@@ -542,11 +570,50 @@ frames are the relay's one NOTICE and the idle-only probes.
 
 ## The meeting link
 
-`https://hypercomb.io/#meet=<room>/<secret>/<page>/...`
+`https://hypercomb.io/#meet=<room>/<secret>[/<page>…][&relay=…][&host=…][&code=…]`
 
+- Every part is percent-encoded. The meeting point rides after the place as
+  `&key=value` pairs, only when the meeting is somewhere other than the
+  default relay (meeting-invite.ts `meetFragment` / `parseMeet`):
+  - `relay` — the meeting point, written as its FULL `wss://…` URL (a path
+    such as `/io` kept; `ws://` only to a loopback host). A bare
+    `pluginthematrix.com` is read as `wss://pluginthematrix.com`, never
+    written that way.
+  - `host` — the meeting host (the rule above), written `https://name.tld`.
+  - `code` — the meeting point's access code, an RFC 7230 token of at most
+    128 characters, and only beside a `relay`: a code with no meeting point
+    is dropped, never sent to the default relay.
+  - A pair that is not valid makes the whole link no link — never a quiet
+    join at the default. A link with no pairs reads exactly as it always did.
+- **An older package refuses a link with a meeting point.** Its parser splits
+  on `/` alone and refuses a part that decodes to a `/`; the full `wss://`
+  relay and the `https://` host guarantee one, so it does nothing — rather
+  than fold `&relay=…&code=…` into the secret and join another zone with the
+  code in a page name. meeting-link.spec.ts runs the published parser on
+  every shape this writes.
+- **The code goes nowhere but its meeting point.** It is in the link's
+  fragment (which never reaches a server), this tab's `hc:mesh-zone`, and
+  the dial's subprotocol to that one relay. No sheet, toast, log or effect
+  carries it, it never enters an invite bundle (a resource a host serves),
+  and the command line never records a line carrying one (`invite code <x>`,
+  a pasted link with `code=`) in its recall.
 - The facilitator makes it: joined, nothing selected, type `/invite`, or tap
-  Invite on the status line. The link is copied. With a selection, `invite`
-  still makes the bundle link as before.
+  Invite on the status line. The link is copied, with this tab's meeting
+  point, host and code. `invite wss://…` opens the selector on that point
+  with the cursor on the code; `invite code` opens the code field (a code
+  is never taken from the command line). With a selection, `invite` still
+  makes the bundle link as before (and that carries no meeting point).
+- **Already in that room at that meeting point** (a re-opened link, the
+  owner tapping their own invite): no sheet, just the walk to the page. But
+  a link that would CHANGE something asks first — a new meeting host (the
+  sheet names it), or a new code while the meeting point still lets this
+  tab in. A new code is taken quietly only while the meeting point is
+  refusing the tab's code (a recycle), and it is dialled at once.
+- The stash is kept until the sheet is answered, so a reload before the
+  answer keeps the link. A shell running a package from before the meeting
+  link answers it itself after a grace: the selector opens pre-filled with
+  the link's room, secret and meeting point — never its code
+  (`invite-capture.ts` `watchPendingMeet`).
 - The page segments are the ones the swarm actually hashes, so a pinned Home
   cannot split the room.
 - The fragment never reaches a server. The shell moves it into
@@ -726,6 +793,178 @@ Rollback:
   back to names only, with "No host keeps your tiles yet".
 - Essentials: re-stamp the previous package, then re-stage the apex.
 - Shell: revert on main.
+
+## Reads name an address
+
+THE SIGNATURES ARE THE ONLY THING THAT CAN BE QUERIED. relay.js and the
+always-online meeting point (below) answer the same way:
+
+- **A read names its addresses.** Every REQ filter names `#x` 64-hex
+  signatures (relay.js also takes exact `ids`); anything else — kinds only,
+  authors only, `{}`, a word, a malformed filter — is `CLOSED restricted:` or
+  `invalid:`, with nothing replayed and nothing heard live. A read costs the
+  index at its address, never a walk over the store. Caps: 10 filters and 16
+  addresses per REQ, 256 live addresses per connection. The mesh refuses to
+  read or write at anything but a signature itself (one warning per word),
+  and a doctrine ratchet forbids a word written into essentials as a mesh
+  address.
+- **A write names a signature too.** An event whose `x` is not 64-hex is
+  refused `restricted:` — bar the drained word below, for the broker's ask
+  and cancel (kinds 20400, 20402) only.
+- **`hc:live`**, the liveness probe, is answered EOSE and is never stored or
+  routed.
+- **`broker:fetch`**, the content broker's ask word on builds before the
+  room-scoped channel, is ROOM-SCOPED while those builds drain: an event on it
+  reaches a subscriber only when both connections are in one room, and
+  nothing on it is replayed. A connection is in the room of its own newest
+  unexpired `{alive}`, published on THAT connection — one room at a time, and
+  nothing else places it there: not a key that spoke on it (anyone can replay
+  a member's signed note, and that once put a stranger in the member's room)
+  and never a subscription. An ask sent before the connection's first beacon
+  (a first join, or an older build flushing its queue on a reopen) is held,
+  16 per connection for 3 s, and routed the moment it beacons.
+- **The card says so.** The `hc:host` card carries `addressed: true` only
+  where all of the above holds, and the content broker copies its asks onto
+  the word for older builds only where every relay the tab dials says it
+  (`relaysAddressed()`); on a relay without it, only after an older build has
+  been heard asking in the room. NIP-11 `limitation` names `max_addresses`,
+  `restricted_writes` and `access_code`.
+- **HTTP reads have one spelling.** relay.js serves a path only as written
+  in its canonical form: no `.`/`..`/`//`/`%2e`, no dotfile at any depth, a
+  signature segment only in lowercase, no `:` (a Windows stream such as
+  `<dir>::$INDEX_ALLOCATION`), no `~` (an 8.3 short name such as
+  `RECEIP~1`), no trailing dot or space — and the file the OS opened must
+  have exactly the asked path as its real, case-exact long path. Anything
+  under a directory that is not a listed pool answers exactly as an absent
+  path, so a 404 tells nobody which bags a host holds.
+
+### The access code on relay.js
+
+relay.js can be a meeting point behind a code too (the always-online one is
+below). Only `sha256(code)` is ever on disk:
+
+```bash
+node relay.js --new-access-code ./access-codes   # prints a fresh code ONCE, writes only its hash
+node relay.js --port 7777 … --access-codes ./access-codes
+node relay.js --destroy-access-codes ./access-codes   # empties the file: nobody is admitted
+```
+
+- `--access-codes <file>` (or env `ACCESS_CODES`) names a file of
+  `sha256(code)` lines. A dial carries the code as the subprotocol
+  `hc-access.<code>`; one without a listed code is accepted and closed
+  **4401** before any frame, the card included.
+- **Recycling** is `--new-access-code` again: the new code in, the old one
+  out. The running relay re-reads the file every second and on every
+  upgrade, and closes any session admitted under a hash no longer listed —
+  no restart, no redeploy. A missing file admits nobody.
+- Without `--access-codes` the relay echoes the offered subprotocol (a
+  browser needs that to finish the handshake) and ignores the code — the
+  home relay stays open as it always was.
+
+## The always-online meeting point
+
+jwize, 2026-10-09: "we need a host to use that is always online", and "just
+allow an access code that can be recycled". `wss://pluginthematrix.com` is a
+meeting point with no machine under it. The meeting link names it; no install
+defaults to it.
+
+- **What it is.** A memory-only relay in ONE Durable Object, in its own script
+  `hypercomb-meet` (`hypercomb-relay/meet-worker/`). It speaks what the swarm
+  speaks to relay.js: the `hc:host` card first, NIP-01/33 slots, NIP-40
+  expiry, ephemeral kinds, the per-connection budget, soft wills with their
+  15 s grace, and the address gate ("Reads name an address" above: the same
+  caps, write rule, room rule and ask hold, and the card says `addressed`).
+  Reads name a 64-hex `#x` and nothing else, so an `ids`-only filter is
+  refused here. `pluginthematrix-core` forwards it
+  three things at `MEET_HOSTS` through its `MEET` service binding: a WebSocket
+  upgrade on any path, the NIP-11 answer at `/`, and `/.well-known/hc-meet/*`.
+  The bytes stay on that worker: `PUT /<sig>` → R2, under `AUTO_GRANT`. It now
+  answers `stored <sig>` for an atom it already holds too, so that is a
+  receipt (above).
+- **The access code.** A dial carries it as the subprotocol
+  `hc-access.<code>`, which costs no extra round trip. The object keeps only
+  `sha256(code)`, in its own storage. A wrong, missing or retired code is
+  accepted and then closed with **4401** before a single frame. A browser can
+  read that close code; it cannot read the status of a refused upgrade. A
+  fresh object has no code, so it refuses everyone until its operator sets
+  one.
+- **The door stands in front of the object.** The one object carries every
+  room, and anyone can dial without a code, so the stateless front refuses
+  whatever it can before the object hears of it: a dial with no well-formed
+  code never reaches it, and a code is checked against the front's own copy
+  of the hash in force, asked of the object at most once a second per
+  isolate. A flood of dials costs the meeting one question a second. The
+  object still checks every dial it is handed (the copy may be a second
+  behind a recycle).
+- **Recycling** (becoming-a-host.md, "Keys are recycled"). Run
+  `node scripts/recycle-code.mjs` from `meet-worker/`:
+  - It makes a 192-bit code locally.
+  - It takes an operator key (nsec or hex) at a hidden prompt or on stdin,
+    signs once, and keeps the key nowhere.
+  - It posts only the hash, NIP-98 signed with the method, URL and body hash
+    bound. Only keys listed in `OPERATOR_KEYS` are accepted, and each recycle
+    must be newer than the one in force.
+  - It prints the code and a meeting link (the relay written as its full
+    `wss://` URL, so an older package refuses the link instead of joining
+    the wrong place).
+
+  **`OPERATOR_KEYS` is a key made for recycling alone, never the
+  publisher's.** A recycle key is typed or piped in every time, so it lands
+  where routine things land (shell history, a clipboard manager), and the
+  publisher key signs `install:essentials` — what every fresh install and
+  every floor move runs. `wrangler.meet.toml` ships it empty (every recycle
+  refused, the door shut), and `recycle-code.mjs` refuses the publisher key
+  outright.
+
+  The new code works the moment it is stored. Every socket that came in on
+  the old code is closed with 4401, and each of those participants' wills
+  waits out its grace like any dropped socket. There is no restart and no
+  redeploy. `--close` destroys the code with no successor.
+- **A reset is a relay restart.** While anyone is connected, a sweep timer
+  keeps the object in memory. It runs expiry, the 120 s idle reap (a Worker
+  cannot ping) and the minute line. If the object is evicted or redeployed,
+  every socket closes (or gets 1012 if the object wakes without its memory).
+  The client's reconnect ladder brings the room back, and heartbeats refill
+  the slots. Wills pending at the reset are lost, and NIP-40 expiry covers
+  them.
+
+**Deploy, in this order** (not yet run; deploy from a clean copy once this
+work is merged):
+
+1. `cd hypercomb-relay/meet-worker && npm ci && npx wrangler deploy --config wrangler.meet.toml`
+   creates the script, the `MeetingPoint` class and its SQLite migration. It
+   has no route and no workers.dev address.
+2. Make a recycle-only key, put its PUBLIC half in `OPERATOR_KEYS` in
+   `wrangler.meet.toml`, and deploy step 1 again (or set the var on the
+   script).
+3. In `blossom-worker/wrangler.pluginthematrix.toml`, uncomment the three
+   `[[services]] MEET` lines (`MEET_HOSTS = "pluginthematrix.com"` is
+   already there, inert without them), then
+   `cd ../blossom-worker && npm run deploy:pluginthematrix`. The binding
+   ships commented out on purpose: a deploy naming a script that does not
+   exist yet is refused whole — every site change and every
+   `npm run connect` with it.
+4. `node scripts/recycle-code.mjs` (in `meet-worker/`) sets the first code.
+   Until then the door stays shut.
+5. Check it: `curl -H 'Accept: application/nostr+json' https://pluginthematrix.com/`
+   should name `hypercomb-meet` with `access_code: true`. A dial with a made-up
+   code should close with 4401.
+
+To roll back, comment the three binding lines out again and redeploy
+`pluginthematrix-core`. A dial at the apex then gets the site, as before.
+
+**Cost on Workers Paid ($5 a month).** These are list prices as the
+investigation knew them, not fetched; check the pricing page.
+
+| Item | Included each month | This meeting point |
+|---|---|---|
+| Durable Object duration | 400k GB-s | About 10,800 GB-s a day, at most 324k a month: one 128 MB object resident around the clock. Nothing is billed while the room is empty and the object is evicted. |
+| Durable Object requests | 1M | One per upgrade, plus one per 20 incoming frames (outgoing frames are free). Clients send 9–150 frames a minute, so ten people for eight hours is under 40k a day. |
+| Storage | — | One row written per recycle, and nothing else. |
+| Worker requests | 10M | One per dial or recycle at `pluginthematrix-core`. |
+
+So the expected bill is the flat $5. Observability stays off on both scripts,
+because a dial's `Sec-WebSocket-Protocol` header carries the code.
 
 ## Related
 

@@ -2580,7 +2580,11 @@ async function putSig(request, env, sig) {
 
   const stored = await storeBlob(env, auth.pubkey, sig, body, request.headers.get('content-type'))
   if (stored.outcome === 'denied') return text(403, stored.reason)
-  if (stored.outcome === 'exists') return text(200, `already held ${sig}`)
+  // `stored <sig>` is the swarm's receipt (documentation/swarm-host.md, "The
+  // receipt"): the bytes hashed to the signature and the heap holds them —
+  // just as true of an atom already held. Any other body costs the swarm a
+  // read-back GET per atom, and peers share atoms all the time.
+  if (stored.outcome === 'exists') return text(200, `stored ${sig}`)
   return text(201, `stored ${sig}`)
 }
 
@@ -3634,6 +3638,29 @@ function serveNostrJson(request, site, asked) {
   })
 }
 
+// ── the always-online meeting point ──────────────────────────────────────────
+//
+// The swarm meets at wss://<meeting host> (documentation/swarm-host.md, "The
+// always-online meeting point"): a memory-only relay in ONE Durable Object in
+// its own script, hypercomb-meet (hypercomb-relay/meet-worker), reached through
+// the MEET service binding. At a host named in MEET_HOSTS this worker hands it
+// three things, untouched, and nothing else: a WebSocket upgrade on any path
+// (the access code rides its Sec-WebSocket-Protocol header and only the
+// meeting point reads it), the NIP-11 answer at `/`, and the operator's
+// recycle under /.well-known/hc-meet/. The bytes stay here: PUT /<sig> → R2.
+// With no binding or no MEET_HOSTS (tests, another deployment) nothing changes.
+const MEET_PATH = '/.well-known/hc-meet/'
+
+function meetingPointFor(request, env, url) {
+  if (typeof env?.MEET?.fetch !== 'function') return null
+  const host = url.hostname.toLowerCase()
+  if (!String(env.MEET_HOSTS || '').split(',').some((h) => h.trim().toLowerCase() === host)) return null
+  const upgrade = String(request.headers.get('upgrade') || '').toLowerCase() === 'websocket'
+  const info = url.pathname === '/' && /application\/nostr\+json/i.test(request.headers.get('accept') || '')
+  if (!upgrade && !info && !url.pathname.startsWith(MEET_PATH)) return null
+  return env.MEET.fetch(request)
+}
+
 // ── router ───────────────────────────────────────────────────────────────────
 
 export default {
@@ -3683,6 +3710,10 @@ export default {
     if (fromDoor && method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
       return text(403, 'a sandbox door writes nothing — do this from your own hive')
     }
+
+    // THE MEETING POINT — ahead of every route, so a dial pays no index read.
+    const meeting = meetingPointFor(request, env, requestUrl)
+    if (meeting) return meeting
 
     // Application domains run Core with a narrower host capability profile.
     // The relay host may accept signed writes; a published Core host never

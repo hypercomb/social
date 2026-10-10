@@ -27,7 +27,9 @@ import { HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, po
 import { registerPoolMeaning, sandboxDoorOf } from '@hypercomb/core'
 import { installedPackageSig, stampInstalledPackage } from '@hypercomb/runtime/installed-package'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
+import { installCandidates, readInstallChannel, type ChannelRead } from '@hypercomb/runtime/host-packages'
 import { cacheImportMap } from './resolve-import-map'
+import { shellInstallFollow, verifyIndexEvent } from './install-follow'
 
 export type BootStatus =
   | { kind: 'cached' }
@@ -210,8 +212,9 @@ export const ensureInstall = async (): Promise<void> => {
   // install. The boot path's job is:
   //
   //   1) If a usable cached install is on disk → boot from cache.
-  //   2) Otherwise → take the first package from the hosts carried (the
-  //      seed host when none) and, failing that, emit `install-needed`.
+  //   2) Otherwise → take the followed publisher's signed install root from
+  //      the hosts carried (the seed host when none) — their pool head when
+  //      the index cannot be read — and, failing that, emit `install-needed`.
   //
   // The previous behaviour fetched `/content/manifest.json` on every
   // single boot just to do a staleness diff against the cached sigs.
@@ -336,10 +339,10 @@ export const ensureInstall = async (): Promise<void> => {
 /**
  * COLD-BOOT ACQUISITION from the domains this participant carries.
  *
- * Asks every carried domain what it publishes and takes the newest package
- * anyone offers. No signature has to be known in advance — on a cold boot
- * there is none to know — so "newest" is the only available answer, and the
- * manifest's own `generation` counter is what orders it.
+ * Takes the root the followed publisher SIGNED as `install:<channel>` (the
+ * index the update scout reads), from the domains carried — and the first
+ * carried domain's pool head only when that index cannot be read, names
+ * nothing, or its root cannot be had yet. A forged index installs nothing.
  *
  * Silent on every failure. No carried domains, none reachable, none
  * publishing, an incomplete walk — all of them fall through to the welcome
@@ -413,34 +416,57 @@ export const installFromHosts = async (): Promise<boolean> => {
     const zones = door ? carried : carried.length ? carried : [...DEFAULT_HOST_ZONES]
     if (!zones.length) return false
 
-    // ASK EACH DOMAIN FOR ITS HEAD. Discovery is the pool at
-    // `sign('host:packages')` — an address every client derives for itself, so
-    // there is nothing published saying where to look and no catalogue to read
-    // (documentation/host-packages-pool.md).
+    // FOLLOW WHAT THE PUBLISHER SIGNED. A pool says what a domain holds, not
+    // what its publisher calls current, and it only moves when somebody
+    // restages the host: for ten days (2026-09-30 → 10-09) hypercomb.com's
+    // pool offered a Sep 30 build while the signed `install:essentials` named
+    // a newer one, and every cold install took the stale build. The signed
+    // index the update scout reads — same address, same pinned key — names
+    // the root first (runtime host-packages.ts readInstallChannel).
     //
-    // THE FIRST CARRIED DOMAIN THAT ANSWERS WINS, and the order is the
-    // participant's own. This used to be "newest wins", ranked by a counter
-    // the manifest stamped — but a counter is per-host bookkeeping, and asking
-    // two hosts to be comparable by it was always a fiction. Ranking ACROSS
-    // hosts is the signed sentinel's job; a host can only answer for itself.
-    // Nothing is risked by the simpler rule: every answer is content-addressed,
-    // so whichever host replies, the bytes verify or they are refused.
-    const heads = (await Promise.all(zones.map(async zone => {
-      try { return await headPackage(zone) } catch { return null }
-    }))).filter((offer): offer is NonNullable<typeof offer> => offer !== null)
-    if (!heads.length) return false
+    // A SANDBOX DOOR follows nothing: it runs exactly the package its own pool
+    // names, never the channel's.
+    //
+    // ASK EACH DOMAIN FOR ITS HEAD at the same time — the pool at
+    // `sign('host:packages')`, an address every client derives for itself
+    // (documentation/host-packages-pool.md). It is the fallback when the index
+    // cannot be read, and the byte source either way. THE FIRST CARRIED DOMAIN
+    // THAT ANSWERS WINS, in the participant's own order: ranking ACROSS hosts
+    // is the signed channel's job; a host can only answer for itself.
+    const unreachable: ChannelRead = { state: 'unreachable' }
+    const [channel, heads] = await Promise.all([
+      readInstallChannel(door ? null : shellInstallFollow(), verifyIndexEvent).catch(() => unreachable),
+      Promise.all(zones.map(async zone => {
+        try { return await headPackage(zone) } catch { return null }
+      })),
+    ])
+    const poolHead = heads.find((offer): offer is NonNullable<typeof offer> => offer !== null) ?? null
 
-    const newest = heads[0]!
-
-    EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
-    console.log(`[ensure-install] cold boot — acquiring ${newest.packageSig.slice(0, 12)}… from ${zones.join(', ')}`)
-
-    // Every domain that publishes it is a byte source for it.
-    const outcome = await acquire(newest.packageSig, zones)
-    if (!outcome.ok) {
-      console.warn('[ensure-install] cold acquisition incomplete —', outcome.error ?? `${outcome.holes.length} hole(s)`)
+    const { candidates, refused } = installCandidates(channel, poolHead)
+    if (refused) {
+      console.warn(`[ensure-install] cold boot — ${refused}`)
       return false
     }
+    if (!candidates.length) return false
+
+    EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
+
+    // The named root first; the pool head only if the root cannot be had from
+    // the domains asked — a publish advances the index at once, and the seed
+    // is restaged by hand, so the root may not be there yet. An older build
+    // that runs beats a welcome card, and the scout offers the root next.
+    let outcome: Awaited<ReturnType<typeof acquire>> | null = null
+    for (const candidate of candidates) {
+      console.log(
+        `[ensure-install] cold boot — acquiring ${candidate.packageSig.slice(0, 12)}… ` +
+        `(${candidate.via === 'channel' ? 'the signed install channel' : `${candidate.zone}'s packages pool`}) from ${zones.join(', ')}`,
+      )
+      // Every domain that publishes it is a byte source for it.
+      outcome = await acquire(candidate.packageSig, zones)
+      if (outcome.ok) break
+      console.warn(`[ensure-install] cold acquisition of ${candidate.packageSig.slice(0, 12)}… incomplete —`, outcome.error ?? `${outcome.holes.length} hole(s)`)
+    }
+    if (!outcome?.ok) return false
 
     // WAIT FOR THE SERVICE WORKER BEFORE RELOADING.
     //

@@ -1,80 +1,38 @@
+// core/secret-store.spec.ts — the secret is THIS tab's.
+//
+// Same contract as the room: the tab's own zone (sessionStorage
+// `hc:mesh-zone`) first, the origin-wide `hc:secret` only for a new tab, and
+// an unchanged set() is no event and no write.
+//
+// Runs against the real module; its module-scope register() is stubbed.
+
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-// Stub global `register` before importing
-;(globalThis as any).register = vi.fn()
+;(globalThis as { register?: unknown }).register = vi.fn()
 
-// We re-implement SecretStore inline to avoid the side-effect `register()` call
-// at module scope that depends on IoC. The logic is identical to the source.
+const { SecretStore } = await import('./secret-store')
 
 const KEY = 'hc:secret'
 const CLEARED_KEY = 'hc:secret-cleared'
-
-class SecretStore extends EventTarget {
-  #value: string
-  public get value(): string { return this.#value }
-
-  constructor() {
-    super()
-    this.#value = this.#read()
-    if (!this.#value && !this.#wasCleared()) {
-      const extracted = SecretStore.extractSubdomain()
-      if (extracted) this.set(extracted)
-    }
-  }
-
-  public set = (secret: string): void => {
-    const clean = (secret ?? '').trim()
-    this.#value = clean
-    this.#write(clean)
-    try {
-      if (clean) localStorage.removeItem(CLEARED_KEY)
-      else localStorage.setItem(CLEARED_KEY, '1')
-    } catch { /* ignore */ }
-    this.dispatchEvent(new Event('change'))
-  }
-
-  public clear = (): void => { this.set('') }
-
-  static extractSubdomain = (): string => {
-    const host = (window.location.hostname ?? '').toLowerCase().trim()
-    if (!host || host === 'localhost') return ''
-    if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return ''
-    const parts = host.split('.')
-    if (parts.length < 3) return ''
-    return parts.slice(0, -2).join('.')
-  }
-
-  #wasCleared = (): boolean => {
-    try { return localStorage.getItem(CLEARED_KEY) === '1' } catch { return false }
-  }
-
-  #read = (): string => {
-    try { return (localStorage.getItem(KEY) ?? '').trim() } catch { return '' }
-  }
-
-  #write = (v: string): void => {
-    try {
-      if (v) localStorage.setItem(KEY, v)
-      else localStorage.removeItem(KEY)
-    } catch { /* ignore */ }
-  }
-}
+const ZONE = 'hc:mesh-zone'
 
 describe('SecretStore', () => {
   beforeEach(() => {
     localStorage.clear()
+    sessionStorage.clear()
   })
 
-  it('starts empty when localStorage is empty and on localhost', () => {
+  it('starts empty when nothing is stored and on localhost', () => {
     const store = new SecretStore()
     expect(store.value).toBe('')
   })
 
-  it('set() persists to localStorage and updates value', () => {
+  it('set() persists to localStorage and this tab\'s zone, and updates value', () => {
     const store = new SecretStore()
     store.set('my-secret')
     expect(store.value).toBe('my-secret')
     expect(localStorage.getItem(KEY)).toBe('my-secret')
+    expect(JSON.parse(sessionStorage.getItem(ZONE)!)).toMatchObject({ secret: 'my-secret' })
   })
 
   it('set() trims whitespace', () => {
@@ -90,6 +48,15 @@ describe('SecretStore', () => {
     expect(store.value).toBe('')
     expect(localStorage.getItem(KEY)).toBeNull()
     expect(localStorage.getItem(CLEARED_KEY)).toBe('1')
+  })
+
+  it('clear() with nothing to clear still remembers the choice — and fires nothing', () => {
+    const store = new SecretStore()
+    const handler = vi.fn()
+    store.addEventListener('change', handler)
+    store.clear()
+    expect(localStorage.getItem(CLEARED_KEY)).toBe('1')
+    expect(handler).not.toHaveBeenCalled()
   })
 
   it('set() with a value removes the cleared flag', () => {
@@ -117,28 +84,41 @@ describe('SecretStore', () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
+  it('set() with the value it already holds fires nothing and writes nothing', () => {
+    const store = new SecretStore()
+    store.set('4417')
+    localStorage.setItem(KEY, 'another-tabs-secret')
+    const handler = vi.fn()
+    store.addEventListener('change', handler)
+    store.set('4417')
+    expect(handler).not.toHaveBeenCalled()
+    expect(localStorage.getItem(KEY)).toBe('another-tabs-secret')
+  })
+
   it('reads persisted value from localStorage on construction', () => {
     localStorage.setItem(KEY, 'persisted-secret')
     const store = new SecretStore()
     expect(store.value).toBe('persisted-secret')
   })
 
+  it('a tab with a zone of its own reads it, whatever another tab wrote since', () => {
+    sessionStorage.setItem(ZONE, JSON.stringify({ room: 'downtown', secret: 'downtown' }))
+    localStorage.setItem(KEY, 'xtab-b')
+    expect(new SecretStore().value).toBe('downtown')
+  })
+
   it('does not overwrite with subdomain when cleared flag is set', () => {
     localStorage.setItem(CLEARED_KEY, '1')
-    // On localhost, extractSubdomain returns '' anyway, but the cleared check runs first
     const store = new SecretStore()
     expect(store.value).toBe('')
   })
 
   describe('extractSubdomain()', () => {
     it('returns empty for localhost', () => {
-      // jsdom defaults to localhost
       expect(SecretStore.extractSubdomain()).toBe('')
     })
 
     it('returns empty for bare domain (2 parts)', () => {
-      // Can't easily change window.location.hostname in jsdom,
-      // so we test the static logic directly
       const original = Object.getOwnPropertyDescriptor(window, 'location')!
       Object.defineProperty(window, 'location', {
         value: { hostname: 'hypercomb.io' },

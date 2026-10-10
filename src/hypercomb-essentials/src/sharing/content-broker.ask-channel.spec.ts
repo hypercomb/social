@@ -181,4 +181,29 @@ describe('the drain: the older word, room-scoped by the relay', () => {
       { kind: 20400, sig: WORD, tags: [['d', 'f'.repeat(64)], ['t', 'layer'], ['asked', 'room']] },
     ])
   })
+
+  it('where the relay keeps the word inside the room, every ask is dual-published — an older holder that never asks is still asked', async () => {
+    membership.joined = true
+    enterRoom('alpha', 'secret')
+    const channel = await channelOf('alpha', 'secret')
+    let addressed = true
+    ;(mesh as unknown as { relaysAddressed: () => boolean }).relaysAddressed = () => addressed
+    const broker = await boot()
+    await vi.waitFor(() => expect(mesh.listening()).toEqual([channel, WORD].sort()))
+
+    // No older build has asked anything — and the ask still reaches the word.
+    expect(await broker.fetchBySig('a'.repeat(64), 'layer', 150)).toBeNull()
+    expect(mesh.asks()).toEqual([
+      { kind: 20400, sig: channel, tags: [['d', 'a'.repeat(64)], ['t', 'layer']] },
+      { kind: 20400, sig: WORD, tags: [['d', 'a'.repeat(64)], ['t', 'layer'], ['asked', 'room']] },
+    ])
+    expect(await broker.fetchVisualsAt('d'.repeat(64), 150)).toBeNull()
+    expect(mesh.asks().filter(p => p.tags.some(t => t[0] === 't' && t[1] === 'visuals')).map(p => p.sig)).toEqual([channel, WORD])
+
+    // A relay before the gate (the word heard by everyone): the room channel only.
+    addressed = false
+    mesh.published = []
+    expect(await broker.fetchBySig('b'.repeat(64), 'layer', 150)).toBeNull()
+    expect(mesh.asks().map(p => p.sig)).toEqual([channel])
+  })
 })

@@ -2722,5 +2722,20 @@
   "invite.meet.join.message-local": "加入房间“{room}”？你会看到这里的所有人。加入期间你添加的磁贴会与房间分享。",
   "invite.meet.join.confirm": "加入",
   "invite.meet.join.cancel": "暂不",
-  "host.no-host": "没有存放字节的地方（{reason}）— 请为此分支添加主机，或在主机面板中设置一个，然后重新发布。未发布任何内容。"
+  "host.no-host": "没有存放字节的地方（{reason}）— 请为此分支添加主机，或在主机面板中设置一个，然后重新发布。未发布任何内容。",
+  "invite.meet.join.message-at": "加入 {point} 的房间“{room}”？你会看到这里的所有人。加入期间你添加的磁贴会与房间分享，并由 {host} 保管。",
+  "invite.meet.join.message-at-local": "加入 {point} 的房间“{room}”？你会看到这里的所有人。加入期间你添加的磁贴会与房间分享。",
+  "invite.meet.copied-at": "会面链接已复制 — 任何打开它的人都会在 {point} 加入本页的 {room}。",
+  "invite.meet.shared-at": "会面链接已分享 — 任何打开它的人都会在 {point} 加入本页的 {room}。",
+  "invite.point.title": "会面点",
+  "invite.point.invalid": "这不是会面点 — 请写成 wss://name.tld（后面可以跟路径）。",
+  "invite.point.code-not-here": "访问码绝不从命令行读取 — 命令行会记住它执行的内容。请改为粘贴到选择器中。",
+  "mesh-modal.point-label": "会面点",
+  "mesh-modal.point-placeholder": "默认 — 或 wss://name.tld",
+  "mesh-modal.bad-point": "会面点是 wss://name.tld — 访问码需要一个会面点",
+  "mesh-modal.code-label": "访问码",
+  "mesh-modal.code-placeholder": "访问码（如果会面点需要）",
+  "mesh-modal.bad-code": "该访问码含有连接无法携带的字符（空格、逗号、斜杠……）",
+  "use-live-relay.too-many": "词太多：{words} — 请给出房间、密钥和一个 ws(s):// 服务器",
+  "use-live-relay.bad-server": "'{server}' 不是此标签页可以连接的服务器"
 }

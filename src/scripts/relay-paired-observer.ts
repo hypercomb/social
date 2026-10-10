@@ -4,6 +4,10 @@
 import { WebSocket } from 'ws'
 
 const RELAY = 'ws://localhost:7777'
+// The relay's address gate refuses a read that names no signature
+// (documentation/swarm-host.md, "Reads name an address"): name the
+// addresses to read, HC_X=<sig>,<sig> (a page sig, a lifecycle sig).
+const XS = String(process.env['HC_X'] || '').split(',').map(s => s.trim()).filter(s => /^[0-9a-f]{64}$/.test(s))
 const DURATION_MS = (Number(process.argv[2]) || 20) * 1000
 
 const ws = new WebSocket(RELAY)
@@ -11,7 +15,7 @@ const start = Date.now()
 
 ws.on('open', () => {
   console.log(`[paired-observer] connected, listening ${DURATION_MS / 1000}s for kind 29010`)
-  ws.send(JSON.stringify(['REQ', 'observer', { kinds: [29010] }]))
+  ws.send(JSON.stringify(['REQ', 'observer', { kinds: [29010], ...(XS.length ? { '#x': XS } : {}) }]))
 })
 
 const byVerbAndAge: Record<string, { count: number; freshest: number; oldest: number; samples: string[] }> = {}
@@ -21,6 +25,7 @@ ws.on('message', (raw) => {
   try {
     const msg = JSON.parse(String(raw))
     if (!Array.isArray(msg)) return
+    if (msg[0] === 'CLOSED') { console.error(`[paired] refused: ${msg[2]} — name the addresses: HC_X=<sig>,<sig>`); process.exit(1) }
     if (msg[0] !== 'EVENT') return
     const evt = msg[2] as { pubkey: string; created_at: number; tags?: string[][]; content?: string }
     const verb = (evt.tags ?? []).find(t => t[0] === 'verb')?.[1] ?? '?'

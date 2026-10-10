@@ -79,9 +79,13 @@
 // THE SWARM'S HOSTS ARE RESOLVED PER PAGE (documentation/swarm-host.md,
 // jwize 2026-10-07). A joined tab uploads the tiles it offers on a page to
 // that page's PUBLISH DOMAINS (the host marks of the nearest branch at or
-// above it), else to the primary host of its HOSTS POOL (`community:hosts`,
-// hypercomb.com seeded), else — only then, and only when its card allows
-// participants — to the RELAY it meets at. swarm-hosts.ts answers that from
+// above it), else to its MEETING HOST (the host the meeting this tab is in
+// named — its meeting link's, or the facilitator's own meeting point; this
+// tab's `hc:mesh-zone`), else to the primary host of its HOSTS POOL
+// (`community:hosts`, hypercomb.com seeded), else — only then, and only when
+// its card allows participants — to the RELAY it meets at. A changed meeting
+// host is a resolver 'change' like any other: the targets are re-judged and
+// what is owed re-staged. swarm-hosts.ts answers that from
 // caches, synchronously; nothing on connect, join or announce waits on it.
 // Each sig goes where it is SHOWN: a tile where its page goes, a branch's
 // subtree where the pages below go (#publicRoots), and what already went
@@ -95,9 +99,10 @@
 // retired `content.` face receipts (the same store); the meeting relay, however
 // it was named, has none. Its
 // receipt is the host's own answer when it says `stored <sig>` (the relay hashes
-// the body against the URL before it writes) — a statement about that sig, not
-// a bare 200 — so that answer skips the read-back GET. Every other answer
-// keeps the read-back.
+// the body against the URL before it writes) or `already held <sig>` (the
+// meeting point's worker, which found that sig already in its heap) — a
+// statement about that sig, not a bare 200 — so that answer skips the
+// read-back GET. Every other answer keeps the read-back.
 
 import { CHILD_SLOTS, EffectBus, SignatureService, registerPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
@@ -257,7 +262,8 @@ type SyncTarget = {
    *  Read only: new receipts are written under `hostHash`. */
   legacyHostHash?: string
   /** A swarm host (#swarmSources): owed what the pages it hosts offer now
-   *  (#owedBy); its PUT answer `stored <sig>` is the receipt, and unheld
+   *  (#owedBy); its PUT answer `stored <sig>` (or `already held <sig>`) is
+   *  the receipt, and unheld
    *  closure refs are vouched for by one HEAD to it. */
   swarm?: true
   /** Also a plain public-only target (the public host or a publish node):
@@ -2638,12 +2644,15 @@ export class HostSyncService extends EventTarget {
       // THE SWARM'S HOST ANSWERS FOR ITSELF. The relay hashes the body
       // against the URL before it writes, and says `stored <sig>` only after
       // the write — an answer naming the sig it verified and stored, which is
-      // not the bare 200 the silent-drop lesson is about. That answer is the
-      // receipt: no read-back GET. Any other 2xx body reads back as below.
+      // not the bare 200 the silent-drop lesson is about. The meeting point's
+      // worker says `already held <sig>` when that sig is in its heap already
+      // — the same statement about the same sig, made without a second write.
+      // Either answer is the receipt: no read-back GET. Any other 2xx body
+      // reads back as below.
       if (target.swarm) {
         let said = ''
         try { said = (await put.text()).trim() } catch { /* unreadable — read back */ }
-        if (said === `stored ${entry.sig}`) return (await this.#writeReceipt(entry.sig, target)) ? 'ok' : 'local'
+        if (said === `stored ${entry.sig}` || said === `already held ${entry.sig}`) return (await this.#writeReceipt(entry.sig, target)) ? 'ok' : 'local'
       }
       // Confirmed read-back: a fresh GET (cache-bypassing) must show the
       // host actually serving the sig. A bare PUT 200 is NOT proof — the

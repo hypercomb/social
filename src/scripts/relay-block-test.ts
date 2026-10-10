@@ -5,6 +5,10 @@
 import { WebSocket } from 'ws'
 
 const RELAY = 'ws://localhost:7777'
+// The relay's address gate refuses a read that names no signature
+// (documentation/swarm-host.md, "Reads name an address"): name the
+// addresses to read, HC_X=<sig>,<sig> (a page sig, a lifecycle sig).
+const XS = String(process.env['HC_X'] || '').split(',').map(s => s.trim()).filter(s => /^[0-9a-f]{64}$/.test(s))
 
 interface LayerEvent {
   kind: number
@@ -19,7 +23,7 @@ function countByPubkey(relay: string, durationMs: number): Promise<Record<string
     const ws = new WebSocket(relay)
     const byPk: Record<string, number> = {}
     ws.on('open', () => {
-      ws.send(JSON.stringify(['REQ', 'count', { kinds: [30200] }]))
+      ws.send(JSON.stringify(['REQ', 'count', { kinds: [30200], ...(XS.length ? { '#x': XS } : {}) }]))
     })
     ws.on('message', (raw) => {
       try {

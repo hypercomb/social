@@ -130,11 +130,14 @@ let pool: string[] | null = []
 let marks = new Map<string, string[]>()
 let participants: unknown = 'all'
 let originLoopback = false
+/** The host this tab's meeting named (its `hc:mesh-zone`), '' = none. */
+let meetingHost = ''
 const deps = {
   readPool: async () => pool,
   readMarks: async (segments: readonly string[]) => marks.get(segments.join('/')) ?? [],
   relay: () => ({ host: swarmHost, participants }),
   originLoopback: () => originLoopback,
+  meetingHost: () => meetingHost,
 }
 
 /** A service whose resolver has read the world (the root's answer, and any
@@ -172,6 +175,7 @@ beforeEach(() => {
   marks = new Map()
   participants = 'all'
   originLoopback = false
+  meetingHost = ''
   // The bus replays its last value to every new resolver: a pool an earlier
   // test announced must not become this test's pool.
   EffectBus.emit('hosts:render', { open: false, zones: [], loaded: false })
@@ -352,6 +356,31 @@ describe('the swarm host is a derived target', () => {
     expect(service.ensureSwarmTarget()).toBe('needs-host')
     registry.delete(MESH_KEY) // no mesh at all — tolerated, no target
     expect(service.ensureSwarmTarget()).toBe('needs-host')
+  })
+
+  it('the meeting point\'s "already held <sig>" is a receipt too — no read-back GET', async () => {
+    // The worker found the sig in its heap: the same statement about the same
+    // sig as `stored <sig>`, made without a second write.
+    const host = makeHost({ put: (_n, sig) => { host.held.set(sig, resources.get(sig)!); return { status: 200, body: `already held ${sig}` } } })
+    vi.stubGlobal('fetch', host.fetch)
+    const service = await make()
+    const s = await resource('{"name":"held already"}')
+    await service.markPublic(s, 'resource')
+    await quiesce(service, host)
+    expect(calls(host, 'PUT')).toEqual([`https://jwize.com/${s}`])
+    expect(calls(host, 'GET')).toEqual([])
+    expect(await receipts()).toEqual([`${s}.${await hostHash('jwize.com')}`])
+    expect(await service.isClosureAvailable(s, 'resource')).toBe(true)
+  })
+
+  it('"already held" naming ANOTHER sig is no receipt — it is read back', async () => {
+    const host = makeHost({ put: (_n, sig) => { host.held.set(sig, resources.get(sig)!); return { status: 200, body: `already held ${'0'.repeat(64)}` } } })
+    vi.stubGlobal('fetch', host.fetch)
+    const service = await make()
+    const s = await resource('{"name":"another sig"}')
+    await service.markPublic(s, 'resource')
+    await quiesce(service, host)
+    expect(calls(host, 'GET')).toEqual([`https://jwize.com/${s}`])
   })
 
   it('a 2xx without the relay\'s words is read back, like every other host', async () => {
@@ -818,6 +847,23 @@ describe('which host: publish domains, then the hosts pool, then the relay', () 
     expect(relay.fetch).not.toHaveBeenCalled()
     expect(await receipts()).toEqual([`${s}.${await hostHash('hypercomb.com')}`])
     expect(await service.isClosureAvailable(s, 'resource')).toBe(true)
+  })
+
+  it('a meeting that names its host uploads there — ahead of the pool\'s hypercomb.com, with the host\'s own receipt', async () => {
+    pool = ['hypercomb.com']
+    meetingHost = 'meet.example'
+    const meet = makeHost()
+    const apex = blossom()
+    vi.stubGlobal('fetch', router({ 'meet.example': meet, 'hypercomb.com': apex }))
+    const service = await make()
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['meet.example'], source: 'meeting', pending: false })
+    expect(service.swarmHosts()).toEqual(['meet.example'])
+    const s = await resource('{"name":"shared at the meeting point"}')
+    await service.markPublic(s, 'resource')
+    await quiesce(service, meet)
+    expect(calls(meet, 'PUT')).toEqual([`https://meet.example/${s}`])
+    expect(calls(meet, 'GET')).toEqual([]) // `stored <sig>` is the receipt
+    expect(apex.fetch).not.toHaveBeenCalled()
   })
 
   it('a pool host honours receipts earned on its zone\'s retired content face', async () => {

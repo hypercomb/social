@@ -196,6 +196,30 @@ nssm set hypercomb-relay AppParameters "C:\Projects\hypercomb\social\src\hyperco
 - To roll back, remove the flag and restart. Participants then share names
   only, and their status line says the host isn't taking uploads.
 
+### A meeting point behind an access code
+
+To run a relay.js for someone else's meetings behind a code that can be
+recycled (jwize, 2026-10-09: "just allow an access code that can be
+recycled"):
+
+```powershell
+node relay.js --new-access-code C:\hypercomb\access-codes    # prints the code ONCE; the file keeps only sha256(code)
+# then add to the service's AppParameters:
+#   --access-codes C:\hypercomb\access-codes                  (or env ACCESS_CODES)
+```
+
+- The code rides the dial as the WebSocket subprotocol `hc-access.<code>` —
+  no extra round trip. A dial without a listed code is closed **4401** before
+  any frame. Hand the code out only inside meeting links (`&relay=…&code=…`,
+  swarm-host.md, "The meeting link").
+- **Recycle** with `--new-access-code <file>` again: the new code in, the old
+  one out, in force within a second on the running relay, and every session
+  that came in on a code no longer listed is closed. No restart, no redeploy.
+  `--destroy-access-codes <file>` empties the file: nobody is admitted.
+- The code itself is never on disk, in a log or in the census line. Without
+  `--access-codes`, a relay ignores the subprotocol (and echoes it, so a
+  browser still connects): the home relay stays open.
+
 ### The NIP-11 check
 
 ```bash
@@ -203,7 +227,9 @@ curl -s -H "Accept: application/nostr+json" https://jwize.com
 ```
 
 `limitation.participant_uploads` is `"all"` for the bare flag, `"zones"` for a
-room list, and `false` when the flag is off. Then run
+room list, and `false` when the flag is off. `max_addresses` (16),
+`restricted_writes` and `access_code` say the address gate and the door are
+in force (swarm-host.md, "Reads name an address"). Then run
 `node scripts/swarm-preflight.cjs` from `src/`. It proves one participant
 upload end to end with a throwaway key.
 

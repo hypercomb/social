@@ -7,12 +7,16 @@
 // culprit.
 
 const WebSocket = require('ws')
+// The relay's address gate refuses a read that names no signature
+// (documentation/swarm-host.md, "Reads name an address"): name the
+// addresses to read, HC_X=<sig>,<sig> (a page sig, a lifecycle sig).
+const XS = String(process.env.HC_X || '').split(',').map(s => s.trim()).filter(s => /^[0-9a-f]{64}$/.test(s))
 
 const ws = new WebSocket('ws://localhost:7777')
 const events = []
 
 ws.on('open', () => {
-  ws.send(JSON.stringify(['REQ', 'hideprobe', { kinds: [30202] }]))
+  ws.send(JSON.stringify(['REQ', 'hideprobe', { kinds: [30202], ...(XS.length ? { '#x': XS } : {}) }]))
 })
 
 ws.on('message', (raw) => {
@@ -33,6 +37,7 @@ ws.on('message', (raw) => {
       expired: exp ? Number(exp) * 1000 < Date.now() : false,
     })
   }
+  if (msg[0] === 'CLOSED') { console.error(`[hideprobe] refused: ${msg[2]} — name the addresses: HC_X=<sig>,<sig>`); process.exit(1) }
   if (msg[0] === 'EOSE') {
     console.log(JSON.stringify({ hideEventCount: events.length, events }, null, 1))
     ws.close()

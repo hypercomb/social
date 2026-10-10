@@ -1577,4 +1577,33 @@ describe('doctrine ratchets', () => {
     assertRatchet(actual.sort(), [], 'origin-wide swarm flag read in essentials')
   })
 
+  it('a mesh address is a computed signature — never a word written into the source', () => {
+    // THE SIGNATURES ARE THE ONLY THING THAT CAN BE QUERIED (relay.js address
+    // gate, nostr-mesh #addressable): a relay refuses a read or a write at
+    // anything but a 64-hex signature, so a word handed to the mesh is a
+    // channel that is silently deaf — and on a relay before the gate, one
+    // every scanner could hear. An address is derived (sign(word \0 room \0
+    // secret), a layer sig), never written down: no string literal, and no
+    // string constant naming a word, as the address of subscribe,
+    // ensureStartedForSig, awaitReadyForSig or publish. The one entry is the
+    // content broker's drained ask word ('broker:fetch'); it leaves with the
+    // last build that asks there. The allowlist may only shrink.
+    const literal = /\.(?:subscribe|ensureStartedForSig|awaitReadyForSig)\(\s*['"`]|\.publish\(\s*[^,()]+,\s*['"`]/
+    const actual: string[] = []
+    for (const file of walk(join(ROOT, 'hypercomb-essentials/src'))) {
+      if (/\.spec\.ts$/.test(file)) continue
+      const code = stripComments(readFileSync(file, 'utf8'))
+      const where = relative(ROOT, file).replace(/\\/g, '/')
+      if (literal.test(code)) actual.push(where)
+      for (const m of code.matchAll(/\bconst\s+([A-Z][A-Z0-9_]*)\s*=\s*['"`]([^'"`]*)['"`]/g)) {
+        if (/^[0-9a-f]{64}$/.test(m[2])) continue
+        const use = new RegExp(`\\.(?:subscribe|ensureStartedForSig|awaitReadyForSig)\\(\\s*${m[1]}\\b|\\.publish\\(\\s*[^,()]+,\\s*${m[1]}\\b`)
+        if (use.test(code)) actual.push(`${where}:${m[1]}`)
+      }
+    }
+    assertRatchet(actual.sort(), [
+      'hypercomb-essentials/src/sharing/content-broker.boot.drone.ts:LEGACY_ASK_WORD',
+    ], 'mesh address written as a word')
+  })
+
 })

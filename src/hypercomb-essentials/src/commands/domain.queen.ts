@@ -89,7 +89,7 @@ export class DomainQueenBee extends QueenBee {
 
     // /domain clear — remove all
     if (trimmed.toLowerCase() === 'clear') {
-      mesh.configureRelays([], true)
+      this.#save(mesh, [])
       console.log('[/domain] All domains cleared')
       return
     }
@@ -123,27 +123,38 @@ export class DomainQueenBee extends QueenBee {
     }
   }
 
+  // THE PAGE'S OWN LIST, never the tab's live one. A tab joined at a meeting
+  // point dials that point alone (its hc:mesh-zone); saving its live list
+  // made that point — and no code — every other tab's default.
+  #own(mesh: any): string[] {
+    if (typeof mesh.ownRelays === 'function') return mesh.ownRelays()
+    return mesh.getDebug?.()?.relays ?? []
+  }
+
+  #save(mesh: any, urls: string[]): void {
+    if (typeof mesh.configureOwnRelays === 'function') mesh.configureOwnRelays(urls)
+    else mesh.configureRelays(urls, true)
+  }
+
   #add(mesh: any, url: string): void {
     if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
       console.warn(`[/domain] Invalid URL — must start with ws:// or wss://`)
       return
     }
 
-    const debug = mesh.getDebug?.()
-    const current: string[] = debug?.relays ?? []
+    const current = this.#own(mesh)
 
     if (current.includes(url)) {
       console.log(`[/domain] Already configured: ${url}`)
       return
     }
 
-    mesh.configureRelays([...current, url], true)
+    this.#save(mesh, [...current, url])
     console.log(`[/domain] Added: ${url}`)
   }
 
   #remove(mesh: any, url: string): void {
-    const debug = mesh.getDebug?.()
-    const current: string[] = debug?.relays ?? []
+    const current = this.#own(mesh)
     const next = current.filter(u => u !== url)
 
     if (next.length === current.length) {
@@ -151,7 +162,7 @@ export class DomainQueenBee extends QueenBee {
       return
     }
 
-    mesh.configureRelays(next, true)
+    this.#save(mesh, next)
     console.log(`[/domain] Removed: ${url}`)
   }
 }

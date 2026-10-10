@@ -31,6 +31,8 @@ type World = {
   relay: string
   participants: unknown
   loopback: boolean
+  /** The meeting host this tab's meeting named ('' = none). */
+  meeting?: string
   reads: { pool: number; marks: string[] }
 }
 
@@ -53,6 +55,7 @@ const depsOf = (w: World): SwarmHostDeps => ({
   },
   relay: () => ({ host: w.relay, participants: w.participants }),
   originLoopback: () => w.loopback,
+  meetingHost: () => w.meeting ?? '',
 })
 
 /** A resolver whose caches are warm for `pages`. */
@@ -152,6 +155,68 @@ describe('where a page\'s bytes go', () => {
     // A zone the participant NAMED may carry a port (a self-hosted machine).
     const selfHosted = await warmed(world({ pool: [], marks: new Map([['meetup', ['home.example.net:8443']]]) }), ['meetup'])
     expect(selfHosted.hostsFor(['meetup'])).toEqual({ hosts: ['home.example.net:8443'], source: 'publish', pending: false })
+  })
+})
+
+describe('the meeting host (jwize 2026-10-09: publish > meeting host > pool > relay)', () => {
+  it('a meeting that names its host: before the pool and the relay', async () => {
+    const r = await warmed(world({ meeting: 'meet.example' }), ['meetup'])
+    expect(r.hostsFor(['meetup'])).toEqual({ hosts: ['meet.example'], source: 'meeting', pending: false })
+    expect(r.hostsFor(null)).toEqual({ hosts: ['meet.example'], source: 'meeting', pending: false })
+  })
+
+  it('after the page\'s own publish domains', async () => {
+    const r = await warmed(world({ meeting: 'meet.example', marks: new Map([['shop', ['pointblank.example']]]) }), ['shop'], ['meetup'])
+    expect(r.hostsFor(['shop'])).toEqual({ hosts: ['pointblank.example'], source: 'publish', pending: false })
+    expect(r.hostsFor(['meetup']).hosts).toEqual(['meet.example'])
+  })
+
+  it('unread marks still make the answer wait — a publish domain could be nearer', async () => {
+    const w = world({ meeting: 'meet.example', unknownMarks: new Set(['shop']) })
+    const r = new SwarmHostResolver(depsOf(w))
+    expect(r.hostsFor(['shop'])).toEqual({ hosts: [], source: 'none', pending: true })
+  })
+
+  it('needs no pool read at all', async () => {
+    const w = world({ meeting: 'meet.example', pool: null })
+    const r = await warmed(w)
+    expect(r.hostsFor(null)).toEqual({ hosts: ['meet.example'], source: 'meeting', pending: false })
+  })
+
+  it('is the meeting\'s explicit choice: never passed over', async () => {
+    const r = await warmed(world({ meeting: 'meet.example' }))
+    r.markDown('meet.example', 'refused')
+    expect(r.hostsFor(null).hosts).toEqual(['meet.example'])
+  })
+
+  it('a loopback meeting host is a door only from a loopback page', async () => {
+    const remote = await warmed(world({ meeting: 'localhost:7801' }))
+    expect(remote.hostsFor(null).source).toBe('pool')
+    const local = await warmed(world({ meeting: 'localhost:7801', loopback: true }))
+    expect(local.hostsFor(null)).toEqual({ hosts: ['localhost:7801'], source: 'meeting', pending: false })
+  })
+
+  it('a meeting host that changes (a link joined, the selector) is news: the version moves and a change lands', async () => {
+    const w = world()
+    const r = await warmed(w)
+    expect(r.hostsFor(null).source).toBe('pool')
+    const before = r.version
+    const changed = vi.fn()
+    r.addEventListener('change', changed)
+    w.meeting = 'meet.example'
+    EffectBus.emit('mesh:zone', { relay: 'wss://meet.example' })
+    await settle()
+    expect(r.version).toBeGreaterThan(before)
+    expect(changed).toHaveBeenCalled()
+    expect(r.hostsFor(null)).toEqual({ hosts: ['meet.example'], source: 'meeting', pending: false })
+  })
+
+  it('the live read is this tab\'s zone (sessionStorage), never another tab\'s', () => {
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's', host: 'meet.example' }))
+    try {
+      expect(liveSwarmHostDeps.meetingHost?.()).toBe('meet.example')
+    } finally { sessionStorage.removeItem('hc:mesh-zone') }
+    expect(liveSwarmHostDeps.meetingHost?.()).toBe('')
   })
 })
 

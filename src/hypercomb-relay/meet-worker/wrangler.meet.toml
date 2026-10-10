@@ -1,0 +1,57 @@
+# hypercomb-meet — the always-online meeting point (worker.js).
+#
+# Its OWN script on purpose: a Durable Object resets whenever the script that
+# defines it is deployed, and pluginthematrix-core is redeployed for every site
+# change. Here a deploy happens only when the meeting point itself changes.
+#
+# NO ROUTE AND NO workers.dev ADDRESS. The only way in is pluginthematrix-core's
+# `[[services]] MEET` binding (wrangler.pluginthematrix.toml), which forwards
+# the meeting host's WebSocket upgrades, its NIP-11 answer and the recycle path
+# (/.well-known/hc-meet/code). So this script must be deployed FIRST: a deploy
+# of pluginthematrix-core whose service binding names a script that does not
+# exist yet is refused.
+#
+#   npx wrangler deploy --config wrangler.meet.toml       (from this folder)
+#
+# Nothing secret lives here. The access code's hash is in the object's own
+# storage, set by scripts/recycle-code.mjs; the operator's signing key never
+# leaves the operator's machine. Observability stays off: a dial carries the
+# code in its Sec-WebSocket-Protocol header, and request logs would keep it.
+
+name = "hypercomb-meet"
+main = "worker.js"
+compatibility_date = "2026-06-01"
+workers_dev = false
+preview_urls = false
+
+[[durable_objects.bindings]]
+name = "MEETING"
+class_name = "MeetingPoint"
+
+# SQLite-backed, as Cloudflare recommends for every new class. It writes one
+# row per recycle and nothing else: the meeting itself is memory only.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MeetingPoint"]
+
+[vars]
+# Keys (64-hex, comma separated) whose NIP-98 signature may recycle the access
+# code. Public keys only — the matching secret keys never come here.
+#
+# A RECYCLE-ONLY KEY, NEVER THE PUBLISHER'S. Recycling is routine and its key
+# is typed or piped into scripts/recycle-code.mjs every time, so it lands
+# where routine things land (shell history, a clipboard manager). The
+# publisher key (eacc0e65…) signs install:essentials — what every fresh
+# install and every floor move runs — so a recovered recycle key must never
+# be able to sign that. Make a key for this alone (any nostr key generator),
+# put its PUBLIC half here before the first deploy, and keep its secret half
+# with the operator. Empty, every recycle is refused (503) and the meeting
+# point stays shut; recycle-code.mjs also refuses the publisher key outright.
+OPERATOR_KEYS = ""
+# What the hc:host card tells clients about the byte host behind this meeting
+# point: pluginthematrix-core takes any signing key's PUT /<sig> (AUTO_GRANT=1,
+# 100 MB per key per 90 days), so "all". Keep it in step with that worker.
+PARTICIPANTS = "all"
+# Where the one object is created (only on its first request; later deploys
+# keep it where it is). Western North America: the people meeting today.
+LOCATION_HINT = "wnam"

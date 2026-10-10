@@ -164,6 +164,22 @@ id = "11e24dcda743413ab24397e936671641"
 binding = "HIVES"
 id = "186c91f7458b421abea02d7647f27821"
 
+# THE ALWAYS-ONLINE MEETING POINT (documentation/swarm-host.md). WebSocket
+# upgrades at MEET_HOSTS, their NIP-11 answer and /.well-known/hc-meet/* go to
+# the hypercomb-meet script (hypercomb-relay/meet-worker), which has no route
+# of its own.
+#
+# COMMENTED OUT UNTIL hypercomb-meet EXISTS ON THE ACCOUNT. A deploy of this
+# file naming a service that does not exist is refused whole — every site
+# change and every `npm run connect` with it. So the order is: deploy
+# hypercomb-meet (`npx wrangler deploy --config wrangler.meet.toml` in
+# meet-worker), THEN uncomment these three lines and deploy this worker.
+# Without the binding the worker serves exactly as before (meetingPointFor
+# falls through), so leaving it commented is always safe.
+# [[services]]
+# binding = "MEET"
+# service = "hypercomb-meet"
+
 [vars]
 # The front door every frontDoor apex serves: the shim host card, a static
 # Pages deployment (npm --prefix hypercomb-shim run host:deploy -- --project hypercomb-host).
@@ -180,6 +196,11 @@ SANDBOX_SHELL_ORIGIN = "https://hypercomb.io"
 # There is no visitor hold: a door opens only while the publisher's SIGNED
 # index names its lineage (worker.js "open is a signed mark"). Unpublish hides it.
 AUTO_GRANT = "1"
+# The hosts whose WebSocket dials are the meeting point's (the MEET binding
+# above): wss://pluginthematrix.com, on any path. Comma separated; a host must
+# also be routed to this worker. The meeting link names it — no install
+# defaults to it. Inert while the MEET binding above stays commented out.
+MEET_HOSTS = "pluginthematrix.com"
 DEFAULT_QUOTA_BYTES = "104857600"
 GRANT_TTL_DAYS = "90"
 AI_MODEL = "claude-haiku-4-5"

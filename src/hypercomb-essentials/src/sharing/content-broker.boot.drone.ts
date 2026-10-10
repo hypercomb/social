@@ -135,13 +135,22 @@ const SECRET_STORE_KEY = '@hypercomb.social/SecretStore'
 
 // DRAIN — builds before the room channel ask and listen on the WORD itself.
 // While a joined tab is in a room it still LISTENS there, so an older build's
-// ask is answered, and while it has heard an older build ask in the last
-// OLDER_ASKER_TTL_MS it also ASKS there, so an older build's bytes are still
-// reachable — that copy carries ROOM_COPY_TAG, and a current holder (which
-// heard the room copy) skips it. A relay with the address gate delivers the
-// word only between connections that beaconed the same zone and replays
-// nothing on it (relay.js ROOM_SCOPED_WORDS); a relay before it is the open
-// word it always was. Retire both with the last build that asks there.
+// ask is answered, and it DUAL-PUBLISHES its own asks there too, so an older
+// build's bytes are still reachable — that copy carries ROOM_COPY_TAG, and a
+// current holder (which heard the room copy) skips it. When:
+//   - on a relay whose card says its reads are ADDRESSED (mesh.relaysAddressed)
+//     — always. The gate delivers the word only between connections in the
+//     same room and replays nothing on it (relay.js ROOM_SCOPED_WORDS), so the
+//     copy tells nobody outside the room anything, and an older build that
+//     holds a picture but never asks is still asked. "In the same room" is a
+//     rule nobody can forge: a connection is in a room only by an {alive} it
+//     published itself at the room's lifecycle sig (relay.js zonesOf) — never
+//     by a key that spoke on it, since anyone can replay a member's signed
+//     note. The card's `addressed` came with that rule and only with it;
+//   - on a relay before the gate, where the word is heard by everyone — only
+//     while an older build has been heard asking in this room in the last
+//     OLDER_ASKER_TTL_MS (its own asks already go out there).
+// Retire both with the last build that asks there.
 const LEGACY_ASK_WORD = 'broker:fetch'
 const ROOM_COPY_TAG: string[] = ['asked', 'room']
 const OLDER_ASKER_TTL_MS = 10 * 60_000
@@ -406,6 +415,9 @@ interface MeshApi {
   // The broker uses this to serve 'visuals' requests without keeping
   // its own LRU — the mesh already does the work.
   getNonExpired?: (sig: string) => readonly { event: NostrEventLike }[]
+  // Every relay this tab dials said (in its card) that its reads are
+  // addressed — the drained word is room-scoped there (see DRAIN).
+  relaysAddressed?: () => boolean
 }
 
 interface SignerApi {
@@ -2445,7 +2457,11 @@ export class ContentBrokerDrone extends Drone {
     const mesh = this.#getMesh()
     if (!mesh?.publish) return Promise.resolve()
     const sent: Promise<unknown>[] = [mesh.publish(kind, channel, '', tags)]
-    if (this.#olderBuildsAsking()) sent.push(mesh.publish(kind, LEGACY_ASK_WORD, '', [...tags, ROOM_COPY_TAG]))
+    // DUAL-PUBLISH during the drain (see DRAIN): always where the word is
+    // room-scoped by the relay, else only while an older build is heard here.
+    let roomScoped = false
+    try { roomScoped = mesh.relaysAddressed?.() === true } catch { roomScoped = false }
+    if (roomScoped || this.#olderBuildsAsking()) sent.push(mesh.publish(kind, LEGACY_ASK_WORD, '', [...tags, ROOM_COPY_TAG]))
     return Promise.all(sent)
   }
 

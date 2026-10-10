@@ -2722,5 +2722,20 @@
   "invite.meet.join.message-local": "Entrare nella stanza «{room}»? Vedrai tutti quelli che sono qui. Le tessere che aggiungi mentre sei dentro sono condivise con la stanza.",
   "invite.meet.join.confirm": "Entra",
   "invite.meet.join.cancel": "Non ora",
-  "host.no-host": "Nessun posto dove mettere i byte ({reason}) — aggiungi un host a questo ramo, o impostane uno nel pannello degli host, poi pubblica di nuovo. Non è stato pubblicato nulla."
+  "host.no-host": "Nessun posto dove mettere i byte ({reason}) — aggiungi un host a questo ramo, o impostane uno nel pannello degli host, poi pubblica di nuovo. Non è stato pubblicato nulla.",
+  "invite.meet.join.message-at": "Entrare nella stanza «{room}» su {point}? Vedrai tutti quelli che sono qui. Le tessere che aggiungi mentre sei dentro sono condivise con la stanza e conservate da {host}.",
+  "invite.meet.join.message-at-local": "Entrare nella stanza «{room}» su {point}? Vedrai tutti quelli che sono qui. Le tessere che aggiungi mentre sei dentro sono condivise con la stanza.",
+  "invite.meet.copied-at": "Link della riunione copiato — chiunque lo apra entra in {room} su {point}, in questa pagina.",
+  "invite.meet.shared-at": "Link della riunione condiviso — chiunque lo apra entra in {room} su {point}, in questa pagina.",
+  "invite.point.title": "Punto d'incontro",
+  "invite.point.invalid": "Questo non è un punto d'incontro — indicalo come wss://name.tld (può seguire un percorso).",
+  "invite.point.code-not-here": "Il codice di accesso non viene mai preso dalla riga di comando — ricorda ciò che esegue. Incollalo invece nel selettore.",
+  "mesh-modal.point-label": "punto d'incontro",
+  "mesh-modal.point-placeholder": "quello predefinito — o wss://name.tld",
+  "mesh-modal.bad-point": "un punto d'incontro è wss://name.tld — e un codice di accesso ne richiede uno",
+  "mesh-modal.code-label": "codice di accesso",
+  "mesh-modal.code-placeholder": "codice di accesso, se il punto d'incontro lo chiede",
+  "mesh-modal.bad-code": "quel codice di accesso contiene un carattere che una connessione non può portare (uno spazio, una virgola, una barra…)",
+  "use-live-relay.too-many": "troppe parole: {words} — indica una stanza, un segreto e un server ws(s)://",
+  "use-live-relay.bad-server": "'{server}' non è un server che questa scheda può raggiungere"
 }

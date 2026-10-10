@@ -1,0 +1,26 @@
+{
+  "name": "@hypercomb/meet-worker",
+  "version": "0.1.0",
+  "description": "The always-online meeting point — a memory-only Nostr relay in one Durable Object, behind a recyclable access code",
+  "type": "module",
+  "main": "worker.js",
+  "scripts": {
+    "check": "node --check worker.js && node --check access.js && node --check meeting.js && node --check scripts/recycle-code.mjs",
+    "test": "node --test meeting.test.js worker.test.js",
+    "test:dev": "node --test meet.dev.test.js",
+    "dev": "wrangler dev --local --config wrangler.meet.toml",
+    "deploy": "wrangler deploy --config wrangler.meet.toml",
+    "recycle": "node scripts/recycle-code.mjs"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.9.0",
+    "@noble/hashes": "^1.8.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22.4.0"
+  },
+  "license": "AGPL-3.0-only"
+}

@@ -1,6 +1,15 @@
 // hypercomb-shared/core/secret-store.ts
-// Shared secret state — single localStorage key, readable by UI and initializers.
-// On first access, captures any subdomain-derived secret from the URL.
+// Secret state — THIS tab's, with the origin-wide localStorage key as the
+// pre-fill for a new tab. On first access, captures any subdomain-derived
+// secret from the URL.
+//
+// The tab's own zone (sessionStorage `hc:mesh-zone`, mesh-session.ts) wins:
+// a reload comes back with the secret this tab joined with, whatever another
+// tab wrote since. A set() records it in both places; setting the value it
+// already holds does nothing at all — no write, no 'change' (the swarm tears
+// down and resyncs on 'change', and a no-op save used to send a {left}).
+
+import { readMeshZone, writeMeshZone } from './mesh-session'
 
 const KEY = 'hc:secret'
 const CLEARED_KEY = 'hc:secret-cleared'
@@ -15,7 +24,7 @@ export class SecretStore extends EventTarget {
     super()
     this.#value = this.#read()
 
-    // if localStorage is empty and user hasn't explicitly cleared, try subdomain
+    // if nothing is stored and user hasn't explicitly cleared, try subdomain
     if (!this.#value && !this.#wasCleared()) {
       const extracted = SecretStore.extractSubdomain()
       if (extracted) this.set(extracted)
@@ -24,16 +33,18 @@ export class SecretStore extends EventTarget {
 
   public set = (secret: string): void => {
     const clean = (secret ?? '').trim()
+    if (clean === this.#value) return
     this.#value = clean
     this.#write(clean)
-    try {
-      if (clean) localStorage.removeItem(CLEARED_KEY)
-      else localStorage.setItem(CLEARED_KEY, '1')
-    } catch { /* ignore */ }
+    this.#markCleared(!clean)
+    writeMeshZone({ secret: clean })
     this.dispatchEvent(new Event('change'))
   }
 
+  /** Clearing is an explicit choice even when there is nothing to clear: it
+   *  is remembered, so no default is seeded over it later. */
   public clear = (): void => {
+    if (!this.#value) { this.#markCleared(true); return }
     this.set('')
   }
 
@@ -66,9 +77,19 @@ export class SecretStore extends EventTarget {
     try { return localStorage.getItem(CLEARED_KEY) === '1' } catch { return false }
   }
 
-  // ── localStorage ──────────────────────────────────────
+  #markCleared = (cleared: boolean): void => {
+    try {
+      if (cleared) localStorage.setItem(CLEARED_KEY, '1')
+      else localStorage.removeItem(CLEARED_KEY)
+    } catch { /* ignore */ }
+  }
 
+  // ── storage ───────────────────────────────────────────
+
+  /** The tab's own secret first, else the origin-wide one. */
   #read = (): string => {
+    const own = readMeshZone()?.secret
+    if (typeof own === 'string') return own.trim()
     try { return (localStorage.getItem(KEY) ?? '').trim() } catch { return '' }
   }
 

@@ -2722,5 +2722,20 @@
   "invite.meet.join.message-local": "Bergabung ke ruangan “{room}”? Kamu akan melihat semua orang di sini. Ubin yang kamu tambahkan selama bergabung dibagikan ke ruangan.",
   "invite.meet.join.confirm": "Bergabung",
   "invite.meet.join.cancel": "Tidak sekarang",
-  "host.no-host": "Tidak ada tempat untuk byte ({reason}) — tambahkan host ke cabang ini, atau atur satu di panel host, lalu terbitkan lagi. Tidak ada yang diterbitkan."
+  "host.no-host": "Tidak ada tempat untuk byte ({reason}) — tambahkan host ke cabang ini, atau atur satu di panel host, lalu terbitkan lagi. Tidak ada yang diterbitkan.",
+  "invite.meet.join.message-at": "Bergabung ke ruangan “{room}” di {point}? Kamu akan melihat semua orang di sini. Ubin yang kamu tambahkan selama bergabung dibagikan ke ruangan dan disimpan oleh {host}.",
+  "invite.meet.join.message-at-local": "Bergabung ke ruangan “{room}” di {point}? Kamu akan melihat semua orang di sini. Ubin yang kamu tambahkan selama bergabung dibagikan ke ruangan.",
+  "invite.meet.copied-at": "Tautan pertemuan disalin — siapa pun yang membukanya bergabung ke {room} di {point}, di halaman ini.",
+  "invite.meet.shared-at": "Tautan pertemuan dibagikan — siapa pun yang membukanya bergabung ke {room} di {point}, di halaman ini.",
+  "invite.point.title": "Titik temu",
+  "invite.point.invalid": "Itu bukan titik temu — tulis sebagai wss://name.tld (boleh diikuti path).",
+  "invite.point.code-not-here": "Kode akses tidak pernah diambil dari baris perintah — baris perintah mengingat apa yang dijalankannya. Tempel di pemilih saja.",
+  "mesh-modal.point-label": "titik temu",
+  "mesh-modal.point-placeholder": "bawaan — atau wss://name.tld",
+  "mesh-modal.bad-point": "titik temu berbentuk wss://name.tld — dan kode akses memerlukannya",
+  "mesh-modal.code-label": "kode akses",
+  "mesh-modal.code-placeholder": "kode akses, jika titik temu memintanya",
+  "mesh-modal.bad-code": "kode akses itu memuat karakter yang tidak bisa dibawa koneksi (spasi, koma, garis miring…)",
+  "use-live-relay.too-many": "terlalu banyak kata: {words} — berikan ruang, rahasia, dan server ws(s)://",
+  "use-live-relay.bad-server": "'{server}' bukan server yang bisa dihubungi tab ini"
 }

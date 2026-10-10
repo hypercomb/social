@@ -37,6 +37,7 @@ import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { isSelectOp, BRACKET_CMD_RE, normalizeSelectInput } from './select-ops'
 import { dispatchedCallsOf, viewCommandOf, type FeatureReading, type SpokenCall } from './remote-verbs'
+import { isSensitiveLine } from './command-history'
 import { parseTargetedKeywordsInput } from '../../core/targeted-keywords-input'
 
 const BUILTIN_SLASH: { behaviour: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
@@ -3525,7 +3526,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** Record an executed line. Newest first; consecutive repeats collapse. */
   #recordHistory(line: string): void {
     const entry = line.trim()
-    if (!entry || entry === this.#commandHistory[0]) { this.#historyIndex = -1; return }
+    // A line carrying an access code runs, and is never written down.
+    if (!entry || entry === this.#commandHistory[0] || isSensitiveLine(entry)) { this.#historyIndex = -1; return }
     this.#commandHistory = [entry, ...this.#commandHistory].slice(0, COMMAND_HISTORY_MAX)
     this.#historyIndex = -1
     this.#historyDraft = ''

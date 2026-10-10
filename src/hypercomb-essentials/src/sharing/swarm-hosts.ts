@@ -10,12 +10,17 @@
 //   1. PUBLISH DOMAINS — the `host:<zone>` marks worn by the nearest branch at
 //      or above the page (community-hosts.ts), every one of them, primary
 //      first: the same write doors a publish of that branch uses.
-//   2. THE HOSTS POOL — the participant's `community:hosts` pool (HostsDrone
+//   2. THE MEETING HOST — the host the meeting this tab is in named: its
+//      meeting link's `host`, or the facilitator's own meeting point
+//      (sessionStorage `hc:mesh-zone`, membership.ts — this tab's, so a
+//      reload keeps it and another tab's meeting never moves it). Like a
+//      publish domain it is an explicit choice, never passed over.
+//   3. THE HOSTS POOL — the participant's `community:hosts` pool (HostsDrone
 //      seeds hypercomb.com into an empty one): its PRIMARY, the host added
 //      first. A pool host that failed this session (it refused, is full, or
 //      did not answer while the relay did) is passed over for the next one —
 //      a host that cannot take uploads must never strand every tile as a name.
-//   3. THE RELAY YOU MEET AT — only when 1 and 2 have nothing usable, and only
+//   4. THE RELAY YOU MEET AT — only when 1-3 have nothing usable, and only
 //      when that relay's `hc:host` card said participants 'all' or 'zones'.
 //
 // HOT PATH: `hostsFor` is SYNCHRONOUS and reads caches only. Connect, join,
@@ -34,8 +39,9 @@
 import { EffectBus } from '@hypercomb/core'
 import { HOSTS_SEEDED_KEY, hostZone, hostsOfBranchKnown, listCommunityHostsInAddedOrder } from './community-hosts.js'
 import { foldContentLabel, isLoopbackHost } from './zone-door.js'
+import { tabMeetingHost } from './membership.js'
 
-export type SwarmHostSource = 'publish' | 'pool' | 'relay' | 'none'
+export type SwarmHostSource = 'publish' | 'meeting' | 'pool' | 'relay' | 'none'
 
 /** Where one page's bytes go. `hosts` are write doors, primary first. */
 export interface SwarmHostChoice {
@@ -62,6 +68,9 @@ export interface SwarmHostDeps {
   relay(): { host: string; participants: unknown }
   /** Is this page itself loopback? */
   originLoopback(): boolean
+  /** The meeting host this tab's meeting named ('' when none). A local,
+   *  synchronous read. */
+  meetingHost?(): string
 }
 
 const STORE_KEY = '@hypercomb.social/Store'
@@ -134,6 +143,7 @@ export const liveSwarmHostDeps: SwarmHostDeps = {
   originLoopback: () => {
     try { return isLoopbackHost(globalThis.location?.host ?? '') } catch { return false }
   },
+  meetingHost: () => tabMeetingHost(),
 }
 
 const keyOf = (segments: readonly string[], length: number): string => segments.slice(0, length).join('\u0000')
@@ -189,7 +199,11 @@ export class SwarmHostResolver extends EventTarget {
   /** Bumped whenever any cached answer may differ — a cheap key for whoever
    *  memoizes over many lookups (host-sync's target set). */
   #version = 0
-  get version(): number { return this.#version }
+  get version(): number { this.#meetingDoor(); return this.#version }
+
+  /** The meeting host as last seen, so a change bumps the version (it is a
+   *  session read, with no signal of its own besides `mesh:zone`). */
+  #meetingSeen: string | undefined = undefined
 
   constructor(deps: SwarmHostDeps = liveSwarmHostDeps) {
     super()
@@ -243,6 +257,9 @@ export class SwarmHostResolver extends EventTarget {
       this.#relayAsked = false
       this.#changed()
     })
+    // THE MEETING POINT moved (a link joined, the selector, /use-live-relay):
+    // its host may have too.
+    EffectBus.on('mesh:zone', () => { this.#meetingDoor() })
     // ANOTHER TAB may have changed the pool or a branch's marks (membership is
     // per tab; the caches are this tab's). Coming back to this tab re-reads
     // them; an unchanged answer is no news.
@@ -295,10 +312,21 @@ export class SwarmHostResolver extends EventTarget {
       const doors = this.#usable(zones, true)
       if (doors.length > 0) return { hosts: doors, source: 'publish', pending: false }
     }
-    // 2. The hosts pool: its primary, unless it failed this session. Read
-    //    alongside unread marks, so the answer needs one wait, not two.
-    if (unknown || this.#pool === null) {
-      if (this.#pool !== null) return PENDING
+    // Unread marks could still name a nearer publish domain: nothing below
+    // them can answer yet. The pool is read alongside, so the answer needs
+    // one wait, not two.
+    if (unknown) {
+      if (this.#pool === null) {
+        if (ask) this.#askedPool = true
+        this.#refreshPool()
+      }
+      return PENDING
+    }
+    // 2. The meeting host — the host this tab's meeting named.
+    const meeting = this.#meetingDoor()
+    if (meeting) return { hosts: [meeting], source: 'meeting', pending: false }
+    // 3. The hosts pool: its primary, unless it failed this session.
+    if (this.#pool === null) {
       if (ask) this.#askedPool = true
       this.#refreshPool()
       return PENDING
@@ -307,7 +335,7 @@ export class SwarmHostResolver extends EventTarget {
     const passedOver = pool.filter(h => this.#down.has(h))
     const primary = pool.find(h => !this.#down.has(h))
     if (primary) return passedOver.length > 0 ? { hosts: [primary], source: 'pool', pending: false, passedOver } : { hosts: [primary], source: 'pool', pending: false }
-    // 3. The relay you meet at — last resort, and only when it said so.
+    // 4. The relay you meet at — last resort, and only when it said so.
     this.#relayAsked = true
     const { host, participants } = this.#deps.relay()
     const door = this.#usable([host])[0]
@@ -354,6 +382,21 @@ export class SwarmHostResolver extends EventTarget {
 
   /** Why a host is passed over ('' when it is not). */
   readonly downReason = (host: string): string => this.#down.get(host) ?? ''
+
+  /** The meeting host as a write door ('' when none, or not one this page
+   *  may use). A change since the last look bumps the version and is news. */
+  readonly #meetingDoor = (): string => {
+    let raw = ''
+    try { raw = String(this.#deps.meetingHost?.() ?? '') } catch { raw = '' }
+    const door = raw ? (this.#usable([raw], true)[0] ?? '') : ''
+    const seen = this.#meetingSeen
+    this.#meetingSeen = door
+    if (seen !== undefined && seen !== door) {
+      this.#version++
+      this.#changed()
+    }
+    return door
+  }
 
   // ── caches ──────────────────────────────────────────────────────────────
 

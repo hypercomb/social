@@ -2722,5 +2722,20 @@
   "invite.meet.join.message-local": "방 \"{room}\"에 참여할까요? 여기 있는 모든 사람이 보입니다. 참여 중에 추가한 타일은 방과 공유됩니다.",
   "invite.meet.join.confirm": "참여",
   "invite.meet.join.cancel": "나중에",
-  "host.no-host": "바이트를 둘 곳이 없습니다 ({reason}) — 이 분기에 호스트를 추가하거나 호스트 패널에서 설정한 뒤 다시 게시하세요. 아무것도 게시되지 않았습니다."
+  "host.no-host": "바이트를 둘 곳이 없습니다 ({reason}) — 이 분기에 호스트를 추가하거나 호스트 패널에서 설정한 뒤 다시 게시하세요. 아무것도 게시되지 않았습니다.",
+  "invite.meet.join.message-at": "{point}의 방 \"{room}\"에 참여할까요? 여기 있는 모든 사람이 보입니다. 참여 중에 추가한 타일은 방과 공유되며 {host}이(가) 보관합니다.",
+  "invite.meet.join.message-at-local": "{point}의 방 \"{room}\"에 참여할까요? 여기 있는 모든 사람이 보입니다. 참여 중에 추가한 타일은 방과 공유됩니다.",
+  "invite.meet.copied-at": "모임 링크를 복사했습니다 — 여는 사람은 누구나 {point}에서 이 페이지의 {room}에 참여합니다.",
+  "invite.meet.shared-at": "모임 링크를 공유했습니다 — 여는 사람은 누구나 {point}에서 이 페이지의 {room}에 참여합니다.",
+  "invite.point.title": "모임 장소",
+  "invite.point.invalid": "모임 장소가 아닙니다 — wss://name.tld 형식으로 입력하세요(경로를 붙여도 됩니다).",
+  "invite.point.code-not-here": "접속 코드는 명령줄에서 받지 않습니다 — 명령줄은 실행한 내용을 기억합니다. 대신 선택기에 붙여 넣으세요.",
+  "mesh-modal.point-label": "모임 장소",
+  "mesh-modal.point-placeholder": "기본값 — 또는 wss://name.tld",
+  "mesh-modal.bad-point": "모임 장소는 wss://name.tld입니다 — 접속 코드에는 모임 장소가 필요합니다",
+  "mesh-modal.code-label": "접속 코드",
+  "mesh-modal.code-placeholder": "모임 장소가 요구하는 경우의 접속 코드",
+  "mesh-modal.bad-code": "그 접속 코드에는 연결로 보낼 수 없는 문자가 있습니다(공백, 쉼표, 슬래시 등)",
+  "use-live-relay.too-many": "단어가 너무 많습니다: {words} — 방, 비밀, ws(s):// 서버를 입력하세요",
+  "use-live-relay.bad-server": "'{server}'은(는) 이 탭이 연결할 수 있는 서버가 아닙니다"
 }

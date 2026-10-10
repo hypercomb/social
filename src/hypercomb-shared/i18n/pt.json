@@ -2722,5 +2722,20 @@
   "invite.meet.join.message-local": "Entrar na sala “{room}”? Você verá todos que estão aqui. Os blocos que você adicionar enquanto estiver dentro são compartilhados com a sala.",
   "invite.meet.join.confirm": "Entrar",
   "invite.meet.join.cancel": "Agora não",
-  "host.no-host": "Não há onde colocar os bytes ({reason}) — adicione um host a esta ramificação, ou defina um no painel de hosts, e publique de novo. Nada foi publicado."
+  "host.no-host": "Não há onde colocar os bytes ({reason}) — adicione um host a esta ramificação, ou defina um no painel de hosts, e publique de novo. Nada foi publicado.",
+  "invite.meet.join.message-at": "Entrar na sala “{room}” em {point}? Você verá todos que estão aqui. Os blocos que você adicionar enquanto estiver dentro são compartilhados com a sala e guardados por {host}.",
+  "invite.meet.join.message-at-local": "Entrar na sala “{room}” em {point}? Você verá todos que estão aqui. Os blocos que você adicionar enquanto estiver dentro são compartilhados com a sala.",
+  "invite.meet.copied-at": "Link da reunião copiado — quem o abrir entra em {room} em {point}, nesta página.",
+  "invite.meet.shared-at": "Link da reunião compartilhado — quem o abrir entra em {room} em {point}, nesta página.",
+  "invite.point.title": "Ponto de encontro",
+  "invite.point.invalid": "Isso não é um ponto de encontro — informe como wss://name.tld (pode seguir um caminho).",
+  "invite.point.code-not-here": "O código de acesso nunca é tirado da linha de comando — ela lembra o que executa. Cole-o no seletor.",
+  "mesh-modal.point-label": "ponto de encontro",
+  "mesh-modal.point-placeholder": "o padrão — ou wss://name.tld",
+  "mesh-modal.bad-point": "um ponto de encontro é wss://name.tld — e um código de acesso precisa de um",
+  "mesh-modal.code-label": "código de acesso",
+  "mesh-modal.code-placeholder": "código de acesso, se o ponto de encontro pedir",
+  "mesh-modal.bad-code": "esse código de acesso tem um caractere que uma conexão não consegue levar (espaço, vírgula, barra…)",
+  "use-live-relay.too-many": "palavras demais: {words} — indique uma sala, um segredo e um servidor ws(s)://",
+  "use-live-relay.bad-server": "'{server}' não é um servidor que esta aba consegue alcançar"
 }

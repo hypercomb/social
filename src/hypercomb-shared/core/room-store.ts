@@ -1,6 +1,15 @@
 // hypercomb-shared/core/room-store.ts
-// Shared room state — single localStorage key, readable by UI and initializers.
-// On first access, captures any subdomain-derived room from the URL.
+// Room state — THIS tab's, with the origin-wide localStorage key as the
+// pre-fill for a new tab. On first access, captures any subdomain-derived
+// room from the URL.
+//
+// The tab's own zone (sessionStorage `hc:mesh-zone`, mesh-session.ts) wins:
+// a reload comes back in the room this tab was in, whatever another tab
+// wrote since. A set() records the room in both places; setting the value it
+// already holds does nothing at all — no write, no 'change' (the swarm tears
+// down and resyncs on 'change', and a no-op save used to send a {left}).
+
+import { readMeshZone, writeMeshZone } from './mesh-session'
 
 const KEY = 'hc:room'
 
@@ -14,7 +23,7 @@ export class RoomStore extends EventTarget {
     super()
     this.#value = this.#read()
 
-    // if localStorage is empty, try to extract from the current subdomain
+    // if nothing is stored, try to extract from the current subdomain
     if (!this.#value) {
       const extracted = RoomStore.extractSubdomain()
       if (extracted) this.set(extracted)
@@ -23,8 +32,10 @@ export class RoomStore extends EventTarget {
 
   public set = (room: string): void => {
     const clean = (room ?? '').trim()
+    if (clean === this.#value) return
     this.#value = clean
     this.#write(clean)
+    writeMeshZone({ room: clean })
     this.dispatchEvent(new Event('change'))
   }
 
@@ -57,9 +68,12 @@ export class RoomStore extends EventTarget {
     return sub
   }
 
-  // ── localStorage ──────────────────────────────────────
+  // ── storage ───────────────────────────────────────────
 
+  /** The tab's own room first, else the origin-wide one. */
   #read = (): string => {
+    const own = readMeshZone()?.room
+    if (typeof own === 'string') return own.trim()
     try { return (localStorage.getItem(KEY) ?? '').trim() } catch { return '' }
   }
 

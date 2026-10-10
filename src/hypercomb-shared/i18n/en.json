@@ -3363,5 +3363,20 @@
   "invite.meet.join.message-local": "Join the room “{room}”? You'll see everyone here. Tiles you add while joined are shared with the room.",
   "invite.meet.join.confirm": "Join",
   "invite.meet.join.cancel": "Not now",
-  "host.no-host": "Nowhere to put the bytes ({reason}) — add a host to this branch, or set one in the hosts panel, then publish again. Nothing was published."
+  "host.no-host": "Nowhere to put the bytes ({reason}) — add a host to this branch, or set one in the hosts panel, then publish again. Nothing was published.",
+  "invite.meet.join.message-at": "Join the room “{room}” at {point}? You'll see everyone here. Tiles you add while joined are shared with the room and kept by {host}.",
+  "invite.meet.join.message-at-local": "Join the room “{room}” at {point}? You'll see everyone here. Tiles you add while joined are shared with the room.",
+  "invite.meet.copied-at": "Meeting link copied — anyone who opens it joins {room} at {point}, on this page.",
+  "invite.meet.shared-at": "Meeting link shared — anyone who opens it joins {room} at {point}, on this page.",
+  "invite.point.title": "Meeting point",
+  "invite.point.invalid": "That is not a meeting point — give it as wss://name.tld (a path may follow).",
+  "invite.point.code-not-here": "The access code is never taken from the command line — it remembers what it runs. Paste it in the selector instead.",
+  "mesh-modal.point-label": "meeting point",
+  "mesh-modal.point-placeholder": "the default — or wss://name.tld",
+  "mesh-modal.bad-point": "a meeting point is wss://name.tld — and an access code needs one",
+  "mesh-modal.code-label": "access code",
+  "mesh-modal.code-placeholder": "access code, if the meeting point asks for one",
+  "mesh-modal.bad-code": "that access code has a character a connection cannot carry (a space, a comma, a slash…)",
+  "use-live-relay.too-many": "too many words: {words} — give a room, a secret, and a ws(s):// server",
+  "use-live-relay.bad-server": "'{server}' is not a server this tab can dial"
 }

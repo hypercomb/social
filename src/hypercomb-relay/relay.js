@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 // hypercomb-relay — minimal Nostr relay AND HTTP content host for private swarm meetings
-// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--max-event-size 65536] [--content-dir ./content] [--shell-dir ./host-shell] [--writers hex1,hex2] [--domain a.example,b.example] [--primary hex|npub] [--max-body-bytes 52428800] [--replication-origins https://a.example,https://b.example] [--allow-private-sources] [--allow-participants[=all|lifecycleSig,...]]
+// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--max-event-size 65536] [--content-dir ./content] [--shell-dir ./host-shell] [--writers hex1,hex2] [--domain a.example,b.example] [--primary hex|npub] [--max-body-bytes 52428800] [--replication-origins https://a.example,https://b.example] [--allow-private-sources] [--allow-participants[=all|lifecycleSig,...]] [--access-codes <file>]
+//        node relay.js --new-access-code <file>       (recycle: print a fresh code, keep only its hash)
+//        node relay.js --destroy-access-codes <file>  (admit nobody new)
 //
 // env fallbacks (used when the matching --flag is absent):
+//   ACCESS_CODES     → --access-codes: the file of sha256(code) lines; set, a
+//                      WebSocket is admitted only with a current access code
 //   PORT             → port to listen on (Azure App Service injects this)
 //   ALLOW_PARTICIPANTS → --allow-participants: `all` (or 1/true), or a comma
 //                      list of lifecycle sigs; unset/0/false: writers only
@@ -23,7 +27,7 @@
 
 import { createServer } from 'node:http'
 import { randomBytes, createHash } from 'node:crypto'
-import { createReadStream, existsSync, readFileSync, readdirSync, statSync, rmSync, promises as fsp } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, rmSync, writeFileSync, promises as fsp } from 'node:fs'
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer } from 'ws'
@@ -124,6 +128,13 @@ function parseArgs(argv) {
     // swarm-temp REMOVED — there is no mesh file transfer and no TTL'd side
     // pool. A participant's bytes reach this host only as ordinary flat atoms
     // over PUT /<sig>, and only when --allow-participants says so.
+    //
+    // THE ACCESS CODE (the access gate, below): a file of sha256(code) lines.
+    // Set, a WebSocket is admitted only with a current code; unset, the relay
+    // is open as it always was. `accessCommand` is the operator's one-shot
+    // recycle (`--new-access-code` / `--destroy-access-codes`), never a server.
+    accessCodes: (() => { const e = String(process.env.ACCESS_CODES ?? '').trim(); return e ? resolve(e) : null })(),
+    accessCommand: null,
   }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
@@ -143,6 +154,9 @@ function parseArgs(argv) {
     else if (a === '--primary' && next) { args.primary = declaredPrimary(next); i++ }
     else if (a === '--max-body-bytes' && next) { args.maxBodyBytes = Number(next); i++ }
     else if (a === '--replication-origins' && next) { args.replicationOrigins = next.split(',').map(normalizeOrigin).filter(Boolean); i++ }
+    else if (a === '--access-codes' && next) { args.accessCodes = resolve(next); i++ }
+    else if (a === '--new-access-code' && next) { args.accessCommand = { op: 'new', file: resolve(next) }; i++ }
+    else if (a === '--destroy-access-codes' && next) { args.accessCommand = { op: 'destroy', file: resolve(next) }; i++ }
     else if (a === '--spa-dir' && next) {
       // Removed flag — surface a clear error so legacy startup scripts get
       // updated rather than silently changing behavior. The relay no longer
@@ -221,6 +235,53 @@ const replicationOrigins = new Set(cfg.replicationOrigins || [])
 
 function sha256Hex(buf) {
   return createHash('sha256').update(buf).digest('hex')
+}
+
+// ── the access code: recycled by the operator, never kept ────────────────────
+//
+// jwize 2026-10-09: "Just allow an access code that can be recycled — we will
+// set up servers for other people." A relay started with --access-codes <file>
+// (or ACCESS_CODES) admits a WebSocket only when its dial carries the
+// subprotocol `hc-access.<code>` and sha256(code) is a line of that file. The
+// code rides the upgrade itself, so admission costs no round trip, and the
+// relay keeps the HASH, never the code: secrets are never kept anywhere they
+// could be read back.
+//
+// RECYCLED, NOT RESTARTED (documentation/becoming-a-host.md, "Keys are
+// recycled"): the file is the one place the current code lives.
+//   node relay.js --new-access-code <file>       a fresh code in, every old one out
+//   node relay.js --destroy-access-codes <file>  nobody new gets in
+// The running relay reads the change within a second and closes every
+// connection that came in under a hash no longer listed, so the old code
+// stops working the moment it is recycled: no restart, no redeploy. A missing
+// or empty file admits nobody (fail closed). A refusal is close 4401 straight
+// after the upgrade, before any frame — a browser cannot read the status of a
+// refused upgrade, but it can read a close code. A relay without
+// --access-codes echoes the subprotocol (ws's default) and ignores it.
+const ACCESS_PROTOCOL_PREFIX = 'hc-access.'
+const ACCESS_REFUSED_CLOSE = 4401
+
+/** Write `hashes` as the access file, atomically (a reader never sees half). */
+function writeAccessFile(file, hashes) {
+  const tmp = `${file}.${process.pid}.tmp`
+  writeFileSync(tmp, hashes.map((h) => h + '\n').join(''), { mode: 0o600 })
+  renameSync(tmp, file)
+}
+
+if (cfg.accessCommand) {
+  const { op, file } = cfg.accessCommand
+  if (op === 'new') {
+    // 128 random bits as base64url: 22 characters, every one valid in a
+    // WebSocket subprotocol token and in a URL fragment.
+    const code = randomBytes(16).toString('base64url')
+    writeAccessFile(file, [sha256Hex(Buffer.from(code, 'utf8'))])
+    console.log(code)
+    console.error(`[relay] a new access code is current; every earlier one stopped working. ${file} holds only its hash — the code above is shown once: put it in the meeting link.`)
+  } else {
+    writeAccessFile(file, [])
+    console.error(`[relay] every access code is destroyed: nobody new is admitted until --new-access-code ${file}`)
+  }
+  process.exit(0)
 }
 
 // ── the swarm's host: participants ───────────────────────────────────────────
@@ -623,7 +684,7 @@ function sweepBuckets() {
 // participant uploads, and how many participants are alive in each room (a
 // room is the first 6 hex of its lifecycle sig). Never an IP, never a key.
 // Printed once a minute, and only when there is something to say.
-const census = { refusedEvents: 0, refusedReqs: 0, refusedSubs: 0, unaddressed: 0, handlerErrors: 0, willsFired: 0, willsCancelled: 0, puts: 0, putBytes: 0, putsRefused: 0 }
+const census = { refusedEvents: 0, refusedReqs: 0, refusedSubs: 0, unaddressed: 0, accessRefused: 0, handlerErrors: 0, willsFired: 0, willsCancelled: 0, puts: 0, putBytes: 0, putsRefused: 0 }
 
 function printCensus() {
   const rooms = new Map()  // x prefix → Set of pubkeys (counted, never printed)
@@ -633,11 +694,12 @@ function printCensus() {
     rooms.get(room).add(pubkey)
   }
   const c = census
-  const said = clients.size + c.refusedEvents + c.refusedReqs + c.refusedSubs + c.unaddressed + c.handlerErrors + c.willsFired + c.willsCancelled + c.puts + c.putsRefused
+  const said = clients.size + c.refusedEvents + c.refusedReqs + c.refusedSubs + c.unaddressed + c.accessRefused + c.handlerErrors + c.willsFired + c.willsCancelled + c.puts + c.putsRefused
   if (said > 0) {
     const zones = [...rooms].map(([room, keys]) => `${room}:${keys.size}`).join(' ') || 'none'
-    // `unaddressed`: reads that named no signature (a scan) — CLOSED, see the address gate.
-    console.log(`[minute] open ${clients.size} · refused event ${c.refusedEvents} req ${c.refusedReqs}${c.refusedSubs ? ` subs ${c.refusedSubs}` : ''}${c.unaddressed ? ` unaddressed ${c.unaddressed}` : ''}${c.handlerErrors ? ` · handler errors ${c.handlerErrors}` : ''} · wills fired ${c.willsFired} cancelled ${c.willsCancelled} · participant puts ${c.puts} (${c.putBytes} bytes) refused ${c.putsRefused} · zones ${zones}`)
+    // `unaddressed`: reads or writes that named no signature (a scan) — refused, see the address gate.
+    // `access`: dials refused for want of the current access code (the access gate).
+    console.log(`[minute] open ${clients.size} · refused event ${c.refusedEvents} req ${c.refusedReqs}${c.refusedSubs ? ` subs ${c.refusedSubs}` : ''}${c.unaddressed ? ` unaddressed ${c.unaddressed}` : ''}${c.accessRefused ? ` access ${c.accessRefused}` : ''}${c.handlerErrors ? ` · handler errors ${c.handlerErrors}` : ''} · wills fired ${c.willsFired} cancelled ${c.willsCancelled} · participant puts ${c.puts} (${c.putBytes} bytes) refused ${c.putsRefused} · zones ${zones}`)
   }
   for (const k of Object.keys(c)) c[k] = 0
 }
@@ -721,14 +783,28 @@ const MAX_SUBID_LENGTH = 64  // NIP-01
 //                  bytes — or a room's location — it wants, so a channel anyone
 //                  can hear is a directory of every room's addresses. Kept for
 //                  the drain ONLY room-scoped: an event on it reaches a
-//                  subscriber only when both connections beaconed one lifecycle
-//                  zone (sharesZone), and nothing on it is ever replayed. A
+//                  subscriber only when both connections are in one lifecycle
+//                  zone (zonesOf), and nothing on it is ever replayed. A
 //                  scanner that knows no room's lifecycle sig hears nothing.
-//                  Retire it with the last build that asks there.
+//                  Only the broker's ask and cancel (DRAIN_KINDS) may be
+//                  published there. Retire it with the last build that asks
+//                  there.
+//
+// WRITES NAME A SIGNATURE TOO. An event's `x` is the address it is filed and
+// fanned out under, so an `x` that is not 64-hex (bar the drained word's own
+// two kinds) is refused `restricted:` — before this, a word address was
+// stored where no read could ever reach it but an exact id.
+//
+// Limits: 10 filters and 16 addresses per REQ, and 256 live addresses per
+// connection — a joined tab holds at most one address per subscription (its
+// 200-subscription cap), so the ceiling only stops one socket from parking
+// thousands of guessed room addresses at once.
 const LIVENESS_WORD = 'hc:live'
 const ROOM_SCOPED_WORDS = new Set(['broker:fetch'])
+const DRAIN_KINDS = new Set([20400, 20402])  // the broker's ask and its cancel
 const MAX_FILTERS_PER_REQ = 10
-const MAX_ADDRESSES_PER_REQ = 256
+const MAX_ADDRESSES_PER_REQ = 16
+const MAX_ADDRESSES_PER_CONNECTION = 256
 const MAX_LIMIT = 5000
 
 const isStringArray = (v) => Array.isArray(v) && v.every((s) => typeof s === 'string')
@@ -766,14 +842,69 @@ function filterRefusal(filters) {
 /** The liveness probe: every filter's `#x` is the probe word and nothing else. */
 const isLivenessProbe = (filters) => filters.every((f) => !f.ids && Array.isArray(f['#x']) && f['#x'].length > 0 && f['#x'].every((x) => x === LIVENESS_WORD))
 
-/** Did connections `a` and `b` both beacon {alive} in one lifecycle zone? */
-function sharesZone(a, b) {
-  for (const key of a.beaconed) {
-    const x = key.slice(0, key.indexOf('\0'))
-    if (!HEX64.test(x)) continue
-    for (const other of b.beaconed) if (other.startsWith(x + '\0')) return true
+/** The OK-false reason for an event filed under an address that is not a
+ *  signature, else null. The drained word takes only the broker's ask and
+ *  cancel, which are ephemeral: never stored, only routed in-zone. */
+function addressRefusal(evt) {
+  for (const tag of evt.tags) {
+    if (tag[0] !== 'x') continue
+    const x = String(tag[1] ?? '')
+    if (HEX64.test(x)) continue
+    if (ROOM_SCOPED_WORDS.has(x) && DRAIN_KINDS.has(evt.kind)) continue
+    return 'restricted: an event is filed under a 64-hex signature (x)'
   }
-  return false
+  return null
+}
+
+/** How many addresses a connection's live subscriptions name, but `subId`'s. */
+function liveAddressCount(client, subId) {
+  let n = 0
+  for (const [id, route] of client.routes) if (id !== subId) n += route.xs.size + route.ids.size
+  return n
+}
+
+// ── who is in which room, for the drained word ──────────────────────────────
+//
+// A connection is in the zone of its own newest {alive} beacon, published ON
+// THAT CONNECTION, while that beacon is unexpired — ONE zone, the newest
+// replacing the last, so a client that moved rooms and lost its {left} is
+// never in both. Nothing else places a connection in a room: not the keys
+// that have spoken on it (any signed event can be REPLAYED by anyone, so a
+// stranger replaying a member's public note would have joined that member's
+// room), and never its subscriptions (anyone can subscribe anywhere). Only a
+// signed {alive} at the room's lifecycle sig, which needs room + secret.
+//
+// An ask on the word from a connection in no zone yet is HELD — at most 16
+// per connection, for at most 3 s — and routed the moment that connection
+// beacons. That covers both a first join (the ask is signed a moment before
+// the beacon) and an older build's reopen (it flushes its queued asks before
+// it beacons again). Nothing waits on the hold: the asker's own timeout runs
+// as before.
+const LIFECYCLE_DEFAULT_TTL = 120  // seconds an {alive} with no expiration counts
+const HELD_ASKS_MAX = 16
+const HELD_ASK_MS = 3_000
+
+/** The lifecycle zones a connection is in (see above): its own beacon's, or none. */
+function zonesOf(client, nowSec) {
+  const own = client.drainZone
+  return own && own.exp > nowSec ? [own.x] : []
+}
+
+const isDrainAsk = (evt) => DRAIN_KINDS.has(evt.kind) && evt.tags.some((t) => t[0] === 'x' && ROOM_SCOPED_WORDS.has(t[1]))
+
+/** Hold an ask until its connection beacons (oldest dropped past the cap). */
+function holdAsk(client, evt) {
+  client.heldAsks.push({ evt, at: Date.now() })
+  if (client.heldAsks.length > HELD_ASKS_MAX) client.heldAsks.shift()
+}
+
+/** The connection is in a zone now: route what it asked meanwhile. */
+function releaseHeldAsks(client) {
+  if (client.heldAsks.length === 0) return
+  const held = client.heldAsks
+  client.heldAsks = []
+  const cutoff = Date.now() - HELD_ASK_MS
+  for (const { evt, at } of held) if (at >= cutoff) broadcast(evt, client)
 }
 
 // ── subscription routing ─────────────────────────────────────────────────────
@@ -817,16 +948,20 @@ function unrouteSubscription(client, subId) {
 
 /** Fan an event out to the subscriptions at its addresses. `source` is the
  *  connection it came from (never echoed), or null for one the relay made. A
- *  room-scoped word reaches only subscribers that share a zone with `source`. */
+ *  room-scoped word reaches only subscribers in a zone `source` is in. */
 function broadcast(evt, source) {
   const candidates = new Set()
+  let sourceZones = null
+  const nowSec = Math.floor(Date.now() / 1000)
   for (const tag of evt.tags || []) {
     if (!Array.isArray(tag) || tag[0] !== 'x') continue
     const value = String(tag[1])
     const set = subsByX.get(value)
     if (!set) continue
-    const scoped = ROOM_SCOPED_WORDS.has(value)
-    for (const entry of set) if (!scoped || (source && sharesZone(source, entry.client))) candidates.add(entry)
+    if (!ROOM_SCOPED_WORDS.has(value)) { for (const entry of set) candidates.add(entry); continue }
+    sourceZones ??= source ? zonesOf(source, nowSec) : []
+    if (sourceZones.length === 0) continue
+    for (const entry of set) if (zonesOf(entry.client, nowSec).some((x) => sourceZones.includes(x))) candidates.add(entry)
   }
   for (const entry of subsById.get(evt.id) ?? []) candidates.add(entry)
   for (const { client: c, subId } of candidates) {
@@ -908,10 +1043,19 @@ function trackLifecycle(client, evt) {
   const key = info.x + '\0' + info.d
   cancelWill(key)
   const live = participants.get(info.pubkey)
-  if (info.left) { client.lifecycle.delete(key); client.beaconed.delete(key); live?.xs.delete(info.x); return }
+  if (info.left) {
+    client.lifecycle.delete(key); client.beaconed.delete(key); live?.xs.delete(info.x)
+    if (client.drainZone?.x === info.x) client.drainZone = null
+    return
+  }
   client.beaconed.add(key)
   live?.xs.add(info.x)
   client.lifecycle.set(key, { x: info.x, d: info.d, pubkey: info.pubkey })
+  // The drained word's zone: this connection's newest {alive}, and only it.
+  if (HEX64.test(info.x)) {
+    client.drainZone = { x: info.x, exp: expirationOf(evt) || (Number(evt.created_at) + LIFECYCLE_DEFAULT_TTL) }
+    releaseHeldAsks(client)
+  }
   // The participant is alive on THIS connection, so any will another
   // connection still holds for the same slot is stale — a refreshed tab
   // whose old socket hasn't been reaped yet. Left armed, it fires up to a
@@ -1047,9 +1191,10 @@ function handleMessage(client, raw) {
     const evt = msg[1]
     const shape = eventShapeError(evt)
     if (shape) { send(client.ws, ['OK', HEX64.test(String(evt?.id)) ? evt.id : '', false, shape]); return }
+    const unaddressed = addressRefusal(evt)
+    if (unaddressed) { census.unaddressed++; send(client.ws, ['OK', evt.id, false, unaddressed]); return }
     try { if (!verifyEvent(evt)) { send(client.ws, ['OK', evt.id, false, 'invalid: bad signature']); return } }
     catch { send(client.ws, ['OK', evt.id, false, 'invalid: verification error']); return }
-
     // A verified EVENT is the key speaking, live, on this relay: it may upload
     // to the swarm's host (markLive). It speaks for a slot's pending will only
     // on a connection that beaconed that slot — the participant, still here on
@@ -1067,8 +1212,11 @@ function handleMessage(client, raw) {
     if (verdict === 'duplicate') { send(client.ws, ['OK', evt.id, true, 'duplicate: already have this event']); return }
     send(client.ws, ['OK', evt.id, true, ''])
     // A stale replaceable is accepted (the publisher did nothing wrong) but
-    // not fanned out: subscribers already hold the newer slot.
-    if (verdict !== 'stale') broadcast(evt, client)
+    // not fanned out: subscribers already hold the newer slot. An ask on the
+    // drained word from a connection in no room yet waits for its beacon.
+    if (verdict === 'stale') return
+    if (isDrainAsk(evt) && zonesOf(client, Math.floor(Date.now() / 1000)).length === 0) holdAsk(client, evt)
+    else broadcast(evt, client)
     return
   }
 
@@ -1097,6 +1245,13 @@ function handleMessage(client, raw) {
       // participant who cannot tell why.
       census.refusedSubs++
       send(client.ws, ['CLOSED', subId, `error: too many subscriptions (max ${MAX_SUBS_PER_CLIENT})`]); return
+    }
+    const { xs: wantXs, ids: wantIds } = routesOf(filters)
+    if (liveAddressCount(client, subId) + wantXs.size + wantIds.size > MAX_ADDRESSES_PER_CONNECTION) {
+      census.refusedSubs++
+      client.subs.delete(subId)
+      unrouteSubscription(client, subId)
+      send(client.ws, ['CLOSED', subId, `error: too many addresses (max ${MAX_ADDRESSES_PER_CONNECTION} live on one connection)`]); return
     }
     client.subs.set(subId, filters)
     routeSubscription(client, subId, filters)
@@ -1129,6 +1284,10 @@ const relayInfo = {
     // Every read names a signature address (`#x`) or exact ids; any other
     // filter is CLOSED `restricted:` (the address gate). Nothing is listed.
     addressed_reads: true,
+    max_addresses: MAX_ADDRESSES_PER_REQ,
+    restricted_writes: true,
+    // Whether a WebSocket needs the current access code (`hc-access.<code>`).
+    access_code: !!cfg.accessCodes,
     auth_required: authRequired,
     // Whether PUT /<sig> takes a live participant's bytes: 'all', 'zones', or
     // false (writers only). A pre-meeting curl reads it; clients never
@@ -1281,6 +1440,10 @@ function tryServeHiveIndex(req, res) {
     let evt
     try { evt = JSON.parse(body.toString('utf8')) } catch { respondText(res, 400, 'not an event'); return }
     if (Number(evt?.kind) !== HIVE_INDEX_KIND) { respondText(res, 400, 'not a hive index'); return }
+    // An index is read here, by its publisher's key, and nowhere else: one
+    // that names a mesh address (`x`) would be filed under it and replayed to
+    // that room's REQs, a way onto the mesh past every WebSocket rule.
+    if (Array.isArray(evt.tags) && evt.tags.some((t) => Array.isArray(t) && t[0] === 'x')) { respondText(res, 400, 'an index carries no x tag'); return }
     const owner = String(evt?.pubkey ?? '').toLowerCase()
     // The caller, the body and the address must be one key. Any disagreement
     // is somebody moving an index that is not theirs.
@@ -1455,6 +1618,13 @@ function tryServeContent(req, res) {
   // reachable only through authenticated /receipts, never through the legacy
   // generic content-directory fallback below.
   if (urlPath === '/.receipts' || urlPath.startsWith('/.receipts/')) return false
+  // ONE SPELLING PER PATH. Every gate below reads the path as written, while
+  // the file is opened by the OS — which drops '.', resolves '..', collapses
+  // '//' and, on Windows, ignores case. So /./.receipts/<pk>.json, //<bag>/…
+  // and /<BAG>/00000001 used to walk past the gates to the very bytes they
+  // guard. Only the canonical spelling is read; any other answers exactly as
+  // an absent path does.
+  if (!isCanonicalPath(urlPath) && !/^\/[0-9a-f]{64}\/$/.test(urlPath)) return false
 
   // ── the directory branch (documentation/pools-across-hosts.md) ──────────
   //
@@ -1527,16 +1697,14 @@ function tryServeContent(req, res) {
     // kept during the migration to bare-sig URLs. Resolve under
     // contentDir, then verify the result is still inside it.
     //
-    // A MEMBER of a directory that is not a public pool (a history bag's
-    // 00000000 marker, a molecule pool's entry) is read exactly as a path that
-    // does not exist: the listing is gated above, and a guessable member name
-    // must not be a second way in.
-    const memberMatch = urlPath.match(/^\/([0-9a-f]{64})\/[^/]+$/)
-    if (memberMatch && !listedPool(memberMatch[1])) {
-      let isDir = false
-      try { isDir = statSync(join(resolve(cfg.contentDir), memberMatch[1])).isDirectory() } catch { /* absent */ }
-      if (isDir) return false
-    }
+    // ANYTHING UNDER a directory that is not a listed pool (a history bag's
+    // 00000000 marker, a molecule pool's entry, at any depth) is read exactly
+    // as a path that does not exist — decided by the address alone, never by
+    // looking: answering differently when the directory is there told anyone
+    // which bags and pools this host holds. The listing is gated above, and a
+    // guessable member name must not be a second way in.
+    const head = urlPath.match(/^\/([0-9a-f]{64})\//)
+    if (head && !listedPool(head[1])) return false
     resolved = resolve(cfg.contentDir, '.' + urlPath)
     const rootDir = resolve(cfg.contentDir)
     if (!resolved.startsWith(rootDir + sep) && resolved !== rootDir) return false
@@ -1544,6 +1712,13 @@ function tryServeContent(req, res) {
     if (existsSync(resolved)) {
       try { typedHit = statSync(resolved).isFile() } catch { typedHit = false }
     }
+    // THE FILE OPENED IS THE FILE NAMED. Windows also opens a file by its
+    // 8.3 short name (RECEIP~1), by a stream suffix (<dir>::$INDEX_ALLOCATION),
+    // in any case, and with trailing dots or spaces dropped — each a spelling
+    // the gates above never saw. isCanonicalPath refuses the ones it can
+    // name; this refuses the rest: the OS's own long, case-exact path for
+    // what it opened must be exactly the path that was asked for.
+    if (typedHit && !opensAsNamed(rootDir, urlPath, resolved)) return false
     if (typedHit) {
       contentType = getContentType(resolved)
     } else {
@@ -1552,7 +1727,10 @@ function tryServeContent(req, res) {
       // still running pre-flat brokers ask `/__resources__/<sig>` etc.
       // The URL carries identity only — serve the bytes from whichever
       // layout holds them (the mirror of resolveFlatSig's typed
-      // fallback). Non-sig paths keep falling through (landing page).
+      // fallback). Non-sig paths keep falling through (landing page). Only
+      // the legacy typed dirs and listed pools fall back — never an
+      // arbitrary prefix, which would answer for any directory name at all.
+      if (!/^\/__[a-z]+__\//.test(urlPath) && !head) return false
       const base = urlPath.split('/').pop() || ''
       const m = base.match(/^([0-9a-f]{64})(?:\.(?:js|json))?$/i)
       if (!m) return false
@@ -1599,6 +1777,34 @@ function tryServeContent(req, res) {
     if (req.method === 'HEAD') { res.end(); return true }
     createReadStream(resolved).on('error', () => res.destroy()).pipe(res)
     return true
+  } catch {
+    return false
+  }
+}
+
+/** Is this decoded path in its one canonical spelling? No empty, '.' or '..'
+ *  segment, no dot-file at any depth, no backslash or NUL, a signature
+ *  segment only in lowercase (the OS folds case on Windows), and none of
+ *  Windows' other ways to spell a name: ':' (a stream, `<dir>::$INDEX_ALLOCATION`),
+ *  '~' (an 8.3 short name, `RECEIP~1`), or a trailing '.' or space (dropped
+ *  by the OS, so `<bag>./00000001` opens `<bag>/00000001`). */
+function isCanonicalPath(urlPath) {
+  if (!urlPath.startsWith('/') || /[\\\0:~]/.test(urlPath)) return false
+  for (const segment of urlPath.slice(1).split('/')) {
+    if (segment === '' || segment.startsWith('.') || /[. ]$/.test(segment)) return false
+    if (/^[0-9a-f]{64}$/i.test(segment) && segment !== segment.toLowerCase()) return false
+  }
+  return true
+}
+
+/** Does the file the OS opened for `urlPath` carry exactly that name? Its
+ *  real path (long names, the case on disk, links followed) must be the
+ *  content root's real path plus the asked segments, verbatim. Anything
+ *  else — a short name, another case, a stream, a link out — is absent. */
+function opensAsNamed(rootDir, urlPath, resolved) {
+  try {
+    const expected = join(realpathSync.native(rootDir), ...urlPath.slice(1).split('/'))
+    return realpathSync.native(resolved) === expected
   } catch {
     return false
   }
@@ -2234,17 +2440,80 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server })
 
+// The current access hashes (null: no --access-codes, everyone admitted), and
+// the file's stamp they were read at — re-read on every upgrade and every
+// second, so a recycle is in force before anyone could use the old code.
+let accessHashes = null
+let accessStamp = ''
+
+function refreshAccessHashes() {
+  if (!cfg.accessCodes) return
+  let stamp = 'absent'
+  try { const st = statSync(cfg.accessCodes); stamp = `${st.mtimeMs}:${st.size}:${st.ino}` } catch { /* fail closed */ }
+  if (accessHashes && stamp === accessStamp) return
+  accessStamp = stamp
+  const next = new Set()
+  try {
+    for (const line of readFileSync(cfg.accessCodes, 'utf8').split(/\r?\n/)) {
+      const hash = line.trim().toLowerCase()
+      if (HEX64.test(hash)) next.add(hash)
+    }
+  } catch { /* missing: nobody is admitted */ }
+  accessHashes = next
+  // THE OLD OUT: whoever came in on a hash no longer listed leaves now.
+  for (const c of clients) {
+    if (c.accessHash && !next.has(c.accessHash)) { try { c.ws.close(ACCESS_REFUSED_CLOSE, 'access: the access code was recycled') } catch {} }
+  }
+}
+
+/** sha256 of the access code a dial offered as `hc-access.<code>`, or null. */
+function offeredAccessHash(req) {
+  for (const offer of String(req.headers['sec-websocket-protocol'] ?? '').split(',')) {
+    const protocol = offer.trim()
+    if (protocol.startsWith(ACCESS_PROTOCOL_PREFIX) && protocol.length > ACCESS_PROTOCOL_PREFIX.length) {
+      return sha256Hex(Buffer.from(protocol.slice(ACCESS_PROTOCOL_PREFIX.length), 'utf8'))
+    }
+  }
+  return null
+}
+
+if (cfg.accessCodes) {
+  refreshAccessHashes()
+  setInterval(refreshAccessHashes, 1_000).unref?.()
+}
+
 wss.on('connection', (ws, req) => {
+  // THE ACCESS GATE, before anything is said: a dial without the current code
+  // is closed 4401 with no frame, never counted as a participant.
+  let accessHash = null
+  if (cfg.accessCodes) {
+    refreshAccessHashes()
+    accessHash = offeredAccessHash(req)
+    if (!accessHash || !accessHashes.has(accessHash)) {
+      census.accessRefused++
+      ws.on('error', () => {})
+      try { ws.close(ACCESS_REFUSED_CLOSE, 'access: this meeting point needs its current access code') } catch {}
+      return
+    }
+  }
+
   const client = {
     ws, ip: requestIp(req), authed: !authRequired, pubkey: null, challenge: null,
     subs: new Map(), routes: new Map(), lifecycle: new Map(), closed: false,
     bucket: freshBucket(CONN_BURST, Date.now()), beaconed: new Set(),
+    // the drained word's zone (trackLifecycle: this connection's own newest
+    // {alive}) and asks waiting for its beacon (holdAsk)
+    drainZone: null, heldAsks: [],
+    accessHash,
   }
 
   // THE HOST CARD, first frame, before anything is asked: the relay's clock
-  // (a client corrects its created_at by it — no round trip) and whether this
-  // host takes participants' bytes. An older client notes an unknown NOTICE.
-  send(ws, ['NOTICE', 'hc:host ' + JSON.stringify({ v: 1, time: Math.floor(Date.now() / 1000), participants: participantMode })])
+  // (a client corrects its created_at by it — no round trip), whether this
+  // host takes participants' bytes, and that its reads are addressed — the
+  // drained word reaches only the asker's own room here, so a client may
+  // still ask there for an older build without telling any other room.
+  // An older client notes an unknown NOTICE.
+  send(ws, ['NOTICE', 'hc:host ' + JSON.stringify({ v: 1, time: Math.floor(Date.now() / 1000), participants: participantMode, addressed: true })])
 
   if (authRequired) {
     client.challenge = makeChallenge()

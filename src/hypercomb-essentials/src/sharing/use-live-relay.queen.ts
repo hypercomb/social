@@ -13,15 +13,24 @@
 //   /use-live-relay <room> <secret> <ws(s)://relay>   + explicit server
 //   /use-live-relay off                   leave: go private, opt out of live
 //   /use-live-relay clear                 clear the relay flag (origin default)
+//                                         and this tab's meeting point
+//
+// More words than a room and a secret are REFUSED, by name: typed as
+// `pluginthematrix.com downtown downtown` the third word used to vanish and
+// the room became 'pluginthematrix.com' — a zone of one. The success toast
+// says the room's two words, so a room can compare them out loud.
 //
 // What one invocation configures (each step skipped when already right):
 //   1. relay reachability — clears a 'hc:nostrmesh:network' opt-out; on a
 //      real host forces the live relay ('hc:nostrmesh:use-live-relay'='1')
 //      and applies it NOW via mesh.configureRelays (no reload); an explicit
-//      ws(s):// server persists 'hc:nostrmesh:relays' instead. A local
-//      origin keeps its loopback default unless a server is given. The mesh
-//      is re-pointed ONLY when the relay actually differs: re-pointing it at
-//      the relay it already holds tore down a live socket mid-meeting.
+//      ws(s):// server becomes THIS TAB's meeting point (sessionStorage
+//      `hc:mesh-zone`, membership.ts), so a reload dials it again — never the
+//      origin-wide list, which every other tab (in its own meeting) would
+//      dial on its next reload. A local origin keeps its loopback default
+//      unless a server is given. The mesh is re-pointed ONLY when the relay
+//      actually differs: re-pointing it at the relay it already holds tore
+//      down a live socket mid-meeting.
 //   2. the zone — RoomStore/SecretStore .set() (their change events run the
 //      swarm's teardown+resync). The BARE command keeps the zone you are
 //      already in (room AND secret set) — typed mid-meeting it used to drag
@@ -43,11 +52,11 @@
 //
 // The old on|off|clear ramp-control forms keep working for scripts.
 
-import { EffectBus } from '@hypercomb/core'
-import { isJoinedHere } from './membership.js'
+import { EffectBus, secretTag, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { isJoinedHere, readTabZone, writeTabZone } from './membership.js'
+import { meetingRelayOf } from './meeting-invite.js'
 
 const FLAG_KEY = 'hc:nostrmesh:use-live-relay'
-const RELAYS_KEY = 'hc:nostrmesh:relays'
 const NETWORK_KEY = 'hc:nostrmesh:network'
 const DEFAULT_ZONE = 'hive'
 
@@ -59,6 +68,13 @@ interface MeshLike {
 }
 
 const ioc = () => (window as { ioc?: { get?: <T>(k: string) => T | undefined } }).ioc
+
+/** The catalog's words, else the English fallback (`t()` answers a missing
+ *  key with the key itself on an older shell). */
+const tr = (key: string, fallback: string, params?: Record<string, string | number>): string => {
+  const s = ioc()?.get?.<I18nProvider>(I18N_IOC_KEY)?.t(key, params)
+  return s && s !== key ? s : fallback
+}
 
 const isLocalOrigin = (): boolean => {
   try {
@@ -78,6 +94,10 @@ export class UseLiveRelayQueenBee {
   readonly description =
     'One-command swarm setup: /use-live-relay [room] [secret] [ws(s)://server] configures the relay, the zone, and goes public — nothing else to set. Bare = keep the zone you are in (or join the shared default). off = leave, clear = reset the relay flag.'
   readonly slashHidden = false
+  // The room and secret are the zone's identity, capitals and all: the
+  // selector and a #meet link keep them as typed, so this word must too, or
+  // `Garden Rose` here and `Garden Rose` from a link meet in two rooms.
+  readonly rawArgs = true
 
   invoke(args: string): void {
     const tokens = (args ?? '').trim().split(/\s+/).filter(Boolean)
@@ -92,6 +112,7 @@ export class UseLiveRelayQueenBee {
     }
     if (first === 'clear' || first === 'reset' || first === 'default') {
       localStorage.removeItem(FLAG_KEY)
+      if (readTabZone()?.relay) writeTabZone({ relay: '', host: '', code: '' })
       this.#toast('success', 'relay flag cleared — origin default applies on reload')
       return
     }
@@ -101,8 +122,20 @@ export class UseLiveRelayQueenBee {
     const zoneTokens = (first === 'on' || first === '1' || first === 'true')
       ? tokens.slice(1)
       : tokens
-    const server = zoneTokens.find(t => /^wss?:\/\//i.test(t))
+    const servers = zoneTokens.filter(t => /^wss?:\/\//i.test(t))
     const named = zoneTokens.filter(t => !/^wss?:\/\//i.test(t))
+    // A room, a secret, one server — nothing else. An extra word is not
+    // silently dropped (it was the secret the participant meant).
+    if (named.length > 2 || servers.length > 1) {
+      const words = [...named.slice(2), ...servers.slice(1)].map(w => `'${w}'`).join(', ')
+      this.#toast('error', tr('use-live-relay.too-many', `too many words: ${words} — give a room, a secret, and a ws(s):// server`, { words }))
+      return
+    }
+    const server = servers.length ? meetingRelayOf(servers[0]) : ''
+    if (servers.length && !server) {
+      this.#toast('error', tr('use-live-relay.bad-server', `'${servers[0]}' is not a server this tab can dial`, { server: servers[0] }))
+      return
+    }
     // The bare form keeps the zone this hive is already in — see step 2.
     const roomStore = ioc()?.get?.<ZoneStore>('@hypercomb.social/RoomStore')
     const secretStore = ioc()?.get?.<ZoneStore>('@hypercomb.social/SecretStore')
@@ -116,17 +149,25 @@ export class UseLiveRelayQueenBee {
     if (localStorage.getItem(NETWORK_KEY) === '0') localStorage.removeItem(NETWORK_KEY)
     const mesh = ioc()?.get?.<MeshLike>('@diamondcoreprocessor.com/NostrMeshDrone')
     let relayNote: string
+    const tabRelay = readTabZone()?.relay ?? ''
     if (server) {
-      localStorage.setItem(RELAYS_KEY, JSON.stringify([server]))
+      // This tab's meeting point. A different one is a different meeting:
+      // the old one's access code and host do not come along.
+      if (server !== tabRelay) writeTabZone({ relay: server, host: '', code: '' })
       this.#pointAt(mesh, server)
       relayNote = server
-    } else if (isLocalOrigin()) {
-      relayNote = 'local relay'
     } else {
-      localStorage.setItem(FLAG_KEY, '1')
-      this.#pointAt(mesh, liveRelayUrl())
-      relayNote = 'live relay'
+      // The default meeting point: a tab that held its own lets it go.
+      if (tabRelay) writeTabZone({ relay: '', host: '', code: '' })
+      if (isLocalOrigin()) {
+        relayNote = 'local relay'
+      } else {
+        localStorage.setItem(FLAG_KEY, '1')
+        this.#pointAt(mesh, liveRelayUrl())
+        relayNote = 'live relay'
+      }
     }
+    if ((server || '') !== tabRelay) EffectBus.emit('mesh:zone', { relay: server })
     mesh?.connectAll?.()
 
     // 2. The zone. set() fires the stores' change events — the swarm tears
@@ -150,9 +191,13 @@ export class UseLiveRelayQueenBee {
     // share toggles, named in the toast.
     EffectBus.emit('features:roster-open', {})
 
+    // The room's two words (room + secret only — the swarm's lifecycle
+    // channel), so everyone can check out loud that they typed the same.
+    let words = ''
+    try { words = secretTag(`lifecycle\0${room.trim()}\0${secret.trim()}`, 'en') } catch { words = '' }
     console.log(`[use-live-relay] participant setup: room='${room}' relay=${relayNote}`)
     this.#toast('success',
-      `you're in "${room}" via ${relayNote} — the roster picks which behaviors you share; world mode picks the tiles`)
+      `you're in "${room}"${words ? ` ◆ ${words} ◆` : ''} via ${relayNote} — the roster picks which behaviors you share; world mode picks the tiles`)
   }
 
   /** Point the mesh at `url` — only when it is not already the one relay

@@ -1,24 +1,28 @@
 // sharing/meeting-invite.join.ts
 //
 // Shared "apply an invite" logic, used by EVERY entry path:
-//   - the meeting link — `#meet=room/secret/page`, captured at boot
+//   - the meeting link — `#meet=room/secret/page[&relay=…&host=…&code=…]`,
+//     captured at boot
 //   - the link path    — MeetingInviteWorker resolves a /<sig> boot URL
 //   - the tile path    — clicking a `swarm:invite` junction icon on a tile
 //
 // Joining is an AUTH SWITCH (the model the user picked: "just an auth-switch
-// junction"). ONE sheet asks, naming the room and the host that keeps what
-// the guest shares (the swarm's host — the relay they are about to meet at).
-// On Join the credentials are set EXACTLY, the guest walks to the page, the
-// command line drops to tiles (a typed name must become a tile, never a
+// junction"). ONE sheet asks, naming the room, the meeting point when the
+// link names one, and the host that keeps what the guest shares — never the
+// meeting point's access code. On Join the credentials are set EXACTLY, the
+// link's meeting point becomes this tab's (sessionStorage `hc:mesh-zone`,
+// membership.ts) and the mesh is pointed at it, the guest walks to the page,
+// the command line drops to tiles (a typed name must become a tile, never a
 // command — the sticky stance ate a meeting's worth of names), and the swarm
-// is joined through the one toggle door. On cancel, the snapshot is restored
-// so a declined invite leaves the participant exactly where they were.
+// is joined through the one toggle door. "Not now" writes NOTHING: every
+// write waits for the answer, so a declined invite leaves the participant
+// exactly where they were — and never writes a stale pair over another tab's.
 
 import { EffectBus, get, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { validateInviteBundle, type MeetingInviteBundle } from './meeting-invite.js'
+import { validateInviteBundle, meetingRelayOf, meetingHostOf, isAccessCode, type MeetingInviteBundle, type MeetingPoint } from './meeting-invite.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { readDoorsOf } from './zone-door.js'
-import { isJoinedHere } from './membership.js'
+import { isJoinedHere, readTabZone, writeTabZone } from './membership.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const ROOM_KEY = '@hypercomb.social/RoomStore'
@@ -27,6 +31,7 @@ const NAV_KEY = '@hypercomb.social/Navigation'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
+const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 /** Mirror of the command line's own key (hypercomb-shared/ui/command-line). */
 const STANCE_KEY = 'hc:command-line-stance'
 
@@ -44,8 +49,13 @@ interface NavLike {
 }
 interface LineageLike { explorerSegments?: () => readonly string[] }
 interface HostSyncLike {
-  swarmHostsFor?: (segments: readonly string[]) => { hosts: readonly string[]; pending: boolean }
+  swarmHostsFor?: (segments: readonly string[]) => { hosts: readonly string[]; pending: boolean; source?: string }
   warmSwarmHosts?: (segments: readonly string[]) => void
+}
+interface MeshLike {
+  configureRelays?: (urls: string[], persist?: boolean) => void
+  getDebug?: () => { relays?: readonly string[] } | undefined
+  connectionState?: () => { refused?: string } | undefined
 }
 
 /** How long the sheet waits for the invited page's host to be known (local
@@ -58,8 +68,16 @@ const KEEPER_POLL_MS = 100
  *  from caches). On a first visit those are still being read when the link
  *  opens, and the sheet IS the consent — so it waits, briefly, for the answer
  *  rather than naming no one. '' when nothing hosts it (or still unknown). */
-async function keeperOf(segments: readonly string[]): Promise<string> {
+async function keeperOf(segments: readonly string[], meetingHost = ''): Promise<string> {
   const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
+  // The link names its meeting host: that is who keeps the room's tiles,
+  // unless the page already wears publish domains of its own (they come
+  // first — swarm-hosts.ts). Asked once, from caches; nothing waits.
+  if (meetingHost) {
+    let choice: { hosts: readonly string[]; pending: boolean; source?: string } | undefined
+    try { choice = hostSync?.swarmHostsFor?.(segments) } catch { choice = undefined }
+    return choice && !choice.pending && choice.source === 'publish' && choice.hosts[0] ? choice.hosts[0] : meetingHost
+  }
   if (!hostSync?.swarmHostsFor) return ''
   try { hostSync.warmSwarmHosts?.(segments) } catch { /* an older host-sync */ }
   const deadline = Date.now() + KEEPER_WAIT_MS
@@ -148,9 +166,48 @@ async function fetchAndVerify(sig: string): Promise<Blob | null> {
 const sameSegments = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((s, i) => s === b[i])
 
+/** The meeting point a link names, canonical — '' when it names none. */
+const pointOf = (bundle: MeetingInviteBundle & MeetingPoint): Required<MeetingPoint> => {
+  const relay = meetingRelayOf(bundle.relay)
+  return {
+    relay,
+    host: meetingHostOf(bundle.host),
+    // A code is for its meeting point alone — never the default relay's.
+    code: relay && isAccessCode(bundle.code) ? bundle.code : '',
+  }
+}
+
+/** Is the meeting point refusing this tab's access code right now? */
+function refusedAccess(): boolean {
+  try { return get<MeshLike>(MESH_KEY)?.connectionState?.()?.refused === 'access' } catch { return false }
+}
+
+/** A meeting point as a person reads it: its host and path, no scheme. */
+export const meetingPointLabel = (relay: string): string => relay.replace(/^wss?:\/\//, '')
+
+/**
+ * POINT THIS TAB'S MESH AT ITS MEETING POINT, now. The zone must already hold
+ * it (the dial reads the access code from there). '' = the default relay: the
+ * mesh reloads its own defaults on the announcement. Re-pointing to the relay
+ * the mesh already dials does nothing — that tore a live socket down.
+ * Announces `mesh:zone` {relay} — never the code.
+ */
+export function pointMeshAt(relay: string): void {
+  if (relay) {
+    const mesh = get<MeshLike>(MESH_KEY)
+    let current: readonly string[] | undefined
+    try { current = mesh?.getDebug?.()?.relays } catch { current = undefined }
+    const same = Array.isArray(current) && current.length === 1 && current[0] === relay
+    if (!same) {
+      try { mesh?.configureRelays?.([relay], false) } catch { /* the announcement below still reaches the mesh */ }
+    }
+  }
+  EffectBus.emit('mesh:zone', { relay })
+}
+
 /** Confirm + auth-switch into the bundle's meeting place. Returns true iff
- *  the participant joined. Restores prior credentials on cancel. */
-export async function joinMeetingPlace(bundle: MeetingInviteBundle): Promise<boolean> {
+ *  the participant joined. Nothing is written unless they do. */
+export async function joinMeetingPlace(bundle: MeetingInviteBundle & MeetingPoint): Promise<boolean> {
   const room = get<CredStoreLike>(ROOM_KEY)
   const secret = get<CredStoreLike>(SECRET_KEY)
   const nav = get<NavLike>(NAV_KEY)
@@ -158,44 +215,68 @@ export async function joinMeetingPlace(bundle: MeetingInviteBundle): Promise<boo
 
   const where = bundle.segments.length ? '/' + bundle.segments.join('/') : '/ (hive root)'
   const label = bundle.alias?.trim() || where
+  const point = pointOf(bundle)
+  const tab = readTabZone()
 
-  // Already in this room, joined — there is nothing to switch and nothing to
-  // ask. At most the guest walks to the page the link names; the owner who
-  // clicks the invite they minted, or a guest re-opening the link after a
-  // reload, lands where they were pointed with no sheet.
-  if (room.value === bundle.room && secret.value === bundle.secret && isJoinedHere()) {
+  // Already in this room AT THIS MEETING POINT, joined — there is nothing to
+  // switch and nothing to ask. At most the guest walks to the page the link
+  // names. The owner who clicks the invite they minted, or a guest re-opening
+  // the link after a reload, lands where they were pointed with no sheet.
+  //
+  // But a link that would CHANGE something is never taken quietly — anyone
+  // who knows the room can post one. A new meeting host is who keeps what
+  // this participant shares from then on, so the sheet names it and asks. A
+  // new access code is taken quietly only while the meeting point is refusing
+  // this tab's code (a recycle — the very case a fresh link is for); a tab the
+  // meeting point lets in is asked before its working code is replaced.
+  const hereAlready = room.value === bundle.room && secret.value === bundle.secret && (tab?.relay ?? '') === point.relay && isJoinedHere()
+  const newKeeper = !!point.host && point.host !== (tab?.host ?? '')
+  const newCode = !!point.code && point.code !== (tab?.code ?? '')
+  if (hereAlready && !newKeeper && (!newCode || refusedAccess())) {
+    if (newCode) {
+      writeTabZone({ code: point.code })
+      // The mesh dials the new code at once, past its refusal.
+      EffectBus.emit('mesh:zone', { relay: point.relay })
+    }
     if (!sameSegments(hereSegments(nav), bundle.segments)) walkTo(nav, bundle.segments)
     toast('tip', tr('invite.join.title', 'Meeting place'), tr('invite.already-here', `You're already in "${label}".`, { label }))
     return false
   }
 
-  // Snapshot the credentials in effect BEFORE the prompt so a cancel
-  // restores them exactly. All live writes are deferred to the accept path,
-  // so cancel is non-destructive by construction; this is the explicit belt.
-  const prev = { room: room.value, secret: secret.value }
-  // The sheet names who keeps what the guest shares (keeperOf). Still not
-  // known after the short wait: the sheet names no one.
-  const host = await keeperOf(bundle.segments)
-  const params = { room: bundle.room, host }
+  // The sheet names the meeting point (when the link names one) and who keeps
+  // what the guest shares (keeperOf) — never the access code. Still not known
+  // after the short wait: the sheet names no keeper.
+  const host = await keeperOf(bundle.segments, point.host)
+  const at = point.relay ? meetingPointLabel(point.relay) : ''
+  const params = { room: bundle.room, host, point: at }
+  const message = at
+    ? host
+      ? tr('invite.meet.join.message-at', `Join the room “${bundle.room}” at ${at}? You'll see everyone here. Tiles you add while joined are shared with the room and kept by ${host}.`, params)
+      : tr('invite.meet.join.message-at-local', `Join the room “${bundle.room}” at ${at}? You'll see everyone here. Tiles you add while joined are shared with the room.`, params)
+    : host
+      ? tr('invite.meet.join.message', `Join the room “${bundle.room}”? You'll see everyone here. Tiles you add while joined are shared with the room and kept by ${host}.`, params)
+      : tr('invite.meet.join.message-local', `Join the room “${bundle.room}”? You'll see everyone here. Tiles you add while joined are shared with the room.`, params)
   const confirmed = await requestConfirm({
     title: tr('invite.meet.join.title', 'Join the room'),
-    message: host
-      ? tr('invite.meet.join.message', `Join the room “${bundle.room}”? You'll see everyone here. Tiles you add while joined are shared with the room and kept by ${host}.`, params)
-      : tr('invite.meet.join.message-local', `Join the room “${bundle.room}”? You'll see everyone here. Tiles you add while joined are shared with the room.`, params),
+    message,
     confirmLabel: tr('invite.meet.join.confirm', 'Join'),
     cancelLabel: tr('invite.meet.join.cancel', 'Not now'),
   })
-  if (!confirmed) {
-    room.set(prev.room)
-    secret.set(prev.secret)
-    return false
-  }
+  // Not now: nothing was written, so nothing is restored. (Restoring a
+  // snapshot WROTE it — a stale tab's pair over the one another tab chose.)
+  if (!confirmed) return false
 
   // Reproduce (segments, room, secret) so the composed sig lands on the
   // inviter's exact relay slot: the credentials EXACTLY as carried (never
   // case-folded — the zone is case-sensitive), then the page.
   room.set(bundle.room)
   secret.set(bundle.secret)
+  // The link's meeting point becomes this tab's, whole: a link that names
+  // none meets at the default, so a point this tab held from an earlier
+  // meeting is dropped with its code.
+  writeTabZone({ room: bundle.room, secret: bundle.secret, relay: point.relay, host: point.host, code: point.code })
+  if (point.relay !== (tab?.relay ?? '')) pointMeshAt(point.relay)
+  else if (point.code !== (tab?.code ?? '')) EffectBus.emit('mesh:zone', { relay: point.relay })
   EffectBus.emit('mesh:room', { room: bundle.room })
   EffectBus.emit('mesh:secret', { secret: bundle.secret })
   walkTo(nav, bundle.segments)

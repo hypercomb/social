@@ -2810,5 +2810,20 @@
   "invite.meet.join.message-local": "ルーム「{room}」に参加しますか？ ここにいる全員が見えます。参加中に追加したタイルはルームと共有されます。",
   "invite.meet.join.confirm": "参加",
   "invite.meet.join.cancel": "今はしない",
-  "host.no-host": "バイトの置き場所がありません（{reason}）— このブランチにホストを追加するか、ホストパネルで設定してから、もう一度公開してください。何も公開されていません。"
+  "host.no-host": "バイトの置き場所がありません（{reason}）— このブランチにホストを追加するか、ホストパネルで設定してから、もう一度公開してください。何も公開されていません。",
+  "invite.meet.join.message-at": "{point} のルーム「{room}」に参加しますか？ ここにいる全員が見えます。参加中に追加したタイルはルームと共有され、{host} が保管します。",
+  "invite.meet.join.message-at-local": "{point} のルーム「{room}」に参加しますか？ ここにいる全員が見えます。参加中に追加したタイルはルームと共有されます。",
+  "invite.meet.copied-at": "ミーティングリンクをコピーしました — 開いた人は誰でも {point} のこのページの {room} に参加します。",
+  "invite.meet.shared-at": "ミーティングリンクを共有しました — 開いた人は誰でも {point} のこのページの {room} に参加します。",
+  "invite.point.title": "集合場所",
+  "invite.point.invalid": "集合場所ではありません — wss://name.tld の形で指定してください（パスを続けても構いません）。",
+  "invite.point.code-not-here": "アクセスコードはコマンドラインからは受け取りません — コマンドラインは実行した内容を記憶します。代わりにセレクターに貼り付けてください。",
+  "mesh-modal.point-label": "集合場所",
+  "mesh-modal.point-placeholder": "既定 — または wss://name.tld",
+  "mesh-modal.bad-point": "集合場所は wss://name.tld です — アクセスコードには集合場所が必要です",
+  "mesh-modal.code-label": "アクセスコード",
+  "mesh-modal.code-placeholder": "集合場所が求める場合のアクセスコード",
+  "mesh-modal.bad-code": "そのアクセスコードには接続で送れない文字が含まれています（空白、カンマ、スラッシュなど）",
+  "use-live-relay.too-many": "語が多すぎます: {words} — ルーム、シークレット、ws(s):// サーバーを指定してください",
+  "use-live-relay.bad-server": "'{server}' はこのタブが接続できるサーバーではありません"
 }

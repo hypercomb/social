@@ -152,16 +152,47 @@ The shell owns the one exception to "the human decides"
 question: does anything answer `packages:open` (`EffectBus.listens`)? A
 package that answers is never touched, so updating it stays a choice. A
 package that answers nothing is **below the floor**, and the shell takes the
-seed's head for it through the **floor** door:
+seed's head for it through the **floor** door.
+
+**Also below the floor (2026-10-09): a package that keeps swarm membership in
+the origin-wide flag.** A package from before per-tab membership gates every
+swarm beacon and publish on `hc:mesh-public`, which every tab shares, so a
+second hypercomb.io tab silenced the joined one mid-meeting — and such a
+package still answers the door. Its own bytes say so: it reads
+`hc:mesh-public` and never `hc:mesh-session`. The shell reads the installed
+package's modules (dependencies first, where a current build keeps it) at
+most once per package per page; the verdict is a derivation of the package
+signature and is never written down. A package that reads neither has no
+swarm and is left alone; a module that cannot be read makes the floor stand
+aside.
+
+**Where it goes**: the root the followed publisher SIGNED (`install:essentials`
+in the index the update scout reads, `sign('hive:indexes')/<pubkey>`), then
+the seed's pool head when that root cannot be had from the seed yet — the
+pool alone lagged the channel for ten days. A forged index moves nothing.
 
 - integrity and the core-surface gate apply exactly as for any install;
 - complete-or-absent: a failed move activates nothing, and the old package
   keeps running until the next boot asks again;
 - nothing is deleted: the old package's bytes stay, and the move is recorded
   in `hc:install:floor` (`{ from, to, zone, at }`);
-- the reload waits for three quiet seconds, and happens at most once per
-  session (`hc:install:floor-reloaded`), so a move that did not stick never
-  loops.
+- the reload waits for three quiet seconds, and happens at most **once per
+  session, whatever the target** (`hc:install:floor-reloaded`, written before
+  the record, on its own): with two targets (the signed root and the pool
+  head) a guard that remembered only the last one alternated between them on
+  every boot. A move that did not stick is never retried in that session, and
+  a session that cannot remember the move does not reload at all.
+
+**A first install follows the same channel.** `installFromHosts`
+(`hypercomb-runtime/src/host-packages.ts`) reads the signed index and the
+pool heads at once, and tries the signed root first, then the pool head when
+it is another package. It follows `hc:install-follow` when the participant set
+one, else the publisher the shell ships (`hypercomb-web/src/setup/
+install-publisher.json`); the signature check (`nostr-tools/pure`) loads only
+when an index is actually read. It falls back to the pool head when the index
+cannot be read, names no `install:<channel>` root, or that root is not on the
+seed yet. A forged index installs nothing. A sandbox door ignores the channel
+and runs its own package.
 
 Two guards keep an old package BOOTABLE long enough for the floor to act:
 core's export surface is a protocol (`hypercomb-core/src/export-surface.spec.ts`

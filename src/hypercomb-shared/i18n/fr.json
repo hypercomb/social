@@ -2722,5 +2722,20 @@
   "invite.meet.join.message-local": "Rejoindre la salle « {room} » ? Vous verrez tout le monde ici. Les tuiles que vous ajoutez pendant ce temps sont partagées avec la salle.",
   "invite.meet.join.confirm": "Rejoindre",
   "invite.meet.join.cancel": "Pas maintenant",
-  "host.no-host": "Nulle part où mettre les octets ({reason}) — ajoutez un hôte à cette branche, ou définissez-en un dans le panneau des hôtes, puis publiez à nouveau. Rien n'a été publié."
+  "host.no-host": "Nulle part où mettre les octets ({reason}) — ajoutez un hôte à cette branche, ou définissez-en un dans le panneau des hôtes, puis publiez à nouveau. Rien n'a été publié.",
+  "invite.meet.join.message-at": "Rejoindre la salle « {room} » à {point} ? Vous verrez tout le monde ici. Les tuiles que vous ajoutez pendant ce temps sont partagées avec la salle et conservées par {host}.",
+  "invite.meet.join.message-at-local": "Rejoindre la salle « {room} » à {point} ? Vous verrez tout le monde ici. Les tuiles que vous ajoutez pendant ce temps sont partagées avec la salle.",
+  "invite.meet.copied-at": "Lien de réunion copié — quiconque l'ouvre rejoint {room} à {point}, sur cette page.",
+  "invite.meet.shared-at": "Lien de réunion partagé — quiconque l'ouvre rejoint {room} à {point}, sur cette page.",
+  "invite.point.title": "Point de rencontre",
+  "invite.point.invalid": "Ce n'est pas un point de rencontre — indiquez-le sous la forme wss://name.tld (un chemin peut suivre).",
+  "invite.point.code-not-here": "Le code d'accès n'est jamais pris depuis la ligne de commande — elle mémorise ce qu'elle exécute. Collez-le plutôt dans le sélecteur.",
+  "mesh-modal.point-label": "point de rencontre",
+  "mesh-modal.point-placeholder": "par défaut — ou wss://name.tld",
+  "mesh-modal.bad-point": "un point de rencontre est wss://name.tld — et un code d'accès en exige un",
+  "mesh-modal.code-label": "code d'accès",
+  "mesh-modal.code-placeholder": "code d'accès, si le point de rencontre en demande un",
+  "mesh-modal.bad-code": "ce code d'accès contient un caractère qu'une connexion ne peut pas transporter (espace, virgule, barre oblique…)",
+  "use-live-relay.too-many": "trop de mots : {words} — donne une salle, un secret et un serveur ws(s)://",
+  "use-live-relay.bad-server": "'{server}' n'est pas un serveur que cet onglet peut joindre"
 }

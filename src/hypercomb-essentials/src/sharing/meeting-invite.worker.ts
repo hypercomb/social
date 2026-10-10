@@ -5,9 +5,13 @@
 //
 //   • Meeting link — `#meet=room/secret/page`, the link a bare `invite`
 //     copies. The shell capture stashes the fragment under MEET_KEY; this
-//     worker drains it once and joins straight from it. Nothing is fetched
-//     first: the link carries the place itself, so joining by link waits on
-//     no host and no bundle.
+//     worker joins straight from it. Nothing is fetched first: the link
+//     carries the place itself, so joining by link waits on no host and no
+//     bundle. The stash is KEPT until the sheet is answered — joined, not
+//     now, already here, or a link that is no link — so a reload (or the
+//     package floor's own reload) while the sheet is up asks again instead
+//     of losing the invitation: the fragment left the address bar at boot,
+//     and the stash is the only copy.
 //
 //   • Link path — the shell capture (hypercomb-shared/core/invite-capture.ts)
 //     stashes a `/<sig>` boot URL under PENDING_INVITE_KEY; this worker drains
@@ -69,6 +73,12 @@ export class MeetingInviteWorker extends Worker {
   // wiring the listener, but the link branch is one-shot).
   #handled = false
 
+  /** THE SHELL ASKS THIS. A package that keeps the meeting link until it is
+   *  answered says so here; the shell's fallback (invite-capture.ts) then
+   *  leaves the stash to it. A package without it either drained the stash
+   *  at once or never read it — and the shell opens the selector itself. */
+  readonly meetLinks = 2
+
   protected override ready = (): boolean => {
     if (this.#handled) return false
     return !!get(STORE_KEY) && !!get(ROOM_KEY) && !!get(SECRET_KEY) && !!get(NAV_KEY)
@@ -84,11 +94,13 @@ export class MeetingInviteWorker extends Worker {
       }
     })
 
-    // One-shot: a `#meet=` meeting link captured at boot. Drained BEFORE the
-    // join so a reload while the sheet is up never asks twice; a malformed
-    // fragment is simply dropped.
+    // One-shot: a `#meet=` meeting link captured at boot. Cleared only once
+    // the join has settled, on every exit; a malformed fragment is dropped
+    // at once (there is nothing to answer).
     const meet = this.#pendingMeet()
-    if (meet) void joinMeetingPlace(meet)
+    if (meet) {
+      void joinMeetingPlace(meet).catch(() => false).finally(this.#clearMeet)
+    }
 
     // One-shot: a /<sig> invite link captured at boot. sessionStorage
     // survives a reload within the tab, so clear it regardless of outcome.
@@ -122,8 +134,13 @@ export class MeetingInviteWorker extends Worker {
     let held = ''
     try { held = sessionStorage.getItem(MEET_KEY) ?? '' } catch { held = '' }
     if (!held) return null
+    const meet = parseMeet(held)
+    if (!meet) this.#clearMeet()
+    return meet
+  }
+
+  #clearMeet = (): void => {
     try { sessionStorage.removeItem(MEET_KEY) } catch { /* ignore */ }
-    return parseMeet(held)
   }
 
   #pendingLink = (): string => {

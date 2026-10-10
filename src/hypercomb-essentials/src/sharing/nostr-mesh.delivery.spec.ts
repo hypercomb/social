@@ -372,7 +372,7 @@ describe('CLOSED backoff', () => {
 
   it("a standing refusal ('restricted:' / 'invalid:') is never retried", async () => {
     const { mesh, ws } = await boot()
-    const word = 'not-a-signature'
+    const word = 'd'.repeat(64)
     mesh.subscribe(word, () => void 0)
     ws.receive(['CLOSED', subIdOf(ws, word), 'restricted: name a signature address (#x) or exact ids — this relay lists nothing'])
     mesh.subscribe(S, () => void 0)

@@ -25,6 +25,13 @@
 // scout bundles into its own verified bytes (update-scout.service.ts). The
 // package stamped now predates the file; the next build carries it.
 //
+// AND WHOM A COLD SHELL FOLLOWS. A shell with nothing installed has no scout
+// yet, so the web shell carries the same record
+// (`hypercomb-web/src/setup/install-publisher.json`) and its first install
+// follows that publisher's signed `install:<channel>`. Both copies are written
+// here, together, byte-identical — and install-follow.spec.ts fails the suite
+// if they ever differ.
+//
 // ONLY WHEN ASKED (`--adopt-publisher`). A stamp answered by a hive holding a
 // DIFFERENT key than the file names is refused and left owed, exactly as the
 // broker refuses an owed stamp (run-bridge.cjs). Observed 2026-09-22: a stamp
@@ -48,37 +55,34 @@ import WebSocket from 'ws'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 const SIG_RE = /^[a-f0-9]{64}$/
-const PUBLISHER_FILE = resolve(__dirname, '..', 'src', 'sharing', 'install-publisher.json')
+/** Every copy of the publisher record, scout's first: the package's (bundled
+ *  into the update scout) and the web shell's (read by a cold install). */
+export const PUBLISHER_FILES: readonly string[] = [
+  resolve(__dirname, '..', 'src', 'sharing', 'install-publisher.json'),
+  resolve(__dirname, '..', '..', 'hypercomb-web', 'src', 'setup', 'install-publisher.json'),
+]
+const DIST = resolve(__dirname, '..', 'dist')
 const owedStamps = createRequire(import.meta.url)('../../scripts/bridge/owed-stamps.cjs') as {
   recordOwed(channel: string, sig: string, host?: string): boolean
   settleOwed(channel: string, sig: string): boolean
   followedPubkey(): string | null
 }
 
-const argv = process.argv.slice(2)
-const flag = (name: string): string | undefined => {
-  const i = argv.indexOf(name)
-  return i >= 0 ? argv[i + 1] : undefined
-}
-const channel = argv.find(a => !a.startsWith('--') && a !== flag('--sig') && a !== flag('--host')) || 'essentials'
-const require_ = argv.includes('--require')
-const adoptPublisher = argv.includes('--adopt-publisher')
-
 /** The package this build made, read from dist's own `host:packages` member —
  *  the same thing a host publishes and a client reads, rather than a document
- *  about it (documentation/host-packages-pool.md). */
-function packageSigFromDist(): string | null {
-  const explicit = String(flag('--sig') ?? '').trim().toLowerCase()
-  if (explicit) return SIG_RE.test(explicit) ? explicit : null
+ *  about it (documentation/host-packages-pool.md). An explicit `--sig` wins. */
+export function packageSigFromDist(explicit?: string, distDir: string = DIST): string | null {
+  const named = String(explicit ?? '').trim().toLowerCase()
+  if (named) return SIG_RE.test(named) ? named : null
   try {
     const pool = createHash('sha256').update('host:packages', 'utf8').digest('hex')
-    const entry = readFileSync(resolve(__dirname, '..', 'dist', pool, '00000000'), 'utf8')
+    const entry = readFileSync(resolve(distDir, pool, '00000000'), 'utf8')
     const sig = (entry.split('\n')[0] ?? '').trim().toLowerCase()
     return SIG_RE.test(sig) ? sig : null
   } catch { return null }
 }
 
-function stamp(sig: string): Promise<Record<string, unknown>> {
+function stamp(sig: string, channel: string, host?: string): Promise<Record<string, unknown>> {
   return new Promise((resolvePromise, reject) => {
     const ws = new WebSocket(BRIDGE, {
       ...(process.env.HYPERCOMB_BRIDGE_TOKEN
@@ -92,7 +96,7 @@ function stamp(sig: string): Promise<Record<string, unknown>> {
       id,
       key: `install:${channel}`,
       sig,
-      ...(flag('--host') ? { host: flag('--host') } : {}),
+      ...(host ? { host } : {}),
     })))
     ws.on('message', (raw: Buffer) => {
       let res: { id?: string; ok?: boolean; data?: Record<string, unknown>; error?: string }
@@ -107,68 +111,110 @@ function stamp(sig: string): Promise<Record<string, unknown>> {
   })
 }
 
-/** Name the key that just signed as the one this channel's builds follow.
- *  Only the channel the scout reads, and only when something changed — an
- *  ordinary stamp leaves the source tree alone. */
-function recordPublisher(data: Record<string, unknown>): void {
-  if (channel !== 'essentials') return
+/** Name the key that just signed as the one this channel's builds — and a
+ *  cold shell — follow. Only the channel the scout reads, and only when
+ *  something changed: an ordinary stamp leaves the source tree alone.
+ *
+ *  The FIRST file is the record; every other file is made byte-identical to
+ *  it, so a copy that drifted (edited by hand, or written before the shell
+ *  carried one) is healed by the next stamp. Returns the files written. */
+export function recordPublisher(
+  data: Record<string, unknown>,
+  channel: string,
+  files: readonly string[] = PUBLISHER_FILES,
+  log: (line: string) => void = line => console.log(line),
+): string[] {
+  if (channel !== 'essentials' || !files.length) return []
   const pubkey = String(data['pubkey'] ?? '').trim().toLowerCase()
-  if (!SIG_RE.test(pubkey)) return
+  if (!SIG_RE.test(pubkey)) return []
   const host = String(data['host'] ?? '').trim().toLowerCase()
   // THE HOSTS ARE THE OWNER'S. The host a stamp landed on is only where this
   // tab's hive happened to sign; writing it over the list made every stamp
   // from 4250 swap content.hypercomb.com for pluginthematrix.com (jwize,
   // 2026-10-05: "keep hypercomb.com default"). A host is recorded only when
   // the file names none.
+  const [record, ...copies] = files
   let current: { pubkey?: string; hosts?: string[]; channel?: string } | null = null
-  try { current = JSON.parse(readFileSync(PUBLISHER_FILE, 'utf8')) } catch { /* absent or unreadable — write it */ }
+  try { current = JSON.parse(readFileSync(record!, 'utf8')) } catch { /* absent or unreadable — write it */ }
   const hosts = Array.isArray(current?.hosts) && current!.hosts.length ? current!.hosts : host ? [host] : []
   const next = { pubkey, hosts, channel }
-  if (current && current.pubkey === next.pubkey && current.channel === next.channel
-    && JSON.stringify(current.hosts) === JSON.stringify(next.hosts)) return
-  writeFileSync(PUBLISHER_FILE, JSON.stringify(next, null, 2) + '\n')
-  console.log(`[stamp-install-channel] builds now follow pubkey ${pubkey.slice(0, 12)}… (src/sharing/install-publisher.json) — the next build carries it`)
+  const text = JSON.stringify(next, null, 2) + '\n'
+  const unchanged = !!current && current.pubkey === next.pubkey && current.channel === next.channel
+    && JSON.stringify(current.hosts) === JSON.stringify(next.hosts)
+  const recordText = unchanged ? readFileSync(record!, 'utf8') : text
+  const written: string[] = []
+  if (!unchanged) { writeFileSync(record!, text); written.push(record!) }
+  for (const copy of copies) {
+    let held: string | null = null
+    try { held = readFileSync(copy, 'utf8') } catch { /* absent — write it */ }
+    if (held === recordText) continue
+    writeFileSync(copy, recordText)
+    written.push(copy)
+  }
+  if (!unchanged) log(`[stamp-install-channel] builds and cold installs now follow pubkey ${pubkey.slice(0, 12)}… — the next build carries it`)
+  else if (written.length) log(`[stamp-install-channel] the shell's copy of the publisher record matched to the package's`)
+  return written
 }
 
-const sig = packageSigFromDist()
-if (!sig) {
-  console.error('[stamp-install-channel] no package sig — dist carries no host:packages member, or --sig is malformed')
-  process.exit(1)
+async function main(): Promise<void> {
+  const argv = process.argv.slice(2)
+  const flag = (name: string): string | undefined => {
+    const i = argv.indexOf(name)
+    return i >= 0 ? argv[i + 1] : undefined
+  }
+  const channel = argv.find(a => !a.startsWith('--') && a !== flag('--sig') && a !== flag('--host')) || 'essentials'
+  const require_ = argv.includes('--require')
+  const adoptPublisher = argv.includes('--adopt-publisher')
+
+  const sig = packageSigFromDist(flag('--sig'))
+  if (!sig) {
+    console.error('[stamp-install-channel] no package sig — dist carries no host:packages member, or --sig is malformed')
+    process.exit(1)
+  }
+
+  try {
+    const data = await stamp(sig, channel, flag('--host'))
+    const signer = String(data['pubkey'] ?? '').trim().toLowerCase()
+    const followed = channel === 'essentials' ? owedStamps.followedPubkey() : null
+    if (followed && signer !== followed && !adoptPublisher) {
+      throw new Error(
+        `signed by ${signer.slice(0, 12) || 'an unknown key'}…, but builds follow ${followed.slice(0, 12)}… — ` +
+        `the index that moved is one no build reads. Attach the hive holding ${followed.slice(0, 12)}… and retry, ` +
+        `or pass --adopt-publisher to move every future build onto the signing key`,
+      )
+    }
+    if (data['unchanged']) {
+      console.log(`[stamp-install-channel] install:${channel} already at ${sig.slice(0, 12)}… — sentinel current`)
+    } else {
+      console.log(`[stamp-install-channel] SENTINEL ADVANCED: install:${channel} → ${sig.slice(0, 12)}… on ${String(data['host'])} (pubkey ${String(data['pubkey']).slice(0, 12)}…)`)
+    }
+    recordPublisher(data, channel)
+    owedStamps.settleOwed(channel, sig)
+  } catch (err) {
+    owedStamps.recordOwed(channel, sig, flag('--host'))
+    const retry = `npx tsx hypercomb-essentials/scripts/stamp-install-channel.ts ${channel} --sig ${sig}`
+    console.error('')
+    console.error('  ┌─────────────────────────────────────────────────────────────┐')
+    console.error(`  │  SENTINEL STAMP OWED — install:${channel} not advanced`)
+    const reason = err instanceof Error
+      ? (err.message || (err as { code?: string }).code || 'connection failed')
+      : String(err)
+    console.error(`  │  reason: ${reason}`)
+    console.error('  │  Bytes ARE published; consumers see the OLD root until')
+    console.error('  │  stamped. The debt is recorded: the bridge pays it the')
+    console.error('  │  next time a hive attaches (?claudeBridge=1). Or run:')
+    console.error(`  │    ${retry}`)
+    console.error('  └─────────────────────────────────────────────────────────────┘')
+    console.error('')
+    process.exit(require_ ? 1 : 0)
+  }
 }
 
-try {
-  const data = await stamp(sig)
-  const signer = String(data['pubkey'] ?? '').trim().toLowerCase()
-  const followed = channel === 'essentials' ? owedStamps.followedPubkey() : null
-  if (followed && signer !== followed && !adoptPublisher) {
-    throw new Error(
-      `signed by ${signer.slice(0, 12) || 'an unknown key'}…, but builds follow ${followed.slice(0, 12)}… — ` +
-      `the index that moved is one no build reads. Attach the hive holding ${followed.slice(0, 12)}… and retry, ` +
-      `or pass --adopt-publisher to move every future build onto the signing key`,
-    )
-  }
-  if (data['unchanged']) {
-    console.log(`[stamp-install-channel] install:${channel} already at ${sig.slice(0, 12)}… — sentinel current`)
-  } else {
-    console.log(`[stamp-install-channel] SENTINEL ADVANCED: install:${channel} → ${sig.slice(0, 12)}… on ${String(data['host'])} (pubkey ${String(data['pubkey']).slice(0, 12)}…)`)
-  }
-  recordPublisher(data)
-  owedStamps.settleOwed(channel, sig)
-} catch (err) {
-  owedStamps.recordOwed(channel, sig, flag('--host'))
-  const retry = `npx tsx hypercomb-essentials/scripts/stamp-install-channel.ts ${channel} --sig ${sig}`
-  console.error('')
-  console.error('  ┌─────────────────────────────────────────────────────────────┐')
-  console.error(`  │  SENTINEL STAMP OWED — install:${channel} not advanced`)
-  const reason = err instanceof Error
-    ? (err.message || (err as { code?: string }).code || 'connection failed')
-    : String(err)
-  console.error(`  │  reason: ${reason}`)
-  console.error('  │  Bytes ARE published; consumers see the OLD root until')
-  console.error('  │  stamped. The debt is recorded: the bridge pays it the')
-  console.error('  │  next time a hive attaches (?claudeBridge=1). Or run:')
-  console.error(`  │    ${retry}`)
-  console.error('  └─────────────────────────────────────────────────────────────┘')
-  console.error('')
-  process.exit(require_ ? 1 : 0)
+/** Run only as a script — a spec imports the helpers above without stamping. */
+const invokedDirectly = (): boolean => {
+  const entry = process.argv[1]
+  if (!entry) return false
+  const [a, b] = [resolve(entry), fileURLToPath(import.meta.url)]
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
 }
+if (invokedDirectly()) await main()

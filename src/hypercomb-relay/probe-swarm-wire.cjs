@@ -6,16 +6,21 @@ const WebSocket = require('ws')
 
 const RELAY = process.argv[2] || 'ws://localhost:7777'
 const WINDOW_MS = 45_000
+// The relay's address gate refuses a read that names no signature
+// (documentation/swarm-host.md, "Reads name an address"): name the
+// addresses to read, HC_X=<sig>,<sig> (a page sig, a lifecycle sig).
+const XS = String(process.env.HC_X || '').split(',').map(s => s.trim()).filter(s => /^[0-9a-f]{64}$/.test(s))
 const seen = new Map() // pubkey -> Map(kindSig -> {count, lastVisuals})
 
 const ws = new WebSocket(RELAY)
 ws.on('open', () => {
   const since = Math.floor(Date.now() / 1000) - 300
-  ws.send(JSON.stringify(['REQ', 'probe', { kinds: [30200, 30201, 30202, 30203, 30204, 30205], since }]))
+  ws.send(JSON.stringify(['REQ', 'probe', { kinds: [30200, 30201, 30202, 30203, 30204, 30205], since, ...(XS.length ? { '#x': XS } : {}) }]))
   console.log(`[probe] listening on ${RELAY} for 45s (replay since -300s + live)...`)
 })
 ws.on('message', (raw) => {
   let msg; try { msg = JSON.parse(raw.toString()) } catch { return }
+  if (msg[0] === 'CLOSED') { console.error(`[probe] refused: ${msg[2]} — name the addresses: HC_X=<sig>,<sig>`); process.exit(1) }
   if (msg[0] !== 'EVENT') return
   const evt = msg[2]
   const pk = String(evt.pubkey || '').slice(0, 8)

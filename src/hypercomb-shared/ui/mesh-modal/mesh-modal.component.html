@@ -120,6 +120,49 @@
         }
       </section>
 
+      <!-- 5. Meeting point (empty = the default relay) and its access code.
+           Both are THIS tab's, and ride in the meeting link the share button
+           copies; the code is masked like the secret and never shown again
+           anywhere else. -->
+      <section class="mesh-modal-section">
+        <label class="mesh-modal-label" for="mesh-modal-point-input">{{ 'mesh-modal.point-label' | t }}</label>
+        <input
+          id="mesh-modal-point-input"
+          class="mesh-modal-input mesh-modal-point"
+          type="text"
+          [placeholder]="'mesh-modal.point-placeholder' | t"
+          [value]="pointDraft()"
+          [class.mesh-modal-input-missing]="missingField() === 'point'"
+          (input)="onPointInput($event)"
+          autocapitalize="off"
+          autocorrect="off"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        @if (missingField() === 'point') {
+          <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.bad-point' | t }}</p>
+        }
+        <div class="mesh-modal-secret-row">
+          <input
+            id="mesh-modal-code-input"
+            class="mesh-modal-input mesh-modal-code"
+            [type]="secretInputType()"
+            [placeholder]="'mesh-modal.code-placeholder' | t"
+            [attr.aria-label]="'mesh-modal.code-label' | t"
+            [value]="codeDraft()"
+            [class.mesh-modal-input-missing]="missingField() === 'code'"
+            (input)="onCodeInput($event)"
+            autocapitalize="off"
+            autocorrect="off"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+        @if (missingField() === 'code') {
+          <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.bad-code' | t }}</p>
+        }
+      </section>
+
     </div>
 
     @if (joinMode()) {

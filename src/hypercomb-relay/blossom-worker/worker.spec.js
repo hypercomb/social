@@ -3074,3 +3074,74 @@ test('a front door with no apex address keeps the card at the apex, and at host.
   visitorAssets(plain.env, [])
   assert.equal(carriedDoor(await pageAt('https://host.pluginthematrix.com/', plain.env)).lineage, 'camelflage')
 })
+
+// ── the always-online meeting point (meet-worker) ────────────────────────────
+
+/** The MEET service binding, recording what reaches the meeting point. */
+function meetBinding() {
+  const asked = []
+  return {
+    asked,
+    fetch: async (request) => {
+      asked.push({ url: request.url, method: request.method, protocol: request.headers.get('sec-websocket-protocol') })
+      return new Response('from the meeting point', { status: 200 })
+    },
+  }
+}
+
+test('a WebSocket dial at the meeting host goes to the meeting point, its access code untouched', async () => {
+  const { env } = await fixture()
+  const MEET = meetBinding()
+  const meetEnv = { ...env, MEET, MEET_HOSTS: 'pluginthematrix.com' }
+  const dial = (url, headers = {}) => worker.fetch(new Request(url, {
+    headers: { upgrade: 'websocket', connection: 'Upgrade', 'sec-websocket-protocol': 'hc-access.the-code-of-the-day', ...headers },
+  }), meetEnv)
+
+  assert.equal(await (await dial('https://pluginthematrix.com/')).text(), 'from the meeting point')
+  assert.equal(await (await dial('https://pluginthematrix.com/io', { upgrade: 'WebSocket' })).text(), 'from the meeting point',
+    'any path at the meeting host: wss://pluginthematrix.com/io is the same meeting point')
+  assert.deepEqual(MEET.asked.map((a) => a.protocol), ['hc-access.the-code-of-the-day', 'hc-access.the-code-of-the-day'])
+
+  // The operator's recycle and the NIP-11 answer are the meeting point's too.
+  await worker.fetch(new Request('https://pluginthematrix.com/.well-known/hc-meet/code', { method: 'POST', body: '{}' }), meetEnv)
+  await worker.fetch(new Request('https://pluginthematrix.com/', { headers: { accept: 'application/nostr+json' } }), meetEnv)
+  assert.deepEqual(MEET.asked.slice(2).map((a) => [a.method, new URL(a.url).pathname]), [['POST', '/.well-known/hc-meet/code'], ['GET', '/']])
+
+  // Nothing else is: the page at the apex, a site under the zone, a dial
+  // anywhere else, and a door's write.
+  const page = await worker.fetch(new Request('https://pluginthematrix.com/'), meetEnv)
+  assert.notEqual(await page.text(), 'from the meeting point')
+  const site = await dial('https://revolucion.pluginthematrix.com/')
+  assert.notEqual(await site.text(), 'from the meeting point')
+  const door = await worker.fetch(new Request('https://pluginthematrix.com/.well-known/hc-meet/code', {
+    method: 'POST', headers: { origin: 'https://try-fresh-rooms.pluginthematrix.com' }, body: '{}',
+  }), meetEnv)
+  assert.equal(door.status, 403, 'doors write nothing — not even to the meeting point')
+  assert.equal(MEET.asked.length, 4)
+})
+
+test('with no meeting point bound, a dial at the apex is answered as it always was', async () => {
+  const { env } = await fixture()
+  const unbound = await worker.fetch(new Request('https://pluginthematrix.com/', { headers: { upgrade: 'websocket' } }), { ...env, MEET_HOSTS: 'pluginthematrix.com' })
+  assert.notEqual(await unbound.text(), 'from the meeting point')
+  const MEET = meetBinding()
+  await worker.fetch(new Request('https://pluginthematrix.com/', { headers: { upgrade: 'websocket' } }), { ...env, MEET })
+  assert.equal(MEET.asked.length, 0, 'a binding with no MEET_HOSTS names no meeting host')
+})
+
+test('a PUT of an atom the host already holds is a receipt too: `stored <sig>`', async () => {
+  const env = { SITE_BINDINGS: '{}', CONTENT: contentBag() }
+  const bytes = 'an atom two participants share'
+  const sig = await sha256Hex(bytes)
+  const url = `https://pluginthematrix.com/${sig}`
+  const put = async () => worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT') }, body: bytes }), env)
+  const first = await put()
+  assert.equal(first.status, 201)
+  assert.equal((await first.text()).trim(), `stored ${sig}`)
+  // The swarm's drain takes exactly this body as the receipt and skips the
+  // read-back GET (host-sync: said === `stored <sig>`); the bytes hashed to
+  // the signature either way.
+  const again = await put()
+  assert.equal(again.status, 200)
+  assert.equal((await again.text()).trim(), `stored ${sig}`)
+})
