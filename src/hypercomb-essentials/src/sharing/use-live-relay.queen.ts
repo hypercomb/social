@@ -110,10 +110,13 @@ const isLocalOrigin = (): boolean => {
   } catch { return false }
 }
 
+/** The shipped default meeting point — nostr-mesh's LIVE_RELAY, read from the
+ *  anchor it publishes; the literal is only for a mesh not loaded yet. Open,
+ *  always online, and the only host a public install names (2026-10-11). */
 const liveRelayUrl = (): string => {
   const known = (globalThis as Record<string, unknown>)['__HYPERCOMB_RELAYS__'] as
     | { live?: string } | undefined
-  return known?.live ?? 'wss://jwize.com'
+  return known?.live ?? 'wss://hypercomb.com'
 }
 
 export class UseLiveRelayQueenBee {

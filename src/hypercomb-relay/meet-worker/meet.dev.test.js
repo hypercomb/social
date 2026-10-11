@@ -1,9 +1,12 @@
 // The meeting point in the real Workers runtime: `wrangler dev --local` runs
-// worker.js and its Durable Object in workerd on a scratch port, and real
+// worker.js and its Durable Objects in workerd on a scratch port, and real
 // WebSockets dial it — the access code as a subprotocol, a recycle by the
-// operator's script, the address gate, wills, expiry and a reconnect.
+// operator's script, the address gate, wills, expiry and a reconnect — and the
+// OPEN host beside the coded one: the same server dialled as `localhost` is
+// open (MEET_OPEN_HOSTS), as `127.0.0.1` coded, each in its own object.
 //
 //   npm run test:dev        (needs wrangler from devDependencies; no network)
+//   MEET_DEV_PORTS=8890-8895 npm run test:dev    another scratch port range
 import test, { before, after, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
@@ -21,22 +24,26 @@ const nowSec = () => Math.floor(Date.now() / 1000)
 const operator = schnorr.utils.randomPrivateKey()
 const GRACE_MS = 1500
 
-/** A free port in the scratch range 8780-8799. */
+const [PORT_MIN, PORT_MAX] = (/^(\d+)-(\d+)$/.exec(process.env.MEET_DEV_PORTS ?? '')?.slice(1).map(Number)) ?? [8780, 8799]
+
+/** A free port in the scratch range (8780-8799 unless MEET_DEV_PORTS says). */
 async function freePort(taken = new Set()) {
-  for (let port = 8780; port <= 8799; port++) {
+  for (let port = PORT_MIN; port <= PORT_MAX; port++) {
     if (taken.has(port)) continue
     const free = await new Promise((resolve) => {
       const server = createServer().once('error', () => resolve(false)).listen(port, '127.0.0.1', () => server.close(() => resolve(true)))
     })
     if (free) return port
   }
-  throw new Error('no free port in 8780-8799')
+  throw new Error(`no free port in ${PORT_MIN}-${PORT_MAX}`)
 }
 
 let dev
 const opened = new Set()
 let base
 let wsBase
+let openBase
+let wsOpen
 let state
 
 before(async () => {
@@ -50,12 +57,16 @@ before(async () => {
     '--var', `OPERATOR_KEYS:${bytesToHex(schnorr.getPublicKey(operator))}`,
     '--var', `DIAG_WILL_GRACE_MS:${GRACE_MS}`,
     '--var', 'DIAG_SWEEP_MS:500',
+    // The same server, named two ways: `localhost` is the open host here.
+    '--var', 'MEET_OPEN_HOSTS:localhost',
   ], { cwd: here, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' } })
   const out = []
   dev.stdout.on('data', (chunk) => out.push(String(chunk)))
   dev.stderr.on('data', (chunk) => out.push(String(chunk)))
   base = `http://127.0.0.1:${port}`
   wsBase = `ws://127.0.0.1:${port}`
+  openBase = `http://localhost:${port}`
+  wsOpen = `ws://localhost:${port}`
   for (let tries = 0; ; tries++) {
     try { if ((await fetch(base + '/', { headers: { accept: 'application/nostr+json' } })).ok) break } catch {}
     if (tries > 240) throw new Error(`wrangler dev did not start:\n${out.join('')}`)
@@ -88,9 +99,9 @@ function recycle(key = operator, extra = []) {
 }
 
 /** Dial the meeting point with a code; resolves once open (or closed). */
-function dial(code) {
+function dial(code, at = wsBase) {
   return new Promise((resolve) => {
-    const ws = code === undefined ? new WebSocket(wsBase) : new WebSocket(wsBase, [`hc-access.${code}`])
+    const ws = code === undefined ? new WebSocket(at) : new WebSocket(at, [`hc-access.${code}`])
     const inbox = []
     const waiters = []
     const s = {
@@ -162,6 +173,34 @@ test('a fresh meeting point is closed: every dial is refused 4401 with no data',
     assert.deepEqual(closed, { code: 4401, reason })
     assert.deepEqual(s.inbox, [], 'not one frame')
   }
+})
+
+test('the open host admits a codeless dial, card first, while the coded host beside it stays shut', async () => {
+  const s = await dial(undefined, wsOpen)
+  assert.equal(s.closed, null, `refused: ${JSON.stringify(s.closed)}`)
+  const first = await s.wait(() => true)
+  assert.equal(first?.[0], 'NOTICE')
+  const card = JSON.parse(first[1].slice('hc:host '.length))
+  assert.equal(card.participants, 'all')
+  assert.equal(card.addressed, true)
+  assert.ok(Math.abs(card.time - nowSec()) <= 2)
+  assert.equal(await ask(s, 'scan', { kinds: [30206], limit: 1 }).then((r) => /^restricted: /.test(r)), true, 'no scans at the open default either')
+
+  // A stale code from an old meeting link: echoed, ignored, admitted.
+  const stale = await dial('C'.repeat(32), wsOpen)
+  assert.equal(stale.closed, null)
+  assert.equal(stale.protocol, `hc-access.${'C'.repeat(32)}`)
+
+  const info = async (at) => (await fetch(at + '/', { headers: { accept: 'application/nostr+json' } })).json()
+  assert.equal((await info(openBase)).limitation.access_code, false)
+  assert.equal((await info(base)).limitation.access_code, true)
+  const recycleOpen = await fetch(`${openBase}/.well-known/hc-meet/code`, { method: 'POST', body: '{}' })
+  assert.equal(recycleOpen.status, 404, 'an open host has no code to recycle')
+
+  // The coded host on the same server is still closed: no code has been set.
+  const shut = await dial('A'.repeat(32))
+  assert.deepEqual(await shut.untilClosed(), { code: 4401, reason: 'access: the meeting point is closed' })
+  for (const x of [s, stale]) x.ws.close()
 })
 
 test('the operator recycles the first code; only that code gets in, card first', async () => {
@@ -258,9 +297,30 @@ test('a will fires after its grace; a reconnect inside the grace cancels it', as
   for (const s of [watcher, returned]) s.ws.close()
 })
 
+test('the open default and the coded point are separate objects: one zone on both is two rooms', async () => {
+  const zone = sha256Hex('lifecycle\0both\0secret')
+  const member = await dial(code)
+  const watcher = await dial(undefined, wsOpen)
+  assert.equal(await ask(member, 'zone', { '#x': [zone] }), 'EOSE')
+  assert.equal(await ask(watcher, 'zone', { '#x': [zone] }), 'EOSE')
+  const guest = await dial(undefined, wsOpen)
+  const secret = key()
+  await publish(guest, beacon(secret, zone))
+  assert.ok(await watcher.wait((m) => m[0] === 'EVENT' && m[1] === 'zone' && m[2].pubkey === pub(secret)), 'the open room hears its guest')
+  await sleep(300)
+  assert.equal(member.events('zone').length, 0, 'the private meeting hears nothing of the open room')
+  const late = await dial(code)
+  assert.equal(await ask(late, 'zone', { '#x': [zone] }), 'EOSE')
+  assert.equal(late.events('zone').length, 0, 'nor does the coded object replay it')
+  for (const s of [member, watcher, guest, late]) s.ws.close()
+})
+
 test('a recycle is in force at once: sockets on the old code are cut, the old code opens nothing', async () => {
   const zone = sha256Hex('lifecycle\0recycle\0secret')
   const secret = key()
+  // Someone at the open default, the whole time: no recycle is theirs.
+  const bystander = await dial(undefined, wsOpen)
+  assert.equal(bystander.closed, null)
   const inRoom = await dial(code)
   await publish(inRoom, beacon(secret, zone))
   const idle = await dial(code)
@@ -297,4 +357,12 @@ test('a recycle is in force at once: sockets on the old code are cut, the old co
   const after = await dial(code)
   assert.deepEqual(await after.untilClosed(), { code: 4401, reason: 'access: the meeting point is closed' })
   assert.deepEqual(await keep.untilClosed(15_000), { code: 4401, reason: 'access: the meeting point is closed' })
+
+  // Two recycles and a destroyed code later, the open default never noticed.
+  assert.equal(bystander.closed, null)
+  assert.equal(bystander.ws.readyState, 1)
+  assert.equal(await ask(bystander, 'hc-live', { '#x': ['hc:live'], limit: 0 }), 'EOSE')
+  const newcomer = await dial(undefined, wsOpen)
+  assert.equal(newcomer.closed, null, 'and still takes everyone')
+  for (const s of [bystander, newcomer]) s.ws.close()
 })

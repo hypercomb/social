@@ -1,7 +1,9 @@
 # The swarm's host
 
 **Status: DESIGNED 2026-10-04, building on `swarm-bulletproof`; WHICH HOST
-amended 2026-10-07; the LONG TAIL amended 2026-10-10.** Owner decisions
+amended 2026-10-07; the LONG TAIL amended 2026-10-10; the OPEN DEFAULT
+(`wss://hypercomb.com`, "The always-online meeting point") amended
+2026-10-11.** Owner decisions
 (jwize, 2026-10-04): a swarm's host allows participants by default;
 connection and reconnect speed are never traded for anything else; the
 tightest setup wins. And (jwize, 2026-10-07): "I thought we only use pools
@@ -673,7 +675,7 @@ so the swarm forgets it had sent it.
 | `connecting` | a socket is opening |
 | `open` | a socket is open and answering |
 | `stalled` | a probe went unanswered for 1.5 s; past its deadline a replacement dials while this socket keeps its place |
-| `retrying` | no open socket; the reconnect ladder is running. After 30 s the line says "Can't reach jwize.com" |
+| `retrying` | no open socket; the reconnect ladder is running. After 30 s the line says "Can't reach {host}" (the shipped default: hypercomb.com) |
 | `offline` | nothing is being dialled: this tab has not joined, or it has no relay |
 
 ### Detection
@@ -937,8 +939,8 @@ frames are the relay's one NOTICE and the idle-only probes.
 - The link carries the secret. Anyone holding it can join and upload within
   the caps. Post it where the room is, and nowhere else.
 - **THE TWO WORDS (D4).** They come from the room, the secret and — when it
-  is not the shipped default `jwize.com` — the meeting point's host, never
-  the page. Everyone in a room sees the same two words on any page, and half
+  is not the shipped default `hypercomb.com` (since 2026-10-11; it was
+  `jwize.com`) — the meeting point's host, never the page. Everyone in a room sees the same two words on any page, and half
   a room split onto another relay sees a different pair. Rooms on the
   default relay keep the words they always had. The pair is always from the
   ONE English list, in every language; a reader of another language sees
@@ -946,6 +948,21 @@ frames are the relay's one NOTICE and the idle-only probes.
   compares the same English words out loud. One relay reached under two
   names (a host and its `www.`, a proxy port) reads two pairs; real links
   carry one URL.
+- **THE WORDS DURING THE MOVE TO hypercomb.com (2026-10-11).** Which point
+  counts as the shipped default is the SHELL's (`SHIPPED_POINT`), and the
+  relay a tab dials is its ESSENTIALS' (`LIVE_RELAY`). Every web profile takes
+  a new shell on reload; essentials arrive only when its participant presses
+  Update (installs are push-only). So from the shell deploy until each
+  participant updates, a tab on the new shell and old essentials still meets
+  at `wss://jwize.com` but reads a jwize-folded pair: a NEW pair, unlike the
+  one it always read, matching only other new-shell peers at jwize.com. A
+  native app on its old bundled shell in the same jwize.com meeting reads the
+  plain pair. That is not a short deploy gap — it lasts until everyone has
+  taken the update. **Have a group take the update before it compares
+  words.** jwize.com is deliberately NOT also counted as shipped: then the
+  old-essentials (jwize.com) and new-essentials (hypercomb.com) halves of one
+  room name — two meetings — would read the same pair, which is the worse
+  failure.
 
 Typed fallback: the swarm control, then the room and secret, then Start. The
 fields — and the command line — never autocapitalize or autocorrect. Room
@@ -1018,6 +1035,15 @@ If it fails:
    everyone's hive, so nobody's seeded tiles collide there.
 3. Type `/invite`. Paste the link in the group chat and show it on screen.
    Type `>` to go back to making tiles.
+   **Facilitating from a loopback hive** (`http://localhost:4250`): a loopback
+   page dials `ws://localhost:7777`, not the shipped default. Until
+   2026-10-11 that was the same relay (`wss://jwize.com` reached `:7777`
+   through cloudflared); now the default is `wss://hypercomb.com`, so turn
+   the live relay on first (`/use-live-relay on`), or invite with
+   `invite wss://hypercomb.com` — it opens the selector on that meeting point,
+   and its share button copies a link that carries `relay=`. The explicit
+   `relay=` also brings guests on packages from before the move to the same
+   meeting point.
 4. The line reads "Live · meetup · {words} — you're the first one here ·
    Invite".
 
@@ -1072,7 +1098,7 @@ name the relay.
 | Live · {room} · {words} — you're the first one here · Invite | nobody else is in the room yet | share the link |
 | Connecting to {host}… | the first connect after a join | wait |
 | Reconnecting… your tiles are safe | `stalled` or `retrying` after having been open; peers still see your tiles | wait |
-| Can't reach jwize.com — check wifi or switch to mobile data. Still trying. | no socket for 30 s | change network; a captive portal may be blocking it |
+| Can't reach hypercomb.com — check wifi or switch to mobile data. Still trying. | no socket for 30 s (the line names the meeting point's host) | change network; a captive portal may be blocking it |
 | Sharing {n} | every public tile here is hosted | nothing |
 | Sharing {n} · {k} uploading | {k} tiles are name-only while their bytes move | wait |
 | {host} isn't taking uploads from guests — others see your tile names only | 401/403: the page's host does not take this key (a publish domain, or the last host left to try) | the host adds the flag or a grant; or make a host that takes your key the first in Hosts |
@@ -1147,9 +1173,11 @@ blocked-storage card and the canonical zone text reach nobody until both are
 out. relay.js changes (two buckets, verified answer runs, carried beacons,
 the access-file read, the heir rule) are a restart, by the owner, outside a
 meeting; an un-upgraded relay ignores the beacon tag, and a PUT without it
-behaves as before. Never put an access code on the shipped default relay
-`wss://jwize.com` (D8): packages from before the access ladder (87383624,
-75007af2) redial it 13 times a minute.
+behaves as before. Never put an access code on a shipped default relay
+(D8): packages from before the access ladder (87383624, 75007af2) redial it
+13 times a minute. Since 2026-10-11 the shipped default is the OPEN
+always-online meeting point `wss://hypercomb.com` (below); packages from
+before that keep dialing `wss://jwize.com`, uncoded, until they update.
 
 1. **Relay**, at least 24 h before a meeting: add `--allow-participants`
    ([hosting-from-a-machine.md](hosting-from-a-machine.md)), restart cleanly,
@@ -1255,20 +1283,59 @@ node relay.js --destroy-access-codes ./access-codes   # empties the file: nobody
 ## The always-online meeting point
 
 jwize, 2026-10-09: "we need a host to use that is always online", and "just
-allow an access code that can be recycled". `wss://pluginthematrix.com` is a
-meeting point with no machine under it. The meeting link names it; no install
-defaults to it.
+allow an access code that can be recycled". Then, 2026-10-11: "we can't rely
+on my computer being on that is ridiculous for my setup" → "yes, open default
+on hypercomb.com, go ahead". One worker, two kinds of host, each in a
+script of its own, no machine under either:
 
-- **What it is.** A memory-only relay in ONE Durable Object, in its own script
-  `hypercomb-meet` (`hypercomb-relay/meet-worker/`). It speaks what the swarm
+- **`wss://hypercomb.com` — THE SHIPPED DEFAULT, OPEN.** Every install dials
+  it (nostr-mesh `LIVE_RELAY`; the public install names only hypercomb.com).
+  No access code, ever (D8). An offered `hc-access.*` subprotocol is echoed
+  and ignored, so a tab still carrying a code from an old link joins. It
+  keeps every other rule: the address gate, the per-connection budgets, the
+  address caps, a store that evicts rather than refuses presence — and what
+  one stranger may hold is bounded (below). Its card
+  says `participants: "all"` and `addressed: true`, and its byte host is the
+  hypercomb.com apex's worker (`AUTO_GRANT`), so the swarm's relay tier
+  resolves `wss://hypercomb.com` to `https://hypercomb.com` — the same host a
+  fresh install's pool is seeded with. Packages from before 2026-10-11 keep
+  dialing `wss://jwize.com` until they update; an operator can still name any
+  relay (their own list, `/domain`, a meeting link).
+- **`wss://pluginthematrix.com` — CODED, for private meetings.** A meeting
+  link names it; behind the recyclable access code below, unchanged.
+- **Never one script.** The same `worker.js` is deployed twice:
+  `hypercomb-meet-open` (`wrangler.meet-open.toml`, `MEET_OPEN_HOSTS =
+  "hypercomb.com"`) and `hypercomb-meet` (`wrangler.meet.toml`, no open host).
+  `pluginthematrix-core` sends a host in its `MEET_OPEN_HOSTS` to the
+  `MEET_OPEN` binding and nowhere else, and a host in `MEET_HOSTS` to `MEET`.
+  Durable Objects of one class in one script may share an isolate — one event
+  loop, one 128 MB — so two object names alone could not stop an open herd
+  slowing a private meeting's frames, or an open object pushed past the
+  isolate's memory taking the private meeting down with it. Two scripts never
+  share an isolate. Inside each script the router still asks the host: a host
+  is open only when that script's `MEET_OPEN_HOSTS` names it exactly, open
+  hosts go to `idFromName('open')` and coded ones to the object they always
+  had (`idFromName('meet')`, so its stored code survives) — so even a crossed
+  binding could not put an open dial in a coded meeting. The recycle path is
+  the coded host's alone: at an open host it is 404 before any object.
+- **The card page stays Azure's.** hypercomb.com is an `ORIGIN_HOSTS` apex:
+  `pluginthematrix-core` hands the meeting point only the upgrade, the NIP-11
+  answer (`Accept: application/nostr+json` at `/`) and
+  `/.well-known/hc-meet/*`. A browser asking for `/` still gets the host card
+  from the origin, and writes stay the worker's.
+
+- **What it is.** A memory-only relay in ONE Durable Object per script —
+  `hypercomb-meet-open` and `hypercomb-meet` (`hypercomb-relay/meet-worker/`).
+  It speaks what the swarm
   speaks to relay.js: the `hc:host` card first, NIP-01/33 slots, NIP-40
   expiry, ephemeral kinds, the per-connection budget, soft wills with their
   15 s grace, and the address gate ("Reads name an address" above: the same
   caps, write rule, room rule and ask hold, and the card says `addressed`).
   Reads name a 64-hex `#x` and nothing else, so an `ids`-only filter is
   refused here. `pluginthematrix-core` forwards it
-  three things at `MEET_HOSTS` through its `MEET` service binding: a WebSocket
-  upgrade on any path, the NIP-11 answer at `/`, and `/.well-known/hc-meet/*`.
+  three things at a meeting host through that host's service binding
+  (`MEET_OPEN` or `MEET`): a WebSocket upgrade on any path, the NIP-11 answer
+  at `/`, and `/.well-known/hc-meet/*`.
   The bytes stay on that worker: `PUT /<sig>` → R2, under `AUTO_GRANT`. It now
   answers `stored <sig>` for an atom it already holds too, so that is a
   receipt (above).
@@ -1314,7 +1381,7 @@ defaults to it.
 - **The store makes room; it never refuses presence (2026-10-10).** The
   object counts each event as its JSON plus 600 bytes (what it really costs
   the heap) within 64 MB. Full, it EVICTS instead of refusing: broker answers
-  first, oldest first; then other kinds that expire, soonest first (to the
+  first, oldest first; then other kinds, soonest-ending first (to the
   minute — a full sort per event cost 75 ms at 50k entries); presence slots
   last and only to make room for presence. Presence (30206, 30200, 30204,
   30208) is never refused while anything can be evicted, and the last 1/16
@@ -1322,13 +1389,47 @@ defaults to it.
   Broker answers are kept as relay.js keeps them (above): 15 minutes, one
   holder's verified whole run per address. Each connection has a bulk and a
   control bucket, and a broadcast serializes its event once.
+- **What one stranger can hold (2026-10-11, the open default).** With no
+  code in front of it, nothing one sender does — from one address, on one
+  connection, inside its own budget — may fill the store, pin it, outlast a
+  real beacon or hold the isolate's memory (`meeting.js`). Both scripts run
+  the same rules; the code was never the barrier for these, since every guest
+  of a coded meeting shares one.
+  - **Nothing is kept for good.** Every kept event's stored life has a
+    ceiling, whatever expiration it carries or lacks: presence 5 minutes (the
+    swarm beacons a 90–120 s life; a will's tombstone lives 300 s), any other
+    kind 7 days (the longest a shipped client asks: feedback items and the
+    install roster; resource bytes ask a day). So every event is evictable,
+    and a far-future beacon outlasts a real one by minutes at most.
+  - **One source's share.** Each kept event is charged to its source — the
+    sender's IP, IPv6 by its /64. One source holds at most 1/8 of the store
+    (8 MB): past it, its OWN oldest events make room (its answers and other
+    kinds first; its presence only for its presence), never anyone else's.
+    One machine can never make another participant's beacon come back full.
+  - **Too large to keep.** A non-bulk event over 128 KB is fanned out live and
+    never kept (and the publisher's older copy in that slot goes). Bytes ride
+    the bulk kinds, which may be up to the 512 KB frame.
+  - **Sockets.** One source holds at most 32 sockets at once; the object at
+    most 2,500, routing at most 50,000 subscribed addresses in all (about 350
+    bytes of heap each). Past a ceiling a dial is accepted and closed **1013**
+    (busy) before a frame — the client's ordinary ladder redials, never the
+    access ladder — and a REQ is `CLOSED error: the meeting point is full`.
+    The minute line counts `dials N`. Refused, never the isolate's 128 MB,
+    which would drop every room at once.
+  - **Only a frame that pays is hearing.** A `CLOSE`, a malformed frame or a
+    refused one never keeps a socket from the 120 s idle reap; the liveness
+    probe every client already sends (a REQ) does. A connection keeps the
+    wills of its 16 newest lifecycle slots at most.
+  - **In front of it, at the edge:** a Cloudflare rate-limiting rule on
+    WebSocket upgrades at `hypercomb.com` (deploy step 4) caps how fast any one
+    address can dial, before a request reaches either worker.
 - **A failed door question never shuts the door.** When the front's question
   to the object fails (a rejected fetch, a non-OK status, non-JSON), the
   answer is `unknown` and the dial is forwarded to the object, which checks
   the code itself; 4401 at the front only on a hash the front actually holds.
 - **D8: the deploy waits on these (code gate met in this branch).** The
-  `hypercomb-meet` deploy and the `MEET` binding below are the owner's act;
-  until then the always-online point does not exist.
+  `hypercomb-meet-open` and `hypercomb-meet` deploys and their bindings below
+  are the owner's act; until then the always-online point does not exist.
 - **A reset is a relay restart.** While anyone is connected, a sweep timer
   keeps the object in memory. It runs expiry, the 120 s idle reap (a Worker
   cannot ping) and the minute line. If the object is evicted or redeployed,
@@ -1338,42 +1439,81 @@ defaults to it.
   them.
 
 **Deploy, in this order** (not yet run; deploy from a clean copy once this
-work is merged):
+work is merged). The open default (2026-10-11) raises the stakes of the
+order: an essentials revision naming `wss://hypercomb.com` must not be
+published until step 5 checks out, or its installs meet nobody.
 
-1. `cd hypercomb-relay/meet-worker && npm ci && npx wrangler deploy --config wrangler.meet.toml`
-   creates the script, the `MeetingPoint` class and its SQLite migration. It
-   has no route and no workers.dev address.
-2. Make a recycle-only key, put its PUBLIC half in `OPERATOR_KEYS` in
-   `wrangler.meet.toml`, and deploy step 1 again (or set the var on the
-   script).
+1. `cd hypercomb-relay/meet-worker && npm ci && npm run deploy:open`
+   (`wrangler deploy --config wrangler.meet-open.toml`) creates
+   `hypercomb-meet-open`: the `MeetingPoint` class, its SQLite migration and
+   `MEET_OPEN_HOSTS = "hypercomb.com"`. No route, no workers.dev address, no
+   key — the open default has no code.
+2. For private meetings: make a recycle-only key, put its PUBLIC half in
+   `OPERATOR_KEYS` in `wrangler.meet.toml`, and `npm run deploy`
+   (`wrangler deploy --config wrangler.meet.toml`) creates or updates
+   `hypercomb-meet`, the coded point. It names no open host. Skip this step
+   for an open-only launch; the coded binding then stays commented out.
 3. In `blossom-worker/wrangler.pluginthematrix.toml`, uncomment the three
-   `[[services]] MEET` lines (`MEET_HOSTS = "pluginthematrix.com"` is
-   already there, inert without them), then
-   `cd ../blossom-worker && npm run deploy:pluginthematrix`. The binding
-   ships commented out on purpose: a deploy naming a script that does not
+   `[[services]] MEET_OPEN` lines (and, after step 2, the three `MEET` lines).
+   `MEET_OPEN_HOSTS = "hypercomb.com"` and `MEET_HOSTS =
+   "pluginthematrix.com"` are already there, inert without their bindings.
+   Then `cd ../blossom-worker && npm run deploy:pluginthematrix`. The bindings
+   ship commented out on purpose: a deploy naming a script that does not
    exist yet is refused whole — every site change and every
-   `npm run connect` with it.
-4. `node scripts/recycle-code.mjs` (in `meet-worker/`) sets the first code.
-   Until then the door stays shut.
-5. Check it: `curl -H 'Accept: application/nostr+json' https://pluginthematrix.com/`
-   should name `hypercomb-meet` with `access_code: true`. A dial with a made-up
-   code should close with 4401.
+   `npm run connect` with it. The hypercomb.com apex needs no new route or
+   DNS record: its zone route `hypercomb.com/*` already reaches this worker
+   over the proxied `A` record, and `/` runs the worker first. The zone's
+   Network → WebSockets setting must be on (Cloudflare's default).
+4. In the hypercomb.com zone (dashboard → Security → WAF → Rate limiting
+   rules), add one rule that counts dials per IP: requests to `hypercomb.com`
+   with the `Upgrade: websocket` header where the zone's plan can match a
+   header, else requests for the path `/` (a browser asks for `/` once per
+   page view), on the order of 10 per 10 seconds, action Block. A client
+   redials at most every few seconds on its ladder, so no real tab comes near
+   it; a dial flood then stops at the edge before either worker runs. Which
+   fields and periods a rule may use depends on the zone's plan (from memory,
+   not checked: the free plan has one rule with a 10 s period) — check the
+   dashboard.
+5. Check the open default: `curl -H 'Accept: application/nostr+json' https://hypercomb.com/`
+   names `hypercomb-meet` (version 0.2.0) with `access_code: false`; a plain
+   `curl https://hypercomb.com/` is still the host card; and
+   `node scripts/swarm-preflight.cjs` (its default is now
+   `--relay wss://hypercomb.com`) passes `ws`, `card`, `policy`, `probe`,
+   `scan`, `unsigned`, `beacon`, `store`, `serve` and `reserved` (any 4xx
+   here: the byte host refuses before auth or by content address), the
+   `pool-*` checks and `apex`, and SKIPs `not-live` and `no-store` (relay.js
+   rules) — "ready to host a meeting".
+6. After step 2: `node scripts/recycle-code.mjs` (in `meet-worker/`) sets
+   the coded point's first code; until then that door stays shut. Check it:
+   `curl -H 'Accept: application/nostr+json' https://pluginthematrix.com/`
+   names `hypercomb-meet` with `access_code: true`, and a dial with a
+   made-up code closes with 4401.
+7. Only now publish the essentials revision and deploy the shell that make
+   `wss://hypercomb.com` the default, back to back. Comparing words across
+   the move: see "THE WORDS DURING THE MOVE" above — a group should take the
+   update before it compares words.
 
-To roll back, comment the three binding lines out again and redeploy
-`pluginthematrix-core`. A dial at the apex then gets the site, as before.
+To roll back, re-stamp the previous essentials package FIRST (installs on the
+new default meet nobody without the binding), then comment the binding lines
+out again and redeploy `pluginthematrix-core`. A dial at either apex then
+gets the site, as before. jwize.com's relay is untouched throughout: packages
+from before the move keep dialing it.
 
 **Cost on Workers Paid ($5 a month).** These are list prices as the
 investigation knew them, not fetched; check the pricing page.
 
 | Item | Included each month | This meeting point |
 |---|---|---|
-| Durable Object duration | 400k GB-s | About 10,800 GB-s a day, at most 324k a month: one 128 MB object resident around the clock. Nothing is billed while the room is empty and the object is evicted. |
-| Durable Object requests | 1M | One per upgrade, plus one per 20 incoming frames (outgoing frames are free). Clients send 9–150 frames a minute, so ten people for eight hours is under 40k a day. |
+| Durable Object duration | 400k GB-s | About 10,800 GB-s a day per resident 128 MB object, at most 324k a month each. The open default is resident whenever any install is online, so expect it around the clock; the coded object only while a private meeting is on. Both together can pass the included amount (list price about $12.50 per extra million GB-s). Nothing is billed for an object while it is evicted. |
+| Durable Object requests | 1M | One per upgrade, plus one per 20 incoming frames (outgoing frames are free). Clients send 9–150 frames a minute, so ten people for eight hours is under 40k a day. At the open default every online install counts, around the clock: about 15 always-on clients fill the included million; past it, about $0.15 per million. |
 | Storage | — | One row written per recycle, and nothing else. |
 | Worker requests | 10M | One per dial or recycle at `pluginthematrix-core`. |
 
-So the expected bill is the flat $5. Observability stays off on both scripts,
-because a dial's `Sec-WebSocket-Protocol` header carries the code.
+So expect the flat $5 while the open default is quiet, and a few dollars more
+a month once it carries installs around the clock or a private meeting runs
+beside it. Observability stays off on both scripts, because a dial's
+`Sec-WebSocket-Protocol` header carries the code. Past the socket and address
+ceilings above, the next step is sharding the open point by room.
 
 ## Related
 

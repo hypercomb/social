@@ -61,10 +61,10 @@ beforeEach(() => {
   // The mesh as this package ships it: it follows the tab's meeting point
   // (ownRelays is the page's own list, never the point).
   mesh = {
-    relays: ['wss://jwize.com'],
+    relays: ['wss://hypercomb.com'],
     configureRelays: vi.fn((urls: string[]) => { mesh.relays = [...urls] }),
     getDebug: () => ({ relays: mesh.relays }),
-    ownRelays: () => ['wss://jwize.com'],
+    ownRelays: () => ['wss://hypercomb.com'],
     swarmHost: () => { try { return new URL(mesh.relays[0] ?? '').host } catch { return '' } },
   }
   services.clear()
@@ -293,7 +293,7 @@ describe('ZI-1 / ZI-6: the selector\'s words', () => {
     typeInto(modal.onPointInput, 'pluginthematrix.com')
     const atPoint = modal.zoneWords()
     expect(atPoint).not.toBe(today)
-    typeInto(modal.onPointInput, 'wss://jwize.com')
+    typeInto(modal.onPointInput, 'wss://hypercomb.com')
     expect(modal.zoneWords()).toBe(today)
 
     services.set('@hypercomb.social/I18n', { locale: 'ja' })

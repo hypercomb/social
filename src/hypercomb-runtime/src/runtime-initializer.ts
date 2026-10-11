@@ -139,8 +139,10 @@ const _runInitializeRuntime = async (
     // On a DEPLOYED origin, seed hc:nostrmesh:use-live-relay='1' ONCE so the
     // whole beta routing is explicit and stable rather than merely implied by
     // the unset origin-default: this single flag steers BOTH the mesh
-    // (→ wss://jwize.com, nostr-mesh.drone loadRelays) AND ContentBroker's byte
-    // fallback (→ jwize.com + pluginthematrix.io, #liveRelayActive). The
+    // (→ wss://hypercomb.com, the open always-online meeting point —
+    // nostr-mesh.drone loadRelays) AND ContentBroker's byte fallback
+    // (→ hypercomb.com + pluginthematrix.io + pluginthematrix.com,
+    // #liveRelayActive). The public install names no home machine. The
     // one-time marker (hc:beta-relay-seeded) means a later `/use-live-relay
     // clear` is respected — we never re-seed over an explicit clear. Loopback
     // dev is never seeded (it resolves from the local relay; force with

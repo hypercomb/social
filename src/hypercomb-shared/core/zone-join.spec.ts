@@ -60,7 +60,7 @@ const openTab = async (): Promise<Tab> => {
   EffectBus.clear()
   registry.clear()
   vi.resetModules()
-  relays = ['wss://jwize.com']
+  relays = ['wss://hypercomb.com']
   mesh.configureRelays.mockClear()
   registry.set('@diamondcoreprocessor.com/NostrMeshDrone', mesh)
   await import('./mesh-session')
@@ -198,7 +198,7 @@ describe('ZI-1 — retyping the room keeps this tab\'s meeting point', () => {
     const tab = await openTab()
     tab.useLiveRelay('uptown lily')
     expect(tab.zone()).toEqual({ room: 'uptown', secret: 'lily' })
-    expect(relays).toEqual(['wss://jwize.com'])
+    expect(relays).toEqual(['wss://hypercomb.com'])
   })
 
   it('the toast names no second word formula — it points at the room line', async () => {

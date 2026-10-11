@@ -3,20 +3,23 @@
 // WHERE A MEETING'S BYTES GO (documentation/swarm-host.md, 2026-10-07): each
 // page's publish domains, else the participant's hosts pool — hypercomb.com on
 // a fresh install — and, when neither can take them, the relay they meet at
-// (wss://jwize.com means https://jwize.com/<sig>) if it was started with
-// --allow-participants. So this checks both: the relay, and whether the pool's
-// default host takes a fresh key's upload at all (WARN, not FAIL: a pool host
+// (wss://hypercomb.com means https://hypercomb.com/<sig>) if its card allows
+// participants — the shipped default, the always-online meeting point, always
+// does; a relay.js meeting point only when started with --allow-participants.
+// So this checks both: the relay, and whether the pool's default host takes a
+// fresh key's upload at all (WARN, not FAIL: a pool host
 // that cannot is passed over for the relay). Run this an hour before a
 // meeting, and after every relay restart or stamp. It is live and as light as a
 // check can be: one throwaway key, one throwaway zone (beaconed, then left),
 // one stored 16-byte atom. Every line is PASS / FAIL / SKIP; the exit code is
 // non-zero when anything FAILs.
 //
-//   node scripts/swarm-preflight.cjs                         # wss://jwize.com + the hypercomb.com apex
+//   node scripts/swarm-preflight.cjs                         # wss://hypercomb.com + the hypercomb.com apex
+//   node scripts/swarm-preflight.cjs --relay wss://jwize.com  # a relay.js meeting point (a home machine)
 //   node scripts/swarm-preflight.cjs --relay ws://localhost:7801 --no-apex
 //
 // Options:
-//   --relay <ws(s) url>   the meeting point            (default wss://jwize.com)
+//   --relay <ws(s) url>   the meeting point            (default wss://hypercomb.com, the shipped default)
 //   --apex <origin>       the cold-install apex          (default https://hypercomb.com)
 //   --no-apex             skip the package checks (a scratch relay has no package)
 //   --known <sig>         a sig the swarm host must serve (default: the signed install:<channel> root)
@@ -32,12 +35,16 @@
 //   scan      a read that names no signature (kinds only, limit 1) is CLOSED restricted:, nothing replayed —
 //             the relay's address gate; an open relay lists every room's events to anyone (FAIL)
 //   unsigned  a PUT without NIP-98 is refused (401)
-//   not-live  a signed PUT from a key the relay has not heard on its socket is refused (401 not-live)
+//   not-live  a signed PUT from a key the relay has not heard on its socket is refused (401 not-live) —
+//             relay.js only: the always-online meeting point (NIP-11 software hypercomb-relay/meet-worker)
+//             keeps no bytes, and its byte host takes any signed key (AUTO_GRANT), so there it is SKIP
 //   beacon    a {alive} beacon on the throwaway zone is accepted
 //   store     after the beacon, PUT /<sig> answers 2xx 'stored <sig>' — the receipt
 //   serve     the stored atom is served back byte-for-byte (HEAD 200, GET equal)
-//   reserved  a PUT at sign('hive:indexes') is refused (409)
-//   no-store  a missing sig answers 404 with Cache-Control: no-store
+//   reserved  a PUT at sign('hive:indexes') is refused (409) — at the always-online meeting point its
+//             byte host (pluginthematrix-core) refuses it before auth or by content address: any 4xx
+//   no-store  a missing sig answers 404 with Cache-Control: no-store — relay.js only: the always-online
+//             meeting point's byte host answers a bare 404 with no validator, so there it is SKIP
 //   known     HEAD on a known sig (the installed package root) answers 200
 //   apex      the apex's sign('host:packages') head equals the signed install:<channel> root, and the apex serves it
 //   pool-cors the pool host's CORS preflight allows a PUT carrying Authorization from a hive origin   (WARN)
@@ -53,7 +60,7 @@ function arg(name, fallback = null) {
   const i = process.argv.indexOf('--' + name)
   return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : fallback
 }
-const RELAY = arg('relay', 'wss://jwize.com')
+const RELAY = arg('relay', 'wss://hypercomb.com')
 const APEX = process.argv.includes('--no-apex') ? null : arg('apex', 'https://hypercomb.com').replace(/\/+$/, '')
 const relayUrl = new URL(RELAY)
 const HTTP = `${relayUrl.protocol === 'wss:' ? 'https:' : 'http:'}//${relayUrl.host}`
@@ -182,7 +189,12 @@ async function apexHead() {
   // policy (NIP-11)
   const info = await http('GET', HTTP + '/', { headers: { Accept: 'application/nostr+json' } })
   let policy
+  let software = ''
   try { policy = JSON.parse(info.text)?.limitation?.participant_uploads } catch { policy = undefined }
+  try { software = String(JSON.parse(info.text)?.software ?? '') } catch { software = '' }
+  // The always-online meeting point is a Durable Object behind a byte host
+  // that takes any signed key's upload (AUTO_GRANT): liveness is not its rule.
+  const meetWorker = software === 'hypercomb-relay/meet-worker'
   if (policy === 'all' || policy === 'zones') {
     const agrees = !card || card.participants === policy
     ;(agrees ? pass : fail)('policy', `NIP-11 participant_uploads=${JSON.stringify(policy)}${agrees ? '' : ` but the card says ${JSON.stringify(card.participants)}`}${policy === 'zones' ? ' — only listed rooms upload (pass --room/--secret of one)' : ''}`)
@@ -216,8 +228,11 @@ async function apexHead() {
   const url = `${HTTP}/${sig}`
   const unsigned = await http('PUT', url, { body: atom })
   ;(unsigned.status === 401 ? pass : fail)('unsigned', `PUT without NIP-98 → ${unsigned.status} ${unsigned.text.slice(0, 60)}`)
-  const early = await http('PUT', url, { body: atom, headers: { Authorization: nip98(url, 'PUT', atom) } })
-  ;(early.status === 401 && /^not-live/.test(early.text) ? pass : fail)('not-live', `a key the relay has not heard → ${early.status} ${early.text.slice(0, 70)}`)
+  if (meetWorker) skip('not-live', `${relayUrl.host} is the always-online meeting point: its byte host takes any signed key (AUTO_GRANT) — store/serve below check the upload`)
+  else {
+    const early = await http('PUT', url, { body: atom, headers: { Authorization: nip98(url, 'PUT', atom) } })
+    ;(early.status === 401 && /^not-live/.test(early.text) ? pass : fail)('not-live', `a key the relay has not heard → ${early.status} ${early.text.slice(0, 70)}`)
+  }
 
   let beaconOk = false
   if (sock.ok) {
@@ -245,11 +260,16 @@ async function apexHead() {
 
   const indexes = sign('hive:indexes')
   const reserved = await http('PUT', `${HTTP}/${indexes}`, { body: Buffer.from('preflight') })
-  ;(reserved.status === 409 ? pass : fail)('reserved', `PUT at sign('hive:indexes') → ${reserved.status} ${reserved.text.slice(0, 60)}`)
+  const refusedHere = meetWorker ? reserved.status >= 400 && reserved.status < 500 : reserved.status === 409
+  ;(refusedHere ? pass : fail)('reserved', `PUT at sign('hive:indexes') → ${reserved.status} ${reserved.text.slice(0, 60)}`)
 
   const missing = await http('HEAD', `${HTTP}/${sha256(crypto.randomBytes(16))}`)
   const cc = missing.headers.get('cache-control') ?? ''
-  ;(missing.status === 404 && /no-store/.test(cc) ? pass : fail)('no-store', `a missing sig → ${missing.status} cache-control '${cc || '—'}'`)
+  if (meetWorker && missing.status === 404) {
+    skip('no-store', `a missing sig → 404 (relay.js rule: the byte host's 404 carries no validator, cache-control '${cc || '—'}')`)
+  } else {
+    (missing.status === 404 && /no-store/.test(cc) ? pass : fail)('no-store', `a missing sig → ${missing.status} cache-control '${cc || '—'}'`)
+  }
 
   // the package
   let installed = null

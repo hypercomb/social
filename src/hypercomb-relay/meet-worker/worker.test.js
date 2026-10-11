@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { schnorr } from '@noble/curves/secp256k1.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import * as main from './worker.js'
-import { offeredAccess, codeOpens, checkRecycle, operatorKeys, CODE_PATH } from './access.js'
+import { offeredAccess, codeOpens, checkRecycle, isOpenHost, operatorKeys, CODE_PATH } from './access.js'
 import { sha256Hex, eventId } from './meeting.js'
 import { DEFAULT_LINK_TEMPLATE, meetingLink, nip98, newCode, publisherKeys, secretKeyBytes } from './scripts/recycle-code.mjs'
 import { readFileSync } from 'node:fs'
@@ -425,4 +425,249 @@ test('a door question that fails is no refusal: the dial goes to the object, whi
   assert.equal(forwarded, before, 'no wrong code reached the object once the door answered')
   assert.ok(doorAsked >= 4)
   for (const s of [first, second]) object.webSocketClose(s, 1000, '', true)
+})
+
+// ── the open default and the coded meeting points (jwize 2026-10-11) ────────
+//
+// "yes, open default on hypercomb.com": the shipped default takes no code (D8)
+// and lives in its own object; a coded host keeps its door, its code and its
+// object exactly as before. A host is open only when MEET_OPEN_HOSTS names it.
+
+const OPEN_ENV = { MEET_OPEN_HOSTS: 'hypercomb.com' }
+
+async function dialAt(object, url, protocols) {
+  const headers = { upgrade: 'websocket' }
+  if (protocols) headers['sec-websocket-protocol'] = protocols
+  const res = await object.fetch(new Request(url, { headers }))
+  assert.equal(res.status, 101)
+  return { res, server: globalThis.__lastPairs.at(-1) }
+}
+
+/** Forget this isolate's copy of a coded door an earlier test left behind. */
+async function forgetDoor() {
+  const env = { MEETING: { idFromName: (name) => ({ name }), get: () => ({ fetch: async () => new RealResponse('{}') }) } }
+  await worker.fetch(new Request(CODE_URL, { method: 'POST', body: '{}' }), env)
+}
+
+test('a host is open only when MEET_OPEN_HOSTS names it exactly', () => {
+  assert.equal(isOpenHost(OPEN_ENV, 'hypercomb.com'), true)
+  assert.equal(isOpenHost(OPEN_ENV, 'HyperComb.COM'), true)
+  assert.equal(isOpenHost({ MEET_OPEN_HOSTS: ' pluginthematrix.net , hypercomb.com ' }, 'hypercomb.com'), true)
+  for (const host of ['pluginthematrix.com', 'www.hypercomb.com', 'hypercomb.com.', 'evilhypercomb.com', 'hypercomb.com.evil.test', '']) {
+    assert.equal(isOpenHost(OPEN_ENV, host), false, host)
+  }
+  assert.equal(isOpenHost({}, 'hypercomb.com'), false, 'no list: every host is coded')
+  assert.equal(isOpenHost({ MEET_OPEN_HOSTS: '' }, ''), false)
+})
+
+test('the open host admits a codeless dial and serves the card first; an offered code is echoed and ignored', async () => {
+  const { object, state } = await meetingPoint(OPEN_ENV)
+  // No code was ever set: a coded host here would be closed to everyone.
+  const plain = await dialAt(object, 'https://hypercomb.com/')
+  assert.equal(plain.res.headers.get('sec-websocket-protocol'), null)
+  assert.equal(plain.server.accepted, 'hibernation', 'one of the object\'s own sockets')
+  assert.equal(plain.server.closedWith, null)
+  assert.match(plain.server.sent[0][1], /^hc:host /, 'the card is the first frame')
+  const card = JSON.parse(plain.server.sent[0][1].slice('hc:host '.length))
+  assert.equal(card.participants, 'all', 'the byte host behind it takes participants\' uploads')
+  assert.equal(card.addressed, true, 'the address gate holds at the open default too')
+
+  // A package that still carries a code from a meeting link offers it: echoed
+  // so the browser completes the handshake, and nothing else.
+  for (const token of [`hc-access.${newCode()}`, 'hc-access.short', 'hc-access.has-no-hash-anywhere']) {
+    const coded = await dialAt(object, 'https://hypercomb.com/io', `chat, ${token}`)
+    assert.equal(coded.res.headers.get('sec-websocket-protocol'), token)
+    assert.equal(coded.server.closedWith, null, token)
+    assert.equal(coded.server.accepted, 'hibernation')
+  }
+
+  // The address gate is the same gate: a scan is refused, an address is read.
+  object.webSocketMessage(plain.server, JSON.stringify(['REQ', 'scan', { kinds: [30206], limit: 1 }]))
+  assert.match(plain.server.sent.at(-1)[2], /^restricted: /)
+  object.webSocketMessage(plain.server, JSON.stringify(['REQ', 'hc-live', { '#x': ['hc:live'], limit: 0 }]))
+  assert.deepEqual(plain.server.sent.at(-1), ['EOSE', 'hc-live'])
+
+  // NIP-11 says it is open; there is no code to recycle here, and nothing is kept.
+  const info = await (await object.fetch(new Request('https://hypercomb.com/', { headers: { accept: 'application/nostr+json' } }))).json()
+  assert.equal(info.limitation.access_code, false)
+  assert.equal(info.limitation.addressed_reads, true)
+  assert.equal(info.limitation.participant_uploads, 'all')
+  const recycled = await recycle(object, { hash: sha256Hex(newCode()) }, operator, nowSec(), `https://hypercomb.com${CODE_PATH}`)
+  assert.equal(recycled.status, 404)
+  assert.equal(state.stored.size, 0, 'an open meeting point stores no code')
+  for (const s of state.getWebSockets()) object.webSocketClose(s, 1000, '', true)
+  assert.equal(intervals.size, 0)
+})
+
+test('a coded host keeps its door beside an open one: codeless and wrong codes close 4401, its NIP-11 says access_code', async () => {
+  const { object } = await meetingPoint(OPEN_ENV)
+  // Closed until its operator sets a code — whatever is open elsewhere.
+  for (const host of ['pluginthematrix.com', 'www.hypercomb.com']) {
+    const { server } = await dialAt(object, `https://${host}/`)
+    assert.deepEqual(server.closedWith, { code: 4401, reason: 'access: the meeting point is closed' }, host)
+    assert.deepEqual(server.sent, [], 'not one frame')
+  }
+  const code = newCode()
+  assert.equal((await recycle(object, { hash: sha256Hex(code) })).status, 200)
+  const none = await dialAt(object, 'https://pluginthematrix.com/')
+  assert.deepEqual(none.server.closedWith, { code: 4401, reason: 'access: code required' })
+  const wrong = await dialAt(object, 'https://pluginthematrix.com/', `hc-access.${newCode()}`)
+  assert.deepEqual(wrong.server.closedWith, { code: 4401, reason: 'access: code refused' })
+  assert.deepEqual(wrong.server.sent, [])
+  const right = await dialAt(object, 'https://pluginthematrix.com/', `hc-access.${code}`)
+  assert.equal(right.server.closedWith, null)
+  const info = await (await object.fetch(new Request('https://pluginthematrix.com/', { headers: { accept: 'application/nostr+json' } }))).json()
+  assert.equal(info.limitation.access_code, true)
+  object.webSocketClose(right.server, 1000, '', true)
+})
+
+test('open and coded hosts go to different objects: the open dial never reaches a coded meeting, and needs no door question', async () => {
+  const code = newCode()
+  const asked = []
+  const env = {
+    ...OPEN_ENV,
+    LOCATION_HINT: 'wnam',
+    MEETING: {
+      idFromName: (name) => ({ name }),
+      get: (id, options) => ({
+        fetch: async (request) => {
+          const url = new URL(request.url)
+          asked.push({ object: id.name, options, path: url.pathname, upgrade: String(request.headers.get('upgrade') || '').toLowerCase() === 'websocket' })
+          if (url.pathname === '/.well-known/hc-meet/door') return new RealResponse(JSON.stringify({ hash: sha256Hex(code) }))
+          return new RealResponse(`object ${id.name}`)
+        },
+      }),
+    },
+  }
+  const upgrade = (url, protocols) => {
+    const headers = { upgrade: 'websocket' }
+    if (protocols) headers['sec-websocket-protocol'] = protocols
+    return worker.fetch(new Request(url, { headers }), env)
+  }
+  await forgetDoor()
+
+  // The open default: codeless, any path, a stale code — all to 'open', and the door is never asked.
+  for (const [url, protocols] of [['https://hypercomb.com/'], ['https://hypercomb.com/io'], ['https://HYPERCOMB.com/', `hc-access.${newCode()}`]]) {
+    assert.equal(await (await upgrade(url, protocols)).text(), 'object open', url)
+  }
+  assert.deepEqual(asked.map((a) => [a.object, a.upgrade]), [['open', true], ['open', true], ['open', true]])
+  assert.ok(asked.every((a) => a.options?.locationHint === 'wnam'))
+
+  // The coded point: refused in front without a code, and only the coded object is ever asked.
+  const before = asked.length
+  const refused = await upgrade('https://pluginthematrix.com/')
+  assert.equal(refused.status, 101)
+  assert.equal(globalThis.__lastPairs.at(-1).closedWith?.code, 4401)
+  assert.equal(asked.length, before, 'a codeless dial at a coded host reaches no object at all')
+  assert.equal(await (await upgrade('https://pluginthematrix.com/', `hc-access.${code}`)).text(), 'object meet')
+  assert.deepEqual(asked.slice(before).map((a) => [a.object, a.path, a.upgrade]),
+    [['meet', '/.well-known/hc-meet/door', false], ['meet', '/', true]])
+
+  // NIP-11 goes to each host's own object; the recycle path is the coded host's alone.
+  const nip11 = (host) => worker.fetch(new Request(`https://${host}/`, { headers: { accept: 'application/nostr+json' } }), env)
+  assert.equal(await (await nip11('hypercomb.com')).text(), 'object open')
+  assert.equal(await (await nip11('pluginthematrix.com')).text(), 'object meet')
+  const mark = asked.length
+  const openRecycle = await worker.fetch(new Request(`https://hypercomb.com${CODE_PATH}`, { method: 'POST', body: '{}' }), env)
+  assert.equal(openRecycle.status, 404)
+  assert.equal(asked.length, mark, 'a recycle at an open host reaches neither object')
+  assert.equal((await worker.fetch(new Request('https://hypercomb.com/'), env)).status, 404, 'the open host\'s pages are not the meeting point\'s')
+
+  // Without MEET_OPEN_HOSTS the same host is coded: refused in front.
+  const n = asked.length
+  const res = await worker.fetch(new Request('https://hypercomb.com/', { headers: { upgrade: 'websocket' } }), { ...env, MEET_OPEN_HOSTS: '' })
+  assert.equal(res.status, 101)
+  assert.deepEqual(globalThis.__lastPairs.at(-1).closedWith, { code: 4401, reason: 'access: code required' })
+  assert.equal(asked.length, n)
+})
+
+test('through the router, the open default and a private meeting are two rooms of sockets: neither object hears the other', async () => {
+  const open = await meetingPoint(OPEN_ENV)
+  const coded = await meetingPoint(OPEN_ENV)
+  const code = newCode()
+  assert.equal((await recycle(coded.object, { hash: sha256Hex(code) })).status, 200)
+  const objects = { open: open.object, meet: coded.object }
+  const env = { ...OPEN_ENV, MEETING: { idFromName: (name) => ({ name }), get: (id) => ({ fetch: (request) => objects[id.name].fetch(request) }) } }
+  await forgetDoor()
+  const dialRouter = async (url, protocols) => {
+    const headers = { upgrade: 'websocket' }
+    if (protocols) headers['sec-websocket-protocol'] = protocols
+    const res = await worker.fetch(new Request(url, { headers }), env)
+    assert.equal(res.status, 101)
+    return globalThis.__lastPairs.at(-1)
+  }
+  const guest = await dialRouter('https://hypercomb.com/')
+  const member = await dialRouter('https://pluginthematrix.com/', `hc-access.${code}`)
+  assert.equal(guest.closedWith, null)
+  assert.equal(member.closedWith, null)
+  assert.ok(open.state.sockets.has(guest) && !open.state.sockets.has(member), 'the open object holds only the open dial')
+  assert.ok(coded.state.sockets.has(member) && !coded.state.sockets.has(guest), 'the coded object holds only its member')
+
+  // One zone, both points: a beacon at the open default never reaches the private meeting.
+  const zone = sha256Hex('lifecycle\0downtown\0rose')
+  coded.object.webSocketMessage(member, JSON.stringify(['REQ', 'zone', { '#x': [zone] }]))
+  const secret = schnorr.utils.randomPrivateKey()
+  const at = nowSec()
+  const beacon = { pubkey: bytesToHex(schnorr.getPublicKey(secret)), created_at: at, kind: 30206, tags: [['x', zone], ['d', 'me'], ['expiration', String(at + 90)]], content: '{"alive":true}' }
+  beacon.id = eventId(beacon)
+  beacon.sig = bytesToHex(schnorr.sign(beacon.id, secret))
+  open.object.webSocketMessage(guest, JSON.stringify(['EVENT', beacon]))
+  assert.deepEqual(guest.sent.at(-1), ['OK', beacon.id, true, ''])
+  assert.equal(member.sent.filter((m) => m[0] === 'EVENT').length, 0, 'the private meeting hears nothing of the open room')
+
+  // Destroying the private code cuts its member and nobody at the open default.
+  const shut = await recycle(coded.object, { close: true }, operator, nowSec() + 1)
+  assert.deepEqual(await shut.json(), { ok: true, open: false, closed: 1 })
+  assert.equal(member.closedWith?.code, 4401)
+  assert.equal(guest.closedWith, null)
+  open.object.webSocketClose(guest, 1000, '', true)
+  assert.equal(intervals.size, 0)
+})
+
+test('the deployed configs: hypercomb.com — and only it — is open, in a script of its own; the coded script names no open host', () => {
+  const read = (file) => readFileSync(new URL(file, import.meta.url), 'utf8').split('\n').filter((line) => !line.trim().startsWith('#')).join('\n')
+  const value = (toml, name) => new RegExp(`^${name}\\s*=\\s*"([^"]*)"`, 'm').exec(toml)?.[1]
+  const open = read('./wrangler.meet-open.toml')
+  const coded = read('./wrangler.meet.toml')
+  assert.equal(value(open, 'MEET_OPEN_HOSTS'), 'hypercomb.com')
+  assert.equal(isOpenHost({ MEET_OPEN_HOSTS: value(open, 'MEET_OPEN_HOSTS') }, 'pluginthematrix.com'), false, 'the coded meeting point stays coded')
+  assert.equal(value(coded, 'MEET_OPEN_HOSTS'), undefined, 'the coded script holds no open object')
+  assert.equal(isOpenHost({ MEET_OPEN_HOSTS: value(coded, 'MEET_OPEN_HOSTS') }, 'hypercomb.com'), false)
+  // Two scripts — objects of one script may share an isolate — of one worker.
+  assert.equal(value(open, 'name'), 'hypercomb-meet-open')
+  assert.equal(value(coded, 'name'), 'hypercomb-meet')
+  for (const toml of [open, coded]) {
+    assert.equal(value(toml, 'main'), 'worker.js')
+    assert.equal(value(toml, 'PARTICIPANTS'), 'all')
+    assert.match(toml, /^workers_dev\s*=\s*false/m, 'no address of its own: only the service binding reaches it')
+    assert.doesNotMatch(toml, /^routes?\s*=/m)
+  }
+})
+
+test('a dial past the socket ceiling is closed BUSY (1013) before a frame: one address holds 32 at most', async () => {
+  const { object, state } = await meetingPoint(OPEN_ENV)
+  const dialFrom = async (ip, protocols) => {
+    const headers = { upgrade: 'websocket', 'cf-connecting-ip': ip }
+    if (protocols) headers['sec-websocket-protocol'] = protocols
+    const res = await object.fetch(new Request('https://hypercomb.com/', { headers }))
+    assert.equal(res.status, 101)
+    return { res, server: globalThis.__lastPairs.at(-1) }
+  }
+  const held = []
+  for (let i = 0; i < 32; i++) {
+    const { server } = await dialFrom('203.0.113.77')
+    assert.equal(server.closedWith, null, `socket ${i + 1}`)
+    held.push(server)
+  }
+  const token = `hc-access.${newCode()}`
+  const busy = await dialFrom('203.0.113.77', token)
+  assert.deepEqual(busy.server.closedWith, { code: 1013, reason: 'busy: at most 32 connections from one address' })
+  assert.deepEqual(busy.server.sent, [], 'not one frame')
+  assert.equal(busy.server.accepted, 'standard', "never one of the object's sockets")
+  assert.equal(busy.res.headers.get('sec-websocket-protocol'), token, 'the offered token is still echoed')
+  assert.equal((await dialFrom('198.51.100.77')).server.closedWith, null, 'another address is let in')
+  object.webSocketClose(held[0], 1000, '', true)
+  assert.equal((await dialFrom('203.0.113.77')).server.closedWith, null, 'a socket that left frees its place')
+  for (const s of state.getWebSockets()) object.webSocketClose(s, 1000, '', true)
+  assert.equal(intervals.size, 0)
 })

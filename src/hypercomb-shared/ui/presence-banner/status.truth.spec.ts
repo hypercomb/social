@@ -186,8 +186,15 @@ describe('the room\'s two words fold the meeting point and are one list for ever
   it('default-relay rooms keep today\'s words exactly', () => {
     const today = secretTag('lifecycle\0downtown\0rose', 'en')
     expect(roomWords('downtown', 'rose')).toBe(today)
-    for (const p of ['', 'jwize.com', 'wss://jwize.com', 'wss://JWIZE.com/', 'wss://jwize.com:443']) expect(roomWords('downtown', 'rose', p)).toBe(today)
-    expect(meetingPointKey('wss://jwize.com')).toBe('')
+    // The shipped default is wss://hypercomb.com (2026-10-11): a room met there
+    // reads the pair it always read.
+    for (const p of ['', 'hypercomb.com', 'wss://hypercomb.com', 'wss://HyperComb.com/', 'wss://hypercomb.com:443']) expect(roomWords('downtown', 'rose', p)).toBe(today)
+    expect(meetingPointKey('wss://hypercomb.com')).toBe('')
+  })
+
+  it('jwize.com, the default before, is a point like any other: no shipped default names it', () => {
+    expect(meetingPointKey('wss://jwize.com')).toBe('jwize.com')
+    expect(roomWords('downtown', 'rose', 'wss://jwize.com')).not.toBe(roomWords('downtown', 'rose'))
   })
 
   it('two halves of one meeting on different points read different words', () => {

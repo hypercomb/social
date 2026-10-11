@@ -97,6 +97,18 @@ The relay **at** jwize.com (`wss://jwize.com`) accepts event publishes
 permissionlessly today — that is how `FeedbackSwarmDrone` already delivers
 visitor feedback. v1 rides that same relay. No operator action is required.
 
+> **2026-10-11: the mesh's default relay is `wss://hypercomb.com`**, the open
+> always-online meeting point ([swarm-host.md](swarm-host.md), "The
+> always-online meeting point"); the channel rides whatever relay the mesh
+> dials, so installs from then on publish there, and packages from before keep
+> publishing at `wss://jwize.com` until they update. That meeting point is
+> MEMORY ONLY, as relay.js always was: an item lives there only while its
+> object stays resident — it is evicted when the last socket leaves (the
+> 7-day expiration is a ceiling, not a promise), so the host and its routine
+> should read while contributors are online, or point their own mesh at a relay
+> that keeps events (`hc:nostrmesh:relays`). The pending map keeps
+> republishing an item until it is read back, as below.
+
 One NIP-33 parameterized-replaceable kind in v1 (must be added to
 `SwarmDrone.configureKinds()` or the relay filters it out):
 
@@ -345,18 +357,31 @@ nothing, so they are harmless; drop them the next time that file is open.
    feedback on your own hive publishes automatically). To force-disable, set
    `localStorage['hc:feedback-channel:enabled']='false'`.
 2. Routine renderer: `ensure-renderer.cjs` auto-injects the preflight (enabled +
-   `hc:nostrmesh:self-domain=jwize.com` + live relay) before the page loads, so it
-   converges on the owner's channel with no key injection. Assert with
+   `hc:nostrmesh:self-domain=jwize.com` + its relays) before the page loads, so
+   it converges on the owner's channel with no key injection. Assert with
    `node .claude/skills/feedback-loop/fb.cjs channel-status` →
    `{ enabled:true, channelId:<64-hex> }` (now also reports `pending`,
    `confirmed`, `ingested`, `reconciled`).
-3. Both derive the channel from `hc:nostrmesh:self-domain` (default `jwize.com`) and
-   ride the same relay (`wss://jwize.com`, or `wss://localhost:7777` — the same relay
-   via cloudflared for a local host).
+3. **The routine and the owner's hive must ride the SAME relay list.** The
+   channel id is the same everywhere; the relay is not. Until 2026-10-11 the
+   routine's live relay (`wss://jwize.com`) and the owner's loopback hive
+   (`ws://localhost:7777`) were one relay — jwize.com reached `:7777` through
+   cloudflared. Since then the mesh's default is `wss://hypercomb.com`, so a
+   routine forced onto the live relay and a `localhost:4250` hive left on
+   `:7777` never see each other's items. During the transition pin BOTH to
+   `localStorage['hc:nostrmesh:relays'] = '["wss://hypercomb.com","ws://localhost:7777"]'`:
+   the routine then reads new-package contributors (hypercomb.com) and the
+   owner's hive (`:7777`), and the qa ITEMs it mints reach both. In
+   `ensure-renderer.cjs` that means seeding that list instead of
+   `hc:nostrmesh:use-live-relay='1'` (and its `→ wss://jwize.com` comment is
+   stale); on the owner's 4250 hive, set the same list once (or
+   `/use-live-relay on`, which drops `:7777`). Contributors on packages from
+   before the move still publish at `wss://jwize.com`; add it to both lists
+   while they matter.
 4. Submit a feedback item in the owner browser → confirm a kind-30213 ITEM event
-   lands on the relay (a raw `REQ {"#x":[channelId],"kinds":[30213]}` on
-   `wss://jwize.com`) → run one feedback-loop cycle in the routine → confirm a `qa`
-   ITEM comes back and the feedback window lists the question.
+   lands on the relay (a raw `REQ {"#x":[channelId],"kinds":[30213]}` on each
+   relay in that list) → run one feedback-loop cycle in the routine → confirm a
+   `qa` ITEM comes back and the feedback window lists the question.
 5. Down-test: stop the relay, submit feedback, confirm its sig rests in
    `localStorage['hc:feedback-channel:pending']`; restart the relay, confirm it
    auto-posts and the routine picks it up next cycle.

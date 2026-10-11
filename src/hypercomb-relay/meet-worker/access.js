@@ -1,13 +1,17 @@
-// access.js — the meeting point's door: the access code a dial carries, and
-// the operator's signed recycle that replaces it (worker.js says why). Kept
-// apart from worker.js because the Workers runtime takes only handlers and
-// classes as that module's exports.
+// access.js — the meeting point's door: the access code a dial carries, the
+// operator's signed recycle that replaces it, and which hosts have no door at
+// all (worker.js says why). Kept apart from worker.js because the Workers
+// runtime takes only handlers and classes as that module's exports.
 
 import { HEX64, sha256Hex, verifyEvent } from './meeting.js'
 
 export const ACCESS_PREFIX = 'hc-access.'
 export const CODE_PATH = '/.well-known/hc-meet/code'
 export const ACCESS_REFUSED = 4401
+// RFC 6455 "Try Again Later": the meeting point is at a socket ceiling (the
+// object's, or one address's). The client's ordinary ladder redials; it is
+// never the access ladder, and never a word about codes.
+export const BUSY = 1013
 const NIP98_KIND = 27235
 const RECYCLE_SKEW_SECS = 60
 // RFC 6455 subprotocols are tokens; a code is base64url (scripts/recycle-code.mjs).
@@ -41,14 +45,25 @@ export function codeOpens(code, hash) {
 }
 
 /** The answer to a dial that is not let in: accepted on the standard API (so
- *  it is never one of the object's sockets) and closed 4401 before a byte. The
- *  offered token is echoed — a browser fails a handshake that names none — and
- *  a browser can read a close code, never the status of a refused upgrade. */
-export function refuseDial(offered, reason) {
+ *  it is never one of the object's sockets) and closed — 4401, or BUSY —
+ *  before a byte. The offered token is echoed — a browser fails a handshake
+ *  that names none — and a browser can read a close code, never the status of
+ *  a refused upgrade. */
+export function refuseDial(offered, reason, code = ACCESS_REFUSED) {
   const [client, server] = Object.values(new WebSocketPair())
   server.accept()
-  server.close(ACCESS_REFUSED, reason)
+  server.close(code, reason)
   return new Response(null, { status: 101, webSocket: client, headers: offered ? { 'Sec-WebSocket-Protocol': offered.token } : {} })
+}
+
+/** Is `hostname` an OPEN meeting point — one that takes no access code?
+ *  Only a host named in MEET_OPEN_HOSTS (comma/space separated, exact,
+ *  case-folded) is open; every other host is coded, so a host nobody listed
+ *  never opens by accident (a typo, a new MEET_HOSTS entry, a subdomain). */
+export function isOpenHost(env, hostname) {
+  const host = String(hostname || '').trim().toLowerCase()
+  if (!host) return false
+  return String(env?.MEET_OPEN_HOSTS || '').split(/[\s,]+/).some((h) => h && h.toLowerCase() === host)
 }
 
 /** The operator keys, lowercase hex, from a comma/space separated env var. */

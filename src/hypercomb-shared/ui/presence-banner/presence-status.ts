@@ -182,8 +182,11 @@ export function headerLink(conn: MeshConnection | null, downSince: number | null
 }
 
 /** The shipped default meeting point (nostr-mesh LIVE_RELAY): a room met
- *  there keeps the words it always had. */
-export const SHIPPED_POINT = 'jwize.com'
+ *  there keeps the words it always had. wss://hypercomb.com since 2026-10-11
+ *  (the open, always-online meeting point); jwize.com, the default before it,
+ *  is now a point like any other — a room an operator meets at there reads
+ *  its own pair. Keep in step with LIVE_RELAY (a spec holds them together). */
+export const SHIPPED_POINT = 'hypercomb.com'
 
 /** A meeting point as the words fold it: its host[:port], lowercase, from a
  *  relay URL or a bare name ('wss://Point.example/' → 'point.example',

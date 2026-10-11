@@ -1655,4 +1655,49 @@ describe('doctrine ratchets', () => {
     ], 'mesh address written as a word')
   })
 
+  it('no shipped default names a home machine — the public install names only hypercomb.com', () => {
+    // jwize, 2026-10-11: "we can't rely on my computer being on that is
+    // ridiculous for my setup" → "yes, open default on hypercomb.com". The
+    // home machine jwize.com is no relay, byte mirror, example roster or
+    // example text a public install ships. An operator may still CHOOSE it
+    // (a relay list they set, a meeting link, a fallback list) — that is
+    // their data, never this source. Comments are history and are not
+    // scanned; specs and operator-run scripts are not shipped. The allowlist
+    // is empty and stays empty.
+    const quoted = /['"`][^'"`\n]*\bjwize\.com\b/
+    const actual: string[] = []
+    for (const dir of SCAN_DIRS.filter(d => d !== 'hypercomb-essentials/scripts')) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const code = stripComments(readFileSync(file, 'utf8'))
+        if (quoted.test(code)) actual.push(relative(ROOT, file).replace(/\\/g, '/'))
+      }
+    }
+    // What a shell serves as data: the first-boot rosters and the rest of public/.
+    for (const shell of ['hypercomb-web/public', 'hypercomb-dev/public']) {
+      for (const name of readdirSync(join(ROOT, shell))) {
+        if (!name.endsWith('.json')) continue
+        if (/\bjwize\.com\b/.test(readFileSync(join(ROOT, shell, name), 'utf8'))) actual.push(`${shell}/${name}`)
+      }
+    }
+    assertRatchet(actual.sort(), [], 'a shipped default naming jwize.com')
+  })
+
+  it('the shipped meeting point, the room words\' shipped point and the hosts pool seed are one host', () => {
+    // The default relay (nostr-mesh LIVE_RELAY), the point the comparison
+    // words treat as "the default" (D4, presence-status SHIPPED_POINT) and the
+    // upload host a fresh install's pool is seeded with (HostsDrone SEED_HOST,
+    // the shell's DEFAULT_HOST_ZONES) must move together: a default relay the
+    // words do not know changes every default room's pair, and a relay tier
+    // that is not the pool's host splits one meeting's bytes over two hosts.
+    const literal = (file: string, re: RegExp): string => re.exec(readFileSync(join(ROOT, file), 'utf8'))?.[1] ?? ''
+    const relay = literal('hypercomb-essentials/src/sharing/nostr-mesh.drone.ts', /^const LIVE_RELAY = '([^']+)'/m)
+    expect(relay).toBe('wss://hypercomb.com')
+    const host = new URL(relay).host
+    expect(literal('hypercomb-shared/ui/presence-banner/presence-status.ts', /^export const SHIPPED_POINT = '([^']+)'/m)).toBe(host)
+    expect(literal('hypercomb-essentials/src/sharing/hosts.drone.ts', /^const SEED_HOST = '([^']+)'/m)).toBe(host)
+    expect(literal('hypercomb-runtime/src/host-zones.ts', /^export const DEFAULT_HOST_ZONES: readonly string\[\] = \['([^']+)'\]/m)).toBe(host)
+  })
+
 })

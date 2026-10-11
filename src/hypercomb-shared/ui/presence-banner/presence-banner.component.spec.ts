@@ -26,7 +26,7 @@ const { roomWords, wordsBeside } = await import('./presence-status')
 type Banner = InstanceType<typeof PresenceBannerComponent>
 
 const value = (v: string): EventTarget & { value: string } => Object.assign(new EventTarget(), { value: v })
-let swarmHost = 'jwize.com'
+let swarmHost = 'hypercomb.com'
 let segments: string[] = []
 let made: Banner[] = []
 
@@ -51,7 +51,7 @@ beforeEach(() => {
   EffectBus.clear()
   sessionStorage.clear()
   services.clear()
-  swarmHost = 'jwize.com'
+  swarmHost = 'hypercomb.com'
   segments = []
   services.set('@hypercomb.social/RoomStore', value('downtown'))
   services.set('@hypercomb.social/SecretStore', value('rose'))
@@ -215,7 +215,7 @@ describe('ZI-1 / ZI-6: the words fold the point the tab meets at, from one list'
     const b = mount()
     connect('open')
     const pair = b.status()?.parts.find(p => p.text && p.text !== 'downtown')?.text
-    expect(pair).toBe(wordsBeside('downtown', 'rose', 'jwize.com', 'ja'))
+    expect(pair).toBe(wordsBeside('downtown', 'rose', 'hypercomb.com', 'ja'))
     expect(pair?.startsWith(roomWords('downtown', 'rose'))).toBe(true)
   })
 })

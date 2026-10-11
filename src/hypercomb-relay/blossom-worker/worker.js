@@ -4251,24 +4251,40 @@ function serveNostrJson(request, site, asked) {
 // ── the always-online meeting point ──────────────────────────────────────────
 //
 // The swarm meets at wss://<meeting host> (documentation/swarm-host.md, "The
-// always-online meeting point"): a memory-only relay in ONE Durable Object in
-// its own script, hypercomb-meet (hypercomb-relay/meet-worker), reached through
-// the MEET service binding. At a host named in MEET_HOSTS this worker hands it
-// three things, untouched, and nothing else: a WebSocket upgrade on any path
-// (the access code rides its Sec-WebSocket-Protocol header and only the
-// meeting point reads it), the NIP-11 answer at `/`, and the operator's
-// recycle under /.well-known/hc-meet/. The bytes stay here: PUT /<sig> → R2.
-// With no binding or no MEET_HOSTS (tests, another deployment) nothing changes.
+// always-online meeting point"): a memory-only relay in a Durable Object, in
+// a script of its own (hypercomb-relay/meet-worker), reached through a
+// service binding. Two kinds of host, two scripts, two bindings:
+//   • MEET_OPEN_HOSTS → MEET_OPEN (hypercomb-meet-open): wss://hypercomb.com,
+//     THE SHIPPED DEFAULT every install dials — open, no access code.
+//   • MEET_HOSTS → MEET (hypercomb-meet): wss://pluginthematrix.com, named by
+//     a meeting link — coded, behind the recyclable access code.
+// They are two scripts because objects of one script may share an isolate:
+// an open herd must never slow, or take down, a private meeting. A host named
+// in MEET_OPEN_HOSTS goes to MEET_OPEN and nowhere else — with that binding
+// missing it is no meeting host at all, never the coded script's.
+//
+// At a meeting host this worker hands the meeting point three things,
+// untouched, and nothing else: a WebSocket upgrade on any path (an access
+// code rides its Sec-WebSocket-Protocol header and only the meeting point
+// reads it), the NIP-11 answer at `/` (Accept: application/nostr+json only —
+// a browser asking for `/` gets the host's own page, which at hypercomb.com,
+// an ORIGIN_HOSTS apex, stays Azure's), and /.well-known/hc-meet/*. The bytes
+// stay here: PUT /<sig> → R2. With no binding or no host list (tests, another
+// deployment) nothing changes.
 const MEET_PATH = '/.well-known/hc-meet/'
 
+const namesHost = (list, host) => String(list || '').split(/[\s,]+/).some((h) => h && h.toLowerCase() === host)
+
 function meetingPointFor(request, env, url) {
-  if (typeof env?.MEET?.fetch !== 'function') return null
   const host = url.hostname.toLowerCase()
-  if (!String(env.MEET_HOSTS || '').split(',').some((h) => h.trim().toLowerCase() === host)) return null
+  const binding = namesHost(env?.MEET_OPEN_HOSTS, host) ? env?.MEET_OPEN
+    : namesHost(env?.MEET_HOSTS, host) ? env?.MEET
+    : null
+  if (typeof binding?.fetch !== 'function') return null
   const upgrade = String(request.headers.get('upgrade') || '').toLowerCase() === 'websocket'
   const info = url.pathname === '/' && /application\/nostr\+json/i.test(request.headers.get('accept') || '')
   if (!upgrade && !info && !url.pathname.startsWith(MEET_PATH)) return null
-  return env.MEET.fetch(request)
+  return binding.fetch(request)
 }
 
 // ── router ───────────────────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ import { EffectBus } from '@hypercomb/core'
 
 const roomStore = { value: 'meetup', set: vi.fn((v: string) => { roomStore.value = v }) }
 const secretStore = { value: '4417', set: vi.fn((v: string) => { secretStore.value = v }) }
-let relays: string[] = ['wss://jwize.com']
+let relays: string[] = ['wss://hypercomb.com']
 const mesh = {
   configureRelays: vi.fn((urls: string[]) => { relays = [...urls] }),
   connectAll: vi.fn(),
@@ -59,7 +59,7 @@ beforeEach(() => {
   localStorage.removeItem('hc:nostrmesh:relays')
   roomStore.value = 'meetup'
   secretStore.value = '4417'
-  relays = ['wss://jwize.com']
+  relays = ['wss://hypercomb.com']
   EffectBus.emit('mesh:public-changed', { public: true })
 })
 
@@ -107,7 +107,7 @@ describe('/use-live-relay', () => {
     relays = ['wss://elsewhere.example']
     queen.invoke('')
     expect(mesh.configureRelays).toHaveBeenCalledTimes(1)
-    expect(mesh.configureRelays).toHaveBeenCalledWith(['wss://jwize.com'], false)
+    expect(mesh.configureRelays).toHaveBeenCalledWith(['wss://hypercomb.com'], false)
   })
 
   it('a named zone is set, and an unjoined tab joins through the one guarded gesture', () => {
@@ -173,7 +173,7 @@ describe('/use-live-relay', () => {
     relays = ['wss://a.example']
     queen.invoke('garden rose')
     expect(JSON.parse(sessionStorage.getItem('hc:mesh-zone')!)).toEqual({ room: 'garden', secret: 'rose' })
-    expect(mesh.configureRelays).toHaveBeenCalledWith(['wss://jwize.com'], false)
+    expect(mesh.configureRelays).toHaveBeenCalledWith(['wss://hypercomb.com'], false)
     expect(points).toEqual([{ relay: '' }])
   })
 

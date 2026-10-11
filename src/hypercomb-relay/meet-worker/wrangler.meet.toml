@@ -6,10 +6,19 @@
 #
 # NO ROUTE AND NO workers.dev ADDRESS. The only way in is pluginthematrix-core's
 # `[[services]] MEET` binding (wrangler.pluginthematrix.toml), which forwards
-# the meeting host's WebSocket upgrades, its NIP-11 answer and the recycle path
+# its MEET_HOSTS' WebSocket upgrades, their NIP-11 answer and the recycle path
 # (/.well-known/hc-meet/code). So this script must be deployed FIRST: a deploy
 # of pluginthematrix-core whose service binding names a script that does not
 # exist yet is refused.
+#
+# THE CODED MEETING POINT ONLY (jwize 2026-10-11, "yes, open default on
+# hypercomb.com"): wss://pluginthematrix.com, named by a meeting link, behind
+# the recyclable code, in the object it always had. The OPEN default,
+# wss://hypercomb.com, is the same worker.js deployed as its OWN script —
+# hypercomb-meet-open, wrangler.meet-open.toml — because objects of one script
+# may share an isolate (its event loop and its 128 MB), and an open herd must
+# never slow or take down a private meeting. So this file names no open host:
+# every host that reaches this script is coded.
 #
 #   npx wrangler deploy --config wrangler.meet.toml       (from this folder)
 #
@@ -50,8 +59,10 @@ new_sqlite_classes = ["MeetingPoint"]
 OPERATOR_KEYS = ""
 # What the hc:host card tells clients about the byte host behind this meeting
 # point: pluginthematrix-core takes any signing key's PUT /<sig> (AUTO_GRANT=1,
-# 100 MB per key per 90 days), so "all". Keep it in step with that worker.
+# 100 MB per key per 90 days) at every zone root it serves — hypercomb.com and
+# pluginthematrix.com alike — so "all". Keep it in step with that worker.
 PARTICIPANTS = "all"
-# Where the one object is created (only on its first request; later deploys
+# NO MEET_OPEN_HOSTS HERE, ever: an open host lives in hypercomb-meet-open.
+# Where the coded object is created (only on its first request; later deploys
 # keep it where it is). Western North America: the people meeting today.
 LOCATION_HINT = "wnam"

@@ -1,9 +1,11 @@
 // nostr/nostr-mesh.drone.ts
 //
-// Live bootstrap relay (wss://jwize.com) shipped 2026-05-29; default-ON
-// for real hosts since 2026-06-10 (see LIVE_RELAY notes below). Local
-// origins seed the loopback dev relay instead; hc:nostrmesh:use-live-relay
-// ('1'/'0') and hc:nostrmesh:relays override.
+// Live bootstrap relay shipped 2026-05-29; default-ON for real hosts since
+// 2026-06-10 (see LIVE_RELAY notes below). Since 2026-10-11 it is
+// wss://hypercomb.com, the always-online meeting point, open (it was
+// wss://jwize.com, a home machine). Local origins seed the loopback dev
+// relay instead; hc:nostrmesh:use-live-relay ('1'/'0') and
+// hc:nostrmesh:relays override.
 import { Drone } from '@hypercomb/core'
 import { isJoinedHere } from './membership.js'
 
@@ -24,7 +26,16 @@ const LOCAL_RELAY = 'ws://localhost:7777'
 //   localStorage['hc:nostrmesh:use-live-relay'] = '0'   opt out (real host
 //                                                       idles, no loopback)
 //   localStorage['hc:nostrmesh:relays']        = '[…]'  manual override, wins
-const LIVE_RELAY = 'wss://jwize.com'
+//
+// THE ALWAYS-ONLINE MEETING POINT (jwize, 2026-10-11: "we can't rely on my
+// computer being on that is ridiculous for my setup" → "yes, open default on
+// hypercomb.com, go ahead"). A Durable Object behind the hypercomb.com apex
+// (hypercomb-relay/meet-worker), OPEN: no access code, ever (D8 — packages
+// from before the access ladder would redial a coded default 13 times a
+// minute). The public install names only hypercomb.com. Packages from before
+// this change keep dialing wss://jwize.com until they update; an operator can
+// still name any relay (hc:nostrmesh:relays, /domain, a meeting link).
+const LIVE_RELAY = 'wss://hypercomb.com'
 
 // Force the literal into the bundle via a globalThis assignment.
 // esbuild treats global property writes as side effects and will not
@@ -624,7 +635,7 @@ export class NostrMeshDrone extends Drone {
   }
 
   /** The relay this tab meets at: host[:port] of the first relay it may
-   *  dial — wss://jwize.com gives jwize.com, ws://localhost:7801 gives
+   *  dial — wss://hypercomb.com gives hypercomb.com, ws://localhost:7801 gives
    *  localhost:7801. A pure function of the relay list: no fetch, no NIP-11,
    *  nothing stored. '' when no relay can be dialled. A loopback relay
    *  counts only for a page that is itself local: a developer's

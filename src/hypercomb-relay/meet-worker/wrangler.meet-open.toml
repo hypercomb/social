@@ -1,0 +1,64 @@
+# hypercomb-meet-open — THE OPEN DEFAULT MEETING POINT (worker.js).
+#
+# jwize 2026-10-11: "we can't rely on my computer being on that is ridiculous
+# for my setup" → "yes, open default on hypercomb.com, go ahead". Every install
+# dials wss://hypercomb.com (nostr-mesh LIVE_RELAY), with NO access code (D8:
+# never a code on the shipped default — packages from before the access
+# ladder would redial a coded default 13 times a minute).
+#
+# The same worker.js as hypercomb-meet (wrangler.meet.toml, the CODED point
+# for private meetings), deployed as its OWN SCRIPT on purpose: Durable
+# Objects of one class in one script may share an isolate — one event loop,
+# one 128 MB — so an open herd in the same script could slow a private
+# meeting's frames, and an open object pushed past the isolate's memory would
+# take the private meeting down with it. Two scripts never share an isolate.
+# What one stranger may hold here is bounded in meeting.js (a source's share
+# of the store, its sockets, the object's socket and address ceilings, and
+# nothing kept for good).
+#
+# NO ROUTE AND NO workers.dev ADDRESS. The only way in is pluginthematrix-core's
+# `[[services]] MEET_OPEN` binding (wrangler.pluginthematrix.toml), which
+# forwards its MEET_OPEN_HOSTS' WebSocket upgrades, their NIP-11 answer and
+# /.well-known/hc-meet/* (an open host has no code: that path answers 404).
+# Deploy this script BEFORE that binding is uncommented: a deploy of
+# pluginthematrix-core naming a script that does not exist is refused whole.
+#
+#   npx wrangler deploy --config wrangler.meet-open.toml    (from this folder)
+#
+# Its own deploy cadence too: a Durable Object resets whenever its script is
+# deployed, and pluginthematrix-core is redeployed for every site change.
+
+name = "hypercomb-meet-open"
+main = "worker.js"
+compatibility_date = "2026-06-01"
+workers_dev = false
+preview_urls = false
+
+[[durable_objects.bindings]]
+name = "MEETING"
+class_name = "MeetingPoint"
+
+# SQLite-backed, as Cloudflare recommends for every new class. The open
+# meeting point writes nothing to it: there is no code to keep.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MeetingPoint"]
+
+[vars]
+# THE OPEN HOSTS — exact hostnames (comma separated) whose meeting point takes
+# NO access code. A host is open ONLY when it is named here; anything else
+# that reaches this script is coded, and finds a door no code was ever set
+# for: closed. Each host here must also be in pluginthematrix-core's
+# MEET_OPEN_HOSTS, or nothing reaches it.
+MEET_OPEN_HOSTS = "hypercomb.com"
+# What the hc:host card tells clients about the byte host behind this meeting
+# point: pluginthematrix-core takes any signing key's PUT /<sig> (AUTO_GRANT=1,
+# 100 MB per key per 90 days) at the hypercomb.com zone root, so "all" — the
+# swarm's relay tier then uploads to https://hypercomb.com, the host a fresh
+# install's pool is seeded with. Keep it in step with that worker.
+PARTICIPANTS = "all"
+# No recycle here: an open host has no code. Left empty on purpose.
+OPERATOR_KEYS = ""
+# Where the open object is created (only on its first request; later deploys
+# keep it where it is). Western North America: the people meeting today.
+LOCATION_HINT = "wnam"

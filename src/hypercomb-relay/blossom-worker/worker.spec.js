@@ -4531,3 +4531,86 @@ test('ORIGIN_HOSTS changes nothing on any other host, and only the deploy var ma
     })
   }
 })
+
+// ── the shipped default meets at hypercomb.com (jwize 2026-10-11) ───────────
+// "yes, open default on hypercomb.com": every install dials wss://hypercomb.com.
+// On that ORIGIN_HOSTS apex only the upgrade, the NIP-11 answer and the
+// meeting point's own path are the meeting point's; the card page, the tour
+// and every other read stay the origin's, and the writes stay this worker's.
+
+test('at hypercomb.com a dial and its NIP-11 go to the meeting point, the card page stays the origin\'s, writes stay here', async () => {
+  const { env } = await originFixture()
+  // The open default has a script of its own (hypercomb-meet-open); the coded
+  // point's script must never hear a byte of it.
+  const MEET = meetBinding()
+  const CODED = meetBinding()
+  Object.assign(env, { MEET_OPEN: MEET, MEET_OPEN_HOSTS: 'hypercomb.com', MEET: CODED, MEET_HOSTS: 'pluginthematrix.com' })
+  const bytes = 'an upload at the default'
+  const sig = await sha256Hex(bytes)
+  await withUpstream(originPage, async (asked) => {
+    // The shipped default dials with no code; an old meeting link's code rides along untouched.
+    for (const [path, headers] of [['/', {}], ['/io', {}], ['/', { 'sec-websocket-protocol': 'hc-access.a-code-from-a-link' }]]) {
+      const res = await worker.fetch(new Request(`https://hypercomb.com${path}`, { headers: { upgrade: 'websocket', connection: 'Upgrade', ...headers } }), env)
+      assert.equal(await res.text(), 'from the meeting point', path)
+    }
+    assert.deepEqual(MEET.asked.map((a) => [new URL(a.url).host, a.protocol]),
+      [['hypercomb.com', null], ['hypercomb.com', null], ['hypercomb.com', 'hc-access.a-code-from-a-link']])
+    const info = await worker.fetch(new Request('https://hypercomb.com/', { headers: { accept: 'application/nostr+json' } }), env)
+    assert.equal(await info.text(), 'from the meeting point', 'NIP-11 is the meeting point\'s')
+    assert.equal(MEET.asked.length, 4)
+
+    // Browsers — and anything that is not a NIP-11 ask — get the card page, from the origin, as it arrived.
+    for (const [method, path, accept] of [['GET', '/', 'text/html,application/xhtml+xml,*/*;q=0.8'], ['HEAD', '/', 'text/html'],
+      ['GET', '/', 'application/json'], ['GET', '/', '*/*'], ['GET', '/tour/', 'text/html'], ['GET', '/io', 'application/nostr+json']]) {
+      const request = new Request(`https://hypercomb.com${path}`, { method, headers: { accept } })
+      const res = await worker.fetch(request, env)
+      assert.equal(res.status, 200, `${method} ${path} ${accept}`)
+      if (method === 'GET') assert.equal(await res.text(), `origin ${path}`, `${path} ${accept}`)
+      assert.equal(asked.at(-1).input, request, `${method} ${path} (${accept}) goes to the origin unchanged`)
+    }
+    assert.equal(MEET.asked.length, 4, 'no page read reached the meeting point')
+
+    // The upload host behind the default: a fresh key's signed PUT is taken here (AUTO_GRANT).
+    const url = `https://hypercomb.com/${sig}`
+    const put = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT') }, body: bytes }), env)
+    assert.equal(put.status, 201)
+    assert.ok(env.CONTENT.held.has(sig))
+    assert.equal(MEET.asked.length, 4, 'bytes never go to the meeting point')
+    assert.ok(!asked.some((a) => a.method === 'PUT'), 'nor to the origin')
+    assert.equal(CODED.asked.length, 0, 'nothing at the open default reached the coded script')
+  })
+})
+
+test('open and coded meeting hosts go to their own scripts, and an open host never falls to the coded one', async () => {
+  const { env } = await fixture()
+  const OPEN = meetBinding()
+  const CODED = meetBinding()
+  const dial = (host, bindings) => worker.fetch(new Request(`https://${host}/`, { headers: { upgrade: 'websocket', connection: 'Upgrade' } }), { ...env, ...bindings })
+  const both = { MEET_OPEN: OPEN, MEET: CODED, MEET_OPEN_HOSTS: 'hypercomb.com', MEET_HOSTS: 'pluginthematrix.com' }
+  assert.equal(await (await dial('hypercomb.com', both)).text(), 'from the meeting point')
+  assert.equal(await (await dial('pluginthematrix.com', both)).text(), 'from the meeting point')
+  assert.deepEqual(OPEN.asked.map((a) => new URL(a.url).host), ['hypercomb.com'])
+  assert.deepEqual(CODED.asked.map((a) => new URL(a.url).host), ['pluginthematrix.com'])
+  // A host named in both lists is open — never the coded script's.
+  await dial('hypercomb.com', { ...both, MEET_HOSTS: 'pluginthematrix.com,hypercomb.com' })
+  assert.equal(OPEN.asked.length, 2)
+  assert.equal(CODED.asked.length, 1)
+  // With its binding missing, an open host is no meeting host at all.
+  const unbound = await dial('hypercomb.com', { MEET: CODED, MEET_OPEN_HOSTS: 'hypercomb.com', MEET_HOSTS: 'pluginthematrix.com,hypercomb.com' })
+  assert.notEqual(await unbound.text(), 'from the meeting point')
+  assert.equal(CODED.asked.length, 1, 'the coded script never hears an open host')
+})
+
+test('the deployed config forwards hypercomb.com\'s dials and keeps its pages on the origin', () => {
+  const config = readFileSync(new URL('./wrangler.pluginthematrix.toml', import.meta.url), 'utf8')
+    .split('\n').filter((line) => !line.trim().startsWith('#')).join('\n')
+  const list = (name) => (new RegExp(`^${name}\\s*=\\s*"([^"]*)"`, 'm').exec(config)?.[1] ?? '').split(/[\s,]+/).filter(Boolean)
+  assert.deepEqual(list('MEET_OPEN_HOSTS'), ['hypercomb.com'], 'the shipped default is open, in its own script')
+  assert.deepEqual(list('MEET_HOSTS'), ['pluginthematrix.com'], 'the coded point keeps its door')
+  // Each binding names its own script (commented until the script exists).
+  const raw = readFileSync(new URL('./wrangler.pluginthematrix.toml', import.meta.url), 'utf8')
+  assert.match(raw, /binding = "MEET_OPEN"\s*\n#?\s*service = "hypercomb-meet-open"/)
+  assert.match(raw, /binding = "MEET"\s*\n#?\s*service = "hypercomb-meet"\s*$/m)
+  assert.ok(list('ORIGIN_HOSTS').includes('hypercomb.com'), 'the card page at / stays the origin\'s')
+  assert.match(config, /\{\s*pattern\s*=\s*"hypercomb\.com\/\*"\s*,\s*zone_name\s*=\s*"hypercomb\.com"\s*\}/, 'the apex reaches this worker by its zone route')
+})

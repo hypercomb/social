@@ -260,14 +260,15 @@ hosting, and this path is hosting. Decide before building step 1.
 
 ## Decisions this depends on
 
-These are the defaults that still name personal domains (audit, 2026-10-05);
-the path is only as clean as they are:
+These are the defaults that named personal domains (audit, 2026-10-05);
+the path is only as clean as they are. Two are settled (2026-10-11, jwize:
+"yes, open default on hypercomb.com"):
 
 | Default | Today | For the path |
 |---|---|---|
-| Live relay, on for every public visitor | `wss://jwize.com` | hypercomb.com, or off until one exists |
+| Live relay, on for every public visitor | `wss://hypercomb.com` — open, always online ([swarm-host.md](swarm-host.md), "The always-online meeting point"); packages from before keep dialing `wss://jwize.com` until they update | SETTLED 2026-10-11 |
 | Default content host, publish target, publications directory, claims, AI host | `pluginthematrix.com` | hypercomb.com where it serves that role, else unset |
-| Byte fallbacks; example hives | `jwize.com`, `pluginthematrix.io`, `content.jwize.com` | hypercomb.com, or none |
+| Byte fallbacks; example hives | byte fallbacks `hypercomb.com`, `pluginthematrix.io`, `pluginthematrix.com`; example hives `hypercomb.com`, `pluginthematrix.com` | SETTLED 2026-10-11 (no personal host) |
 
 ## Order of work
 

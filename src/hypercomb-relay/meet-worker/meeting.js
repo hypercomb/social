@@ -16,6 +16,9 @@
 // the content broker's answers, which are kept one per sig for the 15
 // minutes a reader can ask for them, and are the first thing a full store
 // lets go. A full store never refuses presence while it can make room.
+// Nothing is kept for good (presence 5 minutes at most, anything else a
+// week), and no one source holds more than its share of the store or more
+// than its share of the sockets ("what one stranger can hold", below).
 //
 // Ported from relay.js (the home relay), behaviour for behaviour: the hc:host
 // first frame, NIP-01/33 slots, NIP-40 expiry, the per-connection token
@@ -112,6 +115,63 @@ const FUTURE_SKEW_SECS = 15 * 60
 // connection has two buckets of these sizes — one for BULK_KINDS, one for
 // everything else — and both draw on the one ceiling for its address.
 export const BUCKETS = { connBurst: 400, connPerSec: 10, ipBurst: 12_000, ipPerSec: 200 }
+
+// ── what one stranger can hold (2026-10-11, the open default) ────────────────
+//
+// wss://hypercomb.com takes every install with no code, so nothing here may be
+// something one sender can fill, pin or outlast. The code was never the
+// barrier for these either: every guest of every coded meeting shares one.
+//
+// NOTHING IS KEPT FOR GOOD. Every kept event's stored life has a ceiling,
+// whatever expiration it carries (or none): presence PRESENCE_STORE_SECS (the
+// swarm beacons a 90–120 s life every 30–90 s; a will's tombstone lives 300
+// s), every other kind STORE_LIFE_MAX_SECS — the longest any shipped client
+// asks for (feedback items and the install roster, 7 days; resource bytes a
+// day). So every kept event is in an eviction tier, and a far-future beacon
+// can never outlast a real one by more than a few minutes.
+export const PRESENCE_STORE_SECS = 300
+export const STORE_LIFE_MAX_SECS = 7 * 86_400
+// ONE SOURCE'S SHARE. Each kept event is charged to its SOURCE — the sender's
+// address, IPv6 by its /64 (sourceOf) — and one source holds at most
+// 1/SOURCE_STORE_SHARE of the store: past it, its OWN oldest events make room
+// (answers and other kinds first; its presence only for its presence), never
+// anyone else's. One machine can never fill the store, so it can never make a
+// later beacon from anyone else come back full.
+export const SOURCE_STORE_SHARE = 8
+// A non-bulk event this large is fanned out but never kept: no page, beacon or
+// item the swarm writes comes near it (a page names its tiles' signatures),
+// and bytes ride the bulk kinds.
+export const STORED_EVENT_MAX_BYTES = 128 * 1024
+// SOCKETS. A socket costs the isolate memory whether it speaks or not, so one
+// source holds at most MAX_SOCKETS_PER_SOURCE at once (a household, an office
+// behind one NAT, a refreshing tab's zombie), and the object at most
+// MAX_SOCKETS, routing at most MAX_LIVE_ADDRESSES subscribed addresses in all
+// (about 350 bytes of heap each). Past either ceiling a dial is closed BUSY
+// (1013) and a REQ is CLOSED full: refused, never the isolate's 128 MB — which
+// would drop every room at once.
+export const MAX_SOCKETS_PER_SOURCE = 32
+export const MAX_SOCKETS = 2_500
+export const MAX_LIVE_ADDRESSES = 50_000
+// The lifecycle slots one connection beacons (its wills): a participant is in
+// one room, a few while moving between them.
+export const MAX_LIFECYCLE_PER_CONNECTION = 16
+
+const IPV4_MAPPED = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/
+
+/** The source a connection is counted as: its IPv4 address, or its IPv6 /64 —
+ *  the prefix one subscriber or one server holds whole and can rotate through
+ *  at will. '' (no address known) is one source like any other. */
+export function sourceOf(ip) {
+  const raw = String(ip || '').trim().toLowerCase()
+  if (!raw.includes(':')) return raw
+  const mapped = IPV4_MAPPED.exec(raw)
+  if (mapped) return mapped[1]
+  const [head, tail] = raw.split('::')
+  const front = head ? head.split(':') : []
+  const back = tail ? tail.split(':') : []
+  const groups = tail === undefined ? front : [...front, ...Array(Math.max(0, 8 - front.length - back.length)).fill('0'), ...back]
+  return groups.slice(0, 4).map((g) => (g || '0').replace(/^0+(?=.)/, '')).join(':') + '::/64'
+}
 
 // ── the address gate ─────────────────────────────────────────────────────────
 //
@@ -311,11 +371,21 @@ export class Meeting {
   #reapIdleMs
   #willGraceMs
   #buckets
+  #sourceStoreMaxBytes
+  #storedEventMaxBytes
+  #maxSockets
+  #maxSocketsPerSource
+  #maxLiveAddresses
 
   #clients = new Set()
+  #socketsBySource = new Map()  // source → open connections
+  #liveAddresses = 0       // addresses routed across every connection
   #events = new Map()      // id → stored event
   #sizes = new Map()       // id → bytes it costs the store
-  #untils = new Map()      // id → second its stored life ends (events that expire)
+  #untils = new Map()      // id → second its stored life ends (every kept event has one)
+  #sourceOfId = new Map()  // id → the source it is charged to
+  #idsBySource = new Map() // source → Set<id>, oldest kept first
+  #bytesBySource = new Map() // source → bytes it holds
   // What a full store may evict, in the order it does (#makeRoom):
   #answers = new Set()     // broker answers, oldest first
   #othersByMinute = new Map()   // minute its life ends → Set<id>: other kinds that expire
@@ -351,16 +421,35 @@ export class Meeting {
     this.#reapIdleMs = options.reapIdleMs ?? REAP_IDLE_MS
     this.#willGraceMs = options.willGraceMs ?? WILL_GRACE_MS
     this.#buckets = { ...BUCKETS, ...(options.buckets ?? {}) }
+    // 8 MB of 64 MB; a test's small store keeps the same 1/8.
+    this.#sourceStoreMaxBytes = options.sourceStoreMaxBytes ?? Math.floor(this.#storeMaxBytes / SOURCE_STORE_SHARE)
+    this.#storedEventMaxBytes = options.storedEventMaxBytes ?? STORED_EVENT_MAX_BYTES
+    this.#maxSockets = options.maxSockets ?? MAX_SOCKETS
+    this.#maxSocketsPerSource = options.maxSocketsPerSource ?? MAX_SOCKETS_PER_SOURCE
+    this.#maxLiveAddresses = options.maxLiveAddresses ?? MAX_LIVE_ADDRESSES
   }
 
   static #freshCensus() {
-    return { refusedEvents: 0, refusedReqs: 0, refusedSubs: 0, unaddressed: 0, refusedFull: 0, evicted: 0, handlerErrors: 0, willsFired: 0, willsCancelled: 0, reaped: 0 }
+    return { refusedEvents: 0, refusedReqs: 0, refusedSubs: 0, refusedDials: 0, unaddressed: 0, refusedFull: 0, evicted: 0, handlerErrors: 0, willsFired: 0, willsCancelled: 0, reaped: 0 }
   }
 
   get size() { return this.#clients.size }
   get pendingWills() { return this.#pendingWills.size }
   get storedEvents() { return this.#events.size }
   get storedBytes() { return this.#storedBytes }
+  get liveAddresses() { return this.#liveAddresses }
+  /** Bytes the store holds for `ip`'s source. */
+  storedBytesOf(ip) { return this.#bytesBySource.get(sourceOf(ip)) ?? 0 }
+
+  /** Why a dial from `ip` is not let in — the object's socket ceiling or its
+   *  source's — or null. Asked before the socket is accepted. */
+  refusal(ip) {
+    let why = null
+    if (this.#clients.size >= this.#maxSockets) why = 'busy: the meeting point is full — try again shortly'
+    else if ((this.#socketsBySource.get(sourceOf(ip)) ?? 0) >= this.#maxSocketsPerSource) why = `busy: at most ${this.#maxSocketsPerSource} connections from one address`
+    if (why) this.#census.refusedDials++
+    return why
+  }
 
   /** NIP-11 `limitation` — what a pre-meeting curl reads. */
   limitation() {
@@ -388,8 +477,10 @@ export class Meeting {
    *  and whether the byte host takes participants' bytes. */
   connect(socket, { ip = '' } = {}) {
     const now = this.#now()
+    const source = sourceOf(ip)
+    this.#socketsBySource.set(source, (this.#socketsBySource.get(source) ?? 0) + 1)
     const client = {
-      socket, ip, closed: false, lastInboundMs: now,
+      socket, ip, source, closed: false, lastInboundMs: now,
       // beaconed: lifecycle slot → when this connection last beaconed it
       subs: new Map(), routes: new Map(), lifecycle: new Map(), beaconed: new Map(),
       bucket: { tokens: this.#buckets.connBurst, at: now },
@@ -405,10 +496,13 @@ export class Meeting {
     return client
   }
 
-  /** One frame. A throw is this frame's NOTICE and a count, never the meeting. */
+  /** One frame. A throw is this frame's NOTICE and a count, never the meeting.
+   *  Only a frame that pays a token (an EVENT or REQ the budget took) counts
+   *  as hearing from the socket: a CLOSE, a malformed frame or a refused one
+   *  never keeps an idle socket from the reap, so holding a socket open costs
+   *  what every live client already spends on its liveness probe. */
   message(client, raw) {
     if (!client || client.closed) return
-    client.lastInboundMs = this.#now()
     try { this.#handle(client, typeof raw === 'string' ? raw : new TextDecoder().decode(raw)) }
     catch { this.#census.handlerErrors++; this.#send(client, ['NOTICE', 'error: could not handle that message']) }
   }
@@ -421,6 +515,9 @@ export class Meeting {
     for (const subId of [...client.routes.keys()]) this.#unroute(client, subId)
     try { this.#armWills(client) } catch {}
     this.#clients.delete(client)
+    const left = (this.#socketsBySource.get(client.source) ?? 1) - 1
+    if (left > 0) this.#socketsBySource.set(client.source, left)
+    else this.#socketsBySource.delete(client.source)
   }
 
   /** Close every connection (the access code was recycled, or the door shut):
@@ -466,7 +563,7 @@ export class Meeting {
     if (!said) return null
     const zones = [...rooms].map(([room, keys]) => `${room}:${keys.size}`).join(' ') || 'none'
     return `[minute] open ${this.#clients.size} · refused event ${c.refusedEvents} req ${c.refusedReqs}`
-      + `${c.refusedSubs ? ` subs ${c.refusedSubs}` : ''}${c.unaddressed ? ` unaddressed ${c.unaddressed}` : ''}`
+      + `${c.refusedSubs ? ` subs ${c.refusedSubs}` : ''}${c.refusedDials ? ` dials ${c.refusedDials}` : ''}${c.unaddressed ? ` unaddressed ${c.unaddressed}` : ''}`
       + `${c.refusedFull ? ` full ${c.refusedFull}` : ''}${c.evicted ? ` · evicted ${c.evicted}` : ''}${c.handlerErrors ? ` · handler errors ${c.handlerErrors}` : ''}`
       + ` · wills fired ${c.willsFired} cancelled ${c.willsCancelled}${c.reaped ? ` · reaped ${c.reaped}` : ''}`
       + ` · stored ${this.#events.size} (${this.#storedBytes} bytes) · zones ${zones}`
@@ -509,6 +606,7 @@ export class Meeting {
       else { this.#census.refusedReqs++; this.#send(client, ['CLOSED', String(msg[1] ?? ''), 'rate-limited: slow down']) }
       return
     }
+    client.lastInboundMs = this.#now()
     if (type === 'EVENT') this.#onEvent(client, msg[1])
     else this.#onReq(client, msg[1], msg.slice(2))
   }
@@ -527,7 +625,7 @@ export class Meeting {
     // own later death would leave no leave to fire.
     if (this.#pendingWills.size) for (const key of client.beaconed.keys()) this.#adoptWill(client, key)
 
-    const verdict = this.#insert(evt)
+    const verdict = this.#insert(evt, client.source)
     if (verdict === 'full') {
       this.#census.refusedFull++
       this.#send(client, ['OK', evt.id, false, 'error: the meeting point is full — try again shortly'])
@@ -581,6 +679,13 @@ export class Meeting {
       this.#send(client, ['CLOSED', subId, `error: too many live addresses (max ${MAX_ADDRESSES_PER_CONNECTION} per connection)`])
       return
     }
+    if (this.#liveAddresses - (client.routes.get(subId)?.xs.size ?? 0) + asked > this.#maxLiveAddresses) {
+      client.subs.delete(subId)
+      this.#unroute(client, subId)
+      this.#census.refusedSubs++
+      this.#send(client, ['CLOSED', subId, 'error: the meeting point is full — try again shortly'])
+      return
+    }
     client.subs.set(subId, filters)
     this.#route(client, subId, filters)
     // limit:0 asks for nothing stored — a live-only listen.
@@ -590,8 +695,9 @@ export class Meeting {
 
   // ── store ──────────────────────────────────────────────────────────────────
 
-  /** 'stored' | 'duplicate' | 'stale' | 'ephemeral' | 'unaddressed' | 'passing' | 'full' */
-  #insert(evt) {
+  /** 'stored' | 'duplicate' | 'stale' | 'ephemeral' | 'unaddressed' | 'passing' | 'full'
+   *  `source` is who the kept event is charged to (sourceOf its sender). */
+  #insert(evt, source = '') {
     const kind = evt.kind
     if (isEphemeralKind(kind)) return 'ephemeral'
     if (this.#events.has(evt.id)) return 'duplicate'
@@ -600,12 +706,17 @@ export class Meeting {
     // A broker answer lives here only while a reader's REQ (since = now −
     // 900) can still reach it; one already past that is fanned out, not kept.
     const nowSec = Math.floor(this.#now() / 1000)
+    const presence = PRESENCE_KINDS.has(kind)
     let until = expirationOf(evt)
     if (kind === ANSWER_KIND) {
       const life = Math.min(evt.created_at, nowSec) + ANSWER_STORE_SECS
       until = until ? Math.min(until, life) : life
       if (until < nowSec || evt.created_at > nowSec + ANSWER_FUTURE_SECS) return 'passing'
       if (this.#answerNotKept(evt)) return 'passing'
+    } else {
+      // Nothing is kept for good (above): the ceiling, whatever it carries.
+      const ceiling = nowSec + (presence ? PRESENCE_STORE_SECS : STORE_LIFE_MAX_SECS)
+      until = until ? Math.min(until, ceiling) : ceiling
     }
     const slotted = isAddressableKind(kind) || isReplaceableKind(kind)
     const key = slotted ? slotKey(evt, kind) : null
@@ -618,8 +729,18 @@ export class Meeting {
     if (held && (held.created_at > evt.created_at || (held.created_at === evt.created_at && held.id < evt.id))) return kind === ANSWER_KIND ? 'passing' : 'stale'
     const rec = { id: evt.id, pubkey: evt.pubkey, created_at: evt.created_at, kind, tags: evt.tags, content: evt.content, sig: evt.sig }
     const size = JSON.stringify(rec).length + EVENT_OVERHEAD_BYTES
-    const presence = PRESENCE_KINDS.has(kind)
-    const over = this.#storedBytes - (heldId ? this.#sizes.get(heldId) ?? 0 : 0) + size
+    // Too large to keep (above): fanned out — and the publisher's older copy
+    // in the slot goes, so nobody replays what it has replaced.
+    if (size > this.#storedEventMaxBytes && !BULK_KINDS.has(kind)) {
+      if (heldId) this.#drop(heldId)
+      return 'passing'
+    }
+    const heldSize = heldId ? this.#sizes.get(heldId) ?? 0 : 0
+    // The source's share first, from its own events only; then the store.
+    const mine = (this.#bytesBySource.get(source) ?? 0) - (heldId && this.#sourceOfId.get(heldId) === source ? heldSize : 0)
+    const overMine = mine + size - this.#sourceStoreMaxBytes
+    if (overMine > 0 && !this.#makeRoomFrom(source, overMine, presence, heldId)) return 'full'
+    const over = this.#storedBytes - heldSize + size
       - (this.#storeMaxBytes - (presence ? 0 : this.#storeReserveBytes))
     if (over > 0 && !this.#makeRoom(over, presence, heldId)) return 'full'
     if (heldId) this.#drop(heldId)
@@ -627,10 +748,13 @@ export class Meeting {
     this.#events.set(rec.id, rec)
     this.#sizes.set(rec.id, size)
     this.#storedBytes += size
+    this.#sourceOfId.set(rec.id, source)
+    indexAdd(this.#idsBySource, source, rec.id)
+    this.#bytesBySource.set(source, (this.#bytesBySource.get(source) ?? 0) + size)
     for (const x of addressesOf(rec)) indexAdd(this.#idsByX, x, rec.id)
     if (kind === ANSWER_KIND) this.#answers.add(rec.id)
-    else if (until) indexAdd(presence ? this.#presenceByMinute : this.#othersByMinute, Math.floor(until / 60), rec.id)
-    if (until) this.#untils.set(rec.id, until)
+    else indexAdd(presence ? this.#presenceByMinute : this.#othersByMinute, Math.floor(until / 60), rec.id)
+    this.#untils.set(rec.id, until)
     if (kind === ANSWER_KIND) this.#answerStored(rec)
     return 'stored'
   }
@@ -696,10 +820,11 @@ export class Meeting {
   }
 
   /** Free `need` bytes, or nothing at all: broker answers oldest first, then
-   *  other kinds that expire, soonest first (to the minute), and presence
-   *  slots last and only to make room for presence. Never `keep` (the slot
-   *  being replaced), never an event that does not expire. It walks only as
-   *  far as it takes. False: the store is truly full. */
+   *  other kinds, soonest-ending first (to the minute), and presence slots
+   *  last and only to make room for presence. Never `keep` (the slot being
+   *  replaced). Every kept event has a stored life (the ceilings above), so
+   *  every one is in a tier. It walks only as far as it takes. False: the
+   *  store is truly full. */
   #makeRoom(need, presence, keep) {
     const victims = []
     let found = 0
@@ -723,12 +848,43 @@ export class Meeting {
     return true
   }
 
+  /** Free `need` bytes of ONE source's share from its own events, or nothing
+   *  at all: its answers and other kinds first, oldest kept first, then — only
+   *  to make room for its presence — its presence. Never `keep`. */
+  #makeRoomFrom(source, need, presence, keep) {
+    const ids = this.#idsBySource.get(source)
+    if (!ids) return false
+    const victims = []
+    let found = 0
+    for (const pass of presence ? [false, true] : [false]) {
+      for (const id of ids) {
+        if (found >= need) break
+        if (id === keep || PRESENCE_KINDS.has(this.#events.get(id)?.kind) !== pass) continue
+        victims.push(id)
+        found += this.#sizes.get(id) ?? 0
+      }
+    }
+    if (found < need) return false
+    for (const id of victims) this.#drop(id)
+    this.#census.evicted += victims.length
+    return true
+  }
+
   #drop(id) {
     const rec = this.#events.get(id)
     if (!rec) return
     this.#events.delete(id)
-    this.#storedBytes -= this.#sizes.get(id) ?? 0
+    const size = this.#sizes.get(id) ?? 0
+    this.#storedBytes -= size
     this.#sizes.delete(id)
+    const source = this.#sourceOfId.get(id)
+    if (source !== undefined) {
+      this.#sourceOfId.delete(id)
+      indexDrop(this.#idsBySource, source, id)
+      const left = (this.#bytesBySource.get(source) ?? 0) - size
+      if (left > 0) this.#bytesBySource.set(source, left)
+      else this.#bytesBySource.delete(source)
+    }
     const until = this.#untils.get(id)
     this.#untils.delete(id)
     if (rec.kind === ANSWER_KIND) this.#answers.delete(id)
@@ -772,8 +928,8 @@ export class Meeting {
     const now = this.#now()
     const b = this.#buckets
     const own = bulk ? client.bulk : client.bucket
-    let venue = this.#ipBuckets.get(client.ip)
-    if (!venue) { venue = { tokens: b.ipBurst, at: now }; this.#ipBuckets.set(client.ip, venue) }
+    let venue = this.#ipBuckets.get(client.source)
+    if (!venue) { venue = { tokens: b.ipBurst, at: now }; this.#ipBuckets.set(client.source, venue) }
     const refill = (bucket, burst, perSec) => {
       bucket.tokens = Math.min(burst, bucket.tokens + (now - bucket.at) * perSec / 1000)
       bucket.at = now
@@ -799,12 +955,14 @@ export class Meeting {
     for (const f of filters) for (const x of f['#x']) xs.add(x)
     for (const x of xs) indexAdd(this.#subsByX, x, entry)
     client.routes.set(subId, { entry, xs })
+    this.#liveAddresses += xs.size
   }
 
   #unroute(client, subId) {
     const route = client.routes.get(subId)
     if (!route) return
     client.routes.delete(subId)
+    this.#liveAddresses -= route.xs.size
     for (const x of route.xs) indexDrop(this.#subsByX, x, route.entry)
   }
 
@@ -902,8 +1060,15 @@ export class Meeting {
       if (client.drainZone?.x === info.x) client.drainZone = null
       return
     }
+    // Newest last, and at most MAX_LIFECYCLE_PER_CONNECTION of each: the
+    // oldest slot a connection beaconed is forgotten first.
+    client.beaconed.delete(key)
     client.beaconed.set(key, this.#now())
+    client.lifecycle.delete(key)
     client.lifecycle.set(key, { x: info.x, d: info.d, pubkey: info.pubkey })
+    for (const map of [client.beaconed, client.lifecycle]) {
+      while (map.size > MAX_LIFECYCLE_PER_CONNECTION) map.delete(map.keys().next().value)
+    }
     // The drained word's zone: this connection's newest {alive}, and only it.
     if (HEX64.test(info.x)) {
       client.drainZone = { x: info.x, exp: expirationOf(evt) || (Number(evt.created_at) + LIFECYCLE_DEFAULT_TTL) }
@@ -932,7 +1097,8 @@ export class Meeting {
       if (heir) { if (!heir.lifecycle.has(key)) heir.lifecycle.set(key, will); continue }
       const held = this.#pendingWills.get(key)
       if (held) this.#clearTimer(held.timer)
-      this.#pendingWills.set(key, { ...will, since, timer: this.#setTimer(() => this.#fireWill(key), this.#willGraceMs) })
+      // The tombstone is charged to the source whose connection died.
+      this.#pendingWills.set(key, { ...will, since, source: client.source, timer: this.#setTimer(() => this.#fireWill(key), this.#willGraceMs) })
     }
     client.lifecycle.clear()
   }
@@ -953,7 +1119,7 @@ export class Meeting {
     }
     tomb.id = eventId(tomb)
     tomb.sig = ''  // made by the meeting point (see above)
-    try { this.#insert(tomb) } catch {}
+    try { this.#insert(tomb, will.source ?? '') } catch {}
     this.#broadcast(tomb, null)
     this.#census.willsFired++
   }

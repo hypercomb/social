@@ -5,7 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { schnorr } from '@noble/curves/secp256k1.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
-import { Meeting, sha256Hex, eventId, MAX_SUBS_PER_CLIENT, MAX_ADDRESSES_PER_REQ, MAX_ADDRESSES_PER_CONNECTION } from './meeting.js'
+import { Meeting, sha256Hex, eventId, sourceOf, MAX_SUBS_PER_CLIENT, MAX_ADDRESSES_PER_REQ, MAX_ADDRESSES_PER_CONNECTION, MAX_SOCKETS_PER_SOURCE, PRESENCE_STORE_SECS, STORE_LIFE_MAX_SECS, STORE_MAX_BYTES, SOURCE_STORE_SHARE, STORED_EVENT_MAX_BYTES } from './meeting.js'
 
 const sha = (text) => sha256Hex(text)
 const b64 = (text) => Buffer.from(text).toString('base64')
@@ -488,20 +488,22 @@ test('closeAll closes every socket with its code, and each will waits out its gr
   assert.equal(meeting.pendingWills, 1)
 })
 
-test('the store is bounded: past its bytes an event is refused, never the meeting', () => {
-  const { open, nowSec, meeting } = setup({ storeMaxBytes: 4000 })
+test('the store is bounded: past its bytes it makes room or refuses, never the meeting', () => {
+  // One source may hold the whole store here, so the store's own rule shows.
+  const { open, nowSec, meeting } = setup({ storeMaxBytes: 4000, sourceStoreMaxBytes: Infinity })
   const p = open()
   const x = sha('big')
   const secret = key()
-  let refused = null
-  for (let i = 0; i < 40 && !refused; i++) {
-    const ok = publish(p, sign(secret, 30200, x, 'y'.repeat(300), [['d', `d${i}`]], nowSec()))
-    if (ok[2] === false) refused = ok[3]
+  for (let i = 0; i < 40; i++) {
+    assert.equal(publish(p, sign(secret, 30200, x, 'y'.repeat(300), [['d', `d${i}`]], nowSec()))[2], true, 'presence makes room')
+    assert.ok(meeting.storedBytes <= 4000)
   }
-  assert.equal(refused, 'error: the meeting point is full — try again shortly')
+  // Only presence is held, and presence never makes room for another kind.
+  assert.deepEqual(publish(p, sign(secret, 30213, x, 'z'.repeat(300), [['d', 'item']], nowSec())).slice(2),
+    [false, 'error: the meeting point is full — try again shortly'])
   assert.ok(meeting.storedBytes <= 4000)
   // Replacing a held slot with an event of the same size still fits.
-  const ok = publish(p, sign(secret, 30200, x, 'z'.repeat(300), [['d', 'd0']], nowSec() + 1))
+  const ok = publish(p, sign(secret, 30200, x, 'z'.repeat(300), [['d', 'd39']], nowSec() + 1))
   assert.equal(ok[2], true)
 })
 
@@ -655,19 +657,20 @@ test("a full store makes room by evicting broker answers, oldest first — a new
 })
 
 test('the last part of the store is kept for presence: other kinds never take it, and a slot evicts what expires soonest', () => {
-  const { open, nowSec, meeting } = setup({ storeMaxBytes: 64_000, buckets: { connBurst: 10_000 } })
+  const { open, nowSec, meeting } = setup({ storeMaxBytes: 64_000, sourceStoreMaxBytes: Infinity, buckets: { connBurst: 10_000 } })
   const zone = sha('zone')
   const writer = key()
   const w = open()
-  // Store-and-forward items that never expire and are never evicted, until
-  // the store refuses them.
-  let items = 0
-  for (; items < 200; items++) {
-    const ok = publish(w, sign(writer, 30213, sha(`item ${items}`), 'f'.repeat(1_000), [['d', `item:${items}`]], nowSec()))
-    if (ok[2] !== true) { assert.equal(ok[3], 'error: the meeting point is full — try again shortly'); break }
+  // Store-and-forward items that carry no expiration are kept a week at most
+  // (STORE_LIFE_MAX_SECS), so they are evictable like everything else: past
+  // the store's bytes the oldest makes room, and none takes the reserve.
+  for (let i = 0; i < 200; i++) {
+    assert.equal(publish(w, sign(writer, 30213, sha(`item ${i}`), 'f'.repeat(1_000), [['d', `item:${i}`]], nowSec()))[2], true, `item ${i}`)
+    assert.ok(meeting.storedBytes <= 64_000 - 4_000, 'they never reach the presence reserve (1/16 of the store, 4 MB at 64 MB)')
   }
-  assert.ok(items < 200, 'kinds that are not presence are refused before the store is full')
-  assert.ok(meeting.storedBytes <= 64_000 - 4_000, 'they never reach the presence reserve (1/16 of the store, 4 MB at 64 MB)')
+  const itemHeld = (i) => { const q = open('192.0.2.71'); ask(q, 'i', { '#x': [sha(`item ${i}`)] }); return q.events('i').length }
+  assert.equal(itemHeld(0), 0, 'the oldest item made room')
+  assert.equal(itemHeld(199), 1, 'the newest is held')
   const joiner = key()
   const j = open('198.51.100.4')
   assert.deepEqual(publish(j, sign(joiner, 30206, zone, '{"alive":true,"v":2}', [['d', pub(joiner)], ['expiration', String(nowSec() + 90)]], nowSec())).slice(2), [true, ''])
@@ -676,7 +679,7 @@ test('the last part of the store is kept for presence: other kinds never take it
 
   // Expiring slots of other kinds (resource streams, 30201) are evicted
   // soonest-expiry first (to the minute) when a presence slot needs the room.
-  const second = setup({ storeMaxBytes: 64_000, buckets: { connBurst: 10_000 } })
+  const second = setup({ storeMaxBytes: 64_000, sourceStoreMaxBytes: Infinity, buckets: { connBurst: 10_000 } })
   const r = second.open()
   const streamer = key()
   const streams = Array.from({ length: 24 }, (_, i) => sha(`stream ${i}`))
@@ -829,4 +832,150 @@ test('a broadcast serializes its event once, whatever the number of listeners, a
     assert.deepEqual(heard, [JSON.stringify(['EVENT', `sub-${i}`, evt])], `listener ${i} hears the canonical frame once`)
   }
   assert.ok(serialized <= 2, `serialized ${serialized} times for 50 listeners (once for the store's count, once for the fan-out)`)
+})
+
+// ── the open default: what one stranger can hold (2026-10-11) ───────────────
+// wss://hypercomb.com takes every install with no code, so nothing one sender
+// does — from one address, on one connection, inside its own budget — may
+// fill the store, pin it, outlast a real beacon or hold the isolate's memory.
+
+test('one address can never fill the store: its own oldest make room, and a beacon from anyone else is never refused', () => {
+  // The real limits: a 64 MB store, 1/8 of it per source.
+  const { open, nowSec, meeting } = setup({ verify: () => true })
+  const stranger = 'e'.repeat(64)
+  const a = open('203.0.113.66')
+  const okOf = (evt) => { a.send(['EVENT', evt]); return a.inbox.findLast((m) => m[0] === 'OK' && m[1] === evt.id) }
+  // The reported fill: 510 KB events at random addresses, no expiration, one
+  // connection, inside its burst. One that is not bulk is never kept at all…
+  const junk = 'j'.repeat(510_000)
+  for (let i = 0; i < 5; i++) assert.equal(okOf(unsigned(stranger, 1, sha(`junk ${i}`), junk, [], nowSec()))[2], true)
+  assert.equal(meeting.storedBytes, 0, 'a 510 KB event that is not bytes is fanned out, never kept')
+  // …bytes, which may be that large, fill only the sender's own share…
+  const bytes = 'r'.repeat(400_000)
+  for (let i = 0; i < 120; i++) {
+    const x = sha(`blob ${i}`)
+    assert.equal(okOf(unsigned(stranger, 30201, x, bytes, [['d', x]], nowSec()))[2], true, `blob ${i}: its own oldest makes room`)
+  }
+  // …and so does presence that never expires or claims the far future.
+  for (let i = 0; i < 200; i++) {
+    const far = i % 2 ? [['expiration', String(nowSec() + 10 ** 8)]] : []
+    assert.equal(okOf(unsigned(stranger, 30204, sha(`fake place ${i}`), '{}', [['d', `p${i}`], ...far], nowSec()))[2], true)
+  }
+  const share = STORE_MAX_BYTES / SOURCE_STORE_SHARE
+  assert.ok(meeting.storedBytesOf('203.0.113.66') <= share, `one source holds at most 1/8 of the store (${meeting.storedBytesOf('203.0.113.66')} of ${share})`)
+  assert.ok(meeting.storedBytes <= share)
+  // A participant at another address beacons and walks in, as ever.
+  const me = 'f'.repeat(64)
+  const p = open('198.51.100.20')
+  const zone = sha('lifecycle downtown rose')
+  const page = sha('/ downtown rose')
+  for (const evt of [
+    unsigned(me, 30206, zone, '{"alive":true,"v":2}', [['d', me], ['expiration', String(nowSec() + 120)]], nowSec()),
+    unsigned(me, 30200, page, '{"children":[]}', [['d', page], ['expiration', String(nowSec() + 90)]], nowSec()),
+  ]) {
+    p.send(['EVENT', evt])
+    assert.deepEqual(p.inbox.findLast((m) => m[0] === 'OK' && m[1] === evt.id).slice(2), [true, ''])
+  }
+})
+
+test('nothing is kept for good: presence lives at most 5 minutes whatever it carries, any other kind at most a week', () => {
+  const { open, clock, nowSec, meeting } = setup({ verify: () => true })
+  const me = 'c'.repeat(64)
+  const s = open()
+  const far = String(nowSec() + 10 ** 8)
+  publish(s, unsigned(me, 30204, sha('place none'), '{}', [['d', 'none']], nowSec()))
+  publish(s, unsigned(me, 30204, sha('place far'), '{}', [['d', 'far'], ['expiration', far]], nowSec()))
+  publish(s, unsigned(me, 30213, sha('item none'), '{}', [['d', 'i:none']], nowSec()))
+  publish(s, unsigned(me, 30213, sha('item far'), '{}', [['d', 'i:far'], ['expiration', far]], nowSec()))
+  assert.equal(meeting.storedEvents, 4)
+  const heldAt = (x) => { const q = open('192.0.2.80'); ask(q, 'h', { '#x': [x] }); const n = q.events('h').length; q.drop(); return n }
+  clock.advance((PRESENCE_STORE_SECS - 30) * 1000)
+  meeting.sweep()
+  assert.equal(heldAt(sha('place far')), 1, 'inside five minutes it is replayed')
+  clock.advance(60_000)
+  meeting.sweep()
+  for (const x of ['place none', 'place far']) assert.equal(heldAt(sha(x)), 0, `${x}: gone after five minutes`)
+  for (const x of ['item none', 'item far']) assert.equal(heldAt(sha(x)), 1, `${x}: kept`)
+  clock.advance(STORE_LIFE_MAX_SECS * 1000)
+  meeting.sweep()
+  assert.equal(meeting.storedEvents, 0, 'a week on, nothing of it is left')
+})
+
+test('an event over 128 KB that is not bytes reaches its listeners live and is never kept', () => {
+  const { open, nowSec, meeting } = setup({ verify: () => true })
+  const me = 'd'.repeat(64)
+  const x = sha('a huge page')
+  const listener = open('192.0.2.90')
+  assert.equal(ask(listener, 'live', { '#x': [x], limit: 0 }), 'EOSE')
+  const s = open()
+  publish(s, unsigned(me, 30200, x, 'small', [['d', x], ['expiration', String(nowSec() + 90)]], nowSec()))
+  const huge = unsigned(me, 30200, x, 'p'.repeat(STORED_EVENT_MAX_BYTES), [['d', x], ['expiration', String(nowSec() + 90)]], nowSec() + 1)
+  assert.deepEqual(publish(s, huge).slice(2), [true, ''])
+  assert.equal(listener.events('live').length, 2, 'both were heard live')
+  assert.equal(meeting.storedEvents, 0, 'the huge one is not kept, and the copy it replaced is gone')
+  const blob = sha('blob')
+  publish(s, unsigned(me, 30201, blob, 'r'.repeat(STORED_EVENT_MAX_BYTES), [['d', blob]], nowSec()))
+  assert.equal(meeting.storedEvents, 1, 'bytes that large are kept')
+})
+
+test('one address holds at most 32 sockets — IPv6 by its /64 — and the object at most its ceiling', () => {
+  assert.equal(sourceOf('203.0.113.7'), '203.0.113.7')
+  assert.equal(sourceOf('2001:db8:1:2:aaaa::1'), '2001:db8:1:2::/64')
+  assert.equal(sourceOf('2001:0DB8:0001:0002:ffff:ffff:ffff:ffff'), '2001:db8:1:2::/64')
+  assert.equal(sourceOf('2001:db8::1'), '2001:db8:0:0::/64')
+  assert.equal(sourceOf('::ffff:192.0.2.1'), '192.0.2.1')
+  assert.equal(sourceOf(''), '')
+  const { meeting, open } = setup({ maxSockets: 100 })
+  const held = []
+  for (let i = 0; i < MAX_SOCKETS_PER_SOURCE; i++) {
+    const ip = `2001:db8:1:2::${(i + 1).toString(16)}`
+    assert.equal(meeting.refusal(ip), null)
+    held.push(open(ip))
+  }
+  assert.equal(meeting.refusal('2001:db8:1:2:dead:beef::9'), `busy: at most ${MAX_SOCKETS_PER_SOURCE} connections from one address`, 'any host in the same /64')
+  assert.equal(meeting.refusal('2001:db8:1:3::1'), null, 'the next /64 is another source')
+  held[0].drop()
+  assert.equal(meeting.refusal('2001:db8:1:2::ff'), null, 'a socket that leaves frees its place')
+  for (let i = 0; meeting.size < 100; i++) open(`198.51.100.${i}`)
+  assert.equal(meeting.refusal('192.0.2.200'), 'busy: the meeting point is full — try again shortly')
+  assert.match(meeting.census(), / dials 2 /, 'the minute line counts refused dials')
+})
+
+test('the object routes a bounded number of live addresses in all: past it a REQ is CLOSED full', () => {
+  const { open } = setup({ maxLiveAddresses: 40 })
+  const xs = (n, tag) => Array.from({ length: n }, (_, i) => sha(`${tag}${i}`))
+  const [a, b, c] = ['192.0.2.1', '192.0.2.2', '192.0.2.3'].map((ip) => open(ip))
+  assert.equal(ask(a, 's', { '#x': xs(16, 'a'), limit: 0 }), 'EOSE')
+  assert.equal(ask(b, 's', { '#x': xs(16, 'b'), limit: 0 }), 'EOSE')
+  assert.equal(ask(c, 's', { '#x': xs(16, 'c'), limit: 0 }), 'error: the meeting point is full — try again shortly')
+  assert.equal(ask(c, 'small', { '#x': xs(8, 'c'), limit: 0 }), 'EOSE', 'what fits still fits')
+  assert.equal(ask(a, 's', { '#x': xs(16, 'a2'), limit: 0 }), 'EOSE', 'a replacing REQ counts only the difference')
+  b.send(['CLOSE', 's'])
+  assert.equal(ask(c, 's', { '#x': xs(16, 'c'), limit: 0 }), 'EOSE', 'a CLOSE gives its addresses back')
+  c.drop()
+  assert.equal(ask(b, 's', { '#x': xs(16, 'b'), limit: 0 }), 'EOSE', 'so does a socket that leaves')
+})
+
+test('a socket that sends only CLOSE — or frames it is refused — is reaped like a silent one', () => {
+  const { open, clock, meeting } = setup()
+  const idle = open('203.0.113.9')
+  const live = open('203.0.113.10')
+  for (let i = 0; i < 13; i++) {
+    clock.advance(10_000)
+    idle.send(['CLOSE', 'nothing'])
+    idle.send('not a message')
+    live.send(['REQ', 'hc-live', { '#x': ['hc:live'], limit: 0 }])
+    meeting.sweep()
+  }
+  assert.deepEqual(idle.socket.closed, { code: 1001, reason: 'idle: nothing heard from this socket' })
+  assert.equal(live.socket.closed, null, 'the liveness probe every client sends is hearing')
+})
+
+test('a connection keeps the wills of its 16 newest lifecycle slots at most', () => {
+  const { open, nowSec, meeting } = setup({ verify: () => true })
+  const me = 'a'.repeat(64)
+  const s = open()
+  for (let i = 0; i < 40; i++) publish(s, unsigned(me, 30206, sha(`room ${i}`), '{"alive":true}', [['d', me], ['expiration', String(nowSec() + 90)]], nowSec()))
+  s.drop()
+  assert.equal(meeting.pendingWills, 16)
 })
