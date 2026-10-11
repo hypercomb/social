@@ -51,11 +51,10 @@ The hive already keeps this promise for its own code: it boots from what is
 installed, and a new package is "one check per boot, no push channel … the
 consumer asks; the icon is the answer; the human decides"
 (`sharing/update-scout.service.ts`). An adopted peer's creation keeps the head
-you accepted until you take a newer one. There are two gaps:
+you accepted until you take a newer one, and so does a card held in the card
+page's Hyperdex (by its address, at the head you took). One gap remains:
 - **The third place below:** someone using a creation on another person's
   domain gets whatever that person published last.
-- **The card page's Hyperdex:** it keeps a copy of each card, not its address
-  and the head you took.
 
 ## Three places to use a creation
 
@@ -269,7 +268,7 @@ mode, or Single App Mode on a supervised iPhone).
 | Turning an address's page on or off from your hive, with a preview and your review; a newer version of the page you follow shown as an update | built (Publish panel, `setEntrance`, `entrance-scout.service.ts`). Reaches your hive with an essentials rebuild |
 | jwize.com as jwize's entrance, his machine a farm member at `relay.pluginthematrix.io` | prepared: the relay passthrough and the farm read-through are built, not deployed; the steps are in [hosting-from-a-machine.md](hosting-from-a-machine.md), "Moving your root off the machine" |
 | Held cards read and updated by address in the hive | built: essentials `CardReader` (`sharing/published-address.ts`, `commands/card-read.ts`) and the card page. An address's head is read from its door record and taken only when the publisher's signed index names it, binds that address to the lineage and opens a door there; an older head is never offered; a version from a file counts once its head is seen to carry its card. It reaches your hive with an essentials rebuild, and hypercomb.io with a revision publish. On a door, or with a root-path address (`hypercomb.com/<name>`), a held card waits unread |
-| A held item keeps the head you took: a newer head is an update notice; upgrade or skip; the item's versions in a list with the current one on top; deleting an inactive version is a local forget | built for the hive's own packages and adopted creations. Not built in the card page, whose Hyperdex keeps a copy of each card rather than its address and head |
+| A held item keeps the head you took: a newer head is an update notice; upgrade or skip; the item's versions in a list with the current one on top; deleting an inactive version is a local forget | built for the hive's own packages and adopted creations, and in the card page: a held card keeps its address and the versions you took, a newer head is offered as Update (Upgrade or Skip), Use this re-checks an older version, Forget keeps the bytes |
 | A creation used on someone else's domain stays at the version you use | not built. The page would record the signature it runs, keep serving it, and show a notice when the domain publishes a newer one; the visitor shell would need to open a creation by signature |
 | The list as the phone's root, people first, the default at the top, "create your own" at the bottom | built in the card page |
 | Making yourself the default on someone's domain | built in the card page ("Open this site with") |
