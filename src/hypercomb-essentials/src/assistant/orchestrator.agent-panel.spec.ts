@@ -8,7 +8,7 @@
 // perch and the audit view down. A close left over from a failed load is old
 // news: the retry opens.
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 
 // The route-flow drain is the orchestrator's to schedule, not this spec's.
@@ -40,10 +40,28 @@ const boot = async (): Promise<void> => {
   EffectBus.emit('agent:start', { id: 'local-a', behavior: 'opus' })
   EffectBus.emit('agent:start', { id: 'local-b', behavior: 'opus' })
 }
+/** The panel's load has finished and the orchestrator has acted on it: every
+ *  import still resolving or evaluating has settled, then one more turn. */
 const made = async (): Promise<void> => {
-  await vi.waitFor(() => expect(services.has(KEY)).toBe(true), { timeout: 10_000 })
+  await vi.dynamicImportSettled()
+  expect(services.has(KEY)).toBe(true)
 }
 const panels = (): number => document.querySelectorAll('.hc-agent').length
+
+// The first boot and the first open each transform a module graph once per
+// worker: seconds of the default 5 s budget on a loaded machine. That cost is
+// paid here, once. Every test's boot resets the modules, so the tests still
+// load the panel anew, but from transformed code: tens of milliseconds.
+beforeAll(async () => {
+  await boot()
+  EffectBus.emit('agent:open', { id: 'local-a' })
+  await made()
+}, 60_000)
+
+// A test that ends with the panel still loading would finish that load in the
+// next test, after its boot cleared the page: two panels, one failure become
+// two. Whatever was in flight lands here, in its own test.
+afterEach(async () => { await vi.dynamicImportSettled() })
 
 describe('the agent panel door', () => {
   it('makes nothing at boot, then the panel once on the first open — later opens reuse it', async () => {
