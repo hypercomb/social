@@ -79,8 +79,12 @@ describe('the shell answers a meeting link no package will', () => {
     await vi.advanceTimersByTimeAsync(900)
     expect(opened).toEqual([])
     await vi.advanceTimersByTimeAsync(300)
-    // The meeting point rides along (START meets where the room is); the code never does.
-    expect(opened).toEqual([{ join: true, room: 'Meet Up', secret: '4417', point: 'wss://x.example' }])
+    // The meeting point rides along (START meets where the room is); the pair
+    // and the code never do — the selector reads the pair from the stash.
+    expect(opened).toEqual([{ join: true, meet: true, point: 'wss://x.example' }])
+    expect(JSON.stringify(opened)).not.toContain('4417')
+    const { pendingMeetCredentials } = await load()
+    expect(pendingMeetCredentials()).toEqual({ room: 'Meet Up', secret: '4417' })
     expect(sessionStorage.getItem('hc:pending-meet')).not.toBeNull() // kept until answered
     expect(localStorage.getItem('hc:room')).toBeNull()
     EffectBus.emit('mesh:modal-open', { open: true })
@@ -117,7 +121,8 @@ describe('the shell answers a meeting link no package will', () => {
     await vi.advanceTimersByTimeAsync(4_000)
     expect(opened).toEqual([])
     await vi.advanceTimersByTimeAsync(1_200)
-    expect(opened).toEqual([{ join: true, room: 'meetup', secret: '4417' }])
+    expect(opened).toEqual([{ join: true, meet: true }])
+    expect(JSON.stringify(opened)).not.toContain('4417')
   })
 
   it('a link whose meeting point is not one is let go — never a quiet join at the default relay', async () => {

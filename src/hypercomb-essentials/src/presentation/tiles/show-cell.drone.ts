@@ -6778,7 +6778,10 @@ export class ShowCellDrone extends Drone {
       }
     })
 
-    this.onEffect<{ secret: string }>('mesh:secret', ({ secret }) => {
+    // A notice, never the secret (the bus replays its last value to every late
+    // subscriber): read it where it lives, as the boot seeding below does.
+    this.onEffect('mesh:secret', () => {
+      const secret = String(get<any>('@hypercomb.social/SecretStore')?.value ?? '')
       if (this.#secret !== secret) {
         this.#secret = secret
         this.#layerCellsCache.clear()

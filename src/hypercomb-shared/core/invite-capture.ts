@@ -161,6 +161,12 @@ export const meetPointOf = (raw: string): string | null => {
   return ''
 }
 
+/** The pair in the meeting link stashed in this tab, or null — read where it
+ *  lives, device-local, so it never has to ride an effect. */
+export const pendingMeetCredentials = (): { room: string; secret: string } | null => {
+  try { return meetCredentialsOf(sessionStorage.getItem(PENDING_MEET_KEY) ?? '') } catch { return null }
+}
+
 export const watchPendingMeet = (timing: PendingMeetTiming = {}): void => {
   const pollMs = timing.pollMs ?? 250
   const graceMs = timing.graceMs ?? 5_000
@@ -176,8 +182,10 @@ export const watchPendingMeet = (timing: PendingMeetTiming = {}): void => {
     const point = meetPointOf(link)
     if (!creds || point === null) { drop(); return }
     // The meeting point rides along, so START meets where the room is — never
-    // quietly at the default relay. The code does not: no effect carries it.
-    EffectBus.emit('mesh:open-modal', { join: true, room: creds.room, secret: creds.secret, ...(point ? { point } : {}) })
+    // quietly at the default relay. The pair and the code do not: the bus
+    // replays its last value to every late subscriber, so the selector reads
+    // the pair from this tab's stash (pendingMeetCredentials) when it opens.
+    EffectBus.emit('mesh:open-modal', { join: true, meet: true, ...(point ? { point } : {}) })
     // Subscribed AFTER the open, so the replayed value is this open.
     const off = EffectBus.on<{ open?: boolean }>('mesh:modal-open', (p) => {
       if (p?.open !== false) return

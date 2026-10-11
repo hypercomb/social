@@ -321,9 +321,9 @@ Expired items are pruned:
 1. **NIP-07** (`window.nostr.signEvent`) — browser extension.
 2. **IOC NostrSigner** — registered signer from `window.ioc.get('NostrSigner')`.
 3. **Secret key sources** (in order):
-   - `window.NOSTR_SECRET_KEY` (64-char hex)
-   - `localStorage['hc:nostr:secret-key']` (64-char hex)
-   - Dev fallback key (hardcoded, test use only)
+   - `localStorage['hc:nostr:secret-key']` (64-char hex) — this device's key
+   - otherwise a fresh random key is minted and persisted there
+   - at a sandbox door (`try-<change>.<zone>`) there is no source: the signer signs nothing
 
 ### 10.2 Signing Mechanics
 

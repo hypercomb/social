@@ -154,7 +154,9 @@ describe('doctrine ratchets', () => {
       countRatchet(countsMatching(/\.createWritable\(/g), allowed['createWritable'], 'createWritable',
         'write through the store: a layer commit, putResource, or putPoolDoc'),
       countRatchet(countsMatching(/localStorage\??\.setItem\(/g), allowed['localStorage.setItem'], 'localStorage.setItem',
-        'durable state belongs in a pool of meaning (putPoolDoc / ParticipantDocument), never a browser key'),
+        'durable state belongs in a pool of meaning (putPoolDoc / ParticipantDocument), never a browser key — '
+        + 'except a credential: its only home is this device\'s localStorage (llm-keys.ts, nostr-signer.ts, '
+        + 'change-channel.ts) and it never moves into a pool'),
     ]
     expect(results.flatMap(r => r.problems), results.map(r => r.msg).join('')).toEqual([])
   })
@@ -852,7 +854,9 @@ describe('doctrine ratchets', () => {
     // bounds each match to the first close-paren, so a later unrelated
     // `apiKey` in the same function cannot trip it. Reads (`getItem`) and
     // storage-key CONSTANTS (`*_KEY`/`*_STORAGE`, matched as whole words that
-    // these patterns deliberately do not contain) are not credentials.
+    // these patterns deliberately do not contain) are not credentials. It sees
+    // only what is spelled inside the call's first parentheses — bytes built a
+    // line earlier pass it — so the structural half is the next test.
     //
     // Empty allowlist, and it stays empty. If you need to persist something
     // key-shaped, it belongs in LlmKeyStore; if you need to ANNOUNCE that a
@@ -861,10 +865,82 @@ describe('doctrine ratchets', () => {
       'putResource|putPoolDoc|putBee|putLayer|commitLayer|commitSlot[A-Za-z]*|writeChildrenManifest'
       + '|emitEffect|EffectBus\\.emit(?:Transient)?|decorationAdd|addDecoration'
     const CREDENTIALS = 'apiKey|api_key|apikey|secretValue|password|credential|bearerToken|accessToken|authToken'
+      + '|secretHex|secretKey|nsec|privateKey'
     const actual = filesMatching(
       new RegExp(`(?:${SINKS})\\s*(?:<[^>]*>)?\\s*\\([^)]{0,400}?\\b(?:${CREDENTIALS})\\b`, 'i'),
     )
     assertRatchet(actual, [], 'plaintext credential in a persisted or broadcast payload')
+
+    // A SECRET IS ANNOUNCED, NEVER CARRIED. A payload field named `secret`
+    // (the swarm room's passphrase) rode `mesh:secret`, `mesh:secret-draft` and
+    // `mesh:open-modal`, and the bus replayed it to every late subscriber —
+    // the bridge's `effect-last` handed it off the page. Emit a notice; the
+    // listener re-reads the SecretStore. Empty allowlist, and it stays empty.
+    const SECRET_FIELD = new RegExp(`(?:${SINKS})\\s*(?:<[^>]*>)?\\s*\\([^)]{0,400}?[{,]\\s*secret\\s*[:,}]`)
+    assertRatchet(filesMatching(SECRET_FIELD), [], 'secret field in a persisted or broadcast payload')
+
+    // The PERSISTED face, with the wider vocabulary a secret goes by. Kept off
+    // the bus sinks only because a notice may NAME what changed.
+    const PERSISTED_SINKS = 'putResource|putPoolDoc|putBee|putLayer|commitLayer|commitSlot[A-Za-z]*|writeChildrenManifest'
+      + '|decorationAdd|addDecoration|putArtifactMeta|putOptimization'
+    const SECRETS = `${CREDENTIALS}|secret\\w*|nsec\\w*|private_?key\\w*|mnemonic|passphrase`
+    assertRatchet(
+      filesMatching(new RegExp(`(?:${PERSISTED_SINKS})\\s*(?:<[^>]*>)?\\s*\\([^)]{0,400}?\\b(?:${SECRETS})\\b`, 'i')),
+      [], 'secret-shaped identifier in a persisted payload',
+    )
+  })
+
+  it('a credential is never read in a file that persists — a key cannot reach a pool by being nearby', () => {
+    // SECRETS NEVER ENTER A POOL (jwize 2026-10-07): a private key or an API
+    // key lives in this device's localStorage and nowhere else — never a pool,
+    // a resource, an event, an export or a public place. A document pool keeps
+    // every version and folder-sync copies every pool, so one that slips in is
+    // permanent. The argument-list check above cannot see a key inside `bytes`
+    // built a line earlier; this one sees where a key's VALUE is handed back,
+    // and keeps that out of any file that writes a pool, a resource or a
+    // layer. A credential's storage key spelled as a value counts as a read —
+    // that is the shape a localStorage-to-pool migration would take.
+    // `has()`/`configured()` hand no key back and are not reads.
+    const READS = new RegExp(
+      String.raw`\bllmKeyStore\s*\??\.\s*get\s*\(|\bgetApiKey\s*\(|\bresolveSecretKeyHex\b|\bNOSTR_SECRET_KEY\b`
+      + String.raw`|[=(:,]\s*['"\x60]hc:(?:nostr:secret-key|change-channel:secret|anthropic-api-key|llm:[\w-]+:key)['"\x60]`,
+    )
+    const PERSISTS = /\bputPoolDoc\s*\??\.?\s*\(|\bgetPool\s*\??\.?\s*\(|\bParticipantDocument\b|\bputResource\s*\??\.?\s*\(|\bcommitLayer\s*\(|\.createWritable\s*\(|\bputArtifactMeta\s*\(|\bputOptimization\s*\(|\baddDecoration\s*\(|\bdecorationAdd\b|\bputBee\s*\(|\bputLayer\s*\(|\bwriteChildrenManifest\s*\(/
+    const readers: string[] = []
+    const coResident: string[] = []
+    for (const dir of SCAN_DIRS) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const raw = readFileSync(file, 'utf8')
+        if (/^\/\/\s*auto-generated/.test(raw)) continue
+        const code = stripComments(raw)
+        if (!READS.test(code)) continue
+        const name = relative(ROOT, file).replace(/\\/g, '/')
+        readers.push(name)
+        if (PERSISTS.test(code)) coResident.push(name)
+      }
+    }
+    // The floor: the three homes are seen as readers, so a broken pattern
+    // fails here instead of passing vacuously — and, being readers, they are
+    // held to persisting nothing but localStorage.
+    for (const home of [
+      'hypercomb-core/src/core/llm-keys.ts',
+      'hypercomb-essentials/src/sharing/nostr-signer.ts',
+      'hypercomb-essentials/src/assistant/change-channel.ts',
+    ]) expect(readers).toContain(home)
+    // translation.service.ts is the last deprecated getApiKey() caller (its
+    // key rides a request header; only translated text is stored). Moving it
+    // to callModel pays this off.
+    assertRatchet(coResident.sort(), ['hypercomb-essentials/src/commands/translation.service.ts'], 'credential read in a file that persists')
+  })
+
+  it('no page global names the signing key', () => {
+    // `window.NOSTR_SECRET_KEY` once outranked the device's key: anything that
+    // set it had later events signed under a key the page reported for
+    // nobody, and nothing recorded the switch. The key lives in this device's
+    // storage only (nostr-signer.ts). Empty allowlist, and it stays empty.
+    assertRatchet(filesMatching(/\bNOSTR_SECRET_KEY\b/), [], 'page-global signing key')
   })
 
   it('a sandbox door is recognised in ONE place — never by a local try- regex', () => {

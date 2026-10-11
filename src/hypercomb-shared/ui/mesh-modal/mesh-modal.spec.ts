@@ -3,10 +3,12 @@
 // It pre-filled from the store's in-memory copy, which a stale tab held since
 // boot: START then wrote that stale pair back over the meeting another tab
 // had joined since. Now it pre-fills from the tab's own zone, else a FRESH
-// read of the origin-wide pair; an opener may hand it a pair or a meeting
-// point; nothing is written until save / START / share, and cancel writes
-// nothing. The meeting point's access code is typed here, once — never on the
-// command line — and kept only in this tab's session (and the link).
+// read of the origin-wide pair; an opener may point it at the meeting link
+// stashed in this tab or hand it a meeting point; nothing is written until
+// save / START / share, and cancel writes nothing. The meeting point's access
+// code is typed here, once — never on the command line — and kept only in
+// this tab's session (and the link). The secret never rides the bus: the bus
+// replays its last value to every late subscriber.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
@@ -45,6 +47,14 @@ const zone = (): Record<string, string> | null => {
   return raw ? JSON.parse(raw) : null
 }
 const typeInto = (handler: (e: Event) => void, value: string): void => handler({ target: { value } } as unknown as Event)
+/** A meeting link stashed in this tab, as the shell's capture leaves it. */
+const stashMeet = (link: string): void => { sessionStorage.setItem('hc:pending-meet', link) }
+/** What a subscriber arriving now is handed for an effect. */
+const replayed = (effect: string): unknown => {
+  let got: unknown
+  EffectBus.on(effect, (payload) => { got = payload })()
+  return got
+}
 
 beforeEach(() => {
   sessionStorage.clear()
@@ -85,8 +95,9 @@ describe('the selector pre-fills from THIS tab', () => {
     expect(modal.secretDraft()).toBe('its-secret')
   })
 
-  it('an opener may hand it a pair (the meeting link fallback) — and cancel writes nothing at all', () => {
-    const modal = open({ join: true, room: 'Meet Up', secret: '4417' })
+  it('an opener may point it at the stashed meeting link (the fallback) — and cancel writes nothing at all', () => {
+    stashMeet('Meet%20Up/4417/')
+    const modal = open({ join: true, meet: true })
     expect(modal.roomDraft()).toBe('Meet Up')
     expect(modal.secretDraft()).toBe('4417')
     modal.dismiss()
@@ -98,11 +109,37 @@ describe('the selector pre-fills from THIS tab', () => {
   })
 
   it('START writes the pair on screen and joins', () => {
-    const modal = open({ join: true, room: 'Meet Up', secret: '4417' })
+    stashMeet('Meet%20Up/4417/')
+    const modal = open({ join: true, meet: true })
     modal.save()
     expect(room.set).toHaveBeenCalledWith('Meet Up')
     expect(secret.set).toHaveBeenCalledWith('4417')
     expect(seen.map(s => s.effect)).toContain('mesh:join')
+  })
+})
+
+describe('the secret never rides the bus', () => {
+  it('save makes mesh:secret a notice and the draft a strength — no late subscriber is handed the secret', () => {
+    const modal = open({ join: true })
+    typeInto(modal.onRoomInput, 'river')
+    typeInto(modal.onSecretInput, 'river-stone-9')
+    expect(replayed('mesh:secret-draft')).toMatchObject({ open: true, score: expect.any(Number) })
+    modal.save()
+    expect(secret.set).toHaveBeenCalledWith('river-stone-9')
+    expect(seen.map(s => s.effect)).toContain('mesh:secret')
+    expect(JSON.stringify(seen)).not.toContain('river-stone-9')
+    for (const effect of ['mesh:secret', 'mesh:secret-draft', 'mesh:open-modal']) {
+      expect(JSON.stringify(replayed(effect) ?? null)).not.toContain('river-stone-9')
+    }
+    expect(replayed('mesh:secret-draft')).toEqual({ open: false, score: null })
+  })
+
+  it('a stashed meeting link fills the drafts without its secret ever reaching the bus', () => {
+    stashMeet('Meet%20Up/4417/')
+    const modal = open({ join: true, meet: true })
+    expect(modal.secretDraft()).toBe('4417')
+    expect(JSON.stringify(replayed('mesh:open-modal'))).not.toContain('4417')
+    expect(JSON.stringify(replayed('mesh:secret-draft'))).not.toContain('4417')
   })
 })
 
@@ -148,7 +185,8 @@ describe('the meeting point and its access code', () => {
   })
 
   it('refuses a code with no meeting point (it would reach the default relay), a bad code and a bad point', () => {
-    const modal = open({ join: true, room: 'r', secret: 's' })
+    stashMeet('r/s/')
+    const modal = open({ join: true, meet: true })
     typeInto(modal.onCodeInput, 'sekrit')
     modal.save()
     expect(modal.missingField()).toBe('point')
@@ -169,7 +207,8 @@ describe('the meeting point and its access code', () => {
       expect(zone()).toMatchObject({ relay: 'wss://pluginthematrix.com', code: 'sekrit-42' })
     })
     services.set('@diamondcoreprocessor.com/InviteQueenBee', { invoke: vi.fn(), meetingLink })
-    const modal = open({ room: 'downtown', secret: 'downtown', point: 'pluginthematrix.com' })
+    stashMeet('downtown/downtown/')
+    const modal = open({ meet: true, point: 'pluginthematrix.com' })
     typeInto(modal.onCodeInput, 'sekrit-42')
     await modal.copyShareLink()
     expect(meetingLink).toHaveBeenCalledTimes(1)

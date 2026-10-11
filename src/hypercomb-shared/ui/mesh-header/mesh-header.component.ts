@@ -109,27 +109,30 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
     () => (get('@hypercomb.social/SecretStore') as SecretStore | undefined)?.value ?? '',
   )
 
-  // While the mesh-modal is editing, it broadcasts the draft so the header
-  // shield can preview the strength in real time. Null = no active draft;
-  // header falls back to the persisted store value.
-  readonly #draft = signal<string | null>(null)
+  // While the mesh-modal is editing, it broadcasts the draft's STRENGTH (never
+  // the draft: the bus replays its last value to late subscribers) so the
+  // header shield can preview it in real time. Closed = the persisted value.
+  readonly #draft = signal<{ open: boolean; score: number | null }>({ open: false, score: null })
   #unsubDraft: (() => void) | null = null
   #unsubStepBack: (() => void) | null = null
   #unsubModal: (() => void) | null = null
 
   readonly shieldColor = computed(() => {
     const draft = this.#draft()
-    const secret = (draft !== null ? draft : this.#secret$()).trim()
-    if (!secret) return 'rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint))'
-    const provider = get('@hypercomb.social/SecretStrengthProvider') as SecretStrengthProvider | undefined
-    const score = provider?.evaluate(secret) ?? 0.5
+    let score = draft.score
+    if (!draft.open) {
+      const secret = this.#secret$().trim()
+      const provider = get('@hypercomb.social/SecretStrengthProvider') as SecretStrengthProvider | undefined
+      score = secret ? (provider?.evaluate(secret) ?? 0.5) : null
+    }
+    if (score === null) return 'rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint))'
     const hue = Math.round(score * 130)
     return `hsl(${hue} 70% var(--hc-shield-l, 50%))`
   })
 
   ngOnInit(): void {
-    this.#unsubDraft = EffectBus.on<{ secret: string | null }>('mesh:secret-draft', ({ secret }) => {
-      this.#draft.set(secret)
+    this.#unsubDraft = EffectBus.on<{ open?: boolean; score?: number | null }>('mesh:secret-draft', (draft) => {
+      this.#draft.set({ open: !!draft?.open, score: typeof draft?.score === 'number' ? draft.score : null })
     })
     // Unchecking "skip the privacy review" in the selector means "I DO want to
     // review" — so step back to the WORLD stage. (Checking it changes nothing:

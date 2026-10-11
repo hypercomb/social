@@ -10,7 +10,9 @@
 // holds. It lives in this device's localStorage and nowhere else. A doctrine
 // ratchet in `src/doctrine.spec.ts` enforces the negative half of that
 // sentence mechanically; this file is the positive half — the ONE place a key
-// is written and read, so there is a single seam to audit.
+// is written and read, so there is a single seam to audit. The pool write path
+// asks `carriedBy` before it persists a document, so a held key that reaches a
+// pool's bytes by any route is refused before the atom exists.
 //
 // Shape is copied from `hypercomb-shared/core/secret-store.ts` (EventTarget,
 // `#fields`, `change` events) because that is the repo's existing credential-
@@ -49,6 +51,11 @@
 
 import { register } from '../ioc/ioc.js'
 import { isSandboxDoor } from './sandbox-door.js'
+
+/** A held value shorter than this never blocks a write: a placeholder typed
+ *  into a key field ('x', 'ollama') is no key, and every real provider key is
+ *  32 characters or more. */
+const CARRIED_MIN_LENGTH = 20
 
 /** IoC key. Resolve via `window.ioc.get(LLM_KEY_STORE_IOC_KEY)`. */
 export const LLM_KEY_STORE_IOC_KEY = '@hypercomb.social/LlmKeyStore'
@@ -133,6 +140,20 @@ export class LlmKeyStore extends EventTarget {
   configured(): string[] {
     if (isSandboxDoor()) return []
     return [...this.#fields.keys()].sort()
+  }
+
+  /**
+   * Which provider's held key these bytes carry, verbatim — the provider id,
+   * never the key — or `''`. An exact match, so it has no false positives and
+   * needs no list of vendor key shapes. It reads `#fields`, not `get()`, so the
+   * refusal still holds at a sandbox door.
+   */
+  carriedBy(content: ArrayBuffer | ArrayBufferView | string): string {
+    if (this.#fields.size === 0) return ''
+    let text: string
+    try { text = typeof content === 'string' ? content : new TextDecoder().decode(content) } catch { return '' }
+    for (const [id, key] of this.#fields) if (key.length >= CARRIED_MIN_LENGTH && text.includes(key)) return id
+    return ''
   }
 
   /** Store (or, with an empty value, clear) a provider's key. */
