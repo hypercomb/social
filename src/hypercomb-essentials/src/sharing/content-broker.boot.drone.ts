@@ -77,6 +77,7 @@ import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
 import { isJoinedHere } from './membership.js'
 import { PASSIVE_REPLICATION_KEY, passiveReplicationQueue } from './passive-replication-queue.js'
+import { visualArtifactSigs } from './visual-hosts.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
@@ -114,11 +115,20 @@ const KIND_FETCH_RESPONSE = 30401
 const KIND_FETCH_CANCEL = 20402
 const CANCEL_TTL_MS = 30_000  // 30s — enough to cover any reasonable readLocal duration
 
-// Long expiration on responses. Content is sig-addressed and immutable,
-// so technically a response could live forever — but most relays
-// garbage-collect old events. 1 day keeps newcomers' REQ replays useful
-// for an active session window without piling up indefinitely.
-const RESPONSE_TTL_SECS = 86_400
+// A cancel from an asker a HOST served (its HTTP leg won the race) says only
+// "stop preparing this one": no answer sits in the relay for a later asker to
+// replay, so it holds back answers just long enough to cover the holders
+// still standing down, never the full CANCEL_TTL_MS. Marked so a current
+// holder can tell; an older one reads it as an ordinary cancel.
+const HOST_CANCEL_TAG: string[] = ['via', 'host']
+const HOST_CANCEL_TTL_MS = 5_000
+
+// AS LONG AS ANYONE READS IT, AND NO LONGER. Every reader asks the relay for
+// answers with since = now - 900 (the mesh's replay window), so an answer is
+// useless after 15 minutes — and one kept for a day only filled the meeting
+// point's store until it refused newcomers (RM-1 / SCALE-4). Content is
+// sig-addressed and immutable; a later asker who misses the window just asks.
+const RESPONSE_TTL_SECS = 900
 
 // THE ASK CHANNEL IS THE ROOM'S (jwize 2026-10-07: "the signatures are the
 // only thing that can be queried"; a scannable directory "would be making our
@@ -135,22 +145,15 @@ const SECRET_STORE_KEY = '@hypercomb.social/SecretStore'
 
 // DRAIN — builds before the room channel ask and listen on the WORD itself.
 // While a joined tab is in a room it still LISTENS there, so an older build's
-// ask is answered, and it DUAL-PUBLISHES its own asks there too, so an older
-// build's bytes are still reachable — that copy carries ROOM_COPY_TAG, and a
-// current holder (which heard the room copy) skips it. When:
-//   - on a relay whose card says its reads are ADDRESSED (mesh.relaysAddressed)
-//     — always. The gate delivers the word only between connections in the
-//     same room and replays nothing on it (relay.js ROOM_SCOPED_WORDS), so the
-//     copy tells nobody outside the room anything, and an older build that
-//     holds a picture but never asks is still asked. "In the same room" is a
-//     rule nobody can forge: a connection is in a room only by an {alive} it
-//     published itself at the room's lifecycle sig (relay.js zonesOf) — never
-//     by a key that spoke on it, since anyone can replay a member's signed
-//     note. The card's `addressed` came with that rule and only with it;
-//   - on a relay before the gate, where the word is heard by everyone — only
-//     while an older build has been heard asking in this room in the last
-//     OLDER_ASKER_TTL_MS (its own asks already go out there).
-// Retire both with the last build that asks there.
+// ask is answered. It copies its OWN asks there — marked ROOM_COPY_TAG, which
+// a current holder (it heard the room copy) skips — only while an older build
+// has been heard asking in this room in the last OLDER_ASKER_TTL_MS. It used
+// to copy every ask whenever the relays' cards said their reads were
+// addressed, so that an older build holding a picture and never asking was
+// still asked; that doubled every ask in every room for a case nobody could
+// see, and a page of pictures spent the connection's whole frame budget on
+// the copies (SCALE-3). An older build that asks anything is heard, and is
+// asked from then on. Retire both with the last build that asks there.
 const LEGACY_ASK_WORD = 'broker:fetch'
 const ROOM_COPY_TAG: string[] = ['asked', 'room']
 const OLDER_ASKER_TTL_MS = 10 * 60_000
@@ -202,10 +205,60 @@ const PEER_CLAIMED_MESH_TIMEOUT_MS = 10_000
 const STAND_DOWN_SLOT_MS = 350
 const MAX_STAND_DOWN_SLOTS = 2
 
+// An answer the relay already holds reaches a new asker by itself: the asker
+// subscribes at x=sig (since now-900) before it asks, the relay replays the
+// stored answer, and the asker cancels. A holder that knows an answer is
+// stored stands down this long for that cancel — two cancel round trips —
+// and answers only if none comes (the store dropped it, or never took it).
+const REPLAY_GRACE_MS = 2 * STAND_DOWN_SLOT_MS
+
 // How long a participant seen on the broadcast channel counts toward the crowd
 // estimate. Long enough to span a page's fetch burst, short enough that a
 // departed peer stops widening the window.
 const ZONE_PEER_TTL_MS = 60_000
+
+// Who holds a sig, as far as this tab knows: a live page that names it, or an
+// asker whose cancel said it took it. A page re-announces well inside this.
+const HOLDER_TTL_MS = 3 * 60_000
+// A sig this tab's own page named (swarm:page-announced) — its author answers
+// first. Re-announced on every refresh of the page while it stands there.
+const OWN_ANNOUNCED_TTL_MS = 10 * 60_000
+// Bound on every per-sig memory below (FIFO): a long session in a busy room
+// must not grow them without limit.
+const KNOWLEDGE_MAX = 4096
+const HOLDERS_PER_SIG_MAX = 64
+
+// ANSWERS ARE PACED (RM-2). The relay charges this connection's own beacon,
+// page and asks to the same bucket (400, refilled 10/s) as its answers, so a
+// sharer whose pictures are in demand could drain it and be marked away by
+// their own room. At most ANSWER_RATE_PER_S answer events a second after a
+// burst of ANSWER_BURST (one large picture goes at once); an answer that could
+// only go out after ANSWER_MAX_WAIT_MS is not sent — the asker has stopped
+// waiting by then, and asks again or reads a host.
+const ANSWER_RATE_PER_S = 6
+const ANSWER_BURST = 8
+const ANSWER_MAX_WAIT_MS = 8_000
+
+// AT MOST THIS MANY MESH ASKS OPEN AT ONCE (SCALE-3). Each is a REQ held up to
+// PEER_CLAIMED_MESH_TIMEOUT_MS plus an ask; a page of pictures used to open
+// them all together and spend the connection's frame budget in a second. The
+// rest wait their turn, newest first (the page the participant is looking at),
+// and a leg whose host answered while it waited never asks at all.
+const MESH_LEGS_MAX = 16
+
+const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
+const SWARM_LAYER_KIND = 30200
+
+/** Insert or refresh `key` in a bounded map, oldest dropped first. */
+const remember = <V>(map: Map<string, V>, key: string, value: V, max = KNOWLEDGE_MAX): void => {
+  map.delete(key)
+  map.set(key, value)
+  if (map.size <= max) return
+  const oldest = map.keys().next().value
+  if (oldest !== undefined) map.delete(oldest)
+}
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
 /** A cheap, deterministic, per-(sig, participant) ordering key. Not a hash
  *  anyone verifies — only an order every holder computes identically from
@@ -332,10 +385,23 @@ const FETCH_MISS_TTL_MS = 60_000
 // when it can; silent and non-blocking when it can't.
 const MAX_MISS_TTL_MS = 30 * 60_000
 
+// DEEPER PAGES ON THE SHARER'S DEVICE (D1, deep:'owner'). A tile is takeable
+// once its own atoms are on a host; the pages beneath it may still be only on
+// the sharer's device while their upload runs. While the sharer announces the
+// tile that way (within OWNER_TTL_MS), everything beneath it is asked of the
+// mesh first — a host cannot have it yet, so its probes would only stand in
+// front of the one participant who can answer. Each announcement re-opens
+// the subtree's miss windows at most once per OWNER_REOPEN_MS, so a page that
+// missed while the sharer was away is asked again when they are back, and at
+// once when the tile flips to hosted (the upload finished).
+const OWNER_TTL_MS = 3 * 60_000
+const OWNER_REOPEN_MS = FETCH_MISS_TTL_MS
+const OWNER_SUBTREE_MAX = 8192
+
 // Beta shared byte mirrors — appended to the HTTP-direct fallback tier (Tier 3)
 // whenever the shared LIVE relay is active (see #getFallbackDomains /
 // #liveRelayActive). The SAME hc:nostrmesh:use-live-relay flag that points the
-// MESH at wss://jwize.com also points BYTE-resolution here, so a single flag
+// MESH at the default meeting point (wss://hypercomb.com) also points BYTE-resolution here, so a single flag
 // makes the whole beta resolvable end to end. Resources (website pages, images,
 // game assets) have NO mesh fallback — without a guaranteed host a fresh viewer
 // that never received the publisher's ['domain'] attribution simply 404s and
@@ -414,9 +480,6 @@ interface MeshApi {
   // The broker uses this to serve 'visuals' requests without keeping
   // its own LRU — the mesh already does the work.
   getNonExpired?: (sig: string) => readonly { event: NostrEventLike }[]
-  // Every relay this tab dials said (in its card) that its reads are
-  // addressed — the drained word is room-scoped there (see DRAIN).
-  relaysAddressed?: () => boolean
 }
 
 interface SignerApi {
@@ -658,6 +721,34 @@ export class ContentBrokerDrone extends Drone {
   // is the local-time expiration (ms epoch). Stale entries are pruned
   // lazily before each check.
   #cancelledSigs = new Map<string, number>()
+
+  // ── answering ──
+  // Sigs this tab is answering right now: one answer per sig at a time.
+  #answering = new Set<string>()
+  // sig → when this tab last knew the relay holds an answer for it: it
+  // published one, or a cancel said the bytes arrived over the mesh.
+  #satisfiedAtMs = new Map<string, number>()
+  // sig → participant → when its page last named the sig (announced) and when
+  // its cancel said it took the bytes (took). See #standDownDelayMs.
+  #holdersBySig = new Map<string, Map<string, { announced: number; took: number }>>()
+  // sig → when this tab's own page last named it (#noteOwnPage).
+  #ownAnnouncedMs = new Map<string, number>()
+  // Answer pacing (GCRA): the theoretical send time of the next answer event.
+  #answerTat = 0
+
+  // ── asking ──
+  // Mesh asks open now, and the ones waiting for a turn (newest last).
+  #meshLegs = 0
+  #meshLegWaiters: Array<() => void> = []
+
+  // ── deep:'owner' ──
+  // A tile whose deeper pages are only on its sharer's device → that sharer
+  // and when they last said so (reopened: when its subtree's miss windows
+  // were last re-opened). Every sig read beneath it → the tile, and the
+  // layers already read for their references.
+  #ownerRoots = new Map<string, { pubkey: string; seenMs: number; reopenedMs: number }>()
+  #ownerSubtree = new Map<string, string>()
+  #ownerScanned = new Map<string, true>()
 
   constructor() {
     super()
@@ -1351,19 +1442,37 @@ export class ContentBrokerDrone extends Drone {
    * never with heartbeats or participant count.
    *
    * Claims also mark the sig as live-peer-backed, which is what lets
-   * #resolveRemote race the mesh instead of waiting out the HTTP cascade.
+   * #resolveRemote race the mesh instead of waiting out the HTTP cascade —
+   * except the ones `page.hosted` names: a full entry's own atoms, which its
+   * host already serves, are read from the host first and asked of the mesh
+   * only after it misses.
+   *
+   * `page.owner` names the publisher's tiles whose DEEPER pages are only on
+   * their device (deep:'owner'): everything read beneath them is asked of the
+   * mesh first (#ownerHeld), and the subtree's miss windows re-open when the
+   * publisher announces again (at most once per OWNER_REOPEN_MS) or the tile
+   * flips to hosted. Leaving `page.owner` out says nothing about it.
    */
-  public notePeerLiveness = (pubkey: string, sigs: readonly string[]): void => {
+  public notePeerLiveness = (
+    pubkey: string,
+    sigs: readonly string[],
+    page: { hosted?: readonly string[]; owner?: readonly string[] } = {},
+  ): void => {
     const peer = String(pubkey ?? '').trim().toLowerCase()
     if (!/^[0-9a-f]{64}$/.test(peer)) return
-    if (!Array.isArray(sigs) || sigs.length === 0) return
+    const clean = (list: unknown): string[] => (Array.isArray(list) ? list : [])
+      .map(raw => String(raw ?? '').trim().toLowerCase())
+      .filter(sig => SIG_RE.test(sig))
+    const named = clean(sigs)
+    const owner = Array.isArray(page?.owner) ? clean(page.owner) : null
+    if (named.length === 0 && !owner) return
+    const hosted = new Set(clean(page?.hosted))
 
     const woken: string[] = []
-    for (const raw of sigs) {
-      const sig = String(raw ?? '').trim().toLowerCase()
-      if (!SIG_RE.test(sig)) continue
-
-      this.#rememberPeerClaim(this.#peerClaimedSigs, sig)
+    for (const sig of named) {
+      this.#noteHolder(sig, peer, 'announced')
+      if (hosted.has(sig)) this.#peerClaimedSigs.delete(sig)
+      else this.#rememberPeerClaim(this.#peerClaimedSigs, sig)
 
       const claim = `${peer} ${sig}`
       if (this.#grantedPeerClaims.has(claim)) continue
@@ -1375,6 +1484,7 @@ export class ContentBrokerDrone extends Drone {
       this.#missBackoff.delete(sig)
       if (wasMissing) woken.push(sig)
     }
+    if (owner) woken.push(...this.#noteOwnerRoots(peer, named, owner))
 
     // ONE coalesced wake for the batch. content:arrived forces a full render
     // pass (show-cell #rearmResolveGates), and a joining peer announces a
@@ -1384,6 +1494,79 @@ export class ContentBrokerDrone extends Drone {
     if (woken.length > 0) {
       this.emitEffect('content:arrived', { sig: woken[0], kind: 'layer' as const })
     }
+  }
+
+  /** A publisher's deep:'owner' tiles, as its page names them now. Registers
+   *  new ones; re-opens a known one's subtree (at most once per
+   *  OWNER_REOPEN_MS — the sharer is back, or still here); and a tile this
+   *  publisher names again WITHOUT the mark has finished uploading — its
+   *  subtree goes back to the ordinary cascade, windows open. No request is
+   *  made here: the windows only let the next read ask again. Returns the sigs
+   *  whose window it opened. */
+  #noteOwnerRoots = (peer: string, named: readonly string[], owner: readonly string[]): string[] => {
+    const now = Date.now()
+    const owned = new Set(owner)
+    const reopen = new Set<string>()
+    const hostedNow = new Set<string>()
+    for (const root of owned) {
+      const held = this.#ownerRoots.get(root)
+      if (!held) {
+        remember(this.#ownerRoots, root, { pubkey: peer, seenMs: now, reopenedMs: 0 })
+        // A tile already taken is read locally, never through here — learn
+        // what lies beneath it now, so its first deeper page asks the mesh.
+        if (!this.#ownerScanned.has(root)) {
+          void this.#readLocal(root, 'layer').then(bytes => { if (bytes) this.#learnOwnerSubtree(root, bytes) })
+        }
+        continue
+      }
+      held.pubkey = peer
+      held.seenMs = now
+      if (now - held.reopenedMs >= OWNER_REOPEN_MS) { held.reopenedMs = now; reopen.add(root) }
+    }
+    for (const root of named) {
+      const held = this.#ownerRoots.get(root)
+      if (!held || owned.has(root) || held.pubkey !== peer) continue
+      this.#ownerRoots.delete(root)
+      reopen.add(root)
+      hostedNow.add(root)
+    }
+    if (reopen.size === 0) return []
+    const opened: string[] = []
+    const open = (sig: string): void => {
+      if (this.#fetchMissUntil.delete(sig)) opened.push(sig)
+      this.#missBackoff.delete(sig)
+    }
+    for (const root of reopen) open(root)
+    for (const [sig, root] of this.#ownerSubtree) {
+      if (!reopen.has(root)) continue
+      open(sig)
+      if (hostedNow.has(root)) this.#ownerSubtree.delete(sig)
+    }
+    return opened
+  }
+
+  /** Read a layer beneath a deep:'owner' tile for the sigs it names, so each
+   *  of them is asked of the mesh first too. Once per layer. */
+  #learnOwnerSubtree = (sig: string, bytes: Uint8Array): void => {
+    const root = this.#ownerRoots.has(sig) ? sig : this.#ownerSubtree.get(sig)
+    if (!root || this.#ownerScanned.has(sig) || bytes.byteLength > DEEP_RECORD_MAX_BYTES) return
+    remember(this.#ownerScanned, sig, true, OWNER_SUBTREE_MAX)
+    let parsed: unknown
+    try { parsed = JSON.parse(new TextDecoder().decode(bytes)) } catch { return }
+    const refs = new Set<string>()
+    this.#collectSigs(parsed, refs)
+    for (const ref of refs) {
+      if (ref === sig || this.#ownerRoots.has(ref) || this.#ownerSubtree.has(ref)) continue
+      remember(this.#ownerSubtree, ref, root, OWNER_SUBTREE_MAX)
+    }
+  }
+
+  /** Beneath a tile whose sharer said, within OWNER_TTL_MS, that its deeper
+   *  pages are only on their device. */
+  #ownerHeld = (sig: string): boolean => {
+    const root = this.#ownerSubtree.get(sig)
+    const held = root ? this.#ownerRoots.get(root) : undefined
+    return !!held && Date.now() - held.seenMs < OWNER_TTL_MS
   }
 
   /** Bounded FIFO insert — these sets are keyed by peer claims, so a long
@@ -1440,6 +1623,7 @@ export class ContentBrokerDrone extends Drone {
       this.#stageToHost(s, type, local)
       this.#missBackoff.delete(s)   // resolved — reset any prior backoff
       this.#mintOutcome('local', 'ok')
+      if (type === 'layer') this.#learnOwnerSubtree(s, local)
       return local
     }
 
@@ -1476,7 +1660,10 @@ export class ContentBrokerDrone extends Drone {
     // BEFORE starting it, so every concurrent caller for this sig awaits
     // ONE cascade — previously only the mesh leg coalesced, and N callers
     // for the same missing sig each dialed the full HTTP tier walk.
-    const fetchPromise = this.#resolveRemote(s, type, timeoutMs)
+    const fetchPromise = this.#resolveRemote(s, type, timeoutMs).then((bytes) => {
+      if (bytes && type === 'layer') this.#learnOwnerSubtree(s, bytes)
+      return bytes
+    })
     this.#pendingFetches.set(s, fetchPromise)
     try { return await fetchPromise }
     finally { this.#pendingFetches.delete(s) }
@@ -1486,6 +1673,20 @@ export class ContentBrokerDrone extends Drone {
    *  fallback for layers. Runs coalesced under #pendingFetches; records
    *  a full-cascade miss (with backoff) when everything comes up empty. */
   #resolveRemote = async (s: string, type: ContentType, timeoutMs: number): Promise<Uint8Array | null> => {
+    // BENEATH A deep:'owner' TILE → THE SHARER FIRST. Its upload is still
+    // running, so a host cannot have this yet and its probes (up to
+    // HTTP_PROBE_TIMEOUT_MS each) would only stand in front of the one
+    // participant who can answer. A host is asked after the mesh misses: the
+    // upload may have finished since the sharer last said so.
+    if ((type === 'layer' || type === 'resource') && this.#ownerHeld(s)) {
+      const fromSharer = await this.#fetchOverMesh(s, type, Math.max(timeoutMs, PEER_CLAIMED_MESH_TIMEOUT_MS))
+      if (fromSharer) return fromSharer
+      const fromHost = await this.#fetchOverHttp(s, type)
+      if (fromHost) return fromHost
+      this.#noteFetchMiss(s)
+      return null
+    }
+
     // LIVE PEER PRESENT → ASK BOTH AT ONCE. The serial cascade (HTTP fully,
     // then mesh) is right when the durable tier is the likely holder, and
     // exactly wrong in a swarm: the bytes are on a participant's disk one
@@ -1537,16 +1738,22 @@ export class ContentBrokerDrone extends Drone {
    *  participant answering a whole page of tiles at once is doing an OPFS read
    *  plus a base64 encode per sig, and the tail of that burst does not make a
    *  2s deadline — the sigs that missed it were the ones that then sat on the
-   *  60s ladder, which is precisely the observed sparseness. */
+   *  60s ladder, which is precisely the observed sparseness.
+   *
+   *  A HOST THAT WINS ENDS THE MESH LEG (SCALE-2): its subscription closes and
+   *  the holders still standing down hear a cancel, instead of the leg holding
+   *  its REQ open for the full mesh window and every copy that commits in it
+   *  reaching this tab anyway. A leg still waiting for its turn never asks. */
   #raceHostAndMesh = async (
     s: string,
     type: ContentType,
     timeoutMs: number,
   ): Promise<Uint8Array | null> => {
     const meshTimeout = Math.max(timeoutMs, PEER_CLAIMED_MESH_TIMEOUT_MS)
+    const meshLeg = new AbortController()
     const legs = [
-      this.#fetchOverHttp(s, type),
-      this.#fetchOverMesh(s, type, meshTimeout),
+      this.#fetchOverHttp(s, type).then((bytes) => { if (bytes) meshLeg.abort(); return bytes }),
+      this.#fetchOverMesh(s, type, meshTimeout, meshLeg.signal),
     ]
     return new Promise<Uint8Array | null>((resolve) => {
       let settled = false
@@ -2007,121 +2214,175 @@ export class ContentBrokerDrone extends Drone {
   // Internals
   // ─────────────────────────────────────────────────────────────────
 
-  #fetchOverMesh = async (sig: string, type: ContentType, timeoutMs: number): Promise<Uint8Array | null> => {
+  #fetchOverMesh = async (sig: string, type: ContentType, timeoutMs: number, signal?: AbortSignal): Promise<Uint8Array | null> => {
     const mesh = this.#getMesh()
     if (!mesh) return null
     // Only a room is asked: out of one, there is nobody to hear (ASK_LABEL).
     const channel = await this.#roomAskChannel()
     if (!channel) return null
+    // A turn among the open mesh asks (MESH_LEGS_MAX); a leg whose host
+    // answered while it waited gives its turn up without asking.
+    const release = await this.#meshLegTurn(signal)
+    if (!release) return null
+    if (signal?.aborted) { release(); return null }
 
-    return new Promise<Uint8Array | null>((resolve) => {
-      let settled = false
-      const cleanup = (): void => {
-        if (settled) return
-        settled = true
-        try { sub?.close() } catch { /* ignore */ }
-      }
-
-      // Subscribe to responses on this sig's channel BEFORE publishing
-      // the request — if the responder is fast (local fanout from a
-      // co-resident broker, or sub-100ms relay round-trip) we don't
-      // want to race past the EVENT and miss it.
-      // Chunk runs in flight, per responder. A run completes when every index
-      // 0..n-1 is present; the concatenation is then verified exactly like a
-      // single-event response. Runs from different responders never mix.
-      const runs = new Map<string, { n: number; parts: Map<number, Uint8Array>; bytes: number }>()
-      const startedAt = Date.now()
-      let timer: ReturnType<typeof setTimeout> | null = null
-      const armTimer = (ms: number): void => {
-        if (timer !== null) clearTimeout(timer)
-        timer = setTimeout(() => {
+    try {
+      return await new Promise<Uint8Array | null>((resolve) => {
+        let settled = false
+        let sub: MeshSubLike | null = null
+        // The race's host leg won: close this leg, and tell the holders still
+        // standing down — for this ask only (HOST_CANCEL_TAG).
+        const onHostWon = (): void => {
           if (settled) return
-          this.#mintOutcome('mesh', 'timeout')
-          cleanup()
-          resolve(null)
-        }, Math.max(100, ms))
-      }
-      const accept = (bytes: Uint8Array, attributed: string[]): void => {
-        void this.#acceptVerifiedBytes(sig, type, bytes).then((ok) => {
-          // Bytes that failed verification do NOT resolve — keep waiting; some
-          // other (honest) responder may still answer before the timeout. We
-          // also don't cancel — other peers may still legitimately need to send.
-          if (!ok) return
-          // Branch-closure attribution (§21.14) for MESH-fetched layers too —
-          // the HTTP path already does this (#fetchOverHttp), and skipping it
-          // here left every ref inside a mesh-delivered layer without a host,
-          // so the branch's resources could never HTTP-resolve.
-          if (type === 'layer') {
-            for (const d of attributed) {
-              const host = this.#domainToHost(d)
-              if (host) this.#attributeClosure(ok, host, sig)
-            }
-          }
-          // Cooperative-cancellable broadcast: signal that the sig
-          // is satisfied so other in-flight preparers abort before
-          // committing duplicate bandwidth. Fire-and-forget — we
-          // don't await; the fetch itself resolves immediately.
-          void this.#publishCancel(sig)
           if (timer !== null) clearTimeout(timer)
           cleanup()
-          resolve(ok)
+          void this.#publishCancel(sig, true)
+          resolve(null)
+        }
+        const cleanup = (): void => {
+          if (settled) return
+          settled = true
+          signal?.removeEventListener('abort', onHostWon)
+          release()
+          try { sub?.close() } catch { /* ignore */ }
+        }
+
+        // Subscribe to responses on this sig's channel BEFORE publishing
+        // the request — if the responder is fast (local fanout from a
+        // co-resident broker, or sub-100ms relay round-trip) we don't
+        // want to race past the EVENT and miss it.
+        // Chunk runs in flight, per responder. A run completes when every index
+        // 0..n-1 is present; the concatenation is then verified exactly like a
+        // single-event response. Runs from different responders never mix.
+        const runs = new Map<string, { n: number; parts: Map<number, Uint8Array>; bytes: number }>()
+        const startedAt = Date.now()
+        let timer: ReturnType<typeof setTimeout> | null = null
+        const armTimer = (ms: number): void => {
+          if (timer !== null) clearTimeout(timer)
+          timer = setTimeout(() => {
+            if (settled) return
+            this.#mintOutcome('mesh', 'timeout')
+            cleanup()
+            resolve(null)
+          }, Math.max(100, ms))
+        }
+        const accept = (bytes: Uint8Array, attributed: string[]): void => {
+          void this.#acceptVerifiedBytes(sig, type, bytes).then((ok) => {
+            // Bytes that failed verification do NOT resolve — keep waiting; some
+            // other (honest) responder may still answer before the timeout. We
+            // also don't cancel — other peers may still legitimately need to send.
+            // A leg the host already won keeps the bytes (stored above) and
+            // says nothing more.
+            if (!ok || settled) return
+            // Branch-closure attribution (§21.14) for MESH-fetched layers too —
+            // the HTTP path already does this (#fetchOverHttp), and skipping it
+            // here left every ref inside a mesh-delivered layer without a host,
+            // so the branch's resources could never HTTP-resolve.
+            if (type === 'layer') {
+              for (const d of attributed) {
+                const host = this.#domainToHost(d)
+                if (host) this.#attributeClosure(ok, host, sig)
+              }
+            }
+            // Cooperative-cancellable broadcast: signal that the sig
+            // is satisfied so other in-flight preparers abort before
+            // committing duplicate bandwidth. Fire-and-forget — we
+            // don't await; the fetch itself resolves immediately.
+            void this.#publishCancel(sig)
+            if (timer !== null) clearTimeout(timer)
+            cleanup()
+            resolve(ok)
+          })
+        }
+
+        sub = mesh.subscribe(sig, (evt) => {
+          if (settled) return
+          if (Number(evt.event?.kind) !== KIND_FETCH_RESPONSE) return
+          const pubkey = String(evt.event?.pubkey ?? '').toLowerCase()
+          if (!pubkey) return  // local fanout (our own publish), pre-sign — skip
+          if (this.#myPubkey && pubkey === this.#myPubkey) return  // our own echo
+          const typeTag = evt.event?.tags?.find(t => t[0] === 't')?.[1]
+          if (typeTag !== type) return  // wrong content kind
+
+          // Accumulate domain attributions regardless of whether the bytes
+          // verify. The address graph is informational — a domain that
+          // responded once for this sig is worth recording even if their
+          // particular byte payload was malformed.
+          const attributed = this.#extractDomains(evt)
+          this.#noteDomains(sig, attributed)
+
+          const b64 = String(evt.event?.content ?? '')
+          if (!b64) return
+          let part: Uint8Array
+          try { part = base64ToBytes(b64) } catch { return }
+          if (part.byteLength === 0 || part.byteLength > CHUNK_BYTES) return
+
+          const chunkTag = evt.event?.tags?.find(t => t[0] === 'c')?.[1]
+          if (!chunkTag) { accept(part, attributed); return }   // a single-event response
+
+          const m = /^(\d+)\/(\d+)$/.exec(chunkTag)
+          if (!m) return
+          const i = Number(m[1]), n = Number(m[2])
+          if (!(n >= 2 && i >= 0 && i < n) || (n - 1) * CHUNK_BYTES > MAX_RESPONSE_BYTES) return
+          let run = runs.get(pubkey)
+          if (!run || run.n !== n) { run = { n, parts: new Map(), bytes: 0 }; runs.set(pubkey, run) }
+          if (run.parts.has(i)) return
+          run.parts.set(i, part)
+          run.bytes += part.byteLength
+          if (run.bytes > MAX_RESPONSE_BYTES) { runs.delete(pubkey); return }
+          // Progress keeps the clock alive — a large run must not lose to a
+          // deadline sized for a single event — inside the hard assembly bound.
+          armTimer(Math.min(Math.max(timeoutMs, 5_000), Math.max(100, MESH_ASSEMBLY_MAX_MS - (Date.now() - startedAt))))
+          if (run.parts.size < n) return
+          const whole = new Uint8Array(run.bytes)
+          let at = 0
+          for (let k = 0; k < n; k++) { const c = run.parts.get(k)!; whole.set(c, at); at += c.byteLength }
+          runs.delete(pubkey)
+          accept(whole, attributed)
         })
-      }
 
-      const sub: MeshSubLike = mesh.subscribe(sig, (evt) => {
-        if (settled) return
-        if (Number(evt.event?.kind) !== KIND_FETCH_RESPONSE) return
-        const pubkey = String(evt.event?.pubkey ?? '').toLowerCase()
-        if (!pubkey) return  // local fanout (our own publish), pre-sign — skip
-        if (this.#myPubkey && pubkey === this.#myPubkey) return  // our own echo
-        const typeTag = evt.event?.tags?.find(t => t[0] === 't')?.[1]
-        if (typeTag !== type) return  // wrong content kind
+        signal?.addEventListener('abort', onHostWon, { once: true })
 
-        // Accumulate domain attributions regardless of whether the bytes
-        // verify. The address graph is informational — a domain that
-        // responded once for this sig is worth recording even if their
-        // particular byte payload was malformed.
-        const attributed = this.#extractDomains(evt)
-        this.#noteDomains(sig, attributed)
+        // Ask the room.
+        void this.#ask(channel, KIND_FETCH_REQUEST, [
+          ['d', sig],
+          ['t', type],
+        ])
 
-        const b64 = String(evt.event?.content ?? '')
-        if (!b64) return
-        let part: Uint8Array
-        try { part = base64ToBytes(b64) } catch { return }
-        if (part.byteLength === 0 || part.byteLength > CHUNK_BYTES) return
-
-        const chunkTag = evt.event?.tags?.find(t => t[0] === 'c')?.[1]
-        if (!chunkTag) { accept(part, attributed); return }   // a single-event response
-
-        const m = /^(\d+)\/(\d+)$/.exec(chunkTag)
-        if (!m) return
-        const i = Number(m[1]), n = Number(m[2])
-        if (!(n >= 2 && i >= 0 && i < n) || (n - 1) * CHUNK_BYTES > MAX_RESPONSE_BYTES) return
-        let run = runs.get(pubkey)
-        if (!run || run.n !== n) { run = { n, parts: new Map(), bytes: 0 }; runs.set(pubkey, run) }
-        if (run.parts.has(i)) return
-        run.parts.set(i, part)
-        run.bytes += part.byteLength
-        if (run.bytes > MAX_RESPONSE_BYTES) { runs.delete(pubkey); return }
-        // Progress keeps the clock alive — a large run must not lose to a
-        // deadline sized for a single event — inside the hard assembly bound.
-        armTimer(Math.min(Math.max(timeoutMs, 5_000), Math.max(100, MESH_ASSEMBLY_MAX_MS - (Date.now() - startedAt))))
-        if (run.parts.size < n) return
-        const whole = new Uint8Array(run.bytes)
-        let at = 0
-        for (let k = 0; k < n; k++) { const c = run.parts.get(k)!; whole.set(c, at); at += c.byteLength }
-        runs.delete(pubkey)
-        accept(whole, attributed)
+        // Timeout safety net.
+        armTimer(timeoutMs)
       })
+    } finally { release() }
+  }
 
-      // Ask the room.
-      void this.#ask(channel, KIND_FETCH_REQUEST, [
-        ['d', sig],
-        ['t', type],
-      ])
-
-      // Timeout safety net.
-      armTimer(timeoutMs)
+  /** Wait for a turn among the open mesh asks. Resolves the turn's release
+   *  (call it exactly once — it is idempotent) or null when `signal` aborted
+   *  first. The newest waiter goes next. */
+  #meshLegTurn = (signal?: AbortSignal): Promise<(() => void) | null> => {
+    const grant = (): (() => void) => {
+      this.#meshLegs++
+      let released = false
+      return () => {
+        if (released) return
+        released = true
+        this.#meshLegs--
+        this.#meshLegWaiters.pop()?.()
+      }
+    }
+    if (signal?.aborted) return Promise.resolve(null)
+    if (this.#meshLegs < MESH_LEGS_MAX) return Promise.resolve(grant())
+    return new Promise((resolve) => {
+      const start = (): void => {
+        signal?.removeEventListener('abort', drop)
+        resolve(grant())
+      }
+      const drop = (): void => {
+        const at = this.#meshLegWaiters.indexOf(start)
+        if (at >= 0) this.#meshLegWaiters.splice(at, 1)
+        resolve(null)
+      }
+      signal?.addEventListener('abort', drop, { once: true })
+      this.#meshLegWaiters.push(start)
     })
   }
 
@@ -2390,7 +2651,63 @@ export class ContentBrokerDrone extends Drone {
     for (const key of [ROOM_STORE_KEY, SECRET_STORE_KEY]) {
       ioc?.whenReady?.(key, (store) => { (store as EventTarget | undefined)?.addEventListener?.('change', resync) })
     }
+    // The page this tab stands on is in the room: what it names, this tab
+    // answers first (#standDownDelayMs).
+    EffectBus.on<{ segments?: unknown }>('swarm:page-announced', (p) => { void this.#noteOwnPage(p?.segments) })
     resync()
+  }
+
+  /** Remember the sigs this tab's own word for a page names — read back from
+   *  the mesh's cache of what it published there, so nothing new is asked. */
+  #noteOwnPage = async (segments: unknown): Promise<void> => {
+    if (!Array.isArray(segments)) return
+    const swarm = window.ioc?.get?.(SWARM_DRONE_KEY) as { composeSigForSegments?: (s: readonly string[]) => Promise<string> } | undefined
+    let at = ''
+    try { at = String(await swarm?.composeSigForSegments?.(segments.map(String)) ?? '') } catch { return }
+    if (!SIG_RE.test(at)) return
+    for (const item of this.#getMesh()?.getNonExpired?.(at) ?? []) {
+      const event = item.event
+      if (Number(event?.kind) !== SWARM_LAYER_KIND) continue
+      // Unsigned (this tab's own fanout) or signed by this tab — never a peer's.
+      const pubkey = String(event?.pubkey ?? '').toLowerCase()
+      if (pubkey && pubkey !== this.#myPubkey) continue
+      let visuals: unknown
+      try { visuals = (JSON.parse(String(event?.content ?? '')) as { visuals?: unknown }).visuals } catch { continue }
+      if (!Array.isArray(visuals)) continue
+      const now = Date.now()
+      const entries = visuals.filter((v): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v))
+      for (const sig of visualArtifactSigs(entries)) remember(this.#ownAnnouncedMs, sig, now)
+      return   // newest first: this is the page's current word
+    }
+  }
+
+  #announcedHere = (sig: string): boolean => {
+    const at = this.#ownAnnouncedMs.get(sig)
+    return at !== undefined && Date.now() - at < OWN_ANNOUNCED_TTL_MS
+  }
+
+  /** A participant holds `sig`: its page names it, or its cancel said it took it. */
+  #noteHolder = (sig: string, pubkey: string, how: 'announced' | 'took'): void => {
+    if (this.#myPubkey && pubkey === this.#myPubkey) return
+    let holders = this.#holdersBySig.get(sig)
+    if (!holders) { holders = new Map(); remember(this.#holdersBySig, sig, holders) }
+    const known = holders.get(pubkey) ?? { announced: 0, took: 0 }
+    known[how] = Date.now()
+    remember(holders, pubkey, known, HOLDERS_PER_SIG_MAX)
+  }
+
+  /** The other participants known to hold `sig` lately — only those whose
+   *  page names it, when `announcedOnly`. */
+  #knownHolders = (sig: string, announcedOnly: boolean): string[] => {
+    const holders = this.#holdersBySig.get(sig)
+    if (!holders) return []
+    const cutoff = Date.now() - HOLDER_TTL_MS
+    const out: string[] = []
+    for (const [pubkey, known] of holders) {
+      if (Math.max(known.announced, known.took) < cutoff) { holders.delete(pubkey); continue }
+      if (announcedOnly ? known.announced >= cutoff : true) out.push(pubkey)
+    }
+    return out
   }
 
   /** This tab's room ask channel: sign('broker:fetch\0room\0secret') while
@@ -2450,17 +2767,13 @@ export class ContentBrokerDrone extends Drone {
     return this.#olderAskersSeenMs.size > 0
   }
 
-  /** Ask the room on its channel — and on the drained word, marked, while an
-   *  older build there may be the only holder. */
+  /** Ask the room on its channel — and on the drained word, marked, only
+   *  while an older build has been heard asking there (see DRAIN). */
   #ask = (channel: string, kind: number, tags: string[][]): Promise<unknown> => {
     const mesh = this.#getMesh()
     if (!mesh?.publish) return Promise.resolve()
     const sent: Promise<unknown>[] = [mesh.publish(kind, channel, '', tags)]
-    // DUAL-PUBLISH during the drain (see DRAIN): always where the word is
-    // room-scoped by the relay, else only while an older build is heard here.
-    let roomScoped = false
-    try { roomScoped = mesh.relaysAddressed?.() === true } catch { roomScoped = false }
-    if (roomScoped || this.#olderBuildsAsking()) sent.push(mesh.publish(kind, LEGACY_ASK_WORD, '', [...tags, ROOM_COPY_TAG]))
+    if (this.#olderBuildsAsking()) sent.push(mesh.publish(kind, LEGACY_ASK_WORD, '', [...tags, ROOM_COPY_TAG]))
     return Promise.all(sent)
   }
 
@@ -2510,13 +2823,32 @@ export class ContentBrokerDrone extends Drone {
    *     may both take rank 0 — that costs one extra copy, never a missing one.
    *
    * Alone (nobody else seen): rank 0, zero wait — a quiet swarm pays nothing.
+   *
+   * RANKED AMONG HOLDERS, NOT THE ROOM (SCALE-2). Ranking every member put a
+   * sole holder in a crowd at rank ≥ 2 most of the time — the author of a
+   * fresh picture waited 700 ms while everyone looked at an empty tile. So:
+   *   - a sig this tab's own page names: its author answers first (ranked only
+   *     among the other pages that name it — alone, at once);
+   *   - a sig another live page names: that page's author answers first, this
+   *     tab after both slots, only if no cancel came;
+   *   - otherwise ranked among the participants known to hold it (a cancel
+   *     says its sender took it), or, knowing none, among the room as before.
    */
   #standDownDelayMs = (sig: string): number => {
-    const peers = this.#zonePeers()
-    if (peers.length === 0 || !this.#myPubkey) return 0
+    if (!this.#myPubkey) return 0
+    const announcers = this.#knownHolders(sig, true)
+    if (this.#announcedHere(sig)) return this.#tierAmong(sig, announcers)
+    if (announcers.length > 0) return MAX_STAND_DOWN_SLOTS * STAND_DOWN_SLOT_MS
+    const holders = this.#knownHolders(sig, false)
+    return this.#tierAmong(sig, holders.length > 0 ? holders : this.#zonePeers())
+  }
+
+  /** This tab's stand-down tier among `others` for `sig`. */
+  #tierAmong = (sig: string, others: readonly string[]): number => {
+    if (others.length === 0 || !this.#myPubkey) return 0
     const mine = standDownScore(sig, this.#myPubkey)
     let rank = 0
-    for (const p of peers) if (standDownScore(sig, p) < mine) rank++
+    for (const p of others) if (standDownScore(sig, p) < mine) rank++
     // TIERS, NOT A LADDER. rank × slot stacked past the asker's own mesh
     // window in a crowd of nine (the sole holder ranked fifth waited 2s and
     // the asker had already given up — measured: cold fetches went from
@@ -2548,7 +2880,20 @@ export class ContentBrokerDrone extends Drone {
     const sigTag = evt.event?.tags?.find(t => t[0] === 'd')?.[1]
     if (!sigTag || !SIG_RE.test(sigTag)) return
 
-    this.#cancelledSigs.set(sigTag, Date.now() + CANCEL_TTL_MS)
+    const viaHost = (evt.event?.tags ?? []).some(t => t[0] === HOST_CANCEL_TAG[0] && t[1] === HOST_CANCEL_TAG[1])
+    this.#noteCancelled(sigTag, viaHost)
+    // Whoever cancels has the bytes now.
+    this.#noteHolder(sigTag, pubkey, 'took')
+  }
+
+  /** A cancel for `sig`, heard or sent. Answers in preparation stand down
+   *  either way. One that came over the mesh also means the relay holds an
+   *  answer a later asker replays (#satisfiedAtMs); one a host satisfied
+   *  holds answers back only while the holders of this ask stand down. */
+  #noteCancelled = (sig: string, viaHost: boolean): void => {
+    const until = Date.now() + (viaHost ? HOST_CANCEL_TTL_MS : CANCEL_TTL_MS)
+    if ((this.#cancelledSigs.get(sig) ?? 0) < until) this.#cancelledSigs.set(sig, until)
+    if (!viaHost) remember(this.#satisfiedAtMs, sig, Date.now())
     this.#pruneStaleCancellations()
   }
 
@@ -2577,7 +2922,7 @@ export class ContentBrokerDrone extends Drone {
   // correctness primitive (workers that miss the cancel just publish
   // an extra response, which the relay's parameterized-replaceable
   // semantics dedup at storage anyway).
-  #publishCancel = async (sig: string): Promise<void> => {
+  #publishCancel = async (sig: string, viaHost = false): Promise<void> => {
     const mesh = this.#getMesh()
     if (!mesh?.publish) return
     if (!SIG_RE.test(sig)) return
@@ -2585,7 +2930,7 @@ export class ContentBrokerDrone extends Drone {
     // Also note locally so a self-fanout of the cancel (which would
     // skip the pubkey check in #handleFetchCancel) still has the
     // intended effect on subsequent #isCancelled checks.
-    this.#cancelledSigs.set(sig, Date.now() + CANCEL_TTL_MS)
+    this.#noteCancelled(sig, viaHost)
 
     const channel = await this.#roomAskChannel()
     if (!channel) return
@@ -2595,6 +2940,7 @@ export class ContentBrokerDrone extends Drone {
       await this.#ask(channel, KIND_FETCH_CANCEL, [
         ['d', sig],
         ['expiration', String(expirationSecs)],
+        ...(viaHost ? [HOST_CANCEL_TAG] : []),
       ])
     } catch (err) {
       // best-effort; do nothing on failure — extra response events
@@ -2618,7 +2964,11 @@ export class ContentBrokerDrone extends Drone {
     // The mesh's TTL window (ttlMs in nostr-mesh.drone) bounds how
     // long a peer can serve as proxy for another peer's view.
     if (typeTag === 'visuals') {
-      await this.#serveVisuals(sigTag)
+      const flight = `visuals ${sigTag}`
+      if (this.#answering.has(flight)) return
+      this.#answering.add(flight)
+      try { await this.#serveVisuals(sigTag) }
+      finally { this.#answering.delete(flight) }
       return
     }
 
@@ -2635,7 +2985,19 @@ export class ContentBrokerDrone extends Drone {
     // pipeline entirely. Saves a disk read and a publish round-trip.
     if (this.#isCancelled(sigTag)) return
 
-    const bytes = await this.#readLocal(sigTag, typeTag as ContentType)
+    // ONE ANSWER PER SIG AT A TIME (SCALE-2). Every asker subscribes at
+    // x=sig before it asks, so an answer already under way reaches each of
+    // them: N people asking at once cost one copy delivered N times — not N
+    // copies, each delivered to all N.
+    if (this.#answering.has(sigTag)) return
+    this.#answering.add(sigTag)
+    try { await this.#answer(sigTag, typeTag) }
+    finally { this.#answering.delete(sigTag) }
+  }
+
+  /** Answer one ask for `sig` from the local copy, if this tab holds it. */
+  #answer = async (sigTag: string, typeTag: 'layer' | 'resource'): Promise<void> => {
+    const bytes = await this.#readLocal(sigTag, typeTag)
     if (!bytes) return  // we don't have it — silent no-op
     if (bytes.byteLength === 0) return
     if (bytes.byteLength > MAX_RESPONSE_BYTES) {
@@ -2663,14 +3025,22 @@ export class ContentBrokerDrone extends Drone {
 
     // Spread responses across the crowd, then look once more. This is where
     // the redundant copies are actually eliminated — see #standDownDelayMs.
-    const standDown = this.#standDownDelayMs(sigTag)
+    // An answer the relay already holds (#satisfiedAtMs, inside the readers'
+    // replay window) reaches this asker on its own: stand down for its cancel
+    // and answer only if none comes — the store dropped it, or never took it.
+    const satisfiedAt = this.#satisfiedAtMs.get(sigTag)
+    const replayable = satisfiedAt !== undefined && Date.now() - satisfiedAt < RESPONSE_TTL_SECS * 1000
+    const standDown = Math.max(this.#standDownDelayMs(sigTag), replayable ? REPLAY_GRACE_MS : 0)
     if (standDown > 0) {
-      await new Promise<void>(resolve => setTimeout(resolve, standDown))
+      await sleep(standDown)
       if (this.#isCancelled(sigTag)) return
     }
 
     const mesh = this.#getMesh()
     if (!mesh?.publish) return
+    const n = Math.ceil(bytes.byteLength / CHUNK_BYTES)
+    const due = this.#answerSchedule(n)
+    if (!due) return
     // Parameterized-replaceable: ['d', sig] makes the relay store
     // exactly one of these per (pubkey, kind, sig). Future requesters
     // for the same sig hit the cached event via REQ replay — they
@@ -2690,27 +3060,64 @@ export class ContentBrokerDrone extends Drone {
     // localStorage['hc:nostrmesh:self-domain'] (e.g. 'wss://jwize.com');
     // regular peers leave it empty and emit domain-less responses.
     const selfDomain = this.#getSelfDomain()
-    const n = Math.ceil(bytes.byteLength / CHUNK_BYTES)
-    for (let i = 0; i < n; i++) {
-      // A cancel that lands mid-run stops the rest of it — the asker has
-      // already assembled a full run from someone else.
-      if (i > 0 && this.#isCancelled(sigTag)) return
-      const slice = bytes.subarray(i * CHUNK_BYTES, Math.min(bytes.byteLength, (i + 1) * CHUNK_BYTES))
-      const content = arrayBufferToBase64(slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength) as ArrayBuffer)
-      const responseTags: string[][] = [
-        ['d', n > 1 ? `${sigTag}#${i}` : sigTag],
-        ['t', typeTag],
-        ['expiration', String(expirationSecs)],
-      ]
-      if (n > 1) responseTags.push(['c', `${i}/${n}`])
-      if (selfDomain) responseTags.push(['domain', selfDomain])
-      try {
-        await mesh.publish(KIND_FETCH_RESPONSE, sigTag, content, responseTags)
-      } catch (err) {
-        console.warn('[content-broker] response publish failed', { sig: sigTag.slice(0, 12), chunk: `${i}/${n}`, err })
-        return
+    let sent = 0
+    try {
+      for (let i = 0; i < n; i++) {
+        const wait = due[i]! - Date.now()
+        if (wait > 0) await sleep(wait)
+        // A cancel that lands mid-run (or while this answer waited its turn)
+        // stops the rest of it — the asker has a full run from someone else.
+        if ((i > 0 || wait > 0) && this.#isCancelled(sigTag)) return
+        const slice = bytes.subarray(i * CHUNK_BYTES, Math.min(bytes.byteLength, (i + 1) * CHUNK_BYTES))
+        const content = arrayBufferToBase64(slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength) as ArrayBuffer)
+        const responseTags: string[][] = [
+          ['d', n > 1 ? `${sigTag}#${i}` : sigTag],
+          ['t', typeTag],
+          ['expiration', String(expirationSecs)],
+        ]
+        if (n > 1) responseTags.push(['c', `${i}/${n}`])
+        if (selfDomain) responseTags.push(['domain', selfDomain])
+        try {
+          if (!await mesh.publish(KIND_FETCH_RESPONSE, sigTag, content, responseTags)) return
+        } catch (err) {
+          console.warn('[content-broker] response publish failed', { sig: sigTag.slice(0, 12), chunk: `${i}/${n}`, err })
+          return
+        }
+        sent++
       }
+    } finally {
+      // A run cut short (a cancel, a refused publish) gives back the turns it
+      // reserved and never used — else every later answer from this tab,
+      // a deep:'owner' page only this device holds among them, waits behind
+      // phantom sends, or is not sent at all.
+      if (sent < n) this.#answerRelease(n - sent)
     }
+    // The relay holds it now: the next asker inside the replay window reads it
+    // there (it subscribes before it asks), and this tab stands down for it.
+    remember(this.#satisfiedAtMs, sigTag, Date.now())
+  }
+
+  /** When each of the next `n` answer events may go (ms epoch), paced at
+   *  ANSWER_RATE_PER_S after a burst of ANSWER_BURST — or null, reserving
+   *  nothing, when the first could only go after ANSWER_MAX_WAIT_MS. */
+  #answerSchedule = (n: number): number[] | null => {
+    const now = Date.now()
+    const interval = 1000 / ANSWER_RATE_PER_S
+    const tolerance = (ANSWER_BURST - 1) * interval
+    let tat = Math.max(this.#answerTat, now)
+    const due: number[] = []
+    for (let i = 0; i < n; i++) {
+      due.push(Math.max(now, tat - tolerance))
+      tat += interval
+    }
+    if (due[0]! - now > ANSWER_MAX_WAIT_MS) return null
+    this.#answerTat = tat
+    return due
+  }
+
+  /** Give back `unused` answer turns a run reserved and did not send. */
+  #answerRelease = (unused: number): void => {
+    this.#answerTat = Math.max(Date.now(), this.#answerTat - unused * (1000 / ANSWER_RATE_PER_S))
   }
 
   /**
@@ -2730,7 +3137,7 @@ export class ContentBrokerDrone extends Drone {
     // Only the swarm's layer kind. Hide events (30202), resource events
     // (30201), and other kinds at this sig aren't part of the "what's
     // here" surface — they have their own broker types if needed later.
-    const visualEvents = cached.filter(e => Number(e.event?.kind) === 30200)
+    const visualEvents = cached.filter(e => Number(e.event?.kind) === SWARM_LAYER_KIND)
     if (visualEvents.length === 0) return
 
     // Dedupe by pubkey, keeping the latest per peer. The relay's
@@ -2773,6 +3180,9 @@ export class ContentBrokerDrone extends Drone {
       ['expiration', String(expirationSecs)],
     ]
     if (selfDomain) visualsTags.push(['domain', selfDomain])
+    const due = this.#answerSchedule(1)
+    if (!due) return
+    if (due[0]! > Date.now()) await sleep(due[0]! - Date.now())
     try {
       await mesh.publish(KIND_FETCH_RESPONSE, composedSig, content, visualsTags)
     } catch (err) {
