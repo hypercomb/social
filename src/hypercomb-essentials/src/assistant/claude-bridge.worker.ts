@@ -24,6 +24,7 @@ import { readPublicBranches } from '../presentation/tiles/tile-public.js'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
 import { bridgeMaySetRootKey, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 import { zoneDoor } from '../sharing/zone-door.js'
+import { swarmDebugSnapshot } from './swarm-debug.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -620,6 +621,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'ui-state': return this.#uiState(req)
       case 'diag-open': return this.#diagOpen(req)
       case 'effect-last': return this.#effectLast(req)
+      case 'swarm-debug': return this.#swarmDebug(req)
       case 'hit-test': return this.#hitTest(req)
       case 'decoration-add':      return this.#decorationAdd(req)
       case 'bag-add':      return this.#bagMutate(req, 'add')
@@ -1134,6 +1136,20 @@ export class ClaudeBridgeWorker extends Worker {
     const off = EffectBus.on(name, (payload: unknown) => { captured = payload })
     try { if (typeof off === 'function') off() } catch { /* unsubscribe best-effort */ }
     return { id: req.id, ok: true, data: { name, last: captured === undefined ? null : captured } }
+  }
+
+  // ─── swarm-debug ───────────────────────────────────────────────────
+  //
+  // THE SWARM IN ONE READ: the swarm drone's walks, first announce, in-flight
+  // work and peer counts; the mesh's relays, sockets and counters; the share
+  // line and each host's last `sync:state` word and trouble; and whether this
+  // tab is joined, with its zone minus the secret and the code. Read-only —
+  // no emit, no write, no dial — and never a secret, a key or a private tile
+  // name (assistant/swarm-debug.ts). The read a live failure needs when a
+  // second tab on the hive is not an option.
+  async #swarmDebug(req: BridgeRequest): Promise<BridgeResponse> {
+    try { return { id: req.id, ok: true, data: swarmDebugSnapshot() } }
+    catch (e) { return { id: req.id, ok: false, error: `swarm-debug failed: ${(e as Error)?.message ?? 'unknown'}` } }
   }
 
   // ─── hit-test ──────────────────────────────────────────────────────
