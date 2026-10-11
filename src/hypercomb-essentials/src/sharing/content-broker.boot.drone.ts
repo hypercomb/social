@@ -339,26 +339,25 @@ const MAX_MISS_TTL_MS = 30 * 60_000
 // makes the whole beta resolvable end to end. Resources (website pages, images,
 // game assets) have NO mesh fallback — without a guaranteed host a fresh viewer
 // that never received the publisher's ['domain'] attribution simply 404s and
-// the tile/page renders blank. These two hosts are that guarantee — both serve
-// bytes at the bare ROOT of the domain, `https://<host>/<sig>`:
-//   • jwize.com          — the bootstrap relay; ALSO an HTTP /<sig> host.
-//   • pluginthematrix.io — Azure byte mirror, a byte-equal copy of jwize.com's
-//                          content dir. Served at the ROOT: a CDN/Cloudflare
-//                          front rewrites /<sig> → the blob container and adds
-//                          the CORS header (raw Azure blob forces a container
-//                          segment; the static-website endpoint can't set CORS —
-//                          the front resolves both, and edge-caches for scale).
-//                          See mirror-content-to-azure.ps1 + infrastructure.md.
-// sha256 gates every fetched byte, so a mirror that 404s or serves wrong bytes
+// the tile/page renders blank. These two sources are that guarantee, both on
+// hypercomb.com — the public install's one name (jwize, 2026-10-05: "There
+// should only be hypercomb.com on the public install"):
+//   • hypercomb.com          — the PUBLIC content endpoint's zone ROOT
+//                              (Blossom over R2, public-content-endpoint.md):
+//                              `https://hypercomb.com/<sig>`, where
+//                              published-public closures land.
+//   • hypercomb.com/content  — the shipped package pool on the hypercomb.com
+//                              origin, addressed by PATH, not a bare host
+//                              (#domainToHost keeps a path):
+//                              `https://hypercomb.com/content/<sig>`. It holds
+//                              the package layers and dependencies the R2 heap
+//                              lacks — 659 of 659 install:essentials sigs
+//                              answered there, hash-checked (2026-10-11), where
+//                              jwize.com used to be the only source.
+// sha256 gates every fetched byte, so a source that 404s or serves wrong bytes
 // is harmless — it only ever costs a 404 before the cascade moves on, never
 // corruption.
-// pluginthematrix.com is the PUBLIC content endpoint's zone ROOT (Blossom
-// over R2, documentation/public-content-endpoint.md) — where published-public
-// closures land via HostSyncService's public target. content.jwize.com is
-// the retired content face, kept LAST as a read fallback for bytes only it
-// held (writes never go there — zone-door.ts). Same tier, same flag, same
-// sha256 harmlessness as the mirrors.
-const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io', 'pluginthematrix.com', 'content.jwize.com'] as const
+const BETA_FALLBACK_DOMAINS = ['hypercomb.com', 'hypercomb.com/content'] as const
 
 export type ContentType = 'layer' | 'resource' | 'dependency' | 'bee'
 
@@ -760,8 +759,8 @@ export class ContentBrokerDrone extends Drone {
   // Tier 3 of the HTTP-direct cascade — last-resort byte mirrors, in priority
   // order:
   //
-  //   (a) BETA shared mirrors (BETA_FALLBACK_DOMAINS — jwize.com + the
-  //       pluginthematrix.io Azure mirror). Injected whenever the shared
+  //   (a) BETA shared mirrors (BETA_FALLBACK_DOMAINS — hypercomb.com's R2
+  //       heap and its shipped package pool). Injected whenever the shared
   //       LIVE relay is active, so ONE flag (hc:nostrmesh:use-live-relay) steers
   //       both the mesh AND a guaranteed byte source. This is what lets a fresh
   //       viewer resolve a peer's website/resource sig even when no mesh

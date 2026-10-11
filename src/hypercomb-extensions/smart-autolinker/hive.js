@@ -3,7 +3,7 @@
 
   // The directory host whose publications are read. A host answers them at
   // one address only: sign('host:publications') — never a named route.
-  const DEFAULT_LEDGER = "https://pluginthematrix.com";
+  const DEFAULT_LEDGER = "https://hypercomb.com";
   const publicationsAt = async (host) => {
     const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("host:publications"));
     const sig = [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
