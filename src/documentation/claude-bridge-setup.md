@@ -199,10 +199,43 @@ node scripts/bridge/bridge-cli.cjs list
 node scripts/bridge/_bop.cjs '{"op":"note-add","segments":["my-tile"],"cell":"ideas","text":"hello from the terminal"}'
 ```
 
-`_bop.cjs` sends any raw bridge op. The op vocabulary (36 verbs: `layer-at`,
-`inflate`, `note-add`, `put-resource`, `decoration-add`, `submit`, …) lives in
-`claude-bridge.worker.ts` — and `{"op":"submit","text":"/website"}` types into
-the hive command line itself, so anything you can do by hand, a script can do.
+`_bop.cjs` sends any raw bridge op. The op vocabulary (every `case` of the
+worker's `#route`: `layer-at`, `inflate`, `note-add`, `put-resource`,
+`decoration-add`, `submit`, …) lives in `claude-bridge.worker.ts` — and
+`{"op":"submit","text":"/website"}` types into the hive command line itself, so
+anything you can do by hand, a script can do.
+
+### Optional · Read a live swarm failure
+
+A swarm that goes quiet on the hive tab cannot be watched from a second tab —
+a second tab is a second member, and changes what it measures. Read the tab
+itself instead, in one call:
+
+```bash
+npm run bridge:swarm
+```
+
+(`node scripts/bridge/swarm-debug.cjs`; add `--json` for the snapshot alone.)
+It sends the read-only op `swarm-debug` (`assistant/swarm-debug.ts`) and prints
+a summary, then the snapshot:
+
+| Part | What it says |
+|---|---|
+| `swarm` | The swarm drone's `debug()`: the current page sig, subscriptions, peers per sig, the last 64 page walks (newest last) with their timings and outcome, the first announce after the join, the work in flight, the own-replay counts; how many participants stand on this page and in the zone; the tile names peers published here. A field `debug()` did not report reads null (never empty) and is named in `debugMissing` |
+| `mesh` | The MEETING RELAY (`swarmHost` — the `{host}` of the banner's "Can't reach {host}"), the last `mesh:connection`, each relay and its socket's ready state, the counters (events and REQs sent, refusals), whether the relays' reads are addressed |
+| `share` | Where the tiles' BYTES go, apart from the meeting: the last share line (`swarm:share-status`), each host's last `sync:state` word heard since the bridge module loaded and when, `hostTrouble()` for every host named, and where host sync is configured to write (backup, public host, publish nodes) |
+| `membership` | Whether this tab is joined, and its zone as `{room, relay, host, hasSecret, hasCode}` |
+
+It reads and does nothing else — no emit, no write, no dial (it never calls
+the mesh's `getDebug()`, which starts the mesh, or `connectionState()`, which
+can announce). And it never answers with a secret: no room secret, access code,
+key, nsec, NIP-98 token, bridge code or storage dump; relay addresses lose any
+login, query or fragment; a reason, refusal or error that holds the room
+secret or the access code reads `[redacted]` WHOLE (never with a hole cut in
+it, which would give the secret back by its place); a page path is shown up to
+its first tile that is not public on this tab, which reads `[private]`. Hosts
+and relay addresses are shown as they are. Lists stop at 64 and strings at 200
+characters.
 
 ### Optional · Unattended answering (no parked session)
 
@@ -305,6 +338,8 @@ every form.
 | `unauthorized — this bridge serves its own machine…` | A page or a remote sender without a code | `bridge give <name>` in the hive tab; send it as `Authorization: Bearer <code>`, or from a page as `{"type":"code","code":"<code>"}` first |
 | Broker logs `refused a renderer from page … not a hive page` | The hive runs on a port outside the default list | Start the broker with `BRIDGE_RENDERER_ORIGINS=http://localhost:<port>` |
 | Broker logs `refused a second renderer … holds the slot` | Another hive tab, on another origin, is already the renderer | Close one tab; the other takes the slot on its next retry |
+| Banner: "Can't reach {host}" — and {host} is not where your tiles go | `{host}` is the swarm's MEETING RELAY (the mesh's `swarmHost()`), never an upload host: the socket to it has not been open for 30 s. With no zone relay and no `hc:nostrmesh:relays`, a real host meets at the built-in `wss://jwize.com`, whatever the publish hosts are | `npm run bridge:swarm` — `mesh.swarmHost`, `mesh.relays`, `mesh.sockets` (ready states), `mesh.connection` (state, refusal) and `membership.zone.relay` |
+| "{branch}: {host} can't be reached" or "Can't upload to {host}" | An UPLOAD host refuses this tab's bytes or cannot be reached | `npm run bridge:swarm` — `share.shareStatus.blocked`, `share.hostTrouble`, and `share.syncByHost`: each host's last `sync:state` word heard since the bridge module loaded (plus the one replayed at load, `heardAtMs: null`); `share.targets` says where host sync is configured to write |
 
 ---
 
