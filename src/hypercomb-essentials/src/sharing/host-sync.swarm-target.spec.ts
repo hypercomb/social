@@ -17,6 +17,7 @@
 // its relay clock). Where the bytes go is handed to each service directly, as
 // a resolver over a fake world.
 
+import { createHash } from 'node:crypto'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus, SignatureService } from '@hypercomb/core'
 
@@ -87,6 +88,22 @@ class MemoryDir {
   }
   async *entries(): AsyncGenerator<[string, MemoryDir | MemoryFile]> { yield* [...this.children.entries()] }
   names(): string[] { return [...this.children.keys()].sort() }
+}
+
+// ── SHA-256 in the same turn ───────────────────────────────────────────────
+// WebCrypto hashes on a worker thread and answers on a later turn of the
+// event loop: the one piece of this world that neither the microtask queue
+// nor a fake clock holds. On a loaded machine that turn comes late. A
+// fake-time step moved the clock while a retry's PUT still waited on its
+// digest (a wait of at most 5 s measured 6.3 s), and a real-time test ended
+// with its drain still running, PUTting into the next test's host. The same
+// SHA-256, answered on the microtask queue, leaves nothing that waits on the
+// wall clock: `settle()` runs every chain out, and a fake timer's work is
+// done at the instant it fires.
+const digestNow = async (algorithm: AlgorithmIdentifier, data: BufferSource): Promise<ArrayBuffer> => {
+  const name = typeof algorithm === 'string' ? algorithm : algorithm.name
+  const hash = createHash(name.replace('-', '').toLowerCase()).update(toBytes(data)).digest()
+  return hash.buffer.slice(hash.byteOffset, hash.byteOffset + hash.byteLength) as ArrayBuffer
 }
 
 // ── IoC: the local store, the signer, the mesh ─────────────────────────────
@@ -166,6 +183,7 @@ beforeAll(async () => {
 const join = (joined: boolean): void => { EffectBus.emit('mesh:public-changed', { public: joined }) }
 
 beforeEach(() => {
+  vi.spyOn(crypto.subtle, 'digest').mockImplementation(digestNow)
   root = new MemoryDir('')
   resources.clear()
   layers.clear()
@@ -229,7 +247,9 @@ const writeReceipt = async (name: string): Promise<void> => {
   await w.close()
 }
 
-/** Let real async work (WebCrypto digests) finish between fake-timer steps. */
+/** Run every chain of awaits out. Nothing here waits on the wall clock (the
+ *  digest answers in the same turn, above), so when this returns, only what
+ *  a timer holds is still to come. */
 const settle = async (turns = 40): Promise<void> => {
   for (let i = 0; i < turns; i++) await new Promise<void>(resolve => setImmediate(resolve))
 }
@@ -263,7 +283,7 @@ type HostOptions = {
   held?: Map<string, Uint8Array>
   /** Status (and body) for every PUT, or a function of the attempt number. */
   put?: (attempt: number, sig: string) => { status: number; body?: string; headers?: Record<string, string> } | null
-  /** Milliseconds each PUT takes (real time). */
+  /** Milliseconds each PUT takes, on the test's clock (fake where it fakes one). */
   putDelayMs?: number
 }
 
@@ -459,6 +479,14 @@ describe('only public sigs are staged in a joined tab', () => {
 })
 
 describe('the drain is fast and honest', () => {
+  // Fake time for the whole block: the 30 s sweep, every retry timer, each
+  // PUT's delay and the clock the backoff reads. Nothing moves unless a test
+  // moves it, so every wait is measured exactly as the service scheduled it,
+  // never against a wall clock that a loaded machine stretches.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+  })
+
   it('uploads four at a time', async () => {
     const host = makeHost({ putDelayMs: 15 })
     vi.stubGlobal('fetch', host.fetch)
@@ -466,14 +494,15 @@ describe('the drain is fast and honest', () => {
     const sigs: string[] = []
     for (let i = 0; i < 10; i++) sigs.push(await resource(`{"name":"tile ${i}"}`))
     for (const s of sigs) await service.markPublic(s, 'resource')
-    await quiesce(service, host)
+    await service.drain()
+    await settle()
+    await vi.advanceTimersByTimeAsync(1_000) // each PUT holds its slot for 15 ms
     expect(host.stats.maxInFlight).toBe(4)
     expect(calls(host, 'PUT')).toHaveLength(10)
     expect(await queued()).toEqual([])
   })
 
   it('a 500 is retried at about 2 s, then about 4 s, and says why', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
     const host = makeHost({ put: () => ({ status: 500, body: 'boom\nstack' }) })
     vi.stubGlobal('fetch', host.fetch)
     const state = listen<{ host: string; status: string; state: string; reason: string }>('sync:state')
@@ -483,21 +512,20 @@ describe('the drain is fast and honest', () => {
     await service.drain()
     await settle()
     expect(host.stats.putAt).toHaveLength(1)
-    for (let step = 0; step < 100 && host.stats.putAt.length < 3; step++) {
-      await vi.advanceTimersByTimeAsync(100)
-      await settle()
-    }
+    // The ladder's first two rungs, each plus up to a quarter of jitter:
+    // nothing else is asked of the host in between.
+    await vi.advanceTimersByTimeAsync(2_500 + 5_000)
+    expect(host.stats.putAt).toHaveLength(3)
     const [first, second, third] = host.stats.putAt
-    expect(second - first).toBeGreaterThanOrEqual(1_900)
-    expect(second - first).toBeLessThanOrEqual(2_700)
-    expect(third - second).toBeGreaterThanOrEqual(3_900)
-    expect(third - second).toBeLessThanOrEqual(5_200)
+    expect(second - first).toBeGreaterThanOrEqual(2_000)
+    expect(second - first).toBeLessThanOrEqual(2_500)
+    expect(third - second).toBeGreaterThanOrEqual(4_000)
+    expect(third - second).toBeLessThanOrEqual(5_000)
     expect(state.seen.find(p => p.host === 'jwize.com' && p.status === 'unreachable')).toMatchObject({ state: 'unreachable', reason: '500 boom' })
     state.off()
   })
 
   it('not-live is retried every second until the relay has seen the key, then shares', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
     const host = makeHost({ put: n => n <= 2 ? { status: 401, body: 'not-live: send an event first' } : null })
     vi.stubGlobal('fetch', host.fetch)
     const state = listen<{ host: string; status: string }>('sync:state')
@@ -506,15 +534,12 @@ describe('the drain is fast and honest', () => {
     await service.markPublic(s, 'resource')
     await service.drain()
     await settle()
-    for (let step = 0; step < 50 && (await queued()).length > 0; step++) {
-      await vi.advanceTimersByTimeAsync(100)
-      await settle()
-    }
-    const [first, second, third] = host.stats.putAt
+    await vi.advanceTimersByTimeAsync(2_000)
     expect(host.stats.putAt).toHaveLength(3)
-    expect(second - first).toBeGreaterThanOrEqual(900)
-    expect(second - first).toBeLessThanOrEqual(1_300)
-    expect(third - second).toBeLessThanOrEqual(1_300)
+    const [first, second, third] = host.stats.putAt
+    expect(second - first).toBe(1_000)
+    expect(third - second).toBe(1_000)
+    expect(await queued()).toEqual([])
     expect(await service.isClosureAvailable(s, 'resource')).toBe(true)
     const words = state.seen.filter(p => p.host === 'jwize.com').map(p => p.status)
     expect(words).toContain('not-live')
@@ -523,7 +548,6 @@ describe('the drain is fast and honest', () => {
   })
 
   it('429 waits out the host (at most one PUT per entry in 5 min); 413 drops the entry for that host', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
     const full = makeHost({ put: () => ({ status: 429, body: 'quota: 256 MB per key per day', headers: { 'retry-after': '60' } }) })
     vi.stubGlobal('fetch', full.fetch)
     const state = listen<{ host: string; status: string; reason: string }>('sync:state')
@@ -533,13 +557,12 @@ describe('the drain is fast and honest', () => {
     for (const s of sigs) await service.markPublic(s, 'resource')
     await service.drain()
     await settle()
-    for (let minute = 0; minute < 5; minute++) { await vi.advanceTimersByTimeAsync(60_000); await settle() }
+    await vi.advanceTimersByTimeAsync(5 * 60_000) // ten 30 s sweeps, all inside a full host's wait
     const perEntry = new Map<string, number>()
     for (const url of calls(full, 'PUT')) perEntry.set(url, (perEntry.get(url) ?? 0) + 1)
     expect(Math.max(...perEntry.values())).toBeLessThanOrEqual(1)
     expect(state.seen.find(p => p.status === 'full')).toMatchObject({ reason: '429 quota: 256 MB per key per day' })
     expect(await queued()).toHaveLength(5) // still owed — the host named its wait
-    vi.useRealTimers()
 
     root = new MemoryDir('')
     registry.set('@hypercomb.social/Store', { opfsRoot: root, getResourceLocal: async (s: string) => { const b = resources.get(s); return b ? { arrayBuffer: async () => b.slice().buffer } : null } })
@@ -548,7 +571,8 @@ describe('the drain is fast and honest', () => {
     const fresh = await make()
     const big = await resource('{"name":"a very large picture"}')
     await fresh.markPublic(big, 'resource')
-    await quiesce(fresh, large)
+    await fresh.drain()
+    await settle()
     expect(calls(large, 'PUT')).toEqual([`https://jwize.com/${big}`])
     expect(await queued()).toEqual([])
     expect(await fresh.isClosureAvailable(big, 'resource')).toBe(false)
@@ -564,7 +588,8 @@ describe('the drain is fast and honest', () => {
     const service = await make()
     const s = await resource('{"name":"slow clock"}')
     await service.markPublic(s, 'resource')
-    await quiesce(service, host)
+    await service.drain()
+    await settle()
     expect(signedAt).toEqual([Math.floor(relayNow / 1000)])
   })
 })
