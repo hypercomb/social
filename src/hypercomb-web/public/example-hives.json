@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "domains": ["hypercomb.com", "pluginthematrix.com"],
+  "domains": ["hypercomb.com"],
   "examples": [
     {
       "name": "honey-garden",

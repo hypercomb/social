@@ -169,8 +169,14 @@ export const STATIC_FOLLOWS_KEY = 'hc:static-follows'
  *
  *  The worker's ZONE ROOT: writes go to the zone itself, never its retired
  *  `content.` face (zone-door.ts). Reads that must reach old published data
- *  fall back to `content.pluginthematrix.com` through `readDoorsOf`. */
-export const PUBLIC_CONTENT_HOSTS = ['pluginthematrix.com']
+ *  fall back to `content.hypercomb.com` through `readDoorsOf`.
+ *
+ *  HYPERCOMB.COM, NEVER A PERSON'S DOMAIN (jwize, 2026-10-05: "There should
+ *  only be hypercomb.com on the public install"). The same worker and R2
+ *  heap answer on hypercomb.com and pluginthematrix.com — signed indexes,
+ *  atoms, the publications ledger and claims were probed byte-identical on
+ *  both (2026-10-11); pluginthematrix.com is the machine, not the name. */
+export const PUBLIC_CONTENT_HOSTS = ['hypercomb.com']
 
 // ── THE OUTSIDE-IN DOOR ─────────────────────────────────────────────────────
 //

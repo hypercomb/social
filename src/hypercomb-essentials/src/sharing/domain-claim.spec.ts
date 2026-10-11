@@ -562,8 +562,10 @@ describe('the domain word', () => {
       ioc.register('@diamondcoreprocessor.com/ToastDrone', {})
       off()
       expect(shown).toHaveLength(2)
-      expect(shown[0]).toContain('Say domain claim first.org to check again')
-      expect(shown[1]).toContain('Say domain claim second.org @hypercomb.com to check again')
+      // hypercomb.com is the default host now, so its claim needs no @host
+      // and the one kept on pluginthematrix.com names it.
+      expect(shown[0]).toContain('Say domain claim first.org @pluginthematrix.com to check again')
+      expect(shown[1]).toContain('Say domain claim second.org to check again')
       expect(localStorage.getItem(DOMAIN_CLAIMS_KEY)).toBeNull()
     })
   })

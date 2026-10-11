@@ -67,13 +67,18 @@ follow ([pools-across-hosts.md](pools-across-hosts.md)).
 The Hyperdex is the participant's collection of the addresses they have been
 handed. It is a collection of references, so:
 
-- An entry is an address. Opening it reads the card at its head, so a contact
-  who changed jobs last week shows the new job without anyone being told.
+- An entry is an address and the versions of its card you took. The first read
+  takes the head; a newer head is offered as an update you take or skip, so a
+  contact who changed jobs last week shows **Update** on their row, and nothing
+  changes until you choose ([using-a-creation.md](using-a-creation.md),
+  "Holding a published item", decided 2026-10-07).
 - It is the participant's own and private by default, as every collection is
   ([collections-sharing.md](collections-sharing.md)); handing a card to one
   person does not put it in front of a third.
-- It keeps no copy. A card that goes dark goes dark in every Hyperdex that
-  holds it, which is the owner's right.
+- It keeps the versions you took, each by its signature. A card its owner
+  takes down stops being handed out at their address, which is the owner's
+  right, but the version you took stays in your Hyperdex: a version is a
+  signature, and its bytes are never deleted.
 
 The exchange is two scans: you scan their code, they scan yours. A one-scan
 handshake through a relay is a meeting point, never a store, and is not built.
@@ -128,12 +133,14 @@ whole social layer of the card is that one act, seen from four sides.
    its host, since the community is "the set of addresses you hold and the
    hosts you follow".
 3. **You make an update; they see it.** You publish, and your door's signed
-   head moves. Their hive notices on its own: once per boot it asks each held
-   address's host for its current head (the host's signed `host:offerings`),
-   compares it with the head it last saw, and marks the entry as updated.
-   Opening the entry reads the live card. You never push, and you never learn
-   who follows you: a host sees only anonymous reads, and keeping a follower
-   list would be tracking.
+   head moves. Their card page notices on its own: once per load, a few
+   seconds in, it reads each held address's newest door record from its host,
+   holds it against your signed index (the index must name that head and bind
+   that address to your lineage), and when the head is newer than the version
+   they hold, their row says **Update**. They choose Upgrade or Skip, and
+   nothing changes until they do; an older head is never offered. You never
+   push, and you never learn who follows you: a host sees only anonymous
+   reads, and keeping a follower list would be tracking.
 4. **You send someone a contact.** You hand them another person's address,
    never their card. In person or out of band it is a link or a QR. Through the
    mesh it is a signed offer to that one person that expires within minutes, in
@@ -471,7 +478,7 @@ useful on day one, so it is the creation the concept is explained with:
 | Reading a held address at its live head | built — opening a door resolves the signed index |
 | A local card at someone else's domain (the silo) | built, in the page. "New card" keeps it on the device, its QR carries the card in a link at that domain, and opening the link shows it with "Add to my Hyperdex". The hive clears a link's `#` part before a page mounts, so the page reads the link it was opened with from the browser's record of the visit, once per load. The card's extra links list does not travel in the link. |
 | Moving a silo's card and Hyperdex into your own hive | not built |
-| An update notice on a Hyperdex entry: the head you took stays until you upgrade or skip ([using-a-creation.md](using-a-creation.md), "Holding a published item") | not built. The Hyperdex keeps copies, not addresses and heads. Each host already answers its current heads in the signed `host:offerings` pool, and the update scout's one check per boot is the model. |
+| An update notice on a Hyperdex entry: the head you took stays until you upgrade or skip ([using-a-creation.md](using-a-creation.md), "Holding a published item") | built in the card page. A held card keeps the version you took; once per load the page reads each held address's head (door record held against the signed index) and offers a newer one as Update, Upgrade or Skip; the versions are listed with the current on top; Use this re-checks an older version first; Forget drops a version and keeps its bytes; an older head is never offered. It needs a page that can keep things and read addresses: your hive, or an address whose owner turned powers on (committed, not deployed) |
 | From a card's door to a hive, a host, a domain and a card, in that order | not built. The door shows nothing onward. Each step exists on its own: a hive by replication (`acquire`), a host (Serve This Hive in the desktop client, `hypercomb-serve`, or a Pages deploy), a domain (`domain claim`), and the card (`/publish`). Nothing leads a newcomer through them. The door's `?home=` button is a hosting step for people who already have a hive. |
 | Becoming a host without a developer | not built. Serve This Hive opens a port on the participant's own machine. Reaching it from the internet needs a server, a forwarded port or a tunnel in front, which is a developer's job today. |
 | No card without a host and a domain | not enforced. Today a guest with no host of their own can publish a branch to the shared hypercomb.com host, and it opens at a path on hypercomb.com. |

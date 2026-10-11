@@ -81,8 +81,10 @@ export interface PublicationCard {
 /** The public directory this beehavior reads when its own origin has no
  *  ledger (authoring hive, dev shell). A deployed directory site never
  *  reaches this — same origin answers first. */
-/** The directory host whose publications are asked when no other is named. */
-export const CANONICAL_DIRECTORY = 'https://pluginthematrix.com'
+/** The directory host whose publications are asked when no other is named —
+ *  hypercomb.com, the public install's one name (its ledger is the same
+ *  global ledger, byte-identical to pluginthematrix.com's, 2026-10-11). */
+export const CANONICAL_DIRECTORY = 'https://hypercomb.com'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 

@@ -50,7 +50,8 @@ describe('the write door is the zone root', () => {
   })
 
   it('the standing public endpoint is the worker root', () => {
-    expect(PUBLIC_CONTENT_HOSTS).toEqual(['pluginthematrix.com'])
+    // hypercomb.com: the public install's one name (jwize, 2026-10-05).
+    expect(PUBLIC_CONTENT_HOSTS).toEqual(['hypercomb.com'])
   })
 })
 
@@ -207,11 +208,12 @@ describe('stored settings carry over on update — folded on read, never rewritt
     expect(localStorage.getItem('hc:public-host:domain')).toBe('example.org')
   })
 
-  it('the AI host: default is the worker root, a content. override asks the root', async () => {
+  it('the AI host: no default, a content. override asks the root', async () => {
     const { AI_HOST_DEFAULT, AI_HOST_STORAGE_KEY, HostAiService } = await import('../assistant/host-ai.service.js')
     const service = new HostAiService()
-    expect(AI_HOST_DEFAULT).toBe('pluginthematrix.com')
-    expect(service.host).toBe('pluginthematrix.com')
+    // No host is named for the participant (jwize, 2026-10-05).
+    expect(AI_HOST_DEFAULT).toBe('')
+    expect(service.host).toBe('')
     localStorage.setItem(AI_HOST_STORAGE_KEY, 'content.jwize.com')
     expect(service.host).toBe('jwize.com')
     expect(localStorage.getItem(AI_HOST_STORAGE_KEY)).toBe('content.jwize.com')
