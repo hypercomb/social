@@ -37,6 +37,15 @@ from its own line in Publish. A host exists before any branch names it and
 outlives every branch that does, so host/package discovery does not depend on a
 publish sweep.
 
+**There is always a way to publish from a view (jwize, 2026-10-10).** Inside a
+takeover view the rail is not on screen, so a bare `p` (`publish.toggle` in
+`keyboard/default-keymap.ts`) toggles the panel through the same lane as the
+rail icon and `/publish`, on the layer the view shows, without leaving it. Over
+a view the panel is a POPUP: same place, rounded on all four corners, a margin
+on the right, and it reserves no edge, so the view keeps its full width under it
+(`overView` in `publish-panel.component.ts`). On the hexagons it docks as
+before. Proof: `scripts/drive-publish-from-view.cjs` (6 checks).
+
 The drone emits one `publish:render` payload (`PublishRenderPayload`) and
 accepts intents back (`publish:run`, `publish:unpublish`, `publish:inspect`,
 `publish:copy-link`, `publish:refresh`, `publish:view-toggle`, `publish:close`,

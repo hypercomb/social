@@ -25,6 +25,16 @@
 > the same intent (`features:default`, `toggle`), and the one rule in
 > `view-default.ts` `decideDefaultToggle`. See behaviors-view-simplification.md,
 > "THE DEFAULT VIEW". Nothing else may name a tile other than the context.
+>
+> **While the panel shows, the surface is the hexagons (jwize, 2026-10-10:
+> "the views take us away from the assignment").** Behaviours are applied to
+> the tiles, so the panel and a view never share the screen. Opening the panel
+> over a view peels it to hexagons; every arrival while it is up lands on the
+> grid (a held `h` — walking in, or choosing a layer's default view, never pops
+> a face over the tiles); entering a view anyway (the rail, a slash word, a
+> row's Open) closes the panel. Closing the panel restores nothing. Owners:
+> `view.bee.ts` (`#behaviorsShowing`, from `features:viewer-state`) and
+> `features-viewer.component.ts` (closes on a ViewMode change off hexagons).
 
 > **The `/dashboard` first slice is RETIRED (2026-07-26).** It was built as
 > the worked example of the toggle semantics below and is cited that way

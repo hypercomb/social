@@ -732,7 +732,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'tile:preview']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'tile:preview']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -1520,6 +1520,10 @@ export class ShowCellDrone extends Drone {
    *  preview and the armed set while it lasts. */
   #dragShadeMarks: string[] = []
   #dragShadeColor: [number, number, number] | null = null
+  /** A PUBLISH GROUP under the cursor (`group:preview {labels, color}`) — the
+   *  strip names its members outright, so there is no mark to resolve. Same
+   *  rank and same look as the pheromone hover; a live drag still outranks it. */
+  #groupPreviewLabels: string[] = []
   /** 0..1 ramp — the whole treatment fades in and out (see u_markPreview). */
   #markPreviewK = 0
   #markPreviewTarget = 0
@@ -6581,6 +6585,20 @@ export class ShowCellDrone extends Drone {
       this.#refreshMarkPreview()
     })
 
+    // group:preview — a publish group's icon is under the cursor (the strip
+    // at the top of the hive). Its members light in the group's colour and the
+    // rest recede: the same look as a hovered pheromone, answered from the
+    // labels the strip already holds.
+    this.onEffect<{ labels?: readonly string[]; color?: string }>('group:preview', ({ labels, color }) => {
+      const next = (Array.isArray(labels) ? labels : []).map(l => String(l ?? '').trim()).filter(Boolean)
+      const rgb = color ? hexToRgbTriple(color) : null
+      if (rgb && next.length) this.#markPreviewColor = rgb
+      if (next.length === this.#groupPreviewLabels.length
+        && next.every((l, i) => l === this.#groupPreviewLabels[i])) return
+      this.#groupPreviewLabels = next
+      this.#refreshMarkPreview()
+    })
+
     // A programmatic mark change (e.g. /mobile sweep) deposits tags via
     // DecorationService directly, bypassing the painter's tags:apply
     // invalidation. Clear the render cache so tag chips refresh without
@@ -7690,6 +7708,14 @@ export class ShowCellDrone extends Drone {
     const dragged = this.#dragShadeMarks
     const hovered = this.#markPreviewMarks
     const armed = this.#armedApplyMarks
+    // A hovered publish group names its members — no mark to match.
+    if (dragged.length === 0 && this.#groupPreviewLabels.length > 0) {
+      const members = new Set(this.#groupPreviewLabels.filter(label => this.renderedCells.has(label)))
+      this.#markPreviewLabels = members
+      if (members.size > 0) this.#paintMarkPreviewBuffer()
+      this.#setMarkPreview(members.size > 0)
+      return
+    }
     // The live drag outranks the hover, the hover outranks the standing armed
     // set. Drag and armed share the ALL-match rule (what would the landing
     // change?); the hover keeps ANY-match (who carries this?).

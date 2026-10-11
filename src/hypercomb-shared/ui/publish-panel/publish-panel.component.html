@@ -1,7 +1,9 @@
 @if (visible()) {
   <aside
     class="publish-panel"
+    [class.over-view]="overView()"
     hcDockInset="right"
+    [hcDockInsetActive]="!overView()"
     hcDockedPanel="publish-panel"
     [hcSession]="session"
     (hcDockedPanelClose)="close()"

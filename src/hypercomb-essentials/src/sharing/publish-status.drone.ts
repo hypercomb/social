@@ -341,6 +341,7 @@ export class PublishStatusDrone extends Drone {
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
     'hosts:render', 'publish:arrival', 'publish:participant', 'publish:participant-publish',
     'publish:entrance', 'publish:entrance-preview', 'publish:entrance-skip', ENTRANCE_UPDATE_EFFECT, 'hidden:render',
+    'keymap:invoke',
   ]
   protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log', 'hidden:refresh']
 
@@ -398,19 +399,13 @@ export class PublishStatusDrone extends Drone {
   constructor() {
     super()
 
-    this.onEffect('publish:view-toggle', () => {
-      // THE ICON ASKS THE SCREEN, NEVER THE FLAG.
-      //
-      // A docked panel is PARKED — not closed — whenever another window opens
-      // (window-rule.ts): its DOM goes, this drone is never told, and `#open`
-      // stays true over an empty edge. The next press on the glyph then only
-      // cleared a flag nobody could see, and it took a SECOND press to get the
-      // panel back. `isWindowShowing` is the panel's own registration in the
-      // window session, dropped the moment it stops showing — so parked and
-      // closed read alike, which is exactly what the participant means.
-      this.#open = !isWindowShowing('publish-panel')
-      this.#emit()
-      if (this.#open) void this.#refresh()
+    this.onEffect('publish:view-toggle', () => this.#toggle())
+
+    // `p` (keyboard/default-keymap.ts) is the same act through the keymap's
+    // one lane — and the way to publish from inside a view, where the rail
+    // is not on screen.
+    this.onEffect<{ cmd?: string }>('keymap:invoke', (p) => {
+      if (p?.cmd === 'publish.toggle') this.#toggle()
     })
 
     this.onEffect('publish:close', () => {
@@ -566,6 +561,22 @@ export class PublishStatusDrone extends Drone {
       row.hostTrouble = this.#troubleFor(row.zones)
     }
     this.#emit()
+  }
+
+  /** Open or close the panel — the rail icon, `/publish` and `p` all land here.
+   *
+   *  THE ICON ASKS THE SCREEN, NEVER THE FLAG. A docked panel is PARKED — not
+   *  closed — whenever another window opens (window-rule.ts): its DOM goes,
+   *  this drone is never told, and `#open` stays true over an empty edge. The
+   *  next press on the glyph then only cleared a flag nobody could see, and it
+   *  took a SECOND press to get the panel back. `isWindowShowing` is the
+   *  panel's own registration in the window session, dropped the moment it
+   *  stops showing — so parked and closed read alike, which is exactly what
+   *  the participant means. */
+  #toggle(): void {
+    this.#open = !isWindowShowing('publish-panel')
+    this.#emit()
+    if (this.#open) void this.#refresh()
   }
 
   // ── the sweep ─────────────────────────────────────────────────────────
