@@ -200,6 +200,20 @@ const CAPABILITIES: Readonly<Record<string, {
     cascades: true,
     addable: false,
   },
+  // PUBLISH GROUPS — lit per layer, it puts that layer's groups on a strip at
+  // the top of the hive (sharing/publish-groups.drone.ts). The groups are
+  // `publish:group` records and the members wear `group` marks; this deposit
+  // only says the strip belongs here.
+  'publish:groups': {
+    view: 'publish-groups',
+    icon: 'category',
+    slashCommand: '',
+    labelKey: 'features.cap.publishGroups',
+    descriptionKey: 'features.cap.publishGroups.desc',
+    fallbackLabel: 'Publish groups',
+    cascades: false,
+    addable: true,
+  },
 }
 
 /** The WAITING record for behaviours whose content is authored later: the

@@ -689,6 +689,23 @@ export class FeaturesViewerComponent implements OnDestroy {
       if (this.visible()) this.close()
     }))
 
+    // ── the panel is a HEXAGONS surface ───────────────────────────────
+    //
+    // Behaviours are applied to the tiles, so the panel and a view never share
+    // the screen: view.bee peels a view when the panel opens and lands every
+    // arrival on the grid while it is up. A view entered anyway (the rail, a
+    // slash word, the row's own Open) is the participant leaving the
+    // assignment, so the panel goes with it.
+    const viewMode = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<EventTarget & { mode?: string }>('@hypercomb.social/ViewMode')
+    if (viewMode?.addEventListener) {
+      const onView = (): void => {
+        if (this.visible() && viewMode.mode !== 'hexagons') this.close()
+      }
+      viewMode.addEventListener('change', onView)
+      this.#cleanups.push(() => viewMode.removeEventListener('change', onView))
+    }
+
     // The website gate blocked a foreign, unverified page — review it here.
     this.#cleanups.push(EffectBus.on<{ cell: string; segments: string[]; sig: string; kind: string; label: string }>(
       'feature:review:open',

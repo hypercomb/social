@@ -3,10 +3,12 @@
 // It pre-filled from the store's in-memory copy, which a stale tab held since
 // boot: START then wrote that stale pair back over the meeting another tab
 // had joined since. Now it pre-fills from the tab's own zone, else a FRESH
-// read of the origin-wide pair; an opener may hand it a pair or a meeting
-// point; nothing is written until save / START / share, and cancel writes
-// nothing. The meeting point's access code is typed here, once — never on the
-// command line — and kept only in this tab's session (and the link).
+// read of the origin-wide pair; an opener may point it at the meeting link
+// stashed in this tab or hand it a meeting point; nothing is written until
+// save / START / share, and cancel writes nothing. The meeting point's access
+// code is typed here, once — never on the command line — and kept only in
+// this tab's session (and the link). The secret never rides the bus: the bus
+// replays its last value to every late subscriber.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
@@ -49,6 +51,20 @@ const zone = (): Record<string, string> | null => {
   return raw ? JSON.parse(raw) : null
 }
 const typeInto = (handler: (e: Event) => void, value: string): void => handler({ target: { value } } as unknown as Event)
+/** A meeting link stashed in this tab, as the shell's capture leaves it. */
+const stashMeet = (link: string): void => { sessionStorage.setItem('hc:pending-meet', link) }
+/** The old-package fallback's open: the pair waits in this tab's stash and
+ *  the open names it — the pair itself never rides the bus. */
+const openStashed = (pair: { room: string; secret: string }, payload: Record<string, unknown> = {}): InstanceType<typeof MeshModalComponent> => {
+  stashMeet(`${encodeURIComponent(pair.room)}/${encodeURIComponent(pair.secret)}/`)
+  return open({ ...payload, meet: true })
+}
+/** What a subscriber arriving now is handed for an effect. */
+const replayed = (effect: string): unknown => {
+  let got: unknown
+  EffectBus.on(effect, (payload) => { got = payload })()
+  return got
+}
 
 beforeEach(() => {
   // The pre-fill is a participant document held in memory here (no Store):
@@ -96,8 +112,9 @@ describe('the selector pre-fills from THIS tab', () => {
     expect(modal.secretDraft()).toBe('its-secret')
   })
 
-  it('an opener may hand it a pair (the meeting link fallback) — and cancel writes nothing at all', () => {
-    const modal = open({ join: true, room: 'Meet Up', secret: '4417' })
+  it('an opener may point it at the stashed meeting link (the fallback) — and cancel writes nothing at all', () => {
+    stashMeet('Meet%20Up/4417/')
+    const modal = open({ join: true, meet: true })
     expect(modal.roomDraft()).toBe('Meet Up')
     expect(modal.secretDraft()).toBe('4417')
     modal.dismiss()
@@ -109,11 +126,37 @@ describe('the selector pre-fills from THIS tab', () => {
   })
 
   it('START writes the pair on screen and joins', () => {
-    const modal = open({ join: true, room: 'Meet Up', secret: '4417' })
+    stashMeet('Meet%20Up/4417/')
+    const modal = open({ join: true, meet: true })
     modal.save()
     expect(room.set).toHaveBeenCalledWith('Meet Up')
     expect(secret.set).toHaveBeenCalledWith('4417')
     expect(seen.map(s => s.effect)).toContain('mesh:join')
+  })
+})
+
+describe('the secret never rides the bus', () => {
+  it('save makes mesh:secret a notice and the draft a strength — no late subscriber is handed the secret', () => {
+    const modal = open({ join: true })
+    typeInto(modal.onRoomInput, 'river')
+    typeInto(modal.onSecretInput, 'river-stone-9')
+    expect(replayed('mesh:secret-draft')).toMatchObject({ open: true, score: expect.any(Number) })
+    modal.save()
+    expect(secret.set).toHaveBeenCalledWith('river-stone-9')
+    expect(seen.map(s => s.effect)).toContain('mesh:secret')
+    expect(JSON.stringify(seen)).not.toContain('river-stone-9')
+    for (const effect of ['mesh:secret', 'mesh:secret-draft', 'mesh:open-modal']) {
+      expect(JSON.stringify(replayed(effect) ?? null)).not.toContain('river-stone-9')
+    }
+    expect(replayed('mesh:secret-draft')).toEqual({ open: false, score: null })
+  })
+
+  it('a stashed meeting link fills the drafts without its secret ever reaching the bus', () => {
+    stashMeet('Meet%20Up/4417/')
+    const modal = open({ join: true, meet: true })
+    expect(modal.secretDraft()).toBe('4417')
+    expect(JSON.stringify(replayed('mesh:open-modal'))).not.toContain('4417')
+    expect(JSON.stringify(replayed('mesh:secret-draft'))).not.toContain('4417')
   })
 })
 
@@ -159,7 +202,8 @@ describe('the meeting point and its access code', () => {
   })
 
   it('refuses a code with no meeting point (it would reach the default relay), a bad code and a bad point', () => {
-    const modal = open({ join: true, room: 'r', secret: 's' })
+    stashMeet('r/s/')
+    const modal = open({ join: true, meet: true })
     typeInto(modal.onCodeInput, 'sekrit')
     modal.save()
     expect(modal.missingField()).toBe('point')
@@ -180,7 +224,8 @@ describe('the meeting point and its access code', () => {
       expect(zone()).toMatchObject({ relay: 'wss://pluginthematrix.com', code: 'sekrit-42' })
     })
     services.set('@diamondcoreprocessor.com/InviteQueenBee', { invoke: vi.fn(), meetingLink })
-    const modal = open({ room: 'downtown', secret: 'downtown', point: 'pluginthematrix.com' })
+    stashMeet('downtown/downtown/')
+    const modal = open({ meet: true, point: 'pluginthematrix.com' })
     typeInto(modal.onCodeInput, 'sekrit-42')
     await modal.copyShareLink()
     expect(meetingLink).toHaveBeenCalledTimes(1)
@@ -202,7 +247,7 @@ describe('VO-6: a computer\'s own ws:// meeting point survives START untouched',
   })
 
   it('the old-package link fallback hands ws://… over and it stays ws://', () => {
-    const modal = open({ join: true, room: 'r', secret: 's', point: 'ws://localhost:7894' })
+    const modal = openStashed({ room: 'r', secret: 's' }, { join: true, point: 'ws://localhost:7894' })
     expect(modal.pointDraft()).toBe('ws://localhost:7894')
     modal.save()
     expect(zone()).toMatchObject({ relay: 'ws://localhost:7894' })
@@ -218,7 +263,7 @@ describe('VO-2: a package from before meeting points is never pointed at one', (
   })
 
   it('the point and code are disabled, with the way to update — and START never calls configureRelays', () => {
-    const modal = open({ join: true, room: 'downtown', secret: 'rose', point: 'wss://pluginthematrix.com' })
+    const modal = openStashed({ room: 'downtown', secret: 'rose' }, { join: true, point: 'wss://pluginthematrix.com' })
     expect(modal.pointSupported()).toBe(false)
     typeInto(modal.onCodeInput, 'sekrit-42')
     modal.save()
@@ -275,11 +320,11 @@ describe('ZI-1 / ZI-6: the selector\'s words', () => {
   it('preview the zone START will store: typed text folds (D6), the store\'s own value is read as held', async () => {
     const { secretTag } = await import('@hypercomb/core')
     const plain = secretTag('lifecycle\0downtown\0joe\'s', 'en')
-    const modal = open({ room: 'ｄｏｗｎｔｏｗｎ', secret: 'joe’s' })
+    const modal = openStashed({ room: 'ｄｏｗｎｔｏｗｎ', secret: 'joe’s' })
     expect(modal.zoneWords()).toBe(plain)        // what a friend typing plain text reads
     // A pair the store already holds (recorded before the fold) previews as held.
     room.value = 'joe’s place'
-    const held = open({ room: 'joe’s place', secret: 'joe’s' })
+    const held = openStashed({ room: 'joe’s place', secret: 'joe’s' })
     expect(held.zoneWords()).toBe(secretTag('lifecycle\0joe’s place\0joe\'s', 'en'))
     typeInto(held.onRoomInput, 'joe’s place ')
     expect(held.zoneWords()).toBe(secretTag('lifecycle\0joe’s place\0joe\'s', 'en'))
@@ -288,7 +333,7 @@ describe('ZI-1 / ZI-6: the selector\'s words', () => {
   it('fold the point typed — the default keeps today\'s pair — from the English list, the reader\'s own beside it', async () => {
     const { secretTag } = await import('@hypercomb/core')
     const today = secretTag('lifecycle\0downtown\0rose', 'en')
-    const modal = open({ room: 'downtown', secret: 'rose' })
+    const modal = openStashed({ room: 'downtown', secret: 'rose' })
     expect(modal.zoneWords()).toBe(today)
     typeInto(modal.onPointInput, 'pluginthematrix.com')
     const atPoint = modal.zoneWords()
@@ -297,7 +342,7 @@ describe('ZI-1 / ZI-6: the selector\'s words', () => {
     expect(modal.zoneWords()).toBe(today)
 
     services.set('@hypercomb.social/I18n', { locale: 'ja' })
-    const ja = open({ room: 'downtown', secret: 'rose' })
+    const ja = openStashed({ room: 'downtown', secret: 'rose' })
     expect(ja.zoneWords()).toBe(`${today} (${secretTag('lifecycle\0downtown\0rose', 'ja')})`)
   })
 })

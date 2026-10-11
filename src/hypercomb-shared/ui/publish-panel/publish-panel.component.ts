@@ -42,6 +42,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { signalSession } from '../window-session'
 import { accordion } from '../accordion'
+import { isTransientMode } from '../../core/view-mode.service'
 
 // Mirrors of the essentials read-model shapes (shared cannot import
 // essentials). Kept field-for-field identical to PublishRenderPayload in
@@ -259,6 +260,12 @@ export class PublishPanelComponent implements OnDestroy {
    *  standard (ui/accordion.ts), all closed by default. The hive is the list:
    *  walk to another branch and the panel follows. */
   readonly sectionsOpen = accordion()
+
+  /** OVER A VIEW IT IS A POPUP (jwize 2026-10-10) — `p` reaches this panel
+   *  from inside a view, and there it floats on the page: it reserves no edge
+   *  (the view keeps its width under it) and the scss rounds all four corners.
+   *  The same question the shells ask for `body.hc-view-covered`. */
+  readonly overView = signal(false)
 
   #cleanups: (() => void)[] = []
 
@@ -554,6 +561,15 @@ export class PublishPanelComponent implements OnDestroy {
   constructor() {
     const ageTimer = setInterval(() => this.renderedAt.set(Date.now()), 15_000)
     this.#cleanups.push(() => clearInterval(ageTimer))
+
+    const viewMode = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<EventTarget & { mode?: string }>('@hypercomb.social/ViewMode')
+    if (viewMode?.addEventListener) {
+      const onView = (): void => this.overView.set(isTransientMode(viewMode.mode ?? ''))
+      onView()
+      viewMode.addEventListener('change', onView)
+      this.#cleanups.push(() => viewMode.removeEventListener('change', onView))
+    }
 
     // WHAT HAS BEEN PUT AWAY — the same pool and the same owner the host
     // ledger reads, so hiding means one thing across the shell.

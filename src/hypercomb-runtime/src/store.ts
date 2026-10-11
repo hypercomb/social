@@ -11,6 +11,7 @@ import {
   isMetaEnvelope,
   isSignature,
   latestLayerMarker,
+  llmKeyStore,
   markerName,
   metaPayloadOf,
   mintMetaEnvelope,
@@ -428,6 +429,16 @@ export class Store extends EventTarget {
     currentOnly: boolean,
   ): Promise<string | null> => {
     try {
+      // A KEY NEVER ENTERS A POOL (jwize 2026-10-07). Refused before the atom
+      // exists, because a document pool keeps every version and folder-sync
+      // copies every pool. `null` is this contract's existing "could not
+      // write"; `?.` means a stale core switches the check off rather than
+      // failing every document write.
+      const carried = llmKeyStore.carriedBy?.(bytes)
+      if (carried) {
+        console.warn(`[pool] refused a document in ${String(pool?.name ?? '').slice(0, 8)}… — it carries this device's ${carried} key; a key never enters a pool`)
+        return null
+      }
       const target = subKey
         ? await pool.getDirectoryHandle(await Store.poolSignature(subKey), { create: true })
         : pool

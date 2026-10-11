@@ -2963,15 +2963,9 @@ export class NostrMeshDrone extends Drone {
     // note: if already signed, pass through
     if (evt?.id && evt?.pubkey && evt?.sig) return evt
 
-    // note: nip-07 if available
-    const anyWin = window as any
-    if (anyWin?.nostr?.signEvent) {
-      try {
-        const signed = await anyWin.nostr.signEvent(evt)
-        return signed ?? null
-      } catch { /* ignore */ }
-    }
-
+    // Only through the signer: it already prefers NIP-07, and it holds the
+    // sandbox-door rule (a door signs nothing), so asking window.nostr here
+    // would step around that rule and prompt twice on a refusal.
     const signer = this.resolve<any>('signer')
     if (signer?.signEvent) {
       try {

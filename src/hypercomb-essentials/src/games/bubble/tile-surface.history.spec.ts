@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createHash } from 'node:crypto'
 import { afterEach, expect, it, vi } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
 import { CAVE_COLUMNS, CAVE_ROWS } from './dos-geometry.js'
@@ -13,7 +14,19 @@ vi.hoisted(() => {
     register: () => {}, get: () => undefined, whenReady: () => {},
   }
 })
-afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); localStorage.clear() })
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear() })
+
+// SHA-256 in the same turn: node:crypto, the same digest. WebCrypto answers
+// each digest on a later turn of the event loop, by way of the thread pool,
+// and this round asks for about twelve thousand of them. Idle that is about
+// 2 s; with the full suite loading every core, each round trip stretched and
+// the round ran past its 30 s budget in three full runs out of three.
+const digestNow = async (algorithm: AlgorithmIdentifier, data: BufferSource): Promise<ArrayBuffer> => {
+  const name = typeof algorithm === 'string' ? algorithm : algorithm.name
+  const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data)
+  const hash = createHash(name.replace('-', '').toLowerCase()).update(bytes).digest()
+  return hash.buffer.slice(hash.byteOffset, hash.byteOffset + hash.byteLength) as ArrayBuffer
+}
 
 class MemoryFile {
   readonly kind = 'file'
@@ -78,6 +91,7 @@ const readBlob = (blob: Blob): Promise<ArrayBuffer> => new Promise((resolve, rej
 
 it('creates, edits, and reopens an 800-cell round through real hive history services', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  vi.spyOn(crypto.subtle, 'digest').mockImplementation(digestNow)
   localStorage.clear()
   const root = new MemoryDirectory()
   const store = {

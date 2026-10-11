@@ -1787,7 +1787,7 @@ export class SwarmDrone extends Drone {
     // Effect listeners retained as a belt-and-braces path — UI may
     // emit the effect before/instead of writing the store.
     this.onEffect<{ room?: string }>('mesh:room', () => this.#teardownAndResync('mesh:room-effect'))
-    this.onEffect<{ secret?: string }>('mesh:secret', () => this.#teardownAndResync('mesh:secret-effect'))
+    this.onEffect('mesh:secret', () => this.#teardownAndResync('mesh:secret-effect'))
 
     // Tile properties changed — any writer that updates a child's 0000
     // (layout index write, editor save, AI bridge stamp, substrate

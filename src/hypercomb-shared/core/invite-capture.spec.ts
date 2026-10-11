@@ -72,7 +72,7 @@ describe('the shell answers a meeting link no package will', () => {
   afterEach(() => { offOpen(); vi.useRealTimers() })
 
   it('an older worker that never takes the stash: after the grace, the selector opens on the link\'s room — nothing written', async () => {
-    const { watchPendingMeet } = await load()
+    const { watchPendingMeet, pendingMeetCredentials } = await load()
     // A plain link: one naming a meeting point goes to the update door
     // instead (invite-capture.robust.spec.ts).
     sessionStorage.setItem('hc:pending-meet', 'Meet%20Up/4417/Ideas')
@@ -81,7 +81,12 @@ describe('the shell answers a meeting link no package will', () => {
     await vi.advanceTimersByTimeAsync(900)
     expect(opened).toEqual([])
     await vi.advanceTimersByTimeAsync(300)
-    expect(opened).toEqual([{ join: true, room: 'Meet Up', secret: '4417' }])
+    // The pair never rides the bus — the bus replays its last value to every
+    // late subscriber — so the open names the stash, and the selector reads
+    // the pair from it.
+    expect(opened).toEqual([{ join: true, meet: true }])
+    expect(JSON.stringify(opened)).not.toContain('4417')
+    expect(pendingMeetCredentials()).toEqual({ room: 'Meet Up', secret: '4417' })
     expect(sessionStorage.getItem('hc:pending-meet')).not.toBeNull() // kept until answered
     expect(localStorage.getItem('hc:room')).toBeNull()
     EffectBus.emit('mesh:modal-open', { open: true })
@@ -118,7 +123,8 @@ describe('the shell answers a meeting link no package will', () => {
     await vi.advanceTimersByTimeAsync(4_000)
     expect(opened).toEqual([])
     await vi.advanceTimersByTimeAsync(1_200)
-    expect(opened).toEqual([{ join: true, room: 'meetup', secret: '4417' }])
+    expect(opened).toEqual([{ join: true, meet: true }])
+    expect(JSON.stringify(opened)).not.toContain('4417')
   })
 
   it('a link whose meeting point is not one is let go — never a quiet join at the default relay', async () => {

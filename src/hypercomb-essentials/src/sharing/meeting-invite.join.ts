@@ -297,7 +297,9 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   if (point.relay !== (tab?.relay ?? '')) pointMeshAt(point.relay)
   else if (point.code !== (tab?.code ?? '')) EffectBus.emit('mesh:zone', { relay: point.relay })
   EffectBus.emit('mesh:room', { room: bundle.room })
-  EffectBus.emit('mesh:secret', { secret: bundle.secret })
+  // A notice, never the secret: the bus replays its last value to every late
+  // subscriber, so listeners re-read the SecretStore `secret.set()` wrote above.
+  EffectBus.emit('mesh:secret', {})
   walkTo(nav, bundle.segments)
   // A guest who typed a slash word before tapping the link is still in
   // command stance — and there every name they type next is read as a

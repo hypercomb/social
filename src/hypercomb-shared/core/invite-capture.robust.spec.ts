@@ -125,11 +125,15 @@ describe('VO-1 — an older package that drains a link it refuses', () => {
 describe('VO-3 — the selector path carries the access code into the tab', () => {
   it('no worker at all: the zone holds the point, its host and code BEFORE the selector opens', async () => {
     sessionStorage.setItem('hc:pending-meet', POINT_LINK)
-    const { watchPendingMeet } = await load()
+    const { watchPendingMeet, pendingMeetCredentials } = await load()
     watchPendingMeet({ pollMs: 100, maxWaitMs: 1_000 })
     await vi.advanceTimersByTimeAsync(1_200)
     expect(JSON.parse(sessionStorage.getItem('hc:mesh-zone') ?? 'null')).toEqual({ relay: 'ws://localhost:7914', host: 'localhost:7914', code: 'pointCode42' })
-    expect(named('mesh:open-modal')).toEqual([{ join: true, room: 'downtown', secret: 'rose', point: 'ws://localhost:7914' }])
+    // The point rides along; the pair and the code never do — the selector
+    // reads the pair from the stash, the code from the zone.
+    expect(named('mesh:open-modal')).toEqual([{ join: true, meet: true, point: 'ws://localhost:7914' }])
+    expect(JSON.stringify(named('mesh:open-modal'))).not.toMatch(/rose|pointCode42/)
+    expect(pendingMeetCredentials()).toEqual({ room: 'downtown', secret: 'rose' })
     EffectBus.emit('mesh:modal-open', { open: false, cancelled: false }) // START
     expect(JSON.parse(sessionStorage.getItem('hc:mesh-zone') ?? 'null')).toMatchObject({ code: 'pointCode42' })
     expect(sessionStorage.getItem('hc:pending-meet')).toBeNull()

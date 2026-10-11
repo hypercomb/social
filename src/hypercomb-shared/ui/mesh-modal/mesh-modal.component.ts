@@ -6,9 +6,15 @@
 // THE TAB'S OWN PAIR. It pre-fills from this tab's zone (mesh-session.ts),
 // else a FRESH read of the origin-wide pair — never a copy held in memory
 // since boot, which a stale tab used to write back over another tab's
-// meeting on START. An opener may hand it a pair (the old-package meeting
-// link fallback) or a meeting point (`invite wss://…`); nothing is written
-// until save / START / share, and cancel writes nothing at all.
+// meeting on START. An opener may point it at the meeting link stashed in
+// this tab (the old-package fallback) or hand it a meeting point (`invite
+// wss://…`); nothing is written until save / START / share, and cancel
+// writes nothing at all.
+//
+// THE SECRET NEVER RIDES THE BUS. The bus replays its last value to every
+// late subscriber (and the bridge's `effect-last` hands it off the page), so
+// `mesh:secret` is a notice — listeners re-read the SecretStore — the draft
+// goes out as its strength, and an opener names the stash, never the pair.
 //
 // THE MEETING POINT. Where this tab meets when it is not the default relay,
 // and that meeting point's access code — typed or pasted here once, by the
@@ -36,6 +42,7 @@ import type { SavedLocationsStore } from '../../core/saved-locations-store'
 import { wordsBeside } from '../presence-banner/presence-status'
 import { isAccessCode, meetingRelayOf, readMeshZone, tabCredential, writeMeshZone } from '../../core/mesh-session'
 import * as meshSession from '../../core/mesh-session'
+import { pendingMeetCredentials } from '../../core/invite-capture'
 
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 /** The /invite queen (essentials sharing/invite.queen.ts) — reached through
@@ -57,9 +64,9 @@ interface MeshRelayApi {
 /** What an opener may hand the selector. */
 interface OpenPayload {
   join?: boolean
-  /** A pair to pre-fill instead of the tab's own (nothing is written). */
-  room?: string
-  secret?: string
+  /** Pre-fill from the meeting link stashed in this tab instead of the tab's
+   *  own pair (nothing is written). The pair itself never rides the bus. */
+  meet?: boolean
   /** A meeting point to pre-fill (`invite wss://…`). */
   point?: string
   /** Which field takes the focus. */
@@ -203,11 +210,12 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.#unsubOpen = EffectBus.on<OpenPayload>('mesh:open-modal', (payload) => {
       this.joinMode.set(!!payload?.join)
-      // The pair an opener handed over, else THIS tab's own, else a fresh
-      // read of the origin-wide one — never the store's boot-time copy.
-      const handed = typeof payload?.room === 'string' && typeof payload?.secret === 'string'
-      const initialSecret = handed ? String(payload!.secret) : tabCredential('secret')
-      this.roomDraft.set(handed ? String(payload!.room) : tabCredential('room'))
+      // The pair in the stashed meeting link the opener named, else THIS
+      // tab's own, else a fresh read of the origin-wide one — never the
+      // store's boot-time copy.
+      const handed = payload?.meet === true ? pendingMeetCredentials() : null
+      const initialSecret = handed ? handed.secret : tabCredential('secret')
+      this.roomDraft.set(handed ? handed.room : tabCredential('room'))
       this.secretDraft.set(initialSecret)
       const zone = readMeshZone()
       const point = typeof payload?.point === 'string' ? meetingRelayOf(payload.point) : ''
@@ -237,7 +245,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       catch { this.skipReview.set(false) }
       this.open.set(true)
       EffectBus.emit('mesh:modal-open', { open: true })
-      EffectBus.emit('mesh:secret-draft', { secret: initialSecret })
+      this.#announceDraft(initialSecret)
       const focus = payload?.focus === 'code' ? '.mesh-modal-code' : '.mesh-modal-room'
       queueMicrotask(() => {
         document.querySelector<HTMLInputElement>(focus)?.focus()
@@ -277,7 +285,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   readonly onSecretInput = (event: Event): void => {
     const value = (event.target as HTMLInputElement).value
     this.secretDraft.set(value)
-    EffectBus.emit('mesh:secret-draft', { secret: value })
+    this.#announceDraft(value)
   }
 
   readonly onLabelInput = (event: Event): void => {
@@ -428,9 +436,11 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     // wrapper. Empty save doesn't unset it (the runtime bootstrap default
     // of window.location.origin stays), so we only write on non-empty.
     if (host) this.#writeHost(host)
-    // What the stores hold now (entered text folds), never the raw draft.
+    // What the store holds now (entered text folds), never the raw draft.
     EffectBus.emit('mesh:room', { room: this.#roomStore?.value ?? room })
-    EffectBus.emit('mesh:secret', { secret: this.#secretStore?.value ?? secret })
+    // A notice, never the secret: the store above already holds it (folded),
+    // and listeners re-read it there.
+    EffectBus.emit('mesh:secret', {})
     EffectBus.emit('mesh:host', { host: this.#readHost() })
     if (room) this.#savedStore?.add(room)
 
@@ -519,7 +529,15 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   #close = (cancelled = false): void => {
     this.open.set(false)
     EffectBus.emit('mesh:modal-open', { open: false, cancelled })
-    EffectBus.emit('mesh:secret-draft', { secret: null })
+    this.#announceDraft(null)
+  }
+
+  /** The header previews the draft's STRENGTH while the selector is open —
+   *  the score, never the draft (null = closed). */
+  #announceDraft = (draft: string | null): void => {
+    const clean = draft?.trim() ?? ''
+    const provider = get('@hypercomb.social/SecretStrengthProvider') as SecretStrengthProvider | undefined
+    EffectBus.emit('mesh:secret-draft', { open: draft !== null, score: clean ? (provider?.evaluate(clean) ?? 0.5) : null })
   }
 }
 

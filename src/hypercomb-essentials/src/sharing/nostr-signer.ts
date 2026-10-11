@@ -1,5 +1,6 @@
 // nostr/nostr-signer.ts
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
+import { isSandboxDoor } from '@hypercomb/core'
 
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }
 
@@ -28,6 +29,12 @@ export class NostrSigner {
    * to the channel's hostPubkey).
    */
   public getPublicKeyHex = async (): Promise<string | null> => {
+    // A SANDBOX DOOR HOLDS NO SIGNER (hypercomb-core sandbox-door.ts). A
+    // publisher's package runs there with full page power, so we never ask an
+    // extension from it and never read, mint or persist a key in its storage —
+    // the same rule LlmKeyStore keeps. `null` is "I own no bucket" to every
+    // caller. A key a door minted before this rule stays where it is, unread.
+    if (isSandboxDoor()) return null
     if (this.#cachedPubkey) return this.#cachedPubkey
     const anyWin = window as any
     if (anyWin?.nostr?.getPublicKey) {
@@ -70,6 +77,7 @@ export class NostrSigner {
   public signEvent = async (evt: NostrEvent): Promise<NostrEvent> => {
     // already signed
     if (evt?.id && evt?.pubkey && evt?.sig) return evt
+    if (isSandboxDoor()) throw new Error('nostr signer: a sandbox door signs nothing')
 
     const anyWin = window as any
 
@@ -103,48 +111,47 @@ export class NostrSigner {
   readonly #instanceId = Math.random().toString(36).slice(2, 8)
 
   /**
-   * Resolve the secret key, in priority order:
+   * Resolve the secret key, in order:
    *
-   *   1. `window.NOSTR_SECRET_KEY` — test / scripted override.
-   *   2. `localStorage['hc:nostr:secret-key']` — persisted per-session key.
-   *   3. Mint a fresh random 32-byte key, persist it, return it.
+   *   1. `localStorage['hc:nostr:secret-key']` — this device's key.
+   *   2. Mint a fresh random 32-byte key, persist it, return it.
+   *
+   * The key lives ONLY in this device's storage (never a pool, resource,
+   * event or export — jwize 2026-10-07). No page global can name it: a
+   * page-set key would sign under an identity the app reported for nobody,
+   * and nothing would record the switch.
    *
    * The mint-on-miss path is the important one: every browser /
-   * profile / incognito session lands at step 3 the first time and
+   * profile / incognito session lands at step 2 the first time and
    * walks away with its own stable identity. Two different sessions
    * never collide — which means self-skip in paired-channel.drone
    * only suppresses our actual own broadcasts, not the other peer's.
    *
-   * Persistence is best-effort: if localStorage is unavailable
-   * (private mode quirks, storage disabled), we mint an ephemeral
-   * in-memory key that lives until the page closes. Better than
-   * falling back to a shared constant.
+   * PINNED FOR THE SESSION. Once resolved, the instance signs with this key
+   * until the page reloads, so a signature is always made by the key
+   * getPublicKeyHex reported; a storage write mid-session takes effect on
+   * reload. If localStorage refuses the write (private mode quirks, storage
+   * disabled) the minted key lives in memory until the page closes — better
+   * than falling back to a shared constant.
    */
   private resolveSecretKeyHex = (): string => {
-    const anyWin = window as any
-
-    const fromWindow = String(anyWin?.NOSTR_SECRET_KEY ?? '').trim().toLowerCase()
-    if (this.isHex64(fromWindow)) return fromWindow
+    if (this.#secretHex) return this.#secretHex
 
     try {
       const fromStorage = String(localStorage.getItem(SECRET_KEY_STORAGE) ?? '').trim().toLowerCase()
-      if (this.isHex64(fromStorage)) return fromStorage
+      if (this.isHex64(fromStorage)) return this.#secretHex = fromStorage
     } catch {
       // localStorage unavailable — fall through to mint.
     }
 
-    if (this.#ephemeralSecretKey && this.isHex64(this.#ephemeralSecretKey)) {
-      return this.#ephemeralSecretKey
-    }
-
     const fresh = this.#mintSecretKeyHex()
     try { localStorage.setItem(SECRET_KEY_STORAGE, fresh) }
-    catch { this.#ephemeralSecretKey = fresh }
-    return fresh
+    catch { /* storage refused — the key lives in memory for this page */ }
+    return this.#secretHex = fresh
   }
 
-  /** Cached only when localStorage refused the write (rare). */
-  #ephemeralSecretKey: string | null = null
+  /** The key this instance signs with, once resolved — pinned for the session. */
+  #secretHex: string | null = null
 
   #mintSecretKeyHex = (): string => {
     const bytes = new Uint8Array(32)

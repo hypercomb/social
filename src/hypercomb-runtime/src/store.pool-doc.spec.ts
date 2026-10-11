@@ -327,3 +327,40 @@ describe("{ keep: 'current' } — what the software writes on its own is not a s
     warn.mockRestore()
   })
 })
+
+describe('putPoolDoc — a key never enters a pool', () => {
+  const KEY = 'sk-proj-' + 'z9'.repeat(16)
+
+  it('a document carrying this device\'s held key is refused before any atom or marker exists', async () => {
+    const { llmKeyStore } = await import('@hypercomb/core')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => { /* quiet */ })
+    try {
+      llmKeyStore.set('openai', KEY)
+      const pool = await colonPool('spec:drafts')
+      expect(await store.putPoolDoc(pool, bytesOf(`{"draft":"my key is ${KEY}"}`))).toBeNull()
+      expect(await store.putPoolDoc(pool, bytesOf(`{"draft":"${KEY}"}`), 'one-sub')).toBeNull()
+      expect(pool.files.size).toBe(0)
+      expect(pool.dirs.size).toBe(0)
+      expect(String(warn.mock.calls[0]?.[0] ?? '')).not.toContain(KEY)
+
+      expect(await store.putPoolDoc(pool, bytesOf('{"draft":"no key here"}'))).toMatch(SIG)
+
+      llmKeyStore.clear('openai')
+      expect(await store.putPoolDoc(pool, bytesOf(`{"draft":"my key is ${KEY}"}`))).toMatch(SIG)
+    } finally {
+      llmKeyStore.clear('openai')
+      warn.mockRestore()
+    }
+  })
+
+  it('a held placeholder never refuses a write', async () => {
+    const { llmKeyStore } = await import('@hypercomb/core')
+    try {
+      llmKeyStore.set('ollama', 'ollama')
+      const pool = await colonPool('spec:models')
+      expect(await store.putPoolDoc(pool, bytesOf('{"model":"ollama"}'))).toMatch(SIG)
+    } finally {
+      llmKeyStore.clear('ollama')
+    }
+  })
+})

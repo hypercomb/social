@@ -60,6 +60,24 @@ $quiet: #8ea2b0;
   @include tw.panel($accent, right);
 }
 
+// OVER A VIEW IT IS A POPUP (jwize 2026-10-10). Same place, but it floats on
+// the page rather than docking to the hive's edge: it reserves no edge (the
+// view keeps its width under it — `hcDockInsetActive`), it is rounded on all
+// four corners, and it has a margin on the right (and below, so the bottom
+// corners read) with the floating shell's full border and shadow. MARGINS, not
+// offsets: the docked-panel primitive writes `right` inline for the lane, and
+// a margin moves an absolute box in from wherever that lands. Phones keep
+// their bottom sheet (the not-phone query is the complement of `phone`).
+@media (min-width: $bp-tablet) and (min-height: $bp-phone-short + 1) {
+  .publish-panel.over-view {
+    margin: 0 0.75rem 0.75rem 0;
+    border: 1px solid rgba(var(--acc), 0.38);
+    border-radius: tw.$radius-floating;
+    box-shadow: 0 18px 54px rgba(var(--hc-panel-shadow), 0.55), inset 0 1px rgba(var(--hc-panel-sheen), 0.03);
+    overflow: hidden;
+  }
+}
+
 .publish-header {
   @include tw.header;
 }

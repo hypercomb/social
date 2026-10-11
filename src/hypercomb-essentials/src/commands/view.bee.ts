@@ -152,6 +152,14 @@ export class ViewBee extends Worker {
    *  arming while standing still changes nothing here. */
   #hexagonsOnce = false
 
+  /** THE BEEHAVIORS PANEL HOLDS THE HEXAGONS — mirrors `features:viewer-state`.
+   *  Behaviours are applied to the tiles, so while the panel is up the surface
+   *  is the grid: opening it peels any view away, and every arrival lands on
+   *  hexagons, a held `h` (jwize 2026-10-10: "the views take us away from the
+   *  assignment"). Closing it restores nothing — the grid is where Escape
+   *  would leave you anyway. */
+  #behaviorsShowing = false
+
   /** Cancel handle for a release that is waiting on the destination's
    *  paint (see #releaseWhenPainted). Non-null while one is armed. */
   #pendingRelease: (() => void) | null = null
@@ -250,6 +258,18 @@ export class ViewBee extends Worker {
     EffectBus.on<{ cmd?: string; event?: KeyboardEvent | null }>('keymap:invoke', (payload) => {
       if (payload?.cmd !== 'navigation.hexagonsOnce' || payload.event?.repeat) return
       this.#hexagonsKey()
+    })
+
+    // The Beehaviors panel opening over a view peels it — the same release as
+    // `h` in a view. A view entered WHILE it is up is the participant leaving
+    // the assignment, and the panel closes itself for that (features-viewer).
+    EffectBus.on<{ open?: boolean }>('features:viewer-state', (payload) => {
+      this.#behaviorsShowing = payload?.open === true
+      if (!this.#behaviorsShowing) return
+      const vmNow = get<ViewModeLike>('@hypercomb.social/ViewMode')
+      if (!vmNow || vmNow.mode === DEFAULT_SURFACE) return
+      this.#pendingRelease?.()
+      vmNow.setMode(DEFAULT_SURFACE)
     })
 
     // The GLOBAL roster (behavior-enablement lens). A behavior flipped off
@@ -609,6 +629,14 @@ export class ViewBee extends Worker {
     if (this.#hexagonsOnce) {
       this.#hexagonsOnce = false
       EffectBus.emit('navigation:hexagons-once', { armed: false })
+      if (vm.mode !== DEFAULT_SURFACE) this.#releaseWhenPainted(vm, vm.mode)
+      this.#autoOpenedView = ''
+      EffectBus.emit('view:arrival', { segments: [...segments], view: '' })
+      return
+    }
+    // BEEHAVIORS UP: every arrival is the grid, latched like any other answer
+    // so closing the panel later never pops the face over the tiles.
+    if (this.#behaviorsShowing) {
       if (vm.mode !== DEFAULT_SURFACE) this.#releaseWhenPainted(vm, vm.mode)
       this.#autoOpenedView = ''
       EffectBus.emit('view:arrival', { segments: [...segments], view: '' })

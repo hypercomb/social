@@ -91,7 +91,8 @@ module audit roots (`module.queen.ts:276`), plus four keys not yet audited:
 
 ## F. Needs jwize
 
-- **Device identity keys** (`hc:nostr:secret-key`, `hc:client-id`, 7 files): cannot sit in a replicated pool; a cleared profile loses the identity.
+- **Device secrets — DECIDED (jwize, 2026-10-07): never in a pool.** `hc:nostr:secret-key`, `hc:llm:<id>:key`, `hc:anthropic-api-key` and `hc:change-channel:secret` live in this device's localStorage and nowhere else — never a pool, resource, event, export or public place. Their single localStorage write each is their home, not debt to migrate. Enforced by the two credential ratchets in `doctrine.spec.ts` (a secret in a write's arguments; a credential read in a file that persists) and by `Store.#writePoolDoc` refusing a document that carries a held key (`LlmKeyStore.carriedBy`). A cleared profile loses the identity; that is the price.
+- **Device identity** (`hc:client-id`): an identifier, not a secret — still open.
 - **Per-device UI and AI preferences** (about 53 files): persist forever by design; by the rule as stated they deviate. `hc:chat-seen` and `hc:chat-models` also grow one entry per conversation.
 - **Derived caches** with no collector (`store.ts:1444`, `:2447`, `eggs.ts:90`), the trust set `hypercomb.signature-store` (`acquire.ts:1136`, only grows), and `sign('temporary')` (fed by `archiveEntries` and `/sweep`, nothing cleans it).
 - **The doctrine text itself**: `hide-first-delete-second.md` says a state change in `hidden:items` is "remove-then-write, never an edit". By the standard it should be a new item in place of the old, with history keeping both.

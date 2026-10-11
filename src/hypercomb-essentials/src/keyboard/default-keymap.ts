@@ -187,6 +187,18 @@ export const defaultKeyMap: KeyMapLayer = {
       category: 'Navigation',
     },
 
+    // Publish — a bare p raises the Publish panel on the layer you stand on,
+    // from the hexagons OR from inside a view: there is always a way to
+    // publish what you are looking at without leaving it. Same lane as the
+    // rail icon and `/publish` (publish:view-toggle in publish-status.drone).
+    {
+      cmd: 'publish.toggle',
+      sequence: [[{ key: 'p', primary: false }]],
+      description: 'Publish this layer',
+      descriptionKey: 'keymap.publish',
+      category: 'Navigation',
+    },
+
     // Arrange — apply / cycle tile target sequences over existing tiles
     {
       cmd: 'sequence.cycle',

@@ -276,6 +276,11 @@ const olderRefuses = (raw: string): boolean => {
 }
 
 const held = (): string => { try { return sessionStorage.getItem(PENDING_MEET_KEY) ?? '' } catch { return '' } }
+
+/** The pair in the meeting link stashed in this tab, or null — read where it
+ *  lives, device-local, so it never has to ride an effect. */
+export const pendingMeetCredentials = (): { room: string; secret: string } | null => meetCredentialsOf(held())
+
 /** The link is answered: neither copy is kept. */
 const drop = (): void => {
   meetCopy = ''
@@ -307,7 +312,13 @@ const offerUpdate = (link: string): void => {
  *  naming a meeting point puts it in this tab's zone FIRST, with its host and
  *  access code: no effect carries a code, so the selector shows it from the
  *  zone, and a reload (the floor's own included) resumes at the point with it
- *  (VO-3). Closed without START, the zone is put back as it was. */
+ *  (VO-3). Closed without START, the zone is put back as it was.
+ *
+ *  The pair does not ride the bus either: the bus replays its last value to
+ *  every late subscriber, so the open names the stash (`meet: true`) and the
+ *  selector reads the pair from it (pendingMeetCredentials) when it opens.
+ *  The meeting point rides along, so START meets where the room is — never
+ *  quietly at the default relay. */
 const answer = (link: string): void => {
   const creds = meetCredentialsOf(link)
   const point = meetingPointOf(link)
@@ -321,7 +332,7 @@ const answer = (link: string): void => {
     // later selector on this device to it). START's join records it.
     writeMeshZone(point, { prefill: false })
   }
-  EffectBus.emit('mesh:open-modal', { join: true, room: creds.room, secret: creds.secret, ...(point.relay ? { point: point.relay } : {}) })
+  EffectBus.emit('mesh:open-modal', { join: true, meet: true, ...(point.relay ? { point: point.relay } : {}) })
   // Subscribed AFTER the open, so the replayed value is this open.
   const off = EffectBus.on<{ open?: boolean; cancelled?: boolean }>('mesh:modal-open', (p) => {
     if (p?.open !== false) return

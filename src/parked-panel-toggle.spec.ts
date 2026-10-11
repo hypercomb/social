@@ -122,7 +122,16 @@ describe('a parked panel opens on ONE press of its glyph', () => {
       expect(start).toBeGreaterThan(-1)
       const rest = src.slice(start + 1)
       const end = rest.indexOf('this.onEffect')
-      const body = end === -1 ? rest : rest.slice(0, end)
+      let body = end === -1 ? rest : rest.slice(0, end)
+      // A handler that hands the press to one method (`() => this.#toggle()`,
+      // so the keymap's `p` lands in the same place) is read in that method.
+      const handoff = body.match(/^[^\n]*=>\s*this\.(#\w+)\(\)/)?.[1]
+      if (handoff) {
+        const at = src.indexOf(`  ${handoff}(): void {`)
+        expect(at, `the ${handoff} method`).toBeGreaterThan(-1)
+        const method = src.slice(at)
+        body = method.slice(0, method.indexOf('\n  }\n') + 4)
+      }
       expect(body).toMatch(/this\.#open = !isWindowShowing\(/)
       // The old shape is the bug itself. It must never come back here.
       expect(body).not.toMatch(/this\.#open = !this\.#open/)

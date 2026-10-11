@@ -52,7 +52,6 @@ const freshEnv = (): void => {
     get: (k: string) => registry.get(k),
   }
   delete (globalThis as Record<string, unknown>)['nostr']
-  delete (globalThis as Record<string, unknown>)['NOSTR_SECRET_KEY']
   try { localStorage.clear() } catch { /* jsdom always has it */ }
   vi.resetModules()
 }
@@ -71,7 +70,7 @@ const loadBinding = async (): Promise<typeof import('./head-claim-signer.js')> =
 describe('THE MINT PATH NOW RUNS THE READER\'S SHAPE GATE (was: the writer was weaker)', () => {
   beforeEach(async () => {
     freshEnv()
-    ;(globalThis as Record<string, unknown>)['NOSTR_SECRET_KEY'] = SECRET_A
+    localStorage.setItem(SECRET_STORAGE, SECRET_A)
     await wireSigner()
   })
 
@@ -194,7 +193,7 @@ describe('A NIP-07 DENIAL NO LONGER MINTS AN IDENTITY (was: unconsented, and wed
 describe("verifyEvent's memo is real, and the self-verify no longer relies on it", () => {
   beforeEach(async () => {
     freshEnv()
-    ;(globalThis as Record<string, unknown>)['NOSTR_SECRET_KEY'] = SECRET_A
+    localStorage.setItem(SECRET_STORAGE, SECRET_A)
     await wireSigner()
   })
 

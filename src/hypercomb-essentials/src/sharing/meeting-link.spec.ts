@@ -279,6 +279,15 @@ describe('joining from a meeting link', () => {
     expect(toggles).toHaveLength(1)
   })
 
+  it('on Join the secret reaches the SecretStore and never the bus', async () => {
+    await joinMeetingPlace(parseMeet(meetFragment('meetup', 'river-stone-9', ['Ideas']))!)
+    expect(secret.value).toBe('river-stone-9')
+    let late: unknown
+    EffectBus.on('mesh:secret', (p) => { late = p })()
+    expect(late).toEqual({})
+    expect(JSON.stringify(late)).not.toContain('river-stone-9')
+  })
+
   it('does not toggle a tab that is already a member (a toggle would make it leave)', async () => {
     joined(true)
     await joinMeetingPlace(parseMeet(meetFragment('meetup', '4417', []))!)
