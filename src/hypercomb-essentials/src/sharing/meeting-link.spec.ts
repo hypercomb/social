@@ -122,7 +122,9 @@ describe('the meeting link', () => {
 
   it('a slash inside a part is encoded, so it can never add a page', () => {
     const frag = meetFragment('r/oom', 's', [])
-    expect(parseMeet(frag)).toBeNull()   // a decoded part may not carry a slash
+    // The place splits before decoding: a room may hold a slash (ZI-3), a page may not.
+    expect(parseMeet(frag)).toMatchObject({ room: 'r/oom', secret: 's', segments: [] })
+    expect(parseMeet(meetFragment('r', 's', ['a/b']))).toBeNull()
   })
 
   it('ignores a malformed fragment', () => {
@@ -133,7 +135,8 @@ describe('the meeting link', () => {
 
   it('carries a meeting point after the place — relay, host and code — and reads it back', () => {
     const frag = meetFragment('downtown', 'downtown', ['Big Ideas'], { relay: 'wss://pluginthematrix.com', host: 'pluginthematrix.com', code: 'k3y.Recycled-2' })
-    expect(frag).toBe('#meet=downtown/downtown/Big%20Ideas&relay=wss%3A%2F%2Fpluginthematrix.com&host=https%3A%2F%2Fpluginthematrix.com&code=k3y.Recycled-2')
+    // Strictly encoded (ZI-2): no raw punctuation a chat app could trim off the end.
+    expect(frag).toBe('#meet=downtown/downtown/Big%20Ideas&relay=wss%3A%2F%2Fpluginthematrix%2Ecom&host=https%3A%2F%2Fpluginthematrix%2Ecom&code=k3y%2ERecycled%2D2')
     expect(parseMeet(frag)).toMatchObject({
       room: 'downtown', secret: 'downtown', segments: ['Big Ideas'],
       relay: 'wss://pluginthematrix.com', host: 'pluginthematrix.com', code: 'k3y.Recycled-2',

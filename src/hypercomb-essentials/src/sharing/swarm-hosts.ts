@@ -13,8 +13,16 @@
 //   2. THE MEETING HOST — the host the meeting this tab is in named: its
 //      meeting link's `host`, or the facilitator's own meeting point
 //      (sessionStorage `hc:mesh-zone`, membership.ts — this tab's, so a
-//      reload keeps it and another tab's meeting never moves it). Like a
-//      publish domain it is an explicit choice, never passed over.
+//      reload keeps it and another tab's meeting never moves it).
+//
+//   A publish domain or a meeting host is an explicit choice, and the swarm
+//   tries it first — but one that CANNOT take this tab's uploads (it refused
+//   them, is full, takes uploads only from people meeting on it, or has never
+//   answered at all — the `hyperccomb.com` typo) must not hold the room's
+//   tiles as names for the whole meeting (jwize 2026-10-10, D2). host-sync
+//   says so (markDown) and the page falls through to the next door, the
+//   domain named in `passedOver` so the status line can say why. A `publish
+//   here` is not the swarm: it still needs the domain itself.
 //   3. THE HOSTS POOL — the participant's `community:hosts` pool (HostsDrone
 //      seeds hypercomb.com into an empty one): its PRIMARY, the host added
 //      first. A pool host that failed this session (it refused, is full,
@@ -124,6 +132,15 @@ const DOWN_REMEMBER_MAX = 8
 const PENDING: SwarmHostChoice = Object.freeze({ hosts: Object.freeze([]) as readonly string[], source: 'none', pending: true })
 const NONE: SwarmHostChoice = Object.freeze({ hosts: Object.freeze([]) as readonly string[], source: 'none', pending: false })
 
+/** A pass-over on an UPLOAD's own standing answer — host-sync's reason leads
+ *  with the status word: the host refused (its own 4xx, a CORS-blocked
+ *  upload, not-live while this tab meets elsewhere), is full, or nothing at
+ *  that name ever answered. Only that passes over a door the participant
+ *  CHOSE (a publish domain, the meeting host): a web page at its door, or a
+ *  moment's silence, is enough for a pool host but not for a choice — a
+ *  static door may serve some sigs as files, so its uploads decide. */
+const CHOSEN_DOWN_RE = /^(?:refused|full|unresolved):/
+
 const ioc = <T>(key: string): T | undefined =>
   (globalThis as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
 
@@ -199,8 +216,9 @@ export class SwarmHostResolver extends EventTarget {
   #staleTimer: ReturnType<typeof setTimeout> | undefined
 
   /** Hosts that failed this session (host-sync says so), with the reason.
-   *  A pool host here is passed over; publish domains are the participant's
-   *  explicit choice for a branch and are never passed over. */
+   *  Any door here is passed over — a pool host on any failure host-sync
+   *  calls the host's, a publish domain or meeting host only on a standing
+   *  one (host-sync decides which; see the header). */
   readonly #down = new Map<string, string>()
   /** When each REMEMBERED failure was marked — the ones this tab's session
    *  keeps across a reload (#rememberDown). A failure marked while the path
@@ -325,6 +343,13 @@ export class SwarmHostResolver extends EventTarget {
     //    any. A level not read yet could be the nearest one, so nothing below
     //    it can be trusted until it has been.
     let unknown = false
+    // Doors passed over on the way down the tiers (a standing failure), in
+    // order; and the first tier that named any — it keeps the page when no
+    // door below it takes bytes, so its status names the host and why.
+    const passedOver: string[] = []
+    let first: SwarmHostChoice | null = null
+    const choose = (hosts: readonly string[], source: SwarmHostSource): SwarmHostChoice =>
+      passedOver.length > 0 ? { hosts, source, pending: false, passedOver: [...passedOver] } : { hosts, source, pending: false }
     for (let n = segs.length; n >= 1; n--) {
       const key = keyOf(segs, n)
       const zones = this.#marks.get(key)
@@ -339,7 +364,15 @@ export class SwarmHostResolver extends EventTarget {
       this.#marks.set(key, zones)
       if (unknown) continue
       const doors = this.#usable(zones, true)
-      if (doors.length > 0) return { hosts: doors, source: 'publish', pending: false }
+      if (doors.length === 0) continue
+      // The nearest branch that wears any is the page's choice — only its
+      // doors, never a farther branch's. Those whose uploads cannot land are
+      // passed over; the rest serve the page.
+      const up = doors.filter(h => !this.#chosenDown(h))
+      if (up.length > 0) return choose(up, 'publish')
+      passedOver.push(...doors)
+      first = { hosts: doors, source: 'publish', pending: false }
+      break
     }
     // Unread marks could still name a nearer publish domain: nothing below
     // them can answer yet. The pool is read alongside, so the answer needs
@@ -353,7 +386,11 @@ export class SwarmHostResolver extends EventTarget {
     }
     // 2. The meeting host — the host this tab's meeting named.
     const meeting = this.#meetingDoor()
-    if (meeting) return { hosts: [meeting], source: 'meeting', pending: false }
+    if (meeting) {
+      if (!this.#chosenDown(meeting)) return choose([meeting], 'meeting')
+      if (!passedOver.includes(meeting)) passedOver.push(meeting)
+      first ??= { hosts: [meeting], source: 'meeting', pending: false }
+    }
     // 3. The hosts pool: its primary, unless it failed this session.
     if (this.#pool === null) {
       if (ask) this.#askedPool = true
@@ -361,18 +398,20 @@ export class SwarmHostResolver extends EventTarget {
       return PENDING
     }
     const pool = this.#usable(this.#pool, true)
-    const passedOver = pool.filter(h => this.#down.has(h))
+    for (const h of pool) if (this.#down.has(h) && !passedOver.includes(h)) passedOver.push(h)
     const primary = pool.find(h => !this.#down.has(h))
-    if (primary) return passedOver.length > 0 ? { hosts: [primary], source: 'pool', pending: false, passedOver } : { hosts: [primary], source: 'pool', pending: false }
+    if (primary) return choose([primary], 'pool')
     // 4. The relay you meet at — last resort, and only when it said so.
     this.#relayAsked = true
     const { host, participants } = this.#deps.relay()
     const door = this.#usable([host])[0]
     const allowed = participants === 'all' || participants === 'zones'
-    if (door && allowed) return passedOver.length > 0 ? { hosts: [door], source: 'relay', pending: false, passedOver } : { hosts: [door], source: 'relay', pending: false }
-    // Every pool host failed and the relay takes nobody: the primary keeps
-    // the page, so its status names the host and why it is not taking bytes.
+    if (door && allowed && !this.#down.has(door)) return choose([door], 'relay')
+    // No door takes bytes: the first one the page named keeps it, so its
+    // status names the host and why it is not taking bytes.
+    if (first) return first
     if (pool.length > 0) return { hosts: [pool[0]!], source: 'pool', pending: false }
+    if (door && allowed) return { hosts: [door], source: 'relay', pending: false }
     if (!door) return NONE
     return participants === undefined || participants === null ? PENDING : NONE
   }
@@ -385,22 +424,31 @@ export class SwarmHostResolver extends EventTarget {
   readonly isPoolHost = (host: string): boolean => this.#pool !== null && this.#usable(this.#pool, true).includes(host)
 
   /** A host failed this session (host-sync: it refused, is full, answered a
-   *  page where a heap answers bytes, or did not answer while the relay did).
-   *  A pool host is passed over from now on — and, `remember`ed (the
-   *  default), across a reload of this tab too (#rememberDown). A failure
-   *  that may have been the PATH (no socket open) is this page's only. */
+   *  page where a heap answers bytes, takes uploads only from people meeting
+   *  on it, or never answered while another host did). It is passed over
+   *  from now on, whichever tier named it — and, `remember`ed (the default),
+   *  across a reload of this tab too (#rememberDown). A failure that may have
+   *  been the PATH (no socket open) is this page's only. */
   readonly markDown = (host: string, reason: string, remember = true): void => {
     if (!host) return
-    if (this.#down.has(host)) {
+    const before = this.#down.get(host)
+    if (before !== undefined) {
       // Already passed over; a later failure the path cannot explain makes a
-      // path-time pass-over one to remember.
-      if (remember && !this.#downAt.has(host)) { this.#downAt.set(host, Date.now()); this.#rememberDown() }
+      // path-time pass-over one to remember. An upload's own standing answer
+      // replaces a weaker reason (a page at the door): a door the participant
+      // chose is passed over from now on too (CHOSEN_DOWN_RE).
+      const stronger = CHOSEN_DOWN_RE.test(reason) && !CHOSEN_DOWN_RE.test(before)
+      const newlyRemembered = remember && !this.#downAt.has(host)
+      if (stronger) this.#down.set(host, reason)
+      if (newlyRemembered) this.#downAt.set(host, Date.now())
+      if (stronger || newlyRemembered) this.#rememberDown()
+      if (stronger) { this.#version++; this.#changed() }
       return
     }
     this.#down.set(host, reason)
     if (remember) { this.#downAt.set(host, Date.now()); this.#rememberDown() }
     this.#version++
-    if (this.isPoolHost(host)) this.#changed()
+    this.#changed()
   }
 
   /** A host answered again (a receipt, or the participant asked to retry). */
@@ -408,22 +456,25 @@ export class SwarmHostResolver extends EventTarget {
     if (!this.#down.delete(host)) return
     if (this.#downAt.delete(host)) this.#rememberDown()
     this.#version++
-    if (this.isPoolHost(host)) this.#changed()
+    this.#changed()
   }
 
   /** Forget every failure — the participant asked to try again. */
   readonly clearDown = (): void => {
     if (this.#down.size === 0) return
-    const pooled = [...this.#down.keys()].some(h => this.isPoolHost(h))
     this.#down.clear()
     this.#downAt.clear()
     this.#rememberDown()
     this.#version++
-    if (pooled) this.#changed()
+    this.#changed()
   }
 
   /** Why a host is passed over ('' when it is not). */
   readonly downReason = (host: string): string => this.#down.get(host) ?? ''
+
+  /** Is a door the participant chose (a publish domain, the meeting host)
+   *  passed over — on its uploads' own standing answer (CHOSEN_DOWN_RE)? */
+  readonly #chosenDown = (host: string): boolean => CHOSEN_DOWN_RE.test(this.#down.get(host) ?? '')
 
   /** The meeting host as a write door ('' when none, or not one this page
    *  may use). A change since the last look bumps the version and is news. */

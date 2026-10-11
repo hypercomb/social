@@ -113,6 +113,8 @@ async function main() {
     await ctx.addInitScript(({ room, secret, relayUrl, extras }) => {
       localStorage.setItem('hc:room', room)
       localStorage.setItem('hc:secret', secret)
+      // This tab's own zone (D5: a bare join needs one, else it opens the selector).
+      if (!sessionStorage.getItem('hc:mesh-zone')) sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room, secret }))
       localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([relayUrl]))
       for (const [k, v] of Object.entries(extras)) localStorage.setItem(k, String(v))
     }, { room: ROOM, secret: SECRET, relayUrl: relay, extras: extra })

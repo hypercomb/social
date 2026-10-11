@@ -219,35 +219,76 @@ export function relayDomainOf(relay: string): string {
   try { return meetingHostOf(new URL(relay).host) } catch { return '' }
 }
 
+// A LINK SURVIVES THE CHAT IT IS PASTED INTO. A chat app's linkifier trims
+// what looks like sentence punctuation off the END of a link (GFM drops a
+// trailing ? ! . , : * _ ~ and an unbalanced ')'), and a sentence leaves its
+// own '.', ')' or ',' stuck to it. The secret is often the last thing in the
+// link, so either way it changed — silently, into a zone of one. So a link
+// is minted STRICTLY: every character but a letter or a digit is %XX, which
+// decodeURIComponent (and so every older reader) reads back as the same text,
+// and a minted link never ENDS in raw punctuation. Reading, whatever raw
+// punctuation sits at the end is not the link's (trimLinkTail).
+
+/** Percent-encode one link part strictly: encodeURIComponent leaves
+ *  ! ' ( ) * . _ ~ - raw; here they are %XX too. */
+const strictPart = (text: string): string =>
+  encodeURIComponent(text).replace(/[!'()*._~-]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+
+/** Raw punctuation a link picked up at its END — never the link's own: a
+ *  strictly minted link carries none of it raw, and encodeURIComponent never
+ *  left , ; : ? ] } > " raw in any link. A ')' only when unbalanced, so an
+ *  old link with a raw `(2)` in it keeps it. Never _ * ~ — sentences do not
+ *  leave them, and a code or secret minted before 2026-10-10 may end in one
+ *  raw (base64url ends in '_'). MIRRORED in the shell's
+ *  invite-capture.ts (trimLinkTail) — invite-capture.robust.spec.ts holds
+ *  the two to the same answers. */
+export function trimLinkTail(text: string): string {
+  let body = text
+  for (;;) {
+    let next = body.replace(/[.,;:!?'"\]}>]+$/, '')
+    if (next.endsWith(')') && (next.match(/\(/g)?.length ?? 0) < (next.match(/\)/g)?.length ?? 0)) next = next.slice(0, -1)
+    if (next === body) return body
+    body = next
+  }
+}
+
 /** The link's fragment for (room, secret, segments) — the caller prefixes
- *  its own origin. Every part is percent-encoded, so a slash, a space or a
- *  non-Latin letter in a room survives the round trip unchanged. A meeting
- *  point rides after it (see above); one not valid is left out. */
+ *  its own origin. Every part is strictly percent-encoded (above), so a
+ *  slash, a space, punctuation or a non-Latin letter in a room survives the
+ *  round trip unchanged. A meeting point rides after it (see above); one not
+ *  valid is left out. */
 export function meetFragment(room: string, secret: string, segments: readonly string[], point?: MeetingPoint): string {
-  const place = MEET_PREFIX + [room, secret, ...segments].map(s => encodeURIComponent(s)).join('/')
+  const place = MEET_PREFIX + [room, secret, ...segments].map(strictPart).join('/')
   const pairs: string[] = []
   const relay = meetingRelayOf(point?.relay)
   // Always the full URL, and the host with its scheme: each decodes to text
   // with a '/', which an older parser refuses (see above) — never shortened.
-  if (relay) pairs.push(`relay=${encodeURIComponent(relay)}`)
+  if (relay) pairs.push(`relay=${strictPart(relay)}`)
   const host = meetingHostOf(point?.host)
-  if (host) pairs.push(`host=${encodeURIComponent(`https://${host}`)}`)
+  if (host) pairs.push(`host=${strictPart(`https://${host}`)}`)
   // A code is for its meeting point alone — never sent to the default relay.
-  if (relay && isAccessCode(point?.code)) pairs.push(`code=${encodeURIComponent(point!.code!)}`)
+  if (relay && isAccessCode(point?.code)) pairs.push(`code=${strictPart(point!.code!)}`)
   return pairs.length ? `${place}&${pairs.join('&')}` : place
 }
 
 /** Read a stashed meeting fragment (with or without its `#meet=` prefix)
- *  back into a joinable link. A malformed fragment — a bad escape, a
- *  missing room or secret, a part carrying a slash, an absurd length, a
- *  meeting point that is not one — is null, and the caller ignores it.
- *  Never throws. */
+ *  back into a joinable link. Punctuation stuck to its end is not the
+ *  link's (trimLinkTail). A malformed fragment — a bad escape, a missing
+ *  room or secret, a page carrying a slash, an absurd page, a meeting point
+ *  that is not one — is null, and the caller says so. Never throws.
+ *
+ *  The room and secret are free text: a '/' typed into one was encoded, and
+ *  the place is split BEFORE decoding, so it can never add a page. Only a
+ *  page must be one path component. (A package from before 2026-10-10
+ *  refuses a slash in the room or secret too — such a link waits for the
+ *  newer package; the shell's fallback, invite-capture.ts, says so.) */
 export function parseMeet(raw: string): MeetingLink | null {
   let body = String(raw ?? '').trim()
   if (body.startsWith(MEET_PREFIX)) body = body.slice(MEET_PREFIX.length)
   else if (body.startsWith('meet=')) body = body.slice('meet='.length)
   // Some other fragment altogether (`#other=…`) is not a meeting link.
   if (!body || body.startsWith('#')) return null
+  body = trimLinkTail(body)
   const amp = body.indexOf('&')
   const placeText = amp < 0 ? body : body.slice(0, amp)
   const point = amp < 0 ? {} : parsePoint(body.slice(amp + 1))
@@ -255,10 +296,10 @@ export function parseMeet(raw: string): MeetingLink | null {
   const encoded = placeText.split('/')
   if (encoded.length < 2 || encoded.length > MEET_SEGMENTS_MAX + 2) return null
   const parts: string[] = []
-  for (const e of encoded) {
+  for (const [i, e] of encoded.entries()) {
     let part: string
     try { part = decodeURIComponent(e) } catch { return null }
-    if (part.length > MEET_PART_MAX || SLASH_RE.test(part)) return null
+    if (i >= 2 && (part.length > MEET_PART_MAX || SLASH_RE.test(part))) return null
     parts.push(part)
   }
   const [room, secret, ...rest] = parts

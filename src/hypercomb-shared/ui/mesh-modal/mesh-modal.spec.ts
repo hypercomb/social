@@ -21,6 +21,7 @@ const services = new Map<string, unknown>()
 ;(window as unknown as { ioc: unknown }).ioc = { get: (k: string) => services.get(k), register: (k: string, v: unknown) => { services.set(k, v) } }
 
 const { MeshModalComponent } = await import('./mesh-modal.component')
+const meshSession = await import('../../core/mesh-session')
 
 type Cred = { value: string; set: ReturnType<typeof vi.fn> }
 const cred = (value: string): Cred => {
@@ -29,7 +30,10 @@ const cred = (value: string): Cred => {
 }
 let room: Cred
 let secret: Cred
-let mesh: { relays: string[]; configureRelays: ReturnType<typeof vi.fn>; getDebug: () => { relays: string[] } }
+let mesh: {
+  relays: string[]; configureRelays: ReturnType<typeof vi.fn>; getDebug: () => { relays: string[] }
+  ownRelays?: () => string[]; swarmHost?: () => string
+}
 const seen: { effect: string; payload: unknown }[] = []
 const offs: (() => void)[] = []
 
@@ -47,14 +51,21 @@ const zone = (): Record<string, string> | null => {
 const typeInto = (handler: (e: Event) => void, value: string): void => handler({ target: { value } } as unknown as Event)
 
 beforeEach(() => {
+  // The pre-fill is a participant document held in memory here (no Store):
+  // back to the default relay for every case.
+  meshSession.writeMeshZone({ relay: '' })
   sessionStorage.clear()
   localStorage.clear()
   room = cred('boot-copy')
   secret = cred('boot-secret')
+  // The mesh as this package ships it: it follows the tab's meeting point
+  // (ownRelays is the page's own list, never the point).
   mesh = {
     relays: ['wss://jwize.com'],
     configureRelays: vi.fn((urls: string[]) => { mesh.relays = [...urls] }),
     getDebug: () => ({ relays: mesh.relays }),
+    ownRelays: () => ['wss://jwize.com'],
+    swarmHost: () => { try { return new URL(mesh.relays[0] ?? '').host } catch { return '' } },
   }
   services.clear()
   services.set('@hypercomb.social/RoomStore', room)
@@ -173,5 +184,120 @@ describe('the meeting point and its access code', () => {
     typeInto(modal.onCodeInput, 'sekrit-42')
     await modal.copyShareLink()
     expect(meetingLink).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── the long-tail hunt (2026-10-10) ──────────────────────────────────────
+
+describe('VO-6: a computer\'s own ws:// meeting point survives START untouched', () => {
+  it('pre-fills ws://localhost:7894 as written, and START commits nothing new', () => {
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's', relay: 'ws://localhost:7894' }))
+    mesh.relays = ['ws://localhost:7894']
+    const modal = open({ join: true })
+    expect(modal.pointDraft()).toBe('ws://localhost:7894')
+    modal.save()
+    expect(zone()).toMatchObject({ relay: 'ws://localhost:7894' })
+    expect(mesh.configureRelays).not.toHaveBeenCalled()
+    expect(seen.filter(s => s.effect === 'mesh:zone')).toEqual([])
+  })
+
+  it('the old-package link fallback hands ws://… over and it stays ws://', () => {
+    const modal = open({ join: true, room: 'r', secret: 's', point: 'ws://localhost:7894' })
+    expect(modal.pointDraft()).toBe('ws://localhost:7894')
+    modal.save()
+    expect(zone()).toMatchObject({ relay: 'ws://localhost:7894' })
+    expect(mesh.configureRelays).toHaveBeenCalledWith(['ws://localhost:7894'], false)
+  })
+})
+
+describe('VO-2: a package from before meeting points is never pointed at one', () => {
+  beforeEach(() => {
+    // 87383624's mesh: configureRelays, no ownRelays — it reloads its own
+    // default list on every refresh and cannot carry an access code.
+    delete mesh.ownRelays
+  })
+
+  it('the point and code are disabled, with the way to update — and START never calls configureRelays', () => {
+    const modal = open({ join: true, room: 'downtown', secret: 'rose', point: 'wss://pluginthematrix.com' })
+    expect(modal.pointSupported()).toBe(false)
+    typeInto(modal.onCodeInput, 'sekrit-42')
+    modal.save()
+    expect(mesh.configureRelays).not.toHaveBeenCalled()
+    expect(zone()?.relay).toBeUndefined()
+    expect(zone()?.code).toBeUndefined()
+    expect(seen.filter(s => s.effect === 'mesh:zone')).toEqual([])
+    // it still joins the room — on the relay this package can reach
+    expect(seen.map(s => s.effect)).toContain('mesh:join')
+  })
+
+  it('the update button opens Packages', () => {
+    const opened: unknown[] = []
+    offs.push(EffectBus.on('packages:open', p => { opened.push(p) }))
+    const modal = open({ join: true })
+    modal.openPackages()
+    expect(opened.length).toBe(1)
+    expect(modal.open()).toBe(false)
+  })
+
+  it('the template disables both fields and shows the line', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const html = readFileSync(join(__dirname, 'mesh-modal.component.html'), 'utf8')
+    for (const id of ['mesh-modal-point-input', 'mesh-modal-code-input']) {
+      const at = html.indexOf(`id="${id}"`)
+      expect(html.slice(at, html.indexOf('/>', at))).toContain('[disabled]="!pointSupported()"')
+    }
+    expect(html).toContain("'zone.point-needs-update' | t")
+    expect(html).toContain('(click)="openPackages()"')
+  })
+})
+
+describe('ZI-1: a new tab pre-fills the point the origin last met at — never its code', () => {
+  it('no zone of its own: the point this device last met at (mesh:meet-point), and an empty code', () => {
+    localStorage.setItem('hc:room', 'downtown')
+    localStorage.setItem('hc:secret', 'rose')
+    meshSession.writeMeshZone({ relay: 'wss://pluginthematrix.com', code: 'k-9' })
+    sessionStorage.clear()
+    const modal = open({ join: true })
+    expect(modal.roomDraft()).toBe('downtown')
+    expect(modal.pointDraft()).toBe('pluginthematrix.com')
+    expect(modal.codeDraft()).toBe('')
+  })
+
+  it('a tab with a zone of its own keeps its own point — the default included', () => {
+    meshSession.writeMeshZone({ relay: 'wss://pluginthematrix.com' })
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's' }))
+    expect(open({ join: true }).pointDraft()).toBe('')
+  })
+})
+
+describe('ZI-1 / ZI-6: the selector\'s words', () => {
+  it('preview the zone START will store: typed text folds (D6), the store\'s own value is read as held', async () => {
+    const { secretTag } = await import('@hypercomb/core')
+    const plain = secretTag('lifecycle\0downtown\0joe\'s', 'en')
+    const modal = open({ room: 'ｄｏｗｎｔｏｗｎ', secret: 'joe’s' })
+    expect(modal.zoneWords()).toBe(plain)        // what a friend typing plain text reads
+    // A pair the store already holds (recorded before the fold) previews as held.
+    room.value = 'joe’s place'
+    const held = open({ room: 'joe’s place', secret: 'joe’s' })
+    expect(held.zoneWords()).toBe(secretTag('lifecycle\0joe’s place\0joe\'s', 'en'))
+    typeInto(held.onRoomInput, 'joe’s place ')
+    expect(held.zoneWords()).toBe(secretTag('lifecycle\0joe’s place\0joe\'s', 'en'))
+  })
+
+  it('fold the point typed — the default keeps today\'s pair — from the English list, the reader\'s own beside it', async () => {
+    const { secretTag } = await import('@hypercomb/core')
+    const today = secretTag('lifecycle\0downtown\0rose', 'en')
+    const modal = open({ room: 'downtown', secret: 'rose' })
+    expect(modal.zoneWords()).toBe(today)
+    typeInto(modal.onPointInput, 'pluginthematrix.com')
+    const atPoint = modal.zoneWords()
+    expect(atPoint).not.toBe(today)
+    typeInto(modal.onPointInput, 'wss://jwize.com')
+    expect(modal.zoneWords()).toBe(today)
+
+    services.set('@hypercomb.social/I18n', { locale: 'ja' })
+    const ja = open({ room: 'downtown', secret: 'rose' })
+    expect(ja.zoneWords()).toBe(`${today} (${secretTag('lifecycle\0downtown\0rose', 'ja')})`)
   })
 })

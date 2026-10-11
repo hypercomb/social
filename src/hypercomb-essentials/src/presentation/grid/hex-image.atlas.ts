@@ -50,6 +50,8 @@ export class HexImageAtlas {
   // hard display rule is that a tile NEVER renders without its image
   // outside text-only mode. The ring allocator steps over pinned slots.
   #pinned: ReadonlySet<string> = new Set()
+  // One warning per atlas, not one per picture per pass.
+  #overflowWarned = false
 
   readonly #cols: number
   readonly #rows: number
@@ -164,28 +166,34 @@ export class HexImageAtlas {
     }
   }
 
+  /** Claim the next slot for `sig`, stepping over slots whose occupant is
+   *  pinned (on screen) — a visible tile must never lose its pixels mid-view.
+   *  Bounded scan. When EVERY slot is pinned (a layer with more pictures than
+   *  slots) there is NO slot: -1, nothing evicted, nothing announced. Evicting
+   *  a pinned picture fired `hex-image-atlas:evicted` for an on-screen tile,
+   *  whose healing repaint evicted the next one — the label atlas's twin of
+   *  SCALE-1's loop that never converges. The picture left out paints
+   *  label-only until a slot frees. */
+  #allocSlot(sig: string): number {
+    const capacity = this.#cols * this.#rows
+    for (let scanned = 0; scanned < capacity; scanned++) {
+      const slot = this.#nextSlot % capacity
+      this.#nextSlot++
+      const occupant = this.#slotToSig[slot]
+      if (occupant === null || occupant === sig || !this.#pinned.has(occupant)) return slot
+    }
+    if (!this.#overflowWarned) {
+      this.#overflowWarned = true
+      console.warn(`[HexImageAtlas] every slot pinned — more on-screen pictures than the ${capacity} atlas slots; the rest paint label-only until a slot frees`)
+    }
+    return -1
+  }
+
   async #loadInto(sig: string, blob: Blob): Promise<ImageUV | null> {
     const tLoad = performance.now()
-    // Step over slots whose occupant is pinned (on screen) — a visible
-    // tile must never lose its pixels mid-view. Bounded scan; if EVERY
-    // slot is pinned (a layer bigger than the atlas) fall back to plain
-    // reuse — the eviction event downstream schedules the repaint that
-    // keeps the display converging.
-    const capacity = this.#cols * this.#rows
-    let slot = this.#nextSlot % capacity
-    for (let scanned = 0; scanned < capacity; scanned++) {
-      const occupant = this.#slotToSig[slot]
-      if (occupant === null || occupant === sig || !this.#pinned.has(occupant)) break
-      this.#nextSlot++
-      slot = this.#nextSlot % capacity
-      if (scanned === capacity - 1) {
-        console.warn('[HexImageAtlas] every slot pinned — layer exceeds atlas capacity, evicting a pinned slot')
-      }
-    }
-    this.#nextSlot++
-
-    const col = slot % this.#cols
-    const row = Math.floor(slot / this.#cols)
+    // Before the decode: a picture with nowhere to go costs nothing.
+    let slot = this.#allocSlot(sig)
+    if (slot < 0) return null
 
     let bitmap: ImageBitmap
     try {
@@ -234,6 +242,17 @@ export class HexImageAtlas {
       console.warn(`[HexImageAtlas] createImageBitmap failed for ${sig.slice(0, 12)}… (attempt ${this.#recordFailure(sig)}/${HexImageAtlas.MAX_RETRIES})`)
       return null
     }
+
+    // The pin set can change across the decode await — a pass pins its page
+    // while this picture decodes. Never overwrite a slot that came on screen
+    // meanwhile: claim another, or give the picture up like any overflow.
+    const holder = this.#slotToSig[slot]
+    if (holder !== null && holder !== sig && this.#pinned.has(holder)) {
+      slot = this.#allocSlot(sig)
+      if (slot < 0) { bitmap.close(); return null }
+    }
+    const col = slot % this.#cols
+    const row = Math.floor(slot / this.#cols)
 
     let texture: Texture
     try {

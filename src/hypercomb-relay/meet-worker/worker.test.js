@@ -358,3 +358,71 @@ test('recycling never uses the install publisher key, and the meeting link it pr
   const fragment = link.slice(link.indexOf('#meet=') + '#meet='.length)
   assert.ok(fragment.split('/').some((part) => decodeURIComponent(part).includes('/')))
 })
+
+test('a door question that fails is no refusal: the dial goes to the object, which checks the code itself', async () => {
+  // The real object behind the router, its code set by its operator.
+  const { object } = await meetingPoint()
+  const code = newCode()
+  assert.equal((await recycle(object, { hash: sha256Hex(code) })).status, 200)
+  let failures = 0                 // door questions still to fail
+  let failWith = 'throw'           // how: a rejected fetch, or an answer that is no answer
+  let doorAsked = 0
+  let forwarded = 0
+  const env = {
+    MEETING: {
+      idFromName: (name) => ({ name }),
+      get: () => ({
+        fetch: async (request) => {
+          const path = new URL(request.url).pathname
+          if (path === CODE_PATH) return new RealResponse('{}')  // a recycle answered: this isolate forgets its copy
+          if (path === '/.well-known/hc-meet/door') {
+            doorAsked++
+            if (failures > 0) {
+              failures--
+              if (failWith === 'throw') throw new Error('Durable Object reset because its code was updated.')
+              return new RealResponse('overloaded', { status: 503 })
+            }
+          }
+          if (String(request.headers.get('upgrade') || '').toLowerCase() === 'websocket') forwarded++
+          return object.fetch(request)
+        },
+      }),
+    },
+  }
+  const dialRouter = async (token) => {
+    const res = await worker.fetch(new Request('https://pluginthematrix.com/', { headers: { upgrade: 'websocket', 'sec-websocket-protocol': token } }), env)
+    assert.equal(res.status, 101)
+    return globalThis.__lastPairs.at(-1)
+  }
+  // A FRESH isolate (a phone woke on another colo; a deploy recycled the
+  // isolates): no copy of the hash in force.
+  await worker.fetch(new Request(CODE_URL, { method: 'POST', body: '{}' }), env)
+
+  failures = 1
+  const first = await dialRouter(`hc-access.${code}`)
+  assert.equal(first.closedWith, null, 'the current code is let in — never 4401 for a code nobody refused')
+  assert.equal(first.accepted, 'hibernation', 'one of the object\'s own sockets')
+  assert.equal(forwarded, 1, 'forwarded, not answered in front')
+
+  failWith = 'answer'
+  failures = 1
+  const second = await dialRouter(`hc-access.${code}`)
+  assert.equal(second.closedWith, null, 'an answer that is no answer (503, not JSON) is a failed question too')
+  assert.equal(forwarded, 2)
+
+  // A wrong code forwarded while the door cannot be asked is still refused —
+  // by the object, which checks every code it is handed.
+  failWith = 'throw'
+  failures = 1
+  const wrong = await dialRouter(`hc-access.${newCode()}`)
+  assert.deepEqual(wrong.closedWith, { code: 4401, reason: 'access: code refused' })
+  assert.deepEqual(wrong.sent, [], 'not one frame')
+
+  // Once the door answers, a wrong code is refused in front again: the
+  // object hears nothing of a flood.
+  const before = forwarded
+  for (let i = 0; i < 10; i++) assert.equal((await dialRouter(`hc-access.${newCode()}`)).closedWith?.code, 4401)
+  assert.equal(forwarded, before, 'no wrong code reached the object once the door answered')
+  assert.ok(doorAsked >= 4)
+  for (const s of [first, second]) object.webSocketClose(s, 1000, '', true)
+})

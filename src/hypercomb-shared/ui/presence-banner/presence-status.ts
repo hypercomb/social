@@ -28,6 +28,17 @@ import { secretTag } from '@hypercomb/core'
  *  "Can't reach <host>" — and the header glyph goes from amber to off. */
 export const UNREACHABLE_AFTER_MS = 30_000
 
+/** How long a STALLED socket — still OPEN, its liveness probe unanswered for
+ *  1.5 s — reads as "Live · slow connection" rather than "Reconnecting": the
+ *  rest of the mesh's 4 s probe deadline (nostr-mesh PROBE_DEADLINE_MS −
+ *  STALL_AFTER_MS). Busy venue wifi answers in 2 s and never drops; past the
+ *  deadline the mesh dials a replacement, and that is a reconnect. */
+export const SLOW_FOR_MS = 2_500
+
+/** How long the current page's word may go untaken by the relay (no NIP-01
+ *  OK yet) before the line says "Sending…". */
+export const SENDING_AFTER_MS = 3_000
+
 /** NostrMeshDrone's `mesh:connection` payload. */
 export interface MeshConnection {
   state?: string
@@ -62,6 +73,29 @@ export interface ShareStatus {
    *  why, never counted as uploading (a publish domain that does not
    *  resolve, answers a page, refuses or is full). */
   blocked?: readonly BlockedBranch[]
+  /** The hosts that keep this page's name-only tiles names, from the gate's
+   *  own verdict (the blocking host of each child's closure), with how many
+   *  tiles each holds back. Absent on an older swarm. */
+  held?: readonly HeldHost[]
+  /** Hosts passed over this session (refused, full, silent) — this page's,
+   *  and its offered branches' (a publish domain that refuses, D2). */
+  passedOver?: readonly string[]
+  /** Whether the relay has taken this page's newest word (its NIP-01 OK). */
+  taken?: boolean
+}
+
+/** One host that holds tiles back as names (SwarmDrone share-status held). */
+export interface HeldHost {
+  host?: string
+  /** refused · never-answered · too-large · full · unreachable · … */
+  state?: string
+  reason?: string
+  /** How many of this page's tiles it holds back. */
+  count?: number
+  names?: readonly string[]
+  /** The tiles CAN be taken; only their deeper pages are held (they open
+   *  from this device while it is in the room — D1). Never "stay names". */
+  deep?: boolean
 }
 
 /** One branch a host holds (SwarmDrone #blockedBranches). */
@@ -111,32 +145,138 @@ export function linkPhase(
   return wasOpen || conn.reopened ? 'reconnecting' : 'connecting'
 }
 
-/** The relay refused our events because this device's clock is far off. */
-export function clockRefused(conn: MeshConnection | null): boolean {
+/** The relay's standing refusal, as a reason word ('' when none). */
+export function refusalOf(conn: MeshConnection | null): string {
   const r = conn?.refused
   const reason = typeof r === 'string' ? r : (r as { reason?: unknown } | null | undefined)?.reason
-  return typeof reason === 'string' && /clock/i.test(reason)
+  return typeof reason === 'string' ? reason : ''
 }
 
-/** THE ROOM'S TWO WORDS — from the room and secret only, never the page, so
- *  everyone in one room reads the same pair wherever they stand and can
- *  check it out loud. The preimage is the swarm's own lifecycle channel
- *  (`lifecycle \0 room \0 secret`), the one roster every member of the room
- *  beacons on: same pair, same room. Empty when there is no room at all. */
-export function roomWords(room: string, secret: string, locale = 'en'): string {
+/** The relay refused our events because this device's clock is far off. */
+export function clockRefused(conn: MeshConnection | null): boolean {
+  return /clock/i.test(refusalOf(conn))
+}
+
+/** A socket that is still OPEN but slow to answer its probe: 'stalled' for
+ *  less than SLOW_FOR_MS. It is live — the line says "slow connection", never
+ *  "Reconnecting" (which a working socket on busy wifi flickered every 10-20
+ *  s). `now` is the caller's clock; a clock older than the stall reads young. */
+export function slowLink(conn: MeshConnection | null, now: number): boolean {
+  if (conn?.state !== 'stalled') return false
+  const since = typeof conn.since === 'number' && conn.since > 0 ? conn.since : now
+  return now - since < SLOW_FOR_MS
+}
+
+/** The header glyph's three states, by the line's own rules: an OPEN socket
+ *  slow to answer is live (never the amber reconnect — TS-6), and a standing
+ *  refusal no wait cures (the meeting point wants the current code, or names
+ *  a computer's own relay this page cannot reach) is down at once, not after
+ *  UNREACHABLE_AFTER_MS of amber. null until the mesh has said anything. */
+export function headerLink(conn: MeshConnection | null, downSince: number | null, now: number): 'open' | 'pending' | 'down' | null {
+  const phase = linkPhase(conn, downSince, now, true)
+  if (!phase) return null
+  if (phase === 'open' || slowLink(conn, now)) return 'open'
+  const refused = refusalOf(conn)
+  if (refused === 'access' || refused === 'unreachable') return 'down'
+  return phase === 'down' ? 'down' : 'pending'
+}
+
+/** The shipped default meeting point (nostr-mesh LIVE_RELAY): a room met
+ *  there keeps the words it always had. */
+export const SHIPPED_POINT = 'jwize.com'
+
+/** A meeting point as the words fold it: its host[:port], lowercase, from a
+ *  relay URL or a bare name ('wss://Point.example/' → 'point.example',
+ *  'ws://localhost:7896' → 'localhost:7896'). '' for none — and for the
+ *  shipped default, so a default-relay room's words never change. */
+export function meetingPointKey(point: string): string {
+  let text = String(point ?? '').trim()
+  if (!text) return ''
+  if (!/^wss?:\/\//i.test(text)) text = `wss://${text}`
+  try {
+    const host = new URL(text).host.toLowerCase()
+    return host && host !== SHIPPED_POINT ? host : ''
+  } catch { return '' }
+}
+
+/** THE ROOM'S TWO WORDS — from the room, the secret and the meeting point,
+ *  never the page, so everyone in one room reads the same pair wherever they
+ *  stand and can check it out loud. The preimage is the swarm's own
+ *  lifecycle channel (`lifecycle \0 room \0 secret`), the one roster every
+ *  member of the room beacons on — plus the meeting point when it is not the
+ *  shipped default (D4, 2026-10-10): a meeting split across two relays is
+ *  two rooms, and its halves now read two pairs. Always from the ENGLISH
+ *  list, whatever the reader's language: a bilingual room compares one pair
+ *  out loud (the localized pair may be shown beside it — `wordsBeside`).
+ *  Empty when there is no room at all. */
+export function roomWords(room: string, secret: string, point = ''): string {
   const r = String(room ?? '').trim()
   const s = String(secret ?? '').trim()
   if (!r && !s) return ''
-  return secretTag(`lifecycle\0${r}\0${s}`, locale)
+  const p = meetingPointKey(point)
+  return secretTag(p ? `lifecycle\0${r}\0${s}\0${p}` : `lifecycle\0${r}\0${s}`, 'en')
+}
+
+/** The comparison words with the reader's own pair beside them when their
+ *  language has its own list: 'light moss (うるわしい しま)'. */
+export function wordsBeside(room: string, secret: string, point = '', locale = 'en'): string {
+  const words = roomWords(room, secret, point)
+  if (!words || !locale || locale === 'en') return words
+  const p = meetingPointKey(point)
+  const r = String(room ?? '').trim()
+  const s = String(secret ?? '').trim()
+  const local = secretTag(p ? `lifecycle\0${r}\0${s}\0${p}` : `lifecycle\0${r}\0${s}`, locale)
+  return local && local !== words ? `${words} (${local})` : words
+}
+
+/** Damerau-Levenshtein (optimal string alignment) distance, capped: returns
+ *  max + 1 as soon as the rows prove it is larger. */
+export function editDistance(a: string, b: string, max = 2): number {
+  if (a === b) return 0
+  if (Math.abs(a.length - b.length) > max) return max + 1
+  const rows: number[][] = [Array.from({ length: b.length + 1 }, (_, j) => j)]
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i]
+    let best = i
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      let d = Math.min(rows[i - 1]![j]! + 1, row[j - 1]! + 1, rows[i - 1]![j - 1]! + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d = Math.min(d, rows[i - 2]![j - 2]! + 1)
+      row.push(d)
+      if (d < best) best = d
+    }
+    if (best > max) return max + 1
+    rows.push(row)
+  }
+  return rows[a.length]![b.length]!
+}
+
+/** "did you mean hypercomb.com?" — the nearest known host within two edits
+ *  (a swap counts as one) of a host that never answered. Local only: the
+ *  candidates are hosts this device already knows. '' when none is close. */
+export function didYouMean(host: string, known: readonly string[]): string {
+  const h = String(host ?? '').trim().toLowerCase()
+  if (!h) return ''
+  let best = ''
+  let bestD = 3
+  for (const raw of known) {
+    const k = String(raw ?? '').trim().toLowerCase()
+    if (!k || k === h) continue
+    const d = editDistance(h, k, 2)
+    if (d < bestD) { best = k; bestD = d }
+  }
+  return best
 }
 
 /** One piece of the line: a catalog key (with params), or the
- *  participant's own text (room, word pair). `action` makes it a button. */
+ *  participant's own text (room, word pair). `action` makes it a button:
+ *  invite hands out the meeting link, share offers the private tiles here,
+ *  code opens the selector on the access code (a recycled meeting link). */
 export interface StatusPart {
   key?: string
   params?: Record<string, string | number>
   text?: string
-  action?: 'invite' | 'share'
+  action?: 'invite' | 'share' | 'code'
 }
 
 export interface StatusLine {
@@ -164,7 +304,8 @@ export interface StatusInput {
   words: string
   /** Everyone live in the room, you included. */
   roomCount: number
-  /** Everyone live on this page, you included. */
+  /** Everyone standing on this page — you included once the relay has taken
+   *  your word for it (until then you are on your way, not here). */
   hereCount: number
   /** This page's share status, when the swarm has walked it. */
   share: ShareStatus | null
@@ -175,6 +316,23 @@ export interface StatusInput {
   /** The last refusal the relay gave an event (other than rate limits,
    *  which the mesh retries itself); '' when none is current. */
   rejected: string
+  /** The relay's standing refusal of the connection (refusalOf): 'access',
+   *  'unreachable', 'subscriptions', 'clock' — '' or absent when none. */
+  refused?: string
+  /** The meeting point this tab is joined at, as named ('' = the default) —
+   *  what the 'unreachable' line names when the page cannot dial it. */
+  point?: string
+  /** The socket is open but slow to answer (slowLink). */
+  slow?: boolean
+  /** This page's newest word has gone untaken for SENDING_AFTER_MS. */
+  sending?: boolean
+  /** Hosts this device knows (the pool, the page's hosts, every host it has
+   *  heard from) — what a never-answering name is checked against. A
+   *  function is read only when a host on the line never answered. */
+  knownHosts?: readonly string[] | (() => readonly string[])
+  /** The names of members whose tiles here can be taken while their deeper
+   *  pages are still only on their device (deep: 'owner', D1). */
+  deepOwners?: readonly string[]
 }
 
 /** Host answers that keep a participant's tiles name-only, by catalog key. */
@@ -184,6 +342,9 @@ const HOST_HELD: Readonly<Record<string, string>> = {
   'full': 'swarm.share.full',
   'too-large': 'swarm.share.too-large',
   'unreachable': 'swarm.share.unreachable',
+  // A host no HTTP status ever came from (a name that does not resolve):
+  // as unreachable, with the near-miss spelling offered beside it.
+  'never-answered': 'swarm.share.unreachable',
   'not-live': 'swarm.share.not-live',
 }
 
@@ -196,15 +357,47 @@ const BRANCH_HELD: Readonly<Record<string, string>> = {
   'unreachable': 'swarm.share.branch.unreachable',
 }
 
+/** A host that has never answered (a name that does not resolve, the
+ *  `hyperccomb.com` typo) is the one a near-miss spelling is offered for. */
+const NEVER_ANSWERED = new Set(['never-answered', 'unresolved'])
+
 const branchPart = (b: BlockedBranch): StatusPart => ({
-  key: BRANCH_HELD[String(b.why ?? '')] ?? BRANCH_HELD[String(b.state ?? '')] ?? BRANCH_HELD['unreachable'],
+  key: BRANCH_HELD[String(b.why ?? '')] ?? BRANCH_HELD[String(b.state ?? '')]
+    ?? (NEVER_ANSWERED.has(String(b.why ?? b.state ?? '')) ? BRANCH_HELD['unresolved'] : BRANCH_HELD['unreachable']),
   params: { branch: String(b.branch ?? ''), host: String(b.host ?? '') },
 })
+
+/** A host holding tiles back as names, by its state, by catalog key:
+ *  "<host> … — N tiles stay names". */
+const HELD_HOST: Readonly<Record<string, string>> = {
+  'refused': 'share.held.refused',
+  'not-live': 'share.held.refused',
+  'page': 'share.held.refused',
+  'never-answered': 'share.held.never-answered',
+  'unresolved': 'share.held.never-answered',
+  'too-large': 'share.held.too-large',
+  'full': 'share.held.full',
+}
+/** Which held host the line names when several do: the one holding the
+ *  most tiles, then the one least likely to come back by itself. */
+const HELD_RANK: Readonly<Record<string, number>> = { 'never-answered': 5, 'unresolved': 5, 'refused': 4, 'page': 4, 'not-live': 3, 'full': 2, 'too-large': 1 }
 
 const count = (n: unknown): number => {
   const v = Number(n)
   return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0
 }
+
+/** "did you mean …?" after a host that never answered, when a host this
+ *  device knows is within two edits of it. */
+const nearMiss = (host: string, state: string, known: StatusInput['knownHosts']): StatusPart[] => {
+  if (!NEVER_ANSWERED.has(state)) return []
+  const near = didYouMean(host, (typeof known === 'function' ? known() : known) ?? [])
+  return near ? [{ key: 'share.held.did-you-mean', params: { host: near } }] : []
+}
+
+/** A meeting point as a person reads it: the default scheme dropped, a
+ *  computer's own ws:// kept (it is the whole point of the line). */
+const pointText = (point: string): string => String(point ?? '').trim().replace(/^wss:\/\//i, '').replace(/\/+$/, '')
 
 export function statusLine(i: StatusInput): StatusLine {
   const host = i.host
@@ -212,8 +405,21 @@ export function statusLine(i: StatusInput): StatusLine {
   const upload = i.uploadHost || host
   const parts: StatusPart[] = []
   let tone: StatusLine['tone'] = 'live'
+  const refused = String(i.refused ?? '')
 
-  if (i.phase === 'connecting') {
+  if (refused === 'access' && i.phase !== 'open') {
+    // The meeting point closed 4401: this tab's access code is not its
+    // current one (the operator recycled it, or the link is old). No wifi
+    // fixes that, and waiting 30 s first only hides it — say so at once,
+    // with the one remedy: the newest meeting link (or its code).
+    parts.push({ key: 'mesh.state.access', params: { host } }, { key: 'mesh.state.access-action', action: 'code' })
+    tone = 'down'
+  } else if (refused === 'unreachable' && i.phase !== 'open') {
+    // Joined at a meeting point this page may not dial (a computer's own
+    // ws://localhost relay, opened from a real host): it meets nowhere.
+    parts.push({ key: 'mesh.state.unreachable-local', params: { relay: pointText(i.point || host) } })
+    tone = 'down'
+  } else if (i.phase === 'connecting') {
     parts.push({ key: 'mesh.state.connecting', params: { host } })
     tone = 'warn'
   } else if (i.phase === 'reconnecting') {
@@ -224,12 +430,27 @@ export function statusLine(i: StatusInput): StatusLine {
     tone = 'down'
   } else {
     parts.push({ key: 'mesh.state.live' })
+    // Slow, not gone: the socket is open and answers late. Said, never as
+    // "Reconnecting", and the tone stays live.
+    if (i.slow) parts.push({ key: 'mesh.state.slow' })
     if (i.room) parts.push({ text: i.room })
     if (i.words) parts.push({ text: i.words })
     if (i.roomCount <= 1) {
       parts.push({ key: 'presence.room-alone' }, { key: 'presence.room-invite', action: 'invite' })
     } else {
-      parts.push({ key: 'presence.room-count', params: { count: i.roomCount, here: Math.max(1, i.hereCount) } })
+      parts.push({ key: 'presence.room-count', params: { count: i.roomCount, here: Math.max(0, Math.floor(i.hereCount)) } })
+    }
+    // The relay has not taken this page's word yet: peers do not see you
+    // here, whatever the socket says.
+    if (i.sending) {
+      parts.push({ key: 'mesh.state.sending' })
+      tone = 'warn'
+    }
+    // The meeting point takes no more listeners on this socket: the room is
+    // partly deaf here until the tab reloads.
+    if (refused === 'subscriptions') {
+      parts.push({ key: 'mesh.state.subscriptions' })
+      tone = 'warn'
     }
 
     // What THIS participant is offering here — only meaningful while the
@@ -248,10 +469,14 @@ export function statusLine(i: StatusInput): StatusLine {
     // named so only while its live word still holds it.
     const blocked = (share?.blocked ?? []).filter(b => !!b?.branch && !!b.host && (b.host !== upload || !!held))
     const own = held ? blocked.find(b => b.host === upload) : undefined
+    // Hosts already named on the line — a later part never names one twice.
+    const named = new Set<string>()
     if (held) {
       // Names only — the count would promise more than the room receives.
       // The host's live why beats the walk's snapshot of it.
-      parts.push(own ? branchPart({ ...own, why: i.sync?.why || own.why }) : { key: held, params: { host: upload } })
+      const why = String(i.sync?.why || own?.why || hostWord)
+      parts.push(own ? branchPart({ ...own, why: i.sync?.why || own.why }) : { key: held, params: { host: upload } }, ...nearMiss(upload, why, i.knownHosts))
+      named.add(upload)
       tone = 'warn'
     } else {
       if (share && count(share.offered) > 0) {
@@ -259,11 +484,39 @@ export function statusLine(i: StatusInput): StatusLine {
           ? { key: 'swarm.share.uploading', params: { count: count(share.offered), uploading: count(share.uploading) } }
           : { key: 'swarm.share.sharing', params: { count: count(share.offered) } })
       }
+      // WHO HOLDS THE NAMES (TS-1/BCL-2): the gate's own verdict names the
+      // host each name-only child waits on — a publish domain below a branch
+      // that refuses, never answered or is full, while this page's own host
+      // is fine. The worst of them is named, with how many tiles it holds
+      // back, instead of the page reading "uploading" in the all-is-well
+      // tone for ever.
+      const heldHosts = (share?.held ?? []).filter(h => !!h?.host && count(h.count) > 0)
+      const worstOf = (groups: readonly HeldHost[]): HeldHost | undefined => [...groups].sort((a, b) =>
+        count(b.count) - count(a.count) || (HELD_RANK[String(b.state ?? '')] ?? 0) - (HELD_RANK[String(a.state ?? '')] ?? 0))[0]
+      const worst = worstOf(heldHosts.filter(h => h.deep !== true))
+      if (worst) {
+        const state = String(worst.state ?? '')
+        parts.push({ key: HELD_HOST[state] ?? 'share.held.not-here', params: { host: String(worst.host), count: count(worst.count) } }, ...nearMiss(String(worst.host), state, i.knownHosts))
+        named.add(String(worst.host))
+        tone = 'warn'
+      }
+      // Tiles the room CAN take whose deeper pages a host is not taking:
+      // never "stay names" — they open from this device while it is here.
+      const deepWorst = worstOf(heldHosts.filter(h => h.deep === true && !named.has(String(h.host))))
+      if (deepWorst) {
+        parts.push({ key: 'share.held.deep', params: { host: String(deepWorst.host), count: count(deepWorst.count) } }, ...nearMiss(String(deepWorst.host), String(deepWorst.state ?? ''), i.knownHosts))
+        named.add(String(deepWorst.host))
+        tone = 'warn'
+      }
       // Name-only tiles whose closure reaches content no store here holds
       // and no host serves: they stay names until someone who holds it shares.
       const notHeld = /missing|not-held/.test(share?.reason ?? '') || count(i.sync?.missing) > 0
       if (share && notHeld && count(share.nameOnly) > 0) {
         parts.push({ key: 'swarm.share.not-held', params: { count: count(share.nameOnly) } })
+        tone = 'warn'
+      } else if (share && !worst && blocked.length === 0 && count(share.nameOnly) > 0 && count(share.uploading) === 0) {
+        // Names, and nothing on its way for them: never "uploading".
+        parts.push({ key: 'share.names-only', params: { count: count(share.nameOnly) } })
         tone = 'warn'
       }
       if (tooLarge) {
@@ -272,9 +525,18 @@ export function statusLine(i: StatusInput): StatusLine {
       }
     }
     for (const b of blocked) {
-      if (b === own) continue
-      parts.push(branchPart(b))
+      if (b === own || named.has(String(b.host))) continue
+      parts.push(branchPart(b), ...nearMiss(String(b.host), String(b.why || b.state || ''), i.knownHosts))
+      named.add(String(b.host))
       tone = 'warn'
+    }
+    // Hosts passed over — this page's, and its branches' (a publish domain
+    // that refuses or never answered, D2): said whenever there is one, also
+    // once the tiles went by the pool and can be taken, so a mistyped domain
+    // never reads as the one hosting the branch.
+    const passed = (share?.passedOver ?? []).map(String).filter(h => !!h && !named.has(h))
+    if (share && passed.length > 0) {
+      parts.push({ key: 'share.passed-over', params: { host: passed.join(', ') } })
     }
     if (share && count(share.private) > 0) {
       parts.push(
@@ -282,6 +544,11 @@ export function statusLine(i: StatusInput): StatusLine {
         { key: 'swarm.share.offer', action: 'share' },
       )
     }
+    // A RECEIVER is told when a branch here opens its deeper pages from
+    // its sharer's device alone (D1): they go blank if that sharer leaves
+    // before the upload lands, and nothing else would say why.
+    const owners = (i.deepOwners ?? []).map(String).filter(Boolean)
+    if (owners.length > 0) parts.push({ key: 'share.deep-owner', params: { name: owners.join(', ') } })
     if (i.older > 0) {
       parts.push({ key: 'presence.room-older', params: { count: i.older } })
       tone = 'warn'
@@ -298,7 +565,7 @@ export function statusLine(i: StatusInput): StatusLine {
     if (tone === 'live') tone = 'warn'
   }
 
-  const compact = i.phase === 'open' ? `${i.roomCount} (${Math.max(1, i.hereCount)})` : ''
+  const compact = i.phase === 'open' ? `${i.roomCount} (${Math.max(0, Math.floor(i.hereCount))})` : ''
   const quiet = tone === 'live' && !parts.some(p => p.action)
   return { tone, parts, compact, quiet }
 }

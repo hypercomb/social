@@ -182,28 +182,24 @@ describe('the drain: the older word, room-scoped by the relay', () => {
     ])
   })
 
-  it('where the relay keeps the word inside the room, every ask is dual-published — an older holder that never asks is still asked', async () => {
+  it('a relay that keeps the word inside the room is no reason to copy every ask there — only an older build asking is (SCALE-3)', async () => {
     membership.joined = true
     enterRoom('alpha', 'secret')
     const channel = await channelOf('alpha', 'secret')
-    let addressed = true
-    ;(mesh as unknown as { relaysAddressed: () => boolean }).relaysAddressed = () => addressed
+    // Every relay's card says its reads are addressed.
+    ;(mesh as unknown as { relaysAddressed: () => boolean }).relaysAddressed = () => true
     const broker = await boot()
     await vi.waitFor(() => expect(mesh.listening()).toEqual([channel, WORD].sort()))
 
-    // No older build has asked anything — and the ask still reaches the word.
+    // No older build has asked anything: each ask goes out once, on the room.
     expect(await broker.fetchBySig('a'.repeat(64), 'layer', 150)).toBeNull()
-    expect(mesh.asks()).toEqual([
-      { kind: 20400, sig: channel, tags: [['d', 'a'.repeat(64)], ['t', 'layer']] },
-      { kind: 20400, sig: WORD, tags: [['d', 'a'.repeat(64)], ['t', 'layer'], ['asked', 'room']] },
-    ])
     expect(await broker.fetchVisualsAt('d'.repeat(64), 150)).toBeNull()
-    expect(mesh.asks().filter(p => p.tags.some(t => t[0] === 't' && t[1] === 'visuals')).map(p => p.sig)).toEqual([channel, WORD])
+    expect(mesh.asks().map(p => p.sig)).toEqual([channel, channel])
 
-    // A relay before the gate (the word heard by everyone): the room channel only.
-    addressed = false
+    // An older build is heard asking on the word: from then on it is asked there too.
+    mesh.deliver(WORD, ask(OLDER, 'e'.repeat(64), 'layer'))
     mesh.published = []
     expect(await broker.fetchBySig('b'.repeat(64), 'layer', 150)).toBeNull()
-    expect(mesh.asks().map(p => p.sig)).toEqual([channel])
+    expect(mesh.asks().map(p => p.sig)).toEqual([channel, WORD])
   })
 })

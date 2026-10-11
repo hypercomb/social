@@ -28,14 +28,30 @@ import { registerPoolMeaning, sandboxDoorOf } from '@hypercomb/core'
 import { installedPackageSig, stampInstalledPackage } from '@hypercomb/runtime/installed-package'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
 import { installCandidates, readInstallChannel, type ChannelRead } from '@hypercomb/runtime/host-packages'
+import { restoreMeetLink } from '@hypercomb/shared/core/invite-capture'
 import { cacheImportMap } from './resolve-import-map'
 import { shellInstallFollow, verifyIndexEvent } from './install-follow'
 
-export type BootStatus =
+export type BootStatus = (
   | { kind: 'cached' }
   | { kind: 'installing' }
   | { kind: 'installed' }
   | { kind: 'install-needed'; reason: 'no-source' | 'no-storage' | 'no-writable' }
+) & {
+  /** Only where the hive cannot live here (storageBlockedStatus): the
+   *  meeting link that brought the guest, for the welcome card to offer. */
+  meetLink?: string
+}
+
+/** THE HIVE CANNOT LIVE HERE — no storage, or none it can write. A meeting
+ *  link that brought the guest here is put back in the address bar and rides
+ *  the status to the welcome card, which offers it to copy: every remedy the
+ *  card names (a regular window, an updated browser) needs the link, and the
+ *  boot capture had already stripped it (CC-2). */
+export const storageBlockedStatus = (reason: 'no-storage' | 'no-writable'): BootStatus => {
+  const meetLink = restoreMeetLink()
+  return { kind: 'install-needed', reason, ...(meetLink ? { meetLink } : {}) }
+}
 
 /** Can this browser actually WRITE to OPFS? `getDirectory` alone is not the
  *  answer: iOS Safari 16.4–18.3 has it, but every write in the store goes
@@ -196,14 +212,14 @@ export const ensureInstall = async (): Promise<void> => {
     // explanation (private window / old Safari) instead of a Start button
     // that can only loop: every install source needs OPFS to land bytes.
     console.warn('[ensure-install] OPFS unavailable — skipping install; app will boot without persistence')
-    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-storage' } as BootStatus)
+    EffectBus.emit('boot:status', storageBlockedStatus('no-storage'))
     return
   }
 
   if (!opfsWritable()) {
     // OPFS opens but cannot be written (iOS 16.4–18.3): explain, don't loop.
     console.warn('[ensure-install] OPFS present but createWritable missing — browser too old to install')
-    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-writable' } as BootStatus)
+    EffectBus.emit('boot:status', storageBlockedStatus('no-writable'))
     return
   }
 

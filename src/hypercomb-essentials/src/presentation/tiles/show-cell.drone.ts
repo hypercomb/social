@@ -2368,6 +2368,36 @@ export class ShowCellDrone extends Drone {
   #evictRepaintCount = 0
   static readonly #EVICT_REPAINT_MAX = 8
 
+  /** SCALE-1. The labels the last paint pinned when the layer held MORE names
+   *  than the label atlas has slots: the cells in view plus a one-ring margin.
+   *  Null — the normal case — means the layer fits and every cell is pinned and
+   *  baked, exactly as before. Pinning every cell of an oversized layer pinned
+   *  every slot, so zooming in could never give the cells in view their text;
+   *  only cells in this set bake, the rest keep a slot they already hold or
+   *  draw without baked text. */
+  #labelView: ReadonlySet<string> | null = null
+  /** A settled gesture brought cells without a label slot into view — the
+   *  next applyGeometry must rebuild even though the cells did not change. */
+  #labelViewStale = false
+  /** True while applyGeometry bakes and builds. An eviction its own bake
+   *  causes needs no repaint — this pass is the repaint, and it reads every
+   *  cell's slot after the bake — so #onLabelAtlasEvicted stands aside. Without
+   *  this, a zoom into an oversized layer counted the not-yet-baked cells of
+   *  the same pass as "owed", spent the repaint bound and warned per eviction. */
+  #inPaintBake = false
+
+  /** Concurrent detached host fills (fillFromHost). A page of peer pictures
+   *  used to start every fetch at once — each one an HTTP probe plus a mesh
+   *  ask on the one socket, hundreds inside a second against the relay's
+   *  per-connection budget (SCALE-3). The rest wait in arrival order, each
+   *  under the location whose pass queued it: one the participant has left
+   *  is dropped when its turn comes, so a picture-heavy page's misses never
+   *  hold the next page's tiles dimmed behind them (its own pass re-asks on
+   *  a return). */
+  static readonly #HOST_FILL_CONCURRENCY = 8
+  #hostFillActive = 0
+  readonly #hostFillQueue = new Map<string, { owner: string; start: () => void }>()
+
   /** Location keys already warned about a futile readiness working set. */
   #repairFutileWarned = new Set<string>()
 
@@ -2490,7 +2520,11 @@ export class ShowCellDrone extends Drone {
         break outer
       }
     }
+    if (this.#inPaintBake) return
     for (const c of this.renderedCells.values()) {
+      // An oversized layer's out-of-view cells hold no slot by design; only
+      // the cells this paint pinned can be owed their glyphs.
+      if (this.#labelView && !this.#labelView.has(c.label)) continue
       if (this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))) continue
       if (!atlas.hasLabel(c.label)) {
         if (this.#evictRepaintCount >= ShowCellDrone.#EVICT_REPAINT_MAX) {
@@ -2503,6 +2537,70 @@ export class ShowCellDrone extends Drone {
         return
       }
     }
+  }
+
+  /** The label pin set for one paint (SCALE-1): null while the layer fits the
+   *  label atlas — every cell pins and bakes, as it always has — otherwise the
+   *  labels of the cells in view plus a one-ring margin (#labelsInView). */
+  #labelViewFor(cells: readonly Cell[]): Set<string> | null {
+    const atlas = this.atlas
+    if (!atlas || cells.length + 1 <= atlas.capacity) return null
+    return this.#labelsInView(cells)
+  }
+
+  /** Labels of the cells whose centres sit inside the screen grown by one hex
+   *  ring. Null while the viewport cannot be trusted — no mesh yet, or a
+   *  recenter, fit or offset restore still to run in this paint (the fit about
+   *  to run shows every cell anyway); the caller then pins every cell. */
+  #labelsInView(cells: Iterable<Cell>): Set<string> | null {
+    const mesh = this.hexMesh as { toGlobal?: (p: { x: number; y: number }) => { x: number; y: number } } | null
+    const screen = this.pixiRenderer?.screen
+    if (!mesh?.toGlobal || !screen || !(screen.width > 0) || !(screen.height > 0)) return null
+    if (this.#pendingRecenter || this.#pendingFitRestore || this.#pendingFirstVisitFit || this.#pendingMeshOffsetRestore) return null
+    const o = mesh.toGlobal({ x: 0, y: 0 })
+    const ex = mesh.toGlobal({ x: 1, y: 0 })
+    const ey = mesh.toGlobal({ x: 0, y: 1 })
+    const ax = ex.x - o.x, ay = ex.y - o.y, bx = ey.x - o.x, by = ey.y - o.y
+    const scale = Math.hypot(ax, ay)
+    if (!Number.isFinite(scale) || scale <= 0) return null
+    const { circumRadiusPx, gapPx } = this.#hexGeo
+    const spacing = circumRadiusPx + gapPx
+    // One ring: a neighbour's centre is √3·spacing from a cell's, and a cell
+    // straddling the edge reaches ~1.2·spacing past its own centre.
+    const margin = (Math.sqrt(3) + 1.2) * spacing * scale
+    const right = screen.width + margin
+    const bottom = screen.height + margin
+    const view = new Set<string>()
+    for (const c of cells) {
+      const p = this.axialToPixel(c.q, c.r, spacing, this.#flat)
+      const x = o.x + ax * p.x + bx * p.y
+      const y = o.y + ay * p.x + by * p.y
+      if (x >= -margin && y >= -margin && x <= right && y <= bottom) view.add(c.label)
+    }
+    return view
+  }
+
+  /** A gesture settled (the viewport persisted). On an oversized layer the
+   *  label slots belong to the cells that were in view at the last paint; when
+   *  the view now holds cells with no slot, repaint so they pin and bake. A
+   *  view identical to the pinned one would repaint to the same result (a
+   *  fitted page with more names than slots), so it does not. A layer that
+   *  fits returns on the first line, so nothing changes for it. */
+  #refreshLabelView = (): void => {
+    const atlas = this.atlas
+    const pinned = this.#labelView
+    if (!atlas || !pinned) return
+    const view = this.#labelsInView(this.renderedCells.values())
+    if (!view) return
+    let unslotted = false
+    for (const label of view) if (!atlas.hasLabel(label)) { unslotted = true; break }
+    if (!unslotted) return
+    let same = view.size === pinned.size
+    if (same) for (const label of view) if (!pinned.has(label)) { same = false; break }
+    if (same) return
+    this.#labelViewStale = true
+    this.#forceNextRender = true
+    this.requestRender()
   }
 
   /** Fast path for move:preview — skips OPFS/mesh/image loading, only rebuilds geometry with reordered labels */
@@ -5122,6 +5220,7 @@ export class ShowCellDrone extends Drone {
       && cells.length === this.renderedCount
       && nextImageAtlasGen === this.#bakedImageAtlasGen
       && nextLabelAtlasGen === this.#bakedLabelAtlasGen
+      && !this.#labelViewStale
     ) {
       return
     }
@@ -5158,16 +5257,31 @@ export class ShowCellDrone extends Drone {
     // The old layer's labels unpin here and become ordinary evictees.
     // PENDING_CELL_LABEL is displayed in place of any mid-mutation cell's
     // name, so it is part of the on-screen set whenever it is baked at all.
-    this.atlas.setPinned([...cells.map(c => c.label), PENDING_CELL_LABEL])
+    //
+    // A layer with more names than the atlas has slots (SCALE-1) pins only
+    // what is in view: pinning all of it pinned every slot, and then nothing a
+    // zoom brought into view could ever take one. Out-of-view cells are not
+    // baked at all — they keep a slot they already hold, or draw without baked
+    // text (buildFillQuadGeometry) until a settled gesture brings them in.
+    const view = this.#labelViewFor(cells)
+    this.#labelView = view
+    this.atlas.setPinned([...(view ?? cells.map(c => c.label)), PENDING_CELL_LABEL])
 
-    for (const cell of cells) {
-      const label = this.#pendingCellMutations.has(cell.label) && !this.atlas.hasLabel(cell.label)
-        ? PENDING_CELL_LABEL
-        : cell.label
-      this.atlas.getLabelUV(label)
+    let geom: Geometry
+    this.#inPaintBake = true
+    try {
+      for (const cell of cells) {
+        if (view && !view.has(cell.label)) continue
+        const label = this.#pendingCellMutations.has(cell.label) && !this.atlas.hasLabel(cell.label)
+          ? PENDING_CELL_LABEL
+          : cell.label
+        this.atlas.getLabelUV(label)
+      }
+
+      geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
+    } finally {
+      this.#inPaintBake = false
     }
-
-    const geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
 
     if (!this.shader) {
       this.shader = new HexSdfTextureShader(labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
@@ -5322,6 +5436,7 @@ export class ShowCellDrone extends Drone {
     // re-baked is the only thing that makes a generation "already applied".
     this.#bakedImageAtlasGen = nextImageAtlasGen
     this.#bakedLabelAtlasGen = nextLabelAtlasGen
+    this.#labelViewStale = false
     this.renderedCount = cells.length
     this.#recordRenderAudit('paint', cells.length, this.renderedLocationKey)
     // A real paint ends every hold on this location — drop both deadlines so a
@@ -5343,7 +5458,8 @@ export class ShowCellDrone extends Drone {
     const imagesConverged = !!this.imageAtlas && !cells.some(c =>
       c.imageSig && !this.imageAtlas!.hasImage(c.imageSig) && !this.imageAtlas!.hasFailed(c.imageSig))
     const labelsConverged = !this.atlas || !cells.some(c =>
-      !this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))
+      (!view || view.has(c.label))
+      && !this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))
       && !this.atlas!.hasLabel(c.label))
     if (imagesConverged && labelsConverged) {
       this.#evictRepaintCount = 0
@@ -5906,6 +6022,7 @@ export class ShowCellDrone extends Drone {
         && segments.every((s, i) => s === cur[i])
       if (same) {
         this.#layerViewportCache.set(this.renderedLocationKey, { ...(snapshot ?? {}) })
+        this.#refreshLabelView()
       }
     })
 
@@ -9080,9 +9197,25 @@ export class ShowCellDrone extends Drone {
     // full cascade and re-rendered on arrival. The Store negative-caches
     // misses, so an unresolvable sig costs one bounded cascade per TTL
     // window instead of a network storm on every synchronize pass.
+    // At most #HOST_FILL_CONCURRENCY run at once; the rest queue in arrival
+    // order (render order) and start as earlier fills conclude.
     const fillFromHost = (sig: string, label?: string): void => {
+      const queued = this.#hostFillQueue.get(sig)
+      if (this.#hostFillInFlight.has(sig) || queued?.owner === cacheOwner) return
+      // Still queued for a page left behind, and wanted here too: this page
+      // takes it over, in the place it already holds.
+      if (queued) { queued.owner = cacheOwner; queued.start = () => fillNow(sig, label); return }
+      if (this.#hostFillActive >= ShowCellDrone.#HOST_FILL_CONCURRENCY) {
+        this.#hostFillQueue.set(sig, { owner: cacheOwner, start: () => fillNow(sig, label) })
+        return
+      }
+      fillNow(sig, label)
+    }
+    const fillNow = (sig: string, label?: string): void => {
+      // A child warm may have claimed it while it queued — one fetch per sig.
       if (this.#hostFillInFlight.has(sig)) return
       this.#hostFillInFlight.add(sig)
+      this.#hostFillActive++
       void (async () => {
         try {
           const blob = await store.getResource(sig)
@@ -9123,7 +9256,11 @@ export class ShowCellDrone extends Drone {
           this.#forceNextRender = true
           this.requestRender()
         } catch { /* bounded by the Store's miss cache */ }
-        finally { this.#hostFillInFlight.delete(sig) }
+        finally {
+          this.#hostFillInFlight.delete(sig)
+          this.#hostFillActive--
+          this.#pumpHostFills()
+        }
       })()
     }
 
@@ -10119,6 +10256,18 @@ export class ShowCellDrone extends Drone {
     this.#pumpChildWarms()
   }
 
+  /** Start queued detached host fills while fewer than
+   *  #HOST_FILL_CONCURRENCY are running (see loadCellImages' fillFromHost). */
+  #pumpHostFills = (): void => {
+    while (this.#hostFillActive < ShowCellDrone.#HOST_FILL_CONCURRENCY && this.#hostFillQueue.size > 0) {
+      const [sig, queued] = this.#hostFillQueue.entries().next().value as [string, { owner: string; start: () => void }]
+      this.#hostFillQueue.delete(sig)
+      // Queued by a page the participant has since left: not this page's turn.
+      if (queued.owner !== this.#derivedLocationKey) continue
+      queued.start()
+    }
+  }
+
   #pumpChildWarms = (): void => {
     while (this.#childWarmActive < ShowCellDrone.#CHILD_WARM_CONCURRENCY && this.#childWarmQueue.length > 0) {
       const sig = this.#childWarmQueue.shift()!
@@ -11030,7 +11179,12 @@ export class ShowCellDrone extends Drone {
       const atlasLabel = !foreign && this.#pendingCellMutations.has(c.label) && !this.atlas!.hasLabel(c.label)
         ? PENDING_CELL_LABEL
         : c.label
-      const ruv = (this.#hidesName(c.hideText, !!imgUV) && c.label !== revealLabel)
+      // An oversized layer's out-of-view cell (#labelView) never claims a
+      // slot here: it reads the one it already holds, or none. Baking it
+      // would take a slot from another out-of-view cell — every pass, for
+      // every such cell.
+      const unbaked = !foreign && !!this.#labelView && !this.#labelView.has(c.label) && !this.atlas!.hasLabel(atlasLabel)
+      const ruv = (this.#hidesName(c.hideText, !!imgUV) && c.label !== revealLabel) || unbaked
         ? { u0: 0, v0: 0, u1: 0, v1: 0 }
         : this.atlas!.getLabelUV(atlasLabel)
       for (let i = 0; i < 4; i++) {

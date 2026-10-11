@@ -92,17 +92,18 @@ installNativeStorageOverride()
 installNativeSwBridge()
 // Capture a `/<sig>` meeting-place invite link before navigation parses the
 // URL — stashes the sig for the receive-side MeetingInviteWorker.
-import '@hypercomb/shared/core/invite-capture'
+import { keepRestoredMeetLink } from '@hypercomb/shared/core/invite-capture'
 // Restore the persisted header-size preset before first paint + register the
 // `/header` slash command (auto-wires via ioc.onRegister).
 import '@hypercomb/shared/core/header-size'
 
 import { bootstrapApplication } from '@angular/platform-browser'
+import { NavigationEnd, Router } from '@angular/router'
 import { EffectBus } from '@hypercomb/core'
 import { Store } from '@hypercomb/runtime/store'
 import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
-import { ensureInstall, installFromHosts, opfsWritable, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
+import { ensureInstall, installFromHosts, opfsWritable, storageBlockedStatus, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
 import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap, sessionBound } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
@@ -117,6 +118,20 @@ import { watchPackageFloor } from './setup/package-floor'
 
 // Ensure side-effect registration
 const _deps = [DependencyLoader]
+
+// THE WELCOME CARD'S "Copy meeting link" (app.html, where storage is blocked —
+// CC-2): a plain button carrying the link, answered here so the card needs no
+// handler of its own. The link also sits selectable beside it, for a browser
+// that refuses the clipboard.
+document.addEventListener('click', (event) => {
+  const button = (event.target as Element | null)?.closest?.('[data-hc-copy-meet]')
+  const link = button?.getAttribute('data-hc-copy-meet')
+  if (!button || !link) return
+  void navigator.clipboard?.writeText(link).then(() => {
+    const done = (get('@hypercomb.social/I18n') as { t?: (k: string) => string } | undefined)?.t?.('meet.link-copied')
+    button.textContent = done && done !== 'meet.link-copied' ? done : 'Copied — open it in a regular window'
+  }, () => { /* the field beside it is selectable */ })
+})
 
 const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
@@ -364,6 +379,18 @@ const bootstrap = async (): Promise<void> => {
 
   const appRef = await bootstrapApplication(App, appConfig)
   ;(window as any).__hcBoot('bootstrapApplication done (Angular first paint)')
+  // A meeting link put back in the address bar for a guest whose storage is
+  // blocked (CC-2) outlives the router's first navigation, which writes the
+  // address with the fragment decoded.
+  const router = appRef.injector.get(Router)
+  if (router.navigated) keepRestoredMeetLink()
+  else {
+    const first = router.events.subscribe(event => {
+      if (!(event instanceof NavigationEnd)) return
+      first.unsubscribe()
+      keepRestoredMeetLink()
+    })
+  }
   // Visitor builds wait for this boundary before handing the signed site
   // descriptor to HiveVisitDrone. By here dependencies and bees are loaded,
   // Angular is painted, and the existing preview path can receive the root.
@@ -393,7 +420,7 @@ const bootstrap = async (): Promise<void> => {
     // auto-firing this same handler into the same refusal.
     if (!nativeAvailable() && typeof navigator.storage?.getDirectory !== 'function') {
       console.warn('[main] persistent storage unavailable — install cannot proceed')
-      EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-storage' } as BootStatus)
+      EffectBus.emit('boot:status', storageBlockedStatus('no-storage'))
       return
     }
     // iOS 16.4–18.3 passes the gate above but cannot WRITE (no
@@ -401,7 +428,7 @@ const bootstrap = async (): Promise<void> => {
     // card would loop Start → Starting… forever. Explain instead.
     if (!opfsWritable()) {
       console.warn('[main] OPFS present but not writable — browser too old to install')
-      EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-writable' } as BootStatus)
+      EffectBus.emit('boot:status', storageBlockedStatus('no-writable'))
       return
     }
     void (async () => {

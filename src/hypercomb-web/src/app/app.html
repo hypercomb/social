@@ -37,10 +37,18 @@
 <div class="install-prompt" role="dialog" aria-modal="true" aria-labelledby="install-title">
   <div class="install-card">
     <h2 id="install-title">{{ 'install.title' | t }}</h2>
-    @if (storageBlocked()) {
-      <p class="install-blocked">{{ 'install.storage-blocked' | t }}</p>
-    } @else if (updateNeeded()) {
-      <p class="install-blocked">{{ 'install.update-needed' | t }}</p>
+    @if (storageBlocked() || updateNeeded()) {
+      <div>
+        <p class="install-blocked">{{ (storageBlocked() ? 'install.storage-blocked' : 'install.update-needed') | t }}</p>
+        <!-- A meeting link that brought the guest here (CC-2): back in the
+             address bar, and here to copy — every remedy above needs it.
+             The button is answered in main.ts (data-hc-copy-meet). -->
+        @if (bootStatus()?.meetLink; as meetLink) {
+          <input class="install-blocked" readonly [value]="meetLink" (focus)="$any($event.target).select()"
+                 style="display:block;width:100%;margin:0.5rem 0;font:inherit;background:transparent;border:1px solid rgba(255,255,255,0.15);padding:0.3rem" />
+          <button class="install-cta" type="button" [attr.data-hc-copy-meet]="meetLink">{{ 'meet.copy-link' | t }}</button>
+        }
+      </div>
     } @else {
       <button class="install-cta" type="button" (click)="startWelcome()" [disabled]="upgrading()">
         @if (upgrading()) { {{ 'install.starting' | t }} } @else { {{ 'install.start' | t }} }

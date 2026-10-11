@@ -37,14 +37,25 @@ export const writeLayerMarker = async (
   const bytes = layerMarkerBytes(layer)
   // A second writer may have claimed this name after our scan. Never replace
   // a marker: it is an immutable revision even when the next commit races.
+  // The refusal is NAMED so a writer can tell "another tab got here first —
+  // re-read the head and re-apply" apart from a broken write.
   try {
     await bag.getFileHandle(name, { create: false })
-    throw new Error(`Location marker ${name} already exists`)
+    throw Object.assign(new Error(`Location marker ${name} already exists`), { name: 'MarkerExistsError' })
   } catch (error) {
     if ((error as { name?: string })?.name !== 'NotFoundError') throw error
   }
   const handle = await bag.getFileHandle(name, { create: true })
   const writer = await handle.createWritable()
-  try { await writer.write(bytes.buffer as ArrayBuffer) } finally { await writer.close() }
+  // KEEP THE WRITE'S OWN ERROR. `finally { close() }` on a write that failed
+  // (a full device) threw "Cannot close a ERRORED writable stream" in place of
+  // the QuotaExceededError, so no caller could ever say "out of space".
+  try {
+    await writer.write(bytes.buffer as ArrayBuffer)
+    await writer.close()
+  } catch (error) {
+    try { await writer.abort() } catch { /* already errored */ }
+    throw error
+  }
   return { name, bytes }
 }

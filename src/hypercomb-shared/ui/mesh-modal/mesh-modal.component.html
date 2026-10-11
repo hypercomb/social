@@ -111,7 +111,9 @@
         @if (missingField() === 'secret') {
           <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.needs-secret' | t }}</p>
         }
-        <!-- The room's two words (room + secret only, never the page), live
+        <!-- The room's two words (room + secret, and the meeting point when it
+             is not the default — never the page; the English pair, the
+             reader's own beside it), live
              as the fields change — dressed like the crumb (◆ pair ◆) so the
              pair up top and on the presence line is recognisably THIS room
              once the window closes, for everyone in it. -->
@@ -132,6 +134,8 @@
           type="text"
           [placeholder]="'mesh-modal.point-placeholder' | t"
           [value]="pointDraft()"
+          [disabled]="!pointSupported()"
+          [style.opacity]="pointSupported() ? null : 0.55"
           [class.mesh-modal-input-missing]="missingField() === 'point'"
           (input)="onPointInput($event)"
           autocapitalize="off"
@@ -150,6 +154,8 @@
             [placeholder]="'mesh-modal.code-placeholder' | t"
             [attr.aria-label]="'mesh-modal.code-label' | t"
             [value]="codeDraft()"
+            [disabled]="!pointSupported()"
+            [style.opacity]="pointSupported() ? null : 0.55"
             [class.mesh-modal-input-missing]="missingField() === 'code'"
             (input)="onCodeInput($event)"
             autocapitalize="off"
@@ -160,6 +166,14 @@
         </div>
         @if (missingField() === 'code') {
           <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.bad-code' | t }}</p>
+        }
+        <!-- An older package forgets a meeting point on its first refresh and
+             cannot carry a code: the fields stay disabled, with the way out. -->
+        @if (!pointSupported()) {
+          <p class="mesh-modal-missing" role="status">
+            {{ 'zone.point-needs-update' | t }}
+            <button class="mesh-modal-chip mesh-modal-update" type="button" (click)="openPackages()">{{ 'zone.point-update' | t }}</button>
+          </p>
         }
       </section>
 

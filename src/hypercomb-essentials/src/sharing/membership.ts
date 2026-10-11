@@ -22,10 +22,24 @@
 // NOT rejoined silently somewhere else: it is put back in its own pair, left
 // unjoined, and the selector opens on it — one START and it is back.
 //
+// ONE TEXT, ONE ZONE: a room or secret written here that is not what its
+// store already holds is entered text (a link's, a typed word's) and is
+// folded by core's canonicalZoneText exactly as the stores fold it, so the
+// record and the store never disagree; what the store holds is recorded
+// verbatim, so a tab that joined before the fold keeps its pair.
+//
+// A SELECTOR WITH NO POINT FIELD (VO-5). Under a shell older than the
+// meeting point, the selector cannot show or clear the point an earlier link
+// left in this tab — a START there used to dial that old point with its old
+// code. A shell whose selector carries the point says so
+// (`__hcShellZoneUi`, mesh-session.ts); without it, a selector START
+// (`mesh:join`) lets the tab's point, host and code go and meets at the
+// default, as that selector shows.
+//
 // Seeded once from the session, then it follows `mesh:public-changed`, which
 // every join and leave path announces.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, canonicalZoneText } from '@hypercomb/core'
 
 const MESH_SESSION_KEY = 'hc:mesh-session'
 /** MIRRORED: hypercomb-shared/core/mesh-session.ts MESH_ZONE_KEY. */
@@ -60,30 +74,48 @@ export const readTabZone = (): TabZone | null => {
   } catch { return null }
 }
 
+type Cred = { value?: unknown; set?: (v: string) => void; addEventListener?: (t: string, h: () => void) => void }
+const ioc = (key: string): Cred | undefined => {
+  try { return (globalThis as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as Cred | undefined } catch { return undefined }
+}
+
+/** A room or secret on its way into the zone: what its store holds is kept
+ *  verbatim, anything else is entered text and folds. */
+const zoneText = (f: 'room' | 'secret', text: string): string => {
+  const held = ioc(f === 'room' ? ROOM_KEY : SECRET_KEY)?.value
+  return typeof held === 'string' && text === held.trim() ? text : canonicalZoneText(text)
+}
+
 /** Merge into this tab's zone, exactly as the shell's writeMeshZone does:
- *  undefined keeps a field, an empty relay/host/code removes it. */
+ *  undefined keeps a field, an empty relay/host/code removes it, and a room
+ *  or secret that is not the store's folds as entered text. */
 export const writeTabZone = (patch: TabZone): void => {
   const next: TabZone = { ...(readTabZone() ?? {}) }
   for (const f of FIELDS) {
     const v = patch[f]
     if (v === undefined) continue
     const clean = String(v ?? '').trim()
-    if (f === 'room' || f === 'secret') next[f] = clean
+    if (f === 'room' || f === 'secret') next[f] = zoneText(f, clean)
     else if (clean) next[f] = clean
     else delete next[f]
   }
   try { sessionStorage.setItem(MESH_ZONE_KEY, JSON.stringify(next)) } catch { /* no storage — this session only */ }
 }
 
+/** The zone THIS tab joined or chose — room and secret both recorded here,
+ *  never the origin-wide pre-fill another tab (or last week's meeting) left
+ *  behind — else null. A bare `join` / `use-live-relay` keeps only this. */
+export const ownZone = (): { room: string; secret: string } | null => {
+  const zone = readTabZone()
+  const room = zone?.room?.trim() ?? ''
+  const secret = zone?.secret?.trim() ?? ''
+  return room && secret ? { room, secret } : null
+}
+
 /** The meeting point this tab dials ('' = the default relay). */
 export const tabRelay = (): string => readTabZone()?.relay ?? ''
 /** The meeting host this tab's tiles go to ('' = none named). */
 export const tabMeetingHost = (): string => readTabZone()?.host ?? ''
-
-type Cred = { value?: unknown; set?: (v: string) => void; addEventListener?: (t: string, h: () => void) => void }
-const ioc = (key: string): Cred | undefined => {
-  try { return (globalThis as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as Cred | undefined } catch { return undefined }
-}
 
 /** Record the pair the stores hold as this tab's — at a join, and on any
  *  change while joined (a shell older than the zone does not). */
@@ -126,6 +158,20 @@ EffectBus.on<{ public?: boolean }>('mesh:public-changed', (p) => {
   joined = p?.public === true
   if (joined) pinFromStores()
 })
+
+// VO-5: a selector START under a shell whose selector has no point field.
+// Armed after subscribing, so an earlier START replayed by the bus is not
+// taken for this one.
+let selectorArmed = false
+EffectBus.on('mesh:join', () => {
+  if (!selectorArmed) return
+  if ((globalThis as { __hcShellZoneUi?: boolean }).__hcShellZoneUi === true) return
+  const zone = readTabZone()
+  if (!zone?.relay && !zone?.host && !zone?.code) return
+  writeTabZone({ relay: '', host: '', code: '' })
+  EffectBus.emit('mesh:zone', { relay: '' })
+})
+selectorArmed = true
 
 // A room changed while joined (the selector, /use-live-relay) moves the
 // tab's zone with it, so the next reload resumes where the tab went.

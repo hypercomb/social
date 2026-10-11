@@ -41,7 +41,9 @@ interface StoreLike {
   getResource: (sig: string) => Promise<Blob | null>
   putResource?: (blob: Blob, options?: { emit?: boolean }) => Promise<string>
 }
-interface CredStoreLike { value: string; set: (v: string) => void }
+/** `exact`: record the text as carried (a shell older than the fold ignores
+ *  it, and keeps any text verbatim anyway). */
+interface CredStoreLike { value: string; set: (v: string, exact?: boolean) => void }
 interface NavLike {
   go: (segments: readonly string[]) => void
   goRaw?: (segments: readonly string[]) => void
@@ -280,10 +282,14 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   if (!confirmed) return false
 
   // Reproduce (segments, room, secret) so the composed sig lands on the
-  // inviter's exact relay slot: the credentials EXACTLY as carried (never
-  // case-folded — the zone is case-sensitive), then the page.
-  room.set(bundle.room)
-  secret.set(bundle.secret)
+  // inviter's exact relay slot: the credentials EXACTLY as carried — never
+  // case-folded (the zone is case-sensitive), and never canonicalized like
+  // typed text (D6 folds what is ENTERED; a link is an exact zone, and an
+  // inviter still in a pre-fold room — a curly quote recorded before the fold
+  // — must not split the room in two). Then the page. The stores hold the
+  // carried text first, so writeTabZone below records it as held, verbatim.
+  room.set(bundle.room, true)
+  secret.set(bundle.secret, true)
   // The link's meeting point becomes this tab's, whole: a link that names
   // none meets at the default, so a point this tab held from an earlier
   // meeting is dropped with its code.

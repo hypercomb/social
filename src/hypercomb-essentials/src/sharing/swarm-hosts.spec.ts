@@ -101,16 +101,42 @@ describe('where a page\'s bytes go', () => {
     const closed = await warmed(world({ pool: ['hypercomb.com'], participants: false }))
     closed.markDown('hypercomb.com', 'refused')
     expect(closed.hostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false })
-    // A failure of a publish domain is never passed over: it was chosen.
+    // A publish domain was chosen: a page at its door is not enough to pass
+    // it over (its uploads decide) — its uploads' own standing refusal is
+    // (D2, 2026-10-10): the page goes to the next door, the domain named.
     const shop = await warmed(world({ marks: new Map([['shop', ['pointblank.example']]]) }), ['shop'])
-    shop.markDown('pointblank.example', 'refused')
+    shop.markDown('pointblank.example', 'pointblank.example answers a page — takes no uploads')
     expect(shop.hostsFor(['shop']).hosts).toEqual(['pointblank.example'])
+    shop.markDown('pointblank.example', 'refused: 405 Method Not Allowed')
+    expect(shop.hostsFor(['shop'])).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['pointblank.example'] })
     // It answered again, or the participant asked to retry.
     r.markUp('hypercomb.com')
     expect(r.hostsFor(null).hosts).toEqual(['hypercomb.com'])
     r.markDown('hypercomb.com', 'refused')
     r.clearDown()
     expect(r.hostsFor(null).hosts).toEqual(['hypercomb.com'])
+  })
+
+  it('D2: a chosen door passed over at its HEAD (a page) is still the page\'s; its uploads\' own refusal passes it over, with news', async () => {
+    const r = await warmed(world({ pool: ['shop.example', 'hypercomb.com'], marks: new Map([['shop', ['shop.example']]]) }), ['shop'])
+    r.markDown('shop.example', 'shop.example answers a page — takes no uploads')
+    // As a pool host it is passed over at once; as the shop's choice it is not.
+    expect(r.hostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['shop.example'] })
+    expect(r.hostsFor(['shop']).hosts).toEqual(['shop.example'])
+    const changes: number[] = []
+    r.addEventListener('change', () => changes.push(1))
+    const version = r.version
+    r.markDown('shop.example', 'refused: shop.example answers, but lets no upload from this page through', false)
+    await settle()
+    expect(changes.length).toBe(1)
+    expect(r.version).toBeGreaterThan(version)
+    expect(r.downReason('shop.example')).toMatch(/^refused:/)
+    expect(r.hostsFor(['shop'])).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['shop.example'] })
+    // No door below takes bytes: the chosen domain keeps the page, so its
+    // status names it — never NONE.
+    const alone = await warmed(world({ pool: [], participants: false, marks: new Map([['shop', ['shop.example']]]) }), ['shop'])
+    alone.markDown('shop.example', 'refused: 405 Method Not Allowed')
+    expect(alone.hostsFor(['shop'])).toEqual({ hosts: ['shop.example'], source: 'publish', pending: false })
   })
 
   it('publish domains override the pool for a page that wears them — and for the pages below it', async () => {
@@ -183,10 +209,16 @@ describe('the meeting host (jwize 2026-10-09: publish > meeting host > pool > re
     expect(r.hostsFor(null)).toEqual({ hosts: ['meet.example'], source: 'meeting', pending: false })
   })
 
-  it('is the meeting\'s explicit choice: never passed over', async () => {
+  it('is the meeting\'s explicit choice: passed over only on its uploads\' own standing answer (BCL-7, TS-5)', async () => {
     const r = await warmed(world({ meeting: 'meet.example' }))
-    r.markDown('meet.example', 'refused')
+    r.markDown('meet.example', 'unreachable: timed out')
     expect(r.hostsFor(null).hosts).toEqual(['meet.example'])
+    // A relay.js host that takes only the people meeting on it: the pool.
+    r.markDown('meet.example', 'refused: this host only takes uploads from people meeting on it (401 not-live)')
+    // The pool was never needed before; it is read now (pending a moment).
+    expect(r.hostsFor(null).pending).toBe(true)
+    await settle()
+    expect(r.hostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['meet.example'] })
   })
 
   it('a loopback meeting host is a door only from a loopback page', async () => {

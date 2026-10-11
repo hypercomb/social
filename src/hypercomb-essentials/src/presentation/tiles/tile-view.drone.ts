@@ -1704,8 +1704,8 @@ export class TileViewDrone extends Drone {
    *  hive itself renders, already framed for that shape. On a phone it rests
    *  as a RECTANGLE, and a hex capture's corners are not picture: a tile
    *  saved before captures were made pure carries a baked rim there. So the
-   *  phone reads the untouched original (`large.image`) first, cropped to
-   *  `cover`. */
+   *  phone reads the whole picture (`large.image`, its large copy) first,
+   *  cropped to `cover`. */
   async #pictureSig(label: string): Promise<string> {
     const store = this.resolve<StoreShape>('store')
     const history = window.ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryShape | undefined

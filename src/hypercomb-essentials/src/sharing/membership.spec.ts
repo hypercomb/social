@@ -154,3 +154,91 @@ describe('resuming on a shell older than the zone', () => {
     expect((await load())()).toBe(true)
   })
 })
+
+// ── one text, one zone (ZI-5) ───────────────────────────────────────────────
+
+describe('writeTabZone folds entered text; what the store holds is kept verbatim', () => {
+  beforeEach(() => { services.clear() })
+
+  it('a link\'s or a word\'s room folds exactly as the stores fold it', async () => {
+    withStores('', '')
+    const mod = await import('./membership.js')
+    mod.writeTabZone({ room: 'ｄｏｗｎｔｏｗｎ\u200B', secret: 'joe\u2019s' })
+    expect(mod.readTabZone()).toEqual({ room: 'downtown', secret: "joe's" })
+  })
+
+  it('the pair a store already holds — a tab that joined before the fold — is recorded as it is', async () => {
+    withStores('garden  rose', 'joe\u2019s')
+    await load()
+    EffectBus.emit('mesh:public-changed', { public: true })
+    expect(zone()).toEqual({ room: 'garden  rose', secret: 'joe\u2019s' })
+  })
+})
+
+describe('ownZone — the zone THIS tab joined or chose', () => {
+  it('is null with no record, or with half a pair; the pair when both are recorded', async () => {
+    const mod = await import('./membership.js')
+    expect(mod.ownZone()).toBeNull()
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'downtown' }))
+    expect(mod.ownZone()).toBeNull()
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'downtown', secret: ' ' }))
+    expect(mod.ownZone()).toBeNull()
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'downtown', secret: 'rose', relay: 'wss://a.example' }))
+    expect(mod.ownZone()).toEqual({ room: 'downtown', secret: 'rose' })
+  })
+
+  it('never reads the origin-wide pre-fill', async () => {
+    localStorage.setItem('hc:room', 'downtown')
+    localStorage.setItem('hc:secret', 'rose')
+    const mod = await import('./membership.js')
+    expect(mod.ownZone()).toBeNull()
+  })
+})
+
+// ── VO-5: a selector with no point field ────────────────────────────────────
+
+describe('a selector START under a shell whose selector has no meeting point', () => {
+  beforeEach(() => {
+    services.clear()
+    delete (globalThis as { __hcShellZoneUi?: boolean }).__hcShellZoneUi
+  })
+  const atOldPoint = (): void => {
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'downtown', secret: 'rose', relay: 'wss://old.example', host: 'old.example', code: 'k-old' }))
+  }
+
+  it('lets the tab\'s point, host and code go, and tells the mesh — that selector showed none', async () => {
+    atOldPoint()
+    withStores('uptown', 'lily')
+    await load()
+    const points: unknown[] = []
+    EffectBus.on('mesh:zone', (p) => { if (p) points.push(p) })
+    EffectBus.emit('mesh:join', {})
+    expect(zone()).toEqual({ room: 'downtown', secret: 'rose' })
+    expect(points).toEqual([{ relay: '' }])
+  })
+
+  it('a shell whose selector carries the point keeps it — that START meant it', async () => {
+    ;(globalThis as { __hcShellZoneUi?: boolean }).__hcShellZoneUi = true
+    atOldPoint()
+    withStores('downtown', 'rose')
+    await load()
+    EffectBus.emit('mesh:join', {})
+    expect(zone()).toMatchObject({ relay: 'wss://old.example', code: 'k-old' })
+  })
+
+  it('a START from before this module loaded (replayed by the bus) is not taken for a new one', async () => {
+    atOldPoint()
+    withStores('downtown', 'rose')
+    EffectBus.emit('mesh:join', {})
+    await load()
+    expect(zone()).toMatchObject({ relay: 'wss://old.example', code: 'k-old' })
+  })
+
+  it('a link join (no selector) keeps the point it wrote', async () => {
+    withStores('downtown', 'rose')
+    const mod = await import('./membership.js')
+    mod.writeTabZone({ room: 'downtown', secret: 'rose', relay: 'wss://new.example', code: 'k-new' })
+    EffectBus.emit('mesh:public-changed', { public: true })
+    expect(zone()).toMatchObject({ relay: 'wss://new.example', code: 'k-new' })
+  })
+})

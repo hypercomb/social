@@ -127,6 +127,7 @@ export class HexLabelAtlas {
     this.map.clear()
     this.slotToLabel.fill(null)
     this.nextIndex = 0
+    this.#fullUnder = null
     this.#evictionGeneration++
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
   }
@@ -156,6 +157,7 @@ export class HexLabelAtlas {
     this.map.clear()
     this.slotToLabel.fill(null)
     this.nextIndex = 0
+    this.#fullUnder = null
     this.#evictionGeneration++
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
   }
@@ -182,6 +184,7 @@ export class HexLabelAtlas {
     const had = this.map.delete(label)
     if (slot < 0) return had
     this.slotToLabel[slot] = null
+    this.#fullUnder = null
     this.#evictionGeneration++
     this.#clearSlot(slot % this.cols, Math.floor(slot / this.cols))
     return true
@@ -213,6 +216,14 @@ export class HexLabelAtlas {
   // and evict VISIBLE labels; each eviction forces a repaint whose bakes
   // evict the next victim — on screen that is every tile's text blinking.
   #pinned: ReadonlySet<string> = new Set()
+  // The pinned set under which a full scan last found NO claimable slot. While
+  // it is still the live set nothing can have freed (a flush clears it), so
+  // the next request answers "no slot" without rescanning every slot.
+  #fullUnder: ReadonlySet<string> | null = null
+  // One warning per atlas, not one per label per paint: the old per-call
+  // warning was itself 1.7 s of a 36 s profile on a 987-name page, and a
+  // zoom in and back out of an oversized page re-enters the overflow.
+  #overflowWarned = false
 
   /** Replace the pinned set. Called by the renderer with the on-screen
    *  labels on every paint; the previous layer's labels unpin automatically. */
@@ -221,23 +232,29 @@ export class HexLabelAtlas {
   }
 
   /** Claim the next slot for `label`, stepping over slots whose occupant is
-   *  pinned (on screen). Bounded scan; if EVERY slot is pinned (more visible
-   *  labels than slots) fall back to plain reuse — the eviction event keeps
-   *  the display converging, same contract as HexImageAtlas.#loadInto. */
+   *  pinned (on screen). Bounded scan. When EVERY slot is pinned (more
+   *  on-screen labels than slots) there is NO slot: -1, nothing evicted,
+   *  nothing announced. Evicting a pinned label here used to fire
+   *  `hex-label-atlas:evicted` for a label that was on screen, the renderer
+   *  repainted to heal it, the repaint's bake evicted the next on-screen label
+   *  — a loop that never converges once a page holds more names than slots
+   *  (SCALE-1: a 307-name page spent 72 s of 74 s re-baking labels). The label
+   *  left out simply has no baked glyphs until a slot frees. */
   #allocSlot(label: string): number {
+    if (this.#fullUnder === this.#pinned) return -1
     const capacity = this.cols * this.rows
-    let slot = this.nextIndex % capacity
     for (let scanned = 0; scanned < capacity; scanned++) {
-      const occupant = this.slotToLabel[slot]
-      if (occupant === null || occupant === label || !this.#pinned.has(occupant)) break
+      const slot = this.nextIndex % capacity
       this.nextIndex++
-      slot = this.nextIndex % capacity
-      if (scanned === capacity - 1) {
-        console.warn('[HexLabelAtlas] every slot pinned — more on-screen labels than atlas slots, evicting a pinned slot')
-      }
+      const occupant = this.slotToLabel[slot]
+      if (occupant === null || occupant === label || !this.#pinned.has(occupant)) return slot
     }
-    this.nextIndex++
-    return slot
+    this.#fullUnder = this.#pinned
+    if (!this.#overflowWarned) {
+      this.#overflowWarned = true
+      console.warn(`[HexLabelAtlas] every slot pinned — more on-screen labels than the ${capacity} atlas slots; the rest draw without baked text until a slot frees`)
+    }
+    return -1
   }
 
   /**
@@ -306,6 +323,7 @@ export class HexLabelAtlas {
       if (!label || this.map.has(label)) continue
 
       const slot = this.#allocSlot(label)
+      if (slot < 0) continue // every slot is on screen — nothing to warm into
 
       const previous = this.slotToLabel[slot]
       this.slotToLabel[slot] = label
@@ -340,8 +358,12 @@ export class HexLabelAtlas {
     const cached = this.map.get(label)
     if (cached) return cached
 
-    // wrap if you exceed capacity (production-safe: no crash, just overwrites old slots)
+    // Wraps onto off-screen slots once the ring is full. With every slot on
+    // screen there is no slot: the degenerate rect is the shader's "no label"
+    // (no glyphs, no band — the same rect a hidden name bakes). Not cached, so
+    // the label bakes on a later paint once a slot frees.
     const slot = this.#allocSlot(label)
+    if (slot < 0) return { u0: 0, v0: 0, u1: 0, v1: 0 }
 
     const previous = this.slotToLabel[slot]
     this.slotToLabel[slot] = label

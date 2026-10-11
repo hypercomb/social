@@ -73,14 +73,15 @@ describe('the shell answers a meeting link no package will', () => {
 
   it('an older worker that never takes the stash: after the grace, the selector opens on the link\'s room — nothing written', async () => {
     const { watchPendingMeet } = await load()
-    sessionStorage.setItem('hc:pending-meet', 'Meet%20Up/4417/Ideas&relay=x.example&code=k')
+    // A plain link: one naming a meeting point goes to the update door
+    // instead (invite-capture.robust.spec.ts).
+    sessionStorage.setItem('hc:pending-meet', 'Meet%20Up/4417/Ideas')
     services.set('@diamondcoreprocessor.com/MeetingInviteWorker', {}) // no meetLinks
     watchPendingMeet({ pollMs: 100, graceMs: 1_000 })
     await vi.advanceTimersByTimeAsync(900)
     expect(opened).toEqual([])
     await vi.advanceTimersByTimeAsync(300)
-    // The meeting point rides along (START meets where the room is); the code never does.
-    expect(opened).toEqual([{ join: true, room: 'Meet Up', secret: '4417', point: 'wss://x.example' }])
+    expect(opened).toEqual([{ join: true, room: 'Meet Up', secret: '4417' }])
     expect(sessionStorage.getItem('hc:pending-meet')).not.toBeNull() // kept until answered
     expect(localStorage.getItem('hc:room')).toBeNull()
     EffectBus.emit('mesh:modal-open', { open: true })
@@ -148,7 +149,7 @@ describe('the shell answers a meeting link no package will', () => {
     expect(meetCredentialsOf('a/b')).toEqual({ room: 'a', secret: 'b' })
     expect(meetCredentialsOf('#meet=a%20b/c/page&relay=x.example')).toEqual({ room: 'a b', secret: 'c' })
     expect(meetCredentialsOf('a')).toBeNull()
-    expect(meetCredentialsOf('a%2Fb/c')).toBeNull()
+    expect(meetCredentialsOf('a%2Fb/c')).toEqual({ room: 'a/b', secret: 'c' }) // free text (ZI-3)
     expect(meetCredentialsOf('%E0%A4%A/c')).toBeNull()
   })
 })

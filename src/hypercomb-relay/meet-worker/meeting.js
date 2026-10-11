@@ -12,11 +12,15 @@
 // Memory only: replaceable slots (one per publisher + kind + d, the newest
 // wins) and expiring beacons, gone when the object goes. Ephemeral kinds
 // (20000–29999) are fanned out and never kept. Bytes never come here; they
-// travel by replication to a host (the R2 PUT at pluginthematrix.com).
+// travel by replication to a host (the R2 PUT at pluginthematrix.com) — bar
+// the content broker's answers, which are kept one per sig for the 15
+// minutes a reader can ask for them, and are the first thing a full store
+// lets go. A full store never refuses presence while it can make room.
 //
 // Ported from relay.js (the home relay), behaviour for behaviour: the hc:host
-// first frame, NIP-01/33 slots, NIP-40 expiry, the per-connection token bucket
-// under a per-address ceiling, the 200-subscription cap, the room-scoped drain
+// first frame, NIP-01/33 slots, NIP-40 expiry, the per-connection token
+// buckets (one for bulk kinds, one for the rest) under a per-address ceiling,
+// the 200-subscription cap, the room-scoped drain
 // word (one room per connection, from its own newest {alive}, with the
 // pre-beacon ask hold), the write rule (an `x` is a 64-hex signature), the
 // address caps, and soft wills with their 15 s grace, cancel and heir. Two
@@ -51,20 +55,62 @@ export const MAX_FILTERS_PER_REQ = 10
 export const MAX_ADDRESSES_PER_REQ = 16
 export const MAX_ADDRESSES_PER_CONNECTION = 256
 export const MAX_LIMIT = 5000
-/** What the object keeps in memory before it refuses to store more. One
+/** What the object keeps in memory before it makes room or refuses. One
  *  isolate has 128 MB; the rest is sockets, subscriptions and the runtime. */
 export const STORE_MAX_BYTES = 64 * 1024 * 1024
+/** An event is COUNTED as its JSON plus this: the heap it really costs (the
+ *  record, its strings, its index entries). Counted as JSON alone, a store
+ *  "full" of 200-byte events was 140 MB of heap — past the isolate, which
+ *  would have died, every room with it, before it ever said full. */
+export const EVENT_OVERHEAD_BYTES = 600
+/** The swarm's presence: who is here (30206), the pages they show (30200),
+ *  where they are (30204) and what they hold back (30208). Never refused
+ *  while anything can be evicted, and the last STORE_RESERVE_BYTES of the
+ *  store are theirs alone — a store that fills up never makes a newcomer
+ *  invisible or a new page unwalkable. */
+export const PRESENCE_KINDS = new Set([30200, 30204, 30206, 30208])
+export const STORE_RESERVE_BYTES = 4 * 1024 * 1024
+/** The content broker's answer: content-addressed bytes the asker sha256-
+ *  checks, so any holder's copy is as good as another's — ONE holder's WHOLE
+ *  run is kept per address and type (the asker assembles a chunked answer
+ *  from one key's chunks, so a mix of holders never completes), exactly as
+ *  relay.js keeps it — and readers ask with since = now − 900, so it is kept
+ *  ANSWER_STORE_SECS at most, whatever expiration it carries (the broker
+ *  stamps a day). Only a run a reader can assemble is kept (d = x, or d = x#i
+ *  with c = i/n, n ≤ ANSWER_CHUNKS_MAX), at most ANSWERS_PER_ADDRESS_MAX per
+ *  address, never one dated more than ANSWER_FUTURE_SECS ahead, and a run of
+ *  bytes becomes THE run only once it hashes to its address: a forged copy
+ *  never pins a popular picture's replay. Everything else is fanned out, not
+ *  kept. A full store evicts answers first, oldest first. */
+export const ANSWER_KIND = 30401
+export const ANSWER_STORE_SECS = 900
+export const ANSWER_CHUNKS_MAX = 64
+export const ANSWERS_PER_ADDRESS_MAX = 128
+export const ANSWER_FUTURE_SECS = 60
+/** What the broker answers: a layer, a resource, a location's visuals. */
+const ANSWER_TYPES = new Set(['layer', 'resource', 'visuals'])
+/** Bulk: the broker's answers, ask and cancel and the swarm's resource
+ *  bytes. They draw on their OWN bucket, so a sharer whose pictures are in
+ *  demand never has its own beacon or page refused for answering. */
+export const BULK_KINDS = new Set([ANSWER_KIND, 30201, 20400, 20402])
 /** A Worker cannot send a protocol ping, so a socket whose path died without
  *  a FIN is found by its silence: every live client probes at least every
  *  30 s (hidden) and a throttled hidden tab about once a minute. */
 export const REAP_IDLE_MS = 120_000
 export const WILL_GRACE_MS = 15_000
+/** An heir heard within this long counts as there, whenever the dying
+ *  connection last beaconed: past a throttled hidden tab's minute cadence
+ *  (it cannot be pinged — see above), short of the silence a locked phone's
+ *  zombie socket keeps before the reap. */
+export const HEIR_HEARD_MS = 90_000
 export const LIFECYCLE_KIND = 30206
 const LIFECYCLE_WILL_TTL = 300   // seconds a synthesized tombstone lingers for late joiners
 const FUTURE_SKEW_SECS = 15 * 60
 
 // The per-connection budget and the per-address ceiling (relay.js "AN IP IS
-// NOT ONE PARTICIPANT"): EVENT and REQ cost one token; CLOSE never does.
+// NOT ONE PARTICIPANT"): EVENT and REQ cost one token; CLOSE never does. A
+// connection has two buckets of these sizes — one for BULK_KINDS, one for
+// everything else — and both draw on the one ceiling for its address.
 export const BUCKETS = { connBurst: 400, connPerSec: 10, ipBurst: 12_000, ipPerSec: 200 }
 
 // ── the address gate ─────────────────────────────────────────────────────────
@@ -153,6 +199,38 @@ const dTagOf = (evt) => String(tagValue(evt, 'd') ?? '')
 const expirationOf = (evt) => { const n = Number(tagValue(evt, 'expiration')); return Number.isFinite(n) && n > 0 ? n : 0 }
 const slotKey = (evt, kind) => `${evt.pubkey}\0${kind}\0${isAddressableKind(kind) ? dTagOf(evt) : ''}`
 
+/** A broker answer's place in a run a reader can assemble — { xt, x, t, i, n }
+ *  — or null: then it is fanned out, never kept. */
+function answerShape(evt) {
+  const x = String(tagValue(evt, 'x') ?? '')
+  if (!HEX64.test(x)) return null
+  const t = String(tagValue(evt, 't') ?? '')
+  if (!ANSWER_TYPES.has(t)) return null
+  const d = dTagOf(evt)
+  const c = tagValue(evt, 'c')
+  if (c === undefined) return d === x ? { xt: `${x}\0${t}`, x, t, i: 0, n: 1 } : null
+  const m = /^(\d{1,3})\/(\d{1,3})$/.exec(String(c))
+  if (!m) return null
+  const i = Number(m[1])
+  const n = Number(m[2])
+  if (n < 2 || n > ANSWER_CHUNKS_MAX || i >= n || d !== `${x}#${i}`) return null
+  return { xt: `${x}\0${t}`, x, t, i, n }
+}
+
+/** Do a run's chunks (base64, in order) hash to its address? */
+function runHashesTo(contents, x) {
+  try {
+    const hash = sha256.create()
+    for (const content of contents) {
+      const bin = atob(String(content))
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      hash.update(bytes)
+    }
+    return bytesToHex(hash.digest()) === x
+  } catch { return false }
+}
+
 /** The signature addresses an event names: its 64-hex `x` tag values. */
 function addressesOf(evt) {
   const xs = new Set()
@@ -229,6 +307,7 @@ export class Meeting {
   #participants
   #maxMessageBytes
   #storeMaxBytes
+  #storeReserveBytes
   #reapIdleMs
   #willGraceMs
   #buckets
@@ -236,8 +315,14 @@ export class Meeting {
   #clients = new Set()
   #events = new Map()      // id → stored event
   #sizes = new Map()       // id → bytes it costs the store
+  #untils = new Map()      // id → second its stored life ends (events that expire)
+  // What a full store may evict, in the order it does (#makeRoom):
+  #answers = new Set()     // broker answers, oldest first
+  #othersByMinute = new Map()   // minute its life ends → Set<id>: other kinds that expire
+  #presenceByMinute = new Map() // minute its life ends → Set<id>: presence slots that expire
   #storedBytes = 0
   #slots = new Map()       // pubkey\0kind\0d → id of the replaceable event held
+  #answersAt = new Map()   // x\0t → { count, runs: Map<pubkey, { n, parts: Map<i, id> }>, whole: pubkey | '' }
   #idsByX = new Map()      // 64-hex x → Set<event id>
   #subsByX = new Map()     // x value → Set<route entry>
   #pendingWills = new Map() // x\0d → { x, d, pubkey, timer }
@@ -261,13 +346,15 @@ export class Meeting {
     this.#participants = options.participants ?? false
     this.#maxMessageBytes = options.maxMessageBytes ?? MAX_MESSAGE_BYTES
     this.#storeMaxBytes = options.storeMaxBytes ?? STORE_MAX_BYTES
+    // 4 MB of 64 MB; a test's small store keeps the same 1/16.
+    this.#storeReserveBytes = options.storeReserveBytes ?? Math.min(STORE_RESERVE_BYTES, Math.floor(this.#storeMaxBytes / 16))
     this.#reapIdleMs = options.reapIdleMs ?? REAP_IDLE_MS
     this.#willGraceMs = options.willGraceMs ?? WILL_GRACE_MS
     this.#buckets = { ...BUCKETS, ...(options.buckets ?? {}) }
   }
 
   static #freshCensus() {
-    return { refusedEvents: 0, refusedReqs: 0, refusedSubs: 0, unaddressed: 0, refusedFull: 0, handlerErrors: 0, willsFired: 0, willsCancelled: 0, reaped: 0 }
+    return { refusedEvents: 0, refusedReqs: 0, refusedSubs: 0, unaddressed: 0, refusedFull: 0, evicted: 0, handlerErrors: 0, willsFired: 0, willsCancelled: 0, reaped: 0 }
   }
 
   get size() { return this.#clients.size }
@@ -303,8 +390,10 @@ export class Meeting {
     const now = this.#now()
     const client = {
       socket, ip, closed: false, lastInboundMs: now,
-      subs: new Map(), routes: new Map(), lifecycle: new Map(), beaconed: new Set(),
+      // beaconed: lifecycle slot → when this connection last beaconed it
+      subs: new Map(), routes: new Map(), lifecycle: new Map(), beaconed: new Map(),
       bucket: { tokens: this.#buckets.connBurst, at: now },
+      bulk: { tokens: this.#buckets.connBurst, at: now },
       // the drained word's zone (own newest {alive}) and asks waiting for it
       drainZone: null, heldAsks: [],
     }
@@ -378,7 +467,7 @@ export class Meeting {
     const zones = [...rooms].map(([room, keys]) => `${room}:${keys.size}`).join(' ') || 'none'
     return `[minute] open ${this.#clients.size} · refused event ${c.refusedEvents} req ${c.refusedReqs}`
       + `${c.refusedSubs ? ` subs ${c.refusedSubs}` : ''}${c.unaddressed ? ` unaddressed ${c.unaddressed}` : ''}`
-      + `${c.refusedFull ? ` full ${c.refusedFull}` : ''}${c.handlerErrors ? ` · handler errors ${c.handlerErrors}` : ''}`
+      + `${c.refusedFull ? ` full ${c.refusedFull}` : ''}${c.evicted ? ` · evicted ${c.evicted}` : ''}${c.handlerErrors ? ` · handler errors ${c.handlerErrors}` : ''}`
       + ` · wills fired ${c.willsFired} cancelled ${c.willsCancelled}${c.reaped ? ` · reaped ${c.reaped}` : ''}`
       + ` · stored ${this.#events.size} (${this.#storedBytes} bytes) · zones ${zones}`
   }
@@ -415,7 +504,7 @@ export class Meeting {
       return
     }
     if (type !== 'EVENT' && type !== 'REQ') return  // AUTH, COUNT, … — not spoken here
-    if (!this.#takeToken(client)) {
+    if (!this.#takeToken(client, type === 'EVENT' && BULK_KINDS.has(msg[1]?.kind))) {
       if (type === 'EVENT') { this.#census.refusedEvents++; this.#send(client, ['OK', msg[1]?.id ?? '', false, 'rate-limited: slow down']) }
       else { this.#census.refusedReqs++; this.#send(client, ['CLOSED', String(msg[1] ?? ''), 'rate-limited: slow down']) }
       return
@@ -433,8 +522,10 @@ export class Meeting {
     if (!this.#verify(evt)) { this.#send(client, ['OK', evt.id, false, 'invalid: bad signature']); return }
 
     // A verified EVENT speaks for a slot's pending will only on a connection
-    // that beaconed that slot — the participant, still here.
-    if (this.#pendingWills.size) for (const key of client.beaconed) this.#cancelWill(key)
+    // that beaconed that slot — the participant, still here — and that
+    // connection TAKES the will (relay.js adoptWill): cancelled outright, its
+    // own later death would leave no leave to fire.
+    if (this.#pendingWills.size) for (const key of client.beaconed.keys()) this.#adoptWill(client, key)
 
     const verdict = this.#insert(evt)
     if (verdict === 'full') {
@@ -499,29 +590,137 @@ export class Meeting {
 
   // ── store ──────────────────────────────────────────────────────────────────
 
-  /** 'stored' | 'duplicate' | 'stale' | 'ephemeral' | 'unaddressed' | 'full' */
+  /** 'stored' | 'duplicate' | 'stale' | 'ephemeral' | 'unaddressed' | 'passing' | 'full' */
   #insert(evt) {
     const kind = evt.kind
     if (isEphemeralKind(kind)) return 'ephemeral'
     if (this.#events.has(evt.id)) return 'duplicate'
     // No read can reach an event that names no signature: keep nothing.
     if (addressesOf(evt).size === 0) return 'unaddressed'
+    // A broker answer lives here only while a reader's REQ (since = now −
+    // 900) can still reach it; one already past that is fanned out, not kept.
+    const nowSec = Math.floor(this.#now() / 1000)
+    let until = expirationOf(evt)
+    if (kind === ANSWER_KIND) {
+      const life = Math.min(evt.created_at, nowSec) + ANSWER_STORE_SECS
+      until = until ? Math.min(until, life) : life
+      if (until < nowSec || evt.created_at > nowSec + ANSWER_FUTURE_SECS) return 'passing'
+      if (this.#answerNotKept(evt)) return 'passing'
+    }
     const slotted = isAddressableKind(kind) || isReplaceableKind(kind)
     const key = slotted ? slotKey(evt, kind) : null
     const heldId = key ? this.#slots.get(key) : undefined
     const held = heldId ? this.#events.get(heldId) : undefined
-    // NIP-01: one event per slot — the newest; on equal created_at the lowest id.
-    if (held && (held.created_at > evt.created_at || (held.created_at === evt.created_at && held.id < evt.id))) return 'stale'
+    // NIP-01: one event per slot — the newest; on equal created_at the lowest
+    // id. An older ANSWER is still fanned out (not kept): any holder's bytes
+    // are as good, and a future-dated copy in the slot must never silence the
+    // live answers of the holders who came after it.
+    if (held && (held.created_at > evt.created_at || (held.created_at === evt.created_at && held.id < evt.id))) return kind === ANSWER_KIND ? 'passing' : 'stale'
     const rec = { id: evt.id, pubkey: evt.pubkey, created_at: evt.created_at, kind, tags: evt.tags, content: evt.content, sig: evt.sig }
-    const size = JSON.stringify(rec).length
-    if (this.#storedBytes - (heldId ? this.#sizes.get(heldId) ?? 0 : 0) + size > this.#storeMaxBytes) return 'full'
+    const size = JSON.stringify(rec).length + EVENT_OVERHEAD_BYTES
+    const presence = PRESENCE_KINDS.has(kind)
+    const over = this.#storedBytes - (heldId ? this.#sizes.get(heldId) ?? 0 : 0) + size
+      - (this.#storeMaxBytes - (presence ? 0 : this.#storeReserveBytes))
+    if (over > 0 && !this.#makeRoom(over, presence, heldId)) return 'full'
     if (heldId) this.#drop(heldId)
     if (key) this.#slots.set(key, evt.id)
     this.#events.set(rec.id, rec)
     this.#sizes.set(rec.id, size)
     this.#storedBytes += size
     for (const x of addressesOf(rec)) indexAdd(this.#idsByX, x, rec.id)
+    if (kind === ANSWER_KIND) this.#answers.add(rec.id)
+    else if (until) indexAdd(presence ? this.#presenceByMinute : this.#othersByMinute, Math.floor(until / 60), rec.id)
+    if (until) this.#untils.set(rec.id, until)
+    if (kind === ANSWER_KIND) this.#answerStored(rec)
     return 'stored'
+  }
+
+  // ── broker answers: one holder's whole run per address and type ───────────
+  //
+  // Kept as running counts (#answersAt), so a store costs O(1) whatever is
+  // held at the address — never a rescan of it.
+
+  /** True when an answer is fanned out but not kept: shaped as no run a
+   *  reader can assemble, another holder's whole run already kept here, or
+   *  the address full. */
+  #answerNotKept(evt) {
+    const shape = answerShape(evt)
+    if (!shape) return true
+    const at = this.#answersAt.get(shape.xt)
+    if (!at) return false
+    if (at.whole && at.whole !== evt.pubkey) return true
+    return at.count >= ANSWERS_PER_ADDRESS_MAX && !at.runs.get(evt.pubkey)?.parts.has(shape.i)
+  }
+
+  /** A kept answer joins its holder's run; once that run is whole (and, for
+   *  bytes, hashes to its address) it is the only one kept here. */
+  #answerStored(rec) {
+    const shape = answerShape(rec)
+    if (!shape) return
+    const older = this.#answersAt.get(shape.xt)?.runs.get(rec.pubkey)
+    // re-chunked: the holder's older run is not this one
+    if (older && older.n !== shape.n) for (const id of [...older.parts.values()]) this.#drop(id)
+    let at = this.#answersAt.get(shape.xt)
+    if (!at) this.#answersAt.set(shape.xt, at = { count: 0, runs: new Map(), whole: '' })
+    let run = at.runs.get(rec.pubkey)
+    if (!run) { run = { n: shape.n, parts: new Map() }; at.runs.set(rec.pubkey, run) }
+    if (!run.parts.has(shape.i)) at.count++
+    run.parts.set(shape.i, rec.id)
+    if (run.parts.size !== run.n || at.whole) return
+    // A location's visuals carry no byte address (the asker checks each event
+    // they pack); every other answer's bytes must hash to it.
+    if (shape.t !== 'visuals') {
+      const contents = []
+      for (let i = 0; i < run.n; i++) contents.push(this.#events.get(run.parts.get(i))?.content ?? '')
+      if (!runHashesTo(contents, shape.x)) {
+        for (const id of [...run.parts.values()]) this.#drop(id)
+        return
+      }
+    }
+    at.whole = rec.pubkey
+    for (const [pubkey, other] of [...at.runs]) if (pubkey !== rec.pubkey) for (const id of [...other.parts.values()]) this.#drop(id)
+  }
+
+  /** An answer left the store (replaced, expired, evicted, or another run won). */
+  #answerDropped(rec) {
+    const shape = answerShape(rec)
+    if (!shape) return
+    const at = this.#answersAt.get(shape.xt)
+    const run = at?.runs.get(rec.pubkey)
+    if (!run || run.parts.get(shape.i) !== rec.id) return
+    run.parts.delete(shape.i)
+    at.count--
+    if (run.parts.size === 0) at.runs.delete(rec.pubkey)
+    if (at.whole === rec.pubkey) at.whole = ''
+    if (at.count === 0) this.#answersAt.delete(shape.xt)
+  }
+
+  /** Free `need` bytes, or nothing at all: broker answers oldest first, then
+   *  other kinds that expire, soonest first (to the minute), and presence
+   *  slots last and only to make room for presence. Never `keep` (the slot
+   *  being replaced), never an event that does not expire. It walks only as
+   *  far as it takes. False: the store is truly full. */
+  #makeRoom(need, presence, keep) {
+    const victims = []
+    let found = 0
+    const take = (ids) => {
+      for (const id of ids) {
+        if (found >= need) return
+        if (id !== keep) { victims.push(id); found += this.#sizes.get(id) ?? 0 }
+      }
+    }
+    take(this.#answers)
+    for (const tier of presence ? [this.#othersByMinute, this.#presenceByMinute] : [this.#othersByMinute]) {
+      if (found >= need) break
+      for (const minute of [...tier.keys()].sort((a, b) => a - b)) {
+        take(tier.get(minute))
+        if (found >= need) break
+      }
+    }
+    if (found < need) return false
+    for (const id of victims) this.#drop(id)
+    this.#census.evicted += victims.length
+    return true
   }
 
   #drop(id) {
@@ -530,11 +729,16 @@ export class Meeting {
     this.#events.delete(id)
     this.#storedBytes -= this.#sizes.get(id) ?? 0
     this.#sizes.delete(id)
+    const until = this.#untils.get(id)
+    this.#untils.delete(id)
+    if (rec.kind === ANSWER_KIND) this.#answers.delete(id)
+    else if (until) indexDrop(PRESENCE_KINDS.has(rec.kind) ? this.#presenceByMinute : this.#othersByMinute, Math.floor(until / 60), id)
     for (const x of addressesOf(rec)) indexDrop(this.#idsByX, x, id)
     if (isAddressableKind(rec.kind) || isReplaceableKind(rec.kind)) {
       const key = slotKey(rec, rec.kind)
       if (this.#slots.get(key) === id) this.#slots.delete(key)
     }
+    if (rec.kind === ANSWER_KIND) this.#answerDropped(rec)
   }
 
   /** Read by address only: the ids held at each filter's `#x`, never the store. */
@@ -548,8 +752,8 @@ export class Meeting {
         if (seen.has(id)) continue
         const evt = this.#events.get(id)
         if (!evt) continue
-        const exp = expirationOf(evt)
-        if (exp && exp < nowSec) continue  // NIP-40: never replay an expired beacon, even before the sweep
+        const until = this.#untils.get(id)
+        if (until && until < nowSec) continue  // NIP-40: never replay an expired beacon, even before the sweep
         if (matchFilter(f, evt)) { hits.push(evt); seen.add(id) }
       }
       hits.sort((a, b) => b.created_at - a.created_at)
@@ -559,27 +763,25 @@ export class Meeting {
   }
 
   #deleteExpired(nowSec) {
-    for (const [id, evt] of this.#events) {
-      const exp = expirationOf(evt)
-      if (exp && exp < nowSec) this.#drop(id)
-    }
+    for (const [id, until] of this.#untils) if (until < nowSec) this.#drop(id)
   }
 
   // ── budgets ────────────────────────────────────────────────────────────────
 
-  #takeToken(client) {
+  #takeToken(client, bulk) {
     const now = this.#now()
     const b = this.#buckets
+    const own = bulk ? client.bulk : client.bucket
     let venue = this.#ipBuckets.get(client.ip)
     if (!venue) { venue = { tokens: b.ipBurst, at: now }; this.#ipBuckets.set(client.ip, venue) }
     const refill = (bucket, burst, perSec) => {
       bucket.tokens = Math.min(burst, bucket.tokens + (now - bucket.at) * perSec / 1000)
       bucket.at = now
     }
-    refill(client.bucket, b.connBurst, b.connPerSec)
+    refill(own, b.connBurst, b.connPerSec)
     refill(venue, b.ipBurst, b.ipPerSec)
-    if (client.bucket.tokens < 1 || venue.tokens < 1) return false
-    client.bucket.tokens--
+    if (own.tokens < 1 || venue.tokens < 1) return false
+    own.tokens--
     venue.tokens--
     return true
   }
@@ -650,11 +852,16 @@ export class Meeting {
       if (sourceZones.length === 0) continue
       for (const entry of set) if (this.#zonesOf(entry.client).some((x) => sourceZones.includes(x))) candidates.add(entry)
     }
-    const frame = (subId) => JSON.stringify(['EVENT', subId, evt])
+    // The event is serialized ONCE and each subscription id spliced in: a
+    // reconnect herd's beacons reach every member, and serializing per
+    // subscriber made that cost grow with the square of the room.
+    let body = null
     for (const { client: c, subId } of candidates) {
       if (c === source || c.closed) continue
       const filters = c.subs.get(subId)
-      if (filters && matchesAny(filters, evt)) try { c.socket.send(frame(subId)) } catch {}
+      if (!filters || !matchesAny(filters, evt)) continue
+      body ??= JSON.stringify(evt)
+      try { c.socket.send(`["EVENT",${JSON.stringify(subId)},${body}]`) } catch {}
     }
   }
 
@@ -665,10 +872,16 @@ export class Meeting {
   // = pubkey) and, when the socket dies, tombstones it — but only after a
   // GRACE: a reload, a network hop or a NAT rebind kills a socket while the
   // person is still there. Any {alive}/{left} on the slot, or any verified
-  // EVENT on a connection that beaconed it, cancels the will; another open
-  // connection that beaconed the slot inherits it instead. The tombstone is
-  // unsigned (the meeting point cannot sign as the participant) and can only
-  // remove a peer's tiles, never add content.
+  // EVENT on a connection that beaconed it, hands the will to that connection
+  // (it is still here); another open connection that beaconed the slot
+  // inherits it instead — but only one HEARD FROM since the dying
+  // connection's newest beacon for the slot, or within HEIR_HEARD_MS. A phone
+  // that locked without a FIN leaves a silent socket until the reap; when its
+  // wake's socket dies too, a zombie silent that long must not hold the will
+  // for the minutes the reap takes, while a throttled hidden tab of the same
+  // key (heard once a minute) still does. The tombstone is unsigned (the
+  // meeting point cannot sign as the participant) and can only remove a
+  // peer's tiles, never add content.
 
   #lifecycleInfo(evt) {
     const x = tagValue(evt, 'x')
@@ -689,7 +902,7 @@ export class Meeting {
       if (client.drainZone?.x === info.x) client.drainZone = null
       return
     }
-    client.beaconed.add(key)
+    client.beaconed.set(key, this.#now())
     client.lifecycle.set(key, { x: info.x, d: info.d, pubkey: info.pubkey })
     // The drained word's zone: this connection's newest {alive}, and only it.
     if (HEX64.test(info.x)) {
@@ -701,18 +914,25 @@ export class Meeting {
     for (const other of this.#clients) if (other !== client) other.lifecycle.delete(key)
   }
 
-  #willHeir(key, except) {
-    for (const c of this.#clients) if (c !== except && !c.closed && c.beaconed.has(key)) return c
+  /** An open connection that beaconed the slot and is still THERE: spoken
+   *  since `since` (the dying connection's newest beacon for the slot), or
+   *  within HEIR_HEARD_MS — a hidden second tab, throttled to a frame a
+   *  minute and never pinged (a Worker cannot), must not lose the will to a
+   *  beacon it did not happen to follow. */
+  #willHeir(key, except, since) {
+    const heard = Math.min(since, this.#now() - HEIR_HEARD_MS)
+    for (const c of this.#clients) if (c !== except && !c.closed && c.beaconed.has(key) && c.lastInboundMs >= heard) return c
     return null
   }
 
   #armWills(client) {
     for (const [key, will] of client.lifecycle) {
-      const heir = this.#willHeir(key, client)
+      const since = client.beaconed.get(key) ?? 0
+      const heir = this.#willHeir(key, client, since)
       if (heir) { if (!heir.lifecycle.has(key)) heir.lifecycle.set(key, will); continue }
       const held = this.#pendingWills.get(key)
       if (held) this.#clearTimer(held.timer)
-      this.#pendingWills.set(key, { ...will, timer: this.#setTimer(() => this.#fireWill(key), this.#willGraceMs) })
+      this.#pendingWills.set(key, { ...will, since, timer: this.#setTimer(() => this.#fireWill(key), this.#willGraceMs) })
     }
     client.lifecycle.clear()
   }
@@ -721,7 +941,9 @@ export class Meeting {
     const will = this.#pendingWills.get(key)
     if (!will) return
     this.#pendingWills.delete(key)
-    const heir = this.#willHeir(key, null)
+    // Asked again at the end of the grace: a second tab that has spoken since
+    // inherits; a zombie that has not, does not.
+    const heir = this.#willHeir(key, null, will.since)
     if (heir) { if (!heir.lifecycle.has(key)) heir.lifecycle.set(key, { x: will.x, d: will.d, pubkey: will.pubkey }); return }
     const nowSec = Math.floor(this.#now() / 1000)
     const tomb = {
@@ -742,5 +964,13 @@ export class Meeting {
     this.#clearTimer(will.timer)
     this.#pendingWills.delete(key)
     this.#census.willsCancelled++
+  }
+
+  /** A connection of the slot spoke during the grace: the will is its own. */
+  #adoptWill(client, key) {
+    const will = this.#pendingWills.get(key)
+    if (!will) return
+    this.#cancelWill(key)
+    if (!client.lifecycle.has(key)) client.lifecycle.set(key, { x: will.x, d: will.d, pubkey: will.pubkey })
   }
 }

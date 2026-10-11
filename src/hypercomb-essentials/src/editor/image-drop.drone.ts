@@ -8,12 +8,19 @@
 //   Empty area   → arm the image in the command-line chevron slot; the
 //                  user types a cell name and presses Enter to commit.
 
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { extractDroppedUrl } from '../link/link-drop-destination.js'
 import { isImageUrl } from '../link/photo.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 import { armImageBlob } from './arm-resource.js'
+
+const t = (key: string, fallback: string): string => {
+  try {
+    const text = window.ioc?.get<I18nProvider>(I18N_IOC_KEY)?.t?.(key)
+    return text && text !== key ? text : fallback
+  } catch { return fallback }
+}
 
 type DropTarget = {
   q: number
@@ -31,7 +38,7 @@ export class ImageDropDrone extends Drone {
   public override description =
     'Intercepts drag-and-drop image files from the desktop and routes them into the tile editor.'
 
-  protected override emits = ['drop:dragging', 'command:arm-resource']
+  protected override emits = ['drop:dragging', 'command:arm-resource', 'toast:show']
   protected override listens = ['render:host-ready', 'drop:target', 'editor:mode']
 
   #canvas: HTMLCanvasElement | null = null
@@ -192,7 +199,18 @@ export class ImageDropDrone extends Drone {
     const dropTarget = this.#lastTarget
     this.#clearDragging()
 
-    void this.#routeImage(imageFile, dropTarget)
+    // A drop that fails must SAY so. This used to be a bare `void`: a full
+    // device turned the drop into an unhandled rejection and the picture
+    // simply never appeared. The store already says "out of space" once.
+    void this.#routeImage(imageFile, dropTarget).catch(error => {
+      console.warn('[image-drop] the dropped picture could not be used', error)
+      const e = error as { name?: unknown; code?: unknown } | null
+      if (e?.name === 'QuotaExceededError' || e?.code === 22) return
+      this.emitEffect('toast:show', {
+        type: 'warning',
+        message: t('drop.image-failed', 'That picture could not be added — try again, or try another picture.'),
+      })
+    })
   }
 
   // ── routing ───────────────────────────────────────────────────

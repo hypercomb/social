@@ -273,10 +273,12 @@ describe('the drain asks the host before it sends', () => {
     receipt.off()
   })
 
-  it('(c) reconciles every entry of a batch before sending any: one served + one lacking is a total of 1 and exactly one PUT', async () => {
-    // The lacking entry is queued FIRST, so a drain that sent as it went would
-    // PUT before it ever asked about the second. (A batch is 32 entries; a
-    // longer queue sends after each batch — host-sync.stuck-uploads.spec.)
+  it('(c) asks about each entry and sends it in the same breath: one served + one lacking is one PUT, and the line ends 1 of 1', async () => {
+    // BCL-4: each of the four workers asks about ITS entry (HEAD) and sends
+    // it at once — the first byte never waits on another entry's question
+    // (a whole-queue reconcile held GW1's first byte back 262 s). The total
+    // is an upper bound that shrinks to the truth: what is found lacking,
+    // plus what has not been asked about yet.
     const lacking = await stage('{"name":"the host lacks me"}')
     const served = await stage('{"name":"the host serves me"}')
     const host = makeHost({ held: new Map([[served.sig, served.bytes]]) })
@@ -286,10 +288,15 @@ describe('the drain asks the host before it sends', () => {
 
     await service.drain()
 
-    expect(methods(host)).toEqual(['HEAD', 'HEAD', 'PUT', 'GET'])
-    expect(calls(host, 'HEAD')).toEqual([urlOf(lacking.sig), urlOf(served.sig)])
+    expect(calls(host, 'HEAD').sort()).toEqual([urlOf(lacking.sig), urlOf(served.sig)].sort())
     expect(calls(host, 'PUT')).toEqual([urlOf(lacking.sig)])
-    expect(progress.seen).toEqual([{ done: 0, total: 1 }, { done: 1, total: 1 }])
+    // The lacking entry is staged first: its PUT follows its own HEAD, never
+    // a second entry's question.
+    const order = methods(host)
+    expect(order.indexOf('PUT')).toBeGreaterThan(order.indexOf('HEAD'))
+    expect(progress.seen[0]).toMatchObject({ done: 0 })
+    expect(progress.seen[0]!.total).toBeLessThanOrEqual(2)
+    expect(progress.seen.at(-1)).toEqual({ done: 1, total: 1 })
     expect(await receipts()).toEqual([lacking.sig, served.sig].sort())
     expect(await queued()).toEqual([])
     expect(receipt.seen.map(r => r.sig).sort()).toEqual([lacking.sig, served.sig].sort())

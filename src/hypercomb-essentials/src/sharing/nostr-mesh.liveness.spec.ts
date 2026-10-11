@@ -481,7 +481,9 @@ describe('early arming', () => {
     ws0.open()
     const types = ws0.sent.map(f => `${String(f[0])}:${f[0] === 'REQ' ? String(f[1]).slice(0, 3) : ''}`)
     expect(types).toEqual(['REQ:hc-', 'REQ:hc-', 'EVENT:'])
-    expect(ws0.sent.slice(0, 2).map(f => (f[2] as { '#x': string[] })['#x'][0])).toEqual(['b'.repeat(64), 'c'.repeat(64)])
+    // newest consumer first (the page this tab stands on), so a relay at its
+    // subscription cap refuses the tail, never the page (LS-1)
+    expect(ws0.sent.slice(0, 2).map(f => (f[2] as { '#x': string[] })['#x'][0])).toEqual(['c'.repeat(64), 'b'.repeat(64)])
     expect(probes(ws0)).toBe(0)
   })
 })

@@ -4,7 +4,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { fromRuntime } from '../../core/from-runtime'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
-import { UNREACHABLE_AFTER_MS, linkPhase, type MeshConnection } from '../presence-banner/presence-status'
+import { SLOW_FOR_MS, UNREACHABLE_AFTER_MS, headerLink, type MeshConnection } from '../presence-banner/presence-status'
 
 /** Stages of the single share toggle. Ordered: the preview is on from WORLD up. */
 const STAGE_PRIVATE = 0
@@ -71,7 +71,11 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
   // `mesh:connection`: 'groups' while live, amber 'sync' while it connects
   // or reconnects, 'link_off' once it has had no socket for 30 s. Until the
   // mesh reports anything (an older essentials package never does) it stays
-  // 'groups', exactly as before.
+  // 'groups', exactly as before. The glyph reads the line's rules: an OPEN
+  // socket slow to answer is live (never a flickering 'sync' — TS-6), and a
+  // standing refusal no wait cures (the meeting point wants the current code,
+  // or names a computer's own relay this page cannot reach) is 'link_off' at
+  // once, not after 30 s of amber.
   readonly #conn = signal<MeshConnection | null>(null)
   readonly #downSince = signal<number | null>(null)
   readonly #clock = signal(Date.now())
@@ -79,11 +83,8 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
   #unsubConn: (() => void) | null = null
 
   /** 'open' | 'pending' | 'down' — null when the mesh never said. */
-  readonly link = computed<'open' | 'pending' | 'down' | null>(() => {
-    const phase = linkPhase(this.#conn(), this.#downSince(), this.#clock(), true)
-    if (!phase) return null
-    return phase === 'open' ? 'open' : phase === 'down' ? 'down' : 'pending'
-  })
+  readonly link = computed<'open' | 'pending' | 'down' | null>(() => headerLink(this.#conn(), this.#downSince(), this.#clock()))
+  #slowTimer: ReturnType<typeof setTimeout> | null = null
 
   /** Glyph for the current stage (see class comment). */
   readonly modeGlyph = (): string => {
@@ -175,6 +176,15 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
   #onConnection(c: MeshConnection | null | undefined, rejoined: boolean): void {
     if (!c || typeof c.state !== 'string') return
     this.#conn.set(c)
+    // The glyph reads its own clock: bring it to now, and wake it once a
+    // stall outlives the probe deadline (slow → reconnecting).
+    const at = Date.now()
+    this.#clock.set(at)
+    if (this.#slowTimer) { clearTimeout(this.#slowTimer); this.#slowTimer = null }
+    if (c.state === 'stalled') {
+      const since = typeof c.since === 'number' && c.since > 0 ? c.since : at
+      this.#slowTimer = setTimeout(() => { this.#slowTimer = null; this.#clock.set(Date.now()) }, Math.max(0, since + SLOW_FOR_MS - at) + 50)
+    }
     if (c.state === 'open') {
       this.#downSince.set(null)
       if (this.#downTimer) { clearTimeout(this.#downTimer); this.#downTimer = null }
@@ -196,6 +206,7 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
     this.#unsubModal?.()
     this.#unsubConn?.()
     if (this.#downTimer) clearTimeout(this.#downTimer)
+    if (this.#slowTimer) clearTimeout(this.#slowTimer)
   }
 
   // One control, cycling PRIVATE → WORLD → HOST → (wrap) PRIVATE.

@@ -213,9 +213,14 @@ node relay.js --new-access-code C:\hypercomb\access-codes    # prints the code O
   any frame. Hand the code out only inside meeting links (`&relay=…&code=…`,
   swarm-host.md, "The meeting link").
 - **Recycle** with `--new-access-code <file>` again: the new code in, the old
-  one out, in force within a second on the running relay, and every session
-  that came in on a code no longer listed is closed. No restart, no redeploy.
-  `--destroy-access-codes <file>` empties the file: nobody is admitted.
+  one out, in force within a second or two on the running relay, and every
+  session that came in on a code no longer listed is closed. No restart, no
+  redeploy. A read of the file that fails (held by another process, a sync
+  tool mid-write) changes nothing; a hash leaves only when the file says so
+  twice. `--destroy-access-codes <file>` empties the file: nobody is admitted.
+- With `--allow-participants` beside `--access-codes`, uploads come only from
+  keys live on this relay's own admitted sockets: a beacon carried on a PUT
+  (swarm-host.md, "LIVE HERE TOO") is never accepted on a coded relay.
 - The code itself is never on disk, in a log or in the census line. Without
   `--access-codes`, a relay ignores the subprotocol (and echoes it, so a
   browser still connects): the home relay stays open.

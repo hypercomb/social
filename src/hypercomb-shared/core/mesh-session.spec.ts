@@ -7,6 +7,9 @@
 // each case imports it fresh.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+// mesh-session folds entered text with core's canonicalZoneText: transform
+// core at collection, so a cold first load() is not timed against a case.
+import '@hypercomb/core'
 
 type Mod = typeof import('./mesh-session')
 const load = async (): Promise<Mod> => {
@@ -140,5 +143,43 @@ describe('the meeting point mirrors (the shell never imports a module)', () => {
     for (const c of ['abc', 'a.b-c_d~e!', '', 'a b', 'a,b', 'a/b', 'x'.repeat(128), 'x'.repeat(129), 'é']) {
       expect(shell.isAccessCode(c), c).toBe(mod.isAccessCode(c))
     }
+  })
+})
+
+describe('the zone write mirrors (the shell never imports a module)', () => {
+  it('writeMeshZone and essentials writeTabZone record the same zone for the same writes', async () => {
+    const writes = [
+      { room: ' ｄｏｗｎｔｏｗｎ\u200B ', secret: 'joe\u2019s', relay: 'wss://x.example', code: 'c' },
+      { code: '' },
+      { room: 'garden  rose', host: 'x.example' },
+      { relay: '' },
+      { room: '' },
+    ]
+    const shell = await load()
+    for (const w of writes) shell.writeMeshZone(w)
+    const viaShell = sessionStorage.getItem('hc:mesh-zone')
+    sessionStorage.clear()
+    const mod = await import('../../hypercomb-essentials/src/sharing/membership')
+    for (const w of writes) mod.writeTabZone(w)
+    expect(sessionStorage.getItem('hc:mesh-zone')).toBe(viaShell)
+    expect(JSON.parse(viaShell!)).toEqual({ room: '', secret: "joe's", host: 'x.example' })
+  })
+})
+
+describe('the shell says its selector carries the meeting point (VO-5)', () => {
+  it('sets __hcShellZoneUi at load', async () => {
+    delete (globalThis as { __hcShellZoneUi?: boolean }).__hcShellZoneUi
+    await load()
+    expect((globalThis as { __hcShellZoneUi?: boolean }).__hcShellZoneUi).toBe(true)
+  })
+})
+
+describe('the resume pin keeps the pair verbatim', () => {
+  it('a join from an older shell with a pair that would fold is pinned as it was', async () => {
+    sessionStorage.setItem('hc:mesh-session', 'true')
+    localStorage.setItem('hc:room', 'garden  rose')
+    localStorage.setItem('hc:secret', 'joe\u2019s')
+    await load()
+    expect(zone()).toEqual({ room: 'garden  rose', secret: 'joe\u2019s' })
   })
 })

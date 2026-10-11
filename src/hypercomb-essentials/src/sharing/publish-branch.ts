@@ -111,6 +111,13 @@ interface HostSyncLike {
   isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
   /** Available on one of THESE hosts (the nodes this publish writes to). */
   isClosureAvailableOn?: (sig: string, kind: string, closure: boolean, domains: readonly string[]) => Promise<boolean>
+  /** The same, with what it waits on: `ownerHeld` = those hosts will never
+   *  take what they lack this session (host-sync closureVerdictOn). */
+  closureVerdictOn?: (sig: string, kind: string, closure: boolean, domains: readonly string[]) => Promise<{
+    ok: boolean
+    ownerHeld: boolean
+    blocking?: { host: string; state: string; reason: string; name?: string; bytes?: number }
+  }>
   ensureReceipt?: (sig: string, timeoutMs?: number) => Promise<boolean>
   probeServed?: (host: string, sig: string) => Promise<'served' | 'absent' | 'unknown'>
   /** Publish these atoms to one host now, read back by hash (host-sync). */
@@ -135,7 +142,7 @@ export type PublishFailure =
   | 'no-host'         // nowhere to put the bytes: no node named, none standing, or none answering
   | 'seal-failed'     // a child is cold or unresolvable
   | 'no-signer'       // no key to sign the index with
-  | 'not-available'   // closure still uploading at the deadline — pointer NOT advanced
+  | 'not-available'   // closure not served at the deadline — or a node refused it (`refused`) — pointer NOT advanced
   | 'index-unsafe'    // could not verify the existing index — refused to rewrite it
   | 'index-failed'    // the PUT itself failed
   | 'bundle-failed'   // the link resource could not be minted
@@ -172,7 +179,15 @@ export type PublishResult =
        *  host — a stranger reading the pointer finds the atom. */
       stagesReceipted: boolean
     }
-  | { ok: false; failure: PublishFailure; reason?: string; sealed?: string }
+  | {
+      ok: false
+      failure: PublishFailure
+      reason?: string
+      sealed?: string
+      /** `not-available` because the nodes REFUSED what they lack (TS-4) —
+       *  not still uploading: the node, its state and its own words. */
+      refused?: { host: string; state: string; reason: string }
+    }
 
 export interface PublishOptions {
   /** Re-verify receipts and re-stage before waiting. The `markPublic` walk
@@ -327,27 +342,49 @@ export async function publishBranch(
   //    receipts say nothing about the node whose index is about to name the
   //    branch. So the question is asked of the answering nodes, and the
   //    progress counts only what they still owe.
+  //
+  //    A NODE THAT REFUSED IS NOT "STILL UPLOADING" (TS-4). A node that
+  //    answered 403 (participants closed, not a writer), is full, or refused
+  //    an atom too large for it, is paused by the drain for minutes: waiting
+  //    out the deadline promised an upload that was never going to happen.
+  //    The verdict on the nodes says so the moment the refusal lands — its
+  //    `sync:state` wakes the wait — and the publish stops, naming the node
+  //    and its own words. No request of its own: the drain's answer is read.
   report({ phase: 'waiting' })
   const nodeSet = new Set(answering.map(d => foldContentLabel(String(d).toLowerCase())))
   let pending = -1
-  const offSync = EffectBus.on<{ pending?: number; host?: string }>('sync:state', p => {
-    if (typeof p?.pending !== 'number') return
-    if (p.host && !nodeSet.has(foldContentLabel(String(p.host).toLowerCase()))) return
-    pending = p.pending
+  let wake: (() => void) | null = null
+  const offSync = EffectBus.on<{ pending?: number; host?: string; status?: string }>('sync:state', p => {
+    if (p?.host && !nodeSet.has(foldContentLabel(String(p.host).toLowerCase()))) return
+    if (typeof p?.pending === 'number') pending = p.pending
+    // A node's answer changed: look again now, not at the next poll.
+    if (p?.status && p.status !== 'syncing') wake?.()
   })
-  const availableOnNodes = async (): Promise<boolean> => hostSync.isClosureAvailableOn
-    ? (await hostSync.isClosureAvailableOn(sealed, 'layer', true, answering)) === true
-    : (await hostSync.isClosureAvailable?.(sealed, 'layer', true)) === true
+  const verdictOnNodes = async (): Promise<{ ok: boolean; ownerHeld: boolean; blocking?: { host: string; state: string; reason: string } }> => {
+    if (hostSync.closureVerdictOn) return await hostSync.closureVerdictOn(sealed, 'layer', true, answering)
+    const ok = hostSync.isClosureAvailableOn
+      ? (await hostSync.isClosureAvailableOn(sealed, 'layer', true, answering)) === true
+      : (await hostSync.isClosureAvailable?.(sealed, 'layer', true)) === true
+    return { ok, ownerHeld: false }
+  }
   let available = false
+  let refusal: { host: string; state: string; reason: string } | undefined
   const deadline = Date.now() + AVAILABILITY_DEADLINE_MS
   try {
     for (;;) {
-      available = await availableOnNodes()
-      if (available || Date.now() >= deadline) break
+      const verdict = await verdictOnNodes()
+      available = verdict.ok
+      if (available) break
+      if (verdict.ownerHeld) { refusal = verdict.blocking ?? { host: answering[0] ?? '', state: 'refused', reason: '' }; break }
+      if (Date.now() >= deadline) break
       report({ phase: 'waiting', ...(pending >= 0 ? { pending } : {}) })
-      await new Promise(r => setTimeout(r, AVAILABILITY_POLL_MS))
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(() => { wake = null; resolve() }, AVAILABILITY_POLL_MS)
+        wake = () => { clearTimeout(timer); wake = null; resolve() }
+      })
     }
   } finally { offSync() }
+  if (refusal) return { ok: false, failure: 'not-available', reason: `${refusal.host}: ${refusal.reason}`, refused: refusal, sealed }
   if (!available) return { ok: false, failure: 'not-available', sealed }
 
   // 6. Merge + sign + PUT the index — behind the wipe guard.

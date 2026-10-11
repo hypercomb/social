@@ -1,11 +1,19 @@
 # The swarm's host
 
 **Status: DESIGNED 2026-10-04, building on `swarm-bulletproof`; WHICH HOST
-amended 2026-10-07.** Owner decisions (jwize, 2026-10-04): a swarm's host
-allows participants by default; connection and reconnect speed are never
-traded for anything else; the tightest setup wins. And (jwize, 2026-10-07):
-"I thought we only use pools but maybe if publish domains take precedence
-over pools that would be fine too … but sure on your relay."
+amended 2026-10-07; the LONG TAIL amended 2026-10-10.** Owner decisions
+(jwize, 2026-10-04): a swarm's host allows participants by default;
+connection and reconnect speed are never traded for anything else; the
+tightest setup wins. And (jwize, 2026-10-07): "I thought we only use pools
+but maybe if publish domains take precedence over pools that would be fine
+too … but sure on your relay." And (jwize, 2026-10-10, "make it so it never
+breaks", then "go with the recommendations"): TILE FIRST (D1), a dead
+publish domain never holds the room (D2), the large copy of a photo is a
+WebP (D3), the two words name the meeting point (D4), a tab with no meeting
+of its own asks (D5), room text is canonical (D6), a beacon carried on the
+upload is liveness (D7), the always-online point's deploy waits for its
+eviction and door fixes (D8), publish and shell deploy before coded links
+are handed out (D9), two tabs of one hive both keep writing (D10).
 
 Your hosts host the meeting. Joining is enough to share. A tile's name reaches
 the room at once, and its bytes follow as soon as its host serves them.
@@ -21,7 +29,8 @@ is slow.
      the same write doors a publish of that branch uses;
   2. **the meeting host** (2026-10-09) — the host a meeting link names
      (`&host=`), kept in this tab's `hc:mesh-zone.host`. It is the room's own
-     choice, so it outranks your pool and is never passed over. Only a link
+     choice, so it outranks your pool — passed over only on its uploads' own
+     standing answer, like a publish domain (D2, below). Only a link
      that names one sets it: a meeting point typed in the selector names
      none (its domain was a guess, and a relay that takes no uploads would
      have stranded every tile as a name);
@@ -42,19 +51,39 @@ is slow.
      relay that sends no card hosts nobody.
 
   The relay is never the host merely because it is where you meet: that made
-  one person's relay everyone's host. Publish domains are never passed over:
-  they are your choice for that branch, so the status line and the branch's
-  publish row NAME the branch, the host and why instead — "favorites:
+  one person's relay everyone's host.
+
+  **A dead door never holds the room (D2, 2026-10-10).** A publish domain or
+  the meeting host is passed over for the swarm once ITS OWN UPLOADS give a
+  standing answer — it refuses (its 4xx, a CORS-blocked upload, or not-live
+  past five retries while this tab meets elsewhere), it is full, or it never
+  answered three uploads while the socket was open and another host answered
+  (the `hyperccomb.com` typo). A web page at the door is not enough: the
+  uploads decide. The page then goes by the next door down — meeting host,
+  pool, relay — and the status line NAMES the passed-over domain
+  (`passedOver`, on the branch's own page and on the page that offers the
+  branch): "hyperccomb.com passed over — it isn't taking uploads". When no
+  door below takes bytes either, the chosen door keeps the page, and the line
+  and the branch's publish row name the branch, the host and why — "favorites:
   hyperccomb.com can't be reached — check the host name, and that the host is
-  running" — rather than the branch reading as uploading for ever.
+  running" — rather than the branch reading as uploading for ever. `publish
+  here` still needs the domain itself: publish nodes are never passed over.
 - **A tile goes where its page goes; a branch's subtree goes where ITS pages
   go.** A tile offered on a page is uploaded to that page's hosts, and its
   children to the hosts of the page one step down, and so on. So a branch that
   wears its own publish domains keeps its subtree on them even when it is
   shared from the hive root: only the branch tile itself goes to the root
   page's host.
-- **Hosting stays the truth.** No signature is ever announced that no host
-  serves. Taking a tile still needs hosted bytes.
+- **Hosting stays the truth — for the tile itself.** No tile is announced
+  takeable until its OWN atoms (its layer, properties, picture, notes,
+  decorations and meta envelopes) are on its page's host. TILE FIRST (D1):
+  a big branch is takeable as soon as its own atoms are there; its deeper
+  pages keep uploading, and until they all are, its entry says `deep:
+  'owner'` — they are served from the sharer's device while the sharer is in
+  the room — then `deep: 'hosted'`. Receivers are told ("Deeper pages open
+  from Ana's device until their upload finishes"). An atom of the tile's own
+  that no host will ever take (a 9 MB picture answered 413) keeps the tile a
+  name: no host and no broker answer (8 MB cap) could carry it.
 - **Names before bytes.** Until a tile's host serves it, its name goes out
   without signatures. Peers see a label tile they cannot take yet.
 - **Never retract.** A shared name leaves the room only when you delete it,
@@ -164,13 +193,29 @@ sharer leaves.
   own swarm hosts, self-domain, community and the rest. A sig whose publisher
   said where it went is never first asked somewhere it is not — every extra
   probe is a request against some host's daily cap.
-- The share gate judges each part of a closure where it is SHOWN
-  (`isClosureAvailableAt`): the tile by the page's hosts, its subtree by the
-  hosts of the pages below, plus your self-domain while its backup is on. So
-  a receipt on some other target never announces a handle the receiver is not
-  told where to fetch. A page on the way still being read is UNKNOWN, never
-  "no": the walk says nothing for that page — the relay keeps the slot it
-  had — and walks again when the answer lands, for at most 5 s.
+- The share gate judges each part of a closure where it is SHOWN: the tile by
+  the page's hosts, its subtree by the hosts of the pages below, plus your
+  self-domain while its backup is on. So a receipt on some other target never
+  announces a handle the receiver is not told where to fetch. A page on the
+  way still being read is UNKNOWN, never "no": the walk says nothing for that
+  page — the relay keeps the slot it had — and walks again when the answer
+  lands, for at most 5 s.
+- The gate SAYS WHY (`closureVerdict(sig, kind, deep, page)`, and
+  `closureVerdictOn` for named hosts; `isClosureAvailableAt` / `On` are its
+  yes/no wrappers): `{ok, ownerHeld, unknown?, blocking?: {host, page, sig,
+  kind, state, reason, why?, name?, bytes?}}`. `deep: false` asks for the
+  tile's own atoms (the takeable question, D1), `deep: true` for the whole
+  closure. `ownerHeld` means every host the atom's page has gave a STANDING
+  answer for it — 413/409 for that entry, a refusal, full, never answered —
+  so waiting changes nothing; `blocking.state` `unreachable` and `not-live`
+  are transient and never owner-held. The walk keeps going past owner-held
+  atoms, so anything still uploading is reported first. Its node memos are
+  epoch-stamped: every standing change moves the epoch.
+- A deep closure that verifies leaves a CLOSURE RECEIPT, `{sig}.{hostHash}.closure`
+  in `sign('host-receipts')` (one shared writer; the storage-write counts do
+  not move), so a reload answers the deep verdict from one lookup instead of
+  walking thousands of layers (a 5,000-node branch: 415 s → 1.5 s, no host
+  requests). It is keyed by the ROOT page's host.
 - When the set of targets changes, cached "not available" answers are checked
   again.
 - A tile made private while its upload waits out a backoff never reaches the
@@ -178,9 +223,15 @@ sharer leaves.
   bytes into the next room. The public CDN and publish nodes keep the plain
   marker rule (a swarm host that is also one of them is owed every marked
   sig).
-- The publish gate asks the nodes it publishes to (`isClosureAvailableOn`),
+- The publish gate asks the nodes it publishes to (`closureVerdictOn`),
   never a swarm host: a receipt there says nothing about the node whose index
-  is about to name the branch.
+  is about to name the branch. When every node REFUSES what it lacks, the
+  publish stops at once — failure `not-available` with `refused: {host,
+  state, reason}`, the index untouched — and both the host gesture and the
+  publish panel say "{node} refused the upload ({reason}) — nothing was
+  published" instead of "still uploading … it keeps retrying". A node's
+  `sync:state` wakes the wait early, and an explicit publish clears that
+  node's back-off: each press is one fresh attempt.
 
 ### hypercomb.com as the default host: what it is today, and the Workers cap
 
@@ -311,11 +362,23 @@ hashed to the signature and were written to its heap. The read-back rule
 answer 200 without storing anything. Neither can produce `stored <sig>`. Every
 other target keeps the read-back.
 
-The drain:
+The drain (2026-10-10):
 
-- asks the host first: HEAD, four at a time. A signature the host already
-  serves earns its receipt without a PUT;
-- PUTs what is missing, four at a time;
+- runs FOUR WORKERS, each taking one entry and asking the host about it (a
+  HEAD) and then sending it at once — no batch barrier, so the first byte
+  leaves after one round trip (a 5,000-node branch used to send no byte for
+  262 s while 11,000 HEADs went out). A signature the host already serves
+  earns its receipt without a PUT;
+- skips the HEAD for an atom under 16 KB to a swarm host that answers its PUT
+  for itself (`stored <sig>` / `already held`): the PUT says "held" in the
+  same round trip;
+- sends a host's FIRST upload — the first ever, and the first after each
+  failure — alone: its answer says how to treat the rest, so a host that
+  refuses costs one PUT a wave, not four. The others wait on it at most 2 s:
+  a big first picture on a slow uplink never idles them for its whole body;
+- orders the queue by page DEPTH below the offered root, across every root,
+  then by age — every offered tile's own atoms go before any tile's children
+  (tile first);
 - after a receipt, re-walks every page that is waiting, within 150 ms, not only
   the current page.
 
@@ -326,7 +389,8 @@ going out whatever happens.
 
 | Answer | `sync:state` | Back-off | Result |
 |---|---|---|---|
-| 401 `not-live…` | `not-live` | 1 s, up to 5 times | clears itself, because the beacon goes first |
+| 401 `not-live…` | `not-live` | 1 s, up to 5 times | clears itself, because the beacon goes first. From then on each upload to that host carries this key's signed `{alive}` beacon (D7, below). Still not-live after 5 retries from a host this tab does not meet at: `refused` — "this host only takes uploads from people meeting on it" — and passed over |
+| no answer to 3 uploads while the socket is open and another host answers | `unreachable`, why `unresolved` (`never-answered` in the gate) | the ladder | a publish domain or meeting host is passed over (D2); not remembered across a reload (silence is weak evidence) |
 | 403 `participants-closed` | `refused` | 10 min | names only (also a live key whose only room is one a `--allow-participants=<rooms>` relay does not take) |
 | 413 | `too-large` | the entry is dropped for this host | that tile stays name-only |
 | 429 or 507 | `full` | Retry-After, at least 10 min | names only |
@@ -342,19 +406,19 @@ while the tab was online with its socket open — a typo, a name that resolves
 nowhere, or a machine host switched off behind its edge; the browser cannot
 tell them apart, so the line asks for both; a timeout is never `unresolved`),
 `refused`, `full`, or plain `unreachable`. `hostTrouble(host)` answers the
-same from memory, for the publish rows. The drain reconciles and sends in
-batches of 32 — a HEAD-before-PUT check a batch at a time — so a reload that
-re-stages thousands of entries for a host never holds the first upload, or
-the first failure that passes a dead host over, behind all of them;
-`host-sync:progress` is up after the first batch. A swarm host that has not
-answered yet gets ONE CANARY — the first entry it is owed — in the first
-batch, and a target set that moves mid-pass (a branch given its publish
-domain, a pool host passed over) starts the pass over, so a new host's first
-answer never waits behind another host's backlog. The FIRST question this
-tab asks a host goes alone: while it is in flight the rest of the batch waits
-on that one answer, so a page host costs one HEAD (and the GET that checks
-what a 200 carries), not one per concurrent slot; once it has settled, either
-way, the host is asked at the full cap. Back-off resets on success, and on a
+same from memory, for the publish rows. The drain's four workers each ask
+about and send their own entry (above), so a reload that re-stages thousands
+of entries for a host never holds the first upload, or the first failure
+that passes a dead host over, behind all of them; `host-sync:progress` is up
+from the first entry. A swarm host that has not answered yet gets ONE CANARY
+— the first entry it is owed — at the front, and a target set that moves
+mid-pass (checked every 32 entries: a branch given its publish domain, a
+pool host passed over) starts the pass over, so a new host's first answer
+never waits behind another host's backlog. The FIRST question this tab asks
+a host goes alone: while it is in flight the rest wait on that one answer,
+so a page host costs one HEAD (and the GET that checks what a 200 carries),
+not one per worker; once it has settled, either way, the host is asked at
+the full cap. Back-off resets on success, and on a
 socket that comes back — the first open after a join, or the one `reopened` payload; a stall
 answered late is not a return. A 409 answers only a PUT at a reserved address,
 which a tile's bytes never are. Each receipt the swarm host earns is announced
@@ -374,16 +438,42 @@ sessionStorage (`hc:swarm-hosts:down`, the newest 8, an hour at most — never
 localStorage) so a reload does not make it primary again; a full host (it
 named its own wait) and plain silence are this page's only. A remembered one
 gets its chance back only when the pool changes, `enable()` or `reDrain()` is
-called, or it serves a receipt. `swarm:share-status` names the pool hosts
-passed over (`passedOver`).
+called, or it serves a receipt. `swarm:share-status` names the hosts passed
+over (`passedOver`) — the page's own, and those of the branches it offers.
+
+**LIVE HERE TOO: the beacon rides the upload (D7).** A relay.js host started
+with `--allow-participants` takes a participant's upload only from a key live
+on ITS socket, and a participant meeting at another point (the always-online
+one, another relay) never speaks there. Once such a host has answered
+`not-live`, each later PUT of the room's own drain to it carries this key's
+newest signed `{alive}` beacon in the NIP-98 event — tag `['alive', <the
+kind-30206 event as JSON>]`, `x` = the room's lifecycle sig, `d` = the key,
+expiring 120 s on, signed at most once a minute — and the relay takes a
+fresh one (same key, verified, `{alive: true}`, a 64-hex `x`, at most 120 s
+old, at most 4096 characters) as the key being live, in that room (zones
+mode still decides by room: 403 "this room is not hosted here"). No request
+and no round trip is added; the first contact costs one 401. The beacon is
+attached ONLY while this tab meets (`isJoinedHere`), only to the room's
+drain (never a publish node or a package push, which must not learn the
+room's lifecycle address), and its room is this tab's own zone, never the
+stores' pre-fill. The relay records the key live only after the whole token
+has held for that request (freshness, method, url), and **never on a relay
+with an access code**: there live means "spoke on a socket admitted with the
+current code", which a self-signed beacon cannot prove — a coded relay takes
+uploads only from its own sockets.
 
 ## Names before bytes: the gate
 
 Each walk builds the entry for each public child with one helper:
 
-1. **Hosted.** The closure has a receipt on a current target. Publish the full
-   entry: name, layer signature, properties and titles. Remember it as this
-   name's last hosted entry.
+1. **Hosted.** The TILE's own closure (its layer, properties, picture, notes,
+   decorations, meta envelopes — never its child pages) has a receipt on a
+   current target (D1, tile first). Publish the full entry: name, layer
+   signature, properties and titles. Remember it as this name's last hosted
+   entry. A public BRANCH still marks its whole closure, so its deeper pages
+   keep uploading; its entry carries `deep: 'owner'` until the whole closure
+   verifies, then `deep: 'hosted'` (a receiver that does not know the field
+   ignores it).
 2. **Last hosted.** Not hosted yet, but this name has a last hosted entry.
    Publish that entry unchanged. Its old handle and picture are still served.
 3. **Name only.** Neither. Publish a placeholder: the name, the titles and the
@@ -392,6 +482,16 @@ Each walk builds the entry for each public child with one helper:
    taken until the full entry lands.
 
 - A page that used 2 or 3 is walked again when a receipt arrives.
+- A branch's handle is history's merkle SEAL of its live subtree. A seal that
+  refuses (a layer below held nowhere — GC'd, never fetched, a pasted bare
+  leaf) settles on the raw handle, so the hole is named and the tile is
+  takeable by its own atoms, and a late seal re-walks the page only if it
+  lands on something other than what was offered. The walk's seal is a
+  BACKGROUND seal (`sealSubtree(segments, undefined, { bypassMissWindow:
+  false })`, as is the publish panel's status row): it trusts this epoch's
+  refusal and leaves the store's host-miss window standing, so receipt
+  re-walks never keep a GET-404 stream going against the hosts for the hole.
+  Explicit snapshot, publish and paste still ask the hosts again.
 - The remembered entry is used only for children that are still public. Making
   a tile private drops it at once.
 - The remembered entry goes out only while the current targets still serve
@@ -406,10 +506,37 @@ Each walk builds the entry for each public child with one helper:
 - The `swarm:availability-hold` effect, the held list, and the "Watching only"
   and "Uploading before sharing" toasts are gone. After each walk the swarm
   emits `swarm:share-status` {location, offered, uploading, nameOnly, private,
-  host, hosts, hostSource, hostState, reason}: WHICH host this page's tiles go
-  to, why that one (`publish`, `pool` or `relay`), and what it last said —
-  `no-host` when nothing hosts them. `sync:state` carries the same `source`
-  for every swarm host.
+  host, hosts, hostSource, hostState, reason, why?, passedOver?, blocked?,
+  held, notQueued, deepOnDevice, taken, unackedMs}: WHICH host this page's
+  tiles go to, why that one (`publish`, `meeting`, `pool` or `relay`), and
+  what it last said — `no-host` when nothing hosts them. `sync:state` carries
+  the same `source` for every swarm host. And (2026-10-10):
+  - `held` — WHAT HOLDS EACH TILE BACK, grouped by host: `{host, state,
+    reason, why?, count, names, deep?}`, from the gate's own `blocking` word,
+    else every one of this page's hosts refusing, else a page below going to a
+    host that takes none of a branch's bytes. `deep: true` on a group whose
+    tiles CAN be taken and only their deeper pages stay on this device — the
+    line says so ("dead-b.localhost isn't taking the deeper pages of 1 tile —
+    they open from your device while you're here"), never "stays a name";
+  - `uploading` counts only tiles a needed host still owes uploads for;
+    `notQueued` the name-only rest nothing is uploading (a hole in the
+    closure, a seal that never resolves): "N names only — not queued";
+  - `deepOnDevice` — takeable branches whose deeper pages are still only here;
+  - `taken` / `unackedMs` — whether the relay OK'd this page's newest word,
+    and for how long it has not (said again once at about 3 s while
+    untaken). The line shows "Sending…" past 3 s and counts you in "(N
+    here)" only once the word is taken;
+  - `passedOver` — the hosts passed over, this page's and its offered
+    branches' (D2), named whenever there is one.
+- A full entry's atoms are read over HTTP first: the receiver's broker is told
+  every ref of a live peer's page as `hosted` (never raced on the mesh), and
+  the `deep: 'owner'` roots as `owner` — everything read BENEATH such a root
+  is asked of the mesh first (it is only on the sharer's device), and the
+  subtree's miss windows re-open when the sharer announces again (at most
+  once a minute) and the moment the root is named without the mark (its
+  upload finished). `swarm:presence-changed` carries `deepOwners`, and the
+  receiver's line names them: "Deeper pages open from Ana's device until
+  their upload finishes".
 - Once the relay has taken the page this tab stands on, the swarm emits
   `swarm:page-announced` {location, segments} — the page's address only,
   never a count or a name. "Taken" is the relay's OK, reported by the mesh's
@@ -490,6 +617,46 @@ quota, a target is missing, or the tab reloaded.
   refresh when revisited, or lapse at their 90 s TTL.
 - Listeners are armed when the drones are constructed, not at first paint, so
   nothing created in the first seconds is missed.
+- **A tab with no meeting of its own asks (D5, 2026-10-10).** A bare
+  `use-live-relay`, the `join` word, ctrl+shift+P and every keymap join need
+  THIS tab's own room and secret in `hc:mesh-zone`; without them they open
+  the selector pre-filled, and never silently join last week's pair from the
+  origin-wide pre-fill or the world-shared `hive/hive`. A named
+  `use-live-relay <room> <secret>` records the pair as the tab's zone first,
+  so it still joins at once; with the same pair as the tab's zone and no
+  server it keeps the tab's meeting point and code. A reload resumes without
+  asking. Double-quoted words (straight or curly) are one word. The secret is
+  never seeded from the address bar, and the room only on
+  `<room>.hypercomb.io` (`www` excluded).
+- **One text, one zone (D6).** A room or secret ENTERED (the selector,
+  `use-live-relay`) is folded by core's `canonicalZoneText`: NFKC, invisible
+  characters dropped, curly quotes and dashes straightened (an em dash is
+  `--`, as iOS types a doubled hyphen), spaces collapsed; case is kept. Plain
+  ASCII hashes exactly as before (`downtown/rose` is still `166d0590ac44`). A
+  value the store already holds is kept as recorded, so a tab resuming a
+  pre-fold pair keeps it; and a MEETING LINK's room and secret are an exact
+  zone, recorded as carried (`set(text, exact)`), so a guest always lands
+  where the inviter is. The selector's two words preview what START will
+  store.
+- **The meeting point is pre-filled too (ZI-1).** A new tab's selector is
+  pre-filled with the point this device last met at — never its code. It is
+  a participant DOCUMENT (pool `mesh:meet-point`, `participant-document.ts`),
+  never a localStorage key: written when the selector sets a point and at a
+  join (never at a reload's re-announcement, and never by a link's zone write
+  before the guest said yes).
+- **"(N here)" counts who STANDS here (TS-3).** Each member's newest drill
+  request (kind 30203, d `drill:<pubkey>`, already sent on every arrival —
+  now on every move to another page, `{away: true}` with no names on a
+  private one) says where they stand. `swarm:presence-changed` carries
+  `peers` (everyone whose tiles are here — the badge filter, the spotlight
+  and the layer strip keep a member whose tiles stay while they walk on),
+  `at` (the standing subset — the count) and `zonePeers` (here, elsewhere,
+  away). A member never heard drilling counts where their slots are.
+- On a move, the personal channel and presence (30204) wait a 300 ms settle
+  and the channel says only a changed word; the late-joiner ask waits 1 s
+  (a join or reconnect still asks at once); the sticky refresh skips pages
+  where this participant holds nothing; the fast join retry is armed only by
+  arrivals. Join, connect and reconnect frames are unchanged.
 
 ## The socket says what it is
 
@@ -526,11 +693,25 @@ so the swarm forgets it had sent it.
 - An EVENT unacked for 5 s, with nothing heard since, triggers a probe. It
   never kills the socket outright.
 - Nothing is judged while bytes queued on the device are still draining
-  (`bufferedAmount` going down), or on a tick that runs more than 1 s late. A
-  buffer that has not gone down for 15 s is a dead path and is judged as
-  usual.
-- `online`, `pageshow` and the tab becoming visible: probe with a 3 s deadline
-  if a socket is open; otherwise connect now.
+  (`bufferedAmount` going down). A buffer that has not gone down for 15 s is
+  a dead path and is judged as usual.
+- A tick more than 1.5 s late judges no deadline but still sends the idle or
+  unacked probe. In a hidden tab, a late tick right after another late tick
+  (Chrome runs a tab hidden 5 minutes on the minute) judges as usual, and an
+  EVENT that has waited a whole such tick for its OK dials the replacement at
+  once. The first tick after resume, visibilitychange or pageshow never
+  judges. (A visible tab's consecutive late ticks are a busy main thread,
+  which could be holding a handshake's open event: never judged.)
+- A wake — `online`, `pageshow`, `resume`, the tab becoming visible, a change
+  of network TYPE: probe an open socket with a 3 s deadline; otherwise
+  connect now. Only a wake that means a NEW PATH — `online`, a type change,
+  `resume`, a pageshow from the back-forward cache — cancels a handshake in
+  flight for more than 500 ms and dials it again at once (a browser holds one
+  handshake per host:port in flight, so one beside it would only wait), and
+  not one the previous new-path wake dialled within 5 s. A tab shown again
+  says nothing about the path, and an `effectiveType` re-estimate is never a
+  wake: on cellular or a busy meeting point a healthy handshake takes over
+  500 ms. `online` and a type change also reset the connect timeout to 8 s.
 
 ### Reconnect
 
@@ -543,12 +724,36 @@ so the swarm forgets it had sent it.
   more time, not less.
 - A retired socket's handlers are cut before it closes, so a stale close can
   never delete the live socket.
-- On open, in order: the REQs for every bucket (the same 900 s window), then
-  unacked and queued frames, then the beacon, then the current page, then the
-  visited pages spread over 0-5 s.
+- On open, in order: the REQs — held subscriptions newest first (the page
+  this tab stands on first), leases last (the same 900 s window) — then
+  unacked and queued control frames, then bulk, then the beacon, then the
+  current page, then the visited pages spread over 0-5 s.
 - Refused events are sent again. `rate-limited:` is retried after 1, 2, 4, 8
   and 15 s, at most 5 times, unless a newer event replaced it. A refused
   subscription retries after 1 s·2ⁿ, capped at 30 s.
+- LEASES. A bucket opened by `ensureStartedForSig` / `awaitReadyForSig` with no
+  consumer is a lease: it closes at the relay's EOSE or its deadline (the
+  wait, or 10 s), and its waiters are answered then. At the relay's
+  subscription cap a held subscription takes the oldest lease's place and
+  asks again at once; a lease the relay refuses is dropped, never retried.
+  The swarm's own walks never open one for a page this tab is not on (a
+  reloaded sharer used to hit the 200-subscription cap and go deaf).
+- SEND PRIORITY. The relay's per-connection budget (400, refilled 10/s) is
+  mirrored per socket, full at open. Beacons, layers, presence, drills,
+  probes and held REQs go at once; broker asks, answers, cancels and resource
+  bytes (kinds 30401, 30201, 20400, 20402) wait FIFO while fewer than 40
+  tokens remain (superseded per slot, at most 512, gone after 60 s). A full
+  outbound queue evicts the oldest bulk frame first; bulk never displaces a
+  control frame. (The relays now keep two buckets, bulk and control; one
+  mirror is conservative.)
+- After a 4401, every later dial to that relay is announced only on its first
+  frame (its card, on the same flight), so a tab without the current code
+  climbs the access ladder and is never shown a reopen.
+- THE CLOCK. The relay clock offset is kept per tab in sessionStorage
+  `hc:mesh-clock`, so a reload stamps its first frames on the learned clock.
+  `mesh:clock-corrected` {relay, offsetMs, prevOffsetMs} fires once when a
+  card moves the offset by more than 2 s after EVENTs already went out on
+  that socket, and the swarm re-says everything, as on a reopen.
 
 ### Liveness numbers
 
@@ -571,14 +776,23 @@ frames are the relay's one NOTICE and the idle-only probes.
 ## Soft wills
 
 - The relay holds a disconnected key's last will for 15 s. An `{alive}` or
-  `{left}` for the same slot cancels it, and so does any verified EVENT on a
-  connection that has itself beaconed that slot. A reopened socket's first word
-  is its beacon, so a reload, a blip or a network change never tombstones.
+  `{left}` for the same slot cancels it, and any verified EVENT on a
+  connection that has itself beaconed that slot hands the will to that
+  connection. A reopened socket's first word is its beacon, so a reload, a
+  blip or a network change never tombstones.
 - A will belongs to the connections that beaconed the slot, not to every
   connection the key has spoken on. Another open connection that beaconed it
-  (a second joined tab) inherits the will. A same-key tab that never joined
-  neither inherits nor cancels it, so closing the joined tab still marks it
-  away after 15 s.
+  (a second joined tab) inherits the will — but only one still THERE: heard
+  from since the dying connection's newest beacon for the slot (MS6). A phone
+  that locked twice leaves a zombie socket of the first lock that must not
+  hold the will until the reap. relay.js pings the quiet candidates when the
+  will is armed and asks again when the grace ends; the always-online
+  meeting point cannot ping (a Worker cannot), so there a candidate heard
+  within the last 90 s counts too — a hidden second tab, throttled to a frame
+  a minute, keeps the will. A connection of the slot that speaks DURING the
+  grace takes the will (it does not merely cancel it), so its own later death
+  is still heard. A same-key tab that never joined neither inherits nor
+  cancels it, so closing the joined tab still marks it away after 15 s.
 - A tombstone the relay made (empty `sig`) marks the peer **away**. The roster
   shows them hollow, and their tiles stay.
 - Each tile lives until its own expiration tag plus 30 s, which is the 90 s
@@ -608,10 +822,28 @@ frames are the relay's one NOTICE and the idle-only probes.
   `nowSec()` give relay time. `created_at` only rises per slot (the larger of
   now and the last value plus 1), so a same-second update is never dropped.
   NIP-98 uses relay time too. Freshness checks allow 30 s.
-- Rate: per connection, a burst of 400 and a refill of 10 a second. Per IP, a
-  burst of 12000 and a refill of 200 a second, keyed on `CF-Connecting-IP`.
-  CLOSE and AUTH are never charged. Twenty phones on one venue IP use about a
-  quarter of the IP ceiling.
+- Rate: per connection, TWO buckets, each a burst of 400 and a refill of 10
+  a second — bulk (the broker's kinds 30401, 30201, 20400, 20402) and
+  control (everything else, every REQ) — so a sharer whose pictures are in
+  demand never has its own beacon or page refused for answering. Per IP, a
+  burst of 12000 and a refill of 200 a second, keyed on `CF-Connecting-IP`,
+  shared by both. CLOSE and AUTH are never charged. Twenty phones on one
+  venue IP use about a quarter of the IP ceiling.
+- BROKER ANSWERS ARE A REPLAY WINDOW, NOT A STORE (relay.js and the meeting
+  point alike). A 30401 answer is kept only for the readers' window —
+  created_at + 15 min, whatever its tag says (the client stamps 900 s now) —
+  and ONE holder's WHOLE run per address and type is kept: the asker
+  assembles a chunked answer from one key's chunks, so a mix never
+  completes. Once a holder's run is whole, other holders' copies are dropped
+  and later ones are fanned out live but not kept. Only a run a reader can
+  assemble is kept (d = x, or d = x#i with c = i/n, n ≤ 64), at most 128 per
+  address and type, never one dated more than 60 s ahead, kept as running
+  counts (a store never rescans the address); and a run of BYTES becomes the
+  run only once it hashes to its address — a forged answer is dropped, so it
+  can never pin a popular picture's replay. Every answer is still fanned out
+  live. Answers are paced by the sender too (a burst of 8, then 6 a second;
+  a run cut short gives its unused turns back), one answer per sig at a
+  time, and a tab answers at once for sigs its own page names.
 - The relay prints one counts-only line a minute when anything happened: open
   connections, refused EVENTs and REQs, wills fired and cancelled, participant
   PUTs and bytes, and alive participants per zone (a 6-hex prefix). No IPs, no
@@ -665,8 +897,31 @@ frames are the relay's one NOTICE and the idle-only probes.
   (`invite-capture.ts` `watchPendingMeet`).
 - The page segments are the ones the swarm actually hashes, so a pinned Home
   cannot split the room.
+- **A link survives being pasted (2026-10-10).** Every part is minted
+  strictly: `! ' ( ) * . _ ~ -` are `%XX` too (every older reader decodes
+  them to the same text), so a link never ends in raw punctuation; and a
+  stray trailing `. , ; : ! ? ' " ) ] } >` (an unbalanced `)`) a chat app
+  glued on is trimmed on read — never `_ * ~`, which end base64url codes.
+  The room and the secret may hold `/` (only a page segment may not); a link
+  that would not read back the same is never handed out ("A meeting link to
+  this page would not open for anyone…").
 - The fragment never reaches a server. The shell moves it into
-  `sessionStorage['hc:pending-meet']` and strips it from the address bar.
+  `sessionStorage['hc:pending-meet']` and strips it from the address bar —
+  only once the stash write succeeded. Where storage is blocked (a private
+  window that refuses it, an in-app browser) the link is put back in the
+  address bar and the blocked-storage card shows it with a "Copy meeting
+  link" button.
+- A link opened in the SAME tab (a second tap, a pasted URL) is caught on
+  `hashchange`/`popstate` before navigation reads it: stashed, stripped, and
+  announced as the transient `meet:pending`, which the meeting-invite worker
+  takes; a newer link that arrives while a sheet is up is kept.
+- A package from before meeting points (or one that refuses a slash in the
+  room or secret) gets the UPDATE DOOR, never the selector: the shell keeps
+  its own copy of the link, writes it back to the stash, opens the packages
+  panel and says "This meeting needs the newer Hypercomb — update and the
+  link opens itself". Where the selector is still the fallback (no worker at
+  all), the link's point is put in this tab's zone first (never the next
+  tab's pre-fill — that waits for the guest's START) and restored on cancel.
 - Opening it shows one sheet: "Join the room 'meetup'? You'll see everyone
   here. Tiles you add while joined are shared with the room and kept by
   hypercomb.com." [Join] [Not now]. The host named is where the invited
@@ -676,16 +931,26 @@ frames are the relay's one NOTICE and the idle-only probes.
   only, at most 1.5 s; with none known by then, it names no host. A pool host
   that turns out not to take uploads is passed over afterwards, so the bytes
   may end up on the relay the sheet did not name.
-- Join sets the exact room and secret, goes to the page, switches the command
-  line to tiles (so a typed name never becomes a command), and connects.
+- Join sets the exact room and secret — as carried, never folded like typed
+  text (D6) — goes to the page, switches the command line to tiles (so a
+  typed name never becomes a command), and connects.
 - The link carries the secret. Anyone holding it can join and upload within
   the caps. Post it where the room is, and nowhere else.
-- The room words come from the room and secret only, not the page. Everyone in
-  a room sees the same two words on any page. Compare them out loud.
+- **THE TWO WORDS (D4).** They come from the room, the secret and — when it
+  is not the shipped default `jwize.com` — the meeting point's host, never
+  the page. Everyone in a room sees the same two words on any page, and half
+  a room split onto another relay sees a different pair. Rooms on the
+  default relay keep the words they always had. The pair is always from the
+  ONE English list, in every language; a reader of another language sees
+  their own pair beside it ("light moss (うるわしい しま)"), so a mixed room
+  compares the same English words out loud. One relay reached under two
+  names (a host and its `www.`, a proxy port) reads two pairs; real links
+  carry one URL.
 
 Typed fallback: the swarm control, then the room and secret, then Start. The
-fields no longer autocapitalize or autocorrect. Room names are not
-case-folded, so `Meetup` and `meetup` are two rooms.
+fields — and the command line — never autocapitalize or autocorrect. Room
+names are not case-folded, so `Meetup` and `meetup` are two rooms; but what
+LOOKS the same is the same (D6, "One text, one zone" above).
 
 ## Meeting runbook
 
@@ -818,13 +1083,73 @@ name the relay.
 | {k} tiles include content this device doesn't hold | taken content that is neither here nor on the host | nothing; those tiles stay name-only |
 | {k} of your tiles here are private · Share | tiles from before the meeting | tap Share to offer them |
 | Your device clock is far off — set it automatically | the relay refused the clock | turn on automatic time |
+| Live · slow connection | the open socket is answering late (under 2.5 s of a stalled probe) | nothing; past the probe deadline it reads Reconnecting |
+| Sending… | this page's newest word has gone 3 s without the relay's OK; you are not counted "here" until it is taken | wait |
+| {host} needs the current meeting link — ask for the newest one · Enter the new code | 4401: the meeting point's access code was recycled (down tone at once, never "check wifi") | get the newest link, or type the new code |
+| This link meets at {relay}, a computer's own relay — this page can't reach it | a loopback meeting point opened from a real host | open the link on that computer, or ask for a link to a public meeting point |
+| The meeting point stopped taking more listeners — reload this tab | the relay's subscription cap | reload |
+| {host} isn't taking uploads — {n} tiles stay names (· did you mean {other}?) | the gate's `held`: the host in the way of these tiles, refused / never answered / too large / full | a typo: fix the branch's publish domain; otherwise another host |
+| {host} isn't taking the deeper pages of {n} tiles — they open from your device while you're here | `held` with `deep`: the tiles can be taken, their deeper pages stay here | stay in the room until they upload, or give the branch a host that takes them |
+| {n} names only — not queued | name-only tiles nothing is uploading (a hole, a seal that never resolves) | nothing to wait for; the content is not held here |
+| {host} passed over — it isn't taking uploads | a pool host, the meeting host or a branch's publish domain gave a standing answer (D2); the tiles went to the next door | check the domain's spelling, or remove it |
+| Deeper pages open from {name}'s device until their upload finishes | a receiver: a branch here is takeable, its deeper pages still only on its sharer's device | open them while {name} is here |
+| {node} refused the upload ({reason}) — nothing was published | a publish whose nodes all refuse what they lack | the node adds the flag or a grant; or publish elsewhere |
 | {n} people need to tap Update to share | peers on an older package | tell them |
 | Only {name}'s tiles · Show everyone | a badge was tapped, so the canvas is filtered | tap Show everyone |
 | "{text}" isn't a command — say "create {text}" to add it as a tile, or type > on an empty line to make tiles | a command line with no action; the text is kept | type `create {text}`, or `>` alone on the line |
 
+## Two tabs of one hive (D10)
+
+Two tabs of one hive both keep writing; neither silently loses a change.
+
+- core `writeLayerMarker` refuses a marker name that exists with a named
+  `MarkerExistsError`. `commitLayer` refuses with `StaleHeadError` — after
+  re-reading the head from disk — when its marker name is taken, when a cold
+  name scan finds a bag max past the head it built on, or when the caller's
+  base marker (the optional `{ marker }`, from `history.headMarkerOf(loc)`)
+  has moved.
+- `LayerCommitter` runs each task through a rebase: on `StaleHeadError` it
+  runs the change once more on the fresh head; a second refusal shows one
+  toast ("Another tab of this hive changed this page at the same moment —
+  your change was not saved. Try it again.") and rejects.
+- Every marker write is announced on `BroadcastChannel('hc:history')`. Other
+  tabs re-read that head (`revalidateHead`, one directory read), emit
+  `history:head-external`, and reconcile the page on screen through the
+  `cell:added` / `cell:removed` diff. A tab coming back into view revalidates
+  its current page. Deletes and archives are not announced; another tab meets
+  them at its next commit there.
+
+## Pictures: the large copy (D3)
+
+A dropped, pasted or captured photo's LARGE copy is never the raw file: it is
+re-encoded as WebP with its long edge at most 2560 px (a 12 MB photo stores
+at most about 2 MB), and the small hex pictures are taken from it. The
+re-encode is also what strips the photo's EXIF — the GPS of where it was
+taken — so a picture this engine can draw is ALWAYS stored re-encoded, even
+one already within the edge whose re-encode is no smaller. Kept as it came
+only: a picture the engine cannot decode or draw, and a GIF within the edge
+(its animation). Safari cannot encode WebP: a photo becomes a JPEG and
+anything that may carry transparency the shrunk PNG. The tile editor stores
+the large copy of a new picture and divides its framing scale by the shrink
+ratio, so the crop on screen is the crop saved. A device out of space says so
+once ("This device is out of space — the last change was not saved"); a
+picture that cannot be added says so too.
+
 ## Rolling it out
 
 Order: relay, then shell, then the essentials stamp, then apex staging.
+
+**The 2026-10-10 long tail (D9):** publish the essentials revision AND deploy
+the shell before anyone hands out a meeting-point or coded link — essentials
+built from it import core's `canonicalZoneText`, which a shell with an older
+`/core` refuses by name, and the update-door fallback for older packages, the
+blocked-storage card and the canonical zone text reach nobody until both are
+out. relay.js changes (two buckets, verified answer runs, carried beacons,
+the access-file read, the heir rule) are a restart, by the owner, outside a
+meeting; an un-upgraded relay ignores the beacon tag, and a PUT without it
+behaves as before. Never put an access code on the shipped default relay
+`wss://jwize.com` (D8): packages from before the access ladder (87383624,
+75007af2) redial it 13 times a minute.
 
 1. **Relay**, at least 24 h before a meeting: add `--allow-participants`
    ([hosting-from-a-machine.md](hosting-from-a-machine.md)), restart cleanly,
@@ -884,11 +1209,11 @@ always-online meeting point (below) answer the same way:
   (a first join, or an older build flushing its queue on a reopen) is held,
   16 per connection for 3 s, and routed the moment it beacons.
 - **The card says so.** The `hc:host` card carries `addressed: true` only
-  where all of the above holds, and the content broker copies its asks onto
-  the word for older builds only where every relay the tab dials says it
-  (`relaysAddressed()`); on a relay without it, only after an older build has
-  been heard asking in the room. NIP-11 `limitation` names `max_addresses`,
-  `restricted_writes` and `access_code`.
+  where all of the above holds. The content broker copies its asks onto the
+  word for older builds only while an older build has been heard asking in
+  the room (2026-10-10: being on an addressed relay no longer copies every
+  ask, which doubled a picture-heavy page's frames). NIP-11 `limitation`
+  names `max_addresses`, `restricted_writes` and `access_code`.
 - **HTTP reads have one spelling.** relay.js serves a path only as written
   in its canonical form: no `.`/`..`/`//`/`%2e`, no dotfile at any depth, a
   signature segment only in lowercase, no `:` (a Windows stream such as
@@ -915,8 +1240,14 @@ node relay.js --destroy-access-codes ./access-codes   # empties the file: nobody
   **4401** before any frame, the card included.
 - **Recycling** is `--new-access-code` again: the new code in, the old one
   out. The running relay re-reads the file every second and on every
-  upgrade, and closes any session admitted under a hash no longer listed —
-  no restart, no redeploy. A missing file admits nobody.
+  upgrade, and closes any session admitted under a hash no longer listed
+  within a second or two — no restart, no redeploy. A missing file admits
+  nobody. A read that FAILS (the file held by another process, a sync tool
+  mid-write) changes nothing and is retried the next second; a hash is added
+  at once, but leaves only when the file says so twice, at least 500 ms
+  apart (an editor that truncates before it writes never closes the room).
+- A coded relay takes uploads only from keys live on its OWN admitted
+  sockets: a beacon carried on a PUT (D7) is never accepted there.
 - Without `--access-codes` the relay echoes the offered subprotocol (a
   browser needs that to finish the handshake) and ignores the code — the
   home relay stays open as it always was.
@@ -980,6 +1311,24 @@ defaults to it.
   the old code is closed with 4401, and each of those participants' wills
   waits out its grace like any dropped socket. There is no restart and no
   redeploy. `--close` destroys the code with no successor.
+- **The store makes room; it never refuses presence (2026-10-10).** The
+  object counts each event as its JSON plus 600 bytes (what it really costs
+  the heap) within 64 MB. Full, it EVICTS instead of refusing: broker answers
+  first, oldest first; then other kinds that expire, soonest first (to the
+  minute — a full sort per event cost 75 ms at 50k entries); presence slots
+  last and only to make room for presence. Presence (30206, 30200, 30204,
+  30208) is never refused while anything can be evicted, and the last 1/16
+  of the store (4 MB) is theirs alone. The minute line counts `evicted N`.
+  Broker answers are kept as relay.js keeps them (above): 15 minutes, one
+  holder's verified whole run per address. Each connection has a bulk and a
+  control bucket, and a broadcast serializes its event once.
+- **A failed door question never shuts the door.** When the front's question
+  to the object fails (a rejected fetch, a non-OK status, non-JSON), the
+  answer is `unknown` and the dial is forwarded to the object, which checks
+  the code itself; 4401 at the front only on a hash the front actually holds.
+- **D8: the deploy waits on these (code gate met in this branch).** The
+  `hypercomb-meet` deploy and the `MEET` binding below are the owner's act;
+  until then the always-online point does not exist.
 - **A reset is a relay restart.** While anyone is connected, a sweep timer
   keeps the object in memory. It runs expiry, the 120 s idle reap (a Worker
   cannot ping) and the minute line. If the object is evicted or redeployed,

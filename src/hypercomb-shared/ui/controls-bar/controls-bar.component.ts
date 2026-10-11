@@ -298,6 +298,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     get('@hypercomb.social/I18n') as EventTarget | undefined,
     () => (get('@hypercomb.social/I18n') as { locale?: string } | undefined)?.locale ?? 'en',
   )
+  /** The relay this tab meets at, host[:port] (the mesh's swarmHost) — what
+   *  the room's words fold in when it is not the shipped default. Re-read on
+   *  every connection change and every move of the tab's meeting point. */
+  #meetPoint$ = signal('')
+  #meetPointUnsubs: (() => void)[] = []
 
   // ── background sync indicator ──
   private get installMonitor(): InstallMonitor | undefined {
@@ -1153,7 +1158,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // itself out loud; a split it SHOULD catch (a capital the phone slipped
     // into the room, a stale secret) hid among those false alarms. Same
     // pair in the location window and on the presence line.
-    return roomWords(this.#room$(), this.#secret$(), this.#locale$())
+    // The meeting point is in the preimage when it is not the shipped
+    // default, so a meeting split across two relays reads two pairs; the
+    // pair is the English one in every language (D4, 2026-10-10).
+    return roomWords(this.#room$(), this.#secret$(), this.#meetPoint$())
   })
 
   readonly hasSecret = computed(() => !!this.#secret$().trim())
@@ -1564,6 +1572,20 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#meshJoinUnsub = EffectBus.on('mesh:join', () => {
       if (!this.meshPublic()) this.meshToggled.emit()
     })
+
+    // Where this tab meets, for the room's words: synchronous reads of the
+    // mesh, on its own announcements — nothing is asked of anyone.
+    const readMeetPoint = (): void => {
+      try {
+        const host = (get('@diamondcoreprocessor.com/NostrMeshDrone') as { swarmHost?: () => string } | undefined)?.swarmHost?.()
+        if (typeof host === 'string') this.#meetPoint$.set(host)
+      } catch { /* keep the last one */ }
+    }
+    readMeetPoint()
+    this.#meetPointUnsubs.push(
+      EffectBus.on('mesh:connection', readMeetPoint),
+      EffectBus.on('mesh:zone', () => queueMicrotask(readMeetPoint)),
+    )
 
     // The swarm reports that it is public but has nowhere to publish — it
     // composes its sig from (path, room, secret) and declines without both.
@@ -2194,6 +2216,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#meshJoinUnsub?.()
     this.#meshLeaveUnsub?.()
     this.#swarmZoneUnsub?.()
+    for (const off of this.#meetPointUnsubs.splice(0)) off()
     this.#lockBumpUnsub?.()
     this.#iconEditUnsub?.()
     this.#configureControlUnsub?.()

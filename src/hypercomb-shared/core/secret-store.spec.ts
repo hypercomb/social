@@ -107,59 +107,24 @@ describe('SecretStore', () => {
     expect(new SecretStore().value).toBe('downtown')
   })
 
-  it('does not overwrite with subdomain when cleared flag is set', () => {
+  it('a cleared secret stays cleared', () => {
     localStorage.setItem(CLEARED_KEY, '1')
     const store = new SecretStore()
     expect(store.value).toBe('')
   })
 
-  describe('extractSubdomain()', () => {
-    it('returns empty for localhost', () => {
-      expect(SecretStore.extractSubdomain()).toBe('')
-    })
-
-    it('returns empty for bare domain (2 parts)', () => {
-      const original = Object.getOwnPropertyDescriptor(window, 'location')!
-      Object.defineProperty(window, 'location', {
-        value: { hostname: 'hypercomb.io' },
-        writable: true,
-        configurable: true,
+  // ZI-7: the secret used to be seeded from the subdomain, so every visitor
+  // of business-card.<domain> shared one zone whose secret was the host name.
+  describe('never from the address bar', () => {
+    for (const hostname of ['mysecret.hypercomb.io', 'deep.path.hypercomb.io', 'business-card.jwize.com', 'x.pages.dev']) {
+      it(`${hostname} seeds no secret`, () => {
+        const original = Object.getOwnPropertyDescriptor(window, 'location')!
+        Object.defineProperty(window, 'location', { value: { hostname }, writable: true, configurable: true })
+        try {
+          expect(new SecretStore().value).toBe('')
+          expect(localStorage.getItem(KEY)).toBeNull()
+        } finally { Object.defineProperty(window, 'location', original) }
       })
-      expect(SecretStore.extractSubdomain()).toBe('')
-      Object.defineProperty(window, 'location', original)
-    })
-
-    it('returns subdomain for 3-part hostname', () => {
-      const original = Object.getOwnPropertyDescriptor(window, 'location')!
-      Object.defineProperty(window, 'location', {
-        value: { hostname: 'mysecret.hypercomb.io' },
-        writable: true,
-        configurable: true,
-      })
-      expect(SecretStore.extractSubdomain()).toBe('mysecret')
-      Object.defineProperty(window, 'location', original)
-    })
-
-    it('returns deep subdomain for 4+ part hostname', () => {
-      const original = Object.getOwnPropertyDescriptor(window, 'location')!
-      Object.defineProperty(window, 'location', {
-        value: { hostname: 'deep.path.hypercomb.io' },
-        writable: true,
-        configurable: true,
-      })
-      expect(SecretStore.extractSubdomain()).toBe('deep.path')
-      Object.defineProperty(window, 'location', original)
-    })
-
-    it('returns empty for IP addresses', () => {
-      const original = Object.getOwnPropertyDescriptor(window, 'location')!
-      Object.defineProperty(window, 'location', {
-        value: { hostname: '192.168.1.1' },
-        writable: true,
-        configurable: true,
-      })
-      expect(SecretStore.extractSubdomain()).toBe('')
-      Object.defineProperty(window, 'location', original)
-    })
+    }
   })
 })

@@ -48,6 +48,7 @@ import {
   inviteSecretCheck,
   meetFragment,
   meetingRelayOf,
+  parseMeet,
   type InviteDecorationPayload,
   type MeetingInviteBundle,
 } from './meeting-invite.js'
@@ -269,7 +270,18 @@ export class InviteQueenBee {
     const segments = segs.map(s => String(s ?? '').trim()).filter(s => s.length > 0)
     const zone = readTabZone()
     const relay = meetingRelayOf(zone?.relay)
-    const url = `${window.location.origin}/${meetFragment(room, secret, segments, { relay, host: zone?.host, code: zone?.code })}`
+    const fragment = meetFragment(room, secret, segments, { relay, host: zone?.host, code: zone?.code })
+    // A LINK NOBODY CAN OPEN IS NEVER HANDED OUT. It is read back here the
+    // way every guest will read it; a page that cannot travel in it (a name
+    // past 512 characters or holding a slash, a page too deep) would make a
+    // link that does nothing for anyone — said so instead.
+    const back = parseMeet(fragment)
+    if (!back || back.room !== room || back.secret !== secret || JSON.stringify(back.segments) !== JSON.stringify(segments)) {
+      this.#toast('warning', this.#tr('invite.meet.title', 'Meeting link'), this.#tr('meet.link-cannot-travel',
+        'A meeting link to this page would not open for anyone — a page name on the way here is too long or holds a slash. Invite from a page higher up.'))
+      return
+    }
+    const url = `${window.location.origin}/${fragment}`
     const point = relay.replace(/^wss?:\/\//, '')
 
     const delivery = await deliverLink(url, 'Hypercomb meeting')

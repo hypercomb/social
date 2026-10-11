@@ -251,9 +251,10 @@ function sha256Hex(buf) {
 // recycled"): the file is the one place the current code lives.
 //   node relay.js --new-access-code <file>       a fresh code in, every old one out
 //   node relay.js --destroy-access-codes <file>  nobody new gets in
-// The running relay reads the change within a second and closes every
-// connection that came in under a hash no longer listed, so the old code
-// stops working the moment it is recycled: no restart, no redeploy. A missing
+// The running relay reads the change within a second, and within a second or
+// two closes every connection that came in under a hash no longer listed, so
+// the old code stops working once it is recycled: no restart, no redeploy. A
+// read that fails (the file held by another process) changes nothing. A missing
 // or empty file admits nobody (fail closed). A refusal is close 4401 straight
 // after the upgrade, before any frame — a browser cannot read the status of a
 // refused upgrade, but it can read a close code. A relay without
@@ -528,6 +529,7 @@ function dropEvent(id) {
   events.delete(id)
   for (const x of addressesOf(rec)) indexDrop(idsByX, x, id)
   indexDrop(idsByAuthorKind, `${rec.pubkey}\0${rec.kind}`, id)
+  if (rec.kind === BROKER_ANSWER_KIND) answerDropped(rec)
 }
 
 // Bumped whenever a WRITER's hive index enters or leaves the store, so what
@@ -542,13 +544,143 @@ const isReplaceableKind = (kind) => kind === 0 || kind === 3 || (kind >= 10000 &
 const tagValue = (evt, name) => (evt.tags || []).find((t) => Array.isArray(t) && t[0] === name)?.[1]
 const dTagOf = (evt) => String(tagValue(evt, 'd') ?? '')
 const expirationOf = (evt) => { const n = Number(tagValue(evt, 'expiration')); return Number.isFinite(n) && n > 0 ? n : 0 }
-const slotKey = (evt, kind) => `${evt.pubkey}\0${kind}\0${isAddressableKind(kind) ? dTagOf(evt) : ''}`
+const slotKey =(evt, kind) => `${evt.pubkey}\0${kind}\0${isAddressableKind(kind) ? dTagOf(evt) : ''}`
+
+// THE BROKER'S ANSWERS ARE A REPLAY WINDOW, NOT A STORE. A kind-30401 answer
+// carries a picture's bytes (or a location's visuals) to whoever asked, and
+// every reader asks with since = now − 15 min — yet each answer was kept for
+// the 24 h its expiration tag names, one copy per holder: a picture held by
+// five members was five copies, every one replayed to every later asker, and
+// the process only grew. So an answer is kept only for the readers' window
+// (created_at + 15 min, whatever its tag says), and ONE holder's answer is
+// kept per address and type: the bytes are content-addressed and the asker
+// sha256-checks them, so any holder's copy is as good. It is one holder's
+// whole RUN, never a mix — the asker assembles a chunked answer ('c' i/n,
+// d = <sig>#i) from one key's chunks — so once a holder's run is complete,
+// every other holder's copies at that address are dropped and later ones are
+// not kept. Every answer is still fanned out live, exactly as before.
+//
+// BOUNDED, AND NEVER TAKEN ON TRUST (2026-10-10 review). The runs at an
+// address are kept as running counts (answersAt), so a store costs O(1) — a
+// rescan of every event at the address per store let one key on the open
+// relay freeze its event loop with never-completing chunk runs. Only a run a
+// reader can assemble is kept: d = x for a single answer, d = x#i with
+// c = i/n (n at most ANSWER_CHUNKS_MAX) for a chunk; at most
+// ANSWERS_PER_ADDRESS_MAX events per address and type; never one dated more
+// than ANSWER_FUTURE_SECS ahead. And a picture's or layer's run becomes THE
+// run only once its bytes hash to its address — a forged answer otherwise
+// pinned the replay of a popular picture for every room for 15 minutes. A
+// run that does not hash is dropped. (Only a location's visuals carry no byte
+// address; the asker checks each event they pack.)
+const BROKER_ANSWER_KIND = 30401
+const BROKER_ANSWER_KEEP_SECS = 900
+const ANSWER_CHUNKS_MAX = 64
+const ANSWERS_PER_ADDRESS_MAX = 128
+const ANSWER_FUTURE_SECS = 60
+// What the broker answers: a layer, a resource, a location's visuals.
+const ANSWER_TYPES = new Set(['layer', 'resource', 'visuals'])
+
+/** x\0t → { count, runs: Map<pubkey, { n, parts: Map<i, id> }>, whole: pubkey | '' } */
+const answersAt = new Map()
+
+/** When a stored event stops being served (unix s, 0 = never): its NIP-40
+ *  expiration — and for a broker answer, the readers' window at most. */
+function keptUntil(evt) {
+  const exp = expirationOf(evt)
+  if (Number(evt.kind) !== BROKER_ANSWER_KIND) return exp
+  const window = Number(evt.created_at) + BROKER_ANSWER_KEEP_SECS
+  return exp ? Math.min(exp, window) : window
+}
+
+/** A broker answer's place in a run a reader can assemble — { xt, x, t, i, n }
+ *  — or null: then it is fanned out, never kept. */
+function answerShape(evt) {
+  const x = String(tagValue(evt, 'x') ?? '')
+  if (!HEX64.test(x)) return null
+  const t = String(tagValue(evt, 't') ?? '')
+  if (!ANSWER_TYPES.has(t)) return null
+  const d = dTagOf(evt)
+  const c = tagValue(evt, 'c')
+  if (c === undefined) return d === x ? { xt: `${x}\0${t}`, x, t, i: 0, n: 1 } : null
+  const m = /^(\d{1,3})\/(\d{1,3})$/.exec(String(c))
+  if (!m) return null
+  const i = Number(m[1])
+  const n = Number(m[2])
+  if (n < 2 || n > ANSWER_CHUNKS_MAX || i >= n || d !== `${x}#${i}`) return null
+  return { xt: `${x}\0${t}`, x, t, i, n }
+}
+
+/** Why an answer is fanned out but not kept, or '' to keep it. */
+function answerNotKept(evt, nowSec) {
+  if (keptUntil(evt) <= nowSec || Number(evt.created_at) > nowSec + ANSWER_FUTURE_SECS) return 'window'
+  const shape = answerShape(evt)
+  if (!shape) return 'shape'
+  const at = answersAt.get(shape.xt)
+  if (!at) return ''
+  // another holder's whole run is THE run here
+  if (at.whole && at.whole !== evt.pubkey) return 'whole'
+  if (at.count >= ANSWERS_PER_ADDRESS_MAX && !at.runs.get(evt.pubkey)?.parts.has(shape.i)) return 'full'
+  return ''
+}
+
+/** Drop one stored event and the slot that names it. */
+function dropStored(id) {
+  const rec = events.get(id)
+  if (!rec) return
+  dropEvent(id)
+  if ((isAddressableKind(rec.kind) || isReplaceableKind(rec.kind)) && slots.get(slotKey(rec, rec.kind)) === id) slots.delete(slotKey(rec, rec.kind))
+}
+
+/** A kept answer joins its holder's run; once that run is whole (and, for
+ *  bytes, hashes to its address) it is the only one kept here. */
+function answerStored(rec) {
+  const shape = answerShape(rec)
+  if (!shape) return
+  const older = answersAt.get(shape.xt)?.runs.get(rec.pubkey)
+  // re-chunked: the holder's older run is not this one
+  if (older && older.n !== shape.n) for (const id of [...older.parts.values()]) dropStored(id)
+  let at = answersAt.get(shape.xt)
+  if (!at) answersAt.set(shape.xt, at = { count: 0, runs: new Map(), whole: '' })
+  let run = at.runs.get(rec.pubkey)
+  if (!run) { run = { n: shape.n, parts: new Map() }; at.runs.set(rec.pubkey, run) }
+  if (!run.parts.has(shape.i)) at.count++
+  run.parts.set(shape.i, rec.id)
+  if (run.parts.size !== run.n || at.whole) return
+  if (shape.t !== 'visuals') {
+    const hash = createHash('sha256')
+    for (let i = 0; i < run.n; i++) hash.update(Buffer.from(String(events.get(run.parts.get(i))?.content ?? ''), 'base64'))
+    if (hash.digest('hex') !== shape.x) {
+      for (const id of [...run.parts.values()]) dropStored(id)
+      return
+    }
+  }
+  at.whole = rec.pubkey
+  for (const [pubkey, other] of [...at.runs]) if (pubkey !== rec.pubkey) for (const id of [...other.parts.values()]) dropStored(id)
+}
+
+/** An answer left the store (replaced, expired, or another run won). */
+function answerDropped(rec) {
+  const shape = answerShape(rec)
+  if (!shape) return
+  const at = answersAt.get(shape.xt)
+  const run = at?.runs.get(rec.pubkey)
+  if (!run || run.parts.get(shape.i) !== rec.id) return
+  run.parts.delete(shape.i)
+  at.count--
+  if (run.parts.size === 0) at.runs.delete(rec.pubkey)
+  if (at.whole === rec.pubkey) at.whole = ''
+  if (at.count === 0) answersAt.delete(shape.xt)
+}
 
 // Returns the NIP-01 verdict: 'stored' | 'duplicate' | 'stale' | 'ephemeral'.
 function insertEvent(evt) {
   const kind = Number(evt.kind)
   if (isEphemeralKind(kind)) return 'ephemeral'
   if (events.has(evt.id)) return 'duplicate'
+  // Past the readers' window, shaped as no run a reader can assemble, another
+  // holder's whole run already kept here, or the address full: routed live,
+  // never kept.
+  if (kind === BROKER_ANSWER_KIND && answerNotKept(evt, Math.floor(Date.now() / 1000))) return 'ephemeral'
   if (isAddressableKind(kind) || isReplaceableKind(kind)) {
     // NIP-01: exactly ONE event per slot — the newest; on equal created_at
     // the lowest id wins. The whole swarm wire model assumes this. A stale
@@ -561,6 +693,7 @@ function insertEvent(evt) {
     slots.set(key, evt.id)
   }
   storeEvent({ id: evt.id, pubkey: evt.pubkey, created_at: Number(evt.created_at), kind, tags: evt.tags, content: evt.content, sig: evt.sig })
+  if (kind === BROKER_ANSWER_KIND) answerStored(events.get(evt.id))
   if (movesWriterIndex(evt)) writerIndexMoves++
   return 'stored'
 }
@@ -609,7 +742,7 @@ function queryEvents(filters) {
     for (const id of candidatesOf(f)) {
       const evt = events.get(id)
       if (!evt) continue
-      const exp = expirationOf(evt)
+      const exp = keptUntil(evt)
       if (exp && exp < now) continue  // NIP-40: never replay an expired beacon, even before the sweep
       if (matchFilter(f, evt)) hits.push(evt)
     }
@@ -622,7 +755,7 @@ function queryEvents(filters) {
 function deleteExpired() {
   const now = Math.floor(Date.now() / 1000)
   for (const [id, evt] of events) {
-    const exp = expirationOf(evt)
+    const exp = keptUntil(evt)
     if (exp && exp < now) {
       dropEvent(id)
       if (movesWriterIndex(evt)) writerIndexMoves++
@@ -644,12 +777,23 @@ function deleteExpired() {
 // the client-written first X-Forwarded-For hop (requestIp, http-auth.js).
 // EVENT and REQ cost one token; CLOSE and AUTH cost nothing and are never
 // refused — a refused CLOSE leaked a subscription the client had forgotten.
-// HARNESS ONLY: DIAG_RATE_LIMIT (frames/min) scales the per-connection bucket.
+//
+// BULK NEVER STARVES PRESENCE. A member whose pictures are in demand answers
+// asks faster than the refill, and with one bucket those answers spent it:
+// that member's own beacon and page layer were refused next, again on every
+// re-send, until the room marked them away and their tiles left every screen
+// while everyone was looking at their pictures. So a connection has TWO
+// buckets, each burst 400 at 10/s: the content broker's traffic — its answer
+// (30401), a picture event (30201), its ask (20400) and cancel (20402) —
+// spends the bulk one, and everything else (beacons, layers, presence, every
+// REQ) the control one. The venue ceiling is one for both.
+// HARNESS ONLY: DIAG_RATE_LIMIT (frames/min) scales the per-connection buckets.
 const CONN_SCALE = Number(process.env.DIAG_RATE_LIMIT) > 0 ? Number(process.env.DIAG_RATE_LIMIT) / 600 : 1
 const CONN_BURST = 400 * CONN_SCALE
 const CONN_REFILL_PER_SEC = 10 * CONN_SCALE
 const IP_BURST = 12_000
 const IP_REFILL_PER_SEC = 200
+const BULK_KINDS = new Set([30401, 30201, 20400, 20402])
 const ipBuckets = new Map() // ip → { tokens, at }
 
 const freshBucket = (burst, now) => ({ tokens: burst, at: now })
@@ -658,15 +802,17 @@ function refill(bucket, burst, perSec, now) {
   bucket.at = now
 }
 
-/** One token from this connection AND its IP, or none from either. */
-function takeToken(client) {
+/** One token from this connection's bucket for the frame (bulk or control)
+ *  AND from its IP, or none from either. */
+function takeToken(client, bulk) {
   const now = Date.now()
   let venue = ipBuckets.get(client.ip)
   if (!venue) { venue = freshBucket(IP_BURST, now); ipBuckets.set(client.ip, venue) }
-  refill(client.bucket, CONN_BURST, CONN_REFILL_PER_SEC, now)
+  const own = bulk ? client.bulkBucket : client.bucket
+  refill(own, CONN_BURST, CONN_REFILL_PER_SEC, now)
   refill(venue, IP_BURST, IP_REFILL_PER_SEC, now)
-  if (client.bucket.tokens < 1 || venue.tokens < 1) return false
-  client.bucket.tokens--
+  if (own.tokens < 1 || venue.tokens < 1) return false
+  own.tokens--
   venue.tokens--
   return true
 }
@@ -1044,11 +1190,12 @@ function trackLifecycle(client, evt) {
   cancelWill(key)
   const live = participants.get(info.pubkey)
   if (info.left) {
-    client.lifecycle.delete(key); client.beaconed.delete(key); live?.xs.delete(info.x)
+    client.lifecycle.delete(key); client.beaconed.delete(key); client.beaconAt.delete(key); live?.xs.delete(info.x)
     if (client.drainZone?.x === info.x) client.drainZone = null
     return
   }
   client.beaconed.add(key)
+  client.beaconAt.set(key, Date.now())
   live?.xs.add(info.x)
   client.lifecycle.set(key, { x: info.x, d: info.d, pubkey: info.pubkey })
   // The drained word's zone: this connection's newest {alive}, and only it.
@@ -1079,23 +1226,39 @@ function synthTombstone(xSig, dTag, pubkey, nowSec) {
   return evt
 }
 
-/** An open connection other than `except` that beaconed this slot (x\0d). */
-function willHeir(key, except) {
-  for (const c of clients) if (c !== except && !c.closed && c.ws.readyState === 1 && c.beaconed.has(key)) return c
+/** Open connections other than `except` that beaconed this slot (x\0d). */
+function* slotSockets(key, except) {
+  for (const c of clients) if (c !== except && !c.closed && c.ws.readyState === 1 && c.beaconed.has(key)) yield c
+}
+
+// AN HEIR MUST STILL BE THERE. A phone that locks without a FIN leaves its
+// socket open here until the keepalive reaps it, 30–60 s on; it wakes, beacons
+// the same slot on a new socket, and locks again — and the new socket's will
+// went to the old, silent one, so the room heard the leave only after that
+// zombie was reaped plus the grace (~90 s, not 15). So a socket inherits a
+// will only if it has said something (a frame or a pong) since the dying
+// socket's newest beacon for that slot. One that has not is pinged: a live
+// second tab answers within the grace and inherits when the will would fire
+// (fireWill looks again); a zombie does not, and the leave is heard on time.
+/** A connection that beaconed this slot and has been heard from since `since` (ms). */
+function willHeir(key, except, since = 0) {
+  for (const c of slotSockets(key, except)) if (c.heardAt >= since) return c
   return null
 }
 
 // A dying connection's wills, one per zone it beaconed in: each goes to an
-// heir if another open connection beaconed the same slot, otherwise it waits
-// out the grace.
+// heir if another open connection beaconed the same slot and has spoken
+// since, otherwise it waits out the grace.
 function armWills(client) {
   if (!client.lifecycle || client.lifecycle.size === 0) return
   for (const [key, will] of client.lifecycle) {
-    const heir = willHeir(key, client)
+    const since = client.beaconAt.get(key) ?? 0
+    const heir = willHeir(key, client, since)
     if (heir) { if (!heir.lifecycle.has(key)) heir.lifecycle.set(key, will); continue }
+    for (const quiet of slotSockets(key, client)) try { quiet.ws.ping() } catch {}
     const held = pendingWills.get(key)
     if (held) clearTimeout(held.timer)
-    pendingWills.set(key, { ...will, timer: setTimeout(() => fireWill(key), WILL_GRACE_MS) })
+    pendingWills.set(key, { ...will, since, timer: setTimeout(() => fireWill(key), WILL_GRACE_MS) })
   }
   client.lifecycle.clear()
 }
@@ -1106,7 +1269,7 @@ function fireWill(key) {
   const will = pendingWills.get(key)
   if (!will) return
   pendingWills.delete(key)
-  const heir = willHeir(key, null)
+  const heir = willHeir(key, null, will.since ?? 0)
   if (heir) { if (!heir.lifecycle.has(key)) heir.lifecycle.set(key, { x: will.x, d: will.d, pubkey: will.pubkey }); return }
   const tomb = synthTombstone(will.x, will.d, will.pubkey, Math.floor(Date.now() / 1000))
   try { insertEvent(tomb) } catch {}
@@ -1120,6 +1283,16 @@ function cancelWill(key) {
   clearTimeout(will.timer)
   pendingWills.delete(key)
   census.willsCancelled++
+}
+
+/** A connection that beaconed the slot spoke during the grace: the
+ *  participant is still here, on it, so the will is cancelled and becomes
+ *  that connection's own — it fires when that one goes. */
+function adoptWill(key, client) {
+  const will = pendingWills.get(key)
+  if (!will) return
+  cancelWill(key)
+  if (!client.lifecycle.has(key)) client.lifecycle.set(key, { x: will.x, d: will.d, pubkey: will.pubkey })
 }
 
 // One disconnect path for both 'close' and 'error' — guarded so the will
@@ -1162,7 +1335,7 @@ function handleMessage(client, raw) {
   }
 
   if (type === 'EVENT' || type === 'REQ') {
-    if (!takeToken(client)) {
+    if (!takeToken(client, type === 'EVENT' && BULK_KINDS.has(Number(msg[1]?.kind)))) {
       if (type === 'EVENT') { census.refusedEvents++; send(client.ws, ['OK', msg[1]?.id ?? '', false, 'rate-limited: slow down']) }
       else { census.refusedReqs++; send(client.ws, ['CLOSED', String(msg[1] ?? ''), 'rate-limited: slow down']) }
       return
@@ -1198,9 +1371,9 @@ function handleMessage(client, raw) {
     // A verified EVENT is the key speaking, live, on this relay: it may upload
     // to the swarm's host (markLive). It speaks for a slot's pending will only
     // on a connection that beaconed that slot — the participant, still here on
-    // a socket that announced it (see WILL_GRACE_MS).
+    // a socket that announced it (see WILL_GRACE_MS), which now holds the will.
     markLive(evt.pubkey)
-    if (pendingWills.size) for (const key of client.beaconed) cancelWill(key)
+    if (pendingWills.size) for (const key of client.beaconed) adoptWill(key, client)
 
     const verdict = insertEvent(evt)
     // Arm/disarm this connection's last-will from lifecycle beacons so we
@@ -1856,11 +2029,92 @@ function fromSandboxDoor(req) {
 function verifyWriteAuth(req) {
   // DEV ONLY: bypass writer-auth (sha256(body)===sig is still enforced by the
   // caller, so content can't be forged — only the WHO check is skipped).
-  return verifyNip98(req, writers, {
+  let carried = null
+  const auth = verifyNip98(req, writers, {
     devOpen: cfg.devOpenWrites,
-    allow: pubkey => writers.has(pubkey) || participantAllowed(pubkey),
+    allow: (pubkey) => {
+      if (writers.has(pubkey) || participantAllowed(pubkey)) return true
+      // A carried beacon is only READ here: the key is recorded live once the
+      // whole token has held for THIS request (freshness, method, url) — a
+      // token replayed from another host must leave nothing behind.
+      carried = carriedAliveRoom(req, pubkey)
+      return !!carried && carriedRoomTaken(carried)
+    },
     skewSecs: ATOM_AUTH_SKEW_SECS,
   })
+  if (!carried) return auth
+  if (auth.ok) { liveByCarriedBeacon(auth.pubkey, carried); return auth }
+  // A fresh beacon for a room this host does not take: the standing answer
+  // (403), once the rest of the token holds for this request — and nothing
+  // recorded.
+  if (auth.denied && verifyNip98(req, writers, { allow: () => true, skewSecs: ATOM_AUTH_SKEW_SECS }).ok) {
+    return { ...auth, roomNotHosted: true }
+  }
+  return auth
+}
+
+// A BEACON CARRIED ON THE PUT (D7, jwize 2026-10-10). A participant meeting at
+// another point — the always-on meeting point, another relay — never speaks
+// on this relay's WebSocket, so it was never live here and every PUT was 401
+// not-live for the whole meeting. Its NIP-98 token may carry its newest signed
+// lifecycle beacon as a tag, ['alive', <the kind-30206 event as JSON>]. A
+// beacon that is the same key's, verified, {alive}, at a 64-hex room and at
+// most CARRIED_ALIVE_SECS old makes the key live here exactly as that beacon
+// on the socket would: the same bar as an OPEN relay's (any key that sends one
+// event is live), and in zones mode its room must still be one this host
+// takes. It rides the PUT that was being made anyway: no request, no round
+// trip.
+//
+// NEVER ON A RELAY WITH AN ACCESS CODE. There, live means "spoke on a socket
+// admitted with the current code"; a beacon is self-signed by the same key and
+// proves nothing a stranger cannot mint, so a carried one would let any key —
+// one that never had the code, or one whose code was recycled — fill the
+// participant budget. A coded relay takes uploads only from its own sockets.
+const CARRIED_ALIVE_SECS = 120
+const CARRIED_ALIVE_MAX_CHARS = 4096
+
+/** Would a key live in `room` be taken here? (participantAllowed's rule for
+ *  the beacon's room alone.) */
+function carriedRoomTaken(room) {
+  if (participantPolicy.mode === 'all') return true
+  return participantPolicy.mode === 'zones' && participantPolicy.zones.has(room)
+}
+
+/** The room of a fresh, signed {alive} beacon of `pubkey` carried on this
+ *  request's NIP-98 token, or null — always null on a relay gated by an
+ *  access code, or without --allow-participants. Reads only. */
+function carriedAliveRoom(req, pubkey) {
+  if (!participantPolicy.mode || cfg.accessCodes) return null
+  const match = /^Nostr\s+(.+)$/i.exec(String(req.headers.authorization || '').trim())
+  if (!match) return null
+  let carried
+  try {
+    const token = JSON.parse(Buffer.from(match[1], 'base64').toString('utf8'))
+    carried = (Array.isArray(token?.tags) ? token.tags : []).find((tag) => Array.isArray(tag) && tag[0] === 'alive')?.[1]
+  } catch { return null }
+  if (typeof carried !== 'string' || carried.length > CARRIED_ALIVE_MAX_CHARS) return null
+  let beacon
+  try { beacon = JSON.parse(carried) } catch { return null }
+  if (eventShapeError(beacon) || beacon.kind !== LIFECYCLE_KIND || beacon.pubkey !== pubkey) return null
+  const nowSec = Math.floor(Date.now() / 1000)
+  if (Math.abs(nowSec - beacon.created_at) > CARRIED_ALIVE_SECS) return null
+  const exp = expirationOf(beacon)
+  if (exp && exp < nowSec) return null
+  const info = lifecycleInfo(beacon)
+  if (!info || info.left || !HEX64.test(info.x)) return null
+  let alive = false
+  try { alive = JSON.parse(beacon.content)?.alive === true } catch {}
+  if (!alive) return null
+  try { if (!verifyEvent(beacon)) return null } catch { return null }
+  return info.x
+}
+
+/** A carried beacon whose token held makes the key live here, in the beacon's
+ *  room (markLive). */
+function liveByCarriedBeacon(pubkey, room) {
+  if (!participantPolicy.mode) return
+  markLive(pubkey)
+  participants.get(pubkey).xs.add(room)
 }
 
 /** Land an atom so no reader ever sees part of it: staged beside its final
@@ -2129,7 +2383,7 @@ function tryWriteContent(req, res) {
     // a standing answer, not a race with the beacon: 403, so the client
     // pauses (10 min) instead of retrying every second for good. A live key
     // with no room yet is the race (its PUT beat its beacon): 401 not-live.
-    if (participantMode === 'zones' && isLive(auth.pubkey) && participants.get(auth.pubkey).xs.size > 0) {
+    if (participantMode === 'zones' && (auth.roomNotHosted || (isLive(auth.pubkey) && participants.get(auth.pubkey).xs.size > 0))) {
       respondText(res, 403, 'participants-closed: this room is not hosted here')
       return true
     }
@@ -2440,30 +2694,72 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server })
 
-// The current access hashes (null: no --access-codes, everyone admitted), and
-// the file's stamp they were read at — re-read on every upgrade and every
-// second, so a recycle is in force before anyone could use the old code.
-let accessHashes = null
+// The access file's hashes, and the stamp they were read at — re-read on every
+// upgrade and every second, so a recycle is in force within a second or two.
+//
+// A READ THAT FAILS IS NOT A RECYCLE. The stamp changes, and in that second
+// something holds the file without read sharing — an antivirus scan, a backup,
+// an indexer, an editor: stat answers and the read throws. Committing the stamp
+// before the read made that an empty set, so everyone was closed 4401 and every
+// valid code refused until the file happened to change again. Now the stamp is
+// committed only after a read that worked, and any error but "not there" keeps
+// the hashes in force for the next second to try again. A hash also leaves only
+// once the file has said so twice, ACCESS_SETTLE_MS apart: a writer that
+// truncates before it writes (an editor, a sync tool) is read mid-write as
+// empty and a moment later as whole. What a read ADDS is in force at once — a
+// fresh code works the moment it is issued.
+const ACCESS_SETTLE_MS = 500
+let accessHashes = null   // the file at accessStamp (null until a read worked: nobody is admitted)
 let accessStamp = ''
+let accessPending = null  // { stamp, hashes, at }: a read that removes hashes, waiting for its second look
+
+/** Whether a dial's hash is admitted: listed now, or added by a read still settling. */
+const accessAdmits = (hash) => !!hash && (!!accessHashes?.has(hash) || !!accessPending?.hashes.has(hash))
+
+/** The file's stamp, 'absent' when it is not there, null when it cannot be told now. */
+function accessFileStamp() {
+  try { const st = statSync(cfg.accessCodes); return `${st.mtimeMs}:${st.size}:${st.ino}` }
+  catch (error) { return error?.code === 'ENOENT' ? 'absent' : null }
+}
+
+/** The file's hashes; none when it is not there (fail closed); null when it cannot be read now. */
+function readAccessFile() {
+  try {
+    const hashes = new Set()
+    for (const line of readFileSync(cfg.accessCodes, 'utf8').split(/\r?\n/)) {
+      const hash = line.trim().toLowerCase()
+      if (HEX64.test(hash)) hashes.add(hash)
+    }
+    return hashes
+  } catch (error) {
+    return error?.code === 'ENOENT' ? new Set() : null
+  }
+}
+
+function commitAccess(stamp, hashes) {
+  accessHashes = hashes
+  accessStamp = stamp
+  accessPending = null
+  // THE OLD OUT: whoever came in on a hash no longer listed leaves now.
+  for (const c of clients) {
+    if (c.accessHash && !hashes.has(c.accessHash)) { try { c.ws.close(ACCESS_REFUSED_CLOSE, 'access: the access code was recycled') } catch {} }
+  }
+}
 
 function refreshAccessHashes() {
   if (!cfg.accessCodes) return
-  let stamp = 'absent'
-  try { const st = statSync(cfg.accessCodes); stamp = `${st.mtimeMs}:${st.size}:${st.ino}` } catch { /* fail closed */ }
-  if (accessHashes && stamp === accessStamp) return
-  accessStamp = stamp
-  const next = new Set()
-  try {
-    for (const line of readFileSync(cfg.accessCodes, 'utf8').split(/\r?\n/)) {
-      const hash = line.trim().toLowerCase()
-      if (HEX64.test(hash)) next.add(hash)
-    }
-  } catch { /* missing: nobody is admitted */ }
-  accessHashes = next
-  // THE OLD OUT: whoever came in on a hash no longer listed leaves now.
-  for (const c of clients) {
-    if (c.accessHash && !next.has(c.accessHash)) { try { c.ws.close(ACCESS_REFUSED_CLOSE, 'access: the access code was recycled') } catch {} }
+  const stamp = accessFileStamp()
+  if (accessHashes && stamp === accessStamp) { accessPending = null; return }
+  if (stamp !== null && accessPending?.stamp === stamp) {
+    if (Date.now() - accessPending.at >= ACCESS_SETTLE_MS) commitAccess(stamp, accessPending.hashes)
+    return
   }
+  // Anything else breaks a removal's run of looks: it starts over from here.
+  accessPending = null
+  const next = stamp === null ? null : readAccessFile()
+  if (!next) return  // cannot be read now: what is in force stays, and the next second tries again
+  if (!accessHashes || [...accessHashes].every((hash) => next.has(hash))) commitAccess(stamp, next)
+  else accessPending = { stamp, hashes: next, at: Date.now() }
 }
 
 /** sha256 of the access code a dial offered as `hc-access.<code>`, or null. */
@@ -2489,7 +2785,7 @@ wss.on('connection', (ws, req) => {
   if (cfg.accessCodes) {
     refreshAccessHashes()
     accessHash = offeredAccessHash(req)
-    if (!accessHash || !accessHashes.has(accessHash)) {
+    if (!accessAdmits(accessHash)) {
       census.accessRefused++
       ws.on('error', () => {})
       try { ws.close(ACCESS_REFUSED_CLOSE, 'access: this meeting point needs its current access code') } catch {}
@@ -2500,7 +2796,10 @@ wss.on('connection', (ws, req) => {
   const client = {
     ws, ip: requestIp(req), authed: !authRequired, pubkey: null, challenge: null,
     subs: new Map(), routes: new Map(), lifecycle: new Map(), closed: false,
-    bucket: freshBucket(CONN_BURST, Date.now()), beaconed: new Set(),
+    bucket: freshBucket(CONN_BURST, Date.now()), bulkBucket: freshBucket(CONN_BURST, Date.now()), beaconed: new Set(),
+    // when this connection last said anything (a frame or a pong), and when it
+    // beaconed each slot — a will's heir must have spoken since (willHeir)
+    heardAt: Date.now(), beaconAt: new Map(),
     // the drained word's zone (trackLifecycle: this connection's own newest
     // {alive}) and asks waiting for its beacon (holdAsk)
     drainZone: null, heldAsks: [],
@@ -2523,11 +2822,12 @@ wss.on('connection', (ws, req) => {
   clients.add(client)
 
   client.alive = true
-  ws.on('pong', () => { client.alive = true })
+  ws.on('pong', () => { client.alive = true; client.heardAt = Date.now() })
   // One frame can never take the meeting point down: a throw is this frame's
   // NOTICE and a count in the minute line, and the process carries on.
   ws.on('message', (data) => {
     client.alive = true
+    client.heardAt = Date.now()
     try { handleMessage(client, String(data)) } catch { census.handlerErrors++; send(ws, ['NOTICE', 'error: could not handle that message']) }
   })
   ws.on('close', () => handleDisconnect(client))

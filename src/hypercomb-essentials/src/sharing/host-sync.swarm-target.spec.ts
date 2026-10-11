@@ -688,7 +688,7 @@ describe('reads try the advertised hosts first, then this tab\'s swarm hosts', (
 describe('the room is owed only what it is offered now', () => {
   it('a tile made private while its upload waits never reaches the swarm host; offered again, it goes', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
-    const host = makeHost({ put: n => n <= 2 ? { status: 500, body: 'busy' } : null })
+    const host = makeHost({ put: n => n <= 1 ? { status: 500, body: 'busy' } : null })
     vi.stubGlobal('fetch', host.fetch)
     const service = (await make()) as Service & { withdrawPublic: (sig: string) => void }
     const pic = await resource('{"name":"a photo, then private"}')
@@ -696,17 +696,19 @@ describe('the room is owed only what it is offered now', () => {
     await service.markPublic(tile, 'layer', false)
     await service.drain()
     await settle()
-    expect(calls(host, 'PUT')).toHaveLength(2)   // both refused — waiting out the backoff
+    // The first upload to a host goes alone; its refusal pauses the host, so
+    // the other is not sent into it — both wait out the backoff.
+    expect(calls(host, 'PUT')).toHaveLength(1)
 
     service.withdrawPublic(tile)                  // the walk pruned it as private
     for (let step = 0; step < 100; step++) { await vi.advanceTimersByTimeAsync(100); await settle() }
-    expect(calls(host, 'PUT')).toHaveLength(2)    // nothing more went to the room's host
+    expect(calls(host, 'PUT')).toHaveLength(1)    // nothing more went to the room's host
     expect((await queued()).sort()).toEqual([`${pic}.resource`, `${tile}.layer`].sort())
 
     await service.markPublic(tile, 'layer', false) // public again: the next walk names it
     await service.drain()
     await settle()
-    expect(calls(host, 'PUT').slice(2).sort()).toEqual([pic, tile].map(s => `https://jwize.com/${s}`).sort())
+    expect(calls(host, 'PUT').slice(1).sort()).toEqual([pic, tile].map(s => `https://jwize.com/${s}`).sort())
   })
 
   it('a leave ends the offer: rejoined, nothing goes until the walk names it again', async () => {

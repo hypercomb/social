@@ -94,6 +94,17 @@ const PENDING_FOLDS_KEY = 'hc:pending-folds'
 const SYNC_RECEIPTS_KEY = 'hc:synced-publisher-roots'
 
 const SIG_RE = /^[a-f0-9]{64}$/
+
+// A DIVERGENCE PASS IS BOUNDED (SCALE-5). Rules 3 and 4 each cost a mesh ask
+// for a held tile a peer also offers — a cached-visuals probe one level in, a
+// layers-only walk of the publisher's branch — and a hive sharing a hundred
+// names with a peer (a workshop on one template) once sent every probe in one
+// pass and spent the connection's whole frame budget for a quarter minute. A
+// pass makes at most this many probes. The next pass starts at the first held
+// tile this one had no probe left for, and a pass cut short schedules that
+// next one itself after DIVERGENCE_ROTATE_MS.
+const DIVERGENCE_PROBES_PER_PASS = 8
+const DIVERGENCE_ROTATE_MS = 10_000
 const STORE_KEY_LOCAL = '@hypercomb.social/Store'
 // The durable work-list behind a multi-tile adopt (AdoptQueueService).
 const ADOPT_QUEUE_KEY = '@diamondcoreprocessor.com/AdoptQueueService'
@@ -1575,6 +1586,11 @@ export class SwarmAdoptDrone extends Drone {
 
   #divergenceTimer: ReturnType<typeof setTimeout> | null = null
 
+  // The running pass's probes (DIVERGENCE_PROBES_PER_PASS), and where among
+  // the offered tiles the next pass starts.
+  #passProbes: { left: number; short: boolean } | null = null
+  #scanStart = 0
+
   // Rule 4 reads the publisher's branch from this device. Taking a tile brings
   // its own layer, not the ones beneath it, so the first walk under a held
   // tile usually stops short. Bring that branch's LAYER RECORDS here — the
@@ -1587,6 +1603,7 @@ export class SwarmAdoptDrone extends Drone {
 
   #localizeBranchLayers = (sig: string): void => {
     if (this.#localizedBranches.has(sig)) return
+    if (!this.#spendProbe()) return
     this.#localizedBranches.add(sig)
     const broker = this.#ioc()?.get?.(BROKER_KEY) as BrokerLike | undefined
     if (!broker?.adopt) return
@@ -1595,12 +1612,21 @@ export class SwarmAdoptDrone extends Drone {
       .catch(() => undefined)
   }
 
-  #scheduleDivergenceScan = (): void => {
+  #scheduleDivergenceScan = (delayMs = 4000): void => {
     if (this.#divergenceTimer) clearTimeout(this.#divergenceTimer)
     this.#divergenceTimer = setTimeout(() => {
       this.#divergenceTimer = null
       void this.#divergenceScanPass()
-    }, 4000)
+    }, delayMs)
+  }
+
+  /** Spend one of the running pass's probes, if any are left. */
+  #spendProbe = (): boolean => {
+    const probes = this.#passProbes
+    if (!probes) return true
+    if (probes.left > 0) { probes.left--; return true }
+    probes.short = true
+    return false
   }
 
   /**
@@ -1654,6 +1680,8 @@ export class SwarmAdoptDrone extends Drone {
       return
     }
     const diverged = new Set<string>()
+    const probes = { left: DIVERGENCE_PROBES_PER_PASS, short: false }
+    this.#passProbes = probes
     // A public host's offer is a peer too (static-peers.drone.ts): the same
     // three rules judge a held tile whichever wire the offer arrived on.
     // Tagged so rule 3 asks the static source for the publisher's children
@@ -1663,7 +1691,13 @@ export class SwarmAdoptDrone extends Drone {
       ...swarm.peerTilesAtCurrentSig(),
       ...(statics?.peerEntriesAt?.(at) ?? []).map(e => ({ ...e, static: true })),
     ]
-    for (const tile of offered) {
+    // Rotated: this pass starts where the last one ran out of probes.
+    const start = offered.length > 0 ? this.#scanStart % offered.length : 0
+    let nextStart = 0
+    for (let k = 0; k < offered.length; k++) {
+      const slot = (start + k) % offered.length
+      const tile = offered[slot]!
+      if (!probes.short) nextStart = slot
       const name = String(tile.name ?? '').trim()
       if (!name) continue
       const sig = String((tile as Record<string, unknown>)['layerSig'] ?? '').trim().toLowerCase()
@@ -1722,6 +1756,9 @@ export class SwarmAdoptDrone extends Drone {
       // it structurally and tsc stays silent; the wrapper has no `children`,
       // which reads as "I hold nothing here" and would mark EVERY held tile
       // with any peer child as diverged.
+      // The SAME branch, byte for byte (their layer sig is the one held here):
+      // nothing beneath it can differ, so neither rule below probes for it.
+      if (SIG_RE.test(sig) && held.sig === sig) continue
       const unheld = tile.static
         ? await this.#staticOffersUnheldChildren(statics, history, target, held.layer)
         : await this.#peerOffersUnheldChildren(swarm, history, target, held.layer)
@@ -1740,9 +1777,14 @@ export class SwarmAdoptDrone extends Drone {
         else if (below.incomplete) this.#localizeBranchLayers(sig)
       }
     }
+    if (this.#passProbes === probes) this.#passProbes = null
+    this.#scanStart = probes.short ? nextStart : 0
     if (setDivergedLabels(diverged)) {
       EffectBus.emit('swarm:divergence-changed', { labels: [...diverged] })
     }
+    // Held tiles this pass had no probe left for: the next pass reaches them.
+    // A peer burst that schedules one sooner keeps its own time.
+    if (probes.short && !this.#divergenceTimer) this.#scheduleDivergenceScan(DIVERGENCE_ROTATE_MS)
   }
 
   /**
@@ -1797,8 +1839,9 @@ export class SwarmAdoptDrone extends Drone {
       // cache and emits swarm:peers-changed, which re-runs this scan with
       // the cache warm; no answer = nothing published there = correctly
       // silent. (Cooldown inside primePeerTilesAt keeps heartbeat-driven
-      // rescans from re-asking the same empty location every burst.)
-      void swarm.primePeerTilesAt?.(childSig).catch(() => undefined)
+      // rescans from re-asking the same empty location every burst; the
+      // pass's probe budget keeps a hundred of them from going at once.)
+      if (this.#spendProbe()) void swarm.primePeerTilesAt?.(childSig).catch(() => undefined)
       return false
     }
     const { names, coldMiss } = await childNamesOfStrict(history, heldChild)

@@ -118,12 +118,15 @@ class FakeLineage extends EventTarget {
 }
 const lineage = new FakeLineage()
 
-const verdictAsks: string[] = []
+// Each ask, as `sig` and whether it asked the whole closure (a public
+// branch's tile is asked twice — its own atoms, and its whole subtree:
+// tile first, D1).
+const verdictAsks: { sig: string; closure: boolean }[] = []
 const hostSync = {
   markPublic: vi.fn(async () => undefined),
   withdrawPublic: vi.fn(),
-  isClosureAvailable: vi.fn((sig: string) => {
-    verdictAsks.push(sig)
+  isClosureAvailable: vi.fn((sig: string, _kind?: string, closure = true) => {
+    verdictAsks.push({ sig, closure })
     const wait = state.servedAtMs - Date.now()
     if (wait <= 0) return Promise.resolve(true)
     return new Promise<boolean>(r => setTimeout(() => r(true), wait))
@@ -244,11 +247,13 @@ describe('the page speaks first; slow work only upgrades it', () => {
     expect(upgraded).toBeTruthy()
     expect(upgraded.at - state.servedAtMs).toBeLessThan(1_000)
     for (const name of PUBLIC) expect(visual(upgraded, name)['layerSig']).toBe(sealOf(name))
-    // Asked once per closure while it was uploading — the walks that ran
+    // Asked once per question while it was uploading — the walks that ran
     // meanwhile joined the question in flight instead of stacking new ones.
     for (const name of PUBLIC) {
-      const asks = verdictAsks.filter(s => s === sealOf(name)).length
-      expect(asks).toBeLessThanOrEqual(3)
+      for (const closure of [false, true]) {
+        const asks = verdictAsks.filter(a => a.sig === sealOf(name) && a.closure === closure).length
+        expect(asks).toBeLessThanOrEqual(3)
+      }
     }
   })
 

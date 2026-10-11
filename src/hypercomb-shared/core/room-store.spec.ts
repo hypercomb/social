@@ -122,6 +122,15 @@ describe('RoomStore', () => {
       Object.defineProperty(window, 'location', original)
     })
 
+    it('returns empty off a zone host — someone\'s address is never a shared room (ZI-7)', () => {
+      const original = Object.getOwnPropertyDescriptor(window, 'location')!
+      for (const hostname of ['business-card.jwize.com', 'abc.hypercomb-web.pages.dev', 'www.hypercomb.io', 'evilhypercomb.io']) {
+        Object.defineProperty(window, 'location', { value: { hostname }, writable: true, configurable: true })
+        expect([hostname, RoomStore.extractSubdomain()]).toEqual([hostname, ''])
+      }
+      Object.defineProperty(window, 'location', original)
+    })
+
     it('returns empty for IP addresses', () => {
       const original = Object.getOwnPropertyDescriptor(window, 'location')!
       Object.defineProperty(window, 'location', {

@@ -163,7 +163,7 @@ async function beforeDeadline<T>(work: Promise<T>, fallback: T): Promise<T> {
 }
 
 interface HistoryLike {
-  sealSubtree: (segments: readonly string[]) => Promise<string | null>
+  sealSubtree: (segments: readonly string[], activeLayers?: Set<string>, options?: { bypassMissWindow?: boolean }) => Promise<string | null>
 }
 interface HostSyncLike {
   publicHostDomain?: () => string
@@ -779,7 +779,7 @@ export class PublishStatusDrone extends Drone {
         const planSig = indexes.get(planDoor)?.roots[arrivalPointer(row.key)] ?? ''
         row.plan = planSig ? await beforeDeadline(this.#readPlan(planDoor, planSig), null) : null
         const here = row.segments.length > 0 && history?.sealSubtree
-          ? await beforeDeadline(history.sealSubtree(row.segments).catch(() => null), null)
+          ? await beforeDeadline(history.sealSubtree(row.segments, undefined, { bypassMissWindow: false }).catch(() => null), null)
           : null
         // Everything online about this row happens at ITS door: the probe,
         // the index verdicts, and the observation it leaves behind.
@@ -1162,7 +1162,16 @@ export class PublishStatusDrone extends Drone {
     row.busyPhase = null
 
     if (!result.ok) {
-      this.#toast('error', `publish.failure.${result.failure}`, PUBLISH_FAILURE_TEXT[result.failure])
+      // Every node REFUSED what it lacks (TS-4): nothing retries it, so the
+      // line names the node and its word instead of "still uploading".
+      const refused = result.refused
+      if (refused) {
+        const node = refused.host || 'The host'
+        const reason = refused.reason || refused.state || 'refused'
+        this.#toast('error', 'host.publish.refused', `${node} refused the upload (${reason}) — nothing was published`, { node, reason })
+      } else {
+        this.#toast('error', `publish.failure.${result.failure}`, PUBLISH_FAILURE_TEXT[result.failure])
+      }
       this.#emit()
       void this.#refresh()
       return

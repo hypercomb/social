@@ -11,7 +11,11 @@
 //     now, already here, or a link that is no link — so a reload (or the
 //     package floor's own reload) while the sheet is up asks again instead
 //     of losing the invitation: the fragment left the address bar at boot,
-//     and the stash is the only copy.
+//     and the stash is the only copy. A link that ARRIVES LATER — opened in
+//     a tab already on the hive, where only the fragment changes and the
+//     page never loads — is stashed by the shell, which says so with
+//     `meet:pending`; the worker takes it then. A link it cannot read is
+//     said so (a toast), never dropped in silence.
 //
 //   • Link path — the shell capture (hypercomb-shared/core/invite-capture.ts)
 //     stashes a `/<sig>` boot URL under PENDING_INVITE_KEY; this worker drains
@@ -66,13 +70,16 @@ export class MeetingInviteWorker extends Worker {
   public override description =
     'Joins a meeting place from a #meet= meeting link or a /<sig> invite link (on boot), or from a swarm:invite tile junction (on click): confirms, and auth-switches the participant in — nothing is written unless they join.'
   public override effects = ['network'] as const
-  protected override listens = ['tile:action']
+  protected override listens = ['tile:action', 'meet:pending']
   protected override emits = ['keymap:invoke', 'command-line:stance', 'mesh:room', 'mesh:secret', 'toast:show', 'hive:link']
 
   // Synchronous one-shot latch — Worker.pulse sets its own #acted only after
   // act() resolves, so guard re-entrancy ourselves (act awaits nothing before
   // wiring the listener, but the link branch is one-shot).
   #handled = false
+
+  /** The stashed link whose sheet is up — one at a time. */
+  #meetTaken = ''
 
   /** THE SHELL ASKS THIS. A package that keeps the meeting link until it is
    *  answered says so here; the shell's fallback (invite-capture.ts) then
@@ -95,13 +102,10 @@ export class MeetingInviteWorker extends Worker {
       }
     })
 
-    // One-shot: a `#meet=` meeting link captured at boot. Cleared only once
-    // the join has settled, on every exit; a malformed fragment is dropped
-    // at once (there is nothing to answer).
-    const meet = this.#pendingMeet()
-    if (meet) {
-      void joinMeetingPlace(meet).catch(() => false).finally(this.#clearMeet)
-    }
+    // A `#meet=` meeting link captured at boot — and any the shell stashes
+    // later, from a link opened in this tab while it is on the hive.
+    this.onEffect('meet:pending', this.#takeMeet)
+    this.#takeMeet()
 
     // One-shot: a /<sig> invite link captured at boot. sessionStorage
     // survives a reload within the tab, so clear it regardless of outcome.
@@ -131,17 +135,46 @@ export class MeetingInviteWorker extends Worker {
     this.emitEffect('hive:link', door.at.length ? { ...door.bundle, at: [...door.at] } : door.bundle)
   }
 
-  #pendingMeet = () => {
-    let held = ''
-    try { held = sessionStorage.getItem(MEET_KEY) ?? '' } catch { held = '' }
-    if (!held) return null
+  #heldMeet = (): string => {
+    try { return sessionStorage.getItem(MEET_KEY) ?? '' } catch { return '' }
+  }
+
+  /** Answer the stashed meeting link. Cleared only once the join has
+   *  settled, on every exit. A newer link stashed while the sheet was up is
+   *  kept, and asked about next. A link that is no link is dropped at once —
+   *  and said so: the guest tapped something, and nothing at all is the one
+   *  answer they must never get. */
+  #takeMeet = (): void => {
+    if (this.#meetTaken) return
+    const held = this.#heldMeet()
+    if (!held) return
     const meet = parseMeet(held)
-    if (!meet) this.#clearMeet()
-    return meet
+    if (!meet) {
+      this.#clearMeet()
+      this.emitEffect('toast:show', {
+        type: 'warning',
+        title: this.#tr('invite.meet.title', 'Meeting link'),
+        message: this.#tr('meet.link-unreadable', 'This meeting link could not be read — ask whoever shared it for a fresh one.'),
+      })
+      return
+    }
+    this.#meetTaken = held
+    void joinMeetingPlace(meet).catch(() => false).finally(() => {
+      this.#meetTaken = ''
+      if (this.#heldMeet() === held) this.#clearMeet()
+      else this.#takeMeet()
+    })
   }
 
   #clearMeet = (): void => {
     try { sessionStorage.removeItem(MEET_KEY) } catch { /* ignore */ }
+  }
+
+  /** The catalog's words, else English — `t()` answers a missing key with
+   *  the key itself. */
+  #tr = (key: string, fallback: string): string => {
+    const s = (get(I18N_IOC_KEY) as I18nProvider | undefined)?.t(key)
+    return s && s !== key ? s : fallback
   }
 
   #pendingLink = (): string => {

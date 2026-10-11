@@ -11,7 +11,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -168,5 +168,81 @@ test('a relay without an access code ignores the subprotocol — and echoes it, 
     s.socket.close()
   } finally {
     r.close()
+  }
+})
+
+// A READ THAT FAILS IS NOT A RECYCLE. The file's stamp changes and, in that
+// second, something holds it without read sharing (an antivirus scan, a
+// backup, an indexer, an editor): stat answers, the read throws. That used to
+// read as an empty file — everyone closed 4401, and every valid code refused
+// until the file changed again. A directory stands in for the held file here
+// (stat answers, the read throws EISDIR) on every platform.
+test('a read that fails is not a recycle: nobody is closed, and the valid code keeps working', { timeout: 30_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-access-file-'))
+  const file = join(dir, 'access-codes')
+  const { out: code } = operator('--new-access-code', file)
+  const r = await relay(['--access-codes', file])
+  try {
+    const inside = await dial(r.port, 'hc-access.' + code)
+    assert.equal(inside.opened, true)
+
+    const held = file + '.held'
+    renameSync(file, held)
+    mkdirSync(file)
+    const during = []
+    for (let n = 0; n < 3; n++) {
+      await sleep(1_000)
+      const s = await dial(r.port, 'hc-access.' + code)
+      during.push(s.opened && s.closeCode === null)
+      s.socket.close()
+    }
+    rmSync(file, { recursive: true, force: true })
+    renameSync(held, file)
+    await sleep(1_500)
+    const after = await dial(r.port, 'hc-access.' + code)
+
+    assert.equal(inside.closeCode, null, 'the session inside was never closed')
+    assert.equal(inside.socket.readyState, 1)
+    assert.deepEqual(during, [true, true, true], 'the valid code is admitted while the file cannot be read')
+    assert.equal(after.closeCode, null)
+    assert.ok(isCard(after.frames[0]), 'admitted once the file reads again')
+    after.socket.close()
+    inside.socket.close()
+  } finally {
+    r.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// A writer that truncates before it writes (an editor, a sync tool) is read
+// mid-write as an empty file. A hash leaves only once the file has said so
+// twice, so that moment closes nobody and refuses nobody.
+test('a writer that truncates before it writes closes nobody', { timeout: 30_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-access-file-'))
+  const file = join(dir, 'access-codes')
+  const { out: code } = operator('--new-access-code', file)
+  const r = await relay(['--access-codes', file])
+  try {
+    const inside = await dial(r.port, 'hc-access.' + code)
+    assert.equal(inside.opened, true)
+
+    writeFileSync(file, '')
+    // A dial while the file is empty: the relay re-reads it on the upgrade.
+    const midWrite = await dial(r.port, 'hc-access.' + code)
+    await sleep(150)
+    writeFileSync(file, sha(code) + '\n')
+    await sleep(2_500)
+
+    assert.equal(midWrite.closeCode, null, 'admitted while the file was empty for a moment')
+    assert.ok(isCard(midWrite.frames[0]))
+    assert.equal(inside.closeCode, null, 'the session inside was never closed')
+    assert.equal(inside.socket.readyState, 1)
+    const after = await dial(r.port, 'hc-access.' + code)
+    assert.equal(after.closeCode, null)
+    assert.ok(isCard(after.frames[0]))
+    for (const s of [inside, midWrite, after]) s.socket.close()
+  } finally {
+    r.close()
+    rmSync(dir, { recursive: true, force: true })
   }
 })

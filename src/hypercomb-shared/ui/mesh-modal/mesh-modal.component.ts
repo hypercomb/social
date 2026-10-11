@@ -13,11 +13,19 @@
 // THE MEETING POINT. Where this tab meets when it is not the default relay,
 // and that meeting point's access code — typed or pasted here once, by the
 // facilitator, and kept only in this tab's session and in the meeting link
-// (never on the command line, which remembers what it runs).
+// (never on the command line, which remembers what it runs). A NEW tab (no
+// zone of its own) pre-fills the point the origin last met at — never its
+// code: a missing code is then the meeting point's visible 'access' refusal,
+// not a silent split onto the default relay.
+//
+// AN OLDER PACKAGE CANNOT MEET AT A POINT. A mesh from before meeting points
+// (no ownRelays) forgets a point on its first refresh and cannot carry a
+// code; the point and code fields are then disabled with the way to update,
+// and the mesh is never pointed (VO-2).
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, computed, type OnInit, type OnDestroy } from '@angular/core'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, canonicalZoneText } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
@@ -25,8 +33,9 @@ import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
 import type { SavedLocationsStore } from '../../core/saved-locations-store'
-import { roomWords } from '../presence-banner/presence-status'
+import { wordsBeside } from '../presence-banner/presence-status'
 import { isAccessCode, meetingRelayOf, readMeshZone, tabCredential, writeMeshZone } from '../../core/mesh-session'
+import * as meshSession from '../../core/mesh-session'
 
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 /** The /invite queen (essentials sharing/invite.queen.ts) — reached through
@@ -40,6 +49,10 @@ interface SwarmLabelApi { myLabel?: () => string; setMyLabel?: (s: string) => vo
 interface MeshRelayApi {
   configureRelays?: (urls: string[], persist?: boolean) => void
   getDebug?: () => { relays?: readonly string[] } | undefined
+  /** The page's own relay list — present only on a mesh that follows this
+   *  tab's meeting point (hc:mesh-zone) across a refresh. */
+  ownRelays?: () => readonly string[]
+  swarmHost?: () => string
 }
 /** What an opener may hand the selector. */
 interface OpenPayload {
@@ -53,8 +66,19 @@ interface OpenPayload {
   focus?: 'code'
 }
 
-/** A meeting point as a person reads it: no scheme. */
-const pointLabel = (relay: string): string => relay.replace(/^wss?:\/\//, '')
+/** A meeting point as a person reads it: the default wss:// dropped, a
+ *  computer's own ws:// KEPT — a bare host commits as wss://, so dropping it
+ *  re-pointed an untouched ws:// meeting point on START (VO-6). */
+const pointLabel = (relay: string): string => relay.replace(/^wss:\/\//i, '')
+
+/** The origin's last meeting point (mesh-session's origin-wide pre-fill),
+ *  when this shell has it — '' otherwise. Read, never written, here. */
+const meetPointPrefill = (): string => {
+  try {
+    const read = (meshSession as unknown as { readMeetPointPrefill?: () => unknown }).readMeetPointPrefill
+    return typeof read === 'function' ? meetingRelayOf(read()) : ''
+  } catch { return '' }
+}
 
 /** Normalize a host string the same way the rest of the codebase does:
  *  strip protocol prefix, trailing slashes, lowercase. Keeps localStorage
@@ -91,13 +115,39 @@ export class MeshModalComponent implements OnInit, OnDestroy {
 
   readonly #locale = signal('en')
 
+  /** Whether the loaded mesh can meet at a point (see the header). True
+   *  while no mesh is loaded yet: the zone is then read when it starts. */
+  readonly pointSupported = signal(true)
+  /** Where this page meets with no point typed: its own relay. */
+  readonly #ownPoint = signal('')
+
   /** THE ROOM'S TWO WORDS — the same pair the breadcrumb and the presence
-   *  line show, live from the drafts. They hash the room and the secret
-   *  ONLY (`roomWords`: the swarm's lifecycle channel), never the page, so
-   *  everyone in one room reads the same pair wherever they stand: the room
-   *  can check out loud that it typed the same thing, and a capital the
-   *  phone slipped in shows up as a different pair. */
-  readonly zoneWords = computed(() => roomWords(this.roomDraft(), this.secretDraft(), this.#locale()))
+   *  line show, live from the drafts. They hash the room, the secret and
+   *  the meeting point when it is not the shipped default (`roomWords`: the
+   *  swarm's lifecycle channel), never the page, so everyone in one room
+   *  reads the same pair wherever they stand: the room can check out loud
+   *  that it typed the same thing, and a capital the phone slipped in — or a
+   *  half of the room on another relay — shows up as a different pair. The
+   *  pair is from the English list in every language, the reader's own
+   *  beside it. They hash what START will STORE: a draft that is the store's
+   *  own value as held, anything else folded as entered text (D6) — so a
+   *  smart quote or a full-width IME previews the pair the banner shows
+   *  after START, the one a friend typing plain text reads. */
+  readonly zoneWords = computed(() => wordsBeside(
+    this.#asStored(this.roomDraft(), this.#roomStore?.value),
+    this.#asStored(this.secretDraft(), this.#secretStore?.value),
+    this.#wordsPoint(), this.#locale()))
+
+  #asStored = (draft: string, held: string | undefined): string => {
+    const text = draft.trim()
+    return held !== undefined && text === held ? held : canonicalZoneText(text)
+  }
+
+  /** The point the words fold: the one typed, else this page's own relay. */
+  readonly #wordsPoint = computed(() => {
+    const typed = this.pointSupported() ? this.pointDraft().trim() : ''
+    return typed || this.#ownPoint()
+  })
   readonly labelDraft = signal('')
   readonly hostDraft = signal('')
   readonly secretVisible = signal(false)
@@ -161,9 +211,20 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       this.secretDraft.set(initialSecret)
       const zone = readMeshZone()
       const point = typeof payload?.point === 'string' ? meetingRelayOf(payload.point) : ''
-      this.pointDraft.set(point ? pointLabel(point) : zone?.relay ? pointLabel(zone.relay) : '')
+      // THIS tab's point — or, for a tab with no zone of its own, the point
+      // the origin last met at (never its code).
+      const ownZone = !!zone && (typeof zone.room === 'string' || typeof zone.secret === 'string' || !!zone.relay)
+      const resumed = ownZone ? String(zone?.relay ?? '') : meetPointPrefill()
+      this.pointDraft.set(point ? pointLabel(point) : resumed ? pointLabel(resumed) : '')
       // A newly named meeting point starts with no code of the old one's.
-      this.codeDraft.set(point && point !== zone?.relay ? '' : (zone?.code ?? ''))
+      this.codeDraft.set(point && point !== zone?.relay ? '' : ownZone ? (zone?.code ?? '') : '')
+      // An older package cannot meet at a point (VO-2); feature-detected on
+      // the loaded mesh, synchronously — nothing is asked of anyone.
+      const mesh = get(MESH_KEY) as MeshRelayApi | undefined
+      this.pointSupported.set(!mesh || typeof mesh.ownRelays === 'function')
+      let own = ''
+      try { own = String(mesh?.ownRelays?.()?.[0] ?? '') || String(mesh?.swarmHost?.() ?? '') } catch { own = '' }
+      this.#ownPoint.set(own)
       // The word pair's locale, read at open time — the window is modal.
       try {
         this.#locale.set((get('@hypercomb.social/I18n') as { locale?: string } | undefined)?.locale ?? 'en')
@@ -239,6 +300,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
    *  an empty point is the default relay; a code needs the point it is for
    *  (it is never sent to the default relay). Flags the field otherwise. */
   #meetingPointValid = (): boolean => {
+    if (!this.pointSupported()) return true
     const typed = this.pointDraft().trim()
     const code = this.codeDraft().trim()
     if (typed && !meetingRelayOf(typed)) { this.missingField.set('point'); return false }
@@ -258,6 +320,9 @@ export class MeshModalComponent implements OnInit, OnDestroy {
    *  relay still keeps tiles when its card allows participants and nothing
    *  else does (the relay tier). */
   #commitMeetingPoint = (): void => {
+    // An older package forgets a point on refresh and cannot carry a code:
+    // never point it (the fields are disabled, with the way to update).
+    if (!this.pointSupported()) return
     const relay = meetingRelayOf(this.pointDraft())
     const code = relay ? this.codeDraft().trim() : ''
     const zone = readMeshZone()
@@ -363,8 +428,9 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     // wrapper. Empty save doesn't unset it (the runtime bootstrap default
     // of window.location.origin stays), so we only write on non-empty.
     if (host) this.#writeHost(host)
-    EffectBus.emit('mesh:room', { room })
-    EffectBus.emit('mesh:secret', { secret })
+    // What the stores hold now (entered text folds), never the raw draft.
+    EffectBus.emit('mesh:room', { room: this.#roomStore?.value ?? room })
+    EffectBus.emit('mesh:secret', { secret: this.#secretStore?.value ?? secret })
     EffectBus.emit('mesh:host', { host: this.#readHost() })
     if (room) this.#savedStore?.add(room)
 
@@ -442,6 +508,12 @@ export class MeshModalComponent implements OnInit, OnDestroy {
 
   readonly dismiss = (): void => {
     this.#close(true)
+  }
+
+  /** The older-package line's button: open Packages to update. */
+  readonly openPackages = (): void => {
+    this.#close(true)
+    EffectBus.emit('packages:open', {})
   }
 
   #close = (cancelled = false): void => {

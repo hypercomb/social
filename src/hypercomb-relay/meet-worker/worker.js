@@ -217,21 +217,35 @@ export class MeetingPoint {
 // costs the meeting nothing but that one question per second per isolate.
 // The object still checks every dial it is handed: the copy can be up to a
 // second behind a recycle, and a recycle in this isolate forgets it at once.
+//
+// A QUESTION THAT FAILS IS NO ANSWER. The router refuses (4401) only on a
+// hash it actually holds. When the question fails — the object reset by a
+// deploy, "Network connection lost", overloaded by the very reconnect wave
+// that is asking — the dial goes on to the object, which checks the code
+// itself: no extra round trip, and a holder of the right code is never sent
+// onto the client's access ladder (5/15/30/60 s, which a wake does not
+// shorten) by a passing failure. If the object cannot be reached either, the
+// forwarded upgrade fails like any dropped dial and the client redials at once.
 let door = { hash: undefined, at: -Infinity, asking: null }
 
-/** The hash in force (null: the door is shut), from this isolate's copy when
- *  it is under a second old, else asked of the object once for everyone. */
+/** The hash in force (null: the door is shut; undefined: the question failed
+ *  and nothing is known), from this isolate's copy when it is under a second
+ *  old, else asked of the object once for everyone waiting. */
 function hashInForce(stub) {
   if (door.hash !== undefined && Date.now() - door.at < DOOR_REFRESH_MS) return Promise.resolve(door.hash)
   door.asking ??= stub.fetch(new Request('https://meet.internal' + DOOR_PATH))
-    .then((res) => res.json())
+    .then((res) => {
+      if (!res.ok) throw new Error(`door: ${res.status}`)
+      return res.json()
+    })
     .then((body) => {
       const hash = HEX64.test(String(body?.hash)) ? body.hash : null
       door = { hash, at: Date.now(), asking: null }
       return hash
-    }, () => {
+    })
+    .catch(() => {
       door.asking = null
-      return door.hash ?? null
+      return undefined
     })
   return door.asking
 }
@@ -248,7 +262,8 @@ export default {
       const asked = sha256Hex(offered.code)
       let hash = door.hash
       if (hash === undefined || !sameDigest(asked, hash ?? '')) hash = await hashInForce(stub)
-      if (!sameDigest(asked, hash ?? '')) return refuseDial(offered, hash ? 'access: code refused' : 'access: the meeting point is closed')
+      // undefined: the door could not be asked — the object decides.
+      if (hash !== undefined && !sameDigest(asked, hash ?? '')) return refuseDial(offered, hash ? 'access: code refused' : 'access: the meeting point is closed')
       return stub.fetch(request)
     }
     const answer = await stub.fetch(request)

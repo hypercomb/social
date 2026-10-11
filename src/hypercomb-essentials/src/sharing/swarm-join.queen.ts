@@ -22,9 +22,17 @@
 // words would make `join` LEAVE a participant who was already in. The answer
 // is THIS tab's membership (membership.ts), never the origin-wide flag a
 // second tab can rewrite.
+//
+// A TAB WITH NO MEETING OF ITS OWN IS ASKED (D5, 2026-10-10). The origin-wide
+// room and secret only PRE-FILL a new tab: on a returning device they are
+// last week's meeting, and `join` there used to go straight back in without
+// a word. Unless this tab joined or chose a zone itself (`ownZone`), `join`
+// opens the selector pre-filled — one tap to START, no round trip. Asked
+// here as well as at the shell's guard, so a shell older than that guard
+// asks too.
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { isJoinedHere } from './membership.js'
+import { isJoinedHere, ownZone } from './membership.js'
 
 const inSwarm = (): boolean => isJoinedHere()
 
@@ -44,11 +52,12 @@ export class JoinQueenBee extends QueenBee {
   override description = 'Join the swarm here — your public tiles are offered, and other participants appear'
   override descriptionKey = 'slash.join'
   override examples = [
-    { input: '/join', result: 'Joins the swarm for this zone; asks for a room and secret when one is missing' },
+    { input: '/join', result: 'Joins the swarm in the zone this tab is in; a tab with none of its own opens the selector, pre-filled' },
   ]
 
   protected async execute(): Promise<void> {
     if (inSwarm()) { say('swarm.join.already', 'you are already in the swarm here') ; return }
+    if (!ownZone()) { EffectBus.emit('mesh:open-modal', { join: true }) ; return }
     toggle()
   }
 }

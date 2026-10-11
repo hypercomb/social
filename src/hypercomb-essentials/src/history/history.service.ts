@@ -130,6 +130,19 @@ type FaceCandidate = { readonly layer: LayerContent; readonly segments: readonly
 /** Root's display name. Used when the layer has no path segments. */
 export const ROOT_NAME = '/'
 
+/** Write then close, keeping the WRITE'S OWN ERROR: a failed write aborts the
+ *  stream instead of `close()` throwing "Cannot close a ERRORED writable
+ *  stream" over a full device's QuotaExceededError. */
+const writeThenClose = async (writable: FileSystemWritableFileStream, data: FileSystemWriteChunkType): Promise<void> => {
+  try {
+    await writable.write(data)
+    await writable.close()
+  } catch (error) {
+    try { await writable.abort() } catch { /* already errored */ }
+    throw error
+  }
+}
+
 /** Empty layer — content of `00000000` minted on bag's first touch.
  *  Only `name`; no `children` field at all. */
 export const emptyLayer = (name: string): LayerContent => ({ name })
@@ -263,6 +276,32 @@ export class HistoryService {
         this.#preloadGeneration++
       })
     } catch { /* non-DOM context */ }
+    // TWO TABS, ONE HIVE (owner decision D10: both keep writing). A meeting
+    // link opens a second tab beside the hive that is already open; both share
+    // one OPFS and each keeps its own in-memory heads. Every marker this tab
+    // writes is announced to the others, which re-read that lineage's head
+    // (one directory read) instead of building their next commit on a head
+    // that is no longer the bag's max. A tab coming back into view checks its
+    // current page the same way — a frozen tab can miss an announcement.
+    // Reads only: no storage write, nothing added to connect or join.
+    try {
+      if (typeof BroadcastChannel === 'function') {
+        const channel = new BroadcastChannel(HistoryService.#PEER_CHANNEL)
+        ;(channel as { unref?: () => void }).unref?.()
+        channel.onmessage = (event: MessageEvent) => this.#onPeerMarker(event?.data)
+        this.#peerChannel = channel
+      }
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') void this.#revalidateCurrentPage()
+      })
+    } catch { /* non-DOM context — a single writer has nobody to tell */ }
+    // A layer that ARRIVES can answer a seal that refused for want of it. The
+    // arrival is not a head change, so the epoch memo would keep the refusal
+    // for the rest of the epoch — drop refusals (never successes) on arrival.
+    EffectBus.on<{ kind?: string }>('content:arrived', payload => {
+      if (payload?.kind && payload.kind !== 'layer') return
+      for (const [locSig, memo] of this.#sealByEpoch) if (memo.sealedSig === null) this.#sealByEpoch.delete(locSig)
+    })
     // SELF-CLEANING: when the legacy `__history__` pool (or a per-bag
     // `__temporary__` archive) still exists, drain it into the signed
     // locations and remove the orphaned dirs — automatically. Detached
@@ -423,7 +462,7 @@ export class HistoryService {
       try { await legacy.getFileHandle(markerName, { create: false }); return } catch { /* absent — mirror it */ }
       const out = await legacy.getFileHandle(markerName, { create: true })
       const w = await out.createWritable()
-      try { await w.write(bytes) } finally { await w.close() }
+      await writeThenClose(w, bytes)
     } catch { /* best-effort — the home bag is the truth; the mirror is a courtesy to older builds */ }
   }
 
@@ -488,7 +527,7 @@ export class HistoryService {
         const bytes = await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer()
         const out = await dst.getFileHandle(name, { create: true })
         const w = await out.createWritable()
-        try { await w.write(bytes) } finally { await w.close() }
+        await writeThenClose(w, bytes)
       } catch { /* best-effort per entry */ }
     }
   }
@@ -695,7 +734,7 @@ export class HistoryService {
             const bytes = await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer()
             const out = await pool.getFileHandle(name, { create: true })
             const w = await out.createWritable()
-            try { await w.write(bytes) } finally { await w.close() }
+            await writeThenClose(w, bytes)
           }
           await dir.removeEntry(name)
         } catch { /* straggler — absorbed on a later pass */ }
@@ -1058,6 +1097,11 @@ export class HistoryService {
   public readonly commitLayer = async (
     locationSig: string,
     layer: LayerContent,
+    /** The marker the caller's head was read from (`headMarkerOf` right
+     *  after `latestMarkerSigFor`). When it is given and the head has moved
+     *  since — another tab's marker arrived — the commit refuses with
+     *  `StaleHeadError` instead of writing a layer built on the old head. */
+    base?: { marker?: string | null },
   ): Promise<string> => {
     // PREVIEW GUARD: a location whose head is a preview seed must never
     // gain a real marker — the seed-materialization below would fold a
@@ -1075,6 +1119,15 @@ export class HistoryService {
     const lastSig = this.#headSigFor(locationSig)
     if (lastSig === layerSig) return layerSig
 
+    // THE HEAD MOVED UNDER THIS COMMIT. Between the caller's read and this
+    // write, this tab learned of a newer marker (another tab's, announced or
+    // read cold). The layer was built on the old head; writing it would drop
+    // that tab's change.
+    const baseMarker = base?.marker || ''
+    if (baseMarker && this.#headStamp.get(locationSig) !== baseMarker) {
+      throw await this.#staleHead(locationSig, `head moved past ${baseMarker} during the commit`)
+    }
+
     const bag = await this.getBag(locationSig)
     await this.#ensureEmptyMarker(bag, canonical.name, locationSig)
 
@@ -1085,6 +1138,8 @@ export class HistoryService {
     // pool-resident (they are the parent-carried layer).
     const seeded = this.#seededHeadByLineage.get(locationSig)
     this.#seededHeadByLineage.delete(locationSig)
+    /** The seed marker THIS commit wrote, if any — a bag max that is ours. */
+    let seedWritten = ''
     if (seeded && seeded !== layerSig) {
       try {
         const seedList = this.#layerListCache.get(locationSig)
@@ -1095,11 +1150,13 @@ export class HistoryService {
         // a nine-digit name is written but invisible to every reader.
         if (!seedMarkerName) throw new Error('[history] seed marker is past the marker ceiling')
         const { bytes: seedBytes } = await writeLayerMarker(bag, seeded, seedMarkerName)
+        seedWritten = seedMarkerName
         EffectBus.emit('history:marker-wrote', {
           lineageSig: locationSig,
           markerName: seedMarkerName,
           bytes: seedBytes.buffer as ArrayBuffer,
         })
+        this.#announceMarker(locationSig, seedMarkerName)
         if (seedList) seedList.push({ layerSig: seeded, at: Date.now(), filename: seedMarkerName })
       } catch { /* best-effort — the commit below is still correct without it */ }
     }
@@ -1134,16 +1191,35 @@ export class HistoryService {
     // cache entirely). Cold cache → one O(markers) enumeration, after
     // which listLayers' next scan re-warms it.
     const knownList = this.#layerListCache.get(locationSig)
+    const scanned = { liveMax: '' }
     const markerName = (knownList && knownList.length > 0)
       ? markerNameOf(knownList.reduce((max, e) => Math.max(max, Number(e.filename) || 0), 0) + 1)
-      : await this.#nextMarkerName(bag, locationSig)
+      : await this.#nextMarkerName(bag, locationSig, scanned)
     if (!markerName) throw new Error(`[history] lineage ${locationSig.slice(0, 8)}… is at the marker ceiling; refusing to mint an out-of-range name`)
-    const { bytes: markerBytes } = await writeLayerMarker(bag, layerSig, markerName)
+    // ANOTHER WRITER MOVED THIS BAG (a second tab of the same hive). The cold
+    // name scan sees a max marker newer than the one this head was read from:
+    // the layer above was built on a head that is no longer the bag's max, and
+    // writing it would silently drop the other tab's change. Re-read the head
+    // and hand the caller a stale-head refusal so it re-applies its change.
+    const builtOn = baseMarker || this.#headStamp.get(locationSig)
+    if (builtOn && scanned.liveMax && scanned.liveMax > builtOn && scanned.liveMax !== seedWritten) {
+      throw await this.#staleHead(locationSig, `bag max ${scanned.liveMax} is past this tab's head ${builtOn}`)
+    }
+    let markerBytes: Uint8Array
+    try {
+      ({ bytes: markerBytes } = await writeLayerMarker(bag, layerSig, markerName))
+    } catch (error) {
+      // The warm path's max + 1 was taken by another writer. Never overwrite:
+      // the marker is an immutable revision. Same refusal as above.
+      if (!HistoryService.#isMarkerExists(error)) throw error
+      throw await this.#staleHead(locationSig, `marker ${markerName} already exists`)
+    }
     EffectBus.emit('history:marker-wrote', {
       lineageSig: locationSig,
       markerName,
       bytes: markerBytes.buffer as ArrayBuffer,
     })
+    this.#announceMarker(locationSig, markerName)
     await this.#mirrorHomeMarker(locationSig, markerName, markerBytes.buffer as ArrayBuffer)
 
     // Keep the in-memory marker list coherent: the entry we just wrote
@@ -1615,6 +1691,9 @@ export class HistoryService {
   readonly #nextMarkerName = async (
     bag: FileSystemDirectoryHandle,
     locationSig?: string,
+    /** Filled with the bag's live max marker NAME — what commitLayer compares
+     *  against the marker its head was read from. */
+    scanned?: { liveMax: string },
   ): Promise<string> => {
     let max = 0
     for await (const [name, handle] of (bag as any).entries()) {
@@ -1622,6 +1701,7 @@ export class HistoryService {
       if (!HistoryService.#MARKER_RE.test(name)) continue
       const n = Number(name)
       if (!isNaN(n) && n > max) max = n
+      if (scanned && name > scanned.liveMax) scanned.liveMax = name
     }
     // ARCHIVING MUST NOT REWIND THE COUNTER. `archiveEntries` (/flatten,
     // the retired /collapse-history) moves markers out of the bag, so a LIVE-ONLY scan
@@ -1979,6 +2059,12 @@ export class HistoryService {
    *  cache miss. */
   public readonly warmHeadSigFor = (lineageSig: string): string | null =>
     this.#headSigFor(lineageSig) ?? null
+
+  /** The marker FILENAME the lineage's current head was read from, or null
+   *  (a virtual seed, a cold-minted husk, a legacy index entry). A writer
+   *  passes it back to `commitLayer` as its base. */
+  public readonly headMarkerOf = (lineageSig: string): string | null =>
+    this.#headStamp.get(lineageSig) ?? null
 
   readonly #seedVirtualHead = (lineageSig: string, sig: string): void => {
     this.#seededHeadByLineage.set(lineageSig, sig)
@@ -2411,8 +2497,11 @@ export class HistoryService {
    * Bypass a render miss window here: a detached first-paint probe may have
    * happened before the broker learned the layer's host, and that negative
    * cache must not make an explicit snapshot fail for the next minute.
+   * A BACKGROUND seal (`bypassMissWindow: false` — the swarm's publish walk)
+   * keeps the window: it re-runs on its own, and clearing the window on every
+   * walk re-asked every host for a missing layer about once a second.
    */
-  readonly #resolveRequiredLayer = async (layerSig: string): Promise<LayerContent | null> => {
+  readonly #resolveRequiredLayer = async (layerSig: string, bypassMissWindow = true): Promise<LayerContent | null> => {
     const local = await this.#resolveLayerLocal(layerSig)
     if (local) return local
     const store = get<{
@@ -2421,7 +2510,7 @@ export class HistoryService {
         options?: { bypassMissWindow?: boolean },
       ) => Promise<Uint8Array | null>
     }>('@hypercomb.social/Store')
-    const arrived = await store?.fetchLayerFromHost?.(layerSig, { bypassMissWindow: true })
+    const arrived = await store?.fetchLayerFromHost?.(layerSig, { bypassMissWindow })
     if (!arrived) return null
     return this.#resolveLayerLocal(layerSig)
   }
@@ -2435,6 +2524,7 @@ export class HistoryService {
    */
   readonly #resolveRequiredHead = async (
     locationSig: string,
+    bypassMissWindow = true,
   ): Promise<{ head: LayerContent; headSig: string | null } | null> => {
     let latest: { name: string; bag: FileSystemDirectoryHandle } | null
     try {
@@ -2464,7 +2554,7 @@ export class HistoryService {
       this.#setHead(locationSig, layerSig)
       this.#noteHeadDerived(locationSig, latest.name)
       this.#scheduleHeadPersist()
-      const head = await this.#resolveRequiredLayer(layerSig)
+      const head = await this.#resolveRequiredLayer(layerSig, bypassMissWindow)
       return head ? { head, headSig: layerSig } : null
     } catch {
       return null
@@ -2624,7 +2714,13 @@ export class HistoryService {
    *  is skipped — the difference between a navigation that costs O(1) and one
    *  that re-walks every descendant. `#sealCache` above still guards the
    *  re-hash/re-write of an individual node; this guards the walk itself. */
-  readonly #sealByEpoch = new Map<string, { epoch: number; sealedSig: string | null }>()
+  readonly #sealByEpoch = new Map<string, {
+    epoch: number
+    sealedSig: string | null
+    /** Why a memoised refusal refused — restored on a memo hit, so a caller
+     *  reading `lastSealFailure` after a null still learns the reason. */
+    failure?: HistoryService['lastSealFailure']
+  }>()
 
   /** Exact reason the most recent seal refused. Snapshot surfaces this instead
    *  of collapsing structural corruption and a remote miss into "visit it". */
@@ -2680,10 +2776,17 @@ export class HistoryService {
   public readonly sealSubtree = async (
     segments: readonly string[],
     activeLayers: Set<string> = new Set(),
+    /** `bypassMissWindow: false` marks a BACKGROUND seal (the swarm's publish
+     *  walk, a status row): it trusts a refusal already derived at this
+     *  epoch and lets the store's host-miss window stand. Explicit operations
+     *  (snapshot, publish, paste) keep the default — they ask the hosts again
+     *  and never inherit a background refusal. */
+    options: { bypassMissWindow?: boolean } = {},
   ): Promise<string | null> => {
     if (activeLayers.size === 0) this.lastSealFailure = null
     const locSig = await this.sign({ explorerSegments: () => [...segments] })
     if (!locSig) return this.#refuseSeal(segments, 'invalid-location')
+    const bypassMissWindow = options.bypassMissWindow !== false
 
     // EPOCH SHORT-CIRCUIT. A seal is a pure function of the subtree's live
     // heads, so while no head has moved the previous answer is still the
@@ -2693,22 +2796,37 @@ export class HistoryService {
     // result that could not have changed.
     const epochAtEntry = this.#treeEpoch
     const byEpoch = this.#sealByEpoch.get(locSig)
-    if (byEpoch && byEpoch.epoch === epochAtEntry) return byEpoch.sealedSig
+    if (byEpoch && byEpoch.epoch === epochAtEntry) {
+      if (byEpoch.sealedSig !== null) return byEpoch.sealedSig
+      // A REFUSAL IS AS PURE AS A SUCCESS while the epoch holds (and no layer
+      // has arrived — arrival drops refusals, see the constructor). Not
+      // memoising it is what let a background walk re-run a slow refusal
+      // forever: each one re-asked the hosts for the missing layer, finished
+      // past the walk's patience, and scheduled the next walk (BCL-6).
+      if (!bypassMissWindow) {
+        if (!this.lastSealFailure && byEpoch.failure) this.lastSealFailure = byEpoch.failure
+        return null
+      }
+    }
     /** Stamp the derived answer — but only if the tree held still while we
      *  walked. A head that moved mid-walk means this result may already
      *  describe a superseded tree; leave it unmemoised so the next call
-     *  re-derives. */
+     *  re-derives. A refusal is stamped with its reason. */
     const remember = (sealedSig: string | null): string | null => {
-      if (this.#treeEpoch === epochAtEntry) this.#sealByEpoch.set(locSig, { epoch: epochAtEntry, sealedSig })
+      if (this.#treeEpoch === epochAtEntry) {
+        this.#sealByEpoch.set(locSig, sealedSig === null
+          ? { epoch: epochAtEntry, sealedSig, failure: this.lastSealFailure }
+          : { epoch: epochAtEntry, sealedSig })
+      }
       return sealedSig
     }
 
     let head = await this.currentLayerAt(locSig)
     let headSig = this.#headSigFor(locSig) ?? null
     if (!head) {
-      const required = await this.#resolveRequiredHead(locSig)
+      const required = await this.#resolveRequiredHead(locSig, bypassMissWindow)
       if (!required) {
-        return this.#refuseSeal(segments, 'head-unresolvable', this.#headSigFor(locSig))
+        return remember(this.#refuseSeal(segments, 'head-unresolvable', this.#headSigFor(locSig)))
       }
       head = required.head
       headSig = required.headSig
@@ -2744,12 +2862,12 @@ export class HistoryService {
     const sealedChildren: string[] = []
     for (const cs of childSigs) {
       const childSig = String(cs)
-      const child = await this.#resolveRequiredLayer(childSig)
-      if (!child) return this.#refuseSeal(segments, 'child-unresolvable', childSig)
+      const child = await this.#resolveRequiredLayer(childSig, bypassMissWindow)
+      if (!child) return remember(this.#refuseSeal(segments, 'child-unresolvable', childSig))
       const name = (child?.name ?? '').trim()
-      if (!name) return this.#refuseSeal(segments, 'child-name-missing', childSig)
-      const sealed = await this.sealSubtree([...segments, name], activeLayers)
-      if (!sealed) return null
+      if (!name) return remember(this.#refuseSeal(segments, 'child-name-missing', childSig))
+      const sealed = await this.sealSubtree([...segments, name], activeLayers, options)
+      if (!sealed) return remember(null)
       // COMPARE LIKE WITH LIKE. The children slot may carry a metadata
       // INCIDENCE (`{meta:1, layer, relation}`) rather than the layer sig
       // itself, while a bag's markers are always bare layer sigs. Testing the
@@ -3956,6 +4074,137 @@ export class HistoryService {
     }
   }
 
+  // ── TWO TABS, ONE HIVE ───────────────────────────────────────────────
+  //
+  // Each tab keeps its own in-memory heads over one shared OPFS. A marker is
+  // an immutable revision, so the bag itself never forks: the second writer
+  // to a name is refused (`MarkerExistsError`). What used to go wrong was
+  // everything around that refusal — the losing tab kept its stale head, so
+  // every later add at that page failed the same way until a reload, and a
+  // cold marker scan could even WIN the name and commit over the other tab's
+  // change. Now: every marker write is announced to the other tabs, which
+  // re-read that head; a commit that finds its head stale re-reads it and
+  // refuses with `StaleHeadError`, which LayerCommitter answers by
+  // re-applying the change onto the fresh head once.
+
+  static readonly #PEER_CHANNEL = 'hc:history'
+  #peerChannel: BroadcastChannel | null = null
+  readonly #revalidating = new Map<string, Promise<void>>()
+  readonly #revalidateAgain = new Set<string>()
+
+  static readonly #isMarkerExists = (error: unknown): boolean => {
+    const e = error as { name?: unknown; message?: unknown } | null
+    // The message test covers a shell whose core predates the named error.
+    return e?.name === 'MarkerExistsError' || /Location marker \d{8} already exists/.test(String(e?.message ?? ''))
+  }
+
+  /** Tell the other tabs of this hive that `lineageSig` gained `markerName`. */
+  readonly #announceMarker = (lineageSig: string, markerName: string): void => {
+    try { this.#peerChannel?.postMessage({ lineageSig, markerName }) } catch { /* channel closed */ }
+  }
+
+  /** Does this tab hold any state for the lineage that a peer write could
+   *  have made stale? A lineage it never read is read from disk anyway. */
+  readonly #holdsLineage = (lineageSig: string): boolean =>
+    this.#latestSigByLineage.has(lineageSig)
+    || this.#layerListCache.has(lineageSig)
+    || this.#seededHeadByLineage.has(lineageSig)
+
+  readonly #onPeerMarker = (data: unknown): void => {
+    const { lineageSig, markerName } = (data ?? {}) as { lineageSig?: unknown; markerName?: unknown }
+    if (typeof lineageSig !== 'string' || !HistoryService.#SIG_RE.test(lineageSig)) return
+    if (typeof markerName !== 'string' || !HistoryService.#MARKER_RE.test(markerName)) return
+    const stamp = this.#headStamp.get(lineageSig)
+    if (stamp && stamp >= markerName) return
+    if (!this.#holdsLineage(lineageSig)) return
+    this.#peerRevalidate(lineageSig)
+  }
+
+  /** Re-read one lineage's head, coalesced: announcements that land while a
+   *  read is running fold into one more read. A head that moved is announced
+   *  on `history:head-external` (transient — a late subscriber must never
+   *  replay another tab's old move). */
+  readonly #peerRevalidate = (lineageSig: string): void => {
+    if (this.#revalidating.has(lineageSig)) { this.#revalidateAgain.add(lineageSig); return }
+    const run = (async (): Promise<void> => {
+      do {
+        this.#revalidateAgain.delete(lineageSig)
+        const moved = await this.revalidateHead(lineageSig).catch(() => null)
+        if (moved) EffectBus.emitTransient('history:head-external', { lineageSig, ...moved })
+      } while (this.#revalidateAgain.has(lineageSig))
+    })().finally(() => {
+      this.#revalidating.delete(lineageSig)
+      // An announcement that landed after the last pass: one more read.
+      if (this.#revalidateAgain.delete(lineageSig)) this.#peerRevalidate(lineageSig)
+    })
+    this.#revalidating.set(lineageSig, run)
+  }
+
+  /** A tab coming back into view checks its CURRENT page with one directory
+   *  read — an announcement can be missed while a tab is frozen. */
+  readonly #revalidateCurrentPage = async (): Promise<void> => {
+    try {
+      const lineage = get<{ domain?: () => string; explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+      const segments = lineage?.explorerSegments?.()
+      if (!Array.isArray(segments)) return
+      const locSig = await this.sign({ domain: lineage?.domain, explorerSegments: () => [...segments] })
+      if (locSig && this.#holdsLineage(locSig)) this.#peerRevalidate(locSig)
+    } catch { /* store not ready — the next read derives from the bag */ }
+  }
+
+  /**
+   * ANOTHER WRITER MAY HAVE MOVED THIS BAG. One directory read answers whether
+   * the bag's max marker is still the one this tab's head was read from; when
+   * it is not, the head is re-read from that marker (one small file). Returns
+   * the move — the head this tab had (real or seeded) and the bag's — or null
+   * when nothing moved. Drops the lineage's marker list (it lacks the other
+   * writer's entries) and any virtual seed (the bag now has a real head).
+   */
+  public readonly revalidateHead = async (
+    lineageSig: string,
+  ): Promise<{ from: string | null; to: string } | null> => {
+    if (!HistoryService.#SIG_RE.test(lineageSig)) return null
+    const latest = await this.#scanLatestMarker(lineageSig)
+    if (!latest) return null
+    const from = this.#headSigFor(lineageSig) ?? null
+    const stamp = this.#headStamp.get(lineageSig)
+    if (from && stamp === latest.name && !this.#headUnvalidated.has(lineageSig)) return null
+    // A genesis-only bag under a virtual seed is the husk case
+    // latestMarkerSigFor arbitrates; a peer never announces 00000000.
+    if (latest.name === '00000000' && this.#seededHeadByLineage.has(lineageSig)) return null
+    const file = await (await latest.bag.getFileHandle(latest.name, { create: false })).getFile()
+    const bytes = await file.arrayBuffer()
+    const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
+    if (!HistoryService.#SIG_RE.test(layerSig)) return null
+    if (!isPointer) this.#preloaderCache.set(layerSig, bytes)
+    this.#layerListCache.delete(lineageSig)
+    this.#seededHeadByLineage.delete(lineageSig)
+    this.#huskUnseedable.delete(lineageSig)
+    this.#setHead(lineageSig, layerSig)
+    this.#noteHeadDerived(lineageSig, latest.name)
+    this.#scheduleHeadPersist()
+    return from === layerSig ? null : { from, to: layerSig }
+  }
+
+  /** The commit-side half: the head this commit was built on is no longer
+   *  the bag's max. Re-read it (announcing the move so the page reconciles)
+   *  and return the refusal the commit throws. When the re-read itself fails,
+   *  the head is left UNVALIDATED so the next read derives it from the bag. */
+  readonly #staleHead = async (lineageSig: string, why: string): Promise<Error> => {
+    this.#layerListCache.delete(lineageSig)
+    try {
+      const moved = await this.revalidateHead(lineageSig)
+      if (moved) EffectBus.emitTransient('history:head-external', { lineageSig, ...moved })
+    } catch {
+      this.#headUnvalidated.add(lineageSig)
+    }
+    console.warn(`[history] another tab moved ${lineageSig.slice(0, 8)}… (${why}) — re-applying onto its head`)
+    return Object.assign(
+      new Error(`[history] stale head at ${lineageSig.slice(0, 8)}…: ${why}`),
+      { name: 'StaleHeadError' },
+    )
+  }
+
   /**
    * One-time bag-pollution cleanup. The pre-refactor history-recorder
    * dual-emitted delta records into the bag root (sig-named files
@@ -4272,7 +4521,7 @@ export class HistoryService {
         if (!pooled) {
           const dstHandle = await archive.getFileHandle(poolName, { create: true })
           const writable = await dstHandle.createWritable()
-          try { await writable.write(bytes) } finally { await writable.close() }
+          await writeThenClose(writable, bytes)
         }
         await bag.removeEntry(filename)
         archived++

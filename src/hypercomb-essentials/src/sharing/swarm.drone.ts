@@ -279,13 +279,33 @@ const STICKY_PAGE_WAIT_MS = 2_000
 const WALK_STATS_MAX = 64
 // A host's `sync:state` words that mean it is not taking this page's bytes
 // right now (#hostReport): another of the page's hosts that is, speaks.
-const HOST_HELD_STATES: ReadonlySet<string> = new Set(['refused', 'full', 'unreachable', 'not-live', 'too-large'])
+// `never-answered`: a host from which no HTTP status ever arrived (a name that
+// does not resolve, a CORS wall) — host-sync's standing verdict for it.
+const HOST_HELD_STATES: ReadonlySet<string> = new Set(['refused', 'full', 'unreachable', 'not-live', 'too-large', 'never-answered'])
 // Of those, the ones that hold a whole BRANCH (#blockedBranches): the host
 // takes none of its bytes. `not-live` clears itself in a second, and
 // `too-large` is one file's fate, never the branch's.
-const BRANCH_HELD_STATES: ReadonlySet<string> = new Set(['refused', 'full', 'unreachable'])
+const BRANCH_HELD_STATES: ReadonlySet<string> = new Set(['refused', 'full', 'unreachable', 'never-answered'])
 // How many held branches a page's status line names — a line, not a list.
 const BLOCKED_SHOWN_MAX = 3
+// How many tile names one held host's entry in the status carries (its
+// `count` says how many there are in all).
+const HELD_NAMES_MAX = 8
+// NAVIGATION SETTLES. A page held at least this long is where the participant
+// IS: only then do the follow mechanism's presence (30204) and the personal
+// channel say it, and only then is a page left behind told we are no longer
+// standing on it. A page merely passed through costs neither (LS-2).
+const NAV_SETTLE_MS = 300
+// On a NAVIGATION into a page with nothing heard yet, the late-joiner visuals
+// ask (#recoverVisualsAt) waits this long for the page's own replay or the
+// publisher's drill answer first — they usually come, and the ask is an
+// EVENT + REQ + CLOSE spent for nothing. A join or a reconnect asks at once.
+const RECOVERY_WAIT_MS = 1_000
+// A word this tab sent (its page slot, its beacon) that no relay has TAKEN
+// this long after it went out reads as still sending (share-status
+// `unackedMs`): the status is said once more at this age so the line can say
+// so without a timer of its own.
+const UNACKED_SHOW_MS = 3_000
 // WHERE A PAGE'S BYTES GO still being read (a reload's first walk; a page
 // whose branch marks were never read) is UNKNOWN, like a cold history read:
 // the walk says nothing for that page — the relay keeps our last slot — and
@@ -459,6 +479,11 @@ interface HostSyncLike {
    *  page it is shown on (a branch's own publish domains below its tile).
    *  null = a page on the way is still being read. */
   isClosureAvailableAt?: (sig: string, kind: 'layer' | 'bee' | 'dependency' | 'resource', closure: boolean, page: readonly string[], extra?: readonly string[]) => Promise<boolean | null>
+  /** The same gate, saying WHY (host-sync's standing verdicts): ok, whether
+   *  some atom only this device holds (a host refuses it for good), and the
+   *  first atom in the way with the host it waits on. Optional: an older
+   *  host-sync has only the boolean above. */
+  closureVerdict?: (sig: string, kind: 'layer' | 'bee' | 'dependency' | 'resource', deep: boolean, page: readonly string[], extra?: readonly string[]) => Promise<ClosureVerdict | boolean | null>
   /** Every swarm host a root's closure is shown on (synchronous). */
   closureHostsOf?: (sig: string) => string[]
   /** Where a page's offered tiles go, synchronously (swarm-hosts.ts):
@@ -495,6 +520,43 @@ type ChildEntry = { name: string; layerSig?: string } & Record<string, unknown>
  *  version a host served (newest still uploading), or its name alone. */
 type EntryForm = 'full' | 'previous' | 'placeholder'
 
+/** The atom a closure waits on, and the host it waits on (host-sync's
+ *  `blocking`). Every field optional: a reader takes what is there. */
+type Blocking = { host?: string; page?: readonly string[]; sig?: string; state?: string; reason?: string; why?: string; name?: string; bytes?: number }
+
+/** A host-sync answer about a closure. `ok` true = served where it is shown;
+ *  false = not (yet); null = a page on the way still being read (host-sync
+ *  says `unknown`). `ownerHeld`: not served, and waiting will not change it —
+ *  every atom still missing sits on hosts that refused it, are full or never
+ *  answered: only this device serves it (the content broker), for the rest of
+ *  the session. */
+type ClosureVerdict = { ok: boolean | null; ownerHeld?: boolean; unknown?: boolean; blocking?: Blocking }
+
+/** WHERE A TAKEABLE BRANCH'S DEEPER PAGES ARE (D1, tile first): `hosted` —
+ *  its whole closure is served; `owner` — its own atoms are, its deeper pages
+ *  are still only on this device (they keep uploading, and a receiver who
+ *  takes it reaches them from here meanwhile). */
+type DeepWhere = 'owner' | 'hosted'
+
+/** One child as a walk announced it (#entryFor). */
+type Announced = {
+  entry: ChildEntry
+  form: EntryForm
+  unknown?: boolean
+  late?: boolean
+  /** A branch's full entry: where its deeper pages are. */
+  deep?: DeepWhere
+  /** Why the newest version is not served yet (a non-full child). */
+  blocking?: Blocking
+  /** Why a full branch's deeper pages are not served yet. */
+  deepBlocking?: Blocking
+}
+
+/** One host that holds tiles back, as the status line names it: the host,
+ *  its word and why, and the tiles it holds. `deep` — the tiles go out and
+ *  can be taken; only their deeper pages stay on this device. */
+type HeldGroup = { host: string; state: string; reason: string; why?: string; count: number; names: string[]; deep?: true }
+
 /** One page walk as debug() reports it: when it ran, how long it took, what
  *  it ended in, and how each public child went out. `said` = a page event
  *  left; `unchanged` = the content and its slot were current; `unknown` =
@@ -519,6 +581,78 @@ type WalkStat = {
 type Within<T> = { late: false; value: T } | { late: true }
 
 const HEX64_RE = /[0-9a-f]{64}/i
+
+/** A received visual keeps the publisher's word on where a takeable branch's
+ *  deeper pages are — a closed enum, and only beside a layerSig. The visual
+ *  sanitizer's whitelist drops every key it does not know, so it is read off
+ *  the raw entry here. */
+function withDeep(cleaned: { name: string } & Record<string, unknown>, raw: Record<string, unknown>): { name: string } & Record<string, unknown> {
+  const deep = raw['deep']
+  if ((deep === 'owner' || deep === 'hosted') && typeof cleaned['layerSig'] === 'string') return { ...cleaned, deep }
+  return cleaned
+}
+
+/** Any host-sync answer as a verdict: a boolean gate's yes/no, null for a
+ *  page still being read, or closureVerdict's object (fields checked). */
+function asVerdict(v: ClosureVerdict | boolean | null | undefined): ClosureVerdict {
+  if (v === null) return { ok: null }
+  if (typeof v === 'boolean') return { ok: v }
+  if (!v || typeof v !== 'object') return { ok: false }
+  const ok = v.ok === true ? true : (v.ok === null || v.unknown === true) ? null : false
+  const b = v.blocking && typeof v.blocking === 'object' ? v.blocking : undefined
+  const blocking: Blocking | undefined = b ? {
+    ...(typeof b.host === 'string' && b.host ? { host: b.host } : {}),
+    ...(Array.isArray(b.page) ? { page: b.page.map(s => String(s ?? '')) } : {}),
+    ...(typeof b.sig === 'string' ? { sig: b.sig } : {}),
+    ...(typeof b.state === 'string' ? { state: b.state } : {}),
+    ...(typeof b.reason === 'string' ? { reason: b.reason } : {}),
+    ...(typeof b.why === 'string' && b.why ? { why: b.why } : {}),
+    ...(typeof b.name === 'string' ? { name: b.name } : {}),
+    ...(typeof b.bytes === 'number' && Number.isFinite(b.bytes) ? { bytes: b.bytes } : {}),
+  } : undefined
+  return { ok, ...(v.ownerHeld === true ? { ownerHeld: true } : {}), ...(blocking ? { blocking } : {}) }
+}
+
+/** A whole closure served — no atom of it held back on this device. */
+const hostedDeep = (v: ClosureVerdict): boolean => v.ok === true && v.ownerHeld !== true
+
+// What host-sync's `blocking.state` says of the atom in the way (its
+// ClosureBlockState): a host that will not take it — named in the status as
+// holding the tile; nothing to carry it at all (a hole no store here holds, a
+// page with no host) — not queued; anything else is on its way.
+const BLOCK_HELD_STATES: ReadonlySet<string> = new Set(['refused', 'full', 'too-large', 'page', 'never-answered', 'unreachable'])
+const BLOCK_STALLED_STATES: ReadonlySet<string> = new Set(['missing', 'no-host'])
+
+/** The layer handles a peer's visuals say are only on the peer's device below
+ *  their own atoms (`deep: 'owner'`): the one claim a live peer makes. A
+ *  served entry is fetched over HTTP first — claiming it made every picture
+ *  race the mesh (3-5 relay frames each, SCALE-3). */
+function ownerHeldRefs(visuals: readonly Record<string, unknown>[]): string[] {
+  const out: string[] = []
+  for (const v of visuals) {
+    const sig = v['layerSig']
+    if (v['deep'] === 'owner' && typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig) && !out.includes(sig)) out.push(sig)
+  }
+  return out
+}
+
+/** The broker's peer-liveness note (content-broker.boot.drone.ts). */
+type NotePeerLiveness = (pubkey: string, sigs: readonly string[], page?: { hosted?: readonly string[]; owner?: readonly string[] }) => void
+
+/** Tell the broker what a live peer's page names, on EVERY page event: every
+ *  ref is a full entry's own atom, which its host already serves (`hosted` —
+ *  read over HTTP first, never raced on the mesh: SCALE-3), and `owner` the
+ *  tiles whose deeper pages are still only on the peer's device (D1), whose
+ *  subtree the broker asks of the mesh first. Said even when `owner` is empty:
+ *  a root named again WITHOUT the mark has finished uploading, and that flip
+ *  re-opens its subtree's miss windows (BCL-9). Idempotent per (pubkey, sig)
+ *  inside the broker, so a heartbeat re-announce costs nothing. */
+function notePeerHolds(note: NotePeerLiveness, pubkey: string, visuals: readonly Record<string, unknown>[]): void {
+  const refs = visualArtifactSigs(visuals)
+  const owner = ownerHeldRefs(visuals)
+  if (refs.length === 0 && owner.length === 0) return
+  note(pubkey, refs, { hosted: refs, owner })
+}
 
 /** Strip every value that carries a signature, recursively. A string holding
  *  64 hex anywhere is dropped; an object or array left empty is dropped with
@@ -589,7 +723,7 @@ interface HistoryServiceLike {
   // Seal a subtree's LIVE location heads into a merkle-correct root sig for
   // sharing — leaf-only commit leaves parent.children frozen/stale. Optional so
   // an older HistoryService without it falls back to the raw child sig.
-  sealSubtree?: (segments: readonly string[]) => Promise<string | null>
+  sealSubtree?: (segments: readonly string[], activeLayers?: Set<string>, options?: { bypassMissWindow?: boolean }) => Promise<string | null>
 }
 
 interface StoreLike {
@@ -806,7 +940,7 @@ export class SwarmDrone extends Drone {
   // emits it on every render; if it fires before our lineage-change hook
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
-  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed', 'swarm:visit-folded', 'mesh:connection', 'mesh:rejected', 'sync:state', 'swarm:hosts-changed']
+  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed', 'swarm:visit-folded', 'mesh:connection', 'mesh:rejected', 'sync:state', 'swarm:hosts-changed', 'mesh:clock-corrected']
   protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed', 'swarm:withheld-changed', 'swarm:zone-incomplete', 'swarm:zone-complete', 'swarm:tile-visited', 'swarm:share-status', 'swarm:page-announced', 'swarm:roster-changed']
 
   // Per-lineage subscription handle. We open one per visited sig and
@@ -886,7 +1020,7 @@ export class SwarmDrone extends Drone {
   // ONE QUESTION AT A TIME. A capped wait leaves the question running; the
   // next walk (a receipt lands every second during a drain) joins it instead
   // of stacking another closure walk or another seal. Keys name the question.
-  readonly #asking = new Map<string, Promise<boolean | null>>()
+  readonly #asking = new Map<string, Promise<ClosureVerdict>>()
   readonly #sealing = new Map<string, Promise<string | null>>()
   // The last seal that landed per child path — what a walk offers while a
   // newer seal is still running, so a branch whose heads keep moving still
@@ -916,8 +1050,43 @@ export class SwarmDrone extends Drone {
   // Each swarm host's last reported state (`sync:state`) — the reason a
   // name-only tile is name-only, for the sharer's status line. Keyed by host:
   // a page names the state of the host ITS tiles go to. `why` is the reason
-  // as a person acts on it (host-sync's HostWhy: page, unresolved, …).
-  readonly #hostStates = new Map<string, { state: string; reason: string; why: string }>()
+  // as a person acts on it (host-sync's HostWhy: page, unresolved, …);
+  // `pending` how many uploads it still owes (a tile counts as uploading only
+  // while a host it needs owes something).
+  readonly #hostStates = new Map<string, { state: string; reason: string; why: string; pending: number }>()
+
+  // WHERE EACH MEMBER STANDS (TS-3) — pubkey → the page their newest drill
+  // request names (lineageKey of its path; null = somewhere private), with
+  // its stamp and slot expiry. The drill rides the zone's lifecycle channel,
+  // which every member hears, and goes out on every arrival anyway: "(N
+  // here)" counts a member at this page only while their newest live drill
+  // names it. A member never heard drilling counts as before (a slot here).
+  readonly #standingByPubkey = new Map<string, { key: string | null; atSec: number; expSec: number }>()
+  // The path key of the last drill this tab sent ('\0away' = somewhere
+  // private) — a move to another page always says where it now stands.
+  #lastDrillKey = ''
+  // Pages where this participant holds NOTHING (no child of its own at all —
+  // a page of someone else's tree it walked through): the sticky refresh
+  // never re-announces them. An empty layer at a foreign page tells nobody
+  // anything, and a long walk's visited pages cost ~1 frame/s of them (LS-2).
+  readonly #nothingHeld = new Set<string>()
+  // The one settle timer (NAV_SETTLE_MS), and the page whose presence and
+  // personal-channel word wait on it.
+  #settleTimer: ReturnType<typeof setTimeout> | null = null
+  #settlingOn: readonly string[] | null = null
+  // The one delayed late-joiner ask after a navigation (RECOVERY_WAIT_MS).
+  #recoveryTimer: ReturnType<typeof setTimeout> | null = null
+
+  // THE SHARER'S LINE (swarm:share-status) for the page this tab stands on,
+  // as its last walk saw it — said again when the relay takes the page's word
+  // or the beacon (`taken`, `unackedMs`). Plus when each page's word and the
+  // beacon went out and when the relay took the beacon.
+  #shareStatus: { sig: string; base: Record<string, unknown> } | null = null
+  readonly #wordSentAtMs = new Map<string, number>()
+  #beaconSentAtMs = 0
+  #beaconTakenAtMs = 0
+  #lastUnackedMs = 0
+  #unackedTimer: ReturnType<typeof setTimeout> | null = null
 
   // Pages the walk is holding while their hosts are being read: since when,
   // and the one timer that walks them again when the wait runs out.
@@ -1193,7 +1362,8 @@ export class SwarmDrone extends Drone {
         }
         return
       }
-      void this.#syncForCurrentLineage()
+      // A heartbeat is not an arrival: it never re-arms the fast join retry.
+      void this.#syncForCurrentLineage(false)
       // Sticky mode — keep every page visited this session on the relay.
       void this.#refreshVisitedPages()
       // Re-assert our own hide list — the same heartbeat cadence as
@@ -1239,11 +1409,11 @@ export class SwarmDrone extends Drone {
     if (this.#joinRetryTimer) return
     this.#joinRetryDeadlineMs = Date.now() + JOIN_FAST_RETRY_WINDOW_MS
     this.#joinRetryTimer = setInterval(() => {
-      if (Date.now() >= this.#joinRetryDeadlineMs || this.participantsAtCurrentSig().length > 0) {
+      if (Date.now() >= this.#joinRetryDeadlineMs || this.#heardAt(this.#currentSig)) {
         this.#stopJoinFastRetry()
         return
       }
-      void this.#syncForCurrentLineage()
+      void this.#syncForCurrentLineage(false)
     }, JOIN_FAST_RETRY_MS)
   }
 
@@ -1328,6 +1498,40 @@ export class SwarmDrone extends Drone {
   #isExpired = (sig: string, pubkey: string, nowSec: number): boolean => {
     const exp = this.#peerExpirySecBySig.get(sig)?.get(pubkey)
     return exp !== undefined && nowSec > exp + EXPIRY_GRACE_SECS
+  }
+
+  /** THE WAKE WINDOW (MS5). A tab that just woke heard nothing while it slept,
+   *  so every slot clock it holds reads as lapsed until the mesh has reopened
+   *  and replayed. The sweep already holds off (SWEEP_RESUME_DEFER_MS); the
+   *  READS hold off with it, so the last-known room stays on screen instead of
+   *  an empty one for the seconds the replay takes. The sweep decides after. */
+  #inWakeWindow = (): boolean => Date.now() < this.#sweepDeferUntilMs
+
+  /** Does any live peer hold an entry at `sig` (standing there or not)? The
+   *  "somebody is here at all" question — the fast join retry and the delayed
+   *  late-joiner ask stop on it. */
+  #heardAt = (sig: string): boolean => {
+    if (!sig) return false
+    const bag = this.#peerLayersBySig.get(sig)
+    if (!bag || bag.size === 0) return false
+    const nowSec = this.#nowSec()
+    const wake = this.#inWakeWindow()
+    for (const pubkey of bag.keys()) {
+      if (this.#myPubkey && pubkey === this.#myPubkey) continue
+      if (!wake && this.#isExpired(sig, pubkey, nowSec)) continue
+      return true
+    }
+    return false
+  }
+
+  /** Is `pubkey` known to stand somewhere other than the page this tab is on?
+   *  Their newest drill (live) names another page, or a private one. Unknown
+   *  — never heard drilling, or their drill's slot lapsed — is not
+   *  "elsewhere": they count where their slots are, as before. */
+  #standsElsewhere = (pubkey: string, nowSec: number): boolean => {
+    const st = this.#standingByPubkey.get(pubkey)
+    if (!st || nowSec > st.expSec + EXPIRY_GRACE_SECS) return false
+    return st.key !== this.#currentPageKey()
   }
 
   /** Does `pubkey` still hold an entry anywhere we witnessed? */
@@ -1520,6 +1724,7 @@ export class SwarmDrone extends Drone {
       clearTimeout(this.#rosterTimer)
       this.#rosterTimer = null
     }
+    this.#cancelNavTimers()
     this.#cancelReassertSpread()
     for (const sub of this.#resourceSubs.values()) {
       try { sub.close() } catch { /* ignore */ }
@@ -1648,16 +1853,23 @@ export class SwarmDrone extends Drone {
     // (refused, full, too large, unreachable) or that it is uploading. Only a
     // swarm host's report counts — another target's backup is not what this
     // room can fetch from — and a page reads its own host's.
-    this.onEffect<{ host?: string; state?: string; status?: string; reason?: string; why?: string; swarm?: boolean }>('sync:state', (s) => {
+    this.onEffect<{ host?: string; state?: string; status?: string; reason?: string; why?: string; swarm?: boolean; pending?: number }>('sync:state', (s) => {
       const host = String(s?.host ?? '').trim()
       if (!host || s?.swarm !== true) return
       const before = this.#hostStates.get(host)
-      const next = { state: String(s?.state ?? s?.status ?? ''), reason: String(s?.reason ?? ''), why: String(s?.why ?? '') }
+      const pending = Number(s?.pending)
+      const next = {
+        state: String(s?.state ?? s?.status ?? ''), reason: String(s?.reason ?? ''), why: String(s?.why ?? ''),
+        pending: Number.isFinite(pending) && pending > 0 ? pending : 0,
+      }
       this.#hostStates.set(host, next)
-      // A host that just stopped (or started again) taking a branch's bytes
-      // changes what the status line names (#blockedBranches): walk once,
-      // rather than leave "uploading" standing until the heartbeat.
-      if (BRANCH_HELD_STATES.has(next.state) !== BRANCH_HELD_STATES.has(before?.state ?? '')) this.#scheduleReceiptRewalk()
+      // A host that just stopped (or started again) taking a branch's bytes,
+      // or that just finished (or started) owing uploads, changes what the
+      // status line says (#heldReport): walk once, rather than leave
+      // "uploading" standing until the heartbeat.
+      const held = (x: { state: string } | undefined): boolean => HOST_HELD_STATES.has(x?.state ?? '')
+      const owes = (x: { pending: number; state: string } | undefined): boolean => (x?.pending ?? 0) > 0 || x?.state === 'syncing'
+      if (held(next) !== held(before) || owes(next) !== owes(before)) this.#scheduleReceiptRewalk()
     })
 
     // A page's hosts became known or moved (the pool, a branch's marks, the
@@ -1676,11 +1888,14 @@ export class SwarmDrone extends Drone {
       if (r.kind === SWARM_LAYER_KIND) {
         this.#lastPublishedBySig.delete(d)
         this.#lastPublishTimeMsBySig.delete(d)
+        // Refused, not still on its way: the next send times it afresh.
+        this.#wordSentAtMs.delete(d)
       } else if (r.kind === SWARM_HIDE_KIND) {
         this.#lastPublishedHideBySig.delete(d)
         this.#lastHidePublishTimeMsBySig.delete(d)
       } else if (r.kind === SWARM_LIFECYCLE_KIND) {
         this.#lastBeaconMs = 0
+        this.#beaconTakenAtMs = this.#beaconSentAtMs
       }
     })
 
@@ -1690,6 +1905,13 @@ export class SwarmDrone extends Drone {
     this.onEffect<MeshConnection>('mesh:connection', (c) => {
       if (c?.state === 'open' && c.reopened === true) this.#reassertOnReopen()
     })
+
+    // THE RELAY'S CLOCK CARD MOVED OUR CLOCK (RM-4). A device whose clock is
+    // slow signed its first beacon and page slots before the card arrived —
+    // already expired on the relay's clock, so nobody sees them, and nothing
+    // would say them again for a whole refresh period. Say everything again
+    // now, exactly as a reopened socket does. An older mesh never emits it.
+    this.onEffect('mesh:clock-corrected', () => this.#reassertOnReopen())
 
     // Mesh-public toggle handler. Going OFF tears down state so temp
     // shared tiles disappear from the canvas. Going ON re-runs the
@@ -1834,7 +2056,23 @@ export class SwarmDrone extends Drone {
     this.#lastChannelJson = ''
     this.#pendingPages.clear()
     this.#privateHere = 0
+    this.#standingByPubkey.clear()
+    this.#lastDrillKey = ''
+    this.#nothingHeld.clear()
+    this.#shareStatus = null
+    this.#wordSentAtMs.clear()
+    this.#beaconSentAtMs = 0
+    this.#beaconTakenAtMs = 0
+    this.#lastUnackedMs = 0
+    this.#cancelNavTimers()
     this.#cancelReassertSpread()
+  }
+
+  #cancelNavTimers = (): void => {
+    if (this.#settleTimer) { clearTimeout(this.#settleTimer); this.#settleTimer = null }
+    this.#settlingOn = null
+    if (this.#recoveryTimer) { clearTimeout(this.#recoveryTimer); this.#recoveryTimer = null }
+    if (this.#unackedTimer) { clearTimeout(this.#unackedTimer); this.#unackedTimer = null }
   }
 
   /** This tab is in the swarm in this page: remember it (a later
@@ -1968,25 +2206,39 @@ export class SwarmDrone extends Drone {
     return this.peerTilesAtSig(this.#currentSig)
   }
 
-  /** Ordered list of pubkeys currently publishing at the live sig,
-   *  excluding self and entries past their relay slot (expiration +
-   *  EXPIRY_GRACE_SECS). Sorted freshness-first — most recent activity at
-   *  index 0.
+  /** Ordered list of pubkeys PUBLISHING at the live sig — everyone whose
+   *  tiles are here, wherever they stand — excluding self and entries past
+   *  their relay slot (expiration + EXPIRY_GRACE_SECS; not judged while the
+   *  tab is just waking, #inWakeWindow). Sorted by the last time each one's
+   *  word here CHANGED — most recent at index 0.
    *
-   *  Backing for SpotlightService.participants() and the layer-cycle
-   *  strip UI. Reads in-memory cache live; multiple peer updates
-   *  during a debounce window all reflect in the returned list. */
-  public participantsAtCurrentSig = (): readonly string[] => {
+   *  Backing for SpotlightService.participants(), the badge filter and the
+   *  layer-cycle strip UI: a member whose tiles stay here while they walk on
+   *  can still be isolated by their tiles. Who STANDS here — the "(N here)"
+   *  count — is participantsStandingAtCurrentSig. Reads in-memory cache
+   *  live; multiple peer updates during a debounce window all reflect in
+   *  the returned list. */
+  public participantsAtCurrentSig = (): readonly string[] => this.#participantsAt(false)
+
+  /** The members of participantsAtCurrentSig STANDING here — not known to
+   *  stand elsewhere (#standsElsewhere: their newest drill names another
+   *  page; a sticky re-announce or a drill answer shares a page its
+   *  publisher has left). The "(N here)" count (TS-3). */
+  public participantsStandingAtCurrentSig = (): readonly string[] => this.#participantsAt(true)
+
+  #participantsAt = (standingOnly: boolean): readonly string[] => {
     const sig = this.#currentSig
     if (!sig) return []
     const peerLayers = this.#peerLayersBySig.get(sig)
     if (!peerLayers || peerLayers.size === 0) return []
     const lastSeenBag = this.#peerLastSeenMsBySig.get(sig) ?? new Map<string, number>()
     const nowSec = this.#nowSec()
+    const wake = this.#inWakeWindow()
     const out: string[] = []
     for (const pubkey of peerLayers.keys()) {
       if (this.#myPubkey && pubkey === this.#myPubkey) continue
-      if (this.#isExpired(sig, pubkey, nowSec)) continue
+      if (!wake && this.#isExpired(sig, pubkey, nowSec)) continue
+      if (standingOnly && this.#standsElsewhere(pubkey, nowSec)) continue
       out.push(pubkey)
     }
     // Freshness-first — newest activity at index 0. Tie-breaks fall
@@ -2050,6 +2302,37 @@ export class SwarmDrone extends Drone {
     }
     if (lineageKey(segments) === this.#currentPageKey() && isJoinedHere()) {
       this.emitEffect('swarm:page-announced', { location, segments: [...segments] })
+    }
+    // The sharer's line says the page is in the room now (`taken`).
+    if (this.#shareStatus?.sig === sig) this.#emitShareStatus()
+  }
+
+  /** THE SHARER'S LINE, with what the relay has TAKEN (TS-7): `taken` — the
+   *  relay took this page's current word (its OK); `unackedMs` — how long the
+   *  oldest of this page's word and the beacon has gone untaken since it was
+   *  sent (0 when both were taken). A socket that is open is not a word
+   *  delivered: a congested uplink holds frames for seconds. Said again once
+   *  at UNACKED_SHOW_MS while something is still untaken, and whenever the
+   *  relay takes it. Local bookkeeping only — nothing is sent. */
+  #emitShareStatus = (): void => {
+    const s = this.#shareStatus
+    if (!s || !isJoinedHere()) return
+    const now = Date.now()
+    const word = this.#lastPublishedBySig.get(s.sig)
+    const taken = word !== undefined && this.#takenBySig.get(s.sig) === word
+    const sentAt = this.#wordSentAtMs.get(s.sig) ?? 0
+    const pageUnacked = !taken && sentAt > 0 ? now - sentAt : 0
+    const beaconUnacked = this.#beaconSentAtMs > this.#beaconTakenAtMs ? now - this.#beaconSentAtMs : 0
+    const unackedMs = Math.max(pageUnacked, beaconUnacked)
+    this.#lastUnackedMs = unackedMs
+    this.emitEffect('swarm:share-status', { ...s.base, taken, unackedMs })
+    if (this.#unackedTimer) { clearTimeout(this.#unackedTimer); this.#unackedTimer = null }
+    const untaken = (!taken && sentAt > 0) || this.#beaconSentAtMs > this.#beaconTakenAtMs
+    if (untaken && unackedMs < UNACKED_SHOW_MS) {
+      this.#unackedTimer = setTimeout(() => {
+        this.#unackedTimer = null
+        this.#emitShareStatus()
+      }, UNACKED_SHOW_MS - unackedMs + 20)
     }
   }
 
@@ -2206,8 +2489,13 @@ export class SwarmDrone extends Drone {
     // first-write-wins (peerImageSigByLabel in show-cell) prefer the
     // most-recent peer's data. A stale peer still cached in the relay
     // from before they disconnected gets superseded by any live peer.
+    // FRESHEST = the last time their word here CHANGED (#onEvent stamps only
+    // a change): two publishers of one name keep their order across their
+    // unchanged 45 s re-sends, so the variant on top no longer flips at every
+    // heartbeat (SCALE-6).
     const lastSeenBag = this.#peerLastSeenMsBySig.get(sig) ?? new Map<string, number>()
     const nowSec = this.#nowSec()
+    const wake = this.#inWakeWindow()
     const sortedPeers = [...peerLayers.entries()].sort(([pkA], [pkB]) => {
       const tA = lastSeenBag.get(pkA) ?? 0
       const tB = lastSeenBag.get(pkB) ?? 0
@@ -2220,8 +2508,9 @@ export class SwarmDrone extends Drone {
       // Slot filter — the entry lives exactly as long as the relay holds it
       // (expiration + EXPIRY_GRACE_SECS), the same answer the sweep gives.
       // A peer who went AWAY (socket died, beacon lapsed) keeps their tiles
-      // here until then; only their signed leave removes them sooner.
-      if (this.#isExpired(sig, pubkey, nowSec)) continue
+      // here until then; only their signed leave removes them sooner. A tab
+      // just waking judges no slot until the mesh has replayed (#inWakeWindow).
+      if (!wake && this.#isExpired(sig, pubkey, nowSec)) continue
       const visuals = Array.isArray(layer?.visuals) ? layer.visuals : []
       for (const v of visuals) {
         if (!v || typeof v !== 'object' || Array.isArray(v)) continue
@@ -2463,7 +2752,12 @@ export class SwarmDrone extends Drone {
     this.emitEffect('swarm:zone-complete', {})
   }
 
-  #syncForCurrentLineage = async (): Promise<void> => {
+  // `arrival`: this sync is an ARRIVAL — a navigation, a join, a zone
+  // change, a reconnect — the only kind that arms the fast join retry. The
+  // heartbeat and the retry's own re-syncs are not: re-armed by every 30 s
+  // heartbeat, a participant alone on a page re-synced every 3 s for 20 s of
+  // every 30 (presence, channel, a seal of every public child) for ever.
+  #syncForCurrentLineage = async (arrival = true): Promise<void> => {
     const lineage = this.#getLineage()
     const sigStore = this.#getSignatureStore()
     if (!lineage || !sigStore) { slog('[swarm] syncForCurrentLineage: missing', { lineage: !!lineage, sigStore: !!sigStore }); return }
@@ -2515,6 +2809,11 @@ export class SwarmDrone extends Drone {
     } catch { return }
     if (!composedSig) return
 
+    // A MOVE, as opposed to the join, a heartbeat, a reconnect or a zone
+    // change (which re-sync the page the tab already stands on): the page the
+    // last sync stood on is not this one.
+    const prevKey = this.#currentPageKey()
+    const navigated = this.#lastSyncInput !== null && prevKey !== pathKey
     this.#lastSyncInput = { segments, room, secretLen: secret.length, key: `${pathKey}\0${room}\0${secret}` }
     // PRIVATE = SILENT. Only #syncForSig used to read the mesh flag; every
     // publish after it — the lifecycle beacon, presence, the personal
@@ -2556,20 +2855,27 @@ export class SwarmDrone extends Drone {
     // Personal channel publish (subscribe mechanism) — same kind-30200
     // visuals, second sig (`channel:pubkey\0room\0secret`). Subscribers
     // see your tiles wherever you go.
-    void this.#publishCurrentVisualsToMyChannel(segments)
-
+    //
     // Presence publish (follow mechanism) — broadcasts our CURRENT
     // pathSegments to our presence channel sig
     // (`presence:pubkey\0room\0secret`). Followers listen here and
     // navigate when we move. Subscribe and follow are independent —
     // either, both, or neither. Subscribe is data-flow; follow is
     // navigation-sync.
-    void this.#publishMyPresence(segments)
-
+    //
     // Presence-glow publish — while we're inside a child, re-announce
     // ourselves to the PARENT's sig so peers viewing the parent see a
     // glow on the tile we're exploring. No-op at root. Fire-and-forget.
-    void this.#publishPresenceToParent(segments)
+    //
+    // A MOVE says these once the participant has stayed NAV_SETTLE_MS (a page
+    // passed through needs none of them, LS-2). The join, the heartbeat, a
+    // reconnect and a zone change say them at once, as before.
+    if (navigated) {
+      this.#settlingOn = segments
+      this.#scheduleSettle()
+    } else {
+      this.#sayWhereWeStand(segments, false)
+    }
 
     // Visit signal — visit-driven acquisition's trigger. When the tile
     // just entered is offered by a peer at the parent location, announce
@@ -2605,13 +2911,38 @@ export class SwarmDrone extends Drone {
     // peer-cache event, and a user alone in a swarm sees nothing.
     // Subsequent peer joins/leaves come through #emitPeersChanged on
     // the normal debounce.
-    const peers = this.participantsAtCurrentSig()
     this.#emitPresence('initial-sync', composedSig)
     // Nobody found yet — fall back to the fast retry cadence instead of
     // the 30s heartbeat until someone shows up or the window elapses.
-    if (peers.length === 0) this.#startJoinFastRetry()
+    // SOMEBODY = any live slot here, standing or not: a sharer's tiles here
+    // are somebody found, wherever the sharer stands.
+    if (arrival && !this.#heardAt(composedSig)) this.#startJoinFastRetry()
   }
 
+  /** The personal channel, the follow presence and the parent glow for the
+   *  page we stand on. `moved`: said after a move settled — the channel then
+   *  says only a word that changed (an empty page after an empty page says
+   *  nothing new to a follower; the heartbeat keeps the slot alive). */
+  #sayWhereWeStand = (segments: readonly string[], moved: boolean): void => {
+    void this.#publishCurrentVisualsToMyChannel(segments, moved)
+    void this.#publishMyPresence(segments)
+    void this.#publishPresenceToParent(segments)
+  }
+
+  #scheduleSettle = (): void => {
+    if (this.#settleTimer) clearTimeout(this.#settleTimer)
+    this.#settleTimer = setTimeout(() => this.#onSettled(), NAV_SETTLE_MS)
+  }
+
+  /** NAVIGATION SETTLED (NAV_SETTLE_MS without a move): say where we stand —
+   *  the channel, presence, the parent glow — if we still stand there. */
+  #onSettled = (): void => {
+    this.#settleTimer = null
+    const settledOn = this.#settlingOn
+    this.#settlingOn = null
+    if (!isJoinedHere() || !settledOn) return
+    if (lineageKey(settledOn) === this.#currentPageKey()) this.#sayWhereWeStand(settledOn, true)
+  }
   // STICKY MODE refresh — rides the heartbeat and re-announces every page
   // this participant visited in the session except the current one (the
   // normal sync owns that). Each is the same page-only walk the current page
@@ -2627,6 +2958,11 @@ export class SwarmDrone extends Drone {
     const currentKey = this.#currentPageKey()
     for (const [key, segments] of [...this.#visitedPages]) {
       if (key === currentKey) continue
+      // A page where we hold nothing at all says nothing to anyone: never
+      // re-announced (LS-2 — a long walk's visited pages were ~1 frame/s of
+      // empty layers at foreign pages). A page of our own whose tiles are all
+      // private still is: its word is what the room has of it.
+      if (this.#nothingHeld.has(key)) continue
       // One page after another, so N pages are not one burst — but a page
       // whose walk will not finish never holds the pages after it.
       await this.#within(this.#walkPage(segments), STICKY_PAGE_WAIT_MS)
@@ -2797,9 +3133,28 @@ export class SwarmDrone extends Drone {
     // for their cached visuals. Fire-and-forget: never block navigation
     // (real-time supersedes the preloader); injected results emit
     // swarm:peers-changed when they land, and show-cell repaints.
+    //
+    // ON A MOVE it waits RECOVERY_WAIT_MS first: the page's own replay and
+    // the publisher's drill answer usually arrive inside it, and the ask is
+    // an EVENT + REQ + CLOSE per navigation spent for nothing (LS-2). The
+    // join, a reconnect and a zone change ask at once, as before.
     const existingBag = this.#peerLayersBySig.get(sig)
-    if (!existingBag || existingBag.size === 0) void this.#recoverVisualsAt(sig)
+    if (!existingBag || existingBag.size === 0) {
+      if (prevSig && prevSig !== sig) this.#armRecovery(sig)
+      else void this.#recoverVisualsAt(sig)
+    }
     await this.#publishMyLayerAt(sig)
+  }
+
+  /** The late-joiner ask after a move, RECOVERY_WAIT_MS on — only if we are
+   *  still on that page and nobody's slot has been heard there meanwhile. */
+  #armRecovery = (sig: string): void => {
+    if (this.#recoveryTimer) clearTimeout(this.#recoveryTimer)
+    this.#recoveryTimer = setTimeout(() => {
+      this.#recoveryTimer = null
+      if (this.#currentSig !== sig || !isJoinedHere() || this.#heardAt(sig)) return
+      void this.#recoverVisualsAt(sig)
+    }, RECOVERY_WAIT_MS)
   }
 
   // -----------------------------------------------------------------
@@ -2878,7 +3233,7 @@ export class SwarmDrone extends Drone {
       for (const v of visualsRaw) {
         if (!v || typeof v !== 'object' || Array.isArray(v)) continue
         const cleaned = sanitizeVisual(v as Record<string, unknown>)
-        if (cleaned) cleanVisuals.push(cleaned)
+        if (cleaned) cleanVisuals.push(withDeep(cleaned, v as Record<string, unknown>))
       }
       if (cleanVisuals.length === 0) continue
 
@@ -2901,11 +3256,9 @@ export class SwarmDrone extends Drone {
       // A recovered entry is a LIVE answer from a participant who is in the
       // zone right now — the late-joiner path, which is the exact moment the
       // user means by "it should be immediate when participants connect".
-      // Same unconditional claim as #onEvent, same per-claim idempotence.
-      if (broker?.notePeerLiveness) {
-        const refs = visualArtifactSigs(cleanVisuals)
-        if (refs.length) broker.notePeerLiveness(pubkey, refs)
-      }
+      // Same claim as #onEvent — only what is on their device alone — and the
+      // same per-claim idempotence.
+      if (broker?.notePeerLiveness) notePeerHolds(broker.notePeerLiveness, pubkey, cleanVisuals)
       if (!bag) { bag = new Map(); this.#peerLayersBySig.set(sig, bag) }
       bag.set(pubkey, { visuals: cleanVisuals })
       this.#noteExpiry(sig, pubkey, entry.tags, createdAtSec)
@@ -3132,7 +3485,7 @@ export class SwarmDrone extends Drone {
     for (const v of raw.visuals) {
       if (!v || typeof v !== 'object' || Array.isArray(v)) { droppedCount++; continue }
       const cleaned = sanitizeVisual(v as Record<string, unknown>)
-      if (cleaned) cleanVisuals.push(cleaned)
+      if (cleaned) cleanVisuals.push(withDeep(cleaned, v as Record<string, unknown>))
       else droppedCount++
     }
     if (droppedCount > 0) {
@@ -3157,9 +3510,16 @@ export class SwarmDrone extends Drone {
     // also handles the relay-restart case: stale events in the relay
     // get dropped server-side, but our in-memory cache wouldn't
     // notice without this tracking.
+    //
+    // ONLY WHEN THEIR WORD CHANGED (SCALE-6). The stamp orders publishers of
+    // one name freshest-first (peerTilesAtSig), and a byte-identical 45 s
+    // refresh is not news: stamped on every re-send, two participants
+    // offering the same name swapped which variant (and picture) sat on top
+    // at every heartbeat, and a take took whoever was on top that instant.
+    // Presence and expiry keep their own clocks (#markAlive, #noteExpiry).
     let lastSeenBag = this.#peerLastSeenMsBySig.get(sig)
     if (!lastSeenBag) { lastSeenBag = new Map(); this.#peerLastSeenMsBySig.set(sig, lastSeenBag) }
-    lastSeenBag.set(pubkey, Date.now())
+    if (layerChanged || !lastSeenBag.has(pubkey)) lastSeenBag.set(pubkey, Date.now())
     // Also feed identity-level liveness — a layer event is proof of life
     // regardless of which location it came from (unless it is a replay
     // from before the participant went away). The lifecycle beacon is the
@@ -3190,18 +3550,17 @@ export class SwarmDrone extends Drone {
     // names bytes is the host on the byte path the attribution above opened.
     if (refs.length) for (const host of domainTags) nameService.hint(pubkey, host)
 
-    // THE PUBLISHER IS HERE, AND THEY HAVE THE BYTES. Unconditional — the
-    // attribution above only fires for a peer who advertises a host, which
-    // most participants never do, so a plain peer's arrival used to clear
-    // nothing. Every sig of theirs that had already missed stayed on the
-    // broker's exponential ladder (60s doubling toward 30 min) even though the
-    // one participant who could answer it had just announced themselves. That
-    // is why tiles trickled in for minutes instead of resolving on connect.
-    // Idempotent per (pubkey, sig) inside the broker, so the 30s heartbeat
-    // re-announce costs nothing and the crowd cannot turn this into a storm.
-    if (broker?.notePeerLiveness) {
-      if (refs.length) broker.notePeerLiveness(pubkey, refs)
-    }
+    // THE PUBLISHER IS HERE, AND THEY HAVE THE BYTES — of what only they
+    // hold. A full entry is announced only once its host serves it (the
+    // gate), and its domain tags above already wake whatever had missed; its
+    // picture and handle are fetched over HTTP first. Claiming every sig of
+    // every visual made each picture race the mesh — 3-5 relay frames apiece,
+    // hundreds refused 'rate-limited' on a picture-rich page (SCALE-3). What a
+    // live peer claims is a takeable branch's handle whose deeper pages are
+    // still only on their device (`deep: 'owner'`, D1): a take of it reaches
+    // the owner at once. Idempotent per (pubkey, sig) inside the broker, so
+    // the heartbeat re-announce costs nothing.
+    if (broker?.notePeerLiveness) notePeerHolds(broker.notePeerLiveness, pubkey, cleanVisuals)
 
     // Auto-resource-pull DISABLED for the exploration-first model.
     // Visuals carry only inert metadata (names, accents, tags, hideText),
@@ -3277,17 +3636,29 @@ export class SwarmDrone extends Drone {
   }
 
   /** swarm:presence-changed — who publishes at the page we stand on
-   *  (`peers`, excluding self and expired slots), plus the whole room
-   *  (`zonePeers`): every member with their place — here, elsewhere, or
-   *  away (socket gone, tiles kept until their slots expire). */
+   *  (`peers`, excluding self and expired slots: everyone whose tiles are
+   *  here, the badge filter's list), who of them STANDS here (`at` — the
+   *  "(N here)" count, TS-3), plus the whole room (`zonePeers`): every
+   *  member with their place — here, elsewhere, or away (socket gone, tiles
+   *  kept until their slots expire). */
   #emitPresence = (reason: string, sig: string = this.#currentSig): void => {
     const peers = this.participantsAtCurrentSig()
+    const at = this.participantsStandingAtCurrentSig()
+    // Whose tiles here can be taken while their deeper pages are still only
+    // on that member's device (deep: 'owner', D1) — the receiver's line says
+    // so, rather than leaving a taken branch's empty pages unexplained.
+    const deepOwners: string[] = []
+    for (const t of this.peerTilesAtCurrentSig()) {
+      if (t['deep'] === 'owner' && !deepOwners.includes(t.peerPubkey)) deepOwners.push(t.peerPubkey)
+    }
     this.emitEffect('swarm:presence-changed', {
       sig,
-      peerCount: peers.length,
-      alone: peers.length === 0,
+      peerCount: at.length,
+      alone: at.length === 0,
       peers,
-      zonePeers: this.#zonePeers(peers),
+      at,
+      ...(deepOwners.length > 0 ? { deepOwners } : {}),
+      zonePeers: this.#zonePeers(at),
       reason,
     })
   }
@@ -3638,12 +4009,19 @@ export class SwarmDrone extends Drone {
     this.#releaseHostsHold(pageKey)
     const children: ChildEntry[] = announced.map(a => a.entry)
     const nameOnly = announced.filter(a => a.form === 'placeholder').length
-    const uploading = announced.filter(a => a.form !== 'full').length
+    // Still on its way to a host: a child whose newest version is not served
+    // yet, or a takeable branch whose deeper pages are still only on this
+    // device (D1). Each landed receipt re-walks the page until they arrive.
+    const waiting = announced.filter(a => a.form !== 'full' || a.deep === 'owner').length
     // A replay of our own earlier word that lands after this walk may turn
     // these names back into what we said before (#noteOwnReplay).
     if (nameOnly > 0) this.#placeholderSigs.add(sig)
     else this.#placeholderSigs.delete(sig)
-    if (uploading > 0) {
+    // Nothing of ours here at all (a page of someone else's tree): the sticky
+    // refresh leaves it be.
+    if (known.length === 0) this.#nothingHeld.add(pageKey)
+    else this.#nothingHeld.delete(pageKey)
+    if (waiting > 0) {
       // Re-insert so the freshest waiting page sits last; the oldest falls off.
       this.#pendingPages.delete(pageKey)
       this.#pendingPages.set(pageKey, [...segments])
@@ -3655,7 +4033,9 @@ export class SwarmDrone extends Drone {
     } else {
       this.#pendingPages.delete(pageKey)
     }
-    if (pageKey === this.#currentPageKey()) {
+    const isCurrent = pageKey === this.#currentPageKey()
+    let status: Record<string, unknown> | null = null
+    if (isCurrent) {
       // The sharer's status line for the page they stand on: how many go
       // out, how many are still on their way to the host (and of those, how
       // many as a name alone), how many stay private, WHICH host this page's
@@ -3664,29 +4044,59 @@ export class SwarmDrone extends Drone {
       // name-only. No host at all is said as 'no-host'. A branch held by a
       // host that takes none of its bytes is NAMED, with the host and why
       // (`blocked`), and is not counted as uploading: it is not on its way.
+      //
+      // WHAT HOLDS EACH TILE BACK (BCL-2/TS-1, #heldReport): `held` groups the
+      // tiles a host is not taking by that host, with its word and why —
+      // whatever page below them the host serves, not only this page's own;
+      // `deep: true` on a group whose tiles can be taken and only their
+      // deeper pages stay here. `uploading` counts only tiles a needed host
+      // still owes uploads for; `notQueued` the name-only rest, which nothing
+      // is uploading (a hole in the closure, a seal that never resolves);
+      // `deepOnDevice` the takeable tiles whose deeper pages are still only on
+      // this device (D1). The relay's OK for this page's word is said with it
+      // (#emitShareStatus: `taken`, `unackedMs`).
       this.#privateHere = prunedNames.length
-      const { blocked, heldChildren } = this.#blockedBranches(segments, hostSync, childRefs, announced.map(a => a.form))
-      const stillUploading = heldChildren.size === 0 ? uploading
-        : announced.filter((a, i) => a.form !== 'full' && !heldChildren.has(childRefs[i]!.name)).length
-      this.emitEffect('swarm:share-status', {
+      const { blocked } = this.#blockedBranches(segments, hostSync, childRefs, announced.map(a => a.form))
+      const report = this.#heldReport(segments, hostSync, childRefs, announced)
+      const hostInfo = this.#hostReport(segments)
+      // A branch's own publish domain passed over (D2: it refuses or never
+      // answered, so its pages went by the meeting host, the pool or the
+      // relay) is named HERE, where the branch is offered — once its tiles
+      // are takeable nothing else on the line would say the domain is not
+      // the one hosting it.
+      const passedOver = new Set(hostInfo.passedOver ?? [])
+      for (const c of childRefs) {
+        if (!isBranchPublic(publicLocation, c.name)) continue
+        for (const h of this.#pageHosts([...segments, c.name])?.passedOver ?? []) passedOver.add(h)
+      }
+      status = {
         location: publicLocation,
         offered: children.length,
-        uploading: stillUploading,
+        uploading: report.uploading,
         nameOnly,
         private: prunedNames.length,
-        ...this.#hostReport(segments),
+        ...hostInfo,
+        ...(passedOver.size > 0 ? { passedOver: [...passedOver] } : {}),
         ...(blocked.length > 0 ? { blocked } : {}),
-      })
+        held: report.held,
+        notQueued: report.notQueued,
+        deepOnDevice: report.deepOnDevice,
+      }
+    }
+    const sayStatus = (): void => {
+      if (!status || !isJoinedHere() || pageKey !== this.#currentPageKey()) return
+      this.#shareStatus = { sig, base: status }
+      this.#emitShareStatus()
     }
     // Stamp our chosen label onto the payload so participants can render
-// "Alice's tiles" next to peer entries without a separate subscription.
-// Length-capped + plain-text (no nested objects/arrays), so the worst
-// a malicious peer can do is spoof someone else's chosen text — they
-// can't escape the visual sanitizer that filters this on receive.
-const myLabel = this.#readMyLabel()
-const payload: SwarmLayerPayload = myLabel
-  ? { label: myLabel, visuals: children }
-  : { visuals: children }
+    // "Alice's tiles" next to peer entries without a separate subscription.
+    // Length-capped + plain-text (no nested objects/arrays), so the worst
+    // a malicious peer can do is spoof someone else's chosen text — they
+    // can't escape the visual sanitizer that filters this on receive.
+    const myLabel = this.#readMyLabel()
+    const payload: SwarmLayerPayload = myLabel
+      ? { label: myLabel, visuals: children }
+      : { visuals: children }
 
     // Empty-visual publishes only matter where they can REMOVE something
     // (a peer may hold our earlier non-empty layer at this sig — "empty-
@@ -3715,9 +4125,18 @@ const payload: SwarmLayerPayload = myLabel
     if (contentChanged || heartbeatDue) {
       // A newer walk of this page took over, or this tab left meanwhile:
       // what this one learned is no longer the page's word.
-      if (!live()) { stat.outcome = 'superseded'; return }
+      if (!live()) { stat.outcome = 'superseded'; sayStatus(); return }
       this.#lastPublishedBySig.set(sig, serialized)
       this.#lastPublishTimeMsBySig.set(sig, nowMs)
+      // When this word went out — the line says how long the relay has not
+      // taken it (#emitShareStatus). Bounded like the taken memo.
+      this.#wordSentAtMs.delete(sig)
+      this.#wordSentAtMs.set(sig, nowMs)
+      while (this.#wordSentAtMs.size > TAKEN_PAGES_MAX) {
+        const oldest = this.#wordSentAtMs.keys().next().value
+        if (oldest === undefined) break
+        this.#wordSentAtMs.delete(oldest)
+      }
       counter.count++
 
       // SIG-ONLY ON THE WIRE. The visuals inline each child's 0000, and any
@@ -3762,6 +4181,7 @@ const payload: SwarmLayerPayload = myLabel
       if (delivered === false) {
         this.#lastPublishedBySig.delete(sig)
         this.#lastPublishTimeMsBySig.delete(sig)
+        this.#wordSentAtMs.delete(sig)
         stat.outcome = 'not-sent'
       } else {
         stat.outcome = 'said'
@@ -3780,6 +4200,7 @@ const payload: SwarmLayerPayload = myLabel
       // arrival all the same — the page is in the room.
       this.emitEffect('swarm:page-announced', { location: publicLocation, segments: [...segments] })
     }
+    sayStatus()
 
     if (depth >= MAX_PUBLISH_DEPTH) return
 
@@ -3887,16 +4308,27 @@ const payload: SwarmLayerPayload = myLabel
   // this page (#ownReplay, waited on at most REPLAY_WAIT_MS) — re-asked the
   // same way. A placeholder would take back what the page said before the
   // reload.
+  //
+  // TILE FIRST (D1, jwize 2026-10-10 — BCL-3). "Served" in (a) is the TILE's
+  // own closure: its layer, properties, picture, notes, decorations and meta
+  // envelopes on this page's hosts — never its child pages. Waiting for the
+  // whole subtree held a big branch's handle and picture back for 4-13
+  // minutes on a first share, and one bad atom anywhere below held it for
+  // ever. A public BRANCH still marks its whole closure (markPublic, closure
+  // = true), so the deeper pages keep uploading; its full entry says where
+  // they are meanwhile — `deep: 'owner'` (only on this device: a take reaches
+  // them here while we are in the room) until the whole closure verifies,
+  // then `deep: 'hosted'`. A receiver that does not know the field ignores it.
   #entryFor = async (
     child: ChildRef,
     segments: readonly string[],
     pageSig: string,
     hostSync: HostSyncLike | undefined,
     replayReady?: Promise<void>,
-  ): Promise<{ entry: ChildEntry; form: EntryForm; unknown?: boolean; late?: boolean }> => {
+  ): Promise<Announced> => {
     const location = '/' + segments.join('/')
     const memoKey = `${pageSig}\0${child.name}`
-    const closure = isBranchPublic(location, child.name)
+    const branch = isBranchPublic(location, child.name)
     let previous = this.#lastHostedEntry.get(memoKey)
     let available = typeof hostSync?.isClosureAvailable !== 'function'
     // HOSTED = served WHERE IT IS SHOWN: the tile by this page's swarm hosts,
@@ -3909,31 +4341,54 @@ const payload: SwarmLayerPayload = myLabel
     const self = this.#advertisedSelf()
     const advertised = perPage ? this.#advertisedHosts(segments) : []
     const scope = perPage ? `${segments.join('\0')}|${self.join(',')}|${advertised.join(',')}` : '*'
-    const servedHere = (sig: string): Promise<boolean | null> => this.#askOnce(`${sig}\0${closure ? 'c' : 't'}\0${scope}`, () => !perPage
-      ? hostSync!.isClosureAvailable!(sig, 'layer', closure)
-      : typeof hostSync!.isClosureAvailableAt === 'function'
-        ? hostSync!.isClosureAvailableAt(sig, 'layer', closure, segments, self)
-        : (advertised.length > 0 ? hostSync!.isClosureAvailableOn!(sig, 'layer', closure, advertised) : Promise.resolve(false)))
+    // `deep`: the whole closure (child pages too), else the tile's own atoms.
+    const servedHere = (sig: string, deep: boolean): Promise<ClosureVerdict> =>
+      this.#askOnce(`${sig}\0${deep ? 'c' : 't'}\0${scope}`, () => this.#verdict(hostSync!, sig, deep, segments, self, perPage, advertised))
     let unknown = false
     let late = false
+    let blocking: Blocking | undefined
+    let deep: DeepWhere | undefined
+    let deepBlocking: Blocking | undefined
     if (!available && child.layerSig) {
       const seq = this.#answerSeq
-      const verdict = servedHere(child.layerSig)
-      const r = await this.#within(verdict, ENTRY_WAIT_MS)
+      const startMs = Date.now()
+      const tile = servedHere(child.layerSig, false)
+      // Asked beside the tile's question, never after it: the walk waits on
+      // both together at most ENTRY_WAIT_MS.
+      const whole = branch ? servedHere(child.layerSig, true) : null
+      const r = await this.#within(tile, ENTRY_WAIT_MS)
       if (r.late) {
         late = true
         // The answer lands after the walk moved on: a yes — or any answer to
         // a question a receipt has overtaken — walks the page again.
-        void verdict.then(ok => { if (ok === true || this.#answerSeq !== seq) this.#scheduleReceiptRewalk() })
+        void tile.then(v => { if (v.ok === true || this.#answerSeq !== seq) this.#scheduleReceiptRewalk() })
       } else {
-        available = r.value === true
-        unknown = r.value === null
+        // The TILE's own atoms must be ON a host (D1): an atom of its own the
+        // hosts will never take (a 9 MB picture answered 413, every door
+        // refusing) is not served from this device — a take would reach a
+        // picture no host and no broker answer (over its 8 MB cap) can carry.
+        // The tile stays a name, and #heldReport names the host and the file.
+        available = r.value.ok === true
+        unknown = r.value.ok === null
+        if (!available) blocking = r.value.blocking
+      }
+      if (available && whole && !deep) {
+        const d = await this.#within(whole, Math.max(0, ENTRY_WAIT_MS - (Date.now() - startMs)))
+        if (d.late) {
+          deep = 'owner'
+          // The deeper pages land later: walk again to say they are hosted.
+          void whole.then(v => { if (hostedDeep(v)) this.#scheduleReceiptRewalk() })
+        } else {
+          deep = hostedDeep(d.value) ? 'hosted' : 'owner'
+          if (deep === 'owner') deepBlocking = d.value.blocking
+        }
       }
     }
     if (available) {
-      const entry = await this.#visualFor(child, segments)
+      const visual = await this.#visualFor(child, segments)
+      const entry = deep ? canonicaliseValue({ ...visual, deep }) as ChildEntry : visual
       if (child.layerSig) this.#lastHostedEntry.set(memoKey, entry)
-      return { entry, form: 'full' }
+      return { entry, form: 'full', ...(deep ? { deep } : {}), ...(deepBlocking ? { deepBlocking } : {}) }
     }
     // Nothing newer to say: what was said before — this session, or what the
     // relay replayed to us under our own key (a reload).
@@ -3945,15 +4400,17 @@ const payload: SwarmLayerPayload = myLabel
     }
     if (previous && typeof previous.layerSig === 'string' && hostSync?.isClosureAvailable) {
       const seq = this.#answerSeq
-      const asked = servedHere(previous.layerSig)
+      // Its own atoms still served is what it takes for it to stand (tile
+      // first); its `deep` word stands as it was said.
+      const asked = servedHere(previous.layerSig, false)
       const r = await this.#within(asked, ENTRY_WAIT_MS)
       if (r.late) {
         late = true
-        void asked.then(ok => { if (ok === false || this.#answerSeq !== seq) this.#scheduleReceiptRewalk() })
+        void asked.then(v => { if (v.ok === false || this.#answerSeq !== seq) this.#scheduleReceiptRewalk() })
       }
       // Unknown is not "no", and neither is late: what was hosted stands
       // until the hosts answer.
-      const still = r.late ? null : r.value
+      const still = r.late ? null : r.value.ok
       if (still === false) {
         this.#lastHostedEntry.delete(memoKey)
         this.#ownReplay.get(pageSig)?.delete(child.name)
@@ -3962,16 +4419,38 @@ const payload: SwarmLayerPayload = myLabel
         this.#lastHostedEntry.set(memoKey, previous)
       }
     }
-    if (previous) return { entry: previous, form: 'previous', ...(late ? { late: true } : {}) }
+    const why = blocking ? { blocking } : {}
+    if (previous) return { entry: previous, form: 'previous', ...why, ...(late ? { late: true } : {}) }
     const { name, layerSig: _layerSig, inviteSig: _inviteSig, ...rest } = await this.#visualFor(child, segments)
     void _layerSig; void _inviteSig
     const inert = withoutSignatures(rest) as Record<string, unknown> | undefined
     return {
       entry: canonicaliseValue({ ...(inert ?? {}), name }) as ChildEntry,
       form: 'placeholder',
+      ...why,
       ...(unknown ? { unknown: true } : {}),
       ...(late ? { late: true } : {}),
     }
+  }
+
+  /** One closure question to host-sync, in the verdict's shape: the gate
+   *  that says WHY (closureVerdict) when it has one, else the boolean gate
+   *  this tab's host-sync has — per page (isClosureAvailableAt), on named
+   *  hosts (isClosureAvailableOn), or on any target (unjoined, or older). */
+  #verdict = async (
+    hostSync: HostSyncLike,
+    sig: string,
+    deep: boolean,
+    segments: readonly string[],
+    self: readonly string[],
+    perPage: boolean,
+    advertised: readonly string[],
+  ): Promise<ClosureVerdict> => {
+    if (!perPage) return { ok: await hostSync.isClosureAvailable!(sig, 'layer', deep) === true }
+    if (typeof hostSync.closureVerdict === 'function') return asVerdict(await hostSync.closureVerdict(sig, 'layer', deep, segments, self))
+    if (typeof hostSync.isClosureAvailableAt === 'function') return asVerdict(await hostSync.isClosureAvailableAt(sig, 'layer', deep, segments, self))
+    if (advertised.length === 0) return { ok: false }
+    return { ok: await hostSync.isClosureAvailableOn!(sig, 'layer', deep, advertised) === true }
   }
 
   /** `promise` if it settles within `ms`, else `late` — the question keeps
@@ -3990,12 +4469,12 @@ const payload: SwarmLayerPayload = myLabel
 
   /** One host question per key at a time: a walk that finds it running joins
    *  it. A throw answers "no". */
-  #askOnce = (key: string, ask: () => Promise<boolean | null>): Promise<boolean | null> => {
+  #askOnce = (key: string, ask: () => Promise<ClosureVerdict>): Promise<ClosureVerdict> => {
     const held = this.#asking.get(key)
     if (held) return held
-    const asked: Promise<boolean | null> = Promise.resolve()
+    const asked: Promise<ClosureVerdict> = Promise.resolve()
       .then(ask)
-      .catch((): boolean | null => false)
+      .catch((): ClosureVerdict => ({ ok: false }))
       .finally(() => { if (this.#asking.get(key) === asked) this.#asking.delete(key) })
     this.#asking.set(key, asked)
     return asked
@@ -4017,10 +4496,19 @@ const payload: SwarmLayerPayload = myLabel
     const key = childSegments.join('\0')
     let sealing = this.#sealing.get(key)
     if (!sealing) {
+      // A seal that REFUSES (a layer below held nowhere — GC'd, never
+      // fetched, a pasted bare leaf) settles on the raw handle, exactly as a
+      // refusal inside the wait already does (BCL-6): the handle reaches
+      // markPublic and the gate, so the hole is named ("not held here") and
+      // the tile is takeable by its own atoms, instead of going out with no
+      // handle at all, for ever.
       const started: Promise<string | null> = Promise.resolve()
-        .then(() => history.sealSubtree ? history.sealSubtree(childSegments) : null)
+        // A BACKGROUND seal (L11): it trusts this epoch's refusal and lets the
+        // store's host-miss window stand — every receipt re-walk asking the
+        // hosts again for a hole kept a GET-404 stream going (SH1).
+        .then(() => history.sealSubtree ? history.sealSubtree(childSegments, undefined, { bypassMissWindow: false }) : null)
         .catch((): string | null => null)
-        .then((sealed) => { if (sealed) this.#lastSeal.set(key, sealed); return sealed })
+        .then((sealed) => { this.#lastSeal.set(key, sealed || raw); return sealed })
         .finally(() => { if (this.#sealing.get(key) === started) this.#sealing.delete(key) })
       this.#sealing.set(key, started)
       sealing = started
@@ -4028,8 +4516,13 @@ const payload: SwarmLayerPayload = myLabel
     const r = await this.#within(sealing, SEAL_WAIT_MS)
     if (!r.late) return r.value || raw
     if (stat) stat.sealsLate++
-    void sealing.then(() => this.#scheduleReceiptRewalk())
-    return this.#lastSeal.get(key)
+    const offered = this.#lastSeal.get(key)
+    // Walk again when the seal lands ONLY if it lands on something other than
+    // what this walk offered: a slow refusal that settles on the handle
+    // already offered re-walked the page, which sealed again, which refused
+    // again — about once a second, for ever (BCL-6).
+    void sealing.then((sealed) => { if ((sealed || raw) !== offered) this.#scheduleReceiptRewalk() })
+    return offered
   }
 
   /** Wait — once per page per session, at most REPLAY_WAIT_MS — for the
@@ -4043,6 +4536,19 @@ const payload: SwarmLayerPayload = myLabel
     // Joined in this page: nothing of ours is there to wait for. A replay
     // that does arrive still restores earlier entries on the next walk.
     if (!this.#resumedZone) return Promise.resolve()
+    // NEVER A SUBSCRIPTION OF ITS OWN (LS-1). Only the page this tab stands
+    // on has a live subscription, whose REQ is the replay to wait for. Every
+    // other walk — a drill answer, the sticky refresh, a receipt re-walk, the
+    // reassert — reads what the mesh already holds and goes on at once:
+    // waiting there made the mesh open a zero-consumer bucket per drilled
+    // page that nothing ever closed, and a reloaded sharer hit the relay's
+    // 200-subscription cap and went deaf at every page it walked into.
+    if (!this.#subsBySig.has(sig)) {
+      if (!this.#ownReplay.has(sig)) {
+        try { for (const evt of this.#getMesh()?.getNonExpired?.(sig) ?? []) this.#noteOwnReplay(sig, evt) } catch { /* nothing cached */ }
+      }
+      return Promise.resolve()
+    }
     const held = this.#replayWaits.get(sig)
     if (held) return held
     const mesh = this.#getMesh()
@@ -4294,9 +4800,13 @@ const payload: SwarmLayerPayload = myLabel
   /** WHICH BRANCH A HOST HOLDS, BY NAME (jwize 2026-10-10). A publish domain
    *  that can never take a write — a name that does not resolve (the
    *  `hyperccomb.com` typo), a host answering a web page, one that refuses or
-   *  is full — is never passed over: it was the participant's choice. So it
-   *  is NAMED, with the branch that waits on it and why, rather than that
-   *  branch reading as "uploading" for ever: this page itself when it wears
+   *  is full — is passed over for the swarm once its uploads give that
+   *  standing answer (D2, swarm-hosts.ts): the page goes by the meeting
+   *  host, the pool or the relay, and the line names the domain from
+   *  `passedOver`. Until then — and for good when no door below it takes
+   *  bytes, so the domain keeps the page — it is NAMED here, with the branch
+   *  that waits on it and why, rather than that branch reading as
+   *  "uploading" for ever: this page itself when it wears
    *  the host as its publish domain and none of its hosts takes bytes, and
    *  each tile here still on its way whose subtree's pages go to a held host
    *  this page's own tiles do not. From host-sync's last word per host
@@ -4339,6 +4849,103 @@ const payload: SwarmLayerPayload = myLabel
       })
     }
     return { blocked: blocked.slice(0, BLOCKED_SHOWN_MAX), heldChildren }
+  }
+
+  /** WHAT HOLDS EACH TILE BACK, BY HOST (BCL-2/TS-1, jwize 2026-10-10). The
+   *  line used to speak for this page's own host alone, so a tile held by a
+   *  host lower down — a branch's publish domain that refuses, never
+   *  answered, or is full — read as "uploading" in the all-is-well tone for
+   *  fifty minutes. Per tile not yet served (and per takeable branch whose
+   *  deeper pages are still only here), the host in its way, from the first
+   *  that says so:
+   *    1. host-sync's verdict naming the atom in the way and its host;
+   *    2. every one of this page's hosts refusing the tile's own atoms;
+   *    3. a page below it going to a host that takes none of a branch's bytes.
+   *  Grouped by host into `held` (`deep: true` when only the deeper pages are
+   *  held). A tile nothing holds is `uploading` while a host it needs still
+   *  owes uploads (or has not said yet), else `notQueued`: nothing is
+   *  carrying it — the line can say so instead of "uploading" for ever. From
+   *  memory only (each host's last `sync:state`, the walk's verdicts). */
+  #heldReport = (
+    segments: readonly string[],
+    hostSync: HostSyncLike | undefined,
+    refs: readonly ChildRef[],
+    announced: readonly Announced[],
+  ): { uploading: number; notQueued: number; deepOnDevice: number; held: HeldGroup[] } => {
+    const choice = this.#pageHosts(segments)
+    const pageHosts = choice ? [...choice.hosts] : [this.#swarmHost()].filter(Boolean)
+    // The hosts of the pages below a tile: what host-sync learned re-staging
+    // its closure, and — known at once, before any re-stage — the hosts of the
+    // tile's own child page when every one of them refuses (a branch that
+    // wears its own publish domain, 2026-10-10 T4).
+    const below = (c: ChildRef): string[] => {
+      if (!this.#perPage(hostSync)) return []
+      const out: string[] = []
+      if (c.layerSig && typeof hostSync?.closureHostsOf === 'function') {
+        try { for (const h of hostSync.closureHostsOf(c.layerSig)) if (!pageHosts.includes(h) && !out.includes(h)) out.push(h) } catch { /* an older host-sync */ }
+      }
+      const childHosts = this.#pageHosts([...segments, c.name])?.hosts ?? []
+      if (childHosts.length > 0 && childHosts.every(h => BRANCH_HELD_STATES.has(this.#hostStates.get(h)?.state ?? ''))) {
+        for (const h of childHosts) if (!pageHosts.includes(h) && !out.includes(h)) out.push(h)
+      }
+      return out
+    }
+    // A host's hold, if its word (the verdict's, else its last `sync:state`)
+    // is one of `states`.
+    const holdOf = (host: string, states: ReadonlySet<string>, word?: Blocking): Omit<HeldGroup, 'count' | 'names'> | null => {
+      const s = this.#hostStates.get(host)
+      const state = word?.state || s?.state || ''
+      if (!states.has(state)) return null
+      const why = word?.why || s?.why || ''
+      return { host, state, reason: word?.reason || s?.reason || '', ...(why ? { why } : {}) }
+    }
+    const groups = new Map<string, HeldGroup>()
+    let uploading = 0
+    let notQueued = 0
+    let deepOnDevice = 0
+    announced.forEach((a, i) => {
+      const c = refs[i]
+      if (!c) return
+      const deepOnly = a.form === 'full'
+      if (deepOnly && a.deep !== 'owner') return
+      if (deepOnly) deepOnDevice++
+      const word = deepOnly ? a.deepBlocking : a.blocking
+      // host-sync named the atom in the way: its word decides.
+      if (word?.state && !deepOnly && BLOCK_STALLED_STATES.has(word.state)) { notQueued++; return }
+      let hold = word?.host && word.state && BLOCK_HELD_STATES.has(word.state)
+        ? holdOf(word.host, BLOCK_HELD_STATES, word)
+        : word?.host && !word.state ? holdOf(word.host, HOST_HELD_STATES, word) : null
+      if (!hold && word?.state && !BLOCK_HELD_STATES.has(word.state)) {
+        if (!deepOnly) uploading++
+        return
+      }
+      if (!hold && !deepOnly && pageHosts.length > 0) {
+        const holds = pageHosts.map(h => holdOf(h, BRANCH_HELD_STATES))
+        if (holds.every(Boolean)) hold = holds[0]!
+      }
+      if (!hold) {
+        for (const h of below(c)) {
+          hold = holdOf(h, BRANCH_HELD_STATES)
+          if (hold) break
+        }
+      }
+      if (hold) {
+        const key = `${hold.host}\0${deepOnly ? 'deep' : ''}`
+        const group = groups.get(key) ?? { ...hold, count: 0, names: [], ...(deepOnly ? { deep: true as const } : {}) }
+        group.count++
+        if (group.names.length < HELD_NAMES_MAX) group.names.push(c.name)
+        groups.set(key, group)
+        return
+      }
+      if (deepOnly) return
+      const owes = !c.layerSig || [...pageHosts, ...below(c)].some(h => {
+        const s = this.#hostStates.get(h)
+        return !s || !s.state || s.pending > 0 || s.state === 'syncing'
+      })
+      if (owes) uploading++
+      else notQueued++
+    })
+    return { uploading, notQueued, deepOnDevice, held: [...groups.values()] }
   }
 
   /** The branch whose publish domains this page wears: up from the page for
@@ -5063,33 +5670,67 @@ const payload: SwarmLayerPayload = myLabel
     // so there is no privacy prefix to compute, and every holder answers
     // with their public root subset exactly like any other page.
     const share = segments.length === 0 ? [] : this.#broadcastablePrefix(segments)
-    if (segments.length > 0 && share.length === 0) {
-      this.#lastDrillRequest = { stage: 'no-sharable-prefix', at: [...segments], atMs: Date.now() }
-      return
-    }
+    // A page whose path names a private tile at its first step: nothing about
+    // it may be broadcast, and nobody holds it to answer. The drill slot still
+    // says WHERE WE STAND — `{ away: true }`, no path: somewhere private —
+    // so nobody counts us "here" on the page we left (TS-3). An older member
+    // reads a drill without a path as nothing at all.
+    const away = segments.length > 0 && share.length === 0
     const sig = this.#lifecycleSig || await this.#computeLifecycleSig()
     if (!sig) { this.#lastDrillRequest = { stage: 'no-lifecycle-sig', atMs: Date.now() }; return }
 
     // Fast clock while this page is still empty (the publisher's first
-    // answer may have been blank mid-drain); TTL cadence once filled.
-    const pageEmpty = this.peerTilesAtSig(this.#currentSig).length === 0
+    // answer may have been blank mid-drain); TTL cadence once filled. The
+    // clock is for asking the SAME page again: a move to another page — back
+    // to one asked a minute ago, too — always says so at once, since the
+    // drill slot is also where every member reads where we stand.
+    const pageEmpty = !away && this.peerTilesAtSig(this.#currentSig).length === 0
     const minGapMs = pageEmpty ? 5_000 : Math.floor(EVENT_TTL_SECS * 1000 * 2 / 3)
-    const pathKey = lineageKey(share)
+    const pathKey = away ? '\0away' : lineageKey(share)
     const nowMs = Date.now()
-    if (nowMs - (this.#myDrillSentMs.get(pathKey) ?? 0) < minGapMs) return
+    if (pathKey === this.#lastDrillKey && nowMs - (this.#myDrillSentMs.get(pathKey) ?? 0) < minGapMs) return
     this.#myDrillSentMs.set(pathKey, nowMs)
+    this.#lastDrillKey = pathKey
 
     const expirationSecs = Math.floor(nowMs / 1000) + EVENT_TTL_SECS
     try {
-      await mesh.publish(SWARM_INTEREST_KIND, sig, { pathSegments: share }, [
+      await mesh.publish(SWARM_INTEREST_KIND, sig, away ? { away: true } : { pathSegments: share }, [
         ['d', `drill:${myPubkey}`],
         ['expiration', String(expirationSecs)],
       ])
-      this.#lastDrillRequest = { stage: 'sent', share: [...share], pageEmpty, atMs: nowMs }
+      this.#lastDrillRequest = away
+        ? { stage: 'no-sharable-prefix', at: [...segments], away: true, atMs: nowMs }
+        : { stage: 'sent', share: [...share], pageEmpty, atMs: nowMs }
     } catch (err) {
       this.#myDrillSentMs.delete(pathKey)  // allow retry next sync
+      if (this.#lastDrillKey === pathKey) this.#lastDrillKey = ''
       this.#lastDrillRequest = { stage: 'publish-threw', err: String(err).slice(0, 80), atMs: nowMs }
     }
+  }
+
+  /** WHERE A MEMBER STANDS — their drill (kind 30203 on the lifecycle
+   *  channel, d `drill:<pubkey>`): the path it names, or somewhere private
+   *  (`away`). The newest live one per member wins (#standsElsewhere). A
+   *  change recounts who is here. */
+  #noteStanding = (evt: MeshEvtLike): void => {
+    const from = String(evt.event?.pubkey ?? '').trim().toLowerCase()
+    if (!from || (this.#myPubkey && from === this.#myPubkey)) return
+    const tags = evt.event?.tags ?? []
+    if (tags.find(t => t[0] === 'd')?.[1] !== `drill:${from}`) return
+    const atSec = Number(evt.event?.created_at ?? 0)
+    const held = this.#standingByPubkey.get(from)
+    if (held && atSec < held.atSec) return
+    const payload = evt.payload as { pathSegments?: unknown; away?: unknown } | undefined
+    const raw = payload?.pathSegments
+    let key: string | null
+    if (Array.isArray(raw)) {
+      key = lineageKey(raw.map(s => (typeof s === 'string' ? s.trim() : '')).filter(s => s.length > 0 && s.length <= 256).slice(0, 16))
+    } else if (payload?.away === true) {
+      key = null
+    } else return
+    const expSec = expiryOf(tags, atSec, () => this.#nowSec())
+    this.#standingByPubkey.set(from, { key, atSec, expSec })
+    if (held?.key !== key) this.#scheduleRosterEmit()
   }
 
   /** Publisher side of the drill tunnel: a zone member asked for the
@@ -5436,7 +6077,7 @@ const payload: SwarmLayerPayload = myLabel
     // We stood somewhere else by now, or left: this page is not the
     // channel's word any more.
     if (!live()) return
-    this.#channelPending = announced.some(a => a.form !== 'full')
+    this.#channelPending = announced.some(a => a.form !== 'full' || a.deep === 'owner')
     const myLabel = this.#readMyLabel()
     const payload: SwarmLayerPayload = myLabel
       ? { label: myLabel, visuals: children }
@@ -5751,11 +6392,20 @@ const payload: SwarmLayerPayload = myLabel
     if (nowMs - this.#lastBeaconMs < LAYER_REFRESH_MS) return
     this.#lastBeaconMs = nowMs
     const expirationSecs = Math.floor(nowMs / 1000) + EVENT_TTL_SECS
+    // When it went out and when a relay took it (its OK): an open socket is
+    // not a delivered beacon — the line says "sending" while it is not taken
+    // (#emitShareStatus, TS-7).
+    this.#beaconSentAtMs = nowMs
     try {
       await mesh.publish(SWARM_LIFECYCLE_KIND, sig, { alive: true, v: BEACON_VERSION }, [
         ['d', myPubkey],
         ['expiration', String(expirationSecs)],
-      ])
+      ], () => {
+        // Only the OK for the newest beacon says the newest one was taken.
+        if (this.#beaconSentAtMs !== nowMs) return
+        this.#beaconTakenAtMs = Math.max(Date.now(), nowMs)
+        if (this.#lastUnackedMs > 0) this.#emitShareStatus()
+      })
     } catch (err) { console.warn('[swarm] publishAlive failed', err) }
   }
 
@@ -5784,6 +6434,8 @@ const payload: SwarmLayerPayload = myLabel
     // (kind 30203, d-tag `drill:<pubkey>`) — a member is asking whoever
     // holds a path to publish its frontier. Answer best-effort.
     if (Number(evt.event?.kind) === SWARM_INTEREST_KIND) {
+      // It also says where the member stands (TS-3).
+      this.#noteStanding(evt)
       void this.#onDrillRequest(evt)
       return
     }
@@ -5834,6 +6486,7 @@ const payload: SwarmLayerPayload = myLabel
       this.#participantAliveMs.delete(pubkey)
       this.#awayPubkeys.delete(pubkey)
       this.#segmentsByPubkey.delete(pubkey)
+      this.#standingByPubkey.delete(pubkey)
       const res = this.evictPubkey(pubkey)
       this.#scheduleRosterEmit()
       slog('[swarm] lifecycle tombstone', { pubkey: pubkey.slice(0, 8), ...res })
@@ -6057,7 +6710,7 @@ const payload: SwarmLayerPayload = myLabel
       fetchVisualsAt?: (sig: string, timeoutMs?: number) =>
         Promise<readonly { pubkey: string; content: string; created_at: number; tags: string[][] }[] | null>
       noteDomainsForSig?: (sig: string, domains: string[]) => void
-      notePeerLiveness?: (pubkey: string, sigs: readonly string[]) => void
+      notePeerLiveness?: NotePeerLiveness
     } | undefined
 
   #getSigner = (): SignerApi | undefined =>

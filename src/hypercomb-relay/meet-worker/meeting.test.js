@@ -8,6 +8,7 @@ import { bytesToHex } from '@noble/hashes/utils.js'
 import { Meeting, sha256Hex, eventId, MAX_SUBS_PER_CLIENT, MAX_ADDRESSES_PER_REQ, MAX_ADDRESSES_PER_CONNECTION } from './meeting.js'
 
 const sha = (text) => sha256Hex(text)
+const b64 = (text) => Buffer.from(text).toString('base64')
 
 function fakeClock(start = Date.now()) {
   let t = start
@@ -533,4 +534,299 @@ test('the minute line counts and never names anyone', () => {
   s.drop()
   meeting.census()
   assert.equal(meeting.census(), null, 'nothing to say, nothing said')
+})
+
+// ── the long tail (L6): a full store, bulk budgets, zombie heirs, fan-out ────
+//
+// Events with a stand-in signature, for the specs that send thousands of
+// frames: the id is the real NIP-01 id, the signature check is the meeting's
+// `verify` option (stubbed by those specs), so nothing here signs.
+function unsigned(pubkey, kind, x, content = '{}', extra = [], createdAt) {
+  const evt = { pubkey, created_at: createdAt, kind, tags: [['x', x], ...extra], content }
+  evt.id = eventId(evt)
+  evt.sig = 'c'.repeat(128)
+  return evt
+}
+
+test("a broker answer is kept at most 900 s, one holder's answer per address whatever the number of holders", () => {
+  const { open, nowSec, meeting, clock } = setup()
+  const picture = sha('a picture')
+  const watcher = open()
+  assert.equal(ask(watcher, 'w', { '#x': [picture] }), 'EOSE')
+  // Three holders answer the same ask with the same content-addressed bytes,
+  // as the broker does: a day-long expiration on each copy.
+  const answer = (secret, ip) => publish(open(ip), sign(secret, 30401, picture, b64('a picture'),
+    [['d', picture], ['t', 'resource'], ['expiration', String(nowSec() + 86_400)]], nowSec()))
+  for (const [i, secret] of [key(), key(), key()].entries()) assert.equal(answer(secret, `10.0.0.${i}`)[2], true, 'every holder is answered OK')
+  assert.equal(watcher.events('w').length, 3, 'every answer heard live')
+  assert.equal(meeting.storedEvents, 1, "one holder's answer kept, whatever the number of holders")
+  const replayed = () => { const s = open('192.0.2.50'); ask(s, 'r', { '#x': [picture], since: nowSec() - 900 }); return s.events('r').length }
+  assert.equal(replayed(), 1, 'a late asker is replayed one copy, not one per holder')
+  clock.advance(899_000)
+  meeting.sweep()
+  assert.equal(replayed(), 1, "still there inside the readers' 15 min window")
+  clock.advance(2_000)
+  meeting.sweep()
+  assert.equal(meeting.storedEvents, 0, 'gone after 900 s, not after a day')
+  assert.equal(replayed(), 0)
+})
+
+test("a forged or future-dated answer never silences a later holder's: it is fanned out, not kept", () => {
+  const { open, nowSec, meeting } = setup()
+  const picture = sha('a wanted picture')
+  const asker = open()
+  assert.equal(ask(asker, 'want', { '#x': [picture], since: nowSec() - 900 }), 'EOSE')
+  const answer = (secret, content, createdAt) => sign(secret, 30401, picture, content, [['d', picture], ['t', 'resource'], ['expiration', String(nowSec() + 86_400)]], createdAt)
+  // A copy dated 10 minutes ahead: heard live, never kept.
+  assert.equal(publish(open('203.0.113.66'), answer(key(), b64('a wanted picture'), nowSec() + 600))[2], true)
+  assert.equal(meeting.storedEvents, 0, 'a future-dated copy never takes the address')
+  // Garbage at the address, dated now: its bytes do not hash to it, so it is not THE answer.
+  assert.equal(publish(open('203.0.113.67'), answer(key(), 'bm90IGl0', nowSec()))[2], true)
+  assert.equal(meeting.storedEvents, 0, 'a forged copy is never kept')
+  // The holder answers now, with the real bytes.
+  const genuine = answer(key(), b64('a wanted picture'), nowSec())
+  assert.deepEqual(publish(open('198.51.100.8'), genuine).slice(2), [true, ''])
+  assert.ok(asker.events('want').some((m) => m[2].id === genuine.id), 'heard live')
+  const replay = open('192.0.2.51')
+  ask(replay, 'r', { '#x': [picture], since: nowSec() - 900 })
+  assert.deepEqual(replay.events('r').map((m) => m[2].id), [genuine.id], "and it is the one a later asker is replayed")
+})
+
+test("a chunked answer is replayed as ONE holder's whole run, never a mix the asker cannot assemble", () => {
+  const { open, nowSec, meeting } = setup()
+  const text = 'a picture two members hold, in two chunks'
+  const picture = sha(text)
+  const half = Math.ceil(text.length / 2)
+  const parts = [b64(text.slice(0, half)), b64(text.slice(half))]
+  const chunk = (secret, i) => sign(secret, 30401, picture, parts[i], [['d', `${picture}#${i}`], ['t', 'resource'], ['c', `${i}/2`], ['expiration', String(nowSec() + 86_400)]], nowSec())
+  const [cancelled, whole] = [key(), key()]
+  // Both answer in the same second; the asker takes the first whole run and cancels the other after chunk 0.
+  publish(open('10.0.1.1'), chunk(cancelled, 0))
+  const w = open('10.0.1.2')
+  publish(w, chunk(whole, 0))
+  publish(w, chunk(whole, 1))
+  const replay = open('192.0.2.52')
+  ask(replay, 'r', { '#x': [picture], since: nowSec() - 900 })
+  assert.deepEqual(replay.events('r').map((m) => m[2].pubkey), [pub(whole), pub(whole)])
+  assert.equal(meeting.storedEvents, 2)
+  // A run no reader can assemble is never kept: a million chunks, a d that is not its address.
+  const other = sha('another picture')
+  const spam = key()
+  publish(w, sign(spam, 30401, other, 'QUJD', [['d', `${other}#0`], ['t', 'resource'], ['c', '0/1000000']], nowSec()))
+  publish(w, sign(spam, 30401, other, 'QUJD', [['d', 'any-d'], ['t', 'resource'], ['c', '0/2']], nowSec()))
+  publish(w, sign(spam, 30401, other, 'QUJD', [['d', 'not-its-address'], ['t', 'resource']], nowSec()))
+  assert.equal(meeting.storedEvents, 2, 'only runs a reader can assemble are kept')
+})
+
+test("a full store makes room by evicting broker answers, oldest first — a newcomer's beacon and page are never refused", () => {
+  const { open, nowSec, meeting } = setup({ storeMaxBytes: 200_000 })
+  const a = room('alpha')
+  const b = room('beta')
+  const beacon = (secret, zone) => sign(secret, 30206, zone, '{"alive":true,"v":2}', [['d', pub(secret)], ['expiration', String(nowSec() + 90)]], nowSec())
+  const page = (secret, x, n = 1) => sign(secret, 30200, x, JSON.stringify({ children: Array.from({ length: n }, (_, i) => ({ name: `tile-${i}` })), v: 2 }), [['d', x], ['expiration', String(nowSec() + 90)]], nowSec())
+  const sharer = key()
+  const s = open('203.0.113.1')
+  assert.equal(publish(s, beacon(sharer, a.zone))[2], true)
+  assert.equal(publish(s, page(sharer, a.page, 3))[2], true)
+  // The sharer's pictures are asked for: answers of ~13 KB of base64, twice
+  // the store's size in all.
+  const bytesOf = (i) => `picture ${i} `.padEnd(9_750, '.')
+  const pictures = Array.from({ length: 30 }, (_, i) => sha(bytesOf(i)))
+  let refused = 0
+  for (const [i, x] of pictures.entries()) {
+    const ok = publish(s, sign(sharer, 30401, x, b64(bytesOf(i)), [['d', x], ['t', 'resource'], ['expiration', String(nowSec() + 86_400)]], nowSec()))
+    if (ok[2] !== true) refused++
+  }
+  assert.equal(refused, 0, 'an answer is never refused: the oldest answer makes room')
+  assert.ok(meeting.storedBytes <= 200_000, 'the store stays inside its bytes')
+  const held = (x) => { const r = open('192.0.2.60'); ask(r, 'q', { '#x': [x] }); return r.events('q').length }
+  assert.equal(held(pictures[0]), 0, 'the oldest answer went first')
+  assert.equal(held(pictures.at(-1)), 1, 'the newest is held')
+  // Now the meeting: a newcomer in this room and one in another, a new page.
+  const newcomer = key()
+  const n = open('203.0.113.2')
+  assert.deepEqual(publish(n, beacon(newcomer, a.zone)).slice(2), [true, ''], "the newcomer's beacon")
+  assert.equal(publish(n, page(newcomer, a.page))[2], true, "the newcomer's root page")
+  const elsewhere = key()
+  assert.deepEqual(publish(open('198.51.100.3'), beacon(elsewhere, b.zone)).slice(2), [true, ''], 'a newcomer in another room')
+  assert.equal(publish(s, page(sharer, sha('a page nobody announced yet')))[2], true, 'walking into a new page')
+  assert.equal(held(a.page), 2, 'both root pages are held')
+  assert.match(meeting.census(), / · evicted \d+/, 'the minute line counts what was evicted')
+})
+
+test('the last part of the store is kept for presence: other kinds never take it, and a slot evicts what expires soonest', () => {
+  const { open, nowSec, meeting } = setup({ storeMaxBytes: 64_000, buckets: { connBurst: 10_000 } })
+  const zone = sha('zone')
+  const writer = key()
+  const w = open()
+  // Store-and-forward items that never expire and are never evicted, until
+  // the store refuses them.
+  let items = 0
+  for (; items < 200; items++) {
+    const ok = publish(w, sign(writer, 30213, sha(`item ${items}`), 'f'.repeat(1_000), [['d', `item:${items}`]], nowSec()))
+    if (ok[2] !== true) { assert.equal(ok[3], 'error: the meeting point is full — try again shortly'); break }
+  }
+  assert.ok(items < 200, 'kinds that are not presence are refused before the store is full')
+  assert.ok(meeting.storedBytes <= 64_000 - 4_000, 'they never reach the presence reserve (1/16 of the store, 4 MB at 64 MB)')
+  const joiner = key()
+  const j = open('198.51.100.4')
+  assert.deepEqual(publish(j, sign(joiner, 30206, zone, '{"alive":true,"v":2}', [['d', pub(joiner)], ['expiration', String(nowSec() + 90)]], nowSec())).slice(2), [true, ''])
+  const root = sha('root page')
+  assert.equal(publish(j, sign(joiner, 30200, root, 'p'.repeat(1_500), [['d', root], ['expiration', String(nowSec() + 90)]], nowSec()))[2], true, 'a page fits in the reserve too')
+
+  // Expiring slots of other kinds (resource streams, 30201) are evicted
+  // soonest-expiry first (to the minute) when a presence slot needs the room.
+  const second = setup({ storeMaxBytes: 64_000, buckets: { connBurst: 10_000 } })
+  const r = second.open()
+  const streamer = key()
+  const streams = Array.from({ length: 24 }, (_, i) => sha(`stream ${i}`))
+  for (const [i, x] of streams.entries()) {
+    // The first written expires LAST: eviction follows the clock, not the order of arrival.
+    assert.equal(publish(r, sign(streamer, 30201, x, 'r'.repeat(2_000), [['d', x], ['expiration', String(second.nowSec() + 2_000 - 60 * i)]], second.nowSec()))[2], true, `stream ${i}`)
+  }
+  const pages = Array.from({ length: 8 }, (_, i) => sha(`page ${i}`))
+  for (const x of pages) assert.equal(publish(r, sign(key(), 30200, x, 'p'.repeat(2_000), [['d', x], ['expiration', String(second.nowSec() + 90)]], second.nowSec()))[2], true)
+  const heldAt = (x) => { const q = second.open('192.0.2.70'); ask(q, 'h', { '#x': [x] }); return q.events('h').length }
+  assert.ok(second.meeting.storedBytes <= 64_000)
+  assert.equal(heldAt(streams[0]), 1, 'the stream that expires last is still held')
+  assert.equal(heldAt(streams.at(-1)), 0, 'the stream that expires soonest went first')
+  for (const x of pages) assert.equal(heldAt(x), 1)
+})
+
+test('what the store counts is what an event costs the heap: its JSON and 600 bytes', () => {
+  const { open, nowSec, meeting } = setup()
+  const x = sha('one page')
+  const evt = sign(key(), 30200, x, '{"children":[]}', [['d', x], ['expiration', String(nowSec() + 90)]], nowSec())
+  publish(open(), evt)
+  const { id, pubkey, created_at, kind, tags, content, sig } = evt
+  assert.equal(meeting.storedBytes, JSON.stringify({ id, pubkey, created_at, kind, tags, content, sig }).length + 600)
+})
+
+test('a sharer answering picture asks at 15 a second keeps its own beacon and page: bulk kinds have their own bucket', () => {
+  const { open, clock, nowSec } = setup({ verify: () => true })
+  const me = 'a'.repeat(64)
+  const zone = sha('zone')
+  const page = sha('page')
+  const s = open()
+  const okOf = (evt) => { s.send(['EVENT', evt]); return s.inbox.findLast((m) => m[0] === 'OK' && m[1] === evt.id) }
+  let n = 0
+  const control = { sent: 0, refused: 0 }
+  const bulk = { sent: 0, refused: 0 }
+  for (let ms = 0; ms < 240_000; ms += 200) {
+    clock.advance(200)
+    // three chunk answers every 200 ms: 15 a second, sustained past the burst
+    for (let i = 0; i < 3; i++) {
+      const sig = sha(`picture ${n++}`)
+      const ok = okOf(unsigned(me, 30401, sig, 'QUJD', [['d', sig], ['expiration', String(nowSec() + 900)]], nowSec()))
+      bulk.sent++
+      if (ok[2] !== true) bulk.refused++
+    }
+    if (ms % 30_000 === 0) for (const evt of [
+      unsigned(me, 30206, zone, '{"alive":true,"v":2}', [['d', me], ['expiration', String(nowSec() + 90)]], nowSec()),
+      unsigned(me, 30200, page, '{"children":[]}', [['d', page], ['expiration', String(nowSec() + 90)]], nowSec()),
+    ]) {
+      control.sent++
+      const ok = okOf(evt)
+      if (ok[2] !== true && !/^duplicate:/.test(ok[3])) control.refused++
+    }
+  }
+  assert.equal(control.sent, 16)
+  assert.equal(control.refused, 0, "the beacon and the page are never refused for the answers' sake")
+  assert.ok(bulk.refused > 0, 'the answers are still held to their own budget')
+})
+
+test('a phone that locks twice: a socket silent since the newer beacon inherits no will, so the room hears the leave in 15 s', () => {
+  const { open, clock, nowSec, meeting } = setup({ verify: () => true })
+  const me = 'b'.repeat(64)
+  const zone = sha('lifecycle zone')
+  const beacon = (s) => s.send(['EVENT', unsigned(me, 30206, zone, '{"alive":true,"v":2}', [['d', me], ['expiration', String(nowSec() + 90)]], nowSec())])
+  const peer = open()
+  assert.equal(ask(peer, 'life', { '#x': [zone], kinds: [30206] }), 'EOSE')
+  const probe = (s) => s.send(['REQ', 'hc-live', { '#x': ['hc:live'], limit: 0 }])
+  const lefts = () => peer.events('life').filter((m) => m[2].sig === '' && JSON.parse(m[2].content).left === true).length
+
+  const s1 = open(); beacon(s1)
+  // lock 1, silent: S1 is never closed by the network
+  for (let i = 0; i < 3; i++) { clock.advance(25_000); probe(peer) }
+  const s2 = open(); beacon(s2)    // the wake
+  clock.advance(20_000); probe(peer)
+  s2.drop()                         // lock 2, with a FIN — S1 silent 95 s, past HEIR_HEARD_MS
+  assert.equal(meeting.pendingWills, 1, 'the zombie socket is passed over: the will waits out its grace')
+  clock.advance(15_000)
+  assert.equal(lefts(), 1, 'heard 15 s after lock 2, not when the zombie is reaped')
+
+  // A genuinely live second tab with the same key still inherits.
+  const other = 'd'.repeat(64)
+  const live = (s) => s.send(['EVENT', unsigned(other, 30206, zone, '{"alive":true,"v":2}', [['d', other], ['expiration', String(nowSec() + 90)]], nowSec())])
+  const tabA = open(); live(tabA)
+  clock.advance(10_000)
+  const tabB = open(); live(tabB)
+  clock.advance(5_000); probe(tabA)  // tab A speaks after tab B's beacon
+  tabB.drop()
+  assert.equal(meeting.pendingWills, 0, 'a tab heard since the beacon inherits the will')
+  clock.advance(30_000); probe(peer)
+  assert.equal(peer.events('life').filter((m) => m[2].pubkey === other && m[2].sig === '').length, 0, 'and nobody is told it left')
+})
+
+test('a hidden second tab heard a minute ago inherits, and one that speaks during the grace takes the will — its own death is still heard', () => {
+  const { open, clock, nowSec, meeting } = setup({ verify: () => true })
+  const me = 'e'.repeat(64)
+  const zone = sha('two tabs zone')
+  const beacon = (s) => s.send(['EVENT', unsigned(me, 30206, zone, '{"alive":true,"v":2}', [['d', me], ['expiration', String(nowSec() + 90)]], nowSec())])
+  const peer = open()
+  assert.equal(ask(peer, 'life', { '#x': [zone], kinds: [30206] }), 'EOSE')
+  const lefts = () => peer.events('life').filter((m) => m[2].pubkey === me && m[2].sig === '').length
+  const probe = (s) => s.send(['REQ', 'hc-live', { '#x': ['hc:live'], limit: 0 }])
+
+  // Hidden tab B beacons, then is throttled to a frame a minute; visible tab A beacons after it.
+  const tabB = open(); beacon(tabB)
+  clock.advance(30_000)
+  const tabA = open(); beacon(tabA)
+  clock.advance(15_000); probe(peer)
+  tabA.drop()                        // B not heard since A's beacon, but 45 s ago
+  assert.equal(meeting.pendingWills, 0, 'the hidden tab inherits')
+  clock.advance(20_000); probe(peer)
+  assert.equal(lefts(), 0, 'nobody is told the participant left')
+
+  // Now B is quiet past the window when a third tab dies: the will waits …
+  probe(tabB)
+  clock.advance(1_000)
+  const tabC = open(); beacon(tabC)
+  for (let i = 0; i < 4; i++) { clock.advance(24_000); probe(tabC); probe(peer) }
+  tabC.drop()                        // B silent 97 s: past the window, short of the reap
+  assert.equal(meeting.pendingWills, 1)
+  // … B speaks inside the grace (a page layer): it TAKES the will …
+  clock.advance(5_000)
+  tabB.send(['EVENT', unsigned(me, 30200, sha('a page'), '{}', [['d', sha('a page')], ['expiration', String(nowSec() + 90)]], nowSec())])
+  assert.equal(meeting.pendingWills, 0)
+  clock.advance(20_000); probe(peer)
+  assert.equal(lefts(), 0)
+  // … so its own death later is heard.
+  tabB.drop()
+  clock.advance(16_000); probe(peer)
+  assert.equal(lefts(), 1, 'the leave fires when the last tab goes')
+})
+
+test('a broadcast serializes its event once, whatever the number of listeners, and every frame is the canonical one', () => {
+  const { meeting, nowSec } = setup({ verify: () => true })
+  const x = sha('a busy page')
+  const MARK = 'unique-content-' + 'q'.repeat(32)
+  const listeners = Array.from({ length: 50 }, (_, i) => {
+    const raw = []
+    const client = meeting.connect({ send: (text) => raw.push(text), close() {} }, { ip: `10.1.0.${i}` })
+    meeting.message(client, JSON.stringify(['REQ', `sub-${i}`, { '#x': [x] }]))
+    return raw
+  })
+  const publisher = meeting.connect({ send() {}, close() {} }, { ip: '10.2.0.1' })
+  const evt = unsigned('e'.repeat(64), 30200, x, MARK, [['d', x], ['expiration', String(nowSec() + 90)]], nowSec())
+  const frame = JSON.stringify(['EVENT', evt])
+  const real = JSON.stringify
+  let serialized = 0
+  JSON.stringify = function (...args) { const out = real.apply(this, args); if (typeof out === 'string' && out.includes(MARK)) serialized++; return out }
+  try { meeting.message(publisher, frame) } finally { JSON.stringify = real }
+  for (const [i, raw] of listeners.entries()) {
+    const heard = raw.filter((text) => text.includes(MARK))
+    assert.deepEqual(heard, [JSON.stringify(['EVENT', `sub-${i}`, evt])], `listener ${i} hears the canonical frame once`)
+  }
+  assert.ok(serialized <= 2, `serialized ${serialized} times for 50 listeners (once for the store's count, once for the fan-out)`)
 })

@@ -230,18 +230,34 @@ describe("the room's two words", () => {
   })
 
   it('are the same on every page: no word surface hashes the page any more', () => {
-    // Two pages, one room: the crumb and the location window both call
-    // roomWords(room, secret) and nothing else feeds it.
+    // Two pages, one room: the crumb, the location window and the presence
+    // line all fold room, secret and the meeting point (never the page) —
+    // the crumb the English pair alone, the other two with the reader's
+    // own beside it (D4, 2026-10-10).
     const bar = readFileSync(join(UI, 'controls-bar', 'controls-bar.component.ts'), 'utf8')
     const crumb = bar.slice(bar.indexOf('readonly secretWords = computed('), bar.indexOf('readonly hasSecret'))
-    expect(crumb).toContain('roomWords(this.#room$(), this.#secret$(), this.#locale$())')
-    expect(crumb).not.toMatch(/#lineageKey|segmentsRaw/)
+    expect(crumb).toContain('roomWords(this.#room$(), this.#secret$(), this.#meetPoint$())')
+    expect(crumb).not.toMatch(/#lineageKey|segmentsRaw|#locale/)
     expect(bar).not.toContain('secretTag(')
 
     const modal = readFileSync(join(UI, 'mesh-modal', 'mesh-modal.component.ts'), 'utf8')
-    expect(modal).toContain('roomWords(this.roomDraft(), this.secretDraft(), this.#locale())')
+    // the drafts as START will store them (D6), the point, the reader's locale — never the page
+    expect(modal).toMatch(/wordsBeside\(\s*this\.#asStored\(this\.roomDraft\(\), this\.#roomStore\?\.value\),\s*this\.#asStored\(this\.secretDraft\(\), this\.#secretStore\?\.value\),\s*this\.#wordsPoint\(\), this\.#locale\(\)\)/)
     expect(modal).not.toContain('secretTag(')
     expect(modal).not.toContain('#lineageKey')
+
+    const banner = readFileSync(join(UI, 'presence-banner', 'presence-banner.component.ts'), 'utf8')
+    expect(banner).toContain('wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale())')
+    expect(banner).not.toContain('secretTag(')
+  })
+
+  it('the command line never autocorrects either: a room typed there is the room (ZI-8)', () => {
+    const html = readFileSync(join(UI, 'command-shell', 'command-shell.component.html'), 'utf8')
+    const at = html.indexOf('class="command-input"')
+    const tag = html.slice(html.lastIndexOf('<input', at), html.indexOf('/>', at))
+    for (const attr of ['autocapitalize="off"', 'autocorrect="off"', 'spellcheck="false"', 'autocomplete="off"']) {
+      expect(tag, `command input ${attr}`).toContain(attr)
+    }
   })
 
   it('room and secret fields never autocapitalize or autocorrect', () => {

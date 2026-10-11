@@ -3,6 +3,7 @@
 import {
   Bee,
   EffectBus,
+  I18N_IOC_KEY,
   PACKED_STORE_FLAG_KEY,
   SignatureService,
   classifyDirectoryEntry,
@@ -19,6 +20,7 @@ import {
   writeLayerMarker,
   type ArtifactResolutionKind,
   type DirectoryEntry,
+  type I18nProvider,
   type MetaPayloadKind,
   type ResolvedMetaArtifact,
 } from '@hypercomb/core'
@@ -43,6 +45,54 @@ export type DevManifest = {
   resources?: Record<string, string[]>
   domains?: Record<string, unknown> | unknown,
   root: string
+}
+
+/** Write then close, KEEPING THE WRITE'S OWN ERROR. Every OPFS write here
+ *  used to be `try { write } finally { close() }`: when the write failed —
+ *  a full device — close() threw "Cannot close a ERRORED writable stream"
+ *  over the QuotaExceededError, so nothing could ever tell the participant
+ *  their device was out of space, and a dropped photo just did nothing. Now
+ *  a failed write aborts the stream and rethrows what actually happened, and
+ *  a full device is said once (`storage.full`). The `createWritable()` stays
+ *  at each site — this only finishes the stream it is handed. */
+const writeKeepingError = async (
+  writable: FileSystemWritableFileStream,
+  data: FileSystemWriteChunkType,
+): Promise<void> => {
+  try {
+    await writable.write(data)
+    await writable.close()
+  } catch (error) {
+    try { await writable.abort() } catch { /* already errored */ }
+    sayStorageFull(error)
+    throw error
+  }
+}
+
+/** QuotaExceededError, however the engine spells it (Safari has thrown the
+ *  legacy code 22 without the name). */
+const isStorageFull = (error: unknown): boolean => {
+  const e = error as { name?: unknown; code?: unknown } | null
+  return e?.name === 'QuotaExceededError' || e?.code === 22
+}
+
+/** One "out of space" toast per window, however many writes fail behind it:
+ *  a take or an adopt that hits the quota fails dozens of writes at once. */
+const STORAGE_FULL_QUIET_MS = 2 * 60_000
+let storageFullSaidAt = 0
+const sayStorageFull = (error: unknown): void => {
+  if (!isStorageFull(error)) return
+  const now = Date.now()
+  if (now - storageFullSaidAt < STORAGE_FULL_QUIET_MS) return
+  storageFullSaidAt = now
+  const fallback = 'This device is out of space — the last change was not saved. Free some space, then try again.'
+  let message = fallback
+  try {
+    const text = (window.ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.t?.('storage.full')
+    if (text && text !== 'storage.full') message = text
+  } catch { /* no i18n yet — English */ }
+  console.warn('[store] the device is out of space:', error)
+  EffectBus.emit('toast:show', { type: 'warning', message })
 }
 
 /** How a `putPoolDoc` write keeps what came before it: `'versions'` (the
@@ -384,7 +434,7 @@ export class Store extends EventTarget {
       const sig = await SignatureService.sign(bytes)
       const handle = await target.getFileHandle(sig, { create: true })
       const writable = await handle.createWritable()
-      try { await writable.write(bytes) } finally { await writable.close() }
+      await writeKeepingError(writable, bytes)
       // A MARKER IS ADDED ONLY ON POSITIVE PROOF THAT THIS IS THE CALLER'S OWN
       // DOCUMENT SPACE. These two proofs once guarded the sibling sweep; they
       // now guard the marker, because a marker at a molecule address would
@@ -1103,13 +1153,9 @@ export class Store extends EventTarget {
     } catch { /* fall through and create */ }
     const handle = await this.hypercombRoot.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
-    try {
-      // The bytes already read above — handing the writer the Blob made it
-      // read them back a second time.
-      await writable.write(bytes)
-    } finally {
-      await writable.close()
-    }
+    // The bytes already read above — handing the writer the Blob made it
+    // read them back a second time.
+    await writeKeepingError(writable, bytes)
     // Seed the in-memory cache with a DETACHED copy of the bytes we just
     // wrote. The layer commit path already hot-caches its bytes; the
     // resource path did not, so every read of a freshly-put resource fell
@@ -1524,7 +1570,7 @@ export class Store extends EventTarget {
     } catch { /* not present — create */ }
     const handle = await this.optimization.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
-    try { await writable.write(blob) } finally { await writable.close() }
+    await writeKeepingError(writable, blob)
     // Mirror the loop's cross-OPFS records onto the durable feedback channel.
     // FeedbackChannelDrone (essentials) subscribes to `optimization:wrote`;
     // routing through EffectBus avoids a shared→essentials import — the same
@@ -1606,7 +1652,7 @@ export class Store extends EventTarget {
       if (!dir) return
       const handle = await dir.getFileHandle(sourceSig, { create: true })
       const writable = await handle.createWritable()
-      try { await writable.write(bytes) } finally { await writable.close() }
+      await writeKeepingError(writable, bytes)
     } catch { /* best-effort cache */ }
   }
 
@@ -1812,7 +1858,7 @@ export class Store extends EventTarget {
               }
               const dh = await dest.getFileHandle(fname, { create: true })
               const w = await dh.createWritable()
-              try { await w.write(srcBytes) } finally { await w.close() }
+              await writeKeepingError(w, srcBytes)
               await src.removeEntry(fname)              // copied → safe to drop source
             } catch { bucketClean = false }
           }
@@ -1905,7 +1951,7 @@ export class Store extends EventTarget {
           if (!present) {
             const dest = await target.getFileHandle(name, { create: true })
             const writable = await dest.createWritable()
-            try { await writable.write(blob) } finally { await writable.close() }
+            await writeKeepingError(writable, blob)
           }
           await legacy.removeEntry(name)
         } catch { /* straggler — absorbed on a later boot */ }
@@ -2249,7 +2295,7 @@ export class Store extends EventTarget {
     try {
       const handle = await this.hypercombRoot.getFileHandle(expected, { create: true })
       const writable = await handle.createWritable()
-      try { await writable.write(bytes) } finally { await writable.close() }
+      await writeKeepingError(writable, bytes)
     } catch { /* best-effort */ }
   }
 
@@ -2281,7 +2327,7 @@ export class Store extends EventTarget {
     // the boot check on the next reload and the install cache was wiped.
     const handle = await this.bees.getFileHandle(`${expected}.js`, { create: true })
     const writable = await handle.createWritable()
-    try { await writable.write(exact) } finally { await writable.close() }
+    await writeKeepingError(writable, exact)
   }
 
   public getDependencyBytes = async (signature: string): Promise<Uint8Array | null> => {
@@ -2306,7 +2352,7 @@ export class Store extends EventTarget {
     if (await SignatureService.sign(exact) !== expected) return
     const handle = await this.dependencies.getFileHandle(`${expected}.js`, { create: true })
     const writable = await handle.createWritable()
-    try { await writable.write(exact) } finally { await writable.close() }
+    await writeKeepingError(writable, exact)
   }
 
   /** Content relocation: copy every sig-named file from the legacy
@@ -2392,7 +2438,7 @@ export class Store extends EventTarget {
             const bytes = await file.arrayBuffer()
             const dest = await this.hypercombRoot.getFileHandle(name, { create: true })
             const writable = await dest.createWritable()
-            try { await writable.write(bytes) } finally { await writable.close() }
+            await writeKeepingError(writable, bytes)
             done++
           } catch (err) {
             console.warn(`[store] relocate ${sourceName}/${name.slice(0, 12)} → root failed`, err)
@@ -2453,7 +2499,7 @@ export class Store extends EventTarget {
           const bytes = await file.arrayBuffer()
           const dest = await rootBag.getFileHandle(name, { create: true })
           const writable = await dest.createWritable()
-          try { await writable.write(bytes) } finally { await writable.close() }
+          await writeKeepingError(writable, bytes)
         } catch { allPresent = false }
       }
     } catch { return false }
@@ -2484,7 +2530,7 @@ export class Store extends EventTarget {
           const bytes = await sourceFile.arrayBuffer()
           const dest = await this.hypercombRoot!.getFileHandle(name, { create: true })
           const writable = await dest.createWritable()
-          try { await writable.write(bytes) } finally { await writable.close() }
+          await writeKeepingError(writable, bytes)
           return 'copied'
         } catch (err) {
           console.warn(`[store] relocate ${where}/${name.slice(0, 12)} → root failed`, err)
@@ -2609,7 +2655,7 @@ export class Store extends EventTarget {
     try {
       const handle = await this.manifests.getFileHandle(parentLayerSig, { create: true })
       const writable = await handle.createWritable()
-      try { await writable.write(JSON.stringify(manifest)) } finally { await writable.close() }
+      await writeKeepingError(writable, JSON.stringify(manifest))
     } catch { /* cache miss on next read is fine */ }
   }
 
@@ -2635,12 +2681,7 @@ export class Store extends EventTarget {
 
     const handle = await this.bees.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
-
-    try {
-      await writable.write(bytes)
-    } finally {
-      await writable.close()
-    }
+    await writeKeepingError(writable, bytes)
 
     return signature
   }

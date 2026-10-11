@@ -155,8 +155,9 @@ export const recoverableTileImageSig = (props: unknown, flat = false): string | 
 }
 
 /** The sig of the tile's picture AS A PICTURE — what a rectangle should
- *  show. `large.image` first: that is the untouched original, the bytes
- *  the person actually gave the tile.
+ *  show. `large.image` first: the whole picture the person gave the tile
+ *  (its large copy — a WebP of at most 2560 px since D3, the original bytes
+ *  before), never a crop.
  *
  *  The `small`s are not pictures, they are HEX CAPTURES — a crop taken at
  *  the hexagon's aspect, painted over the tile's background colour, and

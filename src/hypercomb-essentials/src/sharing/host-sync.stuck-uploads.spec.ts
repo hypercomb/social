@@ -372,7 +372,9 @@ describe('(A) a pool host that answers a page is passed over at its first HEAD',
 
   it('a heap that answers 404 or the bytes is never passed over', async () => {
     const lacking = await resource('{"name":"the heap lacks me"}')
-    const held = await resource('{"name":"the heap holds me"}')
+    // Large: a small atom to a heap that answers its PUT for itself goes
+    // without a HEAD first (BCL-4) — the HEAD is asked of what is worth it.
+    const held = await resource(JSON.stringify({ name: 'the heap holds me', pad: 'x'.repeat(20_000) }))
     const apex = heap(new Map([[held, resources.get(held)!]]))
     const relay = heap()
     vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
@@ -387,7 +389,7 @@ describe('(A) a pool host that answers a page is passed over at its first HEAD',
     expect(session.has(DOWN_KEY)).toBe(false)
   })
 
-  it('a publish domain that answers a page is never passed over — it is pushed to, and named `page`', async () => {
+  it('a publish domain that answers a page is not passed over for the page — it is pushed to; its blocked uploads pass it over (D2), named `page`', async () => {
     marks = new Map([['shop', ['shop.example']]])
     const shop = pageSite()
     const apex = heap()
@@ -400,10 +402,16 @@ describe('(A) a pool host that answers a page is passed over at its first HEAD',
     // Tried: it was chosen — and only ever with the shop's jar.
     expect(calls(shop, 'PUT').length).toBeGreaterThan(0)
     expect(new Set(calls(shop, 'PUT'))).toEqual(new Set([`https://shop.example/${jar}`]))
-    expect(service.swarmHostsFor(['shop'])).toEqual({ hosts: ['shop.example'], source: 'publish', pending: false })
     expect(state.seen.filter(p => p.host === 'shop.example').pop()).toMatchObject({ why: 'page', swarm: true })
     expect(service.hostTrouble('shop.example')).toMatchObject({ host: 'shop.example', why: 'page' })
-    expect(calls(apex, 'PUT')).toEqual([]) // the shop's bytes never move to the pool
+    // Its second blocked upload is a refusal (B): the swarm stops waiting on
+    // it (D2) — the shop's jar goes to the pool, the domain named as passed
+    // over, still `page` — and its uploads are not tried again this page.
+    await waitFor(() => (service.swarmHostsFor(['shop']).passedOver ?? []).includes('shop.example'), 15_000)
+    expect(service.swarmHostsFor(['shop'])).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['shop.example'] })
+    await waitFor(async () => calls(apex, 'PUT').includes(`https://hypercomb.com/${jar}`) && (await queued()).length === 0, 15_000)
+    expect(calls(shop, 'PUT').length).toBe(2)
+    expect(service.hostTrouble('shop.example')).toMatchObject({ host: 'shop.example', why: 'page' })
     state.off()
   })
 
@@ -425,7 +433,9 @@ describe('(A) a pool host that answers a page is passed over at its first HEAD',
     await service.markPublic(await resource('{"name":"the first upload"}'), 'resource')
     await waitFor(async () => calls(apex, 'PUT').length === 1 && (await queued()).length === 0)
     hiccup = true
-    const second = await resource('{"name":"asked during the hiccup"}')
+    // Large: a small one would go without a HEAD to a heap that answers for
+    // itself — the HEAD is where the hiccup shows.
+    const second = await resource(JSON.stringify({ name: 'asked during the hiccup', pad: 'x'.repeat(20_000) }))
     await service.markPublic(second, 'resource')
     await waitFor(async () => (await queued()).length === 0)
     expect(hiccup).toBe(false) // the page was answered
@@ -692,7 +702,8 @@ describe('(C) a pass-over survives a reload of this tab — bounded, within the 
     apexHeap.fetch.mockImplementation(async (_input: string, init?: RequestInit) =>
       (init?.method === 'PUT' ? new Response('deploying', { status: 503 }) : new Response(null, { status: 404 })))
     const heads = calls(apex, 'HEAD').length
-    const lid = await resource('{"name":"a lid, during a deploy"}')
+    // Large: the HEAD-before-PUT check is for what is worth asking about.
+    const lid = await resource(JSON.stringify({ name: 'a lid, during a deploy', pad: 'x'.repeat(20_000) }))
     await service.markPublic(lid, 'resource', true, ['shop'])
     await waitFor(() => state.seen.some(p => p.host === 'hypercomb.com' && p.status === 'unreachable'))
     expect(state.seen.filter(p => p.host === 'hypercomb.com' && p.status === 'unreachable').pop()).toMatchObject({ why: 'unreachable' })
@@ -832,7 +843,7 @@ describe('(D) the drain sends in batches', () => {
 
 // ── (E) a host that can never take a write is named, with why ─────────────
 
-describe('(E) a publish domain that cannot take writes says so, never passed over', () => {
+describe('(E) a publish domain that cannot take writes says so', () => {
   it('a name that reaches nothing (`hyperccomb.com`): unresolved — "check the host name, and that it is running"', async () => {
     marks = new Map([['favorites', ['hyperccomb.com']]])
     const typo = nowhere()
@@ -846,7 +857,9 @@ describe('(E) a publish domain that cannot take writes says so, never passed ove
     expect(state.seen.filter(p => p.host === 'hyperccomb.com').pop()).toMatchObject({ status: 'unreachable', why: 'unresolved', swarm: true })
     expect(service.hostTrouble('hyperccomb.com')).toMatchObject({ host: 'hyperccomb.com', why: 'unresolved' })
     expect(service.hostTrouble('https://hyperccomb.com/')).toMatchObject({ why: 'unresolved' })
-    // Still the branch's host: a publish domain is never passed over.
+    // Still the branch's host after one silence: a chosen domain is passed
+    // over only once nothing at that name has answered three uploads
+    // (host-sync.verdict.spec.ts — never-answered).
     expect(service.swarmHostsFor(['favorites'])).toEqual({ hosts: ['hyperccomb.com'], source: 'publish', pending: false })
     expect(service.hostTrouble('hypercomb.com')).toBeNull()
     state.off()
@@ -861,7 +874,9 @@ describe('(E) a publish domain that cannot take writes says so, never passed ove
     await service.markPublic(await resource('{"name":"a member card"}'), 'resource', true, ['club'])
     await waitFor(() => state.seen.some(p => p.host === 'closed.example' && p.status === 'refused'))
     expect(service.hostTrouble('closed.example')).toMatchObject({ why: 'refused', reason: '403 not on the writers list' })
-    expect(service.swarmHostsFor(['club']).hosts).toEqual(['closed.example'])
+    // D2 (2026-10-10): the swarm stops waiting on it — the club's tiles go to
+    // the pool, and the domain is named as passed over, with why.
+    expect(service.swarmHostsFor(['club'])).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['closed.example'] })
 
     meshState('offline')
     const offline = await make(['far'])

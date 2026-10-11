@@ -13,7 +13,7 @@
 // of truth; folders on disk are incidental. Deduplication is automatic
 // — commitLayer short-circuits when assembled bytes match the bag's
 // current head.
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { HistoryService } from './history.service.js'
 import { ROOT_NAME } from './history.service.js'
 import type { HistoryCursorService } from './history-cursor.service.js'
@@ -158,6 +158,43 @@ export class RewoundCommitError extends Error {
   }
 }
 
+const t = (key: string, fallback: string): string => {
+  try {
+    const text = window.ioc?.get<I18nProvider>(I18N_IOC_KEY)?.t?.(key)
+    return text && text !== key ? text : fallback
+  } catch { return fallback }
+}
+
+/** A commit refused because another tab of this hive moved the page's head
+ *  under it (HistoryService's `StaleHeadError`). Matched by NAME: the error
+ *  crosses bee bundles, where `instanceof` cannot be trusted. */
+const isStaleHead = (error: unknown): boolean =>
+  (error as { name?: unknown } | null)?.name === 'StaleHeadError'
+
+/**
+ * TWO TABS, ONE HIVE — REBASE AND RETRY ONCE (owner decision D10). Every
+ * commit task re-reads the heads it writes over, and HistoryService has
+ * already re-read the moved head before refusing; so running the task a
+ * second time re-applies the same change onto the other tab's head. Never a
+ * silent loss: a second refusal is said out loud, then rejected like any
+ * failed write.
+ */
+const withRebase = async <T>(task: () => Promise<T>): Promise<T> => {
+  try { return await task() } catch (error) {
+    if (!isStaleHead(error)) throw error
+  }
+  try { return await task() } catch (error) {
+    if (isStaleHead(error)) {
+      EffectBus.emit('toast:show', {
+        type: 'warning',
+        message: t('history.commit-conflict',
+          'Another tab of this hive changed this page at the same moment — your change was not saved. Try it again.'),
+      })
+    }
+    throw error
+  }
+}
+
 const segmentsAtIntent = (): string[] | null => {
   const lineage = get<Lineage>('@hypercomb.social/Lineage')
   const segs = lineage?.explorerSegments?.()
@@ -194,7 +231,7 @@ class CommitMachine {
   request(req: CommitRequest = { segments: null }): void {
     const addressed = this.#addressed(req)
     if (!addressed) return
-    this.#chain = this.#chain.then(() => this.#run(addressed)).catch(err => {
+    this.#chain = this.#chain.then(() => withRebase(() => this.#run(addressed))).catch(err => {
       console.error('[LayerCommitter] cascade failed (request):', err, addressed)
     })
   }
@@ -208,7 +245,7 @@ class CommitMachine {
   requestAndWait(req: CommitRequest = { segments: null }): Promise<void> {
     const addressed = this.#addressed(req)
     if (!addressed) return Promise.resolve()
-    const ran = this.#chain.then(() => this.#run(addressed))
+    const ran = this.#chain.then(() => withRebase(() => this.#run(addressed)))
     this.#chain = ran.catch(err => {
       console.error('[LayerCommitter] cascade failed (requestAndWait):', err, addressed)
     })
@@ -229,7 +266,7 @@ class CommitMachine {
    * requests still run.
    */
   enqueue<T>(task: () => Promise<T>): Promise<T> {
-    const ran = this.#chain.then(task)
+    const ran = this.#chain.then(() => withRebase(task))
     this.#chain = ran.then(() => {}, err => {
       console.error('[LayerCommitter] enqueued task failed:', err)
     })
@@ -397,6 +434,18 @@ export class LayerCommitter {
       },
     )
 
+    // ANOTHER TAB MOVED A HEAD (HistoryService re-read it after that tab's
+    // marker announcement, a commit's stale-head refusal, or this tab coming
+    // back into view). When it is the page on screen, reconcile through the
+    // same name-space diff a commit emits — on the FIFO, so it never lands in
+    // the middle of a commit's read-modify-write.
+    EffectBus.on<{ lineageSig?: string; from?: string | null; to?: string }>('history:head-external', p => {
+      const lineageSig = p?.lineageSig
+      const to = p?.to
+      if (!lineageSig || !to) return
+      void this.#machine.enqueue(() => this.#reconcileExternal(lineageSig, p?.from ?? null, to)).catch(() => {})
+    })
+
     // No preemptive bootstrap. cursor.load (called from show-cell on
     // first render) handles bootstrapping the visible lineage when
     // its bag is empty. Boot stays fast — all OPFS work is deferred
@@ -406,6 +455,41 @@ export class LayerCommitter {
   // All commit requests — batched or per-event — route through the
   // single CommitMachine. See the class above for the state transitions.
   #schedule(): void { this.#machine.request({ segments: null }) }
+
+  /** The page on screen took another tab's head: tell every surface which
+   *  tiles came and went (`fromCascade` — nothing here queues a commit), then
+   *  let the cursor absorb the new marker. A rewound view keeps showing the
+   *  past; only its cursor learns the new head. */
+  async #reconcileExternal(lineageSig: string, from: string | null, to: string): Promise<void> {
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    const lineage = get<Lineage>('@hypercomb.social/Lineage')
+    const segments = segmentsAtIntent()
+    if (!history || !lineage || segments === null) return
+    const here = await history.sign({ domain: lineage.domain, explorerSegments: () => segments } as Lineage)
+    if (here !== lineageSig) return
+    const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
+    const viewingPast = !!cursor && cursor.state.rewound === true
+    if (!viewingPast) {
+      const childNames = async (sig: string | null): Promise<Set<string>> => {
+        const names = new Set<string>()
+        const layer = sig ? await history.getLayerBySig(sig) : null
+        const kids: readonly unknown[] = Array.isArray(layer?.children) ? layer.children : []
+        await Promise.all(kids.map(async raw => {
+          const child = await history.getLayerBySig(String(raw))
+          if (child?.name) names.add(child.name)
+        }))
+        return names
+      }
+      const [before, after] = await Promise.all([childNames(from), childNames(to)])
+      for (const cell of after) if (!before.has(cell)) {
+        EffectBus.emit('cell:added', { cell, segments, fromCascade: true })
+      }
+      for (const cell of before) if (!after.has(cell)) {
+        EffectBus.emit('cell:removed', { cell, segments, fromCascade: true })
+      }
+    }
+    if (cursor) await cursor.onNewLayer()
+  }
 
   /** Bare re-snapshot at `segments`. The leaf hydrates from prev,
    *  applies no delta, outputs identical bytes — commitLayer dedup
@@ -468,10 +552,13 @@ export class LayerCommitter {
         fromCascade: true,
         mutationRollback: true,
       })
-      EffectBus.emit('toast:show', {
-        type: 'warning',
-        message: `${op === 'add' ? 'Add' : 'Remove'} did not save — the change was restored.`,
-      })
+      // A twice-refused rebase already said why (withRebase); one toast.
+      if (!isStaleHead(err)) {
+        EffectBus.emit('toast:show', {
+          type: 'warning',
+          message: `${op === 'add' ? 'Add' : 'Remove'} did not save — the change was restored.`,
+        })
+      }
     })
   }
 
@@ -819,6 +906,9 @@ export class LayerCommitter {
       } as Lineage)
 
       const prevSig = await history.latestMarkerSigFor(ancestorLocSig, ancestorName)
+      // The marker this head came from — commitLayer refuses (and the
+      // FIFO re-runs this import) if another tab moves it meanwhile.
+      const baseMarker = history.headMarkerOf?.(ancestorLocSig) ?? null
       const prevLayer = await history.getLayerBySig(prevSig)
 
       const update = updateByPath.get(pathKey)
@@ -908,7 +998,7 @@ export class LayerCommitter {
         }
       }
 
-      const newSig = await history.commitLayer(ancestorLocSig, machine.output())
+      const newSig = await history.commitLayer(ancestorLocSig, machine.output(), { marker: baseMarker })
       transitions.set(pathKey, { prevSig, newSig, name: ancestorName })
 
       // Post-commit reconcile — mirror what #commit emits so subscribers
@@ -1119,6 +1209,7 @@ export class LayerCommitter {
       } as Lineage)
 
       const prevSig = await history.latestMarkerSigFor(ancestorLocSig, ancestorName)
+      const baseMarker = history.headMarkerOf?.(ancestorLocSig) ?? null
       const prevLayer = await history.getLayerBySig(prevSig)
       const machine = LayerMachine.fromLayer(prevLayer, ancestorName, sub)
 
@@ -1231,7 +1322,7 @@ export class LayerCommitter {
         }
       }
 
-      await history.commitLayer(ancestorLocSig, machine.output())
+      await history.commitLayer(ancestorLocSig, machine.output(), { marker: baseMarker })
 
       // Slot-machine reconciliation. When a commit
       // replaces the children slot (e.g. via 'set' or 'layer' deltas,
