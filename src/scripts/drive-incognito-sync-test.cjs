@@ -11,8 +11,11 @@
 //   - hc:secret        — set (user typed in the modal)
 //   - hc:mesh-public   — 'true' (user toggled it OR dev shell default)
 //   - hc:nostrmesh:network — NOT SET (user has no idea this key exists)
-//   - hc:nostrmesh:relays  — NOT SET (defaults to LOCAL_RELAY)
-//   - hc:nostrmesh:allow-loopback — NOT SET (loopback is in defaults so allowed)
+//   - hc:nostrmesh:relays  — SET to the dev relay, ws://localhost:7777. A
+//     loopback page meets at the LIVE open meeting point wss://hypercomb.com
+//     by default since 2026-10-12; a harness never walks onto it, so the dev
+//     relay is named (a loopback page may dial a loopback relay it is given).
+//   - hc:nostrmesh:allow-loopback — NOT SET (a loopback page needs no allowance)
 //
 // Pass criteria: peer tile flows in BOTH directions, same as the full
 // driver — only with minimal config.
@@ -29,6 +32,8 @@ function log(tag, ...args) { console.log(`[${ts()}] [${tag}]`, ...args) }
 
 async function newPage(browser, label) {
   const ctx = await browser.newContext()
+  // Before any page script: even the first boot never dials the live point.
+  await ctx.addInitScript(() => { localStorage.setItem('hc:nostrmesh:relays', JSON.stringify(['ws://localhost:7777'])) })
   const page = await ctx.newPage()
   page.on('console', (msg) => {
     const text = msg.text()
@@ -59,6 +64,8 @@ async function configureMinimal(page, room, secret) {
     localStorage.setItem('hc:room', r)
     localStorage.setItem('hc:secret', s)
     localStorage.setItem('hc:mesh-public', 'true')
+    // The dev relay, named: never the live meeting point (2026-10-12).
+    localStorage.setItem('hc:nostrmesh:relays', JSON.stringify(['ws://localhost:7777']))
   }, { r: room, s: secret })
 }
 

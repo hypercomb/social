@@ -15,7 +15,11 @@ WebP (D3), the two words name the meeting point (D4), a tab with no meeting
 of its own asks (D5), room text is canonical (D6), a beacon carried on the
 upload is liveness (D7), the always-online point's deploy waits for its
 eviction and door fixes (D8), publish and shell deploy before coded links
-are handed out (D9), two tabs of one hive both keep writing (D10).
+are handed out (D9), two tabs of one hive both keep writing (D10). And
+(jwize, 2026-10-12): a room is its meeting point + room + secret — every
+room address and its two words name the point, the default included, and a
+loopback page meets at the default like every install
+(`swarm-room-identity.md`).
 
 Your hosts host the meeting. Joining is enough to share. A tile's name reaches
 the room at once, and its bytes follow as soon as its host serves them.
@@ -295,9 +299,17 @@ given.
 | `--allow-participants=<lifecycleSig>,...` | only keys whose `{alive}` beacon (kind 30206) carried one of those `x` values |
 | `--writers <keys>` | unchanged: named writers, uncapped |
 
-- `lifecycleSig` is `sha256('lifecycle\0' + room + '\0' + secret)`, the
-  channel the swarm already beacons on. Listing rooms needs a relay restart for
-  each new room. jwize.com runs the bare form.
+- `lifecycleSig` is `sha256('lifecycle\0' + room + '\0' + secret + '\0' + point)`,
+  the channel the swarm already beacons on, `point` being the lowercase
+  host[:port] of the meeting point the room MEETS at — the relay its
+  participants dial (hypercomb.com for a room at the open default), which is
+  this relay only when the room meets here. A relay that only keeps a room's
+  bytes (D7: the room meets elsewhere and uploads here) lists the sig of the
+  point the room meets at, never its own host. The meeting point is part of
+  every room address since 2026-10-12 (`swarm-room-identity.md`); a sig
+  listed before then names no room any more. `scripts/swarm-preflight.cjs`
+  prints the sig for the relay it is pointed at. Listing rooms needs a relay
+  restart for each new room. jwize.com runs the bare form.
 - "Live" means recently heard. The relay keeps an in-memory map from key to
   the time of its last verified EVENT and the zones it beaconed in. A restart
   empties it, and the reconnect beacon refills it within a second. The swarm
@@ -523,13 +535,22 @@ Each walk builds the entry for each public child with one helper:
   - `uploading` counts only tiles a needed host still owes uploads for;
     `notQueued` the name-only rest nothing is uploading (a hole in the
     closure, a seal that never resolves): "N names only — not queued";
-  - `deepOnDevice` — takeable branches whose deeper pages are still only here;
+  - `deepOnDevice` — takeable tiles whose deeper pages are still only on
+    this device, a host still taking them (D1). The sharer is told, in the
+    warn tone: "Deeper pages of N tiles are still only on your device — stay
+    a moment to leave them with the room" (BCL-3) — unless a host refusing
+    those pages is named already (the `held` `deep` line above);
   - `taken` / `unackedMs` — whether the relay OK'd this page's newest word,
-    and for how long it has not (said again once at about 3 s while
-    untaken). The line shows "Sending…" past 3 s and counts you in "(N
-    here)" only once the word is taken;
+    and how long the oldest of this tab's own frames (this page's word, the
+    beacon) has gone untaken (said again once at about 3 s while untaken).
+    The line counts "Sending…" from the swarm's own age — a status said
+    again never restarts the count (TS-7) — shows it past 3 s, and does not
+    count you in "(N here)" while it shows;
   - `passedOver` — the hosts passed over, this page's and its offered
-    branches' (D2), named whenever there is one.
+    branches' at ANY depth (D2; BCL-1: a publish domain worn on a page two
+    levels below the offered tile is named too, via host-sync
+    `closurePassedOverOf`), named whenever there is one, with "they aren't"
+    for two or more.
 - A full entry's atoms are read over HTTP first: the receiver's broker is told
   every ref of a live peer's page as `hosted` (never raced on the mesh), and
   the `deep: 'owner'` roots as `owner` — everything read BENEATH such a root
@@ -789,9 +810,13 @@ frames are the relay's one NOTICE and the idle-only probes.
   that locked twice leaves a zombie socket of the first lock that must not
   hold the will until the reap. relay.js pings the quiet candidates when the
   will is armed and asks again when the grace ends; the always-online
-  meeting point cannot ping (a Worker cannot), so there a candidate heard
-  within the last 90 s counts too — a hidden second tab, throttled to a frame
-  a minute, keeps the will. A connection of the slot that speaks DURING the
+  meeting point cannot ping (a Worker cannot), so it ASKS instead: each
+  quiet candidate is sent, on its own lifecycle subscription only, the
+  tombstone the room would hear (never stored, never fanned out); a live tab
+  beacons again about 1 s later (`#reassertAfterStaleTombstone`) and takes
+  the will, and a zombie says nothing, so the room hears the leave when the
+  15 s grace ends (MS6 — it was 90 s). A tab that cannot run (frozen,
+  suspended) is marked away until its next beacon. A connection of the slot that speaks DURING the
   grace takes the will (it does not merely cancel it), so its own later death
   is still heard. A same-key tab that never joined neither inherits nor
   cancels it, so closing the joined tab still marks it away after 15 s.
@@ -938,17 +963,27 @@ frames are the relay's one NOTICE and the idle-only probes.
   typed name never becomes a command), and connects.
 - The link carries the secret. Anyone holding it can join and upload within
   the caps. Post it where the room is, and nowhere else.
-- **THE TWO WORDS (D4).** They come from the room, the secret and — when it
-  is not the shipped default `hypercomb.com` (since 2026-10-11; it was
-  `jwize.com`) — the meeting point's host, never the page. Everyone in a room sees the same two words on any page, and half
-  a room split onto another relay sees a different pair. Rooms on the
-  default relay keep the words they always had. The pair is always from the
-  ONE English list, in every language; a reader of another language sees
-  their own pair beside it ("light moss (うるわしい しま)"), so a mixed room
-  compares the same English words out loud. One relay reached under two
-  names (a host and its `www.`, a proxy port) reads two pairs; real links
-  carry one URL.
-- **THE WORDS DURING THE MOVE TO hypercomb.com (2026-10-11).** Which point
+- **THE TWO WORDS (D4; the room identity, 2026-10-12).** They are the
+  readable form of the room's address: the meeting point, the room and the
+  secret (`lifecycle \0 room \0 secret \0 point`, core
+  `lifecyclePreimage`), never the page. The point is ALWAYS in it — the
+  shipped default `hypercomb.com` too, and an empty meeting-point field IS
+  `hypercomb.com` — so EVERY pair changed on 2026-10-12, default-relay rooms
+  included: last week's pair is not this week's. Everyone in a room sees the
+  same two words on any page, and half a room at another point is another
+  room and reads another pair. The words follow the package that addresses
+  the room (`SwarmDrone.roomIdentity`, read in-page by the shell): a shell
+  newer than its package reads that package's pair (the D4 one before the
+  update), so a pair always names the address the tab meets at. The pair is
+  always from the ONE English list, in every language; a reader of another
+  language sees their own pair beside it ("light moss (うるわしい しま)"), so
+  a mixed room compares the same English words out loud. One relay reached
+  under two names (a host and its `www.`, a proxy port, `localhost` and
+  `127.0.0.1`) is two rooms; real links carry one URL
+  (`swarm-room-identity.md`).
+- **THE WORDS DURING THE MOVE TO hypercomb.com (2026-10-11 — history: the
+  room identity of 2026-10-12 replaced the shell-side `SHIPPED_POINT` fold
+  below; the words now follow the loaded package).** Which point
   counts as the shipped default is the SHELL's (`SHIPPED_POINT`), and the
   relay a tab dials is its ESSENTIALS' (`LIVE_RELAY`). Every web profile takes
   a new shell on reload; essentials arrive only when its participant presses
@@ -1035,15 +1070,13 @@ If it fails:
    everyone's hive, so nobody's seeded tiles collide there.
 3. Type `/invite`. Paste the link in the group chat and show it on screen.
    Type `>` to go back to making tiles.
-   **Facilitating from a loopback hive** (`http://localhost:4250`): a loopback
-   page dials `ws://localhost:7777`, not the shipped default. Until
-   2026-10-11 that was the same relay (`wss://jwize.com` reached `:7777`
-   through cloudflared); now the default is `wss://hypercomb.com`, so turn
-   the live relay on first (`/use-live-relay on`), or invite with
-   `invite wss://hypercomb.com` — it opens the selector on that meeting point,
-   and its share button copies a link that carries `relay=`. The explicit
-   `relay=` also brings guests on packages from before the move to the same
-   meeting point.
+   **Facilitating from a loopback hive** (`http://localhost:4250`): since
+   2026-10-12 a loopback page meets at the shipped default
+   (`wss://hypercomb.com`) like every install — nothing to turn on. The dev
+   relay `ws://localhost:7777` is dialled only when you name it (the
+   meeting-point field, `/use-live-relay <room> <secret> ws://localhost:7777`,
+   a relay list), and a room there is another room. There is no pre-filled
+   dev secret any more: type one.
 4. The line reads "Live · meetup · {words} — you're the first one here ·
    Invite".
 

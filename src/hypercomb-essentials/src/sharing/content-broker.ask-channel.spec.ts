@@ -3,18 +3,20 @@
 // An ask names what it wants (`d`) — a visuals ask names the room's own
 // composed location — so the channel decides who learns a room's addresses.
 // Pinned here:
-//   1. A joined tab asks on its ROOM's channel, sign('broker:fetch\0room\0secret'),
-//      and on nothing anyone can derive without the secret.
+//   1. A joined tab asks on its ROOM's channel,
+//      sign('broker:fetch\0room\0secret\0point') — the meeting point it dials
+//      always part of it (core roomPreimage, 2026-10-12) — and on nothing
+//      anyone can derive without the secret.
 //   2. Out of a room (or not joined) it asks nothing over the mesh and listens
 //      to nothing — its bytes come from hosts.
 //   3. THE DRAIN: in a room it also listens on the old word, so an older build's
 //      ask is answered; once an older build has been heard asking, its own asks
 //      also go to the word, marked — and a current holder skips a marked copy
 //      (it heard the room one).
-//   4. A change of room, secret or membership moves the channel.
+//   4. A change of room, secret, meeting point or membership moves the channel.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, roomPreimage } from '@hypercomb/core'
 
 const membership = vi.hoisted(() => ({ joined: false }))
 vi.mock('./membership.js', () => ({ isJoinedHere: () => membership.joined }))
@@ -40,12 +42,15 @@ const sha256 = async (bytes: Uint8Array): Promise<string> => {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer))
   return [...digest].map(b => b.toString(16).padStart(2, '0')).join('')
 }
-const channelOf = (room: string, secret: string): Promise<string> => sha256(new TextEncoder().encode(`broker:fetch\0${room}\0${secret}`))
+const channelOf = (room: string, secret: string, point = ''): Promise<string> => sha256(new TextEncoder().encode(`broker:fetch\0${roomPreimage(room, secret, point)}`))
 
 type Evt = { kind: number; pubkey: string; tags: string[][]; content: string }
 type Published = { kind: number; sig: string; tags: string[][] }
 
 class FakeMesh {
+  /** The relay this tab dials, host[:port] ('' = none named: the default). */
+  point = ''
+  swarmHost = (): string => this.point
   published: Published[] = []
   subs = new Map<string, Set<(e: { event: Evt; payload: unknown }) => void>>()
   publish = async (kind: number, sig: string, _payload: unknown, tags: string[][] = []): Promise<boolean> => {
@@ -147,6 +152,44 @@ describe('the ask channel is the room', () => {
     membership.joined = false
     EffectBus.emit('mesh:public-changed', { public: false })
     await vi.waitFor(() => expect(mesh.listening()).toEqual([]))
+  })
+
+  it('the meeting point is part of the room: another point moves the channel, the default is one point however it is written', async () => {
+    // An empty field and hypercomb.com are one room — and not the room's
+    // channel from before the point was part of it.
+    expect(await channelOf('alpha', 'secret', '')).toBe(await channelOf('alpha', 'secret', 'wss://HyperComb.com/'))
+    expect(await channelOf('alpha', 'secret', '')).not.toBe(await sha256(new TextEncoder().encode('broker:fetch\0alpha\0secret')))
+    membership.joined = true
+    enterRoom('alpha', 'secret')
+    mesh.point = 'hypercomb.com'
+    const atDefault = await channelOf('alpha', 'secret', '')
+    const atPoint = await channelOf('alpha', 'secret', 'pluginthematrix.com')
+    expect(atPoint).not.toBe(atDefault)
+    const broker = await boot()
+    await vi.waitFor(() => expect(mesh.listening()).toEqual([atDefault, WORD].sort()))
+
+    // The tab moves to another meeting point; room and secret stay.
+    mesh.point = 'pluginthematrix.com'
+    EffectBus.emit('mesh:zone', { relay: 'wss://pluginthematrix.com' })
+    await vi.waitFor(() => expect(mesh.listening()).toEqual([atPoint, WORD].sort()))
+    expect(await broker.fetchBySig('a'.repeat(64), 'layer', 150)).toBeNull()
+    expect(mesh.asks().map(p => p.sig)).toEqual([atPoint])
+  })
+
+  it('a point that moves with no zone announcement (a relay list changed under a joined tab) moves a tab that only serves', async () => {
+    membership.joined = true
+    enterRoom('alpha', 'secret')
+    mesh.point = 'hypercomb.com'
+    const atDefault = await channelOf('alpha', 'secret', '')
+    const atOther = await channelOf('alpha', 'secret', 'other.example')
+    await boot()
+    await vi.waitFor(() => expect(mesh.listening()).toEqual([atDefault, WORD].sort()))
+    // `/domain remove wss://hypercomb.com`: the mesh now dials other.example
+    // and says its connection again — no zone, and this tab asks nothing.
+    mesh.point = 'other.example'
+    EffectBus.emit('mesh:connection', { state: 'connecting', reopened: false, since: Date.now(), attempt: 0, clockOffsetMs: 0 })
+    await vi.waitFor(() => expect(mesh.listening()).toEqual([atOther, WORD].sort()))
+    expect(mesh.asks()).toEqual([])
   })
 })
 

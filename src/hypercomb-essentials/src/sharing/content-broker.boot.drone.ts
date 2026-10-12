@@ -71,7 +71,7 @@
 // self-cleaning drain removes it. Layer/resource paths use the
 // canonical Store APIs.
 
-import { Drone, EffectBus, isMetaEnvelope, registerPoolMeaning } from '@hypercomb/core'
+import { Drone, EffectBus, isMetaEnvelope, registerPoolMeaning, roomPreimage } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
 import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
@@ -136,8 +136,9 @@ const RESPONSE_TTL_SECS = 900
 // visuals ask names the room's own composed location — so whoever can hear
 // the channel learns the room's addresses, then reads them. It used to be the
 // one global word 'broker:fetch', which anyone on a relay could subscribe to.
-// Now it is sign('broker:fetch\0room\0secret'), derived like the lifecycle
-// and presence channels: only the room's members can name it. A tab that is
+// Now it is sign('broker:fetch\0room\0secret\0point'), derived like the
+// lifecycle and presence channels (core roomPreimage — the meeting point is
+// always part of the room, 2026-10-12): only the room's members can name it. A tab that is
 // not joined to a room asks nothing over the mesh — its bytes come from hosts.
 const ASK_LABEL = 'broker:fetch'
 const ROOM_STORE_KEY = '@hypercomb.social/RoomStore'
@@ -480,6 +481,8 @@ interface MeshApi {
   // The broker uses this to serve 'visuals' requests without keeping
   // its own LRU — the mesh already does the work.
   getNonExpired?: (sig: string) => readonly { event: NostrEventLike }[]
+  /** The relay this tab meets at, host[:port] — the room's meeting point. */
+  swarmHost?: () => string
 }
 
 interface SignerApi {
@@ -857,10 +860,11 @@ export class ContentBrokerDrone extends Drone {
   //       viewer resolve a peer's website/resource sig even when no mesh
   //       ['domain'] attribution ever reached it — resources have no mesh
   //       fallback, so without a fallback host they'd silently 404. Gated
-  //       exactly like the mesh seed (NostrMeshDrone.loadRelays): '1' forces it
-  //       anywhere, '0' opts fully out, unset defaults ON for a real origin and
-  //       OFF on loopback (dev resolves from the local relay). Per-client opt
-  //       out with `/use-live-relay off`.
+  //       exactly like the mesh seed (NostrMeshDrone.loadRelays): '0' opts
+  //       fully out, anything else is ON on every origin — a loopback dev page
+  //       meets at the shipped default since 2026-10-12, so it resolves what
+  //       the room it meets in resolves. Per-client opt out with
+  //       `/use-live-relay off`.
   //
   //   (b) Operator-configured extras — `hc:fallback-domains` (JSON array, same
   //       shape as hc:community:domains), appended after the beta mirrors.
@@ -897,18 +901,14 @@ export class ContentBrokerDrone extends Drone {
   // True when the shared LIVE relay is active for this client — the single
   // condition that also seeds the beta byte mirrors above. Mirrors
   // NostrMeshDrone.loadRelays' seed policy verbatim so ONE flag governs both
-  // transports:
-  //   flag '1'  → forced on (any origin, incl. loopback)
+  // transports (2026-10-12: one default, every origin):
   //   flag '0'  → opted fully out
-  //   unset     → ON for a real (deployed) origin, OFF on loopback dev
+  //   otherwise → on, a loopback dev page too — it meets at the shipped
+  //               default like every install, so its bytes resolve there too
   #liveRelayActive = (): boolean => {
     let flag: string | null = null
     try { flag = localStorage.getItem('hc:nostrmesh:use-live-relay') } catch { /* private mode */ }
-    if (flag === '1') return true
-    if (flag === '0') return false
-    try {
-      return !/^(localhost|127(?:\.\d+){3}|\[?::1\]?)$/i.test(location.hostname)
-    } catch { return false }
+    return flag !== '0'
   }
 
   // Pull all `['domain', host]` tags out of an incoming response event.
@@ -2647,6 +2647,13 @@ export class ContentBrokerDrone extends Drone {
     EffectBus.on('mesh:public-changed', resync)
     EffectBus.on('mesh:room', resync)
     EffectBus.on('mesh:secret', resync)
+    // Another meeting point is another room: its ask channel is another one.
+    // A point can also move with no zone announcement (a relay list changed
+    // under a joined tab — /domain): the mesh says its connection again, and
+    // a tab that only SERVES (asks nothing itself) follows the room there.
+    // A key comparison when nothing moved.
+    EffectBus.on('mesh:zone', resync)
+    EffectBus.on('mesh:connection', resync)
     const ioc = (window as { ioc?: { whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc
     for (const key of [ROOM_STORE_KEY, SECRET_STORE_KEY]) {
       ioc?.whenReady?.(key, (store) => { (store as EventTarget | undefined)?.addEventListener?.('change', resync) })
@@ -2710,8 +2717,9 @@ export class ContentBrokerDrone extends Drone {
     return out
   }
 
-  /** This tab's room ask channel: sign('broker:fetch\0room\0secret') while
-   *  it is joined to a room, else ''. Derived once per room and secret. */
+  /** This tab's room ask channel: sign('broker:fetch\0room\0secret\0point')
+   *  while it is joined to a room, else ''. Derived once per room, secret and
+   *  meeting point (the relay this tab dials — the mesh's swarmHost). */
   #roomAskChannel = (): Promise<string> => {
     if (!isJoinedHere()) return Promise.resolve('')
     const credential = (key: string): string => {
@@ -2720,9 +2728,13 @@ export class ContentBrokerDrone extends Drone {
     const room = credential(ROOM_STORE_KEY)
     const secret = credential(SECRET_STORE_KEY)
     if (!room || !secret) return Promise.resolve('')
-    const key = `${room}\0${secret}`
+    const key = roomPreimage(room, secret, this.#getMesh()?.swarmHost?.() ?? '')
     if (this.#askDerivation?.key !== key) {
+      // A room that moved under an ask (a relay list changed with no zone
+      // announcement) is listened for where it is now, too.
+      const moved = this.#askDerivation !== null
       this.#askDerivation = { key, channel: sha256Hex(new TextEncoder().encode(`${ASK_LABEL}\0${key}`)).catch(() => '') }
+      if (moved) queueMicrotask(() => void this.#syncAskChannel())
     }
     return this.#askDerivation.channel
   }

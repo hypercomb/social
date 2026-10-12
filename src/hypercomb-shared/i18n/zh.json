@@ -369,10 +369,6 @@
   "mesh-modal.location-placeholder": "输入位置名称",
   "mesh-modal.secret-label": "密钥",
   "mesh-modal.secret-placeholder": "共享密钥",
-  "mesh-modal.label-label": "您的名字",
-  "mesh-modal.label-placeholder": "群组中其他人看到的名称",
-  "mesh-modal.host-label": "主机",
-  "mesh-modal.host-placeholder": "连接的域名",
   "mesh-modal.show-secret": "显示密钥",
   "mesh-modal.hide-secret": "隐藏密钥",
   "mesh-modal.remove-saved": "删除已保存的位置",
@@ -2770,6 +2766,9 @@
   "mesh-modal.code-label": "访问码",
   "mesh-modal.code-placeholder": "访问码（如果会面点需要）",
   "mesh-modal.bad-code": "该访问码含有连接无法携带的字符（空格、逗号、斜杠……）",
+  "hosts.own-host": "你自己的主机",
+  "hosts.own-host-placeholder": "你自己的主机 — 备份存放的地方",
+  "hosts.own-host-set": "设置",
   "use-live-relay.too-many": "词太多：{words} — 请给出房间、密钥和一个 ws(s):// 服务器",
   "use-live-relay.bad-server": "'{server}' 不是此标签页可以连接的服务器",
   "mesh.state.access": "{host} 需要当前的会面链接 — 请索取最新的链接",
@@ -2793,6 +2792,8 @@
   "share.names-only": "{count} 个只有名称 — 未排队上传",
   "share.names-only.one": "{count} 个只有名称 — 未排队上传",
   "share.passed-over": "已跳过 {host} — 它不接受上传",
+  "share.passed-over.one": "已跳过 {host} — 它不接受上传",
+  "share.passed-over.other": "已跳过 {host} — 它们不接受上传",
   "share.deep-owner": "更深的页面在上传完成前，从 {name} 的设备打开",
   "host.publish.refused": "{node} 拒绝了上传（{reason}） — 没有发布任何内容",
   "meet.needs-update": "此会面需要较新的 Hypercomb — 更新后链接会自动打开",
@@ -2808,5 +2809,7 @@
   "history.commit-conflict": "此蜂巢的另一个标签页在同一时刻更改了此页面 — 你的更改没有保存。请再试一次。",
   "drop.image-failed": "无法添加那张图片 — 请重试，或换一张图片。",
   "share.held.deep": "{host} 不接受 {count} 个磁贴的更深页面 — 你在这里时，它们从你的设备打开",
-  "share.held.deep.one": "{host} 不接受 {count} 个磁贴的更深页面 — 你在这里时，它们从你的设备打开"
+  "share.held.deep.one": "{host} 不接受 {count} 个磁贴的更深页面 — 你在这里时，它们从你的设备打开",
+  "share.held.on-device": "{count} 个磁贴的更深页面仍只在你的设备上 — 请稍留片刻，把它们留给房间",
+  "share.held.on-device.one": "{count} 个磁贴的更深页面仍只在你的设备上 — 请稍留片刻，把它们留给房间"
 }

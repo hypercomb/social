@@ -11,7 +11,7 @@
 
 import { createHash } from 'node:crypto'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EffectBus, lineageKey } from '@hypercomb/core'
+import { EffectBus, lineageKey, roomPreimage } from '@hypercomb/core'
 
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
 const HEX64 = /[0-9a-f]{64}/i
@@ -138,7 +138,7 @@ const until = async (pred: () => boolean, timeoutMs = 3000): Promise<void> => {
   }
 }
 
-const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${ROOM}\0${SECRET}`)
+const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${roomPreimage(ROOM, SECRET, state.swarmHost)}`)
 const layerAt = (segments: readonly string[]): Published[] =>
   published.filter(p => p.kind === 30200 && p.sig === pageSig(segments))
 const lastLayerAt = (segments: readonly string[]): Published | undefined => layerAt(segments).at(-1)

@@ -26,7 +26,7 @@
 // subscription on the same sig auto-triggers that paint when an event
 // arrives, so we don't need to dispatch a render signal ourselves.
 
-import { Drone, EffectBus, normalizeCell, poolAddresses, SignatureService } from '@hypercomb/core'
+import { Drone, EffectBus, lifecyclePreimage, meetingPointKey, normalizeCell, poolAddresses, roomPreimage, SignatureService } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
@@ -102,7 +102,7 @@ const SWARM_PRESENCE_KIND = 30204
 
 // Subscribe-request event. The would-be subscriber publishes one of
 // these at the leader's "request channel" sig
-// (sha256(`request:${leaderPubkey}\0room\0secret`)) so the leader,
+// (sha256(`request:${leaderPubkey}\0room\0secret\0point`)) so the leader,
 // who is subscribed to their own request channel from boot, receives
 // a notification: "X wants to subscribe to your broadcasts."
 // Content { label } — leader's UI uses it to decide accept / no thanks.
@@ -113,7 +113,8 @@ const SWARM_PRESENCE_KIND = 30204
 const SWARM_SUBSCRIBE_REQUEST_KIND = 30205
 
 // Swarm lifecycle (presence roster) event. ONE shared channel per zone
-// (sha256(`lifecycle\0room\0secret`)) that EVERY participant subscribes
+// (sha256(`lifecycle\0room\0secret\0point`), core lifecyclePreimage —
+// the meeting point always part of it) that EVERY participant subscribes
 // to — so a single broadcast reaches the whole swarm regardless of which
 // location each member is currently viewing. Two payload shapes, both
 // replaceable per (pubkey, kind, d-tag=pubkey):
@@ -486,6 +487,10 @@ interface HostSyncLike {
   closureVerdict?: (sig: string, kind: 'layer' | 'bee' | 'dependency' | 'resource', deep: boolean, page: readonly string[], extra?: readonly string[]) => Promise<ClosureVerdict | boolean | null>
   /** Every swarm host a root's closure is shown on (synchronous). */
   closureHostsOf?: (sig: string) => string[]
+  /** The hosts passed over for the pages of a root's closure (synchronous):
+   *  a publish domain worn below the tile that refuses or never answered,
+   *  whose pages went elsewhere (BCL-1). Optional: an older host-sync. */
+  closurePassedOverOf?: (sig: string) => string[]
   /** Where a page's offered tiles go, synchronously (swarm-hosts.ts):
    *  publish domains, else the hosts pool, else a relay that hosts
    *  participants. Optional: an older host-sync derives one from the relay. */
@@ -940,7 +945,7 @@ export class SwarmDrone extends Drone {
   // emits it on every render; if it fires before our lineage-change hook
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
-  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed', 'swarm:visit-folded', 'mesh:connection', 'mesh:rejected', 'sync:state', 'swarm:hosts-changed', 'mesh:clock-corrected']
+  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'mesh:zone', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed', 'swarm:visit-folded', 'mesh:connection', 'mesh:rejected', 'sync:state', 'swarm:hosts-changed', 'mesh:clock-corrected']
   protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed', 'swarm:withheld-changed', 'swarm:zone-incomplete', 'swarm:zone-complete', 'swarm:tile-visited', 'swarm:share-status', 'swarm:page-announced', 'swarm:roster-changed']
 
   // Per-lineage subscription handle. We open one per visited sig and
@@ -1142,6 +1147,10 @@ export class SwarmDrone extends Drone {
   // SAME sig even after the zone credentials are about to change).
   #lifecycleSub: { close: () => void } | null = null
   #lifecycleSig = ''
+  // The meeting point (core meetingPointKey) the current lifecycle channel —
+  // and so every address of this room — was derived at. A move to another
+  // point is a move to another room (#onMeetingPointMoved).
+  #lifecyclePoint = ''
   // Wall-clock (ms) of our last alive beacon. Throttles the beacon to the
   // NIP-40 refresh cadence instead of firing on every navigation — the
   // heartbeat keeps it alive; nav-time calls within the window no-op.
@@ -1788,6 +1797,12 @@ export class SwarmDrone extends Drone {
     // emit the effect before/instead of writing the store.
     this.onEffect<{ room?: string }>('mesh:room', () => this.#teardownAndResync('mesh:room-effect'))
     this.onEffect('mesh:secret', () => this.#teardownAndResync('mesh:secret-effect'))
+    // A NEW MEETING POINT IS A NEW ROOM (jwize, 2026-10-12): the point is in
+    // every room address, so a tab whose point moved while the room and
+    // secret stayed (`use-live-relay <room> <secret> wss://…`, the selector)
+    // leaves the old room's addresses and meets at the new ones. After the
+    // writer's turn — the zone is already written when this is announced.
+    this.onEffect('mesh:zone', () => { queueMicrotask(() => { this.#onMeetingPointMoved('mesh:zone') }) })
 
     // Tile properties changed — any writer that updates a child's 0000
     // (layout index write, editor save, AI bridge stamp, substrate
@@ -1987,6 +2002,7 @@ export class SwarmDrone extends Drone {
         if (this.#receiptRepublishTimer) { clearTimeout(this.#receiptRepublishTimer); this.#receiptRepublishTimer = null }
         if (this.#lifecycleSub) { try { this.#lifecycleSub.close() } catch { /* ignore */ } this.#lifecycleSub = null }
         this.#lifecycleSig = ''
+        this.#lifecyclePoint = ''
         for (const sub of this.#subsBySig.values()) {
           try { sub.close() } catch { /* ignore */ }
         }
@@ -2123,6 +2139,47 @@ export class SwarmDrone extends Drone {
   /** The relay this tab meets at, as a host — '' when none is dialable. */
   #swarmHost = (): string => {
     try { return String(this.#getMesh()?.swarmHost?.() ?? '').trim() } catch { return '' }
+  }
+
+  /** THE MEETING POINT THIS ROOM IS AT (jwize, 2026-10-12): the relay this
+   *  tab dials — the mesh's swarmHost, which is the tab's own point while it
+   *  meets at one — as core meetingPointKey folds it; the shipped default
+   *  when there is none. Never a replication host. Synchronous: nothing is
+   *  asked of anyone. */
+  #meetingPoint = (): string => meetingPointKey(this.#swarmHost())
+
+  /** THE ROOM AS EVERY ADDRESS NAMES IT: `room \0 secret \0 point` (core
+   *  roomPreimage). Every address this drone derives from the room — page
+   *  channels, the lifecycle roster, the personal, request and presence
+   *  channels — hashes `<label> \0 ` + this, so two halves of one room text
+   *  at two meeting points are two rooms with two pairs of words. */
+  #roomTail = (room: string, secret: string): string => roomPreimage(room, secret, this.#swarmHost())
+
+  /** Which room identity this package derives its addresses with — 2: the
+   *  meeting point + room + secret (core roomPreimage, 2026-10-12). The
+   *  shell reads it, in-page and synchronously, so the two words it shows
+   *  are drawn the way THIS package addresses the room (presence-status
+   *  loadedRoomIdentity): a shell and a package update apart, and a package
+   *  from before (no marker) still meets at `lifecycle \0 room \0 secret`. */
+  public readonly roomIdentity = 2
+
+  /** The room's lifecycle (roster) address this tab beacons on now — ''
+   *  while it is in no room. Synchronous; nothing is derived for the asker.
+   *  Host-sync carries it as the `x` of the `{alive}` beacon on an upload
+   *  (D7), so a host checking the beacon reads exactly the address the room
+   *  meets at — never one host-sync derived on its own. */
+  public lifecycleSig = (): string => this.#lifecycleSig
+
+  /** The mesh now meets somewhere the room's addresses were not derived at:
+   *  tear the old room down (its {left} on the old roster) and resync at the
+   *  new point's addresses. True when it did. Checked on every sync and on
+   *  each `mesh:zone`; a tab with no lifecycle channel yet has nothing to
+   *  move. */
+  #onMeetingPointMoved = (reason: string): boolean => {
+    if (!this.#lifecycleSig || !this.#lifecyclePoint) return false
+    if (this.#meetingPoint() === this.#lifecyclePoint) return false
+    this.#teardownAndResync(`meeting-point:${reason}`)
+    return true
   }
 
   // -----------------------------------------------------------------
@@ -2430,8 +2487,8 @@ export class SwarmDrone extends Drone {
 
   /**
    * Compose the swarm sig for an arbitrary set of segments. Same
-   * algorithm as #syncForCurrentLineage: sha256 of `lineageKey + ' ' +
-   * room + ' ' + secret`. Returns '' when room/secret are not set or
+   * algorithm as #syncForCurrentLineage: sha256 of `lineageKey \0 room \0
+   * secret \0 meeting point` (#roomTail). Returns '' when room/secret are not set or
    * when the signature store isn't ready — caller treats that as
    * "no peer tiles to surface."
    */
@@ -2454,7 +2511,7 @@ export class SwarmDrone extends Drone {
     // another. Both A's local fanout (mesh.fanoutToSig keys by sig) and
     // the relay's #x tag filter use the publish sig — so the subscriber
     // must compose the SAME bytes the publisher does.
-    try { return await sigStore.signText(`${pathKey}\0${room}\0${secret}`) }
+    try { return await sigStore.signText(`${pathKey}\0${this.#roomTail(room, secret)}`) }
     catch { return '' }
   }
 
@@ -2800,12 +2857,18 @@ export class SwarmDrone extends Drone {
     // being read now, so the walk below finds it cached. Never waited on.
     try { this.#getHostSync()?.warmSwarmHosts?.(segments) } catch { /* an older host-sync */ }
 
+    // ANOTHER MEETING POINT IS ANOTHER ROOM. The mesh moved to a relay this
+    // room's addresses were not derived at (a list changed under a joined
+    // tab — /domain, a relay word — without the zone's own announcement):
+    // leave the old room's addresses and come back at the new point's.
+    if (this.#onMeetingPointMoved('sync')) return
+
     let composedSig = ''
     try {
-      // sha256(lineage + '\0' + room + '\0' + secret) — NUL separators
-      // prevent any one field bleeding into another (e.g. room='a:b'
-      // and secret='' colliding with room='a' and secret='b').
-      composedSig = await sigStore.signText(`${pathKey}\0${room}\0${secret}`)
+      // sha256(lineage + '\0' + room + '\0' + secret + '\0' + point) — NUL
+      // separators prevent any one field bleeding into another (e.g.
+      // room='a:b' and secret='' colliding with room='a' and secret='b').
+      composedSig = await sigStore.signText(`${pathKey}\0${this.#roomTail(room, secret)}`)
     } catch { return }
     if (!composedSig) return
 
@@ -2814,7 +2877,7 @@ export class SwarmDrone extends Drone {
     // last sync stood on is not this one.
     const prevKey = this.#currentPageKey()
     const navigated = this.#lastSyncInput !== null && prevKey !== pathKey
-    this.#lastSyncInput = { segments, room, secretLen: secret.length, key: `${pathKey}\0${room}\0${secret}` }
+    this.#lastSyncInput = { segments, room, secretLen: secret.length, key: `${pathKey}\0${this.#roomTail(room, secret)}` }
     // PRIVATE = SILENT. Only #syncForSig used to read the mesh flag; every
     // publish after it — the lifecycle beacon, presence, the personal
     // channel, the drill request, the visit — ran on every navigation and
@@ -3023,11 +3086,21 @@ export class SwarmDrone extends Drone {
     // drop our tiles at once. Capture the sig first; #ensureLifecycle will
     // recompute + resubscribe for the new zone via #syncForCurrentLineage.
     const leavingLifecycleSig = this.#lifecycleSig
-    if (leavingLifecycleSig) void this.#publishLeave(leavingLifecycleSig)
+    // A {left} is said only WHERE THE ROOM IT LEAVES IS. Once this tab meets
+    // at another point (the selector, a meeting link, /use-live-relay with a
+    // server — the list has already moved), the mesh would carry the
+    // tombstone to the NEW relay: the old room would never hear it, and that
+    // relay's operator would be handed the old room's roster address (and
+    // its pubkeys and paths) without its secret. The old socket's close says
+    // it there instead — the meeting point's will, its 15 s grace
+    // (documentation/swarm-room-identity.md).
+    const pointMoved = !!this.#lifecyclePoint && this.#meetingPoint() !== this.#lifecyclePoint
+    if (leavingLifecycleSig && !pointMoved) void this.#publishLeave(leavingLifecycleSig)
     // A new zone: nothing of ours to replay there (#replayReady).
     this.#resumedZone = false
     if (this.#lifecycleSub) { try { this.#lifecycleSub.close() } catch { /* ignore */ } this.#lifecycleSub = null }
     this.#lifecycleSig = ''
+    this.#lifecyclePoint = ''
     this.#participantAliveMs.clear()
     for (const sub of this.#subsBySig.values()) {
       try { sub.close() } catch { /* ignore */ }
@@ -3873,7 +3946,7 @@ export class SwarmDrone extends Drone {
     // composeSigForSegments exactly so subscribers and publishers address the
     // same slot. Canonical key via lineageKey() (folds punctuation) — the walk
     // still resolves dirs/children by RAW name; only the hashed key normalizes.
-    const key = `${lineageKey(segments)}\0${room}\0${secret}`
+    const key = `${lineageKey(segments)}\0${this.#roomTail(room, secret)}`
     let sig = ''
     try { sig = await sigStore.signText(key) } catch { return }
     if (!sig) return
@@ -4063,11 +4136,16 @@ export class SwarmDrone extends Drone {
       // answered, so its pages went by the meeting host, the pool or the
       // relay) is named HERE, where the branch is offered — once its tiles
       // are takeable nothing else on the line would say the domain is not
-      // the one hosting it.
+      // the one hosting it. So is one worn DEEPER in the branch (BCL-1: a
+      // page two levels down wears a mistyped domain): host-sync knows every
+      // page of the branch's closure and where each one's bytes went instead
+      // (closurePassedOverOf — synchronous, caches only).
       const passedOver = new Set(hostInfo.passedOver ?? [])
       for (const c of childRefs) {
         if (!isBranchPublic(publicLocation, c.name)) continue
         for (const h of this.#pageHosts([...segments, c.name])?.passedOver ?? []) passedOver.add(h)
+        if (!c.layerSig || typeof hostSync?.closurePassedOverOf !== 'function') continue
+        try { for (const h of hostSync.closurePassedOverOf(c.layerSig)) passedOver.add(h) } catch { /* an older host-sync */ }
       }
       status = {
         location: publicLocation,
@@ -5114,7 +5192,7 @@ export class SwarmDrone extends Drone {
     this.#publishStats.walkNodeVisits++
 
     // Canonical key via lineageKey() — must match #publishSubtree byte-for-byte.
-    const key = `${lineageKey(segments)}\0${room}\0${secret}`
+    const key = `${lineageKey(segments)}\0${this.#roomTail(room, secret)}`
     let sig = ''
     try { sig = await sigStore.signText(key) } catch { return }
     if (!sig) return
@@ -5963,7 +6041,7 @@ export class SwarmDrone extends Drone {
     const room = this.#getRoomStore()?.value?.trim() ?? ''
     const secret = this.#getSecretStore()?.value?.trim() ?? ''
     if (!room || !secret) return ''
-    try { return await sigStore.signText(`channel:${pubkey}\0${room}\0${secret}`) }
+    try { return await sigStore.signText(`channel:${pubkey}\0${this.#roomTail(room, secret)}`) }
     catch { return '' }
   }
 
@@ -5976,7 +6054,7 @@ export class SwarmDrone extends Drone {
     const room = this.#getRoomStore()?.value?.trim() ?? ''
     const secret = this.#getSecretStore()?.value?.trim() ?? ''
     if (!room || !secret) return ''
-    try { return await sigStore.signText(`request:${pubkey}\0${room}\0${secret}`) }
+    try { return await sigStore.signText(`request:${pubkey}\0${this.#roomTail(room, secret)}`) }
     catch { return '' }
   }
 
@@ -6235,7 +6313,7 @@ export class SwarmDrone extends Drone {
     const room = this.#getRoomStore()?.value?.trim() ?? ''
     const secret = this.#getSecretStore()?.value?.trim() ?? ''
     if (!room || !secret) return ''
-    try { return await sigStore.signText(`presence:${pubkey}\0${room}\0${secret}`) }
+    try { return await sigStore.signText(`presence:${pubkey}\0${this.#roomTail(room, secret)}`) }
     catch { return '' }
   }
 
@@ -6295,32 +6373,38 @@ export class SwarmDrone extends Drone {
   // Swarm lifecycle channel — shared per-zone presence roster
   // ─────────────────────────────────────────────────────────────────
   //
-  // One sig per (room, secret) that EVERY participant subscribes to, so a
-  // single broadcast reaches the whole swarm regardless of location. See
-  // SWARM_LIFECYCLE_KIND for the wire shape. This is what makes removal
-  // event-driven + identity-scoped instead of navigation-coupled.
+  // One sig per (meeting point, room, secret) that EVERY participant
+  // subscribes to, so a single broadcast reaches the whole swarm regardless
+  // of location. See SWARM_LIFECYCLE_KIND for the wire shape. This is what
+  // makes removal event-driven + identity-scoped instead of
+  // navigation-coupled. Its preimage (core lifecyclePreimage) is also the
+  // text the room's two comparison words are drawn from.
 
-  #computeLifecycleSig = async (): Promise<string> => {
+  #computeLifecycleSig = async (point = this.#swarmHost()): Promise<string> => {
     const sigStore = this.#getSignatureStore()
     if (!sigStore?.signText) return ''
     const room = this.#getRoomStore()?.value?.trim() ?? ''
     const secret = this.#getSecretStore()?.value?.trim() ?? ''
     if (!room || !secret) return ''
-    try { return await sigStore.signText(`lifecycle\0${room}\0${secret}`) }
+    try { return await sigStore.signText(lifecyclePreimage(room, secret, point)) }
     catch { return '' }
   }
 
   // Subscribe to the current zone's lifecycle channel (once) and beacon
   // our presence. Idempotent — safe on every sync + heartbeat. Re-points
-  // the subscription if the zone sig changed.
+  // the subscription if the zone sig changed; a new meeting point is a new
+  // room, and the whole old one is torn down (#onMeetingPointMoved).
   #ensureLifecycle = async (): Promise<void> => {
     const mesh = this.#getMesh()
     if (!mesh?.subscribe) return
-    const sig = await this.#computeLifecycleSig()
+    if (this.#onMeetingPointMoved('lifecycle')) return
+    const point = this.#swarmHost()
+    const sig = await this.#computeLifecycleSig(point)
     if (!sig) return
     if (sig !== this.#lifecycleSig) {
       if (this.#lifecycleSub) { try { this.#lifecycleSub.close() } catch { /* ignore */ } this.#lifecycleSub = null }
       this.#lifecycleSig = sig
+      this.#lifecyclePoint = meetingPointKey(point)
       this.#lastBeaconMs = 0  // new zone — beacon immediately
       this.#lastWithheldJson = ''  // new zone — broadcast the withheld list afresh
     }

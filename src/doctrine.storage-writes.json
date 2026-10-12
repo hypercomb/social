@@ -220,7 +220,7 @@
     "hypercomb-shared/ui/flex-editor/flex-editor.component.ts": 1,
     "hypercomb-shared/ui/layout-designer/layout-designer.component.ts": 1,
     "hypercomb-shared/ui/mesh-header/mesh-header.component.ts": 1,
-    "hypercomb-shared/ui/mesh-modal/mesh-modal.component.ts": 3,
+    "hypercomb-shared/ui/mesh-modal/mesh-modal.component.ts": 1,
     "hypercomb-shared/ui/notes-strip/notes-strip.component.ts": 4,
     "hypercomb-shared/ui/pinnable/pinnable-hover.base.ts": 3,
     "hypercomb-shared/ui/pools-of-meaning/pools-data.ts": 1,

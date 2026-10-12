@@ -1150,17 +1150,17 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   })
 
   readonly secretWords = computed(() => {
-    // THE ROOM'S TWO WORDS — a human-verifiable reflection of the room:
-    // they hash the room and the secret only (`roomWords`, the swarm's
-    // lifecycle channel `lifecycle \0 room \0 secret`), never the page. The
-    // page used to be in the preimage, so two people in one room standing
-    // on different pages read different pairs and a room could never check
-    // itself out loud; a split it SHOULD catch (a capital the phone slipped
-    // into the room, a stale secret) hid among those false alarms. Same
-    // pair in the location window and on the presence line.
-    // The meeting point is in the preimage when it is not the shipped
-    // default, so a meeting split across two relays reads two pairs; the
-    // pair is the English one in every language (D4, 2026-10-10).
+    // THE ROOM'S TWO WORDS — the readable form of the room's address: they
+    // hash the meeting point, the room and the secret (`roomWords`, the
+    // swarm's lifecycle channel `lifecycle \0 room \0 secret \0 point` — the
+    // point ALWAYS, the shipped default included, 2026-10-12), never the
+    // page. The page used to be in the preimage, so two people in one room
+    // standing on different pages read different pairs and a room could
+    // never check itself out loud; a split it SHOULD catch (a capital the
+    // phone slipped into the room, a stale secret, half the room at another
+    // point) hid among those false alarms. Same pair in the location window
+    // and on the presence line, the English one in every language — drawn
+    // the way the LOADED package addresses the room (loadedRoomIdentity).
     return roomWords(this.#room$(), this.#secret$(), this.#meetPoint$())
   })
 

@@ -369,10 +369,6 @@
   "mesh-modal.location-placeholder": "स्थान का नाम टाइप करें",
   "mesh-modal.secret-label": "गुप्त कुंजी",
   "mesh-modal.secret-placeholder": "साझा कुंजी",
-  "mesh-modal.label-label": "आपका नाम",
-  "mesh-modal.label-placeholder": "स्वार्म में दूसरे आपको कैसे देखें",
-  "mesh-modal.host-label": "होस्ट",
-  "mesh-modal.host-placeholder": "जिस डोमेन से आप जुड़े हैं",
   "mesh-modal.show-secret": "गुप्त कुंजी दिखाएँ",
   "mesh-modal.hide-secret": "गुप्त कुंजी छिपाएँ",
   "mesh-modal.remove-saved": "सहेजा गया स्थान हटाएँ",
@@ -2770,6 +2766,9 @@
   "mesh-modal.code-label": "एक्सेस कोड",
   "mesh-modal.code-placeholder": "एक्सेस कोड, यदि मिलन स्थल माँगे",
   "mesh-modal.bad-code": "इस एक्सेस कोड में ऐसा अक्षर है जिसे कनेक्शन नहीं ले जा सकता (स्पेस, कॉमा, स्लैश…)",
+  "hosts.own-host": "आपका अपना होस्ट",
+  "hosts.own-host-placeholder": "आपका अपना होस्ट — जहाँ आपका बैकअप जाता है",
+  "hosts.own-host-set": "सेट करें",
   "use-live-relay.too-many": "बहुत ज़्यादा शब्द: {words} — एक कमरा, एक रहस्य और एक ws(s):// सर्वर दें",
   "use-live-relay.bad-server": "'{server}' ऐसा सर्वर नहीं है जिससे यह टैब जुड़ सके",
   "mesh.state.access": "{host} को मौजूदा मीटिंग लिंक चाहिए — सबसे नया लिंक माँगें",
@@ -2793,6 +2792,8 @@
   "share.names-only": "{count} सिर्फ़ नाम — कतार में कुछ नहीं",
   "share.names-only.one": "{count} सिर्फ़ नाम — कतार में कुछ नहीं",
   "share.passed-over": "{host} छोड़ा गया — वह अपलोड नहीं ले रहा",
+  "share.passed-over.one": "{host} छोड़ा गया — वह अपलोड नहीं ले रहा",
+  "share.passed-over.other": "{host} छोड़े गए — वे अपलोड नहीं ले रहे",
   "share.deep-owner": "गहरे पेज तब तक {name} के डिवाइस से खुलते हैं जब तक उनका अपलोड पूरा नहीं होता",
   "host.publish.refused": "{node} ने अपलोड अस्वीकार कर दिया ({reason}) — कुछ भी प्रकाशित नहीं हुआ",
   "meet.needs-update": "इस मीटिंग के लिए नया Hypercomb चाहिए — अपडेट करें और लिंक अपने आप खुल जाएगा",
@@ -2808,5 +2809,7 @@
   "history.commit-conflict": "इस हाइव के दूसरे टैब ने उसी पल यह पेज बदल दिया — आपका बदलाव सहेजा नहीं गया। फिर से कोशिश करें।",
   "drop.image-failed": "वह चित्र जोड़ा नहीं जा सका — फिर से कोशिश करें, या कोई दूसरा चित्र आज़माएँ।",
   "share.held.deep": "{host} {count} टाइलों के गहरे पेज नहीं ले रहा — जब तक आप यहाँ हैं, वे आपके डिवाइस से खुलते हैं",
-  "share.held.deep.one": "{host} {count} टाइल के गहरे पेज नहीं ले रहा — जब तक आप यहाँ हैं, वे आपके डिवाइस से खुलते हैं"
+  "share.held.deep.one": "{host} {count} टाइल के गहरे पेज नहीं ले रहा — जब तक आप यहाँ हैं, वे आपके डिवाइस से खुलते हैं",
+  "share.held.on-device": "{count} टाइलों के गहरे पेज अभी सिर्फ़ आपके डिवाइस पर हैं — उन्हें रूम के पास छोड़ने के लिए थोड़ी देर रुकें",
+  "share.held.on-device.one": "{count} टाइल के गहरे पेज अभी सिर्फ़ आपके डिवाइस पर हैं — उन्हें रूम के पास छोड़ने के लिए थोड़ी देर रुकें"
 }

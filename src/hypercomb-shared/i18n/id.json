@@ -369,10 +369,6 @@
   "mesh-modal.location-placeholder": "ketik nama lokasi",
   "mesh-modal.secret-label": "rahasia",
   "mesh-modal.secret-placeholder": "kunci bersama",
-  "mesh-modal.label-label": "nama Anda",
-  "mesh-modal.label-placeholder": "bagaimana orang lain melihat Anda di kawanan",
-  "mesh-modal.host-label": "host",
-  "mesh-modal.host-placeholder": "domain yang Anda gunakan untuk terhubung",
   "mesh-modal.show-secret": "tampilkan rahasia",
   "mesh-modal.hide-secret": "sembunyikan rahasia",
   "mesh-modal.remove-saved": "hapus lokasi tersimpan",
@@ -2770,6 +2766,9 @@
   "mesh-modal.code-label": "kode akses",
   "mesh-modal.code-placeholder": "kode akses, jika titik temu memintanya",
   "mesh-modal.bad-code": "kode akses itu memuat karakter yang tidak bisa dibawa koneksi (spasi, koma, garis miring…)",
+  "hosts.own-host": "Host Anda sendiri",
+  "hosts.own-host-placeholder": "host Anda sendiri — tempat cadangan Anda disimpan",
+  "hosts.own-host-set": "Atur",
   "use-live-relay.too-many": "terlalu banyak kata: {words} — berikan ruang, rahasia, dan server ws(s)://",
   "use-live-relay.bad-server": "'{server}' bukan server yang bisa dihubungi tab ini",
   "mesh.state.access": "{host} memerlukan tautan pertemuan yang terbaru — minta tautan terbaru",
@@ -2793,6 +2792,8 @@
   "share.names-only": "{count} hanya nama — tidak ada antrean",
   "share.names-only.one": "{count} hanya nama — tidak ada antrean",
   "share.passed-over": "{host} dilewati — tidak menerima unggahan",
+  "share.passed-over.one": "{host} dilewati — tidak menerima unggahan",
+  "share.passed-over.other": "{host} dilewati — tidak menerima unggahan",
   "share.deep-owner": "Halaman yang lebih dalam dibuka dari perangkat {name} sampai unggahannya selesai",
   "host.publish.refused": "{node} menolak unggahan ({reason}) — tidak ada yang diterbitkan",
   "meet.needs-update": "Pertemuan ini memerlukan Hypercomb yang lebih baru — perbarui dan tautan akan terbuka sendiri",
@@ -2808,5 +2809,7 @@
   "history.commit-conflict": "Tab lain dari hive ini mengubah halaman ini pada saat yang sama — perubahanmu tidak tersimpan. Coba lagi.",
   "drop.image-failed": "Gambar itu tidak bisa ditambahkan — coba lagi, atau coba gambar lain.",
   "share.held.deep": "{host} tidak menerima halaman yang lebih dalam dari {count} ubin — halaman itu dibuka dari perangkatmu selama kamu di sini",
-  "share.held.deep.one": "{host} tidak menerima halaman yang lebih dalam dari {count} ubin — halaman itu dibuka dari perangkatmu selama kamu di sini"
+  "share.held.deep.one": "{host} tidak menerima halaman yang lebih dalam dari {count} ubin — halaman itu dibuka dari perangkatmu selama kamu di sini",
+  "share.held.on-device": "Halaman yang lebih dalam dari {count} ubin masih hanya ada di perangkatmu — tunggu sebentar agar halaman itu tertinggal untuk ruangan",
+  "share.held.on-device.one": "Halaman yang lebih dalam dari {count} ubin masih hanya ada di perangkatmu — tunggu sebentar agar halaman itu tertinggal untuk ruangan"
 }

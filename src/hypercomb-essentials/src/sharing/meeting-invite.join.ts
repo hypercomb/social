@@ -288,12 +288,17 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   // inviter still in a pre-fold room — a curly quote recorded before the fold
   // — must not split the room in two). Then the page. The stores hold the
   // carried text first, so writeTabZone below records it as held, verbatim.
+  //
+  // The link's meeting point becomes this tab's, whole — and FIRST: every
+  // address of the room names its point (core roomPreimage, 2026-10-12), and
+  // the stores' change below resyncs a joined tab's swarm at once, so the
+  // point it reads there must already be the link's. A link that names none
+  // meets at the default, so a point this tab held from an earlier meeting
+  // is dropped with its code.
+  writeTabZone({ relay: point.relay, host: point.host, code: point.code })
   room.set(bundle.room, true)
   secret.set(bundle.secret, true)
-  // The link's meeting point becomes this tab's, whole: a link that names
-  // none meets at the default, so a point this tab held from an earlier
-  // meeting is dropped with its code.
-  writeTabZone({ room: bundle.room, secret: bundle.secret, relay: point.relay, host: point.host, code: point.code })
+  writeTabZone({ room: bundle.room, secret: bundle.secret })
   if (point.relay !== (tab?.relay ?? '')) pointMeshAt(point.relay)
   else if (point.code !== (tab?.code ?? '')) EffectBus.emit('mesh:zone', { relay: point.relay })
   EffectBus.emit('mesh:room', { room: bundle.room })

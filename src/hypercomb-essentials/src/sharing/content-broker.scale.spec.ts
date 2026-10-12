@@ -17,7 +17,7 @@
 //      tile flips to hosted.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, roomPreimage } from '@hypercomb/core'
 
 const membership = vi.hoisted(() => ({ joined: true }))
 vi.mock('./membership.js', () => ({ isJoinedHere: () => membership.joined }))
@@ -120,7 +120,7 @@ beforeAll(async () => {
   registrations.set(MESH_KEY, { subscribe: () => ({ close: () => void 0 }), publish: async () => true })
   ;({ ContentBrokerDrone } = await import('./content-broker.boot.drone.js'))
   await sleep(30)
-  channel = await sha256(enc('broker:fetch\0alpha\0secret'))
+  channel = await sha256(enc(`broker:fetch\0${roomPreimage('alpha', 'secret', '')}`))
 })
 
 beforeEach(() => {

@@ -22,7 +22,7 @@
 
 import { createHash } from 'node:crypto'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { EffectBus, lineageKey } from '@hypercomb/core'
+import { EffectBus, lineageKey, roomPreimage } from '@hypercomb/core'
 
 vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
 
@@ -157,8 +157,8 @@ const seedPage = (segments: string[], names: string[], publicNames: readonly str
   for (const n of names) nameByChildSig.set(childSig(page, n), n)
   for (const n of publicNames) state.public.add(`/${page}|${n}`)
 }
-const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${ROOM}\0${SECRET}`)
-const CHANNEL = sha(`channel:${ME}\0${ROOM}\0${SECRET}`)
+const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${roomPreimage(ROOM, SECRET, 'pluginthematrix.com')}`)
+const CHANNEL = sha(`channel:${ME}\0${roomPreimage(ROOM, SECRET, 'pluginthematrix.com')}`)
 const layerAt = (segments: readonly string[]): Published[] =>
   published.filter(p => p.kind === 30200 && p.sig === pageSig(segments))
 const namesOf = (p: Published): string[] => (p.payload.visuals ?? []).map(v => String(v['name'])).sort()

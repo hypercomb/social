@@ -3,12 +3,15 @@
 // Live bootstrap relay shipped 2026-05-29; default-ON for real hosts since
 // 2026-06-10 (see LIVE_RELAY notes below). Since 2026-10-11 it is
 // wss://hypercomb.com, the always-online meeting point, open (it was
-// wss://jwize.com, a home machine). Local origins seed the loopback dev
-// relay instead; hc:nostrmesh:use-live-relay ('1'/'0') and
-// hc:nostrmesh:relays override.
+// wss://jwize.com, a home machine). Since 2026-10-12 loopback origins seed
+// it too (the dev relay only when chosen); hc:nostrmesh:use-live-relay
+// ('1'/'0') and hc:nostrmesh:relays override.
 import { Drone } from '@hypercomb/core'
 import { isJoinedHere } from './membership.js'
 
+// The local dev relay (scripts/local-relay.ts). Never a seed (2026-10-12):
+// dialled only when chosen — a relay list, a meeting point, a server named
+// to /use-live-relay. Kept on the anchor below for the readers that name it.
 const LOCAL_RELAY = 'ws://localhost:7777'
 // Live bootstrap relay.
 //
@@ -20,10 +23,12 @@ const LOCAL_RELAY = 'ws://localhost:7777'
 // A deployed origin must never dial loopback — nothing listens on a
 // visitor's machine, and a public origin touching localhost trips
 // Chrome's Local Network Access permission prompt at page open.
-// Local origins seed LOCAL_RELAY for the self-contained dev loop.
+// Since 2026-10-12 loopback origins seed LIVE_RELAY too (jwize: "yes make
+// localhost default to hypercomb.com"): the meeting point is part of the
+// room (core roomPreimage), and a dev tab seeded elsewhere met nobody.
 //
 //   localStorage['hc:nostrmesh:use-live-relay'] = '1'   force LIVE_RELAY
-//   localStorage['hc:nostrmesh:use-live-relay'] = '0'   opt out (real host
+//   localStorage['hc:nostrmesh:use-live-relay'] = '0'   opt out (the page
 //                                                       idles, no loopback)
 //   localStorage['hc:nostrmesh:relays']        = '[…]'  manual override, wins
 //
@@ -638,9 +643,12 @@ export class NostrMeshDrone extends Drone {
    *  dial — wss://hypercomb.com gives hypercomb.com, ws://localhost:7801 gives
    *  localhost:7801. A pure function of the relay list: no fetch, no NIP-11,
    *  nothing stored. '' when no relay can be dialled. A loopback relay
-   *  counts only for a page that is itself local: a developer's
+   *  counts first only for a page that is itself local: a developer's
    *  ws://localhost override beside the live relay on https://hypercomb.io
-   *  may be dialled, but a peer on another machine can never reach it.
+   *  may be dialled, but a peer on another machine can never reach it — the
+   *  reachable relay beside it is the point. When a loopback relay is ALL
+   *  such a page dials (allowed explicitly), it is the point: the room is
+   *  named by the relay the tab attaches to (core roomPreimage).
    *
    *  It is NOT the swarm's upload host by default any more (2026-10-07,
    *  documentation/swarm-host.md): uploads go to the page's publish domains,
@@ -651,6 +659,11 @@ export class NostrMeshDrone extends Drone {
     if (!relay) return ''
     try { return new URL(relay).host } catch { return '' }
   }
+
+  /** The relay URL behind swarmHost, as configured (a path kept) — what a
+   *  meeting link names so a guest dials the point this tab meets at. '' when
+   *  no relay can be dialled. Synchronous; nothing is asked. */
+  public meetingRelay = (): string => this.#meetingRelay()
 
   /** What the meeting relay's `hc:host` card said about participant
    *  uploads: 'all', 'zones' or false — undefined until its card has been
@@ -670,17 +683,31 @@ export class NostrMeshDrone extends Drone {
     return relays.length > 0 && relays.every(r => this.#addressedByRelay.get(r) === true)
   }
 
-  /** The first relay this tab may dial (see swarmHost), as configured. */
+  /** The first relay this tab may dial (see swarmHost), as configured. A
+   *  joined tab's own meeting point answers at once — before #syncZone has
+   *  moved the list in its microtask — and a joined tab without one answers
+   *  its own list: the room's every address names this point (core
+   *  roomPreimage), so a swarm deriving them in the same turn as the join
+   *  must already read where the tab is about to meet. */
   #meetingRelay = (): string => {
-    const zoneRelay = !this.started && isJoinedHere() ? this.#zoneRelayOf(readMeshZone()) : ''
-    const relays = this.started ? this.relays : zoneRelay ? [zoneRelay] : this.loadRelays(this.relays)
+    const zoneRelay = isJoinedHere() ? this.#zoneRelayOf(readMeshZone()) : ''
+    const relays = zoneRelay ? [zoneRelay] : this.started ? this.ownRelays() : this.loadRelays(this.relays)
     const local = this.isLocalContext()
+    // A loopback relay a public page was ALLOWED to dial (a list naming it,
+    // hc:nostrmesh:allow-loopback) is passed over for a reachable one beside
+    // it — but when it is all the tab dials, it IS where the tab meets: the
+    // room's point is the relay the tab attaches to, never a default it does
+    // not dial (2026-10-12).
+    let onlyLoopback = ''
     for (const relay of relays) {
       if (!this.#relayAllowed(relay)) continue
-      if (!local && this.isLoopbackRelay(relay)) continue
-      try { if (new URL(relay).host) return relay } catch { /* not a URL — try the next relay */ }
+      let host = ''
+      try { host = new URL(relay).host } catch { continue /* not a URL — try the next relay */ }
+      if (!host) continue
+      if (!local && this.isLoopbackRelay(relay)) { onlyLoopback ||= relay; continue }
+      return relay
     }
-    return ''
+    return onlyLoopback
   }
 
   /** Milliseconds on the RELAY's clock: this device's clock corrected by the
@@ -2022,9 +2049,9 @@ export class NostrMeshDrone extends Drone {
 
   private isLocalContext = (): boolean => {
     // True when the app itself is being served from a local-development
-    // origin. Used by loadRelays to prefer LOCAL_RELAY over LIVE_RELAY
-    // when the operator is testing on the same machine that hosts the
-    // relay — avoids round-tripping their own events through Cloudflare.
+    // origin: a loopback relay it is GIVEN may be dialled from here without
+    // the explicit allowance a real host needs. Never a seed of its own
+    // (2026-10-12): a loopback page meets at LIVE_RELAY until it chooses.
     try {
       const host = String(window?.location?.hostname ?? '').toLowerCase()
       if (!host) return false
@@ -3060,22 +3087,24 @@ export class NostrMeshDrone extends Drone {
   }
 
   private loadRelays = (fallback: string[]): string[] => {
-    // Seed policy is origin-aware:
+    // Seed policy — ONE DEFAULT, EVERY ORIGIN (jwize, 2026-10-12: "yes make
+    // localhost default to hypercomb.com"):
     //
-    //   local origin → LOCAL_RELAY. The dev relay (scripts/local-relay.ts)
-    //   serves the WS mesh AND HTTP content on one port and persists content
-    //   across restarts, so two loopback tabs share a fully self-contained
-    //   swarm with no per-tab setup.
+    //   every origin → LIVE_RELAY, the open always-online meeting point. A
+    //   loopback page (localhost:4250, the dev shell) meets there like every
+    //   install, so a dev hive and a phone meet with nothing to set. The
+    //   local dev relay (ws://localhost:7777, scripts/local-relay.ts) is
+    //   dialled only when it is CHOSEN: the meeting point field, a server
+    //   given to /use-live-relay, or a relay list (hc:nostrmesh:relays).
+    //   Seeding LOCAL_RELAY on a real host was a bug twice over (a dead
+    //   loopback socket on infinite backoff, and Chrome's Local Network
+    //   Access prompt at page open); seeding it on loopback split every dev
+    //   tab from the room it meant — the point is part of the room.
     //
-    //   real host → LIVE_RELAY. Seeding LOCAL_RELAY here was a bug twice
-    //   over: every visitor dialed a dead loopback socket on infinite
-    //   backoff, AND a public origin touching localhost trips Chrome's
-    //   Local Network Access permission prompt at page open.
-    //
-    //   'hc:nostrmesh:use-live-relay' — '1' forces LIVE_RELAY anywhere,
-    //   '0' opts out of it: a real host then idles with ZERO relays
-    //   (publishes hit local fanout only) rather than falling back to
-    //   loopback. 'hc:nostrmesh:relays' (explicit list) wins over both.
+    //   'hc:nostrmesh:use-live-relay' — '1' forces LIVE_RELAY, '0' opts out
+    //   of it: the page then idles with ZERO relays (publishes hit local
+    //   fanout only), never falling back to loopback. 'hc:nostrmesh:relays'
+    //   (explicit list) wins over both.
     //
     // IIFE on purpose: an inlined `let` here lets esbuild constant-propagate
     // the flag into the seed expression, dead-code-eliminating a LIVE_RELAY
@@ -3086,9 +3115,7 @@ export class NostrMeshDrone extends Drone {
       try { return localStorage.getItem('hc:nostrmesh:use-live-relay') } catch { return null }
     })()
     const seed =
-      flag === '1' ? [LIVE_RELAY]
-      : this.isLocalContext() ? [LOCAL_RELAY]
-      : flag === '0' ? []
+      flag === '0' ? []
       : [LIVE_RELAY]
     const defaults = fallback.length > 0 ? fallback : seed
     try {

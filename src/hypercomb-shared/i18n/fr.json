@@ -369,10 +369,6 @@
   "mesh-modal.location-placeholder": "saisissez un nom d'emplacement",
   "mesh-modal.secret-label": "secret",
   "mesh-modal.secret-placeholder": "clé partagée",
-  "mesh-modal.label-label": "votre nom",
-  "mesh-modal.label-placeholder": "comment les autres vous voient dans l'essaim",
-  "mesh-modal.host-label": "hôte",
-  "mesh-modal.host-placeholder": "le domaine auquel vous êtes connecté",
   "mesh-modal.show-secret": "afficher le secret",
   "mesh-modal.hide-secret": "masquer le secret",
   "mesh-modal.remove-saved": "supprimer l'emplacement enregistré",
@@ -2770,6 +2766,9 @@
   "mesh-modal.code-label": "code d'accès",
   "mesh-modal.code-placeholder": "code d'accès, si le point de rencontre en demande un",
   "mesh-modal.bad-code": "ce code d'accès contient un caractère qu'une connexion ne peut pas transporter (espace, virgule, barre oblique…)",
+  "hosts.own-host": "Votre propre hôte",
+  "hosts.own-host-placeholder": "votre propre hôte — où va votre sauvegarde",
+  "hosts.own-host-set": "Définir",
   "use-live-relay.too-many": "trop de mots : {words} — donne une salle, un secret et un serveur ws(s)://",
   "use-live-relay.bad-server": "'{server}' n'est pas un serveur que cet onglet peut joindre",
   "mesh.state.access": "{host} demande le lien de réunion actuel — demandez le plus récent",
@@ -2793,6 +2792,8 @@
   "share.names-only": "{count} noms seulement — rien en attente",
   "share.names-only.one": "{count} nom seulement — rien en attente",
   "share.passed-over": "{host} ignoré — il n'accepte pas les envois",
+  "share.passed-over.one": "{host} ignoré — il n'accepte pas les envois",
+  "share.passed-over.other": "{host} ignorés — ils n'acceptent pas les envois",
   "share.deep-owner": "Les pages plus profondes s'ouvrent depuis l'appareil de {name} jusqu'à la fin de leur envoi",
   "host.publish.refused": "{node} a refusé l'envoi ({reason}) — rien n'a été publié",
   "meet.needs-update": "Cette réunion demande la nouvelle version d'Hypercomb — mettez à jour et le lien s'ouvrira de lui-même",
@@ -2808,5 +2809,7 @@
   "history.commit-conflict": "Un autre onglet de cette ruche a modifié cette page au même moment — votre modification n'a pas été enregistrée. Réessayez.",
   "drop.image-failed": "Cette image n'a pas pu être ajoutée — réessayez, ou essayez une autre image.",
   "share.held.deep": "{host} n'accepte pas les pages plus profondes de {count} tuiles — elles s'ouvrent depuis votre appareil tant que vous êtes là",
-  "share.held.deep.one": "{host} n'accepte pas les pages plus profondes de {count} tuile — elles s'ouvrent depuis votre appareil tant que vous êtes là"
+  "share.held.deep.one": "{host} n'accepte pas les pages plus profondes de {count} tuile — elles s'ouvrent depuis votre appareil tant que vous êtes là",
+  "share.held.on-device": "Les pages plus profondes de {count} tuiles ne sont encore que sur votre appareil — restez un instant pour les laisser à la salle",
+  "share.held.on-device.one": "Les pages plus profondes de {count} tuile ne sont encore que sur votre appareil — restez un instant pour les laisser à la salle"
 }

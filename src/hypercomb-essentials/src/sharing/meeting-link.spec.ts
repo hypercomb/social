@@ -453,6 +453,27 @@ describe('`invite` with nothing selected', () => {
     expect(logs.join('\n')).not.toContain('sekrit-42')
   })
 
+  it('a tab meeting on its own list names that point too — never the default, never a loopback one (another point is another room)', async () => {
+    room.value = 'garden'
+    secret.value = 'rose'
+    explorer = []
+    const mesh = services.get('@diamondcoreprocessor.com/NostrMeshDrone') as Record<string, unknown>
+    const cases: [string, string | undefined][] = [
+      ['wss://jwize.com', 'wss://jwize.com'],          // a list the page chose: guests must meet there
+      ['wss://hypercomb.com', undefined],              // the default needs no point
+      ['ws://localhost:7777', undefined],              // no guest's device reaches it
+    ]
+    try {
+      for (const [relay, carried] of cases) {
+        writes.length = 0
+        mesh['meetingRelay'] = () => relay
+        await new InviteQueenBee().invoke('')
+        const place = parseMeet(writes[0].slice(writes[0].indexOf('#')))
+        expect([relay, place?.relay]).toEqual([relay, carried])
+      }
+    } finally { delete mesh['meetingRelay'] }
+  })
+
   it('`invite wss://…` opens the selector on that meeting point and its code — nothing written, no link', async () => {
     room.value = 'downtown'
     secret.value = 'downtown'

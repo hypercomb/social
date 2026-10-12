@@ -23,7 +23,7 @@
 //               not written again.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EffectBus, SignatureService } from '@hypercomb/core'
+import { EffectBus, SignatureService, lifecyclePreimage } from '@hypercomb/core'
 
 vi.setConfig({ testTimeout: 30_000 })
 
@@ -121,6 +121,7 @@ type Service = {
   isClosureAvailableAt: (sig: string, kind: string, closure: boolean, page: readonly string[]) => Promise<boolean | null>
   swarmHostsFor: (segments: readonly string[] | null) => Choice
   hostTrouble: (host: string) => { host: string; status: string; why: string; reason: string } | null
+  closurePassedOverOf: (sig: string) => string[]
 }
 let HostSync: new (resolver?: unknown) => Service
 let Resolver: new (deps: unknown) => { warm: (s: readonly string[] | null) => void; downReason: (h: string) => string }
@@ -207,6 +208,7 @@ beforeEach(() => {
   registry.set(MESH_KEY, { swarmHost: () => 'jwize.com' })
   registry.delete('@hypercomb.social/RoomStore')
   registry.delete('@hypercomb.social/SecretStore')
+  registry.delete('@diamondcoreprocessor.com/SwarmDrone')
   localStorage.clear()
   localStorage.setItem('hc:nostrmesh:self-domain', 'hypercomb.io')
   meshState('open')
@@ -462,6 +464,9 @@ describe('BCL-1 / D2: the swarm stops waiting on a publish domain that refuses o
     expect(calls(door, 'PUT')).toHaveLength(1)
     expect(service.swarmHostsFor(['lt-refused', 'c01'])).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['refuse.example'] })
     expect(service.hostTrouble('refuse.example')).toMatchObject({ why: 'refused', reason: '405 Method Not Allowed' })
+    // BCL-1: the root's closure names the domain worn BELOW it (c01), for
+    // the line where lt-refused is offered — after its pages went elsewhere.
+    expect(service.closurePassedOverOf(r)).toEqual(['refuse.example'])
     // Remembered across a reload of this tab: the host's own 4xx.
     expect(session.get('hc:swarm-hosts:down')).toContain('refuse.example')
   })
@@ -478,6 +483,7 @@ describe('BCL-1 / D2: the swarm stops waiting on a publish domain that refuses o
     await advanceUntil(async () => (service.swarmHostsFor(['lt-typo', 'c01']).passedOver ?? []).includes('typo.example'))
     expect(service.swarmHostsFor(['lt-typo', 'c01'])).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['typo.example'] })
     expect(service.hostTrouble('typo.example')).toMatchObject({ why: 'unresolved' })
+    expect(service.closurePassedOverOf(r)).toEqual(['typo.example'])
     await advanceUntil(async () => (await queued()).length === 0)
     expect(calls(typo, 'PUT').length).toBeLessThanOrEqual(3)
     vi.useRealTimers()
@@ -565,6 +571,14 @@ describe('BCL-7 / TS-5: a host that takes only the people meeting on it', () => 
     // The beacon names THIS tab's own zone — recorded at its join — never the
     // stores' pre-fill: join with the pair so the tab records it.
     join(true)
+    // The roster address the SWARM beacons on — the room AT THE POINT it
+    // meets at (core lifecyclePreimage: the point is part of the room since
+    // 2026-10-12; the mesh says jwize.com here). Host-sync asks for it and
+    // derives nothing: the address a host checks the beacon against is the
+    // room's, never the host it is carried to.
+    const lifecycle = await sign(new TextEncoder().encode(lifecyclePreimage('the-room', 'the-secret', 'jwize.com')))
+    expect(lifecycle).not.toBe(await sign(new TextEncoder().encode('lifecycle\u0000the-room\u0000the-secret')))
+    registry.set('@diamondcoreprocessor.com/SwarmDrone', { lifecycleSig: () => lifecycle })
     // (A host no other test names: an earlier test's service keeps its timers.)
     pool = ['hostd7.example']
     // relay.js with D7: a fresh signed 30206 {alive} in the NIP-98 event is the key live.
@@ -584,7 +598,6 @@ describe('BCL-7 / TS-5: a host that takes only the people meeting on it', () => 
     expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hostd7.example'], source: 'pool', pending: false })
     const alive = authEvent(puts.at(-1)![1]).tags.find(tag => tag[0] === 'alive')!
     const beacon = JSON.parse(alive[1]!) as { kind: number; pubkey: string; created_at: number; content: string; tags: string[][] }
-    const lifecycle = await sign(new TextEncoder().encode('lifecycle\u0000the-room\u0000the-secret'))
     expect(beacon).toMatchObject({ kind: 30206, pubkey: PUBKEY })
     expect(JSON.parse(beacon.content)).toMatchObject({ alive: true })
     expect(beacon.tags).toEqual(expect.arrayContaining([['x', lifecycle], ['d', PUBKEY]]))
@@ -598,6 +611,8 @@ describe('BCL-7 / TS-5: a host that takes only the people meeting on it', () => 
     sessionStorage.removeItem('hc:mesh-zone')
     registry.set('@hypercomb.social/RoomStore', { value: 'last-week' })
     registry.set('@hypercomb.social/SecretStore', { value: 'old-secret' })
+    // Even a swarm that holds a roster address does not make the pre-fill a room.
+    registry.set('@diamondcoreprocessor.com/SwarmDrone', { lifecycleSig: () => 'f'.repeat(64) })
     pool = ['hostd7b.example']
     const b = notLive(init => authEvent(init).tags.some(tag => tag[0] === 'alive'))
     vi.stubGlobal('fetch', router({ 'hostd7b.example': b, 'jwize.com': heap() }))

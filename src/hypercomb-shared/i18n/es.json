@@ -369,10 +369,6 @@
   "mesh-modal.location-placeholder": "escribe un nombre de ubicación",
   "mesh-modal.secret-label": "secreto",
   "mesh-modal.secret-placeholder": "clave compartida",
-  "mesh-modal.label-label": "tu nombre",
-  "mesh-modal.label-placeholder": "cómo te ven los demás en el enjambre",
-  "mesh-modal.host-label": "anfitrión",
-  "mesh-modal.host-placeholder": "el dominio a través del cual estás conectado",
   "mesh-modal.show-secret": "mostrar secreto",
   "mesh-modal.hide-secret": "ocultar secreto",
   "mesh-modal.remove-saved": "eliminar ubicación guardada",
@@ -2770,6 +2766,9 @@
   "mesh-modal.code-label": "código de acceso",
   "mesh-modal.code-placeholder": "código de acceso, si el punto de encuentro lo pide",
   "mesh-modal.bad-code": "ese código de acceso tiene un carácter que una conexión no puede llevar (un espacio, una coma, una barra…)",
+  "hosts.own-host": "Tu propio host",
+  "hosts.own-host-placeholder": "tu propio host — adonde va tu copia de seguridad",
+  "hosts.own-host-set": "Fijar",
   "use-live-relay.too-many": "demasiadas palabras: {words} — indica una sala, un secreto y un servidor ws(s)://",
   "use-live-relay.bad-server": "'{server}' no es un servidor al que esta pestaña pueda conectarse",
   "mesh.state.access": "{host} necesita el enlace de reunión actual — pide el más reciente",
@@ -2793,6 +2792,8 @@
   "share.names-only": "{count} solo con nombre — nada en cola",
   "share.names-only.one": "{count} solo con nombre — nada en cola",
   "share.passed-over": "{host} omitido — no acepta subidas",
+  "share.passed-over.one": "{host} omitido — no acepta subidas",
+  "share.passed-over.other": "{host} omitidos — no aceptan subidas",
   "share.deep-owner": "Las páginas más profundas se abren desde el dispositivo de {name} hasta que termine su subida",
   "host.publish.refused": "{node} rechazó la subida ({reason}) — no se publicó nada",
   "meet.needs-update": "Esta reunión necesita el Hypercomb más nuevo — actualiza y el enlace se abrirá solo",
@@ -2808,5 +2809,7 @@
   "history.commit-conflict": "Otra pestaña de esta colmena cambió esta página en el mismo momento — tu cambio no se guardó. Inténtalo de nuevo.",
   "drop.image-failed": "No se pudo añadir esa imagen — inténtalo de nuevo o prueba con otra imagen.",
   "share.held.deep": "{host} no acepta las páginas más profundas de {count} mosaicos — se abren desde tu dispositivo mientras estés aquí",
-  "share.held.deep.one": "{host} no acepta las páginas más profundas de {count} mosaico — se abren desde tu dispositivo mientras estés aquí"
+  "share.held.deep.one": "{host} no acepta las páginas más profundas de {count} mosaico — se abren desde tu dispositivo mientras estés aquí",
+  "share.held.on-device": "Las páginas más profundas de {count} mosaicos siguen solo en tu dispositivo — quédate un momento para dejárselas a la sala",
+  "share.held.on-device.one": "Las páginas más profundas de {count} mosaico siguen solo en tu dispositivo — quédate un momento para dejárselas a la sala"
 }

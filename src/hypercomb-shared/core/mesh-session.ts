@@ -173,6 +173,29 @@ if (meshResumed) {
   }
 }
 
+// A RESUMED JOIN NEVER MOVES TO ANOTHER MEETING POINT UNSEEN (2026-10-12).
+// Before this shell, a loopback page with no relay list and no live-relay
+// flag met at the dev relay its mesh seeded (ws://localhost:7777), and the
+// zone recorded no point. That seed is gone — a loopback page meets at
+// wss://hypercomb.com — so such a tab, reloaded into this shell, would resume
+// into a PUBLIC room with no gesture of its own. The crossing pins the point
+// it joined at, once per tab (the marker says this shell has seen the tab):
+// it stays where it was until the participant chooses again.
+const POINT_CROSSING_KEY = 'hc:mesh-point-crossing'
+const LEGACY_LOOPBACK_SEED = 'ws://localhost:7777'
+if ((() => { try { return sessionStorage.getItem(POINT_CROSSING_KEY) !== '1' } catch { return false } })()) {
+  try { sessionStorage.setItem(POINT_CROSSING_KEY, '1') } catch { /* no storage — nothing resumes either */ }
+  if (meshResumed && !readMeshZone()?.relay) {
+    const page = (() => { try { return String(globalThis.location?.hostname ?? '').toLowerCase() } catch { return '' } })()
+    const loopback = page === 'localhost' || page === '127.0.0.1' || page === '::1' || page === '[::1]' || page.endsWith('.local')
+    const read = (key: string): string | null => { try { return localStorage.getItem(key) } catch { return null } }
+    const flag = read('hc:nostrmesh:use-live-relay')
+    if (loopback && read('hc:nostrmesh:relays') === null && flag !== '1' && flag !== '0') {
+      mergeZone({ relay: LEGACY_LOOPBACK_SEED }, (_field, text) => text, false)
+    }
+  }
+}
+
 // ── the meeting point, as the selector writes it ─────────────────────────
 // MIRRORS of essentials sharing/meeting-invite.ts (isAccessCode,
 // meetingRelayOf, relayDomainOf) — the shell never imports a module.

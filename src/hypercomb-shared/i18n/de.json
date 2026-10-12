@@ -369,10 +369,6 @@
   "mesh-modal.location-placeholder": "Standortname eingeben",
   "mesh-modal.secret-label": "Geheimnis",
   "mesh-modal.secret-placeholder": "gemeinsamer Schlüssel",
-  "mesh-modal.label-label": "Ihr Name",
-  "mesh-modal.label-placeholder": "wie andere Sie im Schwarm sehen",
-  "mesh-modal.host-label": "Host",
-  "mesh-modal.host-placeholder": "die Domain, über die Sie verbunden sind",
   "mesh-modal.show-secret": "Geheimnis anzeigen",
   "mesh-modal.hide-secret": "Geheimnis verbergen",
   "mesh-modal.remove-saved": "gespeicherten Standort entfernen",
@@ -2770,6 +2766,9 @@
   "mesh-modal.code-label": "Zugangscode",
   "mesh-modal.code-placeholder": "Zugangscode, falls der Treffpunkt einen verlangt",
   "mesh-modal.bad-code": "dieser Zugangscode enthält ein Zeichen, das eine Verbindung nicht tragen kann (Leerzeichen, Komma, Schrägstrich …)",
+  "hosts.own-host": "Dein eigener Host",
+  "hosts.own-host-placeholder": "dein eigener Host — wohin deine Sicherung geht",
+  "hosts.own-host-set": "Festlegen",
   "use-live-relay.too-many": "zu viele Wörter: {words} — gib einen Raum, ein Geheimnis und einen ws(s)://-Server an",
   "use-live-relay.bad-server": "'{server}' ist kein Server, den dieser Tab erreichen kann",
   "mesh.state.access": "{host} braucht den aktuellen Meeting-Link — frag nach dem neuesten",
@@ -2793,6 +2792,8 @@
   "share.names-only": "{count} nur als Namen — nichts in der Warteschlange",
   "share.names-only.one": "{count} nur als Name — nichts in der Warteschlange",
   "share.passed-over": "{host} übersprungen — nimmt keine Uploads an",
+  "share.passed-over.one": "{host} übersprungen — nimmt keine Uploads an",
+  "share.passed-over.other": "{host} übersprungen — nehmen keine Uploads an",
   "share.deep-owner": "Tiefere Seiten öffnen sich vom Gerät von {name}, bis ihr Upload fertig ist",
   "host.publish.refused": "{node} hat den Upload abgelehnt ({reason}) — nichts wurde veröffentlicht",
   "meet.needs-update": "Dieses Meeting braucht das neuere Hypercomb — aktualisiere, und der Link öffnet sich von selbst",
@@ -2808,5 +2809,7 @@
   "history.commit-conflict": "Ein anderer Tab dieses Hives hat diese Seite im selben Moment geändert — deine Änderung wurde nicht gespeichert. Versuche es noch einmal.",
   "drop.image-failed": "Dieses Bild konnte nicht hinzugefügt werden — versuche es noch einmal oder nimm ein anderes Bild.",
   "share.held.deep": "{host} nimmt die tieferen Seiten von {count} Kacheln nicht an — sie öffnen sich von deinem Gerät, solange du hier bist",
-  "share.held.deep.one": "{host} nimmt die tieferen Seiten von {count} Kachel nicht an — sie öffnen sich von deinem Gerät, solange du hier bist"
+  "share.held.deep.one": "{host} nimmt die tieferen Seiten von {count} Kachel nicht an — sie öffnen sich von deinem Gerät, solange du hier bist",
+  "share.held.on-device": "Tiefere Seiten von {count} Kacheln sind noch nur auf deinem Gerät — bleib einen Moment, damit sie beim Raum bleiben",
+  "share.held.on-device.one": "Tiefere Seiten von {count} Kachel sind noch nur auf deinem Gerät — bleib einen Moment, damit sie beim Raum bleiben"
 }

@@ -369,10 +369,6 @@
   "mesh-modal.location-placeholder": "bir konum adı yazın",
   "mesh-modal.secret-label": "gizli anahtar",
   "mesh-modal.secret-placeholder": "paylaşılan anahtar",
-  "mesh-modal.label-label": "adınız",
-  "mesh-modal.label-placeholder": "diğerleri sizi sürüde nasıl görür",
-  "mesh-modal.host-label": "host",
-  "mesh-modal.host-placeholder": "bağlı olduğunuz alan adı",
   "mesh-modal.show-secret": "gizli anahtarı göster",
   "mesh-modal.hide-secret": "gizli anahtarı gizle",
   "mesh-modal.remove-saved": "kaydedilmiş konumu kaldır",
@@ -2770,6 +2766,9 @@
   "mesh-modal.code-label": "erişim kodu",
   "mesh-modal.code-placeholder": "buluşma noktası isterse erişim kodu",
   "mesh-modal.bad-code": "bu erişim kodunda bağlantının taşıyamayacağı bir karakter var (boşluk, virgül, eğik çizgi…)",
+  "hosts.own-host": "Kendi sunucunuz",
+  "hosts.own-host-placeholder": "kendi sunucunuz — yedeğinizin gittiği yer",
+  "hosts.own-host-set": "Ayarla",
   "use-live-relay.too-many": "çok fazla sözcük: {words} — bir oda, bir gizli anahtar ve bir ws(s):// sunucusu verin",
   "use-live-relay.bad-server": "'{server}' bu sekmenin bağlanabileceği bir sunucu değil",
   "mesh.state.access": "{host} güncel toplantı bağlantısını istiyor — en yenisini isteyin",
@@ -2793,6 +2792,8 @@
   "share.names-only": "{count} yalnızca ad — kuyrukta değil",
   "share.names-only.one": "{count} yalnızca ad — kuyrukta değil",
   "share.passed-over": "{host} atlandı — yükleme kabul etmiyor",
+  "share.passed-over.one": "{host} atlandı — yükleme kabul etmiyor",
+  "share.passed-over.other": "{host} atlandı — yükleme kabul etmiyorlar",
   "share.deep-owner": "Daha derin sayfalar, yüklemeleri bitene kadar {name} adlı kişinin cihazından açılır",
   "host.publish.refused": "{node} yüklemeyi reddetti ({reason}) — hiçbir şey yayımlanmadı",
   "meet.needs-update": "Bu toplantı daha yeni Hypercomb'u gerektiriyor — güncelleyin, bağlantı kendiliğinden açılır",
@@ -2808,5 +2809,7 @@
   "history.commit-conflict": "Bu kovanın başka bir sekmesi bu sayfayı aynı anda değiştirdi — değişikliğiniz kaydedilmedi. Yeniden deneyin.",
   "drop.image-failed": "O resim eklenemedi — yeniden deneyin ya da başka bir resim deneyin.",
   "share.held.deep": "{host}, {count} döşemenin daha derin sayfalarını kabul etmiyor — siz buradayken cihazınızdan açılırlar",
-  "share.held.deep.one": "{host}, {count} döşemenin daha derin sayfalarını kabul etmiyor — siz buradayken cihazınızdan açılırlar"
+  "share.held.deep.one": "{host}, {count} döşemenin daha derin sayfalarını kabul etmiyor — siz buradayken cihazınızdan açılırlar",
+  "share.held.on-device": "{count} döşemenin daha derin sayfaları hâlâ yalnızca cihazınızda — onları odaya bırakmak için biraz bekleyin",
+  "share.held.on-device.one": "{count} döşemenin daha derin sayfaları hâlâ yalnızca cihazınızda — onları odaya bırakmak için biraz bekleyin"
 }

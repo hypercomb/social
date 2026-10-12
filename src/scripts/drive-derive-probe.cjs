@@ -21,6 +21,8 @@ async function configure(page) {
     localStorage.setItem('hc:secret', secret)
     localStorage.setItem('hc:mesh-public', 'true')
     localStorage.setItem('hc:nostrmesh:network', '1')
+    // The dev relay, named: a loopback page meets at wss://hypercomb.com by default (2026-10-12).
+    localStorage.setItem('hc:nostrmesh:relays', JSON.stringify(['ws://localhost:7777']))
     localStorage.removeItem('hc:secret-cleared')
   }, { room: ROOM, secret: SECRET })
 }

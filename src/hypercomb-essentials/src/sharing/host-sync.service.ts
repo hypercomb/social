@@ -169,6 +169,8 @@ const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const STORE_KEY = '@hypercomb.social/Store'
 const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
+// The swarm names the room's addresses (its lifecycle sig, for D7's beacon).
+const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 // Explicit opt-in gate. Default false → no `content:wrote` handler
 // reaches the signer, so a casual visitor never triggers a Nostr-signer
@@ -574,10 +576,8 @@ export class HostSyncService extends EventTarget {
    *  relay no longer host-brokers others' bytes; a sig with no endpoint is
    *  an egg, per the byte-path model.) */
   public readonly enable = (selfDomain?: string): void => {
-    try {
-      if (selfDomain) localStorage.setItem(SELF_DOMAIN_KEY, selfDomain.trim())
-      localStorage.setItem(ENABLED_KEY, 'true')
-    } catch { /* private mode — caller still has to honor in-session */ }
+    if (selfDomain) this.setOwnHost(selfDomain)
+    try { localStorage.setItem(ENABLED_KEY, 'true') } catch { /* private mode — caller still has to honor in-session */ }
     // Re-arm after a backoff: enable() is the operator's "I fixed the relay,
     // retry now" signal. Clears every host's window — worst case a
     // still-broken host costs one extra refusal before re-pausing.
@@ -589,6 +589,20 @@ export class HostSyncService extends EventTarget {
     this.#putsThrew.clear()
     this.#resolver.clearDown()
     void this.drain()
+  }
+
+  /** YOUR OWN HOST (`hc:nostrmesh:self-domain`) — where your backup goes
+   *  and the broker's first door; '' clears it. The one writer of the key:
+   *  `enable` names it here, and so does the host directory (the hosts
+   *  drone, `hosts:own-host`) since the swarm selector stopped carrying it
+   *  (2026-10-12 — a host is replication, never who meets). Naming it never
+   *  switches backup on. */
+  public readonly setOwnHost = (host: string): void => {
+    const clean = String(host ?? '').trim()
+    try {
+      if (clean) localStorage.setItem(SELF_DOMAIN_KEY, clean)
+      else localStorage.removeItem(SELF_DOMAIN_KEY)
+    } catch { /* private mode — in-session only */ }
   }
 
   /** Turn host backup off. Existing queued entries stay on disk (not
@@ -1303,6 +1317,20 @@ export class HostSyncService extends EventTarget {
     const out: string[] = []
     for (const segments of pages?.values() ?? []) {
       for (const host of this.#resolver.hostsFor(segments).hosts) if (!out.includes(host)) out.push(host)
+    }
+    return out
+  }
+
+  /** The hosts PASSED OVER for `sig`'s closure (its own page and every page
+   *  below it, as last re-staged) — synchronous. A publish domain worn below
+   *  the offered tile that refuses or never answered sends its pages to the
+   *  next door, and the sharer's line names it where the branch is offered
+   *  (BCL-1), not only while it blocks. */
+  public readonly closurePassedOverOf = (sig: string): string[] => {
+    const pages = this.#closurePagesOf.get(String(sig ?? '').trim().toLowerCase())
+    const out: string[] = []
+    for (const segments of pages?.values() ?? []) {
+      for (const host of this.#resolver.hostsFor(segments).passedOver ?? []) if (!out.includes(host)) out.push(host)
     }
     return out
   }
@@ -3780,16 +3808,19 @@ export class HostSyncService extends EventTarget {
 
   #alive: { at: number; x: string; json: string } | null = null
 
-  /** The room's lifecycle sig — sha256 of `lifecycle\0<room>\0<secret>`, the
-   *  swarm's own derivation — or '' when this tab meets in no room. The pair
-   *  is THIS tab's own zone (the one it joined), never the origin-wide
-   *  stores' pre-fill. */
+  /** The room's lifecycle sig — the roster address the SWARM beacons on now
+   *  (SwarmDrone.lifecycleSig: core lifecyclePreimage, `lifecycle \0 room \0
+   *  secret \0 meeting point` since 2026-10-12) — or '' when this tab meets
+   *  in no room. Asked, never derived here: host-sync names no room address
+   *  of its own and reads no relay, so the beacon's `x` is exactly the
+   *  address the room meets at (the point the tab dials, never the host it
+   *  uploads to). Only for THIS tab's own zone (the one it joined), never
+   *  the origin-wide stores' pre-fill. A move to another point re-signs
+   *  (#alive is keyed by `x`). */
   readonly #lifecycleSig = async (): Promise<string> => {
     const zone = ownZone()
-    const room = zone?.room ?? ''
-    const secret = zone?.secret ?? ''
-    if (!room || !secret) return ''
-    try { return await SignatureService.sign(new TextEncoder().encode(`lifecycle\u0000${room}\u0000${secret}`).buffer as ArrayBuffer) }
+    if (!zone?.room || !zone?.secret) return ''
+    try { return String(this.#ioc<{ lifecycleSig?: () => string }>(SWARM_DRONE_KEY)?.lifecycleSig?.() ?? '') }
     catch { return '' }
   }
   /** The participant's host, scheme/slash stripped (e.g. 'jwize.com').

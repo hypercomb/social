@@ -21,7 +21,7 @@
 
 import { createHash } from 'node:crypto'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { lineageKey } from '@hypercomb/core'
+import { lineageKey, roomPreimage } from '@hypercomb/core'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 
 vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
@@ -61,7 +61,7 @@ vi.mock('../commands/decoration-kind-index.js', async (importOriginal) => ({
   referenceTargetForLabel: () => null,
 }))
 
-const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${ROOM}\0${SECRET}`)
+const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${roomPreimage(ROOM, SECRET, 'pluginthematrix.com')}`)
 const ROOT = pageSig([])
 
 type Published = { kind: number; sig: string; payload: { visuals?: Record<string, unknown>[] } & Record<string, unknown>; at: number }

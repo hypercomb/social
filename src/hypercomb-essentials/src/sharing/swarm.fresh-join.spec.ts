@@ -12,7 +12,7 @@
 
 import { createHash } from 'node:crypto'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { EffectBus, lineageKey } from '@hypercomb/core'
+import { EffectBus, lineageKey, roomPreimage } from '@hypercomb/core'
 
 vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
 
@@ -40,7 +40,7 @@ vi.mock('../commands/decoration-kind-index.js', async (importOriginal) => ({
   referenceTargetForLabel: () => null,
 }))
 
-const ROOT = sha(`${lineageKey([])}\0${ROOM}\0${SECRET}`)
+const ROOT = sha(`${lineageKey([])}\0${roomPreimage(ROOM, SECRET, 'pluginthematrix.com')}`)
 type Published = { kind: number; sig: string; at: number }
 const published: Published[] = []
 // The relay is slow to finish replaying: end-of-stored-events only at the

@@ -37,7 +37,7 @@
 // (command history, on this device), and the code may live only in this tab's
 // session and in the link. A code typed after `code` is refused, and named so.
 
-import { EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, get, I18N_IOC_KEY, meetingPointKey, type I18nProvider } from '@hypercomb/core'
 import { deliverLink } from './deliver-link.js'
 import {
   MEETING_INVITE_KIND,
@@ -61,6 +61,7 @@ const SECRET_KEY = '@hypercomb.social/SecretStore'
 const NAV_KEY = '@hypercomb.social/Navigation'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
+const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
 const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
@@ -70,6 +71,7 @@ interface CredStoreLike { value: string }
 interface NavLike { segments: () => string[] }
 interface SelectionLike { selected: ReadonlySet<string> }
 interface SwarmLike { currentSegments?: () => readonly string[] }
+interface MeshPointLike { meetingRelay?: () => string }
 interface LineageLike { explorerSegments?: () => readonly string[] }
 interface HostSyncLike {
   isEnabled?: () => boolean
@@ -269,7 +271,19 @@ export class InviteQueenBee {
     if (!Array.isArray(segs)) segs = get<LineageLike>(LINEAGE_KEY)?.explorerSegments?.() ?? nav.segments()
     const segments = segs.map(s => String(s ?? '').trim()).filter(s => s.length > 0)
     const zone = readTabZone()
-    const relay = meetingRelayOf(zone?.relay)
+    let relay = meetingRelayOf(zone?.relay)
+    // A TAB THAT MEETS ON ITS OWN LIST (no point in its zone — a relay list
+    // the page chose) names that point too, unless it is the shipped
+    // default: a link with no point lands a guest at hypercomb.com, and
+    // another point is another room (core roomPreimage, 2026-10-12). Never a
+    // loopback one — no guest's device can reach it.
+    if (!relay) {
+      let own = ''
+      try { own = meetingRelayOf(get<MeshPointLike>(MESH_KEY)?.meetingRelay?.() ?? '') } catch { own = '' }
+      let loopback = true
+      try { loopback = /^(?:(?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[::1\])$/i.test(new URL(own).hostname) } catch { /* no point */ }
+      if (own && !loopback && meetingPointKey(own) !== meetingPointKey('')) relay = own
+    }
     const fragment = meetFragment(room, secret, segments, { relay, host: zone?.host, code: zone?.code })
     // A LINK NOBODY CAN OPEN IS NEVER HANDED OUT. It is read back here the
     // way every guest will read it; a page that cannot travel in it (a name

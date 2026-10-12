@@ -369,10 +369,6 @@
   "mesh-modal.location-placeholder": "digita il nome della posizione",
   "mesh-modal.secret-label": "segreto",
   "mesh-modal.secret-placeholder": "chiave condivisa",
-  "mesh-modal.label-label": "il tuo nome",
-  "mesh-modal.label-placeholder": "come ti vedono gli altri nello sciame",
-  "mesh-modal.host-label": "host",
-  "mesh-modal.host-placeholder": "il dominio attraverso cui sei connesso",
   "mesh-modal.show-secret": "mostra segreto",
   "mesh-modal.hide-secret": "nascondi segreto",
   "mesh-modal.remove-saved": "rimuovi posizione salvata",
@@ -2770,6 +2766,9 @@
   "mesh-modal.code-label": "codice di accesso",
   "mesh-modal.code-placeholder": "codice di accesso, se il punto d'incontro lo chiede",
   "mesh-modal.bad-code": "quel codice di accesso contiene un carattere che una connessione non può portare (uno spazio, una virgola, una barra…)",
+  "hosts.own-host": "Il tuo host",
+  "hosts.own-host-placeholder": "il tuo host — dove va il tuo backup",
+  "hosts.own-host-set": "Imposta",
   "use-live-relay.too-many": "troppe parole: {words} — indica una stanza, un segreto e un server ws(s)://",
   "use-live-relay.bad-server": "'{server}' non è un server che questa scheda può raggiungere",
   "mesh.state.access": "{host} richiede il link della riunione attuale — chiedi quello più recente",
@@ -2793,6 +2792,8 @@
   "share.names-only": "{count} solo come nomi — niente in coda",
   "share.names-only.one": "{count} solo come nome — niente in coda",
   "share.passed-over": "{host} saltato — non accetta caricamenti",
+  "share.passed-over.one": "{host} saltato — non accetta caricamenti",
+  "share.passed-over.other": "{host} saltati — non accettano caricamenti",
   "share.deep-owner": "Le pagine più profonde si aprono dal dispositivo di {name} finché il loro caricamento non finisce",
   "host.publish.refused": "{node} ha rifiutato il caricamento ({reason}) — non è stato pubblicato nulla",
   "meet.needs-update": "Questa riunione richiede la versione più recente di Hypercomb — aggiorna e il link si aprirà da solo",
@@ -2808,5 +2809,7 @@
   "history.commit-conflict": "Un'altra scheda di questo alveare ha modificato questa pagina nello stesso momento — la tua modifica non è stata salvata. Riprova.",
   "drop.image-failed": "Non è stato possibile aggiungere quell'immagine — riprova, o prova con un'altra immagine.",
   "share.held.deep": "{host} non accetta le pagine più profonde di {count} tessere — si aprono dal tuo dispositivo finché sei qui",
-  "share.held.deep.one": "{host} non accetta le pagine più profonde di {count} tessera — si aprono dal tuo dispositivo finché sei qui"
+  "share.held.deep.one": "{host} non accetta le pagine più profonde di {count} tessera — si aprono dal tuo dispositivo finché sei qui",
+  "share.held.on-device": "Le pagine più profonde di {count} tessere sono ancora solo sul tuo dispositivo — resta un momento per lasciarle alla stanza",
+  "share.held.on-device.one": "Le pagine più profonde di {count} tessera sono ancora solo sul tuo dispositivo — resta un momento per lasciarle alla stanza"
 }

@@ -109,11 +109,48 @@ describe('resuming after a reload', () => {
     localStorage.setItem('hc:room', 'meetup')
     localStorage.setItem('hc:secret', '4417')
     await load()
-    expect(zone()).toEqual({ room: 'meetup', secret: '4417' })
+    // (jsdom serves localhost: the crossing below also pins where it met.)
+    expect(zone()).toEqual({ room: 'meetup', secret: '4417', relay: 'ws://localhost:7777' })
     // …and from then on it is this tab's.
     localStorage.setItem('hc:room', 'another')
     const { RoomStore } = await import('./room-store')
     expect(new RoomStore().value).toBe('meetup')
+  })
+
+  it('a loopback tab joined before this shell resumes where it met — the dev relay — never moved to a public point unseen', async () => {
+    expect(location.hostname).toBe('localhost')
+    sessionStorage.setItem('hc:mesh-session', 'true')
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'studio', secret: 'downtown' }))
+    await load()
+    expect(zone()).toEqual({ room: 'studio', secret: 'downtown', relay: 'ws://localhost:7777' })
+    // never this device's next pre-fill: nobody chose it here
+    expect((await load()).readMeetPointPrefill()).toBe('')
+  })
+
+  it('the crossing runs once per tab: a join made under this shell keeps the default it met at', async () => {
+    await load()                                  // this shell has seen the tab
+    sessionStorage.setItem('hc:mesh-session', 'true')
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'studio', secret: 's3' }))
+    await load()                                  // the reload
+    expect(zone()).toEqual({ room: 'studio', secret: 's3' })
+  })
+
+  it('a tab that met elsewhere before this shell is left where it met (a list, the live flag, a point of its own)', async () => {
+    for (const [key, value] of [['hc:nostrmesh:relays', '["wss://jwize.com"]'], ['hc:nostrmesh:use-live-relay', '1']] as const) {
+      localStorage.clear()
+      sessionStorage.clear()
+      localStorage.setItem(key, value)
+      sessionStorage.setItem('hc:mesh-session', 'true')
+      sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's' }))
+      await load()
+      expect([key, zone()?.relay]).toEqual([key, undefined])
+    }
+    localStorage.clear()
+    sessionStorage.clear()
+    sessionStorage.setItem('hc:mesh-session', 'true')
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's', relay: 'wss://point.example' }))
+    await load()
+    expect(zone()?.relay).toBe('wss://point.example')
   })
 
   it('a new tab has no zone: it is pre-filled from the origin-wide pair and boots private', async () => {
@@ -176,6 +213,7 @@ describe('the shell says its selector carries the meeting point (VO-5)', () => {
 
 describe('the resume pin keeps the pair verbatim', () => {
   it('a join from an older shell with a pair that would fold is pinned as it was', async () => {
+    sessionStorage.setItem('hc:mesh-point-crossing', '1')   // the point is another case's
     sessionStorage.setItem('hc:mesh-session', 'true')
     localStorage.setItem('hc:room', 'garden  rose')
     localStorage.setItem('hc:secret', 'joe\u2019s')

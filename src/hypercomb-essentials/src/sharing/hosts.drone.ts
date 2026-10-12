@@ -105,6 +105,18 @@ const SEEDED_KEY = HOSTS_SEEDED_KEY
 const SEED_RETRIES = 8
 const SEED_RETRY_MS = 500
 
+/** YOUR OWN HOST — the domain this participant serves from: host-sync's
+ *  backup target and the content broker's first door. Set in the host
+ *  directory (`hosts:own-host`); it was the swarm selector's "host" field
+ *  until 2026-10-12, when the selector came to show only what defines a
+ *  meeting (meeting point, room, secret, code) — a host is replication,
+ *  never who meets. The key every reader reads (host-sync, the broker,
+ *  feature availability) is unchanged. */
+const OWN_HOST_KEY = 'hc:nostrmesh:self-domain'
+/** Host-sync is the key's one writer (setOwnHost) — the module that already
+ *  wrote it for `enable`; this drone only names what it is told. */
+const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
+
 export interface HostsRenderPayload {
   open: boolean
   /** The hosts you carry, in the pool's own stable order. */
@@ -124,7 +136,7 @@ export class HostsDrone extends Drone {
     'The hosts you carry, as their own surface: the `community:hosts` pool read as a list, with add and remove. The data set the publish picker offers and the shim reads by pool address on a cold boot.'
 
   protected override listens: string[] = [
-    'hosts:view-toggle', 'hosts:open', 'hosts:close', 'hosts:refresh', 'hosts:add', 'hosts:remove', 'packages:open',
+    'hosts:view-toggle', 'hosts:open', 'hosts:close', 'hosts:refresh', 'hosts:add', 'hosts:remove', 'hosts:own-host', 'packages:open',
   ]
   protected override emits: string[] = ['hosts:render', 'activity:log']
 
@@ -211,6 +223,22 @@ export class HostsDrone extends Drone {
         await this.#read()
       })()
     })
+    // YOUR OWN HOST — named in the directory, kept as its bare zone; an
+    // empty name clears it. Nothing else changes with it: it is where your
+    // backup goes, never who you meet.
+    this.onEffect<{ host?: unknown }>('hosts:own-host', (p) => {
+      const raw = String(p?.host ?? '').trim()
+      const zone = raw ? hostZone(raw) : ''
+      if (raw && !zone) { this.emitEffect('activity:log', { message: `${raw} is not a host` }); return }
+      let held = ''
+      try { held = hostZone(localStorage.getItem(OWN_HOST_KEY) ?? '') } catch { return }
+      if (zone === held) return
+      const hostSync = window.ioc?.get?.(HOST_SYNC_KEY) as { setOwnHost?: (host: string) => void } | undefined
+      if (typeof hostSync?.setOwnHost !== 'function') return
+      hostSync.setOwnHost(zone)
+      this.emitEffect('activity:log', { message: zone ? `your own host is ${zone}` : 'no own host' })
+    })
+
     // There is deliberately no hosting switch here, and no effect for one.
     // Publishing arms the gate itself, and switching it off never took a
     // published site down — see the ratchet in community-hosts-panel.spec.ts.

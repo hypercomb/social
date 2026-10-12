@@ -259,3 +259,32 @@ describe('the line says whether the relay took the page (TS-7)', () => {
     state.ackMs.set(30200, 5)
   })
 })
+
+describe('a publish domain worn DEEPER than the offered tile is named once passed over (BCL-1)', () => {
+  it('smoke1: lt-typo/c01 wears typo.localhost, which never answered — its pages went to the pool; the root names it', async () => {
+    // The root offers lt-typo (a branch); the domain is worn by c01 BELOW
+    // it, so neither this page's hosts nor lt-typo's own page say so. Only
+    // host-sync, which re-staged lt-typo's closure, knows where c01's pages
+    // went instead.
+    seedPage(['bcl1'], ['lt-typo', 'plain'], ['lt-typo'])
+    state.tileServed.add(sealOf('bcl1/lt-typo'))
+    state.deepServed.add(sealOf('bcl1/lt-typo'))
+    state.tileServed.add(sealOf('bcl1/plain'))
+    state.deepServed.add(sealOf('bcl1/plain'))
+    state.closureHosts.set(sealOf('bcl1/lt-typo'), ['pool-a.example'])
+    hostSays('pool-a.example', 'synced', 0)
+    hostSync['closurePassedOverOf'] = (sig: string) => (sig === sealOf('bcl1/lt-typo') ? ['typo.localhost', 'hypercomb.com'] : ['hypercomb.com'])
+    try {
+      await go(['bcl1'])
+      const s = lastAt('/bcl1')!
+      expect([...(s['passedOver'] as string[])].sort()).toEqual(['hypercomb.com', 'typo.localhost'])
+      // A tile only (not a branch): its deeper pages are not offered, so a
+      // domain worn below it is nobody's business here.
+      hostSync['closurePassedOverOf'] = () => ['elsewhere.localhost']
+      state.branch.delete('/bcl1|lt-typo')
+      await go(['bcl1', 'x'], 200)
+      await go(['bcl1'])
+      expect(lastAt('/bcl1')!['passedOver']).toEqual(['hypercomb.com'])
+    } finally { delete hostSync['closurePassedOverOf'] }
+  })
+})

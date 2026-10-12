@@ -369,10 +369,6 @@
   "mesh-modal.location-placeholder": "digite um nome de localização",
   "mesh-modal.secret-label": "segredo",
   "mesh-modal.secret-placeholder": "chave compartilhada",
-  "mesh-modal.label-label": "seu nome",
-  "mesh-modal.label-placeholder": "como os outros te veem no enxame",
-  "mesh-modal.host-label": "host",
-  "mesh-modal.host-placeholder": "o domínio pelo qual você está conectado",
   "mesh-modal.show-secret": "mostrar segredo",
   "mesh-modal.hide-secret": "ocultar segredo",
   "mesh-modal.remove-saved": "remover localização salva",
@@ -2770,6 +2766,9 @@
   "mesh-modal.code-label": "código de acesso",
   "mesh-modal.code-placeholder": "código de acesso, se o ponto de encontro pedir",
   "mesh-modal.bad-code": "esse código de acesso tem um caractere que uma conexão não consegue levar (espaço, vírgula, barra…)",
+  "hosts.own-host": "Seu próprio host",
+  "hosts.own-host-placeholder": "seu próprio host — para onde vai seu backup",
+  "hosts.own-host-set": "Definir",
   "use-live-relay.too-many": "palavras demais: {words} — indique uma sala, um segredo e um servidor ws(s)://",
   "use-live-relay.bad-server": "'{server}' não é um servidor que esta aba consegue alcançar",
   "mesh.state.access": "{host} precisa do link de reunião atual — peça o mais recente",
@@ -2793,6 +2792,8 @@
   "share.names-only": "{count} só como nomes — nada na fila",
   "share.names-only.one": "{count} só como nome — nada na fila",
   "share.passed-over": "{host} ignorado — não aceita envios",
+  "share.passed-over.one": "{host} ignorado — não aceita envios",
+  "share.passed-over.other": "{host} ignorados — não aceitam envios",
   "share.deep-owner": "As páginas mais profundas abrem a partir do dispositivo de {name} até o envio delas terminar",
   "host.publish.refused": "{node} recusou o envio ({reason}) — nada foi publicado",
   "meet.needs-update": "Esta reunião precisa do Hypercomb mais novo — atualize e o link abre sozinho",
@@ -2808,5 +2809,7 @@
   "history.commit-conflict": "Outra aba desta colmeia alterou esta página no mesmo momento — sua alteração não foi salva. Tente de novo.",
   "drop.image-failed": "Não foi possível adicionar essa imagem — tente de novo ou tente outra imagem.",
   "share.held.deep": "{host} não aceita as páginas mais profundas de {count} blocos — elas abrem a partir do seu dispositivo enquanto você estiver aqui",
-  "share.held.deep.one": "{host} não aceita as páginas mais profundas de {count} bloco — elas abrem a partir do seu dispositivo enquanto você estiver aqui"
+  "share.held.deep.one": "{host} não aceita as páginas mais profundas de {count} bloco — elas abrem a partir do seu dispositivo enquanto você estiver aqui",
+  "share.held.on-device": "As páginas mais profundas de {count} blocos ainda estão só no seu dispositivo — fique um momento para deixá-las com a sala",
+  "share.held.on-device.one": "As páginas mais profundas de {count} bloco ainda estão só no seu dispositivo — fique um momento para deixá-las com a sala"
 }

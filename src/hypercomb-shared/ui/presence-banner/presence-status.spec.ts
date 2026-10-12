@@ -14,7 +14,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { secretTag } from '@hypercomb/core'
 import {
-  UNREACHABLE_AFTER_MS, clockRefused, linkPhase, roomWords, statusLine,
+  ROOM_IDENTITY, UNREACHABLE_AFTER_MS, clockRefused, linkPhase, loadedRoomIdentity, roomWords, statusLine, wordsBeside,
   type StatusInput, type StatusLine,
 } from './presence-status'
 
@@ -223,10 +223,42 @@ describe('the socket as a person reads it', () => {
 })
 
 describe("the room's two words", () => {
-  it('come from the room and the secret only — the lifecycle preimage', () => {
-    expect(roomWords('meetup', '4417')).toBe(secretTag('lifecycle\u0000meetup\u00004417'))
+  it('come from the meeting point, the room and the secret — the lifecycle preimage (2026-10-12)', () => {
+    // An empty field is the shipped default, and the default is part of it.
+    expect(roomWords('meetup', '4417')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000hypercomb.com'))
+    expect(roomWords('meetup', '4417', 'wss://HyperComb.com/')).toBe(roomWords('meetup', '4417'))
+    expect(roomWords('meetup', '4417', 'wss://point.example')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000point.example'))
     expect(roomWords(' meetup ', ' 4417 ')).toBe(roomWords('meetup', '4417'))
     expect(roomWords('', '')).toBe('')
+  })
+
+  it('follow the package that addresses the room — a shell newer than its package reads that package\'s pair', () => {
+    const ioc = globalThis as { ioc?: unknown }
+    const prior = ioc.ioc
+    const swarm: { roomIdentity?: number } = {}
+    ioc.ioc = { get: (key: string) => key === '@diamondcoreprocessor.com/SwarmDrone' ? swarm : undefined }
+    try {
+      // A package from before 2026-10-12 (no marker) meets at `lifecycle \0
+      // room \0 secret`, the point folded into the words only off the
+      // default (D4): its words are that address's, whatever this shell is.
+      expect(loadedRoomIdentity()).toBe(1)
+      expect(roomWords('meetup', '4417')).toBe(secretTag('lifecycle\u0000meetup\u00004417'))
+      expect(roomWords('meetup', '4417', 'wss://hypercomb.com')).toBe(secretTag('lifecycle\u0000meetup\u00004417'))
+      expect(roomWords('meetup', '4417', 'wss://point.example')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000point.example'))
+      expect(wordsBeside('meetup', '4417', '', 'ja')).toContain(secretTag('lifecycle\u0000meetup\u00004417', 'ja'))
+      // The package that marks itself 2 meets at point + room + secret.
+      swarm.roomIdentity = 2
+      expect(loadedRoomIdentity()).toBe(ROOM_IDENTITY)
+      expect(roomWords('meetup', '4417')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000hypercomb.com'))
+    } finally { ioc.ioc = prior }
+    // No swarm loaded yet: the current identity.
+    expect(loadedRoomIdentity()).toBe(ROOM_IDENTITY)
+  })
+
+  it('the swarm says which identity it derives with — the marker the shell reads', () => {
+    const swarm = readFileSync(join(UI, '..', '..', 'hypercomb-essentials', 'src', 'sharing', 'swarm.drone.ts'), 'utf8')
+    expect(swarm).toContain(`public readonly roomIdentity = ${ROOM_IDENTITY}`)
+    expect(swarm).toContain('roomPreimage(room, secret, this.#swarmHost())')
   })
 
   it('are the same on every page: no word surface hashes the page any more', () => {

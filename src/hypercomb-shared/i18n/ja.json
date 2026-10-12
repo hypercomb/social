@@ -373,10 +373,6 @@
   "mesh-modal.location-placeholder": "ロケーション名を入力",
   "mesh-modal.secret-label": "シークレット",
   "mesh-modal.secret-placeholder": "共有キー",
-  "mesh-modal.label-label": "あなたの名前",
-  "mesh-modal.label-placeholder": "群れの中での表示名",
-  "mesh-modal.host-label": "ホスト",
-  "mesh-modal.host-placeholder": "接続しているドメイン",
   "mesh-modal.show-secret": "シークレットを表示",
   "mesh-modal.hide-secret": "シークレットを非表示",
   "mesh-modal.remove-saved": "保存したロケーションを削除",
@@ -2923,6 +2919,9 @@
   "mesh-modal.code-label": "アクセスコード",
   "mesh-modal.code-placeholder": "集合場所が求める場合のアクセスコード",
   "mesh-modal.bad-code": "そのアクセスコードには接続で送れない文字が含まれています（空白、カンマ、スラッシュなど）",
+  "hosts.own-host": "自分のホスト",
+  "hosts.own-host-placeholder": "自分のホスト — バックアップの保存先",
+  "hosts.own-host-set": "設定",
   "use-live-relay.too-many": "語が多すぎます: {words} — ルーム、シークレット、ws(s):// サーバーを指定してください",
   "use-live-relay.bad-server": "'{server}' はこのタブが接続できるサーバーではありません",
   "mesh.state.access": "{host} には最新のミーティングリンクが必要です — 新しいリンクをもらってください",
@@ -2946,6 +2945,8 @@
   "share.names-only": "{count} 件は名前のみ — 送信待ちではありません",
   "share.names-only.one": "{count} 件は名前のみ — 送信待ちではありません",
   "share.passed-over": "{host} はスキップしました — アップロードを受け付けていません",
+  "share.passed-over.one": "{host} はスキップしました — アップロードを受け付けていません",
+  "share.passed-over.other": "{host} はスキップしました — アップロードを受け付けていません",
   "share.deep-owner": "下の階層のページは、アップロードが終わるまで {name} さんの端末から開きます",
   "host.publish.refused": "{node} がアップロードを拒否しました（{reason}） — 何も公開されていません",
   "meet.needs-update": "このミーティングには新しい Hypercomb が必要です — 更新するとリンクが自動で開きます",
@@ -2961,5 +2962,7 @@
   "history.commit-conflict": "このハイブの別のタブが同時にこのページを変更しました — 変更は保存されていません。もう一度お試しください。",
   "drop.image-failed": "その画像を追加できませんでした — もう一度試すか、別の画像をお試しください。",
   "share.held.deep": "{host} は {count} 件のタイルのより深いページを受け付けていません — ここにいる間はあなたのデバイスから開かれます",
-  "share.held.deep.one": "{host} は {count} 件のタイルのより深いページを受け付けていません — ここにいる間はあなたのデバイスから開かれます"
+  "share.held.deep.one": "{host} は {count} 件のタイルのより深いページを受け付けていません — ここにいる間はあなたのデバイスから開かれます",
+  "share.held.on-device": "{count} 件のタイルのより深いページは、まだあなたのデバイスにしかありません — ルームに残せるよう、少しだけこのままお待ちください",
+  "share.held.on-device.one": "{count} 件のタイルのより深いページは、まだあなたのデバイスにしかありません — ルームに残せるよう、少しだけこのままお待ちください"
 }

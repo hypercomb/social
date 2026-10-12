@@ -31,7 +31,7 @@
 //   log, pool or resource. The line itself shows the count; it is sent
 //   transiently, so the bus keeps no copy for late subscribers.
 
-import { EffectBus, I18N_IOC_KEY, SignatureService, Worker, get, lineageKey, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, SignatureService, Worker, get, lineageKey, roomPreimage, type I18nProvider } from '@hypercomb/core'
 import { isJoinedHere } from './membership.js'
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
@@ -40,6 +40,7 @@ const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const ROOM_KEY = '@hypercomb.social/RoomStore'
 const SECRET_KEY = '@hypercomb.social/SecretStore'
 const SIGNATURE_STORE_KEY = '@hypercomb/SignatureStore'
+const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 
 /** This tab's decided pages — digests of (zone, page), nothing readable. */
 export const SHARE_ASKED_KEY = 'hc:share-asked'
@@ -63,6 +64,7 @@ interface LineageLike {
 }
 interface ValueStore { value?: unknown }
 interface SignatureStoreLike { signText?: (text: string) => Promise<string> }
+interface MeshLike { swarmHost?: () => string }
 interface ToastLike { id: number; fading?: boolean; actions?: readonly { payload?: unknown }[] }
 interface ToastsLike { toasts?: readonly ToastLike[] }
 /** A line on screen: which page, in which meeting. `seen` once the toast
@@ -350,10 +352,13 @@ export class ShareAskWorker extends Worker {
   }
 
   /** One digest names (meeting, page) — signed the way the swarm signs its
-   *  addresses (the SignatureStore, else the core primitive). The secret
-   *  never leaves this call. */
+   *  addresses (the SignatureStore, else the core primitive). The meeting is
+   *  its point, room and secret (core roomPreimage — the relay this tab
+   *  dials, 2026-10-12). The secret never leaves this call. */
   #digest = async (room: string, secret: string, page: string): Promise<string> => {
-    const text = `share-ask\0${room}\0${secret}\0${page}`
+    let point = ''
+    try { point = String(get<MeshLike>(MESH_KEY)?.swarmHost?.() ?? '') } catch { point = '' }
+    const text = `share-ask\0${roomPreimage(room, secret, point)}\0${page}`
     const store = get<SignatureStoreLike>(SIGNATURE_STORE_KEY)
     if (typeof store?.signText === 'function') return store.signText(text)
     const bytes = encoder.encode(text)

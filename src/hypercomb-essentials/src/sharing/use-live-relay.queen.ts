@@ -25,14 +25,19 @@
 // it, so the same text typed anywhere is the same zone.
 //
 // What one invocation configures (each step skipped when already right):
-//   1. relay reachability — clears a 'hc:nostrmesh:network' opt-out; on a
-//      real host forces the live relay ('hc:nostrmesh:use-live-relay'='1')
-//      and applies it NOW via mesh.configureRelays (no reload); an explicit
-//      ws(s):// server becomes THIS TAB's meeting point (sessionStorage
-//      `hc:mesh-zone`, membership.ts), so a reload dials it again — never the
-//      origin-wide list, which every other tab (in its own meeting) would
-//      dial on its next reload. A local origin keeps its loopback default
-//      unless a server is given. The mesh is re-pointed ONLY when the relay
+//   1. relay reachability — clears a 'hc:nostrmesh:network' opt-out; on
+//      every origin — a loopback dev page too (2026-10-12) — forces the live
+//      relay ('hc:nostrmesh:use-live-relay'='1') and applies it NOW, for the
+//      session, via mesh.configureRelays (no reload) — whatever relay list
+//      the page holds: the command's name is its promise, and a saved list
+//      (/domain, an older run of this word) would otherwise decide the
+//      point, and so the room, unseen, and send the room to every relay in
+//      it; an explicit ws(s):// server
+//      becomes THIS TAB's meeting point (sessionStorage `hc:mesh-zone`,
+//      membership.ts), so a reload dials it again — never the origin-wide
+//      list, which every other tab (in its own meeting) would dial on its
+//      next reload. The local dev relay is a server you name (`ws://
+//      localhost:7777`). The mesh is re-pointed ONLY when the relay
 //      actually differs: re-pointing it at the relay it already holds tore
 //      down a live socket mid-meeting. THE TAB'S OWN MEETING POINT IS KEPT
 //      (ZI-1): with no server given and the room and secret this tab is
@@ -101,13 +106,6 @@ const ioc = () => (window as { ioc?: { get?: <T>(k: string) => T | undefined } }
 const tr = (key: string, fallback: string, params?: Record<string, string | number>): string => {
   const s = ioc()?.get?.<I18nProvider>(I18N_IOC_KEY)?.t(key, params)
   return s && s !== key ? s : fallback
-}
-
-const isLocalOrigin = (): boolean => {
-  try {
-    const h = (window.location.hostname ?? '').toLowerCase()
-    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.local')
-  } catch { return false }
 }
 
 /** The shipped default meeting point — nostr-mesh's LIVE_RELAY, read from the
@@ -239,10 +237,13 @@ export class UseLiveRelayQueenBee {
       { room, relay: relayNote }))
   }
 
-  /** The default meeting point: a local origin keeps its loopback relay; a
-   *  real host forces the live relay and applies it now. */
+  /** The default meeting point — the same on every origin (2026-10-12: "yes
+   *  make localhost default to hypercomb.com"): the live relay, forced and
+   *  applied now for the session, whatever relay list the page holds. A
+   *  loopback page no longer keeps a loopback relay nobody named here: the
+   *  point is part of the room (core roomPreimage), so a dev tab there met
+   *  no one — the dev relay is a server given to this word. */
   #defaultRelay(mesh: MeshLike | undefined): string {
-    if (isLocalOrigin()) return 'local relay'
     localStorage.setItem(FLAG_KEY, '1')
     this.#pointAt(mesh, liveRelayUrl())
     return 'live relay'

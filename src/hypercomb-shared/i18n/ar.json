@@ -369,10 +369,6 @@
   "mesh-modal.location-placeholder": "اكتب اسم الموقع",
   "mesh-modal.secret-label": "السر",
   "mesh-modal.secret-placeholder": "مفتاح مشترك",
-  "mesh-modal.label-label": "اسمك",
-  "mesh-modal.label-placeholder": "كيف يراك الآخرون في السرب",
-  "mesh-modal.host-label": "المضيف",
-  "mesh-modal.host-placeholder": "النطاق المتصل من خلاله",
   "mesh-modal.show-secret": "إظهار السر",
   "mesh-modal.hide-secret": "إخفاء السر",
   "mesh-modal.remove-saved": "إزالة الموقع المحفوظ",
@@ -2770,6 +2766,9 @@
   "mesh-modal.code-label": "رمز الدخول",
   "mesh-modal.code-placeholder": "رمز الدخول، إن طلبته نقطة اللقاء",
   "mesh-modal.bad-code": "في رمز الدخول هذا حرف لا يحمله الاتصال (مسافة، فاصلة، شرطة مائلة…)",
+  "hosts.own-host": "مضيفك الخاص",
+  "hosts.own-host-placeholder": "مضيفك الخاص — حيث تذهب نسختك الاحتياطية",
+  "hosts.own-host-set": "تعيين",
   "use-live-relay.too-many": "كلمات كثيرة جدًا: {words} — أعطِ غرفة وسرًا وخادم ws(s)://",
   "use-live-relay.bad-server": "'{server}' ليس خادمًا يمكن لهذا التبويب الاتصال به",
   "mesh.state.access": "يحتاج {host} إلى رابط الاجتماع الحالي — اطلب أحدث رابط",
@@ -2793,6 +2792,8 @@
   "share.names-only": "أسماء فقط: {count} — لا شيء في قائمة الانتظار",
   "share.names-only.one": "أسماء فقط: {count} — لا شيء في قائمة الانتظار",
   "share.passed-over": "تم تخطي {host} — لا يقبل الرفع",
+  "share.passed-over.one": "تم تخطي {host} — لا يقبل الرفع",
+  "share.passed-over.other": "تم تخطي {host} — لا تقبل الرفع",
   "share.deep-owner": "تُفتح الصفحات الأعمق من جهاز {name} حتى ينتهي رفعها",
   "host.publish.refused": "رفض {node} الرفع ({reason}) — لم يُنشر أي شيء",
   "meet.needs-update": "يحتاج هذا الاجتماع إلى إصدار أحدث من Hypercomb — حدّث وسيفتح الرابط من تلقاء نفسه",
@@ -2808,5 +2809,7 @@
   "history.commit-conflict": "غيّر تبويب آخر من هذه الخلية هذه الصفحة في اللحظة نفسها — لم يُحفظ تغييرك. حاول مرة أخرى.",
   "drop.image-failed": "تعذّرت إضافة تلك الصورة — حاول مرة أخرى، أو جرّب صورة أخرى.",
   "share.held.deep": "لا يقبل {host} الصفحات الأعمق لبلاطات عددها {count} — تُفتح من جهازك ما دمت هنا",
-  "share.held.deep.one": "لا يقبل {host} الصفحات الأعمق لبلاطات عددها {count} — تُفتح من جهازك ما دمت هنا"
+  "share.held.deep.one": "لا يقبل {host} الصفحات الأعمق لبلاطات عددها {count} — تُفتح من جهازك ما دمت هنا",
+  "share.held.on-device": "الصفحات الأعمق لبلاطات عددها {count} ما زالت على جهازك فقط — ابقَ لحظة لتتركها للغرفة",
+  "share.held.on-device.one": "الصفحات الأعمق لبلاطات عددها {count} ما زالت على جهازك فقط — ابقَ لحظة لتتركها للغرفة"
 }

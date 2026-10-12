@@ -16,7 +16,7 @@
 
 import { createHash } from 'node:crypto'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { EffectBus, lineageKey } from '@hypercomb/core'
+import { EffectBus, lineageKey, roomPreimage } from '@hypercomb/core'
 
 vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
 
@@ -151,8 +151,8 @@ afterAll(() => { swarm.markDisposed(); vi.useRealTimers() })
 
 const settle = async (ms = 20): Promise<void> => { await vi.advanceTimersByTimeAsync(ms) }
 const nowSec = (): number => Math.floor(Date.now() / 1000)
-const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${ROOM}\0${SECRET}`)
-const LIFE = sha(`lifecycle\0${ROOM}\0${SECRET}`)
+const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${roomPreimage(ROOM, SECRET, 'jwize.com')}`)
+const LIFE = sha(`lifecycle\0${roomPreimage(ROOM, SECRET, 'jwize.com')}`)
 
 const deliver = (sig: string, event: Record<string, unknown>, payload: unknown): void => {
   for (const cb of [...(subs.get(sig) ?? [])]) cb({ relay: 'wss://jwize.com', sig, event, payload })

@@ -47,12 +47,15 @@ export type RuntimeInitializerOptions = {
   locales?: () => readonly string[]
 }
 
-// Dev-build default, applied on a LOOPBACK origin only (the operator's own
-// dev machine) and only when the value is unset — so two localhost tabs join
-// the same swarm room with zero manual setup, while a real deployed origin
-// (non-loopback) is never affected. An explicit clear still empties it. The
-// host is never defaulted (see the self-domain block below).
-const DEV_DEFAULT_SECRET = 'downtown'
+// NO DEV-BUILD SECRET (2026-10-12). A loopback page used to pre-fill the room
+// secret with a word published in this source, so two localhost tabs met with
+// nothing typed — on the local relay, which nobody else could reach. A
+// loopback page now meets at the shipped default point (wss://hypercomb.com)
+// like every install, and a room is its point + room + secret: a secret
+// anyone can read here would put a dev hive in a public room anyone can
+// compute. Two tabs of one origin still share the secret once it is typed
+// (the origin-wide pre-fill, secret-store.ts). The host is never defaulted
+// either (see the self-domain block below).
 
 // Reset the former flat-top rollout once, then preserve every explicit
 // participant choice made after this revision. Keeping the revision separate
@@ -145,8 +148,10 @@ const _runInitializeRuntime = async (
     // #liveRelayActive). The public install names no home machine. The
     // one-time marker (hc:beta-relay-seeded) means a later `/use-live-relay
     // clear` is respected — we never re-seed over an explicit clear. Loopback
-    // dev is never seeded (it resolves from the local relay; force with
-    // `/use-live-relay on` to test the live path). Opt out on a real origin
+    // dev needs no flag: the mesh seeds the live relay on EVERY origin since
+    // 2026-10-12 (jwize: "yes make localhost default to hypercomb.com"); the
+    // local dev relay is dialled only when chosen (a relay list, a meeting
+    // point, `/use-live-relay <room> <secret> ws://localhost:7777`). Opt out
     // anytime with `/use-live-relay off`. Revisit when third-party operators
     // federate (no MANDATORY central chokepoint).
     if (!isLoopback
@@ -156,15 +161,6 @@ const _runInitializeRuntime = async (
       localStorage.setItem('hc:beta-relay-seeded', '1')
     }
 
-    // ── location secret (dev-build default) ──
-    // On loopback, seed the room secret so two localhost tabs land in the same
-    // swarm room without typing it. Respects an explicit clear; never touches
-    // a real origin.
-    if (isLoopback) {
-      const cleared = (() => { try { return localStorage.getItem('hc:secret-cleared') === '1' } catch { return false } })()
-      const secretStore = get('@hypercomb.social/SecretStore') as { value: string; set: (s: string) => void } | undefined
-      if (secretStore && !secretStore.value && !cleared) secretStore.set(DEV_DEFAULT_SECRET)
-    }
   } catch { /* private mode — readers handle the empty case */ }
 
   if (logOpfs) {

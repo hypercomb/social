@@ -57,6 +57,9 @@ export const HOST_DIRECTORY_WINDOW = 'hosts-panel'
 const STYLE_ID = 'hc-host-directory-style'
 /** Where the directory was when a change restarted the app — read once. */
 const REOPEN_KEY = 'hc:hosts:reopen'
+/** Your own host (the hosts drone hands it to host-sync, its one writer, on `hosts:own-host`). Read only
+ *  here. */
+const OWN_HOST_KEY = 'hc:nostrmesh:self-domain'
 const SIG_RE = /^[a-f0-9]{64}$/
 
 const ioc = <T,>(key: string): T | undefined =>
@@ -780,6 +783,42 @@ export class HostDirectoryElement extends HTMLElement {
       field.value = ''
     })
     body.append(add)
+    body.append(this.#ownHostForm())
+  }
+
+  /** YOUR OWN HOST — the domain you serve from (`hc:nostrmesh:self-domain`):
+   *  your host backup goes there, and the bytes you share are offered from
+   *  it. It sat in the swarm selector as "host" until 2026-10-12 — but a host
+   *  is REPLICATION, never who meets ("hosts are added to our portal for
+   *  replication"; the room is meeting point + room + secret), so it lives
+   *  here with the rest of your hosts. Empty until you name one; an empty
+   *  field clears it. The hosts drone hands it to host-sync (`hosts:own-host` → setOwnHost). */
+  #ownHostForm(): HTMLFormElement {
+    const own = make('form', 'hd-add hd-own')
+    const field = make('input', 'hd-add-input')
+    field.type = 'text'
+    field.autocomplete = 'off'
+    field.spellcheck = false
+    try { field.value = zoneOf(localStorage.getItem(OWN_HOST_KEY) ?? '') } catch { field.value = '' }
+    field.placeholder = t('hosts.own-host-placeholder', 'your own host — where your backup goes')
+    field.setAttribute('aria-label', t('hosts.own-host', 'Your own host'))
+    field.title = t('hosts.own-host', 'Your own host')
+    const go = make('button', 'hd-quiet', t('hosts.own-host-set', 'Set'))
+    go.type = 'submit'
+    const label = make('label', 'hd-own-label', t('hosts.own-host', 'Your own host'))
+    field.id = 'hd-own-host'
+    label.htmlFor = field.id
+    own.append(label, field, go)
+    own.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const raw = field.value.trim()
+      const host = raw ? zoneOf(raw) : ''
+      if (raw && !host) { field.setAttribute('aria-invalid', 'true'); field.focus(); return }
+      field.removeAttribute('aria-invalid')
+      field.value = host
+      EffectBus.emit('hosts:own-host', { host })
+    })
+    return own
   }
 
   /** THE SEARCH FINISHES INTO LINES: one per matching domain, one per matching
@@ -1497,6 +1536,7 @@ ${S} .hd-chevron{color:var(--hd-ink-quiet);}
 ${S} .hd-add{display:flex;align-items:center;gap:.25em;margin:.7em 0 0;}
 ${S} .hd-add-input{flex:1 1 auto;min-width:0;padding:.2em .4em;font:inherit;font-size:.7em;color:var(--hd-ink);background:rgba(var(--acc),0.06);border:1px solid rgba(var(--acc),0.22);border-radius:var(--hc-radius-control,2px);}
 ${S} .hd-add-input[aria-invalid="true"]{border-color:var(--hc-status-alert);}
+${S} .hd-own-label{flex:0 0 auto;font-size:.7em;color:var(--hd-ink);opacity:.7;white-space:nowrap;}
 ${S} .hd-quiet{padding:.2em .45em;font:inherit;font-size:.7em;color:var(--hd-ink-quiet);background:none;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);cursor:pointer;}
 ${S} .hd-quiet:hover{color:var(--hd-ink);background:rgba(var(--acc),0.07);}
 ${S} .hd-quiet:disabled{cursor:default;opacity:.55;}

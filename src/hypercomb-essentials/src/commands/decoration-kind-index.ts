@@ -1417,6 +1417,8 @@ type RenderCellCountPayload = {
   /** Absolute path per label — populated ONLY while a tag filter flattens the
    *  page, where a visible cell can live anywhere in the hive. */
   readonly flatPaths?: Record<string, readonly string[]>
+  /** Cells that are a peer's alone — no layer of this hive under the name. */
+  readonly peerOnlyLabels?: readonly string[]
 }
 
 EffectBus.on('render:cell-count', (payload: RenderCellCountPayload | undefined) => {
@@ -1442,8 +1444,18 @@ EffectBus.on('render:cell-count', (payload: RenderCellCountPayload | undefined) 
   // case that leaves every crumb cold.
   void hydrateAncestors(parentSegments, history)
 
-  const labels = payload?.labels
-  if (!Array.isArray(labels) || labels.length === 0) return
+  // A PEER'S CELL HAS NO LAYER HERE. Its walk finds none, so the memo above
+  // forgets it and every later pass walked it again: at a meeting of a
+  // thousand peer tiles, a thousand absent-layer reads (each a lineage sign,
+  // a bag miss and a parent-manifest read) on EVERY render pass, queued ahead
+  // of the participant's own create on its way to the room (SCALE-1). Once
+  // a tile of this hive stands under the name it is no longer peer-only, and
+  // that pass walks it.
+  const shown = payload?.labels
+  if (!Array.isArray(shown) || shown.length === 0) return
+  const peerOnly = new Set(payload?.peerOnlyLabels ?? [])
+  const labels = shown.filter(label => !peerOnly.has(label))
+  if (labels.length === 0) return
   // Walk each label in parallel — independent layer fetches. When a first-time
   // walk discovers tags on a cell, signal `tags:indexed` so the tag renderers
   // (controls-bar aggregation, on-tile badge) repaint without waiting for the
