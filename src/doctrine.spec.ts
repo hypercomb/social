@@ -1766,9 +1766,13 @@ describe('doctrine ratchets', () => {
     // host a cold install READS from (the shell's DEFAULT_HOST_ZONES) must
     // move together: a default relay the words do not know changes every
     // default room's pair. None of them is an upload host (the ratchet below).
+    // The package floor's MEETING_POINT too: a package whose bytes do not name
+    // it is moved, so a default that moved without it would move every current
+    // package as if it were old.
     const literal = (file: string, re: RegExp): string => re.exec(readFileSync(join(ROOT, file), 'utf8'))?.[1] ?? ''
     const relay = literal('hypercomb-essentials/src/sharing/nostr-mesh.drone.ts', /^const LIVE_RELAY = '([^']+)'/m)
     expect(relay).toBe('wss://hypercomb.com')
+    expect(literal('hypercomb-web/src/setup/package-floor.ts', /^export const MEETING_POINT = '([^']+)'/m)).toBe(relay)
     const host = new URL(relay).host
     expect(literal('hypercomb-shared/ui/presence-banner/presence-status.ts', /^export const SHIPPED_POINT = '([^']+)'/m)).toBe(host)
     expect(literal('hypercomb-runtime/src/host-zones.ts', /^export const DEFAULT_HOST_ZONES: readonly string\[\] = \['([^']+)'\]/m)).toBe(host)
