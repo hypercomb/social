@@ -182,8 +182,14 @@ describe('the meeting point entered is the host field — the upload host, whate
 
   it('nothing seeds a hosts pool: a friend\'s point is the host, never a shipped one', async () => {
     expect(readFileSync(join(HERE, 'hosts.drone.ts'), 'utf8')).not.toMatch(/\bSEED_HOST\b/)
+    // The tab's zone names the host the participant entered (round two: the
+    // zone's relay IS the meeting point); the page list says the same.
     localStorage.setItem('hc:nostrmesh:relays', JSON.stringify(['wss://friend.example']))
-    const mesh = await bootDefault()
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's', relay: 'wss://friend.example' }))
+    const mesh = new NostrMeshDrone()
+    meshes.push(mesh)
+    services[MESH_KEY] = mesh
+    await Promise.resolve()
     FakeWebSocket.all[0]!.open()
     FakeWebSocket.all[0]!.card({ participants: 'all', addressed: true })
     const resolver = new SwarmHostResolver({
