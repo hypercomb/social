@@ -71,6 +71,9 @@ export type HypercombObservation = {
   /** `/read <sig> src/path.ts`: one source section of a module (core
    *  module-sections.ts) instead of the whole bundle. */
   readonly section?: string
+  /** `/find <word>` with no route: it searched under the participant's
+   *  current page, which the receipt says (2026-10-12). */
+  readonly currentPage?: true
 }
 
 /** `/read <sig>` on anything that is not a layer: the module, dependency or
@@ -191,7 +194,7 @@ export type HypercombRead =
   | { readonly kind: 'node'; readonly read: HypercombNodeRead }
   | { readonly kind: 'history'; readonly read: HypercombHistoryRead }
   | { readonly kind: 'summary'; readonly read: HypercombSummaryRead }
-  | { readonly kind: 'find'; readonly read: HypercombFindRead }
+  | { readonly kind: 'find'; readonly read: HypercombFindRead; readonly currentPage?: true }
   | { readonly kind: 'bytes'; readonly read: HypercombBytesRead }
   | { readonly kind: 'code'; readonly read: HypercombCodeRead }
 
@@ -348,6 +351,7 @@ const parseObservation = (
   // /find <word>: names under the current page. /find <word> /route: names
   // under that route — asked for that way (`find betz /dolphin`), it was
   // turned back as a malformed word and the whole block with it (2026-10-04).
+  // A find with no route is marked, so its receipt can say where it looked.
   const find = /^\/find\s+(.+?)(?:\s+(\/.*))?$/.exec(grammar)
   if (find) {
     const query = find[1].trim()
@@ -355,7 +359,9 @@ const parseObservation = (
       || CONTROL_CHARACTER.test(query)) {
       throw new HypercombObservationError('/find takes one short name fragment, no slashes, and may be followed by /absolute/path')
     }
-    return { grammar, verb: 'find', segments: find[2] ? routeSegments(find[2]) : [...currentSegments], query }
+    return find[2]
+      ? { grammar, verb: 'find', segments: routeSegments(find[2]), query }
+      : { grammar, verb: 'find', segments: [...currentSegments], query, currentPage: true }
   }
   const match = /^\/(tree|read|list|history|summary)\s+(\/.*)$/.exec(grammar)
   if (!match || !VERBS.includes(match[1] as HypercombObservationVerb)) {
@@ -485,7 +491,7 @@ export const executeHypercombObservationPlan = async (
     if (options.signal?.aborted) {
       throw new DOMException('The Hypercomb tree read was stopped', 'AbortError')
     }
-    const { grammar, verb, segments, sig, query, from, section } = observation
+    const { grammar, verb, segments, sig, query, from, section, currentPage } = observation
     const root = verb === 'code' ? 'code' : sig ? sig : segments.length ? `/${segments.join('/')}` : '/'
     // OPEN WHAT A SIGNATURE NAMES (Jaime, 2026-09-13: "open and review every
     // resource and including the code"): a sig that is no layer is a module,
@@ -516,7 +522,7 @@ export const executeHypercombObservationPlan = async (
     } else if (verb === 'find') {
       if (!reader.find) throw new HypercombObservationError('this hive cannot answer /find')
       const read = safeFind(await reader.find(query ?? '', segments, { maxNodes, signal: options.signal }), root, maxNodes)
-      results.push({ grammar, kind: 'find', read })
+      results.push({ grammar, kind: 'find', read, ...(currentPage ? { currentPage } : {}) })
       if (read.ok) snapshots.push(read.snapshot)
     } else if (verb === 'tree') {
       const read = safeRead(await reader.readTree(segments, {
@@ -782,6 +788,25 @@ const safeHistory = (read: HypercombHistoryRead, expectedRoot: string): Hypercom
   return { ok: true, root: expectedRoot, total: read.total, markers }
 }
 
+/** WHERE A FIND WITH NO ROUTE LOOKED. It searches under the participant's
+ *  current page — /business-card, with no children — and a model told the
+ *  participant it had searched the whole hive (the harness defect,
+ *  2026-10-12). Only on the root is the current page the whole hive.
+ *
+ *  THE NOTE SAYS SCOPE, NEVER COVERAGE. A root find on a large hive stops
+ *  before its deepest tiles, and a failed one searched nothing: a note that
+ *  said "searched the whole hive" beside them handed the model the very claim
+ *  the 2026-10-12 defect was about. Where the search did not reach every
+ *  tile, the note says so. */
+const scopeNoteOf = (root: string, grammar: string, reachedEvery: boolean): string => {
+  if (root === '/') {
+    const scope = 'scope: the whole hive — the participant\'s current page is the root'
+    return reachedEvery ? scope : `${scope}; this search did not reach every tile, so do not say the whole hive was searched`
+  }
+  const word = grammar.replace(/^\/?find\s+/, '').trim() || '<word>'
+  return `scope: under ${root} — the participant's current page, not the whole hive; for the whole hive send find ${word} /`
+}
+
 /** JSON keeps hostile labels data-shaped. Snapshot handles stay host-private. */
 export const formatHypercombObservationReceipt = (
   receipt: HypercombObservationReceipt,
@@ -790,7 +815,10 @@ export const formatHypercombObservationReceipt = (
   structureOnly: receipt.results.every(result => result.kind === 'tree'),
   observations: receipt.results.map(result => {
     const { grammar, read } = result
-    if (!read.ok) return { grammar, root: read.root, error: read.code }
+    const scope = result.kind === 'find' && result.currentPage
+      ? { scopeNote: scopeNoteOf(read.root, grammar, result.read.ok && !result.read.truncated) }
+      : {}
+    if (!read.ok) return { grammar, root: read.root, error: read.code, ...scope }
     if (result.kind === 'tree') {
       // A TREE SHOWS NO NOTES. Asked for each tile's notes from a tree, a
       // model answered "0 notes" for tiles holding two (the housekeeping
@@ -813,8 +841,9 @@ export const formatHypercombObservationReceipt = (
           // (2026-10-04: `find betz /` missed /dolphin/associates/betz, which
           // `find betz /dolphin` found). Say how to reach the rest.
           ...(found.truncated ? { truncatedNote: 'the search stopped before the whole route; other matches may exist deeper — search again under a narrower route: find <word> /path' } : {}),
+          ...scope,
         }
-        : { grammar, root: read.root, error: found.code }
+        : { grammar, root: read.root, error: found.code, ...scope }
     }
     if (result.kind === 'summary') {
       const summary = result.read

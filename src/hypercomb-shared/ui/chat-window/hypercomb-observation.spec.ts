@@ -305,6 +305,64 @@ describe('/find under a route', () => {
     ])
     expect(() => parseHypercombObservationGrammars(['/find be/tz'], [])).toThrow(/no slashes/)
   })
+
+  // The harness defect, 2026-10-12: `find betz` with no route searched under
+  // the participant's current page (/business-card, no children) and the
+  // model told the participant it had searched the whole hive.
+  const finder = (): HypercombTreeReader => ({
+    readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+    validateSnapshots: vi.fn(async () => true),
+    find: vi.fn(async (query, segments) => segments[0] === 'gone'
+      ? { ok: false as const, root: `/${segments.join('/')}`, code: 'not-found' }
+      : { ok: true as const, root: segments.length ? `/${segments.join('/')}` : '/', query, matches: [], truncated: false, snapshot: 'private-find' }),
+  })
+  const observationsOf = (text: string): Record<string, unknown>[] =>
+    (JSON.parse(text) as { observations: Record<string, unknown>[] }).observations
+
+  it('says a find with no route searched the current page, not the whole hive', async () => {
+    const plan = parseHypercombObservationGrammars(['/find betz', '/find betz /', '/find betz /dolphin'], ['business-card'])
+    expect(plan.observations.map(o => o.currentPage)).toEqual([true, undefined, undefined])
+    const [here, whole, routed] = observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(plan, finder())))
+    // The receipt's own fields stay as they were.
+    expect(here).toMatchObject({ grammar: '/find betz', root: '/business-card', query: 'betz', matches: [], truncated: false })
+    expect(here['scopeNote']).toBe('scope: under /business-card — the participant\'s current page, not the whole hive; for the whole hive send find betz /')
+    // A find that names its route — the root included — says nothing more.
+    expect(whole).not.toHaveProperty('scopeNote')
+    expect(routed).not.toHaveProperty('scopeNote')
+  })
+
+  it('says so on the root and on a failed find too', async () => {
+    const atRoot = observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/find betz'], []), finder())))[0]
+    expect(atRoot['scopeNote']).toBe('scope: the whole hive — the participant\'s current page is the root')
+    const failed = observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/find betz'], ['gone']), finder())))[0]
+    expect(failed).toMatchObject({ grammar: '/find betz', root: '/gone', error: 'not-found' })
+    expect(String(failed['scopeNote'])).toContain('scope: under /gone')
+  })
+
+  // The note says scope, never coverage: a root find that stopped short, or
+  // failed, must not carry "searched the whole hive" (review of the
+  // 2026-10-12 fix — the very claim the defect was about).
+  it('never says the whole hive was searched when a root find stopped short or failed', async () => {
+    const rootFind = (read: Awaited<ReturnType<HypercombTreeReader['find']>>): HypercombTreeReader => ({
+      readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+      validateSnapshots: vi.fn(async () => true),
+      find: vi.fn(async () => read),
+    })
+    const cut = observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/find betz'], []),
+      rootFind({ ok: true, root: '/', query: 'betz', matches: [], truncated: true, snapshot: 'private-find' }))))[0]
+    expect(cut).toMatchObject({ root: '/', truncated: true })
+    expect(cut).toHaveProperty('truncatedNote')
+    expect(cut['scopeNote']).toBe('scope: the whole hive — the participant\'s current page is the root; this search did not reach every tile, so do not say the whole hive was searched')
+    expect(String(cut['scopeNote'])).not.toMatch(/searched the whole hive/)
+    const failed = observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/find betz'], []),
+      rootFind({ ok: false, root: '/', code: 'unavailable' }))))[0]
+    expect(failed).toMatchObject({ root: '/', error: 'unavailable' })
+    expect(String(failed['scopeNote'])).toContain('did not reach every tile')
+  })
 })
 
 describe('LLM context projection substitutes for content on /read only', () => {

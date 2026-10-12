@@ -550,13 +550,77 @@ describe('an answer about tiles nothing read', () => {
   it('reads the reads a request writes out in prose, and none it forbids', async () => {
     const { readsAskedIn } = await import('./hypercomb-work-fence')
     expect(readsAskedIn('Read only. Run three whole-hive finds (no route) and answer one line each, nothing else: find betz; find imagetest; find isomorphic. Do not read /susan or /howard. Do not change anything.'))
-      .toEqual(['find betz', 'find imagetest', 'find isomorphic'])
+      .toEqual(['find betz /', 'find imagetest /', 'find isomorphic /'])
     expect(readsAskedIn('1) read /revolucion/cigars: noteCount. 3) find betz under /dolphin: the routes found and whether it was cut short.'))
       .toEqual(['read /revolucion/cigars', 'find betz /dolphin'])
     expect(readsAskedIn('Use tree on /revolucion/cigars and /youtube.')).toEqual(['tree /revolucion/cigars'])
     // Prose that only sounds like a read asks for nothing.
     expect(readsAskedIn('I want to find out what is going on. Read only, please.')).toEqual([])
     expect(readsAskedIn('Do not read /susan.')).toEqual([])
+  })
+
+  it('asks a whole-hive find of the root, and leaves a find that names a route as it is', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    // The 2026-10-12 ask: run with no route, the finds searched under the
+    // participant's current page (/business-card, no children) and the model
+    // said it had searched the whole hive.
+    expect(readsAskedIn('Read only. Run three whole-hive finds (no route) and answer one line each: find betz; find imagetest; find isomorphic.'))
+      .toEqual(['find betz /', 'find imagetest /', 'find isomorphic /'])
+    expect(readsAskedIn('Search the entire hive: find betz under /dolphin; find imagetest.'))
+      .toEqual(['find betz /dolphin', 'find imagetest /'])
+    expect(readsAskedIn('Look everywhere in the hive. find betz')).toEqual(['find betz /'])
+    expect(readsAskedIn('Across all of the hive, find betz.')).toEqual(['find betz /'])
+    // No talk of the whole hive: the find stays on the current page.
+    expect(readsAskedIn('find betz; find imagetest')).toEqual(['find betz', 'find imagetest'])
+    // A sentence that forbids the whole hive does not ask for it.
+    expect(readsAskedIn('Do not search the whole hive. find betz')).toEqual(['find betz'])
+  })
+
+  it('asks the whole hive when a negation in the sentence governs something else', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    // Review of the 2026-10-12 fix: a bare `not`, `without` or `except`
+    // anywhere in the sentence threw out the whole-hive ask, and the finds
+    // went back to the current page.
+    expect(readsAskedIn('Search the whole hive, not just the current page. find betz; find imagetest'))
+      .toEqual(['find betz /', 'find imagetest /'])
+    expect(readsAskedIn('Read only, do not change anything, across the whole hive. find betz')).toEqual(['find betz /'])
+    // A list a whole-hive phrase opens with a colon is its own clause: its finds are asked.
+    expect(readsAskedIn('Whole hive, not only /business-card: find betz; find imagetest.'))
+      .toEqual(['find betz /', 'find imagetest /'])
+    expect(readsAskedIn('Search the whole hive without stopping at the current page: find betz.')).toEqual(['find betz /'])
+    // A negation that governs the whole hive, or the read itself, still forbids.
+    expect(readsAskedIn('Do not search the whole hive. find betz')).toEqual(['find betz'])
+    expect(readsAskedIn('Search the whole hive. Do not read /susan, find betz.')).toEqual([])
+  })
+
+  it('forbids a list a negation opens with a colon or dash', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    // Second review of the 2026-10-12 fix: every colon or dash started a new
+    // clause, so the hive would run reads the participant said not to run.
+    expect(readsAskedIn('Do not run any of these: read /susan, tree /howard.')).toEqual([])
+    expect(readsAskedIn('Skip these — read /susan and tree /howard.')).toEqual([])
+    expect(readsAskedIn('Avoid the following — read /susan, tree /howard.')).toEqual([])
+    expect(readsAskedIn('Never do this: read /susan.')).toEqual([])
+    expect(readsAskedIn('Never do the following: find betz.')).toEqual([])
+    expect(readsAskedIn('Do not run these: find betz.')).toEqual([])
+    expect(readsAskedIn("Don't run the following reads, I already have them: find betz, read /susan.")).toEqual([])
+    // A whole-hive phrase opens the list only when no other negation follows it.
+    expect(readsAskedIn('Search the whole hive, then never do this: find betz.')).toEqual([])
+    expect(readsAskedIn('Search the whole hive without stopping: read /susan.')).toEqual([])
+  })
+
+  it('keeps a find on the current page when the request turns the whole hive down', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    // Second review of the 2026-10-12 fix: a comma cut the negation away, and
+    // `no`, `instead of` and `rather than` were no cue, so each became a root find.
+    expect(readsAskedIn('Do not, under any circumstances, search the whole hive. Find betz.')).toEqual(['find betz'])
+    expect(readsAskedIn("Please don't, for now, search the whole hive. Find betz.")).toEqual(['find betz'])
+    expect(readsAskedIn('No whole-hive search, only the current page: find betz.')).toEqual(['find betz'])
+    expect(readsAskedIn('Instead of the whole hive, look on this page: find betz.')).toEqual(['find betz'])
+    expect(readsAskedIn('Rather than the whole hive, just this page: find betz.')).toEqual(['find betz'])
+    expect(readsAskedIn("You shouldn't search the whole hive. Find betz.")).toEqual(['find betz'])
+    // No route is the current page.
+    expect(readsAskedIn('Run these finds (no route), on my current page: find betz.')).toEqual(['find betz'])
   })
 
   it('says which routes went unread and carries the request', async () => {
