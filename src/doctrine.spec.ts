@@ -202,7 +202,9 @@ describe('doctrine ratchets', () => {
       countRatchet(countsMatching(/\.createWritable\(/g), allowed['createWritable'], 'createWritable',
         'write through the store: a layer commit, putResource, or putPoolDoc'),
       countRatchet(countsMatching(/localStorage\??\.setItem\(/g), allowed['localStorage.setItem'], 'localStorage.setItem',
-        'durable state belongs in a pool of meaning (putPoolDoc / ParticipantDocument), never a browser key'),
+        'durable state belongs in a pool of meaning (putPoolDoc / ParticipantDocument), never a browser key — '
+        + 'except a credential: its only home is this device\'s localStorage (llm-keys.ts, nostr-signer.ts, '
+        + 'change-channel.ts) and it never moves into a pool'),
     ]
     expect(results.flatMap(r => r.problems), results.map(r => r.msg).join('')).toEqual([])
   })
@@ -893,7 +895,9 @@ describe('doctrine ratchets', () => {
     // bounds each match to the first close-paren, so a later unrelated
     // `apiKey` in the same function cannot trip it. Reads (`getItem`) and
     // storage-key CONSTANTS (`*_KEY`/`*_STORAGE`, matched as whole words that
-    // these patterns deliberately do not contain) are not credentials.
+    // these patterns deliberately do not contain) are not credentials. It sees
+    // only what is spelled inside the call's first parentheses — bytes built a
+    // line earlier pass it — so the structural half is the next test.
     //
     // Empty allowlist, and it stays empty. If you need to persist something
     // key-shaped, it belongs in LlmKeyStore; if you need to ANNOUNCE that a
@@ -902,10 +906,82 @@ describe('doctrine ratchets', () => {
       'putResource|putPoolDoc|putBee|putLayer|commitLayer|commitSlot[A-Za-z]*|writeChildrenManifest'
       + '|emitEffect|EffectBus\\.emit(?:Transient)?|decorationAdd|addDecoration'
     const CREDENTIALS = 'apiKey|api_key|apikey|secretValue|password|credential|bearerToken|accessToken|authToken'
+      + '|secretHex|secretKey|nsec|privateKey'
     const actual = filesMatching(
       new RegExp(`(?:${SINKS})\\s*(?:<[^>]*>)?\\s*\\([^)]{0,400}?\\b(?:${CREDENTIALS})\\b`, 'i'),
     )
     assertRatchet(actual, [], 'plaintext credential in a persisted or broadcast payload')
+
+    // A SECRET IS ANNOUNCED, NEVER CARRIED. A payload field named `secret`
+    // (the swarm room's passphrase) rode `mesh:secret`, `mesh:secret-draft` and
+    // `mesh:open-modal`, and the bus replayed it to every late subscriber —
+    // the bridge's `effect-last` handed it off the page. Emit a notice; the
+    // listener re-reads the SecretStore. Empty allowlist, and it stays empty.
+    const SECRET_FIELD = new RegExp(`(?:${SINKS})\\s*(?:<[^>]*>)?\\s*\\([^)]{0,400}?[{,]\\s*secret\\s*[:,}]`)
+    assertRatchet(filesMatching(SECRET_FIELD), [], 'secret field in a persisted or broadcast payload')
+
+    // The PERSISTED face, with the wider vocabulary a secret goes by. Kept off
+    // the bus sinks only because a notice may NAME what changed.
+    const PERSISTED_SINKS = 'putResource|putPoolDoc|putBee|putLayer|commitLayer|commitSlot[A-Za-z]*|writeChildrenManifest'
+      + '|decorationAdd|addDecoration|putArtifactMeta|putOptimization'
+    const SECRETS = `${CREDENTIALS}|secret\\w*|nsec\\w*|private_?key\\w*|mnemonic|passphrase`
+    assertRatchet(
+      filesMatching(new RegExp(`(?:${PERSISTED_SINKS})\\s*(?:<[^>]*>)?\\s*\\([^)]{0,400}?\\b(?:${SECRETS})\\b`, 'i')),
+      [], 'secret-shaped identifier in a persisted payload',
+    )
+  })
+
+  it('a credential is never read in a file that persists — a key cannot reach a pool by being nearby', () => {
+    // SECRETS NEVER ENTER A POOL (jwize 2026-10-07): a private key or an API
+    // key lives in this device's localStorage and nowhere else — never a pool,
+    // a resource, an event, an export or a public place. A document pool keeps
+    // every version and folder-sync copies every pool, so one that slips in is
+    // permanent. The argument-list check above cannot see a key inside `bytes`
+    // built a line earlier; this one sees where a key's VALUE is handed back,
+    // and keeps that out of any file that writes a pool, a resource or a
+    // layer. A credential's storage key spelled as a value counts as a read —
+    // that is the shape a localStorage-to-pool migration would take.
+    // `has()`/`configured()` hand no key back and are not reads.
+    const READS = new RegExp(
+      String.raw`\bllmKeyStore\s*\??\.\s*get\s*\(|\bgetApiKey\s*\(|\bresolveSecretKeyHex\b|\bNOSTR_SECRET_KEY\b`
+      + String.raw`|[=(:,]\s*['"\x60]hc:(?:nostr:secret-key|change-channel:secret|anthropic-api-key|llm:[\w-]+:key)['"\x60]`,
+    )
+    const PERSISTS = /\bputPoolDoc\s*\??\.?\s*\(|\bgetPool\s*\??\.?\s*\(|\bParticipantDocument\b|\bputResource\s*\??\.?\s*\(|\bcommitLayer\s*\(|\.createWritable\s*\(|\bputArtifactMeta\s*\(|\bputOptimization\s*\(|\baddDecoration\s*\(|\bdecorationAdd\b|\bputBee\s*\(|\bputLayer\s*\(|\bwriteChildrenManifest\s*\(/
+    const readers: string[] = []
+    const coResident: string[] = []
+    for (const dir of SCAN_DIRS) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const raw = readFileSync(file, 'utf8')
+        if (/^\/\/\s*auto-generated/.test(raw)) continue
+        const code = stripComments(raw)
+        if (!READS.test(code)) continue
+        const name = relative(ROOT, file).replace(/\\/g, '/')
+        readers.push(name)
+        if (PERSISTS.test(code)) coResident.push(name)
+      }
+    }
+    // The floor: the three homes are seen as readers, so a broken pattern
+    // fails here instead of passing vacuously — and, being readers, they are
+    // held to persisting nothing but localStorage.
+    for (const home of [
+      'hypercomb-core/src/core/llm-keys.ts',
+      'hypercomb-essentials/src/sharing/nostr-signer.ts',
+      'hypercomb-essentials/src/assistant/change-channel.ts',
+    ]) expect(readers).toContain(home)
+    // translation.service.ts is the last deprecated getApiKey() caller (its
+    // key rides a request header; only translated text is stored). Moving it
+    // to callModel pays this off.
+    assertRatchet(coResident.sort(), ['hypercomb-essentials/src/commands/translation.service.ts'], 'credential read in a file that persists')
+  })
+
+  it('no page global names the signing key', () => {
+    // `window.NOSTR_SECRET_KEY` once outranked the device's key: anything that
+    // set it had later events signed under a key the page reported for
+    // nobody, and nothing recorded the switch. The key lives in this device's
+    // storage only (nostr-signer.ts). Empty allowlist, and it stays empty.
+    assertRatchet(filesMatching(/\bNOSTR_SECRET_KEY\b/), [], 'page-global signing key')
   })
 
   it('a sandbox door is recognised in ONE place — never by a local try- regex', () => {
@@ -1645,11 +1721,11 @@ describe('doctrine ratchets', () => {
     // leaving for a module named for what it means, so the hive's drill-down
     // from the \`tiles\` spot reads as the design does
     // (documentation/tile-renderer-tree.md: membership, narrowing, order,
-    // mesh, readiness, faces, fill geometry, dive, previews, landing and
-    // hover are out). Until then this file may only get smaller: new tile
+    // mesh, readiness, faces, fill geometry, label view, evictions, dive,
+    // previews, landing and hover are out). Until then this file may only get smaller: new tile
     // behaviour goes in its own module.
     const SHOW_CELL = join(ROOT, 'hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts')
-    const CEILING = 7169
+    const CEILING = 7140
     const lines = readFileSync(SHOW_CELL, 'utf8').split('\n').length
     expect(lines, `show-cell.drone.ts grew to ${lines} lines (ceiling ${CEILING}). Put the new behaviour in a module of its own.`).toBeLessThanOrEqual(CEILING)
     expect(lines, `show-cell.drone.ts shrank to ${lines} lines. Lower CEILING to ${lines} so the ratchet clicks.`).toBeGreaterThan(CEILING - 50)
@@ -1836,6 +1912,82 @@ describe('doctrine ratchets', () => {
       }
     }
     assertRatchet(actual.sort(), [], 'origin-wide swarm flag read in essentials')
+  })
+
+  it('a mesh address is a computed signature — never a word written into the source', () => {
+    // THE SIGNATURES ARE THE ONLY THING THAT CAN BE QUERIED (relay.js address
+    // gate, nostr-mesh #addressable): a relay refuses a read or a write at
+    // anything but a 64-hex signature, so a word handed to the mesh is a
+    // channel that is silently deaf — and on a relay before the gate, one
+    // every scanner could hear. An address is derived (sign(word \0 room \0
+    // secret), a layer sig), never written down: no string literal, and no
+    // string constant naming a word, as the address of subscribe,
+    // ensureStartedForSig, awaitReadyForSig or publish. The one entry is the
+    // content broker's drained ask word ('broker:fetch'); it leaves with the
+    // last build that asks there. The allowlist may only shrink.
+    const literal = /\.(?:subscribe|ensureStartedForSig|awaitReadyForSig)\(\s*['"`]|\.publish\(\s*[^,()]+,\s*['"`]/
+    const actual: string[] = []
+    for (const file of walk(join(ROOT, 'hypercomb-essentials/src'))) {
+      if (/\.spec\.ts$/.test(file)) continue
+      const code = stripComments(readFileSync(file, 'utf8'))
+      const where = relative(ROOT, file).replace(/\\/g, '/')
+      if (literal.test(code)) actual.push(where)
+      for (const m of code.matchAll(/\bconst\s+([A-Z][A-Z0-9_]*)\s*=\s*['"`]([^'"`]*)['"`]/g)) {
+        if (/^[0-9a-f]{64}$/.test(m[2])) continue
+        const use = new RegExp(`\\.(?:subscribe|ensureStartedForSig|awaitReadyForSig)\\(\\s*${m[1]}\\b|\\.publish\\(\\s*[^,()]+,\\s*${m[1]}\\b`)
+        if (use.test(code)) actual.push(`${where}:${m[1]}`)
+      }
+    }
+    assertRatchet(actual.sort(), [
+      'hypercomb-essentials/src/sharing/content-broker.boot.drone.ts:LEGACY_ASK_WORD',
+    ], 'mesh address written as a word')
+  })
+
+  it('no shipped default names a home machine — the public install names only hypercomb.com', () => {
+    // jwize, 2026-10-11: "we can't rely on my computer being on that is
+    // ridiculous for my setup" → "yes, open default on hypercomb.com". The
+    // home machine jwize.com is no relay, byte mirror, example roster or
+    // example text a public install ships. An operator may still CHOOSE it
+    // (a relay list they set, a meeting link, a fallback list) — that is
+    // their data, never this source. Comments are history and are not
+    // scanned; specs and operator-run scripts are not shipped. The allowlist
+    // is empty and stays empty.
+    const quoted = /['"`][^'"`\n]*\bjwize\.com\b/
+    const actual: string[] = []
+    for (const dir of SCAN_DIRS.filter(d => d !== 'hypercomb-essentials/scripts')) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const code = stripComments(readFileSync(file, 'utf8'))
+        if (quoted.test(code)) actual.push(relative(ROOT, file).replace(/\\/g, '/'))
+      }
+    }
+    // What a shell serves as data: the first-boot rosters and the rest of public/.
+    for (const shell of ['hypercomb-web/public', 'hypercomb-dev/public']) {
+      for (const name of readdirSync(join(ROOT, shell))) {
+        if (!name.endsWith('.json')) continue
+        if (/\bjwize\.com\b/.test(readFileSync(join(ROOT, shell, name), 'utf8'))) actual.push(`${shell}/${name}`)
+      }
+    }
+    assertRatchet(actual.sort(), [], 'a shipped default naming jwize.com')
+  })
+
+  it('the shipped meeting point, the room words\' shipped point and the hosts pool seed are one host', () => {
+    // The default relay (nostr-mesh LIVE_RELAY), the point the comparison
+    // words treat as "the default" (D4, presence-status SHIPPED_POINT) and the
+    // upload host a fresh install's pool is seeded with (HostsDrone SEED_HOST,
+    // the shell's DEFAULT_HOST_ZONES) must move together: a default relay the
+    // words do not know changes every default room's pair, and a relay tier
+    // that is not the pool's host splits one meeting's bytes over two hosts.
+    const literal = (file: string, re: RegExp): string => re.exec(readFileSync(join(ROOT, file), 'utf8'))?.[1] ?? ''
+    const relay = literal('hypercomb-essentials/src/sharing/nostr-mesh.drone.ts', /^const LIVE_RELAY = '([^']+)'/m)
+    expect(relay).toBe('wss://hypercomb.com')
+    const host = new URL(relay).host
+    expect(literal('hypercomb-shared/ui/presence-banner/presence-status.ts', /^export const SHIPPED_POINT = '([^']+)'/m)).toBe(host)
+    expect(literal('hypercomb-essentials/src/sharing/hosts.drone.ts', /^const SEED_HOST = '([^']+)'/m)).toBe(host)
+    // A generic release bakes its own seed hosts in at build; the shipped
+    // default is the fallback a build that names none keeps.
+    expect(literal('hypercomb-runtime/src/host-zones.ts', /^export const DEFAULT_HOST_ZONES: readonly string\[\] =\s*(?:typeof __HC_SEED_HOSTS__ !== 'undefined' \? __HC_SEED_HOSTS__ : )?\['([^']+)'\]/m)).toBe(host)
   })
 
 })

@@ -731,6 +731,13 @@ test('a swarm meeting here is hosted: a live participant stores atoms, anyone el
     mkdirSync(join(r.dir, sha(bag)))
     assert.equal((await putAtom(r.base, guest, bag)).status, 409)
     assert.equal((await putAtom(r.base, generateSecretKey(), bag)).status, 401)
+    // … and an admitted key that does NOT hold the address's preimage learns
+    // nothing: wrong bytes at a held directory answer exactly as at an empty one.
+    const wrong = Buffer.from('not the preimage')
+    const atBag = await putAtom(r.base, guest, wrong, { at: sha(bag) })
+    const atNothing = await putAtom(r.base, guest, wrong, { at: sha(Buffer.from('no directory here')) })
+    assert.equal(atBag.status, 422)
+    assert.equal(atNothing.status, 422)
 
     // A miss is never cached, so the atom can arrive a moment later.
     const miss = await fetch(`${r.base}/${'0'.repeat(64)}`)
@@ -858,5 +865,129 @@ test('participants are closed by default, by room when listed, and refused on a 
   } finally {
     for (const ws of sockets) ws.terminate()
     for (const r of [closed, byRoom, nearlyFull]) r.close()
+  }
+})
+
+// A BEACON CARRIED ON THE PUT (D7). A participant meeting at another point
+// never speaks on this relay's WebSocket, so it was 401 not-live here for the
+// whole meeting. Its NIP-98 token may carry its newest signed {alive} beacon
+// (['alive', <kind-30206 JSON>]); a fresh one of the same key makes it live
+// here, as the beacon on the socket would. No request is added.
+const aliveBeacon = (secret, zone, { age = 0, content = { alive: true }, kind = 30206 } = {}) => {
+  const at = Math.floor(Date.now() / 1000) - age
+  return finalizeEvent({ kind, created_at: at, tags: [['x', zone], ['d', getPublicKey(secret)], ['expiration', String(at + 90)]], content: JSON.stringify(content) }, secret)
+}
+
+/** PUT bytes at their own address, the token carrying `carried` (a beacon event, or raw tag text). */
+async function putCarrying(base, secret, bytes, carried) {
+  const url = `${base}/${sha(bytes)}`
+  const tags = [['u', url], ['method', 'PUT']]
+  if (carried !== undefined) tags.push(['alive', typeof carried === 'string' ? carried : JSON.stringify(carried)])
+  const token = finalizeEvent({ kind: 27235, created_at: Math.floor(Date.now() / 1000), tags, content: '' }, secret)
+  const res = await fetch(url, { method: 'PUT', body: bytes, headers: { Authorization: `Nostr ${Buffer.from(JSON.stringify(token)).toString('base64')}` } })
+  return { status: res.status, body: await res.text(), sig: sha(bytes) }
+}
+
+test('a participant meeting at another point uploads here with its beacon carried on the PUT', { timeout: 30_000 }, async () => {
+  const room = sha(Buffer.from('lifecycle\0room\0secret'))
+  const other = sha(Buffer.from('lifecycle\0other\0secret'))
+  const [meetingPoint, host, byRoom, closed] = await Promise.all([
+    relayWith(['--allow-participants']),
+    relayWith(['--allow-participants']),
+    relayWith([`--allow-participants=${room}`]),
+    relayWith([]),
+  ])
+  const sockets = []
+  try {
+    // The participant meets at the meeting point: its beacon is said THERE, never on the host's socket.
+    const guest = generateSecretKey()
+    const said = aliveBeacon(guest, room)
+    const ws = new WebSocket(`ws://127.0.0.1:${meetingPoint.port}`)
+    sockets.push(ws)
+    await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject) })
+    const ok = await new Promise(resolve => {
+      ws.on('message', raw => { const msg = JSON.parse(String(raw)); if (msg[0] === 'OK' && msg[1] === said.id) resolve(msg) })
+      ws.send(JSON.stringify(['EVENT', said]))
+    })
+    assert.equal(ok[2], true, ok[3])
+
+    // Three tiles' atoms to the host: without the beacon, not live; carrying it, stored and takeable.
+    const atoms = ['tile one', 'tile two', 'tile three'].map(text => Buffer.from(text))
+    const bare = await putCarrying(host.base, guest, atoms[0])
+    assert.equal(bare.status, 401)
+    assert.match(bare.body, /^not-live/)
+    for (const atom of atoms) {
+      const put = await putCarrying(host.base, guest, atom, said)
+      assert.equal(put.status, 201, put.body)
+      const read = await fetch(`${host.base}/${put.sig}`)
+      assert.equal(read.status, 200)
+      assert.deepEqual(Buffer.from(await read.arrayBuffer()), atom)
+    }
+    // Live now, as a key that spoke on the socket is: a later PUT needs no beacon.
+    assert.equal((await putCarrying(host.base, guest, Buffer.from('tile four'))).status, 201)
+
+    // Only a fresh, signed {alive} of the SAME key makes a key live.
+    const refusedWith = async (carried, secret = generateSecretKey()) => {
+      const put = await putCarrying(host.base, secret, Buffer.from(`atom ${Math.random()}`), carried)
+      assert.equal(put.status, 401, `admitted with ${typeof carried === 'string' ? carried.slice(0, 40) : JSON.stringify(carried).slice(0, 80)}`)
+      assert.match(put.body, /^not-live/)
+    }
+    await refusedWith(said)                                                       // someone else's beacon
+    const stale = generateSecretKey(); await refusedWith(aliveBeacon(stale, room, { age: 200 }), stale)
+    const leaving = generateSecretKey(); await refusedWith(aliveBeacon(leaving, room, { content: { left: true } }), leaving)
+    const layer = generateSecretKey(); await refusedWith(aliveBeacon(layer, room, { kind: 30200 }), layer)
+    const forged = generateSecretKey(); await refusedWith({ ...aliveBeacon(forged, room), content: JSON.stringify({ alive: true, v: 9 }) }, forged)
+    const garbled = generateSecretKey(); await refusedWith('{"not": "an event"', garbled)
+    const notRoom = generateSecretKey(); await refusedWith(aliveBeacon(notRoom, 'not-a-signature'), notRoom)
+
+    // A host that takes listed rooms only: the beacon's room decides.
+    const member = generateSecretKey()
+    assert.equal((await putCarrying(byRoom.base, member, atoms[0], aliveBeacon(member, room))).status, 201)
+    const elsewhere = generateSecretKey()
+    const notHosted = await putCarrying(byRoom.base, elsewhere, atoms[0], aliveBeacon(elsewhere, other))
+    assert.equal(notHosted.status, 403)
+    assert.match(notHosted.body, /^participants-closed: this room is not hosted here/)
+    // A host closed to participants stays closed, beacon or not.
+    const shut = await putCarrying(closed.base, guest, atoms[0], said)
+    assert.equal(shut.status, 403)
+    assert.equal(shut.body, 'participants-closed')
+  } finally {
+    for (const ws of sockets) ws.terminate()
+    for (const r of [meetingPoint, host, byRoom, closed]) r.close()
+  }
+})
+
+test('a carried beacon never opens a relay behind an access code, and a token that fails leaves nothing live', { timeout: 30_000 }, async () => {
+  const room = sha(Buffer.from('lifecycle\0room\0secret'))
+  const codes = mkdtempSync(join(tmpdir(), 'hypercomb-relay-carried-'))
+  const file = join(codes, 'access-codes')
+  writeFileSync(file, sha(Buffer.from('the-current-code')) + '\n')
+  const [coded, open] = await Promise.all([
+    relayWith(['--allow-participants', '--access-codes', file]),
+    relayWith(['--allow-participants']),
+  ])
+  try {
+    // A key that never dialled with the code: its self-signed {alive} proves
+    // nothing a stranger cannot mint — not live, not stored.
+    const stranger = generateSecretKey()
+    const put = await putCarrying(coded.base, stranger, Buffer.from('not without the code'), aliveBeacon(stranger, room))
+    assert.equal(put.status, 401)
+    assert.match(put.body, /^not-live/)
+
+    // A token signed for ANOTHER host's url, replayed here with a valid beacon:
+    // refused, and the key is not left live for a bare PUT after it.
+    const replayer = generateSecretKey()
+    const bytes = Buffer.from('replayed token')
+    const elsewhereUrl = `http://example.invalid/${sha(bytes)}`
+    const token = finalizeEvent({ kind: 27235, created_at: Math.floor(Date.now() / 1000), tags: [['u', elsewhereUrl], ['method', 'PUT'], ['alive', JSON.stringify(aliveBeacon(replayer, room))]], content: '' }, replayer)
+    const replayed = await fetch(`${open.base}/${sha(bytes)}`, { method: 'PUT', body: bytes, headers: { Authorization: `Nostr ${Buffer.from(JSON.stringify(token)).toString('base64')}` } })
+    assert.equal(replayed.status, 401)
+    assert.match(await replayed.text(), /url tag mismatch/)
+    const after = await putCarrying(open.base, replayer, Buffer.from('a bare put after it'))
+    assert.equal(after.status, 401)
+    assert.match(after.body, /^not-live/)
+  } finally {
+    for (const r of [coded, open]) r.close()
+    rmSync(codes, { recursive: true, force: true })
   }
 })

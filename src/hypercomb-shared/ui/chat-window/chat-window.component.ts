@@ -121,7 +121,7 @@ import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 // module"; runtime module-drafts.ts).
 import { draftModule } from '@hypercomb/runtime/module-drafts'
 import { installedPackageSig } from '@hypercomb/runtime/installed-package'
-import { doctrineFailedMessage, doctrineRanMessage, parseWriteBlock, routesNamedIn, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage } from './hypercomb-work-fence'
+import { doctrineFailedMessage, doctrineRanMessage, parseWriteBlock, readsAskedIn, routesNamedIn, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage } from './hypercomb-work-fence'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'
@@ -161,7 +161,7 @@ import {
 import { contextNeedFor, effortForWork, effortFromJev, effortInThread, isCodeMessage, type MessageEffort } from './message-effort'
 import { CHAT_CONTEXT_COMPILER, compileChatContext } from './context-window-compiler'
 import { executionLineParts } from './execution-line'
-import { withheldMessage, withheldObservation, withoutWithheld } from './withheld-reads'
+import { withheldMessage, withheldObservations, withoutWithheld } from './withheld-reads'
 import { aiWithheld } from '../../core/ai-withheld.store'
 import {
   blockRefusedMessage,
@@ -6736,8 +6736,13 @@ export class ChatWindowComponent implements OnDestroy {
       // paste a read back, a model streamed 3 KB of invented module paths
       // and THEN sent the read (2026-10-02); words on screen are never taken
       // back, so they must not reach it before the read does.
-      const askedRead = splitWork(message).request
-      const readAsked = askedRead?.kind === 'read' && askedRead.lines.length > 0
+      // Reads written out in prose ("find betz; find imagetest") are asked all
+      // the same (readsAskedIn) — and never one aimed at a withheld tile.
+      const blockAsked = splitWork(message).request
+      const askedLines: readonly string[] = blockAsked?.kind === 'read'
+        ? blockAsked.lines
+        : readsAskedIn(message).map(line => workLineGrammar(line, 'read')).filter(Boolean)
+      const readAsked = askedLines.length > 0
       let refusedInARow = 0
       const MAX_REFUSALS_IN_A_ROW = 3
       let budgetSpent = false
@@ -6933,13 +6938,27 @@ export class ChatWindowComponent implements OnDestroy {
           lastRound = true
           throw new WorkRefused('this stretch has used its read budget; hand the work over — say what you found and what is left — and the next stretch reads on with a fresh budget')
         }
-        const plan = parseHypercombObservationGrammars(readLines, grammarContext.segments, readsPerBlock)
+        // A BLOCK PAST THE LIMIT RUNS ITS FIRST READS, AND SAYS WHICH WAITED.
+        // Refused whole, nine reads against a limit of eight lost a round to
+        // nothing (the harness manager, 2026-10-11). A read asked twice in one
+        // block is one read.
+        const asked = [...new Set(readLines.map(line => line.trim()).filter(Boolean))]
+        const waited = asked.slice(readsPerBlock)
+        const parsed = parseHypercombObservationGrammars(asked.slice(0, readsPerBlock), grammarContext.segments, readsPerBlock)
         // WITHHELD TILES (core/ai-withheld.store.ts): only the participant's
-        // own local model may read them. Refused before anything runs.
+        // own local model may read them. A withheld read is refused before
+        // anything runs — itself, not the block: refusing the whole block for
+        // one of them lost the other reads, and the models re-sent the same
+        // block three times (the harness manager, 2026-10-11).
         const ownModel = providerId === 'local' && localReadyAndTrusted
         const covers = ownModel ? () => false : (segments: readonly string[]) => aiWithheld.covers(segments)
-        const withheld = withheldObservation(plan.observations, covers)
-        if (withheld) throw new WorkRefused(withheldMessage(withheld.grammar))
+        const refused = withheldObservations(parsed.observations, covers)
+        if (refused.length === parsed.observations.length) throw new WorkRefused(withheldMessage(refused[0].grammar))
+        const plan = refused.length ? { ...parsed, observations: parsed.observations.filter(observation => !refused.includes(observation)) } : parsed
+        const asides = [
+          ...refused.map(observation => withheldMessage(observation.grammar)),
+          ...(waited.length ? [`Not run — a block holds at most ${readsPerBlock} reads: ${waited.join('; ')}. Ask for ${waited.length === 1 ? 'it' : 'them'} in your next block.`] : []),
+        ]
         const grammars = plan.observations.map(observation => observation.grammar)
         // What each read RESOLVED to — the key an allowed read is remembered
         // by, so "read here" allowed on one page never covers another.
@@ -6966,17 +6985,23 @@ export class ChatWindowComponent implements OnDestroy {
           const windowTokens = (model && router.contextLengthForModel?.(model)) || 128_000
           const room = Math.max(0, windowTokens - 8_000 - estimateTokens(system) - tokensOf(messages)) * 3 / 2
           const perReadBytes = Math.max(1_024, Math.min(harnessNow.reads.pageChars, Math.floor(Math.min(remaining - 512, room) / plan.observations.length)))
-          const receipt = withoutWithheld(await executeHypercombObservationPlan(plan, treeReader, {
+          const read = await executeHypercombObservationPlan(plan, treeReader, {
             maxDepth: 2,
             maxNodes: 48,
             maxBytes: perReadBytes,
             signal,
-          }), covers)
-          if (receipt.results.some(result => {
+          })
+          const receipt = withoutWithheld(read, covers)
+          // Cut short is judged on the read as it came back: a tree that left
+          // a withheld tile out says so to the model (truncated), but that is
+          // no reason to doubt the answer — the notice went on every answer
+          // that read the root (the harness manager, 2026-10-11).
+          if (read.results.some(result => {
             const read = result.read as { ok?: boolean; truncated?: boolean; notesTruncated?: boolean }
             return read.ok === true && (read.truncated === true || read.notesTruncated === true)
           })) readsCut = true
           const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt)
+            + (asides.length ? `\n\n${asides.join('\n')}` : '')
           if (content.length > remaining) {
             // A BLOCK LARGER THAN A WHOLE FRESH STRETCH IS NOT HANDED OVER.
             // Nothing has been read in this stretch, so the next one opens
@@ -7554,18 +7579,19 @@ export class ChatWindowComponent implements OnDestroy {
             messages.push({ role: 'assistant', content: roundText })
             let reply: string
             try {
-              reply = await runRead(askedRead.lines.slice(0, readsPerBlock), roundProviderId, roundModel)
+              reply = await runRead(askedLines.slice(0, readsPerBlock), roundProviderId, roundModel)
             } catch (error) {
               if (signal?.aborted) throw error
               reply = isWorkRefusal(error)
                 ? blockRefusedMessage('read', (error as Error).message, message)
-                : unreadAskedMessage(askedRead.lines.slice(0, 6), message)
+                : unreadAskedMessage(askedLines.slice(0, 6), message)
             }
             messages.push({ role: 'user', content: reply })
-            EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `ran ${askedRead.lines[0]} itself: the model answered without running it` })
+            EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `ran ${askedLines[0]} itself: the model answered without running it` })
             continue
           }
-          const named = routesNamedIn(message)
+          // A withheld tile is never a route to send a model back to read.
+          const named = routesNamedIn(message).filter(route => !aiWithheld.covers(route.split('/').filter(Boolean)))
           if (named.length) {
             unreadSaid = true
             messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: unreadClaimMessage(named.slice(0, 6), message) })
@@ -7590,7 +7616,9 @@ export class ChatWindowComponent implements OnDestroy {
           // A READ CUT SHORT IS SAID, NOT LEFT TO A SCORE. Over a tree read
           // to its limit, a model answered "80 leaf tiles" above a list of
           // 106, and there are 119 (the harness manager, 2026-10-04).
-          if (readsCut) yield '\n\nSome reads in this turn were cut short at their size limit, so this answer may not cover everything — counts especially.'
+          // A find stops on time as often as on size (it walks a hive's whole
+          // depth now, 2026-10-12): say "stopped early", not "size limit".
+          if (readsCut) yield '\n\nSome reads in this turn stopped before they covered everything, so this answer may not be complete — counts especially.'
           if (jevTurn && ran.length) yield needsVerification
             ? '\n\nThe commands ran, but no subsequent readback was completed.'
             : '\n\nReadback was collected after execution; correctness of every affected item has not been independently verified.'

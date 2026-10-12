@@ -60,6 +60,7 @@ mechanism.
 | `/paste` | keystroke, control bar | bare means something entire: place what is held, where you are |
 | `/card`, `/card wear <template>`, `/card <tile> wear <template>` | writing a tile's `card:data` and page records over the bridge | a card wears a template by reference: the template's page and theme, its own details and picture. Bare `card` says what a card wears. Added 2026-10-05 with card templates (business-card.md) |
 | `/opens <tile> as <view>`, `/opens <tile> as hexagons` | ctrl+click on a tile's view icon, the header rail's ctrl+click | the same `features:default` toggle the icon emits; bare `opens <tile>` says how it opens. Added 2026-10-04 with the tile-icon gesture, in the same pass |
+| `/groups` — `on`, `off`, `new`, `add`, `drop`, `rename`, `color`, `icon`, `publish`, `ungroup` | the publish-groups strip at the top of the hive (taps, hover, its editor) | the same acts the strip calls (`PublishGroupsDrone`); `on`/`off` emit the panel's own `features:enable`/`features:remove`, `silent` so the panel stays shut. `rawArgs`, because `publish` is itself a behaviour word. No `machine` grammar — publishing reaches outward. Added 2026-10-11 (publish-groups.md) |
 
 And `/remove` — which already had a word — became sayable by a machine, at
 `reach: 'destructive'`, stated in the catalogue, confirmed at its own door.

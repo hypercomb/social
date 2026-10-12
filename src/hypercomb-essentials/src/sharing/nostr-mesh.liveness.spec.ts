@@ -341,8 +341,10 @@ describe('retire and reconnect', () => {
     expect(ws0.closedAt).toBe(-1)
 
     mesh.configureRelays(['wss://other.test'], false)
-    expect(ws0.closedAt).toBeGreaterThan(0)
     expect(last().url).toBe('wss://other.test')
+    // the old socket drains what was already on its way (2 s), then closes
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(ws0.closedAt).toBeGreaterThan(0)
     // the old relay is off the list: nothing dials it again
     await vi.advanceTimersByTimeAsync(20_000)
     expect(FakeWebSocket.all.filter(s => s.url === RELAY)).toHaveLength(1)
@@ -479,7 +481,9 @@ describe('early arming', () => {
     ws0.open()
     const types = ws0.sent.map(f => `${String(f[0])}:${f[0] === 'REQ' ? String(f[1]).slice(0, 3) : ''}`)
     expect(types).toEqual(['REQ:hc-', 'REQ:hc-', 'EVENT:'])
-    expect(ws0.sent.slice(0, 2).map(f => (f[2] as { '#x': string[] })['#x'][0])).toEqual(['b'.repeat(64), 'c'.repeat(64)])
+    // newest consumer first (the page this tab stands on), so a relay at its
+    // subscription cap refuses the tail, never the page (LS-1)
+    expect(ws0.sent.slice(0, 2).map(f => (f[2] as { '#x': string[] })['#x'][0])).toEqual(['c'.repeat(64), 'b'.repeat(64)])
     expect(probes(ws0)).toBe(0)
   })
 })

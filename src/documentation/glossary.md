@@ -216,10 +216,10 @@ signed-distance-field shader for rendering hex tiles in pixi.js. `HexSdfTextureS
 a pair of effects (`navigation:guard-start`, `navigation:guard-end`) emitted by `ShowCellDrone` during layer transitions. while a guard is active, tile overlay and selection bees ignore clicks, and `KeyMapService` suspends bindings. prevents input during the incremental mesh rebuild.
 
 ### secret store
-shared secret state in `@hypercomb/shared`. persists a single value in `localStorage` (`hc:secret`). on first access, captures any subdomain-derived secret from the url for mesh room joining. exposed in the controls bar ui via a lock icon.
+shared secret state in `@hypercomb/shared`. this tab's secret (its `hc:mesh-zone`), with `localStorage` `hc:secret` as the pre-fill for a new tab. never seeded from the address bar (a subdomain names a room, never its secret — so `join` asks). entered text is folded by core's `canonicalZoneText`; a value it already holds, and a meeting link's (`set(text, exact)`), is kept as recorded. exposed in the controls bar ui via a lock icon.
 
 ### room store
-shared room state in `@hypercomb/shared`. manages the current room identity and secret for mesh participation. provides room controls (join, leave, secret management) in the controls bar ui.
+shared room state in `@hypercomb/shared`. manages the current room identity for mesh participation: this tab's own room first, `localStorage` `hc:room` as a new tab's pre-fill, seeded from the address bar only on `<room>.hypercomb.io` (`www` excluded). entered text folds (`canonicalZoneText`); a held value and a meeting link's are kept as recorded. provides room controls (join, leave, secret management) in the controls bar ui.
 
 ### input gate
 shared input exclusivity service in `@hypercomb/essentials` (`navigation/input-gate.service.ts`). ensures only one input consumer (e.g., panning, selection, editor) has control at a time. also suppresses the browser context menu when an input source is active. drones call `acquire(source)` / `release(source)` to coordinate.

@@ -8,6 +8,7 @@ import { RouterOutlet } from '@angular/router';
 import { awaitFirstTilePaint } from '@hypercomb/shared/core/first-tile-paint';
 import { isTransientMode } from '@hypercomb/shared/core/view-mode.service';
 import { meshResumed, rememberMeshSession } from '@hypercomb/shared/core/mesh-session';
+import { watchPendingMeet } from '@hypercomb/shared/core/invite-capture';
 import { CommandLineComponent } from '@hypercomb/shared/ui/command-line/command-line.component';
 import { ControlsBarComponent } from '@hypercomb/shared/ui/controls-bar/controls-bar.component';
 import { EditActionsComponent } from '@hypercomb/shared/ui/edit-actions/edit-actions.component';
@@ -282,5 +283,9 @@ export class App implements AfterViewInit {
 
     // broadcast initial mesh state so drones can react
     EffectBus.emit('mesh:public-changed', { public: this.meshPublic() })
+
+    // Parity with web: a meeting link no worker answers is answered by the
+    // shell (the drones here are this tree's, so it stands aside at once).
+    watchPendingMeet()
   }
 }

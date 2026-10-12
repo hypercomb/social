@@ -65,6 +65,10 @@ export class MarkPreview {
    *  bouquet, for the length of the drag. Outranks both. */
   #dragged: string[] = []
   #dragColor: [number, number, number] | null = null
+  /** A PUBLISH GROUP under the cursor (`group:preview {labels, color}`) — the
+   *  strip names its members outright, so there is no mark to resolve. Same
+   *  rank and same look as the hover; a live drag still outranks it. */
+  #group: string[] = []
   #labels = new Set<string>()
   /** 0..1 ramp — the whole treatment fades in and out (see u_markPreview). */
   #k = 0
@@ -105,6 +109,16 @@ export class MarkPreview {
     this.refresh()
   }
 
+  /** A publish group's members (or none) are under the cursor. */
+  group(labels: readonly unknown[] | undefined, color?: string): void {
+    const next = trimmed(labels)
+    const rgb = color ? previewRgb(color) : null
+    if (rgb && next.length) this.#color = rgb
+    if (same(next, this.#group)) return
+    this.#group = next
+    this.refresh()
+  }
+
   /** Something is asking the question now — the answer may have changed. */
   get asking(): boolean { return this.#armed.length > 0 || this.#hovered.length > 0 }
 
@@ -115,6 +129,14 @@ export class MarkPreview {
    *  even with zero matches — a fully receded page IS the honest answer. */
   refresh(): void {
     const dragged = this.#dragged
+    // A hovered publish group names its members — no mark to match.
+    if (dragged.length === 0 && this.#group.length > 0) {
+      const page = new Set(this.host.pageLabels())
+      this.#labels = new Set(this.#group.filter(label => page.has(label)))
+      if (this.#labels.size > 0) this.#paint()
+      this.#set(this.#labels.size > 0)
+      return
+    }
     const all = dragged.length > 0 ? dragged : (this.#hovered.length > 0 ? null : this.#armed)
     const next = new Set<string>()
     if (all === null) {

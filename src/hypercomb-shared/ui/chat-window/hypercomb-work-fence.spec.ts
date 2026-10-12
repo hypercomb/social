@@ -123,6 +123,35 @@ describe('the work fence', () => {
     expect(splitWork('ok\n```hypercomb-read\nfind cigar').request).toEqual({ kind: 'read', lines: ['/find cigar'] })
   })
 
+  it('opens a work fence glued to the end of a sentence, and the sentence stays prose', () => {
+    // The live probe, 2026-10-12: the fence on the sentence's own line ran nothing.
+    expect(splitWork("I'll find practice-modules.```hypercomb-read\nfind practice-modules\n```"))
+      .toEqual({ prose: "I'll find practice-modules.", request: { kind: 'read', lines: ['/find practice-modules'] } })
+    expect(splitWork('Adding it. ``` hypercomb-do\ncreate notes\n```\nDone.'))
+      .toEqual({ prose: 'Adding it.\nDone.', request: { kind: 'do', lines: ['/create notes'] } })
+    expect(splitWork('Looking.```hypercomb-read\nfind cigar').request).toEqual({ kind: 'read', lines: ['/find cigar'] })
+    // Only a work word glued to the end: an ordinary fence glued to text, a
+    // mention with words after it, inline code, and a glued fence inside an
+    // ordinary code block all stay as they were.
+    for (const text of [
+      'Here:```ts\nconst a = 1\n```',
+      'The ```hypercomb-read fence reads.\nread here',
+      'Open it with `` ```hypercomb-read ``',
+      'Use `x` here.',
+      '````md\nSee.```hypercomb-read\nread here\n```\n````',
+    ]) expect(splitWork(text)).toEqual({ prose: text })
+  })
+
+  it('leaves a sentence that ends by naming the fence whole — it opens only onto a body', () => {
+    // Review of the 2026-10-12 fix: opened anyway, the fence took the
+    // explanation after it as a read of "/that is how it works.".
+    for (const text of [
+      'To read the hive I open a block with ```hypercomb-read\n\nThat is how it works.\nMore explanation here.',
+      'Done.```hypercomb-do',
+      'Like this ```hypercomb-read\n```ts\nconst a = 1\n```',
+    ]) expect(splitWork(text)).toEqual({ prose: text })
+  })
+
   it('"here" is the current page only for reads', () => {
     expect(workLineGrammar('Tree here', 'read')).toBe('/tree')
     expect(workLineGrammar('`read /a/b`', 'read')).toBe('/read /a/b')
@@ -176,6 +205,22 @@ describe('the stream guard', () => {
     expect(guard.holding).toBe(false)
   })
 
+  it('holds a plain fence whose first line is the marker, as the parser runs it', () => {
+    // The housekeeping manager's answer, 2026-10-11: a plain fence, the
+    // marker as its first line, then the finds.
+    const { shown, guard } = run(['\n\n``', '`\nhyper', 'comb-read\nfind imagetest\nfind gate-probe\n```\n'])
+    expect(shown).toBe('\n\n')
+    expect(guard.holding).toBe(true)
+    const blank = run(['Looking.\n```text\n\n', 'hypercomb-read\nread /x\n```'])
+    expect(blank.shown).toBe('Looking.\n')
+    expect(blank.guard.holding).toBe(true)
+    // An ordinary fence still shows whole once its first line is not a marker,
+    // and one that never gets a body line shows at the end.
+    expect(run(['```\nnot work\n```\nafter\n']).shown).toBe('```\nnot work\n```\nafter\n')
+    expect(run(['```\n', '```']).shown).toBe('```\n```')
+    expect(run(['```']).shown).toBe('```')
+  })
+
   it('releases a line the moment it cannot become a fence', () => {
     expect(new WorkStreamGuard().push('Hel')).toBe('Hel')
     expect(new WorkStreamGuard().push('``')).toBe('')
@@ -185,6 +230,68 @@ describe('the stream guard', () => {
     const { shown, guard } = run(['done\n', '```hypercomb-do'])
     expect(shown).toBe('done\n')
     expect(guard.holding).toBe(true)
+  })
+
+  it('shows the sentence a work fence is glued to and holds from the backticks on', () => {
+    // The live probe, 2026-10-12, arriving in pieces.
+    const probe = run(["I'll find practice-", 'modules.``', '`hypercomb-', 'read\nfind practice-modules\n', '```'])
+    expect(probe.shown).toBe("I'll find practice-modules.")
+    expect(probe.guard.holding).toBe(true)
+    expect(new WorkStreamGuard().push("I'll find practice-modules.``")).toBe("I'll find practice-modules.")
+    // The line under it decides, as the parser decides: a body cut off before
+    // its newline still opens the block.
+    const last = run(['Done.```hypercomb-do\n', 'create no'])
+    expect(last.shown).toBe('Done.')
+    expect(last.guard.holding).toBe(true)
+    // An ordinary fence glued to text, inline code, a mention, a glued fence
+    // inside an ordinary code block, and a sentence that ENDS by naming the
+    // fence — with prose, a fence or nothing under it — all show whole, a
+    // character at a time.
+    for (const text of [
+      'Here:```ts\nconst a = 1\n```\ndone',
+      'Use `x` here.\n',
+      'Open it with `` ```hypercomb-read ``\n',
+      'The ```hypercomb-read fence reads.\n',
+      '````md\nSee.```hypercomb-read\nread here\n```\n````\n',
+      'To read I open a block with ```hypercomb-read\n\nThat is how it works.',
+      'Done.```hypercomb-do',
+      'Done.```hypercomb-do\n',
+      'Like this ```hypercomb-read\n```ts\nconst a = 1\n```\n',
+    ]) {
+      const said = run([...text])
+      expect(said.shown).toBe(text)
+      expect(said.guard.holding).toBe(false)
+    }
+  })
+
+  it('weighs a work tag before a glued fence as the parser does, and holds it', () => {
+    // Review of the 2026-10-12 fix: the parser cuts the fence away and reads
+    // `<hypercomb-read>` alone as the tag's block form, but the guard showed it.
+    const text = 'Looking.<hypercomb-read>```hypercomb-read\nread here\n```\n</hypercomb-read>'
+    expect(splitWork(text)).toEqual({ prose: 'Looking.', request: { kind: 'read', lines: ['/read'] } })
+    const said = run([...text])
+    expect(said.shown).toBe('Looking.')
+    expect(said.guard.holding).toBe(true)
+    const alone = run([...text.slice('Looking.'.length)])
+    expect(alone.shown).toBe('')
+    expect(alone.guard.holding).toBe(true)
+    // With no body under the fence, the tag is a sentence's word again.
+    const mention = 'Looking.<hypercomb-read>```hypercomb-read\n\nThat is the tag.'
+    expect(splitWork(mention)).toEqual({ prose: mention })
+    expect(run([...mention]).shown).toBe(mention)
+  })
+
+  it('stays quick on a long line and a long run of backticks', () => {
+    // Review of the 2026-10-12 fix: weighed on every character, an unanchored
+    // search of the whole line took seconds on 2000 backticks, and on a long
+    // line full of inline code — the chat froze while it streamed.
+    const started = Date.now()
+    const ticks = `a${'`'.repeat(2000)}${'b'.repeat(300)}`
+    const pieces = (text: string): string[] => text.match(/[\s\S]{1,20}/g) ?? []
+    expect(run(pieces(ticks)).shown).toBe(ticks)
+    const inline = 'Use `x` and `y` here. '.repeat(1000)
+    expect(run(pieces(inline)).shown).toBe(inline)
+    expect(Date.now() - started).toBeLessThan(1500)
   })
 
   it('holds the tag spelling, whole on one line or opened mid-stream', () => {
@@ -521,11 +628,156 @@ describe('an answer about tiles nothing read', () => {
     expect(routesNamedIn('See https://example.com/a/b and 3/4 of it, dated 2026/10/01.')).toEqual([])
   })
 
+  it('never names a route the request forbids, and keeps a dot inside a route', async () => {
+    const { routesNamedIn } = await import('./hypercomb-work-fence')
+    // The housekeeping manager's ask, 2026-10-11: sent back to read "/susan,
+    // /howard", the model claimed it had read both.
+    expect(routesNamedIn('Run three whole-hive finds. Do not read /susan or /howard. Do not change anything.')).toEqual([])
+    expect(routesNamedIn('Read /people, never /susan.')).toEqual([])
+    expect(routesNamedIn('Read /people. Never read /susan.')).toEqual(['/people'])
+    expect(routesNamedIn('Open /behaviors/views/postit/postit-view.drone.ts now.')).toEqual(['/behaviors/views/postit/postit-view.drone.ts'])
+  })
+
+  it('reads the reads a request writes out in prose, and none it forbids', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    expect(readsAskedIn('Read only. Run three whole-hive finds (no route) and answer one line each, nothing else: find betz; find imagetest; find isomorphic. Do not read /susan or /howard. Do not change anything.'))
+      .toEqual(['find betz /', 'find imagetest /', 'find isomorphic /'])
+    expect(readsAskedIn('1) read /revolucion/cigars: noteCount. 3) find betz under /dolphin: the routes found and whether it was cut short.'))
+      .toEqual(['read /revolucion/cigars', 'find betz /dolphin'])
+    expect(readsAskedIn('Use tree on /revolucion/cigars and /youtube.')).toEqual(['tree /revolucion/cigars'])
+    // Prose that only sounds like a read asks for nothing.
+    expect(readsAskedIn('I want to find out what is going on. Read only, please.')).toEqual([])
+    expect(readsAskedIn('Do not read /susan.')).toEqual([])
+  })
+
+  it('asks a whole-hive find of the root, and leaves a find that names a route as it is', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    // The 2026-10-12 ask: run with no route, the finds searched under the
+    // participant's current page (/business-card, no children) and the model
+    // said it had searched the whole hive.
+    expect(readsAskedIn('Read only. Run three whole-hive finds (no route) and answer one line each: find betz; find imagetest; find isomorphic.'))
+      .toEqual(['find betz /', 'find imagetest /', 'find isomorphic /'])
+    expect(readsAskedIn('Search the entire hive: find betz under /dolphin; find imagetest.'))
+      .toEqual(['find betz /dolphin', 'find imagetest /'])
+    expect(readsAskedIn('Look everywhere in the hive. find betz')).toEqual(['find betz /'])
+    expect(readsAskedIn('Across all of the hive, find betz.')).toEqual(['find betz /'])
+    // No talk of the whole hive: the find stays on the current page.
+    expect(readsAskedIn('find betz; find imagetest')).toEqual(['find betz', 'find imagetest'])
+    // A sentence that forbids the whole hive does not ask for it.
+    expect(readsAskedIn('Do not search the whole hive. find betz')).toEqual(['find betz'])
+  })
+
+  it('asks the whole hive when a negation in the sentence governs something else', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    // Review of the 2026-10-12 fix: a bare `not`, `without` or `except`
+    // anywhere in the sentence threw out the whole-hive ask, and the finds
+    // went back to the current page.
+    expect(readsAskedIn('Search the whole hive, not just the current page. find betz; find imagetest'))
+      .toEqual(['find betz /', 'find imagetest /'])
+    expect(readsAskedIn('Read only, do not change anything, across the whole hive. find betz')).toEqual(['find betz /'])
+    // A list a whole-hive phrase opens with a colon is its own clause: its finds are asked.
+    expect(readsAskedIn('Whole hive, not only /business-card: find betz; find imagetest.'))
+      .toEqual(['find betz /', 'find imagetest /'])
+    expect(readsAskedIn('Search the whole hive without stopping at the current page: find betz.')).toEqual(['find betz /'])
+    // A negation that governs the whole hive, or the read itself, still forbids.
+    expect(readsAskedIn('Do not search the whole hive. find betz')).toEqual(['find betz'])
+    expect(readsAskedIn('Search the whole hive. Do not read /susan, find betz.')).toEqual([])
+  })
+
+  it('forbids a list a negation opens with a colon or dash', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    // Second review of the 2026-10-12 fix: every colon or dash started a new
+    // clause, so the hive would run reads the participant said not to run.
+    expect(readsAskedIn('Do not run any of these: read /susan, tree /howard.')).toEqual([])
+    expect(readsAskedIn('Skip these — read /susan and tree /howard.')).toEqual([])
+    expect(readsAskedIn('Avoid the following — read /susan, tree /howard.')).toEqual([])
+    expect(readsAskedIn('Never do this: read /susan.')).toEqual([])
+    expect(readsAskedIn('Never do the following: find betz.')).toEqual([])
+    expect(readsAskedIn('Do not run these: find betz.')).toEqual([])
+    expect(readsAskedIn("Don't run the following reads, I already have them: find betz, read /susan.")).toEqual([])
+    // A whole-hive phrase opens the list only when no other negation follows it.
+    expect(readsAskedIn('Search the whole hive, then never do this: find betz.')).toEqual([])
+    expect(readsAskedIn('Search the whole hive without stopping: read /susan.')).toEqual([])
+  })
+
+  it('keeps a find on the current page when the request turns the whole hive down', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    // Second review of the 2026-10-12 fix: a comma cut the negation away, and
+    // `no`, `instead of` and `rather than` were no cue, so each became a root find.
+    expect(readsAskedIn('Do not, under any circumstances, search the whole hive. Find betz.')).toEqual(['find betz'])
+    expect(readsAskedIn("Please don't, for now, search the whole hive. Find betz.")).toEqual(['find betz'])
+    expect(readsAskedIn('No whole-hive search, only the current page: find betz.')).toEqual(['find betz'])
+    expect(readsAskedIn('Instead of the whole hive, look on this page: find betz.')).toEqual(['find betz'])
+    expect(readsAskedIn('Rather than the whole hive, just this page: find betz.')).toEqual(['find betz'])
+    expect(readsAskedIn("You shouldn't search the whole hive. Find betz.")).toEqual(['find betz'])
+    // No route is the current page.
+    expect(readsAskedIn('Run these finds (no route), on my current page: find betz.')).toEqual(['find betz'])
+  })
+
   it('says which routes went unread and carries the request', async () => {
     const { unreadClaimMessage } = await import('./hypercomb-work-fence')
     const said = unreadClaimMessage(['/games'], 'how many tiles are under /games')
     expect(said).toContain('/games')
     expect(said).toContain('hypercomb-read')
+  })
+})
+
+describe('a find written with its route right after the word', () => {
+  it('is a read asked, with that route', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    // The live probe, 2026-10-12: "find practice-modules /" was answered with
+    // reads 0 and not sent back — only `under|in|below /route` was accepted
+    // after the word, so a find spelled as the read grammar spells it was no read.
+    expect(readsAskedIn('find practice-modules /')).toEqual(['find practice-modules /'])
+    expect(readsAskedIn('find betz /dolphin and then answer')).toEqual(['find betz /dolphin'])
+    expect(readsAskedIn('Search the whole hive: find betz /dolphin; find imagetest.'))
+      .toEqual(['find betz /dolphin', 'find imagetest /'])
+  })
+
+  it('is still forbidden by a negation that governs it', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    expect(readsAskedIn('Do not find betz /')).toEqual([])
+    expect(readsAskedIn('Never do this: find betz /dolphin.')).toEqual([])
+  })
+
+  it('ends where the prose around the route begins', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    // Review of the 2026-10-12 probe fix: the bare route took in a question
+    // mark, a closing backtick and a trailing slash — a find of `dolphin?`,
+    // of a tile named "`", and a plan refused whole that lost `read /susan`.
+    expect(readsAskedIn('Can you find betz /dolphin?')).toEqual(['find betz /dolphin'])
+    expect(readsAskedIn('Please run `find practice-modules /`')).toEqual(['find practice-modules /'])
+    expect(readsAskedIn('Please run `find betz /dolphin` and answer.')).toEqual(['find betz /dolphin'])
+    expect(readsAskedIn('find betz /dolphin/; read /susan')).toEqual(['find betz /dolphin', 'read /susan'])
+    expect(readsAskedIn('find betz under /dolphin?')).toEqual(['find betz /dolphin'])
+    expect(readsAskedIn('read /susan? tree /howard/')).toEqual(['read /susan', 'tree /howard'])
+  })
+
+  it('never takes a place word for the find\'s word', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    // Same review: "what you find in /dolphin" asked a find of `in`, and the
+    // hive ran it in place of sending the model back to read /dolphin.
+    expect(readsAskedIn('Tell me what you find in /dolphin, then summarise.')).toEqual([])
+    expect(readsAskedIn('Things you will find under /dolphin: betz and more.')).toEqual([])
+    expect(readsAskedIn('Tell me anything you find on /dolphin.')).toEqual([])
+    expect(readsAskedIn('find inbox /dolphin')).toEqual(['find inbox /dolphin'])
+    expect(readsAskedIn('find betz in /dolphin')).toEqual(['find betz /dolphin'])
+  })
+
+  it('never takes a preposition for the find\'s word', async () => {
+    const { readsAskedIn, routesNamedIn } = await import('./hypercomb-work-fence')
+    // Review of the 2026-10-12 place-word fix: "What can you find about
+    // /dolphin?" asked a find of `about`, the hive ran it, and /dolphin was
+    // never read. Such a question falls through to the route it names.
+    expect(readsAskedIn('What can you find about /dolphin?')).toEqual([])
+    expect(routesNamedIn('What can you find about /dolphin?')).toEqual(['/dolphin'])
+    expect(readsAskedIn('Show me what you find for /dolphin.')).toEqual([])
+    for (const word of ['around', 'with', 'through', 'among', 'regarding', 'over'])
+      expect(readsAskedIn(`What can you find ${word} /dolphin?`)).toEqual([])
+    expect(readsAskedIn('Tell me what you find out in /dolphin.')).toEqual([])
+    // A tile whose name only starts with one is still a find's word.
+    expect(readsAskedIn('find about-us /websites')).toEqual(['find about-us /websites'])
+    expect(readsAskedIn('find forum /')).toEqual(['find forum /'])
   })
 })
 

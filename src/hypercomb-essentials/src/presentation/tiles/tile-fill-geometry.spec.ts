@@ -21,7 +21,7 @@ const UV = { u0: 0.1, v0: 0.2, u1: 0.3, v1: 0.4 }
 const look = (over: Partial<TileLook> = {}): TileLook => ({
   flat: () => false, pivot: () => false, onLauncherPage: () => false, revealLabel: () => null,
   hasImage: () => true, imageUV: () => ({ u0: 0.5, v0: 0.5, u1: 0.6, v1: 0.6 }),
-  labelUV: () => UV, hidesName: (hideText, hasImage) => !!hideText && hasImage,
+  labelUV: () => UV, hidesName: (hideText, hasImage) => !!hideText && hasImage, unbaked: () => false,
   isHiddenItem: () => false, isDormant: () => false, peerPubkey: () => undefined, spotlight: () => null,
   stackDepth: () => 1, shadeValue: () => 0, isShaded: () => false, isPortal: () => false, shapeOf: () => '',
   ...over,
@@ -49,6 +49,19 @@ describe('the fill geometry', () => {
     expect([...attr(hidden, 'aLabelUV').slice(0, 4)].map(v => +v.toFixed(2))).toEqual([0.1, 0.2, 0.3, 0.4])
     const hovered = buildFillQuad(cells, 10, 2, 5, 5, look({ revealLabel: () => 'kitchen' }))
     expect([...attr(hovered, 'aLabelUV').slice(16, 20)].map(v => +v.toFixed(2))).toEqual([0.1, 0.2, 0.3, 0.4])
+  })
+
+  it('an oversized page\'s out-of-view tile draws no baked name and never asks the atlas for one', () => {
+    const asked: string[] = []
+    const built = buildFillQuad(cells, 10, 2, 5, 5, look({
+      unbaked: label => label === 'garden',
+      labelUV: label => { asked.push(label); return UV },
+    }))
+    expect([...attr(built, 'aLabelUV').slice(0, 4)]).toEqual([0, 0, 0, 0])
+    expect(asked).not.toContain('garden')
+    // A dive's tiles belong to another layer: the page's view says nothing of them.
+    const dive = buildFillQuad(cells, 10, 2, 5, 5, look({ unbaked: () => true }), { portals: new Set(), reveal: null })
+    expect([...attr(dive, 'aLabelUV').slice(0, 4)].map(v => +v.toFixed(2))).toEqual([0.1, 0.2, 0.3, 0.4])
   })
 
   it('wears a peer\'s hue on the border, dimmed while another peer is in the spotlight', () => {

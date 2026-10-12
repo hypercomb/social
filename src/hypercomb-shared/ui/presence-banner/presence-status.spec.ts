@@ -96,6 +96,26 @@ describe('the status line — one state, one sentence', () => {
       .toContain('A picture is too large for jwize.com')
   })
 
+  it('the upload lines name the page\'s host; the connection lines name the relay', () => {
+    // 2026-10-07: a page's tiles go to its publish domains, else the hosts
+    // pool, else a relay that hosts participants — never the relay merely
+    // because it is where we meet.
+    const pooled = { ...live, uploadHost: 'hypercomb.com' }
+    const refused = say(statusLine({ ...pooled, share: { offered: 2, host: 'hypercomb.com', hostSource: 'pool', hostState: 'refused' } }))
+    expect(refused).toContain("hypercomb.com isn't taking uploads from guests — others see your tile names only")
+    expect(refused).not.toContain('jwize.com')
+    expect(say(statusLine({ ...pooled, sync: { state: 'full', host: 'hypercomb.com' } }))).toContain('hypercomb.com is full')
+    expect(say(statusLine({ ...pooled, share: { offered: 4 }, sync: { state: 'too-large' } }))).toContain('A picture is too large for hypercomb.com')
+    expect(say(statusLine({ ...pooled, phase: 'connecting' }))).toBe('Connecting to jwize.com…')
+    expect(say(statusLine({ ...pooled, phase: 'down' }))).toContain("Can't reach jwize.com")
+  })
+
+  it('nothing hosts the tiles: said once, names only', () => {
+    const line = statusLine({ ...live, uploadHost: '', share: { offered: 3, uploading: 3, nameOnly: 3, host: '', hostSource: 'none', hostState: 'no-host' } })
+    expect(say(line)).toBe('Live · meetup · amber falcon · 7 in the room (3 here) · No host keeps your tiles yet — others see your tile names only')
+    expect(line.tone).toBe('warn')
+  })
+
   it('a picture too large is said beside the counts, and the host\'s live word beats the walk\'s snapshot', () => {
     const big = statusLine({ ...live, share: { offered: 4 }, sync: { state: 'too-large' } })
     expect(say(big)).toBe('Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 4 · A picture is too large for jwize.com')
@@ -103,6 +123,39 @@ describe('the status line — one state, one sentence', () => {
     // the walk saw 'unreachable'; the host has since recovered
     expect(say(statusLine({ ...live, share: { offered: 4, hostState: 'unreachable' }, sync: { state: 'backed-up' } })))
       .toBe('Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 4')
+  })
+
+  // THE 2026-10-10 MEETING: `favorites` published at the typo
+  // `hyperccomb.com` read as "Sharing 27 · 1 uploading" for ever. A branch a
+  // host takes none of the bytes of is named — the branch, the host, why.
+  it('a branch a publish domain holds is named, with the host and why — never "uploading"', () => {
+    const line = statusLine({
+      ...live, uploadHost: 'hypercomb.com',
+      share: {
+        offered: 27, uploading: 0, host: 'hypercomb.com', hostSource: 'pool', hostState: 'backed-up',
+        blocked: [{ branch: 'favorites', host: 'hyperccomb.com', state: 'unreachable', why: 'unresolved' }],
+      },
+      sync: { state: 'backed-up', host: 'hypercomb.com' },
+    })
+    expect(say(line)).toBe("Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 27 · favorites: hyperccomb.com can't be reached — check the host name, and that the host is running")
+    expect(line.tone).toBe('warn')
+    const why = (w: string): string => say(statusLine({ ...live, share: { offered: 1, blocked: [{ branch: 'shop', host: 'shop.example', why: w }] } }))
+    expect(why('page')).toContain('shop: shop.example answers with a web page — it takes no uploads')
+    expect(why('refused')).toContain("shop: shop.example isn't taking uploads from this page")
+    expect(why('full')).toContain('shop: shop.example is full')
+    expect(why('unreachable')).toContain("shop: can't upload to shop.example right now")
+  })
+
+  it('standing on the branch itself: its own host\'s line names the branch and why, while the host\'s live word holds it', () => {
+    const share = {
+      offered: 3, uploading: 3, nameOnly: 3, host: 'hyperccomb.com', hostSource: 'publish', hostState: 'unreachable', why: 'unresolved',
+      blocked: [{ branch: 'favorites', host: 'hyperccomb.com', state: 'unreachable', why: 'unresolved' }],
+    }
+    const held = say(statusLine({ ...live, uploadHost: 'hyperccomb.com', share, sync: { state: 'unreachable', why: 'unresolved', host: 'hyperccomb.com' } }))
+    expect(held).toBe("Live · meetup · amber falcon · 7 in the room (3 here) · favorites: hyperccomb.com can't be reached — check the host name, and that the host is running")
+    // The host answered since: the walk's snapshot of it says nothing.
+    expect(say(statusLine({ ...live, uploadHost: 'hyperccomb.com', share, sync: { state: 'backed-up', host: 'hyperccomb.com' } })))
+      .toBe('Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 3 · 3 uploading')
   })
 
   it('content this device does not hold', () => {
@@ -177,18 +230,34 @@ describe("the room's two words", () => {
   })
 
   it('are the same on every page: no word surface hashes the page any more', () => {
-    // Two pages, one room: the crumb and the location window both call
-    // roomWords(room, secret) and nothing else feeds it.
+    // Two pages, one room: the crumb, the location window and the presence
+    // line all fold room, secret and the meeting point (never the page) —
+    // the crumb the English pair alone, the other two with the reader's
+    // own beside it (D4, 2026-10-10).
     const bar = readFileSync(join(UI, 'controls-bar', 'controls-bar.component.ts'), 'utf8')
     const crumb = bar.slice(bar.indexOf('readonly secretWords = computed('), bar.indexOf('readonly hasSecret'))
-    expect(crumb).toContain('roomWords(this.#room$(), this.#secret$(), this.#locale$())')
-    expect(crumb).not.toMatch(/#lineageKey|segmentsRaw/)
+    expect(crumb).toContain('roomWords(this.#room$(), this.#secret$(), this.#meetPoint$())')
+    expect(crumb).not.toMatch(/#lineageKey|segmentsRaw|#locale/)
     expect(bar).not.toContain('secretTag(')
 
     const modal = readFileSync(join(UI, 'mesh-modal', 'mesh-modal.component.ts'), 'utf8')
-    expect(modal).toContain('roomWords(this.roomDraft(), this.secretDraft(), this.#locale())')
+    // the drafts as START will store them (D6), the point, the reader's locale — never the page
+    expect(modal).toMatch(/wordsBeside\(\s*this\.#asStored\(this\.roomDraft\(\), this\.#roomStore\?\.value\),\s*this\.#asStored\(this\.secretDraft\(\), this\.#secretStore\?\.value\),\s*this\.#wordsPoint\(\), this\.#locale\(\)\)/)
     expect(modal).not.toContain('secretTag(')
     expect(modal).not.toContain('#lineageKey')
+
+    const banner = readFileSync(join(UI, 'presence-banner', 'presence-banner.component.ts'), 'utf8')
+    expect(banner).toContain('wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale())')
+    expect(banner).not.toContain('secretTag(')
+  })
+
+  it('the command line never autocorrects either: a room typed there is the room (ZI-8)', () => {
+    const html = readFileSync(join(UI, 'command-shell', 'command-shell.component.html'), 'utf8')
+    const at = html.indexOf('class="command-input"')
+    const tag = html.slice(html.lastIndexOf('<input', at), html.indexOf('/>', at))
+    for (const attr of ['autocapitalize="off"', 'autocorrect="off"', 'spellcheck="false"', 'autocomplete="off"']) {
+      expect(tag, `command input ${attr}`).toContain(attr)
+    }
   })
 
   it('room and secret fields never autocapitalize or autocorrect', () => {

@@ -305,6 +305,129 @@ describe('/find under a route', () => {
     ])
     expect(() => parseHypercombObservationGrammars(['/find be/tz'], [])).toThrow(/no slashes/)
   })
+
+  // The harness defect, 2026-10-12: `find betz` with no route searched under
+  // the participant's current page (/business-card, no children) and the
+  // model told the participant it had searched the whole hive.
+  const finder = (): HypercombTreeReader => ({
+    readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+    validateSnapshots: vi.fn(async () => true),
+    find: vi.fn(async (query, segments) => segments[0] === 'gone'
+      ? { ok: false as const, root: `/${segments.join('/')}`, code: 'not-found' }
+      : { ok: true as const, root: segments.length ? `/${segments.join('/')}` : '/', query, matches: [], truncated: false, snapshot: 'private-find' }),
+  })
+  const observationsOf = (text: string): Record<string, unknown>[] =>
+    (JSON.parse(text) as { observations: Record<string, unknown>[] }).observations
+
+  it('says a find with no route searched the current page, not the whole hive', async () => {
+    const plan = parseHypercombObservationGrammars(['/find betz', '/find betz /', '/find betz /dolphin'], ['business-card'])
+    expect(plan.observations.map(o => o.currentPage)).toEqual([true, undefined, undefined])
+    const [here, whole, routed] = observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(plan, finder())))
+    // The receipt's own fields stay as they were.
+    expect(here).toMatchObject({ grammar: '/find betz', root: '/business-card', query: 'betz', matches: [], truncated: false })
+    expect(here['scopeNote']).toBe('scope: under /business-card — the participant\'s current page, not the whole hive; for the whole hive send find betz /')
+    // A find that names its route — the root included — says nothing more.
+    expect(whole).not.toHaveProperty('scopeNote')
+    expect(routed).not.toHaveProperty('scopeNote')
+  })
+
+  it('says so on the root and on a failed find too', async () => {
+    const atRoot = observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/find betz'], []), finder())))[0]
+    expect(atRoot['scopeNote']).toBe('scope: the whole hive — the participant\'s current page is the root')
+    const failed = observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/find betz'], ['gone']), finder())))[0]
+    expect(failed).toMatchObject({ grammar: '/find betz', root: '/gone', error: 'not-found' })
+    expect(String(failed['scopeNote'])).toContain('scope: under /gone')
+  })
+
+  // The note says scope, never coverage: a root find that stopped short, or
+  // failed, must not carry "searched the whole hive" (review of the
+  // 2026-10-12 fix — the very claim the defect was about).
+  it('never says the whole hive was searched when a root find stopped short or failed', async () => {
+    const rootFind = (read: Awaited<ReturnType<HypercombTreeReader['find']>>): HypercombTreeReader => ({
+      readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+      validateSnapshots: vi.fn(async () => true),
+      find: vi.fn(async () => read),
+    })
+    const cut = observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/find betz'], []),
+      rootFind({ ok: true, root: '/', query: 'betz', matches: [], truncated: true, snapshot: 'private-find' }))))[0]
+    expect(cut).toMatchObject({ root: '/', truncated: true })
+    expect(cut).toHaveProperty('truncatedNote')
+    expect(cut['scopeNote']).toBe('scope: the whole hive — the participant\'s current page is the root; this search did not reach every tile, so do not say the whole hive was searched')
+    expect(String(cut['scopeNote'])).not.toMatch(/searched the whole hive/)
+    const failed = observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/find betz'], []),
+      rootFind({ ok: false, root: '/', code: 'unavailable' }))))[0]
+    expect(failed).toMatchObject({ root: '/', error: 'unavailable' })
+    expect(String(failed['scopeNote'])).toContain('did not reach every tile')
+  })
+
+  // The live probe, 2026-10-12 (revision 19d44b5b): told only to "search
+  // again under a narrower route", a model searched under every one of the
+  // root's children in turn — 13 rounds, 144k tokens. The reader names the
+  // branches its walk did not finish; the receipt names them instead.
+  const cutFind = (read: Record<string, unknown>): HypercombTreeReader => ({
+    readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+    validateSnapshots: vi.fn(async () => true),
+    find: vi.fn(async () => ({ ok: true as const, root: '/', query: 'betz', matches: [], truncated: true, snapshot: 'private-find', ...read })),
+  })
+  const receiptOf = async (reader: HypercombTreeReader): Promise<Record<string, unknown>> =>
+    observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/find betz /'], ['business-card']), reader)))[0]
+
+  it('names the branches a cut find did not finish, in place of the narrower-route advice', async () => {
+    const cut = await receiptOf(cutFind({
+      matches: [{ name: 'betz', path: '/people/betz' }],
+      unfinished: ['/solomon-maze-v1', '/bubble-bobble-dos-v1'], unfinishedCount: 2,
+    }))
+    expect(cut).toMatchObject({
+      root: '/', truncated: true, matches: [{ name: 'betz', path: '/people/betz' }],
+      unfinished: ['/solomon-maze-v1', '/bubble-bobble-dos-v1'],
+      truncatedNote: 'the walk did not finish these branches; search under them only if the request needs completeness: find betz <branch>',
+    })
+    expect(String(cut['truncatedNote'])).not.toMatch(/narrower route/)
+    // Every branch is listed: no count to add.
+    expect(cut).not.toHaveProperty('unfinishedCount')
+
+    // More than the reader lists: the count says how many in all.
+    const listed = Array.from({ length: 20 }, (_, at) => `/b${at}`)
+    const many = await receiptOf(cutFind({ unfinished: listed, unfinishedCount: 34 }))
+    expect(many).toMatchObject({ unfinished: listed, unfinishedCount: 34 })
+    expect(String(many['truncatedNote'])).toMatch(/; 34 branches in all, the first 20 listed$/)
+
+    // A cut find that names no branch keeps the old advice.
+    expect((await receiptOf(cutFind({})))['truncatedNote']).toMatch(/search again under a narrower route/)
+  })
+
+  // Review of the 2026-10-12 fair walk: 61 hits in a finished /small, 48
+  // shown, and the note named only /huge — where none of the 13 unshown were.
+  it('says a list the limit cut has more matches, in any branch, before naming the unfinished ones', async () => {
+    const both = await receiptOf(cutFind({ unfinished: ['/huge'], unfinishedCount: 1, moreMatches: true }))
+    expect(both).toMatchObject({ truncated: true, unfinished: ['/huge'] })
+    expect(both['truncatedNote']).toBe('more matches exist than are shown (in any branch, finished or not); to see them, narrow the word or the route: find <word> /path'
+      + '; and the walk did not finish these branches; search under them only if the request needs completeness: find betz <branch>')
+
+    // A whole walk the limit cut: not "stopped before the whole route".
+    const capped = await receiptOf(cutFind({ moreMatches: true }))
+    expect(capped['truncatedNote']).toBe('more matches exist than are shown (in any branch, finished or not); to see them, narrow the word or the route: find <word> /path')
+    expect(capped).not.toHaveProperty('unfinished')
+  })
+
+  it('refuses unfinished branches that are not a bounded list of routes', async () => {
+    for (const read of [
+      { unfinished: Array.from({ length: 21 }, (_, at) => `/b${at}`), unfinishedCount: 21 },
+      { unfinished: ['solomon'], unfinishedCount: 1 },
+      { unfinished: ['/a\n/b'], unfinishedCount: 1 },
+      { unfinished: ['/a', '/b'], unfinishedCount: 1 },
+      { unfinished: '/a' },
+    ]) {
+      await expect(executeHypercombObservationPlan(
+        parseHypercombObservationGrammars(['/find betz /'], []), cutFind(read),
+      )).rejects.toThrow('malformed unfinished branches')
+    }
+  })
 })
 
 describe('LLM context projection substitutes for content on /read only', () => {

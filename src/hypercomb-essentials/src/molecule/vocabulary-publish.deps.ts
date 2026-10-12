@@ -37,7 +37,8 @@ interface HistoryLike {
   headLayer?: (locationSig: string) => Promise<{ layerSig?: string } | null>
 }
 interface HostSyncLike {
-  markPublic?: (sig: string, kind?: string, closure?: boolean) => Promise<void>
+  /** `page: false` — a vocabulary claim is not a room offer. */
+  markPublic?: (sig: string, kind?: string, closure?: boolean, page?: readonly string[] | null | false) => Promise<void>
   isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
   drain?: () => Promise<void>
 }
@@ -187,7 +188,7 @@ export const defaultVocabularyPublishDeps = (): VocabularyPublishDeps => ({
   },
   markPublic: async (sig, kind, closure) => {
     const sync = get<HostSyncLike>(HOST_SYNC_KEY)
-    await sync?.markPublic?.(sig, kind, closure)
+    await sync?.markPublic?.(sig, kind, closure, false)
     void sync?.drain?.()
   },
   available: async (sig) => {

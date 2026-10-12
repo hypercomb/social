@@ -16,6 +16,7 @@
 import { CHILD_SLOTS, childSigsOfLayer, sectionIndex, sectionOf } from '@hypercomb/core'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 import { isPeerContentAt } from '../sharing/adopted-roots.js'
+import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
 
 export const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
 
@@ -36,12 +37,29 @@ const MAX_READ_MS = 5_000
  *  is its output budget. `/find` returns only the matches, and on that budget
  *  it saw the first 64 names of a real hive and never reached
  *  /games/Arkanoid (2026-10-03): it walks wider, and when its time is up it
- *  answers with what it found, marked partial, instead of failing. */
-type WalkCeiling = { readonly nodes: number; readonly bytes: number; readonly ms: number; readonly partial: boolean }
-const TREE_WALK: WalkCeiling = { nodes: MAX_NODES, bytes: MAX_BYTES, ms: MAX_READ_MS, partial: false }
-const FIND_WALK: WalkCeiling = { nodes: 2_000, bytes: 400_000, ms: 12_000, partial: true }
+ *  answers with what it found, marked partial, instead of failing. It walks
+ *  as deep as a search record reaches, not a tree's three levels: cut there,
+ *  every find on a hive four levels deep said it was partial and sent the
+ *  model searching route by route, and only its time or its nodes running
+ *  out may say that (2026-10-12).
+ *
+ *  `fair`: the walk shares itself among the route's children (see
+ *  #readTreeLive). Only `/find` walks that way: a tree's nodes are its
+ *  output, and its picture is the hive level by level. */
+type WalkCeiling = { readonly depth: number; readonly nodes: number; readonly bytes: number; readonly ms: number; readonly partial: boolean; readonly fair: boolean }
+const TREE_WALK: WalkCeiling = { depth: MAX_DEPTH, nodes: MAX_NODES, bytes: MAX_BYTES, ms: MAX_READ_MS, partial: false, fair: false }
+const FIND_WALK: WalkCeiling = { depth: MAX_RECORD_DEPTH, nodes: 2_000, bytes: 400_000, ms: 12_000, partial: true, fair: true }
+/** Unfinished branches one find names; `unfinishedCount` says how many in all. */
+const MAX_UNFINISHED = 20
 /** Children a walk opens at once. */
 const WALK_CONCURRENCY = 16
+/** A find's check of its search-index hints (2026-10-11/12): a slice of time
+ *  of its own — the walk before it has often spent all of FIND_WALK, and a
+ *  whole-hive find is the case the index is for — and a count of hints to
+ *  try per one still wanted, so stale rows ahead of a live one cannot crowd
+ *  it out, while a record of nothing but stale rows still ends. */
+const HINT_CHECK_MS = 4_000
+const HINT_TRIES_PER_WANTED = 4
 /** A leg of three rounds on a slow model outlived two minutes, and its own
  *  reads then counted as changed (2026-10-04). The table's size still
  *  bounds it. */
@@ -125,6 +143,9 @@ export type HypercombTreeReadOptions = {
 type SnapshotHead = { readonly locationSig: string; readonly layerSig: string }
 type Snapshot = { readonly epoch: number; readonly heads: readonly SnapshotHead[]; readonly at: number }
 type CarriedChild = { readonly name: string; readonly sig: string }
+/** A name the search index's record holds under a route — a hint from carried
+ *  copies, shown only once `find` has read it live. */
+type IndexHint = { readonly name: string; readonly path: string; readonly route: readonly string[] }
 
 const MAX_HISTORY_MARKERS = 32
 const COMPACTION_KEY = '@hypercomb.social/Compaction'
@@ -175,9 +196,22 @@ export type HypercombFindRead =
     readonly query: string
     readonly matches: readonly { readonly name: string; readonly path: string }[]
     readonly truncated: boolean
+    /** A partial walk's unfinished branches: the routes, among the route's
+     *  own children, whose subtree the walk did not finish — the first
+     *  MAX_UNFINISHED in the route's order — and how many there are in all.
+     *  Absent when the walk finished every branch it could name. */
+    readonly unfinished?: readonly string[]
+    readonly unfinishedCount?: number
+    /** The walk found more matches than the limit shows — finished branches
+     *  included, so naming the unfinished ones does not say where the rest are. */
+    readonly moreMatches?: true
     readonly snapshot: string
   }
   | { readonly ok: false; readonly root: string; readonly code: 'not-found' | 'incomplete-read' | 'stale-read' | 'budget-exceeded' | 'unavailable' }
+
+/** A walk's read, and on a fair walk the route's children it did not finish
+ *  (every one, in the route's order: find bounds the list it shows). */
+type WalkRead = HypercombTreeRead & { readonly unfinished?: readonly string[] }
 
 export type HypercombSummaryRead =
   | {
@@ -268,6 +302,13 @@ const boundedInteger = (value: number | undefined, fallback: number, max: number
 }
 
 const rootLabel = (segments: readonly string[]): string => segments.length ? `/${segments.join('/')}` : '/'
+
+/** Two places in a walk, step by step: the one reached through the earlier
+ *  child comes first. */
+const compareKeys = (a: readonly number[], b: readonly number[]): number => {
+  for (let at = 0; at < Math.min(a.length, b.length); at++) if (a[at] !== b[at]) return a[at] - b[at]
+  return a.length - b.length
+}
 
 const outputBytes = (value: unknown): number =>
   new TextEncoder().encode(JSON.stringify(value)).byteLength
@@ -418,14 +459,32 @@ export class HypercombHiveTreeReader {
     return id
   }
 
-  /** Bounded breadth-first structural read rooted only at a participant path. */
+  /**
+   * Bounded breadth-first structural read rooted only at a participant path.
+   *
+   * A FAIR WALK (`ceiling.fair`, `/find`) SHARES ITSELF AMONG THE ROUTE'S
+   * CHILDREN. Level by level across the whole route, a find spent its 2,000
+   * nodes on the two huge branches' second level (/solomon-maze-v1, ~3,100
+   * tiles; /bubble-bobble-dos-v1, ~1,603) before any smaller branch's third:
+   * the live probe of 2026-10-12 (revision 19d44b5b, a ~5,900-tile hive) saw
+   * "find betz /" miss /dolphin/associates/betz, "find members /" miss
+   * /dolphin/community/members and "find practice-modules /" miss
+   * /dolphin/certifications/curriculum/practice-modules. So the route's own
+   * children are opened first, each becomes a branch walked breadth-first on
+   * its own, and every batch is dealt round the branches one tile at a time:
+   * each gets an equal share, and what a small branch does not use goes to
+   * the rest. The nodes come back in the order a level-by-level walk lists
+   * them, so a whole walk reads exactly as before. The budgets, the snapshot,
+   * the change guard and the abort signal are the same either way; a fair
+   * walk also says which of the route's children it did not finish.
+   */
   async #readTreeLive(
     segments: readonly string[],
     options: HypercombTreeReadOptions = {},
     /** The cache already waited for pending commits: wait exactly once. */
     settled = false,
     ceiling: WalkCeiling = TREE_WALK,
-  ): Promise<HypercombTreeRead> {
+  ): Promise<WalkRead> {
     const root = rootLabel(segments)
     const history = this.#history()
     const store = this.#store()
@@ -434,7 +493,7 @@ export class HypercombHiveTreeReader {
       return { ok: false, root, code: 'unavailable' }
     }
 
-    const maxDepth = boundedInteger(options.maxDepth, 2, MAX_DEPTH)
+    const maxDepth = boundedInteger(options.maxDepth, 2, ceiling.depth)
     const maxNodes = Math.max(1, boundedInteger(options.maxNodes, 48, ceiling.nodes))
     const maxBytes = Math.max(1_024, boundedInteger(options.maxBytes, 8_000, ceiling.bytes))
     // A partial walk stops itself between batches at `stopAt` and answers
@@ -465,37 +524,8 @@ export class HypercombHiveTreeReader {
       // canvas shows; the root to the bag's latest marker, then its parent's
       // copy. Only a live head goes into the snapshot: a fallback has
       // nothing to revalidate.
-      const currentRef = async (path: readonly string[], carriedSig?: string): Promise<(CurrentLayerRef & { readonly live: boolean }) | null> => {
-        guard()
-        const locationSig = await history.sign({ explorerSegments: () => [...path] })
-        guard()
-        const stats: { cold?: boolean } = {}
-        const head = await history.currentLayerRefAt(locationSig, stats).catch(() => null)
-        guard()
-        if (head) return { ...head, live: true }
-        if (carriedSig) {
-          // The bag's latest marker before the parent's copy, as /read does:
-          // the parent's copy can be older than the page. Straight to the
-          // copy, /dolphin/associates read as empty while its page held
-          // four tiles, and /find never saw them (2026-10-04).
-          const markers = await history.listLayers?.(locationSig).catch(() => []) ?? []
-          const latest = [...markers].sort((a, b) => b.index - a.index)[0]
-          const marked = latest && SIG.test(latest.layerSig) ? await history.getLayerBySig(latest.layerSig).catch(() => null) : null
-          guard()
-          if (marked && latest && !Object.keys(marked).every(key => key === 'name')) {
-            return { locationSig, layerSig: latest.layerSig, layer: marked, live: false }
-          }
-          const layer = await history.getLayerBySig(carriedSig).catch(() => null)
-          guard()
-          if (layer) return { locationSig, layerSig: carriedSig, layer, live: false }
-        } else {
-          const page = await this.#resolvePage(path, locationSig, history, stats)
-          guard()
-          if (page) return page
-        }
-        if (stats.cold) throw new IncompleteReadError()
-        return null
-      }
+      const currentRef = (path: readonly string[], carriedSig?: string): Promise<(CurrentLayerRef & { readonly live: boolean }) | null> =>
+        this.#openPage(path, carriedSig, history, guard)
 
       // A CHILD THAT CANNOT BE OPENED IS LEFT OUT, AND THE TREE SAYS SO
       // (null). The parent names it but its own location has no layer by
@@ -541,61 +571,177 @@ export class HypercombHiveTreeReader {
       let bytes = outputBytes(first)
       let truncated = unopened.has(rootChildren)
       let exhausted = false
-      const queue: Array<{
+
+      // A page whose children are still to open. `key` is where it sits: the
+      // index of each step down from the route, so `key[0]` is the route's
+      // child — the branch — it is under, and the keys put a fair walk's
+      // nodes back in level-by-level order.
+      type Parent = {
         readonly path: readonly string[]
         readonly depth: number
         readonly children: readonly CarriedChild[]
-      }> = [{ path: [...segments], depth: 0, children: rootChildren }]
-
-      for (let cursor = 0; cursor < queue.length && !exhausted; cursor++) {
-        const parent = queue[cursor]
-        if (parent.depth >= maxDepth) {
-          if (parent.children.length > 0) truncated = true
-          continue
+        readonly key: readonly number[]
+        from: number
+      }
+      type Branch = { readonly queue: Parent[]; next: number }
+      type Item = { readonly branch: Branch; readonly parent: Parent; readonly carried: CarriedChild; readonly key: readonly number[] }
+      const keys: (readonly number[])[] = [[]]
+      // The route's children whose subtree the walk did not finish, by index.
+      const unfinished = new Set<number>()
+      const cut = (key: readonly number[], parent?: Parent): void => {
+        if (key.length) unfinished.add(key[0])
+        else if (parent) for (let at = parent.from; at < parent.children.length; at++) unfinished.add(at)
+      }
+      const pending = (branch: Branch): boolean => branch.next < branch.queue.length
+      const enqueue = (branch: Branch, parent: Parent): void => {
+        if (!parent.children.length) return
+        if (parent.depth >= maxDepth) { truncated = true; cut(parent.key, parent); return }
+        branch.queue.push(parent)
+      }
+      const take = (branch: Branch): Item => {
+        const parent = branch.queue[branch.next]
+        const at = parent.from++
+        if (parent.from >= parent.children.length) branch.next++
+        return { branch, parent, carried: parent.children[at], key: [...parent.key, at] }
+      }
+      // The route's own page. On a tree walk everything stays in it, one
+      // queue level by level, as the walk always was.
+      const trunk: Branch = { queue: [], next: 0 }
+      enqueue(trunk, { path: [...segments], depth: 0, children: rootChildren, key: [], from: 0 })
+      const branches: Branch[] = []
+      let turn = 0
+      const batchOf = (room: number): Item[] => {
+        const batch: Item[] = []
+        // The route's children first: on a fair walk they are the branches.
+        while (batch.length < room && pending(trunk)) batch.push(take(trunk))
+        // Then one tile from each branch in turn, round and round, from
+        // where the last batch left off; a branch with nothing to open
+        // leaves its turn to the rest.
+        for (let idle = 0; batch.length < room && idle < branches.length;) {
+          const branch = branches[turn++ % branches.length]
+          if (!pending(branch)) { idle++; continue }
+          idle = 0
+          batch.push(take(branch))
         }
+        return batch
+      }
 
-        // A TILE'S CHILDREN ARE OPENED SIDE BY SIDE, a batch at a time, and
-        // taken in their order. One after another, a /find over a whole hive
-        // spent its time limit before reaching depth three and missed
-        // /dolphin/associates/betz (the housekeeping manager, 2026-10-04).
-        let from = 0
-        while (from < parent.children.length && !exhausted) {
-          guard()
-          if (nodes.length >= maxNodes || Date.now() > stopAt) { truncated = true; exhausted = true; break }
-          const batch = parent.children.slice(from, from + Math.min(WALK_CONCURRENCY, maxNodes - nodes.length))
-          from += batch.length
-          const opened = await Promise.all(batch.map(carried => openChild(carried, [...parent.path, carried.name])))
-          guard()
-          for (let at = 0; at < batch.length; at++) {
-            const carried = batch[at]
-            const got = opened[at]
-            if (!got) { truncated = true; continue }
-            if (got.partial) truncated = true
-            const path = [...parent.path, carried.name]
-            const node: HypercombTreeNode = {
-              path: rootLabel(path),
-              name: carried.name,
-              depth: parent.depth + 1,
-              childCount: got.children.length,
-            }
-            const cost = outputBytes(node)
-            if (bytes + cost > maxBytes) { truncated = true; exhausted = true; break }
-            bytes += cost
-            nodes.push(node)
-            if (got.ref.live) heads.push({ locationSig: got.ref.locationSig, layerSig: got.ref.layerSig })
-            queue.push({ path, depth: node.depth, children: got.children })
+      // PAGES ARE OPENED SIDE BY SIDE, a batch at a time. One after another,
+      // a /find over a whole hive spent its time limit before reaching depth
+      // three and missed /dolphin/associates/betz (the housekeeping manager,
+      // 2026-10-04). A spent budget ends the walk: the byte cut leaves only
+      // the batch, and a walk that carried on after it opened every page
+      // still queued — 904 pages for a /tree that once opened 20, past its
+      // 5 s into budget-exceeded — and appended later, shorter nodes behind
+      // the gap (review of the 2026-10-12 fair walk).
+      while (!exhausted && (pending(trunk) || branches.some(pending))) {
+        guard()
+        if (nodes.length >= maxNodes || Date.now() > stopAt) { truncated = true; exhausted = true; break }
+        const batch = batchOf(Math.min(WALK_CONCURRENCY, maxNodes - nodes.length))
+        const opened = await Promise.all(batch.map(item => openChild(item.carried, [...item.parent.path, item.carried.name])))
+        guard()
+        for (let at = 0; at < batch.length; at++) {
+          const { branch, parent, carried, key } = batch[at]
+          const got = opened[at]
+          if (!got) { truncated = true; cut(key); continue }
+          if (got.partial) { truncated = true; cut(key) }
+          const path = [...parent.path, carried.name]
+          const node: HypercombTreeNode = {
+            path: rootLabel(path),
+            name: carried.name,
+            depth: parent.depth + 1,
+            childCount: got.children.length,
           }
+          const cost = outputBytes(node)
+          if (bytes + cost > maxBytes) {
+            truncated = true
+            exhausted = true
+            for (const left of batch.slice(at)) cut(left.key)
+            break
+          }
+          bytes += cost
+          nodes.push(node)
+          keys.push(key)
+          if (got.ref.live) heads.push({ locationSig: got.ref.locationSig, layerSig: got.ref.layerSig })
+          const opens: Parent = { path, depth: node.depth, children: got.children, key, from: 0 }
+          if (ceiling.fair && branch === trunk) {
+            const own: Branch = { queue: [], next: 0 }
+            enqueue(own, opens)
+            if (pending(own)) branches.push(own)
+          } else {
+            enqueue(branch, opens)
+          }
+        }
+      }
+      if (exhausted) {
+        for (const branch of [trunk, ...branches]) {
+          for (let at = branch.next; at < branch.queue.length; at++) cut(branch.queue[at].key, branch.queue[at])
         }
       }
 
       guard()
-      return { ok: true, root, nodes, truncated, snapshot: this.#remember(epoch, heads) }
+      const snapshot = this.#remember(epoch, heads)
+      if (!ceiling.fair) return { ok: true, root, nodes, truncated, snapshot }
+      // Level by level, each level in the route's order: what a walk that
+      // was not shared out lists, and the order find's hits have always had.
+      const order = nodes.map((_, at) => at).sort((a, b) => nodes[a].depth - nodes[b].depth || compareKeys(keys[a], keys[b]))
+      return {
+        ok: true, root, nodes: order.map(at => nodes[at]), truncated, snapshot,
+        unfinished: rootChildren.flatMap((child, at) => unfinished.has(at) ? [rootLabel([...segments, child.name])] : []),
+      }
     } catch (error) {
       if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
       if (error instanceof StaleReadError) return { ok: false, root, code: 'stale-read' }
       if (error instanceof ReadBudgetError) return { ok: false, root, code: 'budget-exceeded' }
       return { ok: false, root, code: 'incomplete-read' }
     }
+  }
+
+  /**
+   * ONE PAGE, OPENED THE WAY THE WALK OPENS IT: history's pinned head, live;
+   * else the bag's latest marker, else `carriedSig`, the copy its parent
+   * carries under this name. A page reached with no parent's copy — where a
+   * walk or a hint check starts — falls back the way `/read` does
+   * (#resolvePage). `guard` runs between reads. It mints no snapshot and
+   * keeps nothing: what to remember is the caller's (2026-10-11/12 — a find
+   * that checked its hints through `readNode` minted hundreds of snapshots
+   * and evicted its own).
+   */
+  async #openPage(
+    path: readonly string[],
+    carriedSig: string | undefined,
+    history: HiveHistory,
+    guard: () => void,
+  ): Promise<(CurrentLayerRef & { readonly live: boolean }) | null> {
+    guard()
+    const locationSig = await history.sign({ explorerSegments: () => [...path] })
+    guard()
+    const stats: { cold?: boolean } = {}
+    const head = await history.currentLayerRefAt(locationSig, stats).catch(() => null)
+    guard()
+    if (head) return { ...head, live: true }
+    if (carriedSig) {
+      // The bag's latest marker before the parent's copy, as /read does:
+      // the parent's copy can be older than the page. Straight to the
+      // copy, /dolphin/associates read as empty while its page held
+      // four tiles, and /find never saw them (2026-10-04).
+      const markers = await history.listLayers?.(locationSig).catch(() => []) ?? []
+      const latest = [...markers].sort((a, b) => b.index - a.index)[0]
+      const marked = latest && SIG.test(latest.layerSig) ? await history.getLayerBySig(latest.layerSig).catch(() => null) : null
+      guard()
+      if (marked && latest && !Object.keys(marked).every(key => key === 'name')) {
+        return { locationSig, layerSig: latest.layerSig, layer: marked, live: false }
+      }
+      const layer = await history.getLayerBySig(carriedSig).catch(() => null)
+      guard()
+      if (layer) return { locationSig, layerSig: carriedSig, layer, live: false }
+    } else {
+      const page = await this.#resolvePage(path, locationSig, history, stats)
+      guard()
+      if (page) return page
+    }
+    if (stats.cold) throw new IncompleteReadError()
+    return null
   }
 
   /**
@@ -813,9 +959,12 @@ export class HypercombHiveTreeReader {
   }
 
   /**
-   * NAMES UNDER A ROUTE — `/find <word>`. The same bounded walk as `/tree`
-   * (depth 3, node and byte budgets, one snapshot), filtered by a
-   * case-insensitive name fragment. Returns paths the model can `/read`.
+   * NAMES UNDER A ROUTE — `/find <word>`. The live walk `/tree` makes
+   * (one snapshot) on find's deeper, wider budget, shared fairly among the
+   * route's children, filtered by a case-insensitive name fragment. Returns
+   * paths the model can `/read`, and the branches a partial walk left.
+   * The walk alone says whether the answer is whole; the search index only
+   * adds names from past the walk's reach, each confirmed live first.
    */
   async find(
     query: string,
@@ -825,66 +974,186 @@ export class HypercombHiveTreeReader {
     const root = rootLabel(segments)
     const needle = String(query ?? '').trim().toLowerCase()
     if (!needle) return { ok: false, root, code: 'not-found' }
-    // THE SEARCH INDEX FIRST (search/hive-search.service.ts): the record the
-    // participant's own search reads — every name under a layer with its
-    // path, one pool read. Walking alone, a whole-hive find over ~5,900
-    // tiles ran out its time, and a model spent 13 rounds and 124k tokens
-    // finding two tiles route by route (the harness manager, 2026-10-04).
-    // The record is built from the copies parents carry, so the live walk
-    // still runs and its hits come first; when the record covers the whole
-    // route, the walk only needs a tree's reach.
-    const indexed = await this.#indexedNames(segments, needle, options.signal)
-    const ceiling = indexed?.complete ? TREE_WALK : FIND_WALK
+    // THE LIVE WALK IS THE ANSWER, AND ONLY IT SAYS WHETHER THE ANSWER IS
+    // WHOLE (2026-10-11/12). The search index's record is built from the
+    // copies parents carry, and a commit is leaf only, so a parent's copy can
+    // describe an older branch. A record that looked complete used to shrink
+    // this walk to a tree's reach and mark the answer whole, and "find betz /"
+    // answered a confident "not found" for /dolphin/associates/betz. A record
+    // is a derived cache — a hint, never completeness: it never changes the
+    // verdict, whole or partial or failed, only adds names it read live.
     const epoch = await this.#settledEpoch(options.signal)
     const walk = await this.#readTreeLive(segments, {
-      maxDepth: MAX_DEPTH, maxNodes: ceiling.nodes, maxBytes: ceiling.bytes, signal: options.signal,
-    }, epoch !== undefined, ceiling)
-    if (!walk.ok && !indexed) return { ok: false, root, code: walk.code }
+      maxDepth: FIND_WALK.depth, maxNodes: FIND_WALK.nodes, maxBytes: FIND_WALK.bytes, signal: options.signal,
+    }, epoch !== undefined, FIND_WALK)
     const limit = Math.max(1, boundedInteger(options.maxNodes, 48, MAX_NODES))
     const hits = walk.ok ? walk.nodes.filter(node => node.depth > 0 && node.name.toLowerCase().includes(needle)).map(node => ({ name: node.name, path: node.path })) : []
+    const partial = !walk.ok || walk.truncated
+    // THE SEARCH INDEX, PAST THE WALK'S REACH (search/hive-search.service.ts):
+    // every name under a layer with its path, one pool read. Walking alone, a
+    // whole-hive find over ~5,900 tiles ran out its time, and a model spent
+    // 13 rounds and 124k tokens finding two tiles route by route (the harness
+    // manager, 2026-10-04). A whole walk saw every live tile, so there the
+    // record has nothing to add — nor has it when the walk's own hits already
+    // fill the answer.
+    const indexed = partial && hits.length < limit ? await this.#indexedNames(segments, needle, options.signal) : null
     const seen = new Set(hits.map(hit => hit.path.toLowerCase()))
-    for (const hit of indexed?.matches ?? []) {
-      if (seen.has(hit.path.toLowerCase())) continue
-      seen.add(hit.path.toLowerCase())
-      hits.push(hit)
+    const hints = (indexed ?? []).filter(hint => {
+      const key = hint.path.toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    // Find is already partial whenever it reads hints, so it needs none past
+    // the limit to say there are more.
+    const confirmed = await this.#liveHints(hints, segments, limit - hits.length, options.signal)
+    // A WALK THAT FAILED STILL FAILS unless a hint was read live (2026-10-12).
+    // Any record at all — even one with no matching row — turned a stale or
+    // cut walk into "nothing found", ok, with a snapshot of no heads the
+    // change guard could never catch, where the same hive with no record
+    // said the tree had changed.
+    if (!walk.ok && !confirmed.matches.length) return { ok: false, root, code: walk.code }
+    hits.push(...confirmed.matches)
+    // What the model sees is what the change guard revalidates: the pages a
+    // shown hint was confirmed through join the walk's own snapshot.
+    let snapshot: string
+    if (walk.ok) {
+      snapshot = walk.snapshot
+      const read = this.#snapshots.get(snapshot)
+      if (read && confirmed.heads.length) this.#snapshots.set(snapshot, { ...read, heads: [...read.heads, ...confirmed.heads] })
+    } else {
+      snapshot = this.#remember(epoch ?? 0, confirmed.heads)
     }
+    // WHICH BRANCHES THE WALK DID NOT FINISH (2026-10-12). Told only that a
+    // whole-hive find was partial, a model searched under every one of the
+    // root's children in turn: 13 rounds and 144k tokens. Named, it searches
+    // only those — and only when the request needs every match. A hint read
+    // live finishes no branch: the walk alone says what it covered.
+    const unfinished = walk.ok ? walk.unfinished ?? [] : []
     return {
       ok: true, root, query: needle,
       matches: hits.slice(0, limit),
-      truncated: (indexed?.complete ? false : !walk.ok || walk.truncated) || hits.length > limit,
-      snapshot: walk.ok ? walk.snapshot : this.#remember(epoch ?? 0, []),
+      truncated: partial || hits.length > limit,
+      ...(unfinished.length ? { unfinished: unfinished.slice(0, MAX_UNFINISHED), unfinishedCount: unfinished.length } : {}),
+      // The limit cut the list, not only the walk: matches in a finished
+      // branch went unshown too, and a note that named only the unfinished
+      // branches sent the model to the wrong place for them (review of the
+      // 2026-10-12 fair walk).
+      ...(hits.length > limit ? { moreMatches: true as const } : {}),
+      snapshot,
     }
   }
 
-  /** Names under a route from the search index's record, or null when the
-   *  hive has no record for that layer yet (the optimize phase mints it).
-   *  `complete`: the record holds the whole subtree, not its first rows. */
+  /**
+   * THE HINTS THAT ARE TILES NOW (2026-10-11/12). A record's names come from
+   * carried copies and may name a tile since removed. A remove only unlinks,
+   * and the removed tile's own bag still resolves, so a hint is confirmed the
+   * way the walk would have reached it: from `base` down, each page must
+   * list the next name, and that page is opened as the walk opens a child
+   * (#openPage) — once per find, however many hints pass through it — and
+   * must be a tile of that name. Nothing here mints a snapshot or touches a
+   * cache: checking hints through `readNode` minted one per page read and
+   * evicted the find's own, and re-resolved each prefix's parents again on a
+   * page with no pinned head. Hints are tried in record order, a batch at a
+   * time, until `wanted` are confirmed, the tries run out, or the time does;
+   * a hint not confirmed is left out — find is marked partial whenever it
+   * asks, so leaving one out hides nothing. Returns the confirmed hints and
+   * the live heads of the pages they were confirmed through.
+   */
+  async #liveHints(
+    hints: readonly IndexHint[],
+    base: readonly string[],
+    wanted: number,
+    signal?: AbortSignal,
+  ): Promise<{ readonly matches: readonly { name: string; path: string }[]; readonly heads: readonly SnapshotHead[] }> {
+    const history = this.#history()
+    const store = this.#store()
+    if (wanted <= 0 || !hints.length || !history?.currentLayerRefAt || !store?.getResource) return { matches: [], heads: [] }
+    const stopAt = Date.now() + HINT_CHECK_MS
+    const guard = (): void => {
+      if (signal?.aborted) throw stopped()
+      if (Date.now() > stopAt) throw new ReadBudgetError()
+    }
+    type Page = { readonly ref: CurrentLayerRef & { readonly live: boolean }; readonly children: readonly CarriedChild[] }
+    const pages = new Map<string, Promise<Page | null>>()
+    const open = (route: readonly string[], carried?: CarriedChild): Promise<Page | null> => {
+      const key = JSON.stringify(route)
+      let pending = pages.get(key)
+      if (!pending) {
+        pending = (async (): Promise<Page | null> => {
+          const ref = await this.#openPage(route, carried?.sig, history, guard)
+          if (!ref || (carried && ref.layer.name !== carried.name)) return null
+          return { ref, children: await carriedChildren(ref.layer, history, store) }
+        })().catch(error => {
+          if (signal?.aborted) throw error
+          return null
+        })
+        pages.set(key, pending)
+      }
+      return pending
+    }
+    const confirm = async (hint: IndexHint): Promise<readonly SnapshotHead[] | null> => {
+      const heads: SnapshotHead[] = []
+      let page = await open(base)
+      for (let depth = base.length; page; depth++) {
+        if (page.ref.live) heads.push({ locationSig: page.ref.locationSig, layerSig: page.ref.layerSig })
+        if (depth >= hint.route.length) return page.ref.layer.name === hint.name ? heads : null
+        const carried = page.children.find(child => child.name === hint.route[depth])
+        page = carried ? await open(hint.route.slice(0, depth + 1), carried) : null
+      }
+      return null
+    }
+    const tries = Math.min(hints.length, wanted * HINT_TRIES_PER_WANTED)
+    const matches: { name: string; path: string }[] = []
+    const heads = new Map<string, SnapshotHead>()
+    for (let from = 0; from < tries && matches.length < wanted; from += WALK_CONCURRENCY) {
+      if (signal?.aborted) throw stopped()
+      if (Date.now() > stopAt) break
+      const batch = hints.slice(from, Math.min(from + WALK_CONCURRENCY, tries))
+      const seen = await Promise.all(batch.map(confirm))
+      batch.forEach((hint, at) => {
+        const through = seen[at]
+        if (!through || matches.length >= wanted) return
+        matches.push({ name: hint.name, path: hint.path })
+        for (const head of through) heads.set(`${head.locationSig}|${head.layerSig}`, head)
+      })
+    }
+    return { matches, heads: [...heads.values()] }
+  }
+
+  /** Names under a route that the search index's record holds, or null when
+   *  the hive has no record for that layer yet (the optimize phase mints it).
+   *  HINTS, NEVER COMPLETENESS (2026-10-11/12): a record is keyed by the
+   *  signature a parent carries, which can be an older branch than the live
+   *  one, so a record that holds every row says nothing about what the live
+   *  tree holds. Its value is the deep names a walk cannot reach in time. */
   async #indexedNames(
     segments: readonly string[],
     needle: string,
     signal?: AbortSignal,
-  ): Promise<{ readonly matches: readonly { readonly name: string; readonly path: string }[]; readonly complete: boolean } | null> {
+  ): Promise<readonly IndexHint[] | null> {
     const search = this.#lookup<{
-      readRecord?(layerSig: string): Promise<{ readonly rows?: readonly { readonly name?: unknown; readonly path?: unknown }[]; readonly truncated?: boolean } | null>
+      readRecord?(layerSig: string): Promise<{ readonly rows?: readonly { readonly name?: unknown; readonly path?: unknown }[] } | null>
     }>(SEARCH_KEY)
     if (!search?.readRecord) return null
     const node = await this.readNode(segments, { withContent: false, signal }).catch(() => null)
     if (!node?.ok) return null
     const readRecord = search.readRecord
-    const matches: { name: string; path: string }[] = []
+    const matches: IndexHint[] = []
     const take = (rows: readonly { readonly name?: unknown; readonly path?: unknown }[], base: readonly string[]): void => {
       for (const row of rows) {
         if (typeof row?.name !== 'string' || !Array.isArray(row.path)) continue
         if (!row.name.toLowerCase().includes(needle)) continue
         const path = (row.path as readonly unknown[]).filter((part): part is string => typeof part === 'string')
         if (!path.length || path.some((part: string) => !part || UNSAFE_NAME.test(part))) continue
-        matches.push({ name: row.name, path: rootLabel([...base, ...path]) })
+        const route = [...base, ...path]
+        matches.push({ name: row.name, path: rootLabel(route), route })
       }
     }
     const record = await readRecord(node.layerSig).catch(() => null)
     if (record && Array.isArray(record.rows)) {
       take(record.rows, segments)
-      return { matches, complete: record.truncated !== true }
+      return matches
     }
     // A LARGE HIVE HAS NO RECORD AT ITS ROOT: the search index never keeps a
     // truncated record, and a hive past its row cap (~5,900 tiles, the cap is
@@ -892,17 +1161,16 @@ export class HypercombHiveTreeReader {
     // route is read branch by branch, one record each.
     if (!node.children.length) return null
     const records = await Promise.all(node.children.map(child => readRecord(child.sig).catch(() => null)))
-    let complete = true
     let any = false
     node.children.forEach((child, at) => {
-      if (child.name.toLowerCase().includes(needle)) matches.push({ name: child.name, path: rootLabel([...segments, child.name]) })
+      const route = [...segments, child.name]
+      if (child.name.toLowerCase().includes(needle)) matches.push({ name: child.name, path: rootLabel(route), route })
       const branch = records[at]
-      if (!branch || !Array.isArray(branch.rows)) { complete = false; return }
+      if (!branch || !Array.isArray(branch.rows)) return
       any = true
-      if (branch.truncated === true) complete = false
-      take(branch.rows, [...segments, child.name])
+      take(branch.rows, route)
     })
-    return any ? { matches, complete } : null
+    return any ? matches : null
   }
 
   /**

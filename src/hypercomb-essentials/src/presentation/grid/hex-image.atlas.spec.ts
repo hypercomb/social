@@ -69,6 +69,55 @@ describe('HexImageAtlas atomic replacement', () => {
     expect(atlas.evictionGeneration).toBe(before)
   })
 
+  // SCALE-1's image twin: a page with more pictures than slots pins every
+  // slot. Evicting a pinned picture announced an on-screen victim, whose
+  // healing repaint evicted the next — a loop that never converges.
+  it('gives a picture no slot, and evicts nothing, when every slot is pinned', async () => {
+    decode.mockResolvedValue(bitmap())
+    const atlas = new HexImageAtlas({ render: vi.fn() }, 8, 1, 1)
+    await atlas.loadImage('first', new Blob(['first']))
+    atlas.setPinned(['first', 'second'])
+    const before = atlas.evictionGeneration
+    const evicted: string[] = []
+    const onEvicted = (e: Event): void => { evicted.push((e as CustomEvent<{ sig: string }>).detail.sig) }
+    window.addEventListener('hex-image-atlas:evicted', onEvicted)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      for (let pass = 0; pass < 20; pass++) {
+        expect(await atlas.loadImage('second', new Blob(['second']))).toBeNull()
+      }
+
+      expect(atlas.hasImage('first')).toBe(true)
+      expect(atlas.hasImage('second')).toBe(false)
+      expect(evicted).toEqual([])
+      expect(atlas.evictionGeneration).toBe(before)
+      // Nowhere to go is known before the decode — it costs nothing.
+      expect(decode).toHaveBeenCalledTimes(1)
+      expect(atlas.hasFailed('second')).toBe(false)
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener('hex-image-atlas:evicted', onEvicted)
+      warn.mockRestore()
+    }
+  })
+
+  it('never overwrites a slot that came on screen during the decode', async () => {
+    decode.mockResolvedValueOnce(bitmap())
+    const atlas = new HexImageAtlas({ render: vi.fn() }, 8, 1, 1)
+    await atlas.loadImage('first', new Blob(['first']))
+    let release!: (b: ReturnType<typeof bitmap>) => void
+    const late = bitmap()
+    decode.mockReturnValueOnce(new Promise(r => { release = r }))
+
+    const loading = atlas.loadImage('second', new Blob(['second']))
+    atlas.setPinned(['first']) // a pass pinned its page while 'second' decoded
+    release(late)
+
+    expect(await loading).toBeNull()
+    expect(atlas.hasImage('first')).toBe(true)
+    expect(late.close).toHaveBeenCalled()
+  })
+
   it('wakes the renderer when a decode-failure cooldown expires', () => {
     const source = readFileSync(join(__dirname, 'hex-image.atlas.ts'), 'utf8')
     expect(source).toMatch(/count === HexImageAtlas\.MAX_RETRIES[\s\S]*setTimeout/)

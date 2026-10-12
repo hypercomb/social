@@ -354,9 +354,10 @@ pending asks spawn <code>claude&nbsp;-p</code> per model group, answer, and reti
 
 <h3>Remote answering session</h3>
 <p>The renderer tab must stay on the broker's machine — only the answering session can be
-remote, and only with a shared token. Without the token, remote senders are refused outright.</p>
-<div class="term"><span class="term-label">hive machine</span><button class="copy-btn">copy</button><pre>BRIDGE_HOST=0.0.0.0 HYPERCOMB_BRIDGE_TOKEN=&lt;shared-secret&gt; npm run bridge</pre></div>
-<div class="term"><span class="term-label">remote machine</span><button class="copy-btn">copy</button><pre>BRIDGE_URL=ws://&lt;hive-machine&gt;:2401 HYPERCOMB_BRIDGE_TOKEN=&lt;shared-secret&gt; npm run bridge:watch</pre></div>
+remote, and only with a bridge code: say <code>bridge give &lt;their name&gt;</code> in the hive tab and hand them
+the code it copies. Without a code, remote senders are refused outright.</p>
+<div class="term"><span class="term-label">hive machine</span><button class="copy-btn">copy</button><pre>BRIDGE_HOST=0.0.0.0 npm run bridge</pre></div>
+<div class="term"><span class="term-label">remote machine</span><button class="copy-btn">copy</button><pre>BRIDGE_URL=ws://&lt;hive-machine&gt;:2401 HYPERCOMB_BRIDGE_TOKEN=&lt;their code&gt; npm run bridge:watch</pre></div>
 
 <h2>Troubleshooting</h2>
 <div class="tablewrap">

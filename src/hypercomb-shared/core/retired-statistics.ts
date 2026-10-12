@@ -3,7 +3,8 @@
 // WE COLLECT NO STATISTICS (jwize, 2026-10-03: "we don't do any tracking, this
 // is an antipattern … any tracker is overhead bloat"). Only a live, concurrent
 // count is allowed. Every tracker our code used to run is retired, and this
-// file removes what they left on a participant's machine.
+// file removes what they left on a participant's machine — along with the
+// keys of retired writes nothing ever read back.
 //
 // EVERY BUILD CARRIES THIS, AND IT RUNS ON EVERY BOOT. A machine is cleaned
 // whenever it patches to a build that has it, however long ago it last ran a
@@ -31,6 +32,11 @@ export const RETIRED_STATISTIC_KEYS: readonly string[] = Object.freeze([
   'hc:perf-boot-marks',      // boot timings
   'hc:perf-last-boot',
   'hc:perf-find-last',
+])
+
+/** Browser key PREFIXES — one key per location. */
+export const RETIRED_STATISTIC_PREFIXES: readonly string[] = Object.freeze([
+  'hc:history-cursor:',      // the history cursor's rewound position: written, never read
 ])
 
 /** Document spaces a retired tracker wrote: a pool, or one sub-bucket of it. */
@@ -86,9 +92,14 @@ const retireSpace = async (store: RetireStore, meaning: string, subKey?: string)
  *  remains; false when something unexpected was found and left in place.
  *  Never throws. */
 export const retireStatistics = async (store: RetireStore | undefined): Promise<boolean> => {
-  for (const key of RETIRED_STATISTIC_KEYS) {
-    try { globalThis.localStorage?.removeItem(key) } catch { /* storage blocked */ }
-  }
+  try {
+    const keys = globalThis.localStorage
+    for (const key of RETIRED_STATISTIC_KEYS) keys?.removeItem(key)
+    for (let i = (keys?.length ?? 0) - 1; i >= 0; i--) {
+      const key = keys?.key(i)
+      if (key && RETIRED_STATISTIC_PREFIXES.some(prefix => key.startsWith(prefix))) keys?.removeItem(key)
+    }
+  } catch { /* storage blocked */ }
   if (!store?.openPool) return true
   let clean = true
   for (const { meaning, subKey } of RETIRED_STATISTIC_SPACES) {

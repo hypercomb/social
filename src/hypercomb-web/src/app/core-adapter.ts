@@ -10,6 +10,7 @@ import { Injectable, signal } from "@angular/core"
 import { EffectBus } from "@hypercomb/core"
 import { Store, DependencyLoader, DroneRegistry, IconProviderRegistry, initializeRuntime } from "@hypercomb/shared/core"
 import { meshResumed, rememberMeshSession } from '@hypercomb/shared/core/mesh-session'
+import { watchPendingMeet } from '@hypercomb/shared/core/invite-capture'
 import { LayerService } from "./layer-service"
 
 const _ = [DependencyLoader, DroneRegistry, IconProviderRegistry, LayerService, Store]
@@ -18,7 +19,10 @@ const MESH_PUBLIC_KEY = 'hc:mesh-public'
 
 // REFRESH KEEPS THE SWARM; CLOSING THE TAB LEAVES IT. main.ts imports
 // mesh-session first, which rewrites the flag from this tab's session before
-// any drone samples it. See hypercomb-shared/core/mesh-session.ts.
+// any drone samples it — and the room and secret come back from this tab's
+// own zone, never from whatever another tab wrote since. A join records the
+// zone beside the join (rememberMeshSession). See
+// hypercomb-shared/core/mesh-session.ts.
 
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
@@ -82,5 +86,11 @@ export class CoreAdapter {
     // to write '0' under a joined one.
     const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
     mesh?.setNetworkEnabled?.(meshResumed, false)
+
+    // A meeting link the installed package will not answer (one from before
+    // the link, or one that drops it unanswered) is answered by the shell:
+    // the selector, pre-filled from the link. A current package answers it
+    // itself, and this stands aside.
+    watchPendingMeet()
   }
 }

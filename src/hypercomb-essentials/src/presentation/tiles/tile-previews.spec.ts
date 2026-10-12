@@ -1,7 +1,8 @@
 // tile-previews.spec.ts — LOOKS THAT ARE NOT YET TRUE, on their own. Marks:
 // a hover lights who carries ANY; the bouquet in hand and a drag light who
 // already wears ALL; drag outranks hover outranks armed; putting it away
-// restores the baked values at the end of the fade. The editor's edit: shown
+// restores the baked values at the end of the fade; a hovered publish group
+// lights its own members. The editor's edit: shown
 // on its tile, never repainted over a save, restored from the caches when
 // it ends without one, and it — not the store — decides a hidden name.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -51,6 +52,19 @@ describe('the mark preview', () => {
     m.drag(true, ['green'])
     expect(lit(h)).toEqual(['garden', 'library'])
     expect(m.asking).toBe(true)
+  })
+
+  it('a hovered publish group lights its members on this page, outranks a hover, and yields to a drag', () => {
+    const h = markHost()
+    const m = new MarkPreview(h)
+    m.hover(['warm'])
+    m.group(['library', 'elsewhere'], '#ff8800')
+    expect(lit(h)).toEqual(['library'])
+    m.drag(true, ['wild'])
+    expect(lit(h)).toEqual(['garden'])
+    m.drag(false, [])
+    m.group([])
+    expect(lit(h)).toEqual(['kitchen'])
   })
 
   it('puts the page back at the end of the fade, not before', async () => {

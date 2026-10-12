@@ -1,9 +1,9 @@
 // sharing/head-claim-signer.spec.ts
 //
 // Round-trip: the participant's real NostrSigner mints a head claim, and core's
-// acceptor takes it back through the injected verifier. `window.NOSTR_SECRET_KEY`
-// is the sanctioned test override (nostr-signer.ts) — using it means no key is
-// minted into localStorage by running this suite.
+// acceptor takes it back through the injected verifier. The test key is seeded
+// where the app keeps it — this device's storage (jsdom's is per-file memory) —
+// so the signer resolves it on its real path and mints nothing.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getPublicKey } from 'nostr-tools/pure'
@@ -35,7 +35,7 @@ const installSigner = async (secret: string): Promise<void> => {
     register: (k: string, v: unknown) => { registry.set(k, v) },
     get: (k: string) => registry.get(k),
   }
-  ;(globalThis as Record<string, unknown>)['NOSTR_SECRET_KEY'] = secret
+  localStorage.setItem('hc:nostr:secret-key', secret)
   vi.resetModules()
   // The sharing boot bee registers the signer (atomic-modules-plan.md).
   const { NostrSigner } = await import('./nostr-signer.js')

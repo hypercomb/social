@@ -48,9 +48,10 @@ import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { fromRuntime } from '../../core/from-runtime'
 import {
-  UNREACHABLE_AFTER_MS, clockRefused, linkPhase, roomWords, statusLine,
+  SENDING_AFTER_MS, SLOW_FOR_MS, UNREACHABLE_AFTER_MS, clockRefused, linkPhase, refusalOf, slowLink, statusLine, wordsBeside,
   type MeshConnection, type ShareStatus, type StatusLine, type SyncState,
 } from './presence-status'
+import { readMeshZone } from '../../core/mesh-session'
 
 interface PresencePayload {
   sig?: string
@@ -60,6 +61,14 @@ interface PresencePayload {
   /** Everyone live in the room, on any page (SwarmDrone, room-wide roster).
    *  Pubkeys, or `{ pubkey }` rows. Absent on older essentials. */
   zonePeers?: readonly unknown[]
+  /** Of `peers`, those STANDING on this page (their page word carries
+   *  at:true, or predates the flag). The rest only re-announce a page they
+   *  visited this session: their tiles are here, they are not. Absent on an
+   *  older swarm — then everyone in `peers` stands here. */
+  at?: readonly string[]
+  /** Members whose tiles here can be taken while their deeper pages are
+   *  still only on their own device (deep: 'owner', D1). */
+  deepOwners?: readonly string[]
   reason?: string
 }
 
@@ -86,6 +95,14 @@ interface SwarmConsumerApi extends SwarmLabelApi {
 
 /** NostrMeshDrone — only its derived host is read here. */
 interface MeshApi { swarmHost?: () => string }
+/** HostSyncService — the hosts this device knows, read synchronously for the
+ *  "did you mean …?" hint (nothing is fetched). */
+interface HostsApi {
+  swarmHosts?: () => readonly string[]
+  publishNodes?: () => readonly string[]
+  publicHostDomain?: () => string
+  defaultPublicHostDomain?: () => string
+}
 interface InviteApi { invoke: (args: string) => Promise<void>; meetingLink?: () => Promise<void> }
 
 /** Who a key is, at its host (essentials NameService), consumed via IoC at
@@ -120,8 +137,9 @@ interface Badge {
   unnamed: boolean
   /** True when this peer is in the participant-filter selection. */
   selected: boolean
-  /** Where in the room they are: on this page, elsewhere, or away. */
-  where: 'self' | 'here' | 'elsewhere' | 'away'
+  /** Where in the room they are: on this page, sharing here while standing
+   *  elsewhere (a page they visited), elsewhere, or away. */
+  where: 'self' | 'here' | 'visiting' | 'elsewhere' | 'away'
 }
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
@@ -129,6 +147,7 @@ const SWARM_FILTER_KEY = '@diamondcoreprocessor.com/SwarmFilterService'
 const NAMES_KEY = '@diamondcoreprocessor.com/NameService'
 const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const INVITE_KEY = '@diamondcoreprocessor.com/InviteQueenBee'
+const HOSTS_KEY = '@diamondcoreprocessor.com/HostSyncService'
 
 /** How long a relay refusal stays on the line. */
 const REJECTED_SHOWN_MS = 20_000
@@ -173,6 +192,10 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   /** Pubkeys of the live participants at our location. Sorted by
    *  the swarm drone (freshest first). */
   readonly #peers = signal<readonly string[]>([])
+  /** Of those, the ones standing here (null: the swarm does not say, and
+   *  everyone with tiles here stands here, as before). */
+  readonly #at = signal<ReadonlySet<string> | null>(null)
+  readonly #deepOwners = signal<readonly string[]>([])
 
   /** True when the swarm published a presence event and we're alone. */
   readonly #alone = signal(true)
@@ -239,8 +262,24 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   readonly #clock = signal(Date.now())
   #downTimer: ReturnType<typeof setTimeout> | null = null
   #rejectedTimer: ReturnType<typeof setTimeout> | null = null
+  #slowTimer: ReturnType<typeof setTimeout> | null = null
+  #sendingTimer: ReturnType<typeof setTimeout> | null = null
 
-  /** The swarm's host — the relay this tab meets at, as `jwize.com`. */
+  /** The meeting point this tab is joined at, as named in its zone ('' =
+   *  the default) — what the 'unreachable' line names. */
+  readonly #point = signal('')
+  /** DELIVERY, NOT THE SOCKET (TS-7). The relay never echoes our own event
+   *  back, so its OK (swarm:page-announced) is the only proof the room has
+   *  this page's word. #offered: when this page's newest word went out (its
+   *  walk's share status); #taken: when the relay last took a word, by page.
+   *  Until a swarm has ever said page-announced (an older essentials), every
+   *  word counts as taken — the line reads as it always did. */
+  readonly #announceSeen = signal(false)
+  readonly #offered = signal<{ location: string; at: number } | null>(null)
+  readonly #taken = signal<ReadonlyMap<string, number>>(new Map())
+
+  /** The relay this tab meets at, as `jwize.com` — what the connection
+   *  lines name. Where a page's tiles go is the share status's `host`. */
   readonly #swarmHost = signal('')
   /** Live participants anywhere in the room (not you), and those away. */
   readonly #zone = signal<readonly string[]>([])
@@ -251,7 +290,9 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   /** The swarm's per-location share status, newest per location. */
   readonly #shares = signal<ReadonlyMap<string, ShareStatus>>(new Map())
   readonly #lastShare = signal<ShareStatus | null>(null)
-  readonly #sync = signal<SyncState | null>(null)
+  /** Each swarm host's last report, by host, and the newest of them. */
+  readonly #syncs = signal<ReadonlyMap<string, SyncState>>(new Map())
+  readonly #lastSync = signal<SyncState | null>(null)
   readonly #older = signal(0)
   readonly #rejected = signal('')
 
@@ -277,27 +318,76 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     return shares.get(this.#hereSig()) ?? this.#lastShare()
   })
 
+  /** The report of the host THIS page's tiles go to — none while the page
+   *  has no host. A swarm that names no host (older essentials): the newest
+   *  swarm-host report, as before. */
+  readonly #sync = computed<SyncState | null>(() => {
+    const share = this.#share()
+    if (share && typeof share.host === 'string') return share.host ? this.#syncs().get(share.host) ?? null : null
+    return this.#lastSync()
+  })
+
+  /** The host the upload lines name: where this page's tiles go. */
+  readonly #uploadHost = computed(() => String(this.#share()?.host ?? ''))
+
+  /** THIS page's newest word: whether the relay ever took a word of ours
+   *  for it (`arrived`), whether it took the newest (`taken`), and since when
+   *  the newest has been on its way (null while there is nothing on its way). */
+  readonly #delivery = computed<{ arrived: boolean; taken: boolean; since: number | null }>(() => {
+    if (!this.#announceSeen()) return { arrived: true, taken: true, since: null }
+    const share = this.#share()
+    const at = this.#hereLocation() ?? String(share?.location ?? '')
+    const taken = this.#taken().get(at)
+    if (share?.taken === true) return { arrived: true, taken: true, since: null }
+    const offered = this.#offered()
+    const mine = offered && offered.location === at ? offered : null
+    if (taken !== undefined && (!mine || taken >= mine.at)) return { arrived: true, taken: true, since: null }
+    return { arrived: taken !== undefined, taken: false, since: mine ? mine.at : null }
+  })
+
   /** The line, or null for the old rendering. */
   readonly status = computed<StatusLine | null>(() => {
     const conn = this.#conn()
-    const phase = linkPhase(conn, this.#downSince(), this.#clock(), this.#wasOpen())
+    const now = this.#clock()
+    let phase = linkPhase(conn, this.#downSince(), now, this.#wasOpen())
     if (!phase) return null
+    // An OPEN socket answering late is live and slow, never "Reconnecting".
+    const slow = phase !== 'down' && slowLink(conn, now)
+    if (slow) phase = 'open'
     const away = new Set(this.#away())
-    const here = new Set(this.#peers().filter(pk => !away.has(pk)))
-    const room = new Set([...this.#zone(), ...here])
+    const peersHere = this.#peers().filter(pk => !away.has(pk))
+    const at = this.#at()
+    const standing = at ? peersHere.filter(pk => at.has(pk)) : peersHere
+    const room = new Set([...this.#zone(), ...peersHere])
     for (const pk of away) room.delete(pk)
+    // You are here once the relay has taken your word for this page — until
+    // then the room does not see you here, and the line says "Sending…".
+    // A re-said word on its way for less than SENDING_AFTER_MS keeps you
+    // counted: the count never blinks on every walk of the page.
+    const { arrived, taken, since } = this.#delivery()
+    const sending = !taken && since !== null && now - since >= SENDING_AFTER_MS
+    const selfHere = taken || (arrived && !sending)
+    this.#labelVersion() // dependency: a sharer's name landing renames the line
+    const deepOwners = this.#deepOwners().map(pk => this.#labelOf(pk))
     return statusLine({
       phase,
       host: this.#swarmHost() || this.#t('mesh.state.no-host-name'),
+      uploadHost: this.#uploadHost(),
       room: this.#room().trim(),
-      words: roomWords(this.#room(), this.#secret(), this.#locale()),
+      words: wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale()),
       roomCount: room.size + 1,
-      hereCount: here.size + 1,
+      hereCount: standing.length + (selfHere ? 1 : 0),
       share: this.#share(),
       sync: this.#sync(),
       older: this.#older(),
       clockOff: clockRefused(conn),
       rejected: this.#rejected(),
+      refused: refusalOf(conn),
+      point: this.#point(),
+      slow,
+      sending,
+      knownHosts: () => this.#knownHosts(),
+      deepOwners,
     })
   })
 
@@ -347,11 +437,18 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     // until their slot runs out, and the badge says they are away.
     const away = this.#away()
     const awaySet = new Set(away)
-    const here = this.#peers().filter(pk => !awaySet.has(pk))
-    const seen = new Set<string>([...here, ...away])
+    const sharing = this.#peers().filter(pk => !awaySet.has(pk))
+    // Standing here, or only re-announcing a page they visited: their tiles
+    // are here either way (the badge still filters to them), but only the
+    // first are on this page.
+    const at = this.#at()
+    const here = at ? sharing.filter(pk => at.has(pk)) : sharing
+    const visiting = at ? sharing.filter(pk => !at.has(pk)) : []
+    const seen = new Set<string>([...sharing, ...away])
     const elsewhere = this.#zone().filter(pk => !seen.has(pk))
     const roster: [string, Badge['where']][] = [
       ...here.map((pk): [string, Badge['where']] => [pk, 'here']),
+      ...visiting.map((pk): [string, Badge['where']] => [pk, 'visiting']),
       ...elsewhere.map((pk): [string, Badge['where']] => [pk, 'elsewhere']),
       ...away.map((pk): [string, Badge['where']] => [pk, 'away']),
     ]
@@ -432,6 +529,8 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         const peers = Array.isArray(payload?.peers) ? payload.peers : []
         const alone = payload?.alone ?? peers.length === 0
         this.#peers.set(peers)
+        this.#at.set(Array.isArray(payload?.at) ? new Set(payload.at.map(String)) : null)
+        this.#deepOwners.set(Array.isArray(payload?.deepOwners) ? payload.deepOwners.map(String) : [])
         this.#alone.set(alone)
         this.#seen.set(true)
         if (typeof payload?.sig === 'string') this.#hereSig.set(payload.sig)
@@ -513,16 +612,40 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         this.#shares.set(next)
         this.#lastShare.set(p)
         this.#readHere()
+        // A walk of the page we stand on sends (or re-says) its word: from
+        // now it is on its way until the relay takes it.
+        if (at === (this.#hereLocation() ?? at) && p.taken !== true) this.#noteOffered(at)
       }),
 
-      // Does the swarm's host take the bytes — and if not, why. Only the
-      // swarm host's report: another target is a backup, not what the room
-      // fetches from.
+      // The relay took this tab's word for the page it stands on (its OK).
+      EffectBus.on<{ location?: string }>('swarm:page-announced', (p) => {
+        const at = String(p?.location ?? '')
+        this.#announceSeen.set(true)
+        const next = new Map(this.#taken())
+        next.delete(at)
+        next.set(at, Date.now())
+        while (next.size > 64) next.delete(next.keys().next().value as string)
+        this.#taken.set(next)
+        this.#clock.set(Date.now())
+      }),
+
+      // The tab's meeting point moved (the selector, a link): re-read where
+      // it meets, for the words and the lines that name it.
+      EffectBus.on('mesh:zone', () => queueMicrotask(() => { this.#readHost(); this.#readPoint() })),
+
+      // Does a swarm host take the bytes — and if not, why. Only swarm
+      // hosts' reports: another target is a backup, not what the room
+      // fetches from. Kept per host; the line reads this page's (#sync).
       EffectBus.on<SyncState>('sync:state', (p) => {
         if (!p || typeof p !== 'object') return
         const host = String(p.host ?? '').trim()
         if (p.swarm !== true && !(host && host === this.#swarmHost())) return
-        this.#sync.set(p)
+        if (host) {
+          const next = new Map(this.#syncs())
+          next.set(host, p)
+          this.#syncs.set(next)
+        }
+        this.#lastSync.set(p)
       }),
 
       // Someone arrived, left, went away or came back anywhere in the room.
@@ -556,6 +679,7 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     const filter = this.#filter()
     if (filter) this.#selected.set(new Set(filter.selected))
     this.#readHost()
+    this.#readPoint()
   }
 
   /** Click a peer badge (or their row name) → toggle that participant
@@ -576,8 +700,14 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
   /** The line's buttons. `invite` hands out the meeting link (the invite
    *  word, with nothing selected); `share` offers this page's private tiles
-   *  after one confirmation — tile by tile, their insides stay private. */
-  async onStatusAction(action: 'invite' | 'share' | undefined): Promise<void> {
+   *  after one confirmation — tile by tile, their insides stay private;
+   *  `code` opens the selector on the access code (the meeting point refused
+   *  this tab's — paste the newest one). */
+  async onStatusAction(action: 'invite' | 'share' | 'code' | undefined): Promise<void> {
+    if (action === 'code') {
+      EffectBus.emit('mesh:open-modal', { focus: 'code' })
+      return
+    }
     if (action === 'invite') {
       const invite = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(INVITE_KEY) as InviteApi | undefined
       // The meeting link, whatever is selected (an older queen: invoke('')).
@@ -589,10 +719,17 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     if (typeof swarm?.offerPrivateHere !== 'function') return
     let count = Number(this.#share()?.private ?? 0)
     if (!(count > 0)) { try { count = Number(swarm.privateCountHere?.() ?? 0) } catch { count = 0 } }
+    // Who keeps what is shared: this page's upload host, never the relay
+    // merely because it is where we meet. An older swarm names no host (the
+    // relay was its host); a page with no host, or one not known yet, names
+    // no keeper — the confirmation must never promise one that is not there.
+    const share = this.#share()
+    const named = share && typeof share.host === 'string'
+    const keeper = named ? this.#uploadHost() : (this.#swarmHost() || this.#t('mesh.state.no-host-name'))
     const ok = await requestConfirm({
       title: 'swarm.share.confirm.title',
-      message: 'swarm.share.confirm.message',
-      messageParams: { count, host: this.#swarmHost() || this.#t('mesh.state.no-host-name') },
+      message: keeper ? 'swarm.share.confirm.message' : 'swarm.share.confirm.message-local',
+      messageParams: { count, host: keeper },
       confirmLabel: 'swarm.share.confirm.ok',
       cancelLabel: 'swarm.share.confirm.cancel',
     })
@@ -609,6 +746,7 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   badgeTitleKey(b: Badge): string {
     if (b.isSelf) return 'presence.set-name'
     if (b.where === 'elsewhere') return 'presence.room-elsewhere'
+    if (b.where === 'visiting') return 'presence.room-visiting'
     if (b.where === 'away') return 'presence.room-away'
     return 'presence.filter-toggle'
   }
@@ -680,6 +818,8 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     this.#unsubs.length = 0
     if (this.#downTimer) clearTimeout(this.#downTimer)
     if (this.#rejectedTimer) clearTimeout(this.#rejectedTimer)
+    if (this.#slowTimer) clearTimeout(this.#slowTimer)
+    if (this.#sendingTimer) clearTimeout(this.#sendingTimer)
   }
 
   // ── helpers ───────────────────────────────────────────
@@ -711,6 +851,16 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     if (!c || typeof c.state !== 'string') return
     this.#conn.set(c)
     this.#readHost()
+    this.#readPoint()
+    // The line reads the clock it is given: bring it to now, and wake it once
+    // a stall has outlived the probe deadline (slow → reconnecting).
+    const at = Date.now()
+    this.#clock.set(at)
+    if (this.#slowTimer) { clearTimeout(this.#slowTimer); this.#slowTimer = null }
+    if (c.state === 'stalled') {
+      const since = typeof c.since === 'number' && c.since > 0 && c.since <= at ? c.since : at
+      this.#slowTimer = setTimeout(() => { this.#slowTimer = null; this.#clock.set(Date.now()) }, Math.max(0, since + SLOW_FOR_MS - at) + 50)
+    }
     if (c.state === 'open') {
       this.#wasOpen.set(true)
       this.#downSince.set(null)
@@ -735,6 +885,40 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
       const host = mesh?.swarmHost?.()
       if (typeof host === 'string') this.#swarmHost.set(host)
     } catch { /* keep the last one */ }
+  }
+
+  /** The meeting point named in this tab's zone ('' = the default). */
+  #readPoint(): void {
+    this.#point.set(String(readMeshZone()?.relay ?? ''))
+  }
+
+  /** This page's word went out (or was re-said) at `location`: "Sending…"
+   *  shows if the relay has not taken it SENDING_AFTER_MS from now. */
+  #noteOffered(location: string): void {
+    const at = Date.now()
+    this.#offered.set({ location, at })
+    if (this.#sendingTimer) clearTimeout(this.#sendingTimer)
+    this.#sendingTimer = setTimeout(() => { this.#sendingTimer = null; this.#clock.set(Date.now()) }, SENDING_AFTER_MS + 50)
+  }
+
+  /** Hosts this device knows — the pool, the page's hosts, every host heard
+   *  from — for the "did you mean …?" hint. Local reads only. */
+  #knownHosts(): string[] {
+    const out = new Set<string>()
+    const add = (h: unknown): void => { const v = String(h ?? '').trim().toLowerCase(); if (v) out.add(v) }
+    try {
+      const hosts = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(HOSTS_KEY) as HostsApi | undefined
+      for (const h of hosts?.swarmHosts?.() ?? []) add(h)
+      for (const h of hosts?.publishNodes?.() ?? []) add(h)
+      add(hosts?.publicHostDomain?.())
+      add(hosts?.defaultPublicHostDomain?.())
+    } catch { /* an older host-sync: the line's own hosts below */ }
+    for (const h of this.#syncs().keys()) add(h)
+    add(this.#swarmHost())
+    const share = this.#share()
+    for (const h of share?.hosts ?? []) add(h)
+    for (const h of share?.passedOver ?? []) add(h)
+    return [...out]
   }
 
   /** Where this page is, as the swarm hashes it (null on a swarm that does

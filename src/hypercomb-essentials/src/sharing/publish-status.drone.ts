@@ -33,6 +33,19 @@
 // back as intents (publish:run, publish:unpublish, publish:inspect, …).
 
 import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, type I18nProvider, registerPoolMeaning } from '@hypercomb/core'
+import { listDecorations } from '../commands/decoration-manifest.js'
+import { CARD_PAGE_KIND } from '../commands/card-wear.js'
+import { conceal, listConcealed, type ConcealedItem } from '../concealment/concealment.js'
+import {
+  ENTRANCE_SKIP_SCOPE,
+  ENTRANCE_UPDATE_EFFECT,
+  entranceHosts,
+  entranceScout,
+  entranceSkipSaid,
+  entranceSkipSig,
+  readEntranceScents,
+  readPageBytes,
+} from './entrance-scout.service.js'
 import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
@@ -71,11 +84,17 @@ import {
   secureDeleteBranch,
   setBranchAddress,
   setBranchDoors,
+  setEntrance,
   unpublishBranch,
   type PublishFailure,
   type PublishProgress,
+  type ZoneEntranceFailure,
+  type ZoneEntranceIntent,
 } from './publish-branch.js'
-import { APEX_LABEL, creationUrl, foldDnsLabel, ownAddressRefusal, ownLabelOn, zoneDoor } from './zone-door.js'
+import {
+  APEX_LABEL, creationUrl, entranceAddresses, entranceHost, foldDnsLabel, isPoweredEntrance, ownAddressRefusal, ownLabelOn,
+  zoneDoor, type ZoneEntrance,
+} from './zone-door.js'
 
 /** English fallbacks for every way publishing can stop. Each one names what
  *  happened AND what it means for the participant's existing links — the
@@ -91,6 +110,24 @@ const PUBLISH_FAILURE_TEXT: Record<PublishFailure, string> = {
   'index-unsafe': 'Your hive index could not be read back, so it was left untouched — publishing over an index we cannot see would drop every other branch. Try again when the host answers.',
   'index-failed': 'The bytes are hosted but the index update failed. Publish again to retry the index.',
   'bundle-failed': 'The link resource could not be created.',
+}
+
+/** English fallbacks for every way an entrance change can stop, keyed as the
+ *  catalogs are (`publish.entrance.failure.<code>`). The routine's own reason
+ *  goes to the activity log, never into a translated sentence. */
+const ENTRANCE_FAILURE_TEXT: Record<ZoneEntranceFailure, string> = {
+  'services': 'Core services are not ready yet.',
+  'no-host': 'That is not an address an entrance can run on.',
+  'no-signer': 'No signing key is available — the entrance must be signed.',
+  'index-unsafe': 'Your hive index could not be read back, so nothing was changed. Try again when the host answers.',
+  'index-failed': 'The host did not take the signed change. Try again.',
+  'not-available': 'The page is not held on the host yet, so its powers were not turned on.',
+  'scent-failed': 'Your review of the page could not be published, so its powers were not turned on.',
+  'root': 'That is a domain\'s root. Its front door runs no powers. Turn them on at an address under it.',
+  'no-address': 'Give this place its own address on that domain first.',
+  'no-page': 'Preview a page first — there is no page to turn on.',
+  'too-many': 'A host keeps at most sixteen entrances.',
+  'powers-unasked': 'That change would have turned powers on without your Turn on, so nothing was signed.',
 }
 
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
@@ -126,14 +163,21 @@ async function beforeDeadline<T>(work: Promise<T>, fallback: T): Promise<T> {
 }
 
 interface HistoryLike {
-  sealSubtree: (segments: readonly string[]) => Promise<string | null>
+  sealSubtree: (segments: readonly string[], activeLayers?: Set<string>, options?: { bypassMissWindow?: boolean }) => Promise<string | null>
 }
 interface HostSyncLike {
   publicHostDomain?: () => string
   probeServed?: (host: string, sig: string) => Promise<'served' | 'absent' | 'unknown'>
   closureGaps?: (sig: string, kind?: string, closure?: boolean, limit?: number) => Promise<string[]>
   isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
+  /** What stops a host taking this tab's uploads, and why — synchronous,
+   *  null when nothing does. Optional: an older host-sync has none. */
+  hostTrouble?: (host: string) => { host: string; why: string } | null
 }
+
+/** Why a branch's domain takes none of its bytes — the `publish.host.<why>`
+ *  catalog keys. Anything else a host says is not the row's to name. */
+const HOST_TROUBLE_WHYS: ReadonlySet<string> = new Set(['unresolved', 'page', 'refused', 'full', 'unreachable'])
 interface SignerLike { getPublicKeyHex?: () => Promise<string | null> }
 
 export type { PublishRowState } from './publish-verdict.js'
@@ -189,6 +233,39 @@ export interface PublishRow {
   /** The label an own address starts from — the tile's name, folded to a DNS
    *  label ('' when the name has nothing usable). */
   defaultLabel: string
+  /** host → the entrance that address runs, for every address this creation
+   *  is served at on a domain it is switched on for: each own address the
+   *  signed index gives it there, and `<key>.<zone>` when its key is an
+   *  address label no own address took. Never a domain's root. */
+  entrances: Record<string, PublishEntrance>
+  /** A domain this branch publishes to that is taking none of its bytes
+   *  right now, and why (host-sync's word: `unresolved` — the name reaches
+   *  no host, `page` — it answers a web page, `refused`, `full`,
+   *  `unreachable`) — so the row names it instead of reading as uploading.
+   *  null when every domain it uses is taking bytes, or nothing was tried. */
+  hostTrouble: { host: string; why: string } | null
+}
+
+/** One address's entrance as the panel shows it (documentation/using-a-creation.md,
+ *  "Powers are off by default, and the participant turns them on"). */
+export interface PublishEntrance {
+  /** The domain the address sits under — the switch the panel shows it beside. */
+  zone: string
+  /** The page the address runs (H), or null when it runs none of its own. */
+  page: string | null
+  /** H runs with its powers on — all three, version 1. */
+  powered: boolean
+  /** Whose page the entrance follows, when it follows one. */
+  from: { pubkey: string; lineage: string } | null
+  /** The card page this tile wears here now, or null. */
+  wears: string | null
+  /** A newer page the followed head wears, not skipped (the entrance scout). */
+  offered: string | null
+  /** What the community's scents say about H — read only, never a gate. */
+  scents: { pubkey: string; verdict: string; at: number; own: boolean }[]
+  /** Versions put away with Skip, for this address — each can be shown
+   *  again by its record's signature (the offer's, not the page's). */
+  skipped: { page: string; sig: string }[]
 }
 
 /** One choice on the "opens as" strip. `view: ''` is the hexagons ground. */
@@ -242,6 +319,11 @@ export interface PublishRenderPayload {
    *  snapshot matches it: 'published', 'changed' here since, or 'none'. */
   participantOnly: string[]
   participantState: 'published' | 'changed' | 'none'
+  /** The page being previewed: a blob: URL of its exact bytes, shown in a
+   *  sandboxed frame with no storage, no camera and no hive. */
+  entrancePreview: { host: string; page: string; url: string } | null
+  /** Pages previewed in this session — Turn on is offered for these only. */
+  previewed: string[]
 }
 
 export class PublishStatusDrone extends Drone {
@@ -253,13 +335,15 @@ export class PublishStatusDrone extends Drone {
     'The publish differential: one row per publishable branch comparing the head the signed hive index names (what the world sees) against the head sealing would produce now (what is here), with an honest online proof — schnorr-verified index, monotonic freshness against our own publish ledger, and a 404-only absence rule. Publishes, republishes and unpublishes per row.'
 
   protected override listens: string[] = [
-    'publish:view-toggle', 'publish:close', 'publish:refresh',
+    'publish:view-toggle', 'publish:close', 'publish:refresh', 'sync:state',
     'publish:run', 'publish:unpublish', 'publish:inspect', 'publish:copy-link',
     'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
     'hosts:render', 'publish:arrival', 'publish:participant', 'publish:participant-publish',
+    'publish:entrance', 'publish:entrance-preview', 'publish:entrance-skip', ENTRANCE_UPDATE_EFFECT, 'hidden:render',
+    'keymap:invoke',
   ]
-  protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log']
+  protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log', 'hidden:refresh']
 
   #open = false
   #refreshing = false
@@ -285,7 +369,7 @@ export class PublishStatusDrone extends Drone {
     open: false, host: '', zone: '', pubkey: '', currentKey: '', hosts: [],
     index: 'checking', indexCreatedAt: 0, indexStale: false,
     keyMismatch: false, refreshing: false, rows: [], collisions: [], views: [],
-    participantOnly: [], participantState: 'none',
+    participantOnly: [], participantState: 'none', entrancePreview: null, previewed: [],
   }
   #debounce: ReturnType<typeof setTimeout> | null = null
   /** Something changed while a sweep was in flight — sweep again after it. */
@@ -294,31 +378,51 @@ export class PublishStatusDrone extends Drone {
    *  it follows this one subject instead of running for every list row. */
   #inspectedKey = ''
 
+  /** THE ENTRANCES — each address's signed entry as the last sweep read it. */
+  readonly #entranceOf = new Map<string, ZoneEntrance>()
+  /** host → the newer page the entrance scout announced (and the followed
+   *  index's stamp), until it is turned on or skipped. */
+  readonly #entranceUpdates = new Map<string, { offered: string; at: number; head: string }>()
+  /** `<host> <page>` skipped this session → the notice it was (and the
+   *  signature its skip was put away under), so Show again can offer it back. */
+  readonly #skippedUpdates = new Map<string, { host: string; offered: string; at: number; head: string; sig: string }>()
+  /** Every version put away with Skip, still hidden (the concealment pool). */
+  #skipped: ConcealedItem[] = []
+  /** Pages previewed THIS SESSION. Never stored: a review is something you
+   *  just did, and Turn on asks for exactly the page you looked at. */
+  readonly #previewed = new Set<string>()
+  #preview: { host: string; page: string; url: string } | null = null
+  /** Bumped by every preview request and every close: a load installs its
+   *  frame only while its own ticket is still the latest. */
+  #previewTicket = 0
+
   constructor() {
     super()
 
-    this.onEffect('publish:view-toggle', () => {
-      // THE ICON ASKS THE SCREEN, NEVER THE FLAG.
-      //
-      // A docked panel is PARKED — not closed — whenever another window opens
-      // (window-rule.ts): its DOM goes, this drone is never told, and `#open`
-      // stays true over an empty edge. The next press on the glyph then only
-      // cleared a flag nobody could see, and it took a SECOND press to get the
-      // panel back. `isWindowShowing` is the panel's own registration in the
-      // window session, dropped the moment it stops showing — so parked and
-      // closed read alike, which is exactly what the participant means.
-      this.#open = !isWindowShowing('publish-panel')
-      this.#emit()
-      if (this.#open) void this.#refresh()
+    this.onEffect('publish:view-toggle', () => this.#toggle())
+
+    // `p` (keyboard/default-keymap.ts) is the same act through the keymap's
+    // one lane — and the way to publish from inside a view, where the rail
+    // is not on screen.
+    this.onEffect<{ cmd?: string }>('keymap:invoke', (p) => {
+      if (p?.cmd === 'publish.toggle') this.#toggle()
     })
 
     this.onEffect('publish:close', () => {
       if (!this.#open) return
       this.#open = false
+      this.#closePreview()
       this.#emit()
     })
 
     this.onEffect('publish:refresh', () => { if (this.#open) void this.#refresh() })
+
+    // A host started or stopped taking a branch's bytes: the rows that
+    // publish there say so at once — no sweep, no network (#retrouble).
+    this.onEffect('sync:state', () => {
+      if (!this.#open || this.#rows.length === 0) return
+      if (this.#retrouble()) this.#emit()
+    })
 
     // WHERE ONE BRANCH PUBLISHES. Per branch, never global — /susan moving
     // zones must not move /dylan. The intent carries the branch key and its
@@ -376,6 +480,47 @@ export class PublishStatusDrone extends Drone {
     })
     this.onEffect('publish:participant-publish', () => { void this.#publishParticipant() })
 
+    // THE ENTRANCE (each address a row is served at): preview a page
+    // sandboxed, turn its powers on or off, skip an offered version. The
+    // participant's own acts — the bridge has no intent for any.
+    this.onEffect<{ key?: string; host?: string; page?: string | null }>('publish:entrance-preview', (p) => {
+      void this.#previewEntrance(String(p?.host ?? ''), String(p?.page ?? ''))
+    })
+    this.onEffect<{ key?: string; host?: string; on?: boolean; page?: string; forget?: boolean }>('publish:entrance', (p) => {
+      void this.#entrance(String(p?.key ?? ''), String(p?.host ?? ''), p ?? {})
+    })
+    this.onEffect<{ key?: string; host?: string; page?: string }>('publish:entrance-skip', (p) => {
+      void this.#skipEntrance(String(p?.host ?? ''), String(p?.page ?? ''))
+    })
+    // The scout's notice: a badge on the row, and one toast.
+    this.onEffect<{ host?: string; current?: string; offered?: string; at?: number; head?: string }>(ENTRANCE_UPDATE_EFFECT, (p) => {
+      const host = entranceHost(p?.host)
+      const offered = String(p?.offered ?? '').toLowerCase()
+      const at = Number.isSafeInteger(p?.at) ? Number(p?.at) : 0
+      const head = String(p?.head ?? '').toLowerCase()
+      if (!host || !SIG_RE.test(offered) || this.#entranceUpdates.get(host)?.offered === offered) return
+      this.#entranceUpdates.set(host, { offered, at, head: SIG_RE.test(head) ? head : '' })
+      for (const row of this.#rows) { const view = row.entrances[host]; if (view) view.offered = offered }
+      this.#toast('info', 'publish.entrance.update', `A newer card page is offered for ${host} — preview it in Publish.`, { host })
+      this.#emit()
+    })
+    // What is put away changed (a skip, or Show again): the skipped lists
+    // follow, and a version shown again this session is offered again.
+    this.onEffect<{ items?: ConcealedItem[]; gone?: string[] }>('hidden:render', (p) => {
+      const items = Array.isArray(p?.items) ? p.items : []
+      const gone = new Set(Array.isArray(p?.gone) ? p.gone.map(String) : [])
+      this.#skipped = items.filter(i => i?.scope === ENTRANCE_SKIP_SCOPE)
+      const still = new Set(this.#skipped.map(entranceSkipSaid))
+      for (const [said, notice] of this.#skippedUpdates) {
+        if (still.has(said) || gone.has(notice.sig)) continue
+        this.#skippedUpdates.delete(said)
+        if (this.#entranceOf.get(notice.host)?.page !== notice.offered) {
+          this.#entranceUpdates.set(notice.host, { offered: notice.offered, at: notice.at, head: notice.head })
+        }
+      }
+      this.#paintEntrances()
+    })
+
     // A commit anywhere bumps the tree epoch, which invalidates every seal —
     // so every row's local side is stale. Coalesce: a burst of commits must
     // not restart the sweep once per commit.
@@ -411,8 +556,27 @@ export class PublishStatusDrone extends Drone {
     // re-ordered list must not keep probing the door it just left.
     this.#hostByKey.delete(key)
     const row = this.#rows.find(candidate => candidate.key === key)
-    if (row) row.zones = this.#zonesFor(key)
+    if (row) {
+      row.zones = this.#zonesFor(key)
+      row.hostTrouble = this.#troubleFor(row.zones)
+    }
     this.#emit()
+  }
+
+  /** Open or close the panel — the rail icon, `/publish` and `p` all land here.
+   *
+   *  THE ICON ASKS THE SCREEN, NEVER THE FLAG. A docked panel is PARKED — not
+   *  closed — whenever another window opens (window-rule.ts): its DOM goes,
+   *  this drone is never told, and `#open` stays true over an empty edge. The
+   *  next press on the glyph then only cleared a flag nobody could see, and it
+   *  took a SECOND press to get the panel back. `isWindowShowing` is the
+   *  panel's own registration in the window session, dropped the moment it
+   *  stops showing — so parked and closed read alike, which is exactly what
+   *  the participant means. */
+  #toggle(): void {
+    this.#open = !isWindowShowing('publish-panel')
+    this.#emit()
+    if (this.#open) void this.#refresh()
   }
 
   // ── the sweep ─────────────────────────────────────────────────────────
@@ -452,6 +616,9 @@ export class PublishStatusDrone extends Drone {
         return
       }
 
+      // What Skip put away — read from the pool itself, so the list shows even
+      // before the concealment bee has woken.
+      try { this.#skipped = (await listConcealed()).filter(i => i.scope === ENTRANCE_SKIP_SCOPE && i.state === 'hidden') } catch { /* keep the last answer */ }
       const ledger = await latestByLineageKey(pubkey)
       const anyRecord = (await latestByLineageKey()).size > 0
       const keyMismatch = ledger.size === 0 && anyRecord
@@ -518,6 +685,7 @@ export class PublishStatusDrone extends Drone {
         state: PublishIndexState; roots: Record<string, string>
         doors: Record<string, string[]>
         addresses: Record<string, string>
+        entrances: Record<string, ZoneEntrance>
         createdAt: number; stale: boolean
       }>()
       for (const door of doors) {
@@ -525,6 +693,7 @@ export class PublishStatusDrone extends Drone {
         const roots = read.ok ? read.manifest.roots : {}
         const doorsMap = read.ok ? read.manifest.doors ?? {} : {}
         const addresses = read.ok ? read.manifest.addresses ?? {} : {}
+        const entrances = read.ok ? read.manifest.entrances ?? {} : {}
         const createdAt = read.ok ? read.manifest.createdAt : 0
         const state: PublishIndexState = read.ok
           ? 'ok'
@@ -533,7 +702,7 @@ export class PublishStatusDrone extends Drone {
         // which are recorded per host — can say.
         const highWater = await highWaterIndexStamp(door, pubkey)
         indexes.set(door, {
-          state, roots, doors: doorsMap, addresses, createdAt,
+          state, roots, doors: doorsMap, addresses, entrances, createdAt,
           stale: read.ok && highWater > 0 && createdAt < highWater,
         })
       }
@@ -579,6 +748,7 @@ export class PublishStatusDrone extends Drone {
         row.doors = indexes.get(hostFor(key))?.doors[key] ?? null
         row.versions = versionsByKey.get(key) ?? []
         this.#addressRow(row, indexes.get(hostFor(key))?.addresses ?? {})
+        this.#entranceRow(row, indexes.get(hostFor(key))?.addresses ?? {}, indexes.get(hostFor(key))?.entrances ?? {})
         draft.push(row)
       }
       draft.sort((a, b) => a.path.localeCompare(b.path))
@@ -597,6 +767,7 @@ export class PublishStatusDrone extends Drone {
         refreshing: true, rows: this.#rows, collisions,
         views: this.#viewChoices(),
         participantOnly, participantState,
+        entrancePreview: this.#preview, previewed: [...this.#previewed],
       }
       this.#emit()
 
@@ -619,7 +790,7 @@ export class PublishStatusDrone extends Drone {
         const planSig = indexes.get(planDoor)?.roots[arrivalPointer(row.key)] ?? ''
         row.plan = planSig ? await beforeDeadline(this.#readPlan(planDoor, planSig), null) : null
         const here = row.segments.length > 0 && history?.sealSubtree
-          ? await beforeDeadline(history.sealSubtree(row.segments).catch(() => null), null)
+          ? await beforeDeadline(history.sealSubtree(row.segments, undefined, { bypassMissWindow: false }).catch(() => null), null)
           : null
         // Everything online about this row happens at ITS door: the probe,
         // the index verdicts, and the observation it leaves behind.
@@ -631,6 +802,18 @@ export class PublishStatusDrone extends Drone {
               'unknown' as const,
             )
           : 'unknown'
+        // THE ENTRANCES, at each address the row is served at: the page this
+        // tile wears here now, and what the community's scents say about the
+        // page each address runs.
+        if (Object.keys(row.entrances).length > 0) {
+          const wears = row.segments.length > 0 ? await beforeDeadline(this.#wornPage(row.segments), null) : null
+          for (const view of Object.values(row.entrances)) {
+            view.wears = wears
+            if (!view.page) continue
+            const read = await beforeDeadline(readEntranceScents(door, view.page, [pubkey]).catch(() => []), [])
+            view.scents = read.map(s => ({ ...s, own: s.pubkey === pubkey }))
+          }
+        }
         const entry = ledger.get(row.key)
         row.here = here
         row.state = publishVerdict({
@@ -691,7 +874,106 @@ export class PublishStatusDrone extends Drone {
       urls: {},
       ownLabels: {},
       defaultLabel: foldDnsLabel(segments[segments.length - 1] ?? ''),
+      entrances: {},
+      hostTrouble: this.#troubleFor(this.#zonesFor(key)),
     }
+  }
+
+  /** WHICH OF A BRANCH'S DOMAINS TAKES NONE OF ITS BYTES, and why — the
+   *  first of them, primary first (host-sync's own memory, synchronous). A
+   *  publish domain is never passed over — it was chosen — so a domain that
+   *  does not resolve, answers a page, or refuses is NAMED on its row
+   *  instead of the branch reading as uploading for ever. */
+  #troubleFor(zones: readonly string[]): { host: string; why: string } | null {
+    const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
+    if (typeof hostSync?.hostTrouble !== 'function') return null
+    for (const zone of zones) {
+      let trouble: { host: string; why: string } | null = null
+      try { trouble = hostSync.hostTrouble(zoneDoor(zone)) } catch { trouble = null }
+      if (trouble && HOST_TROUBLE_WHYS.has(trouble.why)) return { host: trouble.host, why: trouble.why }
+    }
+    return null
+  }
+
+  /** Re-read every row's trouble; true when any row's changed. */
+  #retrouble(): boolean {
+    let moved = false
+    for (const row of this.#rows) {
+      const next = this.#troubleFor(row.zones)
+      const prev = row.hostTrouble
+      if (prev?.host === next?.host && prev?.why === next?.why) continue
+      row.hostTrouble = next
+      moved = true
+    }
+    return moved
+  }
+
+  /** The entrance of every address this row is served at, from the signed
+   *  index (`entranceAddresses`: own addresses and the implicit label, on the
+   *  domains the row is switched on for — never a domain itself, a root is a
+   *  plain front door). The slow halves (what the tile wears, the scents) fill
+   *  in during the sweep. */
+  #entranceRow(row: PublishRow, addresses: Record<string, string>, entrances: Record<string, ZoneEntrance>): void {
+    const views: Record<string, PublishEntrance> = {}
+    const zones = [...new Set([...this.#knownZones(), ...row.zones])]
+    for (const { host, zone } of entranceAddresses({ key: row.key, live: !!row.live, doors: row.doors }, zones, addresses)) {
+      const entrance = entrances[host]
+      if (entrance) this.#entranceOf.set(host, entrance)
+      else this.#entranceOf.delete(host)
+      views[host] = this.#entranceView(host, zone, entrance ?? null)
+    }
+    row.entrances = views
+  }
+
+  /** One address's view from its signed entrance — what the sweep has not
+   *  read yet (wears, scents) is left for it to fill. */
+  #entranceView(host: string, zone: string, entrance: ZoneEntrance | null): PublishEntrance {
+    const page = entrance?.page ?? null
+    const offered = this.#entranceUpdates.get(host)?.offered ?? null
+    return {
+      zone,
+      page,
+      powered: isPoweredEntrance(entrance),
+      from: entrance?.from ? { pubkey: entrance.from.pubkey, lineage: entrance.from.lineage } : null,
+      wears: null,
+      offered: offered && offered !== page ? offered : null,
+      scents: [],
+      skipped: this.#skippedAt(host),
+    }
+  }
+
+  /** What Skip put away at `host`, still hidden: each page, and the record's
+   *  signature Show again names. */
+  #skippedAt(host: string): { page: string; sig: string }[] {
+    const out: { page: string; sig: string }[] = []
+    for (const item of this.#skipped) {
+      if (item.state !== 'hidden') continue
+      const said = entranceSkipSaid(item)
+      if (said.startsWith(`${host} `)) out.push({ page: said.slice(host.length + 1), sig: item.sig })
+    }
+    return out
+  }
+
+  /** Restate every row's skipped list and offer after the put-away set or a
+   *  notice changed. */
+  #paintEntrances(): void {
+    for (const row of this.#rows) {
+      for (const [host, view] of Object.entries(row.entrances)) {
+        view.skipped = this.#skippedAt(host)
+        const offered = this.#entranceUpdates.get(host)?.offered ?? null
+        view.offered = offered && offered !== view.page ? offered : null
+      }
+    }
+    if (this.#open) this.#emit()
+  }
+
+  /** The card page (htmlSig) the tile at `segments` wears here, or null. */
+  async #wornPage(segments: readonly string[]): Promise<string | null> {
+    try {
+      const [page] = await listDecorations<Record<string, unknown>>({ kind: CARD_PAGE_KIND, segments })
+      const sig = String(page?.record?.payload?.['htmlSig'] ?? '').toLowerCase()
+      return SIG_RE.test(sig) ? sig : null
+    } catch { return null }
   }
 
   /** Every zone's address for one row, from the signed `addresses` map: the
@@ -891,7 +1173,16 @@ export class PublishStatusDrone extends Drone {
     row.busyPhase = null
 
     if (!result.ok) {
-      this.#toast('error', `publish.failure.${result.failure}`, PUBLISH_FAILURE_TEXT[result.failure])
+      // Every node REFUSED what it lacks (TS-4): nothing retries it, so the
+      // line names the node and its word instead of "still uploading".
+      const refused = result.refused
+      if (refused) {
+        const node = refused.host || 'The host'
+        const reason = refused.reason || refused.state || 'refused'
+        this.#toast('error', 'host.publish.refused', `${node} refused the upload (${reason}) — nothing was published`, { node, reason })
+      } else {
+        this.#toast('error', `publish.failure.${result.failure}`, PUBLISH_FAILURE_TEXT[result.failure])
+      }
       this.#emit()
       void this.#refresh()
       return
@@ -979,6 +1270,155 @@ export class PublishStatusDrone extends Drone {
         label ? 'Saved — this place has its own address.' : 'This place lives at the root path again.')
     }
     void this.#refresh()
+  }
+
+  // ── the entrance ──────────────────────────────────────────────────────
+
+  /** PREVIEW a page exactly as the address would serve it: its bytes, checked
+   *  against its signature, as a blob: URL the panel shows in a frame
+   *  sandboxed to scripts alone — no same origin, so no storage, no camera
+   *  and no hive. Never site-view, which mounts page code in this document.
+   *  An empty page closes the preview. */
+  async #previewEntrance(rawHost: string, page: string): Promise<void> {
+    // Every request takes a ticket; a slower load that lost the race to a
+    // newer request (or a close) installs nothing and counts as no preview.
+    const ticket = ++this.#previewTicket
+    const host = entranceHost(rawHost)
+    const sig = page.trim().toLowerCase()
+    if (!host || !SIG_RE.test(sig)) { this.#dropPreview(); this.#emit(); return }
+    // Bytes are read from the domain the address sits under and the row's
+    // door: an app address answers its page at `/` and nothing else.
+    const { zone, door } = this.#entranceDoorFor(host)
+    const bytes = await readPageBytes(sig, [...new Set([zone, door, ...await entranceHosts()])].filter(Boolean))
+    if (ticket !== this.#previewTicket) return
+    if (!bytes) {
+      this.#toast('error', 'publish.entrance.preview-missing', 'That page is not held here or on your hosts.')
+      return
+    }
+    this.#dropPreview()
+    const url = URL.createObjectURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: 'text/html; charset=utf-8' }))
+    this.#preview = { host, page: sig, url }
+    this.#previewed.add(sig)
+    this.#emit()
+  }
+
+  /** Close the preview, and void any load still in flight. */
+  #closePreview(): void {
+    this.#previewTicket++
+    this.#dropPreview()
+  }
+
+  #dropPreview(): void {
+    if (this.#preview) { try { URL.revokeObjectURL(this.#preview.url) } catch { /* already gone */ } }
+    this.#preview = null
+  }
+
+  /** The domain an address sits under and the door its row is read through —
+   *  the address less its first label when no row serves it. */
+  #entranceDoorFor(host: string): { zone: string; door: string } {
+    const row = this.#rows.find(r => r.entrances[host])
+    const zone = row?.entrances[host]?.zone || host.slice(host.indexOf('.') + 1)
+    return { zone, door: (row ? this.#hostByKey.get(row.key) : '') || zone }
+  }
+
+  /** TURN ON, TURN OFF, FORGET — each an INTENT, never a whole entry:
+   *  setEntrance applies it to the entrance as the index holds it at that
+   *  moment, so nothing cached here can raise or drop powers. Turn on names
+   *  only a page previewed this session, and follows its publisher (the one
+   *  already followed, else this creation itself, so your next published page
+   *  is offered here too). */
+  async #entrance(
+    key: string, rawHost: string,
+    p: { on?: boolean; page?: string; forget?: boolean },
+  ): Promise<void> {
+    const row = this.#rows.find(r => r.key === key)
+    const host = entranceHost(rawHost)
+    const view = row?.entrances[host]
+    if (!row || !view || row.busyPhase) return
+    let intent: ZoneEntranceIntent
+    if (p.forget === true) intent = { kind: 'forget' }
+    else if (p.on === true) {
+      const page = String(p.page ?? '').toLowerCase()
+      if (!SIG_RE.test(page) || !this.#previewed.has(page)) {
+        this.#toast('tip', 'publish.entrance.not-previewed', 'Preview this exact page before turning it on.')
+        return
+      }
+      const followed = this.#entranceOf.get(host)?.from
+      const notice = this.#entranceUpdates.get(host)
+      const from = followed
+        // Turning on the page a notice offered: the stamp and head it read.
+        ? { pubkey: followed.pubkey, lineage: followed.lineage, ...(notice?.offered === page && notice.at && notice.head ? { at: notice.at, head: notice.head } : {}) }
+        : SIG_RE.test(this.#payload.pubkey) ? { pubkey: this.#payload.pubkey, lineage: row.key } : undefined
+      intent = { kind: 'on', page, ...(from ? { from } : {}) }
+    } else if (p.on === false) intent = { kind: 'off' }
+    else return
+
+    row.busyPhase = 'indexing'
+    this.#emit()
+    // Read and signed through the door this row's index was read from — the
+    // index the panel shows — then the standing targets; never the domain the
+    // address merely sits under, which may be another host altogether.
+    const result = await setEntrance(host, intent, { doors: [this.#hostByKey.get(row.key) ?? this.#payload.host] })
+    row.busyPhase = null
+    if (!result.ok) {
+      this.#toast('error', `publish.entrance.failure.${result.failure}`, ENTRANCE_FAILURE_TEXT[result.failure] ?? 'The entrance was not changed.', { host, zone: view.zone })
+      this.emitEffect('activity:log', { message: `${host} entrance not changed: ${result.failure}${result.reason ? ` (${result.reason})` : ''}` })
+      this.#emit()
+      return
+    }
+    // THE WRITTEN ENTRY is the truth from here — never the request.
+    const written = result.entrance
+    if (written) this.#entranceOf.set(host, written)
+    else this.#entranceOf.delete(host)
+    const fresh = this.#entranceView(host, view.zone, written)
+    row.entrances[host] = { ...fresh, wears: view.wears, scents: written?.page === view.page ? view.scents : [] }
+    if (written && isPoweredEntrance(written)) {
+      if (this.#entranceUpdates.get(host)?.offered === written.page) this.#entranceUpdates.delete(host)
+      this.#closePreview()
+    }
+    // Nothing signed is never told as a change made.
+    const said: [string, string] = result.reason === 'unchanged' ? ['publish.entrance.unchanged', `${host} was already that way, so nothing was signed.`]
+      : intent.kind === 'forget' ? ['publish.entrance.forgotten', `${host} has no entrance now.`]
+      : intent.kind === 'on' ? ['publish.entrance.on', `${host} runs this page with its powers on.`]
+      : ['publish.entrance.off', `${host} runs its page with the powers off.`]
+    this.#toast(result.reason === 'unchanged' ? 'info' : 'success', said[0], said[1], { host })
+    this.#emit()
+    void this.#refresh()
+  }
+
+  /** SKIP an offered page: put it away in the concealment pool (hide first,
+   *  delete second), written HERE — the concealment bee may be asleep, and
+   *  `hidden:conceal` does not wake it. Its list is then asked to refresh.
+   *  The scout stays quiet about the page at this address; a newer one is
+   *  still offered. */
+  async #skipEntrance(rawHost: string, page: string): Promise<void> {
+    const host = entranceHost(rawHost)
+    const offered = page.trim().toLowerCase()
+    const notice = this.#entranceUpdates.get(host)
+    if (!host || !SIG_RE.test(offered) || notice?.offered !== offered) return
+    // ONE RECORD PER OFFER: the pool keeps one record per signature, so the
+    // skip is named by this page at THIS address — skipping the same page at
+    // a second address must never replace the first skip.
+    const said = `${host} ${offered}`
+    const item = {
+      sig: await entranceSkipSig(host, offered), scope: ENTRANCE_SKIP_SCOPE,
+      label: `${host} ${offered.slice(0, 12)}`, from: said, deletable: true,
+    }
+    const kept = await conceal(item)
+    if (!kept) {
+      this.#toast('error', 'publish.entrance.skip-failed', 'The version could not be put away. Try again.')
+      return
+    }
+    this.#skippedUpdates.set(said, { host, offered, at: notice.at, head: notice.head, sig: item.sig })
+    this.#entranceUpdates.delete(host)
+    if (!this.#skipped.some(i => i.sig === item.sig)) {
+      this.#skipped = [...this.#skipped, { ...item, state: 'hidden' }]
+    }
+    if (this.#preview?.page === offered) this.#closePreview()
+    this.emitEffect('hidden:refresh', {})
+    this.#toast('info', 'publish.entrance.skipped', 'Skipped — it waits in your put-away list.')
+    this.#paintEntrances()
+    this.#emit()
   }
 
   /** SECURE DELETE — the rare act after "off everywhere": ask each host to
@@ -1080,7 +1520,10 @@ export class PublishStatusDrone extends Drone {
   }
 
   #emit(): void {
-    this.#payload = { ...this.#payload, open: this.#open, rows: this.#rows }
+    this.#payload = {
+      ...this.#payload, open: this.#open, rows: this.#rows,
+      entrancePreview: this.#preview, previewed: [...this.#previewed],
+    }
     this.emitEffect<PublishRenderPayload>('publish:render', this.#payload)
   }
 }
@@ -1089,6 +1532,12 @@ const _publishStatus = new PublishStatusDrone()
 ;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(
   '@diamondcoreprocessor.com/PublishStatusDrone',
   _publishStatus,
+)
+// THE BEE WIRES its dependency (atomic-modules-plan.md): the entrance scout
+// registers nothing itself; this drone shows its notices, so it registers it.
+;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(
+  '@diamondcoreprocessor.com/EntranceScoutService',
+  entranceScout,
 )
 
 /** Every domain a host serves, read from its publications at sign('host:publications'): each door

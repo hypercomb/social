@@ -34,7 +34,7 @@ export class VersionsQueenBee extends QueenBee {
   override examples = [
     { input: '/versions', result: 'Lists the revisions this browser holds, with their signatures' },
     { input: '/versions pull', result: 'Takes the version pools this origin serves into this browser' },
-    { input: '/versions pull jwize.com', result: 'Takes them from another host' },
+    { input: '/versions pull example.com', result: 'Takes them from another host' },
   ]
 
   protected override listens = []

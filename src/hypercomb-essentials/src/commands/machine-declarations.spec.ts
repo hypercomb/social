@@ -30,6 +30,7 @@ const listeners: ((key: string, value: unknown) => void)[] = []
 const ioc = (window as unknown as { ioc: { register(key: string, value: unknown): void; get(key: string): unknown } }).ioc
 
 await import('./slash-behaviour.drone.js')
+await import('../assistant/bridge.queen.js')
 await import('../assistant/file.queen.js')
 await import('../assistant/module.queen.js')
 await import('../clipboard/clipboard.queen.js')
@@ -83,6 +84,10 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   profile: ['additive', 'local'],      // shows only, from the participant's own host; every set
                                        // form and any other host is refused, so nothing is written
                                        // and no host a model names is ever asked
+  // Judged on arrival (2026-10-09, bridge codes).
+  bridge: ['destructive', 'local'],    // a ceiling only: every form is refused (who may reach
+                                       // this machine is the participant's to say); declared so
+                                       // the queen stays awake and the remote door finds `refuse`
 }
 
 describe('every machine declaration, as audited', () => {
@@ -98,6 +103,13 @@ describe('every machine declaration, as audited', () => {
 })
 
 describe('what the corrections refuse', () => {
+  it('/bridge refuses a machine every form, the bare word included', () => {
+    const refuse = declared.get('bridge')!.refuse!
+    for (const line of ['', 'give susan', 'add susan', 'withdraw susan']) {
+      expect(refuse(line), line).toContain('only the participant')
+    }
+  })
+
   it('/module lets a machine look, and nothing else', () => {
     const refuse = declared.get('module')!.refuse!
     expect(refuse('')).toBeUndefined()

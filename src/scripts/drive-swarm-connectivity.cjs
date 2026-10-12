@@ -149,6 +149,10 @@ async function newClient(browser, label, zone = { room: ROOM, secret: SECRET, re
   await ctx.addInitScript(({ room, secret, relay, seed }) => {
     localStorage.setItem('hc:room', room)
     localStorage.setItem('hc:secret', secret)
+    // The pair is THIS tab's own zone too: since D5 a bare join on a tab
+    // with no meeting of its own opens the selector instead of joining the
+    // origin-wide pre-fill. A reload keeps whatever the tab recorded since.
+    if (!sessionStorage.getItem('hc:mesh-zone')) sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room, secret }))
     if (relay) {
       localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([relay]))
       localStorage.setItem('hc:nostrmesh:allow-loopback', '1')

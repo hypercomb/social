@@ -125,10 +125,17 @@ signing key in this order (as of writing):
 
 1. `window.nostr.signEvent` (nip-07 browser extension -- preferred; key never
    enters the app context)
-2. `window.NOSTR_SECRET_KEY` (test / scripted runtime override)
-3. `localStorage['hc:nostr:secret-key']` (persisted per-session key)
-4. otherwise, **mint a fresh random 32-byte key**, persist it to localstorage
+2. `localStorage['hc:nostr:secret-key']` (this device's key)
+3. otherwise, **mint a fresh random 32-byte key**, persist it to localstorage
    (or hold it in memory if localstorage is unavailable), and use that
+
+no page global can name the key (the `window.NOSTR_SECRET_KEY` override is
+gone), and once resolved the key is pinned for the session: a signature is
+always made by the key `getPublicKeyHex` reported, and a key written to storage
+mid-session takes effect on reload. at a sandbox door (`try-<change>.<zone>`,
+core `sandbox-door.ts`) the signer holds, mints and signs nothing — it asks no
+extension and reads no key, the same rule the llm key store keeps. the key
+lives only in this device's storage: never a pool, resource, event or export.
 
 note there is no longer any shared, hardcoded fallback key — earlier builds
 shipped a `FALLBACK_DEV_SECRET_KEY` constant, but the signer now mints a unique
@@ -316,8 +323,8 @@ opfs is the only persistent storage mechanism. security properties:
 - **do not attempt deanonymization.** the system is designed to make
   identity correlation difficult. testing must not attempt to reverse this
   property for other participants.
-- **dev keys are for dev.** scripted overrides (`window.NOSTR_SECRET_KEY`) and
-  any persisted `hc:nostr:secret-key` are for local development only. never use
+- **dev keys are for dev.** a test key seeded into `hc:nostr:secret-key` is
+  for local development only. never use
   a shared or pinned test key to publish to public relays in a context where
   real users might encounter the events.
 - **clean up after tests.** call `EffectBus.clear()` and `stop()` on the

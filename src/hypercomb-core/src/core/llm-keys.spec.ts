@@ -102,3 +102,40 @@ describe('LlmKeyStore', () => {
     expect((events[0] as CustomEvent).detail ?? null).toBeNull()
   })
 })
+
+describe('LlmKeyStore.carriedBy — the provider whose held key some bytes carry', () => {
+  beforeEach(() => localStorage.clear())
+  const KEY = 'sk-proj-' + 'q7'.repeat(16)
+
+  it('names the provider for a string, an ArrayBuffer and a Uint8Array — never the key', () => {
+    const store = new LlmKeyStore()
+    store.set('openai', KEY)
+    const text = `{"note":"pasted ${KEY} here"}`
+    const bytes = new TextEncoder().encode(text)
+    expect(store.carriedBy(text)).toBe('openai')
+    expect(store.carriedBy(bytes)).toBe('openai')
+    expect(store.carriedBy(bytes.buffer as ArrayBuffer)).toBe('openai')
+    expect(store.carriedBy(text)).not.toContain(KEY)
+  })
+
+  it('answers nothing with no key held, for text without the key, or for a signature', () => {
+    const store = new LlmKeyStore()
+    expect(store.carriedBy(`x ${KEY} x`)).toBe('')
+    store.set('openai', KEY)
+    expect(store.carriedBy('{"entries":["monday"]}')).toBe('')
+    expect(store.carriedBy('ab'.repeat(32))).toBe('')
+  })
+
+  it('a placeholder shorter than a key never blocks a write', () => {
+    const store = new LlmKeyStore()
+    store.set('ollama', 'ollama')
+    expect(store.carriedBy('{"model":"ollama"}')).toBe('')
+  })
+
+  it('a cleared key no longer matches', () => {
+    const store = new LlmKeyStore()
+    store.set('openai', KEY)
+    store.clear('openai')
+    expect(store.carriedBy(`x ${KEY} x`)).toBe('')
+  })
+})

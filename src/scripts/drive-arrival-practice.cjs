@@ -172,6 +172,10 @@ async function main() {
     const childView = await markLayerDefault()
     check('behaviors wears a default view', childView !== '', childView)
     await shot('02-marked')
+    // Shut the panel before the legs: while Beehaviors shows, every arrival
+    // holds the hexagons (drive-behaviors-hold-hexagons.cjs proves that half).
+    await page.evaluate(() => window.__hypercombEffectBus?.emit?.('features:viewer-close', {}))
+    await page.waitForTimeout(800)
 
     // ── the practice: marked ⇄ marked ⇄ hexagons ────────────────────────
     await page.evaluate(SAMPLER)

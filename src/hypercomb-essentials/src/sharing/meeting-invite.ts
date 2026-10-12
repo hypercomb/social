@@ -45,8 +45,17 @@ export interface MeetingInviteBundle {
   segments: string[]
   /** Room id (RoomStore). Folds into the channel sig. Required, non-empty. */
   room: string
-  /** Access secret (SecretStore). Folds into the channel sig. Required, non-empty. */
-  secret: string
+  /** Access secret (SecretStore). Folds into the channel sig. ONLY on a
+   *  bundle that never leaves the device (a `#meet=` link parsed in memory)
+   *  or one minted before 2026-10-07 — read, never written. A secret is
+   *  never stored where it can be fetched (jwize, 2026-10-07: "the key can
+   *  never be stored in a pool or public place"). */
+  secret?: string
+  /** What a stored bundle carries instead: `inviteSecretCheck(room, secret)`.
+   *  It names the secret without holding it — a swarm peer, who already holds
+   *  this room's secret, matches it and joins; a link carries the secret in
+   *  its fragment, which no server sees. */
+  secretCheck?: string
   /** Optional display label, shown in the recipient's join prompt. */
   alias?: string
   /** Epoch ms the invite was minted (informational only). */
@@ -66,9 +75,12 @@ export function validateInviteBundle(raw: unknown): MeetingInviteBundle | null {
   const o = raw as Record<string, unknown>
   if (o['kind'] !== MEETING_INVITE_KIND) return null
   const room = o['room']
-  const secret = o['secret']
+  const secretRaw = o['secret']
+  const checkRaw = o['secretCheck']
   if (typeof room !== 'string' || !room.trim()) return null
-  if (typeof secret !== 'string' || !secret.trim()) return null
+  const secret = typeof secretRaw === 'string' && secretRaw.trim() ? secretRaw.trim() : ''
+  const secretCheck = typeof checkRaw === 'string' && /^[0-9a-f]{64}$/.test(checkRaw) ? checkRaw : ''
+  if (!secret && !secretCheck) return null
 
   const rawSegments = o['segments']
   const segments = Array.isArray(rawSegments)
@@ -89,7 +101,8 @@ export function validateInviteBundle(raw: unknown): MeetingInviteBundle | null {
     v,
     segments,
     room: room.trim(),
-    secret: secret.trim(),
+    ...(secret ? { secret } : {}),
+    ...(secretCheck ? { secretCheck } : {}),
     ...(alias ? { alias } : {}),
     ...(createdAt ? { createdAt } : {}),
   }
@@ -97,12 +110,37 @@ export function validateInviteBundle(raw: unknown): MeetingInviteBundle | null {
 
 // ── The meeting link ──────────────────────────────────────────────────
 //
-// `https://<origin>/#meet=<room>/<secret>[/<segment>...]`, each part
-// percent-encoded. It carries the SAME three inputs a bundle does, but in the
-// link itself — so it needs no host, no fetch and no upload before anyone can
-// join: the facilitator types `invite`, the room taps the link. The fragment
-// never reaches a server (browsers do not send it), which keeps the secret
-// exactly as private as the bearer bundle's signature kept it.
+// `https://<origin>/#meet=<room>/<secret>[/<segment>...][&relay=…][&host=…][&code=…]`,
+// each part percent-encoded. It carries the SAME three inputs a bundle does,
+// but in the link itself — so it needs no host, no fetch and no upload before
+// anyone can join: the facilitator types `invite`, the room taps the link.
+// The fragment never reaches a server (browsers do not send it), which keeps
+// the secret exactly as private as the bearer bundle's signature kept it.
+//
+// THE MEETING POINT rides after the place, as `&key=value` pairs — only when
+// the facilitator meets somewhere other than the default:
+//   relay — the meeting point everyone dials, as its full ws(s):// URL (a
+//           path such as /io included). ws:// only to a loopback host. A
+//           bare `pluginthematrix.com` is READ as wss://pluginthematrix.com,
+//           but never WRITTEN that way (below).
+//   host  — the meeting host: where the room's shared tiles go, written as
+//           `https://name.tld`.
+//   code  — the meeting point's access code. It leaves the link only to the
+//           meeting point itself (as the dial's subprotocol); no sheet, toast
+//           or log ever shows it, and without a relay it is dropped.
+// `&` never appears inside a part (every part is percent-encoded), so a link
+// without one reads exactly as it always did — and every link minted before
+// the meeting point keeps its meaning.
+//
+// AN OLDER PACKAGE MUST NOT JOIN THE WRONG PLACE. A parser from before the
+// meeting point splits on '/' alone, so it reads `&relay=…&code=…` as the end
+// of the secret (or of the last page) — a different zone on the default
+// relay, with the code in the page name. What it DOES refuse is a part that
+// decodes to text holding a '/'. So every pair this writes carries one once
+// decoded — the relay as its full `wss://…` URL, the host as `https://…` —
+// and a code only ever rides with a relay. An older package reads any link
+// with a meeting point as malformed and does nothing (meeting-link.spec.ts
+// holds the published parser to that).
 //
 // The shell captures it at boot (hypercomb-shared/core/invite-capture.ts,
 // which mirrors MEET_KEY — keep the two literals in sync), stashing the text
@@ -116,42 +154,194 @@ export const MEET_PREFIX = '#meet='
 
 const MEET_PART_MAX = 512
 const MEET_SEGMENTS_MAX = 64
+const RELAY_MAX = 256
+const CODE_MAX = 128
+
+/** Where a meeting is held, beyond its room — see the link above. */
+export interface MeetingPoint {
+  /** `ws(s)://…`, canonical (see meetingRelayOf). */
+  relay?: string
+  /** A bare host (`name.tld`, or `localhost:port`). */
+  host?: string
+  /** The meeting point's access code. */
+  code?: string
+}
+
+/** A meeting link read back: the place, and where it is held. */
+export type MeetingLink = MeetingInviteBundle & MeetingPoint
+
+/** An access code travels as the WebSocket subprotocol `hc-access.<code>`,
+ *  so it is exactly an HTTP token (RFC 7230 tchar) — what a browser accepts
+ *  there, and nothing a header could be split on. */
+const ACCESS_CODE_RE = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/
+
+/** Is `code` an access code a dial can carry? */
+export function isAccessCode(code: unknown): code is string {
+  return typeof code === 'string' && code.length > 0 && code.length <= CODE_MAX && ACCESS_CODE_RE.test(code)
+}
+
+const LOOPBACK_NAME_RE = /^(?:(?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[::1\])$/
+const DOMAIN_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
+
+/** A meeting point as the canonical `ws(s)://host[:port][/path]` — a bare
+ *  domain is wss:// — or '' when it is not one: credentials, a query or a
+ *  fragment, ws:// to anything but a loopback host, no real host name. */
+export function meetingRelayOf(raw: unknown): string {
+  let text = String(raw ?? '').trim()
+  if (!text || text.length > RELAY_MAX) return ''
+  if (!/^wss?:\/\//i.test(text)) text = `wss://${text}`
+  let url: URL
+  try { url = new URL(text) } catch { return '' }
+  if (url.protocol !== 'wss:' && url.protocol !== 'ws:') return ''
+  if (url.username || url.password || url.search || url.hash) return ''
+  const name = url.hostname.toLowerCase()
+  const loopback = LOOPBACK_NAME_RE.test(name)
+  if (!loopback && !DOMAIN_RE.test(name)) return ''
+  if (url.protocol === 'ws:' && !loopback) return ''
+  const path = url.pathname === '/' ? '' : url.pathname.replace(/\/+$/, '')
+  return `${url.protocol}//${url.host.toLowerCase()}${path}`
+}
+
+/** A meeting host as a bare `name.tld` (a port only on loopback), or ''. */
+export function meetingHostOf(raw: unknown): string {
+  const text = String(raw ?? '').trim().toLowerCase()
+    .replace(/^(?:wss?|https?):\/\//, '').replace(/\/.*$/, '')
+  if (!text || text.length > 253) return ''
+  const port = /:(\d{1,5})$/.exec(text)
+  const name = port ? text.slice(0, port.index) : text
+  if (LOOPBACK_NAME_RE.test(name)) return port && Number(port[1]) > 0 && Number(port[1]) < 65536 ? text : name
+  return !port && DOMAIN_RE.test(name) ? name : ''
+}
+
+/** The domain a meeting point's relay is on — the host it keeps tiles at by
+ *  default. */
+export function relayDomainOf(relay: string): string {
+  try { return meetingHostOf(new URL(relay).host) } catch { return '' }
+}
+
+// A LINK SURVIVES THE CHAT IT IS PASTED INTO. A chat app's linkifier trims
+// what looks like sentence punctuation off the END of a link (GFM drops a
+// trailing ? ! . , : * _ ~ and an unbalanced ')'), and a sentence leaves its
+// own '.', ')' or ',' stuck to it. The secret is often the last thing in the
+// link, so either way it changed — silently, into a zone of one. So a link
+// is minted STRICTLY: every character but a letter or a digit is %XX, which
+// decodeURIComponent (and so every older reader) reads back as the same text,
+// and a minted link never ENDS in raw punctuation. Reading, whatever raw
+// punctuation sits at the end is not the link's (trimLinkTail).
+
+/** Percent-encode one link part strictly: encodeURIComponent leaves
+ *  ! ' ( ) * . _ ~ - raw; here they are %XX too. */
+const strictPart = (text: string): string =>
+  encodeURIComponent(text).replace(/[!'()*._~-]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+
+/** Raw punctuation a link picked up at its END — never the link's own: a
+ *  strictly minted link carries none of it raw, and encodeURIComponent never
+ *  left , ; : ? ] } > " raw in any link. A ')' only when unbalanced, so an
+ *  old link with a raw `(2)` in it keeps it. Never _ * ~ — sentences do not
+ *  leave them, and a code or secret minted before 2026-10-10 may end in one
+ *  raw (base64url ends in '_'). MIRRORED in the shell's
+ *  invite-capture.ts (trimLinkTail) — invite-capture.robust.spec.ts holds
+ *  the two to the same answers. */
+export function trimLinkTail(text: string): string {
+  let body = text
+  for (;;) {
+    let next = body.replace(/[.,;:!?'"\]}>]+$/, '')
+    if (next.endsWith(')') && (next.match(/\(/g)?.length ?? 0) < (next.match(/\)/g)?.length ?? 0)) next = next.slice(0, -1)
+    if (next === body) return body
+    body = next
+  }
+}
 
 /** The link's fragment for (room, secret, segments) — the caller prefixes
- *  its own origin. Every part is percent-encoded, so a slash, a space or a
- *  non-Latin letter in a room survives the round trip unchanged. */
-export function meetFragment(room: string, secret: string, segments: readonly string[]): string {
-  return MEET_PREFIX + [room, secret, ...segments].map(s => encodeURIComponent(s)).join('/')
+ *  its own origin. Every part is strictly percent-encoded (above), so a
+ *  slash, a space, punctuation or a non-Latin letter in a room survives the
+ *  round trip unchanged. A meeting point rides after it (see above); one not
+ *  valid is left out. */
+export function meetFragment(room: string, secret: string, segments: readonly string[], point?: MeetingPoint): string {
+  const place = MEET_PREFIX + [room, secret, ...segments].map(strictPart).join('/')
+  const pairs: string[] = []
+  const relay = meetingRelayOf(point?.relay)
+  // Always the full URL, and the host with its scheme: each decodes to text
+  // with a '/', which an older parser refuses (see above) — never shortened.
+  if (relay) pairs.push(`relay=${strictPart(relay)}`)
+  const host = meetingHostOf(point?.host)
+  if (host) pairs.push(`host=${strictPart(`https://${host}`)}`)
+  // A code is for its meeting point alone — never sent to the default relay.
+  if (relay && isAccessCode(point?.code)) pairs.push(`code=${strictPart(point!.code!)}`)
+  return pairs.length ? `${place}&${pairs.join('&')}` : place
 }
 
 /** Read a stashed meeting fragment (with or without its `#meet=` prefix)
- *  back into a joinable bundle. A malformed fragment — a bad escape, a
- *  missing room or secret, a part carrying a slash, an absurd length — is
- *  null, and the caller ignores it. Never throws. */
-export function parseMeet(raw: string): MeetingInviteBundle | null {
+ *  back into a joinable link. Punctuation stuck to its end is not the
+ *  link's (trimLinkTail). A malformed fragment — a bad escape, a missing
+ *  room or secret, a page carrying a slash, an absurd page, a meeting point
+ *  that is not one — is null, and the caller says so. Never throws.
+ *
+ *  The room and secret are free text: a '/' typed into one was encoded, and
+ *  the place is split BEFORE decoding, so it can never add a page. Only a
+ *  page must be one path component. (A package from before 2026-10-10
+ *  refuses a slash in the room or secret too — such a link waits for the
+ *  newer package; the shell's fallback, invite-capture.ts, says so.) */
+export function parseMeet(raw: string): MeetingLink | null {
   let body = String(raw ?? '').trim()
   if (body.startsWith(MEET_PREFIX)) body = body.slice(MEET_PREFIX.length)
   else if (body.startsWith('meet=')) body = body.slice('meet='.length)
   // Some other fragment altogether (`#other=…`) is not a meeting link.
   if (!body || body.startsWith('#')) return null
-  const encoded = body.split('/')
+  body = trimLinkTail(body)
+  const amp = body.indexOf('&')
+  const placeText = amp < 0 ? body : body.slice(0, amp)
+  const point = amp < 0 ? {} : parsePoint(body.slice(amp + 1))
+  if (!point) return null
+  const encoded = placeText.split('/')
   if (encoded.length < 2 || encoded.length > MEET_SEGMENTS_MAX + 2) return null
   const parts: string[] = []
-  for (const e of encoded) {
+  for (const [i, e] of encoded.entries()) {
     let part: string
     try { part = decodeURIComponent(e) } catch { return null }
-    if (part.length > MEET_PART_MAX || SLASH_RE.test(part)) return null
+    if (i >= 2 && (part.length > MEET_PART_MAX || SLASH_RE.test(part))) return null
     parts.push(part)
   }
   const [room, secret, ...rest] = parts
   if (!room.trim() || !secret.trim()) return null
-  return validateInviteBundle({
+  const bundle = validateInviteBundle({
     kind: MEETING_INVITE_KIND,
     v: MEETING_INVITE_VERSION,
     segments: rest.filter(s => s.trim().length > 0),
     room,
     secret,
   })
+  return bundle ? { ...bundle, ...point } : null
+}
+
+/** `relay=…&host=…&code=…` → a meeting point; null when a named value is
+ *  not valid (a link that names a meeting point it cannot reach must not
+ *  quietly join the default one instead). Unknown keys are ignored, the
+ *  first of a repeated key wins. */
+function parsePoint(text: string): MeetingPoint | null {
+  const point: MeetingPoint = {}
+  for (const pair of text.split('&')) {
+    if (!pair) continue
+    const eq = pair.indexOf('=')
+    const key = eq < 0 ? pair : pair.slice(0, eq)
+    let value: string
+    try { value = decodeURIComponent(eq < 0 ? '' : pair.slice(eq + 1)) } catch { return null }
+    if (key === 'relay' && point.relay === undefined) {
+      const relay = meetingRelayOf(value)
+      if (!relay) return null
+      point.relay = relay
+    } else if (key === 'host' && point.host === undefined) {
+      const host = meetingHostOf(value)
+      if (!host) return null
+      point.host = host
+    } else if (key === 'code' && point.code === undefined) {
+      if (!isAccessCode(value)) return null
+      point.code = value
+    }
+  }
+  // A code is for its meeting point alone: with none named, it goes nowhere.
+  if (point.code !== undefined && point.relay === undefined) delete point.code
+  return point
 }
 
 // ── Tile-borne invites ────────────────────────────────────────────────
@@ -181,9 +371,42 @@ export function encodeInviteBundle(b: MeetingInviteBundle): Blob {
     v: b.v,
     segments: b.segments,
     room: b.room,
-    secret: b.secret,
+    // Never the secret: these bytes go to a host (see `secret` above).
+    ...(b.secretCheck ? { secretCheck: b.secretCheck } : {}),
     ...(b.alias ? { alias: b.alias } : {}),
     ...(b.createdAt ? { createdAt: b.createdAt } : {}),
   }
   return new Blob([JSON.stringify(ordered)], { type: 'application/json' })
 }
+
+/** The check a stored invite carries in place of its secret: SHA-256 of a
+ *  fixed label, the room and the secret. It names the secret without holding
+ *  it. */
+export async function inviteSecretCheck(room: string, secret: string): Promise<string> {
+  const bytes = new TextEncoder().encode(`hypercomb:invite\0${room}\0${secret}`)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** The secret an invite opens with, or null: the bundle's own (a meeting
+ *  link, or a bundle minted before 2026-10-07), else the first candidate —
+ *  the link's fragment, then the secret the participant already holds —
+ *  that matches the bundle's check. */
+export async function resolveInviteSecret(
+  bundle: MeetingInviteBundle,
+  candidates: readonly (string | null | undefined)[],
+): Promise<string | null> {
+  if (bundle.secret) return bundle.secret
+  if (!bundle.secretCheck) return null
+  for (const candidate of candidates) {
+    const secret = String(candidate ?? '').trim()
+    if (secret && await inviteSecretCheck(bundle.room, secret) === bundle.secretCheck) return secret
+  }
+  return null
+}
+
+/** The fragment an invite link carries its secret in — `/<sig>#invite-secret=…`.
+ *  A fragment never reaches a server. Captured at boot (shell
+ *  invite-capture.ts) under PENDING_INVITE_SECRET_KEY. */
+export const INVITE_SECRET_PREFIX = '#invite-secret='
+export const PENDING_INVITE_SECRET_KEY = 'hc:pending-invite-secret'

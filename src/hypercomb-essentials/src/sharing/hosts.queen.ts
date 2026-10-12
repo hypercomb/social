@@ -19,15 +19,21 @@
 //                                   for every zone you operate on that host
 //   hosts builders add <pubkey> [@<host>]     name one (hypercomb-relay/build-asks.js)
 //   hosts builders remove <pubkey> [@<host>]  stop naming it
+//   hosts welcome <zone> <title> [| <tagline>] [@<host>]
+//                                   what a front door calls itself: a signed
+//                                   card in the pool sign('welcome:<zone>')
+//                                   (host-welcome.ts) — a link to the zone
+//                                   previews under this title
 //
 // With no @<host>, the words speak to your public content host.
 
 import { EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { buildersOf, fetchHiveIndex, listedOf, setHostBuilders, setHostListing } from './hive-pointer.js'
+import { publishWelcome, welcomeZone } from './host-welcome.js'
 
 const SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 const SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
-const WORDS = ['list', 'unlist', 'listed', 'builders']
+const WORDS = ['list', 'unlist', 'listed', 'builders', 'welcome']
 
 type SyncLike = { publicHostDomain?: () => string }
 type SignerLike = { getPublicKeyHex?: () => Promise<string | null> }
@@ -43,7 +49,7 @@ export class HostsQueenBee {
   readonly description =
     'Open your host directory — add or remove a host, inspect its packages, and add one to your hive. Publish uses this directory for branch destinations.'
   readonly descriptionKey = 'slash.hosts'
-  readonly options = ['list <meaning> [@<host>]', 'unlist <meaning> [@<host>]', 'listed [@<host>]', 'builders [add|remove <pubkey>] [@<host>]']
+  readonly options = ['list <meaning> [@<host>]', 'unlist <meaning> [@<host>]', 'listed [@<host>]', 'builders [add|remove <pubkey>] [@<host>]', 'welcome <zone> <title> [| <tagline>] [@<host>]']
 
   slashComplete(args: string): readonly string[] {
     const q = args.toLowerCase().trim()
@@ -58,6 +64,17 @@ export class HostsQueenBee {
     const host = parts.find(p => p.startsWith('@'))?.slice(1)
       || String(get<SyncLike>(SYNC_KEY)?.publicHostDomain?.() ?? '').trim().toLowerCase()
     if (!host) { toast(t('hosts.nohost', 'No public host is configured — add one in hosts, or say @<host>.'), 'warning'); return }
+
+    if (word === 'welcome') {
+      const rest = parts.slice(1).filter(p => !p.startsWith('@'))
+      const zone = welcomeZone(rest[0])
+      const [title = '', tagline = ''] = rest.slice(1).join(' ').split('|').map(part => part.trim())
+      if (!zone || !title) { toast(t('hosts.welcomesay', 'Say hosts welcome <zone> <title> | <tagline>, such as hosts welcome example.com Example | What it is.'), 'warning'); return }
+      const done = await publishWelcome(host, zone, title, tagline)
+      if (!done.ok) { toast(t('hosts.welcomefailed', 'The card for {zone} was not published: {reason}', { zone, reason: done.reason }), 'warning'); return }
+      toast(t('hosts.welcomed', '{zone} now goes by "{title}".', { zone, title }), 'success')
+      return
+    }
 
     if (word === 'listed') {
       const pubkey = String(await get<SignerLike>(SIGNER_KEY)?.getPublicKeyHex?.().catch(() => null) ?? '').toLowerCase()

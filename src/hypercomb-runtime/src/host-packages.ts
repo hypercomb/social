@@ -22,12 +22,14 @@
 // not. Everything a pool names is content-addressed and verified on admission,
 // so a hostile or hijacked host can offer you a different tree but never wrong
 // bytes. Binding "current" to a publisher identity is the signed sentinel's
-// job, not this file's.
+// job, never a pool's — its reader sits at the end of this file (the followed
+// channel), with the verifier injected by the shell.
 //
 // It reads nothing but public URLs and writes nothing anywhere.
 
 import { HOST_IOC_KEY, registerPoolMeaning, type HostProvider } from '@hypercomb/core'
 import { HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from './host-pool.js'
+import { DEFAULT_HOST_ZONES, hostZone } from './host-zones.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -392,6 +394,181 @@ const rowsFrom = async (
 
   const rows = await Promise.all(indices.map(async i => rowFrom(zone, found.base, await found.read(i), i)))
   return rows.filter((row): row is HostPackage => row !== null)
+}
+
+// ── the followed channel ────────────────────────────────────────────────────
+//
+// A POOL SAYS WHAT A DOMAIN HOLDS, NOT WHAT ITS PUBLISHER CALLS CURRENT.
+//
+// A cold shell used to take the newest member of the seed's packages pool, and
+// that pool only moves when somebody restages the host. From 2026-09-30 to
+// 2026-10-09 hypercomb.com's pool held one member, a Sep 30 package, while the
+// publisher's signed `install:essentials` named a newer one — so every fresh
+// install for those ten days got a build that dropped meeting links, shared
+// nothing until a host was set, and went silent whenever a second tab booted.
+//
+// The publisher's signed index is the one record that says "current": the
+// update scout reads it (essentials sharing/update-scout.service.ts) and every
+// publish advances it. A first install reads the same index, verified against
+// the same pinned key, and takes the root it names. The pool stays the byte
+// source and the fallback for when the index cannot be read.
+//
+// Verification is INJECTED: core has no schnorr and runtime adds no
+// dependency, so the shell passes its verifier in (core host-offerings.ts uses
+// the same seam).
+
+const HIVE_INDEXES_MEANING = 'hive:indexes'
+const HIVE_INDEX_KIND = 30564
+
+/** The participant's own follow record. MIRRORED from essentials
+ *  sharing/update-scout.service.ts (a module never imports runtime) — the
+ *  scout and a cold install must read the same record the same way:
+ *  absent → the publisher the shell names; 'off' → follow nobody;
+ *  `{"pubkey","hosts"?,"channel"?}` → that publisher. */
+export const INSTALL_FOLLOW_KEY = 'hc:install-follow'
+
+export type InstallFollow = { pubkey: string; hosts: string[]; channel: string }
+
+/** Schnorr check of one index event — the shell's, injected. */
+export type VerifyIndexEvent = (event: Record<string, unknown>) => boolean | Promise<boolean>
+
+export type ChannelRead =
+  /** A verified index names a root for the channel. */
+  | { state: 'named'; packageSig: string; zone: string; createdAt: number }
+  /** A verified index names nothing for the channel. */
+  | { state: 'unnamed'; zone: string }
+  /** A door served an index that is not the pinned publisher's, and no door
+   *  served one that is. A host substituting the index is not a host to take
+   *  a package from either. */
+  | { state: 'forged'; door: string }
+  /** No door served a readable index: offline, never published, a page where
+   *  the index belongs. Nothing was asserted. */
+  | { state: 'unreachable' }
+  /** Nobody is followed (`hc:install-follow` = 'off', or no publisher key). */
+  | { state: 'unfollowed' }
+
+const parseFollow = (value: unknown): InstallFollow | null => {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const pubkey = String(record['pubkey'] ?? '').trim().toLowerCase()
+  if (!SIG_RE.test(pubkey)) return null
+  const hosts = Array.isArray(record['hosts'])
+    ? [...new Set((record['hosts'] as unknown[]).map(hostZone).filter(Boolean))]
+    : []
+  const channel = String(record['channel'] ?? '').trim().toLowerCase() || 'essentials'
+  // A follow that names no host follows the public install's one host.
+  return { pubkey, hosts: hosts.length ? hosts : [...DEFAULT_HOST_ZONES], channel }
+}
+
+/** The participant's record, else the publisher the shell names. A malformed
+ *  record is no follow — never a fall-through to the shell's publisher. */
+export const readInstallFollow = (
+  storage: Pick<Storage, 'getItem'> | null | undefined,
+  publisher: unknown,
+): InstallFollow | null => {
+  let raw: string | null
+  try { raw = storage?.getItem(INSTALL_FOLLOW_KEY) ?? null } catch { return null }
+  if (!raw) return parseFollow(publisher)
+  if (raw.trim() === 'off') return null
+  try { return parseFollow(JSON.parse(raw)) } catch { return null }
+}
+
+/** Where an index is read: each zone root, then the retired `content.<zone>`
+ *  faces (essentials zone-door.ts readDoorsOf — same order, same reason: a
+ *  zone whose apex is a static site still answers on its content face). */
+export const indexDoors = (hosts: readonly string[]): string[] => {
+  const roots = [...new Set(hosts.map(hostZone).filter(Boolean))]
+  const faces = roots.filter(zone => !isLoopback(zone) && zone.includes('.')).map(zone => `content.${zone}`)
+  return [...roots, ...faces.filter(face => !roots.includes(face))]
+}
+
+const fetchIndexEvent = async (url: string): Promise<Record<string, unknown> | null> => {
+  try {
+    const res = await fetch(url, { cache: 'no-store' })
+    if (!res.ok) return null
+    const parsed = JSON.parse(await res.text()) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null
+  } catch { return null }
+}
+
+/** One event, checked as essentials hive-pointer.ts checks it: the declared
+ *  key must be the pinned one AND the signature must verify — either failing
+ *  is substitution. A wrong kind or unreadable roots is not an index at all. */
+const verifiedRoots = async (
+  event: Record<string, unknown>,
+  pubkey: string,
+  verify: VerifyIndexEvent,
+): Promise<{ roots: Record<string, string>; createdAt: number } | 'forged' | null> => {
+  if (Number(event['kind']) !== HIVE_INDEX_KIND) return null
+  if (String(event['pubkey'] ?? '').toLowerCase() !== pubkey) return 'forged'
+  try { if (!(await verify(event))) return 'forged' } catch { return 'forged' }
+  let content: unknown
+  try { content = JSON.parse(String(event['content'] ?? '')) } catch { return null }
+  const raw = (content as { roots?: unknown } | null)?.roots
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const roots: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const sig = String(value ?? '').trim().toLowerCase()
+    if (!key.trim() || !SIG_RE.test(sig)) return null
+    roots[key] = sig
+  }
+  return { roots, createdAt: Number(event['created_at'] ?? 0) || 0 }
+}
+
+/**
+ * WHAT THE FOLLOWED PUBLISHER CALLS CURRENT — `install:<channel>` in their
+ * signed index, read from the follow's hosts. The first door whose index
+ * verifies answers; the signature makes order a matter of latency, never of
+ * trust. Never throws.
+ */
+export const readInstallChannel = async (
+  follow: InstallFollow | null,
+  verify: VerifyIndexEvent,
+): Promise<ChannelRead> => {
+  if (!follow) return { state: 'unfollowed' }
+  let pool: string
+  try { pool = await registerPoolMeaning(HIVE_INDEXES_MEANING) } catch { return { state: 'unreachable' } }
+  let forged: string | null = null
+  for (const door of indexDoors(follow.hosts)) {
+    const event = await fetchIndexEvent(`${isLoopback(door) ? 'http' : 'https'}://${door}/${pool}/${follow.pubkey}`)
+    if (!event) continue
+    const read = await verifiedRoots(event, follow.pubkey, verify)
+    if (read === 'forged') { forged ??= door; continue }
+    if (!read) continue
+    const zone = hostZone(door)
+    const packageSig = read.roots[`install:${follow.channel}`]
+    return packageSig
+      ? { state: 'named', packageSig, zone, createdAt: read.createdAt }
+      : { state: 'unnamed', zone }
+  }
+  return forged ? { state: 'forged', door: forged } : { state: 'unreachable' }
+}
+
+export type InstallCandidate = { packageSig: string; zone: string; via: 'channel' | 'pool' }
+
+/**
+ * THE ORDER A SHELL WITH NOTHING TO PROTECT TRIES PACKAGES IN — pure.
+ *
+ * The signed channel's root first. The seed pool's head after it, when it
+ * differs, because a root the publisher named may not have reached the seed
+ * yet (a publish advances the index at once; the host is restaged by hand) —
+ * and an older build that runs beats a welcome card that cannot install
+ * anything. The scout then offers the named root as an update.
+ *
+ * A forged index refuses BOTH: the door that substituted the index is the
+ * door whose pool would be taken.
+ */
+export const installCandidates = (
+  channel: ChannelRead,
+  pool: { packageSig: string; zone: string } | null,
+): { candidates: InstallCandidate[]; refused?: string } => {
+  if (channel.state === 'forged') {
+    return { candidates: [], refused: `${channel.door} served an install index that is not the followed publisher's — refused` }
+  }
+  const fromPool: InstallCandidate[] = pool ? [{ packageSig: pool.packageSig, zone: pool.zone, via: 'pool' }] : []
+  if (channel.state !== 'named') return { candidates: fromPool }
+  const named: InstallCandidate = { packageSig: channel.packageSig, zone: channel.zone, via: 'channel' }
+  return { candidates: [named, ...fromPool.filter(c => c.packageSig !== named.packageSig)] }
 }
 
 // ── the port ────────────────────────────────────────────────────────────────

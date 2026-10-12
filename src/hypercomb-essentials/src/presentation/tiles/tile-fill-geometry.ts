@@ -90,6 +90,9 @@ export interface TileLook {
   /** The label's UV; `ownPage` allows the pending-name stand-in for a tile still being added. */
   labelUV(label: string, ownPage: boolean): UV
   hidesName(hideText: boolean | undefined, hasImage: boolean): boolean
+  /** An oversized layer's out-of-view tile holding no label slot: drawn
+   *  without baked text, never claiming a slot (tile-label-view.ts). */
+  unbaked(label: string): boolean
   /** Greyed: hidden and show-hidden is on, or a switched-off launcher member. */
   isHiddenItem(label: string): boolean
   isDormant(label: string): boolean
@@ -218,7 +221,10 @@ foreign?: { portals: ReadonlySet<string>; reveal: string | null },
     // rebuild mid-hover does not blink the text back off, and TEXT-ONLY mode
     // exempts every tile (#hidesName): with no image drawn there is nothing
     // to hide behind, so a hidden name comes back for as long as the mode is on.
-    const ruv = (look.hidesName(c.hideText, !!imgUV) && c.label !== revealLabel)
+    // An oversized layer's out-of-view tile never claims a slot here: it
+    // reads the one it already holds, or none. Baking it would take a slot
+    // from another out-of-view tile — every pass, for every such tile.
+    const ruv = (look.hidesName(c.hideText, !!imgUV) && c.label !== revealLabel) || (!foreign && look.unbaked(c.label))
       ? { u0: 0, v0: 0, u1: 0, v1: 0 }
       : look.labelUV(c.label, !foreign)
     for (let i = 0; i < 4; i++) {

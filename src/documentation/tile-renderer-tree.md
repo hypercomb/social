@@ -32,15 +32,21 @@ show-cell                          the render pass: synchronize → member names
 │                                           Painting the shade stays with the renderer.
 ├── faces           ✓ tile-faces.ts         what each tile shows: its picture and its properties' facts (border,
 │                                           tags, link, substrate, hidden name), cached by label per location;
-│                                           host fills detached, never awaited; a peer's tile from its projection
+│                                           host fills detached, eight at a time, never awaited; a peer's tile
+│                                           from its projection
 ├── fill geometry   ✓ tile-fill-geometry.ts the tiles as the GPU draws them: one quad per tile and every
 │                                           attribute the hex shader reads, asked of the renderer's look;
 │                                           pure — and the key that says when a bake is stale
+├── label view      ✓ tile-label-view.ts    a page with more names than label slots: pin and bake only the
+│                                           tiles in view and a ring; a settled gesture brings the rest in
+├── evictions       ✓ tile-evictions.ts     an atlas slot reused under a tile on screen: repaint, bounded, and
+│                                           hand the victim to readiness's repair
 ├── dive            ✓ tile-dive.ts          another layer's tiles painted in place of this page's, through the
 │                                           page's own shader and packer; the page hidden, never torn down, given
 │                                           back; its names announced for the DOM name layer (tile-name.drone.ts)
 ├── previews        ✓ tile-previews.ts      looks not yet true: the marks' carriers (hover ANY, in hand or dragged
-│                                           ALL) and the tile editor's edit, painted in place, never persisted
+│                                           ALL), a hovered publish group's members, and the tile editor's edit,
+│                                           painted in place, never persisted
 ├── hover           ✓ tile-hover.ts         the tile under the pointer, as one: its hidden name revealed, its band
 │                                           as tall as its menu, its cell lit, its shade lifted (single-cell writes)
 └── landing         ✓ tile-landing.ts       quiet landing: a background write lands as truth, the paint waits —

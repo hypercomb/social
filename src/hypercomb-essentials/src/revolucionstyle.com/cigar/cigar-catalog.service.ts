@@ -1,13 +1,24 @@
 // revolucionstyle.com/cigar/cigar-catalog.service.ts
 import type { Cigar } from '../journal/journal-entry.js'
 import { cigarKey } from './cigar.js'
+import { ParticipantDocument } from '../../preferences/participant-document.js'
 
 type Store = {
   putResource: (blob: Blob) => Promise<string>
   getResource: (sig: string) => Promise<Blob | null>
 }
 
-const INDEX_KEY = 'hc:cigar-catalog-index'
+// The catalog index (cigar key -> the signature of its record) is the
+// participant's own: each cigar they add is a save, so every version is kept.
+// The old `hc:cigar-catalog-index` key is read once, as a fallback.
+export const CIGAR_CATALOG_MEANING = 'cigars:catalog'
+let indexDocument: ParticipantDocument<Record<string, string>> | null = null
+const indexDoc = (): ParticipantDocument<Record<string, string>> => indexDocument ??= new ParticipantDocument<Record<string, string>>({
+  meaning: CIGAR_CATALOG_MEANING,
+  legacyKey: 'hc:cigar-catalog-index',
+  empty: {},
+  parse: raw => raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, string> : null,
+})
 
 export class CigarCatalogService extends EventTarget {
 
@@ -27,7 +38,7 @@ export class CigarCatalogService extends EventTarget {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     if (!store) return
 
-    const index = this.#readIndex()
+    const index = await this.#readIndex()
 
     for (const [key, sig] of Object.entries(index)) {
       try {
@@ -90,12 +101,12 @@ export class CigarCatalogService extends EventTarget {
 
   // ── internal ───────────────────────────────────────────────────
 
-  #readIndex(): Record<string, string> {
-    try {
-      return JSON.parse(localStorage.getItem(INDEX_KEY) ?? '{}')
-    } catch {
-      return {}
-    }
+  /** The index as the pool holds it — waits for the pool to answer first, so a
+   *  load never settles for the first-frame fallback when the pool has more. */
+  async #readIndex(): Promise<Record<string, string>> {
+    const doc = indexDoc()
+    if (!doc.hydrated) await new Promise<void>(resolve => doc.addEventListener('hydrated', () => resolve(), { once: true }))
+    return doc.value
   }
 
   #persistIndex(): void {
@@ -103,7 +114,7 @@ export class CigarCatalogService extends EventTarget {
     for (const [key, { sig }] of this.#cache) {
       index[key] = sig
     }
-    localStorage.setItem(INDEX_KEY, JSON.stringify(index))
+    indexDoc().write(index)
   }
 
   #emit(): void {

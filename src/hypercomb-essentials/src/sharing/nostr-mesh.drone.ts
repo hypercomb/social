@@ -1,9 +1,11 @@
 // nostr/nostr-mesh.drone.ts
 //
-// Live bootstrap relay (wss://jwize.com) shipped 2026-05-29; default-ON
-// for real hosts since 2026-06-10 (see LIVE_RELAY notes below). Local
-// origins seed the loopback dev relay instead; hc:nostrmesh:use-live-relay
-// ('1'/'0') and hc:nostrmesh:relays override.
+// Live bootstrap relay shipped 2026-05-29; default-ON for real hosts since
+// 2026-06-10 (see LIVE_RELAY notes below). Since 2026-10-11 it is
+// wss://hypercomb.com, the always-online meeting point, open (it was
+// wss://jwize.com, a home machine). Local origins seed the loopback dev
+// relay instead; hc:nostrmesh:use-live-relay ('1'/'0') and
+// hc:nostrmesh:relays override.
 import { Drone } from '@hypercomb/core'
 import { isJoinedHere } from './membership.js'
 
@@ -24,7 +26,16 @@ const LOCAL_RELAY = 'ws://localhost:7777'
 //   localStorage['hc:nostrmesh:use-live-relay'] = '0'   opt out (real host
 //                                                       idles, no loopback)
 //   localStorage['hc:nostrmesh:relays']        = '[…]'  manual override, wins
-const LIVE_RELAY = 'wss://jwize.com'
+//
+// THE ALWAYS-ONLINE MEETING POINT (jwize, 2026-10-11: "we can't rely on my
+// computer being on that is ridiculous for my setup" → "yes, open default on
+// hypercomb.com, go ahead"). A Durable Object behind the hypercomb.com apex
+// (hypercomb-relay/meet-worker), OPEN: no access code, ever (D8 — packages
+// from before the access ladder would redial a coded default 13 times a
+// minute). The public install names only hypercomb.com. Packages from before
+// this change keep dialing wss://jwize.com until they update; an operator can
+// still name any relay (hc:nostrmesh:relays, /domain, a meeting link).
+const LIVE_RELAY = 'wss://hypercomb.com'
 
 // Force the literal into the bundle via a globalThis assignment.
 // esbuild treats global property writes as side effects and will not
@@ -60,6 +71,14 @@ type MeshSub = { close: () => void }
 //
 // closedN — consecutive CLOSED refusals; the retry waits 1 s · 2^n (cap 30 s)
 // and an EOSE resets it.
+//
+// lease — a bucket opened with NO consumer (ensureStartedForSig,
+// awaitReadyForSig: "warm the cache for this sig") is a LEASE: it closes when
+// it settles — the relay's EOSE, or its deadline — unless a consumer joined
+// meanwhile (a join ends the lease; the last consumer leaving closes it as
+// always). Before 2026-10-10 nothing ever closed one: a sharer answering
+// drills leaked one relay subscription per page a peer walked into, and at
+// the relay's cap (200) every new page was refused.
 type Bucket = {
   sig: string
   subId: string
@@ -68,6 +87,11 @@ type Bucket = {
   seen: Set<string>
   closedN: number
   retryTimer?: ReturnType<typeof setTimeout>
+  lease?: ReturnType<typeof setTimeout>
+  leaseUntilMs?: number
+  // a lease's REQ held back for the budget (sendReq): a consumer that joins
+  // it asks at once
+  reqDeferred?: boolean
 }
 
 // An EVENT frame on its way to the relays. slot is kind\0d for the
@@ -75,7 +99,11 @@ type Bucket = {
 // event per key, so a newer publish to it supersedes any older frame still
 // queued or awaiting its OK. exp is the frame's NIP-40 expiration in relay
 // seconds; queuedAtMs is when the frame first entered the mesh (its TTL).
-type Outbound = { frame: string; id: string; kind: number; slot?: string; exp?: number; createdAt: number; queuedAtMs: number }
+// `slot` is the relay's replaceable slot (kind\0d). `lane` is that slot AT
+// its address (slot\0x): what a newer frame may supersede while it waits. A
+// {left} in one room and the {alive} in the next share a slot but not a
+// lane — the {left} is for the old room's listeners and must still go out.
+type Outbound = { frame: string; id: string; kind: number; slot?: string; lane?: string; exp?: number; createdAt: number; queuedAtMs: number }
 // An EVENT sent on one relay's socket and not yet answered with an OK.
 type Inflight = Outbound & { relay: string; sentAtMs: number; attempts: number; timer?: ReturnType<typeof setTimeout> }
 // What the watchdog knows about one socket. openedAtMs/healthy: the socket
@@ -83,9 +111,18 @@ type Inflight = Outbound & { relay: string; sentAtMs: number; attempts: number; 
 // starts again from 0. buffered/bufferedMovedMs: the last bufferedAmount seen
 // and when it last went down. suspectAtMs: the probe deadline passed and a
 // replacement is being dialled while this socket keeps its place.
+// admitted: the socket may be announced as open — at once for a plain dial;
+// for one that offered an access code, or one to a relay that has already
+// refused this tab (close 4401), only once the relay has said anything on it
+// (a meeting point that refuses closes before its first frame).
+// code: the access code this socket offered ('' = none).
+// tokens/tokensAtMs: the relay's per-connection send budget, mirrored (see
+// SEND_BURST). eventsOut: EVENTs sent on this socket (the clock card asks).
 type Liveness = {
   createdAtMs: number; connectTimeoutMs: number; lastInboundMs: number; probeSentAtMs: number; probeDeadlineMs: number
   openedAtMs: number; healthy: boolean; buffered: number; bufferedMovedMs: number; suspectAtMs: number
+  admitted: boolean; code: string
+  tokens: number; tokensAtMs: number; eventsOut: number
 }
 
 /** The mesh's connection, announced as `mesh:connection` on every
@@ -100,8 +137,11 @@ type Liveness = {
  *  the same socket, a refusal set or cleared, a clock card) carries false: it
  *  is an edge, never a level, or a slow probe would replay the whole room.
  *  refused names a standing
- *  relay refusal: 'clock' (created_at too far in the future) or
- *  'subscriptions' (too many subscriptions). */
+ *  relay refusal: 'clock' (created_at too far in the future),
+ *  'subscriptions' (too many subscriptions), 'access' (the meeting point
+ *  closed 4401: this tab's access code is not its current one) or
+ *  'unreachable' (this tab is joined at a meeting point this page may not
+ *  dial — a loopback one from a real host — so it meets nowhere). */
 export type MeshConnectionState = 'connecting' | 'open' | 'stalled' | 'retrying' | 'offline'
 export type MeshConnection = { state: MeshConnectionState; reopened: boolean; since: number; attempt: number; clockOffsetMs: number; refused?: string }
 
@@ -116,9 +156,27 @@ export type MeshConnection = { state: MeshConnectionState; reopened: boolean; si
 //   - an EVENT left without its OK for 5 s, with nothing heard since it went
 //     out, triggers the same probe (never a kill outright);
 //   - nothing is judged while bytes queued on the device are still draining
-//     (bufferedAmount going down) or on a tick that ran more than 1 s late —
-//     silence then proves nothing. A buffer that has not gone down for 15 s
-//     is a path that stopped taking bytes, and is judged like any other;
+//     (bufferedAmount going down) — silence then proves nothing. A buffer
+//     that has not gone down for 15 s is a path that stopped taking bytes,
+//     and is judged like any other;
+//   - A LATE TICK STILL SENDS (2026-10-10). A tick more than 1.5 s late may
+//     have frames waiting unread behind a blocked main thread, so it judges
+//     no deadline — but it still sends the idle or unacked probe (one frame
+//     on the socket it has; it can kill nothing). In a hidden tab, a late
+//     tick whose predecessor ran late too is a THROTTLED timer, not a
+//     blocked thread (Chrome lines a tab hidden 5 minutes up to the minute):
+//     a whole timer cycle has passed since the probe went out, every frame
+//     queued then has been read, and it judges as usual. The first tick
+//     after a resume, a visibility change or a pageshow is never trusted. A
+//     tab hidden for an hour used to report 'open' on a dead path until it
+//     was shown again;
+//   - a wake that means a NEW PATH ('online', a change of network type,
+//     'resume', a back-forward-cache pageshow) also REPLACES a handshake
+//     stuck on the dead path (one older than 500 ms): cancelled and dialled
+//     again at once — a browser holds only one handshake per host:port in
+//     flight, so one beside it would only wait. A tab shown again only
+//     probes. 'online' gives the next dial a fresh 8 s handshake allowance;
+//     effectiveType re-estimates are never a wake;
 //   - MAKE BEFORE BREAK: a socket that misses its probe deadline keeps its
 //     place while a replacement dials (at the ladder's next step). Whichever
 //     speaks first wins: the replacement's open retires the old socket, any
@@ -145,7 +203,16 @@ const LADDER_CAP_HIDDEN_MS = 15_000
 const CONNECT_TIMEOUTS_MS = [8_000, 12_000, 20_000]
 const TICK_VISIBLE_MS = 1_000
 const TICK_HIDDEN_MS = 5_000
-const LATE_TICK_MS = 1_000
+// Above Chrome's 1 s alignment of a hidden tab's timers (measured 1,001-1,009
+// ms late): an ordinary hidden tick is punctual.
+const LATE_TICK_MS = 1_500
+// A wake that means a NEW PATH replaces a handshake older than this (MS2): a
+// fresh one is left to finish — it is usually the fastest way back.
+const WAKE_REDIAL_AFTER_MS = 500
+// A second new-path wake this soon after the first ('online', then the type
+// change for the same switch) leaves the handshakes the first dialled alone:
+// they are already on the new path.
+const PATH_SETTLE_MS = 5_000
 const IDLE_PROBE_VISIBLE_MS = 10_000
 const IDLE_PROBE_HIDDEN_MS = 30_000
 const PROBE_DEADLINE_MS = 4_000
@@ -175,6 +242,108 @@ const CLOSED_RETRY_CAP_MS = 30_000
 const SEEN_CAP = 1024
 const SLOT_FLOOR_CAP = 4096
 const CLOCK_APPLY_MS = 2_000
+// publish(…, onTaken): callers waiting on a relay's OK, by event id. Bounded —
+// an event no relay ever answers is forgotten with the oldest waiter.
+const TAKEN_WAITERS_MAX = 64
+// A lease (Bucket.lease) opened by a bare ensureStartedForSig settles at the
+// relay's EOSE or after this long, whichever is first.
+const LEASE_MS = 10_000
+
+// ── send priority (2026-10-10) ───────────────────────────────────────────────
+// The relay charges every EVENT and REQ to a per-connection bucket (burst
+// 400, refilled at 10/s; CLOSE and AUTH are free — relay.js, meeting.js).
+// Both now keep TWO such buckets per connection, bulk (30401, 30201, 20400,
+// 20402) and control (everything else, every REQ); this single mirror spends
+// as if they were one, which is conservative — bulk can only wait longer. A
+// sharer whose pictures were in demand spent it all on broker answers, and
+// its own beacon and page layer came back 'rate-limited' until it dropped off
+// everyone's screen. The mesh now mirrors that bucket per socket and spends
+// it in order: control frames (beacons 30206, layers 30200, presence 30204,
+// behaviour 30208, drills, probes, every REQ a consumer holds) go at once,
+// always; BULK — broker asks, answers and cancels, resource bytes — goes only
+// while BULK_RESERVE tokens are left for control, and waits for the refill
+// otherwise (FIFO, superseded per slot, at most BULK_HELD_MAX, gone after
+// INFLIGHT_TTL_MS like any other frame). The mirror starts full at open, so
+// no connect, join or reconnect frame ever waits.
+const SEND_BURST = 400
+const SEND_REFILL_PER_SEC = 10
+const BULK_RESERVE = 40
+const BULK_KINDS = new Set([30401, 30201, 20400, 20402])
+const BULK_HELD_MAX = 512
+
+// ── relay clock memory ───────────────────────────────────────────────────────
+// The last clock offset each relay's card gave, for this tab (sessionStorage —
+// a reload starts corrected, so a slow device's first beacon is not born
+// expired). When a card moves the offset by more than CLOCK_APPLY_MS after
+// EVENTs already went out on that socket, `mesh:clock-corrected` says so: the
+// frames it carried were stamped on the wrong clock and the publisher sends
+// them again.
+const CLOCK_KEY = 'hc:mesh-clock'
+
+// ── addresses (the relay's address gate) ─────────────────────────────────────
+// THE SIGNATURES ARE THE ONLY THING THAT CAN BE QUERIED (jwize 2026-09-25,
+// 2026-10-07). A relay with the address gate refuses any read or write whose
+// address is not a 64-hex signature, so the mesh never forms one: subscribe,
+// query, ensureStartedForSig and publish refuse anything else here, once and
+// out loud, instead of sending a REQ that comes back CLOSED and a bucket that
+// is silently deaf. One word survives, for the drain only: 'broker:fetch',
+// where builds before the room-scoped ask channel still ask and listen (the
+// relay routes it only inside the asker's own room). Retire it with them.
+// The liveness probe is a raw frame (PROBE_FRAME), not an address.
+const ADDRESS_RE = /^[0-9a-f]{64}$/
+const DRAIN_WORDS = new Set(['broker:fetch'])
+
+// ── this tab's meeting point (sessionStorage `hc:mesh-zone`) ─────────────────
+// The shell keeps THIS tab's zone beside its membership — hypercomb-shared/
+// core/mesh-session.ts, keep the key literal in step with it — as
+// { room, secret, relay?, host?, code? }. Two fields are the mesh's:
+//   relay — the meeting point this tab dials while it is joined, set by the
+//           meeting link: per tab, so a refresh comes back to the SAME place,
+//           and another tab joining elsewhere never moves it. Absent: the
+//           page's own relay list, as before.
+//   code  — that meeting point's access code. It rides the dial itself as the
+//           WebSocket subprotocol `hc-access.<code>` — no extra round trip —
+//           and goes to that one relay and nowhere else. A relay that needs
+//           no code echoes the subprotocol and ignores it.
+// A meeting point that refuses the code closes 4401 straight after the
+// upgrade, before any frame: the mesh says so (`refused: 'access'`) and backs
+// off on its own ladder (5 s, 15 s, 30 s, then every 60 s) — a wrong code is
+// never a tight loop, and a wake or a return to view does not shorten it. A
+// socket that offered a code is not announced as open until the relay has
+// said something on it (its card is its first frame), so a refused one never
+// sends the swarm into a reassert. The same holds for EVERY later dial to a
+// relay that has refused this tab once, code or none (VO-4): a tab with no
+// code at a coded point used to announce each dial as a reopen — a full
+// reassert — and that announcement reset the ladder, so it redialled 13
+// times a minute forever. The card rides the upgrade's own flight: no round
+// trip is added, and only a frame-admitted open starts the ladder over.
+const MESH_ZONE_KEY = 'hc:mesh-zone'
+const ACCESS_PROTOCOL_PREFIX = 'hc-access.'
+const ACCESS_REFUSED_CLOSE = 4401
+const ACCESS_LADDER_MS = [5_000, 15_000, 30_000, 60_000]
+// How long a socket whose relay left the list stays open for what was already
+// on its way there (#drain): a signature, not a meeting.
+const DRAIN_MS = 2_000
+// RFC 7230 token characters: a subprotocol must be one, or the WebSocket
+// constructor throws before anything is dialled.
+const ACCESS_CODE_RE = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,256}$/
+
+type MeshZone = { relay?: string; code?: string }
+
+/** This tab's meeting point and access code; empty when it has none. */
+const readMeshZone = (): MeshZone => {
+  try {
+    const raw = sessionStorage.getItem(MESH_ZONE_KEY)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const o = parsed as Record<string, unknown>
+    const zone: MeshZone = {}
+    if (typeof o['relay'] === 'string' && o['relay'].trim()) zone.relay = o['relay'].trim()
+    if (typeof o['code'] === 'string' && o['code'].trim()) zone.code = o['code'].trim()
+    return zone
+  } catch { return {} }
+}
 
 /** kind\0d for a parameterized-replaceable kind, else undefined. */
 const slotOf = (kind: number, tags: string[][] | undefined): string | undefined => {
@@ -208,7 +377,9 @@ type MeshStats = {
 
 type MeshLog = { atMs: number; type: string; relay?: string; sig?: string; subId?: string; kind?: number; note?: string; data?: any }
 
-type RelayBackoff = { attempts: number; nextAtMs: number; timer?: number }
+// accessN / accessUntilMs: consecutive access refusals and the moment the next
+// dial may go — kept apart from the ladder, so a wake never shortens them.
+type RelayBackoff = { attempts: number; nextAtMs: number; timer?: number; accessN?: number; accessUntilMs?: number }
 type SigReadyWaiter = { resolve: () => void; timer?: number }
 
 type CachedItem = { relay: string; sig: string; event: NostrEvent; payload: any; receivedAtMs: number; createdAtMs: number }
@@ -228,8 +399,8 @@ export class NostrMeshDrone extends Drone {
   public override effects = ['network'] as const
 
   protected override deps = { signer: '@diamondcoreprocessor.com/NostrSigner' }
-  protected override listens = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish']
-  protected override emits = ['mesh:ready', 'mesh:items-updated', 'mesh:connection', 'mesh:rejected']
+  protected override listens = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'mesh:public-changed', 'mesh:zone']
+  protected override emits = ['mesh:ready', 'mesh:items-updated', 'mesh:connection', 'mesh:rejected', 'mesh:host-card', 'mesh:clock-corrected']
 
   // -----------------------------
   // config
@@ -281,10 +452,23 @@ export class NostrMeshDrone extends Drone {
   #live = new WeakMap<WebSocket, Liveness>()
   #connectTimeouts = new Map<string, number>()
   #standby = new Map<string, WebSocket>()
+  // Sockets of relays that just left the list, open for DRAIN_MS (#drain).
+  #draining = new Map<string, WebSocket>()
   #tickTimer: ReturnType<typeof setTimeout> | undefined = undefined
   #tickDueMs = 0
   #lastTickAtMs = 0
   #lastTickLagMs = 0
+  // the tick before ran late too (a throttled timer, not a blocked thread),
+  // and the next tick follows a resume / visibility change / pageshow
+  #prevTickLate = false
+  #distrustTick = false
+  #connKind = ''
+  // when the last wake that means a new path ran (#wake)
+  #pathWakeAtMs = 0
+
+  // send priority: bulk frames waiting for the relay budget, per relay
+  #bulkHeld = new Map<string, Outbound[]>()
+  #bulkTimer: ReturnType<typeof setTimeout> | undefined = undefined
 
   // connection state
   #everOpen = false
@@ -293,12 +477,27 @@ export class NostrMeshDrone extends Drone {
 
   // delivery
   #inflight = new Map<string, Inflight>()
+  /** publish(…, onTaken) waiters: event id → called once, on the first
+   *  relay's OK (accepted or duplicate). Sent or queued is not taken. */
+  #takenWaiters = new Map<string, () => void>()
   #slotFloor = new Map<string, number>()
   #selfPubkey = ''
 
   // relay clock — from the 'hc:host' card the relay sends as its first frame
   #clockOffsetMs = 0
   #hostCard: { relay: string; time: number; participants: unknown; atMs: number } | null = null
+  /** Each relay's last card policy (relayParticipants). */
+  #participantsByRelay = new Map<string, unknown>()
+  /** Each relay's card said its reads are addressed (relaysAddressed). */
+  #addressedByRelay = new Map<string, boolean>()
+
+  // this tab's meeting point (hc:mesh-zone): the relay + code last applied,
+  // whether the relay list is the zone's (not the page's own), the code each
+  // relay was dialled with, and the addresses already refused out loud
+  #zoneKey = ''
+  #zoneOwnsList = false
+  #dialledCode = new Map<string, string>()
+  #refusedAddresses = new Set<string>()
 
   // -----------------------------
   // debug (off by default)
@@ -342,11 +541,46 @@ export class NostrMeshDrone extends Drone {
       await this.publish(kind, sig, payload, extraTags)
     })
 
+    // A join may name a meeting point (hc:mesh-zone). Read a microtask later,
+    // after every listener of the same announcement — the shell records the
+    // zone on it. A leave changes nothing here: the swarm's {left} must go
+    // out on the socket it came in on, and the network goes quiet after it;
+    // the next time it opens, the page's own list is back (setNetworkEnabled).
+    this.onEffect<{ public?: boolean }>('mesh:public-changed', (p) => {
+      if (p?.public === true) queueMicrotask(() => this.#syncZone())
+    })
+    // The zone moved without a join: a link's new meeting point or code, or
+    // the way back to the default relay (meeting-invite.join.ts pointMeshAt).
+    this.onEffect('mesh:zone', () => { queueMicrotask(() => this.#syncZone()) })
+
     try {
       window.addEventListener('online', this.#onWake)
       window.addEventListener('pageshow', this.#onWake)
       document.addEventListener('visibilitychange', this.#onVisibility)
+      // A frozen page thawed (Chrome's page lifecycle): a wake, and the
+      // first tick after it may run before frames that waited are read.
+      document.addEventListener('resume', this.#onWake)
     } catch { /* no window or document — nothing wakes us but our own timers */ }
+    try {
+      // wifi → cellular, a new network: the moment a socket is most likely
+      // dead without knowing it. Only a change of network TYPE — never of
+      // effectiveType: Chrome re-estimates 4g → 3g as RTT samples arrive (and
+      // as a sharer's own uploads fill the uplink), and treating that as a
+      // wake cancelled healthy handshakes and probed live sockets on a 3 s
+      // deadline under bufferbloat.
+      const conn = (navigator as unknown as { connection?: EventTarget & { type?: string } }).connection
+      if (conn?.addEventListener) {
+        this.#connKind = conn.type ?? ''
+        conn.addEventListener('change', () => {
+          const kind = conn.type ?? ''
+          if (kind === this.#connKind) return
+          this.#connKind = kind
+          // a new network: the handshake time a dead one earned is not its
+          this.#connectTimeouts.clear()
+          this.#wake(true)
+        })
+      }
+    } catch { /* no NetworkInformation — online and the wake events still cover it */ }
 
     this.#emitConnection(true)
   }
@@ -356,6 +590,9 @@ export class NostrMeshDrone extends Drone {
   protected override heartbeat = async (): Promise<void> => {
     this.#arm()
     this.pruneAllExpired()
+    // A zone recorded after the join's announcement (a link answered late)
+    // is picked up here; an unchanged one costs a storage read.
+    if (isJoinedHere()) this.#syncZone()
     this.ensureSocketHealth()
   }
 
@@ -380,26 +617,68 @@ export class NostrMeshDrone extends Drone {
     this.reconnectAll()
   }
 
-  /** The swarm's host: host[:port] of the first relay this tab may dial.
-   *  The relay you meet at IS the swarm's host — wss://jwize.com serves
-   *  https://jwize.com/<sig>, ws://localhost:7801 serves
-   *  http://localhost:7801/<sig> — so this is a pure function of the relay
-   *  list: no fetch, no NIP-11, nothing stored. '' when no relay can be
-   *  dialled. A loopback relay is the swarm's host only for a page that is
-   *  itself local: a developer's ws://localhost override beside the live
-   *  relay on https://hypercomb.io may be dialled, but a peer on another
-   *  machine can never fetch from it, so the bytes go to the next relay —
-   *  the same rule the swarm's domain tags follow. */
+  /** The page's OWN relay list: what this origin's tabs dial when they are
+   *  not at a meeting point (hc:nostrmesh:relays, else the defaults). A
+   *  joined tab's meeting point (hc:mesh-zone) is never part of it. */
+  public ownRelays = (): string[] => this.#zoneOwnsList ? this.loadRelays([]) : this.relays.slice()
+
+  /** Replace the page's own list and save it for every tab of this origin
+   *  (the /domain word). A tab at its meeting point stays there — the list
+   *  is not its to change — and takes the saved list when it leaves. Writing
+   *  the live list instead would save one tab's meeting point as every other
+   *  tab's default, and they would dial it without its code. */
+  public configureOwnRelays = (urls: string[]): void => {
+    if (!this.#zoneOwnsList) { this.configureRelays(urls, true); return }
+    this.saveRelays(Array.from(new Set((Array.isArray(urls) ? urls : [])
+      .map(u => String(u ?? '').trim())
+      .filter(u => u.startsWith('ws://') || u.startsWith('wss://')))))
+  }
+
+  /** The relay this tab meets at: host[:port] of the first relay it may
+   *  dial — wss://hypercomb.com gives hypercomb.com, ws://localhost:7801 gives
+   *  localhost:7801. A pure function of the relay list: no fetch, no NIP-11,
+   *  nothing stored. '' when no relay can be dialled. A loopback relay
+   *  counts only for a page that is itself local: a developer's
+   *  ws://localhost override beside the live relay on https://hypercomb.io
+   *  may be dialled, but a peer on another machine can never reach it.
+   *
+   *  It is NOT the swarm's upload host by default any more (2026-10-07,
+   *  documentation/swarm-host.md): uploads go to the page's publish domains,
+   *  else the hosts pool, and to this relay only when both are empty AND its
+   *  card allows participants (`relayParticipants`). */
   public swarmHost = (): string => {
-    const relays = this.started ? this.relays : this.loadRelays(this.relays)
+    const relay = this.#meetingRelay()
+    if (!relay) return ''
+    try { return new URL(relay).host } catch { return '' }
+  }
+
+  /** What the meeting relay's `hc:host` card said about participant
+   *  uploads: 'all', 'zones' or false — undefined until its card has been
+   *  heard on this page. Synchronous; nothing is asked for it. */
+  public relayParticipants = (): unknown => {
+    const relay = this.#meetingRelay()
+    return relay ? this.#participantsByRelay.get(relay) : undefined
+  }
+
+  /** True when every relay this tab dials has said, in its `hc:host` card,
+   *  that its reads are addressed — so the drained word ('broker:fetch')
+   *  reaches only the asker's own room there, and an ask on it tells no other
+   *  room anything. False while any card is unheard, or says otherwise (a
+   *  relay before the address gate serves the word to everyone). */
+  public relaysAddressed = (): boolean => {
+    const relays = this.relays.filter(r => this.#relayAllowed(r))
+    return relays.length > 0 && relays.every(r => this.#addressedByRelay.get(r) === true)
+  }
+
+  /** The first relay this tab may dial (see swarmHost), as configured. */
+  #meetingRelay = (): string => {
+    const zoneRelay = !this.started && isJoinedHere() ? this.#zoneRelayOf(readMeshZone()) : ''
+    const relays = this.started ? this.relays : zoneRelay ? [zoneRelay] : this.loadRelays(this.relays)
     const local = this.isLocalContext()
     for (const relay of relays) {
       if (!this.#relayAllowed(relay)) continue
       if (!local && this.isLoopbackRelay(relay)) continue
-      try {
-        const host = new URL(relay).host
-        if (host) return host
-      } catch { /* not a URL — try the next relay */ }
+      try { if (new URL(relay).host) return relay } catch { /* not a URL — try the next relay */ }
     }
     return ''
   }
@@ -508,22 +787,64 @@ export class NostrMeshDrone extends Drone {
     return publishers.size
   }
 
-  // note: creates a bucket (zero consumers) so relays are queried and cache fills
+  /** May the mesh read or write at `s`? A 64-hex signature, or the one
+   *  drained word. Anything else is refused once, out loud (see ADDRESS_RE). */
+  #addressable = (s: string, op: string): boolean => {
+    if (ADDRESS_RE.test(s) || DRAIN_WORDS.has(s)) return true
+    if (!this.#refusedAddresses.has(s)) {
+      this.#refusedAddresses.add(s)
+      console.warn(`[nostr-mesh] refused to ${op} at "${s.slice(0, 80)}" — a mesh address is a 64-hex signature (only signatures can be queried)`)
+    }
+    this.note('address:refused', undefined, s, undefined, undefined, op)
+    return false
+  }
+
+  // note: opens a LEASE (a bucket with zero consumers) so relays are queried
+  // and the cache fills; it closes at the relay's EOSE or after LEASE_MS
+  // unless a consumer joins (Bucket.lease). A sig that already has a bucket
+  // is left as it is.
   public ensureStartedForSig = (sig: string): void => {
     this.ensureStartedNow()
 
     const s = String(sig ?? '').trim()
-    if (!s) return
+    if (!s || !this.#addressable(s, 'listen')) return
+    this.#lease(s, LEASE_MS)
+  }
 
+  /** A bucket at `s` for at least `leaseMs`: a new one is a lease; a lease
+   *  already open runs to the later deadline; a consumer-held one is left. */
+  #lease = (s: string, leaseMs: number): void => {
     const existing = this.bucketsBySig.get(s)
-    if (existing) return
+    if (existing) {
+      if (existing.lease === undefined || existing.cbs.size > 0) return
+      const until = Date.now() + leaseMs
+      if (until <= (existing.leaseUntilMs ?? 0)) return
+      clearTimeout(existing.lease)
+      existing.leaseUntilMs = until
+      existing.lease = setTimeout(() => this.#settleLease(existing), leaseMs)
+      return
+    }
 
     const bucket = this.#bucket(s)
+    bucket.leaseUntilMs = Date.now() + leaseMs
+    bucket.lease = setTimeout(() => this.#settleLease(bucket), leaseMs)
     this.bucketsBySig.set(s, bucket)
     this.bucketsBySubId.set(bucket.subId, bucket)
 
-    this.note('sub:hidden', undefined, s, bucket.subId, undefined, { consumers: 0 })
+    this.note('sub:hidden', undefined, s, bucket.subId, undefined, { consumers: 0, leaseMs })
     this.sendReqToAll(bucket)
+  }
+
+  /** A lease settled (EOSE, its deadline, or a refusal): closed unless a
+   *  consumer holds it now. Whoever waited on it is answered — nothing more
+   *  is coming on it. */
+  #settleLease = (b: Bucket): void => {
+    if (b.lease !== undefined) clearTimeout(b.lease)
+    b.lease = undefined
+    b.leaseUntilMs = undefined
+    if (b.cbs.size > 0 || this.bucketsBySig.get(b.sig) !== b) return
+    this.resolveReadyWaiters(b.sig)
+    this.closeBucket(b)
   }
 
   // note: returns newest-first cached items that are not expired (mesh ttl rules)
@@ -559,7 +880,7 @@ export class NostrMeshDrone extends Drone {
   public query = async (sig: string, timeoutMs = 1800, sinceSec?: number | null): Promise<MeshEvt[]> => {
     this.ensureStartedNow()
     const s = String(sig ?? '').trim()
-    if (!s) return []
+    if (!s || !this.#addressable(s, 'query')) return []
     if (!this.networkEnabled) return this.getNonExpired(s)
     const bucket = this.#bucket(s, sinceSec)
     this.bucketsBySubId.set(bucket.subId, bucket)
@@ -573,13 +894,17 @@ export class NostrMeshDrone extends Drone {
 
   // note: await initial cache readiness for a signature
   // resolves when first matching event arrives, relay sends EOSE, or timeout elapses
+  // A sig nobody subscribes is asked on a lease that ends with the wait: the
+  // relay's EOSE, or `timeoutMs` (LEASE_MS when there is none) — never a
+  // subscription left open after the caller has stopped listening.
   public awaitReadyForSig = async (sig: string, timeoutMs = 900): Promise<void> => {
     this.ensureStartedNow()
 
     const s = String(sig ?? '').trim()
-    if (!s) return
+    if (!s || !this.#addressable(s, 'listen')) return
 
-    this.ensureStartedForSig(s)
+    const leaseMs = Number(timeoutMs ?? 0)
+    this.#lease(s, Number.isFinite(leaseMs) && leaseMs > 0 ? Math.floor(leaseMs) : LEASE_MS)
     this.pruneSigExpired(s)
 
     const existing = this.itemsBySig.get(s)
@@ -612,6 +937,7 @@ export class NostrMeshDrone extends Drone {
     }
 
     this.#dropAllStandby('stop')
+    this.#closeDraining()
     for (const [url, ws] of this.sockets.entries()) {
       try { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null } catch { /* ignore */ }
       try { ws.close() } catch { /* ignore */ }
@@ -621,6 +947,10 @@ export class NostrMeshDrone extends Drone {
 
     for (const key of Array.from(this.#inflight.keys())) this.#dropInflight(key)
     this.pendingOutbound = []
+    this.#dropBulk()
+    for (const b of this.bucketsBySig.values()) {
+      if (b.lease !== undefined) { clearTimeout(b.lease); b.lease = undefined }
+    }
     this.#emitConnection()
   }
 
@@ -650,11 +980,12 @@ export class NostrMeshDrone extends Drone {
       expiryRules: this.getExpiryRules(),
       sockets: Array.from(this.sockets.entries()).map(([url, ws]) => ({ url, readyState: ws.readyState })),
       standby: Array.from(this.#standby.keys()),
-      buckets: Array.from(this.bucketsBySig.values()).map(b => ({ sig: b.sig, subId: b.subId, consumers: b.cbs.size })),
+      buckets: Array.from(this.bucketsBySig.values()).map(b => ({ sig: b.sig, subId: b.subId, consumers: b.cbs.size, lease: b.lease !== undefined })),
       cached: Array.from(this.itemsBySig.entries()).map(([sig, items]) => ({ sig, count: items.length })),
       connection: this.connectionState(),
       inflight: this.#inflight.size,
       pending: this.pendingOutbound.length,
+      bulkHeld: Array.from(this.#bulkHeld.values()).reduce((n, q) => n + q.length, 0),
       hostCard: this.#hostCard ? { ...this.#hostCard } : null,
       stats: { ...this.stats },
       logs: this.logs.slice()
@@ -680,11 +1011,94 @@ export class NostrMeshDrone extends Drone {
     return
   }
 
-  // coming back online
+  // coming back online — at this tab's meeting point when it is joined to
+  // one, else on the page's own list (a leave left the network off, so the
+  // list moves back here, never under the {left} on its way out)
   this.ensureStartedNow()
+  this.#syncZone(false)
   this.reconnectAll()
   this.#emitConnection()
 }
+
+  /** The meeting point this tab's zone names, when it is a ws(s) URL at all
+   *  ('' for none, or for a value that is no relay). */
+  #zoneRelayNamed = (zone: MeshZone): string => {
+    const relay = zone.relay ?? ''
+    if (!relay.startsWith('ws://') && !relay.startsWith('wss://')) return ''
+    try { return new URL(relay).host ? relay : '' } catch { return '' }
+  }
+
+  /** This tab's meeting point from its zone, when it is one this tab may dial. */
+  #zoneRelayOf = (zone: MeshZone): string => {
+    const relay = this.#zoneRelayNamed(zone)
+    // A loopback meeting point from a real host needs the same explicit
+    // signal any loopback relay does: a link must never make a visitor's
+    // browser dial their own machine.
+    return relay && this.#relayAllowed(relay) ? relay : ''
+  }
+
+  /** The access code `relay` is dialled with: this tab's code, for its
+   *  meeting point ONLY — the zone's own relay, when this page may dial it.
+   *  Never any other relay: a zone whose meeting point cannot be dialled
+   *  from here offers its code to nobody (it is for one meeting point). */
+  #accessCodeFor = (relay: string): string => {
+    const zone = readMeshZone()
+    if (!zone.code) return ''
+    const target = this.#zoneRelayOf(zone)
+    return target && relay === target ? zone.code : ''
+  }
+
+  /** Point the mesh at this tab's meeting point (hc:mesh-zone) while it is
+   *  joined: that one relay, dialled with its access code. Not joined, or no
+   *  meeting point named: the page's own list. Acts only when the zone moved.
+   *  reconnect=false moves only the list (at start, or when the network is
+   *  about to reconnect anyway). A socket already at the right relay with the
+   *  right code is never torn down: a join into the room the warm socket
+   *  already meets at costs nothing. */
+  #syncZone = (reconnect = true): void => {
+    if (!this.started || this.stopped) return
+    const zone = readMeshZone()
+    const joined = isJoinedHere()
+    const relay = joined ? this.#zoneRelayOf(zone) : ''
+    // A meeting point this page may not dial (a loopback one opened from a
+    // real host): meet NOWHERE and say so (refused: 'unreachable'). Meeting
+    // on the page's own list instead would split the meeting without a word
+    // — everyone else is at the point.
+    const unreachable = joined && !relay && !!this.#zoneRelayNamed(zone)
+    const key = `${relay} ${zone.code ?? ''} ${unreachable ? zone.relay : ''}`
+    if (key === this.#zoneKey) return
+    this.#zoneKey = key
+    let listMoved = false
+    if (unreachable) this.#setRefusal('unreachable')
+    else if (this.#refusal?.reason === 'unreachable') this.#clearRefusal()
+    if (relay) {
+      listMoved = !(this.relays.length === 1 && this.relays[0] === relay)
+      this.relays = [relay]
+      this.#zoneOwnsList = true
+      this.note('zone:relay', relay)
+    } else if (unreachable) {
+      listMoved = this.relays.length > 0
+      this.relays = []
+      this.#zoneOwnsList = true
+      this.note('zone:unreachable', zone.relay)
+    } else if (this.#zoneOwnsList) {
+      this.#zoneOwnsList = false
+      const own = this.loadRelays([])
+      listMoved = !(own.length === this.relays.length && own.every((u, i) => u === this.relays[i]))
+      this.relays = own
+      this.note('zone:own-list')
+    }
+    if (!reconnect) return
+    // A new code for a meeting point that refused the old one: stop waiting
+    // out the access ladder and dial now. A socket that is in stays in — the
+    // meeting point closes it (4401) if the code it came in on was recycled,
+    // and that close dials the new code at once (onclose).
+    const target = relay || this.#meetingRelay()
+    const had = target ? this.#dialledCode.get(target) : undefined
+    const refusedWait = !!target && (this.backoff.get(target)?.accessUntilMs ?? 0) > Date.now()
+    const codeMoved = refusedWait && had !== undefined && had !== this.#accessCodeFor(target)
+    if (listMoved || codeMoved) this.reconnectAll()
+  }
 
   // note: signature-only subscription
   // - sig is used as the x tag value
@@ -693,20 +1107,23 @@ export class NostrMeshDrone extends Drone {
     this.ensureStartedNow()
 
     const s = String(sig ?? '').trim()
-    if (!s) return { close: () => void 0 }
+    if (!s || !this.#addressable(s, 'subscribe')) return { close: () => void 0 }
 
     const existing = this.bucketsBySig.get(s)
     if (existing) {
       existing.cbs.add(cb)
+      // A consumer ends a lease: the bucket is held now, and closes when its
+      // last consumer leaves.
+      if (existing.lease !== undefined) { clearTimeout(existing.lease); existing.lease = undefined; existing.leaseUntilMs = undefined }
       // A joiner may need a DEEPER replay than the bucket first asked for —
       // widen the shared window and re-REQ so the stored events flow in
-      // (null = widest; consumers share one subscription per sig).
+      // (null = widest; consumers share one subscription per sig). A lease
+      // whose REQ waited for the budget asks now: it is held.
       const want = opts?.sinceSec
       const have = existing.sinceSec === undefined ? 900 : existing.sinceSec
-      if (want !== undefined && (want === null ? have !== null : (have !== null && want > have))) {
-        existing.sinceSec = want
-        this.sendReqToAll(existing)
-      }
+      const widen = want !== undefined && (want === null ? have !== null : (have !== null && want > have))
+      if (widen) existing.sinceSec = want
+      if (widen || existing.reqDeferred) this.sendReqToAll(existing)
       // The relay replayed this sig to whoever opened the bucket — a visuals
       // probe, a hidden ensureStartedForSig — and a joiner sends no REQ of its
       // own, so it would never see what is already here. Hand it the cache,
@@ -739,14 +1156,16 @@ export class NostrMeshDrone extends Drone {
   // note: publish a payload
   // - always local fanout immediately (even if signer is missing)
   // - best-effort to sign + send to relays
-  public publish = async (kind: number, sig: string, payload: any, extraTags?: string[][]): Promise<boolean> => {
+  // - `onTaken` runs once a relay has TAKEN the event (its OK, accepted or
+  //   duplicate) — `true` from publish only says sent or queued
+  public publish = async (kind: number, sig: string, payload: any, extraTags?: string[][], onTaken?: () => void): Promise<boolean> => {
     this.ensureStartedNow()
 
     const k = Number(kind ?? 0)
     if (!k || !Number.isFinite(k)) return false
 
     const s = String(sig ?? '').trim()
-    if (!s) return false
+    if (!s || !this.#addressable(s, 'publish')) return false
 
     // Sig tag is always present. Expiration is opt-in: if the caller
     // didn't supply one in extraTags, the event lives until the relay
@@ -805,6 +1224,9 @@ export class NostrMeshDrone extends Drone {
     // stamp "published" memos while every peer saw nothing, silently, on
     // every heartbeat. Local fanout already happened above, so the caller
     // keeps its own view either way; `false` says "no relay will see this".
+    // The relays this was meant for, as it was asked: a list that moves while
+    // it is being signed still owes it to the relay it was asked on (#drain).
+    const askedOn = this.relays.slice()
     const signed = await this.trySign(evt)
     if (!signed) {
       this.stats.sendSkippedNoSigner++
@@ -812,6 +1234,20 @@ export class NostrMeshDrone extends Drone {
       return false
     }
     if (signed.pubkey && signed.pubkey !== this.#selfPubkey) this.#learnSelf(String(signed.pubkey))
+    if (onTaken && signed.id) {
+      if (this.#takenWaiters.size >= TAKEN_WAITERS_MAX) {
+        const oldest = this.#takenWaiters.keys().next().value
+        if (oldest !== undefined) this.#takenWaiters.delete(oldest)
+      }
+      this.#takenWaiters.set(String(signed.id), onTaken)
+    }
+    if (this.#draining.size) {
+      for (const relay of askedOn) {
+        const ws = this.#draining.get(relay)
+        if (!ws || this.sockets.has(relay) || ws.readyState !== WebSocket.OPEN) continue
+        try { ws.send(JSON.stringify(['EVENT', signed])); this.note('publish:drained', relay, s, undefined, k) } catch { /* closing */ }
+      }
+    }
 
     const delivered = this.sendEventToAll(signed)
     this.note('publish:sent', undefined, s, undefined, k)
@@ -832,7 +1268,13 @@ export class NostrMeshDrone extends Drone {
 
     // note: allow config from localstorage without rebuilding
     this.relays = this.loadRelays(this.relays)
+    // A joined tab resumes at ITS meeting point — the first dial goes there,
+    // with its code, so a refresh is back in the same place with no detour.
+    this.#syncZone(false)
     this.kinds = this.loadKinds(this.kinds)
+    // The clock this tab last learned for its relay: the first publishes of
+    // a reload are stamped on it, before the card has a chance to say.
+    this.#clockOffsetMs = this.#rememberedOffset(this.#meetingRelay())
 
     this.note('mesh:started', undefined, undefined, undefined, undefined, { relays: this.relays, kinds: this.kinds })
 
@@ -872,10 +1314,43 @@ export class NostrMeshDrone extends Drone {
     // iterator would visit the replacement and retire it too.
     for (const [url, ws] of Array.from(this.sockets.entries())) {
       this.note('socket:close-requested', url)
-      this.#retire(url, ws, 'reconnect')
+      if (!this.relays.includes(url) && ws.readyState === WebSocket.OPEN) this.#drain(url, ws)
+      else this.#retire(url, ws, 'reconnect')
     }
 
     this.connectAll()
+  }
+
+  // LEAVE ON THE SOCKET IT CAME IN ON. A socket whose relay just left the list
+  // (a join into another room at another meeting point) is not cut at once:
+  // the {left} for the room this tab is leaving was asked for a moment before
+  // and is still being signed, and it belongs to that relay — the room it
+  // leaves is there, not at the new point. So the socket stays open, deaf
+  // (no handlers, no subscriptions owed), for DRAIN_MS, and a publish that
+  // began while it was on the list goes out on it too (publish). Nothing new
+  // is ever sent on it.
+  #drain = (relay: string, ws: WebSocket): void => {
+    try { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null } catch { /* ignore */ }
+    this.#live.delete(ws)
+    this.sockets.delete(relay)
+    this.stats.socketsClosed++
+    this.stats.retired++
+    this.note('socket:draining', relay)
+    this.#requeueInflight(relay)
+    this.#dropStandby(relay, 'reconnect')
+    const prior = this.#draining.get(relay)
+    if (prior && prior !== ws) { try { prior.close() } catch { /* ignore */ } }
+    this.#draining.set(relay, ws)
+    setTimeout(() => {
+      if (this.#draining.get(relay) === ws) this.#draining.delete(relay)
+      try { ws.close() } catch { /* ignore */ }
+    }, DRAIN_MS)
+    this.#emitConnection()
+  }
+
+  #closeDraining = (): void => {
+    for (const ws of this.#draining.values()) { try { ws.close() } catch { /* ignore */ } }
+    this.#draining.clear()
   }
 
   // Retire one socket for good. Its handlers go first, so nothing it does
@@ -973,7 +1448,7 @@ export class NostrMeshDrone extends Drone {
   }
 
   private resubscribeAll = (): void => {
-    for (const b of this.bucketsBySig.values()) {
+    for (const b of this.#reqOrder()) {
       this.sendCloseToAll(b.subId)
       this.sendReqToAll(b)
     }
@@ -996,16 +1471,30 @@ export class NostrMeshDrone extends Drone {
 
     const now = Date.now()
     const st = this.backoff.get(relay)
-    if (st && st.nextAtMs > now) {
-      this.scheduleEnsure(relay, st.nextAtMs - now)
+    // A refused access code waits out its own ladder (#accessRefused).
+    const dueAt = Math.max(st?.nextAtMs ?? 0, st?.accessUntilMs ?? 0)
+    if (st && dueAt > now) {
+      this.scheduleEnsure(relay, dueAt - now)
       return
     }
     this.#dial(relay, standby)
   }
 
   #dial = (relay: string, standby: boolean): void => {
+    // The meeting point's access code rides the upgrade as a subprotocol: no
+    // round trip of its own. Not a token, it cannot be offered at all (the
+    // constructor would throw) — the dial goes without it and the meeting
+    // point's refusal says why.
+    let code = this.#accessCodeFor(relay)
+    if (code && !ACCESS_CODE_RE.test(code)) {
+      if (!this.#refusedAddresses.has(`access:${relay}`)) {
+        this.#refusedAddresses.add(`access:${relay}`)
+        console.warn(`[nostr-mesh] the access code for ${relay} is not a valid subprotocol token — dialling without it`)
+      }
+      code = ''
+    }
     let ws: WebSocket
-    try { ws = new WebSocket(relay) } catch {
+    try { ws = code ? new WebSocket(relay, [ACCESS_PROTOCOL_PREFIX + code]) : new WebSocket(relay) } catch {
       // A synchronous constructor throw (malformed URL, mixed-content
       // SecurityError) used to drop the relay from the loop for the whole
       // session with no backoff entry and no retry. Record the failure and
@@ -1024,6 +1513,7 @@ export class NostrMeshDrone extends Drone {
     const timeouts = this.#connectTimeouts.get(relay) ?? 0
     if (standby) this.#standby.set(relay, ws)
     else this.sockets.set(relay, ws)
+    this.#dialledCode.set(relay, code)
     this.#live.set(ws, {
       createdAtMs,
       connectTimeoutMs: CONNECT_TIMEOUTS_MS[Math.min(timeouts, CONNECT_TIMEOUTS_MS.length - 1)],
@@ -1035,6 +1525,13 @@ export class NostrMeshDrone extends Drone {
       buffered: 0,
       bufferedMovedMs: 0,
       suspectAtMs: 0,
+      // A relay that has refused this tab (4401) is believed only once it
+      // speaks, code or none (VO-4).
+      admitted: !code && !this.backoff.get(relay)?.accessN,
+      code,
+      tokens: SEND_BURST,
+      tokensAtMs: createdAtMs,
+      eventsOut: 0,
     })
     this.note(standby ? 'socket:standby' : 'socket:create', relay)
     this.#armTick(this.#nextTickDelay(createdAtMs))
@@ -1048,6 +1545,9 @@ export class NostrMeshDrone extends Drone {
       if (this.sockets.get(relay) !== ws) return
       this.stats.socketsOpened++
       this.note('socket:open', relay)
+      // The relay's budget for this connection starts full now.
+      const opened = this.#live.get(ws)
+      if (opened) { opened.tokens = SEND_BURST; opened.tokensAtMs = Date.now() }
 
       // The ladder is NOT reset here: an open proves only the handshake.
       // #markHealthy resets it once this socket answers a probe or has been
@@ -1055,12 +1555,17 @@ export class NostrMeshDrone extends Drone {
 
       // note: resubscribe everything on connect — FIRST, before anything
       // else goes out on this socket (each bucket with its own window).
-      for (const bucket of this.bucketsBySig.values()) this.sendReq(relay, bucket)
+      // The page this tab stands on — the newest bucket a consumer holds —
+      // asks first; leases last: a relay at its subscription cap refuses
+      // the tail, never the page.
+      for (const bucket of this.#reqOrder()) this.sendReq(relay, bucket)
 
       // Deliver anything queued while no socket was open — the join's
       // first publish burst rides here instead of dying in CONNECTING —
-      // and the frames a dead socket swallowed without an OK.
+      // and the frames a dead socket swallowed without an OK. Control
+      // frames first; bulk after them, within the budget.
       this.flushPendingOutbound()
+      this.#drainBulk()
 
       // Bookkeeping after the frames: no relay frame can arrive before this
       // handler returns. Each bucket forgets what it delivered, so the
@@ -1073,14 +1578,13 @@ export class NostrMeshDrone extends Drone {
       const lv = this.#live.get(ws)
       if (lv) { lv.lastInboundMs = Date.now(); lv.openedAtMs = lv.lastInboundMs }
       this.#connectTimeouts.delete(relay)
-      this.#refusal = null
 
-      const reopened = this.#everOpen
-      this.#everOpen = true
-      // A reopen is always announced, even when another relay kept the
-      // aggregate open: this one may have restarted empty. It is announced
-      // ONCE — this payload alone carries reopened: true.
-      this.#emitConnection(reopened, reopened)
+      // A socket that offered an access code is announced on the relay's
+      // first frame instead (its card, on the same flight): a meeting point
+      // that refuses the code closes before saying anything, and announcing
+      // that as a reopen would send the swarm into a reassert for nothing.
+      if (lv && !lv.admitted) return
+      this.#announceOpen(relay)
     }
 
     ws.onmessage = (msg) => {
@@ -1088,6 +1592,7 @@ export class NostrMeshDrone extends Drone {
       const lv = this.#live.get(ws)
       if (lv) {
         lv.lastInboundMs = Date.now()
+        if (!lv.admitted) { lv.admitted = true; this.#announceOpen(relay) }
         if (lv.probeDeadlineMs > 0) {
           // The probe is answered (anything heard counts): the socket is
           // alive, and a replacement dialled for it is not needed.
@@ -1102,16 +1607,29 @@ export class NostrMeshDrone extends Drone {
       this.onMessage(relay, msg?.data)
     }
 
-    ws.onclose = () => {
+    ws.onclose = (ev?: { code?: number }) => {
+      const refusedAccess = Number(ev?.code) === ACCESS_REFUSED_CLOSE
       if (this.#standby.get(relay) === ws) {
         // The replacement failed before it opened: the next judge dials
         // another at the ladder's next step, or the cap retires the suspect.
-        this.bumpBackoff(relay)
+        if (refusedAccess) this.#accessRefused(relay)
+        else this.bumpBackoff(relay)
         this.#dropStandby(relay, 'closed')
         return
       }
       if (this.sockets.get(relay) !== ws) return
       this.note('socket:closed', relay)
+      if (refusedAccess) {
+        // Refused on a code this tab has since replaced (a new link while it
+        // was in): the new one is dialled at once, on the ordinary ladder.
+        if ((this.#live.get(ws)?.code ?? '') !== this.#accessCodeFor(relay)) {
+          this.#retire(relay, ws, 'access-recycled', false)
+          return
+        }
+        this.#accessRefused(relay)
+        this.#retire(relay, ws, 'access', false)
+        return
+      }
       this.#retire(relay, ws, 'closed')
     }
 
@@ -1122,6 +1640,38 @@ export class NostrMeshDrone extends Drone {
 
       try { ws.close() } catch { /* ignore */ }
     }
+  }
+
+  // A socket is open AND admitted: the connection is announced, standing
+  // refusals are cleared (the relay took us), and an access ladder starts over.
+  // After a refusal only a frame admits (Liveness.admitted), so only a relay
+  // that has spoken resets the access ladder.
+  #announceOpen = (relay: string): void => {
+    this.#refusal = null
+    const st = this.backoff.get(relay)
+    if (st) { st.accessN = 0; st.accessUntilMs = 0 }
+    const reopened = this.#everOpen
+    this.#everOpen = true
+    // A reopen is always announced, even when another relay kept the
+    // aggregate open: this one may have restarted empty. It is announced
+    // ONCE — this payload alone carries reopened: true.
+    this.#emitConnection(reopened, reopened)
+  }
+
+  // The meeting point closed 4401: this tab's access code is not its current
+  // one. A standing answer until the code changes — the next dial waits 5 s,
+  // then 15 s, 30 s and every 60 s after, and nothing (a wake, a return to
+  // view) shortens that; a new code moves the zone and dials at once.
+  #accessRefused = (relay: string): void => {
+    const st = this.backoff.get(relay) ?? { attempts: 0, nextAtMs: 0 }
+    st.accessN = Math.min(32, (st.accessN ?? 0) + 1)
+    st.attempts = Math.min(32, st.attempts + 1)
+    const base = ACCESS_LADDER_MS[Math.min(st.accessN - 1, ACCESS_LADDER_MS.length - 1)]
+    st.accessUntilMs = Date.now() + base - Math.floor(base * 0.2 * Math.random())
+    this.backoff.set(relay, st)
+    this.note('socket:access-refused', relay, undefined, undefined, undefined, { refusals: st.accessN })
+    if (st.accessN === 1) console.warn(`[nostr-mesh] ${relay} refused this tab's access code — the meeting link's code is not its current one`)
+    this.#setRefusal('access')
   }
 
   // -----------------------------
@@ -1178,22 +1728,37 @@ export class NostrMeshDrone extends Drone {
     this.#tickTimer = undefined
     if (!this.networkEnabled || this.stopped) return
     const now = Date.now()
+    const lag = now - this.#tickDueMs
+    // A tick more than 1.5 s late may follow a blocked main thread: frames
+    // can be waiting unread in the task queue, so silence proves nothing
+    // yet — it sends, but judges no deadline. In a HIDDEN tab a late tick
+    // right after another late one is a throttled timer (a tab hidden 5
+    // minutes runs on the minute): a whole cycle has passed, and it judges.
+    // A visible tab is never throttled that way — there, late is always a
+    // busy thread (boot work), and a handshake whose open is queued behind
+    // it must not be cut. The first tick after a resume, a visibility
+    // change or a pageshow never judges.
+    const late = lag > LATE_TICK_MS
+    const trusted = !this.#distrustTick && (!late || (this.#prevTickLate && this.#hidden()))
+    this.#prevTickLate = late
+    this.#distrustTick = false
     this.#lastTickAtMs = now
-    this.#lastTickLagMs = now - this.#tickDueMs
+    this.#lastTickLagMs = lag
     this.#purgeInflight(now)
-    // A tick more than a second late means the main thread was blocked or
-    // the tab frozen: frames may be waiting unread in the task queue, so
-    // silence proves nothing yet. The next, punctual tick judges.
-    if (now - this.#tickDueMs <= LATE_TICK_MS) this.#judge(now)
+    this.#judge(now, trusted, trusted && late)
     this.#emitConnection()
     this.#armTick(this.#nextTickDelay(Date.now()))
   }
 
-  #judge = (now: number): void => {
+  // trusted: deadlines may be judged (handshake timeouts, probe deadlines).
+  // Untrusted, a tick still sends what is due — the idle or unacked probe is
+  // one frame on the socket it has, and can kill nothing. throttled: this is
+  // a hidden tab's minute-aligned tick — the next one is a minute away.
+  #judge = (now: number, trusted = true, throttled = false): void => {
     const idleMs = this.#hidden() ? IDLE_PROBE_HIDDEN_MS : IDLE_PROBE_VISIBLE_MS
     // A replacement that never finished its handshake is dropped; the
     // suspect it was dialled for gets another at the ladder's next step.
-    for (const [relay, ws] of Array.from(this.#standby.entries())) {
+    for (const [relay, ws] of trusted ? Array.from(this.#standby.entries()) : []) {
       const lv = this.#live.get(ws)
       if (ws.readyState === WebSocket.CONNECTING && lv && now - lv.createdAtMs < lv.connectTimeoutMs) continue
       if (ws.readyState === WebSocket.OPEN) continue
@@ -1205,7 +1770,7 @@ export class NostrMeshDrone extends Drone {
       const lv = this.#live.get(ws)
       if (!lv) continue
       if (ws.readyState === WebSocket.CONNECTING) {
-        if (now - lv.createdAtMs >= lv.connectTimeoutMs) {
+        if (trusted && now - lv.createdAtMs >= lv.connectTimeoutMs) {
           this.#connectTimeouts.set(relay, (this.#connectTimeouts.get(relay) ?? 0) + 1)
           this.#retire(relay, ws, 'connect-timeout')
         }
@@ -1226,11 +1791,18 @@ export class NostrMeshDrone extends Drone {
         lv.buffered = 0
       }
       if (lv.probeDeadlineMs > 0) {
-        if (now >= lv.probeDeadlineMs) this.#suspect(relay, ws, lv, now)
+        if (trusted && now >= lv.probeDeadlineMs) this.#suspect(relay, ws, lv, now)
         continue
       }
-      if (now - lv.lastInboundMs >= idleMs || this.#unackedSince(relay, lv.lastInboundMs, now)) {
+      const unacked = this.#unackedSince(relay, lv.lastInboundMs, now)
+      if (now - lv.lastInboundMs >= idleMs || unacked) {
         this.#probe(relay, ws, PROBE_DEADLINE_MS)
+        // Throttled, the probe's verdict is a whole minute away. An EVENT
+        // that has already waited a timer cycle for its OK, with nothing
+        // heard since, is that verdict: frames are not throttled, a live
+        // relay's OK would be here. The replacement dials now — make before
+        // break, so a frame on this socket still drops it.
+        if (throttled && unacked) this.#suspect(relay, ws, lv, now)
       }
     }
   }
@@ -1249,6 +1821,7 @@ export class NostrMeshDrone extends Drone {
     if (!lv) return
     const now = Date.now()
     try { ws.send(PROBE_FRAME) } catch { this.#retire(relay, ws, 'probe-send'); return }
+    this.#charge(lv, now)
     this.stats.probeSent++
     this.note('out:probe', relay, undefined, 'hc-live', undefined, { deadlineMs })
     lv.probeDeadlineMs = lv.probeDeadlineMs > now ? Math.min(lv.probeDeadlineMs, now + deadlineMs) : now + deadlineMs
@@ -1257,23 +1830,55 @@ export class NostrMeshDrone extends Drone {
   }
 
   #onVisibility = (): void => {
+    this.#distrustTick = true
     if (this.#hidden()) return
-    this.#onWake()
+    this.#wake(false)
   }
 
-  // A phone that wakes, a network that returns, a page restored from the
-  // back-forward cache: the moments a socket is most likely dead without
-  // knowing it. An OPEN one must answer within 3 s (one already suspect gets
-  // its replacement now); any other relay drops its backoff and is dialled
-  // now. A handshake already in flight is left to finish — it is usually the
-  // fastest way back.
-  #onWake = (): void => {
+  // A phone that wakes, a network that returns (or changes type), a page
+  // restored from the back-forward cache or thawed: the moments a socket is
+  // most likely dead without knowing it. An OPEN one must answer within 3 s
+  // (one already suspect gets its replacement now); any other relay drops
+  // its backoff and is dialled now.
+  //
+  // Only a wake that means a NEW PATH — 'online', a change of network type,
+  // 'resume', a pageshow from the back-forward cache — replaces a handshake
+  // in flight for more than 500 ms: it may be stuck on the path that died
+  // (dead venue wifi, a captive portal), and used to be left to its connect
+  // timeout (up to 20 s) plus a ladder step nothing had reset. Cancelled and
+  // dialled again, not doubled: a browser lets only ONE handshake per
+  // host:port be in flight (RFC 6455 §4.1), so a dial beside the stuck one
+  // just waits for it to fail (measured: sleep.cjs T5, +13.5 s). A tab
+  // coming back into view or a plain pageshow says nothing about the path —
+  // on cellular or a herd-loaded meeting point a healthy handshake takes
+  // more than 500 ms, and cancelling it added a round trip to the reconnect.
+  // A second new-path wake within PATH_SETTLE_MS leaves the handshakes the
+  // first one dialled alone. 'online' also gives the next handshake a fresh
+  // 8 s: the 20 s the dead path earned is not the new path's. The access
+  // ladder is never shortened (ensureSocket).
+  #onWake = (e?: Event): void => {
+    const type = e?.type ?? ''
+    if (type === 'pageshow' || type === 'resume') this.#distrustTick = true
+    if (type === 'online') this.#connectTimeouts.clear()
+    const persisted = type === 'pageshow' && (e as Event & { persisted?: boolean }).persisted === true
+    this.#wake(type === 'online' || type === 'resume' || persisted)
+  }
+
+  #wake = (newPath: boolean): void => {
     if (!this.networkEnabled || this.stopped) return
+    const now = Date.now()
+    const settledSince = this.#pathWakeAtMs
+    if (newPath) this.#pathWakeAtMs = now
+    // a handshake this wake may cancel: on a new path, older than 500 ms, and
+    // not one the previous new-path wake dialled moments ago
+    const stale = (createdAtMs: number): boolean => newPath
+      && now - createdAtMs >= WAKE_REDIAL_AFTER_MS
+      && !(now - settledSince < PATH_SETTLE_MS && createdAtMs >= settledSince)
     for (const relay of this.relays.slice()) {
       const ws = this.sockets.get(relay)
-      const suspect = !!ws && (this.#live.get(ws)?.suspectAtMs ?? 0) > 0
+      const lv = ws ? this.#live.get(ws) : undefined
+      const suspect = (lv?.suspectAtMs ?? 0) > 0
       if (ws && ws.readyState === WebSocket.OPEN && !suspect) { this.#probe(relay, ws, WAKE_PROBE_DEADLINE_MS); continue }
-      if (ws && ws.readyState === WebSocket.CONNECTING) continue
       const st = this.backoff.get(relay)
       if (st) {
         if (st.timer) clearTimeout(st.timer)
@@ -1281,6 +1886,14 @@ export class NostrMeshDrone extends Drone {
         st.attempts = 0
         st.nextAtMs = 0
       }
+      if (ws && ws.readyState === WebSocket.CONNECTING) {
+        if (lv && stale(lv.createdAtMs)) this.#retire(relay, ws, 'wake-handshake', false)
+        continue
+      }
+      // The same for a replacement still dialling beside a suspect.
+      const beside = this.#standby.get(relay)
+      const besideLv = beside ? this.#live.get(beside) : undefined
+      if (beside && beside.readyState === WebSocket.CONNECTING && besideLv && stale(besideLv.createdAtMs)) this.#dropStandby(relay, 'wake-handshake')
       if (suspect) this.ensureSocket(relay)
       else if (ws) this.#retire(relay, ws, 'wake')
       else this.ensureSocket(relay)
@@ -1300,6 +1913,7 @@ export class NostrMeshDrone extends Drone {
       const ws = this.sockets.get(relay)
       if (!ws || ws.readyState !== WebSocket.OPEN) continue
       const lv = this.#live.get(ws)
+      if (lv && !lv.admitted) continue  // offered a code; not yet taken
       if (!lv || lv.probeDeadlineMs <= 0 || now - lv.probeSentAtMs < STALL_AFTER_MS) return 'open'
       anyOpen = true
     }
@@ -1454,6 +2068,15 @@ export class NostrMeshDrone extends Drone {
 
     const type = String(msg[0] ?? '')
 
+    // A relay whose FIRST frame is not its card never sends one (an older
+    // build, a third-party relay): it hosts nobody's bytes. Said once, so the
+    // swarm's last-resort host is "none" — the status line says why — rather
+    // than "not heard yet" for ever.
+    if (!this.#participantsByRelay.has(relay) && !(type === 'NOTICE' && String(msg[1] ?? '').startsWith('hc:host '))) {
+      this.#participantsByRelay.set(relay, false)
+      this.emitEffect('mesh:host-card', { relay, participants: false })
+    }
+
     if (type === 'NOTICE') {
       this.stats.msgNoticeIn++
       this.note('in:notice', relay, undefined, undefined, undefined, msg[1])
@@ -1501,8 +2124,32 @@ export class NostrMeshDrone extends Drone {
       this.note('in:closed', relay, bucket?.sig, subId, undefined, reason)
       if (!bucket) return
       console.warn(`[nostr-mesh] relay ${relay} CLOSED subscription ${subId}: "${reason}" — ${this.bucketsBySig.size} open here`)
-      if (/too many subscriptions/i.test(reason)) this.#setRefusal('subscriptions', subId)
-      if (reason.startsWith('auth-required:')) return
+      const atCap = /too many subscriptions/i.test(reason)
+      if (reason.startsWith('auth-required:')) { if (atCap) this.#setRefusal('subscriptions', subId); return }
+      // A lease the relay would not take is settled: nothing is coming on
+      // it, and asking again spends the budget on a warm-up nobody holds.
+      // Nobody was listening on it, so nobody is told the relay is full.
+      if (bucket.cbs.size === 0 && bucket.lease !== undefined) { this.#settleLease(bucket); return }
+      if (atCap) this.#setRefusal('subscriptions', subId)
+      // A standing answer: the read names no signature, or is malformed (the
+      // relay's address gate — only signatures can be queried). Asking again
+      // changes nothing, so the bucket is not retried; a resubscribe asks anew.
+      if (reason.startsWith('restricted:') || reason.startsWith('invalid:')) return
+      // At the cap, a subscription someone HOLDS outranks a lease: the oldest
+      // lease still standing gives up its place and the refused one asks
+      // again at once — not after a blind backoff of up to 30 s, which at
+      // the cap only ever met the same answer.
+      if (atCap && bucket.cbs.size > 0) {
+        const victim = this.#oldestLease(bucket)
+        if (victim) {
+          this.note('sub:evicted', relay, victim.sig, victim.subId, undefined, { for: bucket.sig })
+          this.#settleLease(victim)
+          bucket.closedN++
+          if (bucket.retryTimer) { clearTimeout(bucket.retryTimer); bucket.retryTimer = undefined }
+          this.sendReq(relay, bucket)
+          return
+        }
+      }
       const base = Math.min(CLOSED_RETRY_CAP_MS, 1000 * (2 ** Math.min(bucket.closedN, 15)))
       const waitMs = Math.min(CLOSED_RETRY_CAP_MS, base + Math.floor(base * 0.3 * Math.random()))
       bucket.closedN++
@@ -1546,6 +2193,8 @@ export class NostrMeshDrone extends Drone {
         bucket.closedN = 0
         if (this.#refusal?.subId === subId) this.#clearRefusal()
         this.resolveReadyWaiters(bucket.sig)
+        // The stored events are in the cache: a lease has done its work.
+        if (bucket.lease !== undefined) this.#settleLease(bucket)
       }
 
       this.stats.msgOtherIn++
@@ -1668,6 +2317,16 @@ export class NostrMeshDrone extends Drone {
   private sendReq = (url: string, b: Bucket): void => {
     const ws = this.sockets.get(url)
     if (!ws || ws.readyState !== WebSocket.OPEN) return
+    // A lease is a warm-up nobody holds: it never takes the budget a
+    // consumer's REQ or this tab's own frames need (it settles unasked).
+    const lv = this.#live.get(ws)
+    const now = Date.now()
+    if (b.cbs.size === 0 && b.lease !== undefined && lv && this.#budget(lv, now) < BULK_RESERVE + 1) {
+      b.reqDeferred = true
+      this.note('out:req-deferred', url, b.sig, b.subId)
+      return
+    }
+    b.reqDeferred = false
 
     const filter: any = { '#x': [b.sig] }
     // Replay window (see Bucket.sinceSec). The old hardcoded 15-min window
@@ -1685,7 +2344,7 @@ export class NostrMeshDrone extends Drone {
     this.stats.reqSent++
     this.note('out:req', url, b.sig, b.subId, undefined, filter)
 
-    try { ws.send(JSON.stringify(['REQ', b.subId, filter])) } catch { /* ignore */ }
+    try { ws.send(JSON.stringify(['REQ', b.subId, filter])); if (lv) this.#charge(lv, now) } catch { /* ignore */ }
   }
 
   // NIP-42 handshake: kind 22242, tags relay + challenge, fresh created_at.
@@ -1704,7 +2363,7 @@ export class NostrMeshDrone extends Drone {
     }
     try { ws.send(JSON.stringify(['AUTH', signed])) } catch { return }
     this.note('auth:sent', relay)
-    for (const bucket of this.bucketsBySig.values()) this.sendReq(relay, bucket)
+    for (const bucket of this.#reqOrder()) this.sendReq(relay, bucket)
     this.flushPendingOutbound()
   }
 
@@ -1740,11 +2399,14 @@ export class NostrMeshDrone extends Drone {
     const now = Date.now()
     const live = this.pendingOutbound.filter(p => now - p.queuedAtMs <= NostrMeshDrone.PENDING_OUTBOUND_TTL_MS && !this.#expired(p))
     this.pendingOutbound = []
-    for (const p of live) {
+    // Control first: the join's beacon and page layer never queue behind
+    // the bulk that waited with them.
+    const ordered = live.filter(p => !BULK_KINDS.has(p.kind)).concat(live.filter(p => BULK_KINDS.has(p.kind)))
+    for (const p of ordered) {
       let sent = false
       for (const [relay, ws] of this.sockets.entries()) {
         if (ws.readyState !== WebSocket.OPEN) continue
-        try { ws.send(p.frame); sent = true; this.#track(relay, p, now) } catch { /* ignore */ }
+        if (this.#sendOrHold(relay, ws, p, now)) sent = true
       }
       if (sent) this.note('out:flush-pending')
       else this.pendingOutbound.push(p)  // still nothing open — keep it
@@ -1765,7 +2427,7 @@ export class NostrMeshDrone extends Drone {
     for (const [relay, ws] of this.sockets.entries()) {
       if (!this.networkEnabled) return false
       if (ws.readyState !== WebSocket.OPEN) continue
-      try { ws.send(out.frame); sent = true; this.#track(relay, out, now) } catch { /* ignore */ }
+      if (this.#sendOrHold(relay, ws, out, now)) sent = true
     }
     if (sent) return true
     if (this.relays.length === 0) return true  // local-only by configuration
@@ -1777,17 +2439,114 @@ export class NostrMeshDrone extends Drone {
   }
 
   // -----------------------------
+  // send priority (the relay's budget, mirrored)
+  // -----------------------------
+
+  /** The relay's budget for this connection, refilled to `now`. */
+  #budget = (lv: Liveness, now: number): number => {
+    if (now > lv.tokensAtMs) {
+      lv.tokens = Math.min(SEND_BURST, lv.tokens + (now - lv.tokensAtMs) * SEND_REFILL_PER_SEC / 1000)
+      lv.tokensAtMs = now
+    }
+    return lv.tokens
+  }
+
+  /** An EVENT or REQ went out: the relay takes a token for it — or, with
+   *  none left, refuses it and takes nothing. */
+  #charge = (lv: Liveness, now: number): void => {
+    if (this.#budget(lv, now) >= 1) lv.tokens -= 1
+  }
+
+  /** One EVENT on one socket: sent now — control always; bulk while the
+   *  reserve is left and nothing older waits — or held for the refill. True
+   *  either way: it is this relay's to deliver. False: the send threw. */
+  #sendOrHold = (relay: string, ws: WebSocket, o: Outbound, now: number): boolean => {
+    const lv = this.#live.get(ws)
+    if (lv && BULK_KINDS.has(o.kind) && ((this.#bulkHeld.get(relay)?.length ?? 0) > 0 || this.#budget(lv, now) < BULK_RESERVE + 1)) {
+      this.#holdBulk(relay, o)
+      return true
+    }
+    try { ws.send(o.frame) } catch { return false }
+    if (lv) { this.#charge(lv, now); lv.eventsOut++ }
+    this.#track(relay, o, now)
+    return true
+  }
+
+  #holdBulk = (relay: string, o: Outbound): void => {
+    let q = this.#bulkHeld.get(relay)
+    if (!q) { q = []; this.#bulkHeld.set(relay, q) }
+    if (o.id && q.some(p => p.id === o.id)) return
+    if (o.lane) {
+      if (q.some(p => p.lane === o.lane && p.createdAt > o.createdAt)) return
+      for (let i = q.length - 1; i >= 0; i--) if (q[i].lane === o.lane) q.splice(i, 1)
+    }
+    if (q.length >= BULK_HELD_MAX) q.shift()
+    const { frame, id, kind, slot, lane, exp, createdAt, queuedAtMs } = o
+    q.push({ frame, id, kind, slot, lane, exp, createdAt, queuedAtMs })
+    this.note('out:bulk-held', relay, undefined, undefined, kind, { held: q.length })
+    this.#armBulk()
+  }
+
+  /** Send what the budget allows from each relay's held bulk, oldest first;
+   *  wait for the refill for the rest. A relay with no open socket keeps
+   *  its frames for the next open; one off the list loses them. */
+  #drainBulk = (): void => {
+    if (this.#bulkTimer !== undefined) { clearTimeout(this.#bulkTimer); this.#bulkTimer = undefined }
+    const now = Date.now()
+    for (const [relay, q] of Array.from(this.#bulkHeld.entries())) {
+      if (!this.relays.includes(relay) || !this.networkEnabled) { this.#bulkHeld.delete(relay); continue }
+      const ws = this.sockets.get(relay)
+      const lv = ws ? this.#live.get(ws) : undefined
+      if (!ws || !lv || ws.readyState !== WebSocket.OPEN) continue
+      while (q.length > 0 && this.#budget(lv, now) >= BULK_RESERVE + 1) {
+        const o = q.shift()!
+        if (now - o.queuedAtMs > INFLIGHT_TTL_MS || this.#expired(o)) continue
+        try { ws.send(o.frame) } catch { q.unshift(o); break }
+        this.#charge(lv, now)
+        lv.eventsOut++
+        this.#track(relay, o, now)
+      }
+      if (q.length === 0) this.#bulkHeld.delete(relay)
+    }
+    this.#armBulk()
+  }
+
+  #armBulk = (): void => {
+    if (this.#bulkTimer !== undefined || this.stopped) return
+    const now = Date.now()
+    let wait = Infinity
+    for (const relay of this.#bulkHeld.keys()) {
+      const ws = this.sockets.get(relay)
+      const lv = ws ? this.#live.get(ws) : undefined
+      if (!ws || !lv || ws.readyState !== WebSocket.OPEN) continue
+      const short = BULK_RESERVE + 1 - this.#budget(lv, now)
+      wait = Math.min(wait, short <= 0 ? 0 : Math.ceil(short * 1000 / SEND_REFILL_PER_SEC))
+    }
+    if (wait === Infinity) return
+    this.#bulkTimer = setTimeout(() => { this.#bulkTimer = undefined; this.#drainBulk() }, Math.max(25, wait))
+  }
+
+  #dropBulk = (): void => {
+    if (this.#bulkTimer !== undefined) clearTimeout(this.#bulkTimer)
+    this.#bulkTimer = undefined
+    this.#bulkHeld.clear()
+  }
+
+  // -----------------------------
   // delivery (acks, retries, requeue)
   // -----------------------------
 
   #outbound = (evt: NostrEvent): Outbound => {
     const kind = Number(evt?.kind ?? 0)
     const exp = Number((evt?.tags ?? []).find(t => Array.isArray(t) && t[0] === 'expiration')?.[1])
+    const slot = slotOf(kind, evt?.tags)
+    const xs = (evt?.tags ?? []).filter(t => Array.isArray(t) && t[0] === 'x').map(t => String(t[1] ?? '')).join(',')
     return {
       frame: JSON.stringify(['EVENT', evt]),
       id: String(evt?.id ?? ''),
       kind,
-      slot: slotOf(kind, evt?.tags),
+      slot,
+      lane: slot === undefined ? undefined : `${slot}\0${xs}`,
       exp: Number.isFinite(exp) && exp > 0 ? exp : undefined,
       createdAt: Number(evt?.created_at) || 0,
       queuedAtMs: Date.now(),
@@ -1804,17 +2563,17 @@ export class NostrMeshDrone extends Drone {
     const key = `${relay}\0${o.id}`
     const prior = this.#inflight.get(key)
     if (prior) { prior.sentAtMs = now; return }
-    if (o.slot) {
+    if (o.lane) {
       for (const [k, e] of this.#inflight) {
-        if (e.relay === relay && e.slot === o.slot && e.createdAt < o.createdAt) this.#dropInflight(k)
+        if (e.relay === relay && e.lane === o.lane && e.createdAt < o.createdAt) this.#dropInflight(k)
       }
     }
     if (this.#inflight.size >= INFLIGHT_MAX) {
       const oldest = this.#inflight.keys().next().value
       if (oldest !== undefined) this.#dropInflight(oldest)
     }
-    const { frame, id, kind, slot, exp, createdAt, queuedAtMs } = o
-    this.#inflight.set(key, { frame, id, kind, slot, exp, createdAt, queuedAtMs, relay, sentAtMs: now, attempts: 0 })
+    const { frame, id, kind, slot, lane, exp, createdAt, queuedAtMs } = o
+    this.#inflight.set(key, { frame, id, kind, slot, lane, exp, createdAt, queuedAtMs, relay, sentAtMs: now, attempts: 0 })
   }
 
   #dropInflight = (key: string): void => {
@@ -1832,24 +2591,35 @@ export class NostrMeshDrone extends Drone {
 
   // A retired socket's unanswered frames go back in the queue for the next
   // open — the half-open socket swallowed them while publish() said true.
+  // Bulk goes back to its relay's own line (#holdBulk), so a broker's
+  // hundreds of answers never push the beacon out of the pending queue.
   #requeueInflight = (relay: string): void => {
     const now = Date.now()
     for (const [k, e] of this.#inflight) {
       if (e.relay !== relay) continue
       this.#dropInflight(k)
-      if (now - e.queuedAtMs < INFLIGHT_TTL_MS) this.#queueOutbound(e)
+      if (now - e.queuedAtMs >= INFLIGHT_TTL_MS) continue
+      if (BULK_KINDS.has(e.kind) && this.relays.includes(relay)) this.#holdBulk(relay, e)
+      else this.#queueOutbound(e)
     }
   }
 
   #queueOutbound = (o: Outbound): void => {
     if (o.id && this.pendingOutbound.some(p => p.id === o.id)) return
-    if (o.slot) {
-      if (this.pendingOutbound.some(p => p.slot === o.slot && p.createdAt > o.createdAt)) return
-      this.pendingOutbound = this.pendingOutbound.filter(p => p.slot !== o.slot)
+    if (o.lane) {
+      if (this.pendingOutbound.some(p => p.lane === o.lane && p.createdAt > o.createdAt)) return
+      this.pendingOutbound = this.pendingOutbound.filter(p => p.lane !== o.lane)
     }
-    if (this.pendingOutbound.length >= NostrMeshDrone.PENDING_OUTBOUND_MAX) this.pendingOutbound.shift()
-    const { frame, id, kind, slot, exp, createdAt, queuedAtMs } = o
-    this.pendingOutbound.push({ frame, id, kind, slot, exp, createdAt, queuedAtMs })
+    if (this.pendingOutbound.length >= NostrMeshDrone.PENDING_OUTBOUND_MAX) {
+      // Full: the oldest BULK frame makes room; a bulk frame never takes the
+      // place of a control one.
+      const bulk = this.pendingOutbound.findIndex(p => BULK_KINDS.has(p.kind))
+      if (bulk >= 0) this.pendingOutbound.splice(bulk, 1)
+      else if (BULK_KINDS.has(o.kind)) return
+      else this.pendingOutbound.shift()
+    }
+    const { frame, id, kind, slot, lane, exp, createdAt, queuedAtMs } = o
+    this.pendingOutbound.push({ frame, id, kind, slot, lane, exp, createdAt, queuedAtMs })
   }
 
   // NIP-01 OK. true or 'duplicate:' — delivered. 'rate-limited:' — sent
@@ -1865,6 +2635,11 @@ export class NostrMeshDrone extends Drone {
     if (accepted || reason.startsWith('duplicate:')) {
       this.#dropInflight(key)
       if (this.#refusal?.reason === 'clock') this.#clearRefusal()
+      const taken = this.#takenWaiters.get(id)
+      if (taken) {
+        this.#takenWaiters.delete(id)
+        try { taken() } catch { /* the caller's own trouble */ }
+      }
       return
     }
 
@@ -1877,6 +2652,7 @@ export class NostrMeshDrone extends Drone {
     }
 
     this.#dropInflight(key)
+    this.#takenWaiters.delete(id)
     if (/too far in the future/i.test(reason)) this.#setRefusal('clock')
     this.stats.rejected++
     console.warn(`[nostr-mesh] relay ${relay} REJECTED event ${id.slice(0, 12)}: "${reason}"`)
@@ -1897,8 +2673,18 @@ export class NostrMeshDrone extends Drone {
       this.#queueOutbound(entry)
       return
     }
+    const lv = this.#live.get(ws)
+    const now = Date.now()
+    // A bulk retry waits its turn for the budget like any bulk frame: it
+    // never pre-empts the tab's own beacon or page layer.
+    if (lv && BULK_KINDS.has(entry.kind) && ((this.#bulkHeld.get(entry.relay)?.length ?? 0) > 0 || this.#budget(lv, now) < BULK_RESERVE + 1)) {
+      this.#dropInflight(key)
+      this.#holdBulk(entry.relay, entry)
+      return
+    }
     try { ws.send(entry.frame) } catch { /* the watchdog judges the socket */ }
-    entry.sentAtMs = Date.now()
+    if (lv) { this.#charge(lv, now); lv.eventsOut++ }
+    entry.sentAtMs = now
     this.stats.retrySent++
     this.note('out:retry', entry.relay, undefined, undefined, entry.kind, { id: entry.id, attempt: entry.attempts })
   }
@@ -1924,6 +2710,15 @@ export class NostrMeshDrone extends Drone {
     if (!card || !Number.isFinite(time) || time <= 0) return
     const now = Date.now()
     this.#hostCard = { relay, time, participants: card.participants ?? false, atMs: now }
+    // Whether this relay hosts participants' bytes — the swarm's LAST-resort
+    // upload host (swarm-hosts.ts). Said on the bus so the resolver re-reads
+    // it; a repeat of the same policy is no news.
+    const participants = card.participants ?? false
+    if (this.#participantsByRelay.get(relay) !== participants) {
+      this.#participantsByRelay.set(relay, participants)
+      this.emitEffect('mesh:host-card', { relay, participants })
+    }
+    this.#addressedByRelay.set(relay, card.addressed === true)
     const offset = Math.round(time * 1000 + 500 - now)
     const next = Math.abs(offset) > CLOCK_APPLY_MS ? offset : 0
     const prev = this.#clockOffsetMs
@@ -1935,11 +2730,43 @@ export class NostrMeshDrone extends Drone {
       return
     }
     this.#clockOffsetMs = next
+    this.#rememberOffset(relay, next)
     this.note('clock:offset', relay, undefined, undefined, undefined, { offsetMs: next })
     if (prev - next > CLOCK_APPLY_MS) {
-      for (const bucket of this.bucketsBySig.values()) this.sendReq(relay, bucket)
+      for (const bucket of this.#reqOrder()) this.sendReq(relay, bucket)
     }
     this.#emitConnection()
+    // EVENTs already went out on this socket, stamped on the clock the card
+    // just corrected: a slow device's beacon and layers left already expired
+    // (the relay stores them and never replays them; peers drop them). Said
+    // once, with no round trip: the publisher sends them again now instead
+    // of at its next refresh a minute later (RM-4).
+    const ws = this.sockets.get(relay)
+    const sent = ws ? (this.#live.get(ws)?.eventsOut ?? 0) : 0
+    if (sent > 0 && Math.abs(next - prev) > CLOCK_APPLY_MS) {
+      this.note('clock:corrected', relay, undefined, undefined, undefined, { offsetMs: next, prevOffsetMs: prev, eventsOut: sent })
+      this.emitEffect('mesh:clock-corrected', { relay, offsetMs: next, prevOffsetMs: prev })
+    }
+  }
+
+  /** The offset this tab last learned for `relay` (0 when none). */
+  #rememberedOffset = (relay: string): number => {
+    if (!relay) return 0
+    try {
+      const raw = sessionStorage.getItem(CLOCK_KEY)
+      const v = raw ? Number((JSON.parse(raw) as Record<string, unknown>)[relay]) : 0
+      return Number.isFinite(v) && Math.abs(v) > CLOCK_APPLY_MS ? Math.round(v) : 0
+    } catch { return 0 }
+  }
+
+  #rememberOffset = (relay: string, offsetMs: number): void => {
+    try {
+      const raw = sessionStorage.getItem(CLOCK_KEY)
+      const all = (raw ? JSON.parse(raw) : {}) as Record<string, number>
+      if (offsetMs === 0) delete all[relay]
+      else all[relay] = offsetMs
+      sessionStorage.setItem(CLOCK_KEY, JSON.stringify(all))
+    } catch { /* no session storage: a reload learns it again from the card */ }
   }
 
   #raiseFloor = (slot: string, sec: number): void => {
@@ -2062,10 +2889,32 @@ export class NostrMeshDrone extends Drone {
 
   private closeBucket = (b: Bucket): void => {
     if (b.retryTimer) { clearTimeout(b.retryTimer); b.retryTimer = undefined }
+    if (b.lease !== undefined) { clearTimeout(b.lease); b.lease = undefined }
     this.sendCloseToAll(b.subId)
     this.bucketsBySig.delete(b.sig)
     this.bucketsBySubId.delete(b.subId)
+    // A refusal that named this subscription names nothing any more.
+    if (this.#refusal?.subId === b.subId) this.#clearRefusal()
     this.note('sub:closed', undefined, b.sig, b.subId)
+  }
+
+  /** The order every bucket is asked for on a socket: the ones a consumer
+   *  holds newest first (the page this tab stands on was subscribed last),
+   *  then the leases. A relay at its cap refuses the tail. */
+  #reqOrder = (): Bucket[] => {
+    const held: Bucket[] = []
+    const leases: Bucket[] = []
+    for (const b of this.bucketsBySig.values()) (b.cbs.size > 0 ? held : leases).push(b)
+    return held.reverse().concat(leases)
+  }
+
+  /** The oldest lease still asked for (its REQ not refused since its last
+   *  EOSE), other than `not` — the one to give up a place at the cap. */
+  #oldestLease = (not: Bucket): Bucket | undefined => {
+    for (const b of this.bucketsBySig.values()) {
+      if (b !== not && b.cbs.size === 0 && b.closedN === 0) return b
+    }
+    return undefined
   }
 
   private unsubscribe = (sig: string, cb: MeshCb): void => {
@@ -2114,15 +2963,9 @@ export class NostrMeshDrone extends Drone {
     // note: if already signed, pass through
     if (evt?.id && evt?.pubkey && evt?.sig) return evt
 
-    // note: nip-07 if available
-    const anyWin = window as any
-    if (anyWin?.nostr?.signEvent) {
-      try {
-        const signed = await anyWin.nostr.signEvent(evt)
-        return signed ?? null
-      } catch { /* ignore */ }
-    }
-
+    // Only through the signer: it already prefers NIP-07, and it holds the
+    // sandbox-door rule (a door signs nothing), so asking window.nostr here
+    // would step around that rule and prompt twice on a refusal.
     const signer = this.resolve<any>('signer')
     if (signer?.signEvent) {
       try {
@@ -2177,6 +3020,7 @@ export class NostrMeshDrone extends Drone {
   }
 
   this.#dropAllStandby('pause')
+  this.#closeDraining()
   for (const [url, ws] of this.sockets.entries()) {
     try { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null } catch {}
     try { ws.close() } catch {}
@@ -2191,6 +3035,7 @@ export class NostrMeshDrone extends Drone {
   // next join is a first open, not a reopen.
   for (const key of Array.from(this.#inflight.keys())) this.#dropInflight(key)
   this.pendingOutbound = []
+  this.#dropBulk()
   this.#everOpen = false
 
   // Reset every bucket's event-id dedupe set on pause. The

@@ -161,10 +161,10 @@ export class HistoryCursorService extends EventTarget {
       this.#locationSig = locationSig
       this.#cachedLayerSig = null
       this.#cachedContent = null
-      // Always start a fresh page load at head, regardless of any
-      // persisted rewound position. Restoring a rewound cursor from
-      // localStorage would replay a historical layer at render time
-      // (ShowCellDrone's rewound-render path), which caused the
+      // Always start a fresh page load at head; a rewound position is never
+      // kept across loads. Restoring a rewound cursor would replay a
+      // historical layer at render time (ShowCellDrone's rewound-render
+      // path), which caused the
       // "crunched tiles after refresh" regression when any of those
       // historical layers had incomplete layout state. Scrubbed
       // position as a convenience across refreshes can be reintroduced
@@ -744,31 +744,8 @@ export class HistoryCursorService extends EventTarget {
   }
 
   #emit(): void {
-    this.#persistPosition()
     this.dispatchEvent(new CustomEvent('change'))
     EffectBus.emit<CursorState>('history:cursor-changed', this.state)
-  }
-
-  // ── Cursor persistence (localStorage) ──────────────────────
-
-  static readonly #STORAGE_PREFIX = 'hc:history-cursor:'
-
-  #persistPosition(): void {
-    if (!this.#locationSig) return
-    const key = HistoryCursorService.#STORAGE_PREFIX + this.#locationSig
-    if (this.#position >= this.#layers.length) {
-      // At head — drop the persisted entry
-      localStorage.removeItem(key)
-    } else {
-      localStorage.setItem(key, String(this.#position))
-    }
-  }
-
-  #loadPersistedPosition(locationSig: string): number | null {
-    const raw = localStorage.getItem(HistoryCursorService.#STORAGE_PREFIX + locationSig)
-    if (raw === null) return null
-    const n = parseInt(raw, 10)
-    return isNaN(n) ? null : n
   }
 
   // ── Group-step toggle persistence (localStorage) ───────────

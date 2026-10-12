@@ -330,6 +330,18 @@ published); only the moment moved.
    never touches a non-64-hex name — but nothing refreshes it and no client
    reads it.*
 
+## The pool is the fallback for a first install, not its choice (2026-10-09)
+
+A host's pool says what it CARRIES; it never said what a fresh install should
+RUN, and the two drifted: hypercomb.com's pool head lagged the signed
+`install:essentials` for ten days. So a first install (and the floor) follows
+the publisher's signed channel and takes the pool head only when the signed
+root cannot be had: the index unreachable, naming no root for the channel, or
+naming a root the seed does not hold yet. A forged index installs nothing.
+`publish:revision` reads the seed's pool after it stamps and prints the
+restage it owes when the pool lags (publishing-a-revision.md, step 4).
+Details: install-by-replication.md, "The floor".
+
 ## Doctrine rules
 
 - **The pool is the set.** No roster document; a half-written add means one

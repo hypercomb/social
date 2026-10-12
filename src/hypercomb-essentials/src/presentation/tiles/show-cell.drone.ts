@@ -49,6 +49,8 @@ import { TileDive, type DiveCell } from './tile-dive.js'
 import { MarkPreview, TilePreview, type TilePreviewPayload } from './tile-previews.js'
 import { QuietLanding } from './tile-landing.js'
 import { TileHover } from './tile-hover.js'
+import { LabelView } from './tile-label-view.js'
+import { EvictionRepaint } from './tile-evictions.js'
 import { TileOrder, type ReferenceDraftPreview } from './tile-order.js'
 import { adoptPackedVisual, packedVisual, type PackedVisualEntry } from './packed-visuals.js'
 
@@ -320,7 +322,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'tile:preview', 'view:arrival', 'render:set-hive-visible', 'viewport:persisted', 'feature:hidden', 'feature:restored', 'launcher:reconciled', 'launch:indexed', 'frame:changed', 'frame:offset', 'title:indexed', 'reference:indexed', 'reference:draft-preview', 'fs:changed', 'swarm:divergence-changed', 'mobile:marks-changed', 'render:gather-set', 'tags:required', 'labels:invalidated', 'mesh:public-changed', 'tile-names:dom', 'render:set-text-only', 'spotlight:changed', 'tile:hover']
+  protected override listens = ['render:host-ready', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'tile:preview', 'view:arrival', 'render:set-hive-visible', 'viewport:persisted', 'feature:hidden', 'feature:restored', 'launcher:reconciled', 'launch:indexed', 'frame:changed', 'frame:offset', 'title:indexed', 'reference:indexed', 'reference:draft-preview', 'fs:changed', 'swarm:divergence-changed', 'mobile:marks-changed', 'render:gather-set', 'tags:required', 'labels:invalidated', 'mesh:public-changed', 'tile-names:dom', 'render:set-text-only', 'spotlight:changed', 'tile:hover']
   protected override emits = ['mesh:ensure-started', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility', 'navigation:guard-start', 'navigation:guard-end', 'render:gathered', 'render:tile-readiness']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -911,6 +913,19 @@ export class ShowCellDrone extends Drone {
    *  Without it painting is blind — the click writes and nothing on the hive
    *  says so. Cleared when the brush is put down. */
   #tagApplyPainted = new Set<string>()
+  /** Which labels an oversized layer pins and bakes: those in view
+   *  (tile-label-view.ts). */
+  readonly #labels = new LabelView({
+    atlas: () => this.atlas,
+    toGlobal: () => this.hexMesh?.toGlobal ? (p: { x: number; y: number }) => this.hexMesh.toGlobal(p) : null,
+    screen: () => this.pixiRenderer?.screen ?? null,
+    viewportPending: () => this.#pendingRecenter || this.#pendingFitRestore || this.#pendingFirstVisitFit || !!this.#pendingMeshOffsetRestore,
+    spacing: () => this.#hexGeo.circumRadiusPx + this.#hexGeo.gapPx,
+    flat: () => this.#flat,
+    cells: () => this.renderedCells.values(),
+    repaint: () => { this.#forceNextRender = true; this.requestRender() },
+  })
+
   /** Which tiles wear these marks — hovered, in hand, dragged — painted in
    *  place, never a render pass (tile-previews.ts). */
   readonly #marks: MarkPreview = new MarkPreview({
@@ -1208,83 +1223,19 @@ export class ShowCellDrone extends Drone {
     })
   }
 
-  // Bound on CONSECUTIVE eviction-forced repaints while on-screen sigs
-  // keep going missing. A normal layer converges in one or two passes
-  // (reload lands, next eviction scan comes back clean and resets the
-  // counter). Only a layer with more images than the atlas has slots can
-  // keep the scan dirty forever — self-eviction — and that pathology must
-  // not be allowed to spin the render loop.
-  #evictRepaintCount = 0
-  static readonly #EVICT_REPAINT_MAX = 8
-
-
-  /** An atlas slot was reused for different content. If the displaced sig
-   *  belongs to an on-screen cell, its baked UV now points at foreign
-   *  pixels — force a pass so the cell either reloads (loadOne re-queues
-   *  evicted sigs) or falls back to label. This must run even while a
-   *  pass is mid-flight: the eviction may have displaced pixels the
-   *  running pass already awaited (loads and evictions from elsewhere
-   *  interleave), so its rebuilt geometry is stale the moment it bakes.
-   *  requestRender during a pass queues a follow-up pass — bounded by
-   *  #EVICT_REPAINT_MAX so self-evicting oversized layers can't loop. */
-  readonly #onAtlasEvicted = (e?: Event): void => {
-    const atlas = this.imageAtlas
-    if (!atlas) return
-    // PROMISE REPAIR. A branch that brightened made a promise — "the inside is
-    // decoded, the click is instant" — and an eviction can quietly break it:
-    // brightness is monotonic per visit, so the tile stays lit while its
-    // pixels are gone, and the click pays the decode all over again (the
-    // "latency on tiles that have lighted up" bug, reproduced live: 0/12
-    // images resident under a still-lit tile). When the victim sig belongs to
-    // a PROVEN click target of the current location, withdraw the visual
-    // promise and re-queue it for an idle re-bake. Bytes remain local, but the
-    // click is no longer instant until the pixels are resident again.
-    this.#readiness.imageEvicted((e as CustomEvent<{ sig?: string }> | undefined)?.detail?.sig)
-    for (const c of this.renderedCells.values()) {
-      if (c.imageSig && !atlas.hasImage(c.imageSig) && !atlas.hasFailed(c.imageSig)) {
-        if (this.#evictRepaintCount >= ShowCellDrone.#EVICT_REPAINT_MAX) {
-          console.warn('[show-cell] atlas eviction repaint bound reached — layer likely exceeds atlas capacity')
-          return
-        }
-        this.#evictRepaintCount++
-        this.#forceNextRender = true
-        this.requestRender()
-        return
-      }
-    }
-    // Clean scan — every on-screen sig is resolvable again; reset the bound.
-    this.#evictRepaintCount = 0
-  }
-
-  /** Label-atlas twin of #onAtlasEvicted. A displaced on-screen label's
-   *  baked UV samples a DIFFERENT label's glyphs (wrong text — the
-   *  superimposed-labels bug class), so force a repaint; the rebuild
-   *  re-bakes it on demand. Shares #evictRepaintCount with the image
-   *  handler — a converged paint resets both. Cells rendering
-   *  hideText-with-image are skipped: their labelUV is intentionally
-   *  zeroed, so a displaced label cannot show. */
-  readonly #onLabelAtlasEvicted = (e?: Event): void => {
-    const atlas = this.atlas
-    if (!atlas) return
-    // Same promise repair as the image twin: a proven branch's child NAME
-    // displaced from the label atlas would make the next click rasterise it
-    // again (~13ms each — the single biggest click cost measured). Re-seed it
-    // during idle instead.
-    this.#readiness.labelEvicted((e as CustomEvent<{ label?: string }> | undefined)?.detail?.label)
-    for (const c of this.renderedCells.values()) {
-      if (this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))) continue
-      if (!atlas.hasLabel(c.label)) {
-        if (this.#evictRepaintCount >= ShowCellDrone.#EVICT_REPAINT_MAX) {
-          console.warn('[show-cell] label-atlas eviction repaint bound reached — more on-screen labels than atlas slots')
-          return
-        }
-        this.#evictRepaintCount++
-        this.#forceNextRender = true
-        this.requestRender()
-        return
-      }
-    }
-  }
+  /** An atlas slot reused under a tile on screen: repaint, bounded
+   *  (tile-evictions.ts). */
+  readonly #evictions = new EvictionRepaint({
+    imageAtlas: () => this.imageAtlas,
+    labelAtlas: () => this.atlas,
+    cells: () => this.renderedCells.values(),
+    hidesName: c => this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig))),
+    imageEvicted: sig => this.#readiness.imageEvicted(sig),
+    labelEvicted: label => this.#readiness.labelEvicted(label),
+    pinned: label => this.#labels.pinned(label),
+    baking: () => this.#labels.baking,
+    repaint: () => { this.#forceNextRender = true; this.requestRender() },
+  })
 
   /** Fast path for move:preview — skips OPFS/mesh/image loading, only rebuilds geometry with reordered labels */
   private readonly renderMovePreview = (): void => {
@@ -3874,6 +3825,7 @@ export class ShowCellDrone extends Drone {
       && cells.length === this.renderedCount
       && nextImageAtlasGen === this.#bakedImageAtlasGen
       && nextLabelAtlasGen === this.#bakedLabelAtlasGen
+      && !this.#labels.stale
     ) {
       return
     }
@@ -3910,16 +3862,30 @@ export class ShowCellDrone extends Drone {
     // The old layer's labels unpin here and become ordinary evictees.
     // PENDING_CELL_LABEL is displayed in place of any mid-mutation cell's
     // name, so it is part of the on-screen set whenever it is baked at all.
-    this.atlas.setPinned([...cells.map(c => c.label), PENDING_CELL_LABEL])
+    //
+    // A layer with more names than the atlas has slots (SCALE-1) pins only
+    // what is in view: pinning all of it pinned every slot, and then nothing a
+    // zoom brought into view could ever take one. Out-of-view cells are not
+    // baked at all — they keep a slot they already hold, or draw without baked
+    // text (buildFillQuadGeometry) until a settled gesture brings them in.
+    const view = this.#labels.forPaint(cells)
+    this.atlas.setPinned([...(view ?? cells.map(c => c.label)), PENDING_CELL_LABEL])
 
-    for (const cell of cells) {
-      const label = this.#pendingCellMutations.has(cell.label) && !this.atlas.hasLabel(cell.label)
-        ? PENDING_CELL_LABEL
-        : cell.label
-      this.atlas.getLabelUV(label)
+    let geom: Geometry
+    this.#labels.baking = true
+    try {
+      for (const cell of cells) {
+        if (view && !view.has(cell.label)) continue
+        const label = this.#pendingCellMutations.has(cell.label) && !this.atlas.hasLabel(cell.label)
+          ? PENDING_CELL_LABEL
+          : cell.label
+        this.atlas.getLabelUV(label)
+      }
+
+      geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
+    } finally {
+      this.#labels.baking = false
     }
-
-    const geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
 
     if (!this.shader) {
       this.shader = new HexSdfTextureShader(labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
@@ -4074,6 +4040,7 @@ export class ShowCellDrone extends Drone {
     // re-baked is the only thing that makes a generation "already applied".
     this.#bakedImageAtlasGen = nextImageAtlasGen
     this.#bakedLabelAtlasGen = nextLabelAtlasGen
+    this.#labels.stale = false
     this.renderedCount = cells.length
     this.#recordRenderAudit('paint', cells.length, this.renderedLocationKey)
     // A real paint ends every hold on this location — drop both deadlines so a
@@ -4081,25 +4048,15 @@ export class ShowCellDrone extends Drone {
     this.#gateFirstHoldAt.delete(this.renderedLocationKey)
     this.#gateFirstHoldAt.delete('idx:' + this.renderedLocationKey)
 
-    // A paint with every image AND every label resolvable is the convergence
-    // point of the eviction-repaint cycle — reset its bound here (eviction
-    // events alone can't be relied on for the reset: after the reload pass
-    // converges, no further event arrives to run a clean scan).
-    //
-    // The label half is not optional. #evictRepaintCount is SHARED with
-    // #onLabelAtlasEvicted, so an image-only reset defeats the bound on any
-    // layer with more labels than the 256-slot label atlas: the paint wraps
-    // the label ring, the label listener forces a repaint, this reset clears
-    // the counter because the images were fine, and the cycle runs forever —
-    // visible as tile text blinking. Witnessed on a 522-child layer.
+    // Every image AND every label resolvable: the eviction-repaint cycle
+    // converged (tile-evictions.ts) — both halves, or text blinks forever.
     const imagesConverged = !!this.imageAtlas && !cells.some(c =>
       c.imageSig && !this.imageAtlas!.hasImage(c.imageSig) && !this.imageAtlas!.hasFailed(c.imageSig))
     const labelsConverged = !this.atlas || !cells.some(c =>
-      !this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))
+      (!view || view.has(c.label))
+      && !this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))
       && !this.atlas!.hasLabel(c.label))
-    if (imagesConverged && labelsConverged) {
-      this.#evictRepaintCount = 0
-    }
+    if (imagesConverged && labelsConverged) this.#evictions.converged()
 
     // Pin every on-screen image so the ring allocator never reuses their
     // slots — the hard display rule: a tile never renders without its
@@ -4285,12 +4242,12 @@ export class ShowCellDrone extends Drone {
     // else invalidates. Repaint only when a rendered cell is actually
     // affected; mid-pass evictions are skipped because the running pass
     // rebuilds geometry itself.
-    window.addEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
-    window.addEventListener('hex-image-atlas:retry', this.#onAtlasEvicted)
+    window.addEventListener('hex-image-atlas:evicted', this.#evictions.onImage)
+    window.addEventListener('hex-image-atlas:retry', this.#evictions.onImage)
     // Label-atlas twin — in-place updates bake uncached labels on demand,
     // and once the 256-slot label ring has wrapped, such a bake displaces
     // an on-screen label whose baked UV then shows the WRONG text.
-    window.addEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)
+    window.addEventListener('hex-label-atlas:evicted', this.#evictions.onLabel)
 
     // Lineage 'change' is the canonical "the user's explorerPath
     // changed" signal — fired by every code path that mutates the
@@ -4430,6 +4387,7 @@ export class ShowCellDrone extends Drone {
         && segments.every((s, i) => s === cur[i])
       if (same) {
         this.#layerViewportCache.set(this.renderedLocationKey, { ...(snapshot ?? {}) })
+        this.#labels.refresh()
       }
     })
 
@@ -5074,6 +5032,14 @@ export class ShowCellDrone extends Drone {
       this.#marks.hover(marks, color)
     })
 
+    // group:preview — a publish group's icon is under the cursor (the strip
+    // at the top of the hive). Its members light in the group's colour and the
+    // rest recede: the same look as a hovered pheromone, answered from the
+    // labels the strip already holds.
+    this.onEffect<{ labels?: readonly string[]; color?: string }>('group:preview', ({ labels, color }) => {
+      this.#marks.group(labels, color)
+    })
+
     // A programmatic mark change (e.g. /mobile sweep) deposits tags via
     // DecorationService directly, bypassing the painter's tags:apply
     // invalidation. Clear the render cache so tag chips refresh without
@@ -5161,7 +5127,10 @@ export class ShowCellDrone extends Drone {
       }
     })
 
-    this.onEffect<{ secret: string }>('mesh:secret', ({ secret }) => {
+    // A notice, never the secret (the bus replays its last value to every late
+    // subscriber): read it where it lives, as the boot seeding below does.
+    this.onEffect('mesh:secret', () => {
+      const secret = String(get<any>('@hypercomb.social/SecretStore')?.value ?? '')
       if (this.#mesh.secret !== secret) {
         this.#mesh.secret = secret
         this.#layerCellsCache.clear()
@@ -5730,9 +5699,9 @@ export class ShowCellDrone extends Drone {
   protected override dispose = (): void => {
     window.removeEventListener('synchronize', this.onSynchronize)
     window.removeEventListener('navigate', this.onNavigate)
-    window.removeEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
-    window.removeEventListener('hex-image-atlas:retry', this.#onAtlasEvicted)
-    window.removeEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)
+    window.removeEventListener('hex-image-atlas:evicted', this.#evictions.onImage)
+    window.removeEventListener('hex-image-atlas:retry', this.#evictions.onImage)
+    window.removeEventListener('hex-label-atlas:evicted', this.#evictions.onLabel)
     window.removeEventListener('navigate', this.#onNavigateStarted)
     this.#readiness.dispose()
     this.#mesh.close()
@@ -6899,6 +6868,8 @@ export class ShowCellDrone extends Drone {
       ownPage && this.#pendingCellMutations.has(label) && !this.atlas!.hasLabel(label) ? PENDING_CELL_LABEL : label,
     ),
     hidesName: (hideText, hasImage) => this.#hidesName(hideText, hasImage),
+    unbaked: label => this.#labels.unbaked(label,
+      this.#pendingCellMutations.has(label) && !this.atlas!.hasLabel(label) ? PENDING_CELL_LABEL : label),
     isHiddenItem: label => (this.#showHiddenItems && this.#currentHiddenSet.has(label)) || this.#dormantLaunchLabels.has(label),
     isDormant: label => this.#dormantLaunchLabels.has(label),
     peerPubkey: label => this.#peerPubkeyByLabel.get(label),

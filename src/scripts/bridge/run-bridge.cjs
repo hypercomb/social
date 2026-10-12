@@ -5,7 +5,8 @@
 // The broker relays ops that CREATE TILES, WRITE RESOURCES AND COMMIT LAYERS
 // on a live hive. It used to accept anything that could reach the port, which
 // meant anyone on the network could drive the hive — or claim the renderer
-// slot and displace the real tab. Three gates now, matched to the actual
+// slot and displace the real tab. The socket binds loopback unless BRIDGE_HOST
+// says otherwise, and four gates stand behind it, matched to the actual
 // threats (someone else on your LAN, or a page in your own browser), not to
 // ceremony:
 //
@@ -14,34 +15,65 @@
 //      nothing about it; a handshake whose Origin is not a page served from
 //      this machine is refused (bridge-origin.cjs). No Origin = a Node client.
 //
-//   1. RENDERER REGISTRATION IS LOOPBACK-ONLY, always. A hive tab always dials
-//      a broker on its own machine (the bee hardcodes ws://localhost), so a
-//      renderer arriving from anywhere else is either a mistake or a hijack.
+//   1. RENDERER REGISTRATION IS LOOPBACK-ONLY, always, AND ONLY FROM THE
+//      HIVE'S OWN PAGES. A hive tab always dials a broker on its own machine
+//      (the bee hardcodes ws://localhost), so a renderer arriving from
+//      anywhere else is either a mistake or a hijack. The renderer sees every
+//      op and writes every answer, so "any localhost page" is not enough: a
+//      page registers only from an origin in BRIDGE_RENDERER_ORIGINS (default:
+//      the hive's dev and web ports — bridge-origin.cjs); a Node client with
+//      no Origin (this machine's tools) may too. An OPEN renderer is never
+//      displaced by a stranger: a second registration is refused while it
+//      holds the slot, unless it is another tab of the same origin, carries
+//      the same non-empty code list, or is this machine's tool. An answer is
+//      taken only from the socket its op was forwarded to.
 //
-//   2. OP SENDERS: loopback is trusted (already on the machine = already has
-//      the browser). Non-loopback senders must present a shared token:
-//        Authorization: Bearer <HYPERCOMB_BRIDGE_TOKEN>
-//      With NO token configured, non-loopback senders are refused outright —
-//      so the safe default holds even when the socket is bound wide.
+//   2. OP SENDERS: this machine's own tools — a loopback socket with NO
+//      Origin (the scripts and Claude sessions on this machine) — are
+//      trusted. Every page (any Origin, localhost included) and every remote
+//      sender presents a bridge code, checked again on EACH op so a code
+//      withdrawn in the hive stops working at once:
+//        Node:  Authorization: Bearer <code>
+//        page:  {"type":"code","code":"<code>"} before its ops
+//      Codes are made in the hive (`bridge give <name>`); the broker holds only
+//      their SHA-256 hashes (bridge-codes.cjs). With no codes and no token,
+//      everyone but this machine's tools is refused.
+//
+//   3. THE CODE LIST BELONGS TO THE RENDERER SOCKET. It arrives with the
+//      renderer registration, is replaced whole by a `codes` message from that
+//      same socket (from any other socket it is ignored), and is cleared when
+//      that socket closes. No renderer, no codes — and no ops anyway.
 //
 // Env:
-//   BRIDGE_PORT             listen port (default 2401)
-//   BRIDGE_HOST             bind address (default 127.0.0.1 — loopback).
-//                           Set 0.0.0.0 to allow remote answering sessions.
-//   HYPERCOMB_BRIDGE_TOKEN  shared secret required of non-loopback senders.
+//   BRIDGE_PORT                    listen port (default 2401)
+//   BRIDGE_HOST                    bind address (default 127.0.0.1 — loopback).
+//                                  Set 0.0.0.0 to allow remote answering sessions.
+//   BRIDGE_RENDERER_ORIGINS        the hive pages that may register as the
+//                                  renderer (default: the hive's dev and web ports)
+//   HYPERCOMB_BRIDGE_BROKER_TOKEN  optional FALLBACK: one more code, set on the
+//                                  broker, admitted like any code the hive gave.
+//   (HYPERCOMB_BRIDGE_TOKEN is the CLIENT's: the code this machine's scripts
+//   present to someone else's broker. The broker never admits it — a code you
+//   hold for another hive must not open yours.)
 //
-// Local workflows are unaffected: without a token, on the default bind, this
-// behaves exactly as before.
+// This machine's tools are unaffected: on the default bind, with no Origin,
+// they connect exactly as before.
 
 const { WebSocketServer, WebSocket } = require('ws')
 const { createServer } = require('node:http')
 const { watchFile } = require('node:fs')
 const { OWED_FILE, readOwed, settleOwed, followedPubkey, servedByRelay } = require('./owed-stamps.cjs')
-const { bridgeOriginAllowed } = require('./bridge-origin.cjs')
+const { bridgeOriginAllowed, rendererOrigins, rendererOriginAllowed, HIVE_PORTS } = require('./bridge-origin.cjs')
+const { hashCode, parseCodeHashes, codeAdmitted } = require('./bridge-codes.cjs')
 
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 2401)
 const BRIDGE_HOST = process.env.BRIDGE_HOST || '127.0.0.1'
-const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
+const TOKEN = String(process.env.HYPERCOMB_BRIDGE_BROKER_TOKEN || '').trim()
+const TOKEN_HASH = TOKEN ? hashCode(TOKEN) : ''
+const CLIENT_TOKEN_SET = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim() !== ''
+const RENDERER_ORIGINS = rendererOrigins(process.env.BRIDGE_RENDERER_ORIGINS)
+
+const UNAUTHORIZED = 'unauthorized — this bridge serves its own machine; anyone else needs a bridge code from the hive (bridge give <name>), sent as Authorization: Bearer <code>, or from a page as {"type":"code","code":"<code>"} first'
 
 // Browsers cannot test whether a TCP/WebSocket port is open without creating
 // a WebSocket, and Chromium logs every refused WebSocket in the console. This
@@ -73,7 +105,14 @@ const wss = new WebSocketServer({
 server.listen(BRIDGE_PORT, BRIDGE_HOST)
 
 let renderer = null
+// The renderer's page origin ('' for a Node renderer) — a later tab of the same origin is the same hive.
+let rendererOrigin = ''
+// Hashes of the codes the renderer gave — never a code, never logged.
+let codeHashes = new Set()
+// op id → { client, via }: who asked, and the renderer socket the op went to — the only socket whose answer counts.
 const pending = new Map()
+// Second-renderer refusals already logged since the slot last changed hands (a refused tab retries every few seconds).
+const refusalsNoted = new Set()
 let paying = false
 
 // A debt recorded while a hive is already attached is paid without waiting for it to reconnect.
@@ -93,24 +132,30 @@ function presentedToken(req) {
   return m ? m[1].trim() : ''
 }
 
+// The same list, held by a newcomer that never saw it — only the hive's own tabs can carry it.
+function sameCodeList(offered, held) {
+  if (offered.size === 0 || offered.size !== held.size) return false
+  for (const hash of offered) if (!held.has(hash)) return false
+  return true
+}
+
 function askRenderer(op, waitMs = 45_000) {
   return new Promise((resolve) => {
+    if (!renderer || renderer.readyState !== WebSocket.OPEN) {
+      resolve({ ok: false, error: 'no renderer connected' })
+      return
+    }
     const id = `owed-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: 'renderer did not answer' }) }, waitMs)
-    pending.set(id, {
+    const client = {
       readyState: WebSocket.OPEN,
       send: (json) => {
         clearTimeout(timer)
         try { resolve(JSON.parse(json)) } catch { resolve({ ok: false, error: 'unreadable answer' }) }
       },
-    })
-    if (renderer && renderer.readyState === WebSocket.OPEN) {
-      renderer.send(JSON.stringify({ ...op, id }))
-    } else {
-      clearTimeout(timer)
-      pending.delete(id)
-      resolve({ ok: false, error: 'no renderer connected' })
     }
+    pending.set(id, { client, via: renderer })
+    renderer.send(JSON.stringify({ ...op, id }))
   })
 }
 
@@ -147,9 +192,12 @@ async function payOwedStamps() {
 wss.on('connection', (ws, req) => {
   let identified = false
   const local = isLoopback(req)
-  // Loopback is trusted outright; remote needs the shared token, and if none
-  // is configured remote can never be trusted.
-  const trusted = local || (TOKEN !== '' && presentedToken(req) === TOKEN)
+  // A browser always stamps an Origin; this machine's own tools send none.
+  const page = req.headers.origin !== undefined
+  const me = local && !page
+  // The code this sender presented, hashed once — '' when it presented none.
+  const bearer = presentedToken(req)
+  let presented = bearer ? hashCode(bearer) : ''
 
   ws.on('message', (raw) => {
     let msg
@@ -158,52 +206,92 @@ wss.on('connection', (ws, req) => {
     } catch {
       return
     }
+    // `null`, a number, a string: valid JSON, not a message — and `null.type` would end the process.
+    if (!msg || typeof msg !== 'object') return
 
-    // renderer identifies itself on connect — LOOPBACK ONLY
+    // renderer identifies itself on connect — LOOPBACK ONLY, from the hive's
+    // own pages — and brings the hashes of the hive's bridge codes with it.
     if (msg.type === 'renderer') {
       if (!local) {
         console.warn(`[bridge] refused remote renderer registration from ${req.socket.remoteAddress}`)
         try { ws.close() } catch {}
         return
       }
+      const origin = page ? String(req.headers.origin) : ''
+      if (!rendererOriginAllowed(page ? origin : undefined, RENDERER_ORIGINS)) {
+        console.warn(`[bridge] refused a renderer from page ${origin} — not a hive page (BRIDGE_RENDERER_ORIGINS)`)
+        try { ws.close(4403, 'not a hive page') } catch {}
+        return
+      }
+      const offered = parseCodeHashes(msg.codes)
+      const held = renderer && renderer !== ws && renderer.readyState === WebSocket.OPEN
+      if (held && !me && origin !== rendererOrigin && !sameCodeList(offered, codeHashes)) {
+        if (!refusalsNoted.has(origin)) {
+          refusalsNoted.add(origin)
+          console.warn(`[bridge] refused a second renderer from page ${origin} — ${rendererOrigin ? `the hive at ${rendererOrigin}` : "this machine's tool"} holds the slot until it closes`)
+        }
+        try { ws.close(4409, 'renderer slot held') } catch {}
+        return
+      }
+      if (held) console.log(`[bridge] renderer slot passed to ${origin || "this machine's tool"}`)
       renderer = ws
+      rendererOrigin = origin
+      refusalsNoted.clear()
       identified = true
-      console.log('[bridge] renderer connected')
+      codeHashes = offered
+      console.log(`[bridge] renderer connected (${codeHashes.size} codes)`)
       void payOwedStamps()
+      return
+    }
+
+    // the hive's code list changed — only the renderer may say so, whole
+    if (msg.type === 'codes') {
+      if (ws !== renderer) {
+        console.warn(`[bridge] ignored a code list from a socket that is not the renderer (${req.socket.remoteAddress})`)
+        return
+      }
+      codeHashes = parseCodeHashes(msg.codes)
+      console.log(`[bridge] code list now ${codeHashes.size} codes`)
+      return
+    }
+
+    // a page presents its code before its ops; a resend replaces it, no reply
+    if (msg.type === 'code') {
+      if (identified) return
+      presented = typeof msg.code === 'string' ? hashCode(msg.code) : ''
       return
     }
 
     // CLI request — forward to renderer, track by id
     if (msg.id && !identified) {
-      if (!trusted) {
-        console.warn(`[bridge] refused unauthorized op from ${req.socket.remoteAddress}`)
-        ws.send(JSON.stringify({
-          id: msg.id,
-          ok: false,
-          error: TOKEN
-            ? 'unauthorized — send Authorization: Bearer <token>'
-            : 'unauthorized — remote senders require HYPERCOMB_BRIDGE_TOKEN on the broker',
-        }))
+      // Asked on EVERY op, so a code withdrawn in the hive stops working at once.
+      if (!(me || codeAdmitted(presented, codeHashes, TOKEN_HASH))) {
+        console.warn(`[bridge] refused unauthorized op from ${req.socket.remoteAddress}${page ? ` (page ${req.headers.origin})` : ''}`)
+        ws.send(JSON.stringify({ id: msg.id, ok: false, error: UNAUTHORIZED }))
         try { ws.close() } catch {}
         return
       }
-      pending.set(msg.id, ws)
       if (renderer && renderer.readyState === WebSocket.OPEN) {
+        pending.set(msg.id, { client: ws, via: renderer })
         renderer.send(JSON.stringify(msg))
       } else {
         ws.send(JSON.stringify({ id: msg.id, ok: false, error: 'no renderer connected' }))
-        pending.delete(msg.id)
       }
       return
     }
 
-    // response from renderer — route back to CLI client
+    // response from a renderer — routed back to the client only when it comes
+    // from the socket the op was forwarded to; a displaced renderer that kept
+    // its socket cannot answer anyone else's op.
     if (msg.id && identified) {
-      const cli = pending.get(msg.id)
-      if (cli && cli.readyState === WebSocket.OPEN) {
-        cli.send(JSON.stringify(msg))
+      const entry = pending.get(msg.id)
+      if (!entry) return
+      if (entry.via !== ws) {
+        console.warn('[bridge] ignored an answer from a renderer socket the op was not sent to')
+        return
       }
       pending.delete(msg.id)
+      if (entry.client.readyState === WebSocket.OPEN) entry.client.send(JSON.stringify(msg))
       return
     }
   })
@@ -211,6 +299,9 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     if (ws === renderer) {
       renderer = null
+      rendererOrigin = ''
+      refusalsNoted.clear()
+      codeHashes = new Set()
       console.log('[bridge] renderer disconnected')
     }
   })
@@ -222,8 +313,19 @@ server.on('listening', () => {
   console.log(
     BRIDGE_HOST === '127.0.0.1'
       ? '[bridge] loopback-only bind — set BRIDGE_HOST=0.0.0.0 for remote answering sessions'
-      : TOKEN
-        ? '[bridge] bound wide; remote senders must present HYPERCOMB_BRIDGE_TOKEN'
-        : '[bridge] bound wide with NO token — remote senders will be REFUSED (set HYPERCOMB_BRIDGE_TOKEN to allow them)',
+      : '[bridge] bound wide — remote senders need a bridge code',
   )
+  console.log(
+    `[bridge] this machine's tools connect freely; pages and remote senders need a bridge code from the hive (bridge give <name>)${
+      TOKEN_HASH ? ' — HYPERCOMB_BRIDGE_BROKER_TOKEN is set as a fallback code'
+        : TOKEN ? ' — HYPERCOMB_BRIDGE_BROKER_TOKEN is not a code (1–256 printable ASCII characters, no spaces), so it admits no one'
+        : ' — HYPERCOMB_BRIDGE_BROKER_TOKEN is an optional fallback'
+    }`,
+  )
+  if (CLIENT_TOKEN_SET) {
+    console.log("[bridge] HYPERCOMB_BRIDGE_TOKEN is set here — that is the code this machine's scripts present to a broker; this broker does not admit it (HYPERCOMB_BRIDGE_BROKER_TOKEN is the broker's fallback)")
+  }
+  console.log(`[bridge] the renderer registers only from this machine's tools or a hive page: ${
+    process.env.BRIDGE_RENDERER_ORIGINS ? [...RENDERER_ORIGINS].join(', ') || 'none' : `localhost ports ${HIVE_PORTS.join(', ')}`
+  } (BRIDGE_RENDERER_ORIGINS)`)
 })

@@ -31,13 +31,16 @@ import { zoneDoor } from '../sharing/zone-door.js'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const NIP98_KIND = 27235
 
-/** localStorage key naming the AI host (domain only, no scheme). Defaults to
- *  the public content endpoint's zone root — the worker that actually runs
- *  /ai/ask, and not a home machine (jwize.com) a hive must never depend on.
- *  A stored `content.<zone>` (set before the face retired) is read as its
- *  zone: asks go to the root (zone-door.ts). */
+/** localStorage key naming the AI host (domain only, no scheme). A stored
+ *  `content.<zone>` (set before the face retired) is read as its zone: asks
+ *  go to the root (zone-door.ts).
+ *
+ *  NO DEFAULT HOST. The public install names no person's domain (jwize,
+ *  2026-10-05), and no hypercomb.com name could be proven to answer /ai/ask
+ *  — a GET there reaches the old origin, and the service answers only a
+ *  host's own publishers. An ask with no host named is refused, saying so. */
 export const AI_HOST_STORAGE_KEY = PARTICIPANT_AI_HOST_STORAGE_KEY
-export const AI_HOST_DEFAULT = 'pluginthematrix.com'
+export const AI_HOST_DEFAULT = ''
 
 export const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
 
@@ -101,6 +104,13 @@ export class HostAiService extends EventTarget {
     }
 
     const host = this.host
+    // No host named: there is no default to fall back on, and 'https:///ai/ask'
+    // is not a host to sign for.
+    if (!host) {
+      const error = 'AI host is not configured — name one with ask host <domain>'
+      EffectBus.emit('ai:answer', { id, done: true, error } satisfies AskEvent)
+      throw new Error(error)
+    }
     // Loopback hosts use plain http (same rule as host-sync).
     const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
     const url = `${scheme}://${host}/ai/ask`

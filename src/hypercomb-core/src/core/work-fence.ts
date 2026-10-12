@@ -227,6 +227,49 @@ const markerBlock = (lines: readonly string[], index: number): Block | null => {
   return { kind, open: index, end, body: lines.slice(index + 1, end + 1) }
 }
 
+/**
+ * THE GLUED FENCE. A model wrote the opening fence at the END of a sentence,
+ * on the sentence's own line (live probe, 2026-10-12):
+ *
+ *   I'll find practice-modules.```hypercomb-read
+ *   find practice-modules
+ *   ```
+ *
+ * A fence opens only at the start of a line (FENCE_RE), so the block showed as
+ * text and never ran — reads 0. When the backticks carry a WORK word and
+ * nothing after it, that is the same literal opt-in the fence on its own line
+ * carries: the words before the backticks are prose, and the fence opens
+ * there. Only work words — an ordinary fence glued to text (```ts) stays
+ * text, as before — and never inside inline code, nor with no words before
+ * it (an indented fence is markdown's, and FENCE_RE weighs it).
+ *
+ * A sentence also ENDS by naming the fence — "I open a block with
+ * ```hypercomb-read" — and then goes on in prose. So the glued fence opens
+ * only onto a body: the line under it is words (bodyBelow). A blank line, a
+ * fence or the end of the reply under it leaves the sentence whole (review of
+ * the 2026-10-12 fix: opened anyway, it swallowed the explanation after it as
+ * a read).
+ *
+ * The match starts at the FIRST backtick of its run — `(?<!`)` — or a long
+ * run is retried from every backtick in it (same review).
+ */
+// `[ \t]*$`, not `\s*$`: a CR left on the line is no fence end (FENCE_RE's
+// own `(.*)$` refuses it too), so CRLF replies agree with the ordinary fence.
+const GLUED_FENCE_RE = /(?<!`)(`{3,})\s*(hypercomb-[a-z]+)[ \t]*$/
+
+const gluedFence = (line: string): { readonly lead: string; readonly fence: string } | null => {
+  const glued = GLUED_FENCE_RE.exec(line)
+  if (!glued || !kindOf(glued[2])) return null
+  const lead = line.slice(0, glued.index)
+  // Words that are themselves a fence opener are never prose before a glue.
+  if (!lead.trim() || inCode(lead) || FENCE_RE.test(lead)) return null
+  return { lead, fence: `${glued[1]}${glued[2]}` }
+}
+
+/** The line under a glued fence opens it: words — not a blank line, not a
+ *  fence, not the end of the reply. */
+const bodyBelow = (line: string | undefined): boolean => !!line?.trim() && !FENCE_RE.test(line)
+
 /** Every work block, skipping the inside of any other fence. A tag block
  *  re-cuts `lines` (see tagBlock); the indices are into the array as left. */
 const scan = (lines: string[]): Block[] => {
@@ -235,6 +278,11 @@ const scan = (lines: string[]): Block[] => {
   while (index < lines.length) {
     const open = FENCE_RE.exec(lines[index])
     if (!open) {
+      // A glued fence over a body re-cuts the line in two: the words, read
+      // again here as prose (or a tag), and the fence on its own line below,
+      // read next.
+      const glued = gluedFence(lines[index])
+      if (glued && bodyBelow(lines[index + 1])) { lines.splice(index, 1, glued.lead.trimEnd(), glued.fence); continue }
       const tagged = tagBlock(lines, index) ?? markerBlock(lines, index)
       if (tagged) { blocks.push(tagged); index = tagged.end + 1 } else index++
       continue
@@ -405,6 +453,45 @@ const MAY_BE_FENCE = /^\s{0,3}(?:[`~].*)?$/
 const MAY_BE_MARKER = /^\s*h(?:y(?:p(?:e(?:r(?:c(?:o(?:m(?:b(?:-[a-z]*\s*:?\s*)?)?)?)?)?)?)?)?)?$/
 /** …or an opener that is still being written? */
 const MAY_BE_TAG = /^<hypercomb-[a-z]*$/
+/** …or a line's end that may still become a glued work fence: backticks, then
+ *  perhaps the start of `hypercomb-<word>` (gluedFence). It matches from the
+ *  first backtick of a run only, as GLUED_FENCE_RE does. */
+const MAY_BE_GLUED = /(?<!`)`+\s*(?:h(?:y(?:p(?:e(?:r(?:c(?:o(?:m(?:b(?:-[a-z]*\s*)?)?)?)?)?)?)?)?)?)?$/
+
+/**
+ * Where a line that is still arriving must wait from for a glued fence: the
+ * backticks ending it. The line's length when nothing has to wait.
+ *
+ * It is weighed on every character, so it costs only what arrived since the
+ * shown point: it looks from there on (a run of backticks cut by that point,
+ * from the run's first backtick), and it does not ask whether the backticks
+ * close inline code — a run held that did is shown as soon as the line goes
+ * past what a glued fence could be, or at the line's end, where gluedFence
+ * weighs inline code. Searched over the whole line, with inline code counted
+ * each time, a 2000-backtick run took seconds, and so did a 50k-character line
+ * of inline code (review of the 2026-10-12 fix: the chat froze while it
+ * streamed).
+ */
+const gluedHold = (line: string, from: number): number => {
+  let start = from
+  while (start > 0 && line[start - 1] === '`') start--
+  const glued = MAY_BE_GLUED.exec(line.slice(start))
+  return glued ? Math.max(start + glued.index, from) : line.length
+}
+
+/**
+ * Where on a finished line a glued fence would open work, or -1 when it has
+ * none: at its backticks, or at a work tag its words open — the parser cuts
+ * the fence away and reads the words again, so `<hypercomb-read>` alone before
+ * it is the BLOCK form, machinery (review of the 2026-10-12 fix: shown, it put
+ * the opener in the answer). The words before either are prose.
+ */
+const gluedAt = (line: string): number => {
+  const glued = gluedFence(line)
+  if (!glued) return -1
+  const lead = tagAt(glued.lead)?.lead.length ?? glued.lead.length
+  return line.slice(0, lead).trim() ? lead : 0
+}
 
 /**
  * Where a line that is still arriving must wait from: the first `<` at or
@@ -438,6 +525,18 @@ export class WorkStreamGuard {
   #shown = 0
   #fence: string | null = null
   #holding = false
+  /** AN ORDINARY FENCE WAITS FOR ITS FIRST LINE. A model may write the marker
+   *  as a plain fence's first line (markedBody), and the hive runs that block
+   *  — but shown as it streamed, it led an answer with "```" and
+   *  "hypercomb-read" (housekeeping, 2026-10-11). So a fence whose info names
+   *  no work holds its opening line (and any blank lines) until the first
+   *  body line says whether this is work. */
+  #pending = ''
+  /** A WORK FENCE GLUED TO A SENTENCE WAITS FOR THE NEXT LINE (gluedFence):
+   *  the held end of its line, from the fence (or a tag the words open) on.
+   *  A body line under it opens the block, as the parser opens it; anything
+   *  else leaves a sentence that names the fence, and it shows whole. */
+  #glued = ''
 
   get holding(): boolean { return this.#holding }
 
@@ -452,6 +551,35 @@ export class WorkStreamGuard {
         this.#shown = hold
         continue
       }
+      if (this.#glued) {
+        if (bodyBelow(this.#line)) {
+          this.#glued = ''
+          this.#holding = true
+          this.#line = ''
+          this.#shown = 0
+          return out
+        }
+        // Not a body: the glued line was a sentence. It shows, and this line
+        // is weighed below as any other.
+        out += this.#glued
+        this.#glued = ''
+      }
+      if (this.#pending) {
+        const line = this.#line
+        this.#line = ''
+        this.#shown = 0
+        if (!line.trim()) { this.#pending += '\n'; continue }
+        if (kindOf(line.trim())) {
+          this.#pending = ''
+          this.#holding = true
+          return out
+        }
+        out += `${this.#pending}${line}\n`
+        this.#pending = ''
+        if (this.#fence && closes(line, this.#fence)) this.#fence = null
+        continue
+      }
+      const before = this.#fence
       const work = this.#opensWork(this.#line)
       if (work >= 0) {
         out += this.#line.slice(this.#shown, work)
@@ -459,6 +587,21 @@ export class WorkStreamGuard {
         this.#line = ''
         this.#shown = 0
         return out
+      }
+      if (!before && this.#fence) {
+        this.#pending = `${this.#line}\n`
+        this.#line = ''
+        this.#shown = 0
+        continue
+      }
+      const glued = this.#fence ? -1 : gluedAt(this.#line)
+      if (glued >= 0) {
+        const from = Math.max(this.#shown, glued)
+        out += this.#line.slice(this.#shown, from)
+        this.#glued = `${this.#line.slice(from)}\n`
+        this.#line = ''
+        this.#shown = 0
+        continue
       }
       out += `${this.#line.slice(this.#shown)}\n`
       this.#line = ''
@@ -472,23 +615,49 @@ export class WorkStreamGuard {
     if (this.#holding) return ''
     const line = this.#line
     const shown = this.#shown
+    const glued = this.#glued
     this.#line = ''
     this.#shown = 0
+    this.#glued = ''
+    // A glued fence whose body line was cut off before its newline still
+    // opens, as an unclosed block does; with no body it shows, and the round's
+    // last line is weighed after it. (#glued and #pending never both wait.)
+    if (glued && bodyBelow(line)) {
+      this.#holding = true
+      return ''
+    }
+    if (this.#pending) {
+      const pending = this.#pending
+      this.#pending = ''
+      if (line.trim() && kindOf(line.trim())) {
+        this.#holding = true
+        return ''
+      }
+      return `${pending}${line}`
+    }
     const work = line ? this.#opensWork(line) : -1
-    if (work < 0) return line.slice(shown)
+    if (work < 0) return `${glued}${line.slice(shown)}`
     this.#holding = true
-    return line.slice(shown, work)
+    return `${glued}${line.slice(shown, work)}`
   }
 
   /** How much of the line so far may be shown. */
   #holdFrom(): number {
     const line = this.#line
+    // The first line of an ordinary fence waits whole (#pending), and so does
+    // the line under a glued fence (#glued).
+    if (this.#pending || this.#glued) return this.#shown
     if (MAY_BE_FENCE.test(line)) return 0
     // A line that may yet be a block's marker alone (`hypercomb-read`) waits
     // until it is one or is not.
     if (!this.#fence && MAY_BE_MARKER.test(line)) return this.#shown
     if (this.#fence) return line.length
-    const at = tagHold(line, this.#shown)
+    // The words before a tag or a glued fence show; the line waits from it.
+    // A pending work tag holds first: a glued hold's tail is only backticks,
+    // spaces and marker letters and never holds a `<`, so this is the same
+    // minimum without rescanning the line on every character (2026-10-12).
+    const tag = tagHold(line, this.#shown)
+    const at = tag < line.length ? tag : gluedHold(line, this.#shown)
     // An indent is not prose: it waits with the tag it stands before.
     return at < line.length && !line.slice(0, at).trim() ? this.#shown : at
   }

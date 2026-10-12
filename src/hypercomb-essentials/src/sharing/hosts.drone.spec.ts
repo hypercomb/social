@@ -3,7 +3,7 @@
 // way the window is asked for fetches the view once and defines its element
 // once; the bee alone fetches nothing, and it keeps answering the update door.
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,6 +12,7 @@ import { EffectBus } from '@hypercomb/core'
 const wired = vi.hoisted(() => {
   const state = {
     loads: 0,
+    lists: 0,
     fail: false,
     registered: new Map<string, unknown>(),
     ready: new Map<string, (value: unknown) => void>(),
@@ -39,9 +40,10 @@ const standInView = (): Record<string, unknown> => {
   return { HostDirectoryElement, hostDirectoryFacade: { open: true } }
 }
 vi.mock('./community-hosts.js', () => ({
+  HOSTS_SEEDED_KEY: 'hc:hosts:seeded',
   addCommunityHost: async () => '',
   hostZone: (raw: string) => raw,
-  listCommunityHosts: async () => [],
+  listCommunityHosts: async () => { wired.lists++; return [] },
   removeCommunityHost: async () => false,
 }))
 vi.mock('./update-scout.service.js', () => ({ updateScout: {} }))
@@ -67,7 +69,40 @@ const boot = async (): Promise<void> => {
 
 const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
 
+describe('the one seed reaches the pool', () => {
+  afterEach(() => { vi.useRealTimers(); localStorage.removeItem('hc:hosts:seeded') })
+
+  // The store registers before its OPFS root opens, and both boot reads can
+  // land in that gap: the seed is not written, and nothing asked again — on
+  // some profiles every boot, so the pool stayed empty and the swarm's upload
+  // host fell to the relay (swarm-hosts.ts).
+  it('a seed that could not be written is tried again, a bounded few times', async () => {
+    vi.useFakeTimers()
+    localStorage.removeItem('hc:hosts:seeded')
+    await boot()
+    await vi.advanceTimersByTimeAsync(0)
+    const before = wired.lists
+    await vi.advanceTimersByTimeAsync(120_000)
+    const retried = wired.lists - before
+    expect(retried).toBeGreaterThan(0)
+    expect(retried).toBeLessThanOrEqual(8)
+  })
+
+  it('a participant who removed every host is never re-seeded', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('hc:hosts:seeded', '1')
+    await boot()
+    await vi.advanceTimersByTimeAsync(0)
+    const before = wired.lists
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(wired.lists - before).toBe(0)
+  })
+})
+
 describe('the hosts bee loads the host directory with its open', () => {
+  // Not about seeding: the seed is spent, so no drone booted here keeps
+  // reading (and rendering) on a retry timer into the next test.
+  beforeEach(() => { localStorage.setItem('hc:hosts:seeded', '1') })
   afterEach(() => {
     document.body.replaceChildren()
     try { sessionStorage.removeItem('hc:hosts:reopen') } catch { /* none */ }

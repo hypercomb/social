@@ -4,6 +4,7 @@ import { readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLo
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
 import { portalEditTarget } from './portal-edit-target.js'
 import { parseHexColour } from './hex-capture.js'
+import { largeImage } from './arm-resource.js'
 import { editorSurface } from './editor-surface.js'
 import { TileEditorService } from './tile-editor.service.js'
 import { ImageEditorService } from './image-editor.service.js'
@@ -360,15 +361,22 @@ export class TileEditorDrone {
         const fill = parseHexColour((props['background'] as { color?: unknown } | undefined)?.color)
         const pointBlob = await imageEditor.capture('point-top', fill)
         const flatBlob = await imageEditor.capture('flat-top', fill)
-        const largeSig = await store.putResource(imageEditor.source)
+        // A NEW picture is stored as its large copy, never the raw file
+        // (owner decision D3 — see arm-resource.ts largeImage). The framings
+        // count ORIGINAL pixels, so their scale follows the shrink; the
+        // tile's own picture re-saved as it was keeps its stored bytes.
+        const large = pictureChanged
+          ? await largeImage(imageEditor.source)
+          : { blob: imageEditor.source, ratio: 1 }
+        const largeSig = await store.putResource(large.blob)
         const pointSig = await store.putResource(pointBlob)
         const flatSig = await store.putResource(flatBlob)
         const point = imageEditor.framingFor('point-top')
         const flat = imageEditor.framingFor('flat-top')
         const flatProps = isRecord(props['flat']) ? props['flat'] : {}
-        props['large'] = { image: largeSig, x: point.x, y: point.y, scale: point.scale }
+        props['large'] = { image: largeSig, x: point.x, y: point.y, scale: point.scale / large.ratio }
         props['small'] = { image: pointSig }
-        props['flat'] = { ...flatProps, large: { x: flat.x, y: flat.y, scale: flat.scale }, small: { image: flatSig } }
+        props['flat'] = { ...flatProps, large: { x: flat.x, y: flat.y, scale: flat.scale / large.ratio }, small: { image: flatSig } }
         // A picture framed by hand is the participant's, whatever marked it
         // before — the merge earns the participant mark from the picture keys.
         if (props['substrate'] !== undefined) props['substrate'] = undefined

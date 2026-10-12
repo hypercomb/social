@@ -2,7 +2,8 @@
 // become its picture and its facts, cached by label for the location in
 // view; a local miss paints label-only now and fetches detached; a peer's
 // tile shows what its publisher projected; leaving a location sets its
-// projection aside and a return restores it.
+// projection aside and a return restores it; detached fills run eight at a
+// time and a page left behind gives up its queued turns.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const HEX = (c: string) => c.repeat(64)
@@ -123,6 +124,40 @@ describe('a tile\'s face', () => {
     expect(faces.external.has('kitchen')).toBe(false)
     expect(c.imageSig).toBe(IMAGE)
     expect(faces.borders.get('kitchen')).toEqual([1, 0, 0])
+  })
+})
+
+describe('detached host fills (SCALE-3)', () => {
+  const sigs = Array.from({ length: 12 }, (_, i) => i.toString(16).padStart(64, 'e'))
+  const peers = () => sigs.map((_, i) => cell(`v${i}`, true))
+  const hosted = () => {
+    const pending = new Map<string, (blob: Blob | null) => void>()
+    store.getResource.mockImplementation(sig => new Promise(resolve => { pending.set(sig, resolve) }))
+    return { pending, host: hostWith({ registryProperties: label => ({ image: sigs[Number(label.slice(1))] }) }) }
+  }
+
+  it('run at most eight at a time; the rest start in arrival order as fills conclude', async () => {
+    const { pending, host } = hosted()
+    const faces = new TileFaces(host)
+    await faces.load(peers(), null)
+    await settle()
+    expect(store.getResource).toHaveBeenCalledTimes(TileFaces.HOST_FILL_CONCURRENCY)
+    pending.get(sigs[0])!(null)
+    await settle()
+    expect(store.getResource).toHaveBeenCalledTimes(TileFaces.HOST_FILL_CONCURRENCY + 1)
+    expect(store.getResource).toHaveBeenLastCalledWith(sigs[8])
+  })
+
+  it('a fill queued by a page the participant has left is dropped at its turn', async () => {
+    const { pending, host } = hosted()
+    const faces = new TileFaces(host)
+    faces.enter('/home', false)
+    await faces.load(peers(), null)
+    await settle()
+    faces.enter('/garden', false)
+    for (const sig of sigs.slice(0, 8)) pending.get(sig)!(null)
+    await settle()
+    expect(store.getResource).toHaveBeenCalledTimes(TileFaces.HOST_FILL_CONCURRENCY)
   })
 })
 

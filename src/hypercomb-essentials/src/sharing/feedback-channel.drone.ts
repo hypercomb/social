@@ -1,10 +1,10 @@
 // sharing/feedback-channel.drone.ts
 //
 // Durable, store-and-forward, round-trip transport for the feedback LOOP's
-// own records (the optimization substrate) through jwize.com — so feedback a
-// user submits in one OPFS reaches a feedback-loop routine running in another
-// (a headless renderer, a second device, the cloud), and the questions that
-// routine mints come back to it. See
+// own records (the optimization substrate) through the mesh's default relay —
+// so feedback a user submits in one OPFS reaches a feedback-loop routine
+// running in another (a headless renderer, a second device, the cloud), and
+// the questions that routine mints come back to it. See
 // documentation/feedback-channel.md.
 //
 // WHY this is needed: the optimization substrate is strictly local. Host-sync's
@@ -23,13 +23,16 @@
 // bookkeeping never gets a folder. An earlier build minted __feedback_outbox__;
 // #absorbLegacyOutbox drains and DELETES it on sight.
 //
-// v1 rides the relay AT jwize.com (wss://jwize.com) — which already accepts
-// event publishes permissionlessly. No operator
-// writer-auth is required for v1. The HTTP byte-rest hardening (survives relay
+// v1 rides the mesh's DEFAULT relay — wss://hypercomb.com since 2026-10-11 (it
+// was wss://jwize.com, a home machine) — which accepts event publishes
+// permissionlessly. No operator writer-auth is required for v1. That default
+// is a MEETING POINT, NOT A STORE: memory only, so an item survives there only
+// while the meeting point's object stays resident (its 7-day expiration is a
+// ceiling, not a promise); the pending map republishes until read back. The HTTP byte-rest hardening (survives relay
 // eviction) is documented in feedback-channel.md and gated behind its own host
 // config; it is intentionally NOT wired through host-sync's `self-domain` knob,
-// which doubles as the essentials installer's Tier-0 (pointing it at jwize.com
-// has historically 404'd the installer).
+// which doubles as the essentials installer's Tier-0 (pointing it at a relay's
+// host has historically 404'd the installer).
 //
 // TWO ROLES on ONE fixed community channel:
 //   • CONTRIBUTE — publish MY feedback to the host. Publishing only happens
@@ -82,7 +85,7 @@ const RECONCILED_KEY = 'hc:feedback-channel:reconciled'
 // NOT the per-origin self-domain. Everyone (participants, the host, the routine)
 // computes the identical channel id from this constant regardless of which
 // origin loaded the app, so all feedback converges to one place. It is a
-// rendezvous LABEL, not a fetch target — the transport is still wss://jwize.com.
+// rendezvous LABEL, not a fetch target — the transport is the mesh's relay.
 const CANONICAL_FEEDBACK_HOST = 'hypercomb.io'
 // Retired typed folder from an earlier build — absorbed into the pending map
 // and DELETED on sight. Exists here only so we can remove it.
@@ -142,7 +145,7 @@ export class FeedbackChannelDrone extends Drone {
   override genotype = 'sharing'
 
   public override description =
-    'Durable transport for the feedback loop’s records (feedback/qa/qa-answer) over a FIXED community channel through the jwize.com relay. Contributors publish by default; the host + routine (hc:feedback-channel:enabled) subscribe, ingest and aggregate — so a participant sends their own records but never ingests anyone else’s. The loop turns them into Q&A rows on tiles, which is where they are read now that the feedback window has retired.'
+    'Durable transport for the feedback loop’s records (feedback/qa/qa-answer) over a FIXED community channel through the mesh’s default relay. Contributors publish by default; the host + routine (hc:feedback-channel:enabled) subscribe, ingest and aggregate — so a participant sends their own records but never ingests anyone else’s. The loop turns them into Q&A rows on tiles, which is where they are read now that the feedback window has retired.'
 
   protected override listens: string[] = ['optimization:wrote']
   protected override emits: string[] = ['feedback:channel-state', 'feedback:channel-ingested', 'feedback:channel-receipt']

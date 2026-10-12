@@ -29,7 +29,7 @@
 //
 // Full doctrine: documentation/website-artifact-paradigm.md.
 
-import { SignatureService, groupSignature } from '@hypercomb/core'
+import { EffectBus, SignatureService, groupSignature } from '@hypercomb/core'
 import {
   artifactKindFor,
   enrollmentsIn,
@@ -55,14 +55,24 @@ export const HOST_ARTIFACT_KIND = artifactKindFor(HOST_FAMILY)
  *  colon-bearing meaning can never collide with a lineage sigbag. */
 export const COMMUNITY_HOSTS_POOL = 'community:hosts'
 
+/** '1' once the one known host has been planted in an empty pool (HostsDrone
+ *  seeds it once, ever). Until then an empty pool is NOT a participant's
+ *  choice — it is a pool the seed has not reached yet — and nothing may treat
+ *  it as "no hosts" (the swarm would fall to the relay: swarm-hosts.ts). */
+export const HOSTS_SEEDED_KEY = 'hc:hosts:seeded'
+
 type PoolStore = {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
   getResourceLocal?: (sig: string) => Promise<Blob | null>
   getResourceResolvedLocal?: (sig: string) => Promise<Blob | null>
+  /** Memoized: the shell starts it at boot; awaiting it is waiting for the
+   *  OPFS root to open, never a second open. */
+  initialize?: () => Promise<void>
 }
 type HistoryLike = {
   sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
-  currentLayerAt(sig: string): Promise<Record<string, unknown> | null>
+  /** `stats.cold` set on a null: a transient miss, not "no layer". */
+  currentLayerAt(sig: string, stats?: { cold?: boolean }): Promise<Record<string, unknown> | null>
 }
 
 /**
@@ -134,7 +144,33 @@ export const hostArtifactSig = (zone: string): Promise<string> =>
 const communityPool = async (): Promise<FileSystemDirectoryHandle | null> => {
   const store = get<PoolStore>(STORE_KEY)
   if (!store?.getPool) return null
+  // The Store registers before its OPFS root is open, and a pool asked for in
+  // that gap reads as nothing — which is how a boot read listed no hosts and
+  // the one-time seed never landed. Wait for the open (memoized; the shell
+  // has already started it) instead of answering "none".
+  try { await store.initialize?.() } catch { return null }
   try { return await store.getPool(COMMUNITY_HOSTS_POOL) } catch { return null }
+}
+
+/** Every host member with the moment it was written (added, or added again). */
+async function readCommunityMembers(): Promise<{ zone: string; at: number }[] | null> {
+  const pool = await communityPool()
+  if (!pool) return null
+  const members = new Map<string, number>()
+  try {
+    for await (const [, handle] of (pool as unknown as {
+      entries(): AsyncIterableIterator<[string, FileSystemHandle]>
+    }).entries()) {
+      if (handle.kind !== 'file') continue
+      try {
+        const file = await (handle as FileSystemFileHandle).getFile()
+        const zone = zoneOfHostMeaning((JSON.parse(await file.text()) as { meaning?: unknown })?.meaning)
+        const at = Number.isFinite(file.lastModified) ? Number(file.lastModified) : 0
+        if (zone) members.set(zone, Math.min(at, members.get(zone) ?? Number.POSITIVE_INFINITY))
+      } catch { /* a member that will not parse is not a host */ }
+    }
+  } catch { return [] }
+  return [...members].map(([zone, at]) => ({ zone, at }))
 }
 
 /**
@@ -143,22 +179,20 @@ const communityPool = async (): Promise<FileSystemDirectoryHandle | null> => {
  * ever mean one host missing, never a list that disagrees with its members.
  */
 export async function listCommunityHosts(): Promise<string[]> {
-  const pool = await communityPool()
-  if (!pool) return []
-  const zones = new Set<string>()
-  try {
-    for await (const [, handle] of (pool as unknown as {
-      entries(): AsyncIterableIterator<[string, FileSystemHandle]>
-    }).entries()) {
-      if (handle.kind !== 'file') continue
-      try {
-        const text = await (await (handle as FileSystemFileHandle).getFile()).text()
-        const zone = zoneOfHostMeaning((JSON.parse(text) as { meaning?: unknown })?.meaning)
-        if (zone) zones.add(zone)
-      } catch { /* a member that will not parse is not a host */ }
-    }
-  } catch { return [] }
-  return [...zones].sort()
+  return ((await readCommunityMembers()) ?? []).map(m => m.zone).sort()
+}
+
+/**
+ * The same hosts in the order you ADDED them, first added first (ties
+ * alphabetical) — null when the pool cannot be opened. The swarm's upload
+ * host is the first of these (swarm-hosts.ts): on a fresh install the seed,
+ * hypercomb.com. Adding a host to follow it never moves where your tiles go;
+ * removing the ones ahead of a host makes it the one.
+ */
+export async function listCommunityHostsInAddedOrder(): Promise<string[] | null> {
+  const members = await readCommunityMembers()
+  if (!members) return null
+  return members.sort((a, b) => a.at - b.at || a.zone.localeCompare(b.zone)).map(m => m.zone)
 }
 
 /** Add a host to your community. Idempotent — the record is content-addressed,
@@ -430,11 +464,44 @@ const cellAt = async (segments: readonly string[]) => {
 export async function hostsOfBranch(segments: readonly string[]): Promise<string[]> {
   const cell = await cellAt(segments)
   if (!cell) return []
-  return enrollmentsIn(cell, HOST_FAMILY)
+  return zonesOfCell(cell)
+}
+
+const zonesOfCell = (cell: Awaited<ReturnType<typeof readCell>>): string[] =>
+  enrollmentsIn(cell, HOST_FAMILY)
     .map(e => ({ zone: zoneOfHostMeaning(e.meaning), order: typeof e.order === 'number' ? e.order : Number.POSITIVE_INFINITY }))
     .filter(e => e.zone !== '')
     .sort((a, b) => (a.order === b.order ? a.zone.localeCompare(b.zone) : a.order - b.order))
     .map(e => e.zone)
+
+/**
+ * The same answer, or NULL when it is not known yet — the form a cache may
+ * keep. A cold history read (the store root still coming up on a reload, or a
+ * head whose bytes are not in the pool yet) is not "this branch wears no
+ * marks", and neither is a decoration record this device does not hold yet:
+ * either one cached as [] sent a branch's bytes to the pool host for the rest
+ * of the session. `lenient` reads past missing records (after a few unknown
+ * answers a missing record is taken as absent, as `hostsOfBranch` does);
+ * a cold history read is unknown either way.
+ */
+export async function hostsOfBranchKnown(segments: readonly string[], lenient = false): Promise<string[] | null> {
+  const history = get<HistoryLike>(HISTORY_KEY)
+  const store = get<PoolStore>(STORE_KEY)
+  if (!history?.sign || !history.currentLayerAt || !store?.getResourceLocal) return null
+  const locationSig = await history.sign({ explorerSegments: () => [...segments] })
+  if (!locationSig) return null
+  const stats: { cold?: boolean } = {}
+  const layer = await history.currentLayerAt(locationSig, stats)
+  if (!layer) return stats.cold ? null : []
+  if (!lenient) {
+    const decorations = Array.isArray(layer['decorations']) ? (layer['decorations'] as unknown[]).map(String) : []
+    for (const sig of decorations) {
+      if (!SIG_RE.test(sig)) continue
+      const local = store.getResourceResolvedLocal ?? store.getResourceLocal
+      if (!(await local.call(store, sig).catch(() => null))) return null
+    }
+  }
+  return zonesOfCell(await readCell(store as { getResourceLocal(sig: string): Promise<Blob | null> }, layer, segments))
 }
 
 /**
@@ -468,6 +535,9 @@ export async function setBranchHosts(
     await dropEnrollment(segments, sig)
     await wearEnrollment(segments, { sig, meaning: hostMeaning(zone), order: index })
   }
+  // Committed: whoever caches where this branch publishes reads it again
+  // (the swarm's upload host is the branch's publish domains — swarm-hosts.ts).
+  EffectBus.emit('hosts:marks-changed', { segments: [...segments], zones: [...wanted] })
   return wanted
 }
 

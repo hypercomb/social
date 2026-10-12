@@ -120,6 +120,17 @@ export class TileFaces {
   /** Warm label projections by lineage. Location changes must isolate raw
    *  label keys without discarding the work already prepared for a revisit. */
   readonly #derivedStateByLocation = new Map<string, LabelDerivedState>()
+  /** Concurrent detached host fills (fillFromHost). A page of peer pictures
+   *  used to start every fetch at once — each one an HTTP probe plus a mesh
+   *  ask on the one socket, hundreds inside a second against the relay's
+   *  per-connection budget (SCALE-3). The rest wait in arrival order, each
+   *  under the location whose pass queued it: one the participant has left
+   *  is dropped when its turn comes, so a picture-heavy page's misses never
+   *  hold the next page's tiles dimmed behind them (its own pass re-asks on
+   *  a return). */
+  static readonly HOST_FILL_CONCURRENCY = 8
+  #hostFillActive = 0
+  readonly #hostFillQueue = new Map<string, { owner: string; start: () => void }>()
 
   constructor(private readonly host: FacesHost) {}
 
@@ -255,9 +266,25 @@ export class TileFaces {
     // full cascade and re-rendered on arrival. The Store negative-caches
     // misses, so an unresolvable sig costs one bounded cascade per TTL
     // window instead of a network storm on every synchronize pass.
+    // At most HOST_FILL_CONCURRENCY run at once; the rest queue in arrival
+    // order (render order) and start as earlier fills conclude.
     const fillFromHost = (sig: string, label?: string): void => {
+      const queued = this.#hostFillQueue.get(sig)
+      if (this.host.hostFillInFlight.has(sig) || queued?.owner === cacheOwner) return
+      // Still queued for a page left behind, and wanted here too: this page
+      // takes it over, in the place it already holds.
+      if (queued) { queued.owner = cacheOwner; queued.start = () => fillNow(sig, label); return }
+      if (this.#hostFillActive >= TileFaces.HOST_FILL_CONCURRENCY) {
+        this.#hostFillQueue.set(sig, { owner: cacheOwner, start: () => fillNow(sig, label) })
+        return
+      }
+      fillNow(sig, label)
+    }
+    const fillNow = (sig: string, label?: string): void => {
+      // A child warm may have claimed it while it queued — one fetch per sig.
       if (this.host.hostFillInFlight.has(sig)) return
       this.host.hostFillInFlight.add(sig)
+      this.#hostFillActive++
       void (async () => {
         try {
           const blob = await store.getResource(sig)
@@ -296,7 +323,11 @@ export class TileFaces {
           if (label && cacheOwner === this.#locationKey) this.images.delete(label)
           this.host.repaint()
         } catch { /* bounded by the Store's miss cache */ }
-        finally { this.host.hostFillInFlight.delete(sig) }
+        finally {
+          this.host.hostFillInFlight.delete(sig)
+          this.#hostFillActive--
+          this.#pumpHostFills()
+        }
       })()
     }
 
@@ -842,6 +873,18 @@ export class TileFaces {
     }
 
     return renderSegments
+  }
+
+  /** Start queued detached host fills while fewer than HOST_FILL_CONCURRENCY
+   *  are running (see load's fillFromHost). */
+  #pumpHostFills = (): void => {
+    while (this.#hostFillActive < TileFaces.HOST_FILL_CONCURRENCY && this.#hostFillQueue.size > 0) {
+      const [sig, queued] = this.#hostFillQueue.entries().next().value as [string, { owner: string; start: () => void }]
+      this.#hostFillQueue.delete(sig)
+      // Queued by a page the participant has since left: not this page's turn.
+      if (queued.owner !== this.#locationKey) continue
+      queued.start()
+    }
   }
 
   /** A just-landed props resource names the picture it stands for. Follow that

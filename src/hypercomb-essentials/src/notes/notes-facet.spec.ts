@@ -87,11 +87,12 @@ describe('the notes reader', () => {
     expect(read.includes('readNotesFacet(tileName)')).toBe(true)
     expect(read.includes('unionNoteSigs(facetSigs, slotSigs)')).toBe(true)
     const commit = src.slice(src.indexOf('async #commitCellNotes('), src.indexOf('\n  }\n', src.indexOf('async #commitCellNotes(')))
-    expect(commit.includes('unionNoteSigs(await readNotesFacet(')).toBe(true)
+    // both sides read as the notes they name (an envelope is its payload)
+    expect(commit.includes('unionNoteSigs(await this.#noteSigsOf(await readNotesFacet(')).toBe(true)
     // every tree read hands the tile name through
     expect((src.match(/#readAtLocation\(locSig\)/g) ?? []).length).toBe(0)
     // and the synchronous paint path unions the word's last-read facet
     const sync = src.slice(src.indexOf('public readonly notesFor ='), src.indexOf('\n  }\n', src.indexOf('public readonly notesFor =')))
-    expect(sync.includes('unionNoteSigs(cachedNotesFacet(cellLabel), slotSigs)')).toBe(true)
+    expect(sync.includes('unionNoteSigs(cachedNotesFacet(cellLabel).map(named), slotSigs)')).toBe(true)
   })
 })

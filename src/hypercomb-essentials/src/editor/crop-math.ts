@@ -2,8 +2,10 @@
 //
 // THE FRAMING, AS NUMBERS.
 //
-// A tile's picture is stored as the untouched original (`large.image`) plus a
-// FRAMING per orientation (`large.{x,y,scale}` for point-top,
+// A tile's picture is stored as its LARGE copy (`large.image` — since D3,
+// 2026-10-10, a WebP with its long edge at most 2560 px, re-encoded so no
+// EXIF leaves the device; pictures stored before then are the original
+// bytes) plus a FRAMING per orientation (`large.{x,y,scale}` for point-top,
 // `flat.large.{x,y,scale}` for flat-top). The two small pictures the hive
 // renders are derived from exactly those. This file is the one statement of
 // what the numbers mean, shared by the crop stage the participant drags and
@@ -13,7 +15,9 @@
 // THE UNITS (unchanged from every framing already stored):
 //   · the FRAME is a square of `side × 2` units (400 for the default side);
 //   · `x`, `y` are the picture centre's offset from the frame centre;
-//   · `scale` is how many frame units one pixel of the ORIGINAL covers.
+//   · `scale` is how many frame units one pixel of the STORED large picture
+//     covers (the editor divides a framing made against an original by the
+//     shrink ratio when it stores the large copy — arm-resource largeImage).
 // Each orientation's hex box sits centred in the frame, so inside a capture
 // box the picture centre lands at (box/2 + x, box/2 + y) — the frame size
 // cancels, which is why a capture never needs to know it.

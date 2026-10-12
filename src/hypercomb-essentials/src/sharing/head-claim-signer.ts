@@ -107,6 +107,23 @@ export const readerPubkey = async (): Promise<string | null> => {
 /** The cached pubkey WITHOUT resolving one — safe on a read path. */
 export const cachedPubkey = (): string | null => cachedReaderPubkey
 
+/**
+ * MY bucket address when this device already holds a key — never minted,
+ * never asked of an extension (NostrSigner.knownPublicKeyHex). For a write
+ * that must not create an author but must not skip one either: after a reload
+ * the cache above is empty until something signs.
+ */
+export const knownReaderPubkey = async (): Promise<string | null> => {
+  if (cachedReaderPubkey) return cachedReaderPubkey
+  const s = signer() as (SignerLike & { knownPublicKeyHex?: () => Promise<string | null> }) | undefined
+  let pk: string | null = null
+  try { pk = (await s?.knownPublicKeyHex?.()) ?? null } catch { return null }
+  const key = String(pk ?? '').toLowerCase()
+  if (!HEX64.test(key)) return null
+  cachedReaderPubkey = key
+  return key
+}
+
 /** Drop the cache. `#cachedPubkey` on the signer itself is never invalidated
  *  within a session, so a key change mid-session can still leave a stale bucket
  *  address in flight elsewhere; this at least lets a teardown reset ours. */

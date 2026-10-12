@@ -20,19 +20,39 @@
 // Either way the invite encodes (segments, room, secret) so a recipient
 // reproduces the exact swarm channel. SlashBehaviourDrone auto-wraps this
 // registered object into a slash provider (command/description/invoke).
+//
+// THE MEETING POINT. A facilitator who meets somewhere other than the default
+// relay — an always-on meeting point that asks for an access code — hands
+// that out too: the meeting link carries this tab's meeting point, its
+// meeting host and its access code (sessionStorage `hc:mesh-zone`,
+// membership.ts). To set them:
+//
+//   invite wss://<meeting point>    opens the selector on that meeting point,
+//   invite code                     …or on the code field, to paste the
+//                                   access code (a recycled one replaces it);
+//                                   the selector's share button copies the
+//                                   link.
+//
+// The code is NEVER taken from the command line: the line is remembered
+// (command history, on this device), and the code may live only in this tab's
+// session and in the link. A code typed after `code` is refused, and named so.
 
 import { EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { deliverLink } from './deliver-link.js'
 import {
   MEETING_INVITE_KIND,
   MEETING_INVITE_VERSION,
+  INVITE_SECRET_PREFIX,
   SWARM_INVITE_KIND,
   encodeInviteBundle,
+  inviteSecretCheck,
   meetFragment,
+  meetingRelayOf,
+  parseMeet,
   type InviteDecorationPayload,
   type MeetingInviteBundle,
 } from './meeting-invite.js'
-import { isJoinedHere } from './membership.js'
+import { isJoinedHere, readTabZone } from './membership.js'
 import { writeDecoration } from '../commands/decoration-manifest.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
@@ -100,6 +120,16 @@ export class InviteQueenBee {
       return
     }
 
+    // `invite wss://…` / `invite code`: the facilitator's meeting point, set
+    // in the selector — never a code on this line.
+    const tokens = (args ?? '').trim().split(/\s+/).filter(Boolean)
+    const pointToken = tokens.find(t => /^wss?:\/\//i.test(t))
+    const codeAt = tokens.findIndex(t => t.toLowerCase() === 'code')
+    if (pointToken !== undefined || codeAt >= 0) {
+      this.#openMeetingPoint(pointToken, codeAt >= 0 && codeAt < tokens.length - 1)
+      return
+    }
+
     const roomVal = (room.value ?? '').trim()
     const secretVal = (secret.value ?? '').trim()
     if (!roomVal || !secretVal) {
@@ -137,12 +167,17 @@ export class InviteQueenBee {
     const alias = args.trim().slice(0, 120) || undefined
     const baseSegments = nav.segments()
 
+    // THE BUNDLE HOLDS NO SECRET (jwize, 2026-10-07: "the key can never be
+    // stored in a pool or public place"). It goes to the host and its sig
+    // rides the swarm, so it carries only the secret's check; a swarm peer
+    // already holds the secret, and the link carries it in its fragment.
+    const secretCheck = await inviteSecretCheck(roomVal, secretVal)
     const mkBundle = (segments: string[], lbl?: string): MeetingInviteBundle => ({
       kind: MEETING_INVITE_KIND,
       v: MEETING_INVITE_VERSION,
       segments,
       room: roomVal,
-      secret: secretVal,
+      secretCheck,
       ...((alias ?? lbl) ? { alias: alias ?? lbl } : {}),
       createdAt: Date.now(),
     })
@@ -198,7 +233,8 @@ export class InviteQueenBee {
 
     const host = this.#linkHost()
     const scheme = LOOPBACK_RE.test(host) ? 'http' : 'https'
-    const url = `${scheme}://${host}/${linkSig}`
+    // The secret rides in the fragment, which no server is sent.
+    const url = `${scheme}://${host}/${linkSig}${INVITE_SECRET_PREFIX}${encodeURIComponent(secretVal)}`
 
     // Sheet → clipboard → fresh-tap offer: the receipt wait above can leave
     // the tap's activation stale, and on phones the invite is the link most
@@ -221,7 +257,10 @@ export class InviteQueenBee {
   /** The meeting link for this room, secret and page, handed over on the
    *  device's own terms. The page is what the swarm hashes: its own record of
    *  the last sync while joined, else the explorer's segments — never the
-   *  URL's lower-cased form, which differs for a raw-named tile. */
+   *  URL's lower-cased form, which differs for a raw-named tile. It carries
+   *  this tab's meeting point (relay, host, code) when it has one, so the
+   *  room meets where the facilitator meets. The toasts and the log name the
+   *  meeting point, never the code. */
   #deliverMeetingLink = async (room: string, secret: string, nav: NavLike): Promise<void> => {
     let segs: readonly string[] | undefined
     if (isJoinedHere()) {
@@ -229,16 +268,52 @@ export class InviteQueenBee {
     }
     if (!Array.isArray(segs)) segs = get<LineageLike>(LINEAGE_KEY)?.explorerSegments?.() ?? nav.segments()
     const segments = segs.map(s => String(s ?? '').trim()).filter(s => s.length > 0)
-    const url = `${window.location.origin}/${meetFragment(room, secret, segments)}`
+    const zone = readTabZone()
+    const relay = meetingRelayOf(zone?.relay)
+    const fragment = meetFragment(room, secret, segments, { relay, host: zone?.host, code: zone?.code })
+    // A LINK NOBODY CAN OPEN IS NEVER HANDED OUT. It is read back here the
+    // way every guest will read it; a page that cannot travel in it (a name
+    // past 512 characters or holding a slash, a page too deep) would make a
+    // link that does nothing for anyone — said so instead.
+    const back = parseMeet(fragment)
+    if (!back || back.room !== room || back.secret !== secret || JSON.stringify(back.segments) !== JSON.stringify(segments)) {
+      this.#toast('warning', this.#tr('invite.meet.title', 'Meeting link'), this.#tr('meet.link-cannot-travel',
+        'A meeting link to this page would not open for anyone — a page name on the way here is too long or holds a slash. Invite from a page higher up.'))
+      return
+    }
+    const url = `${window.location.origin}/${fragment}`
+    const point = relay.replace(/^wss?:\/\//, '')
 
     const delivery = await deliverLink(url, 'Hypercomb meeting')
     // 'offered' already put the URL on screen behind a fresh-tap button.
     if (delivery !== 'offered') {
-      this.#toast('success', this.#tr('invite.meet.title', 'Meeting link'), delivery === 'shared'
-        ? this.#tr('invite.meet.shared', `Meeting link shared — anyone who opens it joins ${room} on this page.`, { room })
-        : this.#tr('invite.meet.copied', `Meeting link copied — anyone who opens it joins ${room} on this page.`, { room }))
+      const shared = delivery === 'shared'
+      this.#toast('success', this.#tr('invite.meet.title', 'Meeting link'), point
+        ? shared
+          ? this.#tr('invite.meet.shared-at', `Meeting link shared — anyone who opens it joins ${room} at ${point}, on this page.`, { room, point })
+          : this.#tr('invite.meet.copied-at', `Meeting link copied — anyone who opens it joins ${room} at ${point}, on this page.`, { room, point })
+        : shared
+          ? this.#tr('invite.meet.shared', `Meeting link shared — anyone who opens it joins ${room} on this page.`, { room })
+          : this.#tr('invite.meet.copied', `Meeting link copied — anyone who opens it joins ${room} on this page.`, { room }))
     }
-    console.log(`[invite] meeting link ${url.slice(0, url.indexOf('#'))}#meet=…`)
+    console.log(`[invite] meeting link ${url.slice(0, url.indexOf('#'))}#meet=…${point ? ` at ${point}` : ''}`)
+  }
+
+  /** THE FACILITATOR'S MEETING POINT — set in the selector, which pre-fills
+   *  the named point and puts the cursor on the access code. Nothing is
+   *  written here; the selector writes on share or save. */
+  #openMeetingPoint = (pointToken: string | undefined, codeTyped: boolean): void => {
+    const title = this.#tr('invite.point.title', 'Meeting point')
+    const point = pointToken === undefined ? '' : meetingRelayOf(pointToken)
+    if (pointToken !== undefined && !point) {
+      this.#toast('error', title, this.#tr('invite.point.invalid', 'That is not a meeting point — give it as wss://name.tld (a path may follow).'))
+      return
+    }
+    if (codeTyped) {
+      this.#toast('warning', title, this.#tr('invite.point.code-not-here',
+        'The access code is never taken from the command line — it remembers what it runs. Paste it in the selector instead.'))
+    }
+    EffectBus.emit('mesh:open-modal', { ...(point ? { point } : {}), focus: 'code' })
   }
 
   #tr = (key: string, fallback: string, params?: Record<string, string | number>): string => {

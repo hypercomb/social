@@ -60,6 +60,17 @@ const DEV_DEFAULT_SECRET = 'downtown'
 // into a forced setting on every boot.
 const HEX_ORIENTATION_DEFAULT_REVISION = 'point-top-2026-07-29'
 
+/** Whether THIS tab joined or chose a zone itself: room and secret both
+ *  recorded in its sessionStorage `hc:mesh-zone`. MIRRORED: hypercomb-shared/
+ *  core/mesh-session.ts (writes it) and essentials sharing/membership.ts
+ *  `ownZone` — this package imports neither, so it reads the key directly. */
+const tabHasOwnZone = (): boolean => {
+  try {
+    const zone = JSON.parse(sessionStorage.getItem('hc:mesh-zone') ?? 'null') as { room?: unknown; secret?: unknown } | null
+    return typeof zone?.room === 'string' && !!zone.room.trim() && typeof zone.secret === 'string' && !!zone.secret.trim()
+  } catch { return false }
+}
+
 // Idempotent: callers in different parts of the boot sequence (web's
 // main.ts, then App constructor → CoreAdapter.initialize) used to each
 // call initializeRuntime, double-registering EffectBus listeners and
@@ -128,8 +139,10 @@ const _runInitializeRuntime = async (
     // On a DEPLOYED origin, seed hc:nostrmesh:use-live-relay='1' ONCE so the
     // whole beta routing is explicit and stable rather than merely implied by
     // the unset origin-default: this single flag steers BOTH the mesh
-    // (→ wss://jwize.com, nostr-mesh.drone loadRelays) AND ContentBroker's byte
-    // fallback (→ jwize.com + pluginthematrix.io, #liveRelayActive). The
+    // (→ wss://hypercomb.com, the open always-online meeting point —
+    // nostr-mesh.drone loadRelays) AND ContentBroker's byte fallback
+    // (→ hypercomb.com + pluginthematrix.io + pluginthematrix.com,
+    // #liveRelayActive). The public install names no home machine. The
     // one-time marker (hc:beta-relay-seeded) means a later `/use-live-relay
     // clear` is respected — we never re-seed over an explicit clear. Loopback
     // dev is never seeded (it resolves from the local relay; force with
@@ -499,10 +512,18 @@ const _runInitializeRuntime = async (
     // the selector instead; confirming it emits 'mesh:join', which flips the
     // flag through the same path the swarm control uses. Leaving is never
     // gated — the safe direction always works on the first press.
+    //
+    // And the zone must be THIS TAB's (D5, 2026-10-10): its room and secret
+    // recorded in sessionStorage `hc:mesh-zone` (mesh-session.ts — a link,
+    // the selector, `use-live-relay` or an earlier join of this tab wrote
+    // it). A new tab's stores are only PRE-FILLED from the origin-wide pair —
+    // on a returning device, last week's meeting — and this shortcut used to
+    // join it without a word. Such a tab gets the selector, pre-filled: one
+    // tap. A reload resumes from the tab's zone and never comes through here.
     if (next) {
       const room = (get('@hypercomb.social/RoomStore') as { value?: string } | undefined)?.value?.trim() ?? ''
       const secret = (get('@hypercomb.social/SecretStore') as { value?: string } | undefined)?.value?.trim() ?? ''
-      if (!room || !secret) {
+      if (!room || !secret || !tabHasOwnZone()) {
         EffectBus.emit('mesh:open-modal', { join: true })
         return
       }

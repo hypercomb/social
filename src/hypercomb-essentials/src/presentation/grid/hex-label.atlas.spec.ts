@@ -11,7 +11,7 @@
 // navigation walk emits its title event once per titled cell, so a whole-atlas
 // wipe per event took every other tile's glyphs with it.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.hoisted(() => {
   // The module self-registers a factory in IoC at import.
@@ -126,5 +126,84 @@ describe('HexLabelAtlas flushes', () => {
 
     expect(atlas.hasLabel('alpha')).toBe(false)
     expect(atlas.evictionGeneration).toBeGreaterThan(before)
+  })
+})
+
+// SCALE-1 — a page with more names than slots. The renderer pins every name on
+// screen; when that is more names than the atlas holds, the old allocator
+// evicted a PINNED label anyway and announced it, the renderer repainted to
+// heal the on-screen victim, and the repaint's bake evicted the next one: a
+// 307-name page spent 72 s of 74 s re-baking labels and never converged.
+describe('HexLabelAtlas with every slot pinned', () => {
+  const ON_SCREEN = ['a', 'b', 'c', 'd', 'e']
+  let atlas: ReturnType<typeof makeAtlas>
+  let evicted: string[]
+  const onEvicted = (e: Event): void => { evicted.push((e as CustomEvent<{ label: string }>).detail.label) }
+  let warn: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    atlas = makeAtlas() // 4 slots
+    for (const l of ['a', 'b', 'c', 'd']) atlas.getLabelUV(l)
+    atlas.setPinned(ON_SCREEN) // five on screen, four slots
+    evicted = []
+    window.addEventListener('hex-label-atlas:evicted', onEvicted)
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    window.removeEventListener('hex-label-atlas:evicted', onEvicted)
+    warn.mockRestore()
+  })
+
+  it('gives the extra label no slot and evicts nothing', () => {
+    const before = atlas.evictionGeneration
+
+    const uv = atlas.getLabelUV('e')
+
+    // The degenerate rect is the shader's "no label": no glyphs, no band.
+    expect(uv).toEqual({ u0: 0, v0: 0, u1: 0, v1: 0 })
+    expect(atlas.hasLabel('e')).toBe(false)
+    for (const l of ['a', 'b', 'c', 'd']) expect(atlas.hasLabel(l)).toBe(true)
+    expect(evicted).toEqual([])
+    expect(atlas.evictionGeneration).toBe(before)
+  })
+
+  it('stays quiet however often the renderer asks', () => {
+    for (let pass = 0; pass < 50; pass++) {
+      for (const l of ON_SCREEN) atlas.getLabelUV(l)
+      atlas.setPinned(ON_SCREEN) // every paint re-pins the same page
+    }
+    atlas.seed(['e', 'f'])
+    // A zoom in (a view that fits) and back out re-enters the overflow.
+    atlas.setPinned(['a', 'b'])
+    atlas.setPinned(ON_SCREEN)
+    atlas.getLabelUV('e')
+
+    expect(evicted).toEqual([])
+    expect(atlas.hasLabel('e')).toBe(false)
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it('takes a slot as soon as one leaves the screen', () => {
+    atlas.getLabelUV('e')
+
+    atlas.setPinned(['b', 'c', 'd', 'e']) // 'a' scrolled away
+
+    const uv = atlas.getLabelUV('e')
+    expect(Math.max(uv.u1, uv.v1)).toBeGreaterThan(0)
+    expect(atlas.hasLabel('e')).toBe(true)
+    // 'a' was off screen, so its displacement is an ordinary eviction.
+    expect(atlas.hasLabel('a')).toBe(false)
+    expect(evicted).toEqual(['a'])
+  })
+
+  it('takes a slot a flush frees without the pinned set changing', () => {
+    atlas.getLabelUV('e') // full — remembered
+
+    atlas.invalidateLabel('b')
+
+    expect(Math.max(atlas.getLabelUV('e').u1, atlas.getLabelUV('e').v1)).toBeGreaterThan(0)
+    expect(atlas.hasLabel('e')).toBe(true)
+    expect(evicted).toEqual([])
   })
 })

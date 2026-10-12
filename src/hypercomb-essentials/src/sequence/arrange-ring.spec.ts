@@ -10,13 +10,22 @@ import { EffectBus } from '@hypercomb/core'
 
 const registry = new Map<string, any>()
 
+// The ring lives in a pool document now: a fake Store holds what lands there.
+const pools = new Map<string, ArrayBuffer>()
+const fakeStore = {
+  getPool: async (meaning: string) => ({ name: meaning }),
+  openPool: async (meaning: string) => (pools.has(meaning) ? { name: meaning } : null),
+  getPoolDoc: async (pool: { name: string } | undefined) => (pool ? pools.get(pool.name) ?? null : null),
+  putPoolDoc: async (pool: { name: string }, bytes: ArrayBuffer) => { pools.set(pool.name, bytes); return 'sig' },
+}
+
 beforeAll(() => {
   Object.defineProperty(window, 'ioc', {
     configurable: true,
     value: {
       get: (key: string) => registry.get(key),
       register: (key: string, value: unknown) => registry.set(key, value),
-      whenReady: () => {},
+      whenReady: (key: string, cb: (v: unknown) => void) => { if (key === '@hypercomb.social/Store') cb(fakeStore) },
     },
   })
 })
@@ -34,19 +43,23 @@ const show = (labels: string[], slots: number[]) => {
   })
 }
 
-const ringHere = (): Record<string, number>[] =>
-  JSON.parse(localStorage.getItem('hc:arrange-ring') ?? '{}')['ring-here'] ?? []
+const ringHere = async (): Promise<Record<string, number>[]> => {
+  await new Promise(r => setTimeout(r, 0))   // the pool write is async
+  const bytes = pools.get('arrange:ring')
+  return bytes ? JSON.parse(new TextDecoder().decode(bytes))['ring-here'] ?? [] : []
+}
 
 describe('the arrange layout ring', () => {
   beforeEach(async () => {
     localStorage.removeItem('hc:arrange-ring')
     localStorage.removeItem('hc:arrange-active')
+    pools.clear()
     registry.set('@diamondcoreprocessor.com/AxialService', {
       items: new Map(COORDS.map((c, i) => [i, c])),
     })
     registry.set('@hypercomb.social/Lineage', { explorerSegments: () => ['ring-here'] })
     registry.set('@diamondcoreprocessor.com/SequenceService', { list: () => [], get: () => null })
-    await import('./sequence-cycle.drone.js')
+    ;(await import('./sequence-cycle.drone.js'))._resetArrangeRecords()
     await registry.get('@diamondcoreprocessor.com/SequenceCycleDrone').heartbeat()
   })
 
@@ -58,12 +71,12 @@ describe('the arrange layout ring', () => {
   it('saves the hand-made layout on the first press, and only once', async () => {
     show(LABELS, [3, 0, 2, 1])
     await press()
-    expect(ringHere()).toEqual([{ alpha: 3, beta: 0, gamma: 2, delta: 1 }])
+    expect((await ringHere())).toEqual([{ alpha: 3, beta: 0, gamma: 2, delta: 1 }])
 
     // Pressing again from the same hand-made layout does not duplicate it.
     show(LABELS, [3, 0, 2, 1])
     await press()
-    expect(ringHere()).toHaveLength(1)
+    expect((await ringHere())).toHaveLength(1)
   })
 
   it('keeps earlier layouts across a drag, newest first', async () => {
@@ -71,7 +84,7 @@ describe('the arrange layout ring', () => {
     await press()
     show(LABELS, [1, 3, 0, 2])  // a drag the participant made afterwards
     await press()
-    expect(ringHere()).toEqual([
+    expect((await ringHere())).toEqual([
       { alpha: 1, beta: 3, gamma: 0, delta: 2 },
       { alpha: 3, beta: 0, gamma: 2, delta: 1 },
     ])

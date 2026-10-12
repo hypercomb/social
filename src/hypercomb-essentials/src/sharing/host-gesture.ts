@@ -112,10 +112,20 @@ export const hostCurrentBranch = async (): Promise<void> => {
         case 'no-signer':
           toast('error', t(i18n, 'host.title', 'Publish branch'), 'No signing key available — the hive index must be signed.')
           return
-        case 'not-available':
+        case 'not-available': {
+          // The node said no (TS-4): nothing is uploading, so "publish again
+          // in a moment" would be a promise nobody keeps. Name it and its words.
+          if (result.refused) {
+            const node = result.refused.host || 'The host'
+            const reason = result.refused.reason || result.refused.state || 'refused'
+            toast('error', t(i18n, 'host.title', 'Publish branch'),
+              t(i18n, 'host.publish.refused', `${node} refused the upload (${reason}) — nothing was published`, { node, reason }))
+            return
+          }
           toast('info', t(i18n, 'host.title', 'Publish branch'),
             t(i18n, 'host.failed', 'The branch is still uploading — your hive index was NOT advanced, so no link points at missing bytes. Uploads retry on their own; publish again in a moment.'))
           return
+        }
         case 'index-unsafe':
           // The refusal that protects every OTHER branch: rewriting the index
           // off a read we could not verify would drop the ones we cannot see.

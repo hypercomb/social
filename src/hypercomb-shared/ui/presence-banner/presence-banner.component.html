@@ -27,11 +27,12 @@
             [class.self]="b.isSelf"
             [class.add-name]="b.unnamed"
             [class.selected]="b.selected"
-            [class.elsewhere]="b.where === 'elsewhere'"
+            [class.elsewhere]="b.where === 'elsewhere' || b.where === 'visiting'"
+            [class.visiting]="b.where === 'visiting'"
             [class.away]="b.where === 'away'"
             [style.--presence-identity]="b.color"
             (click)="b.isSelf ? onSelfBadgeClick() : onPeerBadgeClick(b.key)"
-            [attr.aria-pressed]="b.where === 'here' ? b.selected : null"
+            [attr.aria-pressed]="b.where === 'here' || b.where === 'visiting' ? b.selected : null"
             [attr.aria-label]="badgeTitleKey(b) | t"
             [title]="badgeTitleKey(b) | t">
             {{ b.initials }}

@@ -26,7 +26,7 @@
 //   `confirmed`. A caller may render "published" on `unconfirmed`, but it must
 //   not render "live".
 
-import { EffectBus, get } from '@hypercomb/core'
+import { EffectBus, get, mintMetaEnvelope } from '@hypercomb/core'
 import {
   HIVE_LINK_KIND,
   HIVE_LINK_VERSION,
@@ -34,7 +34,7 @@ import {
   encodeHiveLinkBundle,
   type HiveLinkBundle,
 } from './hive-link.js'
-import { fetchHiveIndex, nip98Header, putHiveManifest } from './hive-pointer.js'
+import { fetchHiveIndex, fetchHiveManifestFromAny, nip98Header, putHiveManifest } from './hive-pointer.js'
 import {
   STAGE_LIVE,
   STAGE_PUBLISHED,
@@ -45,7 +45,11 @@ import {
   type StageWord,
 } from './stage-succession.js'
 import { isReservedRootKey } from './hive-link.js'
-import { creationUrl, foldContentLabel, ownAddressHost, ownAddressRefusal, withOwnAddress, zoneDoor } from './zone-door.js'
+import {
+  ENTRANCES_MAX, ENTRANCE_POWERS, boundLineage, creationUrl, entranceHost, foldContentLabel, isPoweredEntrance, ownAddressHost,
+  ownAddressRefusal, readEntrance, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
+} from './zone-door.js'
+import type { ModuleAssessmentRecord } from '../assistant/module-review.js'
 
 /** The heads the index names under its branch keys — what a stage list may
  *  hold (deployment-stages.md R2: a list is reconciled against the index). */
@@ -88,7 +92,7 @@ const CONFIRM_POLL_MS = 2_000
  *  a green branch with a 404 link is still a broken share. */
 const BUNDLE_RECEIPT_MS = 12_000
 
-interface StoreLike { putResource: (b: Blob) => Promise<string> }
+interface StoreLike { putResource: (b: Blob, options?: { emit?: boolean }) => Promise<string> }
 interface HistoryLike {
   sealSubtree: (segments: readonly string[]) => Promise<string | null>
 }
@@ -98,14 +102,27 @@ interface HostSyncLike {
   publicHostDomain?: () => string
   /** Name the nodes THIS publish puts its bytes on (host-sync.service). */
   addPublishNodes?: (domains: readonly string[]) => void
-  markPublic?: (sig: string, kind?: string, closure?: boolean) => Promise<void>
+  /** `page: false` — a publish is not a room offer: its bytes go to the
+   *  nodes this act names (the marker rule), never to a joined tab's swarm
+   *  hosts (host-sync.service markPublic). */
+  markPublic?: (sig: string, kind?: string, closure?: boolean, page?: readonly string[] | null | false) => Promise<void>
   drain?: () => Promise<void>
   reDrain?: () => Promise<unknown>
   isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
   /** Available on one of THESE hosts (the nodes this publish writes to). */
   isClosureAvailableOn?: (sig: string, kind: string, closure: boolean, domains: readonly string[]) => Promise<boolean>
+  /** The same, with what it waits on: `ownerHeld` = those hosts will never
+   *  take what they lack this session (host-sync closureVerdictOn). */
+  closureVerdictOn?: (sig: string, kind: string, closure: boolean, domains: readonly string[]) => Promise<{
+    ok: boolean
+    ownerHeld: boolean
+    blocking?: { host: string; state: string; reason: string; name?: string; bytes?: number }
+  }>
   ensureReceipt?: (sig: string, timeoutMs?: number) => Promise<boolean>
   probeServed?: (host: string, sig: string) => Promise<'served' | 'absent' | 'unknown'>
+  /** Publish these atoms to one host now, read back by hash (host-sync). */
+  publishAtoms?: (host: string, sigs: readonly string[], bytesOf: (sig: string) => Promise<Uint8Array | null>) =>
+    Promise<{ ok: true } | { ok: false; error: string }>
 }
 interface SignerLike { getPublicKeyHex?: () => Promise<string | null> }
 
@@ -125,7 +142,7 @@ export type PublishFailure =
   | 'no-host'         // nowhere to put the bytes: no node named, none standing, or none answering
   | 'seal-failed'     // a child is cold or unresolvable
   | 'no-signer'       // no key to sign the index with
-  | 'not-available'   // closure still uploading at the deadline — pointer NOT advanced
+  | 'not-available'   // closure not served at the deadline — or a node refused it (`refused`) — pointer NOT advanced
   | 'index-unsafe'    // could not verify the existing index — refused to rewrite it
   | 'index-failed'    // the PUT itself failed
   | 'bundle-failed'   // the link resource could not be minted
@@ -162,7 +179,15 @@ export type PublishResult =
        *  host — a stranger reading the pointer finds the atom. */
       stagesReceipted: boolean
     }
-  | { ok: false; failure: PublishFailure; reason?: string; sealed?: string }
+  | {
+      ok: false
+      failure: PublishFailure
+      reason?: string
+      sealed?: string
+      /** `not-available` because the nodes REFUSED what they lack (TS-4) —
+       *  not still uploading: the node, its state and its own words. */
+      refused?: { host: string; state: string; reason: string }
+    }
 
 export interface PublishOptions {
   /** Re-verify receipts and re-stage before waiting. The `markPublic` walk
@@ -307,7 +332,7 @@ export async function publishBranch(
 
   // 4. Stage the sealed closure and start pushing.
   report({ phase: 'staging' })
-  await hostSync.markPublic(sealed, 'layer', true)
+  await hostSync.markPublic(sealed, 'layer', true, false)
   if (options.forceReDrain) void hostSync.reDrain?.()
   else void hostSync.drain?.()
 
@@ -317,27 +342,49 @@ export async function publishBranch(
   //    receipts say nothing about the node whose index is about to name the
   //    branch. So the question is asked of the answering nodes, and the
   //    progress counts only what they still owe.
+  //
+  //    A NODE THAT REFUSED IS NOT "STILL UPLOADING" (TS-4). A node that
+  //    answered 403 (participants closed, not a writer), is full, or refused
+  //    an atom too large for it, is paused by the drain for minutes: waiting
+  //    out the deadline promised an upload that was never going to happen.
+  //    The verdict on the nodes says so the moment the refusal lands — its
+  //    `sync:state` wakes the wait — and the publish stops, naming the node
+  //    and its own words. No request of its own: the drain's answer is read.
   report({ phase: 'waiting' })
   const nodeSet = new Set(answering.map(d => foldContentLabel(String(d).toLowerCase())))
   let pending = -1
-  const offSync = EffectBus.on<{ pending?: number; host?: string }>('sync:state', p => {
-    if (typeof p?.pending !== 'number') return
-    if (p.host && !nodeSet.has(foldContentLabel(String(p.host).toLowerCase()))) return
-    pending = p.pending
+  let wake: (() => void) | null = null
+  const offSync = EffectBus.on<{ pending?: number; host?: string; status?: string }>('sync:state', p => {
+    if (p?.host && !nodeSet.has(foldContentLabel(String(p.host).toLowerCase()))) return
+    if (typeof p?.pending === 'number') pending = p.pending
+    // A node's answer changed: look again now, not at the next poll.
+    if (p?.status && p.status !== 'syncing') wake?.()
   })
-  const availableOnNodes = async (): Promise<boolean> => hostSync.isClosureAvailableOn
-    ? (await hostSync.isClosureAvailableOn(sealed, 'layer', true, answering)) === true
-    : (await hostSync.isClosureAvailable?.(sealed, 'layer', true)) === true
+  const verdictOnNodes = async (): Promise<{ ok: boolean; ownerHeld: boolean; blocking?: { host: string; state: string; reason: string } }> => {
+    if (hostSync.closureVerdictOn) return await hostSync.closureVerdictOn(sealed, 'layer', true, answering)
+    const ok = hostSync.isClosureAvailableOn
+      ? (await hostSync.isClosureAvailableOn(sealed, 'layer', true, answering)) === true
+      : (await hostSync.isClosureAvailable?.(sealed, 'layer', true)) === true
+    return { ok, ownerHeld: false }
+  }
   let available = false
+  let refusal: { host: string; state: string; reason: string } | undefined
   const deadline = Date.now() + AVAILABILITY_DEADLINE_MS
   try {
     for (;;) {
-      available = await availableOnNodes()
-      if (available || Date.now() >= deadline) break
+      const verdict = await verdictOnNodes()
+      available = verdict.ok
+      if (available) break
+      if (verdict.ownerHeld) { refusal = verdict.blocking ?? { host: answering[0] ?? '', state: 'refused', reason: '' }; break }
+      if (Date.now() >= deadline) break
       report({ phase: 'waiting', ...(pending >= 0 ? { pending } : {}) })
-      await new Promise(r => setTimeout(r, AVAILABILITY_POLL_MS))
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(() => { wake = null; resolve() }, AVAILABILITY_POLL_MS)
+        wake = () => { clearTimeout(timer); wake = null; resolve() }
+      })
     }
   } finally { offSync() }
+  if (refusal) return { ok: false, failure: 'not-available', reason: `${refusal.host}: ${refusal.reason}`, refused: refusal, sealed }
   if (!available) return { ok: false, failure: 'not-available', sealed }
 
   // 6. Merge + sign + PUT the index — behind the wipe guard.
@@ -416,7 +463,7 @@ export async function publishBranch(
     // stranger who reads the pointer must find the atoms on the same host.
     for (const sig of [advanced.claim, advanced.head, ...advanced.envelopes]) {
       if (!stageAtoms.includes(sig)) stageAtoms.push(sig)
-      await hostSync.markPublic(sig, 'resource')
+      await hostSync.markPublic(sig, 'resource', true, false)
     }
   }
 
@@ -442,7 +489,7 @@ export async function publishBranch(
   let bundleSig: string
   try { bundleSig = await store.putResource(encodeHiveLinkBundle(bundle)) }
   catch { return { ok: false, failure: 'bundle-failed', sealed } }
-  await hostSync.markPublic(bundleSig, 'resource')
+  await hostSync.markPublic(bundleSig, 'resource', true, false)
   const linkReceipted = (await hostSync.ensureReceipt?.(bundleSig, BUNDLE_RECEIPT_MS)) === true
   // The stage atoms share the link's budget, side by side: a pointer a
   // stranger can read must find its atom on the host.
@@ -617,7 +664,7 @@ async function withdrawFromStages(
     const next = await withdrawStage(word, gone, { pubkey }, keepFor(word))
     if (!next.ok || !next.changed || !SIG_RE.test(next.claim)) continue
     pointers[stageRootKey(word)] = next.claim
-    for (const sig of [next.claim, next.head, ...next.envelopes]) await hostSync?.markPublic?.(sig, 'resource')
+    for (const sig of [next.claim, next.head, ...next.envelopes]) await hostSync?.markPublic?.(sig, 'resource', true, false)
   }
   return pointers
 }
@@ -662,7 +709,7 @@ export async function setBranchDoors(
   const live = await advanceStage(STAGE_LIVE, { add: [head], keep: h => liveHeads.has(h) }, { pubkey })
   if (live.ok && live.changed && SIG_RE.test(live.claim)) {
     roots[stageRootKey(STAGE_LIVE)] = live.claim
-    for (const sig of [live.claim, live.head, ...live.envelopes]) await hostSync?.markPublic?.(sig, 'resource')
+    for (const sig of [live.claim, live.head, ...live.envelopes]) await hostSync?.markPublic?.(sig, 'resource', true, false)
   }
   const put = await putHiveManifest(indexHost, roots, doors,
     read.manifest.createdAt, read.manifest.signedContent)
@@ -711,6 +758,252 @@ export async function setBranchAddress(
     read.manifest.createdAt, { ...read.manifest.signedContent, addresses })
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
   return { ok: true, host: label ? ownAddressHost(label, z) || `${label}.${z}` : z }
+}
+
+/** Why an address's entrance could not be changed — each its own word for the
+ *  participant (`publish.entrance.failure.<code>`); `reason` is for logs.
+ *  `root` = the host is a domain's root, whose front door runs no powers;
+ *  `no-address` = the index binds no creation to the host, so nothing runs
+ *  there; `powers-unasked` = the write would leave powers on without a Turn
+ *  on. */
+export type ZoneEntranceFailure =
+  | 'services' | 'no-host' | 'no-signer' | 'index-unsafe' | 'index-failed'
+  | 'not-available' | 'scent-failed' | 'root' | 'no-address' | 'no-page' | 'too-many' | 'powers-unasked'
+
+/** WHAT THE PARTICIPANT ASKED — never a whole entry. The intent is applied to
+ *  the entrance as the index holds it at the moment of writing, so no cached
+ *  copy can raise or drop powers it did not mean to touch. */
+export type ZoneEntranceIntent =
+  /** Run `page` (previewed) with all three powers; follow `from` for updates. */
+  | { kind: 'on'; page: string; from?: ZoneEntranceFrom }
+  /** Keep serving the page, with no powers. */
+  | { kind: 'off' }
+  /** Forget the entrance (the host keeps the last page it served sealed). */
+  | { kind: 'forget' }
+
+export type ZoneEntranceResult =
+  | { ok: true; host: string; entrance: ZoneEntrance | null; reason?: 'unchanged'; assessed?: string }
+  | { ok: false; failure: ZoneEntranceFailure; reason?: string }
+
+/** The participant's own review scent for a card page they turned on: the
+ *  module-assessment shape (assistant/module-review.ts) with the card door
+ *  as its sandbox, so the community reads it beside any other assessment. */
+export const CARD_DOOR_SANDBOX = 'card-door'
+
+/** The entrance an intent leaves, from what the index holds now. Pure; the
+ *  shape only — whether the host is bound is the index's own question. */
+export function applyEntranceIntent(before: ZoneEntrance | null, intent: ZoneEntranceIntent): ZoneEntrance | null {
+  switch (intent.kind) {
+    case 'on': {
+      const from = intent.from ?? before?.from
+      return readEntrance({ page: intent.page, powers: [...ENTRANCE_POWERS], ...(from ? { from } : {}) })
+    }
+    case 'off': return before ? readEntrance({ ...before, powers: [] }) : null
+    case 'forget': return null
+  }
+}
+
+/** Where setEntrance reads and signs. */
+export interface SetEntranceOptions {
+  /** The doors the caller read this index through (the Publish panel passes
+   *  its row's door) — zone roots the participant writes to, asked before the
+   *  standing targets. */
+  doors?: readonly string[]
+}
+
+/** Walk the doors for the VERIFIED index. Unlike resolveIndexDoor, an honest
+ *  404 at one door is not the answer while a later door holds the index: a
+ *  domain's apex may be another host altogether (jwize.com's is the home
+ *  relay, which keeps no copy of this index), and reading "no index" there
+ *  would refuse a Turn on and report a Turn off that signed nothing.
+ *  `nothing` only when EVERY door answered 404. */
+async function verifiedIndexDoor(
+  doors: readonly string[],
+  pubkey: string,
+): Promise<{ host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>>; nothing: boolean }> {
+  let failed: { host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> } | null = null
+  let missing: { host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> } | null = null
+  for (const host of doors) {
+    const read = await fetchHiveIndex(host, pubkey)
+    if (read.ok) return { host, read, nothing: false }
+    if (read.reason === 'http' && read.status === 404) missing ??= { host, read }
+    else failed ??= { host, read }
+  }
+  if (failed) return { ...failed, nothing: false }
+  if (missing) return { ...missing, nothing: true }
+  return { host: '', read: { ok: false, reason: 'unreachable' } as Awaited<ReturnType<typeof fetchHiveIndex>>, nothing: false }
+}
+
+/** THE PARTICIPANT TURNS AN ADDRESS'S POWERS ON, OR OFF — the one writer of
+ *  the signed `entrances[host]` (documentation/using-a-creation.md, "Powers
+ *  are off by default, and the participant turns them on"). The Hyperdex app
+ *  runs at its own address (`business-card.<zone>`), never at a domain's
+ *  root: the root is a plain front door. Never remote: the bridge has no
+ *  intent for it, because a review is not a single tap.
+ *
+ *  It reads the index through the participant's own write doors — the doors
+ *  the caller read it through, then the standing targets; never the domain
+ *  the address merely sits under, which may be a different host that keeps
+ *  no copy of this index — applies the INTENT to the entrance it holds now,
+ *  and signs at the door that held it — one read-modify-write:
+ *  - `on` sets the page and all three powers, and in the SAME signed write
+ *    records the participant's own review scent for the page as
+ *    `roots['assess:<page>']`. Only `on` needs the host bound to a creation
+ *    (`boundLineage`), never a domain's root, and the page held on the host.
+ *  - `off` keeps the page and sets no powers: the host keeps serving it, so
+ *    cards visitors already kept stay unreadable to any other code there.
+ *  - `forget` removes the entry; the panel asks first.
+ *
+ *  HARD GUARD: no write leaves powers on unless the intent is `on`, or the
+ *  entrance already ran that same page with its powers on.
+ *
+ *  Refuses, before anything is signed, an index it cannot read (the wipe
+ *  guard) — and an index no door holds: Off and Forget then have nothing they
+ *  could truthfully report as done. */
+export async function setEntrance(
+  host: string,
+  intent: ZoneEntranceIntent,
+  options: SetEntranceOptions = {},
+): Promise<ZoneEntranceResult> {
+  const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
+  const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
+  if (!signer?.getPublicKeyHex) return { ok: false, failure: 'services' }
+  const h = entranceHost(String(host ?? '').toLowerCase())
+  if (!h) return { ok: false, failure: 'no-host', reason: 'not an address' }
+  if (intent.kind === 'on' && !SIG_RE.test(String(intent.page ?? '').toLowerCase())) return { ok: false, failure: 'no-page' }
+
+  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
+  // THE PARTICIPANT'S OWN WRITE DOORS carry the read and the write: the doors
+  // the caller read the index through, then the standing targets — the same
+  // shared index every one of them fronts.
+  const standing = await nodesFor([], hostSync)
+  const nodes = [...new Set([...(options.doors ?? []).map(zoneDoor), ...standing].filter(Boolean))]
+  if (nodes.length === 0) return { ok: false, failure: 'index-unsafe', reason: 'no door to read the index through' }
+  hostSync?.addPublishNodes?.(nodes)
+  const found = await verifiedIndexDoor(nodes, pubkey)
+  if (!found.read.ok) {
+    // Nothing anywhere binds the host, so there is nothing to turn on; and an
+    // Off or a Forget that found no index must never report success.
+    if (intent.kind === 'on' && found.nothing) return { ok: false, failure: 'no-address', reason: 'no index at any door' }
+    return { ok: false, failure: 'index-unsafe', reason: found.nothing ? 'no index at any door' : found.read.reason }
+  }
+  const indexHost = found.host
+  const manifest = found.read.manifest
+  const held = manifest.entrances ?? {}
+  const before = held[h] ?? null
+
+  // A DOMAIN'S ROOT IS A PLAIN FRONT DOOR on every device: nothing may run
+  // with powers there — a write door, a domain any creation's doors name, or
+  // a bare two-label domain. And a creation must live at the address for a
+  // page to run there. Turning powers off and forgetting are always allowed:
+  // an entrance whose address went away must still be possible to switch off.
+  if (intent.kind === 'on') {
+    const roots = new Set([...nodes, ...Object.values(manifest.doors ?? {}).flat().map(z => zoneDoor(z))])
+    if (roots.has(h) || h.split('.').length === 2) return { ok: false, failure: 'root' }
+    if (!boundLineage(manifest, h)) return { ok: false, failure: 'no-address' }
+  }
+
+  const next = applyEntranceIntent(before, intent.kind === 'on' ? { ...intent, page: intent.page.toLowerCase() } : intent)
+  if (isPoweredEntrance(next) && intent.kind !== 'on' && !(isPoweredEntrance(before) && before?.page === next?.page)) {
+    return { ok: false, failure: 'powers-unasked' }
+  }
+  const same = (a: ZoneEntrance | null, b: ZoneEntrance | null): boolean => {
+    // What was followed is recorded at turn-on, never asked for: compare who.
+    const strip = (e: ZoneEntrance | null) => e?.from ? { ...e, from: { pubkey: e.from.pubkey, lineage: e.from.lineage } } : e
+    return JSON.stringify(strip(a)) === JSON.stringify(strip(b))
+  }
+  if (same(before, next)) return { ok: true, host: h, entrance: before, reason: 'unchanged' }
+  if (next && !before && Object.keys(held).length >= ENTRANCES_MAX) {
+    return { ok: false, failure: 'too-many', reason: `a host keeps at most ${ENTRANCES_MAX} entrances` }
+  }
+
+  // THE PAGE MUST BE HELD before powers run it — asked only when this write
+  // turns a page's powers on. Off and Forget never wait on a receipt.
+  const page = next?.page ?? ''
+  const raising = !!next && isPoweredEntrance(next) && (page !== before?.page || !isPoweredEntrance(before))
+  if (raising) {
+    const ok = hostSync?.isClosureAvailableOn
+      ? (await hostSync.isClosureAvailableOn(page, 'resource', false, [indexHost])) === true
+      : (await hostSync?.isClosureAvailable?.(page, 'resource', false)) === true
+    if (!ok) return { ok: false, failure: 'not-available', reason: 'the page is not held on the host yet' }
+  }
+
+  // WHAT WAS FOLLOWED AT TURN-ON: the followed index's stamp and the followed
+  // lineage's head. Following yourself, the stamp is that of this very write
+  // and the head is the one your index names now; another publisher's are
+  // taken from the notice that offered the page, or read from their index.
+  let createdAt: number | undefined
+  if (intent.kind === 'on' && next?.from) {
+    const replaces = manifest.createdAt ?? 0
+    const { pubkey: followedKey, lineage } = next.from
+    let at: number
+    let head = ''
+    if (followedKey === pubkey) {
+      at = Math.max(Math.floor(Date.now() / 1000), replaces + 1)
+      createdAt = at
+      head = String(manifest.roots[lineage] ?? '')
+    } else if (Number.isSafeInteger(intent.from?.at) && SIG_RE.test(String(intent.from?.head ?? ''))) {
+      at = intent.from!.at!
+      head = intent.from!.head!
+    } else {
+      const followed = await fetchHiveManifestFromAny([indexHost, ...nodes], followedKey).catch(() => null)
+      at = followed?.createdAt || Math.floor(Date.now() / 1000)
+      head = String(followed?.roots[lineage] ?? '')
+    }
+    head = head.toLowerCase()
+    next.from = { pubkey: followedKey, lineage, at, ...(SIG_RE.test(head) ? { head } : {}) }
+  }
+
+  const roots = { ...manifest.roots }
+  let assessed: string | undefined
+  const scentKey = `assess:${page}`
+  if (raising && !roots[scentKey]) {
+    const scent = await cardDoorScent(page, h, indexHost, hostSync)
+    if ('error' in scent) return { ok: false, failure: 'scent-failed', reason: scent.error }
+    roots[scentKey] = scent.sig
+    assessed = scent.sig
+  }
+
+  const entrances: Record<string, ZoneEntrance> = { ...held }
+  if (next) entrances[h] = next
+  else delete entrances[h]
+  const put = await putHiveManifest(indexHost, roots, manifest.doors ?? {},
+    manifest.createdAt ?? 0, { ...(manifest.signedContent ?? {}), entrances },
+    { setsEntrances: true, ...(createdAt ? { createdAt } : {}) })
+  if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
+  // What the write signed, after its own normalisation: an entry on a host
+  // the index no longer binds is dropped there, never kept here.
+  const written = next ? readEntrances({ [h]: next }, manifest)[h] ?? null : null
+  return { ok: true, host: h, entrance: written, ...(assessed ? { assessed } : {}) }
+}
+
+/** Mint and publish the participant's review scent for page `page`: a note
+ *  (wrapped in its relation envelope, as module-review's putHop does) and the
+ *  assessment record, sent to the host now and read back by hash. The index
+ *  pointer `assess:<page>` is the caller's, in its own signed write. */
+async function cardDoorScent(
+  page: string, address: string, host: string, hostSync: HostSyncLike | undefined,
+): Promise<{ sig: string } | { error: string }> {
+  const store = get<StoreLike>(STORE_KEY)
+  if (!store?.putResource || !hostSync?.publishAtoms) return { error: 'the review scent cannot be published from here' }
+  const held = new Map<string, Uint8Array>()
+  const put = async (text: string, type: string): Promise<string> => {
+    const bytes = new TextEncoder().encode(text)
+    const sig = await store.putResource(new Blob([bytes], { type }), { emit: false })
+    held.set(sig, bytes)
+    return sig
+  }
+  try {
+    const noteText = await put(`Previewed and turned on for ${address}.`, 'text/plain; charset=utf-8')
+    const note = await put(JSON.stringify(mintMetaEnvelope({ resource: noteText, relation: 'note' })), 'application/json')
+    const record: ModuleAssessmentRecord = {
+      kind: 'module-assessment', sandbox: CARD_DOOR_SANDBOX, root: page, change: null, verdict: 'accept', note, at: Date.now(),
+    }
+    const sig = await put(JSON.stringify(record), 'application/json')
+    const sent = await hostSync.publishAtoms(host, [noteText, note, sig], async s => held.get(s) ?? null)
+    return sent.ok ? { sig } : { error: sent.error }
+  } catch { return { error: 'the review scent could not be written' } }
 }
 
 // ── SECURE DELETE — remove a switched-off place from my hosts ──────────────

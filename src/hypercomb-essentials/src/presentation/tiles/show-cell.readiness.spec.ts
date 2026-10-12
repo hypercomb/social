@@ -45,9 +45,9 @@ describe('show-cell readiness truth', () => {
     expect(revoke).toMatch(/this\.host\.revoked\(label\)/)
     expect(SRC).toMatch(/revoked: label => \{\s*this\.#shadeFadeStartedAt\.delete\(label\)\s*this\.#writeShadeFor\(label\)/)
 
-    // The renderer's eviction handlers hand the victim to readiness.
-    expect(memberBody('readonly #onAtlasEvicted = (e?: Event): void =>')).toMatch(/this\.#readiness\.imageEvicted\(/)
-    expect(memberBody('readonly #onLabelAtlasEvicted = (e?: Event): void =>')).toMatch(/this\.#readiness\.labelEvicted\(/)
+    // The renderer's eviction repaint (tile-evictions.ts) hands the victim to readiness.
+    expect(SRC).toMatch(/imageEvicted: sig => this\.#readiness\.imageEvicted\(sig\)/)
+    expect(SRC).toMatch(/labelEvicted: label => this\.#readiness\.labelEvicted\(label\)/)
 
     const imageEviction = memberBody('imageEvicted(victim: string | undefined): void', READY)
     expect(imageEviction).toMatch(/entry\?\.targets/)

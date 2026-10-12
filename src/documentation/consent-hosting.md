@@ -2,22 +2,27 @@
 
 **Status: DESIGN — pinned 2026-07-09. Not built.**
 
-## Swarms: consent is the standing allow plus the join sheet (2026-10-04)
+## Swarms: consent is the hosts you chose plus the join sheet (2026-10-04, hosts by pool 2026-10-07)
 
 A swarm does not use this handshake. See [swarm-host.md](swarm-host.md).
 
-- The relay you meet at is the swarm's host. Its operator consents once, for
-  every swarm that meets there, with a standing relay flag:
-  `--allow-participants` (or `=<lifecycleSig,...>` for chosen rooms only).
-- A participant consents by joining. The join sheet names the host: "Tiles you
-  add while joined are shared with the room and kept by jwize.com."
+- A page's tiles go to the hosts the participant already chose: the page's
+  publish domains, else the first host of their hosts pool (hypercomb.com on
+  a fresh install), and only when neither can take them, the relay they meet
+  at — whose operator consents once, for every swarm that meets there, with a
+  standing relay flag: `--allow-participants` (or `=<lifecycleSig,...>` for
+  chosen rooms only).
+- A participant consents by joining. The join sheet names the host the
+  invited page's tiles go to: "Tiles you add while joined are shared with the
+  room and kept by hypercomb.com."
 - No kind 20410 request, no kind 30411 grant, no `/@grant`, no consent toast.
   Fixed caps replace per-key quotas: 8 MB a blob, 256 MB a key and 2 GB an IP
   per 24 h, 4 GB a day across all participants, and no uploads while the disk
   has under 10 GB free.
 - The `.public` marker gate is unchanged. Private tiles never reach the host.
-- For the swarm target only, the relay's `201` body `stored <sig>` is the
-  receipt. Every other target keeps the read-back GET below.
+- For a swarm target only, a `2xx` body of exactly `stored <sig>` (the relay's
+  and the Hypercomb worker's answer) is the receipt. Every other answer, and
+  every other target, keeps the read-back GET below.
 
 What stays here is hosting outside a meeting: a participant asking an
 operator they do not meet at to keep their bytes. That is still a design.
@@ -80,10 +85,10 @@ sharer                         mesh                          host
 Kinds continue the broker's 204xx/304xx neighborhood (in use today:
 20400/30401/20402 broker, 30200 visuals, 30205 subscribe-request).
 
-**REQUEST — kind `20410`** (ephemeral, broadcast on `BROADCAST_TAG`)
+**REQUEST — kind `20410`** (ephemeral, on the room's ask channel — protocol-spec §21.4)
 
 ```
-tags:    [['x', 'broker:fetch'], ['t', 'hosting']]
+tags:    [['x', '<ask channel>'], ['t', 'hosting']]
 content: { "rootSig":   "<64-hex>",   // closure root being shared
            "files":     37,           // closure size (layers + resources)
            "totalBytes": 4390912,     // sum of byte lengths

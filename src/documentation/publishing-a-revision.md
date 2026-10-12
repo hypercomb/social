@@ -25,7 +25,18 @@ attaches (`scripts/bridge/owed-stamps.cjs`).
    file's date IS the revision's date. Nothing else records either.
 3. **Announce** — `stamp-install-channel.ts <name> --require` advances the signed
    `install:<name>` root through the authoring browser. Followers of that name
-   are told; nobody else is.
+   are told; nobody else is. It also writes the publisher record into both
+   shells' copies (`hypercomb-essentials/src/sharing/install-publisher.json`
+   and `hypercomb-web/src/setup/install-publisher.json`, byte for byte — a spec
+   fails if they differ), because a first install follows that record too.
+4. **Check the seed** — publish then reads hypercomb.com's packages pool the
+   way a fresh install does. When its head is not the root just stamped, it
+   prints a **RESTAGE OWED** box (or **RESTAGE UNCONFIRMED** when the host
+   cannot be read) with the step: `npm run deploy:hypercomb.com`, run from
+   `src/` after `az login`. Publish deploys nothing itself and its exit code
+   does not change: the revision is published and announced either way. Until
+   the restage lands, a fresh install and a floor move take the pool head
+   (install-by-replication.md, "The floor").
 
 ## Names
 

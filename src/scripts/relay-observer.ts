@@ -9,6 +9,10 @@
 import { WebSocket } from 'ws'
 
 const RELAY = 'ws://localhost:7777'
+// The relay's address gate refuses a read that names no signature
+// (documentation/swarm-host.md, "Reads name an address"): name the
+// addresses to read, HC_X=<sig>,<sig> (a page sig, a lifecycle sig).
+const XS = String(process.env['HC_X'] || '').split(',').map(s => s.trim()).filter(s => /^[0-9a-f]{64}$/.test(s))
 const DURATION_MS = (Number(process.argv[2]) || 15) * 1000
 
 type LayerEvent = {
@@ -32,7 +36,7 @@ ws.on('open', () => {
   console.log(`[observer] connected to ${RELAY}, listening ${DURATION_MS / 1000}s`)
   // Subscribe widely — every kind 30200 (layer) and 30201 (resource).
   // No filter on d-tag so we catch all rooms / sigs.
-  ws.send(JSON.stringify(['REQ', 'observer', { kinds: [30200] }]))
+  ws.send(JSON.stringify(['REQ', 'observer', { kinds: [30200], ...(XS.length ? { '#x': XS } : {}) }]))
 })
 
 ws.on('message', (raw) => {
@@ -52,6 +56,9 @@ ws.on('message', (raw) => {
       entry.freshestAgeSec = Math.min(entry.freshestAgeSec, ageSec)
       entry.tilesBySig.set(dTag, children)
       byPubkey.set(pk, entry)
+    } else if (msg[0] === 'CLOSED') {
+      console.error(`[observer] refused: ${msg[2]} — name the addresses: HC_X=<sig>,<sig>`)
+      process.exit(1)
     } else if (msg[0] === 'EOSE') {
       console.log(`[observer] EOSE — initial cache delivered, now watching for live publishes`)
     }
