@@ -130,7 +130,7 @@ export type ProfileReasonParams = Readonly<Record<string, string | number>>
 /** What each reason says in English: the fallback when no catalog answers.
  *  profile.queen.spec.ts holds it equal to en.json. */
 export const PROFILE_REASON_TEXT: Readonly<Record<ProfileReason, string>> = {
-  'nohost': 'no host is configured',
+  'nohost': 'no host is named — put one first, like profile @example.com name <name>',
   'nosigner': 'no Nostr signer is available',
   'value': 'the {field} is not one a profile can carry',
   'index-unreachable': 'the index on {host} is unreachable',

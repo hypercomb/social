@@ -60,6 +60,9 @@ export interface ShareStatus {
   offered?: number
   uploading?: number
   nameOnly?: number
+  /** Tiles offered whole from this device because no host keeps them (the
+   *  live swarm, 2026-10-11): never uploading, never held. */
+  live?: number
   private?: number
   host?: string
   hosts?: readonly string[]
@@ -397,9 +400,10 @@ const HOST_HELD: Readonly<Record<string, string>> = {
   'full': 'swarm.share.full',
   'too-large': 'swarm.share.too-large',
   'unreachable': 'swarm.share.unreachable',
-  // A host no HTTP status ever came from (a name that does not resolve):
-  // as unreachable, with the near-miss spelling offered beside it.
-  'never-answered': 'swarm.share.unreachable',
+  // A host no HTTP status ever came from (a name that does not resolve): a
+  // standing answer, so its tiles go live from this device (decision c) —
+  // with the near-miss spelling offered beside it.
+  'never-answered': 'swarm.share.never-answered',
   'not-live': 'swarm.share.not-live',
 }
 
@@ -415,6 +419,19 @@ const BRANCH_HELD: Readonly<Record<string, string>> = {
 /** A host that has never answered (a name that does not resolve, the
  *  `hyperccomb.com` typo) is the one a near-miss spelling is offered for. */
 const NEVER_ANSWERED = new Set(['never-answered', 'unresolved'])
+
+/** THE HOST KEEPS NOTHING — the host this page's tiles go to is not taking
+ *  them: it refused this key, is full, answers a page where a heap belongs,
+ *  or nothing at that name has ever answered. Then no one keeps what is
+ *  shared; the room gets it from this device while the sharer is here (the
+ *  live swarm, decision c 2026-10-11). The host's live word (`sync`) wins
+ *  over the walk's snapshot. A moment's trouble (unreachable, not-live) or
+ *  one file too large is not this. */
+export function hostKeepsNothing(share: ShareStatus | null | undefined, sync: SyncState | null | undefined): boolean {
+  const word = String(sync ? (sync.state ?? sync.status ?? '') : (share?.hostState ?? ''))
+  const why = String((sync ? sync.why : share?.why) ?? '')
+  return word === 'refused' || word === 'full' || NEVER_ANSWERED.has(word) || NEVER_ANSWERED.has(why) || why === 'page'
+}
 
 const branchPart = (b: BlockedBranch): StatusPart => ({
   key: BRANCH_HELD[String(b.why ?? '')] ?? BRANCH_HELD[String(b.state ?? '')]
@@ -523,7 +540,10 @@ export function statusLine(i: StatusInput): StatusLine {
     const share = i.share
     const hostWord = i.sync ? (i.sync.state ?? i.sync.status ?? '') : (share?.hostState ?? '')
     const tooLarge = hostWord === 'too-large'
-    const held = tooLarge ? undefined : HOST_HELD[hostWord]
+    // Unreachable from a name that has NEVER answered, while this page's
+    // tiles already go out live: said as never answered — never "names only".
+    const neverAnswered = hostWord === 'unreachable' && NEVER_ANSWERED.has(String(i.sync?.why ?? share?.why ?? '')) && count(share?.live) > 0
+    const held = tooLarge ? undefined : neverAnswered ? HOST_HELD['never-answered'] : HOST_HELD[hostWord]
     // A BRANCH A HOST HOLDS is named — the branch, the host, and why (a name
     // that does not resolve, a page where a heap belongs, a refusal) —
     // instead of reading as "uploading" for ever. This page's own host is

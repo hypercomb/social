@@ -150,4 +150,35 @@ describe('explicit text-theme offering', () => {
     content.offerings[local.theme.location!].head = SIG
     expect(await textThemeOfferingStatus(local.theme, HOST, deps)).toEqual({ ok: true, state: 'outdated' })
   })
+
+  it('no public host named: the offer goes to the domain chosen for it — never a default host', async () => {
+    const local = await localTheme()
+    const hosts: string[] = []
+    let content: Record<string, unknown> | null = null
+    const deps: TextThemeOfferDeps = {
+      store: local.store,
+      sync: {
+        publicHostDomain: () => '',
+        publishAtoms: async (host: string, sigs: readonly string[]) => { hosts.push(host); return { ok: true as const, sent: sigs.length, held: 0 } },
+      },
+      pubkey: async () => PUBKEY,
+      readIndex: vi.fn(async (host: string): Promise<HiveIndexResult> => {
+        hosts.push(host)
+        return content
+          ? { ok: true, manifest: { roots: {}, createdAt: 1, pubkey: PUBKEY, offerings: content['offerings'] as Record<string, unknown>, signedContent: content } }
+          : { ok: false, reason: 'http', status: 404 } as HiveIndexResult
+      }),
+      putIndex: vi.fn(async (host: string, roots: Record<string, string>, doors: Record<string, string[]> = {},
+        _replaces = 0, previous?: Record<string, unknown>): Promise<PutHiveResult> => {
+        hosts.push(host)
+        content = { ...previous, roots, doors }
+        return { ok: true, pubkey: PUBKEY, createdAt: 1 }
+      }),
+      readMarker: async () => local.head,
+    }
+    const result = await setTextThemeOffering(local.theme, 'content.' + HOST, true, deps)
+    expect(result).toEqual({ ok: true, state: 'current' })
+    expect(hosts.length).toBeGreaterThan(0)
+    expect(new Set(hosts)).toEqual(new Set([HOST]))
+  })
 })

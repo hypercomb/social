@@ -48,7 +48,7 @@ import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { fromRuntime } from '../../core/from-runtime'
 import {
-  SENDING_AFTER_MS, SLOW_FOR_MS, UNREACHABLE_AFTER_MS, clockRefused, linkPhase, refusalOf, slowLink, statusLine, wordsAtHost, wordsBeside,
+  SENDING_AFTER_MS, SLOW_FOR_MS, UNREACHABLE_AFTER_MS, clockRefused, hostKeepsNothing, linkPhase, refusalOf, slowLink, statusLine, wordsAtHost, wordsBeside,
   type MeshConnection, type ShareStatus, type StatusLine, type SyncState,
 } from './presence-status'
 import { readMeshZone } from '../../core/mesh-session'
@@ -742,9 +742,13 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     // merely because it is where we meet. An older swarm names no host (the
     // relay was its host); a page with no host, or one not known yet, names
     // no keeper — the confirmation must never promise one that is not there.
+    // Nor one that is not taking the bytes (it refused this key, is full,
+    // never answered): its tiles go live from this device (decision c).
     const share = this.#share()
     const named = share && typeof share.host === 'string'
-    const keeper = named ? this.#uploadHost() : (this.#swarmHost() || this.#t('mesh.state.no-host-name'))
+    const keeper = named
+      ? (hostKeepsNothing(share, this.#sync()) ? '' : this.#uploadHost())
+      : (this.#swarmHost() || this.#t('mesh.state.no-host-name'))
     const ok = await requestConfirm({
       title: 'swarm.share.confirm.title',
       message: keeper ? 'swarm.share.confirm.message' : 'swarm.share.confirm.message-local',

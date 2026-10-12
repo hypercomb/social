@@ -63,7 +63,9 @@ function fakeState(stored = new Map(), sockets = new Set()) {
 }
 
 async function meetingPoint(env = {}, state = fakeState()) {
-  const object = new MeetingPoint(state, { OPERATOR_KEYS: operatorPub, PARTICIPANTS: 'all', ...env })
+  // PARTICIPANTS as both deployed configs carry it: '' — the meeting point names
+  // no upload host (jwize 2026-10-11, "we can't give hosting away for free").
+  const object = new MeetingPoint(state, { OPERATOR_KEYS: operatorPub, PARTICIPANTS: '', ...env })
   await state.ready
   return { object, state }
 }
@@ -194,7 +196,7 @@ test('the right code is let in (card first); a wrong or missing code is refused'
   assert.equal(server.accepted, 'hibernation')
   assert.equal(server.closedWith, null)
   assert.match(server.sent[0][1], /^hc:host /)
-  assert.equal(JSON.parse(server.sent[0][1].slice(8)).participants, 'all')
+  assert.equal(JSON.parse(server.sent[0][1].slice(8)).participants, false, 'the coded point names no upload host either')
   assert.equal(intervals.size, 1, 'the sweep is armed while anyone is here')
 
   const wrong = await dial(object, 'hc-access.' + newCode())
@@ -282,7 +284,7 @@ test('NIP-11 says what the meeting point is, and nothing else is answered', asyn
   const body = await info.json()
   assert.equal(body.limitation.addressed_reads, true)
   assert.equal(body.limitation.access_code, true)
-  assert.equal(body.limitation.participant_uploads, 'all')
+  assert.equal(body.limitation.participant_uploads, false, 'no upload host is advertised')
   assert.ok(!JSON.stringify(body).includes(operatorPub), 'no operator key is published')
   assert.equal((await object.fetch(new Request('https://pluginthematrix.com/anything'))).status, 404)
   assert.equal((await object.fetch(new Request(CODE_URL))).status, 405)
@@ -469,7 +471,7 @@ test('the open host admits a codeless dial and serves the card first; an offered
   assert.equal(plain.server.closedWith, null)
   assert.match(plain.server.sent[0][1], /^hc:host /, 'the card is the first frame')
   const card = JSON.parse(plain.server.sent[0][1].slice('hc:host '.length))
-  assert.equal(card.participants, 'all', 'the byte host behind it takes participants\' uploads')
+  assert.equal(card.participants, false, 'the meeting point is never anyone\'s upload host: no default host')
   assert.equal(card.addressed, true, 'the address gate holds at the open default too')
 
   // A package that still carries a code from a meeting link offers it: echoed
@@ -491,7 +493,7 @@ test('the open host admits a codeless dial and serves the card first; an offered
   const info = await (await object.fetch(new Request('https://hypercomb.com/', { headers: { accept: 'application/nostr+json' } }))).json()
   assert.equal(info.limitation.access_code, false)
   assert.equal(info.limitation.addressed_reads, true)
-  assert.equal(info.limitation.participant_uploads, 'all')
+  assert.equal(info.limitation.participant_uploads, false)
   const recycled = await recycle(object, { hash: sha256Hex(newCode()) }, operator, nowSec(), `https://hypercomb.com${CODE_PATH}`)
   assert.equal(recycled.status, 404)
   assert.equal(state.stored.size, 0, 'an open meeting point stores no code')
@@ -638,10 +640,20 @@ test('the deployed configs: hypercomb.com — and only it — is open, in a scri
   assert.equal(value(coded, 'name'), 'hypercomb-meet')
   for (const toml of [open, coded]) {
     assert.equal(value(toml, 'main'), 'worker.js')
-    assert.equal(value(toml, 'PARTICIPANTS'), 'all')
+    assert.equal(value(toml, 'PARTICIPANTS'), '', 'no default host: the card says participants false (jwize 2026-10-11)')
     assert.match(toml, /^workers_dev\s*=\s*false/m, 'no address of its own: only the service binding reaches it')
     assert.doesNotMatch(toml, /^routes?\s*=/m)
   }
+})
+
+test('the card says what PARTICIPANTS says: empty or unset is false, only a host that keeps participants\' bytes says all or zones', async () => {
+  for (const [participants, said] of [[undefined, false], ['', false], ['  ', false], ['yes', false], ['ALL', 'all'], ['zones', 'zones']]) {
+    const { object, state } = await meetingPoint({ ...OPEN_ENV, PARTICIPANTS: participants })
+    const { server } = await dialAt(object, 'https://hypercomb.com/')
+    assert.equal(JSON.parse(server.sent[0][1].slice('hc:host '.length)).participants, said, String(participants))
+    for (const s of state.getWebSockets()) object.webSocketClose(s, 1000, '', true)
+  }
+  assert.equal(intervals.size, 0)
 })
 
 test('a dial past the socket ceiling is closed BUSY (1013) before a frame: one address holds 32 at most', async () => {

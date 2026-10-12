@@ -103,8 +103,8 @@ beforeAll(async () => {
   const HostSync = (await import('./host-sync.service.js')).HostSyncService
   const { SwarmHostResolver } = await import('./swarm-hosts.js')
   registry.set('@diamondcoreprocessor.com/HostSyncService', new HostSync(new SwarmHostResolver({
-    readPool: async () => [], readMarks: async () => [], relay: () => ({ host: '', participants: false }),
-    originLoopback: () => false, meetingHost: () => '', session: () => null,
+    readMarks: async () => [], relay: () => ({ host: '' }),
+    originLoopback: () => false, session: () => null,
   })))
   ;({ publishBranch } = await import('./publish-branch.js') as unknown as { publishBranch: typeof publishBranch })
   ;({ hostCurrentBranch } = await import('./host-gesture.js'))

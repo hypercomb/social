@@ -310,12 +310,12 @@ export class ModuleQueenBee extends QueenBee {
   readonly command = 'module'
   override description = 'See, drop, try in public, or promote what runs here'
   override descriptionKey = 'slash.module'
-  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>', 'assess <change> [accept|refuse|unclear <note>]', 'trials [@<host>]', 'changes <change>', 'take <change> [<path>]', 'focus [@<host>]', 'audit <change> [@<host>]']
+  override options = ['list', 'drop <path>', 'commit [<change>] @<host>', 'promote <change> [<channel>] @<host>', 'withdraw <change> @<host>', 'review <change> @<host>', 'assess <change> [accept|refuse|unclear <note>] @<host>', 'trials [@<host>]', 'changes <change> [@<host>]', 'take <change> [<path>] [@<host>]', 'focus @<host>', 'audit <change> [@<host>]']
   override examples = [
     { input: '/module', result: 'Lists the drafts picked over the installed package' },
-    { input: '/module commit fresh-rooms', result: 'Publishes what runs here to try-fresh-rooms.hypercomb.com, not to followers' },
-    { input: '/module promote fresh-rooms', result: 'fresh-rooms.hypercomb.com runs what try-fresh-rooms ran' },
-    { input: '/module promote fresh-rooms essentials', result: 'The live channel moves to the sandbox — followers are told' },
+    { input: '/module commit fresh-rooms @example.com', result: 'Publishes what runs here to try-fresh-rooms.example.com, not to followers' },
+    { input: '/module promote fresh-rooms @example.com', result: 'fresh-rooms.example.com runs what try-fresh-rooms ran' },
+    { input: '/module promote fresh-rooms essentials @example.com', result: 'The live channel moves to the sandbox — followers are told' },
   ]
   /** A MACHINE MAY LOOK, AND NOTHING ELSE (declarations audit, 2026-10-01).
    *  `drop` used to be offered too, declared editing at the network — wrong on
@@ -385,12 +385,15 @@ export class ModuleQueenBee extends QueenBee {
     }
     if (!PUBLISHING.has(word) && !['trials', 'changes', 'take', 'audit'].includes(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change>, assess <change>, trials, changes <change>, take <change> [<path>], focus or audit <change>.'), 'warning'); return }
 
-    // [@<host>] publishes to a host of your own (a machine running
-    // hypercomb-serve, a relay) instead of the public one; the other words are
-    // the change's name and, for promote, the live channel.
-    const host = zoneDoor(rest.find(part => part.startsWith('@'))?.slice(1) || (PUBLIC_CONTENT_HOSTS[0] ?? ''))
+    // @<host> names the host (a machine running hypercomb-serve, a relay, a
+    // zone); the other words are the change's name and, for promote, the live
+    // channel. A word that PUBLISHES goes only to a host the participant names
+    // — there is no default host (jwize 2026-10-11). A word that only READS a
+    // sandbox (trials, changes, take, audit) still reads the public host.
+    const named = zoneDoor(rest.find(part => part.startsWith('@'))?.slice(1) ?? '')
+    const host = named || (PUBLISHING.has(word) ? '' : zoneDoor(PUBLIC_CONTENT_HOSTS[0] ?? ''))
     const words = rest.filter(part => !part.startsWith('@'))
-    if (!host) { toast(t('module.nohost', 'No host is configured to publish to.'), 'warning'); return }
+    if (!host) { toast(t('module.nohost', 'No host is named to publish to — add @<host>, like module commit fresh-rooms @example.com.'), 'warning'); return }
 
     if (word === 'promote') {
       const name = sandboxName(words[0] ?? '')

@@ -229,7 +229,7 @@ export const ensureInstall = async (): Promise<void> => {
   //
   //   1) If a usable cached install is on disk → boot from cache.
   //   2) Otherwise → take the followed publisher's signed install root from
-  //      the hosts carried (the seed host when none) — their pool head when
+  //      the hosts carried and the known read host — their pool head when
   //      the index cannot be read — and, failing that, emit `install-needed`.
   //
   // The previous behaviour fetched `/content/manifest.json` on every
@@ -418,9 +418,12 @@ const repairInstalled = async (cached: InstallManifest): Promise<boolean> => {
 export const installFromHosts = async (): Promise<boolean> => {
   try {
     // A COLD CLIENT CARRIES NOTHING. The pool that holds the domains you have
-    // added is empty on a first run, and the drone that seeds it ships inside
-    // the package we are trying to fetch — so falling back to the one known
-    // host is not a convenience here, it is the only way the cycle opens.
+    // added is empty on a first run, and nothing seeds it any more (no
+    // default host, 2026-10-11) — so the one known READ host is asked beside
+    // whatever is carried, never instead of it: a hive that carries only a
+    // friend's host still installs when that friend is not serving a package.
+    // The carried hosts come first (the first that answers wins); the known
+    // host is a read source only and never where anyone's bytes are written.
     //
     // EXCEPT ON A SANDBOX DOOR. `try-<change>.<zone>` exists to run exactly the
     // package its door names (documentation/module-sandbox.md): the door's own
@@ -429,7 +432,7 @@ export const installFromHosts = async (): Promise<boolean> => {
     // sandbox's name, so the door is the only source.
     const door = sandboxDoor()
     const carried = door ? [door] : await listHostZones()
-    const zones = door ? carried : carried.length ? carried : [...DEFAULT_HOST_ZONES]
+    const zones = door ? carried : [...new Set([...carried, ...DEFAULT_HOST_ZONES])]
     if (!zones.length) return false
 
     // FOLLOW WHAT THE PUBLISHER SIGNED. A pool says what a domain holds, not

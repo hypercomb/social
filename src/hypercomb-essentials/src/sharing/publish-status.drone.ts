@@ -359,9 +359,14 @@ export class PublishStatusDrone extends Drone {
 
   /** Where each branch says it publishes — the marks it wears, by key. */
   readonly #branchHosts = new Map<string, string[]>()
-  /** The STANDING default zone, refreshed each sweep — the fallback for any
-   *  branch that never chose its own. */
+  /** The public host the participant NAMED, refreshed each sweep — where a
+   *  branch that never chose its own WRITES. '' when they named none: there
+   *  is no default host (jwize 2026-10-11), so such a branch writes nowhere. */
   #zone = ''
+  /** Where a branch that never chose its own is READ: the named public host,
+   *  else the public content host — reads stay, so what was published there
+   *  before the default went still shows. Never a write door. */
+  #readDoor = ''
   /** Each row's primary door for this sweep — probes, gap observations and
    *  the panel's addresses all read the same resolution. */
   #hostByKey = new Map<string, string>()
@@ -594,14 +599,18 @@ export class PublishStatusDrone extends Drone {
       const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
       const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
       const history = get<HistoryLike>(HISTORY_KEY)
-      // WHERE THIS PARTICIPANT PUBLISHES. Read from the service, which
-      // owns the setting; the compiled-in list is the standing default for
-      // anyone who never chose. Reading it here rather than importing the
-      // constant is what lets the panel show a target that can change.
+      // WHERE THIS PARTICIPANT PUBLISHES: the public host they NAMED, read
+      // from the service that owns the setting — '' when they named none.
+      // There is no default WRITE host (jwize 2026-10-11): a row with no marks
+      // and no named host has nowhere to write, and its writes refuse.
+      // READS stay: such a row's index is read through the public content
+      // host (#readDoor), where anything published before still lives.
       // The zone ROOT is the door: a setting stored as `content.<zone>`
       // before the face retired is read as its zone (zone-door.ts).
-      const host = zoneDoor(hostSync?.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || '')
+      const host = zoneDoor(hostSync?.publicHostDomain?.() || '')
       this.#zone = host
+      const readDoor = host || zoneDoor(PUBLIC_CONTENT_HOSTS[0] ?? '')
+      this.#readDoor = readDoor
       // The domains come first: they are listed whether or not a key or a
       // tile is ready, so the panel is never an empty page.
       this.#community = await listCommunityHosts()
@@ -663,22 +672,23 @@ export class PublishStatusDrone extends Drone {
         if (named.length > 0) this.#branchHosts.set(key, named)
       }
 
-      // THE DOORS IN USE: the standing default plus every branch's own
-      // choice. Every zone fronts the same per-key index, but a row is
-      // proven through ITS OWN door — which is the point of choosing one:
-      // one dead zone dims its own rows and nobody else's.
+      // THE DOORS IN USE: the read door plus every branch's own choice.
+      // Every zone fronts the same per-key index, but a row is proven
+      // through ITS OWN door — which is the point of choosing one: one dead
+      // zone dims its own rows and nobody else's. These are READ doors; a
+      // row WRITES only through #writeDoorFor.
       this.#hostByKey.clear()
       const hostFor = (key: string): string => {
         let door = this.#hostByKey.get(key)
         if (!door) {
           const zone = this.#zonesFor(key)[0]
-          door = zone ? zoneDoor(zone) : host
+          door = zone ? zoneDoor(zone) : readDoor
           this.#hostByKey.set(key, door)
         }
         return door
       }
-      const doors = new Set<string>([host])
-      for (const key of candidates.keys()) doors.add(hostFor(key))
+      const doors = new Set<string>(readDoor ? [readDoor] : [])
+      for (const key of candidates.keys()) { const door = hostFor(key); if (door) doors.add(door) }
 
       // ONE index read per door answers every row behind that door.
       const indexes = new Map<string, {
@@ -720,8 +730,8 @@ export class PublishStatusDrone extends Drone {
       }
       for (const key of candidates.keys()) hostFor(key)
 
-      // The header speaks for the STANDING door; each row speaks for its own.
-      const head = indexes.get(host)
+      // The header speaks for the READ door; each row speaks for its own.
+      const head = indexes.get(readDoor)
       const indexState: PublishRenderPayload['index'] = head?.state ?? 'checking'
       const indexCreatedAt = head?.createdAt ?? 0
       const indexStale = head?.stale ?? false
@@ -786,7 +796,7 @@ export class PublishStatusDrone extends Drone {
           row.opensAs = await beforeDeadline(defaultViewAt(row.segments).catch(() => ''), '')
         }
         // OPTIMIZE: the published arrival plan, read from its door.
-        const planDoor = this.#hostByKey.get(row.key) ?? host
+        const planDoor = this.#hostByKey.get(row.key) ?? readDoor
         const planSig = indexes.get(planDoor)?.roots[arrivalPointer(row.key)] ?? ''
         row.plan = planSig ? await beforeDeadline(this.#readPlan(planDoor, planSig), null) : null
         const here = row.segments.length > 0 && history?.sealSubtree
@@ -794,7 +804,7 @@ export class PublishStatusDrone extends Drone {
           : null
         // Everything online about this row happens at ITS door: the probe,
         // the index verdicts, and the observation it leaves behind.
-        const door = this.#hostByKey.get(row.key) ?? host
+        const door = this.#hostByKey.get(row.key) ?? readDoor
         const ix = indexes.get(door)
         const served = row.live
           ? await beforeDeadline(
@@ -1047,8 +1057,9 @@ export class PublishStatusDrone extends Drone {
     this.#paintZones(key, ordered)
     const written = await setBranchHosts(row.segments, ordered)
     if (written.join(',') !== ordered.join(',')) this.#paintZones(key, written)
+    const at = written.length > 0 ? written.join(', ') : this.#zone
     this.emitEffect('activity:log', {
-      message: `${key} publishes at ${written.length > 0 ? written.join(', ') : this.#zone}`,
+      message: at ? `${key} publishes at ${at}` : `${key} names no host, so nothing publishes it`,
     })
     // Coalesced, never immediate: ticking three hosts in a row is one sweep,
     // and the sweep is a re-observation, not part of making the choice.
@@ -1069,7 +1080,8 @@ export class PublishStatusDrone extends Drone {
   async #setArrival(key: string, names: string[]): Promise<void> {
     const row = this.#rows.find(r => r.key === key)
     if (!row) return
-    const door = this.#hostByKey.get(key) ?? this.#payload.host
+    const door = this.#writeDoorFor(key)
+    if (!door) { this.#refuseNoHost(); return }
     const before = row.plan
     row.busyPhase = 'optimize'
     this.#emit()
@@ -1094,8 +1106,13 @@ export class PublishStatusDrone extends Drone {
     this.#emit()
   }
 
-  /** Send the participant-only set, signed, to the standing door. */
+  /** Send the participant-only set, signed, to the public host the
+   *  participant named — never the read door; none named, nothing is sent. */
   async #publishParticipant(): Promise<void> {
+    if (!this.#payload.host) {
+      this.#toast('warning', 'publish.optimize.no-host', 'Nothing was sent: no host is named. Say features publish <host> to send the set to one.')
+      return
+    }
     const result = await publishParticipantFeatures(this.#payload.host)
     if (!result.ok) {
       this.#toast('error', 'publish.optimize.failed', `The set could not be published: ${result.reason}`)
@@ -1131,7 +1148,7 @@ export class PublishStatusDrone extends Drone {
     if (!row || this.#inspectedKey !== key) return
     if (!row.live) { row.gaps = []; this.#emit(); return }
     const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
-    const host = this.#hostByKey.get(key) ?? this.#payload.host
+    const host = this.#hostByKey.get(key) ?? this.#readDoor
     const gaps = await beforeDeadline(
       hostSync?.closureGaps?.(row.live, 'layer', true, GAP_LIMIT) ?? Promise.resolve([]),
       [],
@@ -1191,8 +1208,8 @@ export class PublishStatusDrone extends Drone {
       result.status === 'confirmed' ? 'success' : 'info',
       result.status === 'confirmed' ? 'publish.done' : 'publish.done-unconfirmed',
       result.status === 'confirmed'
-        ? 'Published — the public host is serving it.'
-        : 'Published — the public host has not served it back yet. This row re-checks on its own.')
+        ? 'Published — its host is serving it.'
+        : 'Published — its host has not served it back yet. This row re-checks on its own.')
     void this.#refresh()
   }
 
@@ -1352,13 +1369,17 @@ export class PublishStatusDrone extends Drone {
       intent = { kind: 'on', page, ...(from ? { from } : {}) }
     } else if (p.on === false) intent = { kind: 'off' }
     else return
+    // Signed only through a door the participant named for this row.
+    const door = this.#writeDoorFor(row.key)
+    if (!door) { this.#refuseNoHost(); return }
 
     row.busyPhase = 'indexing'
     this.#emit()
-    // Read and signed through the door this row's index was read from — the
-    // index the panel shows — then the standing targets; never the domain the
-    // address merely sits under, which may be another host altogether.
-    const result = await setEntrance(host, intent, { doors: [this.#hostByKey.get(row.key) ?? this.#payload.host] })
+    // Read and signed through the row's write door — its primary mark, the
+    // door its index is read from — then the standing targets; never the
+    // domain the address merely sits under, which may be another host
+    // altogether, and never the read door alone.
+    const result = await setEntrance(host, intent, { doors: [door] })
     row.busyPhase = null
     if (!result.ok) {
       this.#toast('error', `publish.entrance.failure.${result.failure}`, ENTRANCE_FAILURE_TEXT[result.failure] ?? 'The entrance was not changed.', { host, zone: view.zone })
@@ -1500,11 +1521,23 @@ export class PublishStatusDrone extends Drone {
 
   #zonesFor(key: string): string[] {
     // THE MARKS are the branch's one statement of where it publishes. An
-    // unmarked branch rides the standing default.
+    // unmarked branch rides the public host the participant named — and
+    // with none named it publishes nowhere: never a default (2026-10-11).
     const named = this.#branchHosts.get(key) ?? []
     if (named.length > 0) return named
-    const fallback = this.#zone || zoneDoor(PUBLIC_CONTENT_HOSTS[0] ?? '')
-    return fallback ? [fallback] : []
+    return this.#zone ? [this.#zone] : []
+  }
+
+  /** Where a row's WRITES go: its primary mark, else the public host the
+   *  participant named — '' when neither. Never the read door: a row with
+   *  no host named writes nowhere (jwize 2026-10-11, no default host). */
+  #writeDoorFor(key: string): string {
+    return zoneDoor(this.#zonesFor(key)[0] ?? '')
+  }
+
+  /** A write with no host named: say so, send nothing. */
+  #refuseNoHost(): void {
+    this.#toast('warning', 'publish.write.no-host', 'Nothing was sent: this place names no host. Turn on a domain for it first.')
   }
 
   /** Toasts carry RESOLVED text — the bus payload is display copy, and the

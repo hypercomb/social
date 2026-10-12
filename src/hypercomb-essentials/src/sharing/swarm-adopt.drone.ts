@@ -60,6 +60,7 @@ import { publisherHoldsUnheldBelow } from './branch-difference.js'
 import { allows as intakeAllows } from '../pheromones/intake-filter.js'
 import { _adoptQueue } from './adopt-queue.service.js'
 import { isJoinedHere } from './membership.js'
+import { visualArtifactSigs } from './visual-hosts.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -150,7 +151,17 @@ interface BrokerLike {
   adopt: (rootSig: string, opts?: { layersOnly?: boolean; silent?: boolean; quiet?: boolean }) => Promise<{ layers: number; leaves: number; failed: number }>
   noteDomainsForSig?: (sig: string, domains: string[]) => void
   getKnownDomains?: (sig: string) => string[]
+  /** Verified bytes for a sig — local, a host, or a live peer — written
+   *  through to this device's store. */
+  fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null>
+  /** Lift a sig's miss window for one explicit ask (a take is a gesture). */
+  allowFetchRetry?: (sig: string) => void
 }
+
+/** A taken LIVE tile's picture that did not arrive is asked once more after
+ *  this long — its sharer may still be in the room (a relay rate limit, a
+ *  slow chunk run), and once they leave nobody can serve it. */
+const LIVE_PICTURE_RETRY_MS = 2_000
 
 interface CommitterLike {
   update: (
@@ -726,6 +737,7 @@ export class SwarmAdoptDrone extends Drone {
     // slot, while this one-level lightweight fold needs the explicit bridge.
     await this.#applyWireTitles(segments, entry)
     this.#visitStage('landed', { name, at: [...segments] })
+    this.#keepLivePictures(entry, broker)
     this.#scheduleDivergenceScan()
 
     if (SIG_RE.test(layerSig)) {
@@ -763,6 +775,32 @@ export class SwarmAdoptDrone extends Drone {
     return true
   }
 
+  /** A LIVE tile — no host keeps it, its sharer's device serves it while they
+   *  are in the room (`served: 'owner'`, jwize 2026-10-11) — keeps its
+   *  pictures once TAKEN: they are fetched through the broker now, while the
+   *  sharer is still here, and written through to this device's store, so
+   *  the taken tile still paints after they leave. Every picture the wire
+   *  visual names, never its layer (the take folds one level, its own layer
+   *  minted here). The take is the participant's own gesture, so a picture
+   *  sitting in the broker's miss window (a mesh race lost a moment ago) is
+   *  asked anyway, and one that still does not arrive is asked once more.
+   *  Fire-and-forget: a picture that never arrives stays a lazy read. */
+  #keepLivePictures = (entry: Record<string, unknown>, broker: BrokerLike | undefined): void => {
+    if (entry['served'] !== 'owner' || typeof broker?.fetchBySig !== 'function') return
+    const ask = (sig: string): Promise<Uint8Array | null> => {
+      try { broker.allowFetchRetry?.(sig) } catch { /* an older broker: its window stands */ }
+      try { return broker.fetchBySig!(sig, 'resource').catch(() => null) } catch { return Promise.resolve(null) }
+    }
+    const layerSig = String(entry['layerSig'] ?? '').trim().toLowerCase()
+    for (const sig of visualArtifactSigs([entry])) {
+      if (sig === layerSig) continue
+      void ask(sig).then(bytes => {
+        if (bytes) return
+        setTimeout(() => { void ask(sig) }, LIVE_PICTURE_RETRY_MS)
+      })
+    }
+  }
+
   /** Is `label` something a take can add right here? Synchronous, so both
    *  callers can decide in the middle of a gesture — SelectionInputDrone on
    *  POINTERDOWN (is this press a take, and must select stand down?) and
@@ -794,7 +832,8 @@ export class SwarmAdoptDrone extends Drone {
     // union read in `#foldPageTile`, at the commit.
     //
     // A PLACEHOLDER IS NOT TAKEABLE. A sharer announces a tile by name the
-    // moment it exists and with its layerSig once a host serves it
+    // moment it exists and with its layerSig once a host serves it — or at
+    // once when no host keeps it and their device serves it live
     // (swarm.drone #entryFor); until then the name is all there is, and a
     // take would fold a husk. The shade appears when the signature does.
     const entry = this.#peerEntryFor(name)

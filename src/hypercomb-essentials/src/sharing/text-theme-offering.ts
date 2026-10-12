@@ -120,9 +120,11 @@ const scope = async (host: string, deps: TextThemeOfferDeps): Promise<
   if (!selected) return { reason: 'Choose a root domain such as example.org.' }
   const sync = deps.sync ?? get<SyncLike>(SYNC_KEY)
   if (!sync?.publishAtoms || !sync.publicHostDomain) return { reason: 'Host sync is unavailable.' }
-  // Writes go to the zone root — a stored `content.` face is read as its zone.
-  const endpoint = zoneDoor(sync.publicHostDomain())
-  if (!DOMAIN.test(endpoint)) return { reason: 'Choose a public content host in Hosts first.' }
+  // Writes go to a host the participant NAMED (jwize 2026-10-11: no default
+  // host): the public host they set, else the very domain they chose to
+  // offer on — its zone root. A stored `content.` face is read as its zone.
+  const endpoint = zoneDoor(sync.publicHostDomain() || selected)
+  if (!DOMAIN.test(endpoint)) return { reason: 'Choose a root domain such as example.org.' }
   const signer = get<SignerLike>(SIGNER_KEY)
   const pubkey = String(await (deps.pubkey?.() ?? signer?.getPublicKeyHex?.()) ?? '').toLowerCase()
   if (!SIG.test(pubkey)) return { reason: 'A signing key is required.' }

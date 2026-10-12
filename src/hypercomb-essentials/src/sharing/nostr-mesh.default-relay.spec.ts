@@ -9,10 +9,10 @@
 //   2. A participant who names hypercomb.com meets there and offers it no
 //      access code (D8: the open point; a code on it would hot-loop old
 //      packages).
-//   3. Its card makes it the relay tier of the swarm's upload hosts: with no
-//      publish domain, meeting host or pool host, a page's bytes go to
-//      hypercomb.com, written https://hypercomb.com — and the pool's own seed
-//      (hosts.drone SEED_HOST) is the same host, so the two tiers agree.
+//   3. The host the participant entered IS the host field — the swarm's
+//      upload host when the page wears no publish domain (jwize 2026-10-11:
+//      "the source of truth is the host field"), whatever its card says;
+//      nothing seeds a hosts pool, and no pool picks a host.
 //   4. An operator can still name any relay, jwize.com included.
 
 import { readFileSync } from 'node:fs'
@@ -153,50 +153,48 @@ describe('the offered meeting point — never seeded', () => {
   })
 })
 
-describe('its card makes it the relay tier of the upload hosts', () => {
-  it('with no publish domain, meeting host or pool host, a page\'s bytes go to https://hypercomb.com', async () => {
+describe('the meeting point entered is the host field — the upload host, whatever its card says', () => {
+  it('with no publish domain, a page\'s bytes go to the point the participant entered, written https://<host>', async () => {
+    localStorage.setItem('hc:nostrmesh:relays', JSON.stringify(['wss://hypercomb.com']))
     const mesh = await bootDefault()
     const ws = FakeWebSocket.all[0]!
     ws.open()
-    ws.card({ participants: 'all', addressed: true })
-    expect(mesh.relayParticipants()).toBe('all')
-    expect(mesh.relaysAddressed()).toBe(true)
+    // The point's card says it hosts nobody's bytes: that decides nothing —
+    // the host the participant entered is asked, and its answer decides.
+    ws.card({ participants: false, addressed: true })
+    expect(mesh.relayParticipants()).toBe(false)
 
     // The live deps read the mesh through IoC, as host-sync's resolver does.
     const resolver = new SwarmHostResolver({
       ...liveSwarmHostDeps,
-      readPool: async () => [],              // a seeded pool the participant emptied
       readMarks: async () => [],
       originLoopback: () => false,
-      meetingHost: () => '',
       session: () => null,
     })
     resolver.warm(null)
     resolver.warm(['meetup'])
     await settle()
     const choice = resolver.hostsFor(['meetup'])
-    expect(choice).toEqual({ hosts: ['hypercomb.com'], source: 'relay', pending: false })
+    expect(choice).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false })
     expect(originOf(choice.hosts[0])).toBe('https://hypercomb.com')
     expect(resolver.relayHost()).toBe('hypercomb.com')
   })
 
-  it('the pool\'s seed is the same host, so the pool tier and the relay tier agree', async () => {
-    const seed = /const SEED_HOST = '([^']+)'/.exec(readFileSync(join(HERE, 'hosts.drone.ts'), 'utf8'))?.[1]
-    expect(seed).toBe('hypercomb.com')
+  it('nothing seeds a hosts pool: a friend\'s point is the host, never a shipped one', async () => {
+    expect(readFileSync(join(HERE, 'hosts.drone.ts'), 'utf8')).not.toMatch(/\bSEED_HOST\b/)
+    localStorage.setItem('hc:nostrmesh:relays', JSON.stringify(['wss://friend.example']))
     const mesh = await bootDefault()
     FakeWebSocket.all[0]!.open()
     FakeWebSocket.all[0]!.card({ participants: 'all', addressed: true })
     const resolver = new SwarmHostResolver({
       ...liveSwarmHostDeps,
-      readPool: async () => [seed!],         // a fresh install's pool
       readMarks: async () => [],
       originLoopback: () => false,
-      meetingHost: () => '',
       session: () => null,
     })
     resolver.warm(null)
     await settle()
-    expect(resolver.hostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false })
+    expect(resolver.hostsFor(null)).toEqual({ hosts: ['friend.example'], source: 'meeting', pending: false })
     expect(resolver.hostsFor(null).hosts).toEqual([mesh.swarmHost()])
   })
 })

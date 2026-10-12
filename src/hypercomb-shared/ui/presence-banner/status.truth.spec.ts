@@ -101,7 +101,7 @@ describe('the owner\'s tab: 27 tiles name-only behind hosts the page never named
 
   it("a RECEIVER is told when a branch here opens its deeper pages from its sharer's device alone (D1)", () => {
     const line = statusLine({ ...base, deepOwners: ['Ana'] })
-    expect(say(line)).toContain("Deeper pages open from Ana's device until their upload finishes")
+    expect(say(line)).toContain("Deeper pages open from Ana's device while they're here")
     expect(line.tone).toBe('live')
     expect(say(statusLine({ ...base }))).not.toContain('Deeper pages')
   })

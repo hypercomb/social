@@ -27,9 +27,11 @@
 //      object returns 200 without a rewrite (dedup is free).
 //   2. writer-authorization — a schnorr-signed nostr event proves WHO
 //      without ever sending a secret. Instead of relay.js's static
-//      --writers allowlist, this tier meters an auto-grant guest list:
+//      --writers allowlist, this tier meters a grant ledger:
 //      Pool sign('host:grants')/<pubkey> → { quotaBytes, usedBytes, expiresAt }
-//      (KV GRANTS read as a drain source only).
+//      (KV GRANTS read as a drain source only). Bytes are kept for the
+//      host's own people (hostPeople) — never handed to any key that asks
+//      (AUTO_GRANT defaults off since jwize 2026-10-11).
 //
 // Never logs or echoes request bodies. Only dependency: @noble/curves
 // (schnorr verify — wrangler bundles it).
@@ -2870,27 +2872,46 @@ async function verifyBud02(evt, bodyHash) {
   return { ok: true, pubkey: String(evt.pubkey).toLowerCase() }
 }
 
-// ── quota (the auto-grant guest list) ────────────────────────────────────────
+// ── quota (the host's people, and the grant ledger) ──────────────────────────
 //
-// The guest list is a pool of meaning (jwize 2026-09-25: state lives only in
+// The ledger is a pool of meaning (jwize 2026-09-25: state lives only in
 // pools of meaning): each key's grant { quotaBytes, usedBytes, expiresAt } is
 // the member of sign('host:grants') named by the key. Never listed, so never
 // public — only GET /grant hands a key its own row. The KV namespace (GRANTS)
-// that held it before is read as a drain source and never written. Policy
-// via env:
-//   AUTO_GRANT           '1' (default) mints a grant on first valid upload
-//   DEFAULT_QUOTA_BYTES  104857600 (100 MB)
+// that held it before is read as a drain source and never written.
+//
+// WHO GETS BYTES (jwize 2026-10-11: "we can't give hosting away for free";
+// "Then we can share the host with our friends"). A host keeps bytes for its
+// OWN PEOPLE (hostPeople): each zone's operator, every publisher bound to a
+// site here (the aiAdmitted set — a claim binds its claimant to publish, not
+// to be kept), and every key the operator lists in HOST_FRIENDS. They stand
+// on PEOPLE_QUOTA_BYTES at least, their use counted across windows, the
+// window rolled forward while they stay listed. A domain claimant stands on
+// the claim allowance only while it is one of them too (decision d). Anyone
+// else stands on the row they already hold, as it is: an unexpired grant
+// keeps working until its fixed expiresAt (consume never extends it), and
+// is never re-minted. Policy via env:
+//   AUTO_GRANT           '0' (default): no grant is minted for a stranger.
+//                        '1' brings back the open guest list — a fresh
+//                        DEFAULT_QUOTA_BYTES grant on a first upload, and a
+//                        fresh one again when it expires. Never on a host
+//                        that cannot give its storage away.
+//   HOST_FRIENDS         comma list of 64-hex pubkeys the operator shares the
+//                        host with (a redeploy per friend; a self-service
+//                        signed list comes later)
+//   PEOPLE_QUOTA_BYTES   1073741824 (1 GiB) — the host's people
+//   CLAIM_QUOTA_BYTES    1073741824 (1 GiB) — a listed claimant
+//   DEFAULT_QUOTA_BYTES  104857600 (100 MB) — a guest, under AUTO_GRANT
 //   GRANT_TTL_DAYS       90
 //
 // The quota is an anti-abuse throttle, not billing: a malicious uploader
 // can waste granted bytes, never corrupt a reader (every read is sha256-
 // gated at the client). Existing-object PUTs consume nothing — the bytes
-// are already here. Under AUTO_GRANT an EXPIRED grant re-mints fresh, same
-// as an unknown pubkey: the guest list forgets you, it doesn't ban you.
-// With AUTO_GRANT off, missing and expired both close the door (403).
+// are already here. Missing and expired both close the door (403) unless
+// AUTO_GRANT is on. Nothing here ever deletes a byte or a row.
 //
 // Last write wins; two racing uploads can under-count briefly. Acceptable
-// for a guest list — the ceiling holds on the next read.
+// for a throttle — the ceiling holds on the next read.
 
 const HOST_GRANTS_MEANING = 'host:grants'
 const HOST_AI_METERS_MEANING = 'host:ai-meters'
@@ -2926,11 +2947,66 @@ async function writeLedger(env, meaning, member, row) {
 
 const readGrant = (env, pubkey) => readLedger(env, HOST_GRANTS_MEANING, pubkey, pubkey)
 
+/** A byte allowance from a var: the fallback when it is unset or blank — an
+ *  empty var must never read as a 0-byte allowance. */
+function allowance(raw, fallback) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : fallback
+}
+
 function policy(env) {
   return {
-    autoGrant: String(env.AUTO_GRANT ?? '1') === '1',
+    // OFF unless the deployment says '1' (jwize 2026-10-11): a host that
+    // forgets the var gives nothing away.
+    autoGrant: String(env.AUTO_GRANT ?? '0').trim() === '1',
     defaultQuota: Number(env.DEFAULT_QUOTA_BYTES ?? 104_857_600),
+    peopleQuota: allowance(env.PEOPLE_QUOTA_BYTES, 1_073_741_824),
+    claimQuota: allowance(env.CLAIM_QUOTA_BYTES, 1_073_741_824),
     ttlDays: Number(env.GRANT_TTL_DAYS ?? 90),
+  }
+}
+
+/** HOST_FRIENDS: the keys the operator shares this host with — a comma list
+ *  of 64-hex pubkeys, folded to lowercase; anything else in it is ignored. */
+function hostFriends(env) {
+  return String(env.HOST_FRIENDS || '').toLowerCase().split(',').map((s) => s.trim()).filter((s) => SIG_RE.test(s))
+}
+
+/** THE HOST'S PEOPLE — the only keys it keeps bytes for: every key it already
+ *  admitted (aiAdmitted: each zone's operator and every bound publisher, never
+ *  a claimant) and every friend the operator lists. */
+async function hostPeople(env) {
+  const people = await aiAdmitted(env)
+  for (const friend of hostFriends(env)) people.add(friend)
+  return people
+}
+
+/** What a key stands on here: the grant it holds, with the allowance this
+ *  host gives it applied — never persisted (consume() writes it, only after
+ *  bytes land). One person: max(held, PEOPLE_QUOTA_BYTES), raised to
+ *  CLAIM_QUOTA_BYTES while it also holds an active claim (documentation/
+ *  domain-claim.md — a claimed domain's hives live in this bucket), per
+ *  WINDOW as the guest list was: its use counts inside the window it holds,
+ *  and a lapsed (or absent) window starts a fresh one at zero — never a
+ *  lifetime cap on the host's own people. Anyone else — a claimant the host
+ *  does not list among its people too, a friend dropped from HOST_FRIENDS —
+ *  stands on the row it holds until that row's own expiry, capped at the
+ *  guest ceiling (DEFAULT_QUOTA_BYTES): a claim's or a friend's allowance
+ *  ends with its listing (decision d). Upload and GET /grant both ask this,
+ *  so the meter says what an upload would be told. */
+async function standing(env, pubkey, p, now) {
+  const held = await readGrant(env, pubkey)
+  const grant = held && typeof held === 'object' ? held : null
+  if (!(await hostPeople(env)).has(pubkey)) {
+    return grant && { ...grant, quotaBytes: Math.min(Number(grant.quotaBytes || 0), p.defaultQuota) }
+  }
+  const claimed = await holdsActiveClaim(env, pubkey)
+  const open = !!grant && Number(grant.expiresAt || 0) > now
+  return {
+    quotaBytes: Math.max(Number(grant?.quotaBytes || 0), p.peopleQuota, claimed ? p.claimQuota : 0),
+    usedBytes: open ? Number(grant.usedBytes || 0) : 0,
+    expiresAt: open ? Number(grant.expiresAt) : now + p.ttlDays * 86_400,
   }
 }
 
@@ -2940,29 +3016,15 @@ function policy(env) {
 async function admit(env, pubkey, size) {
   const p = policy(env)
   const now = Math.floor(Date.now() / 1000)
-  const held = await readGrant(env, pubkey)
-  let grant = held && typeof held === 'object' ? held : null
-  // A DOMAIN'S CLAIMANT HOSTS IT HERE (documentation/domain-claim.md): the
-  // shared hives a claimed domain serves live in this bucket, replicated up
-  // from the claimant's own hive. While the claim is active the key stands on
-  // the claim allowance, its use counted across windows — the guest list's
-  // refilling 90-day window is for strangers.
-  if (await holdsActiveClaim(env, pubkey)) {
-    const allowance = Number(env.CLAIM_QUOTA_BYTES ?? 1_073_741_824)
-    grant = {
-      quotaBytes: Math.max(Number(grant?.quotaBytes || 0), allowance),
-      usedBytes: Number(grant?.usedBytes || 0),
-      expiresAt: now + p.ttlDays * 86_400,
-    }
-  }
+  let grant = await standing(env, pubkey, p, now)
   const expired = !!grant && Number(grant.expiresAt || 0) <= now
   if (!grant || expired) {
     if (!p.autoGrant) {
       return {
         ok: false, kind: expired ? 'expired' : 'missing',
         reason: expired
-          ? 'your hosting grant has expired — ask the operator for a renewal'
-          : 'no hosting grant for this key and auto-grants are off — ask the operator for one',
+          ? 'your hosting grant has expired — this host keeps bytes for its own people only; ask its operator to add your key'
+          : 'this host keeps bytes for its own people only — ask its operator to add your key',
       }
     }
     grant = { quotaBytes: p.defaultQuota, usedBytes: 0, expiresAt: now + p.ttlDays * 86_400 }
@@ -3238,17 +3300,19 @@ async function headUpload(request, env) {
 // ── grant status (the quota meter) ───────────────────────────────────────────
 //
 // GET /grant, NIP-98-authenticated (method tag GET, u = this URL): a pubkey
-// may read ITS OWN ledger row — nothing else, nobody else's. Reading never
-// mints or mutates a grant; `state:'none'` with the default quota tells a
-// fresh key what an auto-grant WOULD give it. Feeds the client's share-flow
-// meter ("2.1 MB of 100 MB") and the plain-language over-quota moment.
+// may read ITS OWN standing — nothing else, nobody else's. It is what an
+// upload would be told (standing): one of the host's people reads the
+// allowance it stands on, active, whether or not it has uploaded yet. Reading
+// never mints or mutates a grant; `state:'none'` says what an auto-grant
+// WOULD give a fresh key (0 with AUTO_GRANT off). Feeds the client's
+// share-flow meter ("2.1 MB of 100 MB") and the plain-language over-quota
+// moment, and is how an operator checks a device key before a flip.
 async function getGrant(request, env) {
   const auth = await verifyNip98(request, parseAuthEvent(request), 'GET')
   if (!auth.ok) return text(401, auth.reason)
   const p = policy(env)
   const now = Math.floor(Date.now() / 1000)
-  const held = await readGrant(env, auth.pubkey)
-  const grant = held && typeof held === 'object' ? held : null
+  const grant = await standing(env, auth.pubkey, p, now)
   const state = !grant ? 'none' : Number(grant.expiresAt || 0) <= now ? 'expired' : 'active'
   const body = state === 'active'
     ? { state, quotaBytes: Number(grant.quotaBytes || 0), usedBytes: Number(grant.usedBytes || 0), expiresAt: Number(grant.expiresAt || 0) }
@@ -4124,7 +4188,8 @@ async function aiAdmit(env, pubkey, estimate) {
  *  bound to a site on it (the wrangler var and the operators' signed records).
  *  A claimed domain binds its claimant to publish, not to spend the
  *  operator's AI: a claim is self-service, and this allowance is the
- *  operator's to give. */
+ *  operator's to give. The same set is the root of hostPeople — the keys
+ *  this host keeps bytes for — for the same reason. Returns a fresh Set. */
 async function aiAdmitted(env) {
   const scoped = await bindingsEnv(env)
   const keys = new Set(siteOperators(env).map(([, pubkey]) => pubkey))

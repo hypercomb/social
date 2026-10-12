@@ -14,7 +14,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { secretTag } from '@hypercomb/core'
 import {
-  ROOM_IDENTITY, UNREACHABLE_AFTER_MS, clockRefused, linkPhase, loadedRoomIdentity, meetingPointKey, roomWords, statusLine, wordsAtHost, wordsBeside,
+  ROOM_IDENTITY, UNREACHABLE_AFTER_MS, clockRefused, hostKeepsNothing, linkPhase, loadedRoomIdentity, meetingPointKey, roomWords, statusLine, wordsAtHost, wordsBeside,
   type StatusInput, type StatusLine,
 } from './presence-status'
 
@@ -86,23 +86,25 @@ describe('the status line — one state, one sentence', () => {
       .toBe('Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 4 · 1 uploading')
   })
 
-  it('host refuses, host full, picture too large — names only, and why', () => {
-    const refused = statusLine({ ...live, share: { offered: 2, hostState: 'refused' } })
-    expect(say(refused)).toContain("jwize.com isn't taking uploads from guests — others see your tile names only")
+  it('host refuses, host full — the tiles go live from this device; picture too large — and why', () => {
+    // jwize 2026-10-11: a host you named that refuses you leaves your tiles
+    // to your device, served while you are in the room.
+    const refused = statusLine({ ...live, share: { offered: 2, live: 2, hostState: 'refused' } })
+    expect(say(refused)).toContain("jwize.com isn't taking uploads from guests — the room gets your tiles from this device while you're here")
     expect(refused.tone).toBe('warn')
     expect(say(statusLine({ ...live, sync: { state: 'full' } })))
-      .toContain('jwize.com is full — others see your tile names only')
+      .toContain("jwize.com is full — the room gets your tiles from this device while you're here")
     expect(say(statusLine({ ...live, share: { hostState: 'too-large' } })))
       .toContain('A picture is too large for jwize.com')
   })
 
   it('the upload lines name the page\'s host; the connection lines name the relay', () => {
-    // 2026-10-07: a page's tiles go to its publish domains, else the hosts
-    // pool, else a relay that hosts participants — never the relay merely
-    // because it is where we meet.
+    // A page's tiles go to its publish domains, else the host field
+    // (2026-10-11) — the upload lines name where they go, which need not be
+    // the relay the connection lines name.
     const pooled = { ...live, uploadHost: 'hypercomb.com' }
     const refused = say(statusLine({ ...pooled, share: { offered: 2, host: 'hypercomb.com', hostSource: 'pool', hostState: 'refused' } }))
-    expect(refused).toContain("hypercomb.com isn't taking uploads from guests — others see your tile names only")
+    expect(refused).toContain("hypercomb.com isn't taking uploads from guests — the room gets your tiles from this device while you're here")
     expect(refused).not.toContain('jwize.com')
     expect(say(statusLine({ ...pooled, sync: { state: 'full', host: 'hypercomb.com' } }))).toContain('hypercomb.com is full')
     expect(say(statusLine({ ...pooled, share: { offered: 4 }, sync: { state: 'too-large' } }))).toContain('A picture is too large for hypercomb.com')
@@ -110,9 +112,9 @@ describe('the status line — one state, one sentence', () => {
     expect(say(statusLine({ ...pooled, phase: 'down' }))).toContain("Can't reach jwize.com")
   })
 
-  it('nothing hosts the tiles: said once, names only', () => {
-    const line = statusLine({ ...live, uploadHost: '', share: { offered: 3, uploading: 3, nameOnly: 3, host: '', hostSource: 'none', hostState: 'no-host' } })
-    expect(say(line)).toBe('Live · meetup · amber falcon · 7 in the room (3 here) · No host keeps your tiles yet — others see your tile names only')
+  it('nothing hosts the tiles: said once — the room gets them live from this device', () => {
+    const line = statusLine({ ...live, uploadHost: '', share: { offered: 3, live: 3, host: '', hostSource: 'none', hostState: 'no-host' } })
+    expect(say(line)).toBe("Live · meetup · amber falcon · 7 in the room (3 here) · No host keeps your tiles — the room gets them from this device while you're here")
     expect(line.tone).toBe('warn')
   })
 
@@ -156,6 +158,34 @@ describe('the status line — one state, one sentence', () => {
     // The host answered since: the walk's snapshot of it says nothing.
     expect(say(statusLine({ ...live, uploadHost: 'hyperccomb.com', share, sync: { state: 'backed-up', host: 'hyperccomb.com' } })))
       .toBe('Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 3 · 3 uploading')
+  })
+
+  // THE LIVE SWARM (decision c, 2026-10-11): a host field nothing at that
+  // name ever answered is a standing answer — its tiles go out live from
+  // this device, so the line never says "names only" for it.
+  it('a host field that has never answered, with this page\'s tiles live: the room gets them from this device — never "names only"', () => {
+    const share = { offered: 4, live: 4, nameOnly: 0, host: 'hyperccomb.com', hostSource: 'meeting', hostState: 'unreachable', why: 'unresolved' }
+    const line = say(statusLine({ ...live, uploadHost: 'hyperccomb.com', share, sync: { state: 'unreachable', why: 'unresolved', host: 'hyperccomb.com' } }))
+    expect(line).toContain("Nothing at hyperccomb.com has ever answered — the room gets your tiles from this device while you're here")
+    expect(line).not.toContain('names only')
+    // A moment's trouble at a host that HAS answered stays "names only" —
+    // nothing went live for it.
+    const passing = say(statusLine({ ...live, uploadHost: 'jwize.com', share: { offered: 2, nameOnly: 2, host: 'jwize.com', hostState: 'unreachable', why: 'unreachable' }, sync: { state: 'unreachable', why: 'unreachable', host: 'jwize.com' } }))
+    expect(passing).toContain("Can't upload to jwize.com right now")
+  })
+
+  it('who keeps what is shared: no one, while the host refused this key, is full or never answered — its live word first', () => {
+    expect(hostKeepsNothing({ host: 'friend.example', hostState: 'refused' }, null)).toBe(true)
+    expect(hostKeepsNothing({ host: 'friend.example', hostState: 'backed-up' }, { state: 'refused' })).toBe(true)
+    expect(hostKeepsNothing({ host: 'friend.example' }, { state: 'full' })).toBe(true)
+    expect(hostKeepsNothing({ host: 'typo.example' }, { state: 'unreachable', why: 'unresolved' })).toBe(true)
+    expect(hostKeepsNothing({ host: 'door.example' }, { state: 'refused', why: 'page' })).toBe(true)
+    // Taking bytes, or a moment's trouble, or one file too large: it keeps them.
+    expect(hostKeepsNothing({ host: 'jwize.com', hostState: 'refused' }, { state: 'backed-up' })).toBe(false)
+    expect(hostKeepsNothing({ host: 'jwize.com' }, { state: 'syncing' })).toBe(false)
+    expect(hostKeepsNothing({ host: 'jwize.com' }, { state: 'unreachable', why: 'unreachable' })).toBe(false)
+    expect(hostKeepsNothing({ host: 'jwize.com' }, { state: 'too-large', why: 'too-large' })).toBe(false)
+    expect(hostKeepsNothing(null, null)).toBe(false)
   })
 
   it('content this device does not hold', () => {

@@ -1736,7 +1736,8 @@ test('a door writes nothing at our hosts — refused before any route, while hom
   const sigUrl = `https://content.hypercomb.com/${sig}`
   const putSig = async (origin) => {
     const objects = new Map()
-    const env = { SITE_BINDINGS: '{}', CONTENT: heap(objects), GRANTS: kvMap() }
+    // The uploader is one of the host's people (HOST_FRIENDS): only the door refuses it.
+    const env = { SITE_BINDINGS: '{}', HOST_FRIENDS: pubkey, CONTENT: heap(objects), GRANTS: kvMap() }
     const headers = { authorization: await nip98(sigUrl, 'PUT'), ...(origin ? { origin } : {}) }
     const response = await worker.fetch(new Request(sigUrl, { method: 'PUT', headers, body: bytes }), env)
     return { status: response.status, held: objects.has(sig) }
@@ -1821,8 +1822,8 @@ test('an upload records its grant in the host:grants pool, never in KV', async (
   const GRANTS_POOL = await sha256Hex('host:grants')
   const kv = kvMap()
   const content = textHeap()
-  const env = { SITE_BINDINGS: '{}', CONTENT: content, GRANTS: kv }
-  const bytes = 'a guest upload'
+  const env = { SITE_BINDINGS: '{}', HOST_FRIENDS: pubkey, CONTENT: content, GRANTS: kv }
+  const bytes = 'a friend\'s upload'
   const url = `https://content.hypercomb.com/${await sha256Hex(bytes)}`
   const res = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT') }, body: bytes }), env)
   assert.equal(res.status, 201)
@@ -2710,24 +2711,38 @@ test('the forwarder hands every request on unchanged, and its config declares no
   assert.match(hosts, /^name\s*=\s*"hypercomb-hosts"/m)
 })
 
-// ── a claimant hosts its domain here ───────────────────────────────────────
+// ── a claimant hosts its domain here, while the host keeps it ──────────────
 // The shared hives a claimed domain serves live in this bucket, replicated up
-// from the claimant's own hive: an active claim stands its key on the claim
-// allowance, and a stranger stays on the guest list.
-test('an active claim lifts its key past the guest allowance; a stranger stays on it', async () => {
-  const env = claimEnv({ DEFAULT_QUOTA_BYTES: '8', CLAIM_QUOTA_BYTES: '4096' })
-  await keepClaim(env, { domain: DOMAIN, pubkey })
-  const upload = async (bytes, key) => {
-    const url = `https://content.${DOMAIN}/${await sha256Hex(bytes)}`
-    return worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', key) }, body: bytes }), env)
+// from the claimant's own hive — for a claimant this host keeps (decision d,
+// jwize 2026-10-11): one of its people stands on the claim allowance, and a
+// claim alone admits nobody.
+test('an active claim lifts a claimant the host keeps past the people allowance; an unlisted claimant gets nothing from it', async () => {
+  const keptKey = keyOf(21)
+  const loneKey = keyOf(22)
+  const env = claimEnv({ CONTENT: ledgerBag(), HOST_FRIENDS: pubOf(keptKey), PEOPLE_QUOTA_BYTES: '16', CLAIM_QUOTA_BYTES: '4096' })
+  await keepClaim(env, { domain: DOMAIN, pubkey: pubOf(keptKey) })
+  await keepClaim(env, { domain: 'lone-claimant.org', pubkey: pubOf(loneKey) })
+  const upload = async (bytes, key, domain = DOMAIN) => {
+    const url = `https://content.${domain}/${await sha256Hex(bytes)}`
+    const res = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', key) }, body: bytes }), env)
+    return { status: res.status, text: await res.text() }
   }
-  assert.equal((await upload('a hive the claimant shares', sk)).status, 201)
-  const stranger = await upload('a stranger past the guest list', assessorKey)
-  assert.equal(stranger.status, 403)
-  assert.match(await stranger.text(), /quota used up/)
-  // Contested, the claim binds nobody — and lifts nobody.
-  await keepClaim(env, { domain: DOMAIN, pubkey, contested: [pubkey, pubOf(assessorKey)] })
-  const contested = await later(61_000, () => upload('after the contest', sk))
+  // Past the 16-byte people allowance: only the claim allowance takes it.
+  assert.equal((await upload('a hive the kept claimant shares', keptKey)).status, 201)
+  assert.equal((await grantAt(env, `content.${DOMAIN}`, keptKey)).quotaBytes, 4096)
+  // A claimant the host does not list: refused, with nothing minted.
+  const lone = await upload('a hive an unlisted claimant shares', loneKey, 'lone-claimant.org')
+  assert.equal(lone.status, 403)
+  assert.match(lone.text, /own people only/)
+  assert.equal(env.CONTENT.held.has(`${await sha256Hex('host:grants')}/${pubOf(loneKey)}`), false, 'no grant was minted')
+  assert.deepEqual(await grantAt(env, 'content.lone-claimant.org', loneKey), { state: 'none', quotaBytes: 0, usedBytes: 0, expiresAt: null, autoGrant: false })
+  // Contested, a claim binds nobody and lifts nobody: a kept key that never
+  // uploaded under it stands on the people allowance alone.
+  const laterKey = keyOf(23)
+  const contestedEnv = claimEnv({ CONTENT: ledgerBag(), HOST_FRIENDS: pubOf(laterKey), PEOPLE_QUOTA_BYTES: '16', CLAIM_QUOTA_BYTES: '4096' })
+  await keepClaim(contestedEnv, { domain: DOMAIN, pubkey: pubOf(laterKey), contested: [pubOf(laterKey), pubOf(loneKey)] })
+  const url = `https://content.${DOMAIN}/${await sha256Hex('after the contest, past sixteen bytes')}`
+  const contested = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', laterKey) }, body: 'after the contest, past sixteen bytes' }), contestedEnv)
   assert.equal(contested.status, 403)
   assert.match(await contested.text(), /quota used up/)
 })
@@ -3176,7 +3191,7 @@ test('with no meeting point bound, a dial at the apex is answered as it always w
 })
 
 test('a PUT of an atom the host already holds is a receipt too: `stored <sig>`', async () => {
-  const env = { SITE_BINDINGS: '{}', CONTENT: contentBag() }
+  const env = { SITE_BINDINGS: '{}', HOST_FRIENDS: pubkey, CONTENT: contentBag() }
   const bytes = 'an atom two participants share'
   const sig = await sha256Hex(bytes)
   const url = `https://pluginthematrix.com/${sig}`
@@ -4570,11 +4585,25 @@ test('at hypercomb.com a dial and its NIP-11 go to the meeting point, the card p
     }
     assert.equal(MEET.asked.length, 4, 'no page read reached the meeting point')
 
-    // The upload host behind the default: a fresh key's signed PUT is taken here (AUTO_GRANT).
+    // NO DEFAULT HOST (jwize 2026-10-11: "we can't give hosting away for
+    // free"): the meeting point keeps nobody's bytes. A stranger's signed PUT
+    // at the default is refused, with AUTO_GRANT left unset as with "0"…
     const url = `https://hypercomb.com/${sig}`
-    const put = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT') }, body: bytes }), env)
+    const putBy = async (key) => worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', key) }, body: bytes }), env)
+    const stranger = await putBy(assessorKey)
+    assert.equal(stranger.status, 403)
+    assert.match(await stranger.text(), /own people only/)
+    assert.ok(!env.CONTENT.held.has(sig), 'a stranger stores nothing at the default')
+    // …while the host's own people write as before: its bound publisher…
+    const put = await putBy(sk)
     assert.equal(put.status, 201)
     assert.ok(env.CONTENT.held.has(sig))
+    // …and a friend the operator shares it with (HOST_FRIENDS).
+    const friendBytes = 'a friend\'s upload at the default'
+    const friendUrl = `https://hypercomb.com/${await sha256Hex(friendBytes)}`
+    const friendPut = await worker.fetch(new Request(friendUrl, { method: 'PUT', headers: { authorization: await nip98(friendUrl, 'PUT', assessorKey) }, body: friendBytes }),
+      { ...env, HOST_FRIENDS: assessor })
+    assert.equal(friendPut.status, 201)
     assert.equal(MEET.asked.length, 4, 'bytes never go to the meeting point')
     assert.ok(!asked.some((a) => a.method === 'PUT'), 'nor to the origin')
     assert.equal(CODED.asked.length, 0, 'nothing at the open default reached the coded script')
@@ -4613,4 +4642,205 @@ test('the deployed config forwards hypercomb.com\'s dials and keeps its pages on
   assert.match(raw, /binding = "MEET"\s*\n#?\s*service = "hypercomb-meet"\s*$/m)
   assert.ok(list('ORIGIN_HOSTS').includes('hypercomb.com'), 'the card page at / stays the origin\'s')
   assert.match(config, /\{\s*pattern\s*=\s*"hypercomb\.com\/\*"\s*,\s*zone_name\s*=\s*"hypercomb\.com"\s*\}/, 'the apex reaches this worker by its zone route')
+})
+
+// ── the host keeps bytes for its own people (jwize 2026-10-11) ──────────────
+// "we can't give hosting away for free": AUTO_GRANT is off unless the
+// deployment says "1", and a host keeps bytes for its people — its zones'
+// operators, its bound publishers and HOST_FRIENDS — at PEOPLE_QUOTA_BYTES at
+// least. A grant a key already holds keeps working until its own expiry and
+// is never re-minted. Nothing is deleted.
+
+/** A heap whose ledger rows read back, as R2's do (contentBag's objects have
+ *  no text(), so a row it holds is never read). */
+function ledgerBag(held = new Map()) {
+  const bag = contentBag(held)
+  const get = bag.get
+  bag.get = async (key) => {
+    const object = await get(key)
+    return object && { ...object, text: async () => new TextDecoder().decode(held.get(key)) }
+  }
+  return bag
+}
+
+/** GET /grant at `host`, NIP-98 signed by `key`: the JSON it answers. */
+async function grantAt(env, host, key = sk) {
+  const url = `https://${host}/grant`
+  const res = await worker.fetch(new Request(url, { headers: { authorization: await nip98(url, 'GET', key) } }), env)
+  assert.equal(res.status, 200)
+  return res.json()
+}
+
+/** A signed PUT /<sig> of `bytes` at `host` by `key`. */
+async function putBytes(env, host, bytes, key = sk) {
+  const url = `https://${host}/${await sha256Hex(bytes)}`
+  const res = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', key) }, body: bytes }), env)
+  return { status: res.status, text: (await res.text()).trim() }
+}
+
+/** HEAD /upload — the BUD-06 preflight, BUD-02 signed by `key`. */
+async function preflight(env, host, bytes, key = sk) {
+  const sig = await sha256Hex(bytes)
+  const at = Math.floor(Date.now() / 1000)
+  const event = { pubkey: pubOf(key), created_at: at, kind: 24242, tags: [['t', 'upload'], ['x', sig], ['expiration', String(at + 60)]], content: '' }
+  event.id = await sha256Hex(JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]))
+  event.sig = hex(schnorr.sign(event.id, key))
+  const res = await worker.fetch(new Request(`https://${host}/upload`, { method: 'HEAD',
+    headers: { authorization: 'Nostr ' + btoa(JSON.stringify(event)), 'x-sha-256': sig, 'x-content-length': String(bytes.length) } }), env)
+  return res.status
+}
+
+const grantsMember = async (key) => `${await sha256Hex('host:grants')}/${key}`
+async function ledgerRow(env, key) {
+  const raw = env.CONTENT.held.get(await grantsMember(key))
+  return raw ? JSON.parse(new TextDecoder().decode(raw)) : null
+}
+async function holdRow(env, key, row) {
+  env.CONTENT.held.set(await grantsMember(key), enc(JSON.stringify(row)))
+}
+
+const peopleEnv = (extra = {}) => ({ SITE_BINDINGS: JSON.stringify(ONE_ZONE), CONTENT: ledgerBag(), ...extra })
+const WRITE_FACE = 'content.pluginthematrix.com'
+const GIB = 1_073_741_824
+const nowSeconds = () => Math.floor(Date.now() / 1000)
+
+test('with AUTO_GRANT unset or "0" a stranger stores nothing and is minted nothing; only "1" brings the guest list back', async () => {
+  const strangerKey = keyOf(31)
+  const stranger = pubOf(strangerKey)
+  const bytes = 'a stranger asks to be kept'
+  for (const autoGrant of [undefined, '0', '', ' 0 ', 'true']) {
+    const env = peopleEnv(autoGrant === undefined ? {} : { AUTO_GRANT: autoGrant })
+    const refused = await putBytes(env, WRITE_FACE, bytes, strangerKey)
+    assert.equal(refused.status, 403, String(autoGrant))
+    assert.match(refused.text, /own people only/)
+    assert.equal(await ledgerRow(env, stranger), null, 'no grant minted')
+    assert.equal(env.CONTENT.held.has(await sha256Hex(bytes)), false, 'no byte stored')
+    assert.equal(await preflight(env, WRITE_FACE, bytes, strangerKey), 403, 'the preflight says so before a byte is sent')
+    assert.deepEqual(await grantAt(env, WRITE_FACE, strangerKey), { state: 'none', quotaBytes: 0, usedBytes: 0, expiresAt: null, autoGrant: false })
+  }
+  const open = peopleEnv({ AUTO_GRANT: '1', DEFAULT_QUOTA_BYTES: '4096' })
+  assert.equal(await preflight(open, WRITE_FACE, bytes, strangerKey), 200)
+  assert.equal((await putBytes(open, WRITE_FACE, bytes, strangerKey)).status, 201)
+  assert.equal((await ledgerRow(open, stranger)).quotaBytes, 4096)
+})
+
+test('a bound publisher and a zone operator are kept with AUTO_GRANT "0": the people allowance, per window', async () => {
+  const env = peopleEnv({ AUTO_GRANT: '0' })
+  const before = nowSeconds()
+  const bytes = 'a bound publisher shares a tile'
+  assert.deepEqual(await putBytes(env, WRITE_FACE, bytes), { status: 201, text: `stored ${await sha256Hex(bytes)}` })
+  const row = await ledgerRow(env, pubkey)
+  assert.equal(row.quotaBytes, GIB)
+  assert.equal(row.usedBytes, bytes.length)
+  assert.ok(row.expiresAt >= before + 90 * 86_400)
+  // Inside its window a held row is lifted, never lowered, its use carried
+  // and its window kept as it is.
+  const window = before + 3_600
+  await holdRow(env, pubkey, { quotaBytes: 2 * GIB, usedBytes: 500, expiresAt: window })
+  const inside = 'kept inside the window'
+  assert.equal((await putBytes(env, WRITE_FACE, inside)).status, 201)
+  assert.deepEqual(await ledgerRow(env, pubkey), { quotaBytes: 2 * GIB, usedBytes: 500 + inside.length, expiresAt: window })
+  // A LAPSED window refills, as the guest list did — never a lifetime cap on
+  // the host's own people: an expired, nearly full row uploads again.
+  await holdRow(env, pubkey, { quotaBytes: 100 * 1_048_576, usedBytes: GIB - 10, expiresAt: before - 10 })
+  const again = 'kept past an expired window'
+  assert.equal((await putBytes(env, WRITE_FACE, again)).status, 201)
+  const lifted = await ledgerRow(env, pubkey)
+  assert.equal(lifted.quotaBytes, GIB)
+  assert.equal(lifted.usedBytes, again.length)
+  assert.ok(lifted.expiresAt >= before + 90 * 86_400)
+  // A zone's operator is one of the host's people, its record verified or not.
+  const operatorKey = keyOf(32)
+  const operated = peopleEnv({ SITE_OPERATORS: JSON.stringify({ 'operated.example': pubOf(operatorKey) }) })
+  assert.equal((await putBytes(operated, WRITE_FACE, 'an operator keeps its zone', operatorKey)).status, 201)
+  // The people allowance is a ceiling too.
+  const over = await putBytes(peopleEnv({ PEOPLE_QUOTA_BYTES: '8' }), WRITE_FACE, 'more than eight bytes')
+  assert.equal(over.status, 403)
+  assert.match(over.text, /quota used up/)
+})
+
+test('HOST_FRIENDS: each listed key is kept, in any case; anything that is not a key is ignored', async () => {
+  const friendKey = keyOf(33)
+  const env = peopleEnv({ HOST_FRIENDS: ` ${pubOf(friendKey).toUpperCase()} ,not-a-key,, ${'z'.repeat(64)}, ${'0'.repeat(63)}` })
+  assert.equal((await putBytes(env, WRITE_FACE, 'a friend shares the host', friendKey)).status, 201)
+  assert.equal((await ledgerRow(env, pubOf(friendKey))).quotaBytes, GIB)
+  assert.equal((await grantAt(env, WRITE_FACE, friendKey)).state, 'active')
+  const notListed = await putBytes(env, WRITE_FACE, 'a friend of a friend', keyOf(34))
+  assert.equal(notListed.status, 403)
+  assert.match(notListed.text, /own people only/)
+})
+
+test('a grant a stranger already holds keeps working until its own expiry, and is never re-minted', async () => {
+  const strangerKey = keyOf(35)
+  const stranger = pubOf(strangerKey)
+  const env = peopleEnv()
+  const expiresAt = nowSeconds() + 3_600
+  await holdRow(env, stranger, { quotaBytes: 100, usedBytes: 10, expiresAt })
+  const inside = 'still inside my window'
+  assert.equal((await putBytes(env, WRITE_FACE, inside, strangerKey)).status, 201)
+  const used = { quotaBytes: 100, usedBytes: 10 + inside.length, expiresAt }
+  assert.deepEqual(await ledgerRow(env, stranger), used, 'counted, never extended')
+  assert.deepEqual(await grantAt(env, WRITE_FACE, strangerKey), { state: 'active', ...used })
+  // Past its own expiry the door is shut, and nothing is minted in its place.
+  const expired = await later(3_601_000, () => putBytes(env, WRITE_FACE, 'after my window closed', strangerKey))
+  assert.equal(expired.status, 403)
+  assert.match(expired.text, /expired/)
+  assert.deepEqual(await ledgerRow(env, stranger), used, 'the row is as it was: not re-minted, not deleted')
+  assert.equal(env.CONTENT.held.has(await sha256Hex('after my window closed')), false)
+  assert.ok(env.CONTENT.held.has(await sha256Hex(inside)), 'what it stored stays')
+  assert.deepEqual(await later(3_601_000, () => grantAt(env, WRITE_FACE, strangerKey)),
+    { state: 'expired', quotaBytes: 0, usedBytes: 0, expiresAt: null, autoGrant: false })
+  // A row that had already lapsed is refused the same way.
+  const lapsedKey = keyOf(36)
+  const lapsed = { quotaBytes: 100, usedBytes: 0, expiresAt: nowSeconds() - 1 }
+  await holdRow(env, pubOf(lapsedKey), lapsed)
+  const refused = await putBytes(env, WRITE_FACE, 'a lapsed guest comes back', lapsedKey)
+  assert.equal(refused.status, 403)
+  assert.match(refused.text, /expired/)
+  assert.deepEqual(await ledgerRow(env, pubOf(lapsedKey)), lapsed)
+})
+
+test('a raised row ends with its listing: an unlisted claimant or a dropped friend holding 1 GiB stands at the guest ceiling', async () => {
+  const formerKey = keyOf(37)
+  const former = pubOf(formerKey)
+  const env = peopleEnv({ DEFAULT_QUOTA_BYTES: '8' })
+  // A claim-era (or friend-era) row: 1 GiB, unused, weeks left in its window.
+  const expiresAt = nowSeconds() + 80 * 86_400
+  await holdRow(env, former, { quotaBytes: GIB, usedBytes: 0, expiresAt })
+  const refused = await putBytes(env, WRITE_FACE, 'five thousand bytes, say', formerKey)
+  assert.equal(refused.status, 403)
+  assert.match(refused.text, /quota used up/)
+  assert.deepEqual(await grantAt(env, WRITE_FACE, formerKey), { state: 'active', quotaBytes: 8, usedBytes: 0, expiresAt })
+  assert.deepEqual(await ledgerRow(env, former), { quotaBytes: GIB, usedBytes: 0, expiresAt }, 'nothing written, nothing deleted')
+  // Inside the guest ceiling it still stores, until its own expiry.
+  assert.equal((await putBytes(env, WRITE_FACE, 'tiny', formerKey)).status, 201)
+  // Listed again, the people allowance is back.
+  const relisted = peopleEnv({ DEFAULT_QUOTA_BYTES: '8', HOST_FRIENDS: former, CONTENT: env.CONTENT })
+  assert.equal((await putBytes(relisted, WRITE_FACE, 'five thousand bytes, say', formerKey)).status, 201)
+})
+
+test('GET /grant says what an upload would be told, and reading mints nothing', async () => {
+  const env = peopleEnv({ PEOPLE_QUOTA_BYTES: '2048' })
+  const before = nowSeconds()
+  const fresh = await grantAt(env, WRITE_FACE)
+  assert.equal(fresh.state, 'active')
+  assert.equal(fresh.quotaBytes, 2048)
+  assert.equal(fresh.usedBytes, 0)
+  assert.ok(fresh.expiresAt >= before + 90 * 86_400)
+  assert.equal(await ledgerRow(env, pubkey), null, 'reading writes no row')
+  const bytes = 'twenty-one bytes long'
+  await putBytes(env, WRITE_FACE, bytes)
+  assert.equal((await grantAt(env, WRITE_FACE)).usedBytes, bytes.length)
+  // At the zone root too, and a blank allowance var is the default, never zero.
+  assert.equal((await grantAt(peopleEnv({ PEOPLE_QUOTA_BYTES: '' }), 'pluginthematrix.com')).quotaBytes, GIB)
+})
+
+test('both byte hosts keep bytes for their people only: AUTO_GRANT "0", no friend listed yet, 1 GiB each', () => {
+  for (const file of ['./wrangler.pluginthematrix.toml', './wrangler.toml']) {
+    const config = readFileSync(new URL(file, import.meta.url), 'utf8').split('\n').filter((line) => !line.trim().startsWith('#')).join('\n')
+    const value = (name) => new RegExp(`^${name}\\s*=\\s*"([^"]*)"`, 'm').exec(config)?.[1]
+    assert.equal(value('AUTO_GRANT'), '0', file)
+    assert.equal(value('HOST_FRIENDS'), '', file)
+    assert.equal(value('PEOPLE_QUOTA_BYTES'), '1073741824', file)
+  }
 })
