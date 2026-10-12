@@ -30,6 +30,7 @@ describe('NostrSigner at a sandbox door', () => {
     localStorage.setItem(SECRET_KEY_STORAGE, '11'.repeat(32))
     const signer = new NostrSigner()
     expect(await signer.getPublicKeyHex()).toBeNull()
+    expect(await signer.knownPublicKeyHex()).toBeNull()
     await expect(signer.signEvent({ kind: 1, created_at: 0, tags: [], content: '' })).rejects.toThrow(/sandbox door/)
   })
 

@@ -74,6 +74,32 @@ export class NostrSigner {
 
   #cachedPubkey: string | null = null
 
+  /**
+   * THE KEY THIS DEVICE ALREADY HOLDS — never minted, never asked of an
+   * extension. A write that must not make the participant an author just by
+   * happening (a note: "no identity is minted for a note", notes-facet.ts)
+   * still needs the key a device HAS: asked only of a cache that a reload had
+   * emptied, a note removed after a reload left the word's list as it was, and
+   * the note came straight back (/games/arkanoid, 2026-10-11). Null at a door,
+   * with an extension (asking it may prompt), and when no key is held.
+   */
+  public knownPublicKeyHex = async (): Promise<string | null> => {
+    if (isSandboxDoor()) return null
+    if (this.#cachedPubkey) return this.#cachedPubkey
+    if ((window as any)?.nostr) return null
+    if (!this.#secretHex) {
+      try {
+        const held = String(localStorage.getItem(SECRET_KEY_STORAGE) ?? '').trim().toLowerCase()
+        if (this.isHex64(held)) this.#secretHex = held
+      } catch { /* storage unavailable: no key is held */ }
+    }
+    if (!this.#secretHex) return null
+    try {
+      this.#cachedPubkey = getPublicKey(this.hexToBytes(this.#secretHex) as any).toLowerCase()
+      return this.#cachedPubkey
+    } catch { return null }
+  }
+
   public signEvent = async (evt: NostrEvent): Promise<NostrEvent> => {
     // already signed
     if (evt?.id && evt?.pubkey && evt?.sig) return evt

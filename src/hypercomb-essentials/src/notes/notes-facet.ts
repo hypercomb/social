@@ -18,12 +18,15 @@
 // named the same read the same notes, and a delete at one is a delete for
 // the word. A client that has not learned the facet still reads its slot.
 //
-// NO IDENTITY IS MINTED FOR A NOTE. Without a cached author key the facet is
-// simply not written this time; the layer slot still holds the note.
+// NO IDENTITY IS MINTED FOR A NOTE. Without an author key on this device the
+// facet is simply not written this time; the layer slot still holds the note.
+// A key the device already holds is used even when no signature has cached it
+// yet — after a reload, a removal that skipped the facet came straight back
+// through the union (/games/arkanoid, 2026-10-11).
 
 import { moleculeAddress, moleculeKey } from '@hypercomb/core'
 import { readFacetMembers, writeFacetHead, type FacetReadStore, type FacetStore, type FacetWriteResult } from '../molecule/facet-succession.js'
-import { cachedPubkey } from '../sharing/head-claim-signer.js'
+import { cachedPubkey, knownReaderPubkey } from '../sharing/head-claim-signer.js'
 
 /** The plural. Position after the colon makes it a facet; `note` and `notes`
  *  are different addresses forever, and this is the one the doctrine chose. */
@@ -98,7 +101,7 @@ export const writeNotesFacet = async (
   noteSigs: readonly string[],
   io: { store?: FacetStore; pubkey?: string | null } = {},
 ): Promise<FacetWriteResult> => {
-  const pubkey = io.pubkey === undefined ? cachedPubkey() : io.pubkey
+  const pubkey = io.pubkey === undefined ? (cachedPubkey() ?? await knownReaderPubkey()) : io.pubkey
   if (!pubkey) return { ok: false, reason: 'no identity' }
   const name = String(tileName ?? '').trim()
   if (!name) return { ok: false, reason: 'bad subject', detail: 'a tile with no name has no molecule' }

@@ -2,7 +2,7 @@
 // nowhere else: no page global can choose it, and once resolved it is pinned
 // for the session, so a signature is always made by the key the signer reported.
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getPublicKey } from 'nostr-tools/pure'
 import { NostrSigner } from './nostr-signer.js'
 
@@ -43,6 +43,20 @@ describe('NostrSigner — the key is this device\'s', () => {
     const later = await signer.signEvent(blank())
     expect(later.pubkey).toBe(pubkeyOf(SECRET_B))
     expect(later.pubkey).toBe(reported)
+  })
+
+  it('the key a device already holds is known without minting or asking an extension', async () => {
+    expect(await new NostrSigner().knownPublicKeyHex()).toBeNull()
+    expect(localStorage.getItem(SECRET_KEY_STORAGE)).toBeNull()
+    localStorage.setItem(SECRET_KEY_STORAGE, SECRET_B)
+    const signer = new NostrSigner()
+    expect(await signer.knownPublicKeyHex()).toBe(pubkeyOf(SECRET_B))
+    expect((await signer.signEvent(blank())).pubkey).toBe(pubkeyOf(SECRET_B))
+    // With an extension present, asking could prompt: nothing is known.
+    const extension = { getPublicKey: vi.fn(async () => 'ab'.repeat(32)), signEvent: vi.fn() }
+    ;(globalThis as Record<string, unknown>)['nostr'] = extension
+    expect(await new NostrSigner().knownPublicKeyHex()).toBeNull()
+    expect(extension.getPublicKey).not.toHaveBeenCalled()
   })
 
   it('a miss mints one key, persists it, and the next instance reports the same pubkey', async () => {
