@@ -7083,7 +7083,7 @@ export class ChatWindowComponent implements OnDestroy {
         const checked = await verifyStep.run({
           request: message, answer, evidence: read, providerId, system, messages: [...messages, { content: spoken }],
           jev, signal,
-          persist: decision => persistJevVerify(contextStore, answer, decision as VerifyDecisionLike & { answers: Record<string, unknown> }),
+          persist: decision => persistJevVerify(contextStore, answer, decision as VerifyDecisionLike & { answers: Record<string, unknown> }, { request: message, evidence: read }),
           emit: busEmit,
         })
         if (!checked) return undefined

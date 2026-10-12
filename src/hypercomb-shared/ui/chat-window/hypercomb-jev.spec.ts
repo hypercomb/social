@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { splitQuestion } from '@hypercomb/core'
-import { doctrineSections, fitEvidence, parseTable, tableQuestion, tableChoiceNote, persistJevInput, persistJevReceipt, formatJevUsage, type Row } from './hypercomb-jev'
+import { doctrineSections, fitEvidence, parseTable, tableQuestion, tableChoiceNote, persistJevInput, persistJevReceipt, persistJevVerify, formatJevUsage, JEV_STATE_CHARS, type Row } from './hypercomb-jev'
 import { Blob as NodeBlob } from 'node:buffer'
 import { createHash } from 'node:crypto'
-import { splitWork, WorkStreamGuard } from './hypercomb-work-fence'
+import { readResultMessage, splitWork, WorkStreamGuard } from './hypercomb-work-fence'
+import { formatHypercombObservationReceipt, type HypercombObservationReceipt } from './hypercomb-observation'
 
 const rows: Row[] = [
   { id: 'a', kind: 'read', label: 'See the notes', lines: ['list /notes'] },
@@ -79,6 +80,33 @@ describe('the possibility table protocol', () => {
       expect(records.get(decision['answers'] as string)).toEqual({ b_rules: 0.01 })
     } finally { globalThis.Blob = original }
   })
+  it('keeps the request and the evidence a verification judged, each by signature, so a verdict can be replayed', async () => {
+    const records = new Map<string, unknown>()
+    const store = { async putResource(blob: Blob) {
+      const text = await blob.text()
+      const sig = createHash('sha256').update(text).digest('hex')
+      records.set(sig, JSON.parse(text)); return sig
+    } }
+    const original = globalThis.Blob
+    globalThis.Blob = NodeBlob as typeof Blob
+    try {
+      const decision = { verified: false, reason: 'supported .42 · complete .95', model: 'resolved', answers: { supported: 0.42 } }
+      const checked = { request: 'Quote the note on /x.', evidence: ['{"kind":"hypercomb-tree-observation"}', 'second piece'] }
+      const sig = await persistJevVerify(store, '> The note.', decision, checked)
+      const record = records.get(sig!) as Record<string, unknown>
+      expect(record['kind']).toBe('jev-verify')
+      expect(records.get(record['request'] as string)).toBe(checked.request)
+      expect((record['evidence'] as string[]).map(part => records.get(part))).toEqual(checked.evidence)
+      expect(records.get(record['answer'] as string)).toBe('> The note.')
+      // the verdict carries the evidence as the service rendered it for Jev: that is what is kept
+      const rendered = { ...decision, evidence: ['read 1 of 1: read /x\n  note 1:\n  | The note.'] }
+      const shown = records.get((await persistJevVerify(store, '> The note.', rendered, checked))!) as Record<string, unknown>
+      expect((shown['evidence'] as string[]).map(part => records.get(part))).toEqual(rendered.evidence)
+      expect(records.get(shown['request'] as string)).toBe(checked.request)
+      const bare =records.get((await persistJevVerify(store, '> The note.', decision))!) as Record<string, unknown>
+      expect(bare).not.toHaveProperty('evidence')
+    } finally { globalThis.Blob = original }
+  })
   it('parses the table verbatim and never executes a co-emitted action', () => {
     const work = splitWork(fence + '\n```hypercomb-do\nhide notes\n```')
     expect(work.request?.kind).toBe('table')
@@ -133,8 +161,13 @@ describe('what Jev is shown of the evidence', () => {
     const fitted = fitEvidence(['the request', 'folded away', 'an older read', code], seen, 10_000, 1)
     expect(fitted[0]).toBe('the request')
     expect(fitted).not.toContain('folded away')
-    // the newest piece is cut from its start to fit, never dropped whole
-    expect(fitted[fitted.length - 1].startsWith('xxx')).toBe(true)
+    // the newest piece is never dropped whole: it is shown as its head and its
+    // tail, two pieces each as written — a cut of what was written is still
+    // what was written, which is all Jev's source boundary accepts
+    const [front, back] = fitted.slice(-2)
+    expect(code.startsWith(front)).toBe(true)
+    expect(code.endsWith(back)).toBe(true)
+    expect(front.length + back.length).toBeLessThan(code.length)
     expect(JSON.stringify(fitted).length).toBeLessThanOrEqual(10_000)
   })
 
@@ -143,5 +176,102 @@ describe('what Jev is shown of the evidence', () => {
     expect(fitted.length).toBeLessThanOrEqual(12)
     expect(fitted.join('').length).toBeLessThanOrEqual(16_000)
     expect(fitted[fitted.length - 1]).toContain('read 29')
+  })
+})
+
+describe('a read, as Jev is shown it', () => {
+  const sigOf = (seed: string): string => createHash('sha256').update(seed).digest('hex')
+  const receipt = (...results: HypercombObservationReceipt['results']): string =>
+    formatHypercombObservationReceipt({ results, snapshots: [], signatures: [] })
+  const request = 'What does the note on /dolphin/community/members say? Quote it exactly.'
+  /** How the receipt holds a string: JSON-escaped, as the worker was sent it. */
+  const held = (text: string): string => JSON.stringify(text).slice(1, -1)
+  // THE SOURCE BOUNDARY (essentials jev-decision.service.ts): verify takes a
+  // piece only when it is, as written, in a message the worker was sent, and
+  // a decision (jevUnseen) takes that or its escaped forms. The shell may not
+  // import the module, so every fit here is held to the strictest form.
+  const sent = (pieces: readonly string[]): { content: string }[] =>
+    [{ content: request }, ...pieces.map(piece => ({ content: readResultMessage(piece, request) }))]
+  const asWritten = (shown: readonly string[], messages: readonly { content: string }[]): void => {
+    for (const part of shown) expect(messages.some(entry => entry.content.includes(part))).toBe(true)
+  }
+  const NOTE = 'Members: jwize, Dolphin and the "Thursday" circle — ask before inviting anyone new. [community, people]'
+  // The verify door's own fit (chat-window verifyAnswer): the reads, judged
+  // "seen" against what the worker was sent and the answer it spoke.
+  const fitted = (pieces: readonly string[], room = JEV_STATE_CHARS): string[] => {
+    const said = [...sent(pieces), { content: `> ${NOTE}` }]
+    const shown = fitEvidence(pieces, part => said.some(entry => entry.content.includes(part)), room)
+    asWritten(shown, said)
+    return shown
+  }
+  const members = receipt({ grammar: 'read /dolphin/community/members', kind: 'node', read: {
+    ok: true, root: '/dolphin/community/members', name: 'members', layerSig: sigOf('members'),
+    children: [{ name: 'alice', sig: sigOf('alice') }, { name: 'bob', sig: sigOf('bob') }],
+    projection: 'name: members\nlinks: 2', truncated: false, notes: [NOTE], noteCount: 1,
+  } })
+  const children = Array.from({ length: 120 }, (_, i) => ({ name: `member-${String(i).padStart(3, '0')}`, sig: sigOf(`child ${i}`) }))
+  const projection = Array.from({ length: 100 }, (_, i) => `line ${String(i).padStart(2, '0')}: ${'p'.repeat(50)}`).join('\n')
+  const DUES = 'Dues are collected in January. [money]'
+  const WITHHELD = 'The tile /dolphin/community/private is withheld from this model; nothing under it was read.'
+  const big = receipt({ grammar: 'read /dolphin/community', kind: 'node', read: {
+    ok: true, root: '/dolphin/community', name: 'community', layerSig: sigOf('community'),
+    children, projection, truncated: false, notes: [NOTE, DUES], noteCount: 2,
+  } }) + `\n\n${WITHHELD}`
+
+  it('shows the members note whole, as the worker was sent it', () => {
+    expect(fitted([members])).toEqual([members])
+    expect(members).toContain(held(NOTE))
+  })
+
+  it('keeps a big tile\'s notes: a cut piece is its head and its tail, each as written', () => {
+    expect(big.length).toBeGreaterThan(16_000)
+    // before: the notes sat past what a cut from the start could keep
+    expect(big.indexOf(held(DUES))).toBeGreaterThan(16_000)
+    for (const room of [JEV_STATE_CHARS, 4_000]) {
+      const shown = fitted([big], room)
+      expect(shown).toHaveLength(2)
+      const [front, back] = shown
+      // the head names the read; the tail holds the notes and the withheld notice
+      expect(front.startsWith('{"kind":"hypercomb-tree-observation"')).toBe(true)
+      expect(front).toContain('"grammar":"read /dolphin/community"')
+      expect(back).toContain(`"notes":${JSON.stringify([NOTE, DUES])}`)
+      expect(back).toContain('"noteCount":2')
+      expect(back.endsWith(WITHHELD)).toBe(true)
+      // each end stops at a line's end or between two fields, never inside a name
+      expect(big.slice(front.length)).toMatch(/^\s*(?:\n|\\n|,")/)
+      expect(big.slice(0, big.indexOf(back))).toMatch(/(?:\n|\\n|,)\s*$/)
+      expect(JSON.stringify(shown).length + shown.length).toBeLessThanOrEqual(Math.min(room, 16_000))
+    }
+  })
+
+  it('shows the decision only what the worker was sent, as written, after the request', () => {
+    const pieces = [members, big, 'x'.repeat(30_000), 'context: /dolphin\n\n' + members + '\n\nNot run — a block holds at most 8 reads: read /z.']
+    for (const room of [JEV_STATE_CHARS, 6_000]) {
+      const messages = sent(pieces)
+      const shown = fitEvidence([request, ...pieces], part => messages.some(entry => entry.content.includes(part)), room, 1)
+      expect(shown[0]).toBe(request)
+      expect(shown.length).toBeLessThanOrEqual(12)
+      asWritten(shown, messages)
+    }
+  })
+
+  it('stores what Jev was shown: the fitted evidence, piece for piece', async () => {
+    const records = new Map<string, unknown>()
+    const store = { async putResource(blob: Blob) {
+      const text = await blob.text()
+      const sig = createHash('sha256').update(text).digest('hex')
+      records.set(sig, JSON.parse(text)); return sig
+    } }
+    const original = globalThis.Blob
+    globalThis.Blob = NodeBlob as typeof Blob
+    try {
+      for (const pieces of [[members], [members, big]]) {
+        const shown = fitted(pieces)
+        const decision = { verified: true, reason: 'supported .95 · complete .95', model: 'resolved', answers: { supported: 0.95 } }
+        const sig = await persistJevVerify(store, `> ${NOTE}`, decision, { request, evidence: shown })
+        const record = records.get(sig!) as Record<string, unknown>
+        expect((record['evidence'] as string[]).map(part => records.get(part))).toEqual(shown)
+      }
+    } finally { globalThis.Blob = original }
   })
 })
