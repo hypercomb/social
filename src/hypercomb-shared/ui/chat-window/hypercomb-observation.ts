@@ -792,7 +792,13 @@ export const formatHypercombObservationReceipt = (
     const { grammar, read } = result
     if (!read.ok) return { grammar, root: read.root, error: read.code }
     if (result.kind === 'tree') {
-      return { grammar, root: read.root, nodes: result.read.ok ? result.read.nodes : [], truncated: result.read.ok && result.read.truncated }
+      // A TREE SHOWS NO NOTES. Asked for each tile's notes from a tree, a
+      // model answered "0 notes" for tiles holding two (the housekeeping
+      // manager, 2026-10-11): what the receipt leaves out must be said.
+      return {
+        grammar, root: read.root, nodes: result.read.ok ? result.read.nodes : [], truncated: result.read.ok && result.read.truncated,
+        notesNote: 'a tree lists names and children only, never notes; read a tile to see its notes and noteCount',
+      }
     }
     if (result.kind === 'history') {
       const history = result.read

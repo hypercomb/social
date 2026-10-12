@@ -12,13 +12,24 @@ export type Covers = (segments: readonly string[]) => boolean
 
 const segmentsOfPath = (path: string): string[] => String(path ?? '').split('/').filter(Boolean)
 
+const aimsAtWithheld = (observation: HypercombObservation, covers: Covers): boolean =>
+  observation.verb !== 'code' && !observation.sig && covers(observation.segments)
+
 /** The first read in a block aimed at a withheld route, if any. A read by
  *  signature or of code names no route; it is not this guard's to judge. */
 export const withheldObservation = (
   observations: readonly HypercombObservation[],
   covers: Covers,
 ): HypercombObservation | undefined =>
-  observations.find(observation => observation.verb !== 'code' && !observation.sig && covers(observation.segments))
+  observations.find(observation => aimsAtWithheld(observation, covers))
+
+/** Every read in a block aimed at a withheld route — each refused alone, so
+ *  the rest of the block still runs. */
+export const withheldObservations = (
+  observations: readonly HypercombObservation[],
+  covers: Covers,
+): HypercombObservation[] =>
+  observations.filter(observation => aimsAtWithheld(observation, covers))
 
 /** The receipt with every withheld tile left out of trees and finds. */
 export const withoutWithheld = (receipt: HypercombObservationReceipt, covers: Covers): HypercombObservationReceipt => ({

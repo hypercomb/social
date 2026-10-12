@@ -292,15 +292,50 @@ export const blockRefusedMessage = (kind: WorkKind, reason: string, request: str
 
 /** The reply named a work block inside markup the hive does not read as one
  *  (core/work-fence.ts `unwritten`): say so once, and say the one spelling. */
+/** A request's sentences: split at a sentence's end, a semicolon or a line —
+ *  never at a dot inside a route (`/postit-view.drone.ts`). */
+const sentencesOf = (text: string): string[] => String(text ?? '').split(/(?<=[.!?])\s+|[;\n]+/)
+
+/** A sentence that forbids — "Do not read /susan or /howard" — names routes
+ *  the request is NOT about. Sent back to read "/susan, /howard", a model
+ *  claimed it had read both (the housekeeping manager, 2026-10-11). */
+const FORBIDS = /\b(?:do\s+not|don['’]?t|never|not|without|except|avoid|skip)\b/i
+
 /** The routes a request names: `/games`, `/bubble-bobble-dos-v1/round-001`.
  *  A slash that starts a word and is followed by a name — not a URL's path,
- *  not a fraction, not a date. */
+ *  not a fraction, not a date — and never in a sentence that forbids. */
 export const routesNamedIn = (text: string): readonly string[] => {
   const found = new Set<string>()
-  for (const match of String(text ?? '').matchAll(/(?:^|[\s("'`])(\/[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._'-]*)*)/gi)) {
-    found.add(match[1].replace(/[.,;:]+$/, ''))
+  for (const sentence of sentencesOf(text)) {
+    if (FORBIDS.test(sentence)) continue
+    for (const match of sentence.matchAll(/(?:^|[\s("'`])(\/[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._'-]*)*)/gi)) {
+      found.add(match[1].replace(/[.,;:]+$/, ''))
+    }
   }
   return [...found]
+}
+
+/**
+ * THE READS A REQUEST WRITES OUT IN PROSE. "Run three whole-hive finds: find
+ * betz; find imagetest; find isomorphic" is as plain a read as a block, and a
+ * model answered it in six seconds with no read and two invented routes (the
+ * housekeeping manager, 2026-10-11). Only the unmistakable shapes count — `find
+ * <word>` (optionally `under /route`), `read /route`, `tree /route` — and never
+ * in a sentence that forbids. Lines in the read grammar, in order, each once.
+ */
+export const readsAskedIn = (text: string): readonly string[] => {
+  const found: string[] = []
+  const add = (line: string): void => { if (!found.includes(line)) found.push(line) }
+  for (const sentence of sentencesOf(text)) {
+    if (FORBIDS.test(sentence)) continue
+    for (const match of sentence.matchAll(/\bfind\s+([a-z0-9][a-z0-9_-]*)(?:\s+(?:under|in|below)\s+(\/[^\s:;,)]*))?(?=\s*(?:$|[:;,.)]|\s(?:and|then)\b))/gi)) {
+      add(match[2] ? `find ${match[1]} ${match[2].replace(/[.]+$/, '')}` : `find ${match[1]}`)
+    }
+    for (const match of sentence.matchAll(/\b(read|tree)\s+(?:on\s+|of\s+)?(\/[^\s:;,)]*)/gi)) {
+      add(`${match[1].toLowerCase()} ${match[2].replace(/[.]+$/, '') || '/'}`)
+    }
+  }
+  return found
 }
 
 /** AN ANSWER ABOUT TILES NOTHING READ. A model asked how many notes a tile

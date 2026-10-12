@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseHypercombObservationGrammars } from './hypercomb-observation'
-import { withheldMessage, withheldObservation, withoutWithheld } from './withheld-reads'
+import { withheldMessage, withheldObservation, withheldObservations, withoutWithheld } from './withheld-reads'
 import type { HypercombObservationReceipt } from './hypercomb-observation'
 
 // /susan and everything under it is withheld; nothing else is.
@@ -14,6 +14,13 @@ describe('withheld tiles at the read step', () => {
     expect(withheldObservation(here.observations, covers)?.grammar).toBe('/read')
     const fine = parseHypercombObservationGrammars(['/tree /', '/find road', '/code withheld'], [])
     expect(withheldObservation(fine.observations, covers)).toBeUndefined()
+  })
+
+  it('names every withheld read in a block, so each is refused alone and the rest still run', () => {
+    const plan = parseHypercombObservationGrammars(['/read /people', '/read /susan', '/find betz', '/tree /susan/family-support'], [])
+    expect(withheldObservations(plan.observations, covers).map(observation => observation.grammar))
+      .toEqual(['/read /susan', '/tree /susan/family-support'])
+    expect(withheldObservations(plan.observations, () => false)).toEqual([])
   })
 
   it('leaves withheld tiles out of a tree and a find, and says the tree is partial', () => {

@@ -176,6 +176,22 @@ describe('the stream guard', () => {
     expect(guard.holding).toBe(false)
   })
 
+  it('holds a plain fence whose first line is the marker, as the parser runs it', () => {
+    // The housekeeping manager's answer, 2026-10-11: a plain fence, the
+    // marker as its first line, then the finds.
+    const { shown, guard } = run(['\n\n``', '`\nhyper', 'comb-read\nfind imagetest\nfind gate-probe\n```\n'])
+    expect(shown).toBe('\n\n')
+    expect(guard.holding).toBe(true)
+    const blank = run(['Looking.\n```text\n\n', 'hypercomb-read\nread /x\n```'])
+    expect(blank.shown).toBe('Looking.\n')
+    expect(blank.guard.holding).toBe(true)
+    // An ordinary fence still shows whole once its first line is not a marker,
+    // and one that never gets a body line shows at the end.
+    expect(run(['```\nnot work\n```\nafter\n']).shown).toBe('```\nnot work\n```\nafter\n')
+    expect(run(['```\n', '```']).shown).toBe('```\n```')
+    expect(run(['```']).shown).toBe('```')
+  })
+
   it('releases a line the moment it cannot become a fence', () => {
     expect(new WorkStreamGuard().push('Hel')).toBe('Hel')
     expect(new WorkStreamGuard().push('``')).toBe('')
@@ -519,6 +535,28 @@ describe('an answer about tiles nothing read', () => {
     expect(routesNamedIn('How many notes are on /bubble-bobble-dos-v1? Number only.')).toEqual(['/bubble-bobble-dos-v1'])
     expect(routesNamedIn('Compare /games/arkanoid with /solomon-maze-v1, then /games.')).toEqual(['/games/arkanoid', '/solomon-maze-v1', '/games'])
     expect(routesNamedIn('See https://example.com/a/b and 3/4 of it, dated 2026/10/01.')).toEqual([])
+  })
+
+  it('never names a route the request forbids, and keeps a dot inside a route', async () => {
+    const { routesNamedIn } = await import('./hypercomb-work-fence')
+    // The housekeeping manager's ask, 2026-10-11: sent back to read "/susan,
+    // /howard", the model claimed it had read both.
+    expect(routesNamedIn('Run three whole-hive finds. Do not read /susan or /howard. Do not change anything.')).toEqual([])
+    expect(routesNamedIn('Read /people, never /susan.')).toEqual([])
+    expect(routesNamedIn('Read /people. Never read /susan.')).toEqual(['/people'])
+    expect(routesNamedIn('Open /behaviors/views/postit/postit-view.drone.ts now.')).toEqual(['/behaviors/views/postit/postit-view.drone.ts'])
+  })
+
+  it('reads the reads a request writes out in prose, and none it forbids', async () => {
+    const { readsAskedIn } = await import('./hypercomb-work-fence')
+    expect(readsAskedIn('Read only. Run three whole-hive finds (no route) and answer one line each, nothing else: find betz; find imagetest; find isomorphic. Do not read /susan or /howard. Do not change anything.'))
+      .toEqual(['find betz', 'find imagetest', 'find isomorphic'])
+    expect(readsAskedIn('1) read /revolucion/cigars: noteCount. 3) find betz under /dolphin: the routes found and whether it was cut short.'))
+      .toEqual(['read /revolucion/cigars', 'find betz /dolphin'])
+    expect(readsAskedIn('Use tree on /revolucion/cigars and /youtube.')).toEqual(['tree /revolucion/cigars'])
+    // Prose that only sounds like a read asks for nothing.
+    expect(readsAskedIn('I want to find out what is going on. Read only, please.')).toEqual([])
+    expect(readsAskedIn('Do not read /susan.')).toEqual([])
   })
 
   it('says which routes went unread and carries the request', async () => {

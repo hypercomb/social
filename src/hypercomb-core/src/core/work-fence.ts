@@ -438,6 +438,13 @@ export class WorkStreamGuard {
   #shown = 0
   #fence: string | null = null
   #holding = false
+  /** AN ORDINARY FENCE WAITS FOR ITS FIRST LINE. A model may write the marker
+   *  as a plain fence's first line (markedBody), and the hive runs that block
+   *  — but shown as it streamed, it led an answer with "```" and
+   *  "hypercomb-read" (housekeeping, 2026-10-11). So a fence whose info names
+   *  no work holds its opening line (and any blank lines) until the first
+   *  body line says whether this is work. */
+  #pending = ''
 
   get holding(): boolean { return this.#holding }
 
@@ -452,6 +459,22 @@ export class WorkStreamGuard {
         this.#shown = hold
         continue
       }
+      if (this.#pending) {
+        const line = this.#line
+        this.#line = ''
+        this.#shown = 0
+        if (!line.trim()) { this.#pending += '\n'; continue }
+        if (kindOf(line.trim())) {
+          this.#pending = ''
+          this.#holding = true
+          return out
+        }
+        out += `${this.#pending}${line}\n`
+        this.#pending = ''
+        if (this.#fence && closes(line, this.#fence)) this.#fence = null
+        continue
+      }
+      const before = this.#fence
       const work = this.#opensWork(this.#line)
       if (work >= 0) {
         out += this.#line.slice(this.#shown, work)
@@ -459,6 +482,12 @@ export class WorkStreamGuard {
         this.#line = ''
         this.#shown = 0
         return out
+      }
+      if (!before && this.#fence) {
+        this.#pending = `${this.#line}\n`
+        this.#line = ''
+        this.#shown = 0
+        continue
       }
       out += `${this.#line.slice(this.#shown)}\n`
       this.#line = ''
@@ -474,6 +503,15 @@ export class WorkStreamGuard {
     const shown = this.#shown
     this.#line = ''
     this.#shown = 0
+    if (this.#pending) {
+      const pending = this.#pending
+      this.#pending = ''
+      if (line.trim() && kindOf(line.trim())) {
+        this.#holding = true
+        return ''
+      }
+      return `${pending}${line}`
+    }
     const work = line ? this.#opensWork(line) : -1
     if (work < 0) return line.slice(shown)
     this.#holding = true
@@ -483,6 +521,8 @@ export class WorkStreamGuard {
   /** How much of the line so far may be shown. */
   #holdFrom(): number {
     const line = this.#line
+    // The first line of an ordinary fence waits whole (#pending).
+    if (this.#pending) return this.#shown
     if (MAY_BE_FENCE.test(line)) return 0
     // A line that may yet be a block's marker alone (`hypercomb-read`) waits
     // until it is one or is not.
