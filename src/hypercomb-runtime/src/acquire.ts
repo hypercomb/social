@@ -111,6 +111,15 @@ export type InstallOutcome = {
   released?: string[]
 }
 
+export type InstallOptions = {
+  floor?: boolean
+  takeAll?: boolean
+  onHeld?: (sig: string) => void
+  /** Asked once every module is held and verified, before anything runs: a
+   *  sentence refuses the package (nothing activates, the bytes stay). */
+  refuse?: (modules: readonly string[], read: (sig: string) => Promise<Uint8Array | null>) => Promise<string | null>
+}
+
 /** This origin's content bases — a byte source only through {@link originAmong}. */
 export const selfBases = (): string[] => [`${location.origin}/content`, location.origin]
 
@@ -504,8 +513,9 @@ export const acquire = async (
    *  `takeAll`: the participant pressed Update all — picks the new root moves
    *  past are released. Only the install port passes it; boot repair and the
    *  floor never do, so neither can move what the participant picked.
-   *  `onHeld`: told each file's signature as it is held here. */
-  opts: { floor?: boolean; takeAll?: boolean; onHeld?: (sig: string) => void } = {},
+   *  `onHeld`: told each file's signature as it is held here.
+   *  `refuse`: the caller's last word over the held bytes (installPackage). */
+  opts: InstallOptions = {},
 ): Promise<InstallOutcome> => {
   const fail = (error: string): InstallOutcome =>
     ({ ok: false, packageSig, fetched: 0, present: 0, holes: [], refused: [], error })
@@ -555,7 +565,7 @@ export const installPackage = async (
   /** Extra domains to pull the SAME signature from. Every carried host that
    *  publishes it is a byte source for it — see {@link acquire}. */
   alsoFrom: readonly string[] = [],
-  opts: { floor?: boolean; takeAll?: boolean; onHeld?: (sig: string) => void } = {},
+  opts: InstallOptions = {},
 ): Promise<InstallOutcome> => {
   const fail = (error: string): InstallOutcome =>
     ({ ok: false, packageSig: pkg.packageSig, fetched: 0, present: 0, holes: [], refused: [], error })
@@ -679,6 +689,14 @@ export const installPackage = async (
     }
   }
 
+  // THE CALLER'S LAST WORD. Every module is held and verified and nothing has
+  // run. A caller that must not land on these bytes (the floor, moving a
+  // package for its meeting point, 2026-10-11) refuses here — complete-or-
+  // absent like every gate below: the bytes stay, nothing activates.
+  const readAtom = readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig])
+  const refusal = await opts.refuse?.([...inventory.dependencies, ...inventory.bees], readAtom)
+  if (refusal) return fail(refusal)
+
   // PICKS RIDE ACROSS A TRUNK MOVE. What the participant took at a path stays
   // taken on the new trunk, so the selection is composed over what is now
   // held — and passes every gate below again, over the composed set.
@@ -716,7 +734,6 @@ export const installPackage = async (
   // what it exports. A shell that is short refuses HERE, by name, instead of
   // activating a package whose every module dies at evaluation. The bytes stay
   // — once the shell ships, the same call is a delta repair.
-  const readAtom = readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig])
   const compat = await checkCoreCompatibility([...inventory.bees, ...inventory.dependencies], readAtom)
   if (!compat.ok) {
     console.warn(`[acquire] ${pkg.packageSig.slice(0, 12)} ${describeCoreMismatch(compat.missing)}`)

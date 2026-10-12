@@ -1767,9 +1767,13 @@ describe('doctrine ratchets', () => {
     // the shell's DEFAULT_HOST_ZONES) must move together: a default relay the
     // words do not know changes every default room's pair, and a relay tier
     // that is not the pool's host splits one meeting's bytes over two hosts.
+    // The package floor's MEETING_POINT too: a package whose bytes do not name
+    // it is moved, so a default that moved without it would move every current
+    // package as if it were old.
     const literal = (file: string, re: RegExp): string => re.exec(readFileSync(join(ROOT, file), 'utf8'))?.[1] ?? ''
     const relay = literal('hypercomb-essentials/src/sharing/nostr-mesh.drone.ts', /^const LIVE_RELAY = '([^']+)'/m)
     expect(relay).toBe('wss://hypercomb.com')
+    expect(literal('hypercomb-web/src/setup/package-floor.ts', /^export const MEETING_POINT = '([^']+)'/m)).toBe(relay)
     const host = new URL(relay).host
     expect(literal('hypercomb-shared/ui/presence-banner/presence-status.ts', /^export const SHIPPED_POINT = '([^']+)'/m)).toBe(host)
     expect(literal('hypercomb-essentials/src/sharing/hosts.drone.ts', /^const SEED_HOST = '([^']+)'/m)).toBe(host)

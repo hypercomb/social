@@ -50,13 +50,34 @@
 // `hc:mesh-public` and never `hc:mesh-session`. Such a package is below the
 // floor too. A package with no swarm in it reads neither and is left alone.
 //
+// AND A PACKAGE THAT MEETS ON THE HOME MACHINE. On 2026-10-11 the shipped
+// meeting point moved from the owner's home PC to wss://hypercomb.com, which
+// never sleeps. A package from before that still dials the home PC by
+// default, so with the same room and the same secret it sits in a different
+// meeting from every updated device (observed that day: a phone on the new
+// package and a desktop on the old one never met), and only while that PC is
+// on. Its bytes say so: they carry the mesh's relay anchor and never name
+// wss://hypercomb.com. Such a package is below the floor. One that names it is
+// never moved for this, whatever else it names; one with no mesh is left
+// alone. A move made for the meeting point alone must reach it: the target's
+// bytes are read once held, before anything runs, and a target that still
+// dials the home machine is refused (acquire `refuse`), complete-or-absent.
+//
+// THE FLOOR MOVES THE TRUNK, NEVER A PICK. What runs is the trunk with the
+// participant's picks and drafts laid over it, and a move carries every pick
+// across. So a byte rule condemns a package only for modules the TRUNK put
+// there: an old module that a pick brought would survive any move, and the
+// floor would trade one head for the other at every boot without ever
+// changing what runs.
+//
 // WHERE IT GOES: the root the followed publisher SIGNED (the index the update
 // scout reads), then the seed's pool head when that root cannot be had from
 // the seed yet. The pool alone lagged the channel for ten days.
 
 import { EffectBus } from '@hypercomb/core'
-import { acquire, headPackage } from '@hypercomb/runtime/acquire'
+import { acquire, headPackage, layersIoFor } from '@hypercomb/runtime/acquire'
 import { INSTALLED_KEY, installedPackageSig } from '@hypercomb/runtime/installed-package'
+import { readPicks, walkTree } from '@hypercomb/runtime/package-tree'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
 import { installCandidates, readInstallChannel, type ChannelRead } from '@hypercomb/runtime/host-packages'
 import { cacheImportMap } from './resolve-import-map'
@@ -80,6 +101,15 @@ const IDLE_MS = 3_000
 const TAB_MEMBERSHIP_KEY = 'hc:mesh-session'
 /** The origin-wide flag a package from before per-tab membership gates on. */
 const ORIGIN_MEMBERSHIP_KEY = 'hc:mesh-public'
+/** The meeting point every package since 2026-10-11 dials by default.
+ *  MIRRORED: essentials sharing/nostr-mesh.drone.ts LIVE_RELAY (doctrine.spec
+ *  keeps the two one host). */
+export const MEETING_POINT = 'wss://hypercomb.com'
+/** The mesh's global relay anchor (`{ local, live }`), written by every mesh
+ *  since 2026-06-01 so its default relay is never tree-shaken out. A package
+ *  that carries it and never names MEETING_POINT still dials the home machine.
+ *  MIRRORED: essentials sharing/nostr-mesh.drone.ts. */
+const MESH_RELAYS_ANCHOR = '__HYPERCOMB_RELAYS__'
 /** Where an activation leaves its module sets (acquire.ts, ensure-install.ts). */
 const INSTALL_MANIFEST_KEY = 'core-adapter.installed-manifest'
 
@@ -99,11 +129,15 @@ export const planFloor = (q: {
    *  bytes read only the origin-wide flag; null when they cannot say (or it
    *  has no swarm at all). */
   perTabMembership?: boolean | null
+  /** Does the live package dial MEETING_POINT by default? false when its
+   *  bytes carry the mesh and never name it; null when they cannot say (or it
+   *  has no mesh at all). */
+  currentMeetingPoint?: boolean | null
   head: { packageSig: string; zone: string } | null
   reloadedFor: string | null
 }): FloorPlan => {
   if (!q.installed) return { act: false, why: 'nothing installed' }
-  const below = q.legacyRecord === true || q.perTabMembership === false
+  const below = q.legacyRecord === true || q.perTabMembership === false || q.currentMeetingPoint === false
   if (!below && q.doorAnswered === null) return { act: false, why: 'the bus cannot say who listens' }
   if (!below && q.doorAnswered) return { act: false, why: 'the package answers the update door' }
   if (!q.head) return { act: false, why: 'the seed offered no head' }
@@ -122,29 +156,86 @@ const stamped = (): boolean => {
   try { return /^[a-f0-9]{64}$/.test(localStorage.getItem(INSTALLED_KEY) ?? '') } catch { return false }
 }
 
+/** One question a package's bytes answer: `current` clears it, `old` without
+ *  `current` condemns it, and a package naming neither has nothing to say. */
+type ByteRule = { readonly current: string; readonly old: string }
+type ByteVerdict = 'current' | 'old' | 'none' | null
+
+const MEMBERSHIP_RULE: ByteRule = { current: TAB_MEMBERSHIP_KEY, old: ORIGIN_MEMBERSHIP_KEY }
+const MEETING_POINT_RULE: ByteRule = { current: MEETING_POINT, old: MESH_RELAYS_ANCHOR }
+
 /**
- * What a package's modules say about swarm membership — pure over a reader.
+ * What a package's modules say, rule by rule, in ONE read of each module —
+ * pure over a reader.
  *
- * 'tab' as soon as any module reads the per-tab key (a current package stops
- * here, usually on its first few dependencies); 'origin' when modules read the
- * origin-wide flag and none reads the per-tab key; 'none' when neither appears
- * (no swarm in this package). null when a module could not be read and no
- * per-tab reader was found — the missing one might have been it.
+ * 'current' as soon as any module names the rule's current marker; 'old' when
+ * modules name its old marker and none names the current one; 'none' when
+ * neither appears. null when a module could not be read and the current
+ * marker was not found — the missing one might have named it. Reading stops
+ * once every rule is 'current' (a current package usually answers within its
+ * first few modules).
+ */
+const scanBytes = async (
+  sigs: readonly string[],
+  read: (sig: string) => Promise<string | null>,
+  rules: readonly ByteRule[],
+): Promise<ByteVerdict[]> => {
+  const current = rules.map(() => false)
+  const old = rules.map(() => false)
+  let unread = false
+  for (const sig of sigs) {
+    if (current.every(Boolean)) break
+    const text = await read(sig)
+    if (text === null) { unread = true; continue }
+    rules.forEach((rule, i) => {
+      if (text.includes(rule.current)) current[i] = true
+      else if (text.includes(rule.old)) old[i] = true
+    })
+  }
+  return rules.map((_, i) => current[i] ? 'current' : unread ? null : old[i] ? 'old' : 'none')
+}
+
+/**
+ * What a package's modules say about swarm membership: 'tab' as soon as any
+ * module reads the per-tab key, 'origin' when modules read only the
+ * origin-wide flag, 'none' when neither appears (no swarm), null when a module
+ * could not be read and no per-tab reader was found.
  */
 export const scanMembership = async (
   sigs: readonly string[],
   read: (sig: string) => Promise<string | null>,
 ): Promise<'tab' | 'origin' | 'none' | null> => {
-  let origin = false
-  let unread = false
-  for (const sig of sigs) {
-    const text = await read(sig)
-    if (text === null) { unread = true; continue }
-    if (text.includes(TAB_MEMBERSHIP_KEY)) return 'tab'
-    if (text.includes(ORIGIN_MEMBERSHIP_KEY)) origin = true
-  }
-  if (unread) return null
-  return origin ? 'origin' : 'none'
+  const [verdict] = await scanBytes(sigs, read, [MEMBERSHIP_RULE])
+  return verdict === 'current' ? 'tab' : verdict === 'old' ? 'origin' : verdict ?? null
+}
+
+/**
+ * Which meeting point a package dials by default: 'current' as soon as any
+ * module names MEETING_POINT (whatever else it names), 'old' when a module
+ * carries the mesh's relay anchor and none names it, 'none' when there is no
+ * mesh, null when a module could not be read and none named it.
+ */
+export const scanMeetingPoint = async (
+  sigs: readonly string[],
+  read: (sig: string) => Promise<string | null>,
+): Promise<ByteVerdict> => (await scanBytes(sigs, read, [MEETING_POINT_RULE]))[0] ?? null
+
+/**
+ * The floor's last word over a TARGET's bytes, asked by acquire once every
+ * module is held and verified and before anything runs (InstallOptions
+ * `refuse`): a move made for the meeting point never lands on a package that
+ * still dials the home machine. Only bytes that say so refuse.
+ */
+export const refuseOldMeetingPoint = async (
+  modules: readonly string[],
+  read: (sig: string) => Promise<Uint8Array | null>,
+): Promise<string | null> => {
+  const decoder = new TextDecoder()
+  const verdict = await scanMeetingPoint(modules, async sig => {
+    const bytes = await read(sig)
+    return bytes ? decoder.decode(bytes) : null
+  })
+  return verdict === 'old' ? `the target still dials the home machine, not ${MEETING_POINT}` : null
 }
 
 type ModuleDirs = {
@@ -164,33 +255,84 @@ const readText = (dirs: (FileSystemDirectoryHandle | undefined)[]) => async (sig
   return null
 }
 
-/** What a package's bytes said, kept for this page's life. A pure derivation
- *  of the package signature, so nothing is written for it: the next boot reads
- *  the modules again (a current package answers within its first few). */
-const membershipVerdicts = new Map<string, boolean>()
+/** What a package's bytes say, as the floor asks it: true current, false
+ *  below, null cannot say (or the package has nothing to say). */
+export type PackageBytes = {
+  readonly perTabMembership: boolean | null
+  readonly currentMeetingPoint: boolean | null
+}
+const UNSAID: PackageBytes = { perTabMembership: null, currentMeetingPoint: null }
+const said = (verdict: ByteVerdict): boolean | null => verdict === 'current' ? true : verdict === 'old' ? false : null
 
-/** Does the live package keep membership per tab? Read from its own modules
- *  (dependencies first — that is where a current build keeps it), at most once
- *  per package per page. null when the store, the manifest or a module cannot say. */
-export const perTabMembership = async (installed: string): Promise<boolean | null> => {
-  const known = membershipVerdicts.get(installed)
+/** What a package's bytes said, kept for this page's life. A pure derivation
+ *  of the package signature when nothing is picked over it, so nothing is
+ *  written for it: the next boot reads the modules again (a current package
+ *  answers within its first few). */
+const packageVerdicts = new Map<string, PackageBytes>()
+
+/** Every module the trunk's own tree names, picks aside — read from held
+ *  layers only, never fetched. null when the tree cannot be walked here. */
+const trunkModules = async (trunk: string): Promise<Set<string> | null> => {
+  const io = await layersIoFor([]).catch(() => null)
+  if (!io) return null
+  const walk = await walkTree(trunk, { ...io, fetch: async () => null }).catch(() => null)
+  if (!walk?.complete) return null
+  return new Set([...walk.rootDependencies, ...walk.rootBees, ...walk.nodes.flatMap(node => node.bees)])
+}
+
+/** What the live package's own modules say — membership and meeting point in
+ *  one read of each module (dependencies first — that is where a current build
+ *  keeps membership), at most once per package per page. UNSAID when the
+ *  store or the manifest cannot say; a rule is null when a module could not be
+ *  read before it was answered.
+ *
+ *  'current' is read off everything that runs: a pick that brings the current
+ *  marker clears the package. 'old' must come from the trunk: with a live pick
+ *  over it, an old marker that no running trunk module carries says nothing
+ *  (the floor moves the trunk, never a pick). */
+export const packageBytes = async (installed: string): Promise<PackageBytes> => {
+  // A pick from the trunk itself is no pick: the trunk already names it (acquire applySelection).
+  const picked = Object.values(readPicks()).some(pick => pick.root !== installed)
+  const known = picked ? undefined : packageVerdicts.get(installed)
   if (known !== undefined) return known
   let manifest: { bees?: unknown; dependencies?: unknown } | null = null
-  try { manifest = JSON.parse(localStorage.getItem(INSTALL_MANIFEST_KEY) ?? 'null') } catch { return null }
+  try { manifest = JSON.parse(localStorage.getItem(INSTALL_MANIFEST_KEY) ?? 'null') } catch { return UNSAID }
   const sigsOf = (value: unknown): string[] => Array.isArray(value) ? value.filter((sig): sig is string => typeof sig === 'string') : []
   const dependencies = sigsOf(manifest?.dependencies)
   const bees = sigsOf(manifest?.bees)
-  if (!bees.length) return null
+  if (!bees.length) return UNSAID
   const store = (globalThis as { ioc?: { get?: (key: string) => unknown } }).ioc?.get?.('@hypercomb.social/Store') as ModuleDirs | undefined
-  if (!store) return null
+  if (!store) return UNSAID
   const dependencyText = readText([store.dependencies, store.legacyDependencies])
   const beeText = readText([store.bees, store.legacyBees])
   const beeSet = new Set(bees)
-  const verdict = await scanMembership([...dependencies, ...bees], sig => beeSet.has(sig) ? beeText(sig) : dependencyText(sig))
-  const perTab = verdict === 'tab' ? true : verdict === 'origin' ? false : null
-  if (perTab !== null) membershipVerdicts.set(installed, perTab)
-  return perTab
+  const texts = new Map<string, Promise<string | null>>()
+  const read = (sig: string): Promise<string | null> => {
+    let text = texts.get(sig)
+    if (!text) { text = beeSet.has(sig) ? beeText(sig) : dependencyText(sig); texts.set(sig, text) }
+    return text
+  }
+  const rules = [MEMBERSHIP_RULE, MEETING_POINT_RULE] as const
+  const running = [...dependencies, ...bees]
+  let [membership = null, meeting = null] = await scanBytes(running, read, rules)
+  if (picked && (membership === 'old' || meeting === 'old')) {
+    const trunk = await trunkModules(installed)
+    const [ownMembership = null, ownMeeting = null] = trunk
+      ? await scanBytes(running.filter(sig => trunk.has(sig)), read, rules)
+      : [null, null]
+    if (membership === 'old' && ownMembership !== 'old') membership = null
+    if (meeting === 'old' && ownMeeting !== 'old') meeting = null
+  }
+  const verdict: PackageBytes = { perTabMembership: said(membership), currentMeetingPoint: said(meeting) }
+  // Kept only when both rules were answered (an unread module might change
+  // it) and nothing is picked (a pick changes what runs, not the signature).
+  if (!picked && membership !== null && meeting !== null) packageVerdicts.set(installed, verdict)
+  return verdict
 }
+
+/** Does the live package keep membership per tab? (packageBytes) */
+export const perTabMembership = async (installed: string): Promise<boolean | null> =>
+  (await packageBytes(installed)).perTabMembership
 
 const seedHead = async (): Promise<{ packageSig: string; zone: string } | null> => {
   for (const zone of DEFAULT_HOST_ZONES) {
@@ -239,15 +381,21 @@ export const checkPackageFloor = async (): Promise<FloorPlan> => {
   const answered = doorAnswered()
   // Only asked when nothing has already put it below the floor. A local read
   // of the package's own modules, once per package — never a network call.
-  const perTab = installed && !legacyRecord && answered !== false
-    ? await perTabMembership(installed).catch(() => null)
+  const bytes = installed && !legacyRecord && answered !== false
+    ? await packageBytes(installed).catch(() => UNSAID)
+    : UNSAID
+  const perTab = bytes.perTabMembership
+  const meetingPoint = bytes.currentMeetingPoint
+  const reason = legacyRecord || answered === false ? 'door'
+    : perTab === false ? 'membership'
+    : meetingPoint === false ? 'meeting point'
     : null
-  const below = legacyRecord || answered === false || perTab === false
+  const below = reason !== null
   // Only a package below the floor costs a network call.
   const heads = installed && below ? await floorHeads() : []
   const reloadedFor = readSession(FLOOR_RELOADED_KEY)
   const ask = (head: { packageSig: string; zone: string } | null): FloorPlan =>
-    planFloor({ installed, legacyRecord, doorAnswered: answered, perTabMembership: perTab, head, reloadedFor })
+    planFloor({ installed, legacyRecord, doorAnswered: answered, perTabMembership: perTab, currentMeetingPoint: meetingPoint, head, reloadedFor })
 
   let last = ask(heads[0] ?? null)
   let carried: string[] | null = null
@@ -255,10 +403,19 @@ export const checkPackageFloor = async (): Promise<FloorPlan> => {
     const plan = ask(head)
     if (!plan.act) { last = plan; continue }
 
-    const why = legacyRecord || answered === false ? 'cannot answer the update door on this shell' : 'keeps swarm membership in the flag every tab shares'
+    const why = reason === 'door' ? 'cannot answer the update door on this shell'
+      : reason === 'membership' ? 'keeps swarm membership in the flag every tab shares'
+      : `still dials the home machine, never ${MEETING_POINT}`
     console.warn(`[package-floor] ${plan.from.slice(0, 12)}… ${why} — taking ${plan.to.slice(0, 12)}… from ${plan.zone}`)
     carried ??= await listHostZones().catch(() => [] as string[])
-    const outcome = await acquire(plan.to, [plan.zone, ...carried.filter(zone => zone !== plan.zone)], { floor: true })
+    // A move the meeting point alone justifies must reach it; one the door or
+    // membership justifies already mends what they found, and the meeting
+    // point moves it again, next session, once a head that reaches it exists.
+    const outcome = await acquire(
+      plan.to,
+      [plan.zone, ...carried.filter(zone => zone !== plan.zone)],
+      reason === 'meeting point' ? { floor: true, refuse: refuseOldMeetingPoint } : { floor: true },
+    )
     if (!outcome.ok) {
       console.warn(`[package-floor] move to ${plan.to.slice(0, 12)}… failed:`, outcome.error ?? `${outcome.holes.length} hole(s)`)
       last = { act: false, why: outcome.error ?? 'incomplete' }
