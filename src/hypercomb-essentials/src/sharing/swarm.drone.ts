@@ -4567,6 +4567,14 @@ export class SwarmDrone extends Drone {
         }
       }
     }
+    // THE OWNER IS IN THE ROOM (jwize 2026-10-11: the swarm is live — "tiles go
+    // away when the people leave"): while this tab is joined, a tile with a
+    // handle goes out WHOLE from this device whatever its upload is doing —
+    // a gate still asking, a late answer, an upload pending or stalled. The
+    // host only matters after we leave. A tile no host has confirmed is
+    // never remembered as hosted; an atom over the broker cap still stays a
+    // name (#liveHold).
+    if (!available && !live && child.layerSig && isJoinedHere() && blocking?.state !== 'too-large') live = true
     if (live) {
       const visual = await this.#visualFor(child, segments)
       // THIS DEVICE MUST BE ABLE TO SERVE IT (D1, decision c): every atom a
@@ -4773,7 +4781,11 @@ export class SwarmDrone extends Drone {
     // already offered re-walked the page, which sealed again, which refused
     // again — about once a second, for ever (BCL-6).
     void sealing.then((sealed) => { if ((sealed || raw) !== offered) this.#scheduleReceiptRewalk() })
-    return offered
+    // THE OWNER IS IN THE ROOM (2026-10-11): a first seal that is late leaves
+    // no earlier one to offer — the raw handle is offered instead, served from
+    // this device, so the tile is takeable now; the seal re-walks it when it
+    // lands. Unjoined (a follower channel), no handle as before.
+    return offered ?? (isJoinedHere() ? raw : undefined)
   }
 
   /** Wait — once per page per session, at most REPLAY_WAIT_MS — for the

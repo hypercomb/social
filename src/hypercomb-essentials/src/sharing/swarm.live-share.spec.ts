@@ -271,7 +271,7 @@ describe('the sharer: no host is a live swarm, never names only', () => {
     expect(statusAt('/n2')).toMatchObject({ live: 1, deepOnDevice: 0, uploading: 0, notQueued: 0 })
   })
 
-  it('a named host that refuses for good leaves the tile live; too large or still uploading stays a name; served stays hosted', async () => {
+  it('a named host that refuses for good, or is still uploading, leaves the tile live; too large stays a name; served stays hosted', async () => {
     const page = ['h1']
     pageHosts.set('h1', { hosts: ['friend.example'], source: 'meeting', pending: false })
     seedPage(page, ['refused', 'toobig', 'uploading', 'kept'])
@@ -289,13 +289,14 @@ describe('the sharer: no host is a live swarm, never names only', () => {
     // D1: a picture no host takes for its size is one no broker answer carries.
     expect(byName.get('toobig')!['layerSig']).toBeUndefined()
     expect(JSON.stringify(byName.get('toobig'))).not.toMatch(/[0-9a-f]{64}/)
-    expect(byName.get('uploading')!['layerSig']).toBeUndefined()
+    // The owner is in the room: an upload still running never holds it back.
+    expect(byName.get('uploading')).toMatchObject({ layerSig: sealOf(page, 'uploading'), served: 'owner' })
     // The page's host is still named — for what it does serve.
     expect(domainsAt(page)).toEqual([['domain', 'friend.example']])
-    expect(statusAt('/h1')).toMatchObject({ offered: 4, live: 1, nameOnly: 2, host: 'friend.example', hostSource: 'meeting' })
+    expect(statusAt('/h1')).toMatchObject({ offered: 4, live: 2, nameOnly: 1, host: 'friend.example', hostSource: 'meeting' })
   })
 
-  it('a refusal that lands after the walk moved on walks the page again — live', async () => {
+  it('an answer that lands after the walk moved on never holds the tile back — it is live at once', async () => {
     const page = ['h2']
     pageHosts.set('h2', { hosts: ['friend.example'], source: 'meeting', pending: false })
     seedPage(page, ['late'])
@@ -303,9 +304,7 @@ describe('the sharer: no host is a live swarm, never names only', () => {
     verdicts.set(sealOf(page, 'late'), { ok: false, ownerHeld: true, blocking: { host: 'friend.example', state: 'refused', reason: '403' } })
     slow.set(sealOf(page, 'late'), 400)   // past the walk's 250 ms wait
     await goTo(page)
-    expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBeUndefined()
-    await until(() => lastLayerAt(page)!.payload.visuals![0]['served'] === 'owner', 2000)
-    expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBe(sealOf(page, 'late'))
+    expect(lastLayerAt(page)!.payload.visuals![0]).toMatchObject({ layerSig: sealOf(page, 'late'), served: 'owner' })
   })
 })
 

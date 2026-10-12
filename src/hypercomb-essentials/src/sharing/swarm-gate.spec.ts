@@ -169,7 +169,10 @@ beforeEach(() => {
 })
 
 describe('the never-retract gate', () => {
-  it('a held, never-announced child goes out as a placeholder — name only, no 64-hex anywhere', async () => {
+  // THE OWNER IS IN THE ROOM (jwize 2026-10-11, the live swarm): a tile no
+  // host serves yet goes out WHOLE, served from this device, while this tab is
+  // joined — never a name waiting on an upload. The host matters after we leave.
+  it('a held, never-announced child goes out whole while its owner is in the room — served from this device', async () => {
     const page = ['g1']
     seedPage(page, ['alpha', 'hidden-one'])
     makePublic(page, 'alpha')          // 'hidden-one' stays private
@@ -184,16 +187,16 @@ describe('the never-retract gate', () => {
     const visuals = lastLayerAt(page)!.payload.visuals!
     expect(visuals.map(v => v['name'])).toEqual(['alpha'])
     const [alpha] = visuals
-    expect(alpha['layerSig']).toBeUndefined()
+    expect(alpha['layerSig']).toBe(sealOf(page, 'alpha'))
+    expect(alpha['served']).toBe('owner')
     expect(alpha['index']).toBe(3)
     expect(alpha['accent']).toBe('amber')
-    expect(HEX64.test(JSON.stringify(alpha))).toBe(false)
     // The private sibling is never announced — not even by name.
     expect(JSON.stringify(layerAt(page).map(p => p.payload))).not.toContain('hidden-one')
-    expect(shareStatus.at(-1)).toMatchObject({ location: '/g1', offered: 1, uploading: 1, nameOnly: 1, private: 1 })
+    expect(shareStatus.at(-1)).toMatchObject({ location: '/g1', offered: 1, live: 1, nameOnly: 0, private: 1 })
   })
 
-  it('an edited child re-announces its last hosted entry byte-for-byte, then swaps after a receipt', async () => {
+  it('an edited child goes out at once with its new handle, served from this device, then as hosted after a receipt', async () => {
     const page = ['g2']
     seedPage(page, ['beta'])
     makePublic(page, 'beta')
@@ -210,9 +213,12 @@ describe('the never-retract gate', () => {
     const statusBefore = shareStatus.length
     EffectBus.emit('cell:0000-changed', { cell: 'beta' })
     await until(() => shareStatus.length > statusBefore && shareStatus.at(-1)!['location'] === '/g2')
-    expect(shareStatus.at(-1)).toMatchObject({ offered: 1, uploading: 1, nameOnly: 0 })
-    // Never retracted: every announcement since is the hosted entry, unchanged.
-    for (const p of layerAt(page)) expect(JSON.stringify(p.payload.visuals)).toBe(hostedJson)
+    expect(shareStatus.at(-1)).toMatchObject({ offered: 1, live: 1, nameOnly: 0 })
+    // Never a name: the hosted entry until the edit, then the new handle,
+    // served from here while no host has it.
+    const edited = lastLayerAt(page)!.payload.visuals!
+    expect(JSON.stringify(edited)).not.toBe(hostedJson)
+    expect(edited[0]).toMatchObject({ layerSig: sha('seal:g2/beta:v2'), accent: 'green', served: 'owner' })
 
     // The new handle lands on the host — the receipt swaps it in.
     state.available.add(sha('seal:g2/beta:v2'))
@@ -222,6 +228,7 @@ describe('the never-retract gate', () => {
     const swapped = lastLayerAt(page)!.payload.visuals!
     expect(swapped[0]['layerSig']).toBe(sha('seal:g2/beta:v2'))
     expect(swapped[0]['accent']).toBe('green')
+    expect(swapped[0]['served']).toBeUndefined()
   })
 
   it('making a tile private drops its name at once — the hosted memory never resurrects it', async () => {
@@ -241,27 +248,25 @@ describe('the never-retract gate', () => {
     expect(lastLayerAt(page)!.payload.visuals!.map(v => v['name'])).toEqual(['delta'])
   })
 
-  it('a receipt re-walks a waiting visited page within 150 ms — not only the page you stand on', async () => {
+  it('a visited page left behind is never waiting: its tile is live at once, and hosted when we come back after the receipt', async () => {
     const away = ['g4']
     seedPage(away, ['epsilon'])
     makePublic(away, 'epsilon')
     await goTo(away)
-    expect(lastLayerAt(away)!.payload.visuals![0]['layerSig']).toBeUndefined()   // placeholder
+    // Whole at once, served from this device — nothing on it waits on a host,
+    // so no receipt has to re-walk it while we stand elsewhere.
+    expect(lastLayerAt(away)!.payload.visuals![0]).toMatchObject({ layerSig: sealOf(away, 'epsilon'), served: 'owner' })
 
-    // Walk on to another page: g4 stays visited (sticky) and pending.
     seedPage(['g4b'], [])
     await goTo(['g4b'])
-
     state.available.add(sealOf(away, 'epsilon'))
-    const n = layerAt(away).length
-    const t0 = performance.now()
     EffectBus.emit('host:receipt', { sig: sealOf(away, 'epsilon') })
-    await until(() => layerAt(away).length > n, 1000)
+
+    // Back on it: the host serves it now, so it is said as hosted.
+    await goTo(away)
     const landed = lastLayerAt(away)!
     expect(landed.payload.visuals![0]['layerSig']).toBe(sealOf(away, 'epsilon'))
-    // 150 ms coalesce + a stubbed walk — far inside the old 2 s debounce +
-    // current-page-only re-walk, which never reached a page left behind.
-    expect(landed.at - t0).toBeLessThan(600)
+    expect(landed.payload.visuals![0]['served']).toBeUndefined()
   })
 
   it('domain tags lead with the swarm host and never advertise a loopback host from a public origin', async () => {
@@ -348,7 +353,8 @@ describe('per page: the hosts its tiles went to', () => {
     availableOn.set(sealOf(page, 'theta'), ['hypercomb.com']) // served elsewhere only
     await goTo(page)
     expect(domainsAt(page)).toEqual([['domain', 'pointblank.example']])
-    expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBeUndefined()
+    // Not served where it is shown yet: whole from this device meanwhile.
+    expect(lastLayerAt(page)!.payload.visuals![0]).toMatchObject({ layerSig: sealOf(page, 'theta'), served: 'owner' })
     expect(shareStatus.at(-1)).toMatchObject({ location: '/p2', host: 'pointblank.example', hostSource: 'publish' })
 
     availableOn.set(sealOf(page, 'theta'), ['pointblank.example'])
@@ -356,6 +362,7 @@ describe('per page: the hosts its tiles went to', () => {
     EffectBus.emit('host:receipt', { sig: sealOf(page, 'theta'), host: 'pointblank.example', swarm: true })
     await until(() => layerAt(page).length > n, 1000)
     expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBe(sealOf(page, 'theta'))
+    expect(lastLayerAt(page)!.payload.visuals![0]['served']).toBeUndefined()
   })
 
   it('a page\'s status speaks for its own host: another host\'s refusal is not its reason', async () => {
@@ -369,10 +376,10 @@ describe('per page: the hosts its tiles went to', () => {
   })
 
   // THE 2026-10-10 MEETING: `favorites` published at the typo
-  // `hyperccomb.com` (NXDOMAIN) read as "uploading" for ever. A branch a host
-  // takes none of the bytes of is NAMED — the branch, the host, and why — and
-  // is not counted as uploading: it is not on its way.
-  it('a tile whose subtree waits on a publish domain that cannot take bytes is named, with the host and why — not counted as uploading', async () => {
+  // `hyperccomb.com` (NXDOMAIN) read as "uploading" for ever. Since the live
+  // swarm (2026-10-11) such a tile goes out whole from this device while we
+  // are in the room — and is still never counted as uploading.
+  it('a tile whose subtree waits on a publish domain that cannot take bytes goes out live — not counted as uploading', async () => {
     const page = ['p8']
     seedPage(page, ['favorites', 'omicron'])
     makePublic(page, 'favorites')
@@ -385,9 +392,10 @@ describe('per page: the hosts its tiles went to', () => {
       EffectBus.emit('sync:state', { host: 'hypercomb.com', state: 'backed-up', status: 'backed-up', reason: '', swarm: true })
       await goTo(page)
       expect(shareStatus.at(-1)).toMatchObject({
-        location: '/p8', offered: 2, uploading: 0, host: 'hypercomb.com', hostState: 'backed-up',
-        blocked: [{ branch: 'favorites', host: 'hyperccomb.com', state: 'unreachable', why: 'unresolved' }],
+        location: '/p8', offered: 2, uploading: 0, nameOnly: 0, host: 'hypercomb.com', hostState: 'backed-up',
       })
+      const favorites = lastLayerAt(page)!.payload.visuals!.find(v => v['name'] === 'favorites')!
+      expect(favorites).toMatchObject({ layerSig: sealOf(page, 'favorites'), served: 'owner' })
     } finally { delete current['closureHostsOf'] }
   })
 
@@ -462,7 +470,7 @@ describe('per page: the hosts its tiles went to', () => {
     for (const p of layerAt(page)) expect(p.payload.visuals![0]['layerSig']).toBe(sealOf(page, 'mu'))
   })
 
-  it('a closure whose deeper page is still being read keeps the hosted entry, not a name', async () => {
+  it('a closure whose deeper page is still being read is never a name: the edit goes out whole from this device', async () => {
     const page = ['p7']
     seedPage(page, ['nu'])
     makePublic(page, 'nu')
@@ -481,7 +489,8 @@ describe('per page: the hosts its tiles went to', () => {
       const statusBefore = shareStatus.length
       EffectBus.emit('cell:0000-changed', { cell: 'nu' })
       await until(() => shareStatus.length > statusBefore && shareStatus.at(-1)!['location'] === '/p7')
-      for (const p of layerAt(page)) expect(p.payload.visuals![0]['layerSig']).toBe(sha('seal:p7/nu:v1'))
+      expect(lastLayerAt(page)!.payload.visuals![0]).toMatchObject({ layerSig: sha('seal:p7/nu:v2'), served: 'owner' })
+      for (const p of layerAt(page)) expect(p.payload.visuals![0]['layerSig']).toBeTruthy()
       expect(shareStatus.at(-1)).toMatchObject({ nameOnly: 0 })
     } finally { delete current['isClosureAvailableAt'] }
   })

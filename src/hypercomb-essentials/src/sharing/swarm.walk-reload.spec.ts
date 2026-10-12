@@ -226,22 +226,23 @@ await import('./swarm.drone.js')
 const swarm = registry['@diamondcoreprocessor.com/SwarmDrone'] as { markDisposed: () => void }
 afterAll(() => { swarm.markDisposed(); vi.useRealTimers() })
 
-describe('a reload re-announces its own replayed entries while they are served', () => {
-  it('the first page event after the reload carries the earlier full entries — no placeholder downgrade', async () => {
+// The live swarm (jwize 2026-10-11): a joined tab is its tiles' owner in the
+// room, so after a reload it says its CURRENT tiles whole at once, served from
+// this device — never a name, and never an older handle in their place.
+describe('a reload says its current tiles whole at once while its owner is in the room', () => {
+  it('the first page event after the reload carries every public tile whole — current handles, served from here', async () => {
     await tick(1_000)
     const root = layerAt([])
     expect(root.length).toBeGreaterThan(0)
     const first = root[0]
     expect(first.at - BOOT).toBeLessThan(1_000)
     expect(namesOf(first)).toEqual(['ai', 'bubble', 'cat', 'maze'])
-    // Served (or still being re-checked): said again, byte for byte.
-    expect(visual(first, 'maze')).toEqual(said.maze)
-    expect(visual(first, 'bubble')).toEqual(said.bubble)
-    // Its earlier handle is gone from the host: a name, never a dead handle.
-    expect(visual(first, 'cat')['layerSig']).toBeUndefined()
-    expect(HEX64.test(JSON.stringify(visual(first, 'cat')))).toBe(false)
-    // Never said before: a name. The forged word under our key is not ours.
-    expect(visual(first, 'ai')['layerSig']).toBeUndefined()
+    // Whole, with what each tile IS now — not what an earlier session said.
+    for (const name of ['maze', 'bubble', 'cat', 'ai'] as const) {
+      expect(visual(first, name)).toMatchObject({ layerSig: NOW[name], served: 'owner' })
+    }
+    expect(visual(first, 'maze')['accent']).toBe('now-maze')
+    // The forged word under our key is not ours.
     expect(JSON.stringify(published.map(p => p.payload))).not.toContain('forged')
     expect(state.asked).not.toContain(v('forged'))
     // Private now, or deleted: never announced, whatever the relay held.
@@ -250,13 +251,13 @@ describe('a reload re-announces its own replayed entries while they are served',
     expect(wire).not.toContain('gone')
   })
 
-  it('every page event until the host answers keeps the full entries — and then it upgrades to the new handles', async () => {
+  it('every page event until the host answers keeps the tiles whole — never a name — and then they are said as hosted', async () => {
     await tick(SERVED_AT + 1_000 - Date.now())
     const before = layerAt([]).filter(p => p.at < SERVED_AT)
     expect(before.length).toBeGreaterThan(0)
     for (const p of before) {
       expect(visual(p, 'maze')['layerSig']).toBe(NOW.maze)
-      expect(visual(p, 'bubble')['layerSig']).toBe(v('bubble:v1'))
+      expect(visual(p, 'bubble')['layerSig']).toBe(NOW.bubble)
     }
     const last = layerAt([]).at(-1)!
     expect(last.at - SERVED_AT).toBeLessThan(1_000)
@@ -266,7 +267,7 @@ describe('a reload re-announces its own replayed entries while they are served',
     expect(visual(last, 'ai')['layerSig']).toBe(NOW.ai)
   })
 
-  it('a replay that lands after the first walk turns its names back into what was said — within a re-walk', async () => {
+  it('a replay that lands after the first walk never turns a current tile back into an older one', async () => {
     const page = ['late']
     const sig = pageSig(page)
     state.children.set('late', ['kite'])
@@ -292,11 +293,13 @@ describe('a reload re-announces its own replayed entries while they are served',
     const first = layerAt(page)[0]
     expect(first).toBeTruthy()
     expect(first.at - t0).toBeLessThan(1_000)
-    expect(visual(first, 'kite')['layerSig']).toBeUndefined()   // nothing known yet: the name
+    // Whole at once with what it is now, served from here — no name to wait out.
+    expect(visual(first, 'kite')).toMatchObject({ layerSig: v('kite:v2'), served: 'owner' })
 
+    // The replay of what an earlier session said lands later: it never turns
+    // the current tile back into the older one.
     await tick(1_500)
-    const restored = layerAt(page).at(-1)!
-    expect(restored.at - t0).toBeLessThan(2_500)
-    expect(visual(restored, 'kite')).toEqual(saidKite)
+    const after = layerAt(page).at(-1)!
+    expect(visual(after, 'kite')['layerSig']).toBe(v('kite:v2'))
   })
 })

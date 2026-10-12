@@ -176,23 +176,20 @@ const swarm = registry['@diamondcoreprocessor.com/SwarmDrone'] as { markDisposed
 afterAll(() => { swarm.markDisposed(); vi.useRealTimers() })
 
 describe('tile first: a branch is takeable once its own atoms are served (BCL-3, D1)', () => {
-  it('GW1: the name leaves at once, and the handle and picture follow its own atoms — seconds, not 766 s', async () => {
+  // The live swarm (jwize 2026-10-11): while its owner is in the room the
+  // branch leaves WHOLE at once — handle, picture, `deep: 'owner'` — served
+  // from this device; the host only matters after we leave.
+  it('GW1: the branch leaves whole at once, served from this device — not after its atoms reach a host', async () => {
     await tick(1_000)
-    const named = layerAt([]).find(p => visualOf(p, BRANCH))
-    expect(named).toBeTruthy()
-    expect(named!.at - BOOT).toBeLessThan(1_000)
-    // Nothing of it is served yet: a name, no signature anywhere.
-    expect(HEX64.test(JSON.stringify(visualOf(named!, BRANCH)))).toBe(false)
-
-    await tick(TILE_AT + 8_000 - Date.now())
-    const takeable = firstWith([], BRANCH, v => v['layerSig'] === HANDLE)
-    expect(takeable).toBeTruthy()
-    const handleAfterMs = takeable!.at - BOOT
-    expect(handleAfterMs).toBeLessThan(10_000)                    // today: 766,500 ms
-    const v = visualOf(takeable!, BRANCH)!
+    const first = layerAt([]).find(p => visualOf(p, BRANCH))
+    expect(first).toBeTruthy()
+    expect(first!.at - BOOT).toBeLessThan(1_000)
+    const v = visualOf(first!, BRANCH)!
+    expect(v['layerSig']).toBe(HANDLE)
+    expect(v['served']).toBe('owner')
     expect((v['small'] as { image?: string }).image).toBe(PICTURE) // the picture rides with it
     expect(v['deep']).toBe('owner')                                // its deeper pages: on the sharer's device
-    console.info(`[GW1 analog] name ${named!.at - BOOT} ms · handle ${handleAfterMs} ms after join (hunt, before: 1.5 s · 766.5 s)`)
+    console.info(`[GW1 analog] whole ${first!.at - BOOT} ms after join (hunt, before: name 1.5 s · handle 766.5 s)`)
   })
 
   it('the whole closure keeps uploading — the branch is marked as a closure, not as a tile', () => {
