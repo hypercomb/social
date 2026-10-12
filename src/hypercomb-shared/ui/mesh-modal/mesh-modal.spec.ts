@@ -345,17 +345,18 @@ describe('ZI-1: a new tab pre-fills the point the origin last met at — never i
 })
 
 describe('ZI-1 / ZI-6: the selector\'s words', () => {
-  it('preview the zone START will store: typed text folds (D6), the store\'s own value is read as held', async () => {
+  it('preview the zone START will store: typed text folds (D6), and so does a pair the store held from before — one room for everyone', async () => {
     const { secretTag } = await import('@hypercomb/core')
     const plain = `${secretTag('lifecycle\0downtown\0joe\'s\0hypercomb.com', 'en')} · hypercomb.com`
     const modal = openStashed({ room: 'ｄｏｗｎｔｏｗｎ', secret: 'joe’s' })
     expect(modal.zoneWords()).toBe(plain)        // what a friend typing plain text reads
-    // A pair the store already holds (recorded before the fold) previews as held.
+    // A pair the store already holds (recorded before the fold): the ROOM
+    // folds it too (core roomText, 2026-10-12), so everyone reads one pair.
     room.value = 'joe’s place'
     const held = openStashed({ room: 'joe’s place', secret: 'joe’s' })
-    expect(held.zoneWords()).toBe(`${secretTag('lifecycle\0joe’s place\0joe\'s\0hypercomb.com', 'en')} · hypercomb.com`)
+    expect(held.zoneWords()).toBe(`${secretTag('lifecycle\0joe\'s place\0joe\'s\0hypercomb.com', 'en')} · hypercomb.com`)
     typeInto(held.onRoomInput, 'joe’s place ')
-    expect(held.zoneWords()).toBe(`${secretTag('lifecycle\0joe’s place\0joe\'s\0hypercomb.com', 'en')} · hypercomb.com`)
+    expect(held.zoneWords()).toBe(`${secretTag('lifecycle\0joe\'s place\0joe\'s\0hypercomb.com', 'en')} · hypercomb.com`)
   })
 
   it('are drawn at the host START meets at, with that host beside them — from the English list, the reader\'s own beside it', async () => {

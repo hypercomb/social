@@ -95,12 +95,48 @@ describe("the room's preimage always names its host", () => {
     const H = 'wss://hypercomb.com'
     expect(roomPreimage('a', 'b', 'wss://HyperComb.com/')).toBe(roomPreimage('a', 'b', H))
     expect(roomPreimage('a', 'b', 'wss://pluginthematrix.com')).not.toBe(roomPreimage('a', 'b', H))
-    // case is the room's, never the host's
-    expect(roomPreimage('A', 'b', H)).not.toBe(roomPreimage('a', 'b', H))
+    // case splits nothing (2026-10-12: "case ignore or it would be confusing")
+    expect(roomPreimage('A', 'B', H)).toBe(roomPreimage('a', 'b', H))
   })
 
   it('two names for one physical relay are two rooms, on purpose (2026-10-11: localhost:7777 and jwize.com on one PC)', () => {
     expect(lifecyclePreimage('a', 'b', 'ws://localhost:7777')).not.toBe(lifecyclePreimage('a', 'b', 'wss://jwize.com'))
     expect(lifecyclePreimage('a', 'b', 'ws://localhost:7777')).not.toBe(lifecyclePreimage('a', 'b', 'ws://127.0.0.1:7777'))
+  })
+})
+
+// GOLDEN VECTORS — DETERMINISTIC FOR EVERYONE (jwize, 2026-10-12: "It has to
+// be deterministic for everyone"; "case ignore or it would be confusing").
+// The words every device shows for one host + location + secret. A future
+// package that changes any of these splits every room — that is a protocol
+// change, never a refactor. Frozen; never edit a row to make a test pass.
+describe('the room words are the same for everyone, for ever', async () => {
+  const { secretTag } = await import('./secret-words/index.js')
+  const words = (room: string, secret: string, host: string): string => {
+    const preimage = lifecyclePreimage(room, secret, host)
+    return preimage ? secretTag(preimage, 'en') : ''
+  }
+  const GOLDEN: [room: string, secret: string, host: string, words: string][] = [
+    ['downtown', 'downtown', 'hypercomb.com', 'marble cove'],
+    ['DownTown', 'DOWNTOWN', 'wss://HyperComb.com/', 'marble cove'],
+    ['downtown', 'downtown', 'hypercomb.com:443', 'marble cove'],
+    ['MyNewRoom', 'MyNewPass', 'hypercomb.com', 'narrow granite'],
+    ['İstanbul', 'ıI', 'hypercomb.com', 'solid moth'],
+    ['downtown', 'downtown', 'ws://localhost:7777', 'faint dew'],
+    ['downtown', 'downtown', '', ''],
+  ]
+  for (const [room, secret, host, expected] of GOLDEN) {
+    it(`${JSON.stringify([room, secret, host])} → ${JSON.stringify(expected)}`, () => {
+      expect(words(room, secret, host)).toBe(expected)
+    })
+  }
+  it('case never splits a room: location and secret fold; the host folds as a host does', () => {
+    expect(roomPreimage('MyNewRoom', 'MyNewPass', 'HyperComb.com')).toBe(roomPreimage('mynewroom', 'mynewpass', 'hypercomb.com'))
+  })
+  it('the fold is locale-independent: a Turkish dotted capital I folds the same under every locale', () => {
+    expect(lifecyclePreimage('İ', 'I', 'h.example')).toBe(`lifecycle\0${'İ'.toLowerCase()}\0i\0h.example`)
+  })
+  it('punctuation is kept — a room and a secret are not pools of meaning', () => {
+    expect(roomPreimage('p@ss', 'a-b', 'h.example')).not.toBe(roomPreimage('p ss', 'a b', 'h.example'))
   })
 })

@@ -308,3 +308,15 @@ built against the round-two core read an empty field as hypercomb.com.
   never an address, and the bundle names no host.
 - `hc:current-zone` (the swarm's local per-zone scope key for hide lists) is a
   device-local key, not an address.
+
+## Case never splits a room (2026-10-12)
+
+jwize: "case ignore or it would be confusing" and "It has to be deterministic
+for everyone". A room's location and secret enter its preimage as
+`roomText` (core `zone-text.ts`): the canonical entry text, case-folded with
+core's locale-independent `fold` (never `toLocaleLowerCase`). `MyNewRoom` and
+`mynewroom` are one room; `DownTown`/`DOWNTOWN` at `wss://HyperComb.com/` read
+the same words as `downtown`/`downtown` at `hypercomb.com` ("marble cove").
+Location and secret are not pools of meaning: punctuation is kept. The
+golden vectors in `zone-text.spec.ts` are frozen — changing one is a protocol
+change that splits every room.
