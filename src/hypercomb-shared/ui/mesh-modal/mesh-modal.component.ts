@@ -295,9 +295,10 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       const focus = payload?.focus === 'code' ? '.mesh-modal-code'
         : payload?.focus === 'point' || (this.pointSupported() && !this.pointDraft().trim()) ? '.mesh-modal-point'
         : '.mesh-modal-room'
-      queueMicrotask(() => {
-        document.querySelector<HTMLInputElement>(focus)?.focus()
-      })
+      // After the render that draws the fields: a microtask ran before
+      // `@if (open())` had drawn them, and the caret stayed in the command
+      // line, so typing straight after the shortcut went there (2026-10-12).
+      this.#focusSoon(focus)
     })
 
     // The share toggle wrapping HOST → PRIVATE closes the selector with it.
@@ -342,6 +343,13 @@ export class MeshModalComponent implements OnInit, OnDestroy {
 
   readonly onCodeInput = (event: Event): void => {
     this.codeDraft.set((event.target as HTMLInputElement).value)
+  }
+
+  /** Focus a field as soon as it is drawn — a few frames at most. */
+  #focusSoon = (selector: string, tries = 10): void => {
+    const field = document.querySelector<HTMLInputElement>(selector)
+    if (field) { field.focus(); return }
+    if (tries > 0) setTimeout(() => this.#focusSoon(selector, tries - 1), 16)
   }
 
   /** The offered host, in one tap: hypercomb.com fills the field (its code,
