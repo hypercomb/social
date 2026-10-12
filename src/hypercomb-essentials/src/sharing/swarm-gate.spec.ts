@@ -404,16 +404,21 @@ describe('per page: the hosts its tiles went to', () => {
     })
   })
 
-  it('nothing hosts a page: names only, no domain named, said as no-host', async () => {
+  // THE LIVE SWARM (jwize 2026-10-11): with no host, a tile goes out whole —
+  // takeable, its picture named — served from this device while it is here.
+  it('nothing hosts a page: a FULL entry, served:\'owner\', no domain named, said as no-host', async () => {
     const page = ['p3']
     pageHosts.set('p3', { hosts: [], source: 'none', pending: false })
     seedPage(page, ['iota'])
     makePublic(page, 'iota')
-    availableOn.set(sealOf(page, 'iota'), ['jwize.com'])
+    state.props.set('iota', { accent: 'gold', small: { image: '9'.repeat(64) } })
     await goTo(page)
     expect(domainsAt(page)).toEqual([])
-    expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBeUndefined()
-    expect(shareStatus.at(-1)).toMatchObject({ location: '/p3', host: '', hostSource: 'none', hostState: 'no-host' })
+    const [iota] = lastLayerAt(page)!.payload.visuals!
+    expect(iota['layerSig']).toBe(sealOf(page, 'iota'))
+    expect(iota['served']).toBe('owner')
+    expect(iota['small']).toEqual({ image: '9'.repeat(64) })
+    expect(shareStatus.at(-1)).toMatchObject({ location: '/p3', host: '', hostSource: 'none', hostState: 'no-host', nameOnly: 0, uploading: 0, live: 1 })
   })
 
   it('a page whose hosts are still being read says NOTHING yet — never the relay meanwhile — and walks when they land', async () => {

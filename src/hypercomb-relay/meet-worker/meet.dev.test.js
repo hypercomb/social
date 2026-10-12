@@ -181,7 +181,7 @@ test('the open host admits a codeless dial, card first, while the coded host bes
   const first = await s.wait(() => true)
   assert.equal(first?.[0], 'NOTICE')
   const card = JSON.parse(first[1].slice('hc:host '.length))
-  assert.equal(card.participants, 'all')
+  assert.equal(card.participants, false, 'wrangler.meet.toml names no upload host')
   assert.equal(card.addressed, true)
   assert.ok(Math.abs(card.time - nowSec()) <= 2)
   assert.equal(await ask(s, 'scan', { kinds: [30206], limit: 1 }).then((r) => /^restricted: /.test(r)), true, 'no scans at the open default either')
@@ -217,7 +217,7 @@ test('the operator recycles the first code; only that code gets in, card first',
   const first = await s.wait(() => true)
   assert.equal(first[0], 'NOTICE')
   const card = JSON.parse(first[1].slice('hc:host '.length))
-  assert.equal(card.participants, 'all')
+  assert.equal(card.participants, false, 'wrangler.meet.toml names no upload host')
   assert.ok(Math.abs(card.time - nowSec()) <= 2, 'the card carries the meeting point\'s clock')
 
   const wrong = await dial('B'.repeat(32))

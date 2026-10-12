@@ -52,11 +52,17 @@ new_sqlite_classes = ["MeetingPoint"]
 # MEET_OPEN_HOSTS, or nothing reaches it.
 MEET_OPEN_HOSTS = "hypercomb.com"
 # What the hc:host card tells clients about the byte host behind this meeting
-# point: pluginthematrix-core takes any signing key's PUT /<sig> (AUTO_GRANT=1,
-# 100 MB per key per 90 days) at the hypercomb.com zone root, so "all" — the
-# swarm's relay tier then uploads to https://hypercomb.com, the host a fresh
-# install's pool is seeded with. Keep it in step with that worker.
-PARTICIPANTS = "all"
+# point: NOTHING. Empty reads as false (worker.js participantsOf), so no client
+# takes the meeting point for its upload host (jwize 2026-10-11: "we can't give
+# hosting away for free"; "Let's just make sure that there isn't a default
+# host"). A meeting point is where people meet, never who keeps their bytes:
+# a swarm's tiles upload to the host the participant entered in the host field
+# (or a page's publish marks), else nowhere, and are served live from the
+# sharer's device while they are present. pluginthematrix-core keeps bytes only
+# for the people it hosts (blossom-worker hostPeople, AUTO_GRANT "0"), and
+# packages from before 2026-10-11 still read this card as an upload tier, so
+# "" is also what stops their uploads through it. Never "all" or "zones" here.
+PARTICIPANTS = ""
 # No recycle here: an open host has no code. Left empty on purpose.
 OPERATOR_KEYS = ""
 # Where the open object is created (only on its first request; later deploys

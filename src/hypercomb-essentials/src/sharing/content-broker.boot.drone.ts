@@ -77,7 +77,7 @@ import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
 import { isJoinedHere } from './membership.js'
 import { PASSIVE_REPLICATION_KEY, passiveReplicationQueue } from './passive-replication-queue.js'
-import { visualArtifactSigs } from './visual-hosts.js'
+import { MESH_ANSWER_MAX_BYTES, visualArtifactSigs } from './visual-hosts.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
@@ -176,7 +176,7 @@ const OLDER_ASKER_TTL_MS = 10 * 60_000
 const CHUNK_BYTES = 192 * 1024
 // Largest resource a participant will serve or assemble over the mesh. Beyond
 // this the durable tier (an HTTP host) is the path.
-const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+const MAX_RESPONSE_BYTES = MESH_ANSWER_MAX_BYTES
 // A chunked run keeps the asker's clock alive while chunks keep arriving; this
 // bounds the whole assembly regardless.
 const MESH_ASSEMBLY_MAX_MS = 60_000

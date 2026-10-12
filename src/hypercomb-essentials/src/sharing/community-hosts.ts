@@ -55,12 +55,6 @@ export const HOST_ARTIFACT_KIND = artifactKindFor(HOST_FAMILY)
  *  colon-bearing meaning can never collide with a lineage sigbag. */
 export const COMMUNITY_HOSTS_POOL = 'community:hosts'
 
-/** '1' once the one known host has been planted in an empty pool (HostsDrone
- *  seeds it once, ever). Until then an empty pool is NOT a participant's
- *  choice — it is a pool the seed has not reached yet — and nothing may treat
- *  it as "no hosts" (the swarm would fall to the relay: swarm-hosts.ts). */
-export const HOSTS_SEEDED_KEY = 'hc:hosts:seeded'
-
 type PoolStore = {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
   getResourceLocal?: (sig: string) => Promise<Blob | null>
@@ -145,18 +139,24 @@ const communityPool = async (): Promise<FileSystemDirectoryHandle | null> => {
   const store = get<PoolStore>(STORE_KEY)
   if (!store?.getPool) return null
   // The Store registers before its OPFS root is open, and a pool asked for in
-  // that gap reads as nothing — which is how a boot read listed no hosts and
-  // the one-time seed never landed. Wait for the open (memoized; the shell
-  // has already started it) instead of answering "none".
+  // that gap reads as nothing — which is how a boot read listed no hosts.
+  // Wait for the open (memoized; the shell has already started it) instead of
+  // answering "none".
   try { await store.initialize?.() } catch { return null }
   try { return await store.getPool(COMMUNITY_HOSTS_POOL) } catch { return null }
 }
 
-/** Every host member with the moment it was written (added, or added again). */
-async function readCommunityMembers(): Promise<{ zone: string; at: number }[] | null> {
+/**
+ * Every host you carry, alphabetically. The pool IS the set — there is no
+ * roster document to keep in agreement with it, so a half-written add can only
+ * ever mean one host missing, never a list that disagrees with its members.
+ * These are hosts you READ from: none of them picks where your swarm tiles
+ * upload (swarm-hosts.ts — publish marks, else the host field, else none).
+ */
+export async function listCommunityHosts(): Promise<string[]> {
   const pool = await communityPool()
-  if (!pool) return null
-  const members = new Map<string, number>()
+  if (!pool) return []
+  const zones = new Set<string>()
   try {
     for await (const [, handle] of (pool as unknown as {
       entries(): AsyncIterableIterator<[string, FileSystemHandle]>
@@ -165,34 +165,11 @@ async function readCommunityMembers(): Promise<{ zone: string; at: number }[] | 
       try {
         const file = await (handle as FileSystemFileHandle).getFile()
         const zone = zoneOfHostMeaning((JSON.parse(await file.text()) as { meaning?: unknown })?.meaning)
-        const at = Number.isFinite(file.lastModified) ? Number(file.lastModified) : 0
-        if (zone) members.set(zone, Math.min(at, members.get(zone) ?? Number.POSITIVE_INFINITY))
+        if (zone) zones.add(zone)
       } catch { /* a member that will not parse is not a host */ }
     }
   } catch { return [] }
-  return [...members].map(([zone, at]) => ({ zone, at }))
-}
-
-/**
- * Every host you carry, alphabetically. The pool IS the set — there is no
- * roster document to keep in agreement with it, so a half-written add can only
- * ever mean one host missing, never a list that disagrees with its members.
- */
-export async function listCommunityHosts(): Promise<string[]> {
-  return ((await readCommunityMembers()) ?? []).map(m => m.zone).sort()
-}
-
-/**
- * The same hosts in the order you ADDED them, first added first (ties
- * alphabetical) — null when the pool cannot be opened. The swarm's upload
- * host is the first of these (swarm-hosts.ts): on a fresh install the seed,
- * hypercomb.com. Adding a host to follow it never moves where your tiles go;
- * removing the ones ahead of a host makes it the one.
- */
-export async function listCommunityHostsInAddedOrder(): Promise<string[] | null> {
-  const members = await readCommunityMembers()
-  if (!members) return null
-  return members.sort((a, b) => a.at - b.at || a.zone.localeCompare(b.zone)).map(m => m.zone)
+  return [...zones].sort()
 }
 
 /** Add a host to your community. Idempotent — the record is content-addressed,

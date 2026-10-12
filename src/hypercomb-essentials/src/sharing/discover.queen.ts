@@ -17,6 +17,7 @@
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { fetchPublicationCards } from './publications-ledger.js'
+import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 
 import { DISCOVER_EFFECT } from './discover-effects.js'
 
@@ -95,10 +96,16 @@ export class DiscoverQueenBee extends QueenBee {
    *  the host directory shows) are the horizon; each one's ledger is read
    *  and the plates are laid on one page. Nothing is placed, nothing is
    *  written — it is the swarm's "what is out there" for static, public
-   *  content, and every plate can be stepped through or brought home. */
+   *  content, and every plate can be stepped through or brought home.
+   *
+   *  Carrying none (a fresh install: nothing seeds the pool any more, jwize
+   *  2026-10-11), the public content host is READ instead — never written
+   *  into the pool. It stays a read source while it serves; it is no one's
+   *  upload host. */
   async #community(): Promise<void> {
     const { listCommunityHosts } = await import('./community-hosts.js')
-    const zones = await listCommunityHosts().catch(() => [] as string[])
+    const carried = await listCommunityHosts().catch(() => [] as string[])
+    const zones = carried.length > 0 ? carried : [...PUBLIC_CONTENT_HOSTS]
     const origins = zones
       .map(zone => normalizeDirectory(zone)?.origin ?? '')
       .filter(Boolean)

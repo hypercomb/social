@@ -57,11 +57,16 @@ type Say = (key: string, fallback: string, params?: Record<string, string | numb
 
 const ioc = <T>(key: string): T | undefined => window.ioc?.get?.(key) as T | undefined
 
-/** The host this participant publishes to, else the compiled public content host. */
-const defaultHost = (): string => {
-  try { return ioc<HostSyncLike>(HOST_SYNC_KEY)?.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || '' }
-  catch { return PUBLIC_CONTENT_HOSTS[0] ?? '' }
+/** The host this participant publishes to — one they NAMED, or '' (there is
+ *  no default host, jwize 2026-10-11). A set writes only here. */
+const ownHost = (): string => {
+  try { return ioc<HostSyncLike>(HOST_SYNC_KEY)?.publicHostDomain?.() || '' }
+  catch { return '' }
 }
+
+/** Where a show READS: your host, else the public content host — a profile
+ *  published there before the default went is still read there. */
+const readHost = (): string => ownHost() || (PUBLIC_CONTENT_HOSTS[0] ?? '')
 
 const seedLabel = (): string | null => {
   try { return localStorage.getItem(USER_LABEL_KEY) } catch { return null }
@@ -189,7 +194,8 @@ export class ProfileQueenBee extends QueenBee {
     const word = parseProfileWord(args)
     if (word.form === 'usage') { usage(); return }
     if (word.form === 'badhost') { toast(t('profile.badhost', '{host} is not a host name — put @<domain> right after profile, like profile @example.com.', { host: word.host || '@' }), 'warning'); return }
-    const host = word.host ?? defaultHost()
+    // A show reads; a set writes, and only to a host the participant named.
+    const host = word.host ?? (word.form === 'show' ? readHost() : ownHost())
     if (!host) { toast(t('profile.unpublished', 'Your profile was NOT published: {reason}', { reason: why('nohost') }), 'warning'); return }
 
     if (word.form === 'show') {

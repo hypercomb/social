@@ -5,16 +5,19 @@
 //               (a typo: NXDOMAIN) no longer holds its subtree as names: the
 //               domain is passed over after its uploads' own answer — one
 //               PUT for a refusal, three for silence — and the pages go to
-//               the pool's host; the domain is named, with why.
+//               the host field (the meeting point the participant entered);
+//               the domain is named, with why.
 //   BCL-2       closureVerdict names what a closure waits on: the host, the
 //               page, the atom, the state, the host's own words, the tile.
 //   BCL-3 / D1  the TILE-only verdict (deep = false) is ok once the tile's
 //               own atoms are served, whatever its subtree still waits on.
 //   BCL-8       an atom a host refuses for good (413) is the sharer's own to
 //               serve: ownerHeld, the file named — the tile stays takeable.
-//   BCL-7/TS-5  not-live from a host this tab does not meet at is a standing
-//               refusal after its retries (one PUT a wave, at most six), and
-//               the upload to it carries this key's signed {alive} beacon.
+//   BCL-7/TS-5  not-live from a host this tab does not meet at (a publish
+//               domain) is a standing refusal after its retries (one PUT a
+//               wave, at most six); from the host field — where this tab
+//               meets — it never is. An upload after a not-live carries this
+//               key's signed {alive} beacon.
 //   BCL-4       each entry is asked about and sent in the same breath; a small
 //               atom to a host that answers for itself goes without a HEAD;
 //               the queue goes shallowest first across every root.
@@ -135,35 +138,39 @@ const layers = new Map<string, Uint8Array>()
 /** Local layer reads (the gate's walk) — BCL-5. */
 let layerReads = 0
 
-let pool: string[] | null = ['hypercomb.com']
+/** The host field — the meeting point the participant entered (the mesh's
+ *  swarmHost). Each service reads the value it was made with (`make`), so a
+ *  later test's field never moves an earlier test's service. */
+let field = 'hypercomb.com'
 let marks = new Map<string, string[]>()
-let participants: unknown = 'all'
-let meetingHost = ''
 let session = new Map<string, string>()
-const deps = {
-  readPool: async () => pool,
+type Box = { field: string }
+const depsOf = (box: Box, over: Record<string, unknown> = {}) => ({
   readMarks: async (segments: readonly string[]) => marks.get(segments.join('/')) ?? [],
-  relay: () => ({ host: 'jwize.com', participants }),
+  relay: () => ({ host: box.field }),
   originLoopback: () => false,
-  meetingHost: () => meetingHost,
   session: () => ({
     getItem: (k: string) => session.get(k) ?? null,
     setItem: (k: string, v: string) => { session.set(k, String(v)) },
     removeItem: (k: string) => { session.delete(k) },
   }),
-}
+  ...over,
+})
 
 const settle = async (turns = 40): Promise<void> => {
   for (let i = 0; i < turns; i++) await new Promise<void>(resolve => setImmediate(resolve))
 }
 
-const make = async (...pages: string[][]): Promise<Service> => {
-  const resolver = new Resolver(deps)
+/** A service over a resolver that has read the root and `pages`; `box` holds
+ *  its host field (the test's `field` when it was made). */
+const makeWith = async (box: Box, over: Record<string, unknown>, ...pages: string[][]): Promise<Service> => {
+  const resolver = new Resolver(depsOf(box, over))
   resolver.warm(null)
   for (const page of pages) resolver.warm(page)
   await settle(10)
   return new HostSync(resolver)
 }
+const make = (...pages: string[][]): Promise<Service> => makeWith({ field }, {}, ...pages)
 
 const join = (joined: boolean): void => { EffectBus.emit('mesh:public-changed', { public: joined }) }
 const meshState = (state: string): void => { EffectBus.emit('mesh:connection', { state }) }
@@ -191,12 +198,9 @@ beforeEach(() => {
   layerReads = 0
   markerWrites = 0
   signed = []
-  pool = ['hypercomb.com']
+  field = 'hypercomb.com'
   marks = new Map()
-  participants = 'all'
-  meetingHost = ''
   session = new Map()
-  EffectBus.emit('hosts:render', { open: false, zones: [], loaded: false })
   registry.set('@hypercomb.social/Store', {
     opfsRoot: root,
     getResourceLocal: async (s: string) => {
@@ -205,7 +209,7 @@ beforeEach(() => {
     },
     getLayerPoolBytes: async (s: string) => { const b = layers.get(s); if (b) layerReads++; return b?.slice() ?? null },
   })
-  registry.set(MESH_KEY, { swarmHost: () => 'jwize.com' })
+  registry.set(MESH_KEY, { swarmHost: () => field })
   registry.delete('@hypercomb.social/RoomStore')
   registry.delete('@hypercomb.social/SecretStore')
   registry.delete('@diamondcoreprocessor.com/SwarmDrone')
@@ -334,7 +338,7 @@ describe('the tile-only verdict is ok once the tile\'s own atoms are served', ()
   it('deep = false: ok; deep = true: waiting on the child page, named — host, page, atom, tile', async () => {
     const child = await tile('a')
     const big = await tile('big', [child.sig])
-    // The tile's own atoms are on the pool host already (receipts on file);
+    // The tile's own atoms are on the host field already (receipts on file);
     // its child is not — and nothing at all may be asked of the network.
     const fetch = vi.fn(async (): Promise<Response> => { throw new TypeError('no network in this test') })
     vi.stubGlobal('fetch', fetch)
@@ -356,18 +360,15 @@ describe('the tile-only verdict is ok once the tile\'s own atoms are served', ()
 
   it('a page whose hosts are still being read is unknown — never "no"', async () => {
     const t = await tile('waiting')
-    let land!: () => void
-    const landed = new Promise<void>(resolve => { land = resolve })
-    const readPool = deps.readPool
-    deps.readPool = async () => { await landed; return pool }
-    try {
-      vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('no network') }))
-      const service = await make()
-      const v = await service.closureVerdict(t.sig, 'layer', false, [])
-      expect(v).toMatchObject({ ok: false, ownerHeld: false, unknown: true })
-      expect(v.blocking).toMatchObject({ state: 'pending' })
-      expect(await service.isClosureAvailableAt(t.sig, 'layer', false, [])).toBeNull()
-    } finally { land(); deps.readPool = readPool }
+    // The page's marks are a cold read: a publish domain could be nearer than
+    // the host field, so nothing can be said yet.
+    const hang = new Promise<never>(() => undefined)
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('no network') }))
+    const service = await makeWith({ field }, { readMarks: () => hang })
+    const v = await service.closureVerdict(t.sig, 'layer', false, ['shop'])
+    expect(v).toMatchObject({ ok: false, ownerHeld: false, unknown: true })
+    expect(v.blocking).toMatchObject({ state: 'pending' })
+    expect(await service.isClosureAvailableAt(t.sig, 'layer', false, ['shop'])).toBeNull()
   })
 })
 
@@ -420,8 +421,11 @@ describe('an atom refused for good is ownerHeld, the file named — the tile sta
   })
 
   it('a host that refuses every upload, or is full, with no door after it: ownerHeld, its own words', async () => {
-    participants = false // the relay takes nobody: nothing to fall through to
+    // The host field refuses (AUTO_GRANT off, not a friend) or is full:
+    // nothing is after it — there is no default host to fall through to.
     for (const [status, body, state] of [[403, 'participants-closed', 'refused'], [429, 'over the day\'s quota', 'full']] as const) {
+      // Each is its own tab: the first's pass-over is not this one's.
+      session = new Map()
       const t = await tile(`to a ${state} host`)
       const door: Host = heap({ putStatus: () => new Response(body, { status, headers: status === 429 ? { 'retry-after': '3600' } : {} }) })
       vi.stubGlobal('fetch', router({ 'hypercomb.com': door }))
@@ -437,6 +441,32 @@ describe('an atom refused for good is ownerHeld, the file named — the tile sta
   })
 })
 
+describe('a RELOADED tab keeps its host\'s standing answer: a live tile is never taken back for a reload', () => {
+  it('the host field this tab passed over (remembered in its session) is a standing answer at once: ownerHeld, its words, and nothing asked of the network', async () => {
+    // Before the reload: the host field answered 403 and was passed over —
+    // the resolver keeps that in THIS tab's session for the hour.
+    session.set('hc:swarm-hosts:down', JSON.stringify([['hypercomb.com', 'refused: 403 this host keeps bytes for its own people only', Date.now() - 60_000]]))
+    const fetch = vi.fn(async (): Promise<Response> => { throw new TypeError('no network in this test') })
+    vi.stubGlobal('fetch', fetch)
+    const t = await tile('shared before the reload')
+    const service = await make()
+    // No upload of the new page has been refused yet — the answer stands anyway.
+    const v = await service.closureVerdict(t.sig, 'layer', false, [])
+    expect(v).toMatchObject({ ok: false, ownerHeld: true })
+    expect(v.blocking).toMatchObject({ host: 'hypercomb.com', state: 'refused', reason: '403 this host keeps bytes for its own people only' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('a door passed over only for what may have been the path is not a standing answer', async () => {
+    session.set('hc:swarm-hosts:down', JSON.stringify([['hypercomb.com', 'page: answered a web page', Date.now() - 60_000]]))
+    vi.stubGlobal('fetch', vi.fn(async (): Promise<Response> => { throw new TypeError('no network in this test') }))
+    const t = await tile('a page at the door')
+    const service = await make()
+    const v = await service.closureVerdict(t.sig, 'layer', false, [])
+    expect(v.ownerHeld).toBe(false)
+  })
+})
+
 // ── (3) a publish domain that can never take the bytes stops gating (D2) ───
 
 describe('BCL-1 / D2: the swarm stops waiting on a publish domain that refuses or never answers', () => {
@@ -449,7 +479,7 @@ describe('BCL-1 / D2: the swarm stops waiting on a publish domain that refuses o
     return { root: r.sig, grand }
   }
 
-  it('refuse.localhost (HEAD 404, PUT 405): one PUT, passed over, the subtree hosted on the pool — ok, the domain named', async () => {
+  it('refuse.localhost (HEAD 404, PUT 405): one PUT, passed over, the subtree hosted on the host field — ok, the domain named', async () => {
     const { root: r } = await longTail('lt-refused', 'refuse.example')
     const door = staticDoor()
     const apex = heap()
@@ -462,7 +492,7 @@ describe('BCL-1 / D2: the swarm stops waiting on a publish domain that refuses o
     await waitFor(async () => (await service.isClosureAvailableAt(r, 'layer', true, [])) === true, 10_000)
     expect(Date.now() - started).toBeLessThan(10_000)
     expect(calls(door, 'PUT')).toHaveLength(1)
-    expect(service.swarmHostsFor(['lt-refused', 'c01'])).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['refuse.example'] })
+    expect(service.swarmHostsFor(['lt-refused', 'c01'])).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false, passedOver: ['refuse.example'] })
     expect(service.hostTrouble('refuse.example')).toMatchObject({ why: 'refused', reason: '405 Method Not Allowed' })
     // BCL-1: the root's closure names the domain worn BELOW it (c01), for
     // the line where lt-refused is offered — after its pages went elsewhere.
@@ -471,7 +501,7 @@ describe('BCL-1 / D2: the swarm stops waiting on a publish domain that refuses o
     expect(session.get('hc:swarm-hosts:down')).toContain('refuse.example')
   })
 
-  it('typo.localhost (NXDOMAIN): at most three uploads, then never-answered — passed over, ok on the pool', async () => {
+  it('typo.localhost (NXDOMAIN): at most three uploads, then never-answered — passed over, ok on the host field', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
     const { root: r } = await longTail('lt-typo', 'typo.example')
     const typo = nowhere()
@@ -481,7 +511,7 @@ describe('BCL-1 / D2: the swarm stops waiting on a publish domain that refuses o
     const service = await make(['lt-typo'], ['lt-typo', 'c01'])
     void service.markPublic(r, 'layer', true, [])
     await advanceUntil(async () => (service.swarmHostsFor(['lt-typo', 'c01']).passedOver ?? []).includes('typo.example'))
-    expect(service.swarmHostsFor(['lt-typo', 'c01'])).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['typo.example'] })
+    expect(service.swarmHostsFor(['lt-typo', 'c01'])).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false, passedOver: ['typo.example'] })
     expect(service.hostTrouble('typo.example')).toMatchObject({ why: 'unresolved' })
     expect(service.closurePassedOverOf(r)).toEqual(['typo.example'])
     await advanceUntil(async () => (await queued()).length === 0)
@@ -494,12 +524,10 @@ describe('BCL-1 / D2: the swarm stops waiting on a publish domain that refuses o
 
   it('a typo with no door after it: ownerHeld, `never-answered`, the domain named', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
-    pool = []
-    participants = false
     const { root: r } = await longTail('favorites', 'hyperccomb.example')
     const typo = nowhere()
-    // The tile itself goes to its page's host: the meeting host.
-    meetingHost = 'meet.example'
+    // The tile itself goes to its page's host: the host field.
+    field = 'meet.example'
     const meet = heap()
     vi.stubGlobal('fetch', router({ 'hyperccomb.example': typo, 'meet.example': meet }))
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
@@ -507,8 +535,8 @@ describe('BCL-1 / D2: the swarm stops waiting on a publish domain that refuses o
     void service.markPublic(r, 'layer', true, [])
     await advanceUntil(async () => (await service.closureVerdict(r, 'layer', true, [])).ownerHeld, 250, 400)
     vi.useRealTimers()
-    // Passed over to the meeting host — the subtree is hosted there, after all.
-    // (The meeting host is a door below the publish domain.)
+    // Passed over to the host field — the subtree is hosted there, after all.
+    // (The host field is the door below the publish domain.)
     const v = await service.closureVerdict(r, 'layer', true, [])
     expect(v.ok || v.ownerHeld).toBe(true)
     expect(calls(typo, 'PUT').length).toBeLessThanOrEqual(3)
@@ -523,45 +551,45 @@ describe('BCL-7 / TS-5: a host that takes only the people meeting on it', () => 
     putStatus: (_sig, init) => (accept?.(init) ? null : new Response('not-live: join a swarm on this relay first', { status: 401 })),
   })
 
-  it('a pool host answering not-live: at most six uploads (one a wave), then refused — "meeting on it" — and passed over', async () => {
+  it('a publish domain answering not-live: at most six uploads (one a wave), then refused — "meeting on it" — and passed over to the host field', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
-    pool = ['hostb.example']
+    marks = new Map([['shop', ['hostb.example']]])
+    field = 'jwize.com'
     const b = notLive()
     const relay = heap()
     vi.stubGlobal('fetch', router({ 'hostb.example': b, 'jwize.com': relay }))
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const service = await make()
+    const service = await make(['shop'])
     const tiles = [await tile('one'), await tile('two'), await tile('three')]
-    for (const t of tiles) void service.markPublic(t.sig, 'layer', false, [])
-    await advanceUntil(() => (service.swarmHostsFor(null).passedOver ?? []).includes('hostb.example'), 250, 120)
-    expect(service.swarmHostsFor(null)).toMatchObject({ hosts: ['jwize.com'], source: 'relay', passedOver: ['hostb.example'] })
+    for (const t of tiles) void service.markPublic(t.sig, 'layer', false, ['shop'])
+    await advanceUntil(() => (service.swarmHostsFor(['shop']).passedOver ?? []).includes('hostb.example'), 250, 120)
+    expect(service.swarmHostsFor(['shop'])).toMatchObject({ hosts: ['jwize.com'], source: 'meeting', passedOver: ['hostb.example'] })
     expect(calls(b, 'PUT').length).toBeLessThanOrEqual(6)
     expect(service.hostTrouble('hostb.example')).toMatchObject({ why: 'refused' })
     expect(service.hostTrouble('hostb.example')!.reason).toMatch(/meeting on it/)
     await advanceUntil(async () => (await queued()).length === 0)
     vi.useRealTimers()
-    for (const t of tiles) expect((await service.closureVerdict(t.sig, 'layer', false, [])).ok).toBe(true)
+    for (const t of tiles) expect((await service.closureVerdict(t.sig, 'layer', false, ['shop'])).ok).toBe(true)
   })
 
-  it('a meeting host answering not-live (meeting elsewhere): passed over to the pool, never "waiting to see you live" for ever', async () => {
+  it('the host field answering not-live is where this tab meets: retried, never refused as "meeting elsewhere", never passed over', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
-    meetingHost = 'relayjs.example'
+    field = 'relayjs.example'
     const b = notLive()
-    const apex = heap()
-    vi.stubGlobal('fetch', router({ 'relayjs.example': b, 'hypercomb.com': apex }))
+    vi.stubGlobal('fetch', router({ 'relayjs.example': b }))
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const service = await make()
     const t = await tile('at the meeting')
     void service.markPublic(t.sig, 'layer', false, [])
-    await advanceUntil(() => (service.swarmHostsFor(null).passedOver ?? []).includes('relayjs.example'), 250, 120)
-    service.swarmHostsFor(null)
-    await vi.advanceTimersByTimeAsync(50)
+    // Past the retries a publish domain gets before it is refused — and on.
+    await advanceUntil(() => calls(b, 'PUT').length >= 6, 250, 120)
+    await vi.advanceTimersByTimeAsync(60_000)
     await settle()
-    expect(service.swarmHostsFor(null)).toMatchObject({ hosts: ['hypercomb.com'], source: 'pool', passedOver: ['relayjs.example'] })
-    expect(calls(b, 'PUT').length).toBeLessThanOrEqual(6)
-    await advanceUntil(async () => (await queued()).length === 0)
+    expect(calls(b, 'PUT').length).toBeGreaterThanOrEqual(6)
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['relayjs.example'], source: 'meeting', pending: false })
+    // Not-live is a race with the beacon here, no trouble of the host's.
+    expect(service.hostTrouble('relayjs.example')).toBeNull()
     vi.useRealTimers()
-    expect((await service.closureVerdict(t.sig, 'layer', false, [])).ok).toBe(true)
   })
 
   it('D7: after a not-live, its uploads carry this key\'s signed {alive} beacon for the room — a host that reads it takes them', async () => {
@@ -571,19 +599,19 @@ describe('BCL-7 / TS-5: a host that takes only the people meeting on it', () => 
     // The beacon names THIS tab's own zone — recorded at its join — never the
     // stores' pre-fill: join with the pair so the tab records it.
     join(true)
+    // (A host no other test names: an earlier test's service keeps its timers.)
+    // It is the host field — the point this tab meets at.
+    field = 'hostd7.example'
     // The roster address the SWARM beacons on — the room AT THE POINT it
     // meets at (core lifecyclePreimage: the point is part of the room since
-    // 2026-10-12; the mesh says jwize.com here). Host-sync asks for it and
-    // derives nothing: the address a host checks the beacon against is the
-    // room's, never the host it is carried to.
-    const lifecycle = await sign(new TextEncoder().encode(lifecyclePreimage('the-room', 'the-secret', 'jwize.com')))
+    // 2026-10-12). Host-sync asks for it and derives nothing: the address a
+    // host checks the beacon against is the room's.
+    const lifecycle = await sign(new TextEncoder().encode(lifecyclePreimage('the-room', 'the-secret', field)))
     expect(lifecycle).not.toBe(await sign(new TextEncoder().encode('lifecycle\u0000the-room\u0000the-secret')))
     registry.set('@diamondcoreprocessor.com/SwarmDrone', { lifecycleSig: () => lifecycle })
-    // (A host no other test names: an earlier test's service keeps its timers.)
-    pool = ['hostd7.example']
     // relay.js with D7: a fresh signed 30206 {alive} in the NIP-98 event is the key live.
     const b = notLive(init => authEvent(init).tags.some(tag => tag[0] === 'alive'))
-    vi.stubGlobal('fetch', router({ 'hostd7.example': b, 'jwize.com': heap() }))
+    vi.stubGlobal('fetch', router({ 'hostd7.example': b }))
     const service = await make()
     const t = await tile('beaconed')
     void service.markPublic(t.sig, 'layer', false, [])
@@ -595,7 +623,7 @@ describe('BCL-7 / TS-5: a host that takes only the people meeting on it', () => 
     expect(authEvent(puts[0]![1]).tags.some(tag => tag[0] === 'alive')).toBe(false)
     expect(puts.length).toBeLessThanOrEqual(5) // one refused, then the tile's own atoms
     expect(b.held.size).toBe(3)
-    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hostd7.example'], source: 'pool', pending: false })
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hostd7.example'], source: 'meeting', pending: false })
     const alive = authEvent(puts.at(-1)![1]).tags.find(tag => tag[0] === 'alive')!
     const beacon = JSON.parse(alive[1]!) as { kind: number; pubkey: string; created_at: number; content: string; tags: string[][] }
     expect(beacon).toMatchObject({ kind: 30206, pubkey: PUBKEY })
@@ -613,9 +641,9 @@ describe('BCL-7 / TS-5: a host that takes only the people meeting on it', () => 
     registry.set('@hypercomb.social/SecretStore', { value: 'old-secret' })
     // Even a swarm that holds a roster address does not make the pre-fill a room.
     registry.set('@diamondcoreprocessor.com/SwarmDrone', { lifecycleSig: () => 'f'.repeat(64) })
-    pool = ['hostd7b.example']
+    field = 'hostd7b.example'
     const b = notLive(init => authEvent(init).tags.some(tag => tag[0] === 'alive'))
-    vi.stubGlobal('fetch', router({ 'hostd7b.example': b, 'jwize.com': heap() }))
+    vi.stubGlobal('fetch', router({ 'hostd7b.example': b }))
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const service = await make()
     const t = await tile('no zone')
@@ -631,23 +659,29 @@ describe('BCL-7 / TS-5: a host that takes only the people meeting on it', () => 
 // ── (5) the drain (BCL-4, BCL-3 queue order) ───────────────────────────────
 
 describe('BCL-4: each entry asked and sent in the same breath; small atoms without a HEAD', () => {
-  /** Stage while the pool is still being read (nothing drains), then land:
-   *  the first pass meets a full queue. */
+  /** Mark while the participant has entered no host yet (nothing drains),
+   *  with a full queue left from before for what was marked — a previous
+   *  session's, written exactly as enqueue leaves an entry (this package
+   *  never queues what nothing takes: the live swarm, 2026-10-11) — then
+   *  enter the host: the first pass meets a full queue. */
   const stageThenLand = async (stage: (service: Service) => Promise<void>): Promise<Service> => {
-    const readPool = deps.readPool
-    let land!: () => void
-    const landed = new Promise<void>(resolve => { land = resolve })
-    deps.readPool = async () => { await landed; return pool }
-    try {
-      const service = await make()
-      await stage(service)
-      await settle()
-      land()
-      await settle()
-      return service
-    } finally {
-      deps.readPool = readPool
+    const box: Box = { field: '' }
+    const service = await makeWith(box, {})
+    await stage(service)
+    await settle()
+    expect(await queued()).toEqual([])
+    const pool = await root.getDirectoryHandle(await poolName('host-push'), { create: true })
+    for (const name of pool.names().filter(n => n.endsWith('.public'))) {
+      const sig = name.slice(0, 64)
+      const kind = layers.has(sig) ? 'layer' : 'resource'
+      const w = await (await pool.getFileHandle(`${sig}.${kind}`, { create: true })).createWritable()
+      await w.write((layers.get(sig) ?? resources.get(sig))!.slice())
+      await w.close()
     }
+    box.field = field
+    service.swarmHostsFor(null) // the resolver looks again: its host field moved
+    await settle()
+    return service
   }
 
   it('the first PUT follows ONE question, not a batch of them — and a host that answers for itself is not asked about small atoms', async () => {

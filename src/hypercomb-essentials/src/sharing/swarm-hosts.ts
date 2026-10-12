@@ -2,112 +2,106 @@
 //
 // WHERE A SHARED PAGE'S BYTES GO — the swarm's upload host, per page.
 //
-// jwize, 2026-10-07: "I thought we only use pools but maybe if publish domains
-// take precedence over pools that would be fine too … but sure on your relay."
-// The upload host is no longer derived from the relay URL by default (that made
-// one person's relay everyone's host). For the page being offered, in order:
+// jwize, 2026-10-11: "Let's just make sure that there isn't a default host";
+// "all the user should have to do is put the host name in when entering a
+// swarm, end of story"; "the source of truth is the host field". For the page
+// being offered, in order:
 //
 //   1. PUBLISH DOMAINS — the `host:<zone>` marks worn by the nearest branch at
 //      or above the page (community-hosts.ts), every one of them, primary
 //      first: the same write doors a publish of that branch uses.
-//   2. THE MEETING HOST — the host the meeting this tab is in named: its
-//      meeting link's `host`, or the facilitator's own meeting point
-//      (sessionStorage `hc:mesh-zone`, membership.ts — this tab's, so a
-//      reload keeps it and another tab's meeting never moves it).
+//   2. THE HOST FIELD — the meeting point the participant entered: the host of
+//      the relay this tab meets at (the mesh's swarmHost — a link joined, the
+//      selector, the page's own list). '' is no host.
+//   3. NONE — nothing hosts the page.
 //
-//   A publish domain or a meeting host is an explicit choice, and the swarm
-//   tries it first — but one that CANNOT take this tab's uploads (it refused
-//   them, is full, takes uploads only from people meeting on it, or has never
-//   answered at all — the `hyperccomb.com` typo) must not hold the room's
-//   tiles as names for the whole meeting (jwize 2026-10-10, D2). host-sync
-//   says so (markDown) and the page falls through to the next door, the
-//   domain named in `passedOver` so the status line can say why. A `publish
-//   here` is not the swarm: it still needs the domain itself.
-//   3. THE HOSTS POOL — the participant's `community:hosts` pool (HostsDrone
-//      seeds hypercomb.com into an empty one): its PRIMARY, the host added
-//      first. A pool host that failed this session (it refused, is full,
-//      answered a page where a heap answers bytes, or did not answer while
-//      the relay did) is passed over for the next one — a host that cannot
-//      take uploads must never strand every tile as a name. THIS TAB
-//      remembers the pass-over across a reload (sessionStorage, an hour at
-//      most, a handful of hosts): a reload must not make the failed host
-//      primary again and strand the room for another round of failures. A
-//      receipt from it, or the participant's retry, forgets it.
-//   4. THE RELAY YOU MEET AT — only when 1-3 have nothing usable, and only
-//      when that relay's `hc:host` card said participants 'all' or 'zones'.
+//   NOTHING ELSE NAMES A HOST. The hosts pool (`community:hosts`) is the hosts
+//   you READ from: it never picks where your bytes go, and nothing is seeded
+//   into it (a pool seeded by an older package keeps its member — inert for
+//   writes). A meeting link's own `host=` is legacy and decides nothing; the
+//   host field is the one truth. The meeting point's `hc:host` card decides
+//   nothing either: the host you entered is asked, and its answer decides.
+//
+//   Both are explicit choices, and the swarm tries them first — but one that
+//   CANNOT take this tab's uploads (it refused them, is full, takes uploads
+//   only from people meeting on it, or has never answered at all — the
+//   `hyperccomb.com` typo) must not hold the room's tiles as names for the
+//   whole meeting (jwize 2026-10-10, D2). host-sync says so (markDown) and the
+//   page falls through to the next door, the domain named in `passedOver` so
+//   the status line can say why. A `publish here` is not the swarm: it still
+//   needs the domain itself.
 //
 // HOT PATH: `hostsFor` is SYNCHRONOUS and reads caches only. Connect, join,
-// resubscribe and announce never wait on a pool or a layer read: a miss kicks
-// a local read and answers PENDING (no host yet); the read landing dispatches
+// resubscribe and announce never wait on a layer read: a miss kicks a local
+// read and answers PENDING (no host yet); the read landing dispatches
 // 'change', and the owner (host-sync) re-drains and the swarm walks again. The
-// caches refresh on the inputs' own change signals — `hosts:render` (the pool),
-// `hosts:marks-changed` / `decorations:changed` (a branch's marks),
-// `mesh:host-card` (the relay's policy) and the tab becoming visible again (a
-// change made in another tab). No network, ever.
+// host field is a synchronous read of the mesh, checked again on `mesh:zone`
+// and `mesh:connection` (a link joined, the selector moved the point). A
+// branch's marks refresh on `hosts:marks-changed` / `decorations:changed` and
+// the tab becoming visible again (a change made in another tab). No network,
+// ever.
 //
 // A loopback host is a write door only for a page that is itself loopback:
 // nobody else can fetch from it, so on a real origin it is skipped and the next
 // source answers (the rule the mesh applies to a loopback relay).
 
 import { EffectBus } from '@hypercomb/core'
-import { HOSTS_SEEDED_KEY, hostZone, hostsOfBranchKnown, listCommunityHostsInAddedOrder } from './community-hosts.js'
+import { hostZone, hostsOfBranchKnown } from './community-hosts.js'
 import { foldContentLabel, isLoopbackHost } from './zone-door.js'
-import { tabMeetingHost } from './membership.js'
 
+/** Where a page's hosts came from. 'pool' and 'relay' are retired tiers
+ *  (2026-10-11 — nothing answers them now), kept so an older status payload
+ *  still reads. */
 export type SwarmHostSource = 'publish' | 'meeting' | 'pool' | 'relay' | 'none'
 
 /** Where one page's bytes go. `hosts` are write doors, primary first. */
 export interface SwarmHostChoice {
   readonly hosts: readonly string[]
   readonly source: SwarmHostSource
-  /** An input it depends on has not been read yet (a branch's marks, the
-   *  pool, the relay's card): no host until it has. */
+  /** An input it depends on has not been read yet (a branch's marks): no
+   *  host until it has. */
   readonly pending: boolean
-  /** Pool hosts passed over because they failed this session, in pool order
-   *  — the status line can say why the bytes went elsewhere. */
+  /** Doors passed over because their uploads cannot land this session, in
+   *  the order they were named — the status line can say why the bytes went
+   *  elsewhere, or nowhere. */
   readonly passedOver?: readonly string[]
 }
 
 /** What the resolver reads. Every read is local; none is on the hot path. */
 export interface SwarmHostDeps {
-  /** The hosts pool, PRIMARY FIRST, or null while it cannot be read yet. */
-  readPool(): Promise<readonly string[] | null>
   /** The host marks ONE cell wears, primary first; null while unknown (a
    *  cold history read, a decoration record not here yet). `lenient`: take a
    *  missing record as absent. */
   readMarks(segments: readonly string[], lenient?: boolean): Promise<readonly string[] | null>
-  /** The relay this tab meets at, and its card's participant policy
-   *  (undefined: no card heard yet). */
-  relay(): { host: string; participants: unknown }
+  /** THE HOST FIELD — the relay this tab meets at (`host` is the mesh's
+   *  swarmHost: host[:port], '' when none). A local, synchronous read.
+   *  `participants` (its card's policy) is no longer read. */
+  relay(): { host: string; participants?: unknown }
   /** Is this page itself loopback? */
   originLoopback(): boolean
-  /** The meeting host this tab's meeting named ('' when none). A local,
-   *  synchronous read. */
-  meetingHost?(): string
-  /** THIS TAB's session storage — where a passed-over pool host is
-   *  remembered across a reload. Absent or null: this page only. */
+  /** THIS TAB's session storage — where a door passed over is remembered
+   *  across a reload. Absent or null: this page only. */
   session?(): SessionLike | null
 }
 
 /** The part of `Storage` the resolver uses (sessionStorage in a tab). */
 export type SessionLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
-const STORE_KEY = '@hypercomb.social/Store'
+const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 
 /** A real host: labels joined by dots. */
 const HOST_DOMAIN_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
-/** A zone the participant named (a pool host, a publish domain) may carry a
- *  port: a self-hosted machine on :8443 is a zone like any other, exactly as
- *  community-hosts.ts hostZone keeps it. The relay's host may not — a port on
- *  a real relay name is no upload door (only a loopback relay has one). */
+/** Every door here is one the participant named (a publish domain, the host
+ *  field), so it may carry a port: a self-hosted machine on :8443 is a zone
+ *  like any other, exactly as community-hosts.ts hostZone keeps it. */
 const PORT_RE = /:(\d{1,5})$/
 const LOOPBACK_HOST_RE = /^(?:(?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[::1\])(?::\d{1,5})?$/
 
 /** A read that came back unknown is asked again on its own at this cadence —
  *  and no sooner by a lookup (lookups happen on every walk). */
 const RETRY_UNKNOWN_MS = 1_000
-/** How many times an unknown pool, or one branch's unknown marks, is asked
- *  again on its own before it waits for the next lookup or change signal. */
+/** How many times one branch's unknown marks are asked again on their own
+ *  before they wait for the next lookup or change signal. */
 const RETRY_UNKNOWN_MAX = 60
 /** After this many unknown answers for one branch, a decoration record that
  *  is still not here is taken as absent (a cold history read stays unknown). */
@@ -121,9 +115,9 @@ const MARKS_CACHE_MAX = 4_096
 /** Branches re-read when the tab becomes visible (another tab may have moved
  *  their marks): the most recently used. */
 const MARKS_REVISIT = 64
-/** A pool host passed over is remembered in THIS TAB's session — never
+/** A door passed over is remembered in THIS TAB's session — never
  *  localStorage: another tab, or tomorrow, asks the host afresh — so a reload
- *  does not make it primary again. For at most an hour, and only the most
+ *  does not hand the room back to it. For at most an hour, and only the most
  *  recent few. */
 const DOWN_SESSION_KEY = 'hc:swarm-hosts:down'
 const DOWN_REMEMBER_MS = 60 * 60_000
@@ -136,8 +130,7 @@ const NONE: SwarmHostChoice = Object.freeze({ hosts: Object.freeze([]) as readon
  *  with the status word: the host refused (its own 4xx, a CORS-blocked
  *  upload, not-live while this tab meets elsewhere), is full, or nothing at
  *  that name ever answered. Only that passes over a door the participant
- *  CHOSE (a publish domain, the meeting host): a web page at its door, or a
- *  moment's silence, is enough for a pool host but not for a choice — a
+ *  chose: a web page at its door, or a moment's silence, is not enough — a
  *  static door may serve some sigs as files, so its uploads decide. */
 const CHOSEN_DOWN_RE = /^(?:refused|full|unresolved):/
 
@@ -146,39 +139,18 @@ const ioc = <T>(key: string): T | undefined =>
 
 /** The resolver's own reads, against the live runtime. */
 export const liveSwarmHostDeps: SwarmHostDeps = {
-  // EMPTY IS AN ANSWER ONLY WHEN IT IS ONE. A pool the store cannot open yet
-  // lists as nothing — that is unknown. So is an empty pool the seed has not
-  // reached: a fresh install's pool is hypercomb.com, and reading it a moment
-  // early must not make the relay everyone's host. Only a seeded, empty pool
-  // means "no hosts" (the participant removed them all, or storage cannot
-  // remember a seed).
-  readPool: async () => {
-    // Null while there is no store or its OPFS root cannot open; the read
-    // waits for the open itself (community-hosts.ts), so a boot read settles
-    // the moment the store does instead of on the next retry tick.
-    if (!ioc<{ getPool?: unknown }>(STORE_KEY)?.getPool) return null
-    const zones = await listCommunityHostsInAddedOrder()
-    if (zones === null) return null
-    if (zones.length > 0) return zones
-    let seeded = true
-    try { seeded = localStorage.getItem(HOSTS_SEEDED_KEY) === '1' } catch { seeded = true }
-    return seeded ? zones : null
-  },
   readMarks: async (segments, lenient = false) => {
     try { return await hostsOfBranchKnown(segments, lenient) } catch { return null }
   },
   relay: () => {
-    const mesh = ioc<{ swarmHost?: () => string; relayParticipants?: () => unknown }>('@diamondcoreprocessor.com/NostrMeshDrone')
+    const mesh = ioc<{ swarmHost?: () => string }>(MESH_KEY)
     let host = ''
-    let participants: unknown = undefined
     try { host = String(mesh?.swarmHost?.() ?? '') } catch { host = '' }
-    try { participants = mesh?.relayParticipants?.() } catch { participants = undefined }
-    return { host, participants }
+    return { host }
   },
   originLoopback: () => {
     try { return isLoopbackHost(globalThis.location?.host ?? '') } catch { return false }
   },
-  meetingHost: () => tabMeetingHost(),
   session: () => {
     try { return globalThis.sessionStorage ?? null } catch { return null }
   },
@@ -193,16 +165,6 @@ export class SwarmHostResolver extends EventTarget {
 
   readonly #deps: SwarmHostDeps
 
-  /** The hosts pool as zones, primary first; null = not read yet. */
-  #pool: readonly string[] | null = null
-  #poolLoading = false
-  /** A read asked for while one was in flight: read again when it lands
-   *  (the pool changed under the read — an add or a remove). */
-  #poolAgain = false
-  #poolRetryAt = 0
-  #poolTimer: ReturnType<typeof setTimeout> | undefined
-  #poolTimerRuns = 0
-
   /** One cell's marks (raw zones, primary first), by its path — insertion
    *  order is recency (a hit moves the entry to the end). */
   readonly #marks = new Map<string, readonly string[]>()
@@ -215,27 +177,19 @@ export class SwarmHostResolver extends EventTarget {
   readonly #marksStale = new Map<string, readonly string[]>()
   #staleTimer: ReturnType<typeof setTimeout> | undefined
 
-  /** Hosts that failed this session (host-sync says so), with the reason.
-   *  Any door here is passed over — a pool host on any failure host-sync
-   *  calls the host's, a publish domain or meeting host only on a standing
-   *  one (host-sync decides which; see the header). */
+  /** Hosts whose uploads cannot land this session (host-sync says so), with
+   *  the reason. A door here is passed over on a standing answer only (see
+   *  CHOSEN_DOWN_RE and the header). */
   readonly #down = new Map<string, string>()
   /** When each REMEMBERED failure was marked — the ones this tab's session
    *  keeps across a reload (#rememberDown). A failure marked while the path
    *  itself was down is not among them. */
   readonly #downAt = new Map<string, number>()
 
-  /** The relay card's policy as last seen, so a repeat is no change. */
-  #relaySeen = ''
-  /** Some answer reached the relay step since the card was last seen: only
-   *  then does the card change anyone's answer. */
-  #relayAsked = false
-
   /** Inputs a LOOKUP found unread — someone acted on "pending" (a walk sent
    *  names only, a drain had nowhere to go), so their first read is news.
    *  A first read nobody waited on (a warm) changes no one's answer. */
   readonly #askedMarks = new Set<string>()
-  #askedPool = false
 
   #changeQueued = false
 
@@ -244,28 +198,17 @@ export class SwarmHostResolver extends EventTarget {
   #version = 0
   get version(): number { this.#meetingDoor(); return this.#version }
 
-  /** The meeting host as last seen, so a change bumps the version (it is a
-   *  session read, with no signal of its own besides `mesh:zone`). */
+  /** The host field as last seen, so a change bumps the version (a read of
+   *  the mesh, with no signal of its own besides the mesh's effects). */
   #meetingSeen: string | undefined = undefined
 
   constructor(deps: SwarmHostDeps = liveSwarmHostDeps) {
     super()
     this.#deps = deps
-    // A reload of this tab keeps the pool hosts it passed over (within the
-    // hour): the first answer after a reload must not hand the room back to
-    // a host that just proved it takes no uploads.
+    // A reload of this tab keeps the doors it passed over (within the hour):
+    // the first answer after a reload must not hand the room back to a host
+    // that just proved it takes no uploads.
     this.#restoreDown()
-    // THE POOL — HostsDrone emits the list after every read, add and remove,
-    // with last-value replay. Its list is alphabetical and its first read can
-    // run before the store is open, so it is a SIGNAL, never the answer: the
-    // resolver reads the pool itself, in the order the hosts were added.
-    EffectBus.on<{ zones?: unknown; loaded?: boolean }>('hosts:render', (p) => {
-      if (p?.loaded !== true || !Array.isArray(p.zones)) return
-      const zones = (p.zones as unknown[]).map(z => hostZone(z)).filter(Boolean)
-      // The same set we hold: nothing moved (the panel opened, a re-read).
-      if (this.#pool !== null && zones.length === this.#pool.length && zones.every(z => this.#pool!.includes(z))) return
-      this.#refreshPool(true)
-    })
     // A BRANCH'S MARKS — the writer says so once its marks have committed.
     EffectBus.on<{ segments?: unknown }>('hosts:marks-changed', (p) => {
       if (!Array.isArray(p?.segments)) return
@@ -290,30 +233,17 @@ export class SwarmHostResolver extends EventTarget {
         for (const [k, segs] of due) { this.#marksRetryAt.delete(k); this.#loadMarks(segs, k, true) }
       }, MARKS_SETTLE_MS)
     })
-    // THE RELAY'S POLICY — its card arrives in the first frame of a socket.
-    // News only to an answer that reached the relay step (an empty or failed
-    // pool): a pooled tab's first card must not walk the whole swarm again
-    // in the very window a connect is busiest.
-    EffectBus.on('mesh:host-card', () => {
-      const { host, participants } = this.#deps.relay()
-      const seen = `${host} ${String(participants)}`
-      if (seen === this.#relaySeen) return
-      this.#relaySeen = seen
-      this.#version++
-      if (!this.#relayAsked) return
-      this.#relayAsked = false
-      this.#changed()
-    })
-    // THE MEETING POINT moved (a link joined, the selector, /use-live-relay):
-    // its host may have too.
+    // THE HOST FIELD moved (a link joined, the selector, /use-live-relay —
+    // the mesh reconnects to the new point): look again. A synchronous read;
+    // an unchanged field is no news.
     EffectBus.on('mesh:zone', () => { this.#meetingDoor() })
-    // ANOTHER TAB may have changed the pool or a branch's marks (membership is
-    // per tab; the caches are this tab's). Coming back to this tab re-reads
-    // them; an unchanged answer is no news.
+    EffectBus.on('mesh:connection', () => { this.#meetingDoor() })
+    // ANOTHER TAB may have changed a branch's marks (the caches are this
+    // tab's). Coming back to this tab re-reads them; an unchanged answer is
+    // no news.
     try {
       globalThis.document?.addEventListener?.('visibilitychange', () => {
         if (globalThis.document?.visibilityState !== 'visible') return
-        this.#refreshPool(true)
         const recent = [...this.#marks.keys()].slice(-MARKS_REVISIT)
         for (const key of recent) {
           this.#marksRetryAt.delete(key)
@@ -363,7 +293,7 @@ export class SwarmHostResolver extends EventTarget {
       this.#marks.delete(key)
       this.#marks.set(key, zones)
       if (unknown) continue
-      const doors = this.#usable(zones, true)
+      const doors = this.#usable(zones)
       if (doors.length === 0) continue
       // The nearest branch that wears any is the page's choice — only its
       // doors, never a farther branch's. Those whose uploads cannot land are
@@ -375,68 +305,39 @@ export class SwarmHostResolver extends EventTarget {
       break
     }
     // Unread marks could still name a nearer publish domain: nothing below
-    // them can answer yet. The pool is read alongside, so the answer needs
-    // one wait, not two.
-    if (unknown) {
-      if (this.#pool === null) {
-        if (ask) this.#askedPool = true
-        this.#refreshPool()
-      }
-      return PENDING
+    // them can answer yet.
+    if (unknown) return PENDING
+    // 2. The host field — the meeting point the participant entered.
+    const field = this.#meetingDoor()
+    if (field) {
+      if (!this.#chosenDown(field)) return choose([field], 'meeting')
+      if (!passedOver.includes(field)) passedOver.push(field)
+      first ??= { hosts: [field], source: 'meeting', pending: false }
     }
-    // 2. The meeting host — the host this tab's meeting named.
-    const meeting = this.#meetingDoor()
-    if (meeting) {
-      if (!this.#chosenDown(meeting)) return choose([meeting], 'meeting')
-      if (!passedOver.includes(meeting)) passedOver.push(meeting)
-      first ??= { hosts: [meeting], source: 'meeting', pending: false }
-    }
-    // 3. The hosts pool: its primary, unless it failed this session.
-    if (this.#pool === null) {
-      if (ask) this.#askedPool = true
-      this.#refreshPool()
-      return PENDING
-    }
-    const pool = this.#usable(this.#pool, true)
-    for (const h of pool) if (this.#down.has(h) && !passedOver.includes(h)) passedOver.push(h)
-    const primary = pool.find(h => !this.#down.has(h))
-    if (primary) return choose([primary], 'pool')
-    // 4. The relay you meet at — last resort, and only when it said so.
-    this.#relayAsked = true
-    const { host, participants } = this.#deps.relay()
-    const door = this.#usable([host])[0]
-    const allowed = participants === 'all' || participants === 'zones'
-    if (door && allowed && !this.#down.has(door)) return choose([door], 'relay')
-    // No door takes bytes: the first one the page named keeps it, so its
-    // status names the host and why it is not taking bytes.
-    if (first) return first
-    if (pool.length > 0) return { hosts: [pool[0]!], source: 'pool', pending: false }
-    if (door && allowed) return { hosts: [door], source: 'relay', pending: false }
-    if (!door) return NONE
-    return participants === undefined || participants === null ? PENDING : NONE
+    // 3. No door takes bytes: the first one the page named keeps it, so its
+    //    status names the host and why it is not taking bytes — else none.
+    return first ?? NONE
   }
 
-  /** The relay this tab meets at, as a write door ('' when none) — whether or
-   *  not it hosts anyone. */
-  readonly relayHost = (): string => this.#usable([this.#deps.relay().host])[0] ?? ''
+  /** The host field as a write door ('' when none, or not one this page may
+   *  use) — the relay this tab meets at, whether or not it takes uploads.
+   *  host-sync treats this door as the relay's own heap. */
+  readonly relayHost = (): string => this.#fieldDoor()
 
-  /** Is this door one of the pool's hosts (as this page may use them)? */
-  readonly isPoolHost = (host: string): boolean => this.#pool !== null && this.#usable(this.#pool, true).includes(host)
-
-  /** A host failed this session (host-sync: it refused, is full, answered a
-   *  page where a heap answers bytes, takes uploads only from people meeting
-   *  on it, or never answered while another host did). It is passed over
-   *  from now on, whichever tier named it — and, `remember`ed (the default),
-   *  across a reload of this tab too (#rememberDown). A failure that may have
-   *  been the PATH (no socket open) is this page's only. */
+  /** A host's uploads cannot land this session (host-sync: it refused, is
+   *  full, takes uploads only from people meeting on it, or never answered
+   *  while another host did). It is passed over from now on, whichever tier
+   *  named it — and, `remember`ed (the default), across a reload of this tab
+   *  too (#rememberDown). A failure that may have been the PATH (no socket
+   *  open) is this page's only. */
   readonly markDown = (host: string, reason: string, remember = true): void => {
     if (!host) return
     const before = this.#down.get(host)
     if (before !== undefined) {
       // Already passed over; a later failure the path cannot explain makes a
       // path-time pass-over one to remember. An upload's own standing answer
-      // replaces a weaker reason (a page at the door): a door the participant
-      // chose is passed over from now on too (CHOSEN_DOWN_RE).
+      // replaces a weaker reason (a page at the door): the door is passed
+      // over from now on (CHOSEN_DOWN_RE).
       const stronger = CHOSEN_DOWN_RE.test(reason) && !CHOSEN_DOWN_RE.test(before)
       const newlyRemembered = remember && !this.#downAt.has(host)
       if (stronger) this.#down.set(host, reason)
@@ -472,16 +373,31 @@ export class SwarmHostResolver extends EventTarget {
   /** Why a host is passed over ('' when it is not). */
   readonly downReason = (host: string): string => this.#down.get(host) ?? ''
 
-  /** Is a door the participant chose (a publish domain, the meeting host)
+  /** The STANDING answer a door was passed over on — `refused`, `full` or
+   *  `unresolved` (never answered) — or '' (not passed over, or only for
+   *  what may have been the path). Remembered across a reload of this tab
+   *  (#restoreDown), so host-sync can say "this host will not take it" before
+   *  its first upload of the new page has been refused again. */
+  readonly standingDown = (host: string): 'refused' | 'full' | 'unresolved' | '' => {
+    const m = /^(refused|full|unresolved):/.exec(this.#down.get(host) ?? '')
+    return m ? m[1] as 'refused' | 'full' | 'unresolved' : ''
+  }
+
+  /** Is a door the participant chose (a publish domain, the host field)
    *  passed over — on its uploads' own standing answer (CHOSEN_DOWN_RE)? */
   readonly #chosenDown = (host: string): boolean => CHOSEN_DOWN_RE.test(this.#down.get(host) ?? '')
 
-  /** The meeting host as a write door ('' when none, or not one this page
-   *  may use). A change since the last look bumps the version and is news. */
-  readonly #meetingDoor = (): string => {
+  /** The host field as a write door — no side effects. */
+  readonly #fieldDoor = (): string => {
     let raw = ''
-    try { raw = String(this.#deps.meetingHost?.() ?? '') } catch { raw = '' }
-    const door = raw ? (this.#usable([raw], true)[0] ?? '') : ''
+    try { raw = String(this.#deps.relay().host ?? '') } catch { raw = '' }
+    return raw ? (this.#usable([raw])[0] ?? '') : ''
+  }
+
+  /** The host field as a write door; a change since the last look bumps the
+   *  version and is news. */
+  readonly #meetingDoor = (): string => {
+    const door = this.#fieldDoor()
     const seen = this.#meetingSeen
     this.#meetingSeen = door
     if (seen !== undefined && seen !== door) {
@@ -494,16 +410,16 @@ export class SwarmHostResolver extends EventTarget {
   // ── caches ──────────────────────────────────────────────────────────────
 
   /** Raw zones → write doors this page may use: the zone root (never a
-   *  `content.` face), loopback only from loopback, a port on a real host
-   *  only for a zone the participant named (`named`). */
-  readonly #usable = (zones: readonly string[], named = false): string[] => {
+   *  `content.` face), loopback only from loopback, a port kept (every door
+   *  is one the participant named). */
+  readonly #usable = (zones: readonly string[]): string[] => {
     const local = this.#deps.originLoopback()
     const out: string[] = []
     for (const raw of zones) {
       const door = foldContentLabel(String(raw ?? '').trim().toLowerCase().replace(/^(?:wss?|https?):\/\//, ''))
       const loopback = LOOPBACK_HOST_RE.test(door)
       const port = PORT_RE.exec(door)
-      const name = named && port && Number(port[1]) > 0 && Number(port[1]) < 65536 ? door.slice(0, port.index) : door
+      const name = port && Number(port[1]) > 0 && Number(port[1]) < 65536 ? door.slice(0, port.index) : door
       if (!loopback && !HOST_DOMAIN_RE.test(name)) continue
       if (loopback && !local) continue
       if (!out.includes(door)) out.push(door)
@@ -519,9 +435,9 @@ export class SwarmHostResolver extends EventTarget {
     try { return this.#deps.session?.() ?? null } catch { return null }
   }
 
-  /** Take back what this tab's session remembers: pool hosts passed over
-   *  within the last hour, newest first, a handful at most. Anything else in
-   *  the record (older, malformed) is simply not taken back. */
+  /** Take back what this tab's session remembers: doors passed over within
+   *  the last hour, newest first, a handful at most. Anything else in the
+   *  record (older, malformed) is simply not taken back. */
   readonly #restoreDown = (): void => {
     let raw: string | null = null
     try { raw = this.#session()?.getItem(DOWN_SESSION_KEY) ?? null } catch { raw = null }
@@ -555,55 +471,6 @@ export class SwarmHostResolver extends EventTarget {
       if (rows.length === 0) session.removeItem(DOWN_SESSION_KEY)
       else session.setItem(DOWN_SESSION_KEY, JSON.stringify(rows))
     } catch { /* storage refused — this page still passes it over */ }
-  }
-
-  readonly #setPool = (zones: readonly string[]): void => {
-    const first = this.#pool === null
-    if (!first && sameList(this.#pool!, zones)) return
-    // A changed pool is the participant acting: every host gets its chance
-    // again — in this page and after a reload.
-    if (!first) {
-      this.#down.clear()
-      if (this.#downAt.size > 0) { this.#downAt.clear(); this.#rememberDown() }
-    }
-    this.#pool = [...zones]
-    this.#version++
-    const asked = this.#askedPool
-    this.#askedPool = false
-    if (!first || asked) this.#changed()
-  }
-
-  /** `force`: the pool may have changed (an add, a remove, another tab) —
-   *  read now, or again as soon as the read in flight lands. A lookup never
-   *  forces: it asks at most once per RETRY_UNKNOWN_MS. */
-  readonly #refreshPool = (force = false): void => {
-    if (force) this.#poolRetryAt = 0
-    if (this.#poolLoading) { if (force) this.#poolAgain = true; return }
-    if (Date.now() < this.#poolRetryAt) return
-    this.#poolLoading = true
-    this.#poolAgain = false
-    void this.#deps.readPool().then(
-      zones => {
-        if (zones === null) { this.#poolUnknown(); return }
-        this.#poolTimerRuns = 0
-        this.#setPool(zones.map(z => hostZone(z)).filter(Boolean))
-      },
-      () => { this.#poolUnknown() },
-    ).finally(() => {
-      this.#poolLoading = false
-      if (this.#poolAgain) { this.#poolAgain = false; this.#refreshPool(true) }
-    })
-  }
-
-  /** The pool could not be read yet: ask again in a moment, on our own. */
-  readonly #poolUnknown = (): void => {
-    this.#poolRetryAt = Date.now() + RETRY_UNKNOWN_MS
-    if (this.#poolTimer !== undefined || this.#poolTimerRuns >= RETRY_UNKNOWN_MAX) return
-    this.#poolTimerRuns++
-    this.#poolTimer = setTimeout(() => {
-      this.#poolTimer = undefined
-      if (this.#pool === null) this.#refreshPool(true)
-    }, RETRY_UNKNOWN_MS)
   }
 
   readonly #loadMarks = (segments: readonly string[], key: string, force = false): void => {

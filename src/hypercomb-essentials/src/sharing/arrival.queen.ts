@@ -2,16 +2,20 @@
 //
 // `arrival` — what a published branch's first view needs, and nothing more.
 //
-//   arrival <lineage> <Class…>   the arrival loads these bees (and what they
+//   arrival <lineage> <Class…> @<host>
+//                                the arrival loads these bees (and what they
 //                                declare they read); the rest wake when the
 //                                reader steps into the hive
-//   arrival <lineage> none       withdraw it — the whole package loads again
+//   arrival <lineage> none @<host>
+//                                withdraw it — the whole package loads again
+//
+// The plan is signed into your index on the host you NAME: there is no default
+// host (jwize 2026-10-11), so a word with no @<host> sends nothing.
 //
 // The act itself lives in arrival-plan-publish.ts, shared with the Publish
 // window's Optimize section.
 
-import { EffectBus, QueenBee } from '@hypercomb/core'
-import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { EffectBus, I18N_IOC_KEY, QueenBee, get, type I18nProvider } from '@hypercomb/core'
 import { zoneDoor } from './zone-door.js'
 import { publishArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
 
@@ -28,15 +32,21 @@ export class ArrivalQueenBee extends QueenBee {
   readonly command = 'arrival'
   override description = 'Name what a published branch\'s first view loads — the rest waits until the reader steps into the hive'
   override examples = [
-    { input: 'arrival revolucion ViewBee WebsiteQueenBee SiteViewDrone', result: 'revolucion arrives on three bees' },
-    { input: 'arrival revolucion none', result: 'revolucion loads its whole package again' },
+    { input: 'arrival revolucion ViewBee WebsiteQueenBee SiteViewDrone @example.com', result: 'revolucion arrives on three bees' },
+    { input: 'arrival revolucion none @example.com', result: 'revolucion loads its whole package again' },
   ]
 
   protected async execute(args: string): Promise<void> {
-    const [branch = '', ...names] = args.trim().split(/\s+/).filter(Boolean)
+    const parts = args.trim().split(/\s+/).filter(Boolean)
+    // @<host> may stand anywhere; it is never a bee.
+    const host = zoneDoor(parts.find(part => part.startsWith('@'))?.slice(1) ?? '')
+    const [branch = '', ...names] = parts.filter(part => !part.startsWith('@'))
     const lineage = lineageOf(branch)
-    const host = zoneDoor(PUBLIC_CONTENT_HOSTS[0] ?? '')
-    if (!lineage || !host) { say('warning', 'Name the branch and the bees: "arrival revolucion ViewBee SiteViewDrone".'); return }
+    if (!lineage || !host) {
+      const said = get<I18nProvider>(I18N_IOC_KEY)?.t?.('arrival.usage')
+      say('warning', said && said !== 'arrival.usage' ? said : 'Name the branch, the bees and the host: arrival revolucion ViewBee SiteViewDrone @example.com.')
+      return
+    }
     const withdraw = names.length === 1 && names[0]!.toLowerCase() === 'none'
     const result = withdraw ? await withdrawArrivalPlan(host, lineage) : await publishArrivalPlan(host, lineage, names)
     if (!result.ok) { say('error', `${lineage}: ${result.reason}`); return }

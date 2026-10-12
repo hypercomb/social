@@ -30,7 +30,7 @@ import { Drone, EffectBus, lifecyclePreimage, meetingPointKey, normalizeCell, po
 import { verifyEvent } from 'nostr-tools/pure'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
-import { noteVisualHosts, visualArtifactSigs } from './visual-hosts.js'
+import { MESH_ANSWER_MAX_BYTES, noteVisualHosts, visualArtifactSigs } from './visual-hosts.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
 import { hiddenAt, isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-public.js'
 import { referenceTargetForLabel, titlesForSegments } from '../commands/decoration-kind-index.js'
@@ -250,6 +250,8 @@ const RECEIPT_REWALK_MS = 150
 // walks again when the answer lands (see #entryFor). Never longer: a page's
 // names must not wait on an upload.
 const ENTRY_WAIT_MS = 250
+// How many LIVE atoms' sizes are remembered (#liveHold) — a few big pages.
+const LIVE_ATOM_SIZES_MAX = 8_192
 // How long a walk waits for a public child's sealed handle (history re-runs the
 // merkle cascade of its live subtree — seconds, for a big branch whose heads
 // just moved) before it offers the child without the new handle, and walks
@@ -492,8 +494,8 @@ interface HostSyncLike {
    *  whose pages went elsewhere (BCL-1). Optional: an older host-sync. */
   closurePassedOverOf?: (sig: string) => string[]
   /** Where a page's offered tiles go, synchronously (swarm-hosts.ts):
-   *  publish domains, else the hosts pool, else a relay that hosts
-   *  participants. Optional: an older host-sync derives one from the relay. */
+   *  publish domains, else the host field (the meeting point entered), else
+   *  none. Optional: an older host-sync derives one from the relay. */
   swarmHostsFor?: (segments: readonly string[]) => SwarmHostChoiceLike
   /** Start reading a page's hosts before the walk asks. Never waits. */
   warmSwarmHosts?: (segments: readonly string[]) => void
@@ -549,6 +551,10 @@ type Announced = {
   form: EntryForm
   unknown?: boolean
   late?: boolean
+  /** A full entry no host keeps — served from this device while it is in the
+   *  room (`served: 'owner'`, the live swarm). Nothing is on its way for it:
+   *  it is never waiting, uploading or held. */
+  live?: true
   /** A branch's full entry: where its deeper pages are. */
   deep?: DeepWhere
   /** Why the newest version is not served yet (a non-full child). */
@@ -574,6 +580,8 @@ type WalkStat = {
   ms: number
   outcome: 'said' | 'unchanged' | 'unknown' | 'held-for-hosts' | 'superseded' | 'not-sent' | 'error'
   full: number
+  /** Of the full ones, those no host keeps — served from this device. */
+  live: number
   previous: number
   placeholder: number
   private: number
@@ -587,15 +595,32 @@ type Within<T> = { late: false; value: T } | { late: true }
 
 const HEX64_RE = /[0-9a-f]{64}/i
 
-/** A received visual keeps the publisher's word on where a takeable branch's
- *  deeper pages are — a closed enum, and only beside a layerSig. The visual
- *  sanitizer's whitelist drops every key it does not know, so it is read off
- *  the raw entry here. */
+/** A received visual keeps the publisher's word on where its bytes are —
+ *  where a takeable branch's deeper pages are (`deep`), and that no host
+ *  keeps the tile at all, so it is served from the publisher's device while
+ *  they are in the room (`served: 'owner'`, the live swarm). Closed enums,
+ *  and only beside a layerSig. The visual sanitizer's whitelist drops every
+ *  key it does not know, so they are read off the raw entry here. */
 function withDeep(cleaned: { name: string } & Record<string, unknown>, raw: Record<string, unknown>): { name: string } & Record<string, unknown> {
+  if (typeof cleaned['layerSig'] !== 'string') return cleaned
   const deep = raw['deep']
-  if ((deep === 'owner' || deep === 'hosted') && typeof cleaned['layerSig'] === 'string') return { ...cleaned, deep }
-  return cleaned
+  const served = raw['served'] === 'owner'
+  if (deep !== 'owner' && deep !== 'hosted' && !served) return cleaned
+  return {
+    ...cleaned,
+    ...(deep === 'owner' || deep === 'hosted' ? { deep } : {}),
+    ...(served ? { served: 'owner' } : {}),
+  }
 }
+
+/** A verdict that leaves the tile to THIS device for the session (jwize
+ *  2026-10-11: "a host you named that refuses you → your tiles go live from
+ *  your device"): not served, and every host it goes to gave a standing
+ *  answer — it refused, is full, or never answered. Not "too large": an atom
+ *  no host takes for its size is one no broker answer (8 MB cap) carries
+ *  either, so that tile stays a name (D1). */
+const liveVerdict = (v: ClosureVerdict): boolean =>
+  v.ok === false && v.ownerHeld === true && v.blocking?.state !== 'too-large'
 
 /** Any host-sync answer as a verdict: a boolean gate's yes/no, null for a
  *  page still being read, or closureVerdict's object (fields checked). */
@@ -629,14 +654,17 @@ const BLOCK_HELD_STATES: ReadonlySet<string> = new Set(['refused', 'full', 'too-
 const BLOCK_STALLED_STATES: ReadonlySet<string> = new Set(['missing', 'no-host'])
 
 /** The layer handles a peer's visuals say are only on the peer's device below
- *  their own atoms (`deep: 'owner'`): the one claim a live peer makes. A
- *  served entry is fetched over HTTP first — claiming it made every picture
- *  race the mesh (3-5 relay frames each, SCALE-3). */
+ *  their own atoms (`deep: 'owner'`), or not on any host at all (`served:
+ *  'owner'`, the live swarm): the claims a live peer makes — what lies
+ *  beneath them is asked of the mesh first. A hosted entry is fetched over
+ *  HTTP first — claiming it made every picture race the mesh (3-5 relay
+ *  frames each, SCALE-3). */
 function ownerHeldRefs(visuals: readonly Record<string, unknown>[]): string[] {
   const out: string[] = []
   for (const v of visuals) {
     const sig = v['layerSig']
-    if (v['deep'] === 'owner' && typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig) && !out.includes(sig)) out.push(sig)
+    const owned = v['deep'] === 'owner' || v['served'] === 'owner'
+    if (owned && typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig) && !out.includes(sig)) out.push(sig)
   }
   return out
 }
@@ -645,18 +673,22 @@ function ownerHeldRefs(visuals: readonly Record<string, unknown>[]): string[] {
 type NotePeerLiveness = (pubkey: string, sigs: readonly string[], page?: { hosted?: readonly string[]; owner?: readonly string[] }) => void
 
 /** Tell the broker what a live peer's page names, on EVERY page event: every
- *  ref is a full entry's own atom, which its host already serves (`hosted` —
- *  read over HTTP first, never raced on the mesh: SCALE-3), and `owner` the
- *  tiles whose deeper pages are still only on the peer's device (D1), whose
- *  subtree the broker asks of the mesh first. Said even when `owner` is empty:
- *  a root named again WITHOUT the mark has finished uploading, and that flip
- *  re-opens its subtree's miss windows (BCL-9). Idempotent per (pubkey, sig)
- *  inside the broker, so a heartbeat re-announce costs nothing. */
+ *  ref is a full entry's own atom. A hosted entry's atoms its host already
+ *  serves (`hosted` — read over HTTP first, never raced on the mesh:
+ *  SCALE-3); a LIVE entry's (`served: 'owner'` — no host keeps it) only the
+ *  peer holds, so they stay claimed by a live peer and the broker races host
+ *  and mesh for them. `owner` the tiles whose deeper pages are only on the
+ *  peer's device (D1, or live), whose subtree the broker asks of the mesh
+ *  first. Said even when `owner` is empty: a root named again WITHOUT the
+ *  mark has finished uploading, and that flip re-opens its subtree's miss
+ *  windows (BCL-9). Idempotent per (pubkey, sig) inside the broker, so a
+ *  heartbeat re-announce costs nothing. */
 function notePeerHolds(note: NotePeerLiveness, pubkey: string, visuals: readonly Record<string, unknown>[]): void {
   const refs = visualArtifactSigs(visuals)
   const owner = ownerHeldRefs(visuals)
   if (refs.length === 0 && owner.length === 0) return
-  note(pubkey, refs, { hosted: refs, owner })
+  const hosted = visualArtifactSigs(visuals.filter(v => v['served'] !== 'owner'))
+  note(pubkey, refs, { hosted, owner })
 }
 
 /** Strip every value that carries a signature, recursively. A string holding
@@ -740,6 +772,10 @@ interface StoreLike {
   // content:wrote publish trigger — they are not this participant's act.
   getResource?: (sig: string) => Promise<Blob | null>
   putResource?: (blob: Blob, options?: { emit?: boolean }) => Promise<string>
+  // LOCAL ONLY — memory/OPFS, never the network: what a LIVE tile's own
+  // atoms weigh on this device (#liveHold).
+  getResourceLocal?: (sig: string) => Promise<Blob | null>
+  getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
 }
 
 // Singleton credential stores (RoomStore + SecretStore) live in
@@ -999,6 +1035,12 @@ export class SwarmDrone extends Drone {
   // tile; the receipt for the new handle swaps it. Cleared on zone change and
   // on leave. Consulted only for children that are public right now.
   #lastHostedEntry = new Map<string, ChildEntry>()
+
+  // What a LIVE tile's own atoms weigh, by signature — read from this
+  // device's store once (#liveHold). Content-addressed: a size never changes,
+  // so only a held atom is remembered (one not held yet is asked again on the
+  // next walk — a take may land it). Oldest first out.
+  readonly #liveAtomBytes = new Map<string, number>()
 
   // OUR OWN WORD, REPLAYED. pageSig → child name → the newest FULL entry (one
   // carrying a layerSig) the relay replayed to us under our own key, with its
@@ -1887,9 +1929,10 @@ export class SwarmDrone extends Drone {
       if (held(next) !== held(before) || owes(next) !== owes(before)) this.#scheduleReceiptRewalk()
     })
 
-    // A page's hosts became known or moved (the pool, a branch's marks, the
-    // relay's card): walk again, so a name that waited on the read — or went
-    // to the old host — is offered where its bytes now go.
+    // A page's hosts became known or moved (a branch's marks, the host
+    // field, a host passed over): walk again, so a name that waited on the
+    // read — or went to the old host — is offered where its bytes now go, and
+    // a tile no host takes any more goes out live.
     this.onEffect('swarm:hosts-changed', () => { this.#answerSeq++; this.#scheduleReceiptRewalk() })
 
     // A FINAL REFUSAL (rate-limited past its re-sends, invalid, a far-off
@@ -1952,14 +1995,16 @@ export class SwarmDrone extends Drone {
         mesh.resubscribeAll?.()
       }
 
-      // JOINING IS ENOUGH TO SHARE (2026-10-04; hosts by pool 2026-10-07).
-      // Joining needs no host pick: each page's tiles go to its publish
-      // domains, else the participant's hosts pool, else a relay that hosts
-      // participants — resolved by host-sync (swarmHostsFor) while this tab
-      // is joined. A tile goes out by name at once and with its signatures
-      // once its host serves them — so there is no "watching only" state to
-      // warn about, and the status line (swarm:share-status) says why a tile
-      // is still name-only, and which host it waits on.
+      // JOINING IS ENOUGH TO SHARE (2026-10-04; the host field and the live
+      // swarm, 2026-10-11). Joining needs no host pick: each page's tiles go
+      // to its publish domains, else the host field (the meeting point
+      // entered) — resolved by host-sync (swarmHostsFor) while this tab is
+      // joined. A tile goes out with its signatures once its host serves
+      // them; with no host, or one that refuses this key, it goes out whole
+      // at once, served from this device while it is in the room (#entryFor,
+      // the live swarm). There is no "watching only" state to warn about, and
+      // the status line (swarm:share-status) says where the tiles are kept,
+      // and which host a name-only tile waits on.
 
       if (payload?.public === false) {
         // Graceful leave — a SIGNED tombstone, so peers drop our tiles in one
@@ -2223,7 +2268,8 @@ export class SwarmDrone extends Drone {
     // WALK TIMINGS — what a silent sharer's walks are doing, readable from
     // one read-only call (no second tab): per page ('/' = the root), the last
     // walk's start, end and duration in ms, how it ended, and how its public
-    // children went out (full / previous / placeholder), how many stayed
+    // children went out (full — of those, `live` from this device alone —
+    // / previous / placeholder), how many stayed
     // private, and how many seals or host answers it had to leave running.
     walks: Object.fromEntries([...this.#walkStats].map(([key, s]) => ['/' + key, { ...s }])),
     // Join → the first page event this session ('null' while none has left).
@@ -2853,7 +2899,7 @@ export class SwarmDrone extends Drone {
       .map((x: unknown) => String(x ?? '').trim())
       .filter((x: string) => x.length > 0)
     const pathKey = lineageKey(segments)
-    // Where this page's tiles go (its publish domains, the hosts pool) starts
+    // Where this page's tiles go (its publish domains, the host field) starts
     // being read now, so the walk below finds it cached. Never waited on.
     try { this.#getHostSync()?.warmSwarmHosts?.(segments) } catch { /* an older host-sync */ }
 
@@ -3321,7 +3367,8 @@ export class SwarmDrone extends Drone {
         .filter((t): t is string[] => Array.isArray(t) && String(t[0]) === 'domain' && !!String(t[1] ?? '').trim())
         .map(t => String(t[1]).trim())
       if (domainTags.length && broker?.noteDomainsForSig) {
-        noteVisualHosts(cleanVisuals, domainTags, broker.noteDomainsForSig)
+        // Never a LIVE entry's (`served: 'owner'`): no host kept its bytes.
+        noteVisualHosts(cleanVisuals.filter(v => v['served'] !== 'owner'), domainTags, broker.noteDomainsForSig)
       }
       // NOT where their name is asked: a recovered entry is a responder's
       // unsigned JSON, so it could tie any key to any host. Only the key's own
@@ -3614,25 +3661,31 @@ export class SwarmDrone extends Drone {
       .filter((t): t is string[] => Array.isArray(t) && String(t[0]) === 'domain' && !!String(t[1] ?? '').trim())
       .map(t => String(t[1]).trim())
     const broker = this.#getBroker()
+    // A LIVE entry's bytes went to no host (`served: 'owner'`): the page's
+    // domains are never attributed to them — a probe there only misses, and
+    // a take would record a host that never kept the tile.
+    const hostedVisuals = cleanVisuals.filter(v => v['served'] !== 'owner')
     if (domainTags.length && broker?.noteDomainsForSig) {
-      noteVisualHosts(cleanVisuals, domainTags, broker.noteDomainsForSig)
+      noteVisualHosts(hostedVisuals, domainTags, broker.noteDomainsForSig)
     }
-    const refs = visualArtifactSigs(cleanVisuals)
+    const refs = visualArtifactSigs(hostedVisuals)
     // The same host is where their NAME is asked (names.service.ts) — this
     // event is the key's own, signed and relay-verified, and only when it
     // names bytes is the host on the byte path the attribution above opened.
     if (refs.length) for (const host of domainTags) nameService.hint(pubkey, host)
 
     // THE PUBLISHER IS HERE, AND THEY HAVE THE BYTES — of what only they
-    // hold. A full entry is announced only once its host serves it (the
-    // gate), and its domain tags above already wake whatever had missed; its
-    // picture and handle are fetched over HTTP first. Claiming every sig of
-    // every visual made each picture race the mesh — 3-5 relay frames apiece,
-    // hundreds refused 'rate-limited' on a picture-rich page (SCALE-3). What a
-    // live peer claims is a takeable branch's handle whose deeper pages are
-    // still only on their device (`deep: 'owner'`, D1): a take of it reaches
-    // the owner at once. Idempotent per (pubkey, sig) inside the broker, so
-    // the heartbeat re-announce costs nothing.
+    // hold. A hosted full entry is announced only once its host serves it
+    // (the gate), and its domain tags above already wake whatever had missed;
+    // its picture and handle are fetched over HTTP first. Claiming every sig
+    // of every visual made each picture race the mesh — 3-5 relay frames
+    // apiece, hundreds refused 'rate-limited' on a picture-rich page
+    // (SCALE-3). What a live peer claims: a takeable branch's handle whose
+    // deeper pages are still only on their device (`deep: 'owner'`, D1), and
+    // every atom of a LIVE entry (`served: 'owner'` — no host keeps it, the
+    // live swarm), which only they can answer while they are here. A take of
+    // either reaches the owner at once. Idempotent per (pubkey, sig) inside
+    // the broker, so the heartbeat re-announce costs nothing.
     if (broker?.notePeerLiveness) notePeerHolds(broker.notePeerLiveness, pubkey, cleanVisuals)
 
     // Auto-resource-pull DISABLED for the exploration-first model.
@@ -3908,7 +3961,7 @@ export class SwarmDrone extends Drone {
     this.#publishStats.walkNodeVisits++
     const stat: WalkStat = {
       startedAtMs: Date.now(), endedAtMs: 0, ms: 0, outcome: 'error',
-      full: 0, previous: 0, placeholder: 0, private: 0, sealsLate: 0, answersLate: 0,
+      full: 0, live: 0, previous: 0, placeholder: 0, private: 0, sealsLate: 0, answersLate: 0,
     }
     try {
       await this.#publishPage(dir, segments, depth, counter, sigStore, mesh, room, secret, live, stat)
@@ -4027,12 +4080,12 @@ export class SwarmDrone extends Drone {
       // CDN doctrine-gate feed: this walk enumerates EXACTLY the public
       // subset, so it is the sanctioned writer of `.public` markers
       // (host-sync markPublic) — and marking is what stages the upload to
-      // this page's swarm hosts (its publish domains, else the hosts pool,
-      // else a relay that hosts participants). A public-BRANCH root vouches
-      // for its whole closure; an individually-public tile marks only its own
-      // layer + resources (closure=false) — private descendants must never
-      // acquire a marker. Fire-and-forget: never awaited in the walk, never
-      // throws into it.
+      // this page's swarm hosts (its publish domains, else the host field;
+      // with neither, nothing is queued and the tile goes out live). A
+      // public-BRANCH root vouches for its whole closure; an
+      // individually-public tile marks only its own layer + resources
+      // (closure=false) — private descendants must never acquire a marker.
+      // Fire-and-forget: never awaited in the walk, never throws into it.
       if (c.layerSig && hostSync) {
         try {
           void hostSync.markPublic(c.layerSig, 'layer', isBranchPublic(publicLocation, c.name), segments)
@@ -4073,6 +4126,7 @@ export class SwarmDrone extends Drone {
     const announced = await Promise.all(childRefs.map(c => this.#entryFor(c, segments, sig, hostSync, replayReady)))
     for (const a of announced) {
       stat[a.form]++
+      if (a.live) stat.live++
       if (a.late) stat.answersLate++
     }
     // A child whose closure reaches a page still being read, with nothing
@@ -4085,7 +4139,8 @@ export class SwarmDrone extends Drone {
     // Still on its way to a host: a child whose newest version is not served
     // yet, or a takeable branch whose deeper pages are still only on this
     // device (D1). Each landed receipt re-walks the page until they arrive.
-    const waiting = announced.filter(a => a.form !== 'full' || a.deep === 'owner').length
+    // A LIVE child waits on nothing: no host is taking it.
+    const waiting = announced.filter(a => !a.live && (a.form !== 'full' || a.deep === 'owner')).length
     // A replay of our own earlier word that lands after this walk may turn
     // these names back into what we said before (#noteOwnReplay).
     if (nameOnly > 0) this.#placeholderSigs.add(sig)
@@ -4111,12 +4166,14 @@ export class SwarmDrone extends Drone {
     if (isCurrent) {
       // The sharer's status line for the page they stand on: how many go
       // out, how many are still on their way to the host (and of those, how
-      // many as a name alone), how many stay private, WHICH host this page's
-      // tiles go to and why that one (publish domains, the hosts pool, the
-      // relay), and what it last said — the reason a name-only tile is
-      // name-only. No host at all is said as 'no-host'. A branch held by a
-      // host that takes none of its bytes is NAMED, with the host and why
-      // (`blocked`), and is not counted as uploading: it is not on its way.
+      // many as a name alone), how many go out LIVE (`live` — whole, served
+      // from this device: no host keeps them), how many stay private, WHICH
+      // host this page's tiles go to and why that one (publish domains, the
+      // host field), and what it last said — the reason a name-only tile is
+      // name-only, or a live one live. No host at all is said as 'no-host'. A
+      // branch held by a host that takes none of its bytes is NAMED, with the
+      // host and why (`blocked`), and is not counted as uploading: it is not
+      // on its way.
       //
       // WHAT HOLDS EACH TILE BACK (BCL-2/TS-1, #heldReport): `held` groups the
       // tiles a host is not taking by that host, with its word and why —
@@ -4133,8 +4190,8 @@ export class SwarmDrone extends Drone {
       const report = this.#heldReport(segments, hostSync, childRefs, announced)
       const hostInfo = this.#hostReport(segments)
       // A branch's own publish domain passed over (D2: it refuses or never
-      // answered, so its pages went by the meeting host, the pool or the
-      // relay) is named HERE, where the branch is offered — once its tiles
+      // answered, so its pages went by the host field, or went live) is
+      // named HERE, where the branch is offered — once its tiles
       // are takeable nothing else on the line would say the domain is not
       // the one hosting it. So is one worn DEEPER in the branch (BCL-1: a
       // page two levels down wears a mistyped domain): host-sync knows every
@@ -4152,6 +4209,7 @@ export class SwarmDrone extends Drone {
         offered: children.length,
         uploading: report.uploading,
         nameOnly,
+        live: announced.filter(a => a.live).length,
         private: prunedNames.length,
         ...hostInfo,
         ...(passedOver.size > 0 ? { passedOver: [...passedOver] } : {}),
@@ -4341,25 +4399,43 @@ export class SwarmDrone extends Drone {
     await Promise.all(subtreeWork)
   }
 
-  // ── ANNOUNCE WHAT THE HOST SERVES; FOR ANYTHING ELSE, ONLY THE NAME ──
-  // (jwize, 2026-10-04 — supersedes the 09-25 hold-back.) Hosting stays the
-  // truth: no signature goes out that no host serves, so a take never 404s.
-  // But a tile is never TAKEN BACK for being new, edited, uploading, refused
-  // or reloaded — the hold-back blinked every edited tile out for the whole
-  // room (edit-churn-retracts-shared-tiles) and withdrew a reloaded sharer's
-  // tiles for good (reload-drops-session-host). Per public child, per walk:
+  // ── ANNOUNCE WHAT A HOST SERVES, OR WHAT THIS DEVICE SERVES LIVE ──
+  // (jwize, 2026-10-04 — supersedes the 09-25 hold-back; the LIVE SWARM,
+  // 2026-10-11.) Where a host keeps the page, hosting stays the truth: no
+  // signature goes out that its host does not serve yet, so a take never
+  // 404s after the sharer leaves. But a tile is never TAKEN BACK for being
+  // new, edited, uploading, refused or reloaded — the hold-back blinked every
+  // edited tile out for the whole room (edit-churn-retracts-shared-tiles) and
+  // withdrew a reloaded sharer's tiles for good (reload-drops-session-host).
+  // Per public child, per walk:
   //
-  //   (a) its closure is served — a receipt on any current target, which
-  //       while joined always includes the swarm host (the relay this tab
-  //       meets at) → the FULL entry, remembered in #lastHostedEntry;
-  //   (b) not served, but an earlier version was → that earlier entry,
+  //   (a) its closure is served — a receipt on this page's hosts (its
+  //       publish domains, else the host field) → the FULL entry,
+  //       remembered in #lastHostedEntry;
+  //   (L) LIVE — no host keeps it: the page names no host at all, or every
+  //       host it goes to refused it for good (refused, full, never
+  //       answered — host-sync's `ownerHeld`), and it has a handle → the
+  //       FULL entry, at once, marked `served: 'owner'` (and `deep: 'owner'`
+  //       for a takeable branch): THIS DEVICE serves it, through the content
+  //       broker, while it is in the room. "The swarm is different than the
+  //       public publish because tiles go away when the people leave" — and
+  //       they do: a signed leave, or a slot left to expire, takes them off
+  //       every peer's grid. A peer who TOOK one keeps it (its pictures land
+  //       at the take, swarm-adopt). A page with no host asks host-sync
+  //       nothing. An atom a host refused for its SIZE keeps the tile a
+  //       name (D1: no broker answer carries it either);
+  //   (b) neither, but an earlier version was served → that earlier entry,
   //       byte-for-byte: its old handle and old picture are still served;
-  //   (c) neither → a PLACEHOLDER: the name, titles and inert props, with
-  //       layerSig, inviteSig and every value carrying a signature removed,
-  //       recursively. It renders as a label tile; it cannot be taken
-  //       until (a) lands, because a take needs a layerSig.
+  //   (c) none of these → a PLACEHOLDER: the name, titles and inert props,
+  //       with layerSig, inviteSig and every value carrying a signature
+  //       removed, recursively. It renders as a label tile; it cannot be
+  //       taken until (a) or (L) lands, because a take needs a layerSig.
+  //       What is left for it: a sig-less child, a hole no store here holds
+  //       (`missing`), a too-large atom, a page whose hosts are still being
+  //       read, an answer still on its way (late), or an upload still
+  //       running to a host that has not refused it.
   //
-  // A sig-less child (layer not committed yet) has nothing a host could
+  // A sig-less child (layer not committed yet) has nothing anyone could
   // serve, so it goes out as (b) or (c) until its first commit. Without a
   // gate service at all (a shell with no host-sync) there is nothing to wait
   // for, and every child is (a).
@@ -4422,12 +4498,21 @@ export class SwarmDrone extends Drone {
     // `deep`: the whole closure (child pages too), else the tile's own atoms.
     const servedHere = (sig: string, deep: boolean): Promise<ClosureVerdict> =>
       this.#askOnce(`${sig}\0${deep ? 'c' : 't'}\0${scope}`, () => this.#verdict(hostSync!, sig, deep, segments, self, perPage, advertised))
+    // NO HOST AT ALL, once the page's hosts have been read (the live swarm):
+    // no publish domain, no host field, and our own backup off. Nothing could
+    // ever serve this page but this device, so nothing is asked.
+    const choice = perPage ? this.#pageHosts(segments) : null
+    const noHost = !!choice && !choice.pending && choice.hosts.length === 0 && self.length === 0
     let unknown = false
     let late = false
+    let live = false
     let blocking: Blocking | undefined
     let deep: DeepWhere | undefined
     let deepBlocking: Blocking | undefined
-    if (!available && child.layerSig) {
+    if (!available && child.layerSig && noHost) {
+      // (L) at once — never waiting on host-sync.
+      live = true
+    } else if (!available && child.layerSig) {
       const seq = this.#answerSeq
       const startMs = Date.now()
       const tile = servedHere(child.layerSig, false)
@@ -4437,18 +4522,24 @@ export class SwarmDrone extends Drone {
       const r = await this.#within(tile, ENTRY_WAIT_MS)
       if (r.late) {
         late = true
-        // The answer lands after the walk moved on: a yes — or any answer to
-        // a question a receipt has overtaken — walks the page again.
-        void tile.then(v => { if (v.ok === true || this.#answerSeq !== seq) this.#scheduleReceiptRewalk() })
+        // The answer lands after the walk moved on: a yes, a refusal for good
+        // (the tile goes live) — or any answer to a question a receipt has
+        // overtaken — walks the page again.
+        void tile.then(v => { if (v.ok === true || liveVerdict(v) || this.#answerSeq !== seq) this.#scheduleReceiptRewalk() })
       } else {
-        // The TILE's own atoms must be ON a host (D1): an atom of its own the
-        // hosts will never take (a 9 MB picture answered 413, every door
-        // refusing) is not served from this device — a take would reach a
-        // picture no host and no broker answer (over its 8 MB cap) can carry.
-        // The tile stays a name, and #heldReport names the host and the file.
+        // The TILE's own atoms must be ON a host (D1), or every host it goes
+        // to must have refused them for good — then it is live (L), served
+        // from here. An atom of its own a host will never take for its SIZE
+        // (a 9 MB picture answered 413) is not served from this device
+        // either — a take would reach a picture no host and no broker answer
+        // (over its 8 MB cap) can carry. The tile stays a name, and
+        // #heldReport names the host and the file.
         available = r.value.ok === true
         unknown = r.value.ok === null
-        if (!available) blocking = r.value.blocking
+        if (!available) {
+          live = liveVerdict(r.value)
+          if (!live) blocking = r.value.blocking
+        }
       }
       if (available && whole && !deep) {
         const d = await this.#within(whole, Math.max(0, ENTRY_WAIT_MS - (Date.now() - startMs)))
@@ -4461,6 +4552,24 @@ export class SwarmDrone extends Drone {
           if (deep === 'owner') deepBlocking = d.value.blocking
         }
       }
+    }
+    if (live) {
+      const visual = await this.#visualFor(child, segments)
+      // THIS DEVICE MUST BE ABLE TO SERVE IT (D1, decision c): every atom a
+      // peer fetches to paint or take the tile — its layer, its pictures —
+      // held here and small enough for one broker answer. Otherwise it stays
+      // a name, and #heldReport says why. Local reads only.
+      const hold = await this.#liveHold(visual)
+      if (!hold) {
+        // A live branch's deeper pages are on this device too: a take reaches
+        // them here, mesh first, while we are in the room.
+        const where: DeepWhere | undefined = branch ? 'owner' : undefined
+        const entry = canonicaliseValue({ ...visual, served: 'owner', ...(where ? { deep: where } : {}) }) as ChildEntry
+        // Never remembered as hosted: no host serves it, so (b) can never say it.
+        return { entry, form: 'full', live: true, ...(where ? { deep: where } : {}) }
+      }
+      live = false
+      blocking = hold
     }
     if (available) {
       const visual = await this.#visualFor(child, segments)
@@ -4494,6 +4603,13 @@ export class SwarmDrone extends Drone {
         this.#ownReplay.get(pageSig)?.delete(child.name)
         previous = undefined
       } else if (replayed && still === true) {
+        // A replayed LIVE word whose atoms a host serves by now: said again
+        // as hosted, never as this device's alone.
+        if (previous['served'] !== undefined) {
+          const { served: _served, ...hosted } = previous
+          void _served
+          previous = canonicaliseValue(hosted) as ChildEntry
+        }
         this.#lastHostedEntry.set(memoKey, previous)
       }
     }
@@ -4509,6 +4625,49 @@ export class SwarmDrone extends Drone {
       ...(unknown ? { unknown: true } : {}),
       ...(late ? { late: true } : {}),
     }
+  }
+
+  /** Why a tile that would go LIVE cannot be served from this device, or
+   *  undefined when it can: an atom a peer needs (its layer, a picture the
+   *  visual names) that no store here holds — a tile taken from elsewhere
+   *  whose picture never landed (`missing`) — or one over the largest answer
+   *  a broker sends (`too-large`; a 9 MB picture). No host keeps the tile, so
+   *  announcing it would hand peers a signature nobody can serve. Local
+   *  reads only (memory/OPFS — no round trip); a shell whose store has no
+   *  local reader is not judged. */
+  #liveHold = async (visual: ChildEntry): Promise<Blocking | undefined> => {
+    const store = this.#getStore()
+    const readLayer = store?.getLayerPoolBytes
+    const readResource = store?.getResourceLocal
+    if (typeof readLayer !== 'function' && typeof readResource !== 'function') return undefined
+    const layerSig = typeof visual.layerSig === 'string' ? visual.layerSig : ''
+    for (const sig of visualArtifactSigs([visual])) {
+      let bytes = this.#liveAtomBytes.get(sig)
+      if (bytes === undefined) {
+        let size: number | null = null
+        try {
+          if (sig === layerSig) size = (await readLayer?.call(store, sig))?.byteLength ?? null
+          else {
+            const blob = await readResource?.call(store, sig)
+            size = blob && typeof blob.size === 'number' ? blob.size : null
+          }
+        } catch { size = null }
+        if (size === null) {
+          return { host: '', sig, state: 'missing', reason: 'not held on this device — no host keeps it', name: visual.name }
+        }
+        bytes = size
+        this.#liveAtomBytes.set(sig, bytes)
+        while (this.#liveAtomBytes.size > LIVE_ATOM_SIZES_MAX) {
+          const oldest = this.#liveAtomBytes.keys().next().value
+          if (oldest === undefined) break
+          this.#liveAtomBytes.delete(oldest)
+        }
+      }
+      if (bytes > MESH_ANSWER_MAX_BYTES) {
+        return { host: '', sig, state: 'too-large', reason: `${Math.ceil(bytes / 1_048_576)} MB — more than a peer can be sent without a host`, name: visual.name, bytes }
+      }
+    }
+    return undefined
   }
 
   /** One closure question to host-sync, in the verdict's shape: the gate
@@ -4819,8 +4978,8 @@ export class SwarmDrone extends Drone {
   }
 
   /** The hosts a page's layer event names, in order — WHERE these tiles'
-   *  bytes went: the page's swarm hosts (its publish domains, else the hosts
-   *  pool, else a relay that hosts participants), then our own self-domain
+   *  bytes went: the page's swarm hosts (its publish domains, else the host
+   *  field), then our own self-domain
    *  only while its backup target is actually on — advertising the page's
    *  origin named a host that never received the bytes (hypercomb.io answers
    *  every /<sig> with the app page). An older host-sync names the relay, as
@@ -4859,13 +5018,13 @@ export class SwarmDrone extends Drone {
    *  last said. Of the page's hosts, the first that is taking bytes — a
    *  second publish domain that refuses says nothing while the first serves
    *  the room — else the primary's refusal. A page with no host at all, once
-   *  its hosts have been read, is 'no-host'. */
+   *  its hosts have been read, is 'no-host' (its tiles go out live). */
   #hostReport = (segments: readonly string[]): { host: string; hosts: string[]; hostSource: string; hostState: string; reason: string; why?: string; passedOver?: string[] } => {
     const choice = this.#pageHosts(segments)
     const hosts = choice ? [...choice.hosts] : [this.#swarmHost()].filter(Boolean)
     const hostSource = choice ? choice.source : (hosts.length ? 'relay' : 'none')
-    // Pool hosts passed over this session (refused, full, silent): the line
-    // can say why the bytes went elsewhere.
+    // Doors passed over this session (refused, full, never answered): the
+    // line can say why the bytes went elsewhere, or nowhere.
     const passedOver = choice?.passedOver?.length ? { passedOver: [...choice.passedOver] } : {}
     if (hosts.length === 0) {
       return { host: '', hosts, hostSource, hostState: choice && !choice.pending ? 'no-host' : '', reason: '', ...passedOver }
@@ -4879,8 +5038,8 @@ export class SwarmDrone extends Drone {
    *  that can never take a write — a name that does not resolve (the
    *  `hyperccomb.com` typo), a host answering a web page, one that refuses or
    *  is full — is passed over for the swarm once its uploads give that
-   *  standing answer (D2, swarm-hosts.ts): the page goes by the meeting
-   *  host, the pool or the relay, and the line names the domain from
+   *  standing answer (D2, swarm-hosts.ts): the page goes by the host
+   *  field (or, with none, live), and the line names the domain from
    *  `passedOver`. Until then — and for good when no door below it takes
    *  bytes, so the domain keeps the page — it is NAMED here, with the branch
    *  that waits on it and why, rather than that branch reading as
@@ -4983,7 +5142,9 @@ export class SwarmDrone extends Drone {
     let deepOnDevice = 0
     announced.forEach((a, i) => {
       const c = refs[i]
-      if (!c) return
+      // A LIVE tile is offered whole from this device: nothing holds it back,
+      // and nothing is on its way for it.
+      if (!c || a.live) return
       const deepOnly = a.form === 'full'
       if (deepOnly && a.deep !== 'owner') return
       if (deepOnly) deepOnDevice++
@@ -6155,7 +6316,7 @@ export class SwarmDrone extends Drone {
     // We stood somewhere else by now, or left: this page is not the
     // channel's word any more.
     if (!live()) return
-    this.#channelPending = announced.some(a => a.form !== 'full' || a.deep === 'owner')
+    this.#channelPending = announced.some(a => !a.live && (a.form !== 'full' || a.deep === 'owner'))
     const myLabel = this.#readMyLabel()
     const payload: SwarmLayerPayload = myLabel
       ? { label: myLabel, visuals: children }

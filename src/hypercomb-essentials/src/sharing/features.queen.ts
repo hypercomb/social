@@ -5,13 +5,13 @@
 //   features                          list them
 //   features participant <name…>      readers of your sites never load these
 //   features everyone <name…>         give them back to every reader
-//   features publish [host]           send the set, signed, to your host
+//   features publish <host>           send the set, signed, to the host you
+//                                     name — there is no default host
 //
 // The set is the `features:participant` pool (participant-features.ts); the
 // publish folds it into one snapshot and names it in your signed index.
 
-import { EffectBus, QueenBee } from '@hypercomb/core'
-import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { EffectBus, I18N_IOC_KEY, QueenBee, get, type I18nProvider } from '@hypercomb/core'
 import { zoneDoor } from './zone-door.js'
 import {
   addParticipantFeature,
@@ -32,7 +32,7 @@ export class FeaturesQueenBee extends QueenBee {
     { input: 'features', result: 'Lists the participant-only features' },
     { input: 'features participant assistant editor', result: 'Readers of your sites never load the assistant or the editor' },
     { input: 'features everyone editor', result: 'Gives the editor back to every reader' },
-    { input: 'features publish', result: 'Sends the set, signed, to your host' },
+    { input: 'features publish example.com', result: 'Sends the set, signed, to example.com' },
   ]
 
   protected async execute(args: string): Promise<void> {
@@ -51,7 +51,8 @@ export class FeaturesQueenBee extends QueenBee {
       return
     }
     if (verb === 'publish') {
-      await this.#publish(zoneDoor(rest[0] || PUBLIC_CONTENT_HOSTS[0] || ''))
+      // Only to a host the participant names (jwize 2026-10-11: no default host).
+      await this.#publish(zoneDoor(rest[0] ?? ''))
       return
     }
     const names = await listParticipantFeatures()
@@ -59,7 +60,11 @@ export class FeaturesQueenBee extends QueenBee {
   }
 
   async #publish(host: string): Promise<void> {
-    if (!host) { say('error', 'No host to publish to.'); return }
+    if (!host) {
+      const said = get<I18nProvider>(I18N_IOC_KEY)?.t?.('features.publish.nohost')
+      say('warning', said && said !== 'features.publish.nohost' ? said : 'No host is named, so the set was not sent — say features publish <host>.')
+      return
+    }
     const result = await publishParticipantFeatures(host)
     if (!result.ok) { say('error', `The set could not be published to ${host}: ${result.reason}`); return }
     say('success', `Published to ${host}: readers of your sites skip ${result.names.length ? result.names.join(', ') : 'nothing'}.`)

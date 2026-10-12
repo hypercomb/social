@@ -12,7 +12,7 @@
 
 import { SignatureService, acceptVocabularyClaim, get, requestConfirm } from '@hypercomb/core'
 import { lineageKey } from '../history/lineage-key.js'
-import { PUBLIC_CONTENT_HOSTS, vocabularyRootOf } from '../sharing/hive-link.js'
+import { vocabularyRootOf } from '../sharing/hive-link.js'
 import { fetchHiveIndex, setHiveRoot } from '../sharing/hive-pointer.js'
 import { hostsOfBranch } from '../sharing/community-hosts.js'
 import { zoneDoor } from '../sharing/zone-door.js'
@@ -37,6 +37,8 @@ interface HistoryLike {
   headLayer?: (locationSig: string) => Promise<{ layerSig?: string } | null>
 }
 interface HostSyncLike {
+  isPublicHostEnabled?: () => boolean
+  publicHostDomain?: () => string
   /** `page: false` — a vocabulary claim is not a room offer. */
   markPublic?: (sig: string, kind?: string, closure?: boolean, page?: readonly string[] | null | false) => Promise<void>
   isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
@@ -78,7 +80,9 @@ const askParticipant = async (summary: VocabularyPublishSummary): Promise<boolea
 }
 
 /** The door the index is advanced on: the branch marks first, then the
- *  standing public endpoint — the same order `publishBranch` resolves. */
+ *  public host the participant NAMED and turned on — else '' and the routine
+ *  refuses ('no-host'). Never a standing endpoint nobody named (jwize
+ *  2026-10-11, "make sure that there isn't a default host"). */
 const indexHost = async (): Promise<string> => {
   try {
     for (const path of readPublicBranches()) {
@@ -88,8 +92,9 @@ const indexHost = async (): Promise<string> => {
       const first = zones?.[0]
       if (first) return zoneDoor(first)
     }
-  } catch { /* fall through to the standing endpoint */ }
-  return zoneDoor(PUBLIC_CONTENT_HOSTS[0] ?? '')
+  } catch { /* fall through to the named public host */ }
+  const sync = get<HostSyncLike>(HOST_SYNC_KEY)
+  return sync?.isPublicHostEnabled?.() ? zoneDoor(sync.publicHostDomain?.() ?? '') : ''
 }
 
 /**

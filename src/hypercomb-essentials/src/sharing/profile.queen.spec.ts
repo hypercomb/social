@@ -15,6 +15,7 @@ import { EffectBus, I18N_IOC_KEY, machineCatalogue } from '@hypercomb/core'
 import { finalizeEvent, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { decode } from 'nostr-tools/nip19'
 import type { HiveIndexResult } from './hive-pointer.js'
+import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { nip05Name } from './names.service.js'
 import {
   PROFILE_REASONS, PROFILE_REASON_TEXT, PROFILE_ROOT_KEY, acceptProfile, imageKindOf, parseProfileWord, profileFieldsOf,
@@ -664,6 +665,37 @@ describe('the profile word', () => {
         .toBe(`Your profile was NOT published: ${sha(note).slice(0, 12)}… is not an image (PNG, JPEG, GIF, WebP, AVIF or SVG)`)
       expect(atoms.size).toBe(before)
       expect(heap.size).toBe(shipped)
+    })
+
+    it('with no host named, a set is refused and nothing leaves; a show still READS the public content host (no default host, 2026-10-11)', async () => {
+      const sync = held.get('@diamondcoreprocessor.com/HostSyncService') as Record<string, unknown>
+      ioc.register('@diamondcoreprocessor.com/HostSyncService', { ...sync, publicHostDomain: () => '' })
+      const realFetch = globalThis.fetch
+      const asked: { url: string; method: string }[] = []
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        asked.push({ url: String(input), method: init?.method ?? 'GET' })
+        return realFetch(input, init)
+      }) as typeof fetch
+      const index = host.index
+      const shipped = heap.size
+      try {
+        expect(await say('name jwize')).toEqual({
+          type: 'warning',
+          message: 'Your profile was NOT published: no host is named — put one first, like profile @example.com name <name>',
+        })
+        expect(asked).toEqual([])
+        expect(heap.size).toBe(shipped)
+        expect(host.index).toBe(index)
+
+        const shown = await say('')
+        expect(shown.type).toBe('info')
+        expect(shown.message).toContain(`on ${PUBLIC_CONTENT_HOSTS[0]}`)
+        expect(asked.length).toBeGreaterThan(0)
+        expect(asked.every(call => call.method === 'GET' && new URL(call.url).host === PUBLIC_CONTENT_HOSTS[0])).toBe(true)
+      } finally {
+        globalThis.fetch = realFetch
+        ioc.register('@diamondcoreprocessor.com/HostSyncService', sync)
+      }
     })
   })
 })

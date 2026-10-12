@@ -233,7 +233,26 @@ ORIGIN_HOSTS = "hypercomb.com"
 # ROOT_PATHS = "1"
 # There is no visitor hold: a door opens only while the publisher's SIGNED
 # index names its lineage (worker.js "open is a signed mark"). Unpublish hides it.
-AUTO_GRANT = "1"
+#
+# WHO GETS BYTES (jwize 2026-10-11: "we can't give hosting away for free").
+# AUTO_GRANT "0": no stranger's key is minted a grant. Bytes are kept for this
+# host's people only (worker.js hostPeople): the publishers SITE_BINDINGS binds
+# below, any SITE_OPERATORS key, and HOST_FRIENDS — at PEOPLE_QUOTA_BYTES at
+# least. A domain claimant stands on its claim allowance only while it is one
+# of those too. An unexpired grant someone else already holds keeps working
+# until its own expiry, at most at the guest ceiling (DEFAULT_QUOTA_BYTES), and
+# is never re-minted; nothing is deleted. The same bucket
+# and grant ledger sit behind hypercomb-content (wrangler.toml), so a grant is
+# honoured on both — keep AUTO_GRANT "0" on both, or a key minted there
+# uploads here. First rollout: deploy this code with "1" still in force, read
+# GET /grant from every publishing device (each must say active), list any
+# key it does not cover in HOST_FRIENDS, then deploy "0" to both scripts.
+AUTO_GRANT = "0"
+# The friends this host is shared with — 64-hex pubkeys, comma separated
+# (public keys only; never a secret here). A redeploy per friend for now; a
+# self-service signed list comes later.
+HOST_FRIENDS = ""
+PEOPLE_QUOTA_BYTES = "1073741824"   # 1 GiB for each of the host's people per GRANT_TTL_DAYS window (a lapsed window refills)
 # The hosts whose WebSocket dials are a meeting point's (the bindings above),
 # on any path. Comma separated; a host must also be routed to this worker, and
 # a host named in both lists is open (MEET_OPEN) and never the coded script's.

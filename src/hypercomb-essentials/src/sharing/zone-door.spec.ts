@@ -198,8 +198,9 @@ describe('stored settings carry over on update — folded on read, never rewritt
 
   it('hc:public-host:domain stored as content.<zone> publishes to <zone>', async () => {
     const { hostSyncService } = await import('./host-sync.service.js')
-    expect(hostSyncService.defaultPublicHostDomain()).toBe('pluginthematrix.com')
-    expect(hostSyncService.publicHostDomain()).toBe('pluginthematrix.com')
+    // No host is named for the participant (jwize, 2026-10-11): unset is none.
+    expect(hostSyncService.defaultPublicHostDomain()).toBe('')
+    expect(hostSyncService.publicHostDomain()).toBe('')
     localStorage.setItem('hc:public-host:domain', 'content.cafesociety.buzz')
     expect(hostSyncService.publicHostDomain()).toBe('cafesociety.buzz')
     // Read-only: the stored value is untouched until the participant sets one.
