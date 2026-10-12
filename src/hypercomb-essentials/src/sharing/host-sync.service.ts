@@ -246,6 +246,14 @@ const FULL_MIN_BACKOFF_MS = 10 * 60_000
 // (the drain is single-flight) or a verify slot (the semaphore is shared).
 const REQUEST_TIMEOUT_MS = 15_000
 const TIMEOUT_PER_100KB_MS = 1_000
+// NOTHING IN A PASS WAITS FOREVER (2026-10-11). #fetchWithin's deadline ends
+// when the headers arrive; a body read after it, or a signer that never
+// answers, had none — and one hung await held a verify slot, so four of them
+// starved the gate and the drain for minutes (jwize's 4250 tab: every tile
+// name-only, "uploading 27", no host heard for ~630 s). Each such await now
+// has its own deadline.
+const BODY_TIMEOUT_MS = 15_000
+const SIGN_TIMEOUT_MS = 10_000
 // The largest body a common edge (Cloudflare's 100 MB) lets through to a
 // host. Above it the edge answers 413 with no CORS headers, which a browser
 // shows as a bare network error — one entry too large, never a host refusing.
@@ -3332,7 +3340,7 @@ export class HostSyncService extends EventTarget {
       // reads back as below.
       if (target.swarm) {
         let said = ''
-        try { said = (await put.text()).trim() } catch { /* unreadable — read back */ }
+        try { said = (await HostSyncService.#within(put.text(), BODY_TIMEOUT_MS)).trim() } catch { /* unreadable or slow — read back */ }
         if (said === `stored ${entry.sig}` || said === `already held ${entry.sig}`) {
           // It answers for itself: a small atom needs no HEAD before it.
           this.#saysStored.add(host)
@@ -3348,7 +3356,8 @@ export class HostSyncService extends EventTarget {
       // page must never mint a receipt.
       const back = await HostSyncService.#fetchWithin(url, { cache: 'no-store' })
       const served = await this.#servesSig(back, url, entry.sig)
-      try { await back.body?.cancel() } catch { /* already drained/closed */ }
+      // Fire and forget: a body that never closes must not hold the pass.
+      try { void back.body?.cancel().catch(() => void 0) } catch { /* already drained/closed */ }
       if (!served) return { status: 'unreachable', reason: `${back.status} not served back` }
     } catch (err) {
       // The read-back: network, host down, or our own deadline — retry on
@@ -3433,6 +3442,17 @@ export class HostSyncService extends EventTarget {
     return Number.isFinite(at) ? Math.max(0, at - Date.now()) : 0
   }
 
+  /** A promise with a deadline: rejects with an AbortError-named error when
+   *  `ms` pass first. For awaits #fetchWithin cannot cover (body reads, the
+   *  signer). */
+  static #within<T>(work: Promise<T>, ms: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(Object.assign(new Error('timed out'), { name: 'AbortError' })), ms)
+    })
+    return Promise.race([work, late]).finally(() => clearTimeout(timer))
+  }
+
   /** fetch with a deadline: 15 s, plus 1 s per 100 KB sent. */
   static async #fetchWithin(url: string, init: RequestInit, sentBytes = 0): Promise<Response> {
     const ctrl = new AbortController()
@@ -3498,9 +3518,9 @@ export class HostSyncService extends EventTarget {
     const etag = (res.headers.get('etag') ?? '').replace(/^W\//i, '').replace(/"/g, '').trim().toLowerCase()
     if (etag === sig) return true
     try {
-      const body = await fetch(url, { cache: 'no-store' })
+      const body = await HostSyncService.#fetchWithin(url, { cache: 'no-store' })
       if (!body.ok) return false
-      return (await SignatureService.sign(await body.arrayBuffer())) === sig
+      return (await SignatureService.sign(await HostSyncService.#within(body.arrayBuffer(), BODY_TIMEOUT_MS))) === sig
     } catch { return false }
   }
 
@@ -3777,7 +3797,7 @@ export class HostSyncService extends EventTarget {
       content: '',
     }
     try {
-      const signed = await signer.signEvent(evt)
+      const signed = await HostSyncService.#within(signer.signEvent(evt), SIGN_TIMEOUT_MS)
       const json = JSON.stringify(signed)
       return 'Nostr ' + btoa(unescape(encodeURIComponent(json)))
     } catch {
@@ -3801,12 +3821,12 @@ export class HostSyncService extends EventTarget {
     if (!pubkey) return ''
     const createdAt = Math.floor(nowMs / 1000)
     try {
-      const signed = await signer.signEvent({
+      const signed = await HostSyncService.#within(signer.signEvent({
         kind: SWARM_LIFECYCLE_KIND,
         created_at: createdAt,
         tags: [['x', lifecycle], ['d', pubkey], ['expiration', String(createdAt + ALIVE_TTL_SECS)]],
         content: JSON.stringify({ alive: true, v: ALIVE_BEACON_VERSION }),
-      })
+      }), SIGN_TIMEOUT_MS)
       const json = JSON.stringify(signed)
       this.#alive = { at: nowMs, x: lifecycle, json }
       return json
