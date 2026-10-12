@@ -2114,8 +2114,28 @@ export class ClaudeBridgeWorker extends Worker {
     const askId = typeof req.cell === 'string' ? req.cell.trim() : ''
     if (!askId) return { id: req.id, ok: false, error: 'chat-asked requires `cell` (the askId)' }
     const result = this.#askResults.get(askId)
-    return { id: req.id, ok: true, data: result ? { done: true, ...(result as object) } : { done: false, askId } }
+    if (result) return { id: req.id, ok: true, data: { done: true, ...(result as object) } }
+    // AN ASK THIS PAGE NEVER RAN IS OVER. Results live in the page that ran
+    // the ask; a reload mid-turn took that page and its turn with it, and the
+    // asker read `done: false` until it gave up fifteen minutes later (the
+    // harness manager, 2026-10-11). The id carries when it was minted: one
+    // minted before this page loaded was run by a page that is gone.
+    const minted = Number.parseInt(/^ask-([0-9a-z]+)-/.exec(askId)?.[1] ?? '', 36)
+    if (Number.isFinite(minted) && minted < ClaudeBridgeWorker.#BOOTED_AT) {
+      return {
+        id: req.id, ok: true,
+        data: {
+          done: true, askId, ok: false, outcome: 'failed',
+          error: 'the hive tab reloaded while this ask was running, so the turn stopped; ask again — the conversation keeps what was said',
+          rounds: 0, reads: 0, tokens: 0, answer: '',
+        },
+      }
+    }
+    return { id: req.id, ok: true, data: { done: false, askId } }
   }
+
+  /** When this page loaded: an ask minted before it was run by a page that is gone. */
+  static readonly #BOOTED_AT = Date.now()
 
   async #effectEmit(req: BridgeRequest): Promise<BridgeResponse> {
     const name = typeof req.cell === 'string' ? req.cell : ''
