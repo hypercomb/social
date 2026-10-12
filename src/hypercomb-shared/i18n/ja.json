@@ -1582,6 +1582,7 @@
   "slash.publish": "ハイブが配信している内容と、その後こちらで変わった内容を表示",
   "controls.publish": "公開",
   "publish.title": "公開",
+  "publish.groups": "グループ",
   "publish.empty": "まだ何も公開されていません。ブランチを開いてから、ここに戻って公開してください。",
   "publish.header.index-age": "インデックス署名は {age} 前",
   "publish.header.index-none": "まだ何も公開されていません",

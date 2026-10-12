@@ -1753,6 +1753,7 @@
   "slash.publish": "Montrer ce que votre ruche sert, et ce qui a changé ici depuis",
   "controls.publish": "publier",
   "publish.title": "Publier",
+  "publish.groups": "Groupes",
   "publish.empty": "Rien de publié pour l'instant. Ouvrez une branche, puis revenez ici pour la publier.",
   "publish.header.index-age": "index signé il y a {age}",
   "publish.header.index-none": "rien de publié pour l'instant",

@@ -1884,6 +1884,7 @@
   "slash.publish": "Show what your hive is serving, and what has changed here since",
   "controls.publish": "Publish",
   "publish.title": "Publish",
+  "publish.groups": "Groups",
   "publish.empty": "Nothing published yet. Open a branch, then return here to publish it.",
   "publish.header.index-age": "index signed {age} ago",
   "publish.header.index-none": "nothing published yet",

@@ -1753,6 +1753,7 @@
   "slash.publish": "Mostra cosa sta servendo il tuo alveare e cosa è cambiato qui da allora",
   "controls.publish": "pubblica",
   "publish.title": "Pubblica",
+  "publish.groups": "Gruppi",
   "publish.empty": "Non è ancora stato pubblicato nulla. Apri un ramo, poi torna qui per pubblicarlo.",
   "publish.header.index-age": "indice firmato {age} fa",
   "publish.header.index-none": "ancora nulla di pubblicato",

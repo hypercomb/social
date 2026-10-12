@@ -1753,6 +1753,7 @@
   "slash.publish": "اعرض ما تقدّمه خليتك، وما تغيّر هنا منذ ذلك الحين",
   "controls.publish": "نشر",
   "publish.title": "النشر",
+  "publish.groups": "المجموعات",
   "publish.empty": "لم يُنشر شيء بعد. افتح فرعًا، ثم عُد إلى هنا لنشره.",
   "publish.header.index-age": "وُقّع الفهرس قبل {age}",
   "publish.header.index-none": "لم يُنشر شيء بعد",

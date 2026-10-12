@@ -112,6 +112,17 @@ interface PublishEntrance {
   skipped: { page: string; sig: string }[]
 }
 
+/** Mirrors the `publish-groups:render` payload of
+ *  essentials/sharing/publish-groups.drone.ts — shared cannot import it. */
+interface PublishGroupRow {
+  meaning: string
+  name: string
+  icon: string
+  color: string
+  count: number
+  publishing: { done: number; total: number } | null
+}
+
 interface PublishViewChoice {
   view: string
   label: string
@@ -189,7 +200,7 @@ type NavigationLike = { go?: (segments: readonly string[]) => void }
   standalone: true,
   imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './publish-panel.component.html',
-  styleUrls: ['./publish-panel.component.scss'],
+  styleUrls: ['./publish-panel.component.scss', './publish-panel.groups.scss'],
 })
 export class PublishPanelComponent implements OnDestroy {
 
@@ -260,6 +271,18 @@ export class PublishPanelComponent implements OnDestroy {
    *  standard (ui/accordion.ts), all closed by default. The hive is the list:
    *  walk to another branch and the panel follows. */
   readonly sectionsOpen = accordion()
+
+  /** PUBLISH GROUPS on the layer you stand on, as their drone announces them
+   *  (`publish-groups:render`): a group publishes from here as it does from
+   *  the strip — and from inside a view, where the strip is not drawn. */
+  readonly #groups = signal<{ segments: string[]; groups: PublishGroupRow[] }>({ segments: [], groups: [] })
+  /** Only the groups of the page this panel is describing — an announcement
+   *  for a layer we have already left never shows here. */
+  readonly groupsHere = computed<PublishGroupRow[]>(() => {
+    const row = this.current()
+    const { segments, groups } = this.#groups()
+    return row && row.segments.join('/') === segments.join('/') ? groups : []
+  })
 
   /** OVER A VIEW IT IS A POPUP (jwize 2026-10-10) — `p` reaches this panel
    *  from inside a view, and there it floats on the page: it reserves no edge
@@ -579,6 +602,12 @@ export class PublishPanelComponent implements OnDestroy {
       this.concealed.set(new Set([...items.map(i => i.sig), ...(p?.gone ?? [])]))
     }))
 
+    this.#cleanups.push(EffectBus.on<{ segments?: unknown; groups?: unknown }>('publish-groups:render', (p) => {
+      const segments = Array.isArray(p?.segments) ? p!.segments.map(s => String(s ?? '')).filter(Boolean) : []
+      const groups = Array.isArray(p?.groups) ? p!.groups as PublishGroupRow[] : []
+      this.#groups.set({ segments, groups })
+    }))
+
     this.#cleanups.push(EffectBus.on<PublishRenderPayload>('publish:render', (p) => {
       if (!p) return
       this.zone.set(String(p.zone ?? '') || String(p.host ?? ''))
@@ -760,6 +789,12 @@ export class PublishPanelComponent implements OnDestroy {
 
   publishParticipants(): void {
     EffectBus.emit('publish:participant-publish', {})
+  }
+
+  /** Publish one group — its drone runs every member and reports. */
+  publishGroup(group: PublishGroupRow): void {
+    if (group.publishing || group.count === 0) return
+    EffectBus.emit('publish-groups:publish', { segments: [...this.#groups().segments], meaning: group.meaning })
   }
 
   /** Pin (or unpin) the branch root's opening face — the drone writes the

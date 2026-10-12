@@ -1753,6 +1753,7 @@
   "slash.publish": "Mostra o que sua colmeia está servindo e o que mudou aqui desde então",
   "controls.publish": "publicar",
   "publish.title": "Publicar",
+  "publish.groups": "Grupos",
   "publish.empty": "Nada publicado ainda. Abra uma ramificação e depois volte aqui para publicá-la.",
   "publish.header.index-age": "índice assinado há {age}",
   "publish.header.index-none": "nada publicado ainda",

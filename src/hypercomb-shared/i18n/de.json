@@ -1753,6 +1753,7 @@
   "slash.publish": "Zeigen, was Ihr Bienenstock ausliefert und was sich hier seitdem geändert hat",
   "controls.publish": "Veröffentlichen",
   "publish.title": "Veröffentlichen",
+  "publish.groups": "Gruppen",
   "publish.empty": "Noch nichts veröffentlicht. Öffnen Sie einen Zweig und kehren Sie dann hierher zurück, um ihn zu veröffentlichen.",
   "publish.header.index-age": "Index vor {age} signiert",
   "publish.header.index-none": "noch nichts veröffentlicht",

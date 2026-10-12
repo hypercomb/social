@@ -1753,6 +1753,7 @@
   "slash.publish": "하이브가 제공 중인 것과 그 뒤 여기서 바뀐 것을 보여줍니다",
   "controls.publish": "게시",
   "publish.title": "게시",
+  "publish.groups": "그룹",
   "publish.empty": "아직 게시된 것이 없습니다. 분기를 연 다음 여기로 돌아와 게시하세요.",
   "publish.header.index-age": "{age} 전에 서명된 색인",
   "publish.header.index-none": "아직 게시된 것 없음",

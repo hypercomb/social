@@ -96,10 +96,23 @@ chat window), a published visitor shell or a dormant behaviour takes it away.
 - `show-cell.drone.ts` — `group:preview { labels, color }`, the hover light.
 - `groups.queen.ts` — the word; its parser (`parseGroupsLine`,
   `resolveGroupColor`) is in the pure half.
+- `publish-panel.component.{ts,html}` + `publish-panel.groups.scss` — the
+  panel's Groups section.
 - Proof: `scripts/drive-publish-groups.cjs` (13 checks),
-  `scripts/drive-groups-word.cjs` (11 checks).
+  `scripts/drive-groups-word.cjs` (11 checks),
+  `scripts/drive-publish-panel-groups.cjs` (5 checks).
 
-## Not built (yet)
+## In the Publish panel
 
-- Groups listed inside the Publish panel itself; today the strip and the word
-  are the doors.
+The panel's folded **Groups** section lists the layer's groups — icon in its
+colour, name, **Publish (n)** — and publishes one from there, through the same
+act. It is the door that stays open over a view: the strip is a hexagons
+surface, but `p` reaches the panel anywhere, and the panel still lists the
+groups. The panel is shell code and cannot ask the drone, so it is TOLD: the
+drone announces `publish-groups:render { segments, groups[] }` (last-value
+replayed, every render, empty where the behaviour is not lit) and the panel
+shows only the announcement for the page it is describing; the row's button
+sends `publish-groups:publish { segments, meaning }` back. Its styles are their
+own sheet (`publish-panel.groups.scss`) so the panel's main sheet never grows
+toward the per-sheet `anyComponentStyle` budget. Proof:
+`scripts/drive-publish-panel-groups.cjs` (5 checks).

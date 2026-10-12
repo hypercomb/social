@@ -1753,6 +1753,7 @@
   "slash.publish": "Tampilkan apa yang disajikan sarangmu, dan apa yang berubah di sini sejak itu",
   "controls.publish": "terbitkan",
   "publish.title": "Terbitkan",
+  "publish.groups": "Grup",
   "publish.empty": "Belum ada yang diterbitkan. Buka sebuah cabang, lalu kembali ke sini untuk menerbitkannya.",
   "publish.header.index-age": "indeks ditandatangani {age} lalu",
   "publish.header.index-none": "belum ada yang diterbitkan",

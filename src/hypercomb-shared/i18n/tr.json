@@ -1753,6 +1753,7 @@
   "slash.publish": "Kovanının ne sunduğunu ve o zamandan beri burada nelerin değiştiğini göster",
   "controls.publish": "yayınla",
   "publish.title": "Yayınla",
+  "publish.groups": "Gruplar",
   "publish.empty": "Henüz hiçbir şey yayınlanmadı. Bir dal aç, ardından yayınlamak için buraya dön.",
   "publish.header.index-age": "dizin {age} önce imzalandı",
   "publish.header.index-none": "henüz hiçbir şey yayınlanmadı",
