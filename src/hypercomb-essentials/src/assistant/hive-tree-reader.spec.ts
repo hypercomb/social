@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { HypercombHiveTreeReader } from './hive-tree-reader.js'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
+import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
 
 const sig = (n: number): string => n.toString(16).padStart(64, '0')
 
@@ -14,6 +15,8 @@ type Fixture = {
   readonly epoch: { value: number }
   readonly refs: Map<string, CurrentLayerRef>
   readonly paths: Map<string, string>
+  readonly layers: Map<string, LayerContent>
+  readonly locations: Map<string, string>
   readonly getLayerBySig: ReturnType<typeof vi.fn>
   readonly settled: ReturnType<typeof vi.fn>
   readonly history: Record<string, unknown>
@@ -75,8 +78,84 @@ const fixture = (): Fixture => {
     [COMMITTER, { settled }],
   ])
   const lookup = (<T>(key: string): T | undefined => services.get(key) as T | undefined)
-  return { reader: new HypercombHiveTreeReader(lookup), epoch, refs, paths, getLayerBySig, settled, history }
+  return { reader: new HypercombHiveTreeReader(lookup), epoch, refs, paths, layers, locations, getLayerBySig, settled, history }
 }
+
+/** How deep a find walks: as deep as a search record reaches (2026-10-12). */
+const FIND_REACH = MAX_RECORD_DEPTH
+
+/** /projects/roadmap/far-0/…/far-{far - 1}/Deep Betz — by default one level
+ *  past a find's walk, so the walk is cut above it and only a record can name
+ *  it. The roadmap page has its own newer head while /projects still carries
+ *  its old copy (sig 6), as a leaf-only commit leaves it. Page far-{i} is
+ *  layer `sig(200 + i)` at location `sig(300 + i)`; Deep Betz is layer
+ *  `sig(22)` at `sig(106)`. Returns its route. */
+const deepBetz = (fx: Fixture, far = FIND_REACH - 2): readonly string[] => {
+  const route = ['projects', 'roadmap', ...Array.from({ length: far }, (_, i) => `far-${i}`), 'Deep Betz']
+  const deep: LayerContent = { name: 'Deep Betz', children: [] }
+  fx.layers.set(sig(22), deep)
+  fx.locations.set(route.join('/'), sig(106))
+  fx.refs.set(sig(106), { locationSig: sig(106), layerSig: sig(22), layer: deep })
+  let child = sig(22)
+  for (let i = far - 1; i >= 0; i--) {
+    const layer: LayerContent = { name: `far-${i}`, children: [child] }
+    fx.layers.set(sig(200 + i), layer)
+    fx.locations.set(route.slice(0, 3 + i).join('/'), sig(300 + i))
+    fx.refs.set(sig(300 + i), { locationSig: sig(300 + i), layerSig: sig(200 + i), layer })
+    child = sig(200 + i)
+  }
+  const roadmap: LayerContent = { name: 'roadmap', children: [child] }
+  fx.layers.set(sig(20), roadmap)
+  fx.refs.set(sig(104), { locationSig: sig(104), layerSig: sig(20), layer: roadmap })
+  return route
+}
+
+const pathOf = (route: readonly string[]): string => `/${route.join('/')}`
+
+/** The fixture's hive with the search index's record reader beside it. */
+const withIndex = (fx: Fixture, readRecord: (layerSig: string) => Promise<unknown>): HypercombHiveTreeReader => {
+  const services = new Map<string, unknown>([
+    [HISTORY, fx.history],
+    [STORE, { getResource: vi.fn(async () => null) }],
+    [COMMITTER, { settled: fx.settled }],
+    ['@diamondcoreprocessor.com/HiveSearchService', { readRecord }],
+  ])
+  return new HypercombHiveTreeReader(<T>(key: string) => services.get(key) as T | undefined)
+}
+
+/** `count` branches in place of the fixture's root, each a chain
+ *  `/a{i}/b{i}/…/betz-{i}` that is `depth` pages long — past a find's
+ *  FIND_REACH levels, so only a record names a betz. With `husk`, no page below the root
+ *  has a pinned head and each opens by the copy its parent carries. Page
+ *  `level` of branch `i` lives at location `sig(60_000 + i * 32 + level)`. */
+const deepHive = (fx: Fixture, count: number, depth: number, husk = false): readonly (readonly string[])[] => {
+  const routes: string[][] = []
+  const top: string[] = []
+  for (let i = 0; i < count; i++) {
+    const route = Array.from({ length: depth }, (_, level) => level === depth - 1 ? `betz-${i}` : `${String.fromCharCode(97 + level)}${i}`)
+    routes.push(route)
+    let child: string | undefined
+    for (let level = depth - 1; level >= 0; level--) {
+      const layerSig = sig(10_000 + i * 32 + level)
+      const locationSig = sig(60_000 + i * 32 + level)
+      const layer: LayerContent = { name: route[level], children: child ? [child] : [] }
+      fx.layers.set(layerSig, layer)
+      fx.locations.set(route.slice(0, level + 1).join('/'), locationSig)
+      if (!husk) fx.refs.set(locationSig, { locationSig, layerSig, layer })
+      child = layerSig
+    }
+    top.push(child!)
+  }
+  const rootLayer: LayerContent = { name: 'hive', children: top }
+  fx.layers.set(sig(1), rootLayer)
+  fx.refs.set(sig(101), { locationSig: sig(101), layerSig: sig(1), layer: rootLayer })
+  return routes
+}
+
+/** The root's search record, listing every route's last tile. */
+const recordOf = (routes: readonly (readonly string[])[]) => vi.fn(async (layerSig: string) => layerSig === sig(1)
+  ? { v: 1, rows: routes.map(route => ({ name: route[route.length - 1], path: [...route] })) }
+  : null)
 
 describe('the bounded live hive tree reader', () => {
   it('discovers names from the parent but reads each descendant from its live page head', async () => {
@@ -493,44 +572,260 @@ describe('a page history cannot pin to one signature', () => {
     expect(await fx.reader.find('arkanoid', [])).toMatchObject({ ok: true, matches: [{ name: 'Arkanoid', path: '/games/Arkanoid' }] })
   })
 
-  it('finds names from the search index the walk never reaches, and is whole when the record is', async () => {
+  it('finds a name from the search index past the walk’s reach once it reads live, and a whole-looking record never makes the answer whole', async () => {
     // A whole-hive find over ~5,900 tiles ran out its time walking; the
     // participant's own search keeps every name under a layer in one record.
+    // But a record is built from carried copies: one that looked whole used
+    // to make a walk cut at depth three answer truncated:false (2026-10-11/12).
     const fx = fixture()
+    const route = deepBetz(fx)
     const readRecord = vi.fn(async (layerSig: string) => layerSig === sig(1)
       ? { v: 1, rows: [
         { sig: sig(2), name: 'projects', path: ['projects'] },
-        { sig: sig(9), name: 'Deep Betz', path: ['far', 'away', 'down', 'Deep Betz'] },
+        { sig: sig(22), name: 'Deep Betz', path: [...route] },
       ] }
       : null)
-    const services = new Map<string, unknown>([
-      ['@diamondcoreprocessor.com/HistoryService', fx.history],
-      ['@hypercomb.social/Store', { getResource: vi.fn(async () => null) }],
-      ['@diamondcoreprocessor.com/LayerCommitter', { settled: fx.settled }],
-      ['@diamondcoreprocessor.com/HiveSearchService', { readRecord }],
-    ])
-    const reader = new HypercombHiveTreeReader(<T>(key: string) => services.get(key) as T | undefined)
-    expect(await reader.find('betz', [])).toMatchObject({ ok: true, truncated: false, matches: [{ name: 'Deep Betz', path: '/far/away/down/Deep Betz' }] })
+    const reader = withIndex(fx, readRecord)
+    expect(await reader.find('betz', [])).toMatchObject({
+      ok: true, truncated: true, matches: [{ name: 'Deep Betz', path: pathOf(route) }],
+    })
     // The live walk's hit comes once, not twice.
     const projects = await reader.find('projects', [])
     expect(projects.ok && projects.matches.map(match => match.path)).toEqual(['/projects'])
   })
 
+  it('drops an index hint that no longer reads as a tile, including one whose own bag outlived its unlinking', async () => {
+    // The record names tiles from the copies parents carried. A tile removed
+    // since has no place in the live tree — and a remove only unlinks, so
+    // its own bag still resolves: the parent must still list it.
+    const fx = fixture()
+    const route = deepBetz(fx)
+    const unlinked: LayerContent = { name: 'Unlinked Betz', children: [] }
+    fx.layers.set(sig(23), unlinked)
+    fx.locations.set('notes/Unlinked Betz', sig(107))
+    fx.refs.set(sig(107), { locationSig: sig(107), layerSig: sig(23), layer: unlinked })
+    const readRecord = vi.fn(async (layerSig: string) => layerSig === sig(1)
+      ? { v: 1, rows: [
+        { sig: sig(24), name: 'Gone Betz', path: ['projects', 'Gone Betz'] },
+        { sig: sig(23), name: 'Unlinked Betz', path: ['notes', 'Unlinked Betz'] },
+        { sig: sig(22), name: 'Deep Betz', path: [...route] },
+      ] }
+      : null)
+    const reader = withIndex(fx, readRecord)
+    expect(await reader.readNode(['notes', 'Unlinked Betz'], { withContent: false })).toMatchObject({ ok: true })
+
+    const found = await reader.find('betz', [])
+    expect(found).toMatchObject({ ok: true, truncated: true })
+    expect(found.ok && found.matches).toEqual([{ name: 'Deep Betz', path: pathOf(route) }])
+  })
+
+  it('drops a hint whose page now holds a tile of another name, anywhere along its route', async () => {
+    // A carried signature can name a page whose live head is now another
+    // tile — renamed or replaced under the same route. Each page a hint
+    // passes through must be a tile of the name its route gives, and the
+    // last one the record's own name (2026-10-12).
+    const dropped = async (change: (fx: Fixture, route: readonly string[]) => void): Promise<unknown> => {
+      const fx = fixture()
+      const route = deepBetz(fx)
+      change(fx, route)
+      const reader = withIndex(fx, vi.fn(async (layerSig: string) => layerSig === sig(1)
+        ? { v: 1, rows: [{ name: 'Deep Betz', path: [...route] }] }
+        : null))
+      return reader.find('betz', [])
+    }
+    // A page partway down: same children, so only its name gives it away.
+    expect(await dropped(fx => {
+      const renamed: LayerContent = { name: 'renamed', children: [sig(206)] }
+      fx.layers.set(sig(26), renamed)
+      fx.refs.set(sig(305), { locationSig: sig(305), layerSig: sig(26), layer: renamed })
+    })).toMatchObject({ ok: true, truncated: true, matches: [] })
+    // The last page.
+    expect(await dropped(fx => {
+      const moved: LayerContent = { name: 'Moved', children: [] }
+      fx.layers.set(sig(27), moved)
+      fx.refs.set(sig(106), { locationSig: sig(106), layerSig: sig(27), layer: moved })
+    })).toMatchObject({ ok: true, truncated: true, matches: [] })
+
+    // A row whose name is not the tile its route ends at.
+    const fx = fixture()
+    const route = deepBetz(fx)
+    const found = await withIndex(fx, vi.fn(async (layerSig: string) => layerSig === sig(1)
+      ? { v: 1, rows: [{ name: 'Far Betz', path: route.slice(0, 6) }, { name: 'Deep Betz', path: [...route] }] }
+      : null)).find('betz', [])
+    expect(found.ok && found.matches).toEqual([{ name: 'Deep Betz', path: pathOf(route) }])
+  })
+
+  it('still says the tree changed when the walk went stale, unless a hint was read live', async () => {
+    // Any record, even one with no matching row, turned a stale walk into an
+    // ok "nothing found" whose snapshot held no heads (2026-10-12).
+    const staleWalk = (fx: Fixture): void => {
+      const current = fx.history['currentLayerRefAt'] as ReturnType<typeof vi.fn>
+      const original = current.getMockImplementation()! as (location: string, stats?: { cold?: boolean }) => Promise<unknown>
+      current.mockImplementation(async (location: string, stats?: { cold?: boolean }) => {
+        if (location === sig(102)) fx.epoch.value++
+        return original(location, stats)
+      })
+    }
+    const fx = fixture()
+    const route = deepBetz(fx)
+    staleWalk(fx)
+    expect(await fx.reader.find('gone', [])).toMatchObject({ ok: false, code: 'stale-read' })
+    const reader = withIndex(fx, vi.fn(async (layerSig: string) => layerSig === sig(1)
+      ? { v: 1, rows: [{ name: 'Gone', path: ['gone'] }, { name: 'Deep Betz', path: [...route] }] }
+      : null))
+    // A row that matches but is no tile, and no matching row at all.
+    expect(await reader.find('gone', [])).toMatchObject({ ok: false, code: 'stale-read' })
+    expect(await reader.find('nothing', [])).toMatchObject({ ok: false, code: 'stale-read' })
+
+    // A hint read live is shown, partial, and its pages are what the change
+    // guard holds the answer to.
+    const found = await reader.find('betz', [])
+    if (!found.ok) throw new Error('find failed')
+    expect(found).toMatchObject({ truncated: true, matches: [{ name: 'Deep Betz', path: pathOf(route) }] })
+    expect(await reader.validateSnapshots([found.snapshot])).toBe(true)
+    fx.refs.set(sig(106), { locationSig: sig(106), layerSig: sig(77), layer: { name: 'Deep Betz', children: [] } })
+    expect(await reader.validateSnapshots([found.snapshot])).toBe(false)
+  })
+
+  it('confirms many deep hints without evicting the find’s own snapshot or an earlier read’s', async () => {
+    // Checked through readNode, every page a hint passed through minted a
+    // snapshot, and 65 hints six pages deep pushed the find's own out of the
+    // 256 kept: the chat said the tree had changed when nothing had
+    // (2026-10-11/12).
+    const fx = fixture()
+    const routes = deepHive(fx, 70, FIND_REACH + 2)
+    const reader = withIndex(fx, recordOf(routes))
+    const earlier = await reader.readNode(['a0'], { withContent: false })
+    if (!earlier.ok || !earlier.snapshot) throw new Error('read failed')
+
+    const found = await reader.find('betz', [], { maxNodes: 64 })
+    if (!found.ok) throw new Error('find failed')
+    expect(found.truncated).toBe(true)
+    expect(found.matches).toHaveLength(64)
+    expect(await reader.validateSnapshots([found.snapshot])).toBe(true)
+    expect(await reader.validateSnapshots([earlier.snapshot])).toBe(true)
+    // The pages a shown hint was confirmed through are in the find's snapshot.
+    const betz0 = fx.refs.get(sig(60_000 + FIND_REACH + 1))!
+    fx.refs.set(betz0.locationSig, { ...betz0, layerSig: sig(77) })
+    expect(await reader.validateSnapshots([found.snapshot])).toBe(false)
+  })
+
+  it('tries past stale hints for a live one behind them', async () => {
+    // Only the first limit-plus-one rows were checked, so a record still
+    // listing a removed branch's tiles first crowded a live deep hit out of
+    // the answer (2026-10-11/12).
+    const fx = fixture()
+    const route = deepBetz(fx)
+    const stale = Array.from({ length: 60 }, (_, i) => ({ name: `Betz ${i}`, path: ['gone', `Betz ${i}`] }))
+    const reader = withIndex(fx, vi.fn(async (layerSig: string) => layerSig === sig(1)
+      ? { v: 1, rows: [...stale, { name: 'Deep Betz', path: [...route] }] }
+      : null))
+    const found = await reader.find('betz', [])
+    expect(found).toMatchObject({ ok: true, truncated: true })
+    expect(found.ok && found.matches).toEqual([{ name: 'Deep Betz', path: pathOf(route) }])
+  })
+
+  it('stops checking hints when their time is up and leaves the rest out', async () => {
+    // The walk before the check has often spent all its own time; the hints
+    // get a slice of their own, and past it the answer, already partial,
+    // goes without them (2026-10-11/12).
+    const fx = fixture()
+    const routes = deepHive(fx, 40, FIND_REACH + 2)
+    const pastTheWalk = new Set(routes.map((_, i) => sig(60_000 + i * 32 + FIND_REACH)))
+    let now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const current = fx.history['currentLayerRefAt'] as ReturnType<typeof vi.fn>
+    const original = current.getMockImplementation()! as (location: string, stats?: { cold?: boolean }) => Promise<unknown>
+    let opened = 0
+    current.mockImplementation(async (location: string, stats?: { cold?: boolean }) => {
+      if (pastTheWalk.has(location)) { opened++; now += 200 }
+      return original(location, stats)
+    })
+    try {
+      const found = await withIndex(fx, recordOf(routes)).find('betz', [])
+      if (!found.ok) throw new Error('find failed')
+      expect(found.truncated).toBe(true)
+      expect(found.matches.length).toBeGreaterThanOrEqual(16)
+      expect(found.matches.length).toBeLessThan(40)
+      expect(opened).toBeLessThanOrEqual(32)
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it('confirms deep hints under pages with no pinned head by their parents’ copies, opening each page once', async () => {
+    // Through readNode, a page with no pinned head resolved its parents again
+    // from the top for every prefix asked of it (2026-10-11/12).
+    const fx = fixture()
+    const routes = deepHive(fx, 5, FIND_REACH + 3, true)
+    const sign = fx.history['sign'] as ReturnType<typeof vi.fn>
+    const original = sign.getMockImplementation()! as (lineage: { explorerSegments(): readonly string[] }) => Promise<string>
+    const signed = new Map<string, number>()
+    sign.mockImplementation(async (lineage: { explorerSegments(): readonly string[] }) => {
+      const path = lineage.explorerSegments().join('/')
+      signed.set(path, (signed.get(path) ?? 0) + 1)
+      return original(lineage)
+    })
+
+    const found = await withIndex(fx, recordOf(routes)).find('betz', [])
+    expect(found.ok && found.matches.map(match => match.path)).toEqual(routes.map(route => `/${route.join('/')}`))
+    const pastTheWalk = [...signed].filter(([path]) => path.split('/').length > FIND_REACH)
+    expect(pastTheWalk.length).toBe(5 * 3)
+    expect(pastTheWalk.every(([, times]) => times === 1)).toBe(true)
+  })
+
+  it('never shrinks the walk for a record that looks whole but was built from older copies', async () => {
+    // "find betz /" answered a confident "not found": a whole-looking record
+    // cut the walk to a tree's reach, and the record predated the tile.
+    const fx = fixture()
+    const wide = Array.from({ length: 90 }, (_, i) => sig(1_000 + i))
+    const layers = new Map<string, LayerContent>(wide.map((s, i) => [s, { name: `tile-${i}`, children: [] }]))
+    layers.set(sig(2_000), { name: 'games', children: [sig(2_001)] })
+    layers.set(sig(2_001), { name: 'Arkanoid', children: [] })
+    const rootLayer: LayerContent = { name: 'hive', children: [...wide, sig(2_000)] }
+    fx.refs.set(sig(101), { locationSig: sig(101), layerSig: sig(1), layer: rootLayer })
+    fx.getLayerBySig.mockImplementation(async (signature: string) => layers.get(signature) ?? null)
+    const readRecord = vi.fn(async (layerSig: string) => layerSig === sig(1)
+      ? { v: 1, rows: wide.map((s, i) => ({ sig: s, name: `tile-${i}`, path: [`tile-${i}`] })) }
+      : null)
+    const reader = withIndex(fx, readRecord)
+
+    expect(await reader.find('arkanoid', [])).toMatchObject({
+      ok: true, truncated: false, matches: [{ name: 'Arkanoid', path: '/games/Arkanoid' }],
+    })
+    // A whole walk saw every live tile: the record had nothing to add.
+    expect(readRecord).not.toHaveBeenCalled()
+  })
+
+  it('walks past a tree’s three levels, so a find on a deeper hive can still be whole', async () => {
+    // Cut at a tree's depth, every find on a hive four levels deep said it
+    // was partial and sent the model searching route by route (2026-10-12).
+    const fx = fixture()
+    const route = deepBetz(fx, 1)
+    const readRecord = vi.fn(async () => null)
+    expect(await withIndex(fx, readRecord).find('betz', [])).toMatchObject({
+      ok: true, truncated: false, matches: [{ name: 'Deep Betz', path: pathOf(route) }],
+    })
+    expect(readRecord).not.toHaveBeenCalled()
+    // /tree keeps its own reach.
+    const tree = await fx.reader.readTree([], { maxDepth: 8 })
+    expect(tree).toMatchObject({ ok: true, truncated: true })
+    expect(tree.ok && tree.nodes.some(node => node.name === 'Deep Betz')).toBe(false)
+  })
+
   it('reads a large hive branch by branch when its root has no record', async () => {
     // The search index never keeps a truncated record, so a hive past its
-    // row cap has none at the root; its branches have theirs.
+    // row cap has none at the root; its branches have theirs, keyed by the
+    // copy the root carries (/projects at sig 2, older than its live head).
     const fx = fixture()
+    const route = deepBetz(fx)
     const readRecord = vi.fn(async (layerSig: string) => layerSig === sig(2)
-      ? { v: 1, rows: [{ sig: sig(9), name: 'Deep Betz', path: ['far', 'Deep Betz'] }] }
+      ? { v: 1, rows: [{ sig: sig(22), name: 'Deep Betz', path: route.slice(1) }] }
       : layerSig === sig(3) ? { v: 1, rows: [] } : null)
-    const services = new Map<string, unknown>([
-      ['@diamondcoreprocessor.com/HistoryService', fx.history],
-      ['@hypercomb.social/Store', { getResource: vi.fn(async () => null) }],
-      ['@diamondcoreprocessor.com/LayerCommitter', { settled: fx.settled }],
-      ['@diamondcoreprocessor.com/HiveSearchService', { readRecord }],
-    ])
-    const reader = new HypercombHiveTreeReader(<T>(key: string) => services.get(key) as T | undefined)
-    expect(await reader.find('betz', [])).toMatchObject({ ok: true, truncated: false, matches: [{ name: 'Deep Betz', path: '/projects/far/Deep Betz' }] })
+    const reader = withIndex(fx, readRecord)
+    expect(await reader.find('betz', [])).toMatchObject({
+      ok: true, truncated: true, matches: [{ name: 'Deep Betz', path: pathOf(route) }],
+    })
   })
 
   it('walks into a page by its bag’s latest marker before the older copy its parent carries', async () => {
