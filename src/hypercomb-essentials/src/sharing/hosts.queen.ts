@@ -49,6 +49,9 @@ export class HostsQueenBee {
   readonly description =
     'Open your host directory — add or remove a host, inspect its packages, and add one to your hive. Publish uses this directory for branch destinations.'
   readonly descriptionKey = 'slash.hosts'
+  // A card's title keeps its case ("Plugin the Matrix"); every sub-word and zone
+  // below is folded where it is read.
+  readonly rawArgs = true
   readonly options = ['list <meaning> [@<host>]', 'unlist <meaning> [@<host>]', 'listed [@<host>]', 'builders [add|remove <pubkey>] [@<host>]', 'welcome <zone> <title> [| <tagline>] [@<host>]']
 
   slashComplete(args: string): readonly string[] {
