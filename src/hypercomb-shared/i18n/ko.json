@@ -2811,6 +2811,7 @@
   "host.publish.refused": "{node}이(가) 업로드를 거부했습니다({reason}) — 아무것도 게시되지 않았습니다",
   "meet.needs-update": "이 모임에는 최신 Hypercomb이 필요합니다 — 업데이트하면 링크가 저절로 열립니다",
   "meet.link-unreadable": "이 모임 링크를 읽을 수 없습니다 — 다시 요청하세요",
+  "meet.swarm-link-unopened": "This swarm link could not be opened — ask whoever shared it for a fresh one.",
   "meet.copy-link": "모임 링크 복사",
   "storage.full": "이 기기의 저장 공간이 부족합니다 — 마지막 변경 사항이 저장되지 않았습니다. 공간을 확보한 뒤 다시 시도하세요.",
   "zone.point-needs-update": "모임 장소에서 만나려면 업데이트하세요 — 이 버전은 새로고침하면 모임 장소를 잊습니다",

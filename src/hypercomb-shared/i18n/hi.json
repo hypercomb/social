@@ -2811,6 +2811,7 @@
   "host.publish.refused": "{node} ने अपलोड अस्वीकार कर दिया ({reason}) — कुछ भी प्रकाशित नहीं हुआ",
   "meet.needs-update": "इस मीटिंग के लिए नया Hypercomb चाहिए — अपडेट करें और लिंक अपने आप खुल जाएगा",
   "meet.link-unreadable": "यह मीटिंग लिंक पढ़ा नहीं जा सका — इसे फिर से माँगें",
+  "meet.swarm-link-unopened": "This swarm link could not be opened — ask whoever shared it for a fresh one.",
   "meet.copy-link": "मीटिंग लिंक कॉपी करें",
   "storage.full": "इस डिवाइस में जगह खत्म हो गई है — आख़िरी बदलाव सहेजा नहीं गया। कुछ जगह खाली करें, फिर दोबारा कोशिश करें।",
   "zone.point-needs-update": "मिलन स्थल पर मिलने के लिए अपडेट करें — यह संस्करण रीलोड पर उसे भूल जाता है",

@@ -53,6 +53,7 @@ import {
   type MeetingInviteBundle,
 } from './meeting-invite.js'
 import { isJoinedHere, readTabZone } from './membership.js'
+import { publishSwarmLink, swarmLinkText } from './swarm-link.js'
 import { writeDecoration } from '../commands/decoration-manifest.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
@@ -263,6 +264,21 @@ export class InviteQueenBee {
    *  this tab's meeting point (relay, host, code) when it has one, so the
    *  room meets where the facilitator meets. The toasts and the log name the
    *  meeting point, never the code. */
+  /** The signed swarm link for this login, or '' — then the caller hands out
+   *  the #meet= link. Never for a loopback host (no guest reaches it). */
+  #signedLink = async (room: string, secret: string, relay: string, code: string | undefined, page: readonly string[]): Promise<string> => {
+    const host = meetingPointKey(relay)
+    if (!host) return ''
+    try { if (/^(?:(?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[::1\])$/i.test(new URL(relay).hostname)) return '' } catch { return '' }
+    const hostSync = get<{ putOne?: (host: string, sig: string, bytes: Uint8Array) => Promise<{ ok: true } | { ok: false; reason: 'refused' | 'unreachable' }> }>(HOST_SYNC_KEY)
+    if (typeof hostSync?.putOne !== 'function') return ''
+    const login = { host, location: room, secret, ...(code ? { code } : {}), ...(page.length ? { page: [...page] } : {}) }
+    try {
+      const r = await publishSwarmLink(login, ({ host: at, sig, bytes }) => hostSync.putOne!(at, sig, bytes))
+      return r.ok ? swarmLinkText(window.location.origin, r.parts) : ''
+    } catch { return '' }
+  }
+
   #deliverMeetingLink = async (room: string, secret: string, nav: NavLike): Promise<void> => {
     let segs: readonly string[] | undefined
     if (isJoinedHere()) {
@@ -296,7 +312,15 @@ export class InviteQueenBee {
         'A meeting link to this page would not open for anyone — a page name on the way here is too long or holds a slash. Invite from a page higher up.'))
       return
     }
-    const url = `${window.location.origin}/${fragment}`
+    // THE SIGNED SWARM LINK (jwize, 2026-10-12: "we host the payload and give
+    // the link with a signature" … "then the swarm login is retrieved"): the
+    // login — host, location, secret, code, page — sealed under a fresh key,
+    // put on the meeting host by its signature, and handed out as
+    // #swarm=<sig>@<host>~<key>. The host holds ciphertext only; the key rides
+    // the fragment, which no server sees. A host that will not take it (not
+    // yours, not a friend's) leaves the plain #meet= link, as before.
+    const signed = await this.#signedLink(room, secret, relay, zone?.code, segments)
+    const url = signed || `${window.location.origin}/${fragment}`
     const point = relay.replace(/^wss?:\/\//, '')
 
     const delivery = await deliverLink(url, 'Hypercomb meeting')

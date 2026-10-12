@@ -2811,6 +2811,7 @@
   "host.publish.refused": "{node} 拒绝了上传（{reason}） — 没有发布任何内容",
   "meet.needs-update": "此会面需要较新的 Hypercomb — 更新后链接会自动打开",
   "meet.link-unreadable": "无法读取此会面链接 — 请重新索取",
+  "meet.swarm-link-unopened": "This swarm link could not be opened — ask whoever shared it for a fresh one.",
   "meet.copy-link": "复制会面链接",
   "storage.full": "此设备空间已满 — 最后一次更改未保存。请释放一些空间后重试。",
   "zone.point-needs-update": "需要更新才能在会面点会面 — 此版本刷新后会忘记会面点",

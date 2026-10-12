@@ -99,7 +99,14 @@ export interface SwarmLogin {
   location: string
   secret: string
   code?: string
+  /** The page the room is invited to (its segments), so a guest lands where
+   *  the facilitator stood — as the #meet= link always carried. Omitted at
+   *  the root. Each segment one path component, at most PAGE_SEGMENTS_MAX. */
+  page?: string[]
 }
+
+/** The deepest page a login carries (the #meet= link's own limit). */
+const PAGE_SEGMENTS_MAX = 64
 
 /** What a swarm link carries: the blob's signature, where it is fetched from,
  *  and the key that opens it. */
@@ -210,11 +217,21 @@ const loginOf = (raw: unknown): SwarmLogin | null => {
   const code = typeof codeRaw === 'string' ? codeRaw.trim() : ''
   if (codeRaw !== undefined && codeRaw !== null && typeof codeRaw !== 'string') return null
   if (code && !isAccessCode(code)) return null
-  return code ? { host, location, secret, code } : { host, location, secret }
+  const pageRaw = o['page']
+  if (pageRaw !== undefined && pageRaw !== null && !Array.isArray(pageRaw)) return null
+  const page = Array.isArray(pageRaw) ? pageRaw : []
+  if (page.length > PAGE_SEGMENTS_MAX) return null
+  if (!page.every(s => typeof s === 'string' && s.length > 0 && !s.includes('/'))) return null
+  return {
+    host, location, secret,
+    ...(code ? { code } : {}),
+    ...(page.length ? { page: [...page as string[]] } : {}),
+  }
 }
 
-/** The one byte form of a login: JSON `{ v, host, location, secret, code? }`
- *  in that order, the host canonical, the code left out when empty. null
+/** The one byte form of a login: JSON `{ v, host, location, secret, code?,
+ *  page? }` in that order, the host canonical, the code and the page left out
+ *  when empty. null
  *  when the login has no host (or one it cannot carry whole), no location or
  *  no secret, or would not fit a blob. */
 export function swarmLoginBytes(login: unknown): Uint8Array | null {

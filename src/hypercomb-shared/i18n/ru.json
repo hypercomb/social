@@ -2811,6 +2811,7 @@
   "host.publish.refused": "{node} отклонил загрузку ({reason}) — ничего не опубликовано",
   "meet.needs-update": "Для этой встречи нужен новый Hypercomb — обновите, и ссылка откроется сама",
   "meet.link-unreadable": "Не удалось прочитать эту ссылку на встречу — попросите её снова",
+  "meet.swarm-link-unopened": "This swarm link could not be opened — ask whoever shared it for a fresh one.",
   "meet.copy-link": "Копировать ссылку на встречу",
   "storage.full": "На этом устройстве закончилось место — последнее изменение не сохранено. Освободите место и попробуйте снова.",
   "zone.point-needs-update": "Обновите, чтобы встречаться в месте встречи — эта версия забывает его при перезагрузке",

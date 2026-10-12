@@ -3517,6 +3517,7 @@
   "host.publish.refused": "{node} refused the upload ({reason}) — nothing was published",
   "meet.needs-update": "This meeting needs the newer Hypercomb — update and the link opens itself",
   "meet.link-unreadable": "This meeting link could not be read — ask for it again",
+  "meet.swarm-link-unopened": "This swarm link could not be opened — ask whoever shared it for a fresh one.",
   "meet.copy-link": "Copy meeting link",
   "storage.full": "This device is out of space — the last change was not saved. Free some space, then try again.",
   "zone.point-needs-update": "Update to meet at a meeting point — this version forgets it on refresh",

@@ -2811,6 +2811,7 @@
   "host.publish.refused": "{node} recusou o envio ({reason}) — nada foi publicado",
   "meet.needs-update": "Esta reunião precisa do Hypercomb mais novo — atualize e o link abre sozinho",
   "meet.link-unreadable": "Não foi possível ler este link de reunião — peça-o de novo",
+  "meet.swarm-link-unopened": "This swarm link could not be opened — ask whoever shared it for a fresh one.",
   "meet.copy-link": "Copiar link da reunião",
   "storage.full": "Este dispositivo está sem espaço — a última alteração não foi salva. Libere espaço e tente de novo.",
   "zone.point-needs-update": "Atualize para se encontrar em um ponto de encontro — esta versão o esquece ao recarregar",

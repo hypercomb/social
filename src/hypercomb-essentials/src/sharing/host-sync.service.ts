@@ -2405,6 +2405,22 @@ export class HostSyncService extends EventTarget {
    *  sign('host-receipts') pool first, then the legacy `__host_receipts__`
    *  drain source while it still exists — an empty pool must never read as
    *  "nothing receipted" mid-migration (that would re-PUT everything). */
+  /** ONE SIGNED PUT of one atom to one host — the signed swarm link's locked
+   *  package (swarm-link.ts publishSwarmLink, 2026-10-12). Not queued, not
+   *  receipted, not retried: the caller holds the bytes and hands out the
+   *  plain #meet= link on any answer but a stored one. */
+  public readonly putOne = async (host: string, sig: string, bytes: Uint8Array): Promise<{ ok: true } | { ok: false; reason: 'refused' | 'unreachable' }> => {
+    const url = `${HostSyncService.#schemeFor(host)}://${host}/${sig}`
+    const auth = await this.#nip98(url, 'PUT', true)
+    if (!auth) return { ok: false, reason: 'refused' }
+    try {
+      const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+      const res = await HostSyncService.#fetchWithin(url, { method: 'PUT', headers: { Authorization: auth }, body }, bytes.byteLength)
+      try { void res.body?.cancel().catch(() => void 0) } catch { /* nothing to drain */ }
+      return res.ok ? { ok: true } : { ok: false, reason: 'refused' }
+    } catch { return { ok: false, reason: 'unreachable' } }
+  }
+
   public readonly hasReceipt = async (sig: string): Promise<boolean> => {
     if (!SIG_RE.test(sig)) return false
     for (const dir of [

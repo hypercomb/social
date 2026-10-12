@@ -2965,6 +2965,7 @@
   "host.publish.refused": "{node} がアップロードを拒否しました（{reason}） — 何も公開されていません",
   "meet.needs-update": "このミーティングには新しい Hypercomb が必要です — 更新するとリンクが自動で開きます",
   "meet.link-unreadable": "このミーティングリンクを読み取れませんでした — もう一度もらってください",
+  "meet.swarm-link-unopened": "This swarm link could not be opened — ask whoever shared it for a fresh one.",
   "meet.copy-link": "ミーティングリンクをコピー",
   "storage.full": "この端末の空き容量がありません — 最後の変更は保存されていません。容量を空けてから、もう一度お試しください。",
   "zone.point-needs-update": "集合場所で会うには更新が必要です — このバージョンは再読み込みで集合場所を忘れます",

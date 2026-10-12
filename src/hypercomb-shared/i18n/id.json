@@ -2811,6 +2811,7 @@
   "host.publish.refused": "{node} menolak unggahan ({reason}) — tidak ada yang diterbitkan",
   "meet.needs-update": "Pertemuan ini memerlukan Hypercomb yang lebih baru — perbarui dan tautan akan terbuka sendiri",
   "meet.link-unreadable": "Tautan pertemuan ini tidak dapat dibaca — minta lagi",
+  "meet.swarm-link-unopened": "This swarm link could not be opened — ask whoever shared it for a fresh one.",
   "meet.copy-link": "Salin tautan pertemuan",
   "storage.full": "Ruang penyimpanan perangkat ini habis — perubahan terakhir tidak tersimpan. Kosongkan sebagian ruang, lalu coba lagi.",
   "zone.point-needs-update": "Perbarui untuk bertemu di titik temu — versi ini melupakannya saat dimuat ulang",
