@@ -133,9 +133,19 @@ export type HypercombFindRead =
     readonly query: string
     readonly matches: readonly { readonly name: string; readonly path: string }[]
     readonly truncated: boolean
+    /** A partial walk's unfinished branches: routes among the route's own
+     *  children whose subtree the walk did not finish (at most
+     *  MAX_UNFINISHED, in the route's order), and how many in all. */
+    readonly unfinished?: readonly string[]
+    readonly unfinishedCount?: number
+    /** More matches than the limit shows, finished branches included. */
+    readonly moreMatches?: true
     readonly snapshot: string
   }
   | { readonly ok: false; readonly root: string; readonly code: string }
+
+/** The most unfinished branches one find names — the reader's own bound. */
+const MAX_UNFINISHED = 20
 
 export type HypercombNodeRead =
   | {
@@ -634,7 +644,19 @@ const safeFind = (read: HypercombFindRead, expectedRoot: string, maxMatches: num
     }
     return { name: match.name, path: match.path }
   })
-  return { ok: true, root: expectedRoot, query: read.query, matches, truncated: read.truncated === true, snapshot: read.snapshot }
+  const unfinished = read.unfinished === undefined ? [] : read.unfinished
+  const unfinishedCount = read.unfinishedCount === undefined ? unfinished.length : read.unfinishedCount
+  if (!Array.isArray(unfinished) || unfinished.length > MAX_UNFINISHED
+    || !Number.isInteger(unfinishedCount) || unfinishedCount < unfinished.length || unfinishedCount > 1_000_000
+    || unfinished.some(route => typeof route !== 'string' || !route.startsWith('/') || route.length > 2_000 || CONTROL_CHARACTER.test(route))) {
+    throw new HypercombObservationError('the hive reader returned malformed unfinished branches')
+  }
+  return {
+    ok: true, root: expectedRoot, query: read.query, matches, truncated: read.truncated === true,
+    ...(unfinished.length ? { unfinished: [...unfinished], unfinishedCount } : {}),
+    ...(read.moreMatches === true ? { moreMatches: true as const } : {}),
+    snapshot: read.snapshot,
+  }
 }
 
 const safeName = (name: unknown): name is string =>
@@ -807,6 +829,36 @@ const scopeNoteOf = (root: string, grammar: string, reachedEvery: boolean): stri
   return `scope: under ${root} — the participant's current page, not the whole hive; for the whole hive send find ${word} /`
 }
 
+/** WHERE THE REST OF A CUT FIND IS. A whole-hive find stops before the
+ *  deepest tiles on a large hive (2026-10-04: `find betz /` missed
+ *  /dolphin/associates/betz, which `find betz /dolphin` found). Told only to
+ *  search again under a narrower route, a model searched under every one of
+ *  the root's children in turn — 13 rounds, 144k tokens (the live probe,
+ *  2026-10-12). Where the reader names the branches its walk did not finish,
+ *  the receipt names them instead, and says to search them only when the
+ *  request needs every match; where it names none, the old advice stands.
+ *  A list the limit cut is said first: its unshown matches can sit in a
+ *  finished branch, and a note naming only the unfinished ones sent the
+ *  model past them (review of the 2026-10-12 fair walk). */
+const cutNoteOf = (found: Extract<HypercombFindRead, { ok: true }>): Record<string, unknown> => {
+  const unfinished = found.unfinished ?? []
+  const capped = found.moreMatches
+    ? 'more matches exist than are shown (in any branch, finished or not); to see them, narrow the word or the route: find <word> /path'
+    : ''
+  if (!unfinished.length) {
+    return { truncatedNote: capped || 'the search stopped before the whole route; other matches may exist deeper — search again under a narrower route: find <word> /path' }
+  }
+  const count = found.unfinishedCount ?? unfinished.length
+  const more = count > unfinished.length
+  return {
+    unfinished,
+    ...(more ? { unfinishedCount: count } : {}),
+    truncatedNote: (capped ? `${capped}; and ` : '')
+      + `the walk did not finish these branches; search under them only if the request needs completeness: find ${found.query} <branch>`
+      + (more ? `; ${count} branches in all, the first ${unfinished.length} listed` : ''),
+  }
+}
+
 /** JSON keeps hostile labels data-shaped. Snapshot handles stay host-private. */
 export const formatHypercombObservationReceipt = (
   receipt: HypercombObservationReceipt,
@@ -837,10 +889,7 @@ export const formatHypercombObservationReceipt = (
       return found.ok
         ? {
           grammar, root: found.root, query: found.query, matches: found.matches, truncated: found.truncated,
-          // A whole-hive find stops before the deepest tiles on a large hive
-          // (2026-10-04: `find betz /` missed /dolphin/associates/betz, which
-          // `find betz /dolphin` found). Say how to reach the rest.
-          ...(found.truncated ? { truncatedNote: 'the search stopped before the whole route; other matches may exist deeper — search again under a narrower route: find <word> /path' } : {}),
+          ...(found.truncated ? cutNoteOf(found) : {}),
           ...scope,
         }
         : { grammar, root: read.root, error: found.code, ...scope }

@@ -899,3 +899,197 @@ describe('a page history cannot pin to one signature', () => {
     expect(fx.getLayerBySig.mock.calls.length).toBe(layerReads)
   })
 })
+
+/** A hive whose root holds `branches` in order, each `{ name, leaves }` a
+ *  page with that many leaf tiles under it (layers `sig(50_000 + …)`, no
+ *  pinned heads: each opens by the copy its parent carries), or `{ name,
+ *  chain }` a line of pages, one under the next, each with a pinned head.
+ *  Returns the route of each chain's last page. */
+const branchedHive = (
+  fx: Fixture,
+  branches: readonly ({ readonly name: string; readonly leaves: number } | { readonly name: string; readonly chain: readonly string[] })[],
+): Record<string, readonly string[]> => {
+  const top: string[] = []
+  const ends: Record<string, readonly string[]> = {}
+  let next = 50_000
+  branches.forEach((branch, b) => {
+    const branchSig = sig(40_000 + b)
+    let children: string[] = []
+    if ('leaves' in branch) {
+      children = Array.from({ length: branch.leaves }, (_, i) => {
+        const leaf = sig(next++)
+        fx.layers.set(leaf, { name: `${branch.name}-${i}`, children: [] })
+        return leaf
+      })
+    } else {
+      const route = [branch.name, ...branch.chain]
+      ends[branch.name] = route
+      let child: string | undefined
+      for (let level = route.length - 1; level >= 1; level--) {
+        const layerSig = sig(next++)
+        const locationSig = sig(next++)
+        const layer: LayerContent = { name: route[level], children: child ? [child] : [] }
+        fx.layers.set(layerSig, layer)
+        fx.locations.set(route.slice(0, level + 1).join('/'), locationSig)
+        fx.refs.set(locationSig, { locationSig, layerSig, layer })
+        child = layerSig
+      }
+      children = child ? [child] : []
+    }
+    const layer: LayerContent = { name: branch.name, children }
+    fx.layers.set(branchSig, layer)
+    const locationSig = sig(45_000 + b)
+    fx.locations.set(branch.name, locationSig)
+    fx.refs.set(locationSig, { locationSig, layerSig: branchSig, layer })
+    top.push(branchSig)
+  })
+  const rootLayer: LayerContent = { name: 'hive', children: top }
+  fx.layers.set(sig(1), rootLayer)
+  fx.refs.set(sig(101), { locationSig: sig(101), layerSig: sig(1), layer: rootLayer })
+  return ends
+}
+
+describe('a find shares its walk among the route’s branches', () => {
+  // The live probe, 2026-10-12 (revision 19d44b5b, a ~5,900-tile hive):
+  // level by level across the whole route, the find's 2,000 nodes went on
+  // /solomon-maze-v1's and /bubble-bobble-dos-v1's second level, and "find
+  // betz /" missed /dolphin/associates/betz, three levels down a small branch.
+  it('finds a small branch’s depth-three tile behind a huge branch, on the same budget, and names the huge branch as unfinished', async () => {
+    const fx = fixture()
+    const ends = branchedHive(fx, [
+      { name: 'huge', leaves: 2_100 },
+      { name: 'dolphin', chain: ['associates', 'betz'] },
+      { name: 'notes', leaves: 3 },
+    ])
+    const found = await fx.reader.find('betz', [])
+    expect(found).toMatchObject({
+      ok: true, truncated: true,
+      matches: [{ name: 'betz', path: pathOf(ends['dolphin']) }],
+      unfinished: ['/huge'], unfinishedCount: 1,
+    })
+    // The same budget: no more pages opened than a find's 2,000 nodes, and
+    // the huge branch cut short, not walked whole.
+    const signed = (fx.history['sign'] as ReturnType<typeof vi.fn>).mock.calls
+      .map(([lineage]) => (lineage as { explorerSegments(): readonly string[] }).explorerSegments())
+    const hugeOpened = signed.filter(path => path.length === 2 && path[0] === 'huge').length
+    expect(hugeOpened).toBeGreaterThan(1_900)
+    expect(hugeOpened).toBeLessThan(2_000)
+    expect(signed.length).toBeLessThanOrEqual(2_000)
+    // /tree keeps its level-by-level picture of the hive.
+    const tree = await fx.reader.readTree([], { maxDepth: 3 })
+    expect(tree.ok && tree.nodes.map(node => node.path).slice(0, 5)).toEqual(['/', '/huge', '/dolphin', '/notes', '/huge/huge-0'])
+    expect(tree).not.toHaveProperty('unfinished')
+  })
+
+  it('names the first twenty unfinished branches in the route’s order and counts them all', async () => {
+    const fx = fixture()
+    branchedHive(fx, Array.from({ length: 25 }, (_, b) => ({ name: `b${b}`, leaves: 100 })))
+    const found = await fx.reader.find('nothing', [])
+    expect(found).toMatchObject({ ok: true, truncated: true, matches: [], unfinishedCount: 25 })
+    expect(found.ok && found.unfinished).toEqual(Array.from({ length: 20 }, (_, b) => `/b${b}`))
+  })
+
+  it('names under a narrower route its own children, and nothing when the walk finished', async () => {
+    const fx = fixture()
+    branchedHive(fx, [{ name: 'dolphin', chain: ['associates', 'betz'] }])
+    const whole = await fx.reader.find('betz', [])
+    expect(whole).toMatchObject({ ok: true, truncated: false })
+    expect(whole).not.toHaveProperty('unfinished')
+
+    const games = fixture()
+    const page: LayerContent = { name: 'games', children: [sig(40_000), sig(40_001)] }
+    branchedHive(games, [{ name: 'solomon', leaves: 2_100 }, { name: 'small', leaves: 2 }])
+    games.layers.set(sig(9), page)
+    games.locations.set('games', sig(109))
+    games.refs.set(sig(109), { locationSig: sig(109), layerSig: sig(9), layer: page })
+    // /games/solomon and /games/small open by the copies /games carries.
+    const under = await games.reader.find('small-1', ['games'])
+    expect(under).toMatchObject({
+      ok: true, truncated: true, matches: [{ name: 'small-1', path: '/games/small/small-1' }],
+      unfinished: ['/games/solomon'], unfinishedCount: 1,
+    })
+  })
+
+  it('lists a shared walk’s matches level by level in the route’s order, as a walk that was not shared lists them', async () => {
+    // Shared out, the small branch's third level is opened before the big
+    // branch's last second-level tiles; the answer still lists the shallower
+    // match first.
+    const fx = fixture()
+    const ends = branchedHive(fx, [
+      { name: 'big', leaves: 30 },
+      { name: 'small', chain: ['s1', 'big-deep'] },
+    ])
+    const found = await fx.reader.find('big-', [])
+    if (!found.ok) throw new Error('find failed')
+    expect(found.truncated).toBe(false)
+    expect(found.matches.map(match => match.path)).toEqual([
+      ...Array.from({ length: 30 }, (_, i) => `/big/big-${i}`), pathOf(ends['small']),
+    ])
+  })
+
+  it('names a branch whose page could not be opened, and never a branch it finished', async () => {
+    const fx = fixture()
+    branchedHive(fx, [{ name: 'gone', leaves: 2 }, { name: 'kept', leaves: 2 }])
+    // The root still carries /gone; its own page now holds another tile.
+    fx.refs.set(sig(45_000), { locationSig: sig(45_000), layerSig: sig(77), layer: { name: 'elsewhere', children: [] } })
+    const found = await fx.reader.find('kept', [])
+    expect(found).toMatchObject({
+      ok: true, truncated: true,
+      matches: [{ name: 'kept', path: '/kept' }, { name: 'kept-0', path: '/kept/kept-0' }, { name: 'kept-1', path: '/kept/kept-1' }],
+      unfinished: ['/gone'], unfinishedCount: 1,
+    })
+  })
+})
+
+describe('a walk whose budget is spent stops there', () => {
+  // Review of the 2026-10-12 fair walk: the byte cut left only the batch,
+  // and the walk carried on — it opened every page still queued (904 for a
+  // /tree that once opened 20) and appended later, shorter nodes behind the
+  // gap.
+  const signedPaths = (fx: Fixture): (readonly string[])[] =>
+    (fx.history['sign'] as ReturnType<typeof vi.fn>).mock.calls
+      .map(([lineage]) => (lineage as { explorerSegments(): readonly string[] }).explorerSegments())
+
+  it('a /tree cut on bytes in the middle of a batch ends at the first node that does not fit', async () => {
+    const fx = fixture()
+    const long = (at: number): string => `${'l'.repeat(249)}${at}`
+    branchedHive(fx, [
+      ...[0, 1, 2].map(at => ({ name: long(at), leaves: 0 })),
+      ...Array.from({ length: 20 }, (_, at) => ({ name: `s${at}`, leaves: 0 })),
+    ])
+    const tree = await fx.reader.readTree([], { maxDepth: 2, maxNodes: 64, maxBytes: 1_024 })
+    expect(tree).toMatchObject({ ok: true, truncated: true })
+    expect(tree.ok && tree.nodes.map(node => node.path)).toEqual(['/', `/${long(0)}`])
+    // The root, then one batch: nothing opened past the cut.
+    expect(signedPaths(fx).length).toBeLessThanOrEqual(1 + 16)
+  })
+
+  it('a find cut on bytes opens no page past the batch it was cut in, and names the cut branch', async () => {
+    const fx = fixture()
+    const long = 'w'.repeat(240)
+    branchedHive(fx, [{ name: long, leaves: 1_500 }])
+    const found = await fx.reader.find('nothing', [])
+    expect(found).toMatchObject({ ok: true, truncated: true, matches: [], unfinished: [`/${long}`], unfinishedCount: 1 })
+    // About 510 of these nodes fill 400,000 bytes: the root, the branch,
+    // the pages kept, and the rest of the one batch the cut fell in.
+    expect(signedPaths(fx).length).toBeLessThan(560)
+  })
+})
+
+describe('a find whose matches outrun its limit says so', () => {
+  // Review of the 2026-10-12 fair walk: all 61 hits under a finished /small,
+  // 48 shown, and the note named only /huge as unfinished — the 13 unshown
+  // matches were in /small.
+  it('marks more matches than the limit shows, beside the unfinished branches', async () => {
+    const fx = fixture()
+    branchedHive(fx, [{ name: 'huge', leaves: 2_100 }, { name: 'small', leaves: 60 }])
+    const found = await fx.reader.find('small', [], { maxNodes: 48 })
+    expect(found).toMatchObject({ ok: true, truncated: true, unfinished: ['/huge'], unfinishedCount: 1, moreMatches: true })
+    expect(found.ok && found.matches.length).toBe(48)
+    expect(found.ok && found.matches.every(match => match.path.startsWith('/small'))).toBe(true)
+
+    const within = await fx.reader.find('small-5', [], { maxNodes: 48 })
+    expect(within).toMatchObject({ ok: true, truncated: true, unfinished: ['/huge'] })
+    expect(within).not.toHaveProperty('moreMatches')
+  })
+})

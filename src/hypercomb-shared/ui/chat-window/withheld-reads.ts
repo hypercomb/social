@@ -41,7 +41,20 @@ export const withoutWithheld = (receipt: HypercombObservationReceipt, covers: Co
     }
     if (result.kind === 'find' && result.read.ok) {
       const matches = result.read.matches.filter(match => !covers(segmentsOfPath(match.path)))
-      return matches.length === result.read.matches.length ? result : { ...result, read: { ...result.read, matches } }
+      // A find's unfinished branches name tiles too (2026-10-12). Left in, a
+      // large withheld branch reached an outside model by name, with a note
+      // to search under it — a read this step then refuses.
+      const listed = result.read.unfinished ?? []
+      const unfinished = listed.filter(route => !covers(segmentsOfPath(route)))
+      if (matches.length === result.read.matches.length && unfinished.length === listed.length) return result
+      const { unfinished: _listed, unfinishedCount = listed.length, ...read } = result.read
+      return {
+        ...result,
+        read: {
+          ...read, matches,
+          ...(unfinished.length ? { unfinished, unfinishedCount: unfinishedCount - (listed.length - unfinished.length) } : {}),
+        },
+      }
     }
     return result
   }),
