@@ -22,6 +22,13 @@
 // starts clean while old progress survives a revert; item state is keyed
 // by the STABLE `item.id` so progress carries across regenerations that
 // keep an item.
+//
+// ONLY WHAT SCHEDULING NEEDS (jwize, 2026-10-11 — we collect no statistics):
+// an item's box, ease and due time, nothing else. No count of reviews or
+// misses and no record of when you studied; the completion screen's numbers
+// are counted from this state live, never stored. A record written before
+// this keeps its extra fields only until its deck is studied again — the
+// next save writes the three fields alone.
 
 import type { StudyItem, Grade } from './deck.types.js'
 
@@ -30,9 +37,6 @@ interface ItemState {
   box: number       // 0..5 — Leitner box
   ease: number      // 1.3..3.0 — interval multiplier
   due: number       // epoch ms the item is next due
-  reps: number      // total times answered
-  lapses: number    // total `again` grades
-  last: number      // epoch ms last seen (interleaving tie-break)
 }
 
 /** Learning stage derived from box — drives the shell's game biasing. */
@@ -105,11 +109,11 @@ export class TutorScheduler {
     }
     if (pool.length === 0) return null
 
-    // Rank: lowest box first (weakest), then most overdue, then least-recently seen.
+    // Rank: lowest box first (weakest), then most overdue. The sort is
+    // stable, so a tie keeps the deck's own order.
     const rank = (i: StudyItem): number => {
       const s = this.#stateOf(i.id)
-      const overdue = now - s.due
-      return s.box * 1e12 - overdue - (now - s.last) * 1e-3
+      return s.box * 1e12 - (now - s.due)
     }
     pool = [...pool].sort((a, b) => rank(a) - rank(b))
 
@@ -134,12 +138,9 @@ export class TutorScheduler {
     if (!this.#byId.has(itemId)) return
     const s = { ...this.#stateOf(itemId) }
     const now = Date.now()
-    s.reps += 1
-    s.last = now
 
     if (grade === 'again') {
       s.box = 0
-      s.lapses += 1
       s.ease = Math.max(EASE_MIN, s.ease - 0.2)
     } else if (grade === 'good') {
       s.box = Math.min(MAX_BOX, s.box + 1)
@@ -185,7 +186,7 @@ export class TutorScheduler {
   // ── persistence (participant-local) ────────────────────────
 
   #stateOf(id: string): ItemState {
-    return this.#state[id] ?? { box: 0, ease: EASE_START, due: 0, reps: 0, lapses: 0, last: 0 }
+    return this.#state[id] ?? { box: 0, ease: EASE_START, due: 0 }
   }
 
   #key(): string { return `${PROGRESS_PREFIX}${this.#progressKey}` }
@@ -194,8 +195,16 @@ export class TutorScheduler {
     try {
       const raw = localStorage.getItem(this.#key())
       if (!raw) return {}
-      const parsed = JSON.parse(raw) as Record<string, ItemState>
-      return parsed && typeof parsed === 'object' ? parsed : {}
+      const parsed = JSON.parse(raw) as Record<string, Partial<ItemState>>
+      if (!parsed || typeof parsed !== 'object') return {}
+      // Keep the three scheduling fields of each item and nothing else.
+      const out: Record<string, ItemState> = {}
+      for (const [id, item] of Object.entries(parsed)) {
+        if (!item || typeof item !== 'object') continue
+        const { box, ease, due } = item
+        if (Number.isFinite(box) && Number.isFinite(ease) && Number.isFinite(due)) out[id] = { box: box!, ease: ease!, due: due! }
+      }
+      return out
     } catch { return {} }
   }
 
