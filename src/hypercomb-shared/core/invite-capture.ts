@@ -203,7 +203,13 @@ export interface PendingMeetTiming {
 /** What a sentence or a chat app's linkifier leaves stuck to the END of a
  *  link — never the link's own. MIRROR of essentials meeting-invite.ts
  *  trimLinkTail (invite-capture.robust.spec.ts holds the two together). */
+const LINK_BODY_MAX = 8192
 const trimLinkTail = (text: string): string => {
+  // A link body longer than any real one is no link (2026-10-12): the loop
+  // below rescans the whole text per character it trims, so a crafted
+  // 100,000-character tail froze the tab (found reviewing the signed swarm
+  // link, swarm-link.ts, which caps its own body at 512).
+  if (text.length > LINK_BODY_MAX) return ''
   let body = text
   for (;;) {
     let next = body.replace(/[.,;:!?'"\]}>]+$/, '')

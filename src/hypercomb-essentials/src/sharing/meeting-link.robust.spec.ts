@@ -178,3 +178,12 @@ describe('the worker says when a link cannot be read', () => {
     expect(sheets[0].message).toContain('room-new')
   })
 })
+
+describe('a crafted link never freezes the tab (2026-10-12)', () => {
+  it('a 100,000-character tail is refused at once, not trimmed character by character', async () => {
+    const { parseMeet } = await import('./meeting-invite.js')
+    const t0 = performance.now()
+    expect(parseMeet('#meet=room/secret' + ')'.repeat(100_000))).toBeNull()
+    expect(performance.now() - t0).toBeLessThan(250)
+  })
+})
