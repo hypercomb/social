@@ -48,7 +48,7 @@ import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { fromRuntime } from '../../core/from-runtime'
 import {
-  SENDING_AFTER_MS, SLOW_FOR_MS, UNREACHABLE_AFTER_MS, clockRefused, linkPhase, refusalOf, slowLink, statusLine, wordsBeside,
+  SENDING_AFTER_MS, SLOW_FOR_MS, UNREACHABLE_AFTER_MS, clockRefused, linkPhase, refusalOf, slowLink, statusLine, wordsAtHost, wordsBeside,
   type MeshConnection, type ShareStatus, type StatusLine, type SyncState,
 } from './presence-status'
 import { readMeshZone } from '../../core/mesh-session'
@@ -266,7 +266,7 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   #sendingTimer: ReturnType<typeof setTimeout> | null = null
 
   /** The meeting point this tab is joined at, as named in its zone ('' =
-   *  the default) — what the 'unreachable' line names. */
+   *  none named there) — what the 'unreachable' line names. */
   readonly #point = signal('')
   /** DELIVERY, NOT THE SOCKET (TS-7). The relay never echoes our own event
    *  back, so its OK (swarm:page-announced) is the only proof the room has
@@ -382,7 +382,9 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
       host: this.#swarmHost() || this.#t('mesh.state.no-host-name'),
       uploadHost: this.#uploadHost(),
       room: this.#room().trim(),
-      words: wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale()),
+      // The words with the host they were drawn at beside them ('marble
+      // cove · hypercomb.com') — never the page's own domain (2026-10-11).
+      words: wordsAtHost(wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale()), this.#swarmHost()),
       roomCount: room.size + 1,
       hereCount: standing.length + (selfHere ? 1 : 0),
       share: this.#share(),
@@ -714,10 +716,15 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
    *  word, with nothing selected); `share` offers this page's private tiles
    *  after one confirmation — tile by tile, their insides stay private;
    *  `code` opens the selector on the access code (the meeting point refused
-   *  this tab's — paste the newest one). */
-  async onStatusAction(action: 'invite' | 'share' | 'code' | undefined): Promise<void> {
+   *  this tab's — paste the newest one); `host` opens it on the host field
+   *  (joined with no host named — there is no default). */
+  async onStatusAction(action: 'invite' | 'share' | 'code' | 'host' | undefined): Promise<void> {
     if (action === 'code') {
       EffectBus.emit('mesh:open-modal', { focus: 'code' })
+      return
+    }
+    if (action === 'host') {
+      EffectBus.emit('mesh:open-modal', { focus: 'point' })
       return
     }
     if (action === 'invite') {
@@ -899,7 +906,7 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     } catch { /* keep the last one */ }
   }
 
-  /** The meeting point named in this tab's zone ('' = the default). */
+  /** The meeting point named in this tab's zone ('' = none named there). */
   #readPoint(): void {
     this.#point.set(String(readMeshZone()?.relay ?? ''))
   }

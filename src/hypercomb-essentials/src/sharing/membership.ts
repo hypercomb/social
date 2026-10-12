@@ -112,7 +112,8 @@ export const ownZone = (): { room: string; secret: string } | null => {
   return room && secret ? { room, secret } : null
 }
 
-/** The meeting point this tab dials ('' = the default relay). */
+/** The meeting point this tab dials ('' = none of its own: the page's own
+ *  chosen relay list, or nowhere — there is no default). */
 export const tabRelay = (): string => readTabZone()?.relay ?? ''
 /** The meeting host this tab's tiles go to ('' = none named). */
 export const tabMeetingHost = (): string => readTabZone()?.host ?? ''

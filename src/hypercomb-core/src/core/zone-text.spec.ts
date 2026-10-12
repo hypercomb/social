@@ -57,12 +57,20 @@ describe('canonicalZoneText', () => {
   })
 })
 
-// ── THE ROOM IS MEETING POINT + ROOM + SECRET (jwize, 2026-10-12) ──────────
-describe("the room's preimage always names its meeting point", () => {
-  it('an empty field, hypercomb.com and wss://HyperComb.com/ are one point — the shipped default', () => {
+// ── THE ROOM IS HOST + ROOM + SECRET (jwize, 2026-10-11/12) ────────────────
+describe("the room's preimage always names its host", () => {
+  it('hypercomb.com however it is written is one host — offered, never a default', () => {
     expect(SHIPPED_MEETING_POINT).toBe('wss://hypercomb.com')
-    for (const p of ['', '   ', undefined, null, 'hypercomb.com', 'wss://hypercomb.com', 'wss://HyperComb.com/', 'WSS://HYPERCOMB.COM', 'wss://hypercomb.com:443', 'https://hypercomb.com/']) {
+    for (const p of ['hypercomb.com', 'wss://hypercomb.com', 'wss://HyperComb.com/', 'WSS://HYPERCOMB.COM', 'wss://hypercomb.com:443', 'https://hypercomb.com/', SHIPPED_MEETING_POINT]) {
       expect([p, meetingPointKey(p)]).toEqual([p, 'hypercomb.com'])
+    }
+  })
+
+  it('NO HOST, NO ROOM: an empty field, or one that is no address, names no host — never a default', () => {
+    for (const p of ['', '   ', undefined, null, 42, 'wss://', 'not a host at all']) {
+      expect([p, meetingPointKey(p)]).toEqual([p, ''])
+      expect([p, roomPreimage('downtown', 'rose', p)]).toEqual([p, ''])
+      expect([p, lifecyclePreimage('downtown', 'rose', p)]).toEqual([p, ''])
     }
   })
 
@@ -75,18 +83,24 @@ describe("the room's preimage always names its meeting point", () => {
     expect(meetingPointKey('ws://localhost:7801')).not.toBe(meetingPointKey('ws://localhost:7802'))
   })
 
-  it('the default is never left out: room, secret and point, the point included', () => {
-    expect(roomPreimage('downtown', 'rose', '')).toBe('downtown\u0000rose\u0000hypercomb.com')
+  it('room, secret and host — the host always included', () => {
+    expect(roomPreimage('downtown', 'rose', 'hypercomb.com')).toBe('downtown\u0000rose\u0000hypercomb.com')
     expect(roomPreimage('downtown', 'rose', 'wss://jwize.com')).toBe('downtown\u0000rose\u0000jwize.com')
-    expect(lifecyclePreimage('downtown', 'rose', '')).toBe('lifecycle\u0000downtown\u0000rose\u0000hypercomb.com')
-    // the preimage from before the point was part of it is no room any more
-    expect(lifecyclePreimage('downtown', 'rose', '')).not.toBe('lifecycle\u0000downtown\u0000rose')
+    expect(lifecyclePreimage('downtown', 'rose', 'wss://hypercomb.com')).toBe('lifecycle\u0000downtown\u0000rose\u0000hypercomb.com')
+    // the preimage from before the host was part of it is no room any more
+    expect(lifecyclePreimage('downtown', 'rose', 'wss://hypercomb.com')).not.toBe('lifecycle\u0000downtown\u0000rose')
   })
 
-  it('same point + room + secret is one preimage; another point is another room', () => {
-    expect(roomPreimage('a', 'b', 'wss://HyperComb.com/')).toBe(roomPreimage('a', 'b', ''))
-    expect(roomPreimage('a', 'b', 'wss://pluginthematrix.com')).not.toBe(roomPreimage('a', 'b', ''))
-    // case is the room's, never the point's
-    expect(roomPreimage('A', 'b', '')).not.toBe(roomPreimage('a', 'b', ''))
+  it('same host + room + secret is one preimage; another host is another room', () => {
+    const H = 'wss://hypercomb.com'
+    expect(roomPreimage('a', 'b', 'wss://HyperComb.com/')).toBe(roomPreimage('a', 'b', H))
+    expect(roomPreimage('a', 'b', 'wss://pluginthematrix.com')).not.toBe(roomPreimage('a', 'b', H))
+    // case is the room's, never the host's
+    expect(roomPreimage('A', 'b', H)).not.toBe(roomPreimage('a', 'b', H))
+  })
+
+  it('two names for one physical relay are two rooms, on purpose (2026-10-11: localhost:7777 and jwize.com on one PC)', () => {
+    expect(lifecyclePreimage('a', 'b', 'ws://localhost:7777')).not.toBe(lifecyclePreimage('a', 'b', 'wss://jwize.com'))
+    expect(lifecyclePreimage('a', 'b', 'ws://localhost:7777')).not.toBe(lifecyclePreimage('a', 'b', 'ws://127.0.0.1:7777'))
   })
 })

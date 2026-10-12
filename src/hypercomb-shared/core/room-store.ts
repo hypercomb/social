@@ -1,7 +1,12 @@
 // hypercomb-shared/core/room-store.ts
 // Room state — THIS tab's, with the origin-wide localStorage key as the
-// pre-fill for a new tab. On first access, an explicit ZONE HOST's subdomain
-// pre-fills the room (never the secret).
+// pre-fill for a new tab.
+//
+// NEVER THE PAGE'S ADDRESS (jwize, 2026-10-11: "The domain on the other hand
+// should not be used (current address in the browser)"). A zone host's
+// subdomain (`myroom.hypercomb.io`) used to pre-fill the room — the page's
+// own domain deciding part of a room's identity, its words and its every
+// address. The room is only ever what someone typed or a link carried.
 //
 // The tab's own zone (sessionStorage `hc:mesh-zone`, mesh-session.ts) wins:
 // a reload comes back in the room this tab was in, whatever another tab
@@ -19,13 +24,6 @@ import { readMeshZone, writeMeshZone } from './mesh-session'
 
 const KEY = 'hc:room'
 
-/** The hosts whose subdomain names a room: `<room>.<zone host>`. Any other
- *  multi-label origin — business-card.jwize.com, a *.pages.dev deployment —
- *  is somebody's address, never a room every visitor would share. */
-const ZONE_HOSTS: readonly string[] = ['hypercomb.io']
-/** Labels that are a host's own, never a room. */
-const NOT_A_ROOM = new Set(['www'])
-
 export class RoomStore extends EventTarget {
 
   #value: string
@@ -35,12 +33,6 @@ export class RoomStore extends EventTarget {
   constructor() {
     super()
     this.#value = this.#read()
-
-    // if nothing is stored, try a zone host's subdomain
-    if (!this.#value) {
-      const extracted = RoomStore.extractSubdomain()
-      if (extracted) this.set(extracted)
-    }
   }
 
   /** `exact`: the room a link carries — an exact zone, never entered text —
@@ -60,25 +52,6 @@ export class RoomStore extends EventTarget {
 
   public clear = (): void => {
     this.set('')
-  }
-
-  // ── subdomain extraction ──────────────────────────────
-
-  /**
-   * Extracts the room from the hostname on a ZONE HOST's subdomain.
-   * e.g. "myroom.hypercomb.io" → "myroom"
-   *      "deep.path.hypercomb.io" → "deep.path"
-   *      "www.hypercomb.io" → "" (the host's own label)
-   *      "business-card.jwize.com" → "" (not a zone host)
-   *      "localhost" → "" (no subdomain)
-   *      "hypercomb.io" → "" (bare domain)
-   */
-  static extractSubdomain = (): string => {
-    const host = (window.location.hostname ?? '').toLowerCase().trim().replace(/\.$/, '')
-    const zone = ZONE_HOSTS.find(z => host.endsWith(`.${z}`))
-    if (!zone) return ''
-    const sub = host.slice(0, -(zone.length + 1))
-    return sub && !NOT_A_ROOM.has(sub) ? sub : ''
   }
 
   // ── storage ───────────────────────────────────────────

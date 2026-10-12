@@ -188,8 +188,11 @@ export class PeerModelsDrone extends Drone {
     if (!sig?.signText || !room || !secret) return ''
     if (pubkey && !HEX64.test(pubkey)) return ''
     let point = ''
-    try { point = String(this.#mesh()?.swarmHost?.() ?? '') } catch { /* the default point */ }
-    try { return await sig.signText(`${label}:${pubkey}\0${roomPreimage(room, secret, point)}`) } catch { return '' }
+    try { point = String(this.#mesh()?.swarmHost?.() ?? '') } catch { /* no host */ }
+    // No host named: no room, so no channel (there is no default host).
+    const tail = roomPreimage(room, secret, point)
+    if (!tail) return ''
+    try { return await sig.signText(`${label}:${pubkey}\0${tail}`) } catch { return '' }
   }
 
   async #me(): Promise<string> {

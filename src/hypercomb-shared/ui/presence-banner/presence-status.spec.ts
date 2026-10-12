@@ -14,7 +14,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { secretTag } from '@hypercomb/core'
 import {
-  ROOM_IDENTITY, UNREACHABLE_AFTER_MS, clockRefused, linkPhase, loadedRoomIdentity, roomWords, statusLine, wordsBeside,
+  ROOM_IDENTITY, UNREACHABLE_AFTER_MS, clockRefused, linkPhase, loadedRoomIdentity, meetingPointKey, roomWords, statusLine, wordsAtHost, wordsBeside,
   type StatusInput, type StatusLine,
 } from './presence-status'
 
@@ -223,13 +223,38 @@ describe('the socket as a person reads it', () => {
 })
 
 describe("the room's two words", () => {
-  it('come from the meeting point, the room and the secret — the lifecycle preimage (2026-10-12)', () => {
-    // An empty field is the shipped default, and the default is part of it.
-    expect(roomWords('meetup', '4417')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000hypercomb.com'))
-    expect(roomWords('meetup', '4417', 'wss://HyperComb.com/')).toBe(roomWords('meetup', '4417'))
+  it('come from the host, the room and the secret — the lifecycle preimage (2026-10-12)', () => {
+    const H = 'hypercomb.com'
+    expect(roomWords('meetup', '4417', H)).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000hypercomb.com'))
+    expect(roomWords('meetup', '4417', 'wss://HyperComb.com/')).toBe(roomWords('meetup', '4417', H))
     expect(roomWords('meetup', '4417', 'wss://point.example')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000point.example'))
-    expect(roomWords(' meetup ', ' 4417 ')).toBe(roomWords('meetup', '4417'))
-    expect(roomWords('', '')).toBe('')
+    expect(roomWords(' meetup ', ' 4417 ', H)).toBe(roomWords('meetup', '4417', H))
+    expect(roomWords('', '', H)).toBe('')
+  })
+
+  it('NO HOST, NO WORDS — there is no default host (2026-10-11)', () => {
+    expect(roomWords('meetup', '4417')).toBe('')
+    expect(roomWords('meetup', '4417', '')).toBe('')
+    expect(roomWords('meetup', '4417', '   ')).toBe('')
+    expect(wordsBeside('meetup', '4417', '', 'ja')).toBe('')
+    expect(meetingPointKey('')).toBe('')
+  })
+
+  it('show the host beside them — "marble cove · hypercomb.com" — the host in the preimage, never the page', () => {
+    const words = roomWords('meetup', '4417', 'wss://HyperComb.com/')
+    expect(wordsAtHost(words, 'wss://HyperComb.com/')).toBe(`${words} · hypercomb.com`)
+    expect(wordsAtHost('faint dew', 'ws://localhost:7777')).toBe('faint dew · localhost:7777')
+    expect(wordsAtHost('faded lynx', 'wss://jwize.com')).toBe('faded lynx · jwize.com')
+    // the words alone with no host; nothing with no words
+    expect(wordsAtHost('faint dew', '')).toBe('faint dew')
+    expect(wordsAtHost('', 'hypercomb.com')).toBe('')
+    // jwize's two tabs (2026-10-11): one relay under two names reads two
+    // pairs AND two hosts — the split shows at a glance.
+    const dev = wordsAtHost(roomWords('r', 's', 'ws://localhost:7777'), 'ws://localhost:7777')
+    const live = wordsAtHost(roomWords('r', 's', 'wss://jwize.com'), 'wss://jwize.com')
+    expect(dev).not.toBe(live)
+    expect(dev.endsWith(' · localhost:7777')).toBe(true)
+    expect(live.endsWith(' · jwize.com')).toBe(true)
   })
 
   it('follow the package that addresses the room — a shell newer than its package reads that package\'s pair', () => {
@@ -246,10 +271,12 @@ describe("the room's two words", () => {
       expect(roomWords('meetup', '4417', 'wss://hypercomb.com')).toBe(secretTag('lifecycle\u0000meetup\u00004417'))
       expect(roomWords('meetup', '4417', 'wss://point.example')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000point.example'))
       expect(wordsBeside('meetup', '4417', '', 'ja')).toContain(secretTag('lifecycle\u0000meetup\u00004417', 'ja'))
-      // The package that marks itself 2 meets at point + room + secret.
+      // The package that marks itself 2 meets at host + room + secret — and
+      // with no host, nowhere.
       swarm.roomIdentity = 2
       expect(loadedRoomIdentity()).toBe(ROOM_IDENTITY)
-      expect(roomWords('meetup', '4417')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000hypercomb.com'))
+      expect(roomWords('meetup', '4417', 'hypercomb.com')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000hypercomb.com'))
+      expect(roomWords('meetup', '4417')).toBe('')
     } finally { ioc.ioc = prior }
     // No swarm loaded yet: the current identity.
     expect(loadedRoomIdentity()).toBe(ROOM_IDENTITY)
@@ -268,19 +295,34 @@ describe("the room's two words", () => {
     // own beside it (D4, 2026-10-10).
     const bar = readFileSync(join(UI, 'controls-bar', 'controls-bar.component.ts'), 'utf8')
     const crumb = bar.slice(bar.indexOf('readonly secretWords = computed('), bar.indexOf('readonly hasSecret'))
-    expect(crumb).toContain('roomWords(this.#room$(), this.#secret$(), this.#meetPoint$())')
+    // the words, and the host they are drawn at beside them (2026-10-11)
+    expect(crumb).toContain('wordsAtHost(roomWords(this.#room$(), this.#secret$(), this.#meetPoint$()), this.#meetPoint$())')
     expect(crumb).not.toMatch(/#lineageKey|segmentsRaw|#locale/)
+    expect(crumb).not.toMatch(/location\??\.(host|hostname|origin)\b/)
     expect(bar).not.toContain('secretTag(')
 
     const modal = readFileSync(join(UI, 'mesh-modal', 'mesh-modal.component.ts'), 'utf8')
-    // the drafts as START will store them (D6), the point, the reader's locale — never the page
-    expect(modal).toMatch(/wordsBeside\(\s*this\.#asStored\(this\.roomDraft\(\), this\.#roomStore\?\.value\),\s*this\.#asStored\(this\.secretDraft\(\), this\.#secretStore\?\.value\),\s*this\.#wordsPoint\(\), this\.#locale\(\)\)/)
+    // the drafts as START will store them (D6), the host, the reader's locale — never the page
+    expect(modal).toContain('const point = this.#wordsPoint()')
+    expect(modal).toMatch(/wordsAtHost\(wordsBeside\(\s*this\.#asStored\(this\.roomDraft\(\), this\.#roomStore\?\.value\),\s*this\.#asStored\(this\.secretDraft\(\), this\.#secretStore\?\.value\),\s*point, this\.#locale\(\)\), point\)/)
     expect(modal).not.toContain('secretTag(')
     expect(modal).not.toContain('#lineageKey')
+    // the page's own domain picks no host there either
+    expect(modal).not.toMatch(/location\??\.(host|hostname|origin)\b/)
 
     const banner = readFileSync(join(UI, 'presence-banner', 'presence-banner.component.ts'), 'utf8')
-    expect(banner).toContain('wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale())')
+    expect(banner).toContain('wordsAtHost(wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale()), this.#swarmHost())')
     expect(banner).not.toContain('secretTag(')
+    expect(banner).not.toMatch(/location\??\.(host|hostname|origin)\b/)
+  })
+
+  it("the crumb's root is never the page's domain while in a swarm — it reads as home; the host stands beside the words (2026-10-11)", () => {
+    const html = readFileSync(join(UI, 'controls-bar', 'controls-bar.component.html'), 'utf8').replace(/\r\n/g, '\n')
+    const root = html.slice(html.indexOf('<div class="breadcrumb-top"'), html.indexOf('@for (seg of pathSegments()'))
+    // activeDomain() (the page's hostname) only in the private branch
+    const at = root.indexOf('activeDomain()')
+    expect(at).toBeGreaterThan(root.indexOf('} @else {', root.indexOf('@if (meshPublic())')))
+    expect(root.slice(root.indexOf('@if (meshPublic())'), root.indexOf('} @else {', root.indexOf('@if (meshPublic())')))).not.toContain('activeDomain()')
   })
 
   it('the command line never autocorrects either: a room typed there is the room (ZI-8)', () => {

@@ -255,8 +255,9 @@ describe("the tab's meeting point", () => {
     expect(last().url).toBe(MEET)
     expect(mesh.ownRelays()).toEqual([OWN])
     mesh.configureOwnRelays([...mesh.ownRelays(), 'wss://other.test'])
-    // Saved for every tab of the origin, without the meeting point…
-    expect(JSON.parse(localStorage.getItem('hc:nostrmesh:relays')!)).toEqual([OWN, 'wss://other.test'])
+    // Saved for every tab of the origin, without the meeting point (behind
+    // the mark that says the list is the participant's, whole)…
+    expect(JSON.parse(localStorage.getItem('hc:nostrmesh:relays')!)).toEqual(['hc:chosen', OWN, 'wss://other.test'])
     // …while this tab stays where its meeting is.
     expect(FakeWebSocket.all.map(ws => ws.url)).toEqual([MEET])
     expect(mesh.ownRelays()).toEqual([OWN, 'wss://other.test'])

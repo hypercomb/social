@@ -15,9 +15,10 @@
            backup goes — replication, never who meets) is set in the host
            directory; your name on the presence line.
 
-           1. Meeting point (empty = the shipped default, hypercomb.com — the
-           same room as typing it) and, when a coded point needs one, its
-           access code. Both are THIS tab's, and ride in the meeting link the
+           1. The host you meet at — never the page's own domain, and never
+           filled for you: EMPTY on a new install, hypercomb.com OFFERED
+           beside it (one tap fills it), and START needs it (no host, no
+           room) — and, when a coded point needs one, its access code. Both are THIS tab's, and ride in the meeting link the
            share button copies; the code is ALWAYS masked — the secret's eye
            never reveals it (a shared screen would hand the point to every
            viewer) — and never shown anywhere else. -->
@@ -31,13 +32,25 @@
           [value]="pointDraft()"
           [disabled]="!pointSupported()"
           [style.opacity]="pointSupported() ? null : 0.55"
-          [class.mesh-modal-input-missing]="missingField() === 'point'"
+          [class.mesh-modal-input-missing]="missingField() === 'point' || missingField() === 'host'"
           (input)="onPointInput($event)"
           autocapitalize="off"
           autocorrect="off"
           autocomplete="off"
           spellcheck="false"
         />
+        @if (offerShown()) {
+          <div class="mesh-modal-chips">
+            <button class="mesh-modal-chip mesh-modal-offer" type="button"
+                    [attr.aria-label]="'mesh-modal.offer-point' | t: { host: offeredPoint }"
+                    (click)="offerPoint()">
+              <span class="mesh-modal-chip-text">{{ offeredPoint }}</span>
+            </button>
+          </div>
+        }
+        @if (missingField() === 'host') {
+          <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.needs-point' | t }}</p>
+        }
         @if (missingField() === 'point') {
           <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.bad-point' | t }}</p>
         }
@@ -145,9 +158,9 @@
         @if (missingField() === 'secret') {
           <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.needs-secret' | t }}</p>
         }
-        <!-- The room's two words (meeting point + room + secret — the point
-             always, the default included; never the page; the English pair,
-             the reader's own beside it), live
+        <!-- The room's two words (host + room + secret — never the page; the
+             English pair, the reader's own beside it, and the host beside
+             them: 'marble cove · hypercomb.com'), live
              as the fields change — dressed like the crumb (◆ pair ◆) so the
              pair up top and on the presence line is recognisably THIS room
              once the window closes, for everyone in it. -->

@@ -100,6 +100,18 @@ describe('TS-2: a meeting point that refuses this tab\'s access code', () => {
     expect(opened).toEqual([{ focus: 'code' }])
   })
 
+  it('joined with no host named: the line says so, and its button opens the selector on the host field', async () => {
+    swarmHost = ''
+    const b = mount()
+    connect('offline', { refused: 'no-host' })
+    expect(keys(b)).toEqual(['mesh.state.no-host', 'mesh.state.no-host-action'])
+    expect(b.status()?.tone).toBe('down')
+    const opened: unknown[] = []
+    EffectBus.on('mesh:open-modal', p => { opened.push(p) })
+    await b.onStatusAction('host')
+    expect(opened).toEqual([{ focus: 'point' }])
+  })
+
   it("a meeting point this page cannot dial is named, from the tab's zone", () => {
     sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'downtown', secret: 'rose', relay: 'ws://localhost:7896' }))
     swarmHost = ''
@@ -300,25 +312,27 @@ describe('TS-3: who stands here, not who visited', () => {
   })
 })
 
-describe('ZI-1 / ZI-6: the words fold the point the tab meets at, from one list', () => {
-  it('two halves of a meeting on different relays read different words; the default point is in the pair too (2026-10-12)', () => {
+describe('ZI-1 / ZI-6: the words fold the host the tab meets at, from one list — and show it beside them', () => {
+  it('two halves of a meeting on different relays read different words AND different hosts — "marble cove · hypercomb.com" (2026-10-11)', () => {
     const b = mount()
     connect('open')
     const words = (): string => b.status()?.parts.find(p => p.text && p.text !== 'downtown')?.text ?? ''
-    expect(words()).toBe(secretTag('lifecycle\0downtown\0rose\0hypercomb.com', 'en'))
+    expect(words()).toBe(`${secretTag('lifecycle\0downtown\0rose\0hypercomb.com', 'en')} · hypercomb.com`)
     swarmHost = 'pluginthematrix.com'
     EffectBus.emit('mesh:zone', { relay: 'wss://pluginthematrix.com' })
     connect('open', { attempt: 1 })
-    expect(words()).toBe(roomWords('downtown', 'rose', 'pluginthematrix.com'))
-    expect(words()).not.toBe(secretTag('lifecycle\0downtown\0rose\0hypercomb.com', 'en'))
+    expect(words()).toBe(`${roomWords('downtown', 'rose', 'pluginthematrix.com')} · pluginthematrix.com`)
+    expect(words()).not.toContain(secretTag('lifecycle\0downtown\0rose\0hypercomb.com', 'en'))
+    // never the page's own domain beside them
+    expect(words()).not.toContain(location.hostname)
   })
 
-  it('a Japanese reader compares the English pair, their own beside it', () => {
+  it('a Japanese reader compares the English pair, their own beside it, the host after', () => {
     services.set('@hypercomb.social/I18n', Object.assign(new EventTarget(), { locale: 'ja', t: (k: string) => k }))
     const b = mount()
     connect('open')
     const pair = b.status()?.parts.find(p => p.text && p.text !== 'downtown')?.text
-    expect(pair).toBe(wordsBeside('downtown', 'rose', 'hypercomb.com', 'ja'))
-    expect(pair?.startsWith(roomWords('downtown', 'rose'))).toBe(true)
+    expect(pair).toBe(`${wordsBeside('downtown', 'rose', 'hypercomb.com', 'ja')} · hypercomb.com`)
+    expect(pair?.startsWith(roomWords('downtown', 'rose', 'hypercomb.com'))).toBe(true)
   })
 })

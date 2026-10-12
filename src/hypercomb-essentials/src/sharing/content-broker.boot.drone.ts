@@ -401,9 +401,10 @@ const OWNER_SUBTREE_MAX = 8192
 
 // Beta shared byte mirrors — appended to the HTTP-direct fallback tier (Tier 3)
 // whenever the shared LIVE relay is active (see #getFallbackDomains /
-// #liveRelayActive). The SAME hc:nostrmesh:use-live-relay flag that points the
-// MESH at the default meeting point (wss://hypercomb.com) also points BYTE-resolution here, so a single flag
-// makes the whole beta resolvable end to end. Resources (website pages, images,
+// #liveRelayActive). The hc:nostrmesh:use-live-relay flag points BYTE-resolution
+// here (it once pointed the mesh at a default meeting point too; since
+// 2026-10-11 there is no default host and the flag picks no relay), so the
+// whole beta resolves end to end. Resources (website pages, images,
 // game assets) have NO mesh fallback — without a guaranteed host a fresh viewer
 // that never received the publisher's ['domain'] attribution simply 404s and
 // the tile/page renders blank. These two sources are that guarantee, both on
@@ -860,11 +861,10 @@ export class ContentBrokerDrone extends Drone {
   //       viewer resolve a peer's website/resource sig even when no mesh
   //       ['domain'] attribution ever reached it — resources have no mesh
   //       fallback, so without a fallback host they'd silently 404. Gated
-  //       exactly like the mesh seed (NostrMeshDrone.loadRelays): '0' opts
-  //       fully out, anything else is ON on every origin — a loopback dev page
-  //       meets at the shipped default since 2026-10-12, so it resolves what
-  //       the room it meets in resolves. Per-client opt out with
-  //       `/use-live-relay off`.
+  //       by the flag alone: '0' opts fully out, anything else is ON on every
+  //       origin, so a loopback dev page resolves what a deployed one does
+  //       (the mesh no longer reads this flag — it seeds no relay). Per-client
+  //       opt out with `/use-live-relay off`.
   //
   //   (b) Operator-configured extras — `hc:fallback-domains` (JSON array, same
   //       shape as hc:community:domains), appended after the beta mirrors.
@@ -2729,6 +2729,8 @@ export class ContentBrokerDrone extends Drone {
     const secret = credential(SECRET_STORE_KEY)
     if (!room || !secret) return Promise.resolve('')
     const key = roomPreimage(room, secret, this.#getMesh()?.swarmHost?.() ?? '')
+    // No host named: no room, so no ask channel (there is no default host).
+    if (!key) return Promise.resolve('')
     if (this.#askDerivation?.key !== key) {
       // A room that moved under an ask (a relay list changed with no zone
       // announcement) is listened for where it is now, too.

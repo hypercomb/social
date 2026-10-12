@@ -1,17 +1,18 @@
 // @vitest-environment-options {"url": "https://hypercomb.io/"}
 //
-// sharing/swarm.room-identity.spec.ts — THE ROOM IS MEETING POINT + ROOM +
-// SECRET (jwize, 2026-10-12: "hash or however we do it (host+location+secret)
-// gen keywords from those").
+// sharing/swarm.room-identity.spec.ts — THE ROOM IS HOST + ROOM + SECRET
+// (jwize, 2026-10-12: "hash or however we do it (host+location+secret) gen
+// keywords from those").
 //
 // Every address the swarm derives from the room — the lifecycle roster, the
 // page channels, the personal channel — hashes `<label> \0 room \0 secret \0
-// point` (core roomPreimage), the point being the relay this tab dials (the
-// mesh's swarmHost) and the shipped default when there is none: the default
-// is never left out. Pinned here:
-//   1. A tab at an empty meeting-point field meets at hypercomb.com's
-//      addresses — and at none of the addresses a room had before the point
-//      was part of it.
+// host` (core roomPreimage), the host being the relay this tab dials (the
+// mesh's swarmHost). There is no default host (2026-10-11). Pinned here:
+//   0. NO HOST, NO ROOM: a joined tab with a room and a secret but no host
+//      subscribes to no room address and says nothing on one — and meets the
+//      moment a host is named, without waiting for a walk.
+//   1. A tab at hypercomb.com meets at hypercomb.com's addresses — and at
+//      none of the addresses a room had before the host was part of it.
 //   2. The lifecycle address and the room's two words are ONE preimage.
 //   3. Another meeting point, the room and secret unchanged, is another room:
 //      the tab meets at the new point's addresses — nothing waited on,
@@ -131,13 +132,26 @@ const used = (): Set<string> => new Set([...published.map(p => p.sig), ...subscr
 const isLeave = (p: Published): boolean => p.kind === 30206 && JSON.stringify(p.payload ?? '').includes('left')
 const isAlive = (p: Published): boolean => p.kind === 30206 && JSON.stringify(p.payload ?? '').includes('alive')
 
-describe('the room is meeting point + room + secret', () => {
-  it('an empty meeting-point field meets at hypercomb.com\'s addresses — none of the old ones', async () => {
+describe('the room is host + room + secret', () => {
+  it('NO HOST, NO ROOM: joined with a room and a secret but no host, nothing is subscribed or said at any room address', async () => {
+    relay.host = ''
     EffectBus.emit('mesh:public-changed', { public: true })
     await vi.advanceTimersByTimeAsync(1_500)
-    const atDefault = at('')
-    // The empty field IS hypercomb.com.
-    expect(atDefault).toEqual(at('hypercomb.com'))
+    expect(published.filter(p => p.kind === 30206 || p.kind === 30200)).toEqual([])
+    expect(swarm.lifecycleSig()).toBe('')
+    expect(await swarm.composeSigForSegments([])).toBe('')
+    // Not hypercomb.com's room, not the room from before the host was in it.
+    const seen = used()
+    for (const sig of [...Object.values(at('hypercomb.com')), ...Object.values(before)]) expect(seen.has(sig)).toBe(false)
+    expect(lifecyclePreimage(ROOM, SECRET, '')).toBe('')
+  })
+
+  it('a host named meets there at once — hypercomb.com\'s addresses, none of the old ones', async () => {
+    relay.host = 'hypercomb.com'
+    EffectBus.emit('mesh:zone', { relay: 'wss://hypercomb.com' })
+    await vi.advanceTimersByTimeAsync(1_500)
+    const atDefault = at('hypercomb.com')
+    // hypercomb.com however it is written is one host.
     expect(atDefault).toEqual(at('wss://HyperComb.com/'))
     expect(published.some(p => isAlive(p) && p.sig === atDefault.lifecycle)).toBe(true)
     expect(subscribed).toContain(atDefault.lifecycle)
@@ -151,13 +165,13 @@ describe('the room is meeting point + room + secret', () => {
   })
 
   it('the lifecycle address and the two words are one preimage', () => {
-    const preimage = lifecyclePreimage(ROOM, SECRET, '')
-    expect(sha(preimage)).toBe(at('').lifecycle)
+    const preimage = lifecyclePreimage(ROOM, SECRET, 'hypercomb.com')
+    expect(sha(preimage)).toBe(at('hypercomb.com').lifecycle)
     expect(secretTag(preimage, 'en')).toBe(secretTag(`lifecycle\0${ROOM}\0${SECRET}\0hypercomb.com`, 'en'))
   })
 
   it('another meeting point, room and secret unchanged, is another room: the new point\'s addresses at once — and no {left} carried there', async () => {
-    const old = at('')
+    const old = at('hypercomb.com')
     const next = at('pluginthematrix.com')
     expect(next.lifecycle).not.toBe(old.lifecycle)
     expect(next.root).not.toBe(old.root)

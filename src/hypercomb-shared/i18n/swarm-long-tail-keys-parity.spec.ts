@@ -21,6 +21,10 @@ const en = read('en.json')
 
 const KEYS = Object.keys(en).filter(k => /^(share\.held\.|share\.names-only|share\.passed-over|share\.deep-owner|meet\.|zone\.point-)/.test(k))
   .concat(['host.publish.refused', 'storage.full', 'use-live-relay.pick-zone', 'use-live-relay.joined', 'history.commit-conflict', 'drop.image-failed'])
+  // NO DEFAULT HOST (2026-10-11): the host field and every door that asks for it.
+  .concat(['use-live-relay.pick-host', 'use-live-relay.joined-at', 'mesh-modal.point-label', 'mesh-modal.point-placeholder',
+    'mesh-modal.bad-point', 'mesh-modal.needs-point', 'mesh-modal.offer-point',
+    'use-live-relay.cleared', 'use-live-relay.cleared-own'])
 
 /** The keys the long-tail lanes call, with the tokens each one fills. */
 const CONTRACT: Readonly<Record<string, readonly string[]>> = {
@@ -47,6 +51,15 @@ const CONTRACT: Readonly<Record<string, readonly string[]>> = {
   'storage.full': [],
   'zone.point-needs-update': [],
   'zone.point-update': [],
+  'use-live-relay.pick-host': [],
+  'use-live-relay.joined-at': ['{host}', '{room}', '{words}'],
+  'mesh-modal.point-label': [],
+  'mesh-modal.point-placeholder': [],
+  'mesh-modal.bad-point': [],
+  'mesh-modal.needs-point': [],
+  'mesh-modal.offer-point': ['{host}'],
+  'use-live-relay.cleared': [],
+  'use-live-relay.cleared-own': ['{host}'],
 }
 
 const catalogs = readdirSync(DIR).filter(f => f.endsWith('.json'))

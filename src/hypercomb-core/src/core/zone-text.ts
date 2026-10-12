@@ -55,30 +55,42 @@ export const canonicalZoneText = (text: unknown): string => {
     .trim()
 }
 
-// ── THE ROOM IS MEETING POINT + ROOM + SECRET ─────────────────────────────
+// ── THE ROOM IS HOST + ROOM + SECRET ──────────────────────────────────────
 //
 // jwize, 2026-10-12: "hash or however we do it (host+location+secret) gen
-// keywords from those". A room's every address — its lifecycle channel, its
-// page channels, its members' personal channels, its ask channel — and its
-// two comparison words come from ONE preimage tail: the room, the secret and
-// the MEETING POINT the tab attaches to. The point is ALWAYS part of it, the
-// shipped default included ("the host field isn't filled by default"): an
-// empty field resolves to wss://hypercomb.com, so an empty field and
-// 'hypercomb.com' are one room, and the same words at another point are
-// another room with another pair. One meeting point per meeting.
+// keywords from those"; 2026-10-11: "the host needs to be part of the name
+// generation so they meet at the same location and server". A room's every
+// address — its lifecycle channel, its page channels, its members' personal
+// channels, its ask channel — and its two comparison words come from ONE
+// preimage tail: the room, the secret and the HOST the participant named to
+// meet at. Same host + room + secret: the same words and the same addresses,
+// so they meet. Another host: other words and other addresses, so they never
+// meet — two names for one physical relay (localhost:7777 and jwize.com on
+// one PC) are two rooms, on purpose. One meeting point per meeting.
 //
-// The point is the RESOLVED relay this tab dials (nostr-mesh swarmHost), as
+// The host is the RESOLVED relay this tab dials (nostr-mesh swarmHost), as
 // its lowercase host[:port] — never a replication host (the hosts pool, a
 // publish domain, an upload host): those keep bytes, they do not define who
-// meets. "Location" is the ROOM, never the page path: everyone in a room
-// reads one pair wherever they stand.
+// meets. And NEVER THE PAGE (jwize, 2026-10-11: "The domain on the other
+// hand should not be used (current address in the browser)"): the page's
+// own origin — hypercomb.io, localhost:4250, a published site — names no
+// room, picks no host and is shown beside no words. "Location" is the ROOM,
+// never the page path: everyone in a room reads one pair wherever they stand.
 //
-// A room from before this (2026-10-12) hashed `lifecycle\0room\0secret`;
-// every room has a new address now, and a package from before will not meet
-// one from after (documentation/swarm-room-identity.md).
+// NO HOST, NO ROOM. There is no default host (jwize, 2026-10-11: "Let's just
+// make sure that there isn't a default host"): with no host named there is
+// no preimage — '' — so no address and no words. Every caller reads '' as
+// "not in a room yet", never as a room of its own.
+//
+// A room from before 2026-10-12 hashed `lifecycle\0room\0secret`; every room
+// has a new address now, so a package from before does not meet one from
+// after at the same host — their words differ; update to meet
+// (documentation/swarm-room-identity.md).
 
-/** The shipped default meeting point — nostr-mesh LIVE_RELAY. An empty
- *  meeting-point field resolves to it. */
+/** hypercomb.com, the open always-online meeting point — OFFERED (one tap
+ *  fills the host field), never a default: an empty host is no room. The
+ *  literal also lives in nostr-mesh LIVE_RELAY (status.truth.spec holds the
+ *  two together). */
 export const SHIPPED_MEETING_POINT = 'wss://hypercomb.com'
 
 const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i
@@ -87,21 +99,28 @@ const hostOf = (text: string): string => {
   try { return new URL(SCHEME.test(text) ? text : `wss://${text}`).host.toLowerCase() } catch { return '' }
 }
 
-/** A meeting point as a room's identity names it: its lowercase
- *  host[:port] ('wss://HyperComb.com/' → 'hypercomb.com', 'ws://localhost:7777'
- *  → 'localhost:7777'); an empty field, or one that is no address, is the
- *  shipped default's host. Never ''. Never throws. */
+/** A host as a room's identity names it: its lowercase host[:port]
+ *  ('wss://HyperComb.com/' → 'hypercomb.com', 'ws://localhost:7777' →
+ *  'localhost:7777'). '' for an empty field or one that is no address —
+ *  never a default. Never throws. */
 export const meetingPointKey = (point: unknown): string => {
   const text = typeof point === 'string' ? point.trim() : ''
-  return (text && hostOf(text)) || hostOf(SHIPPED_MEETING_POINT)
+  return text ? hostOf(text) : ''
 }
 
-/** THE ROOM'S PREIMAGE TAIL: `room \0 secret \0 point`. Every room address is
- *  sign(`<label> \0 ` + this) and nothing else names the room. */
-export const roomPreimage = (room: string, secret: string, point: unknown): string =>
-  `${room}\0${secret}\0${meetingPointKey(point)}`
+/** THE ROOM'S PREIMAGE TAIL: `room \0 secret \0 host`. Every room address is
+ *  sign(`<label> \0 ` + this) and nothing else names the room. '' when no
+ *  host is named: there is no room, so there is nothing to sign — a caller
+ *  that gets '' derives no address. */
+export const roomPreimage = (room: string, secret: string, point: unknown): string => {
+  const host = meetingPointKey(point)
+  return host ? `${room}\0${secret}\0${host}` : ''
+}
 
 /** The room's lifecycle channel preimage — its roster address, and the text
- *  its two comparison words are drawn from (core secretTag). */
-export const lifecyclePreimage = (room: string, secret: string, point: unknown): string =>
-  `lifecycle\0${roomPreimage(room, secret, point)}`
+ *  its two comparison words are drawn from (core secretTag). '' when no host
+ *  is named (no room, no words). */
+export const lifecyclePreimage = (room: string, secret: string, point: unknown): string => {
+  const tail = roomPreimage(room, secret, point)
+  return tail ? `lifecycle\0${tail}` : ''
+}

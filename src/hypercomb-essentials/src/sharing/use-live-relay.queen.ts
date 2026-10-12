@@ -6,15 +6,18 @@
 // secret" — so this command takes AT MOST those three inputs and configures
 // everything else a working participant needs, idempotently:
 //
-//   /use-live-relay                       join: keep the zone THIS tab is in;
-//                                         a tab with none opens the selector
+//   /use-live-relay                       join: keep the zone THIS tab is in,
+//                                         at its host; a tab with no zone or
+//                                         no host opens the selector
 //   /use-live-relay <room>                join <room> (secret = room)
 //   /use-live-relay <room> <secret>       join an explicit zone
 //   /use-live-relay "Garden Rose" rose    a room (or secret) with a space
 //   /use-live-relay <room> <secret> <ws(s)://relay>   + explicit server
 //   /use-live-relay off                   leave: go private, opt out of live
-//   /use-live-relay clear                 clear the relay flag (origin default)
-//                                         and this tab's meeting point
+//   /use-live-relay clear                 clear the relay flag and this tab's
+//                                         host (it meets at the host its own
+//                                         relay list names, said by name, or
+//                                         nowhere until it names one again)
 //
 // More words than a room and a secret are REFUSED, by name: typed as
 // `pluginthematrix.com downtown downtown` the third word used to vanish and
@@ -25,26 +28,25 @@
 // it, so the same text typed anywhere is the same zone.
 //
 // What one invocation configures (each step skipped when already right):
-//   1. relay reachability — clears a 'hc:nostrmesh:network' opt-out; on
-//      every origin — a loopback dev page too (2026-10-12) — forces the live
-//      relay ('hc:nostrmesh:use-live-relay'='1') and applies it NOW, for the
-//      session, via mesh.configureRelays (no reload) — whatever relay list
-//      the page holds: the command's name is its promise, and a saved list
-//      (/domain, an older run of this word) would otherwise decide the
-//      point, and so the room, unseen, and send the room to every relay in
-//      it; an explicit ws(s):// server
-//      becomes THIS TAB's meeting point (sessionStorage `hc:mesh-zone`,
-//      membership.ts), so a reload dials it again — never the origin-wide
-//      list, which every other tab (in its own meeting) would dial on its
-//      next reload. The local dev relay is a server you name (`ws://
-//      localhost:7777`). The mesh is re-pointed ONLY when the relay
-//      actually differs: re-pointing it at the relay it already holds tore
-//      down a live socket mid-meeting. THE TAB'S OWN MEETING POINT IS KEPT
-//      (ZI-1): with no server given and the room and secret this tab is
-//      already in, its point and access code stay — retyping the words to
-//      'fix' something used to drop the tab onto the default relay, a second
-//      meeting under the same two words. Only `clear` or an explicit server
-//      moves it; another room is another meeting, at the default.
+//   1. the host — clears a 'hc:nostrmesh:network' opt-out, then meets at
+//      the host it is GIVEN, never one chosen for it (jwize, 2026-10-11:
+//      "Let's just make sure that there isn't a default host"): an explicit
+//      ws(s):// server becomes THIS TAB's meeting point (sessionStorage
+//      `hc:mesh-zone`, membership.ts), so a reload dials it again — never the
+//      origin-wide list, which every other tab (in its own meeting) would dial
+//      on its next reload. With no server, the host this tab already meets at
+//      stays (its point and access code — whichever room the word names: the
+//      host is the participant's choice, a room is not), else the relay its
+//      own list names (hc:nostrmesh:relays as chosen — the host /domain or an
+//      older run of this word saved), made this tab's point. With NO host at
+//      all the word joins nothing: the selector opens on its host field, the
+//      room and secret already in — one host typed (or hypercomb.com tapped)
+//      and START. The bare form once forced the shipped live relay
+//      ('hc:nostrmesh:use-live-relay'='1') and so landed every bare run in
+//      the default zone at the default host; it names no host now. The local
+//      dev relay is a server you name (`ws://localhost:7777`). The mesh is
+//      re-pointed ONLY when the relay actually differs: re-pointing it at the
+//      relay it already holds tore down a live socket mid-meeting.
 //   2. the zone — RoomStore/SecretStore .set() (their change events run the
 //      swarm's teardown+resync), and the pair is recorded as THIS tab's
 //      zone. The BARE command keeps the zone this TAB joined or chose
@@ -67,13 +69,16 @@
 // auto-public) — this command makes the PARTICIPANT work, it does not
 // publish their hive.
 //
-// The success toast names the room and points at the room line for the two
-// comparison words: the words are drawn in one place (presence-status
-// roomWords, which folds in the meeting point), never a second formula here.
+// The success toast names the room and its two comparison words with the
+// host beside them ('marble cove · hypercomb.com', jwize 2026-10-11) — the
+// host this word pointed the tab at, never the page's own domain. The words
+// are core's: secretTag(lifecyclePreimage(room, secret, host)), the same
+// preimage the swarm addresses the room with (presence-status roomWords
+// draws them the same way for the package that is loaded — this one).
 //
 // The old on|off|clear ramp-control forms keep working for scripts.
 
-import { EffectBus, canonicalZoneText, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, canonicalZoneText, I18N_IOC_KEY, lifecyclePreimage, meetingPointKey, secretTag, type I18nProvider } from '@hypercomb/core'
 import { isJoinedHere, ownZone, readTabZone, writeTabZone } from './membership.js'
 import { meetingRelayOf } from './meeting-invite.js'
 
@@ -97,6 +102,9 @@ interface MeshLike {
   configureRelays?: (urls: string[], persist?: boolean) => void
   connectAll?: () => void
   getDebug?: () => { relays?: readonly string[] } | undefined
+  /** The relay this tab meets at: its zone's point while joined, else the
+   *  first relay of its own (chosen) list; '' for none. */
+  meetingRelay?: () => string
 }
 
 const ioc = () => (window as { ioc?: { get?: <T>(k: string) => T | undefined } }).ioc
@@ -108,19 +116,10 @@ const tr = (key: string, fallback: string, params?: Record<string, string | numb
   return s && s !== key ? s : fallback
 }
 
-/** The shipped default meeting point — nostr-mesh's LIVE_RELAY, read from the
- *  anchor it publishes; the literal is only for a mesh not loaded yet. Open,
- *  always online, and the only host a public install names (2026-10-11). */
-const liveRelayUrl = (): string => {
-  const known = (globalThis as Record<string, unknown>)['__HYPERCOMB_RELAYS__'] as
-    | { live?: string } | undefined
-  return known?.live ?? 'wss://hypercomb.com'
-}
-
 export class UseLiveRelayQueenBee {
   readonly command = 'use-live-relay'
   readonly description =
-    'One-command swarm setup: /use-live-relay [room] [secret] [ws(s)://server] configures the relay, the zone, and goes public — nothing else to set. Bare = keep the zone this tab is in (a tab with none opens the selector). "Quote" a room with a space. off = leave, clear = reset the relay flag.'
+    'One-command swarm setup: /use-live-relay [room] [secret] [ws(s)://server] meets at the host you give (or the one this tab already meets at), sets the zone, and goes public. With no host it opens the selector on the host field. Bare = keep the zone this tab is in. "Quote" a room with a space. off = leave, clear = forget this tab host.'
   readonly slashHidden = false
   // The room and secret are the zone's identity, capitals and all: the
   // selector and a #meet link keep them as typed, so this word must too, or
@@ -140,8 +139,24 @@ export class UseLiveRelayQueenBee {
     }
     if (first === 'clear' || first === 'reset' || first === 'default') {
       localStorage.removeItem(FLAG_KEY)
-      if (readTabZone()?.relay) writeTabZone({ relay: '', host: '', code: '' })
-      this.#toast('success', 'relay flag cleared — origin default applies on reload')
+      if (readTabZone()?.relay) {
+        writeTabZone({ relay: '', host: '', code: '' })
+        EffectBus.emit('mesh:zone', { relay: '' })
+      }
+      // There is no default to fall back to (2026-10-11): the tab meets at
+      // the relay its own list names (as chosen), or nowhere until a host is
+      // named. Which one is SAID — a move to the own list's host is another
+      // room with other words, never a silent one. Read after the mesh has
+      // taken the cleared zone (its sync runs a microtask after `mesh:zone`).
+      const mesh = ioc()?.get?.<MeshLike>('@diamondcoreprocessor.com/NostrMeshDrone')
+      queueMicrotask(() => {
+        let left = ''
+        try { left = meetingRelayOf(mesh?.meetingRelay?.() ?? '') } catch { left = '' }
+        const host = left ? meetingPointKey(left) : ''
+        this.#toast('success', host
+          ? tr('use-live-relay.cleared-own', `this tab's host is cleared — it meets at ${host} now, the host your relay list names`, { host })
+          : tr('use-live-relay.cleared', 'this tab has no host now — name a host to meet again'))
+      })
       return
     }
 
@@ -176,40 +191,52 @@ export class UseLiveRelayQueenBee {
     // would leave even the selector's START with nothing to dial.
     if (localStorage.getItem(NETWORK_KEY) === '0') localStorage.removeItem(NETWORK_KEY)
 
+    // THE HOST — given, kept, or the tab's own list's; never a default.
+    let listed = ''
+    if (!server && !tabRelay) {
+      try { listed = meetingRelayOf(mesh?.meetingRelay?.() ?? '') } catch { listed = '' }
+    }
+    const host = server || tabRelay || listed
+
     // The bare form keeps the zone THIS tab is in — see step 2. With none,
-    // the selector opens pre-filled (the room, secret and meeting point of
-    // the last meeting on this device) and START is the join.
+    // the selector opens pre-filled (the room, secret and host of the last
+    // meeting on this device) and START is the join — on the host field when
+    // there is no host to pre-fill it with.
     const own = ownZone()
     if (!named.length && !own) {
-      if (!server && !tabRelay) this.#defaultRelay(mesh)
-      EffectBus.emit('mesh:open-modal', server ? { join: true, point: server } : { join: true })
+      EffectBus.emit('mesh:open-modal', server ? { join: true, point: server } : host ? { join: true } : { join: true, focus: 'point' })
       this.#toast('tip', tr('use-live-relay.pick-zone', 'this tab has no meeting of its own yet — check the room and secret, then start'))
       return
     }
     const room = named.length ? named[0] : own!.room
     const secret = named.length ? (named[1] ?? named[0]) : own!.secret
-    const sameZone = !!own && own.room === room && own.secret === secret
 
-    // 1. Relay reachability — point at a server, keep the tab's own, or the
-    // default.
-    let relayNote: string
-    let nextRelay = ''
+    // NO HOST, NO ROOM: the words a person typed are kept (the selector opens
+    // on them), and the selector asks for the one thing missing — the host
+    // they meet at. Nothing is joined until START.
+    if (!host) {
+      if (roomStore.value !== room) roomStore.set(room)
+      if (secretStore.value !== secret) secretStore.set(secret)
+      writeTabZone({ room: roomStore.value, secret: secretStore.value })
+      EffectBus.emit('mesh:open-modal', { join: true, focus: 'point' })
+      this.#toast('tip', tr('use-live-relay.pick-host', 'name the host you meet at — or tap hypercomb.com — then start'))
+      return
+    }
+
+    // 1. The host: a server given, the one this tab meets at (whatever room
+    // the word names — the host is the participant's, a room is not), or its
+    // own list's, made this tab's point.
     if (server) {
       // This tab's meeting point. A different one is a different meeting:
       // the old one's access code and host do not come along.
       if (server !== tabRelay) writeTabZone({ relay: server, host: '', code: '' })
       this.#pointAt(mesh, server)
-      relayNote = nextRelay = server
-    } else if (tabRelay && sameZone) {
-      // The meeting this tab is in, typed again: its point and code stay.
-      relayNote = nextRelay = tabRelay
-    } else {
-      // Another room (or none held): the default meeting point. A tab that
-      // held its own lets it go.
-      if (tabRelay) writeTabZone({ relay: '', host: '', code: '' })
-      relayNote = this.#defaultRelay(mesh)
+    } else if (listed) {
+      writeTabZone({ relay: listed, host: '', code: '' })
+      this.#pointAt(mesh, listed)
     }
-    if (nextRelay !== tabRelay) EffectBus.emit('mesh:zone', { relay: nextRelay })
+    const meetAt = host
+    if (meetAt !== tabRelay) EffectBus.emit('mesh:zone', { relay: meetAt })
     mesh?.connectAll?.()
 
     // 2. The zone. set() fires the stores' change events — the swarm tears
@@ -231,22 +258,20 @@ export class UseLiveRelayQueenBee {
     // share toggles, named in the toast.
     EffectBus.emit('features:roster-open', {})
 
+    const relayNote = meetAt
     console.log(`[use-live-relay] participant setup: room='${room}' relay=${relayNote}`)
-    this.#toast('success', tr('use-live-relay.joined',
-      `you're in "${room}" via ${relayNote} — compare the two words on the room line out loud; the roster picks which behaviors you share, world mode picks the tiles`,
-      { room, relay: relayNote }))
-  }
-
-  /** The default meeting point — the same on every origin (2026-10-12: "yes
-   *  make localhost default to hypercomb.com"): the live relay, forced and
-   *  applied now for the session, whatever relay list the page holds. A
-   *  loopback page no longer keeps a loopback relay nobody named here: the
-   *  point is part of the room (core roomPreimage), so a dev tab there met
-   *  no one — the dev relay is a server given to this word. */
-  #defaultRelay(mesh: MeshLike | undefined): string {
-    localStorage.setItem(FLAG_KEY, '1')
-    this.#pointAt(mesh, liveRelayUrl())
-    return 'live relay'
+    // The room's words with their host beside them, as the stores now hold
+    // the pair (folded) — the pair everyone at this host reads out loud.
+    const hostKey = meetingPointKey(meetAt)
+    const preimage = lifecyclePreimage(roomStore.value, secretStore.value, meetAt)
+    const words = preimage ? secretTag(preimage, 'en') : ''
+    this.#toast('success', words
+      ? tr('use-live-relay.joined-at',
+        `you're in "${room}" — ${words} · ${hostKey} — compare these two words out loud; the roster picks which behaviors you share, world mode picks the tiles`,
+        { room, words, host: hostKey })
+      : tr('use-live-relay.joined',
+        `you're in "${room}" via ${relayNote} — compare the two words on the room line out loud; the roster picks which behaviors you share, world mode picks the tiles`,
+        { room, relay: relayNote }))
   }
 
   /** Point the mesh at `url` — only when it is not already the one relay

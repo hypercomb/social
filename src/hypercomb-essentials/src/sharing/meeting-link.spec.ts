@@ -248,9 +248,12 @@ describe('the meeting link', () => {
 })
 
 // ── joining from it ───────────────────────────────────────────────────────
+/** A link from a current package: it names the host it meets at. */
+const AT_HYPERCOMB = { relay: 'wss://hypercomb.com' }
+
 describe('joining from a meeting link', () => {
   it('asks once, naming the room and the host that keeps what is shared', async () => {
-    await joinMeetingPlace(parseMeet(meetFragment('meetup', '4417', ['Ideas']))!)
+    await joinMeetingPlace(parseMeet(meetFragment('meetup', '4417', ['Ideas'], AT_HYPERCOMB))!)
     expect(confirms).toHaveLength(1)
     expect(confirms[0].title).toBe('Join the room')
     expect(confirms[0].message).toContain('“meetup”')
@@ -262,14 +265,14 @@ describe('joining from a meeting link', () => {
   it('a first visit: the sheet waits briefly for the invited page host, and names it', async () => {
     pendingLookups = 3 // the pool and the page's marks are still being read
     confirms.length = 0
-    await joinMeetingPlace(parseMeet(meetFragment('meetup', '4417', ['Fresh']))!)
+    await joinMeetingPlace(parseMeet(meetFragment('meetup', '4417', ['Fresh'], AT_HYPERCOMB))!)
     expect(warmed.at(-1)).toEqual(['Fresh'])
     expect(confirms.at(-1)!.message).toContain('kept by hypercomb.com')
     expect(confirms.at(-1)!.message).not.toContain('jwize.com')
   })
 
   it('on Join: exact credentials, the page as written, tiles stance, then the one toggle', async () => {
-    const ok = await joinMeetingPlace(parseMeet(meetFragment('Meetup', '4417', ['Big Ideas']))!)
+    const ok = await joinMeetingPlace(parseMeet(meetFragment('Meetup', '4417', ['Big Ideas'], AT_HYPERCOMB))!)
     expect(ok).toBe(true)
     expect(room.value).toBe('Meetup')        // never case-folded
     expect(secret.value).toBe('4417')
@@ -298,6 +301,8 @@ describe('joining from a meeting link', () => {
   it('already in this room: no sheet, just the walk to the page', async () => {
     room.value = 'meetup'
     secret.value = '4417'
+    // A link that names no host meets at the host this tab already meets at.
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'meetup', secret: '4417', relay: 'wss://a.example' }))
     joined(true)
     const ok = await joinMeetingPlace(parseMeet(meetFragment('meetup', '4417', ['Ideas']))!)
     expect(ok).toBe(false)
@@ -345,11 +350,41 @@ describe('joining from a meeting link', () => {
     expect(meetingPoints).toEqual([{ relay: 'wss://pluginthematrix.com' }])
   })
 
-  it('a plain link drops a meeting point this tab held from an earlier meeting', async () => {
+  it('a link that names no host keeps the host this tab meets at — its point and code — for the link\'s room (no default to fall back to)', async () => {
     sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'old-room', secret: 'old-secret', relay: 'wss://a.example', host: 'a.example', code: 'old' }))
-    await joinMeetingPlace(parseMeet(meetFragment('meetup', '4417', []))!)
+    const ok = await joinMeetingPlace(parseMeet(meetFragment('meetup', '4417', []))!)
+    expect(ok).toBe(true)
+    // the sheet names where the guest will meet: the host they chose
+    expect(confirms.at(-1)!.message).toContain('at a.example')
+    // the link's meeting host (none) replaces the old one; the point and code stay
+    expect(JSON.parse(sessionStorage.getItem('hc:mesh-zone')!)).toEqual({ room: 'meetup', secret: '4417', relay: 'wss://a.example', code: 'old' })
+    expect(meetingPoints).toEqual([])
+    expect(configured).toEqual([])
+    expect(toggles).toHaveLength(1)
+  })
+
+  it('a link that names no host, on a tab with none: the sheet says so; Join sets the pair and opens the selector on the host field — never a default', async () => {
+    const ok = await joinMeetingPlace(parseMeet(meetFragment('meetup', '4417', ['Ideas']))!)
+    expect(ok).toBe(false)
+    expect(confirms.at(-1)!.message).toContain('names no host')
+    expect(confirms.at(-1)!.message).not.toContain('hypercomb.com')
+    // the pair and the page are the link's — START is the join
+    expect(room.value).toBe('meetup')
+    expect(secret.value).toBe('4417')
+    expect(walks).toEqual([['Ideas']])
     expect(JSON.parse(sessionStorage.getItem('hc:mesh-zone')!)).toEqual({ room: 'meetup', secret: '4417' })
-    expect(meetingPoints).toEqual([{ relay: '' }])
+    expect(modals.at(-1)).toEqual({ join: true, focus: 'point' })
+    expect(toggles).toHaveLength(0)
+    expect(configured).toEqual([])
+    expect(toasts.at(-1)?.type).toBe('tip')
+  })
+
+  it('a link that names no host, declined: nothing written, no selector', async () => {
+    answer = false
+    await joinMeetingPlace(parseMeet(meetFragment('meetup', '4417', ['Ideas']))!)
+    expect(credWrites).toBe(0)
+    expect(sessionStorage.getItem('hc:mesh-zone')).toBeNull()
+    expect(modals).toEqual([])
   })
 
   it('same room at ANOTHER meeting point is not "already here" — it asks', async () => {
@@ -453,14 +488,14 @@ describe('`invite` with nothing selected', () => {
     expect(logs.join('\n')).not.toContain('sekrit-42')
   })
 
-  it('a tab meeting on its own list names that point too — never the default, never a loopback one (another point is another room)', async () => {
+  it('a tab meeting on its own list names that point too — ALWAYS, hypercomb.com included (no default host), never a loopback one (another host is another room)', async () => {
     room.value = 'garden'
     secret.value = 'rose'
     explorer = []
     const mesh = services.get('@diamondcoreprocessor.com/NostrMeshDrone') as Record<string, unknown>
     const cases: [string, string | undefined][] = [
       ['wss://jwize.com', 'wss://jwize.com'],          // a list the page chose: guests must meet there
-      ['wss://hypercomb.com', undefined],              // the default needs no point
+      ['wss://hypercomb.com', 'wss://hypercomb.com'],  // no default: a guest's package must not pick its own
       ['ws://localhost:7777', undefined],              // no guest's device reaches it
     ]
     try {

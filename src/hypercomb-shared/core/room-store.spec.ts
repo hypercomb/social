@@ -106,40 +106,16 @@ describe('RoomStore', () => {
     expect(new RoomStore().value).toBe('')
   })
 
-  describe('extractSubdomain()', () => {
-    it('returns empty for localhost', () => {
-      expect(RoomStore.extractSubdomain()).toBe('')
-    })
-
-    it('returns subdomain for 3-part hostname', () => {
-      const original = Object.getOwnPropertyDescriptor(window, 'location')!
-      Object.defineProperty(window, 'location', {
-        value: { hostname: 'myroom.hypercomb.io' },
-        writable: true,
-        configurable: true,
-      })
-      expect(RoomStore.extractSubdomain()).toBe('myroom')
-      Object.defineProperty(window, 'location', original)
-    })
-
-    it('returns empty off a zone host — someone\'s address is never a shared room (ZI-7)', () => {
-      const original = Object.getOwnPropertyDescriptor(window, 'location')!
-      for (const hostname of ['business-card.jwize.com', 'abc.hypercomb-web.pages.dev', 'www.hypercomb.io', 'evilhypercomb.io']) {
-        Object.defineProperty(window, 'location', { value: { hostname }, writable: true, configurable: true })
-        expect([hostname, RoomStore.extractSubdomain()]).toEqual([hostname, ''])
-      }
-      Object.defineProperty(window, 'location', original)
-    })
-
-    it('returns empty for IP addresses', () => {
-      const original = Object.getOwnPropertyDescriptor(window, 'location')!
-      Object.defineProperty(window, 'location', {
-        value: { hostname: '10.0.0.1' },
-        writable: true,
-        configurable: true,
-      })
-      expect(RoomStore.extractSubdomain()).toBe('')
-      Object.defineProperty(window, 'location', original)
-    })
+  it("never takes the room from the page's address — a zone host's subdomain is no room (2026-10-11)", () => {
+    const original = Object.getOwnPropertyDescriptor(window, 'location')!
+    for (const hostname of ['myroom.hypercomb.io', 'deep.path.hypercomb.io', 'business-card.jwize.com', 'localhost']) {
+      Object.defineProperty(window, 'location', { value: { hostname, host: hostname }, writable: true, configurable: true })
+      localStorage.clear()
+      sessionStorage.clear()
+      expect([hostname, new RoomStore().value]).toEqual([hostname, ''])
+      expect([hostname, localStorage.getItem(KEY)]).toEqual([hostname, null])
+    }
+    Object.defineProperty(window, 'location', original)
+    expect((RoomStore as unknown as { extractSubdomain?: unknown }).extractSubdomain).toBeUndefined()
   })
 })

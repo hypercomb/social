@@ -1802,7 +1802,15 @@ export class SwarmDrone extends Drone {
     // secret stayed (`use-live-relay <room> <secret> wss://…`, the selector)
     // leaves the old room's addresses and meets at the new ones. After the
     // writer's turn — the zone is already written when this is announced.
-    this.onEffect('mesh:zone', () => { queueMicrotask(() => { this.#onMeetingPointMoved('mesh:zone') }) })
+    // A tab in NO room yet because it named no host (there is no default,
+    // 2026-10-11) meets as soon as one is named — a link, `use-live-relay
+    // … wss://…` — without waiting for the next walk.
+    this.onEffect('mesh:zone', () => {
+      queueMicrotask(() => {
+        if (this.#onMeetingPointMoved('mesh:zone')) return
+        if (!this.#lifecycleSig && isJoinedHere() && this.#meetingPoint()) void this.#syncForCurrentLineage()
+      })
+    })
 
     // Tile properties changed — any writer that updates a child's 0000
     // (layout index write, editor save, AI bridge stamp, substrate
@@ -2141,19 +2149,30 @@ export class SwarmDrone extends Drone {
     try { return String(this.#getMesh()?.swarmHost?.() ?? '').trim() } catch { return '' }
   }
 
-  /** THE MEETING POINT THIS ROOM IS AT (jwize, 2026-10-12): the relay this
-   *  tab dials — the mesh's swarmHost, which is the tab's own point while it
-   *  meets at one — as core meetingPointKey folds it; the shipped default
-   *  when there is none. Never a replication host. Synchronous: nothing is
-   *  asked of anyone. */
+  /** THE HOST THIS ROOM IS AT (jwize, 2026-10-12): the relay this tab dials
+   *  — the mesh's swarmHost, which is the tab's own point while it meets at
+   *  one — as core meetingPointKey folds it; '' when there is none (no
+   *  default host, 2026-10-11). Never a replication host, never the page's
+   *  own domain. Synchronous: nothing is asked of anyone. */
   #meetingPoint = (): string => meetingPointKey(this.#swarmHost())
 
-  /** THE ROOM AS EVERY ADDRESS NAMES IT: `room \0 secret \0 point` (core
+  /** THE ROOM AS EVERY ADDRESS NAMES IT: `room \0 secret \0 host` (core
    *  roomPreimage). Every address this drone derives from the room — page
    *  channels, the lifecycle roster, the personal, request and presence
    *  channels — hashes `<label> \0 ` + this, so two halves of one room text
-   *  at two meeting points are two rooms with two pairs of words. */
+   *  at two hosts are two rooms with two pairs of words. '' with no host:
+   *  no room, so no address (#signRoom). */
   #roomTail = (room: string, secret: string): string => roomPreimage(room, secret, this.#swarmHost())
+
+  /** sign(`<label> \0 room \0 secret \0 host`) — one address of the room.
+   *  '' when there is no room to address: no host named (there is no
+   *  default — the swarm then subscribes and publishes nothing), or the
+   *  signing failed. Every caller already reads '' as "no address". */
+  #signRoom = async (sigStore: SignatureStoreLike, label: string, room: string, secret: string): Promise<string> => {
+    const tail = this.#roomTail(room, secret)
+    if (!tail) return ''
+    try { return await sigStore.signText(`${label}\0${tail}`) } catch { return '' }
+  }
 
   /** Which room identity this package derives its addresses with — 2: the
    *  meeting point + room + secret (core roomPreimage, 2026-10-12). The
@@ -2511,8 +2530,7 @@ export class SwarmDrone extends Drone {
     // another. Both A's local fanout (mesh.fanoutToSig keys by sig) and
     // the relay's #x tag filter use the publish sig — so the subscriber
     // must compose the SAME bytes the publisher does.
-    try { return await sigStore.signText(`${pathKey}\0${this.#roomTail(room, secret)}`) }
-    catch { return '' }
+    return this.#signRoom(sigStore, pathKey, room, secret)
   }
 
   /**
@@ -2863,13 +2881,11 @@ export class SwarmDrone extends Drone {
     // leave the old room's addresses and come back at the new point's.
     if (this.#onMeetingPointMoved('sync')) return
 
-    let composedSig = ''
-    try {
-      // sha256(lineage + '\0' + room + '\0' + secret + '\0' + point) — NUL
-      // separators prevent any one field bleeding into another (e.g.
-      // room='a:b' and secret='' colliding with room='a' and secret='b').
-      composedSig = await sigStore.signText(`${pathKey}\0${this.#roomTail(room, secret)}`)
-    } catch { return }
+    // sha256(lineage + '\0' + room + '\0' + secret + '\0' + host) — NUL
+    // separators prevent any one field bleeding into another (e.g.
+    // room='a:b' and secret='' colliding with room='a' and secret='b'). No
+    // host named: no room, so nothing to subscribe to or say (#signRoom).
+    const composedSig = await this.#signRoom(sigStore, pathKey, room, secret)
     if (!composedSig) return
 
     // A MOVE, as opposed to the join, a heartbeat, a reconnect or a zone
@@ -3946,9 +3962,7 @@ export class SwarmDrone extends Drone {
     // composeSigForSegments exactly so subscribers and publishers address the
     // same slot. Canonical key via lineageKey() (folds punctuation) — the walk
     // still resolves dirs/children by RAW name; only the hashed key normalizes.
-    const key = `${lineageKey(segments)}\0${this.#roomTail(room, secret)}`
-    let sig = ''
-    try { sig = await sigStore.signText(key) } catch { return }
+    const sig = await this.#signRoom(sigStore, lineageKey(segments), room, secret)
     if (!sig) return
     // What we said here before a reload starts arriving with the page's
     // subscription; waited on (bounded) only by a child with nothing newer to
@@ -5192,9 +5206,7 @@ export class SwarmDrone extends Drone {
     this.#publishStats.walkNodeVisits++
 
     // Canonical key via lineageKey() — must match #publishSubtree byte-for-byte.
-    const key = `${lineageKey(segments)}\0${this.#roomTail(room, secret)}`
-    let sig = ''
-    try { sig = await sigStore.signText(key) } catch { return }
+    const sig = await this.#signRoom(sigStore, lineageKey(segments), room, secret)
     if (!sig) return
     // Never published here → nothing of ours lingers on the relay, and
     // nothing below was published either (a descendant publish implies a
@@ -6041,8 +6053,7 @@ export class SwarmDrone extends Drone {
     const room = this.#getRoomStore()?.value?.trim() ?? ''
     const secret = this.#getSecretStore()?.value?.trim() ?? ''
     if (!room || !secret) return ''
-    try { return await sigStore.signText(`channel:${pubkey}\0${this.#roomTail(room, secret)}`) }
-    catch { return '' }
+    return this.#signRoom(sigStore, `channel:${pubkey}`, room, secret)
   }
 
   /** Compute the deterministic follow-request channel sig for a
@@ -6054,8 +6065,7 @@ export class SwarmDrone extends Drone {
     const room = this.#getRoomStore()?.value?.trim() ?? ''
     const secret = this.#getSecretStore()?.value?.trim() ?? ''
     if (!room || !secret) return ''
-    try { return await sigStore.signText(`request:${pubkey}\0${this.#roomTail(room, secret)}`) }
-    catch { return '' }
+    return this.#signRoom(sigStore, `request:${pubkey}`, room, secret)
   }
 
   /** Republish the current location's children at our PERSONAL channel
@@ -6313,8 +6323,7 @@ export class SwarmDrone extends Drone {
     const room = this.#getRoomStore()?.value?.trim() ?? ''
     const secret = this.#getSecretStore()?.value?.trim() ?? ''
     if (!room || !secret) return ''
-    try { return await sigStore.signText(`presence:${pubkey}\0${this.#roomTail(room, secret)}`) }
-    catch { return '' }
+    return this.#signRoom(sigStore, `presence:${pubkey}`, room, secret)
   }
 
   #publishMyPresence = async (segments: readonly string[]): Promise<void> => {
@@ -6386,7 +6395,10 @@ export class SwarmDrone extends Drone {
     const room = this.#getRoomStore()?.value?.trim() ?? ''
     const secret = this.#getSecretStore()?.value?.trim() ?? ''
     if (!room || !secret) return ''
-    try { return await sigStore.signText(lifecyclePreimage(room, secret, point)) }
+    // No host named: no room, so no roster to beacon on.
+    const preimage = lifecyclePreimage(room, secret, point)
+    if (!preimage) return ''
+    try { return await sigStore.signText(preimage) }
     catch { return '' }
   }
 

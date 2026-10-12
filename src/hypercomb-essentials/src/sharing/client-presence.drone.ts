@@ -115,8 +115,11 @@ export class ClientPresenceDrone extends Drone {
     const secret = (ioc()?.get<ValueLike>(SECRET_KEY)?.value ?? '').trim()
     if (!room || !secret) return ''
     let point = ''
-    try { point = String(ioc()?.get<MeshLike>(MESH_KEY)?.swarmHost?.() ?? '') } catch { /* the default point */ }
-    return SignatureService.sign(enc.encode(`hc:clients\0${roomPreimage(room, secret, point)}`).buffer as ArrayBuffer)
+    try { point = String(ioc()?.get<MeshLike>(MESH_KEY)?.swarmHost?.() ?? '') } catch { /* no host */ }
+    // No host named: no room, so no rendezvous (there is no default host).
+    const tail = roomPreimage(room, secret, point)
+    if (!tail) return ''
+    return SignatureService.sign(enc.encode(`hc:clients\0${tail}`).buffer as ArrayBuffer)
   }
 
   readonly #ensureStarted = async (): Promise<void> => {

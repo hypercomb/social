@@ -273,16 +273,17 @@ export class InviteQueenBee {
     const zone = readTabZone()
     let relay = meetingRelayOf(zone?.relay)
     // A TAB THAT MEETS ON ITS OWN LIST (no point in its zone — a relay list
-    // the page chose) names that point too, unless it is the shipped
-    // default: a link with no point lands a guest at hypercomb.com, and
-    // another point is another room (core roomPreimage, 2026-10-12). Never a
-    // loopback one — no guest's device can reach it.
+    // the page chose) names that point too — ALWAYS, hypercomb.com included:
+    // there is no default host (2026-10-11), so a link without one would land
+    // a guest wherever THEIR package meets (an older one at its own old
+    // default), and another host is another room (core roomPreimage). Never
+    // a loopback one — no guest's device can reach it.
     if (!relay) {
       let own = ''
       try { own = meetingRelayOf(get<MeshPointLike>(MESH_KEY)?.meetingRelay?.() ?? '') } catch { own = '' }
       let loopback = true
       try { loopback = /^(?:(?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[::1\])$/i.test(new URL(own).hostname) } catch { /* no point */ }
-      if (own && !loopback && meetingPointKey(own) !== meetingPointKey('')) relay = own
+      if (own && !loopback && meetingPointKey(own)) relay = own
     }
     const fragment = meetFragment(room, secret, segments, { relay, host: zone?.host, code: zone?.code })
     // A LINK NOBODY CAN OPEN IS NEVER HANDED OUT. It is read back here the

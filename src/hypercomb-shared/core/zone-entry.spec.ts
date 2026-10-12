@@ -10,8 +10,9 @@
 //         land in ONE zone. Plain ASCII zones hash exactly as before.
 //   ZI-7  business-card.jwize.com seeded room = secret = 'business-card':
 //         every visitor of every such host shared one zone whose "secret"
-//         sat in the address bar. The secret is never seeded from a host,
-//         and the room only on an explicit zone host.
+//         sat in the address bar. Neither is ever seeded from the page's
+//         address — not even the room on a zone host's subdomain (jwize,
+//         2026-10-11: the page's own domain is never part of a room).
 //   ZI-1  a new tab's selector is pre-filled with the pair of the last
 //         meeting on this origin but not its meeting point, so a rejoin
 //         from the selector silently met on the default relay. The point
@@ -182,12 +183,13 @@ describe('ZI-7 — no zone from an address bar', () => {
     }
   })
 
-  it('a zone host seeds the ROOM only — the secret stays empty, so join asks', async () => {
+  it("a zone host's subdomain seeds nothing either — the page's address is never part of a room (2026-10-11)", async () => {
     const restore = atHost('myroom.hypercomb.io')
     try {
       const tab = await newTab()
-      expect(tab.room.value).toBe('myroom')
+      expect(tab.room.value).toBe('')
       expect(tab.secret.value).toBe('')
+      expect(localStorage.getItem('hc:room')).toBeNull()
       expect(localStorage.getItem('hc:secret')).toBeNull()
     } finally { restore() }
   })

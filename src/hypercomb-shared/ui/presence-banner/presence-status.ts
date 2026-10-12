@@ -185,25 +185,36 @@ export function headerLink(conn: MeshConnection | null, downSince: number | null
   if (!phase) return null
   if (phase === 'open' || slowLink(conn, now)) return 'open'
   const refused = refusalOf(conn)
-  if (refused === 'access' || refused === 'unreachable') return 'down'
+  if (refused === 'access' || refused === 'unreachable' || refused === 'no-host') return 'down'
   return phase === 'down' ? 'down' : 'pending'
 }
 
-/** The shipped default meeting point's host (nostr-mesh LIVE_RELAY, core
- *  SHIPPED_MEETING_POINT): what an empty meeting-point field resolves to.
- *  wss://hypercomb.com since 2026-10-11 (the open, always-online meeting
- *  point); jwize.com, the default before it, is a point like any other.
- *  Keep in step with LIVE_RELAY (doctrine.spec and status.truth.spec hold
- *  them together). */
+/** hypercomb.com, the open always-online meeting point (nostr-mesh
+ *  LIVE_RELAY, core SHIPPED_MEETING_POINT) — offered, never a default
+ *  (2026-10-11). It is named here only for a package from before 2026-10-12,
+ *  whose words left it out (D4); jwize.com, that package's default before
+ *  2026-10-11, is a host like any other. Keep in step with LIVE_RELAY
+ *  (doctrine.spec and status.truth.spec hold them together). */
 export const SHIPPED_POINT = 'hypercomb.com'
 
-/** A meeting point as the room's identity folds it — core meetingPointKey:
- *  its host[:port], lowercase, from a relay URL or a bare name
+/** A host as the room's identity folds it — core meetingPointKey: its
+ *  host[:port], lowercase, from a relay URL or a bare name
  *  ('wss://Point.example/' → 'point.example', 'ws://localhost:7896' →
- *  'localhost:7896'). An empty field is the shipped default, never '' —
- *  the default is part of the room like any other point (2026-10-12). */
+ *  'localhost:7896'). '' for an empty field: there is no default host, and
+ *  no host is no room (2026-10-11). Never the page's own domain. */
 export function meetingPointKey(point: string): string {
   return corePointKey(point)
+}
+
+/** THE WORDS WITH THEIR HOST BESIDE THEM — 'marble cove · hypercomb.com'
+ *  (jwize, 2026-10-11): wherever the room's two words show, the host they
+ *  were drawn at shows with them, so two tabs reading different words can
+ *  see at once that they named two hosts. The host is the one in the
+ *  preimage (meetingPointKey) — never the page's own domain. The words
+ *  alone when no host is named; '' when there are no words. */
+export function wordsAtHost(words: string, point: string): string {
+  const host = corePointKey(point)
+  return words && host ? `${words} · ${host}` : words
 }
 
 /** THE ROOM IDENTITY THE LOADED SWARM DERIVES ITS ADDRESSES WITH — read
@@ -227,33 +238,37 @@ export function loadedRoomIdentity(): number {
   } catch { return ROOM_IDENTITY }
 }
 
-/** The text a room's words are drawn from, as `identity` derives it. */
+/** The text a room's words are drawn from, as `identity` derives it — ''
+ *  when that identity has no room without a host. */
 function wordsPreimage(room: string, secret: string, point: string, identity: number): string {
   if (identity >= 2) return lifecyclePreimage(room, secret, point)
   // Before 2026-10-12 (D4): the address had no point, and the words folded
-  // one only when it was not the shipped default.
+  // one only when it was not the shipped default. That package meets at its
+  // own default with no host named, so its words need none.
   const p = corePointKey(point)
   return p && p !== SHIPPED_POINT ? `lifecycle\0${room}\0${secret}\0${p}` : `lifecycle\0${room}\0${secret}`
 }
 
 /** THE ROOM'S TWO WORDS — the readable form of the room's address (jwize,
  *  2026-10-12: "host+location+secret, gen keywords from those"): drawn from
- *  the room's lifecycle preimage, `lifecycle \0 room \0 secret \0 point`
+ *  the room's lifecycle preimage, `lifecycle \0 room \0 secret \0 host`
  *  (core lifecyclePreimage), the one roster every member of the room beacons
- *  on. The point is ALWAYS in it — the shipped default included — so the
- *  same room text at two meeting points is two rooms with two pairs, and an
- *  empty field reads the hypercomb.com pair. Never the page: everyone in one
- *  room reads the same pair wherever they stand and can check it out loud.
- *  Always from the ENGLISH list, whatever the reader's language: a bilingual
- *  room compares one pair out loud (the localized pair may be shown beside
- *  it — `wordsBeside`). Empty when there is no room at all. `identity` is
- *  the loaded swarm's (loadedRoomIdentity): an older package's room reads
- *  the pair of the address that package meets at. */
+ *  on. Same host + room + secret ⇔ the same pair ⇔ they meet; the same room
+ *  text at two hosts is two rooms with two pairs. NO HOST, NO WORDS: with no
+ *  host named there is no room (there is no default host, 2026-10-11).
+ *  Never the page — its own domain, its path: everyone in one room reads the
+ *  same pair wherever they stand and can check it out loud. Always from the
+ *  ENGLISH list, whatever the reader's language: a bilingual room compares
+ *  one pair out loud (the localized pair may be shown beside it —
+ *  `wordsBeside`). Empty when there is no room at all. `identity` is the
+ *  loaded swarm's (loadedRoomIdentity): an older package's room reads the
+ *  pair of the address that package meets at. */
 export function roomWords(room: string, secret: string, point = '', identity = loadedRoomIdentity()): string {
   const r = String(room ?? '').trim()
   const s = String(secret ?? '').trim()
   if (!r && !s) return ''
-  return secretTag(wordsPreimage(r, s, point, identity), 'en')
+  const text = wordsPreimage(r, s, point, identity)
+  return text ? secretTag(text, 'en') : ''
 }
 
 /** The comparison words with the reader's own pair beside them when their
@@ -312,7 +327,7 @@ export interface StatusPart {
   key?: string
   params?: Record<string, string | number>
   text?: string
-  action?: 'invite' | 'share' | 'code'
+  action?: 'invite' | 'share' | 'code' | 'host'
 }
 
 export interface StatusLine {
@@ -337,6 +352,8 @@ export interface StatusInput {
    *  upload lines name. Empty: the relay, as an older swarm had it. */
   uploadHost?: string
   room: string
+  /** The room's words as shown — with their host beside them
+   *  (`wordsAtHost`: 'marble cove · hypercomb.com'). */
   words: string
   /** Everyone live in the room, you included. */
   roomCount: number
@@ -353,10 +370,12 @@ export interface StatusInput {
    *  which the mesh retries itself); '' when none is current. */
   rejected: string
   /** The relay's standing refusal of the connection (refusalOf): 'access',
-   *  'unreachable', 'subscriptions', 'clock' — '' or absent when none. */
+   *  'unreachable', 'no-host', 'subscriptions', 'clock' — '' or absent when
+   *  none. */
   refused?: string
-  /** The meeting point this tab is joined at, as named ('' = the default) —
-   *  what the 'unreachable' line names when the page cannot dial it. */
+  /** The meeting point this tab is joined at, as named ('' = none named in
+   *  its zone) — what the 'unreachable' line names when the page cannot dial
+   *  it. */
   point?: string
   /** The socket is open but slow to answer (slowLink). */
   slow?: boolean
@@ -449,6 +468,12 @@ export function statusLine(i: StatusInput): StatusLine {
     // fixes that, and waiting 30 s first only hides it — say so at once,
     // with the one remedy: the newest meeting link (or its code).
     parts.push({ key: 'mesh.state.access', params: { host } }, { key: 'mesh.state.access-action', action: 'code' })
+    tone = 'down'
+  } else if (refused === 'no-host' && i.phase !== 'open') {
+    // Joined with no host named (there is no default, 2026-10-11): no room,
+    // no words, nothing to dial. Said at once, with the one remedy — the
+    // host field — never "connecting" for ever.
+    parts.push({ key: 'mesh.state.no-host' }, { key: 'mesh.state.no-host-action', action: 'host' })
     tone = 'down'
   } else if (refused === 'unreachable' && i.phase !== 'open') {
     // Joined at a meeting point this page may not dial (a computer's own

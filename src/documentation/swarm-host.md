@@ -17,9 +17,15 @@ upload is liveness (D7), the always-online point's deploy waits for its
 eviction and door fixes (D8), publish and shell deploy before coded links
 are handed out (D9), two tabs of one hive both keep writing (D10). And
 (jwize, 2026-10-12): a room is its meeting point + room + secret — every
-room address and its two words name the point, the default included, and a
-loopback page meets at the default like every install
-(`swarm-room-identity.md`).
+room address and its two words name the point. And (jwize, 2026-10-11, which
+supersedes the 2026-10-12 round where they differ): the page's own domain is
+never used — not in an address, not in the words, not to pick the host, not
+beside the words; there is no default host (no host, no room — a new
+install dials nothing until its participant names one; hypercomb.com is
+offered in the selector, one tap, never filled; a host named before is
+remembered and dialled at boot as ever); and the host is shown beside the
+words ("marble cove · hypercomb.com") (`swarm-room-identity.md`). The pool's
+upload host below is a separate question (replication, not who meets).
 
 Your hosts host the meeting. Joining is enough to share. A tile's name reaches
 the room at once, and its bytes follow as soon as its host serves them.
@@ -302,8 +308,8 @@ given.
 - `lifecycleSig` is `sha256('lifecycle\0' + room + '\0' + secret + '\0' + point)`,
   the channel the swarm already beacons on, `point` being the lowercase
   host[:port] of the meeting point the room MEETS at — the relay its
-  participants dial (hypercomb.com for a room at the open default), which is
-  this relay only when the room meets here. A relay that only keeps a room's
+  participants named and dial (hypercomb.com for a room that named it; never
+  the page's own domain), which is this relay only when the room meets here. A relay that only keeps a room's
   bytes (D7: the room meets elsewhere and uploads here) lists the sig of the
   point the room meets at, never its own host. The meeting point is part of
   every room address since 2026-10-12 (`swarm-room-identity.md`); a sig
@@ -963,24 +969,34 @@ frames are the relay's one NOTICE and the idle-only probes.
   typed name never becomes a command), and connects.
 - The link carries the secret. Anyone holding it can join and upload within
   the caps. Post it where the room is, and nowhere else.
-- **THE TWO WORDS (D4; the room identity, 2026-10-12).** They are the
-  readable form of the room's address: the meeting point, the room and the
-  secret (`lifecycle \0 room \0 secret \0 point`, core
-  `lifecyclePreimage`), never the page. The point is ALWAYS in it — the
-  shipped default `hypercomb.com` too, and an empty meeting-point field IS
-  `hypercomb.com` — so EVERY pair changed on 2026-10-12, default-relay rooms
-  included: last week's pair is not this week's. Everyone in a room sees the
-  same two words on any page, and half a room at another point is another
-  room and reads another pair. The words follow the package that addresses
-  the room (`SwarmDrone.roomIdentity`, read in-page by the shell): a shell
-  newer than its package reads that package's pair (the D4 one before the
-  update), so a pair always names the address the tab meets at. The pair is
-  always from the ONE English list, in every language; a reader of another
-  language sees their own pair beside it ("light moss (うるわしい しま)"), so
-  a mixed room compares the same English words out loud. One relay reached
-  under two names (a host and its `www.`, a proxy port, `localhost` and
-  `127.0.0.1`) is two rooms; real links carry one URL
-  (`swarm-room-identity.md`).
+- **THE TWO WORDS (D4; the room identity, 2026-10-12; the host beside them,
+  2026-10-11).** They are the readable form of the room's address: the HOST,
+  the room and the secret (`lifecycle \0 room \0 secret \0 host`, core
+  `lifecyclePreimage`). Same host + room + secret ⇔ the same words ⇔ they
+  meet; different words ⇒ they never meet. The host is ALWAYS in it, so
+  EVERY pair changed on 2026-10-12, hypercomb.com rooms included: last
+  week's pair is not this week's, and a package from before then does not
+  meet one from after at the same host — their words differ; update to
+  meet. **No host, no words:** there is no default host, and with none named
+  there is no room. **Never the page:** the page's own domain
+  (`hypercomb.io`, `localhost:4250`, a published site) is in no address, no
+  pair, picks no host and is shown beside no words. **The host shows beside
+  the words** wherever they show — the presence line, the breadcrumb, the
+  selector, the `/use-live-relay` toast: "marble cove · hypercomb.com"; the
+  breadcrumb's root reads as home while you are in a swarm, never the page's
+  domain ("public · hypercomb.io" read as where the room met). Everyone in a
+  room sees the same two words on any page, and half a room at another host
+  is another room and reads another pair and another host. The words follow
+  the package that addresses the room (`SwarmDrone.roomIdentity`, read
+  in-page by the shell): a shell newer than its package reads that package's
+  pair (the D4 one before the update), so a pair always names the address
+  the tab meets at. The pair is always from the ONE English list, in every
+  language; a reader of another language sees their own pair beside it
+  ("light moss (うるわしい しま) · hypercomb.com"), so a mixed room compares the
+  same English words out loud. One relay reached under two names (a host
+  and its `www.`, a proxy port, `localhost` and `127.0.0.1`, `localhost:7777`
+  and the `jwize.com` tunnel to it) is two rooms, on purpose; real links
+  carry one URL (`swarm-room-identity.md`).
 - **THE WORDS DURING THE MOVE TO hypercomb.com (2026-10-11 — history: the
   room identity of 2026-10-12 replaced the shell-side `SHIPPED_POINT` fold
   below; the words now follow the loaded package).** Which point
@@ -1070,15 +1086,17 @@ If it fails:
    everyone's hive, so nobody's seeded tiles collide there.
 3. Type `/invite`. Paste the link in the group chat and show it on screen.
    Type `>` to go back to making tiles.
-   **Facilitating from a loopback hive** (`http://localhost:4250`): since
-   2026-10-12 a loopback page meets at the shipped default
-   (`wss://hypercomb.com`) like every install — nothing to turn on. The dev
-   relay `ws://localhost:7777` is dialled only when you name it (the
-   meeting-point field, `/use-live-relay <room> <secret> ws://localhost:7777`,
-   a relay list), and a room there is another room. There is no pre-filled
-   dev secret any more: type one.
-4. The line reads "Live · meetup · {words} — you're the first one here ·
-   Invite".
+   **Facilitating from a loopback hive** (`http://localhost:4250`): the page
+   you are on never picks the host (2026-10-11) — a loopback page meets at
+   exactly the host a hypercomb.io page would with the same field or list.
+   Name the host everyone meets at; the dev relay `ws://localhost:7777` is
+   dialled only when you name it (the meeting-point field, `/use-live-relay
+   <room> <secret> ws://localhost:7777`, a relay list), and a room there is
+   another room — even when `jwize.com` tunnels to the same relay. There is
+   no pre-filled dev secret any more: type one.
+4. The line reads "Live · meetup · {words} · {host} — you're the first one
+   here · Invite". Everyone in the room reads the same words AND the same
+   host; a different host beside the same-looking room is a different room.
 
 ### At the door
 
@@ -1127,8 +1145,8 @@ name the relay.
 
 | Line | Meaning | Do |
 |---|---|---|
-| Live · {room} · {words} · {n} in the room ({m} here) | connected. Badges: solid here, dim elsewhere, hollow away | nothing |
-| Live · {room} · {words} — you're the first one here · Invite | nobody else is in the room yet | share the link |
+| Live · {room} · {words} · {meeting host} · {n} in the room ({m} here) | connected. Badges: solid here, dim elsewhere, hollow away. The host beside the words is where the room meets (never the page's domain) | nothing |
+| Live · {room} · {words} · {meeting host} — you're the first one here · Invite | nobody else is in the room yet | share the link |
 | Connecting to {host}… | the first connect after a join | wait |
 | Reconnecting… your tiles are safe | `stalled` or `retrying` after having been open; peers still see your tiles | wait |
 | Can't reach hypercomb.com — check wifi or switch to mobile data. Still trying. | no socket for 30 s (the line names the meeting point's host) | change network; a captive portal may be blocking it |

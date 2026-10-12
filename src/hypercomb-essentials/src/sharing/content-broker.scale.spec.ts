@@ -61,6 +61,8 @@ type Evt = { kind: number; pubkey: string; tags: string[][]; content: string }
 type Published = { kind: number; sig: string; tags: string[][]; content: string; at: number }
 
 class FakeMesh {
+  /** The host the room meets at — there is no room without one. */
+  swarmHost = (): string => 'hypercomb.com'
   published: Published[] = []
   subs = new Map<string, Set<(e: { event: Evt; payload: unknown }) => void>>()
   items = new Map<string, { event: Partial<Evt> }[]>()
@@ -120,7 +122,7 @@ beforeAll(async () => {
   registrations.set(MESH_KEY, { subscribe: () => ({ close: () => void 0 }), publish: async () => true })
   ;({ ContentBrokerDrone } = await import('./content-broker.boot.drone.js'))
   await sleep(30)
-  channel = await sha256(enc(`broker:fetch\0${roomPreimage('alpha', 'secret', '')}`))
+  channel = await sha256(enc(`broker:fetch\0${roomPreimage('alpha', 'secret', 'hypercomb.com')}`))
 })
 
 beforeEach(() => {

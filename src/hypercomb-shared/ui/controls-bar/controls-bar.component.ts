@@ -29,7 +29,7 @@ import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '@hypercomb/runtime/install-monitor'
 import { VoiceInputService } from '../../core/voice-input.service'
-import { roomWords } from '../presence-banner/presence-status'
+import { roomWords, wordsAtHost } from '../presence-banner/presence-status'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
@@ -298,8 +298,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     get('@hypercomb.social/I18n') as EventTarget | undefined,
     () => (get('@hypercomb.social/I18n') as { locale?: string } | undefined)?.locale ?? 'en',
   )
-  /** The relay this tab meets at, host[:port] (the mesh's swarmHost) — what
-   *  the room's words fold in when it is not the shipped default. Re-read on
+  /** The relay this tab meets at, host[:port] (the mesh's swarmHost) — the
+   *  host the room's words are drawn at, and shown beside them. Re-read on
    *  every connection change and every move of the tab's meeting point. */
   #meetPoint$ = signal('')
   #meetPointUnsubs: (() => void)[] = []
@@ -1151,17 +1151,18 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly secretWords = computed(() => {
     // THE ROOM'S TWO WORDS — the readable form of the room's address: they
-    // hash the meeting point, the room and the secret (`roomWords`, the
-    // swarm's lifecycle channel `lifecycle \0 room \0 secret \0 point` — the
-    // point ALWAYS, the shipped default included, 2026-10-12), never the
-    // page. The page used to be in the preimage, so two people in one room
-    // standing on different pages read different pairs and a room could
-    // never check itself out loud; a split it SHOULD catch (a capital the
-    // phone slipped into the room, a stale secret, half the room at another
-    // point) hid among those false alarms. Same pair in the location window
-    // and on the presence line, the English one in every language — drawn
-    // the way the LOADED package addresses the room (loadedRoomIdentity).
-    return roomWords(this.#room$(), this.#secret$(), this.#meetPoint$())
+    // hash the host, the room and the secret (`roomWords`, the swarm's
+    // lifecycle channel `lifecycle \0 room \0 secret \0 host`, 2026-10-12),
+    // never the page. The page used to be in the preimage, so two people in
+    // one room standing on different pages read different pairs and a room
+    // could never check itself out loud; a split it SHOULD catch (a capital
+    // the phone slipped into the room, a stale secret, half the room at
+    // another host) hid among those false alarms. Same pair in the location
+    // window and on the presence line, the English one in every language —
+    // drawn the way the LOADED package addresses the room
+    // (loadedRoomIdentity) — with the HOST beside it ('marble cove ·
+    // hypercomb.com', 2026-10-11). No host, no words.
+    return wordsAtHost(roomWords(this.#room$(), this.#secret$(), this.#meetPoint$()), this.#meetPoint$())
   })
 
   readonly hasSecret = computed(() => !!this.#secret$().trim())
@@ -1177,7 +1178,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly hasPrefixPath = computed(() => this.prefixPath().length > 0)
 
-  /** Active domain for breadcrumb display */
+  /** The breadcrumb root's text while PRIVATE: the page's own domain. In a
+   *  swarm the root reads as home instead (the template): "public ·
+   *  hypercomb.io" read as where the room meets, and the page's domain is
+   *  never that (jwize, 2026-10-11) — the host shows beside the words. */
   readonly activeDomain = computed(() => {
     return window.location.hostname || 'hypercomb.io'
   })

@@ -174,6 +174,15 @@ describe('a refusal no wifi fixes is said at once, as what it is', () => {
     expect(line.tone).toBe('down')
   })
 
+  it("refused 'no-host': joined with no host named — said at once, with the host field one tap away (no default, 2026-10-11)", () => {
+    const conn = { state: 'offline', refused: 'no-host', since: t0, reopened: false, attempt: 0, clockOffsetMs: 0 }
+    const line = statusLine({ ...base, host: 'the meeting point', words: '', phase: linkPhase(conn, t0, t0 + 1_000, false)!, refused: 'no-host' })
+    expect(say(line)).toBe('No host named — this tab meets nowhere yet · Name the host')
+    expect(line.tone).toBe('down')
+    expect(line.parts.at(-1)?.action).toBe('host')
+    expect(say(line)).not.toMatch(/hypercomb\.com|wifi|Connecting|Reconnecting/)
+  })
+
   it("refused 'subscriptions': live, with the reload said in the warn tone", () => {
     const line = at('subscriptions', 'open', 1_000)
     expect(say(line)).toContain('The meeting point stopped taking more listeners — reload this tab')
@@ -217,43 +226,44 @@ describe('a word the relay has not taken', () => {
 
 // ── ROOM IDENTITY (jwize, 2026-10-12; replaces D4's fold-only-when-not-default):
 // the comparison words ─────────────────────────────────────────────────────
-describe('the room\'s two words are its address read aloud: meeting point + room + secret', () => {
+describe('the room\'s two words are its address read aloud: host + room + secret', () => {
   const pairAt = (point: string): string => secretTag(`lifecycle\u0000downtown\u0000rose\u0000${point}`, 'en')
 
-  it('the default point is part of the room: an empty field, hypercomb.com and wss://HyperComb.com/ read one pair', () => {
-    const atDefault = pairAt('hypercomb.com')
-    for (const p of ['', 'hypercomb.com', 'wss://hypercomb.com', 'wss://HyperComb.com/', 'wss://hypercomb.com:443']) expect([p, roomWords('downtown', 'rose', p)]).toEqual([p, atDefault])
-    expect(roomWords('downtown', 'rose')).toBe(atDefault)
-    // the default is never folded away any more
+  it('hypercomb.com however it is written reads one pair — and an empty field reads none: there is no default host (2026-10-11)', () => {
+    const atHost = pairAt('hypercomb.com')
+    for (const p of ['hypercomb.com', 'wss://hypercomb.com', 'wss://HyperComb.com/', 'wss://hypercomb.com:443']) expect([p, roomWords('downtown', 'rose', p)]).toEqual([p, atHost])
+    for (const p of ['', '  ']) expect([p, roomWords('downtown', 'rose', p)]).toEqual([p, ''])
+    expect(roomWords('downtown', 'rose')).toBe('')
     expect(meetingPointKey('wss://hypercomb.com')).toBe(SHIPPED_POINT)
-    expect(meetingPointKey('')).toBe(SHIPPED_POINT)
-    // and the pair from before the point was part of the room is not it
-    expect(roomWords('downtown', 'rose')).not.toBe(secretTag('lifecycle\u0000downtown\u0000rose', 'en'))
+    expect(meetingPointKey('')).toBe('')
+    // and the pair from before the host was part of the room is not it
+    expect(atHost).not.toBe(secretTag('lifecycle\u0000downtown\u0000rose', 'en'))
   })
 
   it('jwize.com, the default before, is a point like any other: no shipped default names it', () => {
     expect(meetingPointKey('wss://jwize.com')).toBe('jwize.com')
     expect(roomWords('downtown', 'rose', 'wss://jwize.com')).toBe(pairAt('jwize.com'))
-    expect(roomWords('downtown', 'rose', 'wss://jwize.com')).not.toBe(roomWords('downtown', 'rose'))
+    expect(roomWords('downtown', 'rose', 'wss://jwize.com')).not.toBe(roomWords('downtown', 'rose', 'hypercomb.com'))
   })
 
   it('two halves of one meeting on different points read different words', () => {
     const atPoint = roomWords('downtown', 'rose', 'wss://pluginthematrix.com')
-    expect(atPoint).not.toBe(roomWords('downtown', 'rose'))
+    expect(atPoint).not.toBe(roomWords('downtown', 'rose', 'hypercomb.com'))
     // however the point is written, one point folds one way
     for (const p of ['pluginthematrix.com', 'wss://pluginthematrix.com/', 'WSS://PluginTheMatrix.com']) expect(roomWords('downtown', 'rose', p)).toBe(atPoint)
     expect(roomWords('downtown', 'rose', 'ws://localhost:7896')).not.toBe(roomWords('downtown', 'rose', 'ws://localhost:7895'))
   })
 
   it('en, ja and fr participants compare the same pair; the reader\'s own pair rides beside it', () => {
-    const words = roomWords('downtown', 'rose')
+    const H = 'hypercomb.com'
+    const words = roomWords('downtown', 'rose', H)
     expect(words).toBe(pairAt('hypercomb.com'))
-    for (const locale of ['en', 'ja', 'fr', 'de', 'ru']) expect(wordsBeside('downtown', 'rose', '', locale).startsWith(words)).toBe(true)
-    expect(wordsBeside('downtown', 'rose', '', 'en')).toBe(words)
-    expect(wordsBeside('downtown', 'rose', '', 'ja')).toBe(`${words} (${secretTag('lifecycle\u0000downtown\u0000rose\u0000hypercomb.com', 'ja')})`)
+    for (const locale of ['en', 'ja', 'fr', 'de', 'ru']) expect(wordsBeside('downtown', 'rose', H, locale).startsWith(words)).toBe(true)
+    expect(wordsBeside('downtown', 'rose', H, 'en')).toBe(words)
+    expect(wordsBeside('downtown', 'rose', H, 'ja')).toBe(`${words} (${secretTag('lifecycle\u0000downtown\u0000rose\u0000hypercomb.com', 'ja')})`)
   })
 
-  it('the shipped point the words resolve an empty field to is the shipped relay', () => {
+  it('the host offered (never a default) is the relay the mesh ships', () => {
     const relay = /^const LIVE_RELAY = '([^']+)'/m.exec(readFileSync(join(__dirname, '..', '..', '..', 'hypercomb-essentials', 'src', 'sharing', 'nostr-mesh.drone.ts'), 'utf8'))?.[1] ?? ''
     expect(new URL(relay).host).toBe(SHIPPED_POINT)
     expect(meetingPointKey(relay)).toBe(SHIPPED_POINT)
@@ -274,6 +284,7 @@ describe('the header glyph follows the line', () => {
   it('a standing refusal no wait cures is down at once, not after 30 s of amber', () => {
     expect(headerLink({ state: 'retrying', since: t0, refused: 'access' }, t0, t0 + 1_000)).toBe('down')
     expect(headerLink({ state: 'retrying', since: t0, refused: 'unreachable' }, t0, t0 + 1_000)).toBe('down')
+    expect(headerLink({ state: 'offline', since: t0, refused: 'no-host' }, t0, t0 + 1_000)).toBe('down')
     expect(headerLink({ state: 'retrying', since: t0 }, t0, t0 + 1_000)).toBe('pending')
     expect(headerLink({ state: 'retrying', since: t0 }, t0, t0 + UNREACHABLE_AFTER_MS)).toBe('down')
   })

@@ -1,14 +1,15 @@
-// sharing/room-scoped-channels.spec.ts — EVERY ROOM ADDRESS NAMES ITS POINT.
+// sharing/room-scoped-channels.spec.ts — EVERY ROOM ADDRESS NAMES ITS HOST.
 //
-// jwize, 2026-10-12: a room is its meeting point + room + secret (core
-// roomPreimage). The swarm's own addresses moved with it; so must every other
-// address derived from the room — or 'garden'/'rose' at hypercomb.com and
-// 'garden'/'rose' at another point would still share a client roster and a
+// jwize, 2026-10-12: a room is its host + room + secret (core roomPreimage).
+// The swarm's own addresses moved with it; so must every other address
+// derived from the room — or 'garden'/'rose' at hypercomb.com and
+// 'garden'/'rose' at another host would still share a client roster and a
 // model-lending channel while being two rooms. Pinned:
 //   1. client-presence's roster channel is `hc:clients \0 room \0 secret \0
-//      point`, the default point when none is named, and moves with the point.
+//      host`, and moves with the host. No host named: no channel at all —
+//      there is no default host (2026-10-11).
 //   2. peer-models' offer / request / reply channels are `<label>:<pubkey> \0
-//      room \0 secret \0 point`, and a new meeting point (`mesh:zone`)
+//      room \0 secret \0 host`, and a new meeting point (`mesh:zone`)
 //      resubscribes them there.
 
 import { createHash } from 'node:crypto'
@@ -18,7 +19,7 @@ import { EffectBus, roomPreimage } from '@hypercomb/core'
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
 const ME = 'b'.repeat(64)
 
-const point = { host: '' }
+const point = { host: 'hypercomb.com' }
 const subscribed: string[] = []
 const mesh = {
   publish: vi.fn(async () => true),
@@ -42,16 +43,16 @@ const { ClientPresenceDrone } = await import('./client-presence.drone.js')
 await import('./peer-models.drone.js')
 
 describe('client-presence: the roster channel is the room at its point', () => {
-  it('names the point — the default when none is named — and moves with it', async () => {
-    point.host = ''
-    const atDefault = await ClientPresenceDrone.channel()
-    expect(atDefault).toBe(sha(`hc:clients\0${roomPreimage('garden', 'rose', 'hypercomb.com')}`))
-    expect(atDefault).not.toBe(sha('hc:clients\0garden\0rose'))
+  it('names the host, and moves with it — no host, no channel (never a default)', async () => {
     point.host = 'hypercomb.com'
-    expect(await ClientPresenceDrone.channel()).toBe(atDefault)
+    const atHost = await ClientPresenceDrone.channel()
+    expect(atHost).toBe(sha(`hc:clients\0${roomPreimage('garden', 'rose', 'hypercomb.com')}`))
+    expect(atHost).not.toBe(sha('hc:clients\0garden\0rose'))
     point.host = 'point.example'
     expect(await ClientPresenceDrone.channel()).toBe(sha(`hc:clients\0${roomPreimage('garden', 'rose', 'point.example')}`))
     point.host = ''
+    expect(await ClientPresenceDrone.channel()).toBe('')
+    point.host = 'hypercomb.com'
   })
 })
 
@@ -72,6 +73,13 @@ describe('peer-models: lending channels are the room at its point', () => {
     point.host = 'point.example'
     EffectBus.emit('mesh:zone', { relay: 'wss://point.example' })
     await vi.waitFor(() => expect(subscribed).toEqual(expect.arrayContaining(at('point.example'))))
+
+    // No host named: no room, so nothing to lend on — never a default's.
+    subscribed.length = 0
     point.host = ''
+    EffectBus.emit('mesh:zone', { relay: '' })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(subscribed).toEqual([])
+    point.host = 'hypercomb.com'
   })
 })

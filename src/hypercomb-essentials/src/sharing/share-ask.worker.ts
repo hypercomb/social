@@ -192,7 +192,7 @@ export class ShareAskWorker extends Worker {
     const zone = this.#zone()
     if (!zone) return
     const digest = await this.#digest(zone.room, zone.secret, page)
-    if (!current()) return
+    if (!digest || !current()) return
     if (this.#ask) {
       // This line is up now, not answered yet.
       if (this.#ask.digest === digest) return
@@ -358,7 +358,10 @@ export class ShareAskWorker extends Worker {
   #digest = async (room: string, secret: string, page: string): Promise<string> => {
     let point = ''
     try { point = String(get<MeshLike>(MESH_KEY)?.swarmHost?.() ?? '') } catch { point = '' }
-    const text = `share-ask\0${roomPreimage(room, secret, point)}\0${page}`
+    // No host named: no meeting, so nothing to remember an ask by.
+    const meeting = roomPreimage(room, secret, point)
+    if (!meeting) return ''
+    const text = `share-ask\0${meeting}\0${page}`
     const store = get<SignatureStoreLike>(SIGNATURE_STORE_KEY)
     if (typeof store?.signText === 'function') return store.signText(text)
     const bytes = encoder.encode(text)

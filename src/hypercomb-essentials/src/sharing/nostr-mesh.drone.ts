@@ -1,52 +1,97 @@
 // nostr/nostr-mesh.drone.ts
 //
-// Live bootstrap relay shipped 2026-05-29; default-ON for real hosts since
-// 2026-06-10 (see LIVE_RELAY notes below). Since 2026-10-11 it is
-// wss://hypercomb.com, the always-online meeting point, open (it was
-// wss://jwize.com, a home machine). Since 2026-10-12 loopback origins seed
-// it too (the dev relay only when chosen); hc:nostrmesh:use-live-relay
-// ('1'/'0') and hc:nostrmesh:relays override.
+// NO DEFAULT HOST (jwize, 2026-10-11: "Let's just make sure that there isn't
+// a default host" — "all the user should have to do is put the host name in
+// when entering a swarm, end of story"). A new install dials NOTHING until
+// the participant names the host they meet at: the selector's host field,
+// a meeting link, a server given to /use-live-relay, a relay list
+// (hc:nostrmesh:relays). wss://hypercomb.com, the open always-online meeting
+// point, is OFFERED (one tap fills the selector's field), never seeded. A
+// host named before is the participant's own: a joined tab dials it at boot
+// (its zone), exactly as fast as ever.
 import { Drone } from '@hypercomb/core'
 import { isJoinedHere } from './membership.js'
 
-// The local dev relay (scripts/local-relay.ts). Never a seed (2026-10-12):
-// dialled only when chosen — a relay list, a meeting point, a server named
-// to /use-live-relay. Kept on the anchor below for the readers that name it.
+// The local dev relay (scripts/local-relay.ts). Never a seed: dialled only
+// when chosen — a relay list, a meeting point, a server named to
+// /use-live-relay. Kept on the anchor below for the readers that name it.
 const LOCAL_RELAY = 'ws://localhost:7777'
-// Live bootstrap relay.
-//
-// ⚠️ This constant is referenced in EXACTLY ONE runtime branch — the
-// seed expression in `loadRelays()` below. Keep it that way so the
-// relay policy stays auditable in one place.
-//
-// Policy (since 2026-06-10): real hosts seed LIVE_RELAY by DEFAULT.
-// A deployed origin must never dial loopback — nothing listens on a
-// visitor's machine, and a public origin touching localhost trips
-// Chrome's Local Network Access permission prompt at page open.
-// Since 2026-10-12 loopback origins seed LIVE_RELAY too (jwize: "yes make
-// localhost default to hypercomb.com"): the meeting point is part of the
-// room (core roomPreimage), and a dev tab seeded elsewhere met nobody.
-//
-//   localStorage['hc:nostrmesh:use-live-relay'] = '1'   force LIVE_RELAY
-//   localStorage['hc:nostrmesh:use-live-relay'] = '0'   opt out (the page
-//                                                       idles, no loopback)
-//   localStorage['hc:nostrmesh:relays']        = '[…]'  manual override, wins
-//
-// THE ALWAYS-ONLINE MEETING POINT (jwize, 2026-10-11: "we can't rely on my
-// computer being on that is ridiculous for my setup" → "yes, open default on
-// hypercomb.com, go ahead"). A Durable Object behind the hypercomb.com apex
-// (hypercomb-relay/meet-worker), OPEN: no access code, ever (D8 — packages
-// from before the access ladder would redial a coded default 13 times a
-// minute). The public install names only hypercomb.com. Packages from before
-// this change keep dialing wss://jwize.com until they update; an operator can
-// still name any relay (hc:nostrmesh:relays, /domain, a meeting link).
+// The open always-online meeting point (jwize, 2026-10-11: "yes, open default
+// on hypercomb.com, go ahead" → "hypercomb.com should be available but not
+// filled by default for new installs"). A Durable Object behind the
+// hypercomb.com apex (hypercomb-relay/meet-worker), OPEN: no access code,
+// ever (D8 — packages from before the access ladder would redial a coded
+// point 13 times a minute). OFFERED by the selector (core
+// SHIPPED_MEETING_POINT), NEVER SEEDED here: with nothing named, nothing is
+// dialled, whatever the page's own address is. Packages from before
+// 2026-10-11 seeded wss://jwize.com, and from 10-11 this one, until they
+// update. The literal stays in this bee (the package floor keys on it;
+// doctrine.spec holds it to the hosts the words and the pool name).
 const LIVE_RELAY = 'wss://hypercomb.com'
 
-// Force the literal into the bundle via a globalThis assignment.
+// WHAT A PACKAGE SEEDED IS NOT A CHOICE (R4, 2026-10-11 — from the git
+// history of `hc:nostrmesh:relays`). Two code paths ever stored a package's
+// OWN default there, and nothing else did:
+//   - 2026-02-26 → 03-19 the mesh wrote its hard relay at every boot
+//     (forceHardRelay): exactly ['wss://nos.lol'], later
+//     ['wss://relay.snort.social'].
+//   - 2026-04-03 → 10-11 `/domain <url>` saved [...the list it was
+//     dialling, url]. With nothing saved, that list WAS the seed, so the
+//     saved list BEGINS with the package's default — the dev relay (every
+//     page until 05-29, then loopback pages), the live relay on a real host
+//     (the home machine until 10-11, then hypercomb.com), a boot-written
+//     hard relay still stored — or, behind a loopback-only list on a real
+//     host, the live relay the retired stale-dev-list guard appended. Every
+//     later `/domain` only appended, so what follows the seed is typed.
+// Every other writer saved only what a person typed (`/use-live-relay
+// <server>`, 2026-08-20 → 10-09: exactly [server]). No seed was ever written
+// to the zone or the meeting-point pre-fill by a shipped package.
+//
+// So a seed is only ever a LEADING part of a list an older package wrote:
+// its first entry when it is one of those defaults and more follow, and the
+// live default sitting right after a leading loopback run when more follow
+// (the guard's shape). Nothing after a typed entry is a seed, the last entry
+// is always the person's, and a list of one is theirs unless it is the boot
+// write. Read only — nothing stored is rewritten or deleted for it.
+//
+// THIS PACKAGE SEEDS NOTHING, so a list it saves is the person's whole: it
+// is saved behind CHOSEN_MARK and read back untouched — typing hypercomb.com
+// and then a second relay keeps both, across a reload. The mark is no ws(s)
+// URL, so every reader of the list (this package's, and every older one's,
+// which has always kept only ws(s) entries) passes over it. The defaults are
+// named here only to be recognised and ignored — never dialled.
+const BOOT_WRITTEN_RELAY = /^wss:\/\/(?:nos\.lol|relay\.snort\.social)$/
+const RETIRED_SEED_RELAY = /^wss:\/\/(?:jwize\.com|nos\.lol|relay\.snort\.social)$/
+const RETIRED_LIVE_RELAY = /^wss:\/\/jwize\.com$/
+const wasSeeded = (relay: string): boolean =>
+  relay === LIVE_RELAY || relay === LOCAL_RELAY || RETIRED_SEED_RELAY.test(relay)
+const wasLiveSeed = (relay: string): boolean => relay === LIVE_RELAY || RETIRED_LIVE_RELAY.test(relay)
+const loopbackRelay = (relay: string): boolean => {
+  try {
+    const name = new URL(relay).hostname.toLowerCase()
+    return name === 'localhost' || name === '127.0.0.1' || name === '[::1]' || name === '::1'
+  } catch { return false }
+}
+/** The head of every relay list this package saves (see above). */
+export const CHOSEN_MARK = 'hc:chosen'
+
+/** A relay list an OLDER package stored, as the participant chose it: its
+ *  leading seed dropped (see above), the order and every typed entry kept.
+ *  Never applied to a list this package saved (CHOSEN_MARK). */
+export const chosenRelays = (stored: readonly string[]): string[] => {
+  if (stored.length === 1) return BOOT_WRITTEN_RELAY.test(stored[0]!) ? [] : stored.slice()
+  const last = stored.length - 1
+  const seed = new Set<number>()
+  if (last > 0 && wasSeeded(stored[0]!)) seed.add(0)
+  const afterLoopback = stored.findIndex(relay => !loopbackRelay(relay))
+  if (afterLoopback > 0 && afterLoopback < last && wasLiveSeed(stored[afterLoopback]!)) seed.add(afterLoopback)
+  return stored.filter((_, i) => !seed.has(i))
+}
+
+// Force the literals into the bundle via a globalThis assignment.
 // esbuild treats global property writes as side effects and will not
 // DCE them. Multiple gentler anchors (exported const, frozen object,
-// IIFE) were insufficient — the constant kept getting tree-shaken out
-// when the loadRelays ternary's LIVE_RELAY branch was optimized away.
+// IIFE) were insufficient — the constant kept getting tree-shaken out.
 // A globalThis write is the bluntest object esbuild won't touch.
 //
 // Bracket access: strict TS (`noPropertyAccessFromIndexSignature`)
@@ -146,7 +191,9 @@ type Liveness = {
  *  'subscriptions' (too many subscriptions), 'access' (the meeting point
  *  closed 4401: this tab's access code is not its current one) or
  *  'unreachable' (this tab is joined at a meeting point this page may not
- *  dial — a loopback one from a real host — so it meets nowhere). */
+ *  dial — a loopback one from a real host — so it meets nowhere) or
+ *  'no-host' (this tab is joined and no host is named — there is no default
+ *  — so it meets nowhere until one is). */
 export type MeshConnectionState = 'connecting' | 'open' | 'stalled' | 'retrying' | 'offline'
 export type MeshConnection = { state: MeshConnectionState; reopened: boolean; since: number; attempt: number; clockOffsetMs: number; refused?: string }
 
@@ -553,9 +600,11 @@ export class NostrMeshDrone extends Drone {
     // the next time it opens, the page's own list is back (setNetworkEnabled).
     this.onEffect<{ public?: boolean }>('mesh:public-changed', (p) => {
       if (p?.public === true) queueMicrotask(() => this.#syncZone())
+      else queueMicrotask(() => this.#sayNoHost(false))
     })
     // The zone moved without a join: a link's new meeting point or code, or
-    // the way back to the default relay (meeting-invite.join.ts pointMeshAt).
+    // a point let go (`use-live-relay clear`, a cleared host field) — back to
+    // the page's own chosen list, or to nothing (there is no default).
     this.onEffect('mesh:zone', () => { queueMicrotask(() => this.#syncZone()) })
 
     try {
@@ -618,13 +667,15 @@ export class NostrMeshDrone extends Drone {
 
     this.relays = next
     if (persist) this.saveRelays(this.relays)
+    this.#sayNoHost(isJoinedHere())
     if (unchanged) return
     this.reconnectAll()
   }
 
   /** The page's OWN relay list: what this origin's tabs dial when they are
-   *  not at a meeting point (hc:nostrmesh:relays, else the defaults). A
-   *  joined tab's meeting point (hc:mesh-zone) is never part of it. */
+   *  not at a meeting point (hc:nostrmesh:relays as chosen, else nothing —
+   *  there is no default). A joined tab's meeting point (hc:mesh-zone) is
+   *  never part of it. */
   public ownRelays = (): string[] => this.#zoneOwnsList ? this.loadRelays([]) : this.relays.slice()
 
   /** Replace the page's own list and save it for every tab of this origin
@@ -639,16 +690,18 @@ export class NostrMeshDrone extends Drone {
       .filter(u => u.startsWith('ws://') || u.startsWith('wss://')))))
   }
 
-  /** The relay this tab meets at: host[:port] of the first relay it may
-   *  dial — wss://hypercomb.com gives hypercomb.com, ws://localhost:7801 gives
-   *  localhost:7801. A pure function of the relay list: no fetch, no NIP-11,
-   *  nothing stored. '' when no relay can be dialled. A loopback relay
-   *  counts first only for a page that is itself local: a developer's
-   *  ws://localhost override beside the live relay on https://hypercomb.io
-   *  may be dialled, but a peer on another machine can never reach it — the
-   *  reachable relay beside it is the point. When a loopback relay is ALL
-   *  such a page dials (allowed explicitly), it is the point: the room is
-   *  named by the relay the tab attaches to (core roomPreimage).
+  /** The relay this tab meets at: host[:port] of its meeting point — the
+   *  point its zone names while it is joined, else the first relay of its
+   *  own list — wss://hypercomb.com gives hypercomb.com, ws://localhost:7801
+   *  gives localhost:7801. A pure function of the zone and the relay list: no
+   *  fetch, no NIP-11, nothing stored. '' when no relay is named. The SAME
+   *  answer on every page (jwize, 2026-10-11: "The domain on the other hand
+   *  should not be used (current address in the browser)"): the page's own
+   *  domain never picks the point, so two tabs that named the same relay
+   *  read the same room on localhost:4250 and on hypercomb.io. Whether this
+   *  page may DIAL it is a separate question — a loopback point from a real
+   *  host is refused ('unreachable') and the tab meets nowhere, never at
+   *  another relay under another room's name (core roomPreimage).
    *
    *  It is NOT the swarm's upload host by default any more (2026-10-07,
    *  documentation/swarm-host.md): uploads go to the page's publish domains,
@@ -683,31 +736,23 @@ export class NostrMeshDrone extends Drone {
     return relays.length > 0 && relays.every(r => this.#addressedByRelay.get(r) === true)
   }
 
-  /** The first relay this tab may dial (see swarmHost), as configured. A
-   *  joined tab's own meeting point answers at once — before #syncZone has
-   *  moved the list in its microtask — and a joined tab without one answers
-   *  its own list: the room's every address names this point (core
-   *  roomPreimage), so a swarm deriving them in the same turn as the join
-   *  must already read where the tab is about to meet. */
+  /** The tab's meeting point (see swarmHost), as configured. A joined tab's
+   *  own meeting point answers at once — before #syncZone has moved the list
+   *  in its microtask — and a joined tab without one answers its own list:
+   *  the room's every address names this point (core roomPreimage), so a
+   *  swarm deriving them in the same turn as the join must already read
+   *  where the tab is about to meet. The point NAMED, whatever page this is:
+   *  a point this page may not dial is still the point (refused
+   *  'unreachable' — #syncZone), never swapped for a relay the page can
+   *  reach, which would be another room under the same words (2026-10-11). */
   #meetingRelay = (): string => {
-    const zoneRelay = isJoinedHere() ? this.#zoneRelayOf(readMeshZone()) : ''
-    const relays = zoneRelay ? [zoneRelay] : this.started ? this.ownRelays() : this.loadRelays(this.relays)
-    const local = this.isLocalContext()
-    // A loopback relay a public page was ALLOWED to dial (a list naming it,
-    // hc:nostrmesh:allow-loopback) is passed over for a reachable one beside
-    // it — but when it is all the tab dials, it IS where the tab meets: the
-    // room's point is the relay the tab attaches to, never a default it does
-    // not dial (2026-10-12).
-    let onlyLoopback = ''
+    const zoneRelay = isJoinedHere() ? this.#zoneRelayNamed(readMeshZone()) : ''
+    if (zoneRelay) return zoneRelay
+    const relays = this.started ? this.ownRelays() : this.loadRelays(this.relays)
     for (const relay of relays) {
-      if (!this.#relayAllowed(relay)) continue
-      let host = ''
-      try { host = new URL(relay).host } catch { continue /* not a URL — try the next relay */ }
-      if (!host) continue
-      if (!local && this.isLoopbackRelay(relay)) { onlyLoopback ||= relay; continue }
-      return relay
+      try { if (new URL(relay).host) return relay } catch { /* not a URL — try the next relay */ }
     }
-    return onlyLoopback
+    return ''
   }
 
   /** Milliseconds on the RELAY's clock: this device's clock corrected by the
@@ -1075,25 +1120,46 @@ export class NostrMeshDrone extends Drone {
     return target && relay === target ? zone.code : ''
   }
 
+  /** NO HOST, NO ROOM — SAID (jwize, 2026-10-11: "all the user should have
+   *  to do is put the host name in when entering a swarm"). A joined tab
+   *  with nothing to dial — no point in its zone, no relay it chose — meets
+   *  nowhere, and says so at once (`refused: 'no-host'`): the line names the
+   *  one remedy, the host field, instead of "connecting" for ever. Cleared
+   *  the moment a host is named, and on leaving. */
+  #sayNoHost = (joined: boolean): void => {
+    const none = joined && !this.stopped && this.relays.length === 0 && this.#refusal?.reason !== 'unreachable'
+    if (none) { if (this.#refusal?.reason !== 'no-host') this.#setRefusal('no-host') }
+    else if (this.#refusal?.reason === 'no-host') this.#clearRefusal()
+  }
+
   /** Point the mesh at this tab's meeting point (hc:mesh-zone) while it is
    *  joined: that one relay, dialled with its access code. Not joined, or no
    *  meeting point named: the page's own list. Acts only when the zone moved.
    *  reconnect=false moves only the list (at start, or when the network is
    *  about to reconnect anyway). A socket already at the right relay with the
    *  right code is never torn down: a join into the room the warm socket
-   *  already meets at costs nothing. */
+   *  already meets at costs nothing.
+   *
+   *  A zone that names NO point always puts the page's own list back, joined
+   *  or not: a not-joined tab's selector (or `use-live-relay <server>`)
+   *  points the mesh at the host it names before the join, and when that
+   *  host is let go — an emptied host field, `use-live-relay clear` — the
+   *  mesh must not keep it as this tab's host, or the next join dials a host
+   *  the person removed. A not-joined tab whose zone still names its point
+   *  keeps it until the join. */
   #syncZone = (reconnect = true): void => {
     if (!this.started || this.stopped) return
     const zone = readMeshZone()
     const joined = isJoinedHere()
+    const named = this.#zoneRelayNamed(zone)
     const relay = joined ? this.#zoneRelayOf(zone) : ''
     // A meeting point this page may not dial (a loopback one opened from a
     // real host): meet NOWHERE and say so (refused: 'unreachable'). Meeting
     // on the page's own list instead would split the meeting without a word
     // — everyone else is at the point.
-    const unreachable = joined && !relay && !!this.#zoneRelayNamed(zone)
-    const key = `${relay} ${zone.code ?? ''} ${unreachable ? zone.relay : ''}`
-    if (key === this.#zoneKey) return
+    const unreachable = joined && !relay && !!named
+    const key = `${joined ? 'in' : 'out'} ${relay} ${zone.code ?? ''} ${named}`
+    if (key === this.#zoneKey) { this.#sayNoHost(joined); return }
     this.#zoneKey = key
     let listMoved = false
     if (unreachable) this.#setRefusal('unreachable')
@@ -1108,13 +1174,16 @@ export class NostrMeshDrone extends Drone {
       this.relays = []
       this.#zoneOwnsList = true
       this.note('zone:unreachable', zone.relay)
-    } else if (this.#zoneOwnsList) {
+    } else if (this.#zoneOwnsList || !named) {
       this.#zoneOwnsList = false
       const own = this.loadRelays([])
       listMoved = !(own.length === this.relays.length && own.every((u, i) => u === this.relays[i]))
-      this.relays = own
-      this.note('zone:own-list')
+      if (listMoved) {
+        this.relays = own
+        this.note('zone:own-list')
+      }
     }
+    this.#sayNoHost(joined)
     if (!reconnect) return
     // A new code for a meeting point that refused the old one: stop waiting
     // out the access ladder and dial now. A socket that is in stays in — the
@@ -2043,15 +2112,16 @@ export class NostrMeshDrone extends Drone {
       const raw = localStorage.getItem('hc:nostrmesh:relays')
       const parsed = raw ? JSON.parse(raw) : null
       if (!Array.isArray(parsed)) return []
-      return parsed.filter((u: any) => typeof u === 'string').map((u: string) => u.trim())
+      return parsed.filter((u: any) => typeof u === 'string').map((u: string) => u.trim()).filter((u: string) => u !== CHOSEN_MARK)
     } catch { return [] }
   }
 
   private isLocalContext = (): boolean => {
     // True when the app itself is being served from a local-development
     // origin: a loopback relay it is GIVEN may be dialled from here without
-    // the explicit allowance a real host needs. Never a seed of its own
-    // (2026-10-12): a loopback page meets at LIVE_RELAY until it chooses.
+    // the explicit allowance a real host needs. A DIAL gate only — never a
+    // seed, never which relay is the point, never part of a room (2026-10-11:
+    // the page's own domain is not used for any of that).
     try {
       const host = String(window?.location?.hostname ?? '').toLowerCase()
       if (!host) return false
@@ -3087,37 +3157,23 @@ export class NostrMeshDrone extends Drone {
   }
 
   private loadRelays = (fallback: string[]): string[] => {
-    // Seed policy — ONE DEFAULT, EVERY ORIGIN (jwize, 2026-10-12: "yes make
-    // localhost default to hypercomb.com"):
+    // NO SEED, ON ANY PAGE (jwize, 2026-10-11: "Let's just make sure that
+    // there isn't a default host"). What the tab dials when it is not at a
+    // meeting point of its own is only what someone chose: the list saved
+    // under 'hc:nostrmesh:relays' (/domain, an older `/use-live-relay
+    // <server>`, an operator) — whole when this package saved it
+    // (CHOSEN_MARK), else read as chosen (chosenRelays — the default an older
+    // package stored at its head is not a choice) — else the list this tab was
+    // given in this session (`fallback`), else NOTHING. wss://hypercomb.com is
+    // offered by the selector, never put here; the local dev relay is a
+    // server someone names. The page's own address plays no part.
     //
-    //   every origin → LIVE_RELAY, the open always-online meeting point. A
-    //   loopback page (localhost:4250, the dev shell) meets there like every
-    //   install, so a dev hive and a phone meet with nothing to set. The
-    //   local dev relay (ws://localhost:7777, scripts/local-relay.ts) is
-    //   dialled only when it is CHOSEN: the meeting point field, a server
-    //   given to /use-live-relay, or a relay list (hc:nostrmesh:relays).
-    //   Seeding LOCAL_RELAY on a real host was a bug twice over (a dead
-    //   loopback socket on infinite backoff, and Chrome's Local Network
-    //   Access prompt at page open); seeding it on loopback split every dev
-    //   tab from the room it meant — the point is part of the room.
-    //
-    //   'hc:nostrmesh:use-live-relay' — '1' forces LIVE_RELAY, '0' opts out
-    //   of it: the page then idles with ZERO relays (publishes hit local
-    //   fanout only), never falling back to loopback. 'hc:nostrmesh:relays'
-    //   (explicit list) wins over both.
-    //
-    // IIFE on purpose: an inlined `let` here lets esbuild constant-propagate
-    // the flag into the seed expression, dead-code-eliminating a LIVE_RELAY
-    // or LOCAL_RELAY branch and removing the literal from the bundle.
-    // Wrapping the read in an IIFE makes the value opaque to constant
-    // propagation — esbuild cannot statically evaluate the return.
-    const flag = ((): string | null => {
-      try { return localStorage.getItem('hc:nostrmesh:use-live-relay') } catch { return null }
-    })()
-    const seed =
-      flag === '0' ? []
-      : [LIVE_RELAY]
-    const defaults = fallback.length > 0 ? fallback : seed
+    // 'hc:nostrmesh:use-live-relay' no longer picks a relay: '1' was written
+    // both by a person (`/use-live-relay`) and by the runtime's one-time
+    // beta seed on every deployed origin, so it can never be told from a
+    // seed — and it never named a host. It still steers the byte mirrors
+    // (content-broker), not where anyone meets.
+    const defaults = fallback.length > 0 ? fallback : []
     try {
       const raw = localStorage.getItem('hc:nostrmesh:relays')
       if (!raw) return defaults.slice()
@@ -3125,35 +3181,33 @@ export class NostrMeshDrone extends Drone {
       const parsed = JSON.parse(raw)
       if (!Array.isArray(parsed)) return defaults.slice()
 
-      const next = parsed
+      const listed = Array.from(new Set(parsed
         .filter((u: any) => typeof u === 'string')
         .map((u: string) => u.trim())
-        .filter((u: string) => u.startsWith('ws://') || u.startsWith('wss://'))
+        .filter((u: string) => u.startsWith('ws://') || u.startsWith('wss://'))))
+      const next = parsed.includes(CHOSEN_MARK) ? listed : chosenRelays(listed)
 
       if (next.length === 0) return defaults.slice()
 
-      // Stale-dev-list guard. A loopback-only override left over from a
-      // dev session (hc:nostrmesh:relays=["ws://localhost:7777"]) WINS on
-      // a real host forever: the loopback passes canAttemptRelay (it is
-      // user-configured), the live seed is never dialed, and the client
-      // is silently deaf while every publish still "succeeds". When the
-      // whole override is loopback on a real host, dial the live seed
-      // ALONGSIDE it — unless the operator explicitly claimed loopback
-      // intent with hc:nostrmesh:allow-loopback='1' or opted out of the
-      // live relay with use-live-relay='0'.
-      const allLoopback = next.every(u => this.isLoopbackRelay(u))
-      if (allLoopback && !this.isLocalContext() && flag !== '0' && !this.allowLoopbackRelay()) {
-        this.note('relay:loopback-override-augmented', LIVE_RELAY)
-        return Array.from(new Set([...next, LIVE_RELAY]))
-      }
-      return Array.from(new Set(next))
+      // A list someone wrote is theirs, on every page. The stale-dev-list
+      // guard that appended the live relay to a loopback-only list on a
+      // real host (and only there) is gone (2026-10-11): it chose a relay
+      // for the participant from the page's own domain, and the room is
+      // named by the relay they chose (#meetingRelay) — the live relay
+      // beside it carried that room's addresses to a relay nobody in it
+      // meets at. A loopback list on a real host is dialled as named
+      // (it is user-configured) and its point is what the words say.
+      return next
     } catch {
       return defaults.slice()
     }
   }
 
+  /** Save the page's own list as the participant's, whole: behind
+   *  CHOSEN_MARK, so a reload reads back exactly what this session dials (no
+   *  seed rule — this package seeds nothing). */
   private saveRelays = (urls: string[]): void => {
-    try { localStorage.setItem('hc:nostrmesh:relays', JSON.stringify(urls)) } catch { /* ignore */ }
+    try { localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([CHOSEN_MARK, ...urls])) } catch { /* ignore */ }
   }
 
   private loadKinds = (fallback: number[] | null): number[] | null => {
