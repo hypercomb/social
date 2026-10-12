@@ -204,9 +204,10 @@ id = "186c91f7458b421abea02d7647f27821"
 # its three lines here and deploy this worker. Without a binding the worker
 # serves exactly as before (meetingPointFor falls through), so leaving either
 # commented is always safe.
-# [[services]]
-# binding = "MEET_OPEN"
-# service = "hypercomb-meet-open"
+# MEET_OPEN is LIVE (hypercomb-meet-open deployed 2026-10-11): the open default.
+[[services]]
+binding = "MEET_OPEN"
+service = "hypercomb-meet-open"
 # [[services]]
 # binding = "MEET"
 # service = "hypercomb-meet"
