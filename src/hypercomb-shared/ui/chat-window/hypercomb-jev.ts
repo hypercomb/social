@@ -83,6 +83,10 @@ export interface VerifyDecision {
   readonly model: string
   readonly answers: Record<string, unknown>
   readonly usage?: { inputTokens?: number; outputTokens?: number; cost?: number }
+  /** The evidence exactly as Jev was shown it: each piece the service took
+   *  as the worker was sent it, rendered as text past its source boundary
+   *  (essentials jev-evidence.ts). Absent from an older module. */
+  readonly evidence?: readonly string[]
 }
 export interface JevLike {
   ready(providerId: string): boolean
@@ -154,12 +158,25 @@ export const persistJevFront = async (store: ResourceWriter | undefined, request
   })
 }
 
-/** A verification's provenance: what was checked and what Jev answered. */
-export const persistJevVerify = async (store: ResourceWriter | undefined, answer: string, result: VerifyDecision): Promise<string | undefined> => {
+/** A verification's provenance: what was checked and what Jev answered. The
+ *  verdict is Jev's alone; the request and the evidence EXACTLY as Jev was
+ *  shown it are kept too, each piece by signature, so a verdict can be
+ *  replayed from the outcomes pool against what Jev actually saw. That is the
+ *  evidence the verdict carries — the fitted pieces as the service rendered
+ *  them for Jev — or, from a module that does not return it, the fitted
+ *  pieces (fitEvidence) as they were sent. */
+export const persistJevVerify = async (
+  store: ResourceWriter | undefined, answer: string, result: VerifyDecision,
+  checked?: { readonly request: string; readonly evidence: readonly string[] },
+): Promise<string | undefined> => {
   if (!store?.putResource) return undefined
   return resource(store, {
     kind: 'jev-verify', requestedModel: JEV_MODEL, model: result.model, rubric: 1, verified: result.verified,
     answer: await resource(store, answer), reason: await resource(store, result.reason), answers: await resource(store, result.answers),
+    ...(checked ? {
+      request: await resource(store, checked.request),
+      evidence: await Promise.all((result.evidence ?? checked.evidence).map(part => resource(store, part))),
+    } : {}),
   })
 }
 
@@ -189,27 +206,59 @@ export const JEV_STATE_CHARS = 24_000
 const JEV_EVIDENCE_CHARS = 16_000
 const JEV_EVIDENCE_ITEMS = 12
 
+/** Where a cut may fall, and how much of the mark the tail skips: a line's
+ *  end, a line's end inside a JSON string (`\n` as written), or the comma
+ *  between two JSON fields or items. */
+const BREAKS: readonly (readonly [string, number])[] = [['\n', 1], ['\\n', 2], [',"', 1]]
+
+/** A piece cut to `kept` characters, as written: its head and its tail as
+ *  two pieces (or its head alone when `both` is false). Each end stops at a
+ *  break when one is near, so neither opens or closes on half a name. */
+const ends = (part: string, kept: number, both: boolean): string[] => {
+  if (!both) return [part.slice(0, kept).trim()].filter(Boolean)
+  let front = part.slice(0, Math.ceil(kept / 2))
+  let back = part.slice(part.length - Math.floor(kept / 2))
+  const end = Math.max(...BREAKS.map(([mark]) => front.lastIndexOf(mark)))
+  if (end > 0 && front.length - end < 240) front = front.slice(0, end)
+  const start = Math.min(...BREAKS.map(([mark, skip]) => { const at = back.indexOf(mark); return at < 0 ? Infinity : at + skip }))
+  if (start < 240) back = back.slice(start)
+  return [front.trim(), back.trim()].filter(Boolean)
+}
+
 /** WHAT JEV IS SHOWN OF THE EVIDENCE. Reading a lot is the work, never a
  *  reason for Jev to fall away: the first `keep` pieces (the request) stay,
  *  then the newest pieces the worker can still see as written — after the
  *  ledger folded older rounds, those are the ones Jev may judge by — within
- *  `room` characters as they travel (JSON-escaped) and Jev's own limits. A
- *  piece too long is cut from its start; a cut of what was written is still
- *  what was written. */
+ *  `room` characters as they travel (JSON-escaped) and Jev's own limits.
+ *
+ *  EVERY PIECE STAYS AS WRITTEN. Jev's source boundary (essentials
+ *  jev-decision.service.ts: verify, and jevUnseen for a decision) takes a
+ *  piece only when the worker was sent it as written; a piece rendered,
+ *  re-ordered or carrying a cut marker is refused, and the refusal goes
+ *  unseen — the verify door then checks nothing at all. So a piece too long
+ *  is shown as its head and its tail, two pieces each as written: a read
+ *  receipt's head names the read, its tail holds the notes, which the
+ *  receipt writes after the children and the projection (a cut from the
+ *  start alone dropped them on a big tile, live 2026-10-11/12). With one
+ *  place left it keeps its head. Jev still reads every piece as text: the
+ *  verify door renders it past that boundary (essentials jev-evidence.ts). */
 export const fitEvidence = (evidence: readonly string[], seen: (part: string) => boolean, room: number, keep = 0): string[] => {
-  const cost = (part: string): number => JSON.stringify(part).length + 1
+  const cost = (parts: readonly string[]): number => parts.reduce((sum, part) => sum + JSON.stringify(part).length + 1, 0)
   const head = evidence.slice(0, keep)
-  let left = Math.min(room, JEV_EVIDENCE_CHARS) - head.reduce((sum, part) => sum + cost(part), 0)
+  let left = Math.min(room, JEV_EVIDENCE_CHARS) - cost(head)
   const tail: string[] = []
   for (let i = evidence.length - 1; i >= keep && head.length + tail.length < JEV_EVIDENCE_ITEMS && left > 256; i--) {
-    const part = evidence[i]
-    if (!seen(part)) continue
-    let cut = part
-    while (cut && cost(cut) > left) cut = cut.slice(0, Math.floor(cut.length * Math.min(0.9, left / cost(cut))))
-    cut = cut.trim()
-    if (!cut) continue
-    tail.unshift(cut)
-    left -= cost(cut)
+    if (!seen(evidence[i])) continue
+    const part = evidence[i].trim()
+    const both = JEV_EVIDENCE_ITEMS - head.length - tail.length > 1
+    let shown = part ? [part] : []
+    for (let kept = part.length; shown.length && cost(shown) > left;) {
+      kept = Math.floor(kept * Math.min(0.9, left / cost(shown)))
+      shown = kept > 0 ? ends(part, kept, both) : []
+    }
+    if (!shown.length) continue
+    tail.unshift(...shown)
+    left -= cost(shown)
   }
   return [...head, ...tail]
 }

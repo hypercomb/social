@@ -22,7 +22,7 @@
 // manifest is fine: resolveChildNames backfills a complete one once all
 // children are warm. Nothing here is ever load-bearing.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import type { HistoryService } from './history.service.js'
 import { ACTIVE_GENOME_KEY, ActiveGenomeService } from './active-genome.service.js'
 
@@ -57,6 +57,10 @@ type ManifestEntry = {
 }
 type ManifestStore = {
   writeChildrenManifest?: (parentSig: string, manifest: ManifestEntry[]) => Promise<void>
+  /** A layer's bytes ON THIS DEVICE, meta envelopes followed — never a host fetch. */
+  getLayerBytes?: (sig: string) => Promise<Uint8Array | null>
+  /** The bytes stored under exactly this sig on this device — an envelope is NOT followed. */
+  getLayerLocalBytes?: (sig: string) => Promise<Uint8Array | null>
   getResourceLocal?: (sig: string) => Promise<Blob | null>
   getOptimizedVisual?: (sourceSig: string) => Promise<Blob | null>
   optimizeVisual?: (sourceSig: string, raw: Blob) => Promise<void>
@@ -89,15 +93,60 @@ export class ManifestOptimizerDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'derives children manifests for committed layers during the optimize phase'
 
-  protected override listens = ['content:wrote']
+  protected override listens = ['content:wrote', 'content:arrived', 'broker:fetched', 'adopt:progress', 'adopt:done']
 
   // parent layer sig → child sigs, queued at commit, drained on optimize
   #pending = new Map<string, string[]>()
+
+  // A COLD CHILD KEEPS ITS PARENT WAITING (incident 2026-10-11/12). The pass
+  // clears #pending before it starts, and a parent whose child layer was not
+  // local yet used to be dropped for good: that parent never got a children
+  // manifest, so the search index read its children as leaves and `find betz /`
+  // answered a confident "not found" for /dolphin/associates/betz. A cold child
+  // is "couldn't see yet", never "isn't there", so the parent waits here with
+  // the children it still lacks:
+  //  - it goes back in the queue while passes keep finding MORE of its
+  //    children (an adopted page lands a few layers at a time). Only a pass
+  //    that finds none new counts, and #MAX_STALLED_PASSES of those in a row
+  //    PARK it: out of the queue, said once at debug level, so a child that
+  //    never arrives costs no pass;
+  //  - an ANNOUNCED ARRIVAL wakes it: a layer it lacks announced by
+  //    content:arrived (the Store's host heal, the broker's "host learned"),
+  //    content:wrote (a commit), broker:fetched (a mesh fetch) or
+  //    adopt:progress (the adopt walk, whose fetches persist without a
+  //    content:arrived) puts it back in the queue with a fresh count, parked
+  //    or not; adopt:done does that for every waiter (2026-10-12). A burst of
+  //    acts can use up its passes before the bytes land; an announced arrival
+  //    still reaches it. Bytes that land unannounced (a quiet walk) wake
+  //    nothing — the next ask (enqueue) starts the count over.
+  // `missing` holds what the parent waits ON: each cold child slot, and the
+  // layer its local META ENVELOPE points at (2026-10-12) — the slot is cold
+  // when that target is, and every arrival that heals it names the target.
+  // Memory only, and bounded: past #MAX_WAITING the longest waiter is
+  // forgotten, and the next paint that finds no manifest asks again.
+  #waiting = new Map<string, { children: string[]; missing: Set<string>; found: number; stalls: number }>()
+  static readonly #MAX_STALLED_PASSES = 5
+  static readonly #MAX_WAITING = 256
+  /** Envelope hops followed to a slot's target. An envelope never wraps an
+   *  envelope, so anything past this is malformed and the walk stops. */
+  static readonly #MAX_ENVELOPE_HOPS = 4
+
+  // ONE PASS AT A TIME (2026-10-11/12). The processor clears its flag when a
+  // run STARTS, so an act() landing mid-pass starts a second run while the
+  // first is still minting. That run took the parents the first had just put
+  // back and judged them again before anything could land. A pass that starts
+  // while one runs now waits for it — and they COALESCE (2026-10-12): at most
+  // one pass waits, and every call made while it waits joins it. Otherwise a
+  // burst of acts during a long pass queued a pass each, and they ran
+  // back-to-back once it ended, each one a stall, parking a parent in a tick.
+  #pass: Promise<void> = Promise.resolve()
+  #queued: Promise<void> | null = null
 
   constructor() {
     super()
     this.onEffect<{ sig: string; kind: string; bytes: ArrayBuffer }>('content:wrote', e => {
       if (e?.kind !== 'layer' || !e.sig || !e.bytes) return
+      this.#wake(e.sig)
       try {
         const layer = JSON.parse(new TextDecoder().decode(e.bytes)) as { children?: unknown }
         const children = Array.isArray(layer.children)
@@ -106,6 +155,18 @@ export class ManifestOptimizerDrone extends Drone {
         if (children.length > 0) this.#pending.set(e.sig, children)
       } catch { /* non-JSON layer bytes — nothing to derive */ }
     })
+    this.onEffect<{ sig: string; kind: string }>('content:arrived', e => {
+      if (e?.kind === 'layer' && e.sig) this.#wake(e.sig)
+    })
+    // The broker's own landings (2026-10-12): persisted, never re-announced
+    // as content:arrived. Both fire after the bytes are written.
+    this.onEffect<{ sig: string; type: string }>('broker:fetched', e => {
+      if (e?.type === 'layer' && e.sig) this.#wake(e.sig)
+    })
+    this.onEffect<{ sig: string }>('adopt:progress', e => {
+      if (e?.sig) this.#wake(e.sig)
+    })
+    this.onEffect('adopt:done', () => this.#wake())
   }
 
   /**
@@ -122,12 +183,27 @@ export class ManifestOptimizerDrone extends Drone {
     const children = childSigs.map(c => String(c ?? '').toLowerCase()).filter(c => SIG_RE.test(c))
     if (children.length === 0) return
     this.#pending.set(parent, children)
+    this.#waiting.delete(parent) // asked again: a waiting parent's count starts over
   }
 
   /** How many parents are waiting for the next pass — for a test, or a status line. */
   public get pendingCount(): number { return this.#pending.size }
 
-  public override optimize = async (): Promise<void> => {
+  public override optimize = (): Promise<void> => {
+    if (this.#queued) return this.#queued // a pass already waits: join it
+    const queued = this.#pass.then(this.#startPass, this.#startPass)
+    this.#queued = queued
+    this.#pass = queued.catch(() => { /* a failed pass never blocks the next */ })
+    return queued
+  }
+
+  /** The waiting pass begins: a call from here on queues the next one. */
+  readonly #startPass = (): Promise<void> => {
+    this.#queued = null
+    return this.#runPass()
+  }
+
+  readonly #runPass = async (): Promise<void> => {
     if (this.#pending.size === 0) return
     const store = get('@hypercomb.social/Store') as ManifestStore | undefined
     const history = get('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
@@ -141,15 +217,108 @@ export class ManifestOptimizerDrone extends Drone {
     // under all of them in one go — the same stall buildEntries budgets away.
     const budget = { mints: ManifestOptimizerDrone.#MINTS_PER_PASS }
     for (const [parentSig, childSigs] of batch) {
+      // Every child layer must be HERE before any entry is built. Resolving
+      // first keeps complete-or-absent, and a parent that cannot be written
+      // this pass spends none of the shared mint budget on its warm children.
+      // EVERY child is read, not just up to the first cold one (2026-10-11/12):
+      // a waiting parent's progress, and the arrivals that wake it, are the
+      // whole set.
+      const layers: Array<ManifestEntry['layer'] | null> = []
+      for (const sig of childSigs) layers.push(await this.#localLayer(sig, history, store))
+      const missing = childSigs.filter((_, i) => !layers[i])
+      if (missing.length > 0) {
+        const awaited = new Set<string>()
+        for (const sig of missing) for (const s of await this.#awaitedFor(sig, store)) awaited.add(s)
+        this.#stall(parentSig, childSigs, missing.length, awaited)
+        continue
+      }
+      this.#waiting.delete(parentSig)
       const manifest: ManifestEntry[] = []
-      for (const sig of childSigs) {
-        const child = await history.getLayerBySig(sig)
-        if (!child) break
-        manifest.push({ sig, layer: child, ...await this.#visualFor(child, store, budget) })
+      for (let i = 0; i < childSigs.length; i++) {
+        const layer = layers[i]!
+        manifest.push({ sig: childSigs[i], layer, ...await this.#visualFor(layer, store, budget) })
       }
-      if (manifest.length === childSigs.length) {
-        await store.writeChildrenManifest(parentSig, manifest)
-      }
+      await store.writeChildrenManifest(parentSig, manifest)
+    }
+  }
+
+  /** A child layer, read LOCAL ONLY (2026-10-11/12): the parsed cache, then the
+   *  bytes on this device. getLayerBySig on a miss asks the host — a network
+   *  fetch from a derived-cache pass, and a waiting parent would repeat it
+   *  every pass it comes back for. It is called only once the bytes are known
+   *  to be here, so the layer is hydrated as every reader sees it, from a local
+   *  hit. A store without the local reader keeps the old read. */
+  readonly #localLayer = async (
+    sig: string,
+    history: HistoryService,
+    store: ManifestStore,
+  ): Promise<ManifestEntry['layer'] | null> => {
+    const warm = history.peekLayerBySig(sig)
+    if (warm) return warm
+    if (store.getLayerBytes) {
+      const here = await store.getLayerBytes(sig).catch(() => null)
+      if (!here?.byteLength) return null
+    }
+    return history.getLayerBySig(sig).catch(() => null)
+  }
+
+  /** What a cold child slot waits ON (2026-10-12): the slot, and — since the
+   *  Life write boundary put META ENVELOPES in child slots — every layer its
+   *  local envelope points through. getLayerBytes follows the envelope, so the
+   *  slot is cold when its TARGET is, and the heal that brings it names the
+   *  target (getLayerBySig fetches through the envelope), never the slot.
+   *  Local reads only, bounded by #MAX_ENVELOPE_HOPS. */
+  readonly #awaitedFor = async (sig: string, store: ManifestStore): Promise<string[]> => {
+    const awaited = [sig]
+    for (let hop = 0; hop < ManifestOptimizerDrone.#MAX_ENVELOPE_HOPS && store.getLayerLocalBytes; hop++) {
+      const bytes = await store.getLayerLocalBytes(awaited[awaited.length - 1]).catch(() => null)
+      if (!bytes?.byteLength) break
+      let target: string | null = null
+      try {
+        const parsed = JSON.parse(new TextDecoder().decode(bytes))
+        const payload = isMetaEnvelope(parsed) ? metaPayloadOf(parsed) : null
+        if (payload?.kind === 'layer') target = payload.sig
+      } catch { /* not JSON — not an envelope */ }
+      if (!target || awaited.includes(target)) break
+      awaited.push(target)
+    }
+    return awaited
+  }
+
+  /** A parent this pass could not write. A newer list queued DURING the pass
+   *  (enqueue, content:wrote) is left to be judged on its own pass. Otherwise
+   *  the parent waits: back in the queue, or, after #MAX_STALLED_PASSES passes
+   *  in a row that found none of its children new, parked until one arrives.
+   *  A parent sig names its children, so its list never changes while it waits. */
+  readonly #stall = (parentSig: string, childSigs: string[], missingCount: number, awaited: Set<string>): void => {
+    if (this.#pending.has(parentSig)) return
+    const found = childSigs.length - missingCount
+    const prior = this.#waiting.get(parentSig)
+    const stalls = prior && found <= prior.found ? prior.stalls + 1 : 1
+    this.#waiting.delete(parentSig) // set again so the map runs longest-waiting first
+    this.#waiting.set(parentSig, { children: childSigs, missing: awaited, found, stalls })
+    for (const longest of this.#waiting.keys()) {
+      if (this.#waiting.size <= ManifestOptimizerDrone.#MAX_WAITING) break
+      this.#waiting.delete(longest)
+      this.#pending.delete(longest)
+    }
+    if (stalls >= ManifestOptimizerDrone.#MAX_STALLED_PASSES) {
+      console.debug(`[manifest-optimizer] ${parentSig.slice(0, 12)}: ${missingCount} of ${childSigs.length} children not here after ${stalls} passes — parked until one arrives`)
+      return
+    }
+    this.#pending.set(parentSig, childSigs)
+  }
+
+  /** A layer landed. Every waiting parent that lacks it goes back in the queue
+   *  with a fresh count, parked or not, and the next pass reads what is here.
+   *  No sig (an adopt walk ended, 2026-10-12) wakes every waiter — at most
+   *  #MAX_WAITING. Waking only queues: a pass still runs only when an act()
+   *  schedules one. */
+  readonly #wake = (sig?: string): void => {
+    for (const [parentSig, waiter] of this.#waiting) {
+      if (sig !== undefined && !waiter.missing.has(sig)) continue
+      waiter.stalls = 0
+      if (!this.#pending.has(parentSig)) this.#pending.set(parentSig, waiter.children)
     }
   }
 

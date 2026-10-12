@@ -7,7 +7,8 @@ import { openRouterRouting, providerBlock } from './providers/openrouter-routing
 import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevReadingQuestions, jevReadingResult, jevReadingState, jevResult, jevState, type JevInput, type JevReadingInput, type JevReadingResult, type JevResult, type JevPassInput, type JevPassResult, jevPassQuestions, jevPassResult, jevPassState } from './jev-decision.js'
 import type { JevDirectInput } from './jev-direct.js'
 import { jevFrontInput, jevFrontQuestions, jevFrontResult, jevFrontState, type JevFrontResult } from './jev-front.js'
-import { jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type JevVerifyResult } from './jev-verify.js'
+import { jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type JevVerifyInput, type JevVerifyResult } from './jev-verify.js'
+import { jevEvidenceText } from './jev-evidence.js'
 import { jevFileInput, jevFileQuestions, jevFileResult, type JevFileResult } from './jev-file.js'
 
 /** A subset of material ALREADY sent to / received from the worker whose
@@ -143,8 +144,15 @@ export class JevDecisionService {
 
   /** JEV CHECKS THE ANSWER (jev-verify.ts): is the worker's final answer
    *  supported by what the hive read, and complete? The answer, the request
-   *  and every piece of evidence must already be in the worker's exchange. */
-  async verify(raw: unknown, source: JevSource, signal?: AbortSignal): Promise<JevVerifyResult> {
+   *  and every piece of evidence must already be in the worker's exchange.
+   *
+   *  JEV READS THE READS AS TEXT (jev-evidence.ts). The boundary runs on the
+   *  pieces exactly as the worker was sent them; only past it is each piece
+   *  rendered — from the message that holds it, so nothing new travels —
+   *  and that text is what Jev is shown. Should the text ever outgrow the
+   *  budget the pieces fit as written, Jev is shown them as written. The
+   *  result carries `evidence`: exactly what Jev was shown, for the receipt. */
+  async verify(raw: unknown, source: JevSource, signal?: AbortSignal): Promise<JevVerifyResult & { readonly evidence: readonly string[] }> {
     signal?.throwIfAborted()
     if (!this.ready(source.providerId)) throw new Error('Jev requires an enabled worker and the OpenRouter hive read grant')
     const input = jevVerifyInput(raw)
@@ -152,10 +160,13 @@ export class JevDecisionService {
     const missing = !seen(input.request) ? 'the request' : !seen(input.answer) ? 'the answer'
       : input.evidence.findIndex(part => !seen(part)) >= 0 ? `evidence ${input.evidence.findIndex(part => !seen(part)) + 1}` : null
     if (missing) throw boundary(`Jev may only judge what this worker already saw, and it could not find ${missing} as written`)
-    if (JSON.stringify(input).length > (llmHiveAccess.budget('openrouter') ?? 24_000) + 8_000) throw boundary('Jev verification exceeds the OpenRouter read budget')
-    const result = await this.#post({ state: input, questions: jevVerifyQuestions() }, jevVerifyResult, signal)
+    const budget = (llmHiveAccess.budget('openrouter') ?? 24_000) + 8_000
+    if (JSON.stringify(input).length > budget) throw boundary('Jev verification exceeds the OpenRouter read budget')
+    const rendered: JevVerifyInput = { ...input, evidence: input.evidence.map(piece => jevEvidenceText(piece, source.messages)) }
+    const state = JSON.stringify(rendered).length > budget ? input : rendered
+    const result = await this.#post({ state, questions: jevVerifyQuestions() }, jevVerifyResult, signal)
     if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
-    return result
+    return { ...result, evidence: state.evidence }
   }
 
   /** For a word the participant says directly (no worker): Jev switched on,

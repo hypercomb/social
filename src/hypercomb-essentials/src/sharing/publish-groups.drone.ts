@@ -60,6 +60,29 @@ type StoreLike = { getResource(sig: string): Promise<Blob | null> }
 type RecordLike = { sig: string; kind: string; payload?: Record<string, unknown> }
 type ViewModeLike = EventTarget & { mode?: string }
 
+/** A group as the `groups` word reads it. */
+export interface PublishGroupView {
+  readonly meaning: string
+  readonly name: string
+  readonly icon: string
+  readonly color: string
+  /** The member tiles, by name, in the layer's own child order. */
+  readonly members: readonly string[]
+}
+
+/** What a layer says about its publish groups. */
+export interface PublishGroupsReading {
+  /** `publish:groups` is deposited here. */
+  readonly on: boolean
+  /** …and the behaviour is asleep for this hive (switched off in the pool). */
+  readonly dormant: boolean
+  readonly groups: readonly PublishGroupView[]
+  /** Every child tile of the layer, by name — what a group can hold. */
+  readonly children: readonly string[]
+}
+
+const quiet = (): void => { /* the write queue already said why */ }
+
 /** A group on the strip: its appearance, its identity, who wears it. */
 interface Shown {
   readonly group: PublishGroup
@@ -90,9 +113,11 @@ export class PublishGroupsDrone extends Drone {
   protected override deps = { lineage: '@hypercomb.social/Lineage' }
   protected override listens = [
     'decorations:changed', 'history:cursor-changed', 'selection:changed', 'view:active',
-    'render:cell-count', ENABLEMENT_CHANGED, ICON_PICK_RESULT, ICON_PICKER_OPEN,
+    'render:cell-count', ENABLEMENT_CHANGED, ICON_PICK_RESULT, ICON_PICKER_OPEN, 'publish-groups:publish',
   ]
-  protected override emits = ['group:preview', 'toast:show', 'publish:refresh', ICON_PICK_REQUEST]
+  protected override emits = [
+    'group:preview', 'toast:show', 'publish:refresh', 'publish-groups:render', ICON_PICK_REQUEST,
+  ]
 
   #bound = false
   #element: HTMLElement | null = null
@@ -117,6 +142,8 @@ export class PublishGroupsDrone extends Drone {
    *  they would both start from the old record, one would be lost, and a
    *  stray record would stay in the slot. */
   #writes: Promise<void> = Promise.resolve()
+  /** Groups made by `+` whose editor is open before the read that shows them. */
+  #awaiting = new Set<string>()
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#bound) return
@@ -140,6 +167,13 @@ export class PublishGroupsDrone extends Drone {
       this.#render()
     })
     this.onEffect<{ open?: boolean }>(ICON_PICKER_OPEN, (payload) => { this.#pickerOpen = payload?.open === true })
+    // The Publish panel's own Groups section — a group publishes from there
+    // too, and from inside a view, where the strip is not drawn.
+    this.onEffect<{ segments?: unknown; meaning?: unknown }>('publish-groups:publish', (p) => {
+      const segments = Array.isArray(p?.segments) ? p.segments.map(s => String(s ?? '').trim()).filter(Boolean) : null
+      const meaning = typeof p?.meaning === 'string' ? p.meaning : ''
+      if (segments && meaning) void this.publishGroup(segments, meaning)
+    })
     this.onEffect<IconPickResult>(ICON_PICK_RESULT, (result) => {
       const pick = this.#iconPick
       if (!pick || result?.token !== pick.token) return
@@ -194,45 +228,61 @@ export class PublishGroupsDrone extends Drone {
   async #refresh(): Promise<void> {
     const gen = ++this.#gen
     const segments = this.#currentSegments()
-    const history = ioc<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
-    if (isPublishedVisitorShell() || this.#covered() || !history?.sign) {
+    // A covering view hides the STRIP (#render asks), not the groups: the
+    // Publish panel lists them over a view as well.
+    if (isPublishedVisitorShell()) {
       this.#settle(gen, segments, false, [])
       return
     }
     try {
-      const layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
+      const reading = await this.#read(segments, false)
       if (gen !== this.#gen) return
-      const records = await this.#recordsOf(layer)
-      const lit = records.some(r => r.kind === PUBLISH_GROUPS_KIND)
-        && !isBehaviorDormant(PUBLISH_GROUPS_KIND, segments)
-      if (!lit) { this.#settle(gen, segments, false, []); return }
+      const lit = reading.on && !reading.dormant
+      this.#settle(gen, segments, lit, lit ? reading.shown : [])
+    } catch {
+      this.#settle(gen, segments, false, [])
+    }
+  }
 
-      const groups = groupsInSlotOrder(records)
-      const sigs = await Promise.all(groups.map(g => groupSignature(g.meaning)))
-      const memberOf = new Map(sigs.map(sig => [sig, new Set<string>()]))
-      // Every child of this layer, not just the rendered ones — a filtered
-      // page must not publish half a group. The parent's `children` names
-      // them; each child's marks are read from ITS OWN head, because a child
-      // gaining a mark does not move the sig its parent lists (names are the
-      // truth, resolved to heads when read).
-      const childSigs = (Array.isArray(layer?.children) ? layer!.children as unknown[] : [])
-        .filter((s): s is string => typeof s === 'string' && SIG_RE.test(s))
-      const names = [...new Set((await Promise.all(childSigs.map(sig => history.getLayerBySig(sig).catch(() => null))))
-        .map(child => typeof child?.name === 'string' ? child.name : '')
-        .filter(Boolean))]
-      const heads = await Promise.all(names.map(async name =>
+  /** ONE read of a layer's groups — the strip and the word ask the same
+   *  question. `full` also reads every child (to name members and what a
+   *  group could hold); the strip skips that where there is nothing to show. */
+  async #read(segments: readonly string[], full: boolean): Promise<{
+    on: boolean; dormant: boolean; shown: Shown[]; children: string[]
+  }> {
+    const history = ioc<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
+    if (!history?.sign) return { on: false, dormant: false, shown: [], children: [] }
+    const layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
+    const records = await this.#recordsOf(layer)
+    const on = records.some(r => r.kind === PUBLISH_GROUPS_KIND)
+    const dormant = isBehaviorDormant(PUBLISH_GROUPS_KIND, segments)
+    const groups = groupsInSlotOrder(records)
+    const sigs = await Promise.all(groups.map(g => groupSignature(g.meaning)))
+    const memberOf = new Map(sigs.map(sig => [sig, new Set<string>()]))
+    const shown = (): Shown[] => groups.map((group, i) => ({ group, sig: sigs[i], members: memberOf.get(sigs[i])! }))
+    if (!full && (!on || dormant || groups.length === 0)) return { on, dormant, shown: shown(), children: [] }
+
+    // Every child of this layer, not just the rendered ones — a filtered
+    // page must not publish half a group. The parent's `children` names
+    // them; each child's marks are read from ITS OWN head, because a child
+    // gaining a mark does not move the sig its parent lists (names are the
+    // truth, resolved to heads when read).
+    const childSigs = (Array.isArray(layer?.children) ? layer!.children as unknown[] : [])
+      .filter((s): s is string => typeof s === 'string' && SIG_RE.test(s))
+    const children = [...new Set((await Promise.all(childSigs.map(sig => history.getLayerBySig(sig).catch(() => null))))
+      .map(child => typeof child?.name === 'string' ? child.name : '')
+      .filter(Boolean))]
+    if (groups.length > 0) {
+      const heads = await Promise.all(children.map(async name =>
         history.currentLayerAt(await history.sign({ explorerSegments: () => [...segments, name] })).catch(() => null)))
-      for (const [i, name] of names.entries()) {
+      for (const [i, name] of children.entries()) {
         for (const record of await this.#recordsOf(heads[i])) {
           if (record.kind !== 'group') continue
           memberOf.get(String(record.payload?.['sig'] ?? '').toLowerCase())?.add(name)
         }
       }
-      if (gen !== this.#gen) return
-      this.#settle(gen, segments, true, groups.map((group, i) => ({ group, sig: sigs[i], members: memberOf.get(sigs[i])! })))
-    } catch {
-      this.#settle(gen, segments, false, [])
     }
+    return { on, dormant, shown: shown(), children }
   }
 
   #settle(gen: number, segments: string[], lit: boolean, shown: Shown[]): void {
@@ -240,7 +290,12 @@ export class PublishGroupsDrone extends Drone {
     this.#segments = segments
     this.#lit = lit
     this.#shown = shown
-    if (this.#editing && !shown.some(s => s.group.meaning === this.#editing)) this.#editing = ''
+    for (const s of shown) this.#awaiting.delete(s.group.meaning)
+    // A group made a moment ago may not be in this read yet — its editor
+    // waits for it rather than closing.
+    if (this.#editing && !this.#awaiting.has(this.#editing) && !shown.some(s => s.group.meaning === this.#editing)) {
+      this.#editing = ''
+    }
     this.#render()
   }
 
@@ -270,77 +325,93 @@ export class PublishGroupsDrone extends Drone {
     return record
   }
 
+  async #layerRecords(segments: readonly string[]): Promise<RecordLike[]> {
+    const history = ioc<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
+    if (!history?.sign) return []
+    return this.#recordsOf(await history.currentLayerAt(await history.sign({ explorerSegments: () => segments })))
+  }
+
   /** This group's records on the layer AS IT IS NOW, by the sigs the slot
    *  really holds. A write's returned sig need not be one of them — history's
    *  write boundary canonicalizes what it commits (HistoryService
    *  `#canonicalArtifactReferences`) — so a removal names what a read found,
    *  never what a write returned. */
   async #groupRecords(segments: readonly string[], meaning: string): Promise<RecordLike[]> {
-    const history = ioc<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
-    if (!history?.sign) return []
-    const layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
-    return (await this.#recordsOf(layer))
+    return (await this.#layerRecords(segments))
       .filter(r => r.kind === PUBLISH_GROUP_KIND && parseGroupPayload(r.payload)?.meaning === meaning)
   }
 
-  // ── the gestures ───────────────────────────────────────────────────
+  // ── the acts — the strip's gestures and the `groups` word both land here ──
 
-  /** Queue a write behind every earlier one, then re-read. The layer it
-   *  targets is captured NOW — a walk before it runs must not move it. */
-  #write(task: (segments: readonly string[]) => Promise<void>): Promise<void> {
-    const segments = [...this.#segments]
-    this.#writes = this.#writes
-      .then(() => task(segments))
-      .catch(err => console.warn('[publish-groups] write failed:', err))
-      .then(() => this.#schedule())
-    return this.#writes
+  /** A layer's groups, their members, and every child a group could hold. */
+  async groupsAt(segments: readonly string[]): Promise<PublishGroupsReading> {
+    const reading = await this.#read(segments, true)
+    return {
+      on: reading.on,
+      dormant: reading.dormant,
+      children: reading.children,
+      groups: reading.shown.map(({ group, members }) => ({
+        meaning: group.meaning, name: group.name, icon: group.icon, color: group.color,
+        members: reading.children.filter(name => members.has(name)),
+      })),
+    }
   }
 
-  #tap(shown: Shown): void {
-    if (this.#selected.length === 0) {
-      this.#editing = this.#editing === shown.group.meaning ? '' : shown.group.meaning
-      this.#render()
-      return
-    }
-    const { join, leave } = decideTap(this.#selected, shown.members)
-    // Answer on the strip at once; the reads confirm it when the commits land.
-    for (const label of join) shown.members.add(label)
-    for (const label of leave) shown.members.delete(label)
-    this.#render()
-    const { sig } = shown
-    const { meaning } = shown.group
-    void this.#write(async (segments) => {
-      for (const label of join) await wearEnrollment([...segments, label], { sig, meaning })
-      for (const label of leave) await dropEnrollment([...segments, label], sig)
+  /** The names on the strip right now — what the word offers as you type. */
+  groupNamesShown(): string[] {
+    return this.#shown.map(s => s.group.name)
+  }
+
+  /** A new group on the layer; `members` join it at once. With no name it is
+   *  named from the layer's count, and it takes a colour the layer is not
+   *  wearing yet. */
+  createGroup(
+    segments: readonly string[],
+    opts: { name?: string; members?: readonly string[]; meaning?: string } = {},
+  ): Promise<PublishGroupAppearance> {
+    const meaning = opts.meaning ?? newGroupMeaning()
+    return this.#write(async () => {
+      const before = groupsInSlotOrder(await this.#layerRecords(segments))
+      const n = before.length + 1
+      const made: PublishGroupAppearance = {
+        meaning,
+        name: opts.name?.trim() || this.#t('publish-groups.default-name', `Group ${n}`, { n }),
+        icon: DEFAULT_GROUP_ICON,
+        color: nextGroupColor(before.map(g => g.color)),
+      }
+      await writeDecoration({ kind: PUBLISH_GROUP_KIND, appliesTo: segments, segments, payload: made, mark: 'persistent' })
+      const sig = await groupSignature(meaning)
+      for (const label of opts.members ?? []) await wearEnrollment([...segments, label], { sig, meaning })
+      return made
     })
   }
 
-  #create(): void {
-    const appearance: PublishGroupAppearance = {
-      meaning: newGroupMeaning(),
-      name: this.#t('publish-groups.default-name', `Group ${this.#shown.length + 1}`, { n: this.#shown.length + 1 }),
-      icon: DEFAULT_GROUP_ICON,
-      color: nextGroupColor(this.#shown.map(s => s.group.color)),
-    }
-    const joining = [...this.#selected]
-    this.#editing = appearance.meaning
-    void this.#write(async (segments) => {
-      await writeDecoration({
-        kind: PUBLISH_GROUP_KIND, appliesTo: segments, segments, payload: appearance, mark: 'persistent',
-      })
-      const sig = await groupSignature(appearance.meaning)
-      for (const label of joining) await wearEnrollment([...segments, label], { sig, meaning: appearance.meaning })
+  joinGroup(segments: readonly string[], meaning: string, labels: readonly string[]): Promise<void> {
+    return this.#write(async () => {
+      const sig = await groupSignature(meaning)
+      for (const label of labels) await wearEnrollment([...segments, label], { sig, meaning })
+    })
+  }
+
+  leaveGroup(segments: readonly string[], meaning: string, labels: readonly string[]): Promise<void> {
+    return this.#write(async () => {
+      const sig = await groupSignature(meaning)
+      for (const label of labels) await dropEnrollment([...segments, label], sig)
     })
   }
 
   /** A new appearance is a new record: write it, then drop every record the
    *  group had before it. The meaning never changes, so no member is touched.
    *  Each edit starts from the layer as the previous one left it. */
-  #edit(shown: Shown, patch: Partial<Omit<PublishGroupAppearance, 'meaning'>>): void {
-    const { meaning } = shown.group
-    void this.#write(async (segments) => {
+  editGroup(
+    segments: readonly string[],
+    meaning: string,
+    patch: Partial<Omit<PublishGroupAppearance, 'meaning'>>,
+  ): Promise<void> {
+    return this.#write(async () => {
       const before = await this.#groupRecords(segments, meaning)
-      const g = groupsInSlotOrder(before)[0] ?? shown.group
+      const g = groupsInSlotOrder(before)[0]
+      if (!g) return
       const next: PublishGroupAppearance = {
         meaning,
         name: (patch.name ?? g.name).trim() || g.name,
@@ -358,39 +429,46 @@ export class PublishGroupsDrone extends Drone {
     })
   }
 
-  #ungroup(shown: Shown): void {
-    const { meaning } = shown.group
-    const { sig } = shown
-    const members = [...shown.members]
-    this.#editing = ''
-    this.#render()
-    void this.#write(async (segments) => {
-      for (const label of members) await dropEnrollment([...segments, label], sig)
+  /** Take the group off the layer: every member's mark, then its record. */
+  ungroupAt(segments: readonly string[], meaning: string): Promise<void> {
+    return this.#write(async () => {
+      const shown = (await this.#read(segments, true)).shown.find(s => s.group.meaning === meaning)
+      if (shown) for (const label of shown.members) await dropEnrollment([...segments, label], shown.sig)
       for (const record of await this.#groupRecords(segments, meaning)) {
         await removeDecorationAndWait({ sig: record.sig, segments })
       }
     })
   }
 
-  async #publish(shown: Shown): Promise<void> {
-    const meaning = shown.group.meaning
-    if (this.#publishing.has(meaning)) return
-    const segments = [...this.#segments]
+  /** Publish every member's branch, one after the other — never in parallel:
+   *  every publish read-modify-writes the host's signed index, and two at once
+   *  can drop each other's entry. Reports how it went either way. Null when
+   *  the group is not on this layer or is already publishing. */
+  async publishGroup(
+    segments: readonly string[],
+    meaning: string,
+  ): Promise<{ total: number; failures: string[] } | null> {
+    if (this.#publishing.has(meaning)) return null
+    const shown = (await this.#read(segments, true)).shown.find(s => s.group.meaning === meaning)
+    if (!shown) return null
     const members = [...shown.members]
-    if (members.length === 0) return
+    const name = shown.group.name
+    if (members.length === 0) return { total: 0, failures: [] }
     const progress = { done: 0, total: members.length }
     this.#publishing.set(meaning, progress)
     this.#render()
     const failures: string[] = []
-    for (const label of members) {
-      const result = await publishBranch([...segments, label])
-      if (!result.ok) failures.push(result.failure)
-      progress.done++
+    try {
+      for (const label of members) {
+        const result = await publishBranch([...segments, label])
+        if (!result.ok) failures.push(result.failure)
+        progress.done++
+        this.#render()
+      }
+    } finally {
+      this.#publishing.delete(meaning)
       this.#render()
     }
-    this.#publishing.delete(meaning)
-    this.#render()
-    const name = shown.group.name
     if (failures.length === 0) {
       this.#toast('success', this.#t('publish-groups.done', `Published ${name}`, { name }))
     } else {
@@ -400,6 +478,55 @@ export class PublishGroupsDrone extends Drone {
         this.#t(`publish.failure.${why}`, why))
     }
     EffectBus.emit('publish:refresh', {})
+    return { total: members.length, failures }
+  }
+
+  /** Every write, one after another — the caller hears its own outcome, the
+   *  queue carries on whatever happened, and the strip re-reads after. */
+  #write<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.#writes.then(task)
+    this.#writes = run
+      .then(() => undefined, err => { console.warn('[publish-groups] write failed:', err) })
+      .then(() => this.#schedule())
+    return run
+  }
+
+  // ── the strip's gestures ───────────────────────────────────────────
+
+  #tap(shown: Shown): void {
+    if (this.#selected.length === 0) {
+      this.#editing = this.#editing === shown.group.meaning ? '' : shown.group.meaning
+      this.#render()
+      return
+    }
+    const { join, leave } = decideTap(this.#selected, shown.members)
+    // Answer on the strip at once; the reads confirm it when the commits land.
+    for (const label of join) shown.members.add(label)
+    for (const label of leave) shown.members.delete(label)
+    this.#render()
+    if (join.length) this.joinGroup(this.#segments, shown.group.meaning, join).catch(quiet)
+    if (leave.length) this.leaveGroup(this.#segments, shown.group.meaning, leave).catch(quiet)
+  }
+
+  #create(): void {
+    const meaning = newGroupMeaning()
+    this.#editing = meaning
+    this.#awaiting.add(meaning)
+    this.createGroup(this.#segments, { meaning, members: [...this.#selected] }).catch(quiet)
+  }
+
+  #edit(shown: Shown, patch: Partial<Omit<PublishGroupAppearance, 'meaning'>>): void {
+    this.editGroup(this.#segments, shown.group.meaning, patch).catch(quiet)
+  }
+
+  #ungroup(shown: Shown): void {
+    this.#editing = ''
+    this.#render()
+    this.ungroupAt(this.#segments, shown.group.meaning).catch(quiet)
+  }
+
+  #publish(shown: Shown): void {
+    void this.publishGroup(this.#segments, shown.group.meaning)
   }
 
   #pickIcon(shown: Shown): void {
@@ -441,10 +568,28 @@ export class PublishGroupsDrone extends Drone {
 
   // ── the strip ──────────────────────────────────────────────────────
 
+  /** The layer's groups for the Publish panel (shell — it cannot ask the
+   *  drone, so it is told). Last-value replayed: a panel opened later reads
+   *  the layer it opens on. Empty where the behaviour is not lit. */
+  #announce(): void {
+    EffectBus.emit('publish-groups:render', {
+      segments: [...this.#segments],
+      groups: this.#lit ? this.#shown.map(({ group, members }) => ({
+        meaning: group.meaning,
+        name: group.name,
+        icon: group.icon,
+        color: group.color,
+        count: members.size,
+        publishing: this.#publishing.has(group.meaning) ? { ...this.#publishing.get(group.meaning)! } : null,
+      })) : [],
+    })
+  }
+
   #render(): void {
+    this.#announce()
     const el = this.#element
     if (!el) return
-    if (!this.#lit) {
+    if (!this.#lit || this.#covered()) {
       el.hidden = true
       el.replaceChildren()
       return

@@ -7083,7 +7083,7 @@ export class ChatWindowComponent implements OnDestroy {
         const checked = await verifyStep.run({
           request: message, answer, evidence: read, providerId, system, messages: [...messages, { content: spoken }],
           jev, signal,
-          persist: decision => persistJevVerify(contextStore, answer, decision as VerifyDecisionLike & { answers: Record<string, unknown> }),
+          persist: decision => persistJevVerify(contextStore, answer, decision as VerifyDecisionLike & { answers: Record<string, unknown> }, { request: message, evidence: read }),
           emit: busEmit,
         })
         if (!checked) return undefined
@@ -7613,7 +7613,9 @@ export class ChatWindowComponent implements OnDestroy {
           // A READ CUT SHORT IS SAID, NOT LEFT TO A SCORE. Over a tree read
           // to its limit, a model answered "80 leaf tiles" above a list of
           // 106, and there are 119 (the harness manager, 2026-10-04).
-          if (readsCut) yield '\n\nSome reads in this turn were cut short at their size limit, so this answer may not cover everything — counts especially.'
+          // A find stops on time as often as on size (it walks a hive's whole
+          // depth now, 2026-10-12): say "stopped early", not "size limit".
+          if (readsCut) yield '\n\nSome reads in this turn stopped before they covered everything, so this answer may not be complete — counts especially.'
           if (jevTurn && ran.length) yield needsVerification
             ? '\n\nThe commands ran, but no subsequent readback was completed.'
             : '\n\nReadback was collected after execution; correctness of every affected item has not been independently verified.'

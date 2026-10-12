@@ -320,19 +320,110 @@ export const routesNamedIn = (text: string): readonly string[] => {
  * betz; find imagetest; find isomorphic" is as plain a read as a block, and a
  * model answered it in six seconds with no read and two invented routes (the
  * housekeeping manager, 2026-10-11). Only the unmistakable shapes count — `find
- * <word>` (optionally `under /route`), `read /route`, `tree /route` — and never
- * in a sentence that forbids. Lines in the read grammar, in order, each once.
+ * <word>` (optionally `under /route`, or the route right after the word),
+ * `read /route`, `tree /route` — and never in a sentence that forbids. Lines in
+ * the read grammar, in order, each once.
+ *
+ * A FIND WRITTEN IN THE READ GRAMMAR IS A FIND. "find practice-modules /" was
+ * answered with no read and not sent back (the live probe, 2026-10-12): only
+ * `under|in|below /route` was accepted after the word, so a find spelled as the
+ * grammar spells it — `find <word> /path`, `find <word> /` — was not seen as a
+ * read at all. The route token right after the word is the find's route.
+ *
+ * A ROUTE ENDS WHERE THE PROSE AROUND IT BEGINS. Taking the bare route turned
+ * "Can you find betz /dolphin?" into a find of `dolphin?`, "Please run `find
+ * practice-modules /`" into a find of a tile named "`", and "find betz
+ * /dolphin/; read /susan" into a plan refused whole for its empty last
+ * segment — the hive then ran a read nobody asked for, or none (review of the
+ * 2026-10-12 probe fix). A question or exclamation mark, a closing backtick,
+ * quote or bracket, a dot or a trailing slash after a route is the sentence's,
+ * never the route's; `/` alone stays `/`. A place word is never the find's
+ * word: "what you find in /dolphin" asks no find of `in` (same review).
+ *
+ * A PREPOSITION IS NEVER THE FIND'S WORD. With only the place words refused,
+ * "What can you find about /dolphin?" asked a find of `about` (and so with
+ * for, around, with, through, among, regarding, over): the hive ran a name
+ * search for tiles called "about" in place of sending the model to read
+ * /dolphin, and the answer went out as if from the hive (review of the
+ * 2026-10-12 place-word fix). Every common preposition, and the `out` of
+ * "find out", is refused as the word; such a sentence falls through to the
+ * routes it names.
+ *
+ * A REQUEST OF THE WHOLE HIVE IS ASKED OF THE ROOT. A find with no route
+ * searches under the participant's current page — /business-card, with no
+ * children — and the model told the participant it had searched the whole
+ * hive (the harness defect, 2026-10-12). When a request speaks of the whole
+ * hive, a find it names with no route gets `/`; a find that names a route
+ * keeps it.
+ *
+ * ONLY A NEGATION THAT GOVERNS IT FORBIDS. "Search the whole hive, not just
+ * this page: find betz" asks for the whole hive, but a bare `not` anywhere in
+ * the sentence threw the whole sentence out and the find went back to the
+ * current page (review of the 2026-10-12 fix). "Not just" / "not only" widens,
+ * never forbids.
+ *
+ * THE WHOLE-HIVE PHRASE is cancelled by a negation before it, up to the colon
+ * or dash before it: in its own comma clause ("No whole-hive search",
+ * "Instead of the whole hive"), or dangling across commas ("Do not, under any
+ * circumstances, search the whole hive"). A comma clause that finishes its own
+ * negated phrase ("Read only, do not change anything, across the whole hive")
+ * does not cancel it. "(no route)" is not a whole-hive phrase: no route is the
+ * current page (second review, 2026-10-12).
+ *
+ * A READ STAYS AS WARY AS IT WAS: any negation in its sentence forbids it.
+ * Splitting every sentence at a colon or dash let "Do not run any of these:
+ * read /susan, tree /howard" ask for both reads — and the hive runs a read
+ * the model declined (second review, 2026-10-12). Only a find after an
+ * un-negated whole-hive phrase whose sole qualifier is a `without` is judged
+ * from the colon or dash on: "Search the whole hive without stopping at the
+ * current page: find betz" asks for the find; "Never do the following: find
+ * betz" does not.
  */
+const WHOLE_HIVE = /\b(?:whole|entire)[\s-]+hive\b|\ball\s+of\s+the\s+hive\b|\beverywhere\s+in\s+the\s+hive\b|\bhive-wide\b/i
+const CANCELS = /\b(?:do\s+not|don['’]?t|never|not|no|without|except|avoid|skip|instead\s+of|rather\s+than)\b|\b\w+n['’]t\b/i
+const DANGLES = new RegExp(`(?:${CANCELS.source})\\s*$`, 'i')
+
+const widened = (text: string): string => text.replace(/\bnot\s+(?:just|only|merely)\b/gi, ' ')
+const forbids = (clause: string): boolean => FORBIDS.test(widened(clause))
+
+/** Where a sentence asks for the whole hive, or -1 when it does not or a negation cancels it. */
+const wholeHiveAt = (sentence: string): number => {
+  const at = sentence.search(WHOLE_HIVE)
+  if (at < 0) return -1
+  const clauses = widened(sentence.slice(0, at).split(/[:—–]/).pop() ?? '').split(',')
+  const own = clauses.pop() ?? ''
+  return CANCELS.test(own) || clauses.some(clause => DANGLES.test(clause)) ? -1 : at
+}
+
+/** A find is forbidden by its sentence, unless the list it sits in is opened
+ *  by an un-negated whole-hive phrase qualified by nothing but a `without`. */
+const findForbidden = (sentence: string, index: number): boolean => {
+  const at = wholeHiveAt(sentence)
+  const opens = at < 0 ? -1 : sentence.slice(at).search(/[:—–]/)
+  if (opens >= 0 && at + opens < index && !forbids(sentence.slice(at, at + opens).replace(/\bwithout\b/gi, ' ')))
+    return forbids(sentence.slice(at + opens + 1))
+  return forbids(sentence)
+}
+
+/** `find <word>`, then `under|in|below /route` or the route right after the
+ *  word — never a preposition as the word. */
+const ASKED_FIND = /\bfind\s+(?!(?:about|above|across|after|against|along|amid|among|around|at|before|behind|below|beneath|beside|between|beyond|by|concerning|for|from|in|inside|into|near|of|off|on|out|over|past|regarding|through|throughout|to|toward|towards|under|upon|via|with|within)(?![a-z0-9_-]))([a-z0-9][a-z0-9_-]*)(?:\s+(?:(?:under|in|below)\s+)?(\/[^\s:;,)]*))?(?=\s*(?:$|[:;,.)]|\s(?:and|then)\b))/gi
+/** The route without the prose that closes it; a bare `/` stays the root. */
+const routeOf = (token: string): string => token.replace(/(.)[\/.?!`'"\]>]+$/, '$1')
+
 export const readsAskedIn = (text: string): readonly string[] => {
   const found: string[] = []
   const add = (line: string): void => { if (!found.includes(line)) found.push(line) }
-  for (const sentence of sentencesOf(text)) {
-    if (FORBIDS.test(sentence)) continue
-    for (const match of sentence.matchAll(/\bfind\s+([a-z0-9][a-z0-9_-]*)(?:\s+(?:under|in|below)\s+(\/[^\s:;,)]*))?(?=\s*(?:$|[:;,.)]|\s(?:and|then)\b))/gi)) {
-      add(match[2] ? `find ${match[1]} ${match[2].replace(/[.]+$/, '')}` : `find ${match[1]}`)
+  const sentences = sentencesOf(text)
+  const wholeHive = sentences.some(sentence => wholeHiveAt(sentence) >= 0)
+  for (const sentence of sentences) {
+    for (const match of sentence.matchAll(ASKED_FIND)) {
+      if (findForbidden(sentence, match.index ?? 0)) continue
+      add(match[2] ? `find ${match[1]} ${routeOf(match[2])}` : wholeHive ? `find ${match[1]} /` : `find ${match[1]}`)
     }
+    if (forbids(sentence)) continue
     for (const match of sentence.matchAll(/\b(read|tree)\s+(?:on\s+|of\s+)?(\/[^\s:;,)]*)/gi)) {
-      add(`${match[1].toLowerCase()} ${match[2].replace(/[.]+$/, '') || '/'}`)
+      add(`${match[1].toLowerCase()} ${routeOf(match[2])}`)
     }
   }
   return found

@@ -1,0 +1,56 @@
+// hypercomb-shared/ui/publish-panel/publish-panel.groups.scss
+//
+// The Publish panel's GROUPS section — one row per publish group on this
+// layer: its icon in its own colour, its name, and Publish (n). Its own sheet
+// in `styleUrls` so the panel's main sheet never grows toward the
+// anyComponentStyle budget (that budget is per compiled sheet).
+//
+// A group's colour is the participant's own pastel; `tw.ink` takes it toward
+// the panel's ink on a bright theme so the glyph still reads.
+
+@use '../toolwindow' as tw;
+
+.pgroups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  // The same size as a domain's name above it (.pdoor-zone).
+  font-size: 0.8rem;
+}
+
+.pgroup {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  min-width: 0;
+}
+
+.pgroup-icon {
+  flex: 0 0 auto;
+  font-size: 1.25em;
+  color: tw.ink(var(--pg));
+}
+
+.pgroup-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--hc-window-ink-loud);
+}
+
+.pgroup-act {
+  flex: 0 0 auto;
+  font-size: 0.9em;
+  padding: tw.$button-padding-compact-block tw.$button-padding-compact-inline;
+  border-radius: tw.$radius-control;
+  border: 1px solid color-mix(in srgb, var(--pg) 50%, transparent);
+  background: color-mix(in srgb, var(--pg) 14%, transparent);
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+
+  &:hover:not(:disabled) { background: color-mix(in srgb, var(--pg) 26%, transparent); }
+  &:disabled { opacity: 0.45; cursor: default; }
+}
