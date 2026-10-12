@@ -29,7 +29,7 @@
 // picks up the event and folds the change into the cell's layer, which
 // propagates to root via the standard merkle cascade.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { cachedNotesFacet, readNotesFacet, unionNoteSigs, writeNotesFacet } from './notes-facet.js'
 import {
   addChildInTree,
@@ -76,6 +76,8 @@ type HistoryServiceLike = {
 type StoreLike = {
   putResource: (blob: Blob) => Promise<string>
   getResource: (sig: string) => Promise<Blob | null>
+  /** The raw bytes at a sig — an envelope stays an envelope. */
+  getResourceLocal?: (sig: string) => Promise<Blob | null>
   resolve: <T = unknown>(sig: string) => Promise<T>
 }
 
@@ -339,6 +341,7 @@ export class NotesService {
   async #reorderByCellLabel(cellLabel: string, sourceId: string, targetIndex: number): Promise<void> {
     const resolved = await this.#resolveCellLocation(cellLabel)
     if (!resolved) return
+    sourceId = await this.#noteSigOf(sourceId)
     await this.#commitCellNotes(resolved.segments, (prior) => {
       const current = prior.findIndex(s => s === sourceId)
       if (current === -1) return prior  // sourceId not in this cell; ignore
@@ -367,8 +370,11 @@ export class NotesService {
     if (!locSig) return []
     const layer = history.peekCurrentLayer(locSig)
     const slot = (layer as Record<string, unknown> | null)?.[NOTES_SLOT]
-    const slotSigs = Array.isArray(slot) ? slot.filter((x): x is string => typeof x === 'string') : []
-    const sigs = unionNoteSigs(cachedNotesFacet(cellLabel), slotSigs)
+    // Each entry as the note it names, as far as an async read has learned it
+    // (#noteSigOf) — so the paint shows one note once, as the async read does.
+    const named = (entry: string): string => this.#noteSigByEntry.get(String(entry).toLowerCase()) ?? entry
+    const slotSigs = Array.isArray(slot) ? slot.filter((x): x is string => typeof x === 'string').map(named) : []
+    const sigs = unionNoteSigs(cachedNotesFacet(cellLabel).map(named), slotSigs)
     if (sigs.length === 0) return []
     const out: Note[] = []
     for (const sig of sigs) {
@@ -673,7 +679,8 @@ export class NotesService {
       : []
     const newSig = await this.#writeNoteLayer(text, shape, mark, [], priorTags)
     if (editId && SIG_REGEX.test(editId)) {
-      await this.#commitCellNotes(segments, (prior) => prior.map(s => s === editId ? newSig : s))
+      const edited = await this.#noteSigOf(editId)
+      await this.#commitCellNotes(segments, (prior) => prior.map(s => s === edited ? newSig : s))
     } else {
       await this.#commitCellNotes(segments, (prior) => [...prior, newSig])
     }
@@ -695,7 +702,7 @@ export class NotesService {
   async #deleteFromTree(segments: readonly string[], noteId: string): Promise<void> {
     const locSig = await this.#locSig(segments)
     const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
-    const { tree: nextTree, removed } = removeFromTree(tree, noteId)
+    const { tree: nextTree, removed } = removeFromTree(tree, await this.#noteSigOf(noteId))
     if (!removed) return  // node wasn't in this cell — leave layer alone
     const rootSigs: string[] = []
     for (const node of nextTree) {
@@ -737,6 +744,9 @@ export class NotesService {
 
     // 1. Locate the source node and pluck it (with its subtree) out
     //    of wherever it currently lives.
+    // An id read from an older list may name the note's envelope.
+    sourceId = await this.#noteSigOf(sourceId)
+    if (targetParentId) targetParentId = await this.#noteSigOf(targetParentId)
     const { tree: withoutSource, removed: source } = removeFromTree(tree, sourceId)
     if (!source) return  // source wasn't in this cell's tree
 
@@ -799,7 +809,7 @@ export class NotesService {
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
     const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
-    const { tree: nextTree, changed } = addChildInTree(tree, parentId, text, mark)
+    const { tree: nextTree, changed } = addChildInTree(tree, await this.#noteSigOf(parentId), text, mark)
     if (!changed) return  // parent isn't in this cell
     const rootSigs: string[] = []
     for (const node of nextTree) {
@@ -833,7 +843,7 @@ export class NotesService {
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
     const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
-    const { tree: nextTree, changed } = setTextInTree(tree, noteId, text, mark)
+    const { tree: nextTree, changed } = setTextInTree(tree, await this.#noteSigOf(noteId), text, mark)
     if (!changed) return  // node not in this cell, or already reads exactly that
     const rootSigs: string[] = []
     for (const node of nextTree) {
@@ -861,7 +871,7 @@ export class NotesService {
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
     const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
-    const { tree: nextTree, changed } = setMarkInTree(tree, noteId, mark)
+    const { tree: nextTree, changed } = setMarkInTree(tree, await this.#noteSigOf(noteId), mark)
     if (!changed) return  // node not in this cell, or already carries that mark
     const rootSigs: string[] = []
     for (const node of nextTree) {
@@ -890,7 +900,7 @@ export class NotesService {
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
     const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
-    const { tree: nextTree, changed } = setTagInTree(tree, noteId, tag, add)
+    const { tree: nextTree, changed } = setTagInTree(tree, await this.#noteSigOf(noteId), tag, add)
     if (!changed) return  // node not in this cell, or already in that state
     const rootSigs: string[] = []
     for (const node of nextTree) {
@@ -924,7 +934,7 @@ export class NotesService {
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
     const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
-    const { tree: nextTree, changed } = splitInTree(tree, noteId, head, parts)
+    const { tree: nextTree, changed } = splitInTree(tree, await this.#noteSigOf(noteId), head, parts)
     if (!changed) return  // node not in this cell, blank head, or no usable parts
     const rootSigs: string[] = []
     for (const node of nextTree) {
@@ -974,16 +984,16 @@ export class NotesService {
     }
     const locSig = await history.sign({ explorerSegments: () => segments })
     const priorLayer = await history.currentLayerAt(locSig)
-    const slotNotes = Array.isArray(priorLayer?.[NOTES_SLOT])
-      ? (priorLayer[NOTES_SLOT] as readonly unknown[]).filter((s): s is string => typeof s === 'string')
-      : []
+    const slotNotes = await this.#noteSigsOf(Array.isArray(priorLayer?.[NOTES_SLOT])
+      ? priorLayer[NOTES_SLOT] as readonly unknown[]
+      : [])
     // The prior list is the SAME union the reader shows — facet first, then
     // the slot — so a transform edits what the participant saw, and the result
     // lands on both the slot and the word's facet. That is what makes a removal
     // at one tile of the word a removal for the word (an UNLINK — the atom and
     // every prior list survive; undo walks back), rather than a flicker
     // between two tiles' lists.
-    const priorNotes = unionNoteSigs(await readNotesFacet(segments[segments.length - 1] ?? ''), slotNotes)
+    const priorNotes = unionNoteSigs(await this.#noteSigsOf(await readNotesFacet(segments[segments.length - 1] ?? '')), slotNotes)
     const nextNotes = transform(priorNotes)
     const base: { name?: string; [k: string]: unknown } = priorLayer
       ? { ...priorLayer }
@@ -1060,12 +1070,12 @@ export class NotesService {
     if (!history) return []
     const layer = await history.currentLayerAt(locationSig)
     const slot = (layer as Record<string, unknown> | null)?.[NOTES_SLOT]
-    const slotSigs = Array.isArray(slot) ? slot.filter((x): x is string => typeof x === 'string') : []
+    const slotSigs = await this.#noteSigsOf(Array.isArray(slot) ? slot : [])
     // THE FACET FIRST (decided 2026-09-04). A tile's notes are the notes of
     // its WORD: every author's list on sign('notes:' + moleculeAddress(name)),
     // this reader's own first, then whatever the layer slot still holds that
     // the facet does not. Two tiles named the same read the same notes.
-    const facetSigs = tileName ? await readNotesFacet(tileName) : []
+    const facetSigs = tileName ? await this.#noteSigsOf(await readNotesFacet(tileName)) : []
     const sigs = unionNoteSigs(facetSigs, slotSigs)
     if (sigs.length === 0) return []
     const out: Note[] = []
@@ -1075,6 +1085,50 @@ export class NotesService {
       if (node) out.push(node)
     }
     return out
+  }
+
+  /**
+   * THE NOTE A LIST ENTRY NAMES. A committed layer heals every sig in its
+   * `notes` slot into a meta envelope (`{ resource: <note>, relation:
+   * 'notes' }`, life-primitive healLegacyLayer), while the word's facet lists
+   * the notes themselves. Read side by side, one note was two entries — the
+   * envelope and its payload — so every note showed twice, and a removal took
+   * one copy while the re-written list put the other straight back
+   * (/games/arkanoid, 2026-10-11). Every entry is read as the note it names:
+   * an envelope with a resource payload becomes that payload. Envelopes are
+   * immutable, so the answer is remembered; a sig that is no envelope (or
+   * not here yet) is the note itself.
+   */
+  readonly #noteSigByEntry = new Map<string, string>()
+
+  async #noteSigOf(entry: string): Promise<string> {
+    let sig = String(entry ?? '').trim().toLowerCase()
+    if (!SIG_REGEX.test(sig)) return sig
+    const known = this.#noteSigByEntry.get(sig)
+    if (known) return known
+    const start = sig
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    for (let hop = 0; hop < 4 && store?.getResourceLocal; hop++) {
+      let payload: ReturnType<typeof metaPayloadOf> = null
+      try {
+        const blob = await store.getResourceLocal(sig)
+        if (!blob || blob.size > 64 * 1024) break
+        const parsed: unknown = JSON.parse(await blob.text())
+        payload = isMetaEnvelope(parsed) ? metaPayloadOf(parsed) : null
+      } catch { break }   // not JSON: a note's own bytes, or none here
+      if (payload?.kind !== 'resource') break
+      sig = payload.sig
+    }
+    this.#noteSigByEntry.set(start, sig)
+    return sig
+  }
+
+  /** A list's entries as the notes they name, in order, each note once. */
+  async #noteSigsOf(entries: readonly unknown[]): Promise<string[]> {
+    const sigs = await Promise.all(
+      entries.filter((x): x is string => typeof x === 'string').map(entry => this.#noteSigOf(entry)),
+    )
+    return unionNoteSigs(sigs, [])
   }
 
   /** Async, recursive hydrate — resolves every descendant from storage.
