@@ -80,6 +80,7 @@
 
 import { EffectBus, canonicalZoneText, I18N_IOC_KEY, lifecyclePreimage, meetingPointKey, secretTag, type I18nProvider } from '@hypercomb/core'
 import { isJoinedHere, ownZone, readTabZone, writeTabZone } from './membership.js'
+import { swarmRelayUrl } from './swarm-link.js'
 import { meetingRelayOf } from './meeting-invite.js'
 
 const FLAG_KEY = 'hc:nostrmesh:use-live-relay'
@@ -165,13 +166,22 @@ export class UseLiveRelayQueenBee {
     const zoneTokens = (first === 'on' || first === '1' || first === 'true')
       ? tokens.slice(1)
       : tokens
-    const servers = zoneTokens.filter(t => /^wss?:\/\//i.test(t))
-    const named = zoneTokens.filter(t => !/^wss?:\/\//i.test(t))
+    // A THIRD word is the host, written as a person writes it (jwize,
+    // 2026-10-12: `join downtown downtown hypercomb.com`) — dialled wss://,
+    // ws:// on a loopback host (swarm-link swarmRelayUrl).
+    const bare = zoneTokens.filter(t => !/^wss?:\/\//i.test(t))
+    // Only a word that READS as a host (a dot, a port, or localhost) — a
+    // third bare word like 'downtown' is still refused below, by name: it
+    // was the secret someone meant after putting the host first.
+    const hostLike = (w: string): boolean => /[.:]/.test(w) || /^localhost$/i.test(w)
+    const hostWord = bare.length === 3 && hostLike(bare[2]) ? swarmRelayUrl(bare[2]) : ''
+    const servers = [...zoneTokens.filter(t => /^wss?:\/\//i.test(t)), ...(hostWord ? [hostWord] : [])]
+    const named = hostWord ? bare.slice(0, 2) : bare
     // A room, a secret, one server — nothing else. An extra word is not
     // silently dropped (it was the secret the participant meant).
     if (named.length > 2 || servers.length > 1) {
       const words = [...named.slice(2), ...servers.slice(1)].map(w => `'${w}'`).join(', ')
-      this.#toast('error', tr('use-live-relay.too-many', `too many words: ${words} — give a room, a secret, and a ws(s):// server`, { words }))
+      this.#toast('error', tr('use-live-relay.too-many', `too many words: ${words} — give a room, a secret, and a host`, { words }))
       return
     }
     const server = servers.length ? meetingRelayOf(servers[0]) : ''

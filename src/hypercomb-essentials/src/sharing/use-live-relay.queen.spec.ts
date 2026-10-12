@@ -286,3 +286,17 @@ describe('/use-live-relay', () => {
     expect(toasts.at(-1)?.message).not.toContain(location.hostname)
   })
 })
+
+describe('the host as a person writes it (2026-10-12: join downtown downtown hypercomb.com)', () => {
+  it('a third word that reads as a host is the host — dialled wss://', () => {
+    queen.invoke('downtown downtown hypercomb.com')
+    expect(roomStore.set).toHaveBeenCalledWith('downtown')
+    expect(secretStore.set).toHaveBeenCalledWith('downtown')
+    expect(JSON.parse(sessionStorage.getItem('hc:mesh-zone')!)).toMatchObject({ relay: 'wss://hypercomb.com' })
+  })
+
+  it('a loopback host is dialled ws://', () => {
+    queen.invoke('garden rose localhost:7777')
+    expect(JSON.parse(sessionStorage.getItem('hc:mesh-zone')!)).toMatchObject({ relay: 'ws://localhost:7777' })
+  })
+})

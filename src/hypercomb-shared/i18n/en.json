@@ -3486,7 +3486,7 @@
   "hosts.own-host": "Your own host",
   "hosts.own-host-placeholder": "your own host — where your backup goes",
   "hosts.own-host-set": "Set",
-  "use-live-relay.too-many": "too many words: {words} — give a room, a secret, and a ws(s):// server",
+  "use-live-relay.too-many": "too many words: {words} — give a location, a secret, and a host (like hypercomb.com)",
   "use-live-relay.bad-server": "'{server}' is not a server this tab can dial",
   "mesh.state.access": "{host} needs the current meeting link — ask for the newest one",
   "mesh.state.access-action": "Enter the new code",
