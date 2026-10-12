@@ -1710,6 +1710,14 @@ export class ClaudeBridgeWorker extends Worker {
   // path from root, identical regardless of where the user is.
   async #listAt(req: BridgeRequest): Promise<BridgeResponse> {
     const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    // A CALLER THAT SPEAKS FOR AN OUTSIDE MODEL (`withhold: true` — the hive
+    // managers' tree) never hears a withheld tile's name: `tree /` listed
+    // /susan and /howard to them (the housekeeping manager, 2026-10-11).
+    const withheld = (req as { withhold?: unknown }).withhold === true
+      ? get<{ covers?: (s: readonly string[]) => boolean }>('@hypercomb.social/AiWithheld')
+      : undefined
+    const shown = (names: readonly string[]): string[] =>
+      withheld?.covers ? names.filter(name => !withheld.covers!([...segments, name])) : [...names]
 
     // A tile is not a named directory in the flat-root model: its children are
     // the sigs in its LAYER's `children` slot, and each child's NAME is in that
@@ -1728,7 +1736,7 @@ export class ClaudeBridgeWorker extends Worker {
         for (const child of childLayers) {
           if (typeof child?.name === 'string' && child.name) names.add(child.name)
         }
-        return { id: req.id, ok: true, data: [...names].sort((a, b) => a.localeCompare(b)) }
+        return { id: req.id, ok: true, data: shown([...names]).sort((a, b) => a.localeCompare(b)) }
       }
     }
 
@@ -1760,7 +1768,7 @@ export class ClaudeBridgeWorker extends Worker {
     }
     if (!dir) return { id: req.id, ok: false, error: `path not found: ${segments.join('/')}` }
     const cells = await this.#listCellFolders(dir)
-    return { id: req.id, ok: true, data: cells }
+    return { id: req.id, ok: true, data: shown(cells) }
   }
 
   // Compute ONE deterministic signature over every note id in the whole

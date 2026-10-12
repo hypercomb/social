@@ -160,7 +160,8 @@ const main = async () => {
   const second = rest.join(' ')
   switch (verb) {
     case 'tree': {
-      const reply = await send({ op: 'list-at', segments: segmentsOf(first) })
+      // Managers are outside models: the hive leaves its withheld tiles out.
+      const reply = await send({ op: 'list-at', segments: segmentsOf(first), withhold: true })
       return reply.ok ? print(reply.data) : fail(reply.error)
     }
     case 'read': {
@@ -172,7 +173,8 @@ const main = async () => {
       ])
       // Both failed: that is a failure, not an empty tile.
       if (!tile.ok && !notes.ok) return fail(tile.error || notes.error)
-      return print({ tile: tile.ok ? tile.data : tile.error, notes: notes.ok ? notes.data : notes.error })
+      // noteCount is the top-level count, as the chat's read reports it.
+      return print({ tile: tile.ok ? tile.data : tile.error, ...(notes.ok && Array.isArray(notes.data) ? { noteCount: notes.data.length } : {}), notes: notes.ok ? notes.data : notes.error })
     }
     case 'dates': {
       // Markers written since 2026-10-02 carry their create date; older ones
