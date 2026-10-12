@@ -482,7 +482,11 @@ export class ShowFeaturesDrone extends Drone {
     // AT THE TILE'S OWN SEGMENTS (explicit — never "wherever the participant
     // happens to stand", the wrong-target failure the slash route had), then
     // re-opens the group so the row moves into "On this layer".
-    this.onEffect<{ cell?: string; segments?: string[]; kind?: string }>('features:enable', (p) => {
+    //
+    // `silent` is a word's (`groups on`), as it is the rail's on
+    // `features:default`: the deposit is the whole answer, and popping the
+    // Beehaviors panel over the hive would be an act nobody asked for.
+    this.onEffect<{ cell?: string; segments?: string[]; kind?: string; silent?: boolean }>('features:enable', (p) => {
       const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
       const kind = String(p?.kind ?? '')
       const cell = String(p?.cell ?? '').trim()
@@ -490,19 +494,19 @@ export class ShowFeaturesDrone extends Drone {
       // follows navigation to `/`) — a real target. Empty segments with no
       // cell is still a targetless intent, refused.
       if (!kind || (segments.length === 0 && !cell)) return
-      void this.#enableAt(segments, kind, cell)
+      void this.#enableAt(segments, kind, cell, p?.silent === true)
     })
 
     // The panel's REMOVE on an applied row. Membership is positive — the
     // decorations ARE the applied behaviors — so removing the tile's records
     // of the kind is the whole off. Answers with `features:outcome` and
     // re-opens the group so the row leaves "on this tile".
-    this.onEffect<{ cell?: string; segments?: string[]; kind?: string }>('features:remove', (p) => {
+    this.onEffect<{ cell?: string; segments?: string[]; kind?: string; silent?: boolean }>('features:remove', (p) => {
       const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
       const kind = String(p?.kind ?? '')
       const cell = String(p?.cell ?? '').trim()
       if (!kind || (segments.length === 0 && !cell)) return
-      void this.#removeAt(segments, kind, cell)
+      void this.#removeAt(segments, kind, cell, p?.silent === true)
     })
 
     // The DEFAULT toggle — clicking a view row's ICON in the panel, or
@@ -754,7 +758,7 @@ export class ShowFeaturesDrone extends Drone {
    *  content is authored later deposit their PENDING marker instead — the
    *  same record their own `/x here` writes, which the next generation pass
    *  turns into the content. Only a kind nobody declares is refused. */
-  async #enableAt(segments: readonly string[], kind: string, cellLabel = ''): Promise<void> {
+  async #enableAt(segments: readonly string[], kind: string, cellLabel = '', silent = false): Promise<void> {
     // Root group: no last segment — the panel's cell name (display-only)
     // keeps the outcome routed back to the row that asked.
     const label = segments[segments.length - 1] ?? cellLabel
@@ -803,7 +807,7 @@ export class ShowFeaturesDrone extends Drone {
       // came back dark, and the second press wrote a decoration at the
       // phantom path just to make the bulb light. One press, one light.
       // ([] = the hive-root group, and an explicit empty array says so.)
-      if (label) await this.#open(label, segments)
+      if (label && !silent) await this.#open(label, segments)
     } catch (err) {
       console.warn('[show-features] enable failed', { kind, segments, err })
       this.emitEffect('activity:log', { message: `couldn't add "${kind}" to "${label}"`, icon: '○' })
@@ -815,7 +819,7 @@ export class ShowFeaturesDrone extends Drone {
    *  Committed (not just queued) before the refresh so the row is gone when
    *  the group re-reads. A kind with no records here (slot-backed content)
    *  is refused loudly rather than silently un-removed. */
-  async #removeAt(segments: readonly string[], kind: string, cellLabel = ''): Promise<void> {
+  async #removeAt(segments: readonly string[], kind: string, cellLabel = '', silent = false): Promise<void> {
     const label = segments[segments.length - 1] ?? cellLabel
     try {
       const existing = await listDecorations({ kind, segments: [...segments] })
@@ -828,7 +832,7 @@ export class ShowFeaturesDrone extends Drone {
       }
       this.emitEffect('activity:log', { message: `${kind} off "${label}"`, icon: '○' })
       this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
-      if (label) await this.#open(label, segments)   // refresh the panel group in place
+      if (label && !silent) await this.#open(label, segments)   // refresh the panel group in place
     } catch (err) {
       console.warn('[show-features] remove failed', { kind, segments, err })
       this.emitEffect('activity:log', { message: `couldn't remove "${kind}" from "${label}"`, icon: '○' })

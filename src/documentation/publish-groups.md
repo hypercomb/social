@@ -25,6 +25,35 @@ signed index and two at once can drop each other's entry. The toast says how
 it went, and why when it could not (no host, no signer — the same
 `publish.failure.*` texts the Publish panel uses).
 
+## The word — `groups`
+
+Every act on the strip has a word (`hypercomb-essentials/src/sharing/groups.queen.ts`),
+acting on the layer you stand in through the same acts the strip calls:
+
+```
+groups                          this layer's groups and who is in them
+groups on | off                 light or put out the strip here
+groups new <name>               a new group — the selected tiles join it
+groups add <group> [tiles]      tiles join (the selection when none are named)
+groups drop <group> [tiles]     tiles leave (the selection when none are named)
+groups rename <group> <name>
+groups color <group> <colour>   blue amber green pink red violet, 1–6, or #rrggbb
+groups icon <group> <icon>
+groups publish <group>          publish every member
+groups ungroup <group>          take the group off the layer
+```
+
+A group is named by its name in any case; a name with spaces is quoted
+(`groups add "my blog" one, two`); tiles go by comma or by space. The word
+keeps its whole line (`rawArgs`) — `publish` is itself a behaviour word, and
+`groups publish blog` must not also open the Publish panel. `groups on` / `off`
+emit the panel's own `features:enable` / `features:remove` with `silent: true`
+(the deposit is the answer; the panel stays shut). `groups new` lights the
+strip here if it was not. Unknown groups, tiles and sub-words are said, never
+guessed, and write nothing. No `machine` grammar: publishing reaches outward,
+and default-deny stays the policy. Proof: `scripts/drive-groups-word.cjs`
+(11 checks).
+
 The strip is a hexagons surface: a takeover view, an owner-counted cover (the
 chat window), a published visitor shell or a dormant behaviour takes it away.
 
@@ -65,9 +94,12 @@ chat window), a published visitor shell or a dormant behaviour takes it away.
   reads, the writes, publish.
 - `show-features.drone.ts` `CAPABILITIES['publish:groups']` — the roster row.
 - `show-cell.drone.ts` — `group:preview { labels, color }`, the hover light.
-- Proof: `scripts/drive-publish-groups.cjs` (13 checks).
+- `groups.queen.ts` — the word; its parser (`parseGroupsLine`,
+  `resolveGroupColor`) is in the pure half.
+- Proof: `scripts/drive-publish-groups.cjs` (13 checks),
+  `scripts/drive-groups-word.cjs` (11 checks).
 
 ## Not built (yet)
 
-- A word for it on the command line (`project_every_act_has_a_word`).
-- Groups listed inside the Publish panel itself; today the strip is the door.
+- Groups listed inside the Publish panel itself; today the strip and the word
+  are the doors.

@@ -111,3 +111,93 @@ export function newGroupMeaning(random: () => number = Math.random, now: () => n
   const salt = Math.floor(random() * 0xffffff).toString(36).padStart(5, '0')
   return `${PUBLISH_GROUP_FAMILY}:${stamp}${salt}`
 }
+
+// ── the word: `groups` (groups.queen.ts) ──────────────────────────────
+
+/** The palette by name, in GROUP_COLORS order — what `groups color` reads. */
+export const GROUP_COLOR_NAMES = ['blue', 'amber', 'green', 'pink', 'red', 'violet'] as const
+
+/** `blue`, `3` or `#3ddc84` → the hex a group wears; null when it names no
+ *  colour. A hex outside the palette is the participant's own choice. */
+export function resolveGroupColor(input: string): string | null {
+  const word = String(input ?? '').trim().toLowerCase()
+  const named = (GROUP_COLOR_NAMES as readonly string[]).indexOf(word)
+  if (named >= 0) return GROUP_COLORS[named]
+  if (/^[1-6]$/.test(word)) return GROUP_COLORS[Number(word) - 1]
+  return HEX_COLOR.test(word) ? word : null
+}
+
+/** The sub-words, in the order a participant meets them. */
+export const GROUPS_WORDS = ['on', 'off', 'new', 'add', 'drop', 'rename', 'color', 'icon', 'publish', 'ungroup'] as const
+
+export type GroupsAct =
+  | { readonly verb: 'list' }
+  | { readonly verb: 'on' | 'off' }
+  | { readonly verb: 'new'; readonly name: string }
+  | { readonly verb: 'add' | 'drop'; readonly group: string; readonly tiles: string[] }
+  | { readonly verb: 'rename'; readonly group: string; readonly name: string }
+  | { readonly verb: 'color' | 'icon'; readonly group: string; readonly value: string }
+  | { readonly verb: 'publish' | 'ungroup'; readonly group: string }
+  /** A sub-word that needs a group and was given none. */
+  | { readonly verb: 'needs-group'; readonly word: string }
+  | { readonly verb: 'unknown'; readonly word: string }
+
+/** One token and where the line continues after it. A name with spaces is
+ *  quoted (`"my blog"`); the quotes are not part of it. */
+function token(line: string, from: number): { text: string; end: number } | null {
+  let i = from
+  while (i < line.length && /\s/.test(line[i]!)) i++
+  if (i >= line.length) return null
+  const quote = line[i] === '"' || line[i] === '\'' ? line[i]! : ''
+  if (quote) {
+    const close = line.indexOf(quote, i + 1)
+    if (close > i) return { text: line.slice(i + 1, close), end: close + 1 }
+  }
+  let j = i
+  while (j < line.length && !/\s/.test(line[j]!)) j++
+  return { text: line.slice(i, j), end: j }
+}
+
+/** The rest of the line as one value — a name keeps its spaces, and one outer
+ *  pair of quotes is dropped. */
+function restOf(line: string, from: number): string {
+  const rest = line.slice(from).trim()
+  const quoted = /^(["'])(.*)\1$/.exec(rest)
+  return (quoted ? quoted[2]! : rest).trim()
+}
+
+/** Tile names: separated by commas when there are any (a name may hold a
+ *  space), otherwise by spaces; the selection bracket form `[a,b]` reads too. */
+function tilesOf(text: string): string[] {
+  const bare = text.trim().replace(/^\[|\]$/g, '')
+  const parts = bare.includes(',') ? bare.split(',') : bare.split(/\s+/)
+  return [...new Set(parts.map(p => p.trim().replace(/^(["'])(.*)\1$/, '$2').trim()).filter(Boolean))]
+}
+
+/** Read a `groups …` line (everything after the word itself). */
+export function parseGroupsLine(args: string): GroupsAct {
+  const line = String(args ?? '')
+  const first = token(line, 0)
+  if (!first) return { verb: 'list' }
+  const word = first.text.toLowerCase()
+  const verb = word === 'colour' ? 'color' : word
+  if (verb === 'on' || verb === 'off') return { verb }
+  if (verb === 'new') return { verb, name: restOf(line, first.end) }
+  if (!(GROUPS_WORDS as readonly string[]).includes(verb)) return { verb: 'unknown', word: first.text }
+
+  const group = token(line, first.end)
+  if (!group || !group.text.trim()) return { verb: 'needs-group', word: verb }
+  const name = group.text.trim()
+  switch (verb) {
+    case 'add':
+    case 'drop':
+      return { verb, group: name, tiles: tilesOf(line.slice(group.end)) }
+    case 'rename':
+      return { verb, group: name, name: restOf(line, group.end) }
+    case 'color':
+    case 'icon':
+      return { verb, group: name, value: token(line, group.end)?.text.trim() ?? '' }
+    default:
+      return { verb: verb as 'publish' | 'ungroup', group: name }
+  }
+}
