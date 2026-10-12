@@ -102,7 +102,8 @@ const PARTS = ['install', 'host', 'library', 'hostPackage', 'source', 'package',
 export const sign = bytes => createHash('sha256').update(bytes).digest('hex')
 const poolsRoot = () => resolve(process.env.HYPERCOMB_POOLS_DIR || resolve(homedir(), '.hypercomb'))
 export const poolDir = meaning => resolve(poolsRoot(), sign(meaning))
-const localFile = name => resolve(poolsRoot(), 'local', name)
+/** A file of this device's own state: `local/` never travels. */
+export const localFile = name => resolve(poolsRoot(), 'local', name)
 
 /** A story's label is also a channel: lowercase letters, digits and hyphens, from a letter. */
 export const foldLabel = asked => {
@@ -469,7 +470,8 @@ export const GENERATED_FILES = Object.freeze([
 ])
 
 /** Everything a set of records needs: themselves, their layers, files, atoms, conversations. */
-const closureOf = async (pool, sigs) => {
+/** Every file the revisions `sigs` reach: what travels with them. */
+export const closureOf = async (pool, sigs) => {
   const reach = new Set()
   for (const sig of sigs) {
     reach.add(sig)
@@ -1126,37 +1128,53 @@ export const restore = async dir => {
 }
 
 
-/** Bring in what the hosts hold of both pools, each file hashed once on arrival. */
+/** A host's answer that says nothing about what it holds: it did not
+ *  answer, or failed, or asked to be asked later. */
+const unsure = response => !response || response.status >= 500 || response.status === 429 || response.status === 408
+
+/** Bring in what the hosts hold of both pools, each file hashed once on
+ *  arrival. `failed` counts what a host was asked and gave no clear answer to
+ *  — a listing or a member it did not answer, failed, or deferred. */
 export const pullPools = async (hosts = DEFAULT_HOSTS, { fetch: get = fetch } = {}) => {
   const report = []
   for (const host of hosts) {
     let taken = 0
     let refused = 0
+    let failed = 0
+    let unanswered = 0
     let answered = false
     for (const base of basesOf(host)) {
+      failed = 0
       for (const meaning of [BUILDS_MEANING, SIGNATURES_MEANING]) {
         const pool = sign(meaning)
         const listing = await get(`${base}/${pool}/`, { cache: 'no-store' }).catch(() => null)
-        if (!listing?.ok) continue
+        if (!listing?.ok) { if (unsure(listing)) { failed++; unanswered++ } continue }
+        // A body cut off on the way is as unanswered as no answer.
+        const text = await listing.text().catch(() => null)
+        if (text === null) { failed++; unanswered++; continue }
         answered = true
-        const names = (await listing.text()).split(/\r?\n/).map(n => n.trim()).filter(n => SIG.test(n))
+        const names = text.split(/\r?\n/).map(n => n.trim()).filter(n => SIG.test(n))
         const into = poolDir(meaning)
         const held = new Set(await readdir(into).catch(() => []))
         const wanted = names.filter(n => !held.has(n))
         for (let i = 0; i < wanted.length; i += 8) {
           await Promise.all(wanted.slice(i, i + 8).map(async name => {
             const response = await get(`${base}/${pool}/${name}`).catch(() => null)
-            if (!response?.ok) return
+            if (!response?.ok) { failed++; return }
+            const bytes = await response.arrayBuffer().then(b => Buffer.from(b), () => null)
+            if (!bytes) { failed++; return }
             // A file that does not hash to its name is refused, not kept.
-            if (sign(Buffer.from(await response.clone().arrayBuffer())) !== name) { refused++; return }
-            await admit(into, name, Buffer.from(await response.arrayBuffer()))
+            if (sign(bytes) !== name) { refused++; return }
+            await admit(into, name, bytes)
             taken++
           }))
         }
       }
       if (answered) break
     }
-    report.push({ host, answered, taken, refused })
+    // Where the pools answered, what failed there; where none did, every
+    // listing that went unanswered.
+    report.push({ host, answered, taken, refused, failed: answered ? failed : unanswered })
   }
   const pool = poolDir(BUILDS_MEANING)
   if (!await headOf(pool)) {
@@ -1347,14 +1365,26 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // Its own process, like build-draft: builder.mjs imports this module.
       const r = spawnSync(process.execPath, [resolve(HERE, 'builder.mjs'), 'asks', ref, ...rest].filter(Boolean), { stdio: 'inherit' })
       if (r.status !== 0) process.exitCode = r.status ?? 1
+    } else if (command === 'builder') {
+      // Its own process, like asks: builder.mjs imports this module. A stop
+      // (Ctrl-C, or a supervisor's SIGTERM to this process) is passed on: the
+      // watcher finishes its step and stops, and this waits for it.
+      const { spawn } = await import('node:child_process')
+      const child = spawn(process.execPath, [resolve(HERE, 'builder.mjs'), 'watch', ref, ...rest].filter(Boolean), { stdio: 'inherit' })
+      for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { child.kill(signal) })
+      const [code] = await new Promise(done => child.on('exit', (...end) => done(end)))
+      if (code !== 0) process.exitCode = code ?? 1
     } else if (command === 'build-draft') {
       // Its own process: builder.mjs imports this module, which is still
       // evaluating while its command line runs.
       const r = spawnSync(process.execPath, [resolve(HERE, 'builder.mjs'), ref, ...rest], { stdio: 'inherit' })
       if (r.status !== 0) process.exitCode = r.status ?? 1
     } else if (command === 'pull') {
-      for (const { host, answered, taken, refused } of await pullPools([ref, ...rest].filter(Boolean).length ? [ref, ...rest].filter(Boolean) : DEFAULT_HOSTS)) {
-        console.log(`${host.padEnd(24)} ${answered ? `${taken} new file(s)${refused ? `, ${refused} refused (not what they are named)` : ''}` : 'holds no version pools'}`)
+      for (const { host, answered, taken, refused, failed } of await pullPools([ref, ...rest].filter(Boolean).length ? [ref, ...rest].filter(Boolean) : DEFAULT_HOSTS)) {
+        console.log(`${host.padEnd(24)} ${answered
+          ? `${taken} new file(s)${refused ? `, ${refused} refused (not what they are named)` : ''}${failed ? `, ${failed} not given — pull again` : ''}`
+          : failed ? 'did not answer — pull again' : 'holds no version pools'}`)
+        if (failed) process.exitCode = 1
       }
     } else throw new Error(`unknown command "${command}"`)
   } catch (e) {

@@ -15,8 +15,10 @@
 // is a sandbox door; a second call with another key approves that publisher
 // too. `POST /__operate {zone, pubkey}` names the zone's operator as
 // SITE_OPERATORS does, so its signed index can name builders (the asks a host
-// holds, hypercomb-relay/build-asks.js). The door's shell is fetched from the
-// second argument.
+// holds, hypercomb-relay/build-asks.js). `PUT /__r2/<bucket>/<key>` writes one
+// object as the operator's `wrangler r2 object put` does (hypercomb-shim
+// host/builds.mjs push --r2), so the host lists version pools as a real one
+// does. The door's shell is fetched from the second argument.
 //
 // `--ai-stub` stands in for Anthropic behind the worker's `/ai/ask`: the real
 // endpoint runs (NIP-98, the context read from the heap by signature, the
@@ -99,7 +101,7 @@ http.createServer(async (req, res) => {
   // which sends neither an Origin nor Sec-Fetch-Site; any page in this machine's
   // browser — a sandbox door above all — sends one (a same-origin GET carries no
   // Origin, but always Sec-Fetch-Site), and must not bind a zone or read the store.
-  if ((req.url === '/__state' || req.url === '/__bind' || req.url === '/__operate') && (req.headers.origin || req.headers['sec-fetch-site'])) {
+  if ((req.url === '/__state' || req.url === '/__bind' || req.url === '/__operate' || req.url.startsWith('/__r2/')) && (req.headers.origin || req.headers['sec-fetch-site'])) {
     res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
     res.end('the harness endpoints answer the harness, not a page\n')
     return
@@ -130,6 +132,14 @@ http.createServer(async (req, res) => {
     env.SITE_OPERATORS = JSON.stringify(operators)
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ ok: true, operators }))
+    return
+  }
+  if (req.url.startsWith('/__r2/') && req.method === 'PUT') {
+    // The bucket is this process: the key is everything after it.
+    const key = decodeURIComponent(req.url.slice('/__r2/'.length)).split('/').slice(1).join('/')
+    await env.CONTENT.put(key, Buffer.concat(chunks), { httpMetadata: { contentType: req.headers['content-type'] || 'application/octet-stream' } })
+    res.writeHead(201, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end(`put ${key}\n`)
     return
   }
   const body = ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks)

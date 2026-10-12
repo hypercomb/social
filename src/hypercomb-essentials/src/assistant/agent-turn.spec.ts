@@ -203,6 +203,26 @@ describe('a turn with no window', () => {
     expect(result.rounds).toBe(2)
   })
 
+  it('a read block past the limit runs its first reads, says which waited, and reads a repeat once — as the window does', async () => {
+    const h = held()
+    const path = 'src/hypercomb-essentials/src/a.ts'
+    const reads = [`read ${h.revision}`, `read ${h.revision}`, ...Array.from({ length: 8 }, () => `read ${h.revision} ${path}`)]
+    const extra = Array.from({ length: 8 }, (_, i) => `find tile${i} /`)
+    const { router, calls } = scripted([
+      () => block(READ_FENCE_LANG, ...reads, ...extra),
+      sent => {
+        const back = sent.at(-1)!.content
+        expect(back).toContain('HIVE RESULTS')
+        expect(back).toContain('Not run — a block holds at most 8 reads: /find tile6 /; /find tile7 /. Ask for them in your next block.')
+        return 'Read what fit.'
+      },
+    ])
+    const result = await runAgentTurn({ request: 'look around' }, { router, reader: h.reader, versions: h.versions, readsFreely: () => true })
+    expect(calls).toHaveLength(2)
+    expect(result.read).toHaveLength(8)
+    expect(result.read.slice(0, 2)).toEqual([`/read ${h.revision}`, `/read ${h.revision} ${path}`])
+  })
+
   it('sends back once an answer about tiles nothing read', async () => {
     const h = held()
     const { router, calls } = scripted([

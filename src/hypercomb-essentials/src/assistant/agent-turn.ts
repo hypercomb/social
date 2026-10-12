@@ -276,7 +276,14 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
   const runRead = async (lines: readonly string[], providerId: string, model: string): Promise<string> => {
     if (!reader) throw new WorkRefused('reading the hive is not available here')
     if (!queue && !readsFreely(providerId)) throw new WorkRefused('reading the hive needs the participant\'s approval, and there is nowhere to ask for it here')
-    const plan = parseHypercombObservationGrammars(lines, page, readsPerBlock)
+    // A BLOCK PAST THE LIMIT RUNS ITS FIRST READS, AND SAYS WHICH WAITED; a
+    // read asked twice in one block is one read — as the chat window does.
+    const asked = [...new Set(lines.map(line => line.trim()).filter(Boolean))]
+    const waited = asked.slice(readsPerBlock)
+    const plan = parseHypercombObservationGrammars(asked.slice(0, readsPerBlock), page, readsPerBlock)
+    const aside = waited.length
+      ? `\n\nNot run — a block holds at most ${readsPerBlock} reads: ${waited.join('; ')}. Ask for ${waited.length === 1 ? 'it' : 'them'} in your next block.`
+      : ''
     const grammars = plan.observations.map(o => o.grammar)
     const keys = plan.observations.map(o => o.verb === 'code' ? `code ${o.query ?? ''}`.trim()
       : o.sig ? `${o.verb} ${o.sig}${o.section ? ` ${o.section}` : ''}${o.from ? ` ${o.from}` : ''}`
@@ -303,7 +310,7 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
         turnForeign.push(...theirs.grammars)
         for (const sig of theirs.sigs) theirSigs.add(sig)
       }
-      const content = formatHypercombObservationReceipt(receipt)
+      const content = formatHypercombObservationReceipt(receipt) + aside
       settle(gate.id, 'ran', `${content.length} characters`)
       return readResultMessage(content, turn.request)
     } catch (error) {

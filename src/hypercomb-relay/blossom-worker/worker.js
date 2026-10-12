@@ -36,7 +36,10 @@
 
 import { schnorr } from '@noble/curves/secp256k1'
 import { HOST_LISTING_FLOOR, listedMeanings } from '../host-listing.js'
-import { ASKS_MEANING, ASK_TTL_DAYS, MAX_ASK_BYTES, MAX_DRAFT_BYTES, buildersOf, isDraft, noteable, sweep as sweepAsks, zoneOf } from '../build-asks.js'
+import {
+  ANSWERS_MEANING, ANSWER_TTL_DAYS, ASKS_MEANING, ASK_TTL_DAYS, MAX_ANSWER_BYTES, MAX_ASK_BYTES, MAX_DRAFT_BYTES,
+  askShape, buildersOf, isDraft, noteable, noteableAnswer, originOf as askOriginOf, sweep as sweepAsks, sweepAnswers, zoneOf,
+} from '../build-asks.js'
 import { nostrJson } from '../nip05-names.js'
 import { encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.ts'
 
@@ -1145,7 +1148,7 @@ async function declaredListing(env, read) {
 /** The host's own private ledgers. Each member names a key or a domain and
  *  holds what only its own endpoint may hand out, so no declaration lists
  *  them — not even an operator's signed `listed`. */
-const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters', ASKS_MEANING]
+const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters', ASKS_MEANING, ANSWERS_MEANING]
 
 /** Is this pool listed here? The floor answers without an index read — the
  *  addresses every follower asks stay on the hot path; anything else is
@@ -1611,6 +1614,7 @@ function noPoolHere(request) {
 async function servePoolListing(request, env, sig) {
   const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
   if (sig === await poolAddress(ASKS_MEANING)) return serveAsks(request, env)
+  if (sig === await poolAddress(ANSWERS_MEANING)) return serveAnswers(request, env)
   if (!await listedPool(env, sig)) return noPoolHere(request)
   const prefix = `${sig}/`
   const names = []
@@ -3158,9 +3162,10 @@ async function noteAsk(env, request, uploader, sig, body) {
     // The author's own uploads: the ask, and the draft it names, each stored
     // under their grant first (a later re-upload by another key marks bytes
     // shared but never makes them that key's), the draft a draft record.
-    if ((await env.CONTENT.head(sig))?.customMetadata?.owner !== uploader) return
+    const askHead = await env.CONTENT.head(sig)
+    if (askHead?.customMetadata?.owner !== uploader || askHead.customMetadata.withdrawn === '1') return
     const draftHead = await env.CONTENT.head(verdict.record.draft)
-    if (draftHead?.customMetadata?.owner !== uploader || !(Number(draftHead.size) <= MAX_DRAFT_BYTES)) return
+    if (draftHead?.customMetadata?.owner !== uploader || draftHead.customMetadata.withdrawn === '1' || !(Number(draftHead.size) <= MAX_DRAFT_BYTES)) return
     const draftObject = await env.CONTENT.get(verdict.record.draft)
     if (!draftObject || !isDraft(new Uint8Array(await draftObject.arrayBuffer()))) return
     // Once: a member already noted is not noted, nor swept, again.
@@ -3178,10 +3183,11 @@ async function noteAsk(env, request, uploader, sig, body) {
   } catch { /* an ask that cannot be noted is still stored: the author can name it by hand */ }
 }
 
-/** Every ask the pool holds, with the record noted with it — read in one
- *  listing (R2 returns each member's custom metadata), never member by member. */
-async function askMembers(env) {
-  const pool = await poolAddress(ASKS_MEANING)
+/** Every member a noted pool holds, with the record noted with it — read in
+ *  one listing (R2 returns each member's custom metadata), never member by
+ *  member. Times are numbers; everything else is text. */
+async function notedMembers(env, meaning) {
+  const pool = await poolAddress(meaning)
   const out = []
   let cursor
   do {
@@ -3190,13 +3196,18 @@ async function askMembers(env) {
       const name = String(object.key ?? '').slice(pool.length + 1)
       if (!SIG_RE.test(name)) continue
       const meta = object.customMetadata ?? {}
-      out.push({ name, author: String(meta.author ?? ''), draft: String(meta.draft ?? ''), at: Number(meta.at) || 0,
-        noted: Number(meta.noted) || 0, zone: String(meta.zone ?? ''), origin: String(meta.origin ?? '') })
+      const member = { name }
+      for (const [key, value] of Object.entries(meta)) member[key] = key === 'at' || key === 'noted' ? Number(value) || 0 : String(value ?? '')
+      for (const key of ['author', 'zone', 'origin']) member[key] ??= ''
+      member.at ??= 0
+      member.noted ??= 0
+      out.push(member)
     }
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
   return out
 }
+const askMembers = (env) => notedMembers(env, ASKS_MEANING)
 
 /** The zones a key builds for: those it operates (SITE_OPERATORS), and those
  *  whose operator's signed index names it under `builders`. */
@@ -3239,11 +3250,93 @@ async function withdrawAsks(env, owner, sigs) {
   }
 }
 
-/** Note an upload as an ask once the upload has answered. */
-function noteAskLater(ctx, env, request, uploader, sig, body) {
-  const noting = noteAsk(env, request, uploader, sig, body)
+/** Note an upload as an ask, or an answer to one, once the upload has answered. */
+function noteBuildLater(ctx, env, request, uploader, sig, body) {
+  const noting = Promise.all([noteAsk(env, request, uploader, sig, body), noteAnswer(env, request, uploader, sig, body)])
   if (ctx?.waitUntil) ctx.waitUntil(noting)
   return ctx?.waitUntil ? undefined : noting
+}
+
+// ── build answers (hypercomb-relay/build-asks.js) ────────────────────────────
+//
+// A builder's signed word on an ask — built, refused, failed — uploaded under
+// its own grant is NOTED here, in the private pool host:answers, so the ask's
+// author learns what became of it without being told the answer's signature.
+// Noted once, only from a key that builds for the zone the answer names, for
+// an ask held here that is its `p`'s and was sent to that zone. A built
+// answer takes its ask off the builders' listing.
+
+/** Note these uploaded bytes in host:answers if they are an answer this host
+ *  should keep for an ask's author, and let the oldest of its zone fall off.
+ *  Runs after the upload has answered (waitUntil) and never fails it. */
+async function noteAnswer(env, request, uploader, sig, body) {
+  if (!env.CONTENT?.put || !env.CONTENT?.list || !env.CONTENT?.head || body.byteLength > MAX_ANSWER_BYTES) return
+  try {
+    const url = new URL(request.url)
+    const verdict = await noteableAnswer(new Uint8Array(body), { uploader, origin: url.origin, verify: verifyEventSig })
+    if (!verdict.ok) return
+    const { record } = verdict
+    // A zone this key builds for: its operator, or a builder the operator names.
+    const zones = siteOperators(env).map(([z]) => z)
+    const zone = zoneOf(url.hostname, zones)
+    if (!zone || !(await builderZones(env, uploader)).includes(zone)) return
+    if ((await env.CONTENT.head(sig))?.customMetadata?.owner !== uploader) return
+    // The ask it answers: held here as its author's own upload (a forgotten
+    // ask re-uploaded by anyone else answers nothing), verified, the answer's
+    // `p`'s, sent to this zone, and recent.
+    const askHead = await env.CONTENT.head(record.ask)
+    if (!askHead || !(Number(askHead.size) <= MAX_ASK_BYTES) || askHead.customMetadata?.owner !== record.author || askHead.customMetadata?.withdrawn === '1') return
+    const askObject = await env.CONTENT.get(record.ask)
+    const ask = askObject ? askShape(new Uint8Array(await askObject.arrayBuffer())) : null
+    if (!ask || ask.author !== record.author || !(await verifyEventSig(ask.evt))) return
+    if (!(ask.at > Math.floor(Date.now() / 1000) - ANSWER_TTL_DAYS * 86_400)) return
+    const askOrigin = askOriginOf(ask.host)
+    if (!askOrigin || zoneOf(new URL(askOrigin).hostname, zones) !== zone) return
+    // BUILT IS DONE, for every builder: the ask leaves their listing — on
+    // every upload of the answer, so a removal cut short is made again.
+    if (record.state === 'built') await env.CONTENT.delete(`${await poolAddress(ASKS_MEANING)}/${record.ask}`)
+    // Once: a member already noted is not noted, nor swept, again.
+    const pool = await poolAddress(ANSWERS_MEANING)
+    const member = `${pool}/${sig}`
+    if (await env.CONTENT.head(member)) return
+    const noted = { ...record, noted: Date.now(), zone }
+    await env.CONTENT.put(member, new Uint8Array(0), {
+      customMetadata: Object.fromEntries(Object.entries(noted).map(([k, v]) => [k, String(v)])),
+      onlyIf: new Headers({ 'If-None-Match': '*' }),
+    })
+    for (const name of sweepAnswers(await notedMembers(env, ANSWERS_MEANING))) await env.CONTENT.delete(`${pool}/${name}`)
+  } catch { /* an answer that cannot be noted is still stored: its author can be told it by hand */ }
+}
+
+/** GET /<sign('host:answers')>/ — what builders said of asks, newest first,
+ *  one per line as `<signature> <origin it was sent to>`, to a signed request
+ *  (NIP-98, GET or HEAD): the answers to the key's own asks, and every answer
+ *  in the zones it builds for. A key with none gets an empty listing — the
+ *  usual state, asked for often — and an unsigned request noPoolHere. */
+async function serveAnswers(request, env) {
+  const auth = await verifyNip98(request, parseAuthEvent(request), request.method === 'HEAD' ? 'HEAD' : 'GET')
+  if (!auth.ok) return noPoolHere(request)
+  const builds = new Set(await builderZones(env, auth.pubkey))
+  // Each answer's zone as it stands now, the way the asks listing finds it.
+  const zones = siteOperators(env).map(([zone]) => zone)
+  const since = Math.floor(Date.now() / 1000) - ANSWER_TTL_DAYS * 86_400
+  const seen = (await notedMembers(env, ANSWERS_MEANING))
+    .filter((m) => m.at > since && m.origin && (m.author === auth.pubkey || builds.has(zoneOf(new URL(m.origin).hostname, zones))))
+    .sort((a, b) => (b.noted - a.noted) || (a.name < b.name ? -1 : 1))
+  const listing = seen.length ? seen.map((m) => `${m.name} ${m.origin}`).join('\n') + '\n' : ''
+  return new Response(request.method === 'HEAD' ? null : listing, {
+    status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store, private', Vary: 'Authorization', ...CORS },
+  })
+}
+
+/** WITHDRAWN: a builder's answers it forgot leave the listing, and so do the
+ *  answers to an ask its author forgot. */
+async function withdrawAnswers(env, owner, sigs) {
+  if (!sigs.size || !env.CONTENT?.list) return
+  const pool = await poolAddress(ANSWERS_MEANING)
+  for (const m of await notedMembers(env, ANSWERS_MEANING)) {
+    if ((m.builder === owner && sigs.has(m.name)) || (m.author === owner && sigs.has(m.ask))) await env.CONTENT.delete(`${pool}/${m.name}`)
+  }
 }
 
 // POST /forget — REMOVE FROM MY HOSTS (documentation/remove-from-my-hosts.md).
@@ -3289,11 +3382,22 @@ async function forgetSigs(request, env) {
     if (!claim.owner) { kept[sig] = 'unclaimed'; continue }
     if (claim.owner !== auth.pubkey) { kept[sig] = 'not-yours'; continue }
     theirs.add(sig)
-    if (claim.shared === '1') { kept[sig] = 'shared'; continue }
+    if (claim.shared === '1') {
+      kept[sig] = 'shared'
+      // WITHDRAWN STAYS WITHDRAWN. Someone else relies on the bytes, so they
+      // stay; but an ask or a draft (small) its author forgot is never noted
+      // again, nor answered.
+      if (claim.withdrawn !== '1' && Number(head.size) <= MAX_DRAFT_BYTES) {
+        const obj = await env.CONTENT.get(sig)
+        if (obj) await env.CONTENT.put(sig, obj.body, { httpMetadata: head.httpMetadata, customMetadata: { ...claim, withdrawn: '1' } })
+      }
+      continue
+    }
     await env.CONTENT.delete(sig)
     removed.push(sig)
   }
   await withdrawAsks(env, auth.pubkey, theirs)
+  await withdrawAnswers(env, auth.pubkey, theirs)
   return json(200, { removed, kept }, { 'Cache-Control': 'no-store' })
 }
 
@@ -3312,7 +3416,7 @@ async function putSig(request, env, sig, ctx) {
 
   const stored = await storeBlob(env, auth.pubkey, sig, body, request.headers.get('content-type'))
   if (stored.outcome === 'denied') return text(403, stored.reason)
-  await noteAskLater(ctx, env, request, auth.pubkey, sig, body)
+  await noteBuildLater(ctx, env, request, auth.pubkey, sig, body)
   // `stored <sig>` is the swarm's receipt (documentation/swarm-host.md, "The
   // receipt"): the bytes hashed to the signature and the heap holds them —
   // just as true of an atom already held. Any other body costs the swarm a
@@ -3333,7 +3437,7 @@ async function putUpload(request, env, ctx) {
 
   const stored = await storeBlob(env, auth.pubkey, sig, body, request.headers.get('content-type'))
   if (stored.outcome === 'denied') return text(403, stored.reason)
-  await noteAskLater(ctx, env, request, auth.pubkey, sig, body)
+  await noteBuildLater(ctx, env, request, auth.pubkey, sig, body)
   return json(200, {
     url: new URL(request.url).origin + '/' + sig,
     sha256: sig,

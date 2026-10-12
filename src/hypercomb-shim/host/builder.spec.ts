@@ -176,3 +176,424 @@ describe('origins compare normalized, as a host compares them', () => {
     expect(originOf('try-x.localhost:4291')).toBe('http://try-x.localhost:4291')
   })
 })
+
+describe('a watching builder', () => {
+  const ORIGIN = 'http://h.test'
+  /** A host that lists `names` to `builder`'s signed request, serves every
+   *  hosting's bytes, lists `pooled` in its version pools, and takes PUTs. */
+  const host = async (builder: Uint8Array, hostings: ReturnType<typeof hosting>[], {
+    pooled = [] as string[], refuse = (_sig: string) => false, failing = (_url: string) => false, answersListed = null as string[] | null,
+  } = {}) => {
+    const { verifyEvent } = await import('nostr-tools/pure')
+    const asks = sha('host:asks')
+    const puts: { sig: string; body: Buffer }[] = []
+    const signedBy = (init: RequestInit | undefined, url: string, method: string) => {
+      const header = String((init?.headers as Record<string, string> | undefined)?.Authorization ?? '')
+      try {
+        const event = JSON.parse(Buffer.from(header.replace(/^Nostr /, ''), 'base64').toString('utf8'))
+        return event.kind === 27235 && verifyEvent(event) && event.pubkey === getPublicKey(builder)
+          && event.tags.some((t: string[]) => t[0] === 'u' && t[1] === url) && event.tags.some((t: string[]) => t[0] === 'method' && t[1] === method)
+      } catch { return false }
+    }
+    const get = (async (url: string, init?: RequestInit) => {
+      if (failing(url)) return new Response('slow down', { status: 429 })
+      if (url === `${ORIGIN}/${sha('host:answers')}/` && answersListed && signedBy(init, url, 'GET')) return new Response(answersListed.map(n => `${n} ${ORIGIN}\n`).join(''))
+      if (url === `${ORIGIN}/${asks}/`) {
+        return signedBy(init, url, 'GET') ? new Response(hostings.map(h => `${h.ask} ${ORIGIN}\n`).join('')) : new Response('', { status: 404 })
+      }
+      if (url === `${ORIGIN}/${sha('host:builds')}/`) return new Response(pooled.map(n => `${n}\n`).join(''))
+      for (const h of hostings) {
+        const response = await h.get(url)
+        if (response.ok) return response
+      }
+      return new Response('', { status: 404 })
+    }) as unknown as typeof fetch
+    const send = (async (url: string, init?: RequestInit) => {
+      const body = Buffer.from(init?.body as Uint8Array)
+      const sig = url.split('/').pop()!
+      if (init?.method !== 'PUT' || !signedBy(init, url, 'PUT') || sha(body) !== sig) return new Response('unauthorized', { status: 401 })
+      if (refuse(sig)) return new Response('busy', { status: 503 })
+      puts.push({ sig, body })
+      return new Response(`stored ${sig}`, { status: 201 })
+    }) as unknown as typeof fetch
+    return { get, send, puts }
+  }
+  /** A promoted drafts revision, held in this builder's pool — signed in the
+   *  role builder by `signer`, as promote signs it, when one is named. */
+  const promoted = async (ask: string, label: string, version = '2026.10.12.1', signer?: Uint8Array) => {
+    const { poolDir, signaturePreimage } = await import('./builds.mjs')
+    const { mkdir, writeFile } = await import('node:fs/promises')
+    const bytes = enc({ name: 'build', label, version, ask, at: NOW.toISOString() })
+    await mkdir(poolDir('host:builds'), { recursive: true })
+    await writeFile(resolve(poolDir('host:builds'), sha(bytes)), bytes)
+    let signature: string | undefined
+    if (signer) {
+      const event = enc(finalizeEvent({ kind: 30567, created_at: 1_790_000_000, content: signaturePreimage(sha(bytes), version, 'builder'),
+        tags: [['d', `${sha(bytes)}:builder`], ['b', sha(bytes)], ['r', 'builder'], ['v', version]] }, signer))
+      await mkdir(poolDir('host:build-signatures'), { recursive: true })
+      await writeFile(resolve(poolDir('host:build-signatures'), sha(event)), event)
+      signature = sha(event)
+    }
+    return { label, version, sig: sha(bytes), signature }
+  }
+  const answersIn = (puts: { body: Buffer }[]) => puts.map(p => { try { return JSON.parse(p.body.toString('utf8')) } catch { return null } })
+    .filter(event => event?.kind === 30569)
+  const tagOf = (event: { tags: string[][] }, name: string) => event.tags.find(t => t[0] === name)?.[1]
+
+  it('builds a trusted author\'s ask, carries what the host does not list, then answers built — and holds a stranger\'s', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const { verifyEvent } = await import('nostr-tools/pure')
+    const builder = generateSecretKey()
+    const trusted = hosting()
+    const stranger = hosting()
+    await trustAuthor(trusted.author)
+    // The stand-in build promotes as the real one does: into this builder's pool.
+    const made: { label: string; version: string; sig: string }[] = []
+    const build = vi.fn(async (origin: string, ask: string) => {
+      expect([origin, ask]).toEqual([ORIGIN, trusted.ask])
+      made.push(await promoted(ask, 'hypercomb-essentials-drafts', '2026.10.12.1', builder), await promoted(ask, 'host-drafts', '2026.10.12.1', builder))
+      return { promoted: made.map(({ label, version, sig }) => ({ label, version, sig })) }
+    })
+    // The host lists the package already (its bytes are the stand-in's, made the same way).
+    const pkgSig = sha(enc({ name: 'build', label: 'hypercomb-essentials-drafts', version: '2026.10.12.1', ask: trusted.ask, at: NOW.toISOString() }))
+    const { get, send, puts } = await host(builder, [trusted, stranger], { pooled: [pkgSig] })
+    const lines: string[] = []
+    await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log: l => { lines.push(l) }, carry: async () => [], build })
+    expect(build).toHaveBeenCalledTimes(1)
+    const [pkg, hostRevision] = made
+    expect(pkg.sig).toBe(pkgSig)
+    // The host already listed the package: only the host revision and the
+    // builder's signatures were carried, before the answer.
+    expect(puts.map(p => p.sig).slice(0, -1).sort()).toEqual([hostRevision.sig, pkg.signature!, hostRevision.signature!].sort())
+    const [answer] = answersIn(puts)
+    expect(puts.at(-1)!.sig).toBe(sha(JSON.stringify(answer)))
+    expect(verifyEvent(answer)).toBe(true)
+    expect(answer.pubkey).toBe(getPublicKey(builder))
+    expect(answer.content).toBe(`hc:answer:v1\n${trusted.ask}\nbuilt`)
+    expect({ d: tagOf(answer, 'd'), p: tagOf(answer, 'p'), h: tagOf(answer, 'h'), s: tagOf(answer, 's') })
+      .toEqual({ d: trusted.ask, p: trusted.author, h: ORIGIN, s: 'built' })
+    expect(answer.tags.filter((t: string[]) => t[0] === 'b')).toEqual([['b', pkg.sig, pkg.label, pkg.version], ['b', hostRevision.sig, hostRevision.label, hostRevision.version]])
+    expect(answer.tags.filter((t: string[]) => t[0] === 'g').map((t: string[]) => t[1])).toEqual([pkg.signature!, hostRevision.signature!].sort())
+    // The stranger's ask is held, unanswered.
+    expect(lines.some(l => l.includes(`held: ${stranger.ask.slice(0, 12)}`))).toBe(true)
+    expect(answersIn(puts).some(a => tagOf(a, 'd') === stranger.ask)).toBe(false)
+  })
+
+  it('answers each ask once: a later pass sends a lost answer again and builds nothing', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    await trustAuthor(h.author)
+    let down = true
+    const { get, send, puts } = await host(builder, [h], { refuse: () => down })
+    const failing = vi.fn(async () => { throw new Error('npm run build:core failed:\nerror TS2304: Cannot find name x') })
+    const lines: string[] = []
+    const log = (l: string) => { lines.push(l) }
+    await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log, build: failing, carry: async () => [] })
+    expect(failing).toHaveBeenCalledTimes(1)
+    expect(puts).toEqual([])
+    expect(lines.some(l => /did not reach http:\/\/h\.test yet/.test(l))).toBe(true)
+    down = false
+    await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log, build: failing, carry: async () => [] })
+    expect(failing).toHaveBeenCalledTimes(1)
+    const [answer] = answersIn(puts)
+    expect(tagOf(answer, 's')).toBe('failed')
+    expect(tagOf(answer, 'why')).toBe('npm run build:core failed: error TS2304: Cannot find name x')
+  })
+
+  it('answers refused when it will not build the ask as asked, and waits out a host that does not answer', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    await trustAuthor(h.author)
+    const { get, send, puts } = await host(builder, [h])
+    const lines: string[] = []
+    const waiting = vi.fn(async () => { throw Object.assign(new Error('h.test did not answer'), { transient: true }) })
+    await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log: l => { lines.push(l) }, build: waiting, carry: async () => [] })
+    expect(puts).toEqual([])
+    expect(lines.some(l => l.includes('waits: h.test did not answer'))).toBe(true)
+    // The real build: the draft starts from a revision nobody holds.
+    await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log: () => {}, carry: async () => [] })
+    const [answer] = answersIn(puts)
+    expect(tagOf(answer, 's')).toBe('refused')
+    expect(tagOf(answer, 'why')).toMatch(/the draft starts from bbbbbbbbbbbb, which neither this builder nor http:\/\/h\.test holds/)
+  })
+
+  it('a build of its own that stopped before its answer is answered, not built again — another builder\'s is not its own', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    // Not trusted any longer: the build happened, so it is answered all the same.
+    const theirs = await promoted(h.ask, 'host-drafts', '2026.10.12.3', generateSecretKey())
+    const done = await promoted(h.ask, 'host-drafts', '2026.10.12.2', builder)
+    const { get, send, puts } = await host(builder, [h])
+    const build = vi.fn()
+    await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log: () => {}, build, carry: async () => [] })
+    expect(build).not.toHaveBeenCalled()
+    const [answer] = answersIn(puts)
+    expect(answer.tags.filter((t: string[]) => t[0] === 'b')).toEqual([['b', done.sig, 'host-drafts', done.version]])
+    expect(JSON.stringify(answer)).not.toContain(theirs.sig)
+  })
+
+  it('watches alone, and takes over a lock its holder left behind', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { localFile } = await import('./builds.mjs')
+    const { mkdir, writeFile } = await import('node:fs/promises')
+    const builder = generateSecretKey()
+    const { get, send } = await host(builder, [])
+    await mkdir(resolve(localFile('builder.lock'), '..'), { recursive: true })
+    await writeFile(localFile('builder.lock'), JSON.stringify({ pid: process.ppid, host: 'http://other.test' }))
+    await expect(watchAsks(ORIGIN, { once: true, key: builder, get, send, log: () => {} })).rejects.toThrow(/another builder is at work here/)
+    // Gone, or never fully written: taken over.
+    for (const left of [JSON.stringify({ pid: 2 ** 22 + 12_345, host: 'http://other.test' }), '', '{"pid":']) {
+      await writeFile(localFile('builder.lock'), left)
+      await watchAsks(ORIGIN, { once: true, key: builder, get, send, log: () => {} })
+      await expect(readFile(localFile('builder.lock'))).rejects.toThrow()
+    }
+  })
+
+  it('says why in one line, with nothing of this machine in it', async () => {
+    const { whyOf } = await import('./builder.mjs')
+    const { homedir } = await import('node:os')
+    const why = whyOf(new Error(`npm ci failed:\nnpm ERR! in ${tmpdir()}/hc-builder-AbC123/src\nnpm ERR! see ${homedir()}/.npm/_logs/debug.log`))
+    expect(why).toBe('npm ci failed: npm ERR! see ~/.npm/_logs/debug.log')
+    expect(whyOf(new Error(`the tree differs at ${tmpdir()}/hc-builder-pools-x1/host`))).toBe('the tree differs at <pools>/host')
+    expect(whyOf(new Error('x'.repeat(400))).length).toBe(280)
+  })
+
+  it('signs only answers the host itself would note: built with its signatures, a refusal at the longest why, a failure of many lines', async () => {
+    const { answerEvent, whyOf } = await import('./builder.mjs')
+    const { noteableAnswer } = await import('../../hypercomb-relay/build-asks.js')
+    const { verifyEvent } = await import('nostr-tools/pure')
+    const builder = generateSecretKey()
+    const ask = 'a'.repeat(64), author = getPublicKey(generateSecretKey())
+    const events = [
+      await answerEvent({ ask, author, origin: ORIGIN, state: 'built', built: [{ sig: 'b'.repeat(64), label: 'hypercomb-essentials-drafts', version: '2026.10.12.1' }, { sig: 'c'.repeat(64), label: 'host-drafts', version: '2026.10.12.2' }], signatures: ['d'.repeat(64), 'e'.repeat(64)] }, builder, NOW),
+      await answerEvent({ ask, author, origin: 'HTTP://H.TEST:80/', state: 'refused', why: whyOf(new Error('x'.repeat(1000))) }, builder, NOW),
+      await answerEvent({ ask, author, origin: ORIGIN, state: 'failed', why: whyOf(new Error('npm run build:core failed:\nline\twith a tab\nthe last line')) }, builder, NOW),
+      await answerEvent({ ask, author, origin: ORIGIN, state: 'failed', why: '' }, builder, NOW),
+    ]
+    for (const event of events) {
+      const verdict = await noteableAnswer(Buffer.from(JSON.stringify(event)), { uploader: getPublicKey(builder), origin: ORIGIN, now: Math.floor(NOW.getTime() / 1000), verify: async (e: unknown) => verifyEvent(e as never) })
+      expect(verdict, JSON.stringify(event.tags)).toMatchObject({ ok: true })
+    }
+    expect(tagOf(events[1], 'why')).toHaveLength(280)
+    expect(tagOf(events[2], 'why')).toBe('npm run build:core failed: the last line')
+  })
+
+  it('waits, unanswered, on a host that does not give the draft or its version pools', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    await trustAuthor(h.author)
+    for (const failing of [(url: string) => url.endsWith(h.draft), (url: string) => url.endsWith(`/${sha('host:builds')}/`)]) {
+      const { get, send, puts } = await host(builder, [h], { failing })
+      const lines: string[] = []
+      await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log: l => { lines.push(l) }, carry: async () => [] })
+      expect(puts).toEqual([])
+      expect(lines.some(l => l.includes(`${h.ask.slice(0, 12)} waits:`))).toBe(true)
+    }
+  })
+
+  it('holds an author untrusted while it worked, and answers nothing for a build it was stopped in', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    await trustAuthor(h.author)
+    const { get, send, puts } = await host(builder, [h])
+    const lines: string[] = []
+    const log = (l: string) => { lines.push(l) }
+    const untrusted = vi.fn(async () => { throw Object.assign(new Error(`${h.author} is not an author this builder trusts`), { held: true }) })
+    await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log, build: untrusted, carry: async () => [] })
+    const stop = new AbortController()
+    const stopped = vi.fn(async () => { stop.abort(); throw new Error('npm ci failed:\nnpm ERR! signal SIGINT') })
+    await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log, build: stopped, carry: async () => [], signal: stop.signal })
+    expect(untrusted).toHaveBeenCalledTimes(1)
+    expect(stopped).toHaveBeenCalledTimes(1)
+    expect(puts).toEqual([])
+    expect(lines.some(l => l.startsWith('[builder] held:'))).toBe(true)
+  })
+
+  it('answers nothing until the build is carried; a sync that throws does not stop the carrying', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    await trustAuthor(h.author)
+    let down = true
+    const { get, send, puts } = await host(builder, [h], { refuse: () => down })
+    const build = vi.fn(async (_origin: string, ask: string) => {
+      const p = await promoted(ask, 'host-drafts', '2026.10.12.1', builder)
+      return { promoted: [{ label: p.label, version: p.version, sig: p.sig }] }
+    })
+    const lines: string[] = []
+    const carry = async () => { throw new Error('the subscription directory is gone') }
+    await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log: l => { lines.push(l) }, build, carry })
+    expect(answersIn(puts)).toEqual([])
+    expect(lines.some(l => l.includes('waits to be carried'))).toBe(true)
+    expect(lines.some(l => l.includes('sync: the subscription directory is gone'))).toBe(true)
+    // The host back: carried and answered, and not built again.
+    down = false
+    await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log: () => {}, build, carry })
+    expect(build).toHaveBeenCalledTimes(1)
+    expect(answersIn(puts).map(a => tagOf(a, 's'))).toEqual(['built'])
+  })
+
+  it('sends an answer again while the host has never listed it; once listed, one dropped since stays dropped', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    await trustAuthor(h.author)
+    const failing = vi.fn(async () => { throw new Error('the tests fail') })
+    const pass = async (answersListed: string[] | null) => {
+      const at = await host(builder, [h], { answersListed })
+      await watchAsks(ORIGIN, { once: true, key: builder, get: at.get, send: at.send, now: () => NOW, log: () => {}, build: failing, carry: async () => [] })
+      return at.puts.map(p => p.sig)
+    }
+    const [answer] = await pass(null)
+    expect(await pass([])).toEqual([answer])
+    expect(await pass([answer])).toEqual([])
+    // Swept, or withdrawn by its builder: not put back.
+    expect(await pass([])).toEqual([])
+    expect(failing).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers failed once a draft\'s install has found the registry out of reach three times, run after run', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    await trustAuthor(h.author)
+    const offline = vi.fn(async () => { throw Object.assign(new Error('npm ci from the draft\'s tree failed:\nnpm ERR! code ECONNREFUSED'), { transient: true, network: true }) })
+    const states: (string | undefined)[][] = []
+    for (let run = 0; run < 3; run++) {
+      const at = await host(builder, [h])
+      await watchAsks(ORIGIN, { once: true, key: builder, get: at.get, send: at.send, now: () => NOW, log: () => {}, build: offline, carry: async () => [] })
+      states.push(answersIn(at.puts).map(a => tagOf(a, 's')))
+    }
+    expect(states).toEqual([[], [], ['failed']])
+  })
+
+  it('waits to carry a build while the host does not answer for its version pools, instead of sending everything', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    await trustAuthor(h.author)
+    const { get, send, puts } = await host(builder, [h], { failing: url => url.endsWith(`/${sha('host:builds')}/`) })
+    const build = vi.fn(async (_origin: string, ask: string) => {
+      const p = await promoted(ask, 'host-drafts', '2026.10.12.1', builder)
+      return { promoted: [{ label: p.label, version: p.version, sig: p.sig }] }
+    })
+    const lines: string[] = []
+    await watchAsks(ORIGIN, { once: true, key: builder, get, send, now: () => NOW, log: l => { lines.push(l) }, build, carry: async () => [] })
+    expect(puts).toEqual([])
+    expect(lines.some(l => l.includes('waits to be carried') && l.includes('did not list host:builds'))).toBe(true)
+  })
+
+  it('holds an ask another builder built, and waits out a download cut off on the way', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    await trustAuthor(h.author)
+    // Cut off: the draft's body breaks after its headers.
+    const cut = await host(builder, [h])
+    const cutGet = (async (url: string, init?: RequestInit) => url.endsWith(h.draft)
+      ? new Response(new ReadableStream({ pull: c => c.error(new TypeError('terminated')) }))
+      : cut.get(url, init)) as unknown as typeof fetch
+    const lines: string[] = []
+    await watchAsks(ORIGIN, { once: true, key: builder, get: cutGet, send: cut.send, now: () => NOW, log: l => { lines.push(l) }, carry: async () => [] })
+    expect(cut.puts).toEqual([])
+    expect(lines.some(l => l.includes(`${h.ask.slice(0, 12)} waits:`))).toBe(true)
+    // Built by someone else: theirs to answer.
+    await promoted(h.ask, 'host-drafts', '2026.10.12.1', generateSecretKey())
+    const theirs = await host(builder, [h])
+    lines.length = 0
+    await watchAsks(ORIGIN, { once: true, key: builder, get: theirs.get, send: theirs.send, now: () => NOW, log: l => { lines.push(l) }, carry: async () => [] })
+    expect(theirs.puts).toEqual([])
+    expect(lines.some(l => l.startsWith('[builder] held: that ask was built already'))).toBe(true)
+  })
+
+  it('runs each build step as a group it can end: past its time, or when this builder stops', async () => {
+    const { buildStep, stepTrouble } = await import('./builder.mjs')
+    // A step that starts a grandchild and never ends: the time limit ends both.
+    const forever = `require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' }); setInterval(() => {}, 1000)`
+    const late = await buildStep(process.execPath, ['-e', forever], { minutes: 0.01 })
+    expect(late.timedOut).toBe(true)
+    expect(stepTrouble('npm run build:core', ['run'], late)).toMatchObject({ message: expect.stringMatching(/ran past \d+ minutes and was stopped/) })
+    expect(stepTrouble('npm run build:core', ['run'], late).transient).toBeUndefined()
+    // Stopped by this builder: transient, never the draft's failure.
+    const stop = new AbortController()
+    setTimeout(() => stop.abort(), 200)
+    const stopped = await buildStep(process.execPath, ['-e', forever], { signal: stop.signal })
+    expect(stopped.stopped).toBe(true)
+    expect(stepTrouble('npm ci', ['ci'], stopped)).toMatchObject({ transient: true })
+    // Passed, and failed with what it printed last.
+    expect(stepTrouble('npm run x', ['run'], await buildStep(process.execPath, ['-e', 'console.log("ok")']))).toBeNull()
+    const broke = await buildStep(process.execPath, ['-e', 'console.error("error TS2304: Cannot find name x"); process.exit(2)'])
+    expect(stepTrouble('npm run build:core', ['run'], broke)?.message).toMatch(/npm run build:core failed:\nerror TS2304/)
+  })
+
+  it('counts a registry out of reach against the draft only when the draft changed what an install fetches', async () => {
+    const { stepTrouble } = await import('./builder.mjs')
+    const offline = { code: 1, signal: null, said: 'npm ERR! code ENOTFOUND\nnpm ERR! network request to https://registry.example failed', timedOut: false, stopped: false }
+    expect(stepTrouble('npm ci', ['ci'], offline)).toMatchObject({ transient: true, network: false })
+    expect(stepTrouble('npm ci', ['ci'], offline, { touchesInstall: true })).toMatchObject({ transient: true, network: true })
+    // The same words from a build script are the draft's failure.
+    expect(stepTrouble('npm run build:core', ['run'], offline).transient).toBeUndefined()
+    // Ended by a signal this builder did not send: the draft's doing.
+    expect(stepTrouble('npm run build:core', ['run'], { code: null, signal: 'SIGKILL', said: '', timedOut: false, stopped: false }).transient).toBeUndefined()
+  })
+
+  it('sees an answer the moment the host lists it, so withdrawing it before the next pass keeps it withdrawn', async () => {
+    const { watchAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    await trustAuthor(h.author)
+    const failing = vi.fn(async () => { throw new Error('the tests fail') })
+    // The host notes what it is given, and lists it at once.
+    const listed: string[] = []
+    const first = await host(builder, [h], { answersListed: listed })
+    const send = (async (url: string, init?: RequestInit) => {
+      const response = await first.send(url, init)
+      if (response.ok) listed.push(url.split('/').pop()!)
+      return response
+    }) as unknown as typeof fetch
+    await watchAsks(ORIGIN, { once: true, key: builder, get: first.get, send, now: () => NOW, log: () => {}, build: failing, carry: async () => [] })
+    expect(first.puts).toHaveLength(1)
+    // Withdrawn before the next pass: not sent again.
+    const after = await host(builder, [h], { answersListed: [] })
+    await watchAsks(ORIGIN, { once: true, key: builder, get: after.get, send: after.send, now: () => NOW, log: () => {}, build: failing, carry: async () => [] })
+    expect(after.puts).toEqual([])
+  })
+
+  it('names its newest signature on each revision, and cuts a why between characters', async () => {
+    const { answerEvent, deliverBuilt, whyOf } = await import('./builder.mjs')
+    const { poolDir, signaturePreimage } = await import('./builds.mjs')
+    const { mkdir, writeFile } = await import('node:fs/promises')
+    const builder = generateSecretKey()
+    const rev = await promoted('a'.repeat(64), 'host-drafts', '2026.10.12.1', builder)
+    // Signed again later (builds.mjs sign --as builder): the newer stands.
+    const again = enc(finalizeEvent({ kind: 30567, created_at: 1_790_000_100, content: signaturePreimage(rev.sig, rev.version, 'builder'),
+      tags: [['d', `${rev.sig}:builder`], ['b', rev.sig], ['r', 'builder'], ['v', rev.version]] }, builder))
+    await mkdir(poolDir('host:build-signatures'), { recursive: true })
+    await writeFile(resolve(poolDir('host:build-signatures'), sha(again)), again)
+    const { get, send } = await host(builder, [])
+    const carried = await deliverBuilt(ORIGIN, [rev.sig], { get, send, key: builder })
+    expect(carried.signatures).toEqual([sha(again)])
+    const why = whyOf(new Error('x'.repeat(278) + '\u{1F600}'.repeat(50)))
+    expect(why.length).toBeLessThanOrEqual(280)
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(why)).toBe(false)
+    const event = await answerEvent({ ask: 'a'.repeat(64), author: getPublicKey(generateSecretKey()), origin: ORIGIN, state: 'failed', why }, builder, NOW)
+    expect(tagOf(event, 'why')).toBe(why)
+  })
+})
+

@@ -283,9 +283,79 @@ author's clock earns no place. The ask's bytes stay where its author put
 them; the author takes it off the listing by forgetting it or its draft,
 even after someone else re-uploaded the same bytes. With grants open to every key (`AUTO_GRANT=1`) fresh keys can
 still crowd a zone's listing; R12's grant rules (§4 step 8) are the answer to
-that. A builder reads it with `builds.mjs asks <host>`. Still
-owed: building as another user or in a container; builders watching for asks
-and answering each; the author shown what became of each draft.
+that. A builder reads it with `builds.mjs asks <host>`.
+
+**A builder answers every ask it takes (2026-10-12).** `builds.mjs builder
+<host>` watches a host's asks (once a minute, or `--once`). It builds those
+from authors it trusts and holds the rest unanswered; trusting an author later
+builds theirs. It answers each ask it takes with a signed event (kind 30569,
+`hc:answer:v1\n<ask>\n<state>`) in one of three states:
+
+- **built**, naming the revisions it promoted (`b`) and its own signatures on
+  them (`g`);
+- **refused**, when it will not build the ask as asked: for example a draft
+  that is not one, a path out of the tree, a draft not over the newest
+  revision, or a draft or file the host says it no longer holds;
+- **failed**, when the build or its tests broke, or a step ran past thirty
+  minutes (each step runs as its own process group, and is ended whole).
+
+Refused and failed carry one line of why. The builder's own places in it (the
+build's directories, its pools, its temporary directory, the directory it
+runs in, its home) are named, never shown, and a URL's credentials are
+dropped. Some troubles are no answer at all, and the builder tries again next
+pass:
+
+- a host that did not answer, failed, or rate-limited it, or did not give all
+  of its version pools;
+- an npm registry out of reach while installing — for as long as it lasts,
+  unless the draft changed what an install fetches from (its lockfile, its
+  package files, `.npmrc`): its own lockfile can name a registry nobody
+  reaches, so the third time it is answered failed;
+- the builder being stopped, which ends the running step.
+
+An author it no longer trusts is held, and so is an ask another builder
+built, as far as the host's pools show it once pulled. An ask it cannot read as a signed ask for that host is never taken.
+
+A build is carried before it is answered. The builder syncs it to its own
+subscriptions, then uploads to the asked host, by signature and under its own
+grant, whatever that host does not already list in its version pools; while
+those listings go unanswered it waits rather than send everything. A reader
+finds each file at `/<sig>`, or as a member of those pools. An answer
+therefore never names what the host cannot give. An answer the host has never
+listed is sent again next pass; one it listed once and dropped since (swept,
+or withdrawn) stays dropped.
+
+The host notes an answer in the private pool `host:answers` when:
+
+- it verifies, and the key that signed it uploaded it;
+- that key builds for the zone it names (the zone's operator, or a builder
+  the operator's index names);
+- the ask it answers is held there as its author's own upload, verifies, is
+  the answer's `p`'s, was sent to the same zone, and is under fourteen days
+  old.
+
+The listing answers a signed request only. A key sees the answers to its own
+asks, and a zone's builders see the zone's (each answer's zone as it stands
+now). Anyone else signed gets an empty listing; unsigned, it is a pool the
+host does not hold. A built answer takes its ask off the builders' listing,
+because built is done for every builder.
+
+History falls off builder by builder, so no builder's answers crowd out
+another's. Per zone, a builder keeps:
+
+- its newest word per ask;
+- its newest eight answers to one author;
+- its newest 256 answers in all, room for a word on every ask a zone lists,
+  twice over.
+
+Nothing lasts past fourteen days. A builder withdraws its answer by forgetting
+it, and an author's forgotten ask takes its answers along. An ask or a draft
+its author forgot while someone else still relies on the bytes is kept, but
+marked withdrawn: it is never noted again, nor answered.
+
+Still owed: building as another user or in a container; the author shown what
+became of each draft (`/versions`, `/agent`); taking a built draft from its
+answer.
 
 ## 4. What changes in the code, in order
 

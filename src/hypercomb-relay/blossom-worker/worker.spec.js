@@ -4860,3 +4860,259 @@ test('its author withdraws an ask by forgetting it, even shared, or by forgettin
   await worker.fetch(new Request(url, { method: 'POST', headers: { authorization: await nip98(url, 'POST', askKey(12)), 'content-type': 'application/json' }, body: JSON.stringify({ sigs: [kept] }) }), env)
   assert.deepEqual((await listed(await asksFor(env, builder))).map((l) => l.split(' ')[0]), [kept])
 })
+
+// ── build answers: noted from a zone's builders, listed to the ask's author ──
+
+const ANSWERS = await sha256Hex('host:answers')
+/** A builder's answer to an ask, signed by `key`. */
+async function answerFor(key, ask, author, { state = 'built', h = PTM, at = Math.floor(Date.now() / 1000), why = state === 'built' ? undefined : 'it could not be built', built = state === 'built' ? ['e'.repeat(64)] : [] } = {}) {
+  const tags = [['d', ask], ['p', pubOf(author)], ['h', h], ['s', state], ...(why ? [['why', why]] : []), ...built.map((b, i) => ['b', b, 'host-drafts', `2026.10.12.${i + 1}`])]
+  const event = { pubkey: pubOf(key), created_at: at, kind: 30569, tags, content: `hc:answer:v1\n${ask}\n${state}` }
+  event.id = await sha256Hex(JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]))
+  event.sig = hex(schnorr.sign(event.id, key))
+  return JSON.stringify(event)
+}
+/** The answers listing, as a key asks for it (NIP-98), or with no signature. */
+async function answersFor(env, key, { origin = PTM, method = 'GET' } = {}) {
+  const url = `${origin}/${ANSWERS}/`
+  return worker.fetch(new Request(url, { method, ...(key ? { headers: { authorization: await nip98(url, method, key) } } : {}) }), env)
+}
+const answered = (env) => [...env.CONTENT.held.keys()].filter((k) => k.startsWith(`${ANSWERS}/`))
+const sigsOf = async (res) => (await listed(res)).map((line) => line.split(' ')[0])
+
+test('a builder\'s answer is noted and listed to the ask\'s author and the zone\'s builders, to no one else', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const ask = await sendAsk(env, author)
+  const answer = await upload(env, await answerFor(builder, ask, author, { state: 'refused', why: 'the draft starts from an old revision' }), builder)
+  for (const key of [author, builder, sk]) {
+    const res = await answersFor(env, key)
+    assert.equal(res.status, 200)
+    assert.equal(res.headers.get('cache-control'), 'no-store, private')
+    assert.equal(res.headers.get('vary'), 'Authorization')
+    assert.deepEqual(await listed(res), [`${answer} ${PTM}`])
+  }
+  // Any other key reads its own, empty; nobody unsigned learns the pool is here.
+  const stranger = await answersFor(env, askKey(11))
+  assert.equal(stranger.status, 200)
+  assert.equal(await stranger.text(), '')
+  const unsigned = await answersFor(env)
+  assert.equal(unsigned.status, 404)
+  assert.equal(await unsigned.text(), 'no pool at this address\n')
+  // A member is never served on its own path; the answer's bytes stay at /<sig>.
+  assert.equal((await worker.fetch(new Request(`${PTM}/${ANSWERS}/${answer}`), env)).status, 404)
+  // A refusal leaves the ask open to other builders.
+  assert.deepEqual(await sigsOf(await asksFor(env, builder)), [ask])
+})
+
+test('a built answer takes its ask off the builders\' listing', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const ask = await sendAsk(env, author)
+  const other = await sendAsk(env, author, { seed: 'other' })
+  await upload(env, await answerFor(builder, ask, author), builder)
+  assert.deepEqual(await sigsOf(await asksFor(env, builder)), [other])
+  assert.equal((await sigsOf(await answersFor(env, author))).length, 1)
+})
+
+test('an answer is not noted unless a builder of the zone uploaded it, for an ask held here that is its author\'s', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const other = askKey(13)
+  env.SITE_OPERATORS = JSON.stringify({ 'pluginthematrix.com': pubkey, 'other.example': pubOf(other) })
+  const ask = await sendAsk(env, author)
+  const now = Math.floor(Date.now() / 1000)
+  const refused = async (label, run) => { await run(); assert.deepEqual(answered(env), [], label) }
+  await refused('someone else uploaded it', async () => {
+    const bytes = await answerFor(builder, ask, author, { state: 'failed' })
+    await upload(env, bytes, askKey(12))
+    await upload(env, bytes, builder)   // its builder's upload of bytes another key stored first
+  })
+  await refused('its signer builds for no zone here', async () => {
+    await upload(env, await answerFor(askKey(12), ask, author, { state: 'failed' }), askKey(12))
+  })
+  await refused('its signer builds for another zone', async () => {
+    await upload(env, await answerFor(other, ask, author, { state: 'failed' }), other)
+  })
+  await refused('the ask is not held here', async () => {
+    await upload(env, await answerFor(builder, 'a'.repeat(64), author, { state: 'failed' }), builder)
+  })
+  await refused('the ask is someone else\'s', async () => {
+    await upload(env, await answerFor(builder, ask, askKey(12), { state: 'failed' }), builder)
+  })
+  await refused('the ask was sent to another zone', async () => {
+    const theirs = await sendAsk(env, author, { h: 'https://other.example', seed: 'o' }, 'https://other.example')
+    await upload(env, await answerFor(builder, theirs, author, { state: 'failed' }), builder)
+  })
+  await refused('it names another host', async () => {
+    await upload(env, await answerFor(builder, ask, author, { state: 'failed', h: 'https://elsewhere.example' }), builder)
+  })
+  await refused('it is old, or from the future', async () => {
+    await upload(env, await answerFor(builder, ask, author, { state: 'failed', at: now - 15 * 86_400 }), builder)
+    await upload(env, await answerFor(builder, ask, author, { state: 'refused', at: now + 3600 }), builder)
+  })
+  await refused('it is forged', async () => {
+    const forged = JSON.parse(await answerFor(builder, ask, author, { state: 'failed' }))
+    forged.tags[3] = ['s', 'refused']
+    forged.content = `hc:answer:v1\n${ask}\nrefused`
+    await upload(env, JSON.stringify(forged), builder)
+  })
+  await refused('it is not an answer', async () => {
+    await upload(env, JSON.stringify({ kind: 30569, pubkey: pubOf(builder), tags: [['d', ask]], content: 'built' }), builder)
+  })
+  await refused('what it names is held but is not an ask', async () => {
+    const notAsk = await upload(env, JSON.stringify({ name: 'draft', note: 'not an ask' }), author)
+    await upload(env, await answerFor(builder, notAsk, author, { state: 'failed' }), builder)
+  })
+  await refused('the ask it names does not verify', async () => {
+    const forged = JSON.parse((await askFor(author, { seed: 'forged' })).ask)
+    forged.sig = forged.sig.replace(/^./, (c) => c === '0' ? '1' : '0')
+    const forgedSig = await upload(env, JSON.stringify(forged), author)
+    await upload(env, await answerFor(builder, forgedSig, author, { state: 'failed' }), builder)
+  })
+  await refused('the ask is held as someone else\'s upload', async () => {
+    const { draft, ask: bytes } = await askFor(author, { seed: 'theirs' })
+    await upload(env, draft, author)
+    const sig = await upload(env, bytes, askKey(12))
+    await upload(env, await answerFor(builder, sig, author, { state: 'failed' }), builder)
+  })
+  await refused('the ask is older than an answer lives', async () => {
+    const old = await sendAsk(env, author, { seed: 'old', at: now - 15 * 86_400 })
+    await upload(env, await answerFor(builder, old, author, { state: 'failed' }), builder)
+  })
+  await refused('the host has no operator for its zone', async () => {
+    const operators = env.SITE_OPERATORS
+    env.SITE_OPERATORS = JSON.stringify({ 'other.example': pubOf(other) })
+    await upload(env, await answerFor(builder, ask, author, { state: 'refused', why: 'no zone' }), builder)
+    env.SITE_OPERATORS = operators
+  })
+  // The operator answers too: the zone is theirs.
+  await upload(env, await answerFor(sk, ask, author, { state: 'failed', why: 'npm ci failed' }), sk)
+  assert.equal(answered(env).length, 1)
+})
+
+test('a builder\'s newer word on an ask replaces its older one; another builder\'s stands', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const ask = await sendAsk(env, author)
+  const failed = await later(0, async () => upload(env, await answerFor(builder, ask, author, { state: 'failed', why: 'tests failed' }), builder))
+  const operators = await later(10, async () => upload(env, await answerFor(sk, ask, author, { state: 'refused', why: 'not today' }), sk))
+  const built = await later(20, async () => upload(env, await answerFor(builder, ask, author), builder))
+  assert.deepEqual(await sigsOf(await answersFor(env, author)), [built, operators])
+  assert.ok(!(await sigsOf(await answersFor(env, builder))).includes(failed))
+})
+
+test('a builder withdraws its answer by forgetting it, and an author\'s forgotten ask takes its answers along', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const forget = async (key, sigs) => {
+    const url = `${PTM}/forget`
+    return (await worker.fetch(new Request(url, {
+      method: 'POST', headers: { authorization: await nip98(url, 'POST', key), 'content-type': 'application/json' },
+      body: JSON.stringify({ sigs }),
+    }), env)).json()
+  }
+  const first = await sendAsk(env, author, { seed: 'f1' })
+  const second = await sendAsk(env, author, { seed: 'f2' })
+  const mine = await upload(env, await answerFor(builder, first, author, { state: 'failed' }), builder)
+  await upload(env, await answerFor(builder, second, author, { state: 'refused' }), builder)
+  assert.equal((await sigsOf(await answersFor(env, author))).length, 2)
+  // The author cannot forget the builder's answer for it.
+  await forget(author, [mine])
+  assert.equal((await sigsOf(await answersFor(env, author))).length, 2)
+  assert.deepEqual((await forget(builder, [mine])).removed, [mine])
+  assert.equal((await sigsOf(await answersFor(env, author))).length, 1)
+  assert.deepEqual((await forget(author, [second])).removed, [second])
+  assert.deepEqual(await sigsOf(await answersFor(env, author)), [])
+})
+
+test('an ask its author forgot cannot be answered back onto their listing by someone re-uploading it', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const { draft, ask: bytes } = await askFor(author, { seed: 'gone' })
+  await upload(env, draft, author)
+  const ask = await upload(env, bytes, author)
+  const url = `${PTM}/forget`
+  const forgot = await (await worker.fetch(new Request(url, { method: 'POST', headers: { authorization: await nip98(url, 'POST', author), 'content-type': 'application/json' }, body: JSON.stringify({ sigs: [ask] }) }), env)).json()
+  assert.deepEqual(forgot.removed, [ask])
+  await upload(env, bytes, builder)
+  await upload(env, await answerFor(builder, ask, author, { state: 'refused', why: 'kept anyway' }), builder)
+  assert.deepEqual(answered(env), [])
+  assert.deepEqual(await sigsOf(await answersFor(env, author)), [])
+})
+
+test('the answers listing answers HEAD as GET, and follows a zone carved out after the answer was noted', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const ask = await sendAsk(env, author)
+  const answer = await upload(env, await answerFor(builder, ask, author, { state: 'refused' }), builder)
+  const headersOf = (res) => JSON.stringify([...res.headers].sort())
+  const head = await answersFor(env, author, { method: 'HEAD' })
+  assert.equal(head.status, 200)
+  assert.equal(headersOf(head), headersOf(await answersFor(env, author)))
+  const absentHead = await worker.fetch(new Request(`${PTM}/${await sha256Hex('nothing:held')}/`, { method: 'HEAD' }), env)
+  assert.equal(headersOf(await answersFor(env, null, { method: 'HEAD' })), headersOf(absentHead))
+  // content.pluginthematrix.com becomes its own zone, run by someone else:
+  // the answers there are theirs to see, as its asks are, and no longer this builder's.
+  const carved = askKey(15)
+  env.SITE_OPERATORS = JSON.stringify({ 'pluginthematrix.com': pubkey, 'content.pluginthematrix.com': pubOf(carved) })
+  assert.deepEqual(await sigsOf(await answersFor(env, carved)), [answer])
+  assert.deepEqual(await sigsOf(await answersFor(env, builder)), [])
+  assert.deepEqual(await sigsOf(await answersFor(env, author)), [answer])
+})
+
+
+test('no operator\'s listed declaration makes the answers public, and an answer past its time leaves the listing', async () => {
+  const builder = askKey(7)
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head }, 1_800_000_000, undefined, undefined, { builders: [pubOf(builder)], listed: ['host:answers'] }))
+  env.SITE_OPERATORS = JSON.stringify({ 'pluginthematrix.com': pubkey })
+  const author = askKey(9)
+  const ask = await sendAsk(env, author)
+  const answer = await upload(env, await answerFor(builder, ask, author, { state: 'refused' }), builder)
+  assert.equal((await answersFor(env)).status, 404)
+  assert.equal((await worker.fetch(new Request(`${PTM}/${ANSWERS}/${answer}`), env)).status, 404)
+  assert.deepEqual(await sigsOf(await answersFor(env, author)), [answer])
+  // Fifteen days on, with nothing noted since to sweep it, it is listed to no one.
+  assert.deepEqual(await later(15 * 86_400_000, async () => sigsOf(await answersFor(env, author))), [])
+})
+
+test('a shared ask its author forgot stays withdrawn: neither answered nor noted again', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const { draft, ask: bytes } = await askFor(author, { seed: 'shared-gone' })
+  await upload(env, draft, author)
+  const ask = await upload(env, bytes, author)
+  await upload(env, bytes, askKey(12))
+  const url = `${PTM}/forget`
+  const forgot = await (await worker.fetch(new Request(url, { method: 'POST', headers: { authorization: await nip98(url, 'POST', author), 'content-type': 'application/json' }, body: JSON.stringify({ sigs: [ask] }) }), env)).json()
+  assert.deepEqual(forgot.kept, { [ask]: 'shared' })
+  assert.deepEqual(await sigsOf(await asksFor(env, builder)), [])
+  // A build already under way answers; nothing is listed for it.
+  await upload(env, await answerFor(builder, ask, author, { state: 'failed' }), builder)
+  assert.deepEqual(answered(env), [])
+  // Uploaded again, by anyone, it is not noted again.
+  await upload(env, bytes, author)
+  assert.deepEqual(await sigsOf(await asksFor(env, builder)), [])
+})
+
+test('a built answer uploaded again takes its ask down again; an answer\'s p must be the ask\'s signer', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const ask = await sendAsk(env, author)
+  const bytes = await answerFor(builder, ask, author)
+  await upload(env, bytes, builder)
+  assert.deepEqual(await sigsOf(await asksFor(env, builder)), [])
+  // A removal cut short: the ask is back on the listing until the answer comes again.
+  const member = `${ASKS}/${ask}`
+  env.CONTENT.held.set(member, new Uint8Array(0))
+  env.CONTENT.meta.set(member, { author: pubOf(author), draft: 'd'.repeat(64), at: String(Math.floor(Date.now() / 1000)), origin: PTM, noted: String(Date.now()), zone: 'pluginthematrix.com' })
+  assert.deepEqual(await sigsOf(await asksFor(env, builder)), [ask])
+  await upload(env, bytes, builder)
+  assert.deepEqual(await sigsOf(await asksFor(env, builder)), [])
+  // Key P uploads A's ask bytes first, and a builder answers naming P: not P's ask.
+  const p = askKey(12)
+  const { ask: others } = await askFor(author, { seed: 'first-by-p' })
+  const othersSig = await upload(env, others, p)
+  await upload(env, await answerFor(builder, othersSig, p, { state: 'refused' }), builder)
+  assert.deepEqual(await sigsOf(await answersFor(env, p)), [])
+})

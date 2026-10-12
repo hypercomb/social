@@ -333,7 +333,7 @@ describe('pools on hosts', () => {
     }
     process.env.HYPERCOMB_POOLS_DIR = resolve(root, 'device')
     const report = await builds.pullPools(['https://example.test'], { fetch: served })
-    expect(report).toEqual([{ host: 'https://example.test', answered: true, taken: expect.any(Number), refused: 0 }])
+    expect(report).toEqual([{ host: 'https://example.test', answered: true, taken: expect.any(Number), refused: 0, failed: 0 }])
     expect((await builds.revisions()).map((r: { record: { version: string } }) => r.record.version))
       .toEqual(['2026.9.26.2', '2026.9.26.1'])
     expect(await builds.signaturesOf(first.sig, first.record.version)).toEqual([{ role: 'author', pubkey, ok: true }])

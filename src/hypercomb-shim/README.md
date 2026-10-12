@@ -409,6 +409,52 @@ HYPERCOMB_SIGNER_KEY=<reviewer key> node host/builds.mjs sign <version> --as rev
 node host/builds.mjs adopt <version>             # the channel's next, signed as author, naming the review
 ```
 
+**A builder at work, by itself.** One command watches a host's asks and
+answers every one it takes:
+
+```bash
+HYPERCOMB_SIGNER_KEY=<builder key> node host/builds.mjs builder <host> [--once] [--interval <seconds>] [--test]
+```
+
+Each pass (once a minute by default) lists the asks the host holds for this
+key. It holds an ask from an author it does not trust, unanswered, and says
+so once; trusting the author later builds it. An ask it cannot read as a
+signed ask for that host is never taken. Every other ask is built as
+`build-draft` builds it, and answered with a signed event, kind 30569:
+
+- **built**, naming the revisions it promoted and the builder's signatures on
+  them;
+- **refused**, when it will not build the ask as asked;
+- **failed**, when the build or the tests broke, or a step ran past thirty
+  minutes (`STEP_MINUTES`; each step is its own process group, ended whole).
+
+Refused and failed carry one line of why. The builder's own places in it (the
+build's directories, its pools, the temporary directory, the directory it
+runs in, its home) are named rather than shown.
+
+Some troubles are tried again next pass, not answered: a host that did not
+answer, failed or rate-limited it; an npm registry out of reach while
+installing (for as long as it lasts, or three times when the draft changed
+its lockfile, package files or `.npmrc`, then it is answered failed); a stop.
+Ctrl-C, or a SIGTERM to `builder`, ends the running step and stops the
+watcher without answering, and `builder` waits for it. An ask another builder
+built is held.
+
+What it built is carried first. It is synced to this builder's own
+subscriptions, then uploaded to the asked host, by signature and under the
+builder's grant, wherever that host does not already list it in its version
+pools. While those listings go unanswered, it waits rather than send
+everything. Only then is the ask answered.
+
+The host notes the answer for the ask's author in the private pool
+`host:answers` (`hypercomb-relay/build-asks.js`). A built answer takes the ask
+off every builder's listing.
+
+Answers are kept in this builder's own pool, so each ask is answered once. An
+answer the host has never listed is sent again; one it listed once and
+dropped since stays dropped. One builder works per pools directory at a time,
+watching or `build-draft` (`local/builder.lock`).
+
 **A model writes it too: the loop without a window.** The chat window's
 model loop — reads, changes and writes in rounds until the request is done
 (`documentation/agent-harness.md`) — runs in the minimal build as

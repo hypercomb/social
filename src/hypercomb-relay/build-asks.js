@@ -35,6 +35,32 @@
 // first (an author's own clock earns no place), none older than
 // ASK_TTL_DAYS. The ask's bytes stay at /<sig> (they are the author's, under
 // their grant); only the listing forgets.
+//
+// AN ANSWER is a builder's signed word on one ask (hypercomb-shim host/
+// builder.mjs answerEvent): a nostr event, kind 30569, content
+// `hc:answer:v1\n<ask sig>\n<state>` — built, refused or failed — tags `d`
+// (the ask: one slot per builder per ask), `p` (the ask's author), `h` (the
+// host it answers on), `s` (the state), `why` (one short line, for refused and
+// failed) and, for built, one `b` per revision it promoted (sig, label,
+// version) and one `g` per signature of the builder's on them — each readable
+// from the host by its signature, at /<sig> or in its version pools. The builder uploads it under its own grant, like any bytes, and
+// the host notes it in the pool `host:answers` when all of this holds:
+//
+//   - it is an answer, shaped as one, and its signature verifies;
+//   - the key that signed it uploaded it, and those bytes are its own;
+//   - its `h` names this host, in a zone the key builds for (the zone's
+//     operator, or a builder the operator's signed index names);
+//   - the ask it names is held here as its author's own upload, verifies, is
+//     its `p`'s, was sent to the same zone, and is recent;
+//   - it is recent (ANSWER_TTL_DAYS).
+//
+// Answers are as private as asks: a refusal names an ask, and an ask names a
+// draft. The listing goes to a signed request only — each key sees the
+// answers to its own asks, and the builders of a zone see the zone's — and a
+// built answer takes its ask off the builders' listing: built is done.
+// History falls off by builder, so no builder's answers crowd out another's:
+// per zone, a builder's newest word per ask, its newest ANSWERS_PER_AUTHOR to
+// each author and ANSWERS_PER_BUILDER in all, none past ANSWER_TTL_DAYS.
 
 export const ASK_KIND = 30568
 export const ASKS_MEANING = 'host:asks'
@@ -56,6 +82,26 @@ const DAY = 86_400
 export const AHEAD_SECS = 600
 
 export const askPreimage = (draft) => `hc:ask:v1\n${draft}`
+
+export const ANSWER_KIND = 30569
+export const ANSWERS_MEANING = 'host:answers'
+/** What a builder says of an ask: built it, would not, or could not. */
+export const ANSWER_STATES = Object.freeze(['built', 'refused', 'failed'])
+/** An answer outlives its ask: an author away for the week still finds it. */
+export const ANSWER_TTL_DAYS = 14
+/** Per builder: its answers to one author (an author holds four open asks)… */
+export const ANSWERS_PER_AUTHOR = 8
+/** …and all its answers in a zone: room for a word on every ask the zone
+ *  lists (ASKS_MAX) twice over, so no answer to an open ask is ever swept to
+ *  make room. A zone's builders are a curated few (MAX_BUILDERS and the
+ *  operator), so this bounds the zone too. */
+export const ANSWERS_PER_BUILDER = 256
+export const MAX_ANSWER_BYTES = 4096
+/** One short line: why it was refused, or the last words of the failure. */
+export const MAX_WHY = 280
+/** A build promotes the package and the host; a few more are allowed. */
+export const MAX_BUILT = 4
+export const answerPreimage = (ask, state) => `hc:answer:v1\n${ask}\n${state}`
 
 const tag = (evt, name) => (Array.isArray(evt?.tags) ? evt.tags : []).find((t) => Array.isArray(t) && t[0] === name)?.[1]
 
@@ -113,6 +159,59 @@ export async function noteable(bytes, { uploader, origin, now = Math.floor(Date.
   return { ok: true, record: { author: ask.author, draft: ask.draft, at: ask.at, origin: here } }
 }
 
+/** A label or a version as a revision names it: short, one line. */
+const NAME_RE = /^[^\u0000-\u001f\u007f]{1,64}$/
+/** One line of why. */
+const WHY_RE = /^[^\u0000-\u001f\u007f]+$/
+
+/**
+ * The answer these bytes are, if they are one SHAPED as one — exactly as a
+ * builder signs it (hypercomb-shim host/builder.mjs answerEvent) — or null:
+ * kind and content; the ask (`d`) and the author (`p`) by their lowercase
+ * hex; one known state; for refused and failed, one line of why; for built,
+ * no why, the revisions (`b`: signature, label, version) and the builder's
+ * signatures on them (`g`). The signature itself is the caller's to verify.
+ */
+export function answerShape(bytes) {
+  if (!bytes || bytes.byteLength > MAX_ANSWER_BYTES) return null
+  let evt
+  try { evt = JSON.parse(new TextDecoder().decode(bytes)) } catch { return null }
+  if (!evt || typeof evt !== 'object' || Number(evt.kind) !== ANSWER_KIND || !Array.isArray(evt.tags)) return null
+  const ask = String(tag(evt, 'd') ?? '')
+  const state = String(tag(evt, 's') ?? '')
+  if (!SIG_RE.test(ask) || !ANSWER_STATES.includes(state) || evt.content !== answerPreimage(ask, state)) return null
+  const builder = String(evt.pubkey ?? '')
+  const author = String(tag(evt, 'p') ?? '')
+  if (!SIG_RE.test(builder) || !SIG_RE.test(author)) return null
+  const named = (name) => evt.tags.filter((t) => Array.isArray(t) && t[0] === name)
+  const why = tag(evt, 'why')
+  if (state === 'built' ? why !== undefined : !(typeof why === 'string' && why.length <= MAX_WHY && WHY_RE.test(why))) return null
+  const built = named('b')
+  const signatures = named('g')
+  if (built.length > MAX_BUILT || signatures.length > MAX_BUILT * 2) return null
+  if (built.some((t) => !SIG_RE.test(String(t[1] ?? '')) || !NAME_RE.test(String(t[2] ?? '')) || !NAME_RE.test(String(t[3] ?? '')))) return null
+  if (signatures.some((t) => !SIG_RE.test(String(t[1] ?? '')))) return null
+  if (state === 'built' ? built.length === 0 : built.length + signatures.length > 0) return null
+  return { evt, ask, state, builder, author, host: String(tag(evt, 'h') ?? ''), at: Number(evt.created_at) || 0 }
+}
+
+/**
+ * Is this upload an answer a host should note? Returns `{ ok, record }` —
+ * `{ builder, ask, author, state, at, origin }` — or the reason it is not.
+ * Whether the uploader builds for the zone, whether the bytes are its own,
+ * and whether the ask is held are the host's to check.
+ */
+export async function noteableAnswer(bytes, { uploader, origin, now = Math.floor(Date.now() / 1000), verify }) {
+  const answer = answerShape(bytes)
+  if (!answer) return { ok: false, reason: 'not an answer' }
+  if (answer.builder !== String(uploader ?? '').toLowerCase()) return { ok: false, reason: 'an answer is uploaded by its own builder' }
+  const here = originOf(origin)
+  if (!here || originOf(answer.host) !== here) return { ok: false, reason: 'the answer names another host' }
+  if (!(answer.at > now - ANSWER_TTL_DAYS * DAY) || answer.at > now + AHEAD_SECS) return { ok: false, reason: 'the answer is not recent' }
+  if (!(await verify(answer.evt))) return { ok: false, reason: 'the answer does not verify' }
+  return { ok: true, record: { builder: answer.builder, ask: answer.ask, author: answer.author, state: answer.state, at: answer.at, origin: here } }
+}
+
 /** Are these bytes a draft record (essentials version-drafts.ts stageDraft):
  *  `{ name: 'draft', base, files }`, both named by their signatures? */
 export function isDraft(bytes) {
@@ -165,6 +264,42 @@ export function sweep(members, now = Math.floor(Date.now() / 1000)) {
       perAuthor.set(member.author, seen + 1)
       kept++
     }
+  }
+  return [...drop]
+}
+
+/**
+ * ANSWERS FALL OFF, BUILDER BY BUILDER. Given the pool's members `{ name,
+ * builder, ask, author, at, noted, zone }`, the names to forget: every answer
+ * older than ANSWER_TTL_DAYS; a builder's older answers to the same ask (its
+ * newest word stands); and within each zone, every builder's beyond its newest
+ * ANSWERS_PER_AUTHOR to one author and its newest ANSWERS_PER_BUILDER in all —
+ * newest by receipt. One builder's flood only ever evicts its own answers. A
+ * member whose record is unreadable is forgotten.
+ */
+export function sweepAnswers(members, now = Math.floor(Date.now() / 1000)) {
+  const drop = new Set()
+  const live = []
+  for (const member of members) {
+    if (!member.builder || !member.ask || !member.author || !member.zone || !(member.noted > 0)
+      || !(member.at > now - ANSWER_TTL_DAYS * DAY)) { drop.add(member.name); continue }
+    live.push(member)
+  }
+  live.sort((a, b) => (b.noted - a.noted) || (a.name < b.name ? -1 : 1))
+  const said = new Set()
+  const perBuilder = new Map()
+  const perAuthor = new Map()
+  for (const member of live) {
+    const slot = `${member.zone}\n${member.builder}\n${member.ask}`
+    const builderKey = `${member.zone}\n${member.builder}`
+    const authorKey = `${builderKey}\n${member.author}`
+    if (said.has(slot) || (perBuilder.get(builderKey) ?? 0) >= ANSWERS_PER_BUILDER || (perAuthor.get(authorKey) ?? 0) >= ANSWERS_PER_AUTHOR) {
+      drop.add(member.name)
+      continue
+    }
+    said.add(slot)
+    perBuilder.set(builderKey, (perBuilder.get(builderKey) ?? 0) + 1)
+    perAuthor.set(authorKey, (perAuthor.get(authorKey) ?? 0) + 1)
   }
   return [...drop]
 }
