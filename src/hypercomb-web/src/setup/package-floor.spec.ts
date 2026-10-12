@@ -10,7 +10,7 @@ import { PICKS_KEY } from '@hypercomb/runtime/package-tree'
 import type { ReplicationIo } from '@hypercomb/runtime/replication-walker'
 import {
   checkPackageFloor, FLOOR_RECORD_KEY, MEETING_POINT, packageBytes, perTabMembership, planFloor,
-  refuseOldMeetingPoint, scanMeetingPoint, scanMembership, UPDATE_DOOR,
+  NO_DEFAULT_HOST_MARK, refuseOldMeetingPoint, scanMeetingPoint, scanMembership, UPDATE_DOOR,
 } from './package-floor'
 
 // The move itself needs a browser store; the decision cases need nothing.
@@ -149,6 +149,11 @@ describe('scanMeetingPoint — which meeting the package\'s own bytes dial', () 
   it('says current for a package that names both — the home machine may stay a chosen relay or a self domain', async () => {
     expect(await scanMeetingPoint(['b1', 'b2'], texts({ b1: HOME_MESH, b2: `const SELF = "wss://jwize.com"; const LIVE = "${MEETING_POINT}"` }))).toBe('current')
     expect(await scanMeetingPoint(['b1'], texts({ b1: `${SHIPPED_MESH}\nconst example = 'wss://jwize.com'` }))).toBe('current')
+  })
+
+  it('says current for a mesh that carries the no-default-host mark and names no host at all — hypercomb.com may be retired', async () => {
+    const markOnly = `globalThis["__HYPERCOMB_RELAYS__"] = Object.freeze({ local: "", live: "", mark: "${NO_DEFAULT_HOST_MARK}" });`
+    expect(await scanMeetingPoint(['b1'], texts({ b1: markOnly }))).toBe('current')
   })
 
   it('says none for a package with no mesh in it', async () => {

@@ -1844,3 +1844,13 @@ describe('doctrine ratchets', () => {
   })
 
 })
+
+describe('the no-default-host mark is one string in two places', () => {
+  it('the mesh and the package floor carry the same mark', () => {
+    const read = (p: string): string => readFileSync(join(ROOT, p), "utf8")
+    const pick = (text: string): string => (/NO_DEFAULT_HOST_MARK = '([^']+)'/.exec(text) ?? [])[1] ?? ''
+    const mesh = pick(read('hypercomb-essentials/src/sharing/nostr-mesh.drone.ts'))
+    expect(mesh).toBeTruthy()
+    expect(pick(read('hypercomb-web/src/setup/package-floor.ts'))).toBe(mesh)
+  })
+})

@@ -96,9 +96,16 @@ export const chosenRelays = (stored: readonly string[]): string[] => {
 //
 // Bracket access: strict TS (`noPropertyAccessFromIndexSignature`)
 // forbids dot-access on `Record<string, unknown>` types.
+/** This mesh has NO DEFAULT HOST (2026-10-11): the participant names it.
+ *  The shell's package floor reads this mark in a package's bytes to know
+ *  the package is current — so hypercomb.com, a test host that may be
+ *  retired, never has to stay in the bundle for that. MIRRORED:
+ *  hypercomb-web/src/setup/package-floor.ts NO_DEFAULT_HOST_MARK. */
+export const NO_DEFAULT_HOST_MARK = 'hc:mesh:no-default-host'
 ;(globalThis as Record<string, unknown>)['__HYPERCOMB_RELAYS__'] = Object.freeze({
   local: LOCAL_RELAY,
   live: LIVE_RELAY,
+  mark: NO_DEFAULT_HOST_MARK,
 })
 
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }

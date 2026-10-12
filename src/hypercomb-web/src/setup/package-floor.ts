@@ -110,6 +110,12 @@ export const MEETING_POINT = 'wss://hypercomb.com'
  *  that carries it and never names MEETING_POINT still dials the home machine.
  *  MIRRORED: essentials sharing/nostr-mesh.drone.ts. */
 const MESH_RELAYS_ANCHOR = '__HYPERCOMB_RELAYS__'
+/** The deliberate mark every mesh since the no-default-host change carries
+ *  (2026-10-12): it names no host, so hypercomb.com — a TEST host that may be
+ *  retired (jwize, 2026-10-11) — can leave the bundle without every current
+ *  package reading as old. MIRRORED: essentials sharing/nostr-mesh.drone.ts
+ *  NO_DEFAULT_HOST_MARK. */
+export const NO_DEFAULT_HOST_MARK = 'hc:mesh:no-default-host'
 /** Where an activation leaves its module sets (acquire.ts, ensure-install.ts). */
 const INSTALL_MANIFEST_KEY = 'core-adapter.installed-manifest'
 
@@ -156,13 +162,13 @@ const stamped = (): boolean => {
   try { return /^[a-f0-9]{64}$/.test(localStorage.getItem(INSTALLED_KEY) ?? '') } catch { return false }
 }
 
-/** One question a package's bytes answer: `current` clears it, `old` without
- *  `current` condemns it, and a package naming neither has nothing to say. */
-type ByteRule = { readonly current: string; readonly old: string }
+/** One question a package's bytes answer: any of `current` clears it, `old`
+ *  without one condemns it, and a package naming neither has nothing to say. */
+type ByteRule = { readonly current: string | readonly string[]; readonly old: string }
 type ByteVerdict = 'current' | 'old' | 'none' | null
 
 const MEMBERSHIP_RULE: ByteRule = { current: TAB_MEMBERSHIP_KEY, old: ORIGIN_MEMBERSHIP_KEY }
-const MEETING_POINT_RULE: ByteRule = { current: MEETING_POINT, old: MESH_RELAYS_ANCHOR }
+const MEETING_POINT_RULE: ByteRule = { current: [MEETING_POINT, NO_DEFAULT_HOST_MARK], old: MESH_RELAYS_ANCHOR }
 
 /**
  * What a package's modules say, rule by rule, in ONE read of each module —
@@ -188,7 +194,7 @@ const scanBytes = async (
     const text = await read(sig)
     if (text === null) { unread = true; continue }
     rules.forEach((rule, i) => {
-      if (text.includes(rule.current)) current[i] = true
+      if ((typeof rule.current === 'string' ? [rule.current] : rule.current).some(mark => text.includes(mark))) current[i] = true
       else if (text.includes(rule.old)) old[i] = true
     })
   }
