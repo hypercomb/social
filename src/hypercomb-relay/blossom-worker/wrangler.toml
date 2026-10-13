@@ -60,7 +60,10 @@ HOST_DOOR_HOSTS = "pluginthematrix.io"
 # too, or they upload here at the guest ceiling. It shares the bucket and the ledger with
 # pluginthematrix-core: keep AUTO_GRANT "0" on both, or a key minted here
 # uploads there too.
-AUTO_GRANT = "0"                    # '1' brings back the open guest list; '0' keeps bytes for the host's people
+# OPEN UNTIL IT IS ADOPTED (jwize, 2026-10-12: "let's leave it open until it is
+# adopted"): the guest list stays on. Set "0" to keep bytes for the host's
+# people only (operators, bound publishers, HOST_FRIENDS) — on BOTH scripts.
+AUTO_GRANT = "1"
 HOST_FRIENDS = ""                   # comma-separated 64-hex pubkeys the host is shared with (public keys only)
 PEOPLE_QUOTA_BYTES = "1073741824"   # 1 GiB for each of the host's people per GRANT_TTL_DAYS window (a lapsed window refills)
 DEFAULT_QUOTA_BYTES = "104857600"   # 100 MB per guest, under AUTO_GRANT "1" only

@@ -4835,11 +4835,15 @@ test('GET /grant says what an upload would be told, and reading mints nothing', 
   assert.equal((await grantAt(peopleEnv({ PEOPLE_QUOTA_BYTES: '' }), 'pluginthematrix.com')).quotaBytes, GIB)
 })
 
-test('both byte hosts keep bytes for their people only: AUTO_GRANT "0", no friend listed yet, 1 GiB each', () => {
+// OPEN UNTIL IT IS ADOPTED (jwize, 2026-10-12): "let's leave it open until it
+// is adopted" / "we need to be able to have non host participants share" — the
+// guest list stays on (AUTO_GRANT "1") on both scripts; the people's allowance
+// is ready for the day it is turned off.
+test('both byte hosts stay open until adoption: AUTO_GRANT "1", no friend listed yet, 1 GiB for the host's people', () => {
   for (const file of ['./wrangler.pluginthematrix.toml', './wrangler.toml']) {
     const config = readFileSync(new URL(file, import.meta.url), 'utf8').split('\n').filter((line) => !line.trim().startsWith('#')).join('\n')
     const value = (name) => new RegExp(`^${name}\\s*=\\s*"([^"]*)"`, 'm').exec(config)?.[1]
-    assert.equal(value('AUTO_GRANT'), '0', file)
+    assert.equal(value('AUTO_GRANT'), '1', file)
     assert.equal(value('HOST_FRIENDS'), '', file)
     assert.equal(value('PEOPLE_QUOTA_BYTES'), '1073741824', file)
   }
