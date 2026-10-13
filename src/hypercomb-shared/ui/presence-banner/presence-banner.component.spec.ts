@@ -336,3 +336,28 @@ describe('ZI-1 / ZI-6: the words fold the host the tab meets at, from one list �
     expect(pair?.startsWith(roomWords('downtown', 'rose', 'hypercomb.com'))).toBe(true)
   })
 })
+
+// jwize, 2026-10-13: "the live label with participants need to be able to be
+// hidden and it gets in the way frequently on mobile" — and "our color should
+// be fixed to a default style".
+describe('the room bar folds to its dot, and your badge wears no hue', () => {
+  it('starts unfolded, folds the whole bar (closing the panel) and unfolds again; a second bar remembers the fold', () => {
+    const banner = mount()
+    expect(banner.folded()).toBe(false)
+    banner.expanded.set(true)
+    banner.onFold()
+    expect(banner.folded()).toBe(true)
+    expect(banner.expanded()).toBe(false)
+    expect(mount().folded()).toBe(true)
+    banner.onUnfold()
+    expect(banner.folded()).toBe(false)
+    expect(mount().folded()).toBe(false)
+  })
+
+  it('your own badge has no identity colour — the hues are the others\'', () => {
+    const banner = mount()
+    const self = banner.badges().find(b => b.isSelf)
+    expect(self?.color).toBe('')
+    expect(self?.glow).toBe('')
+  })
+})

@@ -1,4 +1,11 @@
-@if (visible()) {
+@if (visible() && folded()) {
+  <!-- Folded: the whole strip is this one dot, in the connection's colour. -->
+  <button class="presence-dot" type="button" (click)="onUnfold()"
+          [class.warn]="status()?.tone === 'warn'" [class.down]="status()?.tone === 'down'"
+          [attr.aria-label]="'presence.unfold' | t" [title]="'presence.unfold' | t">
+    <span class="presence-status-dot" aria-hidden="true"></span>
+  </button>
+} @else if (visible()) {
   <div class="presence-wrapper">
 
     <!-- Initials badge strip: you first, then each peer. Peer badges
@@ -48,6 +55,12 @@
           [attr.aria-label]="'presence.expand' | t"
           [title]="'presence.expand' | t">{{ expanded() ? '▴' : '▾' }}</button>
       }
+      <button
+        class="strip-fold"
+        type="button"
+        (click)="onFold()"
+        [attr.aria-label]="'presence.fold' | t"
+        [title]="'presence.fold' | t">–</button>
     </div>
 
     <!-- THE ONE STATUS LINE: the socket, the room, and what you offer here.

@@ -1431,6 +1431,8 @@
   "presence.alone": "first one here",
   "presence.one-here": "{who} is here",
   "presence.many-here": "{count} here: {who}",
+  "presence.fold": "hide the room bar",
+  "presence.unfold": "show the room bar",
   "presence.expand": "show participants",
   "presence.panel-label": "participants at this location",
   "presence.subscribe": "subscribe to their hive",

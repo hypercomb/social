@@ -1082,6 +1082,8 @@
   "presence.alone": "첫 번째 참가자",
   "presence.one-here": "{who}님이 여기 있습니다",
   "presence.many-here": "{count}명 참가: {who}",
+  "presence.fold": "방 막대 숨기기",
+  "presence.unfold": "방 막대 보이기",
   "presence.expand": "참가자 표시",
   "presence.panel-label": "이 위치의 참가자",
   "presence.subscribe": "하이브 구독",

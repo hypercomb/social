@@ -1082,6 +1082,8 @@
   "presence.alone": "premier arrivé",
   "presence.one-here": "{who} est ici",
   "presence.many-here": "{count} ici : {who}",
+  "presence.fold": "masquer la barre de la salle",
+  "presence.unfold": "afficher la barre de la salle",
   "presence.expand": "afficher les participants",
   "presence.panel-label": "participants à cet emplacement",
   "presence.subscribe": "s'abonner à leur ruche",

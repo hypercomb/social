@@ -202,6 +202,7 @@ export class HexSdfTextureShader {
     in float aShaded;
     in float aShapeMode;
     in float aIsPortal;
+    in float aOwned;
 
     out vec2 vUV;
     out vec4 vLabelUV;
@@ -217,6 +218,7 @@ export class HexSdfTextureShader {
     out float vShaded;
     out float vShapeMode;
     out float vIsPortal;
+    out float vOwned;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
@@ -253,6 +255,7 @@ export class HexSdfTextureShader {
       vShaded = aShaded;
       vShapeMode = aShapeMode;
       vIsPortal = aIsPortal;
+      vOwned = aOwned;
     }
   `
 
@@ -273,6 +276,7 @@ export class HexSdfTextureShader {
     in float vShaded;
     in float vShapeMode;
     in float vIsPortal;
+    in float vOwned;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
@@ -551,6 +555,14 @@ export class HexSdfTextureShader {
       base.rgb += vec3(1.0) * highlightStrength;
       base.rgb -= vec3(1.0) * shadowStrength;
 
+      // THEIRS ALONE (jwize, 2026-10-13: "each should have their own color that
+      // prominently highlights the tiles"). A tile only one other participant
+      // holds wears their colour (aBorderColor, the hue of their badge): a light
+      // wash over the face here, and a bold solid rim inside the edge after the
+      // readiness shade below. Static — no glow, no motion. Shared tiles keep
+      // the stack marker; yours keep the default look.
+      if (vOwned > 0.5) base.rgb = mix(base.rgb, vBorderColor, 0.18);
+
       vec4 color = base;
 
       // ── label band: the name and the icons, sized to what it holds ──────
@@ -761,6 +773,15 @@ export class HexSdfTextureShader {
         color.rgb = mix(color.rgb, vec3(sgray), 0.6 * k);
         color.rgb *= mix(1.0, 0.55, k);
         color.a *= mix(1.0, 0.5, k);
+      }
+
+      // The participant's rim goes on AFTER the shade: a tile that is not yours
+      // yet still says, at full strength, whose it is.
+      if (vOwned > 0.5) {
+        float rimW = max(u_radiusPx * 0.075, 3.0);
+        float ownedRim = (1.0 - smoothstep(rimW - aa, rimW + aa, -d)) * hexAlpha;
+        color.rgb = mix(color.rgb, vBorderColor, ownedRim * 0.92);
+        color.a = mix(color.a, 1.0, ownedRim);
       }
 
       // hover accent: TWO distinct border highlights so a pathway tile (has

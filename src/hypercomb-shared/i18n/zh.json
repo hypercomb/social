@@ -1082,6 +1082,8 @@
   "presence.alone": "第一个到达",
   "presence.one-here": "{who} 在这里",
   "presence.many-here": "{count} 人在此：{who}",
+  "presence.fold": "隐藏房间栏",
+  "presence.unfold": "显示房间栏",
   "presence.expand": "显示参与者",
   "presence.panel-label": "此位置的参与者",
   "presence.subscribe": "订阅他们的蜂巢",

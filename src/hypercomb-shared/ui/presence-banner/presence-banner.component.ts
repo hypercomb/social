@@ -52,6 +52,7 @@ import {
   type MeshConnection, type ShareStatus, type StatusLine, type SyncState,
 } from './presence-status'
 import { readMeshZone } from '../../core/mesh-session'
+import { ParticipantDocument } from '../../core/participant-document'
 
 interface PresencePayload {
   sig?: string
@@ -142,6 +143,18 @@ interface Badge {
   where: 'self' | 'here' | 'visiting' | 'elsewhere' | 'away'
 }
 
+/** FOLDED TO ITS DOT (jwize, 2026-10-13: "the live label with participants
+ *  need to be able to be hidden and it gets in the way frequently on
+ *  mobile"). The whole strip — badges, names, the status line, the panel —
+ *  folds to the one status dot, which keeps the connection's colour and
+ *  unfolds on a tap. Off until the participant folds it, then sticky: one
+ *  current record per participant, never replicated (presence:strip). */
+const stripFolded = new ParticipantDocument<boolean>({
+  meaning: 'presence:strip',
+  parse: raw => (typeof raw === 'boolean' ? raw : null),
+  empty: false,
+})
+
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const SWARM_FILTER_KEY = '@diamondcoreprocessor.com/SwarmFilterService'
 const NAMES_KEY = '@diamondcoreprocessor.com/NameService'
@@ -211,6 +224,9 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
   /** Expanded participant panel state. Toggles on peer-badge click. */
   readonly expanded = signal(false)
+
+  /** The strip folded to its dot (stripFolded). */
+  readonly folded = signal(stripFolded.value)
 
   /** Inline name editor state + draft. */
   readonly editingName = signal(false)
@@ -429,9 +445,13 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
     // Self badge always leads the strip.
     const myLabel = this.#myLabel().trim()
+    // Your badge wears the default style, never a hue (jwize, 2026-10-13:
+    // "our color should be fixed to a default style"): the colours belong to
+    // the others, and their tiles wear the same ones.
     out.push({
       key: 'self',
-      ...this.#chip(myLabel || 'me'),
+      color: '',
+      glow: '',
       initials: myLabel ? this.#initials(myLabel) : '+',
       isSelf: true,
       unnamed: !myLabel,
@@ -519,6 +539,10 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   })
 
   ngOnInit(): void {
+    // The record arrives from disk after the first paint: follow it.
+    const onFolded = (): void => this.folded.set(stripFolded.value)
+    stripFolded.addEventListener('change', onFolded)
+    this.#unsubs.push(() => stripFolded.removeEventListener('change', onFolded))
     const swarm = this.#swarm()
     if (swarm) {
       try { this.#myLabel.set(swarm.myLabel() ?? '') } catch { /* default empty */ }
@@ -772,6 +796,20 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     if (b.where === 'visiting') return 'presence.room-visiting'
     if (b.where === 'away') return 'presence.room-away'
     return 'presence.filter-toggle'
+  }
+
+  /** Fold the whole strip to its dot — remembered for this participant. */
+  onFold(): void {
+    this.expanded.set(false)
+    this.editingName.set(false)
+    this.folded.set(true)
+    stripFolded.write(true)
+  }
+
+  /** The dot unfolds the strip again. */
+  onUnfold(): void {
+    this.folded.set(false)
+    stripFolded.write(false)
   }
 
   /** The caret toggles the expanded participant panel (expansion no

@@ -1082,6 +1082,8 @@
   "presence.alone": "yang pertama di sini",
   "presence.one-here": "{who} ada di sini",
   "presence.many-here": "{count} di sini: {who}",
+  "presence.fold": "sembunyikan bilah ruang",
+  "presence.unfold": "tampilkan bilah ruang",
   "presence.expand": "tampilkan peserta",
   "presence.panel-label": "peserta di lokasi ini",
   "presence.subscribe": "berlangganan sarang mereka",

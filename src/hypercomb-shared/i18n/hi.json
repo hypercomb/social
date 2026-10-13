@@ -1082,6 +1082,8 @@
   "presence.alone": "यहाँ पहले हैं",
   "presence.one-here": "{who} यहाँ है",
   "presence.many-here": "{count} यहाँ: {who}",
+  "presence.fold": "कमरे की पट्टी छिपाएँ",
+  "presence.unfold": "कमरे की पट्टी दिखाएँ",
   "presence.expand": "प्रतिभागी दिखाएँ",
   "presence.panel-label": "इस स्थान पर प्रतिभागी",
   "presence.subscribe": "उनके हाइव की सदस्यता लें",

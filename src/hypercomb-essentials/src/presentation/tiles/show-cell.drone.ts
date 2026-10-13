@@ -249,15 +249,15 @@ function hexToRgbTriple(css: string): [number, number, number] | null {
   ]
 }
 
-/** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
-function labelToRgb(label: string): [number, number, number] {
+/** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range.
+ *  `sat`/`lit` default to the quiet tile identity; a participant's own colour
+ *  passes their badge's (presence-banner `#chip`: the same hue, 100% / 64%). */
+function labelToRgb(label: string, sat = 0.5, lit = 0.6): [number, number, number] {
   let hash = 5381
   for (let i = 0; i < label.length; i++) hash = ((hash << 5) + hash + label.charCodeAt(i)) | 0
   hash = hash >>> 0
 
   const hue = (hash % 360) / 360
-  const sat = 0.5
-  const lit = 0.6
 
   const c = (1 - Math.abs(2 * lit - 1)) * sat
   const x = c * (1 - Math.abs(((hue * 6) % 2) - 1))
@@ -11171,6 +11171,8 @@ export class ShowCellDrone extends Drone {
     // Per-tile portal flag — a reference tile (doorway to another lineage) gets
     // the magical hover shimmer instead of the plain pathway/leaf ring.
     const portal = new Float32Array(cells.length * 4)
+    // Per-tile "theirs": 1 wears its participant's colour boldly (shader vOwned).
+    const owned = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
     let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0, pp = 0
@@ -11260,12 +11262,26 @@ export class ShowCellDrone extends Drone {
       // pops without losing the rest. Own tiles keep their normal
       // borderColor (label or substrate-derived).
       const cellPubkey = foreign ? undefined : this.#peerPubkeyByLabel.get(c.label)
+      // THEIRS, BOLDLY (jwize, 2026-10-13): a tile wears its participant's
+      // colour — their badge's own hue — as a solid rim and a light wash when
+      // it is theirs ALONE (no one else holds it, you included) or, while you
+      // cycle layers, when theirs is the layer on top: every tile of the
+      // surfaced participant, shared ones swapped to their version too. Your
+      // own tiles keep the default look; a shared tile at rest keeps the
+      // stack marker.
+      const spotlit = this.#spotlightPubkey
+      const isOwned = !!cellPubkey && (spotlit === null
+        ? (this.#stackDepthByLabel.get(c.label) ?? 0) <= 1
+        : spotlit === cellPubkey)
+      const ow = isOwned ? 1 : 0
+      owned.set([ow, ow, ow, ow], ci * 4)
       if (cellPubkey) {
-        const [pr, pg, pb] = labelToRgb(cellPubkey)
-        const brightness = this.#spotlightPubkey === null
-          ? 0.85                                          // no spotlight — all groups at uniform group brightness
-          : (this.#spotlightPubkey === cellPubkey ? 1.0   // this peer is active — full intensity
-            : 0.45)                                       // other peer — recede so the active group pops
+        const [pr, pg, pb] = isOwned ? labelToRgb(cellPubkey, 1, 0.64) : labelToRgb(cellPubkey)
+        const brightness = isOwned ? 1.0
+          : spotlit === null
+            ? 0.85                                        // no spotlight — all groups at uniform group brightness
+            : (spotlit === cellPubkey ? 1.0               // this peer is active — full intensity
+              : 0.45)                                     // other peer — recede so the active group pops
         bcr = pr * brightness
         bcg = pg * brightness
         bcb = pb * brightness
@@ -11336,6 +11352,7 @@ export class ShowCellDrone extends Drone {
       ; (g as any).addAttribute('aShaded', shaded, 1)
       ; (g as any).addAttribute('aShapeMode', shapeAttr, 1)
       ; (g as any).addAttribute('aIsPortal', portal, 1)
+      ; (g as any).addAttribute('aOwned', owned, 1)
       ; (g as any).addIndex(idx)
 
     // save buffer references + label→index map so tile:saved can push

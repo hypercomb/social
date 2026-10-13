@@ -1082,6 +1082,8 @@
   "presence.alone": "burada ilk siz varsınız",
   "presence.one-here": "{who} burada",
   "presence.many-here": "{count} kişi burada: {who}",
+  "presence.fold": "oda çubuğunu gizle",
+  "presence.unfold": "oda çubuğunu göster",
   "presence.expand": "katılımcıları göster",
   "presence.panel-label": "bu konumdaki katılımcılar",
   "presence.subscribe": "kovanlarına abone ol",

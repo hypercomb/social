@@ -1082,6 +1082,8 @@
   "presence.alone": "вы здесь первый",
   "presence.one-here": "{who} здесь",
   "presence.many-here": "{count} здесь: {who}",
+  "presence.fold": "скрыть панель комнаты",
+  "presence.unfold": "показать панель комнаты",
   "presence.expand": "показать участников",
   "presence.panel-label": "участники в этом местоположении",
   "presence.subscribe": "подписаться на их улей",

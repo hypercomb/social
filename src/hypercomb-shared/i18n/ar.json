@@ -1082,6 +1082,8 @@
   "presence.alone": "أنت الأول هنا",
   "presence.one-here": "{who} هنا",
   "presence.many-here": "{count} هنا: {who}",
+  "presence.fold": "إخفاء شريط الغرفة",
+  "presence.unfold": "إظهار شريط الغرفة",
   "presence.expand": "عرض المشاركين",
   "presence.panel-label": "المشاركون في هذا الموقع",
   "presence.subscribe": "الاشتراك في خليتهم",

@@ -1167,6 +1167,8 @@
   "presence.alone": "最初の到着者",
   "presence.one-here": "{who} さんがいます",
   "presence.many-here": "{count} 人: {who}",
+  "presence.fold": "ルームバーを隠す",
+  "presence.unfold": "ルームバーを表示",
   "presence.expand": "参加者を表示",
   "presence.panel-label": "この場所の参加者",
   "presence.subscribe": "ハイブを購読",

@@ -164,6 +164,47 @@
   &:hover { color: var(--hc-window-ink-loud); }
 }
 
+// Folds the whole strip to its dot (presence-dot).
+.strip-fold {
+  appearance: none;
+  flex: 0 0 auto;
+  padding: 0 0.2rem;
+  background: transparent;
+  border: none;
+  color: var(--hc-window-ink-quiet);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover { color: var(--hc-window-ink-loud); }
+}
+
+// The folded strip: one status dot on a small pane, a finger-sized target.
+.presence-dot {
+  appearance: none;
+  // Centred on its own: on a phone the host spans the width (see below).
+  display: flex;
+  margin: 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  background: rgba(var(--hc-panel-pane), 0.86);
+  border: 1px solid var(--hc-window-line);
+  border-radius: 50%;
+  cursor: pointer;
+  pointer-events: auto;
+
+  &.warn { border-color: var(--hc-status-warn); }
+  &.down { border-color: var(--hc-status-alert); }
+
+  @media (pointer: coarse) {
+    width: 2rem;
+    height: 2rem;
+  }
+}
+
 .presence-caption {
   margin-top: 0.3rem;
   padding: 0.18rem 0.45rem;

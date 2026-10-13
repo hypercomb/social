@@ -1082,6 +1082,8 @@
   "presence.alone": "als Erster hier",
   "presence.one-here": "{who} ist hier",
   "presence.many-here": "{count} hier: {who}",
+  "presence.fold": "Raumleiste ausblenden",
+  "presence.unfold": "Raumleiste einblenden",
   "presence.expand": "Teilnehmer anzeigen",
   "presence.panel-label": "Teilnehmer an diesem Standort",
   "presence.subscribe": "deren Bienenstock abonnieren",
