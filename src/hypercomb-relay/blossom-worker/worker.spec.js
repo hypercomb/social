@@ -4839,7 +4839,7 @@ test('GET /grant says what an upload would be told, and reading mints nothing', 
 // is adopted" / "we need to be able to have non host participants share" — the
 // guest list stays on (AUTO_GRANT "1") on both scripts; the people's allowance
 // is ready for the day it is turned off.
-test('both byte hosts stay open until adoption: AUTO_GRANT "1", no friend listed yet, 1 GiB for the host's people', () => {
+test('both byte hosts stay open until adoption: AUTO_GRANT "1", no friend listed yet, 1 GiB for the host people', () => {
   for (const file of ['./wrangler.pluginthematrix.toml', './wrangler.toml']) {
     const config = readFileSync(new URL(file, import.meta.url), 'utf8').split('\n').filter((line) => !line.trim().startsWith('#')).join('\n')
     const value = (name) => new RegExp(`^${name}\\s*=\\s*"([^"]*)"`, 'm').exec(config)?.[1]
