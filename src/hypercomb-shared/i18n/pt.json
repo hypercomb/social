@@ -2826,5 +2826,7 @@
   "history.commit-conflict": "Outra aba desta colmeia alterou esta página no mesmo momento — sua alteração não foi salva. Tente de novo.",
   "drop.image-failed": "Não foi possível adicionar essa imagem — tente de novo ou tente outra imagem.",
   "share.held.deep": "{host} não aceita as páginas mais profundas de {count} blocos — elas abrem a partir do seu dispositivo enquanto você estiver aqui",
-  "share.held.deep.one": "{host} não aceita as páginas mais profundas de {count} bloco — elas abrem a partir do seu dispositivo enquanto você estiver aqui"
+  "share.held.deep.one": "{host} não aceita as páginas mais profundas de {count} bloco — elas abrem a partir do seu dispositivo enquanto você estiver aqui",
+  "hosts.behind": "{host} ainda não tem a versão mais recente",
+  "packages.updates.not-held": "Há uma atualização pronta, mas nenhum dos seus hosts a tem ainda"
 }

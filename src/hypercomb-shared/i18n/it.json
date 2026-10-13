@@ -2826,5 +2826,7 @@
   "history.commit-conflict": "Un'altra scheda di questo alveare ha modificato questa pagina nello stesso momento — la tua modifica non è stata salvata. Riprova.",
   "drop.image-failed": "Non è stato possibile aggiungere quell'immagine — riprova, o prova con un'altra immagine.",
   "share.held.deep": "{host} non accetta le pagine più profonde di {count} tessere — si aprono dal tuo dispositivo finché sei qui",
-  "share.held.deep.one": "{host} non accetta le pagine più profonde di {count} tessera — si aprono dal tuo dispositivo finché sei qui"
+  "share.held.deep.one": "{host} non accetta le pagine più profonde di {count} tessera — si aprono dal tuo dispositivo finché sei qui",
+  "hosts.behind": "{host} non ha ancora la versione più recente",
+  "packages.updates.not-held": "Un aggiornamento è pronto, ma nessuno dei tuoi host ce l'ha ancora"
 }

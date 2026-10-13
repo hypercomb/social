@@ -6,11 +6,12 @@
 // tested as data; the rest are ratchets on the shape the doctrine requires.
 
 import { describe, expect, it } from 'vitest'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { directoryRows, domainRows, filesOf, isOlder, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
+import { directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
+import { ATTESTED_PACKAGES_KEY, attestPackage } from './package-attestation'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..', '..', '..')
@@ -167,7 +168,7 @@ describe('the host directory', () => {
     expect(ACQUIRE).toMatch(/row\.label !== row\.packageSig\.slice\(0, 12\)/)
     expect(ACQUIRE).toMatch(/sources: revision\.sources\.map\(\(\{ root, zone, at, name \}\)/)
     expect(INSTALL_TYPES).toMatch(/interface InstallRevisionSource \{[\s\S]*?name\?: string/)
-    expect(VIEW).toMatch(/revisionGroups\(revisions\)/)
+    expect(VIEW).toMatch(/revisionGroups\(revisions, latest\)/)
     expect(EN['hosts.revisions.unnamed']).toBeTruthy()
   })
 
@@ -301,5 +302,138 @@ describe('the host directory', () => {
     expect(INDICATOR).not.toMatch(/'bundled'/)
     expect(UPGRADE).toMatch(/window\.ioc\.get\(INSTALL_IOC_KEY\)/)
     expect(UPGRADE).not.toMatch(/upgradeHypercomb/)
+  })
+
+  // ── the honest update window (jwize 2026-10-11) ─────────────────────────────
+  // A host can serve an older build than the one the followed publisher names
+  // — hypercomb.com did, for hours, after each publish — and offering its tree
+  // sent the participant into the gate's refusal ("not signed by a publisher
+  // you follow — visit hypercomb.com to try it on its own domain"). The window
+  // offers only what that publisher names, what runs here, and what it named
+  // before; a host holding anything else is told plainly that it is behind.
+
+  const FOLLOWED = 'f'.repeat(64)
+  const offer = (named: string, extra: Partial<Parameters<typeof offerableRoots>[0]> = {}) =>
+    offerableRoots({ named, trunk: 'trunk', picks: [], witnessed: {}, followed: FOLLOWED, ...extra })
+
+  it('offers the named root, what runs here, and what the followed publisher named before — nothing else', () => {
+    const offerable = offer('signed', { picks: ['picked'], witnessed: { older: FOLLOWED, stranger: 'e'.repeat(64) } })
+    expect(['signed', 'trunk', 'picked', 'older'].every(offerable)).toBe(true)
+    expect(offerable('stale')).toBe(false)
+    expect(offerable('stranger')).toBe(false)   // witnessed under another key is no witness
+    expect(offerable('')).toBe(false)
+    expect(offer('signed', { followed: null, witnessed: { older: FOLLOWED } })('older')).toBe(false)
+  })
+
+  it('a stale host tree never joins this hive\'s list — it stays under its own name, which says it is behind', () => {
+    const next: ServedTree = { root: 'signed', nodes: [node('games', 'g2')] }
+    const stale: ServedTree = { root: 'stale', nodes: [node('games', 'g0'), node('wheel', 'w0')] }
+    const carried = new Map<string, ServedTree | null>([['hypercomb.com', stale], ['jwize.com', next]])
+    const offerable = offer('signed')
+
+    const board = rows({ running, next, carried, offerable })
+    expect(board.map(r => r.path)).toEqual(['games', 'notes'])
+    expect(board.find(r => r.path === 'games')?.layerSig).toBe('g1')
+    // Without the rule it was the union of every host's head — the stale wheel included.
+    expect(rows({ running, next, carried }).map(r => r.path)).toContain('wheel')
+    // The host's own list is still what it carries.
+    expect(rows({ scope: 'hypercomb.com', running, carried, offerable }).map(r => r.path)).toEqual(['games', 'wheel'])
+
+    const domains = domainRows({ homeLabel: 'hypercomb.io', zones: ['hypercomb.com', 'jwize.com'], trunk: 'trunk', next,
+      served: carried, count: () => 1, named: 'signed' })
+    expect(domains.map(d => `${d.label}:${d.update}:${d.behind}`)).toEqual(['hypercomb.io:true:false', 'jwize.com:true:false', 'hypercomb.com:false:true'])
+    // Before the named build is known, nobody is called behind.
+    expect(domainRows({ homeLabel: 'h', zones: ['hypercomb.com'], trunk: 'trunk', next: null, served: carried, count: () => 0 })
+      .some(d => d.behind)).toBe(false)
+    expect(hostBehind('stale', 'signed')).toBe(true)
+    expect(hostBehind('signed', 'signed')).toBe(false)
+    expect(hostBehind('', 'signed')).toBe(false)
+  })
+
+  it('revisions are only what may be taken, the named root first and marked latest — never a stale host\'s newer date', () => {
+    const found: InstallRevision[] = [
+      // The stale host's package, listed with a date — it used to sort first.
+      { layer: 'stale-layer', at: '2026-10-11T20:00:00.000Z', sources: [{ root: 'stale', zone: 'hypercomb.com', at: '2026-10-11T20:00:00.000Z', name: 'essentials' }] },
+      { layer: 'older-layer', at: '2026-10-01T09:00:00.000Z', sources: [{ root: 'older', zone: 'jwize.com', at: '2026-10-01T09:00:00.000Z', name: 'essentials' }] },
+      // The signed root, named on no host yet: no date at all.
+      { layer: 'signed-layer', at: '', sources: [{ root: 'signed', zone: '', at: '' }] },
+    ]
+    const offered = offeredRevisions(found, offer('signed', { witnessed: { older: FOLLOWED } }), 'signed', 'essentials')
+    expect(offered.map(r => r.layer)).toEqual(['signed-layer', 'older-layer'])
+    expect(offered[0]!.sources[0]!.name).toBe('essentials')
+    const groups = revisionGroups(offered, 'signed-layer')
+    expect(groups.map(g => `${g.name}:${g.entries.map(e => e.revision.layer).join(',')}`)).toEqual(['essentials:signed-layer,older-layer'])
+    // Without a lead, dates decide, as before.
+    expect(revisionGroups(offered)[0]!.entries[0]!.revision.layer).toBe('older-layer')
+    // A lead nothing names still leads.
+    expect(revisionGroups([found[1]!, { layer: 'x', at: '', sources: [{ root: 'x', zone: '', at: '' }] }], 'x')[0]!.entries[0]!.revision.layer).toBe('x')
+    // The window cuts its list this way, and marks "latest" on the first line.
+    expect(VIEW).toMatch(/this\.#revisions = offeredRevisions\(found, this\.#offerable, this\.#named,/)
+    expect(VIEW).toMatch(/if \(groupIndex === 0 && index === 0\) choose\.append\(make\('span', 'hd-mark quiet', t\('hosts\.revisions\.latest'/)
+  })
+
+  it('takes nothing from a host it may not offer, and says the host is behind instead of leading into the gate', () => {
+    const carrying = VIEW.slice(VIEW.indexOf('#carrying(path: string): ServedTree | null {'))
+    expect(carrying.slice(0, 400)).toMatch(/this\.#offerable\(tree\.root\)/)
+    const list = VIEW.slice(VIEW.indexOf('#packageList(rows: readonly DirectoryRow[]): HTMLElement {'))
+    expect(list).toMatch(/const untakeable = !row\.held && !this\.#carrying\(row\.path\)/)
+    expect(list).toMatch(/\|\| untakeable\n/)
+    const toggle = VIEW.slice(VIEW.indexOf('async #toggle(row: DirectoryRow)'), VIEW.indexOf('async #takeUpdate('))
+    expect(toggle).toMatch(/this\.#isBehind\(this\.#scope\) \? this\.#behindText\(this\.#scope\)/)
+    expect(toggle).toMatch(/this\.#offerable\(other\.root\)/)
+  })
+
+  it('an update no host can serve yet is said plainly, with the hosts behind — and no Update all button', () => {
+    const section = VIEW.slice(VIEW.indexOf('#sectionBody(zone: string): HTMLElement {'), VIEW.indexOf('#renderBranch(body: HTMLElement): void {'))
+    const notHeld = section.slice(section.indexOf('} else if (!zone && (trunk || runsSource()) && this.#named && this.#named !== trunk && !this.#reading) {'), section.indexOf('if (reach && !trunk) {'))
+    expect(notHeld).toMatch(/t\('packages\.updates\.not-held'/)
+    expect(notHeld).toMatch(/this\.#isBehind\(host\)/)
+    expect(notHeld).not.toMatch(/button\(|hosts\.update-all|#updateAll/)
+    // The named root is kept apart from the tree a host could serve.
+    expect(VIEW).toMatch(/this\.#named = named\n\s*this\.#offerable = this\.#offerFor\(named\)/)
+    expect(EN['packages.updates.not-held']).toBe('An update is ready, but none of your hosts has it yet')
+    expect(EN['hosts.behind']).toBe("{host} hasn't got the newest version yet")
+  })
+
+  it('a witness is not what the publisher names now — a newer, unwitnessed root is never hidden or called behind', async () => {
+    // The tab runs P (witnessed long ago); the publisher has since stamped R,
+    // which nobody here has witnessed; hypercomb.com already serves R.
+    const [P, R] = ['a'.repeat(64), 'b'.repeat(64)]
+    const store = new Map<string, string>([[ATTESTED_PACKAGES_KEY, JSON.stringify({ [P]: FOLLOWED })]])
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v) } }
+    const publisher = { pubkey: FOLLOWED, hosts: ['jwize.com'], channel: 'essentials' }
+    const indexNaming = (root: string) => async () => ({ ok: true, manifest: { roots: { 'install:essentials': root } } }) as never
+
+    // The witness alone answers 'held' — which says P was named ONCE.
+    const held = await attestPackage(P, [], { storage, publisher, fetchIndex: indexNaming(R) })
+    expect(held).toMatchObject({ ok: true, witnessed: 'held' })
+    expect(namedFromVerdict(held, P)).toBe('')
+    // Unknown cuts nothing and calls nobody behind.
+    const served = new Map<string, ServedTree | null>([['hypercomb.com', { root: R, nodes: [node('games', 'g2')] }]])
+    expect(offer('')(R)).toBe(true)
+    expect(rows({ running, carried: served, offerable: offer('') }).map(r => r.path)).toContain('games')
+    expect(domainRows({ homeLabel: 'h', zones: ['hypercomb.com'], trunk: P, next: null, served, count: () => 1, named: '' })
+      .some(d => d.behind)).toBe(false)
+
+    // The window reads FRESH, and learns R — R is offered and its host is current.
+    const fresh = await attestPackage(P, [], { storage, publisher, fetchIndex: indexNaming(R), fresh: true })
+    const named = namedFromVerdict(fresh, P)
+    expect(named).toBe(R)
+    expect(offer(named, { trunk: P })(R)).toBe(true)
+    expect(hostBehind(R, named)).toBe(false)
+    // A fresh read naming P itself: P is current, and a host on R is not behind it falsely — R is newer only if named.
+    expect(namedFromVerdict(await attestPackage(P, [], { storage, publisher, fetchIndex: indexNaming(P), fresh: true }), P)).toBe(P)
+    expect(VIEW).toMatch(/attestPackage\(installedSig, this\.#zones, \{ fresh: true \}\)/)
+  })
+
+  it('both sentences speak every language the window does', () => {
+    const catalogs = readdirSync(join(root, 'hypercomb-shared', 'i18n')).filter(file => file.endsWith('.json'))
+    expect(catalogs.length).toBeGreaterThanOrEqual(14)
+    for (const file of catalogs) {
+      const json = JSON.parse(readFileSync(join(root, 'hypercomb-shared', 'i18n', file), 'utf8')) as Record<string, string>
+      expect(json['hosts.behind']?.match(/\{\w+\}/g), `${file} hosts.behind`).toEqual(['{host}'])
+      expect(json['packages.updates.not-held']?.trim(), `${file} packages.updates.not-held`).toBeTruthy()
+      expect(json['packages.updates.not-held']).not.toMatch(/\{\w+\}/)
+    }
   })
 })

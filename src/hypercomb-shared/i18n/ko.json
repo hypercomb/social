@@ -2826,5 +2826,7 @@
   "history.commit-conflict": "이 하이브의 다른 탭이 같은 순간에 이 페이지를 바꿨습니다 — 변경 사항이 저장되지 않았습니다. 다시 시도하세요.",
   "drop.image-failed": "그 그림을 추가할 수 없었습니다 — 다시 시도하거나 다른 그림을 사용해 보세요.",
   "share.held.deep": "{host}은(는) 타일 {count}개의 더 깊은 페이지를 받지 않습니다 — 여기 있는 동안 내 기기에서 열립니다",
-  "share.held.deep.one": "{host}은(는) 타일 {count}개의 더 깊은 페이지를 받지 않습니다 — 여기 있는 동안 내 기기에서 열립니다"
+  "share.held.deep.one": "{host}은(는) 타일 {count}개의 더 깊은 페이지를 받지 않습니다 — 여기 있는 동안 내 기기에서 열립니다",
+  "hosts.behind": "{host}에는 아직 최신 버전이 없습니다",
+  "packages.updates.not-held": "업데이트가 준비되었지만 아직 어느 호스트에도 없습니다"
 }

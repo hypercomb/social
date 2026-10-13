@@ -2826,5 +2826,7 @@
   "history.commit-conflict": "Tab lain dari hive ini mengubah halaman ini pada saat yang sama — perubahanmu tidak tersimpan. Coba lagi.",
   "drop.image-failed": "Gambar itu tidak bisa ditambahkan — coba lagi, atau coba gambar lain.",
   "share.held.deep": "{host} tidak menerima halaman yang lebih dalam dari {count} ubin — halaman itu dibuka dari perangkatmu selama kamu di sini",
-  "share.held.deep.one": "{host} tidak menerima halaman yang lebih dalam dari {count} ubin — halaman itu dibuka dari perangkatmu selama kamu di sini"
+  "share.held.deep.one": "{host} tidak menerima halaman yang lebih dalam dari {count} ubin — halaman itu dibuka dari perangkatmu selama kamu di sini",
+  "hosts.behind": "{host} belum memiliki versi terbaru",
+  "packages.updates.not-held": "Pembaruan sudah siap, tetapi belum ada host Anda yang memilikinya"
 }

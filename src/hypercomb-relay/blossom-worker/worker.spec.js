@@ -4532,6 +4532,251 @@ test('ORIGIN_HOSTS changes nothing on any other host, and only the deploy var ma
   }
 })
 
+// ── an origin host's package comes from the heap (jwize 2026-10-11) ─────────
+// "make each publish leave hypercomb.com current". A publish stamps the signed
+// index here at once; its package used to reach the origin only when someone
+// redeployed it. Now /content/<sig> is the heap's first, and a host whose
+// binding names the channel it installs derives its packages pool from the
+// publisher's signed index — only once the heap holds that root. Whatever the
+// heap cannot answer goes to the origin exactly as before.
+
+const INSTALLING_ZONE = {
+  ...ORIGIN_ZONE,
+  'hypercomb.com': { ...ORIGIN_ZONE['hypercomb.com'], installs: 'essentials', farm: ['jwize.com'] },
+}
+
+async function installingFixture(event, bindings = INSTALLING_ZONE) {
+  const fixed = await fixture(event, bindings)
+  fixed.env.ORIGIN_HOSTS = 'hypercomb.com'
+  return fixed
+}
+
+test('an origin host answers /content/<sig> from the heap, else from its origin — never its farm', async () => {
+  const { env } = await installingFixture(await signedIndex({}))
+  const held = 'a module the heap holds'
+  const heldSig = await sha256(held)
+  env.CONTENT.held.set(heldSig, utf8(held))
+  const staged = 'd'.repeat(64)                      // on the origin's staged copy only
+  const farmed = 'a bee only the publisher machine holds'
+  const farmedSig = await sha256(farmed)
+  const upstream = (url) => {
+    if (url === `https://hypercomb.com/content/${staged}`) return new Response('staged bytes', { headers: { 'content-type': 'application/octet-stream' } })
+    if (url === `https://jwize.com/${farmedSig}`) return sized(farmed)
+    return originPage(url)
+  }
+  await withUpstream(upstream, async (asked) => {
+    const res = await worker.fetch(new Request(`https://hypercomb.com/content/${heldSig}`), env)
+    assert.equal(res.status, 200)
+    assert.equal(await res.text(), held)
+    assert.equal(res.headers.get('etag'), `"${heldSig}"`)
+    const script = await worker.fetch(new Request(`https://hypercomb.com/content/${heldSig}`, { headers: { 'sec-fetch-dest': 'script' } }), env)
+    assert.equal(script.headers.get('content-type'), 'text/javascript; charset=utf-8')
+    assert.equal((await worker.fetch(new Request(`https://hypercomb.com/content/${heldSig}`, { method: 'HEAD' }), env)).status, 200)
+    assert.deepEqual(asked, [], 'a held signature never asks the origin')
+
+    // Only the origin's staged copy has it: the origin answers, and nothing is kept.
+    const fromOrigin = await worker.fetch(new Request(`https://hypercomb.com/content/${staged}`), env)
+    assert.equal(await fromOrigin.text(), 'staged bytes')
+    assert.ok(!env.CONTENT.held.has(staged))
+
+    // Only the farm has it: /content/ still answers as the origin did. Only a
+    // bare read fills the heap, so a package root lands only when the
+    // replication pulls it — never because a client asked for it here.
+    asked.length = 0
+    const miss = await worker.fetch(new Request(`https://hypercomb.com/content/${farmedSig}`), env)
+    assert.equal(await miss.text(), `origin /content/${farmedSig}`)
+    assert.deepEqual(asked.map(({ url }) => url), [`https://hypercomb.com/content/${farmedSig}`])
+    assert.ok(!env.CONTENT.held.has(farmedSig))
+  })
+})
+
+/** A package as the publish ships it: a root layer naming a child layer and
+ *  a bee; the child naming a bee and a dependency. */
+async function packageFixture(tag) {
+  const files = {}
+  const put = async (text) => { const sig = await sha256(text); files[sig] = text; return sig }
+  const bee = await put(`export const bee = '${tag} root bee'`)
+  const childBee = await put(`export const bee = '${tag} child bee'`)
+  const dependency = await put(`// @scope/${tag}\nexport default 1`)
+  const child = await put(JSON.stringify({ name: `${tag}-child`, cells: [], bees: [childBee], dependencies: [dependency] }))
+  const root = await put(JSON.stringify({ name: tag, cells: [{ sig: child }], bees: [`${bee}.js`], dependencies: [] }))
+  return { root, child, bee, childBee, dependency, files }
+}
+
+/** The publisher's machine as a farm: its files by bare signature, and its
+ *  own `host:packages` pool naming `head` (if any). */
+const farmMachine = async (files, head = null) => {
+  const pool = await sha256Hex('host:packages')
+  return (url) => {
+    const { hostname, pathname } = new URL(url)
+    if (hostname !== 'jwize.com') return originPage(url)
+    if (pathname === `/${pool}/`) return new Response(head ? '00000000\n' : '', { headers: { 'content-type': 'text/plain' } })
+    if (pathname === `/${pool}/00000000` && head) return new Response(`${head}\nessentials`, { headers: { 'content-type': 'text/plain' } })
+    const text = files[pathname.slice(1)]
+    return text === undefined ? new Response('not here', { status: 404 }) : sized(text)
+  }
+}
+
+test('an origin host that installs a channel answers its packages pool from the signed index — only once the heap holds the WHOLE package', async () => {
+  const pool = await sha256Hex('host:packages')
+  const pkg = await packageFixture('whole')
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }, 1_800_000_000))
+  const at = (path, method = 'GET') => worker.fetch(new Request(`https://hypercomb.com${path}`, { method }), env)
+  const originAnswers = async (why) => {
+    for (const path of [`/content/${pool}/`, `/content/${pool}/00000000`]) assert.equal(await (await at(path)).text(), `origin ${path}`, why)
+  }
+  await withUpstream(originPage, async (asked) => {
+    await originAnswers('nothing held')
+    // The root alone is not a package: complete or absent.
+    env.CONTENT.held.set(pkg.root, utf8(pkg.files[pkg.root]))
+    await originAnswers('only the root held')
+    for (const sig of [pkg.child, pkg.bee, pkg.dependency]) env.CONTENT.held.set(sig, utf8(pkg.files[sig]))
+    await originAnswers('one bee still missing')
+
+    // Every file is here: the pool names the root.
+    env.CONTENT.held.set(pkg.childBee, utf8(pkg.files[pkg.childBee]))
+    asked.length = 0
+    const listing = await at(`/content/${pool}/`)
+    assert.equal(listing.status, 200)
+    assert.equal(await listing.text(), '00000000\n')
+    assert.equal(listing.headers.get('cache-control'), 'no-store')
+    const member = await at(`/content/${pool}/00000000`)
+    assert.equal(await member.text(), `${pkg.root}\nessentials`)
+    assert.equal(member.headers.get('cache-control'), 'no-store', 'the member moves with the index — never cached')
+    assert.equal((await at(`/content/${pool}/00000000`, 'HEAD')).status, 200)
+    assert.equal((await at(`/content/${pool}/00000001`)).status, 404)
+    assert.deepEqual(asked, [], 'the pool is the heap\'s now')
+    // The flat listing stays the origin's: the walk settles on /content/.
+    assert.equal(await (await at(`/${pool}/`)).text(), `origin /${pool}/`)
+  })
+})
+
+test('anyone pulling the signed root through the farm before its files cannot move the pool (the flip, reproduced)', async () => {
+  const pool = await sha256Hex('host:packages')
+  const pkg = await packageFixture('flip')
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }, 1_800_000_000))
+  await withUpstream(await farmMachine(pkg.files), async () => {
+    // An unauthenticated bare GET of the root: the farm gives it, the heap keeps it…
+    const root = await worker.fetch(new Request(`https://hypercomb.com/${pkg.root}`), env)
+    assert.equal(root.status, 200)
+    assert.equal(root.headers.get('x-read-through'), 'farm')
+    assert.ok(env.CONTENT.held.has(pkg.root))
+    // …and the pool is still the origin's, because the package is not whole.
+    const member = await worker.fetch(new Request(`https://hypercomb.com/content/${pool}/00000000`), env)
+    assert.equal(await member.text(), `origin /content/${pool}/00000000`)
+    // The rest pulled: now it moves.
+    for (const sig of [pkg.child, pkg.bee, pkg.childBee, pkg.dependency]) {
+      assert.equal((await worker.fetch(new Request(`https://hypercomb.com/${sig}`), env)).status, 200)
+    }
+    const moved = await worker.fetch(new Request(`https://hypercomb.com/content/${pool}/00000000`), env)
+    assert.equal(await moved.text(), `${pkg.root}\nessentials`)
+  })
+})
+
+test('an origin host\'s pool is the origin\'s unless the deployed binding installs a channel the signed index names', async () => {
+  const pool = await sha256Hex('host:packages')
+  const rootBytes = 'a root held in the heap'
+  const root = await sha256(rootBytes)
+  const forged = await signedIndex({ 'install:essentials': root })
+  forged.content = JSON.stringify({ roots: { 'install:essentials': 'e'.repeat(64) } })
+  const cases = [
+    ['no channel in the binding', await signedIndex({ 'install:essentials': root }), ORIGIN_ZONE],
+    ['a channel the index does not name', await signedIndex({ 'install:other': root }), INSTALLING_ZONE],
+    ['an index that does not verify', forged, INSTALLING_ZONE],
+    ['a channel that is not a name', await signedIndex({ 'install:essentials': root }),
+      { ...INSTALLING_ZONE, 'hypercomb.com': { ...INSTALLING_ZONE['hypercomb.com'], installs: 'Not A Name!' } }],
+  ]
+  for (const [why, event, bindings] of cases) {
+    const { env } = await installingFixture(event, bindings)
+    env.CONTENT.held.set(root, utf8(rootBytes))
+    await withUpstream(originPage, async () => {
+      for (const path of [`/content/${pool}/`, `/content/${pool}/00000000`]) {
+        assert.equal(await (await worker.fetch(new Request(`https://hypercomb.com${path}`), env)).text(), `origin ${path}`, why)
+      }
+    })
+  }
+  // A signed operator record never sets it: the channel is read from the var as deployed.
+  const record = JSON.stringify({ kind: 'visual:binding:artifact', meaning: 'binding:hypercomb.com', payload: { sites: [{
+    host: 'hypercomb.com', lineage: 'hypercomb', publishers: [{ label: 'Jaime', primary: true, pubkey }],
+    title: 'Hypercomb', installs: 'essentials', farm: ['jwize.com'] }], zone: 'hypercomb.com' } })
+  const recordSig = await sha256(record)
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': root, 'binding:hypercomb.com': recordSig }), ORIGIN_ZONE)
+  env.CONTENT.held.set(root, utf8(rootBytes))
+  env.CONTENT.held.set(recordSig, utf8(record))
+  env.SITE_OPERATORS = JSON.stringify({ 'hypercomb.com': pubkey })
+  await withUpstream(originPage, async () => {
+    assert.equal(await (await worker.fetch(new Request(`https://hypercomb.com/content/${pool}/00000000`), env)).text(), `origin /content/${pool}/00000000`)
+  })
+})
+
+test('a bare signature at an origin host is read through its farm, kept, and says it was', async () => {
+  const pkg = await packageFixture('bare')
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }))
+  await withUpstream(await farmMachine(pkg.files), async (asked) => {
+    const first = await worker.fetch(new Request(`https://hypercomb.com/${pkg.bee}`), env)
+    assert.equal(first.status, 200)
+    assert.equal(await first.text(), pkg.files[pkg.bee])
+    assert.equal(first.headers.get('x-read-through'), 'farm')
+    assert.ok(asked.some(({ url }) => url === `https://jwize.com/${pkg.bee}`))
+    asked.length = 0
+    const again = await worker.fetch(new Request(`https://hypercomb.com/${pkg.bee}`), env)
+    assert.equal(await again.text(), pkg.files[pkg.bee])
+    assert.equal(again.headers.get('x-read-through'), null, 'a held signature was copied by nobody')
+    assert.deepEqual(asked, [])
+  })
+})
+
+test('a farm on a binding that installs a channel gives package files only — never whatever else the publisher machine serves', async () => {
+  const pkg = await packageFixture('scoped')
+  const upload = 'a swarm participant\'s upload on the publisher machine'
+  const uploadSig = await sha256(upload)
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }))
+  await withUpstream(await farmMachine({ ...pkg.files, [uploadSig]: upload }), async (asked) => {
+    for (const host of ['hypercomb.com', 'anything.hypercomb.com']) {
+      const res = await worker.fetch(new Request(`https://${host}/${uploadSig}`), env)
+      assert.notEqual(res.status, 200, host)
+      assert.ok(!env.CONTENT.held.has(uploadSig), `${host} kept nothing`)
+    }
+    assert.ok(!asked.some(({ url }) => url === `https://jwize.com/${uploadSig}`), 'the upload itself is never fetched')
+    // A file of the signed package is still taken, from either name.
+    assert.equal((await worker.fetch(new Request(`https://anything.hypercomb.com/${pkg.dependency}`), env)).status, 200)
+    assert.ok(env.CONTENT.held.has(pkg.dependency))
+  })
+})
+
+test('before the stamp, the package the farm last published may be pulled — and the pool moves the moment the index names it', async () => {
+  const pool = await sha256Hex('host:packages')
+  const older = await packageFixture('older')
+  const next = await packageFixture('next')
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': older.root }, 1_800_000_000))
+  for (const [sig, text] of Object.entries(older.files)) env.CONTENT.held.set(sig, utf8(text))
+  await withUpstream(await farmMachine({ ...older.files, ...next.files }, next.root), async () => {
+    // The publish's pull, files first and the root last — nothing names `next` yet.
+    for (const sig of [next.childBee, next.dependency, next.child, next.bee, next.root]) {
+      assert.equal((await worker.fetch(new Request(`https://hypercomb.com/${sig}`), env)).status, 200, sig)
+    }
+    const before = await worker.fetch(new Request(`https://hypercomb.com/content/${pool}/00000000`), env)
+    assert.equal(await before.text(), `${older.root}\nessentials`, 'the pool keeps the signed, whole package')
+    // The stamp: the pool names the new root at once, its files all here.
+    env.CONTENT.held.set(`${await sha256Hex('hive:indexes')}/${pubkey}`,
+      utf8(JSON.stringify(await signedIndex({ 'install:essentials': next.root }, 1_800_000_100))))
+    const after = await worker.fetch(new Request(`https://hypercomb.com/content/${pool}/00000000`), env)
+    assert.equal(await after.text(), `${next.root}\nessentials`)
+    const served = await worker.fetch(new Request(`https://hypercomb.com/content/${next.root}`), env)
+    assert.equal(await served.text(), next.files[next.root])
+  })
+})
+
+test('the deployed config derives hypercomb.com\'s package from the followed publisher\'s channel, its misses read from the publisher\'s machine', () => {
+  const raw = readFileSync(new URL('./wrangler.pluginthematrix.toml', import.meta.url), 'utf8')
+  const bindings = JSON.parse(/^SITE_BINDINGS\s*=\s*'(.*)'\s*$/m.exec(raw)[1])
+  const publisher = JSON.parse(readFileSync(new URL('../../hypercomb-essentials/src/sharing/install-publisher.json', import.meta.url), 'utf8'))
+  const apex = bindings['hypercomb.com']
+  assert.equal(apex.installs, publisher.channel)
+  assert.equal(apex.publishers.find((p) => p.primary).pubkey, publisher.pubkey, 'the pool follows the key every install follows')
+  assert.deepEqual(apex.farm, ['jwize.com'])
+})
+
 // ── the shipped default meets at hypercomb.com (jwize 2026-10-11) ───────────
 // "yes, open default on hypercomb.com": every install dials wss://hypercomb.com.
 // On that ORIGIN_HOSTS apex only the upgrade, the NIP-11 answer and the

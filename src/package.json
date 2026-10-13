@@ -48,6 +48,7 @@
     "build:module": "npm --prefix hypercomb-essentials run build:module",
     "deploy:essentials": "npm --prefix hypercomb-essentials run publish:revision --",
     "publish:revision": "npm --prefix hypercomb-essentials run publish:revision --",
+    "replicate:revision": "npm --prefix hypercomb-essentials run replicate:revision --",
     "publish:content": "tsx scripts/publish-content.ts",
     "mirror:content": "pwsh hypercomb-relay/mirror-content-to-azure.ps1",
     "mirror:content:setup": "pwsh hypercomb-relay/mirror-content-to-azure.ps1 -SetupCors",

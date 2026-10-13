@@ -2826,5 +2826,7 @@
   "history.commit-conflict": "Ein anderer Tab dieses Hives hat diese Seite im selben Moment geändert — deine Änderung wurde nicht gespeichert. Versuche es noch einmal.",
   "drop.image-failed": "Dieses Bild konnte nicht hinzugefügt werden — versuche es noch einmal oder nimm ein anderes Bild.",
   "share.held.deep": "{host} nimmt die tieferen Seiten von {count} Kacheln nicht an — sie öffnen sich von deinem Gerät, solange du hier bist",
-  "share.held.deep.one": "{host} nimmt die tieferen Seiten von {count} Kachel nicht an — sie öffnen sich von deinem Gerät, solange du hier bist"
+  "share.held.deep.one": "{host} nimmt die tieferen Seiten von {count} Kachel nicht an — sie öffnen sich von deinem Gerät, solange du hier bist",
+  "hosts.behind": "{host} hat die neueste Version noch nicht",
+  "packages.updates.not-held": "Ein Update ist bereit, aber noch keiner Ihrer Hosts hat es"
 }

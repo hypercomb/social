@@ -3532,5 +3532,7 @@
   "history.commit-conflict": "Another tab of this hive changed this page at the same moment — your change was not saved. Try it again.",
   "drop.image-failed": "That picture could not be added — try again, or try another picture.",
   "share.held.deep": "{host} isn't taking the deeper pages of {count} tiles — they open from your device while you're here",
-  "share.held.deep.one": "{host} isn't taking the deeper pages of {count} tile — they open from your device while you're here"
+  "share.held.deep.one": "{host} isn't taking the deeper pages of {count} tile — they open from your device while you're here",
+  "hosts.behind": "{host} hasn't got the newest version yet",
+  "packages.updates.not-held": "An update is ready, but none of your hosts has it yet"
 }

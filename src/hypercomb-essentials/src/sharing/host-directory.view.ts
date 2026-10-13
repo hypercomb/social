@@ -32,7 +32,6 @@
 // peers drone owns the creations a host serves. This file owns none of them.
 
 import {
-  ATTESTATION_IOC_KEY,
   EffectBus,
   I18N_IOC_KEY,
   INSTALL_IOC_KEY,
@@ -43,12 +42,13 @@ import {
   type InstallProvider,
   type InstallRevision,
   type InstallSelection,
-  type PackageAttestation,
+  type AttestationVerdict,
   type WindowSession,
 } from '@hypercomb/core'
 import { hostZone } from './community-hosts.js'
 import { trustCode, trustedCodeDomains } from './code-trust.js'
-import { readInstallFollow } from './update-scout.service.js'
+import { attestPackage, readWitnessed } from './package-attestation.js'
+import { readInstallFollow, type InstallFollow } from './update-scout.service.js'
 
 export const HOST_DIRECTORY_SURFACE = 'hc-host-directory'
 const OWNER = '@diamondcoreprocessor.com/HostDirectoryView'
@@ -111,6 +111,45 @@ export const offAbove = (path: string, off: ReadonlySet<string>): string => {
 
 export type ServedTree = { root: string; nodes: InstallNode[] }
 
+/**
+ * WHICH ROOTS THIS WINDOW MAY OFFER (jwize 2026-10-11: "make the update
+ * window honest"). A host can serve an older package than the one the
+ * publisher you follow names — hypercomb.com did, for hours, after each
+ * publish — and offering its tree sent the participant into the activation
+ * gate's refusal ("not signed by a publisher you follow — visit hypercomb.com
+ * to try it on its own domain"). Offered are only the root that publisher
+ * names now, what runs here (the trunk and the picks over it), and any root
+ * that publisher has been seen to name before (the attester's witnesses,
+ * under the key followed now — every one a valid rollback).
+ *
+ * `named` is `''` while the window does not KNOW what the publisher names now
+ * — then nothing is cut, as before this rule: a guess would hide the very root
+ * the publisher just stamped (a stamp nobody here has witnessed yet).
+ */
+export const offerableRoots = (input: {
+  named: string
+  trunk: string | null
+  picks: readonly string[]
+  witnessed: Readonly<Record<string, string>>
+  followed: string | null
+}): ((root: string) => boolean) => (root: string): boolean =>
+  !!root && (!input.named || root === input.named || root === input.trunk || input.picks.includes(root)
+    || (!!input.followed && input.witnessed[root] === input.followed))
+
+/**
+ * What the followed publisher names NOW, from a FRESH attestation of the
+ * installed build (`attestPackage(..., { fresh: true })`): the build itself
+ * only when an index read just now named it ('current'), the build it names
+ * instead when it does not, and `''` — unknown — for anything else. A 'held'
+ * verdict is a witness from the past (it was named once), never an answer
+ * about now, so it is unknown here.
+ */
+export const namedFromVerdict = (verdict: AttestationVerdict | null | undefined, installedSig: string): string => {
+  if (!verdict) return ''
+  if (verdict.ok) return verdict.witnessed === 'current' ? installedSig : ''
+  return verdict.reason === 'not-named' && verdict.named ? verdict.named : ''
+}
+
 export interface DirectoryRow {
   path: string
   name: string
@@ -136,9 +175,11 @@ export interface DirectoryRow {
 
 /**
  * THE LIST, as data. `scope` is `''` for this origin — the union of what runs
- * here, what the followed publisher names, and every host's head — or a host,
- * for what that host carries. `at` is the branch walked into. A search reaches
- * every depth beneath `at`; without one, the list is `at`'s own children.
+ * here, what the followed publisher names, and every host's head that may be
+ * offered (`offerable`; a host serving an older package is listed under its
+ * own name only) — or a host, for what that host carries. `at` is the branch
+ * walked into. A search reaches every depth beneath `at`; without one, the
+ * list is `at`'s own children.
  */
 export const directoryRows = (input: {
   scope: string
@@ -151,14 +192,16 @@ export const directoryRows = (input: {
   carried: ReadonlyMap<string, ServedTree | null>
   off: ReadonlySet<string>
   moved: ReadonlySet<string> | null
+  offerable?: (root: string) => boolean
 }): DirectoryRow[] => {
   const here = new Map(input.running.map(node => [node.path, node]))
   const nodes = new Map<string, InstallNode>()
   const take = (list: readonly InstallNode[] | undefined): void => {
     for (const node of list ?? []) if (!nodes.has(node.path)) nodes.set(node.path, node)
   }
+  const offered = (tree: ServedTree | null | undefined): boolean => !!tree && (!input.offerable || input.offerable(tree.root))
   if (input.scope) take(input.carried.get(input.scope)?.nodes)
-  else { take(input.running); take(input.next?.nodes); for (const tree of input.carried.values()) take(tree?.nodes) }
+  else { take(input.running); take(input.next?.nodes); for (const tree of input.carried.values()) if (offered(tree)) take(tree?.nodes) }
 
   const nextAt = new Map((input.next?.nodes ?? []).map(node => [node.path, node.layerSig]))
   const q = input.query.trim().toLowerCase()
@@ -205,14 +248,22 @@ export interface DomainRow {
   count: number
   /** The build the followed publisher names now is waiting there. */
   update: boolean
+  /** A host whose head is not the build the followed publisher names. */
+  behind: boolean
 }
+
+/** A host is BEHIND when the head it serves is not the build the followed
+ *  publisher names — known only once both are. */
+export const hostBehind = (head: string, named: string): boolean => !!named && !!head && head !== named
 
 /**
  * THE DOMAINS, as data — the directory's first screen. This origin carries an
  * update when the followed publisher names a build this hive does not run; a
- * host carries one when that named build is the head it serves. Every domain is
- * listed: a host with nothing new is still a host you carry, and hiding it would
- * read as removed. The ones with an update come first, in their own order.
+ * host carries one when that named build is the head it serves, and is BEHIND
+ * when it serves any other (`named` is that build, `''` while it is unknown).
+ * Every domain is listed: a host with nothing new is still a host you carry,
+ * and hiding it would read as removed. The ones with an update come first, in
+ * their own order.
  */
 export const domainRows = (input: {
   homeLabel: string
@@ -221,16 +272,22 @@ export const domainRows = (input: {
   next: ServedTree | null
   served: ReadonlyMap<string, ServedTree | null>
   count: (zone: string) => number
+  named?: string
 }): DomainRow[] => {
-  const named = input.trunk && input.next && input.next.root !== input.trunk ? input.next.root : ''
+  const waiting = input.trunk && input.next && input.next.root !== input.trunk ? input.next.root : ''
+  const signed = input.named ?? ''
   const rows: DomainRow[] = [
-    { zone: '', label: input.homeLabel, count: input.count(''), update: !!named },
-    ...input.zones.map(zone => ({
-      zone,
-      label: zone,
-      count: input.count(zone),
-      update: !!named && input.served.get(zone)?.root === named,
-    })),
+    { zone: '', label: input.homeLabel, count: input.count(''), update: !!waiting, behind: false },
+    ...input.zones.map(zone => {
+      const head = input.served.get(zone)?.root ?? ''
+      return {
+        zone,
+        label: zone,
+        count: input.count(zone),
+        update: !!waiting && head === waiting,
+        behind: hostBehind(head, signed),
+      }
+    }),
   ]
   return rows
     .map((row, order) => ({ row, order }))
@@ -298,8 +355,10 @@ export type RevisionGroup = { name: string; entries: RevisionEntry[] }
  * after another name still lands under its one heading. Headings are ordered
  * by their newest revision. Lines that name nothing (held here, or a member
  * with no label) form the last group, undated ones after every dated one.
+ * `latest` — the revision the followed publisher names — leads, dated or not,
+ * so the list's "latest" is what that publisher calls latest.
  */
-export const revisionGroups = (revisions: readonly InstallRevision[]): RevisionGroup[] => {
+export const revisionGroups = (revisions: readonly InstallRevision[], latest = ''): RevisionGroup[] => {
   const entries: (RevisionEntry & { order: number })[] = []
   revisions.forEach((revision, order) => {
     const named = new Map<string, string>()
@@ -312,7 +371,9 @@ export const revisionGroups = (revisions: readonly InstallRevision[]): RevisionG
     if (!named.size) named.set('', revision.at)
     for (const [name, at] of named) entries.push({ revision, name, at, order })
   })
-  const newestFirst = (a: { at: string; order: number }, b: { at: string; order: number }): number => {
+  const newestFirst = (a: RevisionEntry & { order: number }, b: RevisionEntry & { order: number }): number => {
+    const [leadsA, leadsB] = [!!latest && a.revision.layer === latest, !!latest && b.revision.layer === latest]
+    if (leadsA !== leadsB) return leadsA ? -1 : 1
     if (a.at && b.at) return a.at === b.at ? a.order - b.order : b.at.localeCompare(a.at)
     if (!!a.at !== !!b.at) return a.at ? -1 : 1
     return a.order - b.order
@@ -328,7 +389,34 @@ export const revisionGroups = (revisions: readonly InstallRevision[]): RevisionG
   }
   const named = [...groups.values()].filter(group => group.name)
   const unnamed = groups.get('')
-  return unnamed ? [...named, unnamed] : named
+  if (!unnamed) return named
+  // The lead stays first even when nothing names it.
+  return latest && entries[0]?.revision.layer === latest && !entries[0].name ? [unnamed, ...named] : [...named, unnamed]
+}
+
+/**
+ * THE REVISIONS THIS WINDOW OFFERS: each revision's sources cut to the roots
+ * that may be offered (`offerableRoots`), a revision no such root carries
+ * dropped, and the one `named` carries first. A source of the named root that
+ * no host labels is labelled with the channel it was named on, so it heads
+ * the channel's revisions instead of reading as "held here".
+ */
+export const offeredRevisions = (
+  found: readonly InstallRevision[],
+  offerable: (root: string) => boolean,
+  named: string,
+  channel: string,
+): InstallRevision[] => {
+  const kept = found
+    .map(revision => ({
+      ...revision,
+      sources: revision.sources
+        .filter(source => offerable(source.root))
+        .map(source => source.root === named && !source.name && channel ? { ...source, name: channel } : source),
+    }))
+    .filter(revision => revision.sources.length)
+  const lead = named ? kept.findIndex(revision => revision.sources.some(source => source.root === named)) : -1
+  return lead > 0 ? [kept[lead]!, ...kept.slice(0, lead), ...kept.slice(lead + 1)] : kept
 }
 
 /** `2026-09-20 11:08` from an ISO stamp; the date alone when it has no time. */
@@ -424,6 +512,11 @@ export class HostDirectoryElement extends HTMLElement {
 
   #selection: InstallSelection | null = null
   #next: ServedTree | null = null
+  /** The root the followed publisher names — kept apart from #next, which is
+   *  only set when a host can serve that root's tree. `''` while unknown. */
+  #named = ''
+  /** Which roots may be offered here (offerableRoots), as of the last read. */
+  #offerable: (root: string) => boolean = () => true
   #announced = ''
   #moved: Set<string> | null = null
   #served = new Map<string, ServedTree | null>()
@@ -649,6 +742,7 @@ export class HostDirectoryElement extends HTMLElement {
       carried: this.#served,
       off: port()?.install.offUnits() ?? new Set(),
       moved: this.#moved,
+      offerable: this.#offerable,
     })
   }
 
@@ -728,7 +822,17 @@ export class HostDirectoryElement extends HTMLElement {
       next: this.#next,
       served: this.#served,
       count: zone => zone ? (this.#served.get(zone) ? this.#rows(zone, '', '').length : 0) : this.#rows('', '', '').length,
+      named: this.#named,
     })
+  }
+
+  /** The plain sentence for a host whose head is not the named build. */
+  #behindText(host: string): string {
+    return t('hosts.behind', "{host} hasn't got the newest version yet", { host })
+  }
+
+  #isBehind(zone: string): boolean {
+    return !!zone && hostBehind(this.#served.get(zone)?.root ?? '', this.#named)
   }
 
   /** THE ACCORDION: a vertical list of domain headers, one section open. */
@@ -751,6 +855,9 @@ export class HostDirectoryElement extends HTMLElement {
       header.append(count)
       header.addEventListener('click', () => this.#toggleSection(domain.zone))
       li.append(header)
+      // Under the host, open or shut: it serves an older build than the one
+      // your publisher names, so nothing of it is offered in this hive's list.
+      if (domain.behind) li.append(make('p', 'hd-note hd-behind', this.#behindText(domain.label)))
       if (open) li.append(this.#sectionBody(domain.zone))
       list.append(li)
     }
@@ -876,6 +983,16 @@ export class HostDirectoryElement extends HTMLElement {
         bar.append(take)
       }
       section.append(bar)
+    } else if (!zone && (trunk || runsSource()) && this.#named && this.#named !== trunk && !this.#reading) {
+      // AN UPDATE NONE OF YOUR HOSTS CAN SERVE YET: said plainly, with the
+      // hosts that are behind — never a button that would end in a refusal.
+      const bar = make('div', 'hd-updates')
+      bar.setAttribute('role', 'status')
+      bar.append(make('span', '', t('packages.updates.not-held', 'An update is ready, but none of your hosts has it yet')))
+      section.append(bar)
+      for (const host of this.#zones) {
+        if (host !== this.#home && this.#isBehind(host)) section.append(make('p', 'hd-note hd-behind', this.#behindText(host)))
+      }
     }
     if (reach && !trunk) {
       section.append(make('p', 'hd-note', t('hosts.from-source', 'This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.')))
@@ -918,6 +1035,7 @@ export class HostDirectoryElement extends HTMLElement {
       crumbs.append(crumb)
     })
     body.append(crumbs)
+    if (this.#isBehind(this.#scope)) body.append(make('p', 'hd-note hd-behind', this.#behindText(this.#scope)))
     if (this.#error) {
       const err = make('p', 'hd-error', this.#error)
       err.setAttribute('role', 'alert')
@@ -950,14 +1068,19 @@ export class HostDirectoryElement extends HTMLElement {
       const bulb = button('hd-bulb', '')
       bulb.setAttribute('role', 'switch')
       bulb.setAttribute('aria-checked', String(row.on))
+      // Not here, and no host offers a build it may take it from: a host
+      // that is behind says so, rather than leading into a refusal.
+      const untakeable = !row.held && !this.#carrying(row.path)
       const label = row.blockedBy
         ? t('hosts.blocked', 'Turn on {name} first', { name: row.blockedBy })
-        : row.on
-          ? t('packages.turn-off', 'Turn off {name}', { name: row.path })
-          : t('packages.turn-on', 'Turn on {name}', { name: row.path })
+        : untakeable && this.#isBehind(this.#scope)
+          ? this.#behindText(this.#scope)
+          : row.on
+            ? t('packages.turn-off', 'Turn off {name}', { name: row.path })
+            : t('packages.turn-on', 'Turn on {name}', { name: row.path })
       bulb.setAttribute('aria-label', label)
       bulb.title = label
-      bulb.disabled = !acts || !!this.#busy || !!row.blockedBy || (!row.held && !recursive)
+      bulb.disabled = !acts || !!this.#busy || !!row.blockedBy || (!row.held && !recursive) || untakeable
       const glyph = make('span', 'mat-sym', row.on ? 'lightbulb' : 'lightbulb_outline')
       glyph.setAttribute('aria-hidden', 'true')
       bulb.append(glyph)
@@ -1073,7 +1196,8 @@ export class HostDirectoryElement extends HTMLElement {
     const list = make('ul', 'hd-list')
     // Names are headings only when there is something to tell apart: a list
     // nobody named (an older host, or revisions held here) stays one plain run.
-    const groups = revisionGroups(revisions)
+    const latest = revisions.find(revision => revision.sources.some(source => source.root === this.#named))?.layer ?? ''
+    const groups = revisionGroups(revisions, latest)
     const headed = groups.some(group => group.name)
     groups.forEach((group, groupIndex) => {
       if (headed) {
@@ -1194,11 +1318,12 @@ export class HostDirectoryElement extends HTMLElement {
         const tree = this.#carrying(row.path)
         const node = tree?.nodes.find(candidate => candidate.path === row.path)
         const roots = [...this.#served.values()]
-          .filter((other): other is ServedTree => !!other && other.nodes.some(n => n.path === row.path && n.layerSig === node?.layerSig))
+          .filter((other): other is ServedTree => !!other && this.#offerable(other.root)
+            && other.nodes.some(n => n.path === row.path && n.layerSig === node?.layerSig))
           .map(other => other.root)
         const outcome = tree && node
           ? await install.pick(row.path, { layer: node.layerSig, root: tree.root, roots }, this.#sources())
-          : { ok: false, error: t('hosts.nothing-to-take', 'none of your hosts carries it') }
+          : { ok: false, error: this.#isBehind(this.#scope) ? this.#behindText(this.#scope) : t('hosts.nothing-to-take', 'none of your hosts carries it') }
         if (!outcome.ok) { install.setOffUnits(before); this.#error = outcome.error ?? 'package incomplete'; return }
       } else if (!(await install.applyUnits())) {
         install.setOffUnits(before)
@@ -1281,10 +1406,12 @@ export class HostDirectoryElement extends HTMLElement {
     this.#warning = null
     this.#error = ''
     this.#render()
-    const roots = [this.#next?.root ?? '', ...[...this.#served.values()].map(tree => tree?.root ?? '')].filter(root => SIG_RE.test(root))
+    const roots = [...new Set([this.#named, this.#next?.root ?? '', ...[...this.#served.values()].map(tree => tree?.root ?? '')])]
+      .filter(root => SIG_RE.test(root) && this.#offerable(root))
     const found = await reach.install.revisionsOf(path, this.#sources(), roots).catch(() => [])
     if (this.#view !== 'revisions' || this.#revPath !== path) return
-    this.#revisions = found
+    // Only what may be taken here, the followed publisher's named root first.
+    this.#revisions = offeredRevisions(found, this.#offerable, this.#named, this.#follow()?.channel ?? 'essentials')
     this.#renderBody()
   }
 
@@ -1339,9 +1466,11 @@ export class HostDirectoryElement extends HTMLElement {
   }
 
   /** The tree to take a package from when it does not run here: the host in
-   *  view first, then the followed publisher, then any host carrying it. */
+   *  view first, then the followed publisher, then any host carrying it —
+   *  never a host's tree this window may not offer (offerableRoots). */
   #carrying(path: string): ServedTree | null {
-    const has = (tree: ServedTree | null | undefined): tree is ServedTree => !!tree && tree.nodes.some(node => node.path === path)
+    const has = (tree: ServedTree | null | undefined): tree is ServedTree =>
+      !!tree && this.#offerable(tree.root) && tree.nodes.some(node => node.path === path)
     if (this.#scope && has(this.#served.get(this.#scope))) return this.#served.get(this.#scope)!
     if (has(this.#next)) return this.#next
     for (const tree of this.#served.values()) if (has(tree)) return tree
@@ -1357,9 +1486,25 @@ export class HostDirectoryElement extends HTMLElement {
    *  (module commit) is uploaded to the host its signed pointer lives on,
    *  which the participant need not carry. */
   #channelSources(): string[] {
-    let follow: { hosts?: readonly string[] } | null = null
-    try { follow = readInstallFollow(localStorage) } catch { follow = null }
-    return [...new Set([...this.#zones, ...(follow?.hosts ?? []).map(zoneOf)].filter(Boolean))]
+    return [...new Set([...this.#zones, ...(this.#follow()?.hosts ?? []).map(zoneOf)].filter(Boolean))]
+  }
+
+  /** Whom builds follow here — the update scout's record. */
+  #follow(): InstallFollow | null {
+    try { return readInstallFollow(localStorage) } catch { return null }
+  }
+
+  /** Which roots may be offered, given the root the publisher names now. */
+  #offerFor(named: string): (root: string) => boolean {
+    let witnessed: Record<string, string> = {}
+    try { witnessed = readWitnessed(localStorage) } catch { /* no storage: nothing witnessed */ }
+    return offerableRoots({
+      named,
+      trunk: this.#selection?.trunk ?? null,
+      picks: Object.values(this.#selection?.picks ?? {}).map(pick => pick.root),
+      witnessed,
+      followed: this.#follow()?.pubkey ?? null,
+    })
   }
 
   #restart(): void {
@@ -1381,6 +1526,8 @@ export class HostDirectoryElement extends HTMLElement {
       this.#selection = await this.#selectionOf(reach)
       const trunk = this.#selection?.trunk ?? null
       const named = await this.#namedRoot(trunk)
+      this.#named = named
+      this.#offerable = this.#offerFor(named)
       if (named && named !== trunk) {
         const from = this.#channelSources()
         if (this.#next?.root !== named) this.#next = await this.#tree(named, from)
@@ -1422,15 +1569,14 @@ export class HostDirectoryElement extends HTMLElement {
     return { trunk, picks: {}, applied: [], eclipsed: [], nodes: tree?.nodes ?? [] }
   }
 
-  /** What the followed publisher names: the scout's announcement when there
-   *  is one, else the attester's own answer about the installed build. */
+  /** What the followed publisher names NOW: a fresh read of its index about
+   *  the installed build (namedFromVerdict) — never a witness, which only
+   *  says a root was named once. When that read cannot say, the scout's
+   *  announcement, else `''` (unknown — the window then cuts nothing). */
   async #namedRoot(installedSig: string | null): Promise<string> {
-    if (this.#announced) return this.#announced
-    if (!installedSig) return ''
-    const attester = ioc<PackageAttestation>(ATTESTATION_IOC_KEY)
-    if (typeof attester?.attest !== 'function') return ''
-    const verdict = await attester.attest(installedSig, this.#zones).catch(() => null)
-    return verdict && !verdict.ok && verdict.reason === 'not-named' && verdict.named ? verdict.named : ''
+    if (!installedSig) return this.#announced
+    const verdict = await attestPackage(installedSig, this.#zones, { fresh: true }).catch(() => null)
+    return namedFromVerdict(verdict, installedSig) || this.#announced
   }
 
   #tree(root: string, zones: readonly string[]): Promise<ServedTree | null> {
@@ -1517,6 +1663,7 @@ ${S} .hd-primary{padding:.38em .8em;font:inherit;font-size:.95em;font-weight:600
 ${S} .hd-primary:disabled{cursor:default;opacity:.55;}
 ${S} .hd-error{margin:.1em 0 .4em;font-size:.72em;line-height:1.35;color:var(--hc-status-alert);}
 ${S} .hd-note{margin:.5em 0 0;font-size:.72em;line-height:1.45;color:var(--hd-ink-quiet);}
+${S} .hd-section > .hd-behind{margin:-.35em 0 .5em 1.55em;}
 ${S} .hd-list{list-style:none;margin:0;padding:0;}
 ${S} .hd-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto auto;column-gap:.4em;align-items:center;padding:.3em .2em;border-bottom:1px solid rgba(var(--acc),0.08);}
 ${S} .hd-row:hover{background:rgba(var(--acc),0.04);}

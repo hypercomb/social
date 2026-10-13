@@ -2826,5 +2826,7 @@
   "history.commit-conflict": "此蜂巢的另一个标签页在同一时刻更改了此页面 — 你的更改没有保存。请再试一次。",
   "drop.image-failed": "无法添加那张图片 — 请重试，或换一张图片。",
   "share.held.deep": "{host} 不接受 {count} 个磁贴的更深页面 — 你在这里时，它们从你的设备打开",
-  "share.held.deep.one": "{host} 不接受 {count} 个磁贴的更深页面 — 你在这里时，它们从你的设备打开"
+  "share.held.deep.one": "{host} 不接受 {count} 个磁贴的更深页面 — 你在这里时，它们从你的设备打开",
+  "hosts.behind": "{host} 还没有最新版本",
+  "packages.updates.not-held": "更新已就绪，但你的主机都还没有它"
 }

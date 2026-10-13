@@ -2826,5 +2826,7 @@
   "history.commit-conflict": "Bu kovanın başka bir sekmesi bu sayfayı aynı anda değiştirdi — değişikliğiniz kaydedilmedi. Yeniden deneyin.",
   "drop.image-failed": "O resim eklenemedi — yeniden deneyin ya da başka bir resim deneyin.",
   "share.held.deep": "{host}, {count} döşemenin daha derin sayfalarını kabul etmiyor — siz buradayken cihazınızdan açılırlar",
-  "share.held.deep.one": "{host}, {count} döşemenin daha derin sayfalarını kabul etmiyor — siz buradayken cihazınızdan açılırlar"
+  "share.held.deep.one": "{host}, {count} döşemenin daha derin sayfalarını kabul etmiyor — siz buradayken cihazınızdan açılırlar",
+  "hosts.behind": "{host} henüz en yeni sürüme sahip değil",
+  "packages.updates.not-held": "Bir güncelleme hazır, ancak henüz hiçbir konağınızda yok"
 }

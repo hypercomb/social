@@ -2826,5 +2826,7 @@
   "history.commit-conflict": "Un autre onglet de cette ruche a modifié cette page au même moment — votre modification n'a pas été enregistrée. Réessayez.",
   "drop.image-failed": "Cette image n'a pas pu être ajoutée — réessayez, ou essayez une autre image.",
   "share.held.deep": "{host} n'accepte pas les pages plus profondes de {count} tuiles — elles s'ouvrent depuis votre appareil tant que vous êtes là",
-  "share.held.deep.one": "{host} n'accepte pas les pages plus profondes de {count} tuile — elles s'ouvrent depuis votre appareil tant que vous êtes là"
+  "share.held.deep.one": "{host} n'accepte pas les pages plus profondes de {count} tuile — elles s'ouvrent depuis votre appareil tant que vous êtes là",
+  "hosts.behind": "{host} n'a pas encore la dernière version",
+  "packages.updates.not-held": "Une mise à jour est prête, mais aucun de vos hôtes ne l'a encore"
 }
