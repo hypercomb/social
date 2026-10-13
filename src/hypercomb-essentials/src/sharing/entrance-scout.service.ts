@@ -35,6 +35,7 @@ import { fetchHiveIndex, fetchHiveManifestFromAny } from './hive-pointer.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { listCommunityHosts } from './community-hosts.js'
 import { readFromHost } from './published-address.js'
+import { listPublishRecords } from './publish-heads.js'
 import { isPoweredEntrance, readDoorsOf, zoneDoor } from './zone-door.js'
 import { pageAtHead } from '../commands/card-read.js'
 import { listConcealed } from '../concealment/concealment.js'
@@ -67,6 +68,10 @@ export type EntranceScoutDeps = {
   /** Where indexes and bytes are read: the standing host, then the community. */
   hosts?: () => Promise<string[]>
   ownPubkey?: () => Promise<string | null>
+  /** Has this hive ever written an index under `pubkey`? An entrance lives
+   *  only in your own index, so a key that never wrote one has none — and
+   *  asking every host for it is a row of 404s on every boot. */
+  published?: (pubkey: string) => Promise<boolean>
   fetchManifest?: typeof fetchHiveManifestFromAny
   /** The card page a head wears, read from these hosts. */
   pageAt?: (head: string, hosts: readonly string[]) => Promise<string | null>
@@ -83,6 +88,10 @@ export async function entranceHosts(): Promise<string[]> {
   try { community = await listCommunityHosts() } catch { /* none carried */ }
   return [...new Set([sync?.publicHostDomain?.() ?? '', ...community, ...PUBLIC_CONTENT_HOSTS].map(zoneDoor).filter(Boolean))]
 }
+
+/** Whether this hive's publish ledger holds an index written under `pubkey`. */
+const hasPublishedUnder = async (pubkey: string): Promise<boolean> =>
+  (await listPublishRecords()).some(entry => String(entry.record.pubkey ?? '').toLowerCase() === pubkey)
 
 /** Bytes by signature from the first host that serves them, hash-checked. */
 const bytesFrom = (hosts: readonly string[]) => async (sig: string): Promise<Uint8Array | null> => {
@@ -132,6 +141,8 @@ export class EntranceScoutService {
     const ownPubkey = deps.ownPubkey ?? (() => get<{ getPublicKeyHex?: () => Promise<string | null> }>(NOSTR_SIGNER_KEY)?.getPublicKeyHex?.() ?? Promise.resolve(null))
     const pubkey = String((await ownPubkey().catch(() => null)) ?? '').toLowerCase()
     if (!SIG_RE.test(pubkey)) return []
+    const published = deps.published ?? hasPublishedUnder
+    if (!(await published(pubkey).catch(() => false))) return []
     const fetchManifest = deps.fetchManifest ?? fetchHiveManifestFromAny
     const own = await fetchManifest(hosts, pubkey)
     const followed = Object.entries(own?.entrances ?? {}).filter(([, e]) => isPoweredEntrance(e) && !!e.from)

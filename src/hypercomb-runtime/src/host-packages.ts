@@ -473,14 +473,11 @@ export const readInstallFollow = (
   try { return parseFollow(JSON.parse(raw)) } catch { return null }
 }
 
-/** Where an index is read: each zone root, then the retired `content.<zone>`
- *  faces (essentials zone-door.ts readDoorsOf — same order, same reason: a
- *  zone whose apex is a static site still answers on its content face). */
-export const indexDoors = (hosts: readonly string[]): string[] => {
-  const roots = [...new Set(hosts.map(hostZone).filter(Boolean))]
-  const faces = roots.filter(zone => !isLoopback(zone) && zone.includes('.')).map(zone => `content.${zone}`)
-  return [...roots, ...faces.filter(face => !roots.includes(face))]
-}
+/** Where an index is read: each zone root, and only zone roots (essentials
+ *  zone-door.ts readDoorsOf — the worker keys an index by pubkey, never by
+ *  host, so the retired `content.<zone>` face held nothing the root lacks). */
+export const indexDoors = (hosts: readonly string[]): string[] =>
+  [...new Set(hosts.map(hostZone).filter(Boolean))]
 
 const fetchIndexEvent = async (url: string): Promise<Record<string, unknown> | null> => {
   try {

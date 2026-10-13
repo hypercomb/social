@@ -4,45 +4,22 @@
 // contacts no host.
 
 import { describe, expect, it } from 'vitest'
-import { apexOf, buildHorizon, doorsOfZone, publishersFromCards, contentDoorOf } from './vocabulary-horizon.js'
+import { buildHorizon, doorsOfZone, publishersFromCards } from './vocabulary-horizon.js'
 
 const K1 = '1'.repeat(64)
 const K2 = '2'.repeat(64)
 
 describe('the doors', () => {
-  it('turns a ZONE into its content door', () => {
-    expect(contentDoorOf('example.com')).toBe('content.example.com')
-    expect(contentDoorOf('content.example.com')).toBe('content.example.com')
-    expect(contentDoorOf('https://Example.com/')).toBe('content.example.com')
-    expect(contentDoorOf('')).toBe('')
-  })
-
-  // THE DEAD DOOR. A DNS wildcard covers ONE label, so a site on a wildcard
-  // zone has its relay face at the zone's APEX. `content.susan.hypercomb.com`
-  // is a name nothing answers, and asking it spent the search's whole timeout
-  // before reporting that no door answered.
-  it('puts the relay face on the APEX of a wildcard zone, never on the site', () => {
-    expect(apexOf('susan.hypercomb.com')).toBe('hypercomb.com')
-    expect(apexOf('hypercomb.com')).toBe('hypercomb.com')
-    expect(apexOf('a.b.hypercomb.com')).toBe('hypercomb.com')
-    expect(contentDoorOf('susan.hypercomb.com')).toBe('content.hypercomb.com')
-    expect(contentDoorOf('https://revolucion.pluginthematrix.com/')).toBe('content.pluginthematrix.com')
-  })
-
-  it('leaves a machine alone — a port or a loopback is not a zone', () => {
-    expect(apexOf('localhost:4250')).toBe('localhost:4250')
-    expect(apexOf('127.0.0.1')).toBe('127.0.0.1')
-    expect(contentDoorOf('localhost:4250')).toBe('content.localhost:4250')
-  })
-
   // A published site serves its publisher's signed index on its OWN hostname:
-  // `/<sign('hive:indexes')>/<pubkey>` is matched above the site branch in the worker's router.
-  // Asking only the relay face threw that door away.
-  it('asks the zone itself as well as the relay face', () => {
-    expect(doorsOfZone('susan.hypercomb.com')).toEqual(['susan.hypercomb.com', 'content.hypercomb.com'])
-    expect(doorsOfZone('example.com')).toEqual(['example.com', 'content.example.com'])
-    // A zone recorded as its retired content face is asked at its ROOT first.
-    expect(doorsOfZone('content.example.com')).toEqual(['example.com', 'content.example.com'])
+  // `/<sign('hive:indexes')>/<pubkey>` is matched above the site branch in the
+  // worker's router. The retired `content.` face is never asked — the worker
+  // keys an index by pubkey, so it held nothing the zone lacks.
+  it('asks the zone itself, and only the zone', () => {
+    expect(doorsOfZone('susan.hypercomb.com')).toEqual(['susan.hypercomb.com'])
+    expect(doorsOfZone('https://Example.com/')).toEqual(['example.com'])
+    // A zone recorded as its retired content face is asked at its ROOT.
+    expect(doorsOfZone('content.example.com')).toEqual(['example.com'])
+    expect(doorsOfZone('localhost:4250')).toEqual(['localhost:4250'])
     expect(doorsOfZone('')).toEqual([])
   })
 })
@@ -55,7 +32,7 @@ describe('the horizon', () => {
     })
     expect(horizon.publishers).toHaveLength(1)
     expect(horizon.publishers[0]?.hosts).toEqual(
-      expect.arrayContaining(['content.one.com', 'content.two.com']))
+      expect.arrayContaining(['one.com', 'two.com']))
   })
 
   // This test used to assert the opposite — every community door AND the
@@ -72,10 +49,10 @@ describe('the horizon', () => {
     })
     expect(horizon.publishers).toHaveLength(2)
     const byKey = new Map(horizon.publishers.map(p => [p.pubkey, p.hosts]))
-    // Its own door means the site AND its relay face — both are the
-    // publisher's own, and neither is a host that learns who else you follow.
-    expect(byKey.get(K1)).toEqual(['one.com', 'content.one.com'])
-    expect(byKey.get(K2)).toEqual(['two.com', 'content.two.com'])
+    // Its own door is the publisher's own site — no host that learns who
+    // else you follow.
+    expect(byKey.get(K1)).toEqual(['one.com'])
+    expect(byKey.get(K2)).toEqual(['two.com'])
     for (const row of horizon.publishers) {
       expect(row.hosts).not.toContain('content.shared.example')
       expect(row.hosts).not.toContain('content.pluginthematrix.com')
@@ -89,7 +66,7 @@ describe('the horizon', () => {
       fallbackHosts: ['content.pluginthematrix.com'],
     })
     expect(horizon.publishers).toHaveLength(1)
-    expect(horizon.publishers[0]?.hosts).toEqual(['shared.example', 'content.shared.example'])
+    expect(horizon.publishers[0]?.hosts).toEqual(['shared.example'])
   })
 
   it('drops a relay address and a host carrying a path — a door is a bare authority', () => {

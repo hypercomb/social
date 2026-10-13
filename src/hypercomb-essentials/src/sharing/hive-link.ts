@@ -168,8 +168,8 @@ export const STATIC_FOLLOWS_KEY = 'hc:static-follows'
  *  standing host HostSyncService drains public closures to.
  *
  *  The worker's ZONE ROOT: writes go to the zone itself, never its retired
- *  `content.` face (zone-door.ts). Reads that must reach old published data
- *  fall back to `content.hypercomb.com` through `readDoorsOf`.
+ *  `content.` face (zone-door.ts), and so do reads — the face serves the
+ *  same heap.
  *
  *  HYPERCOMB.COM, NEVER A PERSON'S DOMAIN (jwize, 2026-10-05: "There should
  *  only be hypercomb.com on the public install"). The same worker and R2

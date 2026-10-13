@@ -17,9 +17,11 @@
 //   publishing to the same place with no action. Nothing stored is rewritten
 //   here; the folded value is what gets saved next time.
 //
-//   READS — `readDoorsOf(hosts)` asks every zone root first and only then the
-//   old `content.<zone>` faces, because a reader may still meet an index or an
-//   atom only the content face held. Reads may fall back; writes never.
+//   READS — `readDoorsOf(hosts)` asks every zone root, and only zone roots
+//   (jwize 2026-10-12). The worker keys indexes and atoms by signature, never
+//   by host, so `content.<zone>` serves exactly what `<zone>` serves: asking
+//   it as well only doubled every miss in the console (and a zone with no
+//   `content.` record in DNS failed to resolve outright).
 //
 // And the address a creation lives at: by default the zone's ROOT PATH
 // (`https://<zone>/<lineage path>`), or — when the participant gave it one —
@@ -55,8 +57,9 @@ export const foldContentLabel = (raw: unknown): string => {
 /** Where a WRITE to this host goes: the zone root. Never `content.<zone>`. */
 export const zoneDoor = (raw: unknown): string => foldContentLabel(raw)
 
-/** The retired `content.<zone>` face of a zone — a READ fallback only. Empty
- *  for loopback (a machine has no DNS label in front of it). */
+/** The retired `content.<zone>` face of a zone — only to find LOCAL records
+ *  named before the retirement (receipts, observations). Never asked over the
+ *  network. Empty for loopback (a machine has no DNS label in front of it). */
 export const legacyContentFace = (raw: unknown): string => {
   const zone = foldContentLabel(raw)
   if (!zone || !zone.includes('.') || LOOPBACK_RE.test(zone)) return ''
@@ -64,21 +67,16 @@ export const legacyContentFace = (raw: unknown): string => {
 }
 
 /**
- * Every door worth READING from for these hosts, in order: each zone root
- * first, then the retired content faces as a fallback for old published data.
- * A host given as `content.<zone>` contributes its zone AND that face.
+ * Every door worth READING from for these hosts, in order: each zone root,
+ * deduplicated. A host given as `content.<zone>` reads as its zone.
  */
 export const readDoorsOf = (hosts: readonly unknown[]): string[] => {
   const roots: string[] = []
-  const faces: string[] = []
   for (const host of hosts ?? []) {
     const zone = foldContentLabel(host)
-    if (!zone) continue
-    if (!roots.includes(zone)) roots.push(zone)
-    const face = legacyContentFace(zone)
-    if (face && !faces.includes(face)) faces.push(face)
+    if (zone && !roots.includes(zone)) roots.push(zone)
   }
-  return [...roots, ...faces.filter(face => !roots.includes(face))]
+  return roots
 }
 
 /** `https://` for a real zone, `http://` for loopback. */

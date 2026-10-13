@@ -163,8 +163,8 @@ describe('one press of Look', () => {
     await searchVocabulary(HEX('a'), horizon, deps)
 
     // Each publisher's OWN door may of course be asked about that publisher.
-    expect(askedAt.get('content.alice.example') ?? []).toEqual([K1])
-    expect(askedAt.get('content.bob.example') ?? []).toEqual([K2])
+    expect(askedAt.get('alice.example') ?? []).toEqual([K1])
+    expect(askedAt.get('bob.example') ?? []).toEqual([K2])
 
     // The standing endpoint, which neither participant chose for this lookup,
     // must not learn who they follow.

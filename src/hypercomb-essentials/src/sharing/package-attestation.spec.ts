@@ -40,7 +40,7 @@ describe('attestPackage', () => {
 
   it('attests the root the followed key currently names, and witnesses it', async () => {
     const storage = following()
-    const fetchIndex = indexAt({ 'content.example.com': verified({ 'install:essentials': CURRENT }) })
+    const fetchIndex = indexAt({ 'example.com': verified({ 'install:essentials': CURRENT }) })
     expect(await attestPackage(CURRENT, ['jwize.com'], { storage, publisher: null, fetchIndex }))
       .toEqual({ ok: true, pubkey: PUB, witnessed: 'current' })
     expect(readWitnessed(storage)).toEqual({ [CURRENT]: PUB })
@@ -56,7 +56,7 @@ describe('attestPackage', () => {
 
   it('a witness under a key you no longer follow is no witness', async () => {
     const storage = following({ [ATTESTED_PACKAGES_KEY]: JSON.stringify({ [OLD]: OTHER_PUB }) })
-    const fetchIndex = indexAt({ 'content.example.com': verified({ 'install:essentials': CURRENT }) })
+    const fetchIndex = indexAt({ 'example.com': verified({ 'install:essentials': CURRENT }) })
     const verdict = await attestPackage(OLD, [], { storage, publisher: null, fetchIndex })
     expect(verdict).toMatchObject({ ok: false, reason: 'not-named' })
     expect(fetchIndex).toHaveBeenCalled()
@@ -64,7 +64,7 @@ describe('attestPackage', () => {
 
   it("refuses a stranger's build by name, and still remembers what the publisher names", async () => {
     const storage = following()
-    const fetchIndex = indexAt({ 'content.example.com': verified({ 'install:essentials': CURRENT }) })
+    const fetchIndex = indexAt({ 'example.com': verified({ 'install:essentials': CURRENT }) })
     const verdict = await attestPackage(STRANGER, ['evil.example'], { storage, publisher: null, fetchIndex })
     expect(verdict).toMatchObject({ ok: false, reason: 'not-named' })
     expect((verdict as { detail?: string }).detail).toMatch(new RegExp(CURRENT.slice(0, 12)))
@@ -110,9 +110,9 @@ describe('attestPackage', () => {
 })
 
 describe('indexHostsFor', () => {
-  it('asks the followed hosts first, then each offering zone — every root before any retired content face', () => {
+  it('asks the followed hosts first, then each offering zone — roots only, never a retired content face', () => {
     expect(indexHostsFor({ pubkey: PUB, hosts: ['content.example.com'], channel: 'essentials' }, ['jwize.com', 'content.other.example', 'localhost:4270', '']))
-      .toEqual(['example.com', 'jwize.com', 'other.example', 'localhost:4270', 'content.example.com', 'content.jwize.com', 'content.other.example'])
+      .toEqual(['example.com', 'jwize.com', 'other.example', 'localhost:4270'])
   })
 })
 

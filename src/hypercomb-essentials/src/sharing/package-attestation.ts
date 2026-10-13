@@ -20,8 +20,7 @@
 // another key is no witness.
 //
 // WHERE THE INDEX IS ASKED FOR. The followed hosts first (that is what they
-// are for), then the offering domains — every zone at its root first, the
-// retired `content.` faces only after, for old data — a host that
+// are for), then the offering domains — every zone at its root — a host that
 // serves the publisher's index vouches for its own head, and one that does not
 // simply costs a 404. EVERY verified copy is read before 'not-named' is
 // answered, because one host may hold a stale-but-authentic index naming the
@@ -78,9 +77,7 @@ const witness = (storage: StorageLike, sig: string, pubkey: string): void => {
 }
 
 /** Every host worth asking for the followed publisher's index, in order:
- *  the followed hosts and each offering zone at their ROOTS, then — a read
- *  fallback for an index only the old face held — their retired `content.`
- *  faces (zone-door.ts). */
+ *  the followed hosts and each offering zone at their ROOTS (zone-door.ts). */
 export const indexHostsFor = (follow: InstallFollow, zones: readonly string[]): string[] =>
   readDoorsOf([...follow.hosts, ...zones])
 
