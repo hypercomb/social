@@ -1,29 +1,29 @@
 import { describe, it, expect } from 'vitest'
 import {
-  describeResolution, parseFillArgs, parseSeamArgs, resolveSeam, sameWord, seamWords,
-} from './seam.js'
+  describeResolution, parseFillArgs, parseTraitArgs, resolveTrait, sameWord, traitWords,
+} from './trait.js'
 
 const A = 'a'.repeat(64)
 const B = 'b'.repeat(64)
 const C = 'c'.repeat(64)
 
-describe('seam words', () => {
-  it('two spellings of one word are one seam', () => {
+describe('trait words', () => {
+  it('two spellings of one word are one trait', () => {
     expect(sameWord('Portrait', 'portrait')).toBe(true)
-    expect(seamWords([{ word: 'Portrait' }, { word: 'portrait' }, { word: 'tagline' }])).toEqual(['Portrait', 'tagline'])
+    expect(traitWords([{ word: 'Portrait' }, { word: 'portrait' }, { word: 'tagline' }])).toEqual(['Portrait', 'tagline'])
   })
 
   it('an empty word is never the same as anything', () => {
     expect(sameWord('', '')).toBe(false)
-    expect(seamWords([{ word: '  ' }, null])).toEqual([])
+    expect(traitWords([{ word: '  ' }, null])).toEqual([])
   })
 })
 
-describe('resolveSeam — the rungs, in order', () => {
+describe('resolveTrait — the rungs, in order', () => {
   const none = { fills: [], children: [], hive: [] }
 
   it('a fill mark wins over a child and the hive', () => {
-    const r = resolveSeam('portrait', {
+    const r = resolveTrait('portrait', {
       fills: [{ word: 'Portrait', sig: A }],
       children: [{ name: 'portrait', sig: B, segments: ['card', 'portrait'] }],
       hive: [{ sig: C, route: ['elsewhere', 'portrait'] }],
@@ -32,12 +32,12 @@ describe('resolveSeam — the rungs, in order', () => {
   })
 
   it('a malformed fill mark is ignored, not trusted', () => {
-    const r = resolveSeam('portrait', { ...none, fills: [{ word: 'portrait', sig: 'not-a-sig' }] })
+    const r = resolveTrait('portrait', { ...none, fills: [{ word: 'portrait', sig: 'not-a-sig' }] })
     expect(r.rung).toBe('miss')
   })
 
   it('a child named the word fills it before the hive is asked', () => {
-    const r = resolveSeam('portrait', {
+    const r = resolveTrait('portrait', {
       ...none,
       children: [{ name: 'Portrait', sig: B, segments: ['card', 'Portrait'] }],
       hive: [{ sig: C, route: ['x', 'portrait'] }],
@@ -46,12 +46,12 @@ describe('resolveSeam — the rungs, in order', () => {
   })
 
   it('one tile in the hive fills it', () => {
-    const r = resolveSeam('portrait', { ...none, hive: [{ sig: C, route: ['x', 'portrait'] }] })
+    const r = resolveTrait('portrait', { ...none, hive: [{ sig: C, route: ['x', 'portrait'] }] })
     expect(r).toEqual({ word: 'portrait', rung: 'hive', sig: C, route: ['x', 'portrait'] })
   })
 
   it('several tiles are offered, never first-wins; the same sig twice is one offer', () => {
-    const r = resolveSeam('portrait', {
+    const r = resolveTrait('portrait', {
       ...none,
       hive: [{ sig: B, route: ['a', 'portrait'] }, { sig: C, route: ['b', 'portrait'] }, { sig: B, route: ['c', 'portrait'] }],
     })
@@ -60,17 +60,17 @@ describe('resolveSeam — the rungs, in order', () => {
   })
 
   it('nothing anywhere is a miss', () => {
-    expect(resolveSeam('portrait', none)).toEqual({ word: 'portrait', rung: 'miss' })
+    expect(resolveTrait('portrait', none)).toEqual({ word: 'portrait', rung: 'miss' })
   })
 })
 
 describe('parsing the words', () => {
-  it('seam', () => {
-    expect(parseSeamArgs('')).toEqual({ verb: 'list' })
-    expect(parseSeamArgs('portrait tagline')).toEqual({ verb: 'open', words: ['portrait', 'tagline'] })
-    expect(parseSeamArgs('~ portrait')).toEqual({ verb: 'close', words: ['portrait'] })
-    expect(parseSeamArgs('~')).toEqual({ error: 'unknown' })
-    expect(parseSeamArgs('portrait ~ tagline')).toEqual({ error: 'unknown' })
+  it('trait', () => {
+    expect(parseTraitArgs('')).toEqual({ verb: 'list' })
+    expect(parseTraitArgs('portrait tagline')).toEqual({ verb: 'open', words: ['portrait', 'tagline'] })
+    expect(parseTraitArgs('~ portrait')).toEqual({ verb: 'close', words: ['portrait'] })
+    expect(parseTraitArgs('~')).toEqual({ error: 'unknown' })
+    expect(parseTraitArgs('portrait ~ tagline')).toEqual({ error: 'unknown' })
   })
 
   it('fill', () => {

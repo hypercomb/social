@@ -1,14 +1,14 @@
-// commands/seam-read.ts
+// commands/trait-read.ts
 //
-// Reading seams: what a tile wears, what fills it, where the participant stands. Shared by the `seam`
-// and `fill` words (documentation/seams.md). No writes here; the queens commit.
+// Reading traits: what a tile wears, what fills it, where the participant stands. Shared by the `trait`
+// and `fill` words (documentation/traits.md). No writes here; the queens commit.
 
 import { EffectBus, levelRoster, type RosterHistory, type RosterStore } from '@hypercomb/core'
 import { listDecorations } from './decoration-manifest.js'
 import {
-  SEAM_FILL_KIND, SEAM_KIND, isSig, resolveSeam, sameWord, seamWords,
-  type SeamCandidate, type SeamFill, type SeamPoint, type SeamResolution,
-} from './seam.js'
+  TRAIT_FILL_KIND, TRAIT_WANT_KIND, isSig, resolveTrait, sameWord, traitWords,
+  type TraitCandidate, type TraitFill, type TraitWant, type TraitResolution,
+} from './trait.js'
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
 type HistoryLike = RosterHistory & {
@@ -43,16 +43,16 @@ export async function headAt(segments: readonly string[]): Promise<string> {
   } catch { return '' }
 }
 
-export async function seamPointsAt(segments: readonly string[]) {
-  return listDecorations<SeamPoint>({ kind: SEAM_KIND, segments })
+export async function traitWantsAt(segments: readonly string[]) {
+  return listDecorations<TraitWant>({ kind: TRAIT_WANT_KIND, segments })
 }
 
-export async function seamFillsAt(segments: readonly string[]) {
-  return listDecorations<SeamFill>({ kind: SEAM_FILL_KIND, segments })
+export async function traitFillsAt(segments: readonly string[]) {
+  return listDecorations<TraitFill>({ kind: TRAIT_FILL_KIND, segments })
 }
 
 /** Every tile in this hive named the word, except the tile itself. */
-async function hiveOffers(word: string, own: string): Promise<SeamCandidate[]> {
+async function hiveOffers(word: string, own: string): Promise<TraitCandidate[]> {
   const search = window.ioc.get<SearchLike>('@diamondcoreprocessor.com/HiveSearchService')
   if (!search?.search) return []
   try {
@@ -63,18 +63,18 @@ async function hiveOffers(word: string, own: string): Promise<SeamCandidate[]> {
   } catch { return [] }
 }
 
-/** Resolve every seam a tile wears, in the order it opened them. */
-export async function resolveSeamsAt(segments: readonly string[]): Promise<SeamResolution[]> {
-  const words = seamWords((await seamPointsAt(segments)).map(p => p.record.payload))
+/** Resolve every trait a tile wears, in the order it opened them. */
+export async function resolveTraitsAt(segments: readonly string[]): Promise<TraitResolution[]> {
+  const words = traitWords((await traitWantsAt(segments)).map(p => p.record.payload))
   if (words.length === 0) return []
-  const fills = (await seamFillsAt(segments)).map(f => f.record.payload)
+  const fills = (await traitFillsAt(segments)).map(f => f.record.payload)
   const h = history(); const s = store()
   const children = h && s ? await levelRoster(segments, h, s).catch(() => []) : []
   const own = await headAt(segments)
-  const out: SeamResolution[] = []
+  const out: TraitResolution[] = []
   for (const word of words) {
-    const quick = resolveSeam(word, { fills, children, hive: [] })
-    out.push(quick.rung === 'miss' ? resolveSeam(word, { fills, children, hive: await hiveOffers(word, own) }) : quick)
+    const quick = resolveTrait(word, { fills, children, hive: [] })
+    out.push(quick.rung === 'miss' ? resolveTrait(word, { fills, children, hive: await hiveOffers(word, own) }) : quick)
   }
   return out
 }

@@ -298,19 +298,19 @@ side. A published card serves only the stored image from its own host.
   a host the way text themes are. It needs hive code and a host deploy, as the
   ledger says.
 
-### Seams on a card
+### Traits on a card
 
-Seams are a Hypercomb primitive, not the card's: [seams.md](seams.md). A
-template leaves extension points as seam marks naming one word each. The hive
-fills a seam from an explicit mark, then a child, then this hive, then the
+Traits are a Hypercomb primitive, not the card's: [traits.md](traits.md). A
+template leaves extension points as trait marks naming one word each. The hive
+fills a trait from an explicit mark, then a child, then this hive, then the
 hosts it follows, shows an unfilled one as a hexagon silhouette, and asks on a
 miss.
 Passive discovery, the halo and count, `fill`, and the sticky
-`sign('seam:discovery')` observation are all there.
+`sign('trait:discovery')` observation are all there.
 
 What the card adds is only its words. The business card's template wears
 `name`, up to four roles, up to three contact lines, `portrait`, and the
-middle picture. A card instance wears `seam:fill` marks for the ones it
+middle picture. A card instance wears `trait:fill` marks for the ones it
 chose. A different card with more blanks is a different template signature
 that may reuse every filler this one had. No subdomain is involved: a filler
 is a tile named the word, published from its author's own domain.
@@ -463,7 +463,7 @@ useful on day one, so it is the creation the concept is explained with:
 | The middle picture | built in the page (`artSig`). Making it is `/comfy` today; the hive's AI cannot start a picture on its own yet (`comfy:generate` is not a bridge intent) |
 | `jaime-weise/business-card/template` and its theme tiles | built in the hive. The template wears the themed page and a card of name slots; each starter theme is a tile under it wearing the same page and naming its theme. `jaime-weise` keeps its own page and card and wears `view:default=website`; `business-card` wears `hexagons` |
 | `templates:<business-card>` facet and `template` membership | membership in `template` is by name, today. The facet needs a writer in the hive (`facet-succession.ts` exists; no word or bridge op writes this facet) |
-| The card's blanks as seams ([seams.md](seams.md)) | not built for the card. The seam words exist; the template's card still carries its name slots as fields of its `card:data`, filled by typing |
+| The card's blanks as traits ([traits.md](traits.md)) | not built for the card. The trait words exist; the template's card still carries its name slots as fields of its `card:data`, filled by typing |
 | Templates indexed across public domains (`themes:card`) | not built. It needs the meaning reserved in the pool registry, an offering handler, and the host worker to list it (today it lists `themes:text` only) |
 | The list as the root on a phone; pull a card up into its row, tap a row to grow it; the search always at the top; the dock | built in the card page |
 | Editing a card in place: select, type, drag, size, align and change the template on the card; default elements drawn faint; the ring until Done | built in the card page. The ring lives in the browser at that address, not yet in the hive's clipboard pool |
