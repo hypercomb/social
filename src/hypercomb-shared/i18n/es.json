@@ -363,6 +363,8 @@
   "mesh.secured": "protegido",
   "mesh.solo": "modo solo",
   "mesh.swarm": "modo enjambre",
+  "mesh-modal.label-label": "tu nombre",
+  "mesh-modal.label-placeholder": "cómo te ven los demás en el enjambre",
   "mesh-modal.title": "ubicación",
   "mesh-modal.close": "cerrar",
   "mesh-modal.location-label": "ubicación",

@@ -363,6 +363,8 @@
   "mesh.secured": "защищено",
   "mesh.solo": "одиночный режим",
   "mesh.swarm": "режим роя",
+  "mesh-modal.label-label": "ваше имя",
+  "mesh-modal.label-placeholder": "как другие видят вас в рое",
   "mesh-modal.title": "местоположение",
   "mesh-modal.close": "закрыть",
   "mesh-modal.location-label": "местоположение",

@@ -363,6 +363,8 @@
   "mesh.secured": "diamankan",
   "mesh.solo": "mode solo",
   "mesh.swarm": "mode kawanan",
+  "mesh-modal.label-label": "nama Anda",
+  "mesh-modal.label-placeholder": "bagaimana orang lain melihat Anda di kawanan",
   "mesh-modal.title": "lokasi",
   "mesh-modal.close": "tutup",
   "mesh-modal.location-label": "lokasi",

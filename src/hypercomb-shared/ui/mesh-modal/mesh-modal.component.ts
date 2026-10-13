@@ -192,6 +192,8 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   /** The host the words are drawn at — the one START will meet at. */
   readonly #wordsPoint = computed(() => this.#startPoint())
   readonly secretVisible = signal(false)
+  /** Your name in the swarm (the swarm's own label — never part of the room). */
+  readonly labelDraft = signal('')
   /** JOIN mode only: which credential blocked the start ('room' | 'secret'),
    *  so the field can say so instead of the dialog closing on a join that
    *  could never have worked. Cleared on every open and on a good start. */
@@ -284,6 +286,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
         this.#locale.set((get('@hypercomb.social/I18n') as { locale?: string } | undefined)?.locale ?? 'en')
       } catch { /* English words */ }
       this.secretVisible.set(false)
+      this.labelDraft.set(this.#swarmLabel()?.myLabel?.() ?? '')
       this.missingField.set(null)
       try { this.skipReview.set(localStorage.getItem('hc:skip-privacy-review') === '1') }
       catch { this.skipReview.set(false) }
@@ -489,9 +492,21 @@ export class MeshModalComponent implements OnInit, OnDestroy {
    *  the two can never write the meeting differently. Only what defines the
    *  meeting is here: your own host lives in the host directory, your name
    *  on the presence line. */
+  /** The swarm's label accessors — the one place a name is kept. */
+  #swarmLabel = (): { myLabel?: () => string; setMyLabel?: (label: string) => void } | undefined =>
+    get('@diamondcoreprocessor.com/SwarmDrone') as { myLabel?: () => string; setMyLabel?: (label: string) => void } | undefined
+
+  readonly onLabelInput = (event: Event): void => {
+    this.labelDraft.set((event.target as HTMLInputElement).value)
+  }
+
   #commitDrafts = (): void => {
     const room = this.roomDraft().trim()
     const secret = this.secretDraft().trim()
+    // Your name, when it changed — through the swarm, which re-announces it.
+    const label = this.labelDraft().trim().slice(0, 64)
+    const swarm = this.#swarmLabel()
+    if (swarm?.setMyLabel && label !== (swarm.myLabel?.() ?? '')) swarm.setMyLabel(label)
     // THE POINT FIRST: the stores' change events resync the swarm at once,
     // and its first page address is derived in that same turn from the
     // point the tab meets at — written after, the page went out at the OLD

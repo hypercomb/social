@@ -427,13 +427,14 @@ describe('the selector shows the meeting point, the room and the secret — and 
     return readFileSync(join(__dirname, 'mesh-modal.component.html'), 'utf8')
   }
 
-  it('its fields are the meeting point, the room and the secret, in that order, and the code — nothing else', async () => {
+  it('its fields are your name, then the meeting point, the room and the secret, in that order, and the code — nothing else', async () => {
     const tpl = await html()
     const ids = [...tpl.matchAll(/<input[^>]*?\sid="([^"]+)"/g)].map(m => m[1])
-    expect(ids).toEqual(['mesh-modal-point-input', 'mesh-modal-code-input', 'mesh-modal-room-input', 'mesh-modal-secret-input'])
-    // the replication host and the alias are not the meeting's: they live
-    // in the host directory and on the presence line
-    for (const gone of ['mesh-modal-host-input', 'mesh-modal-label-input', "'mesh-modal.host-label'", "'mesh-modal.label-label'"]) expect(tpl).not.toContain(gone)
+    // Your name came back (jwize, 2026-10-12: "where did the name field
+    // go?") — never part of the room.
+    expect(ids).toEqual(['mesh-modal-label-input', 'mesh-modal-point-input', 'mesh-modal-code-input', 'mesh-modal-room-input', 'mesh-modal-secret-input'])
+    // the replication host is not the meeting's: it lives in the host directory
+    for (const gone of ['mesh-modal-host-input', "'mesh-modal.host-label'"]) expect(tpl).not.toContain(gone)
     const at = tpl.indexOf('id="mesh-modal-code-input"')
     expect(tpl.lastIndexOf('@if (codeShown())', at)).toBeGreaterThan(tpl.indexOf('id="mesh-modal-point-input"'))
   })

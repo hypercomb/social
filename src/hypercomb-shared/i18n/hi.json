@@ -363,6 +363,8 @@
   "mesh.secured": "सुरक्षित",
   "mesh.solo": "सोलो मोड",
   "mesh.swarm": "स्वार्म मोड",
+  "mesh-modal.label-label": "आपका नाम",
+  "mesh-modal.label-placeholder": "स्वार्म में दूसरे आपको कैसे देखें",
   "mesh-modal.title": "स्थान",
   "mesh-modal.close": "बंद करें",
   "mesh-modal.location-label": "स्थान",

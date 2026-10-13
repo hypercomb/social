@@ -363,6 +363,8 @@
   "mesh.secured": "已保护",
   "mesh.solo": "单人模式",
   "mesh.swarm": "群组模式",
+  "mesh-modal.label-label": "您的名字",
+  "mesh-modal.label-placeholder": "群组中其他人看到的名称",
   "mesh-modal.title": "位置",
   "mesh-modal.close": "关闭",
   "mesh-modal.location-label": "位置",

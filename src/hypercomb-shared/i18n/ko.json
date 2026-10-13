@@ -363,6 +363,8 @@
   "mesh.secured": "보호됨",
   "mesh.solo": "솔로 모드",
   "mesh.swarm": "스웜 모드",
+  "mesh-modal.label-label": "이름",
+  "mesh-modal.label-placeholder": "스웜에서 다른 사람에게 보이는 이름",
   "mesh-modal.title": "위치",
   "mesh-modal.close": "닫기",
   "mesh-modal.location-label": "위치",

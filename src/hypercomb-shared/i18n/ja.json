@@ -367,6 +367,8 @@
   "mesh.secured": "保護済み",
   "mesh.solo": "ソロモード",
   "mesh.swarm": "スワームモード",
+  "mesh-modal.label-label": "あなたの名前",
+  "mesh-modal.label-placeholder": "群れの中での表示名",
   "mesh-modal.title": "ロケーション",
   "mesh-modal.close": "閉じる",
   "mesh-modal.location-label": "ロケーション",

@@ -168,7 +168,13 @@ type ByteRule = { readonly current: string | readonly string[]; readonly old: st
 type ByteVerdict = 'current' | 'old' | 'none' | null
 
 const MEMBERSHIP_RULE: ByteRule = { current: TAB_MEMBERSHIP_KEY, old: ORIGIN_MEMBERSHIP_KEY }
-const MEETING_POINT_RULE: ByteRule = { current: [MEETING_POINT, NO_DEFAULT_HOST_MARK], old: MESH_RELAYS_ANCHOR }
+// EVERY ROOM MOVED (2026-10-12): from the no-default-host release on, a room
+// is host + location + secret (case folded), so a package from before — even
+// one that met at hypercomb.com — derives other addresses and other words and
+// never meets an updated device ("I can't connect my laptop from my phone").
+// Only a mesh carrying the mark is current; every earlier mesh is below the
+// floor and moves to the signed root on its next reload.
+const MEETING_POINT_RULE: ByteRule = { current: NO_DEFAULT_HOST_MARK, old: MESH_RELAYS_ANCHOR }
 
 /**
  * What a package's modules say, rule by rule, in ONE read of each module —

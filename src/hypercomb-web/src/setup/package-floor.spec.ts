@@ -131,7 +131,11 @@ describe('scanMembership — what the package\'s own bytes say', () => {
 const meshBytes = (relay: string): string =>
   `var LIVE_RELAY = "${relay}";\nglobalThis["__HYPERCOMB_RELAYS__"] = Object.freeze({ local: "ws://localhost:7777", live: LIVE_RELAY });`
 const HOME_MESH = meshBytes('wss://jwize.com')
-const SHIPPED_MESH = meshBytes(MEETING_POINT)
+// A mesh from before the no-default-host release: it met at hypercomb.com,
+// but its rooms have other addresses — below the floor since 2026-10-12.
+const OPEN_DEFAULT_MESH = meshBytes(MEETING_POINT)
+// The current mesh carries the no-default-host mark.
+const SHIPPED_MESH = `${OPEN_DEFAULT_MESH}\nglobalThis["__HYPERCOMB_RELAYS__"] = Object.freeze({ mark: "${NO_DEFAULT_HOST_MARK}" });`
 
 describe('scanMeetingPoint — which meeting the package\'s own bytes dial', () => {
   const texts = (map: Record<string, string | null>) => vi.fn(async (sig: string) => map[sig] ?? null)
@@ -147,13 +151,17 @@ describe('scanMeetingPoint — which meeting the package\'s own bytes dial', () 
   })
 
   it('says current for a package that names both — the home machine may stay a chosen relay or a self domain', async () => {
-    expect(await scanMeetingPoint(['b1', 'b2'], texts({ b1: HOME_MESH, b2: `const SELF = "wss://jwize.com"; const LIVE = "${MEETING_POINT}"` }))).toBe('current')
+    expect(await scanMeetingPoint(['b1', 'b2'], texts({ b1: HOME_MESH, b2: `const SELF = "wss://jwize.com"; const MARK = "${NO_DEFAULT_HOST_MARK}"` }))).toBe('current')
     expect(await scanMeetingPoint(['b1'], texts({ b1: `${SHIPPED_MESH}\nconst example = 'wss://jwize.com'` }))).toBe('current')
   })
 
   it('says current for a mesh that carries the no-default-host mark and names no host at all — hypercomb.com may be retired', async () => {
     const markOnly = `globalThis["__HYPERCOMB_RELAYS__"] = Object.freeze({ local: "", live: "", mark: "${NO_DEFAULT_HOST_MARK}" });`
     expect(await scanMeetingPoint(['b1'], texts({ b1: markOnly }))).toBe('current')
+  })
+
+  it('says old for a mesh from before the no-default-host release, even one that met at hypercomb.com — its rooms have other addresses', async () => {
+    expect(await scanMeetingPoint(['b1'], texts({ b1: OPEN_DEFAULT_MESH }))).toBe('old')
   })
 
   it('says none for a package with no mesh in it', async () => {
@@ -330,7 +338,7 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
   })
 
   it('leaves a package that names both alone — the shipped point wins whatever else it names', async () => {
-    installOld(`${HOME_MESH}\nconst SELF = "wss://jwize.com"; const LIVE = "${MEETING_POINT}"${perTab}`, '3'.repeat(64))
+    installOld(`${HOME_MESH}\nconst SELF = "wss://jwize.com"; const MARK = "${NO_DEFAULT_HOST_MARK}"${perTab}`, '3'.repeat(64))
 
     expect((await checkPackageFloor()).act).toBe(false)
     expect(acquire).not.toHaveBeenCalled()

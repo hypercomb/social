@@ -363,6 +363,8 @@
   "mesh.secured": "protetto",
   "mesh.solo": "modalità solo",
   "mesh.swarm": "modalità sciame",
+  "mesh-modal.label-label": "il tuo nome",
+  "mesh-modal.label-placeholder": "come ti vedono gli altri nello sciame",
   "mesh-modal.title": "posizione",
   "mesh-modal.close": "chiudi",
   "mesh-modal.location-label": "posizione",

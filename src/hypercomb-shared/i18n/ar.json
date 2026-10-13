@@ -363,6 +363,8 @@
   "mesh.secured": "مؤمّن",
   "mesh.solo": "الوضع الفردي",
   "mesh.swarm": "وضع السرب",
+  "mesh-modal.label-label": "اسمك",
+  "mesh-modal.label-placeholder": "كيف يراك الآخرون في السرب",
   "mesh-modal.title": "الموقع",
   "mesh-modal.close": "إغلاق",
   "mesh-modal.location-label": "الموقع",

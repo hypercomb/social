@@ -363,6 +363,8 @@
   "mesh.secured": "gesichert",
   "mesh.solo": "Einzelmodus",
   "mesh.swarm": "Schwarmmodus",
+  "mesh-modal.label-label": "Ihr Name",
+  "mesh-modal.label-placeholder": "wie andere Sie im Schwarm sehen",
   "mesh-modal.title": "Standort",
   "mesh-modal.close": "schließen",
   "mesh-modal.location-label": "Standort",

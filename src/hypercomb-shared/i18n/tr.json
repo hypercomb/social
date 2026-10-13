@@ -363,6 +363,8 @@
   "mesh.secured": "güvenli",
   "mesh.solo": "solo mod",
   "mesh.swarm": "sürü modu",
+  "mesh-modal.label-label": "adınız",
+  "mesh-modal.label-placeholder": "diğerleri sizi sürüde nasıl görür",
   "mesh-modal.title": "konum",
   "mesh-modal.close": "kapat",
   "mesh-modal.location-label": "konum",
