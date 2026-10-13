@@ -688,6 +688,11 @@ test('the offerings pool projects only open, signed creations on this domain', a
 
   const atDoor = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${pool}/`), env)
   assert.equal(await atDoor.text(), `${names[0]}\n`)
+  // The card at host.<zone> lists what its zone offers — it is the card's
+  // home once the apex opens on a creation.
+  const atCard = await worker.fetch(new Request(`https://host.pluginthematrix.com/${pool}/`), env)
+  assert.equal(atCard.status, 200)
+  assert.equal(await atCard.text(), `${names[0]}\n`)
   const other = await worker.fetch(new Request(`https://other.example/${pool}/`), env)
   assert.equal(other.status, 200)
   const otherNames = (await other.text()).trim().split('\n')

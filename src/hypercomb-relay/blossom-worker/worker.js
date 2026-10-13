@@ -1455,8 +1455,11 @@ async function serveCreationLocation(request, env, host, location, member) {
  *  sigbag is the revision history; offering members are not root history. */
 async function offeredMembers(request, env) {
   const url = new URL(request.url)
-  const host = url.hostname.toLowerCase()
   const scoped = await bindingsEnv(env)
+  // The card at host.<zone> (HOST_DOOR_LABEL) lists what its zone offers —
+  // it is where the card lives once the apex opens on a creation.
+  const named = resolveSite(scoped, url.hostname)
+  const host = named.hostDoor ? named.zone : url.hostname.toLowerCase()
   const bindings = siteBindings(scoped)
   const read = indexReader(scoped)
   const zones = wildcardZones(bindings)
