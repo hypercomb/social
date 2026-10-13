@@ -126,6 +126,20 @@ word, or create a tile by that name. Creating is the ordinary naming gesture.
 A tile named the word joins `sign(word)` by its name, so making it is filling
 it; no list is kept and no second step is owed.
 
+**How it is drawn.** Standing in a tile, every trait no child answers yet
+takes the next free slot of the spiral, in the order the tile opened its
+traits, so a silhouette sits exactly where its tile will land. It is a faint
+hexagon with the inner ring and the word. Pressing it creates the tile by that
+name through the same commit `create <name>` runs, and the next render pass
+puts the tile where the silhouette was. A trait filled from elsewhere, by a
+`trait:fill` mark or by another tile in the hive, still shows a silhouette
+here, because no child by that name exists on this level. A silhouette is
+drawn on its own layer: it is never in the cell list, the counts or the click
+routing, and nothing about it is stored. Drawing one reads only the tile's
+`trait:want` records and the labels already on screen: no search, no network.
+The code is `presentation/tiles/trait-silhouette.ts` (the placement, pure) and
+`trait-silhouette.drone.ts`.
+
 The "how does this work" writing a community leaves about a trait is the same
 pool. A tile named the word on anyone's public domain, with its notes, is that
 domain's statement about the word. Visiting the word across the hosts you
@@ -256,6 +270,6 @@ Nothing here needs a second origin.
 | A card wearing a template inherits the template's traits | not built. A trait is read only on the tile that wears it |
 | The followed-hosts rung | not built. `vocabulary-search.ts` already asks followed hosts for a word with honest absence and is the reader to reuse |
 | A miss as an ask | not built |
-| Hexagon silhouettes for unfilled traits | not built. The welcome hive's silhouette drawing exists and is the model |
+| Hexagon silhouettes for unfilled traits; pressing one creates the tile | built. Not yet proven in the running app. The search act on a silhouette waits for the followed-hosts rung |
 | The halo and count from followed hosts; hover-once; the breathing ring | not built |
 | The `sign('trait:discovery')` pool | not built; the meaning is not yet registered. Every new pool meaning carries a colon (`known-location-pools.md`), so it is `trait:discovery`, never a bare `discovery` |
