@@ -6581,7 +6581,11 @@ export class ChatWindowComponent implements OnDestroy {
       // or selection, so nothing ran") because "here" meant the page under
       // their eyes. The conversation's own subject is the anchor; only a
       // free-floating chat reads from the page and the selection in hand.
-      const subject = this.subjectPath().split('/').filter(Boolean)
+      // THIS TURN'S conversation, never the open one: an outside ask opens its
+      // conversation, starts the turn and puts the participant's back, and
+      // read from the open one the key changed under every read — "the
+      // participant moved to another page", reads 0 (the harness, 2026-10-12).
+      const subject = (this.#threads()?.tilePathOf?.(convoId) ?? '').split('/').filter(Boolean)
       if (subject.length) {
         return {
           key: hypercombContextKey(subject, []),
