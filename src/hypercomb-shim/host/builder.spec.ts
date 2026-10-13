@@ -355,11 +355,26 @@ describe('a watching builder', () => {
     }
   })
 
+  it('says why with the line that says it — not a stack frame, nor the brace closing an error dump', async () => {
+    const { whyOf } = await import('./builder.mjs')
+    // npm run build:module, as a draft with a syntax error leaves it.
+    const work = `${tmpdir()}/hc-builder-Qx9/src`
+    const esbuild = ['npm run build:module failed:', '> @hypercomb/essentials@0.1.0 build:module', '[build-module] dependencies: 61 cached, 1 built',
+      '✘ [ERROR] Unexpected ";"', '', '    src/presentation/screen-state.ts:5:22:', '      5 │ export const broken = ;', '',
+      'Error: Build failed with 1 error:', 'src/presentation/screen-state.ts:5:22: ERROR: Unexpected ";"',
+      `    at failureErrorWithLog (${work}/node_modules/esbuild/lib/main.js:1467:15)`, '    at Socket.emit (node:events:519:28) {',
+      '  errors: [Getter/Setter],', '  warnings: [Getter/Setter]', '}'].join('\n')
+    expect(whyOf(new Error(esbuild))).toBe('npm run build:module failed: src/presentation/screen-state.ts:5:22: ERROR: Unexpected ";"')
+    expect(whyOf(new Error('npm run build:core failed:\nsrc/a.ts(3,5): error TS1109: Expression expected.\nnpm error Lifecycle script `build` failed'))).toBe('npm run build:core failed: src/a.ts(3,5): error TS1109: Expression expected.')
+    expect(whyOf(new Error('npm run build:core failed:\nwrote nothing\n}'))).toBe('npm run build:core failed: wrote nothing')
+  })
+
   it('says why in one line, with nothing of this machine in it', async () => {
     const { whyOf } = await import('./builder.mjs')
     const { homedir } = await import('node:os')
     const why = whyOf(new Error(`npm ci failed:\nnpm ERR! in ${tmpdir()}/hc-builder-AbC123/src\nnpm ERR! see ${homedir()}/.npm/_logs/debug.log`))
-    expect(why).toBe('npm ci failed: npm ERR! see ~/.npm/_logs/debug.log')
+    expect(why).toBe('npm ci failed: npm ERR! in <build>/src')
+    expect(whyOf(new Error(`npm ci failed:\nnpm ERR! see ${homedir()}/.npm/_logs/debug.log`))).toBe('npm ci failed: npm ERR! see ~/.npm/_logs/debug.log')
     expect(whyOf(new Error(`the tree differs at ${tmpdir()}/hc-builder-pools-x1/host`))).toBe('the tree differs at <pools>/host')
     expect(whyOf(new Error('x'.repeat(400))).length).toBe(280)
   })

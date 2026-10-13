@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import {
-  BUILD_SIGNATURE_KIND, BUILDS_MEANING, SIGNATURES_MEANING, pullVersionPools, signaturePreimage, versionRevisions, type PoolIo,
+  BUILD_SIGNATURE_KIND, BUILDS_MEANING, SIGNATURES_MEANING, poolHeads, pullVersionPools, signaturePreimage, versionRevisions, type PoolIo,
 } from './version-pools.js'
 
 const sha = (bytes: Uint8Array | string): string => createHash('sha256').update(bytes).digest('hex')
@@ -87,5 +87,23 @@ describe('the version pools in the browser', () => {
   it('says when a host serves no version pools', async () => {
     const get = (async () => new Response('', { status: 404 })) as unknown as typeof fetch
     expect(await pullVersionPools('nowhere.test', memory(), get)).toEqual({ host: 'nowhere.test', answered: false, taken: 0, refused: 0, held: 0 })
+  })
+
+  it('reads each file once to learn its kind: the next listing reads only what is new', async () => {
+    const io = memory()
+    const reads: string[] = []
+    const counted: PoolIo = { ...io, read: async (meaning, name) => { reads.push(name); return io.read(meaning, name) } }
+    const put = async (value: unknown) => { const bytes = enc(value); const sig = sha(bytes); await io.write(BUILDS_MEANING, sig, bytes); return sig }
+    const file = await put('export const a = 1\n')
+    const workspace = await put({ name: 'workspace', files: { 'a.ts': file } })
+    const first = await put({ name: 'build', label: 'host', version: '0.0.1', parent: null, workspace })
+    expect((await versionRevisions(counted)).map(r => r.sig)).toEqual([first])
+    expect(reads.filter(name => name === file)).toHaveLength(1)
+    reads.length = 0
+    const second = await put({ name: 'build', label: 'host', version: '0.0.2', parent: first, workspace })
+    expect((await versionRevisions(counted)).map(r => r.sig)).toEqual([second, first])
+    // Only the new file was read to learn its kind; the revisions, to list them.
+    expect(reads.filter(name => name !== first && name !== second)).toEqual([])
+    expect((await poolHeads(counted, BUILDS_MEANING)).get(file)).toBe('export const a =')
   })
 })

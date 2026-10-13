@@ -299,11 +299,13 @@ builds theirs. It answers each ask it takes with a signed event (kind 30569,
 - **failed**, when the build or its tests broke, or a step ran past thirty
   minutes (each step runs as its own process group, and is ended whole).
 
-Refused and failed carry one line of why. The builder's own places in it (the
-build's directories, its pools, its temporary directory, the directory it
-runs in, its home) are named, never shown, and a URL's credentials are
-dropped. Some troubles are no answer at all, and the builder tries again next
-pass:
+Refused and failed carry one line of why: for a failed step, the step and the
+line of its output that says what failed — the first error naming a place in
+the source, else the first error, never a stack frame. The builder's own
+places in it (the build's directories, its pools, its temporary directory,
+the directory it runs in, its home) are named, never shown, and a URL's
+credentials are dropped. Some troubles are no answer at all, and the builder
+tries again next pass:
 
 - a host that did not answer, failed, or rate-limited it, or did not give all
   of its version pools;
@@ -353,9 +355,62 @@ it, and an author's forgotten ask takes its answers along. An ask or a draft
 its author forgot while someone else still relies on the bytes is kept, but
 marked withdrawn: it is never noted again, nor answered.
 
-Still owed: building as another user or in a container; the author shown what
-became of each draft (`/versions`, `/agent`); taking a built draft from its
-answer.
+**The author sees what became of each draft (2026-10-12).** `/versions
+drafts` asks each host the author sent an open ask to for its answers, under
+the author's own signature, and takes back every answer that is one. An ask
+stays open while no built answer to it is held and a host may still list one:
+a builder answers within the seven days a host keeps an ask, and the host
+lists its answer for fourteen. An ask is kept in the browser only once the
+host has it. An answer counts when it:
+
+- is shaped exactly as a builder signs it, and verifies;
+- answers an ask of this key's that the browser holds;
+- is listed by the host that ask was sent to, and names it.
+
+A built answer is kept only once everything it names is held in the browser:
+
+- each revision, which must name this draft and this ask, sit in a drafts
+  channel, and carry the label and version the answer says;
+- the builder's signature on each, verifying, checked before anything more is
+  fetched;
+- every file that revision needs, found by the same walk the builder carries
+  it with (essentials `sharing/version-pools.ts` `revisionClosure`, the port
+  of `builds.mjs` `closureOf`), with no revision or draft among them but what
+  the answer names.
+
+Every file is taken by its name and kept only if it hashes to it, and nothing
+is kept until all of it is checked: what a take fetches waits in memory, then
+the files, the signatures and the revisions last are kept. A builder or a
+host answering falsely leaves nothing behind. An answer held in the browser
+therefore means its revisions are whole there: the device that asked is a
+backup of what was built from its draft. One refresh takes at most 4,096
+files and 128 MB, counted as they arrive; a build that alone needs more is
+not taken in the browser. An answer that can never be taken, or is not this
+key's, is not asked about again while the page lasts.
+
+Each draft then reads as one of:
+
+- **built**, with the revisions it was built as, awaiting review in their
+  drafts channel;
+- **refused** or **failed**, the newest word on its newest ask, with the
+  builder's why, quoted;
+- **asked**, with no word yet, or **lapsed**, with no word in the seven days
+  a host keeps an ask;
+- **staged**, never asked — a draft staged on this device. A draft that
+  reached the pools another way (a pulled revision's) is history, never
+  offered as the participant's to send.
+
+`/agent` is taught the same states from what the browser holds, with no
+network and without asking for a key it does not already hold: each draft's
+signature, its state, and the one thing to open next — the revision it was
+built as, or the answer that holds the builder's reason. The reason itself is
+never taught. Opening any builder's answer or any revision built from a draft
+by its signature reads someone else's words, so every change after it waits
+for a hand for the rest of the conversation. A label, version or host that is
+not plainly one is taught as `?`, and a revision nobody's signature vouches
+for is not taught at all.
+
+Still owed: building as another user or in a container.
 
 ## 4. What changes in the code, in order
 

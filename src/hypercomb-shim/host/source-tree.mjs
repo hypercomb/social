@@ -253,11 +253,16 @@ export const hostTree = async ({ units, host, library, hostPackage, keep }) => {
 }
 
 /** Every file a tree holds, by repo path → resource signature, and every
- *  signature it reaches (records, envelopes, resources, the package's atoms). */
+ *  signature it reaches (records, envelopes, resources, the package's atoms).
+ *  What is walked is kept apart from what is reached: a signature named as a
+ *  leaf in one place and as a record in another is walked all the same, so
+ *  the closure does not depend on the order things are met (the browser walks
+ *  the same tree a level at a time, essentials sharing/version-pools.ts). */
 export const walkTree = async (rootSig, readRecord) => {
-  const files = new Map(), reach = new Set()
+  const files = new Map(), reach = new Set(), walked = new Set()
   const visit = async sig => {
-    if (reach.has(sig)) return
+    if (walked.has(sig)) return
+    walked.add(sig)
     reach.add(sig)
     const node = await readRecord(sig)
     if (!node || typeof node !== 'object') return

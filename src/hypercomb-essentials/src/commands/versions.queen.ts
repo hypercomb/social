@@ -7,7 +7,12 @@
 //   /versions pull [host]   → take the version pools a host serves (this
 //                             origin when none is named), every file verified,
 //                             into this browser's storage, kept persistently
-//   /versions drafts        → the drafts staged here (sharing/version-drafts.ts)
+//   /versions drafts        → the drafts staged here and where each stands:
+//                             the hosts of open asks are asked what their
+//                             builders said, and a built draft is taken whole
+//                             (sharing/version-answers.ts); then each draft
+//                             reads staged, asked, lapsed, built, refused or
+//                             failed — a builder's why shown as it said it
 //   /versions ask <host> [draft]
 //                           → sign the ask for a draft (the newest when none is
 //                             named) and send it with its files to a host under
@@ -18,8 +23,9 @@
 // nothing on any disk outside the browser.
 
 import { EffectBus, I18N_IOC_KEY, QueenBee, get, type I18nProvider } from '@hypercomb/core'
-import { keepPools, pullVersionPools, versionRevisions } from '../sharing/version-pools.js'
-import { askBuild, draftClosure, listDrafts, readRevisionFile, revisionFiles, stageDraft } from '../sharing/version-drafts.js'
+import { keepPools, pullVersionPools, versionRevisions, type Revision } from '../sharing/version-pools.js'
+import { askBuild, draftClosure, listDrafts, readRevisionFile, revisionFiles, signerHere, stageDraft } from '../sharing/version-drafts.js'
+import { draftStatus, takeAnswers, type DraftStatus } from '../sharing/version-answers.js'
 
 const SHOWN = 12
 
@@ -35,6 +41,7 @@ export class VersionsQueenBee extends QueenBee {
     { input: '/versions', result: 'Lists the revisions this browser holds, with their signatures' },
     { input: '/versions pull', result: 'Takes the version pools this origin serves into this browser' },
     { input: '/versions pull example.com', result: 'Takes them from another host' },
+    { input: '/versions drafts', result: 'Asks what builders made of your drafts, and lists where each stands' },
   ]
 
   protected override listens = []
@@ -69,15 +76,30 @@ export class VersionsQueenBee extends QueenBee {
   }
 
   async #drafts(): Promise<void> {
-    const drafts = await listDrafts()
+    const me = await signerHere()?.getPublicKeyHex?.().catch(() => null) ?? null
+    if (me) {
+      this.#activity(this.#t('versions.answering', 'asking the hosts of open asks what their builders said…'), '●')
+      try {
+        const report = await takeAnswers()
+        for (const host of report.hosts) if (!host.answered) this.#activity(this.#t('versions.unlisted', '{host} did not list its answers', { host: host.host }), '…')
+        for (const pending of report.pending) this.#activity(`answer ${pending.answer.slice(0, 12)} not taken: ${pending.why}`, '…')
+        if (report.files) this.#activity(this.#t('versions.tookbuilt', '{files} file(s) taken for built drafts', { files: report.files }), '◆')
+      } catch (error) {
+        this.#activity(this.#t('versions.answersfailed', 'the answers could not be taken just now: {why}', { why: error instanceof Error ? error.message : String(error) }), '…')
+      }
+    } else {
+      this.#activity(this.#t('versions.nokey', 'no key here: what builders answered is listed only to the key that asked'), '…')
+    }
+    const drafts = await draftStatus(undefined, { me, staged: true })
     if (!drafts.length) {
       this.#toast('info', this.#t('versions.nodrafts', 'No drafts are staged here.'))
       return
     }
-    for (const draft of drafts.slice(0, SHOWN)) {
-      this.#activity(`${draft.sig.slice(0, 12)} ${draft.label} over ${draft.base.slice(0, 12)} · ${draft.paths.join(', ')}`, '✎')
-    }
-    this.#toast('info', this.#t('versions.drafts', '{count} draft(s) staged here.', { count: drafts.length }))
+    const revisions = drafts.some(d => d.built.length) ? await versionRevisions().catch(() => []) : []
+    for (const draft of drafts.slice(0, SHOWN)) this.#activity(`${draft.draft.slice(0, 12)} ${draft.label} · ${draft.paths.join(', ')} · ${stateLine(draft, revisions)}`, STATE_ICONS[draft.state])
+    const counts = new Map<string, number>()
+    for (const draft of drafts) counts.set(draft.state, (counts.get(draft.state) ?? 0) + 1)
+    this.#toast('info', this.#t('versions.drafts', '{count} draft(s): {states}.', { count: drafts.length, states: [...counts].map(([state, n]) => `${n} ${state}`).join(', ') }))
   }
 
   async #ask(host: string, which: string): Promise<void> {
@@ -128,11 +150,33 @@ export class VersionsQueenBee extends QueenBee {
   #toast = (type: string, message: string): void => { EffectBus.emit('toast:show', { type, title: this.#t('versions.title', 'Versions'), message }) }
 }
 
+const STATE_ICONS: Record<DraftStatus['state'], string> = { staged: '✎', asked: '✉', lapsed: '⌛', built: '◆', refused: '✕', failed: '✕' }
+
+/** Where one draft stands, in one line. A builder's why is quoted: its
+ *  words, as it said them. A build a held revision was adopted from reads
+ *  adopted. */
+const stateLine = (draft: DraftStatus, revisions: readonly Revision[] = []): string => {
+  const by = draft.answer ? draft.answer.builder.slice(0, 12) : ''
+  switch (draft.state) {
+    case 'staged': return 'staged — /versions ask <host> sends it to a builder'
+    case 'asked': return `asked at ${draft.ask?.origin ?? '?'} — no builder has answered yet`
+    case 'lapsed': return `asked at ${draft.ask?.origin ?? '?'} — no builder answered in time; ask again`
+    case 'built': {
+      const as = draft.built.map(b => `${b.label} ${b.version} (${b.sig.slice(0, 12)})`).join(', ') || 'a revision not held here'
+      const adopted = revisions.filter(r => r.reviewed && draft.built.some(b => b.sig === r.reviewed))
+      return `built by ${by} as ${as} — ${adopted.length ? `adopted as ${adopted.map(r => `${r.label} ${r.version}`).join(', ')}` : 'awaiting review'}`
+    }
+    case 'refused': return `refused by ${by}: “${draft.answer?.why ?? ''}”`
+    case 'failed': return `failed at ${by}: “${draft.answer?.why ?? ''}”`
+  }
+}
+
 window.ioc.register('@diamondcoreprocessor.com/VersionsQueenBee', new VersionsQueenBee())
 
 // THE SAME ACTS, FOR A HAND THAT IS NOT TYPING: the harness (a model acting
-// for the participant) reads a revision's files, stages a draft and asks a
-// builder through these, exactly as the words above do.
+// for the participant) reads a revision's files, stages a draft, asks a
+// builder and learns what became of it through these, exactly as the words
+// above do. `status` reads only what is held here; `answers` asks the hosts.
 window.ioc.register('@diamondcoreprocessor.com/VersionDrafts', {
   revisions: () => versionRevisions(),
   pull: (host: string) => pullVersionPools(host),
@@ -142,4 +186,8 @@ window.ioc.register('@diamondcoreprocessor.com/VersionDrafts', {
   closure: (draft: string) => draftClosure(draft),
   drafts: () => listDrafts(),
   ask: (draft: string, host: string) => askBuild(draft, host),
+  // Read-only, and asked every /agent turn: the key only if already known —
+  // never minted, never a prompt.
+  status: async () => draftStatus(undefined, { me: await signerHere()?.knownPublicKeyHex?.().catch(() => null) ?? null }),
+  answers: (hosts?: readonly string[]) => takeAnswers({ hosts }),
 })

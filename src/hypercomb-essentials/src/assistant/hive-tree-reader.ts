@@ -72,8 +72,10 @@ const SNAPSHOT_TTL_MS = 15 * 60_000
 const SNAPSHOT_LIMIT = 256
 /** Read results kept for reuse; the oldest falls out first. */
 const CACHE_LIMIT = 64
-/** The version pool a revision's tree is read from (sharing/version-pools.ts). */
-const VERSION_POOL = 'host:builds'
+/** The version pool a revision's tree is read from (sharing/version-pools.ts),
+ *  then the builders' answers to the participant's drafts
+ *  (sharing/version-answers.ts) — a builder's words, read as someone else's. */
+const VERSION_POOLS = ['host:builds', 'host:answers']
 /** A revision or draft record is small; anything larger is a file. */
 const MAX_RECORD_BYTES = 64_000
 
@@ -1301,11 +1303,14 @@ export class HypercombHiveTreeReader {
   async #versionBytes(sig: string): Promise<Uint8Array | null> {
     const store = this.#store()
     const open = store?.openPool ?? store?.getPool
-    const dir = await open?.call(store, VERSION_POOL).catch(() => null)
-    if (!dir) return null
-    try {
-      return new Uint8Array(await (await (await dir.getFileHandle(sig)).getFile()).arrayBuffer())
-    } catch { return null }
+    for (const meaning of VERSION_POOLS) {
+      const dir = await open?.call(store, meaning).catch(() => null)
+      if (!dir) continue
+      try {
+        return new Uint8Array(await (await (await dir.getFileHandle(sig)).getFile()).arrayBuffer())
+      } catch { /* not in this pool */ }
+    }
+    return null
   }
 
   /** The tree a revision or a draft names, path → file signature: a

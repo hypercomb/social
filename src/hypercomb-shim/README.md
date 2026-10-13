@@ -428,7 +428,9 @@ signed ask for that host is never taken. Every other ask is built as
 - **failed**, when the build or the tests broke, or a step ran past thirty
   minutes (`STEP_MINUTES`; each step is its own process group, ended whole).
 
-Refused and failed carry one line of why. The builder's own places in it (the
+Refused and failed carry one line of why: for a failed step, the line of its
+output that says what failed (the first error naming a place in the source).
+The builder's own places in it (the
 build's directories, its pools, the temporary directory, the directory it
 runs in, its home) are named rather than shown.
 
@@ -454,6 +456,14 @@ Answers are kept in this builder's own pool, so each ask is answered once. An
 answer the host has never listed is sent again; one it listed once and
 dropped since stays dropped. One builder works per pools directory at a time,
 watching or `build-draft` (`local/builder.lock`).
+
+The author takes the answers back in the browser. `/versions drafts` asks the
+hosts of their open asks, keeps every answer to one of their asks, and takes a
+built draft whole before it keeps the answer: its revisions, every file they
+need (by this builder's own walk, `closureOf`) and the builder's signatures,
+each verified (essentials `sharing/version-answers.ts`). Each draft then reads
+staged, asked, lapsed, built, refused or failed, and `/agent` is taught the
+same.
 
 **A model writes it too: the loop without a window.** The chat window's
 model loop — reads, changes and writes in rounds until the request is done

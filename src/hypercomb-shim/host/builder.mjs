@@ -452,13 +452,24 @@ const escaped = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 /** A path of this machine, in either separator. */
 const pathPattern = path => escaped(path).replace(/\\\\|\//g, '[\\\\/]')
 
-/** WHY, IN ONE LINE THE AUTHOR CAN READ — and none of this machine's own
- *  places: the build's directories, the pools, the temporary directory, the
- *  directory it runs in and this user's home are named, never shown, and a
- *  URL's credentials are dropped. */
+/** A line of a failed step's output that says what failed. */
+const ERROR_LINE = /\[ERROR\]|\bERROR:|\berror(?: TS\d+)?:|\bERR!|^npm error\b|\bFAIL\b|\b[A-Z]\w*Error\b/
+/** A place in the source: a file and a line. */
+const SOURCE_PLACE = /[\w.-]+\.\w+[:(]\d+/
+
+/** WHY, IN ONE LINE THE AUTHOR CAN READ — the step that failed and the line
+ *  that says why: the first error naming a place in the source, else the
+ *  first error, else the last line with words in it (never a stack frame, nor
+ *  the brace that closes an error dump). None of this machine's own places:
+ *  the build's directories, the pools, the temporary directory, the directory
+ *  it runs in and this user's home are named, never shown, and a URL's
+ *  credentials are dropped. */
 export const whyOf = error => {
-  const lines = String(error?.message ?? error ?? '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
-  let text = lines.length > 1 ? `${lines[0]} ${lines.at(-1)}` : lines[0] ?? 'the build stopped'
+  const [head, ...rest] = String(error?.message ?? error ?? '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const said = rest.filter(line => !/^at\s/.test(line))
+  const errors = said.filter(line => ERROR_LINE.test(line))
+  const telling = errors.find(line => SOURCE_PLACE.test(line)) ?? errors[0] ?? said.findLast(line => /[\p{L}\p{N}]{2}/u.test(line))
+  let text = telling ? `${head} ${telling}` : head ?? 'the build stopped'
   const places = [
     [`${pathPattern(tmpdir())}[\\\\/]hc-builder-pools-[^\\\\/\\s]+`, '<pools>'],
     [`${pathPattern(tmpdir())}[\\\\/]hc-builder-[^\\\\/\\s]+`, '<build>'],

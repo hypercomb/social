@@ -353,6 +353,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // browser). A device that pulls them is a backup of the code itself.
   'host:builds',
   'host:build-signatures',
+  // What builders answered this key's asks, taken from the hosts it asked
+  // (essentials sharing/version-answers.ts), and the drafts staged on this
+  // device (sharing/version-drafts.ts). Neither travels.
+  'host:answers',
+  'host:drafts',
   // Every publisher's signed index, the member named by their key.
   'hive:indexes',
   // A door's landing view as one transfer pack, the member named by the head

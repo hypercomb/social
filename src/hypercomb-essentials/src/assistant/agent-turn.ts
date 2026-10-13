@@ -63,6 +63,8 @@ const TURN_ROUNDS = 12
 const MAX_REFUSALS_IN_A_ROW = 3
 /** Revisions named in the teaching, newest first. */
 const REVISIONS_TAUGHT = 8
+/** Drafts named in the teaching, newest first. */
+const DRAFTS_TAUGHT = 8
 const KEEP_VERBATIM = 6
 const RESERVE_TOKENS = 8_000
 
@@ -92,11 +94,29 @@ export type AgentDoer = {
   entries(): readonly HypercombBehaviour[]
   executePublicCanonical(command: string, args: string): Promise<void>
 }
+/** Where one draft sent to a builder stands (sharing/version-answers.ts). */
+export type AgentDraftStatus = {
+  readonly draft: string
+  readonly state: string
+  readonly ask: { readonly origin: string } | null
+  readonly answer: { readonly sig: string; readonly builder: string } | null
+  /** Every answer held for the draft: builders' words, all of them. */
+  readonly said?: readonly string[]
+  readonly built: readonly { readonly sig: string; readonly label: string; readonly version: string }[]
+}
 /** The build's own history (commands/versions.queen.ts → sharing/version-drafts.ts). */
 export type AgentVersions = {
-  revisions(): Promise<readonly { readonly sig: string; readonly label: string; readonly version: string }[]>
+  revisions(): Promise<readonly {
+    readonly sig: string; readonly label: string; readonly version: string
+    /** Who signed it, and whether each signature verifies. */
+    readonly signers?: readonly { readonly ok: boolean }[]
+    /** Built from a participant's draft, and not yet adopted. */
+    readonly awaitingReview?: boolean
+  }[]>
   read(revision: string, path: string): Promise<string>
   stage(request: { base: string; files: Record<string, string | null> }): Promise<string>
+  /** The participant's drafts and where each stands, from what is held here. */
+  status?(): Promise<readonly AgentDraftStatus[]>
 }
 
 export type AgentTurnDeps = {
@@ -179,6 +199,33 @@ export const liveAgentDeps = async (): Promise<AgentTurnDeps> => {
 
 const stopped = (): DOMException => new DOMException('The model request was aborted', 'AbortError')
 
+const SIG = /^[a-f0-9]{64}$/
+const DRAFT_STATES = ['staged', 'asked', 'lapsed', 'built', 'refused', 'failed']
+/** A label, a version or an origin as the teaching may carry it — a builder
+ *  chose the label and version, so anything else is shown as `?`. */
+const taught = (value: string, shape: RegExp): string => shape.test(value) ? value : '?'
+const LABEL = /^[a-z0-9][a-z0-9.-]{0,63}$/
+const VERSION = /^\d{1,10}(?:\.\d{1,10}){0,4}$/
+const ORIGIN = /^https?:\/\/[a-z0-9.-]{1,253}(?::\d{1,5})?$/
+
+/** One draft's line in the teaching: its signature, its state, and the one
+ *  thing to open next — the revision it was built as, or the answer that
+ *  holds the builder's reason. Never the reason itself: those are the
+ *  builder's words, read only when the model asks to. */
+const draftLine = (status: AgentDraftStatus): string | null => {
+  if (!SIG.test(status.draft) || !DRAFT_STATES.includes(status.state)) return null
+  const answer = status.answer && SIG.test(status.answer.sig) && SIG.test(status.answer.builder) ? status.answer : null
+  const at = status.ask ? ` at ${taught(status.ask.origin, ORIGIN)}` : ''
+  if (status.state === 'built') {
+    const built = status.built.filter(b => SIG.test(b.sig)).map(b => `${b.sig} ${taught(b.label, LABEL)} ${taught(b.version, VERSION)}`)
+    return `${status.draft} built${answer ? ` by ${answer.builder}` : ''} as ${built.join(', ') || 'a revision not held here'}`
+  }
+  if (status.state === 'refused' || status.state === 'failed') {
+    return `${status.draft} ${status.state}${at}${answer ? ` by ${answer.builder} — answer ${answer.sig}` : ''}`
+  }
+  return `${status.draft} ${status.state}${at}`
+}
+
 /**
  * ONE TURN: the request answered in rounds. Yields the model's prose as it
  * streams (work blocks held back) and returns what happened. A model that
@@ -205,7 +252,21 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
   const canChange = !!queue && !!doer?.executePublicCanonical && callableBehaviours(entries).length > 0
   const held = versions ? await versions.revisions().catch(() => []) : []
   const canWriteVersion = !!versions && held.length > 0
-  const revisions = held.slice(0, REVISIONS_TAUGHT).map(r => `${r.sig} ${r.label} ${r.version}`).join('\n')
+  // Taught only when someone vouched for it — a revision nobody signed is
+  // nobody's word — and named as a revision names itself, or `?`.
+  const revisions = held.filter(r => !r.signers || r.signers.some(s => s.ok)).slice(0, REVISIONS_TAUGHT)
+    .map(r => `${r.sig} ${taught(r.label, LABEL)} ${taught(r.version, VERSION)}${r.awaitingReview ? ' (built from a draft, awaiting review)' : ''}`).join('\n')
+  // Where the participant's drafts stand, read from what is held here alone.
+  const statuses = canWriteVersion && versions?.status ? await versions.status().catch(() => []) : []
+  const drafted = statuses.slice(0, DRAFTS_TAUGHT).map(draftLine).filter((line): line is string => !!line).join('\n')
+  // A BUILDER'S WORDS ARE SOMEONE ELSE'S: every answer held for a draft, and
+  // every revision built from a draft — read by its signature, file by file
+  // or whole — holds changes for a hand, as any foreign read does (core
+  // hive-reads.ts foreignReads), for the rest of the conversation.
+  const builderWords = new Set([
+    ...statuses.flatMap(status => [...status.said ?? [], ...status.answer ? [status.answer.sig] : [], ...status.built.map(b => b.sig)]),
+    ...held.filter(r => r.awaitingReview).map(r => r.sig),
+  ].filter(sig => SIG.test(sig)))
   const readsPerBlock = MAX_OBSERVATIONS
   const page = [...(turn.page ?? [])]
   const systemFor = (model: string | undefined, label: string | undefined, providerId: string | undefined): string => [
@@ -214,7 +275,7 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
     'You are helping inside Hypercomb. Be accurate and concise. Do not claim to have read hive contents unless they are present in the messages.',
     workInstruction({
       canRead, readsRunFreely: !!providerId && readsFreely(providerId), readsPerBlock, canChange,
-      vocabulary: canChange ? hypercombVocabulary(entries) : '', canWriteVersion, revisions,
+      vocabulary: canChange ? hypercombVocabulary(entries) : '', canWriteVersion, revisions, drafts: drafted,
     }),
     canRead ? `"here" is the page /${page.join('/')}.` : '',
   ].filter(Boolean).join('\n\n')
@@ -305,11 +366,18 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
       snapshots = all.slice(-64)
       observed.push(...grammars)
       readRounds++
-      const theirs = foreignReads(plan, receipt, segments => reader.foreign?.(segments) === true, theirSigs)
+      const theirs = foreignReads(plan, receipt, segments => reader.foreign?.(segments) === true, new Set([...theirSigs, ...builderWords]))
       if (theirs.grammars.length) {
         turnForeign.push(...theirs.grammars)
         for (const sig of theirs.sigs) theirSigs.add(sig)
       }
+      // A builder's answer or build opened by its signature — whole, a file
+      // of it, a page of it — is its words, whatever the read returned.
+      plan.observations.forEach((observation, index) => {
+        if (!observation.sig || !builderWords.has(observation.sig) || !receipt.results[index]?.read.ok) return
+        turnForeign.push(observation.grammar)
+        theirSigs.add(observation.sig)
+      })
       const content = formatHypercombObservationReceipt(receipt) + aside
       settle(gate.id, 'ran', `${content.length} characters`)
       return readResultMessage(content, turn.request)

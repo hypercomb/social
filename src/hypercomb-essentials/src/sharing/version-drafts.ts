@@ -32,6 +32,13 @@ import { nip98Header } from './hive-pointer.js'
 import { BUILDS_MEANING, SIGNATURES_MEANING, opfsPools, type PoolIo } from './version-pools.js'
 
 export const ASK_KIND = 30568
+/** How a draft record begins (stageDraft writes `name` first). */
+export const DRAFT_HEAD = '{"name":"draft",'
+/** THE DRAFTS STAGED ON THIS DEVICE, each record under its own name: the
+ *  participant's own work. A draft that reached the version pools some other
+ *  way (a pulled revision's, a builder's) is history, never offered as
+ *  theirs to send. It never travels: hosts take only the two version pools. */
+export const DRAFTS_HERE_MEANING = 'host:drafts'
 export const askPreimage = (draftSig: string): string => `hc:ask:v1\n${draftSig}`
 
 const SIG = /^[a-f0-9]{64}$/
@@ -102,8 +109,9 @@ export const stageDraft = async (request: DraftRequest, io: PoolIo = opfsPools()
     }
   }
   const files = await keep(io, BUILDS_MEANING, encode(JSON.stringify({ name: 'draft-files', files: named })))
-  const record = { name: 'draft', label: request.label ?? 'hypercomb-essentials', base: request.base, files, at: now.toISOString() }
-  return keep(io, BUILDS_MEANING, encode(JSON.stringify(record)))
+  const record = encode(JSON.stringify({ name: 'draft', label: request.label ?? 'hypercomb-essentials', base: request.base, files, at: now.toISOString() }))
+  await keep(io, DRAFTS_HERE_MEANING, record)
+  return keep(io, BUILDS_MEANING, record)
 }
 
 /** Every signature a draft needs on a host: the record, its files layer, the
@@ -116,11 +124,14 @@ export const draftClosure = async (draft: string, io: PoolIo = opfsPools()): Pro
   return [draft, record.files, ...Object.values(layer.files).filter((sig): sig is string => typeof sig === 'string')]
 }
 
-type Signer = {
+export type Signer = {
   signEvent(event: { kind: number; created_at: number; tags: string[][]; content: string }): Promise<Record<string, unknown>>
   getPublicKeyHex?(): Promise<string | null>
+  /** The key, only when it is already known: never mints one, never asks. */
+  knownPublicKeyHex?(): Promise<string | null>
 }
-const signer = (): Signer | undefined =>
+/** This participant's signer (sharing/nostr-signer.ts), when there is one. */
+export const signerHere = (): Signer | undefined =>
   (globalThis as { ioc?: { get?: <T>(key: string) => T | undefined } }).ioc?.get?.<Signer>(SIGNER_KEY)
 
 const schemeFor = (host: string): string => /^https?:\/\//.test(host) ? '' : (/^(localhost|127\.|\[?::1)/.test(host) || /\.localhost(:\d+)?$/.test(host) ? 'http://' : 'https://')
@@ -135,7 +146,7 @@ export type AskOutcome =
 export const askBuild = async (
   draft: string,
   host: string,
-  { io = opfsPools(), sign = signer(), put = (url: string, init: RequestInit) => fetch(url, init) }: { io?: PoolIo; sign?: Signer; put?: (url: string, init: RequestInit) => Promise<Response> } = {},
+  { io = opfsPools(), sign = signerHere(), put = (url: string, init: RequestInit) => fetch(url, init) }: { io?: PoolIo; sign?: Signer; put?: (url: string, init: RequestInit) => Promise<Response> } = {},
 ): Promise<AskOutcome> => {
   if (!sign) return { ok: false, error: 'no signer here: the ask is signed by the author' }
   const closure = await draftClosure(draft, io)
@@ -152,7 +163,9 @@ export const askBuild = async (
     tags: [['d', draft], ['h', origin], ['bytes', String(total)], ['count', String(closure.length)]],
   })
   const askBytes = encode(JSON.stringify(event))
-  const ask = await keep(io, SIGNATURES_MEANING, askBytes)
+  const ask = await signOf(askBytes)
+  // The ask goes last, and is kept here only once the host has it: an ask
+  // the host never got is never waited on.
   bytesOf.set(ask, askBytes)
 
   let sent = 0, held = 0
@@ -167,16 +180,14 @@ export const askBuild = async (
     if (response.status === 200) held++
     else sent++
   }
+  await keep(io, SIGNATURES_MEANING, askBytes)
   return { ok: true, ask, draft, sent, held }
 }
 
-/** The drafts this browser holds, newest first. */
+/** The drafts staged on this device, newest first. */
 export const listDrafts = async (io: PoolIo = opfsPools()): Promise<Array<{ sig: string; label: string; base: string; at: string; paths: string[] }>> => {
   const out: Array<{ sig: string; label: string; base: string; at: string; paths: string[] }> = []
-  const head = '{"name":"draft",'
-  for (const sig of await io.names(BUILDS_MEANING)) {
-    const bytes = await io.read(BUILDS_MEANING, sig)
-    if (!bytes || bytes.length < head.length || decode(bytes.subarray(0, head.length)) !== head) continue
+  for (const sig of await io.names(DRAFTS_HERE_MEANING)) {
     const record = await readJson<{ label?: string; base?: string; at?: string; files?: string }>(io, sig)
     const layer = record?.files ? await readJson<Layer>(io, record.files) : null
     out.push({ sig, label: String(record?.label ?? ''), base: String(record?.base ?? ''), at: String(record?.at ?? ''), paths: Object.keys(layer?.files ?? {}) })
