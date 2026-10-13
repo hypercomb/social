@@ -7080,7 +7080,8 @@ export class ChatWindowComponent implements OnDestroy {
        *  nothing was read to check it against, or when Jev is unavailable. */
       const verifyAnswer = async (answer: string, spoken: string, providerId: string): Promise<string | undefined> => {
         const said = [...messages, { content: spoken }]
-        const read = fitEvidence(evidence.slice(1), part => said.some(entry => entry.content.includes(part)), JEV_STATE_CHARS)
+        const routes = answer.match(//[w.-]+(?:/[w.-]+)*/g) ?? []
+        const read = fitEvidence(evidence.slice(1), part => said.some(entry => entry.content.includes(part)), JEV_STATE_CHARS, 0, part => routes.some(route => part.includes(route)))
         // THE VERIFY DOOR is a step (core agent-doors): the judge, the receipt
         // writer and the bus go in; the verdict and its note come back. The
         // ledger entry and the stage stay here, where the turn is kept.

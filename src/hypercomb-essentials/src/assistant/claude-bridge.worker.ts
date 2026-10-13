@@ -6,7 +6,7 @@ import {
   BRIDGE_CODE_STORE_IOC_KEY, bridgeCodeStore,
   type RemoteSubmitRequest, type RemoteSubmitOutcome, type BridgeCodeStore,
 } from '@hypercomb/core'
-import { deliverTurnSig, readTurns, setConversationGoalReached } from './chat-thread.js'
+import { deliverTurnSig, listConversations, readTurns, setConversationArchived, setConversationGoalReached } from './chat-thread.js'
 import { appendStep, nextSeq as ledgerNextSeq, readSteps, runForAsk } from './chat-steps.js'
 import { MUTATING_OPS, STEP_SILENT_OPS } from './bridge-ops.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
@@ -606,6 +606,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'optimization-add':    return this.#optimizationAdd(req)
       case 'chat-reply':   return this.#chatReply(req)
       case 'chat-goal-reached': return this.#chatGoalReached(req)
+      case 'chat-tidy':    return this.#chatTidy(req)
       case 'thread-read':  return this.#threadRead(req)
       case 'agent-progress': return this.#agentProgress(req)
       case 'agents-announce': return this.#agentsAnnounce(req)
@@ -956,6 +957,30 @@ export class ClaudeBridgeWorker extends Worker {
     return stored
       ? { id: req.id, ok: true, data: { convoId } }
       : { id: req.id, ok: false, error: 'chat-goal-reached could not be stored' }
+  }
+
+  // ─── chat-tidy ─────────────────────────────────────────────────────
+  //
+  // PUT AWAY THE JOBS. Every one-off `manager.cjs ask` is a conversation of
+  // its own (`chat:tile:/::<ms>-<letters>`), and they piled up in the chat
+  // window faster than anyone could read them (jwize, 2026-10-12). This puts
+  // away — archived, not deleted; the window's archive lists them and un-files
+  // with one click — each of those that is answered, not waiting on the
+  // participant, quiet for `olderThanMs` (default 10 minutes), and not in
+  // `keep` (the managers' own conversations). The participant's own chats and
+  // every tile's chat are never touched.
+  async #chatTidy(req: BridgeRequest): Promise<BridgeResponse> {
+    const extra = req as unknown as { keep?: unknown; olderThanMs?: unknown }
+    const keep = new Set(Array.isArray(extra.keep) ? extra.keep.map(String) : [])
+    const olderThanMs = typeof extra.olderThanMs === 'number' ? extra.olderThanMs : 600_000
+    const now = Date.now()
+    const archived: string[] = []
+    for (const convo of await listConversations()) {
+      if (convo.archived || !convo.replied || convo.asking || keep.has(convo.convoId)) continue
+      if (!convo.convoId.startsWith('chat:tile:/::') || now - convo.lastAt < olderThanMs) continue
+      if (await setConversationArchived(convo.convoId, true)) archived.push(convo.convoId)
+    }
+    return { id: req.id, ok: true, data: { archived: archived.length } }
   }
 
   // ─── thread-read ───────────────────────────────────────────────────

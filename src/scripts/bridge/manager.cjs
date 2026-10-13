@@ -19,6 +19,7 @@
 //   node scripts/bridge/manager.cjs held                     what waits on the participant in Execution
 //   node scripts/bridge/manager.cjs do "<behaviour sentence>"      one line through the command line
 //   node scripts/bridge/manager.cjs op '<request json>'      a raw bridge request
+//   node scripts/bridge/manager.cjs tidy [minutes]           put away answered one-off job conversations quiet that long (default 10)
 //   node scripts/bridge/manager.cjs roster                   the managers, as the hive holds them
 //   node scripts/bridge/manager.cjs install                  put the managers into the hive (idempotent)
 //
@@ -244,6 +245,11 @@ const main = async () => {
     case 'convo': {
       const letters = Array.from({ length: 6 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('')
       return print(`chat:tile:/::${Date.now()}-${letters}`)
+    }
+    case 'tidy': {
+      // Put away the answered one-off job conversations (never the managers' own).
+      const reply = await send({ op: 'chat-tidy', keep: Object.values(MANAGERS), olderThanMs: Number(first) > 0 ? Number(first) * 60_000 : undefined })
+      return reply.ok ? print(reply.data) : fail(reply.error)
     }
     case 'roster': {
       const fromHive = await hiveRoster()

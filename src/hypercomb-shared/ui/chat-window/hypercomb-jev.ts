@@ -242,25 +242,35 @@ const ends = (part: string, kept: number, both: boolean): string[] => {
  *  start alone dropped them on a big tile, live 2026-10-11/12). With one
  *  place left it keeps its head. Jev still reads every piece as text: the
  *  verify door renders it past that boundary (essentials jev-evidence.ts). */
-export const fitEvidence = (evidence: readonly string[], seen: (part: string) => boolean, room: number, keep = 0): string[] => {
+export const fitEvidence = (evidence: readonly string[], seen: (part: string) => boolean, room: number, keep = 0, cited?: (part: string) => boolean): string[] => {
   const cost = (parts: readonly string[]): number => parts.reduce((sum, part) => sum + JSON.stringify(part).length + 1, 0)
   const head = evidence.slice(0, keep)
   let left = Math.min(room, JEV_EVIDENCE_CHARS) - cost(head)
-  const tail: string[] = []
-  for (let i = evidence.length - 1; i >= keep && head.length + tail.length < JEV_EVIDENCE_ITEMS && left > 256; i--) {
+  // WHAT THE ANSWER CITES IS KEPT FIRST. Room fills newest-first, so a find
+  // that took several rounds lost the early rounds holding the very matches
+  // the answer names (live 2026-10-12: supported .62 on a correct answer).
+  // The pieces the answer cites take room first, the rest newest-first; what
+  // is kept stays in the order it was read.
+  const order = Array.from({ length: Math.max(0, evidence.length - keep) }, (_, k) => evidence.length - 1 - k)
+  if (cited) order.sort((x, y) => Number(cited(evidence[y])) - Number(cited(evidence[x])))
+  const kept = new Map<number, string[]>()
+  let items = head.length
+  for (const i of order) {
+    if (items >= JEV_EVIDENCE_ITEMS || left <= 256) break
     if (!seen(evidence[i])) continue
     const part = evidence[i].trim()
-    const both = JEV_EVIDENCE_ITEMS - head.length - tail.length > 1
+    const both = JEV_EVIDENCE_ITEMS - items > 1
     let shown = part ? [part] : []
-    for (let kept = part.length; shown.length && cost(shown) > left;) {
-      kept = Math.floor(kept * Math.min(0.9, left / cost(shown)))
-      shown = kept > 0 ? ends(part, kept, both) : []
+    for (let size = part.length; shown.length && cost(shown) > left;) {
+      size = Math.floor(size * Math.min(0.9, left / cost(shown)))
+      shown = size > 0 ? ends(part, size, both) : []
     }
     if (!shown.length) continue
-    tail.unshift(...shown)
+    kept.set(i, shown)
+    items += shown.length
     left -= cost(shown)
   }
-  return [...head, ...tail]
+  return [...head, ...[...kept].sort(([x], [y]) => x - y).flatMap(([, shown]) => shown)]
 }
 
 /** The table the model wrote, before the hive's parsers and Jev see it. */
