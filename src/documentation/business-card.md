@@ -306,7 +306,7 @@ fills a seam from an explicit mark, then a child, then this hive, then the
 hosts it follows, shows an unfilled one as a hexagon silhouette, and asks on a
 miss.
 Passive discovery, the halo and count, `fill`, and the sticky
-`sign('discovery')` observation are all there.
+`sign('seam:discovery')` observation are all there.
 
 What the card adds is only its words. The business card's template wears
 `name`, up to four roles, up to three contact lines, `portrait`, and the

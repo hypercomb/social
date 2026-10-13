@@ -198,7 +198,7 @@ the last known evaluation can be sticky."
 A last-known evaluation is not a derived cache: a cold client cannot rebuild
 it from layers, so it may not be minted in the optimize phase
 ([optimize-phase.md](optimize-phase.md)). It is state, and it gets its own
-pool, `sign('discovery')`, one record per seam word keyed by `sign(word)`,
+pool, `sign('seam:discovery')`, one record per seam word keyed by `sign(word)`,
 holding what each followed host offered and when. Three properties keep it
 honest:
 
@@ -239,4 +239,4 @@ Nothing here needs a second origin.
 | A miss as an ask | not built |
 | Hexagon silhouettes for unfilled seams | not built. The welcome hive's silhouette drawing exists and is the model |
 | The halo and count from followed hosts; hover-once; the breathing ring | not built |
-| The `sign('discovery')` pool | not built; the meaning is not yet reserved in the pool registry |
+| The `sign('seam:discovery')` pool | not built; the meaning is not yet registered. Every new pool meaning carries a colon (`known-location-pools.md`), so it is `seam:discovery`, never a bare `discovery` |
