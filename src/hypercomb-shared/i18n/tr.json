@@ -1410,6 +1410,8 @@
   "slash.opens": "Bir karonun nasıl açılacağını ayarla: görünümlerinden biri olarak ya da altıgenler olarak",
   "slash.groups": "Bu katmandaki yayın grupları — oluştur, doldur, adlandır, renklendir, yayınla",
   "slash.card": "Bir kart şablonu giy veya kartın ne giydiğini söyle",
+  "slash.seam": "Bu karonun açık bıraktığı genişleme noktaları",
+  "slash.fill": "Bu karonun bir dikişini neyin dolduracağını seç",
   "slash.tutor": "Çalışma oyunları — bu kovanı aralıklı tekrar oyunlarına dönüştür; on | off | here | build | list",
   "slash.present": "Sunum görünümü — bu alanın diyagram döşemelerini slayt olarak oynat; on | off | here | slide",
   "slash.reference": "Buraya bir referans döşemesi bırak — başka bir konuma canlı işaretçi; /reference <path>",

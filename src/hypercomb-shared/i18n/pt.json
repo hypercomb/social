@@ -1410,6 +1410,8 @@
   "slash.opens": "Define como um bloco abre: como uma de suas visões ou como hexágonos",
   "slash.groups": "Grupos de publicação desta camada — crie, preencha, nomeie, colora e publique",
   "slash.card": "Usar um modelo de cartão ou dizer o que um cartão usa",
+  "slash.seam": "Os pontos de extensão que este bloco deixa abertos",
+  "slash.fill": "Escolher o que preenche uma costura deste bloco",
   "slash.tutor": "Jogos de estudo — transforme esta colmeia em jogos de repetição espaçada; on | off | here | build | list",
   "slash.present": "Visão de apresentação — reproduzir os blocos de diagrama desta área como slides; on | off | here | slide",
   "slash.reference": "Soltar um bloco de referência aqui — um ponteiro vivo para outra localização; /reference <path>",

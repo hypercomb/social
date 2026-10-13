@@ -1786,6 +1786,8 @@
   "slash.opens": "Set how a tile opens: as one of its views, or as hexagons",
   "slash.groups": "Publish groups on this layer — make them, fill them, name and colour them, publish them",
   "slash.card": "Wear a card template, or say what a card wears",
+  "slash.seam": "The extension points this tile leaves open",
+  "slash.fill": "Choose what fills one of this tile's seams",
   "slash.tutor": "Study games — turn this hive into spaced-repetition games; on | off | here | build | list",
   "slash.present": "Slides view — play the presentation this tile belongs to; on | off | slide",
   "slash.scroller": "Scroller — flick through this branch's pictures and videos as a feed; on | off | here",

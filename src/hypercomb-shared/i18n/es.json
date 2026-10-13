@@ -1410,6 +1410,8 @@
   "slash.opens": "Define cómo se abre un mosaico: como una de sus vistas o como hexágonos",
   "slash.groups": "Grupos de publicación de esta capa: créalos, llénalos, nómbralos, coloréalos y publícalos",
   "slash.card": "Usar una plantilla de tarjeta o decir qué lleva una tarjeta",
+  "slash.seam": "Los puntos de extensión que esta casilla deja abiertos",
+  "slash.fill": "Elige qué llena una de las costuras de esta casilla",
   "slash.tutor": "Juegos de estudio — convierte esta colmena en juegos de repetición espaciada; on | off | here | build | list",
   "slash.present": "Vista de presentación — reproduce los mosaicos de diagrama de esta área como diapositivas; on | off | here | slide",
   "slash.reference": "Colocar un mosaico de referencia aquí — un puntero vivo a otra ubicación; /reference <path>",

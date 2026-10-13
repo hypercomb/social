@@ -1410,6 +1410,8 @@
   "slash.opens": "Festlegen, wie sich eine Kachel öffnet: als eine ihrer Ansichten oder als Sechsecke",
   "slash.groups": "Veröffentlichungsgruppen auf dieser Ebene — anlegen, füllen, benennen, einfärben, veröffentlichen",
   "slash.card": "Eine Kartenvorlage tragen oder sagen, was eine Karte trägt",
+  "slash.seam": "Die Erweiterungspunkte, die diese Kachel offen lässt",
+  "slash.fill": "Wählen, was eine Naht dieser Kachel füllt",
   "slash.tutor": "Lernspiele — diesen Bienenstock in Wiederholungsspiele verwandeln; on | off | here | build | list",
   "slash.present": "Präsentationsansicht — die Diagramm-Kacheln dieses Bereichs als Folien abspielen; on | off | here | slide",
   "slash.reference": "Referenzkachel hier ablegen — ein Live-Zeiger auf einen anderen Standort; /reference <path>",
