@@ -376,6 +376,8 @@ const HTTP_PROBE_TIMEOUT_MS = 3000
 // each pass re-paid the whole cascade (for layers: up to the 2s mesh
 // wait, serially per sig). Cleared early by new domain knowledge.
 const FETCH_MISS_TTL_MS = 60_000
+/** A miss beneath a live owner's tile (#noteFetchMiss): asked again soon. */
+const OWNER_MISS_TTL_MS = 3_000
 
 // A sig that keeps missing the FULL cascade backs off exponentially from
 // FETCH_MISS_TTL_MS up to this ceiling. So a sig no reachable host has (never
@@ -1044,6 +1046,15 @@ export class ContentBrokerDrone extends Drone {
    *  still recovers quickly. Reset by a local hit or new domain knowledge. */
   #noteFetchMiss = (s: string): void => {
     const prev = this.#missBackoff.get(s)
+    // BENEATH A LIVE OWNER (2026-10-12, adopt speed): the one participant who
+    // holds it is in the room, so a miss is a slow answer, not an absence —
+    // a take's second walk of the branch found every first-walk miss inside
+    // a 60 s window and refused the branch ("nothing was folded"). Short
+    // and flat while the owner is here; the usual ladder otherwise.
+    if (this.#ownerHeld(s)) {
+      this.#fetchMissUntil.set(s, Date.now() + OWNER_MISS_TTL_MS)
+      return
+    }
     const ttl = prev ? Math.min(prev * 2, MAX_MISS_TTL_MS) : FETCH_MISS_TTL_MS
     this.#missBackoff.set(s, ttl)
     this.#fetchMissUntil.set(s, Date.now() + ttl)
@@ -2848,13 +2859,18 @@ export class ContentBrokerDrone extends Drone {
    *   - otherwise ranked among the participants known to hold it (a cancel
    *     says its sender took it), or, knowing none, among the room as before.
    */
-  #standDownDelayMs = (sig: string): number => {
+  #standDownDelayMs = (sig: string, asker = ''): number => {
     if (!this.#myPubkey) return 0
-    const announcers = this.#knownHolders(sig, true)
+    // THE ASKER IS NEVER A RIVAL (2026-10-12, adopt speed): it asked because
+    // it does not hold the sig, so ranking against it only delayed the one
+    // copy it waits for — 350–700 ms per answer in a two-person room, on
+    // every step of a take.
+    const others = (list: readonly string[]): string[] => list.filter(p => p !== asker)
+    const announcers = others(this.#knownHolders(sig, true))
     if (this.#announcedHere(sig)) return this.#tierAmong(sig, announcers)
     if (announcers.length > 0) return MAX_STAND_DOWN_SLOTS * STAND_DOWN_SLOT_MS
-    const holders = this.#knownHolders(sig, false)
-    return this.#tierAmong(sig, holders.length > 0 ? holders : this.#zonePeers())
+    const holders = others(this.#knownHolders(sig, false))
+    return this.#tierAmong(sig, holders.length > 0 ? holders : others(this.#zonePeers()))
   }
 
   /** This tab's stand-down tier among `others` for `sig`. */
@@ -3005,12 +3021,13 @@ export class ContentBrokerDrone extends Drone {
     // copies, each delivered to all N.
     if (this.#answering.has(sigTag)) return
     this.#answering.add(sigTag)
-    try { await this.#answer(sigTag, typeTag) }
+    try { await this.#answer(sigTag, typeTag, pubkey) }
     finally { this.#answering.delete(sigTag) }
   }
 
-  /** Answer one ask for `sig` from the local copy, if this tab holds it. */
-  #answer = async (sigTag: string, typeTag: 'layer' | 'resource'): Promise<void> => {
+  /** Answer one ask for `sig` from the local copy, if this tab holds it.
+   *  `asker` is the key that asked: never a rival in the stand-down ranking. */
+  #answer = async (sigTag: string, typeTag: 'layer' | 'resource', asker = ''): Promise<void> => {
     const bytes = await this.#readLocal(sigTag, typeTag)
     if (!bytes) return  // we don't have it — silent no-op
     if (bytes.byteLength === 0) return
@@ -3044,7 +3061,7 @@ export class ContentBrokerDrone extends Drone {
     // and answer only if none comes — the store dropped it, or never took it.
     const satisfiedAt = this.#satisfiedAtMs.get(sigTag)
     const replayable = satisfiedAt !== undefined && Date.now() - satisfiedAt < RESPONSE_TTL_SECS * 1000
-    const standDown = Math.max(this.#standDownDelayMs(sigTag), replayable ? REPLAY_GRACE_MS : 0)
+    const standDown = Math.max(this.#standDownDelayMs(sigTag, asker), replayable ? REPLAY_GRACE_MS : 0)
     if (standDown > 0) {
       await sleep(standDown)
       if (this.#isCancelled(sigTag)) return

@@ -248,7 +248,7 @@ describe('the sharer: no host is a live swarm, never names only', () => {
     expect(sunrise['layerSig']).toBe(sealOf(page, 'sunrise'))
     expect(sunrise['served']).toBe('owner')
     expect(sunrise['small']).toEqual({ image: '1'.repeat(64) })
-    expect(sunrise['deep']).toBeUndefined()
+    expect(sunrise['deep']).toBe('owner')   // its deeper pages too: a take asks this device first
     // Bytes no host keeps: no host is named, and the gate is not asked.
     expect(domainsAt(page)).toEqual([])
     expect(asked).not.toContain(sealOf(page, 'sunrise'))
