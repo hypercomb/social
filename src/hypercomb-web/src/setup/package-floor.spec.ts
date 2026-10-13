@@ -257,7 +257,7 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
     // A hidden page is never mid-gesture: the move does not wait for quiet.
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
     localStorage.setItem('hc:install-follow', JSON.stringify({ pubkey: PUBLISHER, hosts: ['hypercomb.com'], channel: 'essentials' }))
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url) === `https://content.hypercomb.com/${INDEXES}/${PUBLISHER}`
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url) === `https://hypercomb.com/${INDEXES}/${PUBLISHER}`
       ? { ok: true, status: 200, text: async () => JSON.stringify(finalizeEvent({ kind: 30564, created_at: 1, tags: [], content: JSON.stringify({ v: 1, roots: { 'install:essentials': SIGNED_ROOT } }) }, PUBLISHER_KEY)) } as unknown as Response
       : { ok: false, status: 404, text: async () => '' } as unknown as Response))
     // The old package answers the update door — the door alone left it running.
@@ -326,6 +326,33 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
     expect(JSON.parse(localStorage.getItem(FLOOR_RECORD_KEY)!)).toMatchObject({ from: home, to: HEAD.packageSig })
     expect(sessionStorage.getItem('hc:install:floor-reloaded')).toBe(HEAD.packageSig)
     expect(reload).toHaveBeenCalledOnce()
+  })
+
+  // The laptop (jwize, 2026-10-12): "steep edge" beside "marble cove" for the
+  // same join — its swarm derived rooms without the host, and its files could
+  // not say so. The running swarm says it.
+  const swarmSays = (swarm: object): void => vi.stubGlobal('ioc', { get: (key: string) => key === '@diamondcoreprocessor.com/SwarmDrone' ? swarm : undefined })
+
+  it('moves a package whose running swarm derives rooms without the host — even when its files cannot say', async () => {
+    const unsaid = '4'.repeat(64)
+    installSelection(unsaid, {})
+    swarmSays({})
+    vi.mocked(acquire).mockImplementation(async sig => ({ ok: true, packageSig: sig, fetched: 1, present: 0, holes: [], refused: [] }))
+
+    const plan = await checkPackageFloor()
+
+    expect(plan).toEqual({ act: true, from: unsaid, to: SIGNED_ROOT, zone: 'hypercomb.com' })
+    expect(vi.mocked(acquire).mock.calls[0]?.[2]?.refuse).toBe(refuseOldMeetingPoint)
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('leaves a package whose running swarm derives rooms the current way alone — and asks no host', async () => {
+    installSelection('5'.repeat(64), {})
+    swarmSays({ roomIdentity: 2 })
+
+    expect((await checkPackageFloor()).act).toBe(false)
+    expect(acquire).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('leaves a package that dials the shipped meeting point alone — and asks no host', async () => {

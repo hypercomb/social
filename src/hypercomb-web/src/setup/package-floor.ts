@@ -82,6 +82,7 @@ import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones
 import { installCandidates, readInstallChannel, type ChannelRead } from '@hypercomb/runtime/host-packages'
 import { cacheImportMap } from './resolve-import-map'
 import { shellInstallFollow, verifyIndexEvent } from './install-follow'
+import { loadedRoomIdentity, ROOM_IDENTITY } from '@hypercomb/shared/ui/presence-banner/presence-status'
 
 /** What the shell's update pill emits (upgrade-indicator.component.ts). */
 export const UPDATE_DOOR = 'packages:open'
@@ -397,7 +398,16 @@ export const checkPackageFloor = async (): Promise<FloorPlan> => {
     ? await packageBytes(installed).catch(() => UNSAID)
     : UNSAID
   const perTab = bytes.perTabMembership
-  const meetingPoint = bytes.currentMeetingPoint
+  // THE RUNNING SWARM SAYS IT FIRST (2026-10-12, jwize: "still broken on my
+  // laptop it's steep edge and on the desktop it's marble cove the same join").
+  // The byte scan cannot say whenever one module is unread or a pick is laid
+  // over the trunk, and a package that cannot say was never moved — so a
+  // device kept a swarm that derives rooms without the host and never met an
+  // updated one. The swarm in this page names the identity it derives rooms
+  // with (the same number the words follow); one below the current identity
+  // is below the floor, whatever its files say, on any device and any domain.
+  const oldRooms = loadedRoomIdentity() < ROOM_IDENTITY
+  const meetingPoint = oldRooms ? false : bytes.currentMeetingPoint
   const reason = legacyRecord || answered === false ? 'door'
     : perTab === false ? 'membership'
     : meetingPoint === false ? 'meeting point'
@@ -417,6 +427,7 @@ export const checkPackageFloor = async (): Promise<FloorPlan> => {
 
     const why = reason === 'door' ? 'cannot answer the update door on this shell'
       : reason === 'membership' ? 'keeps swarm membership in the flag every tab shares'
+      : oldRooms ? `derives rooms without their host (room identity ${loadedRoomIdentity()}, not ${ROOM_IDENTITY})`
       : `still dials the home machine, never ${MEETING_POINT}`
     console.warn(`[package-floor] ${plan.from.slice(0, 12)}… ${why} — taking ${plan.to.slice(0, 12)}… from ${plan.zone}`)
     carried ??= await listHostZones().catch(() => [] as string[])
