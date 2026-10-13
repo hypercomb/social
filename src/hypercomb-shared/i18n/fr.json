@@ -2849,5 +2849,7 @@
   "share.held.deep.one": "{host} n'accepte pas les pages plus profondes de {count} tuile — elles s'ouvrent depuis votre appareil tant que vous êtes là",
   "share.held.on-device": "Les pages plus profondes de {count} tuiles ne sont encore que sur votre appareil — restez un instant pour les laisser à la salle",
   "share.held.on-device.one": "Les pages plus profondes de {count} tuile ne sont encore que sur votre appareil — restez un instant pour les laisser à la salle",
-  "publish.optimize.no-host": "Rien n'a été envoyé : aucun hôte n'est nommé. Dites features publish <host> pour y envoyer l'ensemble."
+  "publish.optimize.no-host": "Rien n'a été envoyé : aucun hôte n'est nommé. Dites features publish <host> pour y envoyer l'ensemble.",
+  "hosts.behind": "{host} n'a pas encore la dernière version",
+  "packages.updates.not-held": "Une mise à jour est prête, mais aucun de vos hôtes ne l'a encore"
 }

@@ -2849,5 +2849,7 @@
   "share.held.deep.one": "{host} nimmt die tieferen Seiten von {count} Kachel nicht an — sie öffnen sich von deinem Gerät, solange du hier bist",
   "share.held.on-device": "Tiefere Seiten von {count} Kacheln sind noch nur auf deinem Gerät — bleib einen Moment, damit sie beim Raum bleiben",
   "share.held.on-device.one": "Tiefere Seiten von {count} Kachel sind noch nur auf deinem Gerät — bleib einen Moment, damit sie beim Raum bleiben",
-  "publish.optimize.no-host": "Es wurde nichts gesendet: Es ist kein Host genannt. Sagen Sie features publish <host>, um die Auswahl dorthin zu senden."
+  "publish.optimize.no-host": "Es wurde nichts gesendet: Es ist kein Host genannt. Sagen Sie features publish <host>, um die Auswahl dorthin zu senden.",
+  "hosts.behind": "{host} hat die neueste Version noch nicht",
+  "packages.updates.not-held": "Ein Update ist bereit, aber noch keiner Ihrer Hosts hat es"
 }

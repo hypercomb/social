@@ -2849,5 +2849,7 @@
   "share.held.deep.one": "{host}, {count} döşemenin daha derin sayfalarını kabul etmiyor — siz buradayken cihazınızdan açılırlar",
   "share.held.on-device": "{count} döşemenin daha derin sayfaları hâlâ yalnızca cihazınızda — onları odaya bırakmak için biraz bekleyin",
   "share.held.on-device.one": "{count} döşemenin daha derin sayfaları hâlâ yalnızca cihazınızda — onları odaya bırakmak için biraz bekleyin",
-  "publish.optimize.no-host": "Hiçbir şey gönderilmedi: hiçbir sunucu belirtilmedi. Kümeyi göndermek için features publish <host> yaz."
+  "publish.optimize.no-host": "Hiçbir şey gönderilmedi: hiçbir sunucu belirtilmedi. Kümeyi göndermek için features publish <host> yaz.",
+  "hosts.behind": "{host} henüz en yeni sürüme sahip değil",
+  "packages.updates.not-held": "Bir güncelleme hazır, ancak henüz hiçbir konağınızda yok"
 }

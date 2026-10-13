@@ -2849,5 +2849,7 @@
   "share.held.deep.one": "{host} não aceita as páginas mais profundas de {count} bloco — elas abrem a partir do seu dispositivo enquanto você estiver aqui",
   "share.held.on-device": "As páginas mais profundas de {count} blocos ainda estão só no seu dispositivo — fique um momento para deixá-las com a sala",
   "share.held.on-device.one": "As páginas mais profundas de {count} bloco ainda estão só no seu dispositivo — fique um momento para deixá-las com a sala",
-  "publish.optimize.no-host": "Nada foi enviado: nenhum host foi indicado. Diga features publish <host> para enviar o conjunto a um."
+  "publish.optimize.no-host": "Nada foi enviado: nenhum host foi indicado. Diga features publish <host> para enviar o conjunto a um.",
+  "hosts.behind": "{host} ainda não tem a versão mais recente",
+  "packages.updates.not-held": "Há uma atualização pronta, mas nenhum dos seus hosts a tem ainda"
 }

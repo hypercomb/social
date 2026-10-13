@@ -2849,5 +2849,7 @@
   "share.held.deep.one": "{host} tidak menerima halaman yang lebih dalam dari {count} ubin — halaman itu dibuka dari perangkatmu selama kamu di sini",
   "share.held.on-device": "Halaman yang lebih dalam dari {count} ubin masih hanya ada di perangkatmu — tunggu sebentar agar halaman itu tertinggal untuk ruangan",
   "share.held.on-device.one": "Halaman yang lebih dalam dari {count} ubin masih hanya ada di perangkatmu — tunggu sebentar agar halaman itu tertinggal untuk ruangan",
-  "publish.optimize.no-host": "Tidak ada yang dikirim: belum ada host yang disebutkan. Ketik features publish <host> untuk mengirim set ke sana."
+  "publish.optimize.no-host": "Tidak ada yang dikirim: belum ada host yang disebutkan. Ketik features publish <host> untuk mengirim set ke sana.",
+  "hosts.behind": "{host} belum memiliki versi terbaru",
+  "packages.updates.not-held": "Pembaruan sudah siap, tetapi belum ada host Anda yang memilikinya"
 }

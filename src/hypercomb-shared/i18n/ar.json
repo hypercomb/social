@@ -2849,5 +2849,7 @@
   "share.held.deep.one": "لا يقبل {host} الصفحات الأعمق لبلاطات عددها {count} — تُفتح من جهازك ما دمت هنا",
   "share.held.on-device": "الصفحات الأعمق لبلاطات عددها {count} ما زالت على جهازك فقط — ابقَ لحظة لتتركها للغرفة",
   "share.held.on-device.one": "الصفحات الأعمق لبلاطات عددها {count} ما زالت على جهازك فقط — ابقَ لحظة لتتركها للغرفة",
-  "publish.optimize.no-host": "لم يُرسل شيء: لم يُسمَّ أي مضيف. قل features publish <host> لإرسال المجموعة إليه."
+  "publish.optimize.no-host": "لم يُرسل شيء: لم يُسمَّ أي مضيف. قل features publish <host> لإرسال المجموعة إليه.",
+  "hosts.behind": "{host} لا يملك أحدث إصدار بعد",
+  "packages.updates.not-held": "يتوفر تحديث، لكن لا يملكه أيٌّ من مضيفيك بعد"
 }

@@ -2849,5 +2849,7 @@
   "share.held.deep.one": "{host}은(는) 타일 {count}개의 더 깊은 페이지를 받지 않습니다 — 여기 있는 동안 내 기기에서 열립니다",
   "share.held.on-device": "타일 {count}개의 더 깊은 페이지가 아직 내 기기에만 있습니다 — 방에 남길 수 있도록 잠시 머물러 주세요",
   "share.held.on-device.one": "타일 {count}개의 더 깊은 페이지가 아직 내 기기에만 있습니다 — 방에 남길 수 있도록 잠시 머물러 주세요",
-  "publish.optimize.no-host": "아무것도 보내지 않았습니다: 지정된 호스트가 없습니다. 세트를 보내려면 features publish <host> 라고 입력하세요."
+  "publish.optimize.no-host": "아무것도 보내지 않았습니다: 지정된 호스트가 없습니다. 세트를 보내려면 features publish <host> 라고 입력하세요.",
+  "hosts.behind": "{host}에는 아직 최신 버전이 없습니다",
+  "packages.updates.not-held": "업데이트가 준비되었지만 아직 어느 호스트에도 없습니다"
 }

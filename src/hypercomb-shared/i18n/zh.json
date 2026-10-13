@@ -2849,5 +2849,7 @@
   "share.held.deep.one": "{host} 不接受 {count} 个磁贴的更深页面 — 你在这里时，它们从你的设备打开",
   "share.held.on-device": "{count} 个磁贴的更深页面仍只在你的设备上 — 请稍留片刻，把它们留给房间",
   "share.held.on-device.one": "{count} 个磁贴的更深页面仍只在你的设备上 — 请稍留片刻，把它们留给房间",
-  "publish.optimize.no-host": "未发送任何内容：未指定主机。输入 features publish <host> 将该集合发送到某个主机。"
+  "publish.optimize.no-host": "未发送任何内容：未指定主机。输入 features publish <host> 将该集合发送到某个主机。",
+  "hosts.behind": "{host} 还没有最新版本",
+  "packages.updates.not-held": "更新已就绪，但你的主机都还没有它"
 }
