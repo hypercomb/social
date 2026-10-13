@@ -10,7 +10,9 @@
 
 import { sameWord } from '../../commands/trait.js'
 
-export interface Axial { readonly q: number; readonly r: number }
+// The tiles barrel re-exports every module here, so a second Axial declaration is an ambiguous export.
+import type { Axial } from './wave-layout.js'
+export type { Axial }
 export interface Silhouette { readonly word: string; readonly q: number; readonly r: number; readonly index: number }
 
 /** The trait words no tile on this level answers yet, in the order the tile opened them. */
