@@ -4583,11 +4583,10 @@ export class SwarmDrone extends Drone {
       // a name, and #heldReport says why. Local reads only.
       const hold = await this.#liveHold(visual)
       if (!hold) {
-        // A live tile's deeper pages are on this device too — every live tile,
-        // not only a public branch (2026-10-12, adopt speed): a take reaches
-        // them here, mesh first, while we are in the room, instead of a 404
-        // from every host first on every step.
-        const where: DeepWhere = 'owner'
+        // A live branch's deeper pages are on this device too: a take reaches
+        // them here, mesh first, while we are in the room. A tile shared on its
+        // own (tile-only) names no deeper pages — they are not shared.
+        const where: DeepWhere | undefined = branch ? 'owner' : undefined
         const entry = canonicaliseValue({ ...visual, served: 'owner', ...(where ? { deep: where } : {}) }) as ChildEntry
         // Never remembered as hosted: no host serves it, so (b) can never say it.
         return { entry, form: 'full', live: true, ...(where ? { deep: where } : {}) }

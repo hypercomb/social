@@ -1889,6 +1889,25 @@ export class ContentBrokerDrone extends Drone {
     const domains: string[] = this.getKnownDomains(root)
     if (!opts.quiet) this.emitEffect('adopt:meta', { rootSig: root, domains })
 
+    // A TAKE FROM SOMEONE IN THE ROOM ASKS THEM FIRST (2026-10-12, adopt
+    // speed — measured: every level of a take walked the HTTP hosts to a 404
+    // before the mesh, with a 2 s window, and a 49-tile branch was refused).
+    // When a participant's live page names this root, its subtree is read the
+    // way a deep:'owner' subtree is: the mesh first with the owner window, a
+    // miss retried in seconds. The taker decides this alone — nothing about
+    // what anyone shares changes, and a host still answers when the mesh
+    // does not.
+    if (!this.#ownerRoots.has(root)) {
+      const peer = this.#knownHolders(root, true)[0]
+      if (peer) {
+        remember(this.#ownerRoots, root, { pubkey: peer, seenMs: Date.now(), reopenedMs: 0 })
+        if (!this.#ownerScanned.has(root)) {
+          const local = await this.#readLocal(root, 'layer')
+          if (local) this.#learnOwnerSubtree(root, local)
+        }
+      }
+    }
+
     const asSigs = (v: unknown): string[] =>
       Array.isArray(v) ? v.map(x => String(x).toLowerCase().trim()).filter(s => SIG_RE.test(s)) : []
 
