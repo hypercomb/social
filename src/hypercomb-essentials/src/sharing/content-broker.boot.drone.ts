@@ -71,13 +71,13 @@
 // self-cleaning drain removes it. Layer/resource paths use the
 // canonical Store APIs.
 
-import { Drone, EffectBus, isMetaEnvelope, registerPoolMeaning } from '@hypercomb/core'
+import { Drone, EffectBus, isMetaEnvelope, registerPoolMeaning, roomPreimage } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
 import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
 import { isJoinedHere } from './membership.js'
 import { PASSIVE_REPLICATION_KEY, passiveReplicationQueue } from './passive-replication-queue.js'
-import { visualArtifactSigs } from './visual-hosts.js'
+import { MESH_ANSWER_MAX_BYTES, visualArtifactSigs } from './visual-hosts.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
@@ -136,8 +136,9 @@ const RESPONSE_TTL_SECS = 900
 // visuals ask names the room's own composed location — so whoever can hear
 // the channel learns the room's addresses, then reads them. It used to be the
 // one global word 'broker:fetch', which anyone on a relay could subscribe to.
-// Now it is sign('broker:fetch\0room\0secret'), derived like the lifecycle
-// and presence channels: only the room's members can name it. A tab that is
+// Now it is sign('broker:fetch\0room\0secret\0point'), derived like the
+// lifecycle and presence channels (core roomPreimage — the meeting point is
+// always part of the room, 2026-10-12): only the room's members can name it. A tab that is
 // not joined to a room asks nothing over the mesh — its bytes come from hosts.
 const ASK_LABEL = 'broker:fetch'
 const ROOM_STORE_KEY = '@hypercomb.social/RoomStore'
@@ -175,7 +176,7 @@ const OLDER_ASKER_TTL_MS = 10 * 60_000
 const CHUNK_BYTES = 192 * 1024
 // Largest resource a participant will serve or assemble over the mesh. Beyond
 // this the durable tier (an HTTP host) is the path.
-const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+const MAX_RESPONSE_BYTES = MESH_ANSWER_MAX_BYTES
 // A chunked run keeps the asker's clock alive while chunks keep arriving; this
 // bounds the whole assembly regardless.
 const MESH_ASSEMBLY_MAX_MS = 60_000
@@ -375,6 +376,8 @@ const HTTP_PROBE_TIMEOUT_MS = 3000
 // each pass re-paid the whole cascade (for layers: up to the 2s mesh
 // wait, serially per sig). Cleared early by new domain knowledge.
 const FETCH_MISS_TTL_MS = 60_000
+/** A miss beneath a live owner's tile (#noteFetchMiss): asked again soon. */
+const OWNER_MISS_TTL_MS = 3_000
 
 // A sig that keeps missing the FULL cascade backs off exponentially from
 // FETCH_MISS_TTL_MS up to this ceiling. So a sig no reachable host has (never
@@ -400,9 +403,10 @@ const OWNER_SUBTREE_MAX = 8192
 
 // Beta shared byte mirrors — appended to the HTTP-direct fallback tier (Tier 3)
 // whenever the shared LIVE relay is active (see #getFallbackDomains /
-// #liveRelayActive). The SAME hc:nostrmesh:use-live-relay flag that points the
-// MESH at the default meeting point (wss://hypercomb.com) also points BYTE-resolution here, so a single flag
-// makes the whole beta resolvable end to end. Resources (website pages, images,
+// #liveRelayActive). The hc:nostrmesh:use-live-relay flag points BYTE-resolution
+// here (it once pointed the mesh at a default meeting point too; since
+// 2026-10-11 there is no default host and the flag picks no relay), so the
+// whole beta resolves end to end. Resources (website pages, images,
 // game assets) have NO mesh fallback — without a guaranteed host a fresh viewer
 // that never received the publisher's ['domain'] attribution simply 404s and
 // the tile/page renders blank. These two sources are that guarantee, both on
@@ -480,6 +484,8 @@ interface MeshApi {
   // The broker uses this to serve 'visuals' requests without keeping
   // its own LRU — the mesh already does the work.
   getNonExpired?: (sig: string) => readonly { event: NostrEventLike }[]
+  /** The relay this tab meets at, host[:port] — the room's meeting point. */
+  swarmHost?: () => string
 }
 
 interface SignerApi {
@@ -857,10 +863,10 @@ export class ContentBrokerDrone extends Drone {
   //       viewer resolve a peer's website/resource sig even when no mesh
   //       ['domain'] attribution ever reached it — resources have no mesh
   //       fallback, so without a fallback host they'd silently 404. Gated
-  //       exactly like the mesh seed (NostrMeshDrone.loadRelays): '1' forces it
-  //       anywhere, '0' opts fully out, unset defaults ON for a real origin and
-  //       OFF on loopback (dev resolves from the local relay). Per-client opt
-  //       out with `/use-live-relay off`.
+  //       by the flag alone: '0' opts fully out, anything else is ON on every
+  //       origin, so a loopback dev page resolves what a deployed one does
+  //       (the mesh no longer reads this flag — it seeds no relay). Per-client
+  //       opt out with `/use-live-relay off`.
   //
   //   (b) Operator-configured extras — `hc:fallback-domains` (JSON array, same
   //       shape as hc:community:domains), appended after the beta mirrors.
@@ -897,18 +903,14 @@ export class ContentBrokerDrone extends Drone {
   // True when the shared LIVE relay is active for this client — the single
   // condition that also seeds the beta byte mirrors above. Mirrors
   // NostrMeshDrone.loadRelays' seed policy verbatim so ONE flag governs both
-  // transports:
-  //   flag '1'  → forced on (any origin, incl. loopback)
+  // transports (2026-10-12: one default, every origin):
   //   flag '0'  → opted fully out
-  //   unset     → ON for a real (deployed) origin, OFF on loopback dev
+  //   otherwise → on, a loopback dev page too — it meets at the shipped
+  //               default like every install, so its bytes resolve there too
   #liveRelayActive = (): boolean => {
     let flag: string | null = null
     try { flag = localStorage.getItem('hc:nostrmesh:use-live-relay') } catch { /* private mode */ }
-    if (flag === '1') return true
-    if (flag === '0') return false
-    try {
-      return !/^(localhost|127(?:\.\d+){3}|\[?::1\]?)$/i.test(location.hostname)
-    } catch { return false }
+    return flag !== '0'
   }
 
   // Pull all `['domain', host]` tags out of an incoming response event.
@@ -1044,6 +1046,15 @@ export class ContentBrokerDrone extends Drone {
    *  still recovers quickly. Reset by a local hit or new domain knowledge. */
   #noteFetchMiss = (s: string): void => {
     const prev = this.#missBackoff.get(s)
+    // BENEATH A LIVE OWNER (2026-10-12, adopt speed): the one participant who
+    // holds it is in the room, so a miss is a slow answer, not an absence —
+    // a take's second walk of the branch found every first-walk miss inside
+    // a 60 s window and refused the branch ("nothing was folded"). Short
+    // and flat while the owner is here; the usual ladder otherwise.
+    if (this.#ownerHeld(s)) {
+      this.#fetchMissUntil.set(s, Date.now() + OWNER_MISS_TTL_MS)
+      return
+    }
     const ttl = prev ? Math.min(prev * 2, MAX_MISS_TTL_MS) : FETCH_MISS_TTL_MS
     this.#missBackoff.set(s, ttl)
     this.#fetchMissUntil.set(s, Date.now() + ttl)
@@ -1878,6 +1889,25 @@ export class ContentBrokerDrone extends Drone {
     const domains: string[] = this.getKnownDomains(root)
     if (!opts.quiet) this.emitEffect('adopt:meta', { rootSig: root, domains })
 
+    // A TAKE FROM SOMEONE IN THE ROOM ASKS THEM FIRST (2026-10-12, adopt
+    // speed — measured: every level of a take walked the HTTP hosts to a 404
+    // before the mesh, with a 2 s window, and a 49-tile branch was refused).
+    // When a participant's live page names this root, its subtree is read the
+    // way a deep:'owner' subtree is: the mesh first with the owner window, a
+    // miss retried in seconds. The taker decides this alone — nothing about
+    // what anyone shares changes, and a host still answers when the mesh
+    // does not.
+    if (!this.#ownerRoots.has(root)) {
+      const peer = this.#knownHolders(root, true)[0]
+      if (peer) {
+        remember(this.#ownerRoots, root, { pubkey: peer, seenMs: Date.now(), reopenedMs: 0 })
+        if (!this.#ownerScanned.has(root)) {
+          const local = await this.#readLocal(root, 'layer')
+          if (local) this.#learnOwnerSubtree(root, local)
+        }
+      }
+    }
+
     const asSigs = (v: unknown): string[] =>
       Array.isArray(v) ? v.map(x => String(x).toLowerCase().trim()).filter(s => SIG_RE.test(s)) : []
 
@@ -2647,6 +2677,13 @@ export class ContentBrokerDrone extends Drone {
     EffectBus.on('mesh:public-changed', resync)
     EffectBus.on('mesh:room', resync)
     EffectBus.on('mesh:secret', resync)
+    // Another meeting point is another room: its ask channel is another one.
+    // A point can also move with no zone announcement (a relay list changed
+    // under a joined tab — /domain): the mesh says its connection again, and
+    // a tab that only SERVES (asks nothing itself) follows the room there.
+    // A key comparison when nothing moved.
+    EffectBus.on('mesh:zone', resync)
+    EffectBus.on('mesh:connection', resync)
     const ioc = (window as { ioc?: { whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc
     for (const key of [ROOM_STORE_KEY, SECRET_STORE_KEY]) {
       ioc?.whenReady?.(key, (store) => { (store as EventTarget | undefined)?.addEventListener?.('change', resync) })
@@ -2710,8 +2747,9 @@ export class ContentBrokerDrone extends Drone {
     return out
   }
 
-  /** This tab's room ask channel: sign('broker:fetch\0room\0secret') while
-   *  it is joined to a room, else ''. Derived once per room and secret. */
+  /** This tab's room ask channel: sign('broker:fetch\0room\0secret\0point')
+   *  while it is joined to a room, else ''. Derived once per room, secret and
+   *  meeting point (the relay this tab dials — the mesh's swarmHost). */
   #roomAskChannel = (): Promise<string> => {
     if (!isJoinedHere()) return Promise.resolve('')
     const credential = (key: string): string => {
@@ -2720,9 +2758,15 @@ export class ContentBrokerDrone extends Drone {
     const room = credential(ROOM_STORE_KEY)
     const secret = credential(SECRET_STORE_KEY)
     if (!room || !secret) return Promise.resolve('')
-    const key = `${room}\0${secret}`
+    const key = roomPreimage(room, secret, this.#getMesh()?.swarmHost?.() ?? '')
+    // No host named: no room, so no ask channel (there is no default host).
+    if (!key) return Promise.resolve('')
     if (this.#askDerivation?.key !== key) {
+      // A room that moved under an ask (a relay list changed with no zone
+      // announcement) is listened for where it is now, too.
+      const moved = this.#askDerivation !== null
       this.#askDerivation = { key, channel: sha256Hex(new TextEncoder().encode(`${ASK_LABEL}\0${key}`)).catch(() => '') }
+      if (moved) queueMicrotask(() => void this.#syncAskChannel())
     }
     return this.#askDerivation.channel
   }
@@ -2834,13 +2878,18 @@ export class ContentBrokerDrone extends Drone {
    *   - otherwise ranked among the participants known to hold it (a cancel
    *     says its sender took it), or, knowing none, among the room as before.
    */
-  #standDownDelayMs = (sig: string): number => {
+  #standDownDelayMs = (sig: string, asker = ''): number => {
     if (!this.#myPubkey) return 0
-    const announcers = this.#knownHolders(sig, true)
+    // THE ASKER IS NEVER A RIVAL (2026-10-12, adopt speed): it asked because
+    // it does not hold the sig, so ranking against it only delayed the one
+    // copy it waits for — 350–700 ms per answer in a two-person room, on
+    // every step of a take.
+    const others = (list: readonly string[]): string[] => list.filter(p => p !== asker)
+    const announcers = others(this.#knownHolders(sig, true))
     if (this.#announcedHere(sig)) return this.#tierAmong(sig, announcers)
     if (announcers.length > 0) return MAX_STAND_DOWN_SLOTS * STAND_DOWN_SLOT_MS
-    const holders = this.#knownHolders(sig, false)
-    return this.#tierAmong(sig, holders.length > 0 ? holders : this.#zonePeers())
+    const holders = others(this.#knownHolders(sig, false))
+    return this.#tierAmong(sig, holders.length > 0 ? holders : others(this.#zonePeers()))
   }
 
   /** This tab's stand-down tier among `others` for `sig`. */
@@ -2991,12 +3040,13 @@ export class ContentBrokerDrone extends Drone {
     // copies, each delivered to all N.
     if (this.#answering.has(sigTag)) return
     this.#answering.add(sigTag)
-    try { await this.#answer(sigTag, typeTag) }
+    try { await this.#answer(sigTag, typeTag, pubkey) }
     finally { this.#answering.delete(sigTag) }
   }
 
-  /** Answer one ask for `sig` from the local copy, if this tab holds it. */
-  #answer = async (sigTag: string, typeTag: 'layer' | 'resource'): Promise<void> => {
+  /** Answer one ask for `sig` from the local copy, if this tab holds it.
+   *  `asker` is the key that asked: never a rival in the stand-down ranking. */
+  #answer = async (sigTag: string, typeTag: 'layer' | 'resource', asker = ''): Promise<void> => {
     const bytes = await this.#readLocal(sigTag, typeTag)
     if (!bytes) return  // we don't have it — silent no-op
     if (bytes.byteLength === 0) return
@@ -3030,7 +3080,7 @@ export class ContentBrokerDrone extends Drone {
     // and answer only if none comes — the store dropped it, or never took it.
     const satisfiedAt = this.#satisfiedAtMs.get(sigTag)
     const replayable = satisfiedAt !== undefined && Date.now() - satisfiedAt < RESPONSE_TTL_SECS * 1000
-    const standDown = Math.max(this.#standDownDelayMs(sigTag), replayable ? REPLAY_GRACE_MS : 0)
+    const standDown = Math.max(this.#standDownDelayMs(sigTag, asker), replayable ? REPLAY_GRACE_MS : 0)
     if (standDown > 0) {
       await sleep(standDown)
       if (this.#isCancelled(sigTag)) return

@@ -61,6 +61,7 @@ beforeEach(() => {
     myLabel: () => 'me', labelFor: () => '', setMyLabel: () => {}, subscribedTo: () => '', following: () => '',
     subscribeTo: async () => {}, follow: async () => {},
     currentSegments: () => segments, participantsInZone: () => [], awayInZone: () => [],
+    roomIdentity: 2,
   })
 })
 
@@ -97,6 +98,18 @@ describe('TS-2: a meeting point that refuses this tab\'s access code', () => {
     EffectBus.on('mesh:open-modal', p => { opened.push(p) })
     await b.onStatusAction('code')
     expect(opened).toEqual([{ focus: 'code' }])
+  })
+
+  it('joined with no host named: the line says so, and its button opens the selector on the host field', async () => {
+    swarmHost = ''
+    const b = mount()
+    connect('offline', { refused: 'no-host' })
+    expect(keys(b)).toEqual(['mesh.state.no-host', 'mesh.state.no-host-action'])
+    expect(b.status()?.tone).toBe('down')
+    const opened: unknown[] = []
+    EffectBus.on('mesh:open-modal', p => { opened.push(p) })
+    await b.onStatusAction('host')
+    expect(opened).toEqual([{ focus: 'point' }])
   })
 
   it("a meeting point this page cannot dial is named, from the tab's zone", () => {
@@ -167,6 +180,93 @@ describe('TS-7: delivery, not the socket', () => {
     expect(b.status()?.compact).toBe('2 (2)')
   })
 
+  // The swarm's own statuses, as B's diag recorded them in the acceptance run
+  // (T1c D2b at 1,200 B/s): said again while untaken — unackedMs 357 → 3021
+  // → 5474, about every 2.5 s — then taken. The swarm re-says its status at
+  // exactly 3 s, so a line that restarted its 3 s count on every status
+  // never said "Sending…" and kept counting you here.
+  it('T1c D2b (as recorded): a status said again at 3 s does not restart the count — "Sending…", and you are not counted here', () => {
+    const b = mount()
+    connect('open')
+    EffectBus.emit('swarm:presence-changed', { sig: 's', peers: [peer], alone: false, zonePeers: [{ pubkey: peer, state: 'here' }] })
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 1, taken: false, unackedMs: 4 })
+    EffectBus.emit('swarm:page-announced', { location: '/', segments: [] })
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 1, taken: true, unackedMs: 0 })
+    expect(b.status()?.compact).toBe('2 (2)')
+    // b-slow: the new word sits in the throttled uplink
+    vi.advanceTimersByTime(5_000)
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 2, taken: false, unackedMs: 357 })
+    vi.advanceTimersByTime(2_000)
+    expect(keys(b)).not.toContain('mesh.state.sending')
+    expect(b.status()?.compact).toBe('2 (2)')
+    vi.advanceTimersByTime(664)
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 2, taken: false, unackedMs: 3_021 })
+    expect(keys(b)).toContain('mesh.state.sending')
+    expect(b.status()?.tone).toBe('warn')
+    expect(b.status()?.compact).toBe('2 (1)')
+    vi.advanceTimersByTime(2_453)
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 2, taken: false, unackedMs: 5_474 })
+    expect(keys(b)).toContain('mesh.state.sending')
+    expect(b.status()?.compact).toBe('2 (1)')
+    // the relay takes it
+    vi.advanceTimersByTime(1_900)
+    EffectBus.emit('swarm:page-announced', { location: '/', segments: [] })
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 2, taken: true, unackedMs: 0 })
+    expect(keys(b)).not.toContain('mesh.state.sending')
+    expect(b.status()?.compact).toBe('2 (2)')
+  })
+
+  it('a word untaken for 3 s reads "Sending…" from the line\'s own clock, between the swarm\'s statuses', () => {
+    const b = mount()
+    connect('open')
+    EffectBus.emit('swarm:presence-changed', { sig: 's', peers: [peer], alone: false })
+    EffectBus.emit('swarm:page-announced', { location: '/', segments: [] })
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 1, taken: false, unackedMs: 1_200 })
+    vi.advanceTimersByTime(1_700)
+    expect(keys(b)).not.toContain('mesh.state.sending')
+    vi.advanceTimersByTime(200)
+    expect(keys(b)).toContain('mesh.state.sending')
+    expect(b.status()?.compact).toBe('2 (1)')
+  })
+
+  it('the page\'s word taken but the beacon untaken past 3 s: still "Sending…", still not counted here', () => {
+    const b = mount()
+    connect('open')
+    EffectBus.emit('swarm:presence-changed', { sig: 's', peers: [peer], alone: false })
+    EffectBus.emit('swarm:page-announced', { location: '/', segments: [] })
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 1, taken: true, unackedMs: 3_020 })
+    expect(keys(b)).toContain('mesh.state.sending')
+    expect(b.status()?.compact).toBe('2 (1)')
+    // the beacon's OK: the swarm says its status again
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 1, taken: true, unackedMs: 0 })
+    expect(keys(b)).not.toContain('mesh.state.sending')
+    expect(b.status()?.compact).toBe('2 (2)')
+  })
+
+  it('a join on a slow uplink — no OK ever heard yet — says "Sending…" once the swarm says its word is late', () => {
+    const b = mount()
+    connect('open')
+    EffectBus.emit('swarm:presence-changed', { sig: 's', peers: [peer], alone: false })
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 1, taken: false, unackedMs: 2 })
+    expect(keys(b)).not.toContain('mesh.state.sending')
+    expect(b.status()?.compact).toBe('2 (2)')
+    vi.advanceTimersByTime(3_018)
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 1, taken: false, unackedMs: 3_020 })
+    expect(keys(b)).toContain('mesh.state.sending')
+    expect(b.status()?.compact).toBe('2 (1)')
+  })
+
+  it('a word the relay refused is not on its way: no "Sending…" for ever', () => {
+    const b = mount()
+    connect('open')
+    EffectBus.emit('swarm:presence-changed', { sig: 's', peers: [peer], alone: false })
+    EffectBus.emit('swarm:page-announced', { location: '/', segments: [] })
+    EffectBus.emit('swarm:share-status', { location: '/', offered: 1, taken: false, unackedMs: 0 })
+    vi.advanceTimersByTime(10_000)
+    expect(keys(b)).not.toContain('mesh.state.sending')
+    expect(b.status()?.compact).toBe('2 (2)')
+  })
+
   it('an older swarm that never says page-announced reads as it always did', () => {
     const b = mount()
     connect('open')
@@ -175,6 +275,21 @@ describe('TS-7: delivery, not the socket', () => {
     vi.advanceTimersByTime(10_000)
     expect(keys(b)).not.toContain('mesh.state.sending')
     expect(b.status()?.compact).toBe('2 (2)')
+  })
+})
+
+describe('BCL-3 / BCL-1: what the sharer is told about the deeper pages', () => {
+  it('deeper pages still only on this device are said, and a passed-over domain worn deeper is named', () => {
+    const b = mount()
+    connect('open')
+    EffectBus.emit('swarm:share-status', {
+      location: '/', offered: 27, uploading: 0, nameOnly: 0, deepOnDevice: 2, held: [],
+      host: 'pool-a.localhost', hostState: 'syncing', passedOver: ['typo.localhost', 'refuse.localhost'], taken: true, unackedMs: 0,
+    })
+    expect(keys(b)).toEqual(expect.arrayContaining(['swarm.share.sharing', 'share.held.on-device', 'share.passed-over']))
+    expect(b.status()?.parts.find(p => p.key === 'share.held.on-device')?.params).toEqual({ count: 2 })
+    expect(b.status()?.parts.find(p => p.key === 'share.passed-over')?.params).toEqual({ host: 'typo.localhost, refuse.localhost', count: 2 })
+    expect(b.status()?.tone).toBe('warn')
   })
 })
 
@@ -197,25 +312,27 @@ describe('TS-3: who stands here, not who visited', () => {
   })
 })
 
-describe('ZI-1 / ZI-6: the words fold the point the tab meets at, from one list', () => {
-  it('two halves of a meeting on different relays read different words; the default keeps today\'s', () => {
+describe('ZI-1 / ZI-6: the words fold the host the tab meets at, from one list — and show it beside them', () => {
+  it('two halves of a meeting on different relays read different words AND different hosts — "marble cove · hypercomb.com" (2026-10-11)', () => {
     const b = mount()
     connect('open')
     const words = (): string => b.status()?.parts.find(p => p.text && p.text !== 'downtown')?.text ?? ''
-    expect(words()).toBe(secretTag('lifecycle\0downtown\0rose', 'en'))
+    expect(words()).toBe(`${secretTag('lifecycle\0downtown\0rose\0hypercomb.com', 'en')} · hypercomb.com`)
     swarmHost = 'pluginthematrix.com'
     EffectBus.emit('mesh:zone', { relay: 'wss://pluginthematrix.com' })
     connect('open', { attempt: 1 })
-    expect(words()).toBe(roomWords('downtown', 'rose', 'pluginthematrix.com'))
-    expect(words()).not.toBe(secretTag('lifecycle\0downtown\0rose', 'en'))
+    expect(words()).toBe(`${roomWords('downtown', 'rose', 'pluginthematrix.com')} · pluginthematrix.com`)
+    expect(words()).not.toContain(secretTag('lifecycle\0downtown\0rose\0hypercomb.com', 'en'))
+    // never the page's own domain beside them
+    expect(words()).not.toContain(location.hostname)
   })
 
-  it('a Japanese reader compares the English pair, their own beside it', () => {
+  it('a Japanese reader compares the English pair, their own beside it, the host after', () => {
     services.set('@hypercomb.social/I18n', Object.assign(new EventTarget(), { locale: 'ja', t: (k: string) => k }))
     const b = mount()
     connect('open')
     const pair = b.status()?.parts.find(p => p.text && p.text !== 'downtown')?.text
-    expect(pair).toBe(wordsBeside('downtown', 'rose', 'hypercomb.com', 'ja'))
-    expect(pair?.startsWith(roomWords('downtown', 'rose'))).toBe(true)
+    expect(pair).toBe(`${wordsBeside('downtown', 'rose', 'hypercomb.com', 'ja')} · hypercomb.com`)
+    expect(pair?.startsWith(roomWords('downtown', 'rose', 'hypercomb.com'))).toBe(true)
   })
 })

@@ -51,8 +51,9 @@ function summary(d) {
     const st = mesh.stats ?? {}
     lines.push(`mesh    ${val(c.state)}${c.refused ? ` (refused: ${c.refused})` : ''} · attempt ${val(c.attempt)} · since ${ago(c.since)} · network ${yes(mesh.networkEnabled)} · addressed ${yes(mesh.relaysAddressed)}`)
     // The banner's "Can't reach {host}" names THIS: the meeting relay, never
-    // an upload host. With no zone relay and no hc:nostrmesh:relays, a real
-    // host meets at the built-in wss://jwize.com.
+    // an upload host. With no zone relay and no hc:nostrmesh:relays, every
+    // page — a loopback one too, since 2026-10-12 — meets at the built-in
+    // wss://hypercomb.com, and this point is part of the room's address.
     lines.push(`        meets at ${val(mesh.swarmHost)} · relays ${relays} · sockets: ${mesh.sockets === null ? 'unreadable' : sockets}`)
     if (c.state && c.state !== 'open') lines.push(`        not open — a banner "Can't reach ${val(mesh.swarmHost)}" is this meeting relay, not an upload host (see share below)`)
     lines.push(`        sent ${val(st.eventSent)} events / ${val(st.reqSent)} REQs · in ${val(st.msgIn)} · rejected ${val(st.rejected)} · retried ${val(st.retrySent)}`)

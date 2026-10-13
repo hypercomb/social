@@ -90,6 +90,8 @@ describe('the meeting link waits for its answer', () => {
   it('already here is an answer too — a re-opened link is not re-processed on every reload', async () => {
     room.value = 'probe-room'
     secret.value = 'probe-secret'
+    // joined at a host (a link that names none meets at the tab's own)
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'probe-room', secret: 'probe-secret', relay: 'wss://a.example' }))
     EffectBus.emit('mesh:public-changed', { public: true })
     sessionStorage.setItem(KEY, 'probe-room/probe-secret')
     await boot()

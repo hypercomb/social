@@ -181,7 +181,7 @@ test('the open host admits a codeless dial, card first, while the coded host bes
   const first = await s.wait(() => true)
   assert.equal(first?.[0], 'NOTICE')
   const card = JSON.parse(first[1].slice('hc:host '.length))
-  assert.equal(card.participants, 'all')
+  assert.equal(card.participants, false, 'wrangler.meet.toml names no upload host')
   assert.equal(card.addressed, true)
   assert.ok(Math.abs(card.time - nowSec()) <= 2)
   assert.equal(await ask(s, 'scan', { kinds: [30206], limit: 1 }).then((r) => /^restricted: /.test(r)), true, 'no scans at the open default either')
@@ -217,7 +217,7 @@ test('the operator recycles the first code; only that code gets in, card first',
   const first = await s.wait(() => true)
   assert.equal(first[0], 'NOTICE')
   const card = JSON.parse(first[1].slice('hc:host '.length))
-  assert.equal(card.participants, 'all')
+  assert.equal(card.participants, false, 'wrangler.meet.toml names no upload host')
   assert.ok(Math.abs(card.time - nowSec()) <= 2, 'the card carries the meeting point\'s clock')
 
   const wrong = await dial('B'.repeat(32))
@@ -295,6 +295,49 @@ test('a will fires after its grace; a reconnect inside the grace cancels it', as
   await sleep(GRACE_MS)
   assert.deepEqual(lefts().map((m) => m[2].pubkey), [pub(gone)], 'the returner was never tombstoned')
   for (const s of [watcher, returned]) s.ws.close()
+})
+
+test('MS6 on real sockets: a quiet socket of the key is asked; silent, the room hears the leave after the grace; answering, it keeps the will', async () => {
+  const zone = sha256Hex('lifecycle\0heirs\0secret')
+  const watcher = await dial(code)
+  assert.equal(await ask(watcher, 'zone', { '#x': [zone] }), 'EOSE')
+  const isTomb = (who) => (m) => m[0] === 'EVENT' && m[2].pubkey === pub(who) && m[2].sig === '' && JSON.parse(m[2].content).left === true
+  // A joined tab listens on its room's lifecycle channel and beacons.
+  const joined = async (who) => {
+    const s = await dial(code)
+    assert.equal(await ask(s, 'mine', { '#x': [zone], kinds: [30206] }), 'EOSE')
+    await publish(s, beacon(who, zone))
+    return s
+  }
+
+  // A phone: S1 goes silent (lock 1, no FIN — it stays open here and says
+  // nothing); S2, the wake, beacons and closes (lock 2).
+  const phone = key()
+  const s1 = await joined(phone)
+  await sleep(1100)
+  const s2 = await joined(phone)
+  const t0 = Date.now()
+  s2.ws.close()
+  assert.ok(await s1.wait(isTomb(phone)), 'the silent socket is asked, on its own subscription')
+  const left = await watcher.wait(isTomb(phone), GRACE_MS + 3000)
+  const ms = Date.now() - t0
+  assert.ok(left, 'the room hears the leave while the zombie is still open')
+  assert.ok(ms >= GRACE_MS - 100 && ms <= GRACE_MS + 2500, `leave after ${ms} ms, grace ${GRACE_MS}`)
+
+  // A desk: hidden tab H, then visible tab V; V closes. H hears the question
+  // and beacons again (the swarm does so a second past the tombstone; this
+  // object's grace is only GRACE_MS, so the answer comes sooner): nobody is told.
+  const desk = key()
+  const h = await joined(desk)
+  await sleep(1100)
+  const v = await joined(desk)
+  v.ws.close()
+  assert.ok(await h.wait(isTomb(desk)), 'the hidden tab is asked')
+  await sleep(300)
+  await publish(h, beacon(desk, zone))
+  await sleep(GRACE_MS + 1000)
+  assert.equal(watcher.inbox.filter(isTomb(desk)).length, 0, 'it answered: nobody is told the participant left')
+  for (const s of [watcher, s1, h]) s.ws.close()
 })
 
 test('the open default and the coded point are separate objects: one zone on both is two rooms', async () => {

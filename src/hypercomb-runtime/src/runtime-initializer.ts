@@ -47,12 +47,16 @@ export type RuntimeInitializerOptions = {
   locales?: () => readonly string[]
 }
 
-// Dev-build default, applied on a LOOPBACK origin only (the operator's own
-// dev machine) and only when the value is unset — so two localhost tabs join
-// the same swarm room with zero manual setup, while a real deployed origin
-// (non-loopback) is never affected. An explicit clear still empties it. The
-// host is never defaulted (see the self-domain block below).
-const DEV_DEFAULT_SECRET = 'downtown'
+// NO DEV-BUILD SECRET (2026-10-12). A loopback page used to pre-fill the room
+// secret with a word published in this source, so two localhost tabs met with
+// nothing typed — on the local relay, which nobody else could reach. A
+// loopback page now meets at the host its participant names, like every
+// install (there is no default host), and a room is its point + room +
+// secret: a secret
+// anyone can read here would put a dev hive in a public room anyone can
+// compute. Two tabs of one origin still share the secret once it is typed
+// (the origin-wide pre-fill, secret-store.ts). The host is never defaulted
+// either (see the self-domain block below).
 
 // Reset the former flat-top rollout once, then preserve every explicit
 // participant choice made after this revision. Keeping the revision separate
@@ -69,6 +73,49 @@ const tabHasOwnZone = (): boolean => {
     const zone = JSON.parse(sessionStorage.getItem('hc:mesh-zone') ?? 'null') as { room?: unknown; secret?: unknown } | null
     return typeof zone?.room === 'string' && !!zone.room.trim() && typeof zone.secret === 'string' && !!zone.secret.trim()
   } catch { return false }
+}
+
+/** Whether THIS tab has a host to meet at (jwize, 2026-10-11: "Let's just
+ *  make sure that there isn't a default host"): the point in its zone (the
+ *  selector, a link, `use-live-relay <server>`), else the relay its page's
+ *  own list names as chosen (the mesh's `meetingRelay`). A mesh from before
+ *  the host field (no `meetingRelay`) seeds its own default, so it has one.
+ *  Read synchronously; nothing is asked. */
+const tabHasHost = (): boolean => {
+  try {
+    const zone = JSON.parse(sessionStorage.getItem('hc:mesh-zone') ?? 'null') as { relay?: unknown } | null
+    if (typeof zone?.relay === 'string' && zone.relay.trim()) return true
+  } catch { /* no zone — ask the mesh */ }
+  try {
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as { meetingRelay?: () => string } | undefined
+    if (typeof mesh?.meetingRelay !== 'function') return true
+    return !!String(mesh.meetingRelay() ?? '').trim()
+  } catch { return true }
+}
+
+/** A join whose host is the relay the page's own list names (its zone names
+ *  no point) PINS that relay into THIS tab's zone before the join is
+ *  announced — as the selector, a meeting link and `use-live-relay` already
+ *  do — so a reload resumes at the host it joined at, never at whatever the
+ *  origin-wide list (any tab's `/domain`) names by then. The same relay the
+ *  join was about to meet at, so the room and its words do not move. A merge
+ *  into the zone (MIRRORED: mesh-session.ts writeMeshZone, membership.ts
+ *  writeTabZone); a code without a point was never offered, so it does not
+ *  come along. */
+const pinListedHost = (): void => {
+  try {
+    const raw = sessionStorage.getItem('hc:mesh-zone')
+    const parsed: unknown = raw ? JSON.parse(raw) : {}
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
+    const zone = { ...(parsed as Record<string, unknown>) }
+    if (typeof zone['relay'] === 'string' && zone['relay'].trim()) return
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as { meetingRelay?: () => string } | undefined
+    const relay = String(mesh?.meetingRelay?.() ?? '').trim()
+    if (!relay) return
+    zone['relay'] = relay
+    delete zone['code']
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify(zone))
+  } catch { /* no storage — the tab meets at its own list, as before */ }
 }
 
 // Idempotent: callers in different parts of the boot sequence (web's
@@ -135,20 +182,19 @@ const _runInitializeRuntime = async (
       if (devHost) localStorage.setItem('hc:nostrmesh:self-domain', devHost)
     }
 
-    // ── beta ramp: live relay + byte mirrors (real origins only) ──
+    // ── beta ramp: byte mirrors (real origins only) ──
     // On a DEPLOYED origin, seed hc:nostrmesh:use-live-relay='1' ONCE so the
-    // whole beta routing is explicit and stable rather than merely implied by
-    // the unset origin-default: this single flag steers BOTH the mesh
-    // (→ wss://hypercomb.com, the open always-online meeting point —
-    // nostr-mesh.drone loadRelays) AND ContentBroker's byte fallback
-    // (→ hypercomb.com + pluginthematrix.io + pluginthematrix.com,
-    // #liveRelayActive). The public install names no home machine. The
-    // one-time marker (hc:beta-relay-seeded) means a later `/use-live-relay
-    // clear` is respected — we never re-seed over an explicit clear. Loopback
-    // dev is never seeded (it resolves from the local relay; force with
-    // `/use-live-relay on` to test the live path). Opt out on a real origin
-    // anytime with `/use-live-relay off`. Revisit when third-party operators
-    // federate (no MANDATORY central chokepoint).
+    // beta byte routing is explicit and stable: the flag steers
+    // ContentBroker's byte fallback (→ hypercomb.com + pluginthematrix.io +
+    // pluginthematrix.com, #liveRelayActive). It no longer picks a MEETING
+    // POINT (2026-10-11, "Let's just make sure that there isn't a default
+    // host"): the mesh seeds no relay on any origin, and a '1' written here
+    // cannot be told from one a person wrote, so it names no host — the
+    // participant names the host they meet at (hypercomb.com is offered).
+    // The one-time marker (hc:beta-relay-seeded) means a later
+    // `/use-live-relay clear` is respected — we never re-seed over an
+    // explicit clear. Opt out anytime with `/use-live-relay off`. Revisit
+    // when third-party operators federate (no MANDATORY central chokepoint).
     if (!isLoopback
         && localStorage.getItem('hc:nostrmesh:use-live-relay') === null
         && localStorage.getItem('hc:beta-relay-seeded') === null) {
@@ -156,15 +202,6 @@ const _runInitializeRuntime = async (
       localStorage.setItem('hc:beta-relay-seeded', '1')
     }
 
-    // ── location secret (dev-build default) ──
-    // On loopback, seed the room secret so two localhost tabs land in the same
-    // swarm room without typing it. Respects an explicit clear; never touches
-    // a real origin.
-    if (isLoopback) {
-      const cleared = (() => { try { return localStorage.getItem('hc:secret-cleared') === '1' } catch { return false } })()
-      const secretStore = get('@hypercomb.social/SecretStore') as { value: string; set: (s: string) => void } | undefined
-      if (secretStore && !secretStore.value && !cleared) secretStore.set(DEV_DEFAULT_SECRET)
-    }
   } catch { /* private mode — readers handle the empty case */ }
 
   if (logOpfs) {
@@ -520,6 +557,11 @@ const _runInitializeRuntime = async (
     // on a returning device, last week's meeting — and this shortcut used to
     // join it without a word. Such a tab gets the selector, pre-filled: one
     // tap. A reload resumes from the tab's zone and never comes through here.
+    //
+    // And it needs a HOST (2026-10-11: no default host): with none named
+    // there is no room — no words, no address, nothing to dial — so the
+    // selector opens on its host field instead (hypercomb.com offered there,
+    // never filled).
     if (next) {
       const room = (get('@hypercomb.social/RoomStore') as { value?: string } | undefined)?.value?.trim() ?? ''
       const secret = (get('@hypercomb.social/SecretStore') as { value?: string } | undefined)?.value?.trim() ?? ''
@@ -527,7 +569,14 @@ const _runInitializeRuntime = async (
         EffectBus.emit('mesh:open-modal', { join: true })
         return
       }
+      if (!tabHasHost()) {
+        EffectBus.emit('mesh:open-modal', { join: true, focus: 'point' })
+        return
+      }
     }
+
+    // The host this join meets at is the tab's from here on (pinListedHost).
+    if (next) pinListedHost()
 
     // The origin-wide flag stays written for packages older than per-tab
     // membership. The tab's own record is the shell's (rememberMeshSession on

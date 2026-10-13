@@ -68,7 +68,7 @@ export class HarnessQueenBee extends QueenBee {
   readonly command = 'harness'
   override description = 'List the agent harnesses, choose one for the device or this conversation, bring one in'
   override descriptionKey = 'slash.harness'
-  override options = ['use <name or signature>', 'here <name or signature>', 'here default', 'show [name]', 'edit [name]', 'import <json>', 'offer <name> [@<host>]', 'sync [@<host>]', 'try <name> <request>', 'compare [name]']
+  override options = ['use <name or signature>', 'here <name or signature>', 'here default', 'show [name]', 'edit [name]', 'import <json>', 'offer <name> @<host>', 'sync [@<host>]', 'try <name> <request>', 'compare [name]']
   override examples = [
     { input: '/harness', result: 'Lists the harnesses in the pool and which one runs' },
     { input: '/harness use quiet-reader', result: 'The device runs the agent loop under quiet-reader from now on' },
@@ -128,12 +128,15 @@ export class HarnessQueenBee extends QueenBee {
     }
 
     if (word === 'offer') {
-      if (!target) { toast(t('harness.usage.offer', 'Say which: harness offer <name> [@<host>]'), 'warning'); return }
+      if (!target) { toast(t('harness.usage.offer', 'Say which: harness offer <name> @<host>'), 'warning'); return }
       const found = harness.find(target)
       if (!found) { toast(t('harness.unknown', 'No harness called "{name}" in the pool.', { name: target }), 'warning'); return }
-      const host = zoneDoor(at || PUBLIC_CONTENT_HOSTS[0] || '')
-      const deps = host ? publishDeps() : null
-      if (!deps) { toast(t('harness.unoffered', '{name} was not offered: {reason}', { name: found.record.name, reason: host ? 'the store or the host service is not loaded' : 'no host is configured' }), 'warning'); return }
+      // Offered only to a host the participant names: there is no default
+      // host (jwize 2026-10-11). Sync still READS the public hosts below.
+      const host = zoneDoor(at)
+      if (!host) { toast(t('harness.nohost', '{name} was not offered: no host is named — say harness offer {name} @<host>.', { name: found.record.name }), 'warning'); return }
+      const deps = publishDeps()
+      if (!deps) { toast(t('harness.unoffered', '{name} was not offered: {reason}', { name: found.record.name, reason: 'the store or the host service is not loaded' }), 'warning'); return }
       const done = await publishHarness(host, found.record, deps)
       if (!done.ok) { toast(t('harness.unoffered', '{name} was not offered: {reason}', { name: found.record.name, reason: done.error }), 'warning'); return }
       toast(t('harness.offered', 'Offered {name} ({sig}) under your key to {host}; the host lists it once its operator says hosts list agent:harness, and anyone who syncs from there holds it until they choose it.', { name: found.record.name, sig: short(done.sig), host }), 'success')

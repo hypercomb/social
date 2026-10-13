@@ -86,3 +86,59 @@ describe('mesh.togglePublic asks a tab with no zone of its own (D5)', () => {
     expect(toggle()).toEqual([{ public: false }])
   })
 })
+
+describe('mesh.togglePublic needs a host (no default host, 2026-10-11)', () => {
+  const modals: unknown[] = []
+  EffectBus.on('mesh:open-modal', p => { if (p) modals.push(p) })
+  let ownPoint = ''
+  beforeEach(() => {
+    ownPoint = ''
+    modals.length = 0
+    // A current mesh: it says where a tab with no point of its own meets.
+    registry.set('@diamondcoreprocessor.com/NostrMeshDrone', { meetingRelay: () => ownPoint })
+  })
+
+  it('a zone of its own but no host anywhere: the selector on the host field — no join', () => {
+    expect(toggle()).toEqual([])
+    expect(modals).toEqual([{ join: true, focus: 'point' }])
+    expect(sessionStorage.getItem('hc:mesh-session')).toBeNull()
+  })
+
+  it("the tab's own point is a host: it joins", () => {
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'meeting', secret: 'downtown', relay: 'wss://hypercomb.com' }))
+    expect(toggle()).toEqual([{ public: true }])
+    expect(toggle()).toEqual([{ public: false }])
+  })
+
+  it("the relay the page's own list names (as chosen) is a host: it joins — and that host is pinned to this tab before the join is announced", () => {
+    ownPoint = 'wss://own.example'
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'meeting', secret: 'downtown', host: 'keeper.example', code: 'stray' }))
+    let zoneAtJoin: unknown = null
+    const off = EffectBus.on<{ public: boolean }>('mesh:public-changed', p => {
+      if (p?.public) zoneAtJoin = JSON.parse(sessionStorage.getItem('hc:mesh-zone') ?? 'null')
+    })
+    expect(toggle()).toEqual([{ public: true }])
+    off()
+    // A reload resumes at the host it joined at — never at whatever the
+    // origin-wide list (any tab's `/domain`) names by then. A code with no
+    // point was never offered, so it does not come along.
+    expect(zoneAtJoin).toEqual({ room: 'meeting', secret: 'downtown', host: 'keeper.example', relay: 'wss://own.example' })
+    ownPoint = 'wss://moved.example'
+    expect(toggle()).toEqual([{ public: false }])
+    expect(JSON.parse(sessionStorage.getItem('hc:mesh-zone')!).relay).toBe('wss://own.example')
+  })
+
+  it("a tab with a point of its own keeps it: the page's list never overwrites it", () => {
+    ownPoint = 'wss://own.example'
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'meeting', secret: 'downtown', relay: 'wss://point.example', code: 'k' }))
+    expect(toggle()).toEqual([{ public: true }])
+    expect(JSON.parse(sessionStorage.getItem('hc:mesh-zone')!)).toEqual({ room: 'meeting', secret: 'downtown', relay: 'wss://point.example', code: 'k' })
+    expect(toggle()).toEqual([{ public: false }])
+  })
+
+  it('leaving is never gated by it', () => {
+    sessionStorage.setItem('hc:mesh-session', 'true')
+    expect(toggle()).toEqual([{ public: false }])
+    registry.delete('@diamondcoreprocessor.com/NostrMeshDrone')
+  })
+})

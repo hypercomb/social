@@ -256,11 +256,15 @@ network attack surface.
 
 ### connection security
 
-- relay connections use `wss://` (tls). real (deployed) origins seed the live
-  bootstrap relay `wss://jwize.com` **by default** (since 2026-06-10); a public
-  origin must never dial loopback. local dev origins instead seed
-  `ws://localhost:7777`, which is loopback-only and a known dev/prod
-  port-collision hazard. plaintext `ws://` connections to loopback addresses
+- relay connections use `wss://` (tls). every origin seeds the live meeting
+  point **by default** — `wss://hypercomb.com` since 2026-10-11 (it was
+  `wss://jwize.com` from 2026-06-10), loopback dev origins too since
+  2026-10-12; a public origin must never dial loopback. the local dev relay
+  `ws://localhost:7777` is dialled only when chosen, and is a known dev/prod
+  port-collision hazard. a loopback page no longer pre-fills a room secret
+  (the old dev default was a word in the public source, and a room is its
+  meeting point + room + secret — at the public point that would be a
+  public room). plaintext `ws://` connections to loopback addresses
   (`localhost`, `127.0.0.1`, `::1`) are gated behind an explicit opt-in
   (`hc:nostrmesh:allow-loopback` in localstorage); relay selection can be
   overridden with `hc:nostrmesh:use-live-relay` / `hc:nostrmesh:relays`.

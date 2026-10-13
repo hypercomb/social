@@ -1,7 +1,7 @@
 // core/zone-text.spec.ts — one text, one zone (ZI-5).
 
 import { describe, expect, it } from 'vitest'
-import { canonicalZoneText } from './zone-text.js'
+import { SHIPPED_MEETING_POINT, canonicalZoneText, lifecyclePreimage, meetingPointKey, roomPreimage } from './zone-text.js'
 
 describe('canonicalZoneText', () => {
   it('folds what looks the same to one text', () => {
@@ -54,5 +54,89 @@ describe('canonicalZoneText', () => {
     expect(canonicalZoneText(null)).toBe('')
     expect(canonicalZoneText(5)).toBe('')
     expect(canonicalZoneText('   ')).toBe('')
+  })
+})
+
+// ── THE ROOM IS HOST + ROOM + SECRET (jwize, 2026-10-11/12) ────────────────
+describe("the room's preimage always names its host", () => {
+  it('hypercomb.com however it is written is one host — offered, never a default', () => {
+    expect(SHIPPED_MEETING_POINT).toBe('wss://hypercomb.com')
+    for (const p of ['hypercomb.com', 'wss://hypercomb.com', 'wss://HyperComb.com/', 'WSS://HYPERCOMB.COM', 'wss://hypercomb.com:443', 'https://hypercomb.com/', SHIPPED_MEETING_POINT]) {
+      expect([p, meetingPointKey(p)]).toEqual([p, 'hypercomb.com'])
+    }
+  })
+
+  it('NO HOST, NO ROOM: an empty field, or one that is no address, names no host — never a default', () => {
+    for (const p of ['', '   ', undefined, null, 42, 'wss://', 'not a host at all']) {
+      expect([p, meetingPointKey(p)]).toEqual([p, ''])
+      expect([p, roomPreimage('downtown', 'rose', p)]).toEqual([p, ''])
+      expect([p, lifecyclePreimage('downtown', 'rose', p)]).toEqual([p, ''])
+    }
+  })
+
+  it('a point is its lowercase host[:port], however it is written', () => {
+    expect(meetingPointKey('wss://Point.Example/relay')).toBe('point.example')
+    expect(meetingPointKey('point.example')).toBe('point.example')
+    expect(meetingPointKey('ws://localhost:7777')).toBe('localhost:7777')
+    expect(meetingPointKey('localhost:7777')).toBe('localhost:7777')
+    expect(meetingPointKey('ws://127.0.0.1:7801')).toBe('127.0.0.1:7801')
+    expect(meetingPointKey('ws://localhost:7801')).not.toBe(meetingPointKey('ws://localhost:7802'))
+  })
+
+  it('room, secret and host — the host always included', () => {
+    expect(roomPreimage('downtown', 'rose', 'hypercomb.com')).toBe('downtown\u0000rose\u0000hypercomb.com')
+    expect(roomPreimage('downtown', 'rose', 'wss://jwize.com')).toBe('downtown\u0000rose\u0000jwize.com')
+    expect(lifecyclePreimage('downtown', 'rose', 'wss://hypercomb.com')).toBe('lifecycle\u0000downtown\u0000rose\u0000hypercomb.com')
+    // the preimage from before the host was part of it is no room any more
+    expect(lifecyclePreimage('downtown', 'rose', 'wss://hypercomb.com')).not.toBe('lifecycle\u0000downtown\u0000rose')
+  })
+
+  it('same host + room + secret is one preimage; another host is another room', () => {
+    const H = 'wss://hypercomb.com'
+    expect(roomPreimage('a', 'b', 'wss://HyperComb.com/')).toBe(roomPreimage('a', 'b', H))
+    expect(roomPreimage('a', 'b', 'wss://pluginthematrix.com')).not.toBe(roomPreimage('a', 'b', H))
+    // case splits nothing (2026-10-12: "case ignore or it would be confusing")
+    expect(roomPreimage('A', 'B', H)).toBe(roomPreimage('a', 'b', H))
+  })
+
+  it('two names for one physical relay are two rooms, on purpose (2026-10-11: localhost:7777 and jwize.com on one PC)', () => {
+    expect(lifecyclePreimage('a', 'b', 'ws://localhost:7777')).not.toBe(lifecyclePreimage('a', 'b', 'wss://jwize.com'))
+    expect(lifecyclePreimage('a', 'b', 'ws://localhost:7777')).not.toBe(lifecyclePreimage('a', 'b', 'ws://127.0.0.1:7777'))
+  })
+})
+
+// GOLDEN VECTORS — DETERMINISTIC FOR EVERYONE (jwize, 2026-10-12: "It has to
+// be deterministic for everyone"; "case ignore or it would be confusing").
+// The words every device shows for one host + location + secret. A future
+// package that changes any of these splits every room — that is a protocol
+// change, never a refactor. Frozen; never edit a row to make a test pass.
+describe('the room words are the same for everyone, for ever', async () => {
+  const { secretTag } = await import('./secret-words/index.js')
+  const words = (room: string, secret: string, host: string): string => {
+    const preimage = lifecyclePreimage(room, secret, host)
+    return preimage ? secretTag(preimage, 'en') : ''
+  }
+  const GOLDEN: [room: string, secret: string, host: string, words: string][] = [
+    ['downtown', 'downtown', 'hypercomb.com', 'marble cove'],
+    ['DownTown', 'DOWNTOWN', 'wss://HyperComb.com/', 'marble cove'],
+    ['downtown', 'downtown', 'hypercomb.com:443', 'marble cove'],
+    ['MyNewRoom', 'MyNewPass', 'hypercomb.com', 'narrow granite'],
+    ['İstanbul', 'ıI', 'hypercomb.com', 'solid moth'],
+    ['downtown', 'downtown', 'ws://localhost:7777', 'faint dew'],
+    ['downtown', 'downtown', '', ''],
+  ]
+  for (const [room, secret, host, expected] of GOLDEN) {
+    it(`${JSON.stringify([room, secret, host])} → ${JSON.stringify(expected)}`, () => {
+      expect(words(room, secret, host)).toBe(expected)
+    })
+  }
+  it('case never splits a room: location and secret fold; the host folds as a host does', () => {
+    expect(roomPreimage('MyNewRoom', 'MyNewPass', 'HyperComb.com')).toBe(roomPreimage('mynewroom', 'mynewpass', 'hypercomb.com'))
+  })
+  it('the fold is locale-independent: a Turkish dotted capital I folds the same under every locale', () => {
+    expect(lifecyclePreimage('İ', 'I', 'h.example')).toBe(`lifecycle\0${'İ'.toLowerCase()}\0i\0h.example`)
+  })
+  it('punctuation is kept — a room and a secret are not pools of meaning', () => {
+    expect(roomPreimage('p@ss', 'a-b', 'h.example')).not.toBe(roomPreimage('p ss', 'a b', 'h.example'))
   })
 })

@@ -1760,20 +1760,97 @@ describe('doctrine ratchets', () => {
     assertRatchet(actual.sort(), [], 'a shipped default naming jwize.com')
   })
 
-  it('the shipped meeting point, the room words\' shipped point and the hosts pool seed are one host', () => {
+  it('the shipped meeting point, the room words\' shipped point and the read floor are one host', () => {
     // The default relay (nostr-mesh LIVE_RELAY), the point the comparison
     // words treat as "the default" (D4, presence-status SHIPPED_POINT) and the
-    // upload host a fresh install's pool is seeded with (HostsDrone SEED_HOST,
-    // the shell's DEFAULT_HOST_ZONES) must move together: a default relay the
-    // words do not know changes every default room's pair, and a relay tier
-    // that is not the pool's host splits one meeting's bytes over two hosts.
+    // host a cold install READS from (the shell's DEFAULT_HOST_ZONES) must
+    // move together: a default relay the words do not know changes every
+    // default room's pair. None of them is an upload host (the ratchet below).
+    // The package floor's MEETING_POINT too: a package whose bytes do not name
+    // it is moved, so a default that moved without it would move every current
+    // package as if it were old.
     const literal = (file: string, re: RegExp): string => re.exec(readFileSync(join(ROOT, file), 'utf8'))?.[1] ?? ''
     const relay = literal('hypercomb-essentials/src/sharing/nostr-mesh.drone.ts', /^const LIVE_RELAY = '([^']+)'/m)
     expect(relay).toBe('wss://hypercomb.com')
+    expect(literal('hypercomb-web/src/setup/package-floor.ts', /^export const MEETING_POINT = '([^']+)'/m)).toBe(relay)
     const host = new URL(relay).host
     expect(literal('hypercomb-shared/ui/presence-banner/presence-status.ts', /^export const SHIPPED_POINT = '([^']+)'/m)).toBe(host)
-    expect(literal('hypercomb-essentials/src/sharing/hosts.drone.ts', /^const SEED_HOST = '([^']+)'/m)).toBe(host)
     expect(literal('hypercomb-runtime/src/host-zones.ts', /^export const DEFAULT_HOST_ZONES: readonly string\[\] = \['([^']+)'\]/m)).toBe(host)
   })
 
+  it('no shipped default upload host — nothing seeds a hosts pool, and the swarm uploads only where the participant named', () => {
+    // jwize 2026-10-11: "we can't give hosting away for free"; "Let's just
+    // make sure that there isn't a default host"; "the source of truth is the
+    // host field". A swarm's bytes go to the page's publish marks, else the
+    // host field (the meeting point the participant entered), else nowhere —
+    // and a READ host (DEFAULT_HOST_ZONES, the update scout, example hives)
+    // is never a place anyone's bytes are written. The allowlist is empty and
+    // stays empty.
+    const read = (file: string): string => readFileSync(join(ROOT, file), 'utf8')
+    // 1. Nothing plants a host in the hosts pool on its own: no shipped
+    //    source names a seed, or adds a host it was not given.
+    const seeds: string[] = []
+    const seed = /\bSEED_HOST\b|\b(?:addCommunityHost|addHostZone)\(\s*['"`]/
+    for (const dir of SCAN_DIRS) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) if (seed.test(stripComments(readFileSync(file, 'utf8')))) seeds.push(relative(ROOT, file).replace(/\\/g, '/'))
+    }
+    assertRatchet(seeds.sort(), [], 'a shipped seed host')
+    // 2. The resolver reads only what the participant named: a branch's
+    //    publish marks and the host field — never the hosts pool, never the
+    //    meeting point's card, never a host of its own.
+    const resolver = stripComments(read('hypercomb-essentials/src/sharing/swarm-hosts.ts'))
+    expect(resolver).not.toMatch(/listCommunityHosts|COMMUNITY_HOSTS_POOL|community:hosts|readPool|relayParticipants|HOSTS_SEEDED_KEY|hc:hosts:seeded/)
+    expect(resolver).not.toMatch(/['"`][a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?['"`]/)
+    // 3. A meeting point's card offers no one's bytes a home: packages from
+    //    before 2026-10-11 read PARTICIPANTS as an upload tier.
+    for (const toml of ['hypercomb-relay/meet-worker/wrangler.meet-open.toml', 'hypercomb-relay/meet-worker/wrangler.meet.toml']) {
+      const participants = /^PARTICIPANTS\s*=\s*"([^"]*)"/m.exec(read(toml))?.[1] ?? ''
+      expect(['all', 'zones'], toml).not.toContain(participants.trim().toLowerCase())
+    }
+  })
+
+  it('no side word writes to a host nobody named — the public host is the participant\'s, and the public content host is READ only', () => {
+    // jwize 2026-10-11: "make sure that there isn't a default host";
+    // hypercomb.com "is for testing purposes and may be retired". profile,
+    // features, harness offer, language offer/missing, module's publishing
+    // words, arrival, vocabulary and the publish panel used to fall back to
+    // the compiled public content host (or a standing pluginthematrix.com)
+    // when the participant named none, so a word with no host wrote to one
+    // nobody chose. Now: the host the word names, else the public host the
+    // participant NAMED, else the word refuses and asks for @<host>.
+    const read = (file: string): string => readFileSync(join(ROOT, file), 'utf8')
+    // 1. The participant's public host has no default.
+    expect(/^const DEFAULT_PUBLIC_HOST_DOMAIN = '([^']*)'/m.exec(read('hypercomb-essentials/src/sharing/host-sync.service.ts'))?.[1]).toBe('')
+    // 2. `PUBLIC_CONTENT_HOSTS[0]` — the one compiled host — stays only where
+    //    it is READ (a profile show, a module word that only reads a sandbox,
+    //    the publish panel's read door) or where the plan left it on purpose
+    //    (the domain claim request; the operator's own deploy stamp). This
+    //    list may only shrink.
+    const actual: string[] = []
+    for (const dir of SCAN_DIRS) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) if (/PUBLIC_CONTENT_HOSTS\[0\]/.test(stripComments(readFileSync(file, 'utf8')))) actual.push(relative(ROOT, file).replace(/\\/g, '/'))
+    }
+    assertRatchet(actual.sort(), [
+      'hypercomb-essentials/src/assistant/claude-bridge.worker.ts',
+      'hypercomb-essentials/src/assistant/module.queen.ts',
+      'hypercomb-essentials/src/commands/domain.queen.ts',
+      'hypercomb-essentials/src/sharing/profile.queen.ts',
+      'hypercomb-essentials/src/sharing/publish-status.drone.ts',
+    ], 'the compiled public content host used outside a read')
+  })
+
+})
+
+describe('the no-default-host mark is one string in two places', () => {
+  it('the mesh and the package floor carry the same mark', () => {
+    const read = (p: string): string => readFileSync(join(ROOT, p), "utf8")
+    const pick = (text: string): string => (/NO_DEFAULT_HOST_MARK = '([^']+)'/.exec(text) ?? [])[1] ?? ''
+    const mesh = pick(read('hypercomb-essentials/src/sharing/nostr-mesh.drone.ts'))
+    expect(mesh).toBeTruthy()
+    expect(pick(read('hypercomb-web/src/setup/package-floor.ts'))).toBe(mesh)
+  })
 })

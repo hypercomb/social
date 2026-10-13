@@ -37,7 +37,7 @@
 // (command history, on this device), and the code may live only in this tab's
 // session and in the link. A code typed after `code` is refused, and named so.
 
-import { EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, get, I18N_IOC_KEY, meetingPointKey, type I18nProvider } from '@hypercomb/core'
 import { deliverLink } from './deliver-link.js'
 import {
   MEETING_INVITE_KIND,
@@ -53,6 +53,7 @@ import {
   type MeetingInviteBundle,
 } from './meeting-invite.js'
 import { isJoinedHere, readTabZone } from './membership.js'
+import { publishSwarmLink, swarmLinkText } from './swarm-link.js'
 import { writeDecoration } from '../commands/decoration-manifest.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
@@ -61,6 +62,7 @@ const SECRET_KEY = '@hypercomb.social/SecretStore'
 const NAV_KEY = '@hypercomb.social/Navigation'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
+const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
 const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
@@ -70,6 +72,7 @@ interface CredStoreLike { value: string }
 interface NavLike { segments: () => string[] }
 interface SelectionLike { selected: ReadonlySet<string> }
 interface SwarmLike { currentSegments?: () => readonly string[] }
+interface MeshPointLike { meetingRelay?: () => string }
 interface LineageLike { explorerSegments?: () => readonly string[] }
 interface HostSyncLike {
   isEnabled?: () => boolean
@@ -261,6 +264,21 @@ export class InviteQueenBee {
    *  this tab's meeting point (relay, host, code) when it has one, so the
    *  room meets where the facilitator meets. The toasts and the log name the
    *  meeting point, never the code. */
+  /** The signed swarm link for this login, or '' — then the caller hands out
+   *  the #meet= link. Never for a loopback host (no guest reaches it). */
+  #signedLink = async (room: string, secret: string, relay: string, code: string | undefined, page: readonly string[]): Promise<string> => {
+    const host = meetingPointKey(relay)
+    if (!host) return ''
+    try { if (/^(?:(?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[::1\])$/i.test(new URL(relay).hostname)) return '' } catch { return '' }
+    const hostSync = get<{ putOne?: (host: string, sig: string, bytes: Uint8Array) => Promise<{ ok: true } | { ok: false; reason: 'refused' | 'unreachable' }> }>(HOST_SYNC_KEY)
+    if (typeof hostSync?.putOne !== 'function') return ''
+    const login = { host, location: room, secret, ...(code ? { code } : {}), ...(page.length ? { page: [...page] } : {}) }
+    try {
+      const r = await publishSwarmLink(login, ({ host: at, sig, bytes }) => hostSync.putOne!(at, sig, bytes))
+      return r.ok ? swarmLinkText(window.location.origin, r.parts) : ''
+    } catch { return '' }
+  }
+
   #deliverMeetingLink = async (room: string, secret: string, nav: NavLike): Promise<void> => {
     let segs: readonly string[] | undefined
     if (isJoinedHere()) {
@@ -269,7 +287,20 @@ export class InviteQueenBee {
     if (!Array.isArray(segs)) segs = get<LineageLike>(LINEAGE_KEY)?.explorerSegments?.() ?? nav.segments()
     const segments = segs.map(s => String(s ?? '').trim()).filter(s => s.length > 0)
     const zone = readTabZone()
-    const relay = meetingRelayOf(zone?.relay)
+    let relay = meetingRelayOf(zone?.relay)
+    // A TAB THAT MEETS ON ITS OWN LIST (no point in its zone — a relay list
+    // the page chose) names that point too — ALWAYS, hypercomb.com included:
+    // there is no default host (2026-10-11), so a link without one would land
+    // a guest wherever THEIR package meets (an older one at its own old
+    // default), and another host is another room (core roomPreimage). Never
+    // a loopback one — no guest's device can reach it.
+    if (!relay) {
+      let own = ''
+      try { own = meetingRelayOf(get<MeshPointLike>(MESH_KEY)?.meetingRelay?.() ?? '') } catch { own = '' }
+      let loopback = true
+      try { loopback = /^(?:(?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[::1\])$/i.test(new URL(own).hostname) } catch { /* no point */ }
+      if (own && !loopback && meetingPointKey(own)) relay = own
+    }
     const fragment = meetFragment(room, secret, segments, { relay, host: zone?.host, code: zone?.code })
     // A LINK NOBODY CAN OPEN IS NEVER HANDED OUT. It is read back here the
     // way every guest will read it; a page that cannot travel in it (a name
@@ -281,7 +312,15 @@ export class InviteQueenBee {
         'A meeting link to this page would not open for anyone — a page name on the way here is too long or holds a slash. Invite from a page higher up.'))
       return
     }
-    const url = `${window.location.origin}/${fragment}`
+    // THE SIGNED SWARM LINK (jwize, 2026-10-12: "we host the payload and give
+    // the link with a signature" … "then the swarm login is retrieved"): the
+    // login — host, location, secret, code, page — sealed under a fresh key,
+    // put on the meeting host by its signature, and handed out as
+    // #swarm=<sig>@<host>~<key>. The host holds ciphertext only; the key rides
+    // the fragment, which no server sees. A host that will not take it (not
+    // yours, not a friend's) leaves the plain #meet= link, as before.
+    const signed = await this.#signedLink(room, secret, relay, zone?.code, segments)
+    const url = signed || `${window.location.origin}/${fragment}`
     const point = relay.replace(/^wss?:\/\//, '')
 
     const delivery = await deliverLink(url, 'Hypercomb meeting')

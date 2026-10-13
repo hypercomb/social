@@ -9,7 +9,11 @@
 //
 // ADDRESSING — room+secret scoped, one rendezvous for the participant:
 //
-//   clientsChannel = sha256("hc:clients\0" + room + "\0" + secret)
+//   clientsChannel = sha256("hc:clients\0" + room + "\0" + secret + "\0" + point)
+//
+// — core roomPreimage: the meeting point the tab meets at is part of the
+// room (2026-10-12), so the same pair at another point is another room and
+// another rendezvous. Re-derived when the room, the secret or the point moves.
 //
 // Every install of the same participant computes the same channel with no
 // exchange; each publishes a NIP-33 replaceable record (d = "c:"+clientId,
@@ -24,7 +28,7 @@
 // KIND 30207 — MUST stay in SwarmDrone.configureKinds() or the relay filter
 // drops it (same rule as the whole FEEDBACK_* family).
 
-import { Drone, EffectBus, SignatureService, getClientIdentity } from '@hypercomb/core'
+import { Drone, EffectBus, SignatureService, getClientIdentity, roomPreimage } from '@hypercomb/core'
 
 export const CLIENT_PRESENCE_KIND = 30207
 
@@ -49,6 +53,8 @@ type MeshSub = { close: () => void }
 interface MeshLike {
   publish: (kind: number, sig: string, payload: unknown, extraTags?: string[][]) => Promise<boolean>
   subscribe: (sig: string, cb: (e: MeshEvt) => void, opts?: { sinceSec?: number | null }) => MeshSub
+  /** The meeting point this tab meets at (host[:port]); '' = the default. */
+  swarmHost?: () => string
 }
 interface ValueLike { value: string }
 
@@ -74,12 +80,16 @@ export class ClientPresenceDrone extends Drone {
   public override description =
     'Announces this client install (id, name, platform, installed package sig) on the participant\'s room+secret-scoped relay channel and aggregates every install\'s announcement into a local roster, so any one client — and DCP via the portal handoff — can list all of them.'
 
-  protected override listens: string[] = []
+  protected override listens: string[] = ['mesh:room', 'mesh:secret', 'mesh:zone']
   protected override emits: string[] = ['clients:roster']
 
   #initialized = false
   #sub: MeshSub | null = null
   #timer: ReturnType<typeof setInterval> | null = null
+  /** The channel the subscription and the announce timer are on. */
+  #channel = ''
+  /** Bumped on every re-derivation: an older one still signing gives way. */
+  #generation = 0
 
   protected override sense = () => true
   protected override heartbeat = async (): Promise<void> => {
@@ -88,25 +98,44 @@ export class ClientPresenceDrone extends Drone {
 
     const reg = (window as { ioc?: { whenReady?: (key: string, cb: (v: unknown) => void) => void } }).ioc
     reg?.whenReady?.(MESH_KEY, () => void this.#ensureStarted())
+    // The room, the secret or the meeting point moved: another rendezvous.
+    // After the writer's turn, so the stores and the zone are already written.
+    const again = (): void => { queueMicrotask(() => { void this.#ensureStarted() }) }
+    this.onEffect('mesh:room', again)
+    this.onEffect('mesh:secret', again)
+    this.onEffect('mesh:zone', again)
     await this.#ensureStarted()
   }
 
-  /** The participant's clients rendezvous — '' without a room/secret pair. */
+  /** The participant's clients rendezvous — '' without a room/secret pair.
+   *  The room as every address names it (core roomPreimage): room, secret
+   *  and the meeting point the tab meets at. */
   static async channel(): Promise<string> {
     const room = (ioc()?.get<ValueLike>(ROOM_KEY)?.value ?? '').trim()
     const secret = (ioc()?.get<ValueLike>(SECRET_KEY)?.value ?? '').trim()
     if (!room || !secret) return ''
-    return SignatureService.sign(enc.encode(`hc:clients\0${room}\0${secret}`).buffer as ArrayBuffer)
+    let point = ''
+    try { point = String(ioc()?.get<MeshLike>(MESH_KEY)?.swarmHost?.() ?? '') } catch { /* no host */ }
+    // No host named: no room, so no rendezvous (there is no default host).
+    const tail = roomPreimage(room, secret, point)
+    if (!tail) return ''
+    return SignatureService.sign(enc.encode(`hc:clients\0${tail}`).buffer as ArrayBuffer)
   }
 
   readonly #ensureStarted = async (): Promise<void> => {
-    if (this.#sub) return
     const mesh = ioc()?.get<MeshLike>(MESH_KEY)
     if (!mesh?.subscribe || !mesh.publish) return   // whenReady retries
+    const generation = ++this.#generation
     const channel = await ClientPresenceDrone.channel()
+    if (generation !== this.#generation) return
     // Always seed the roster with SELF, channel or not — the portal handoff
     // reads the roster, and a solo participant still has one client.
     this.#upsert(this.#selfRecord())
+    if (channel === this.#channel && (this.#sub || !channel)) return
+    this.#sub?.close()
+    this.#sub = null
+    if (this.#timer) { clearInterval(this.#timer); this.#timer = null }
+    this.#channel = channel
     if (!channel) return
 
     // Full-TTL replay: announcements published while this browser was closed

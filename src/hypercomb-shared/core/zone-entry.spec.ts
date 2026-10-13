@@ -10,8 +10,9 @@
 //         land in ONE zone. Plain ASCII zones hash exactly as before.
 //   ZI-7  business-card.jwize.com seeded room = secret = 'business-card':
 //         every visitor of every such host shared one zone whose "secret"
-//         sat in the address bar. The secret is never seeded from a host,
-//         and the room only on an explicit zone host.
+//         sat in the address bar. Neither is ever seeded from the page's
+//         address — not even the room on a zone host's subdomain (jwize,
+//         2026-10-11: the page's own domain is never part of a room).
 //   ZI-1  a new tab's selector is pre-filled with the pair of the last
 //         meeting on this origin but not its meeting point, so a rejoin
 //         from the selector silently met on the default relay. The point
@@ -26,7 +27,10 @@ const services = new Map<string, unknown>()
 ;(window as unknown as { ioc: unknown }).ioc = { get: (k: string) => services.get(k) }
 ;(globalThis as { register?: unknown }).register = (k: string, v: unknown) => { services.set(k, v) }
 
-/** The swarm's zone address prefix: sha256(`lifecycle\0room\0secret`). */
+/** What the room and secret put into the swarm's zone address — compared
+ *  across entry paths that share one meeting point. The address itself also
+ *  names the point (core lifecyclePreimage, 2026-10-12), which no entry path
+ *  here moves. */
 const x = (room: string, secret: string): string =>
   createHash('sha256').update(`lifecycle\0${room}\0${secret}`, 'utf8').digest('hex').slice(0, 12)
 
@@ -179,12 +183,13 @@ describe('ZI-7 — no zone from an address bar', () => {
     }
   })
 
-  it('a zone host seeds the ROOM only — the secret stays empty, so join asks', async () => {
+  it("a zone host's subdomain seeds nothing either — the page's address is never part of a room (2026-10-11)", async () => {
     const restore = atHost('myroom.hypercomb.io')
     try {
       const tab = await newTab()
-      expect(tab.room.value).toBe('myroom')
+      expect(tab.room.value).toBe('')
       expect(tab.secret.value).toBe('')
+      expect(localStorage.getItem('hc:room')).toBeNull()
       expect(localStorage.getItem('hc:secret')).toBeNull()
     } finally { restore() }
   })
@@ -240,7 +245,8 @@ describe('ZI-1 — a new tab is pre-filled with the meeting point too (never its
   it('the boot re-announcement of a RESUMED join moves no pre-fill — a reload is not a join', async () => {
     // Another tab's meeting left its point as the pre-fill…
     seedMeetPoint('wss://pluginthematrix.com')
-    // …and this tab, joined at the default relay, reloads.
+    // …and this tab, joined at the default relay under this shell, reloads.
+    sessionStorage.setItem('hc:mesh-point-crossing', '1')
     sessionStorage.setItem('hc:mesh-session', 'true')
     sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'hive2', secret: 'x' }))
     const tab = await newTab()

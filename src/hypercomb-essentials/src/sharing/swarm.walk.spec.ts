@@ -22,7 +22,7 @@
 
 import { createHash } from 'node:crypto'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { EffectBus, lineageKey } from '@hypercomb/core'
+import { EffectBus, lineageKey, roomPreimage } from '@hypercomb/core'
 
 vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
 
@@ -157,8 +157,8 @@ const seedPage = (segments: string[], names: string[], publicNames: readonly str
   for (const n of names) nameByChildSig.set(childSig(page, n), n)
   for (const n of publicNames) state.public.add(`/${page}|${n}`)
 }
-const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${ROOM}\0${SECRET}`)
-const CHANNEL = sha(`channel:${ME}\0${ROOM}\0${SECRET}`)
+const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${roomPreimage(ROOM, SECRET, 'pluginthematrix.com')}`)
+const CHANNEL = sha(`channel:${ME}\0${roomPreimage(ROOM, SECRET, 'pluginthematrix.com')}`)
 const layerAt = (segments: readonly string[]): Published[] =>
   published.filter(p => p.kind === 30200 && p.sig === pageSig(segments))
 const namesOf = (p: Published): string[] => (p.payload.visuals ?? []).map(v => String(v['name'])).sort()
@@ -180,8 +180,11 @@ const swarm = registry['@diamondcoreprocessor.com/SwarmDrone'] as {
 }
 afterAll(() => { swarm.markDisposed(); vi.useRealTimers() })
 
-describe('the page speaks first; slow work only upgrades it', () => {
-  it('the first page event leaves at ENTRY_WAIT_MS scale with every public name — names only, none takeable', async () => {
+// The live swarm (jwize 2026-10-11): while this tab is joined it is its
+// tiles' owner in the room — the first page event carries every public tile
+// WHOLE, served from this device; a host's answer only turns them hosted.
+describe('the page speaks first, whole; a host only turns it hosted', () => {
+  it('the first page event leaves at ENTRY_WAIT_MS scale with every public tile whole — takeable, served from here', async () => {
     await tick(1_000)
     const root = layerAt([])
     expect(root.length).toBeGreaterThan(0)
@@ -189,9 +192,9 @@ describe('the page speaks first; slow work only upgrades it', () => {
     expect(first.at - BOOT).toBeLessThan(1_000)
     expect(namesOf(first)).toEqual([...PUBLIC].sort())
     for (const v of first.payload.visuals!) {
-      expect(v['layerSig']).toBeUndefined()
-      expect(HEX64.test(JSON.stringify(v))).toBe(false)
-      expect(v['accent']).toBe('amber')            // inert props ride the name
+      expect(HEX64.test(String(v['layerSig']))).toBe(true)
+      expect(v['served']).toBe('owner')
+      expect(v['accent']).toBe('amber')
     }
     // Presence went out beside it.
     expect(published.some(p => p.kind === 30204 && p.at - BOOT < 1_000)).toBe(true)
@@ -214,8 +217,8 @@ describe('the page speaks first; slow work only upgrades it', () => {
     }
     const root = d.walks['/']
     expect(root).toBeTruthy()
-    expect(root.placeholder).toBe(PUBLIC.length)
-    expect(root.full).toBe(0)
+    expect(root.placeholder).toBe(0)
+    expect(root.full).toBe(PUBLIC.length)
     expect(root.private).toBe(PRIVATE.length)
     expect(root.endedAtMs).toBeGreaterThanOrEqual(root.startedAtMs)
     expect(d.firstAnnounce).toBeTruthy()
@@ -225,10 +228,10 @@ describe('the page speaks first; slow work only upgrades it', () => {
     expect(JSON.stringify(d)).not.toContain(SECRET + '\u0000')
   })
 
-  it('when the verdict lands, the page re-walks to full entries at once — not on the next heartbeat', async () => {
-    // The 30 s heartbeat walks while the host is still verifying: still names.
+  it('when the verdict lands, the page re-walks to hosted entries at once — not on the next heartbeat', async () => {
+    // The 30 s heartbeat walks while the host is still verifying: whole, from here.
     await tick(30_500 - (Date.now() - BOOT))
-    for (const p of layerAt([])) for (const v of p.payload.visuals!) expect(v['layerSig']).toBeUndefined()
+    for (const p of layerAt([])) for (const v of p.payload.visuals!) expect(v['served']).toBe('owner')
     // The host serves them at 32 s.
     await tick(state.servedAtMs + 1_000 - Date.now())
     const last = layerAt([]).at(-1)!
@@ -236,17 +239,16 @@ describe('the page speaks first; slow work only upgrades it', () => {
     expect(last.at - state.servedAtMs).toBeLessThan(1_000)
     expect(namesOf(last)).toEqual([...PUBLIC].sort())
     for (const name of PUBLIC) expect(visual(last, name)['layerSig']).toBe(sealOf(name))
+    for (const name of PUBLIC) expect(visual(last, name)['served']).toBeUndefined()
     // The personal channel follows the page up — not on the next heartbeat.
     const channel = published.filter(p => p.kind === 30200 && p.sig === CHANNEL)
     expect(channel.length).toBeGreaterThan(0)
     expect(channel[0].at - BOOT).toBeLessThan(1_000)
-    for (const p of channel.filter(c => c.at < state.servedAtMs)) {
-      for (const v of p.payload.visuals!) expect(v['layerSig']).toBeUndefined()
+    // Takeable from its first event: no name to upgrade, so nothing waits on
+    // the host's answer to say it again.
+    for (const p of channel) {
+      for (const v of p.payload.visuals!) expect(HEX64.test(String(v['layerSig']))).toBe(true)
     }
-    const upgraded = channel.find(p => p.at >= state.servedAtMs)!
-    expect(upgraded).toBeTruthy()
-    expect(upgraded.at - state.servedAtMs).toBeLessThan(1_000)
-    for (const name of PUBLIC) expect(visual(upgraded, name)['layerSig']).toBe(sealOf(name))
     // Asked once per question while it was uploading — the walks that ran
     // meanwhile joined the question in flight instead of stacking new ones.
     for (const name of PUBLIC) {
@@ -257,7 +259,7 @@ describe('the page speaks first; slow work only upgrades it', () => {
     }
   })
 
-  it('a public branch whose seal is slow goes out by name now, and with its handle when the seal lands', async () => {
+  it('a public branch whose seal is slow goes out whole now on its raw handle, and with its seal when the seal lands', async () => {
     seedPage(['arcade'], ['huge', 'small'])
     state.sealDelayMs.set('arcade/huge', 10_000)
     const t0 = Date.now()
@@ -268,7 +270,8 @@ describe('the page speaks first; slow work only upgrades it', () => {
     expect(first.at - t0).toBeLessThan(1_000)
     expect(namesOf(first)).toEqual(['huge', 'small'])
     expect(visual(first, 'small')['layerSig']).toBe(sealOf('arcade/small'))   // served: full
-    expect(visual(first, 'huge')['layerSig']).toBeUndefined()                // its seal is still running
+    // Its seal is still running: takeable on its raw handle meanwhile.
+    expect(HEX64.test(String(visual(first, 'huge')['layerSig']))).toBe(true)
     await tick(10_000)
     const last = layerAt(['arcade']).at(-1)!
     expect(last.at - t0).toBeLessThan(11_500)

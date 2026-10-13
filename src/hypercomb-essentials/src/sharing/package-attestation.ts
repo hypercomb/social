@@ -48,6 +48,10 @@ export type AttestDeps = {
    *  through readInstallFollow. Pass null to follow nobody. */
   publisher?: unknown
   fetchIndex?: typeof fetchHiveIndex
+  /** Read the index even for a witnessed root. A witness says the root WAS
+   *  named once, never that it is named now — a caller asking what the
+   *  publisher names NOW (the hosts window) passes this. */
+  fresh?: boolean
 }
 
 /** Every root a followed key has been seen to name. Unreadable = nothing. */
@@ -93,7 +97,7 @@ export const attestPackage = async (
   if (!follow) return { ok: false, reason: 'no-follow' }
 
   // A witnessed root answers without a fetch — under the key followed NOW.
-  if (readWitnessed(storage)[sig] === follow.pubkey) return { ok: true, pubkey: follow.pubkey, witnessed: 'held' }
+  if (!deps.fresh && readWitnessed(storage)[sig] === follow.pubkey) return { ok: true, pubkey: follow.pubkey, witnessed: 'held' }
 
   const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
   let forged = false

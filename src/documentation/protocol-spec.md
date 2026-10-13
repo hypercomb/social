@@ -25,8 +25,8 @@ Client ──── wss:// ────► Relay (stateless)
 
 - Relays follow the Nostr relay protocol (NIP-01).
 - Relays store nothing long-term. They forward frames and serve recent events per standard Nostr behavior.
-- The client maintains a configurable relay list. **Default (since 2026-06-10): real hosts seed the shared bootstrap relay `wss://jwize.com` by default** — a deployed origin must never dial loopback (nothing listens on a visitor's machine, and a public origin touching localhost trips Chrome's Local Network Access prompt). Only **local dev origins** seed `ws://localhost:7777` (loopback-only, gated behind `hc:nostrmesh:allow-loopback`), which is a known dev/prod port-collision hazard.
-- `localStorage['hc:nostrmesh:use-live-relay'] = '1'` forces `wss://jwize.com` on any origin; `'0'` opts a real host out (it then idles rather than dialing loopback).
+- The client maintains a configurable relay list. **Default: EVERY origin seeds the shared meeting point** — `wss://hypercomb.com` since 2026-10-11 (the open, always-online point; it was `wss://jwize.com` from 2026-06-10), and since 2026-10-12 loopback dev origins too (the meeting point is part of a room's identity — `swarm-room-identity.md`). A deployed origin must never dial loopback (nothing listens on a visitor's machine, and a public origin touching localhost trips Chrome's Local Network Access prompt). The local dev relay `ws://localhost:7777` is dialled only when chosen (a relay list, a meeting point, a server named to `/use-live-relay`); it is a known dev/prod port-collision hazard.
+- `localStorage['hc:nostrmesh:use-live-relay'] = '1'` forces the live relay on any origin; `'0'` opts the page out (it then idles rather than dialing loopback).
 - Configuration key: `localStorage['hc:nostrmesh:relays']` (JSON array of `wss://` URLs) overrides the seed entirely.
 
 ### 2.2 Connection Management
@@ -642,8 +642,8 @@ Lookup resolves by exact signature first, then by name alias.
 
 | Key                              | Type          | Default                      | Description                        |
 |----------------------------------|---------------|------------------------------|------------------------------------|
-| `hc:nostrmesh:relays`            | JSON string[] | seeded per origin: `["wss://jwize.com"]` on real hosts, `["ws://localhost:7777"]` on local dev origins | Nostr relay endpoints (override wins) |
-| `hc:nostrmesh:use-live-relay`    | `"0"\|"1"`    | (unset → origin default) | `"1"` forces `wss://jwize.com` on any origin; `"0"` opts a real host out (idles, no loopback) |
+| `hc:nostrmesh:relays`            | JSON string[] | unset → `["wss://hypercomb.com"]` on every origin (loopback too, since 2026-10-12) | Nostr relay endpoints (override wins) |
+| `hc:nostrmesh:use-live-relay`    | `"0"\|"1"`    | (unset → the live relay) | `"1"` forces `wss://hypercomb.com` on any origin; `"0"` opts the page out (idles, no loopback) |
 | `hc:nostrmesh:kinds`             | JSON int[]    | `[29010]`                    | Accepted event kinds               |
 | `hc:nostrmesh:debug`             | `"0"\|"1"`    | `"0"`                        | Debug logging                      |
 | `hc:nostrmesh:allow-loopback`    | `"0"\|"1"`    | `"0"`                        | Allow localhost relay connections   |

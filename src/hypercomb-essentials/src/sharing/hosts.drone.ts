@@ -31,7 +31,6 @@
 
 import { Drone, isWindowShowing } from '@hypercomb/core'
 import {
-  HOSTS_SEEDED_KEY,
   addCommunityHost,
   hostZone,
   listCommunityHosts,
@@ -73,37 +72,25 @@ const reopening = (): boolean => {
   try { return !!sessionStorage.getItem(REOPEN_KEY) } catch { return false }
 }
 
-/**
- * THE HOST A COLD CLIENT ALREADY KNOWS.
- *
- * Replication needs somewhere to pull FROM, and a participant who has just
- * arrived carries nothing. Someone has to be reachable before anyone has typed
- * anything, so one known host is seeded on the first read of an empty pool —
- * the first thread, from which the rest is pulled.
- *
- * hypercomb.com, the same seed as the shell's DEFAULT_HOST_ZONES (jwize,
- * 2026-09-30: "jwize.com is personal so drop that as a default"). The apex
- * serves the host and lists the publisher's signed package, its atoms hash to
- * their names, and it answers cross-origin.
- *
- * BE CLEAR ABOUT WHAT THIS COSTS: every fresh client contacts this domain on
- * its first run. That is a real, deliberate phone-home, and it is the whole
- * reason it is ONE named constant in one place rather than a list that could
- * quietly grow.
- */
-const SEED_HOST = 'hypercomb.com'
+// NO HOST IS SEEDED (jwize, 2026-10-11: "Let's just make sure that there
+// isn't a default host"). An empty pool stays empty until the participant adds
+// a host. A cold install still has somewhere to read from — the shell's
+// DEFAULT_HOST_ZONES, a READ source only (ensure-install.ts) — and the swarm's
+// upload host is never this pool (swarm-hosts.ts: publish marks, else the host
+// field, else none). A pool an older package seeded keeps its member: nothing
+// is removed and no key is cleared; it is simply a host you read from.
 
-/** Seeded once, ever. Without this the seed would come BACK after a removal,
- *  which is precisely the bug the community/marks split was built to kill: a
- *  host you deleted must stay deleted, even this one. */
-const SEEDED_KEY = HOSTS_SEEDED_KEY
-
-/** A seed that could not be written is read for again, a bounded few times:
- *  the store registers before its OPFS root is open, and both boot reads can
- *  land in that gap — on some profiles every boot did, and the pool stayed
- *  empty for good (the swarm's upload host is this pool's first host). */
-const SEED_RETRIES = 8
-const SEED_RETRY_MS = 500
+/** YOUR OWN HOST — the domain this participant serves from: host-sync's
+ *  backup target and the content broker's first door. Set in the host
+ *  directory (`hosts:own-host`); it was the swarm selector's "host" field
+ *  until 2026-10-12, when the selector came to show only what defines a
+ *  meeting (meeting point, room, secret, code) — a host is replication,
+ *  never who meets. The key every reader reads (host-sync, the broker,
+ *  feature availability) is unchanged. */
+const OWN_HOST_KEY = 'hc:nostrmesh:self-domain'
+/** Host-sync is the key's one writer (setOwnHost) — the module that already
+ *  wrote it for `enable`; this drone only names what it is told. */
+const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 
 export interface HostsRenderPayload {
   open: boolean
@@ -124,14 +111,13 @@ export class HostsDrone extends Drone {
     'The hosts you carry, as their own surface: the `community:hosts` pool read as a list, with add and remove. The data set the publish picker offers and the shim reads by pool address on a cold boot.'
 
   protected override listens: string[] = [
-    'hosts:view-toggle', 'hosts:open', 'hosts:close', 'hosts:refresh', 'hosts:add', 'hosts:remove', 'packages:open',
+    'hosts:view-toggle', 'hosts:open', 'hosts:close', 'hosts:refresh', 'hosts:add', 'hosts:remove', 'hosts:own-host', 'packages:open',
   ]
   protected override emits: string[] = ['hosts:render', 'activity:log']
 
   #open = false
   #loaded = false
   #zones: string[] = []
-  #seedRetries = 0
 
   constructor() {
     super()
@@ -211,6 +197,22 @@ export class HostsDrone extends Drone {
         await this.#read()
       })()
     })
+    // YOUR OWN HOST — named in the directory, kept as its bare zone; an
+    // empty name clears it. Nothing else changes with it: it is where your
+    // backup goes, never who you meet.
+    this.onEffect<{ host?: unknown }>('hosts:own-host', (p) => {
+      const raw = String(p?.host ?? '').trim()
+      const zone = raw ? hostZone(raw) : ''
+      if (raw && !zone) { this.emitEffect('activity:log', { message: `${raw} is not a host` }); return }
+      let held = ''
+      try { held = hostZone(localStorage.getItem(OWN_HOST_KEY) ?? '') } catch { return }
+      if (zone === held) return
+      const hostSync = window.ioc?.get?.(HOST_SYNC_KEY) as { setOwnHost?: (host: string) => void } | undefined
+      if (typeof hostSync?.setOwnHost !== 'function') return
+      hostSync.setOwnHost(zone)
+      this.emitEffect('activity:log', { message: zone ? `your own host is ${zone}` : 'no own host' })
+    })
+
     // There is deliberately no hosting switch here, and no effect for one.
     // Publishing arms the gate itself, and switching it off never took a
     // published site down — see the ratchet in community-hosts-panel.spec.ts.
@@ -220,9 +222,8 @@ export class HostsDrone extends Drone {
     // nobody happened to look at the hosts panel first.
     //
     // It runs AGAIN once the Store registers. The eager read happens during
-    // module load, before the Store exists, so it can list nothing and — more
-    // to the point — cannot WRITE the seed. Reading twice is cheap; arriving
-    // with no host to replicate from is not.
+    // module load, before the Store exists, so it can list nothing. Reading
+    // twice is cheap; a list that stays empty when hosts are carried is not.
     void this.#read()
     try {
       window.ioc?.whenReady?.(STORE_KEY, () => { void this.#read() })
@@ -246,7 +247,6 @@ export class HostsDrone extends Drone {
   async #read(): Promise<void> {
     try {
       this.#zones = await listCommunityHosts()
-      if (this.#zones.length === 0) await this.#seedOnce()
     } catch {
       // A pool that cannot be read is not an empty pool. Keep the last good
       // list rather than claiming you carry nothing.
@@ -254,52 +254,6 @@ export class HostsDrone extends Drone {
     }
     this.#loaded = true
     this.#emit()
-    this.#retryMissedSeed()
-  }
-
-  /** The pool is still empty and the seed never landed: read again soon. A
-   *  participant who removed every host has the flag set, so this never
-   *  plants a host they deleted. */
-  #retryMissedSeed(): void {
-    if (this.#zones.length > 0 || this.#seedRetries >= SEED_RETRIES) return
-    try { if (localStorage.getItem(SEEDED_KEY) === '1') return } catch { return }
-    this.#seedRetries++
-    setTimeout(() => { void this.#read() }, SEED_RETRY_MS * this.#seedRetries)
-  }
-
-  /**
-   * Put the one known host in an empty pool, once ever.
-   *
-   * Guarded by a flag rather than by emptiness alone: "the pool is empty"
-   * is also true of a participant who deliberately removed every host,
-   * and re-adding it there would make this entry the one host you cannot
-   * get rid of — the exact shape of the bug that the community/marks split
-   * was built to kill. Emptiness gets you the seed once; the flag makes
-   * sure it is once.
-   */
-  async #seedOnce(): Promise<void> {
-    try {
-      if (localStorage.getItem(SEEDED_KEY) === '1') return
-    } catch {
-      // No storage means no way to remember having seeded, and a seed that
-      // cannot be remembered is a seed that comes back. Don't plant it.
-      return
-    }
-
-    const zone = await addCommunityHost(SEED_HOST)
-
-    // THE FLAG IS SPENT ONLY ON SUCCESS. `addCommunityHost` answers '' when
-    // the pool cannot be opened, which is exactly what happens on the eager
-    // first read — the Store has not registered yet. Marking the seed done
-    // before it landed burns the one chance and the participant is left with
-    // nothing to replicate from, silently and for good. Leave the flag unset
-    // and a later read plants it (adding is idempotent — the record is named
-    // by its own content, so a double add is one member).
-    if (!zone) return
-    try { localStorage.setItem(SEEDED_KEY, '1') } catch { /* in-session only */ }
-
-    this.#zones = await listCommunityHosts()
-    this.emitEffect('activity:log', { message: `${zone} joined your community` })
   }
 
   #emit(): void {

@@ -1,7 +1,7 @@
 // assistant/harness-network.ts
 //
 // A HARNESS TRAVELS LIKE A CATALOG (documentation/agent-harness.md, step 5).
-// `harness offer <name> [@host]` puts the record's bytes on a host under the
+// `harness offer <name> @host` puts the record's bytes on the named host under the
 // participant's key and stamps `agent:harness` in their signed index; the
 // host lists every stamped record in the pool at `<origin>/<sign('agent:harness')>`
 // once its operator lists the meaning (`hosts list agent:harness`).

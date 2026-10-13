@@ -62,7 +62,8 @@ export const hostCurrentBranch = async (): Promise<void> => {
     }
     const name = segments[segments.length - 1] ?? ''
 
-    // 1. Consent — names the CDN and the signer before anything happens.
+    // 1. Consent — names where the bytes go (the hosts named for the
+    //    branch; there is no default host) and the signer, before anything.
     const confirmed = await requestConfirm({
       title: 'host.confirm.title',
       message: 'host.confirm.message',
@@ -75,7 +76,7 @@ export const hostCurrentBranch = async (): Promise<void> => {
     let nextNote = 0
     const onProgress = (p: PublishProgress): void => {
       if (p.phase === 'staging') {
-        activity(t(i18n, 'host.uploading', 'uploading branch to the public host…'), '●')
+        activity(t(i18n, 'host.uploading', 'uploading branch to its hosts…'), '●')
         nextNote = Date.now() + PROGRESS_NOTE_MS
         return
       }
@@ -166,7 +167,7 @@ export const hostCurrentBranch = async (): Promise<void> => {
       result.status === 'confirmed'
         ? doneMsg
         : t(i18n, 'host.done-unconfirmed',
-          'Branch published — the public host has not served it back yet. Open /publish to watch it go live. {link}',
+          'Branch published — its host has not served it back yet. Open /publish to watch it go live. {link}',
           { link: linkText }))
 
     // Evidence of a past index wipe (or a publish from another device): our

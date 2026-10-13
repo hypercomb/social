@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { secretTag } from '@hypercomb/core'
 import {
-  SLOW_FOR_MS, UNREACHABLE_AFTER_MS, didYouMean, editDistance, headerLink, linkPhase, meetingPointKey, refusalOf,
+  SHIPPED_POINT, SLOW_FOR_MS, UNREACHABLE_AFTER_MS, didYouMean, editDistance, headerLink, linkPhase, meetingPointKey, refusalOf,
   roomWords, slowLink, statusLine, wordsBeside,
   type ShareStatus, type StatusInput, type StatusLine,
 } from './presence-status'
@@ -101,7 +101,7 @@ describe('the owner\'s tab: 27 tiles name-only behind hosts the page never named
 
   it("a RECEIVER is told when a branch here opens its deeper pages from its sharer's device alone (D1)", () => {
     const line = statusLine({ ...base, deepOwners: ['Ana'] })
-    expect(say(line)).toContain("Deeper pages open from Ana's device until their upload finishes")
+    expect(say(line)).toContain("Deeper pages open from Ana's device while they're here")
     expect(line.tone).toBe('live')
     expect(say(statusLine({ ...base }))).not.toContain('Deeper pages')
   })
@@ -109,6 +109,40 @@ describe('the owner\'s tab: 27 tiles name-only behind hosts the page never named
   it('a passed-over publish domain is named once the tiles went by the pool and are takeable (D2)', () => {
     const line = statusLine({ ...base, share: { offered: 3, nameOnly: 0, uploading: 0, passedOver: ['hyperccomb.com'] } })
     expect(say(line)).toContain('Sharing 3 · hyperccomb.com passed over')
+  })
+
+  // BCL-3 (D1 sharer line): a tile is takeable while its deeper pages are
+  // still only on the sharer's device; a healthy host is draining them. The
+  // sharer read a green "Sharing 27" — and leaving then leaves the takers
+  // blank deeper pages. smoke1 / GW1, 2026-10-11 acceptance.
+  it('the SHARER is told while deeper pages are still only on their device — asked to stay, never the all-is-well tone', () => {
+    const line = statusLine({ ...base, share: { offered: 27, nameOnly: 0, uploading: 0, deepOnDevice: 3, held: [] } })
+    expect(say(line)).toBe('Live · downtown · two words · 3 in the room (3 here) · Sharing 27 · Deeper pages of 3 tiles are still only on your device — stay a moment to leave them with the room')
+    expect(line.tone).toBe('warn')
+    expect(line.quiet).toBe(false)
+    expect(say(statusLine({ ...base, share: { offered: 1, deepOnDevice: 1 } }))).toContain('Deeper pages of 1 tile are still only on your device')
+  })
+
+  it('a host that REFUSES the deeper pages is named instead (share.held.deep) — the line never asks to stay for pages no host will take', () => {
+    const line = statusLine({ ...base, share: { offered: 2, nameOnly: 0, deepOnDevice: 1, held: [{ host: 'dead-b.localhost', state: 'refused', count: 1, deep: true }] } })
+    expect(say(line)).toContain("dead-b.localhost isn't taking the deeper pages of 1 tile")
+    expect(say(line)).not.toContain('stay a moment')
+  })
+
+  it('nothing on the device alone: no such line', () => {
+    expect(say(statusLine({ ...base, share: { offered: 3, deepOnDevice: 0 } }))).not.toContain('only on your device')
+    expect(statusLine({ ...base, share: { offered: 3, deepOnDevice: 0 } }).tone).toBe('live')
+  })
+
+  // BCL-1 (D2 naming half): smoke1 — lt-typo/c01 wears typo.localhost and
+  // lt-refused/c01 refuse.localhost, a page BELOW the offered tile. Once
+  // their pages fell through to the pool the root read plain "Sharing 27".
+  // The swarm now names them in passedOver (swarm.share-status.spec); the
+  // line says them beside the counts.
+  it('domains worn deeper than the offered tile, passed over, are named on the root line', () => {
+    const line = statusLine({ ...base, uploadHost: 'pool-a.localhost', share: { offered: 27, nameOnly: 0, uploading: 0, passedOver: ['typo.localhost', 'refuse.localhost'] } })
+    expect(say(line)).toBe('Live · downtown · two words · 3 in the room (3 here) · Sharing 27 · typo.localhost, refuse.localhost passed over — they aren\'t taking uploads')
+    expect(say(statusLine({ ...base, share: { offered: 3, passedOver: ['typo.localhost'] } }))).toContain("typo.localhost passed over — it isn't taking uploads")
   })
 })
 
@@ -138,6 +172,15 @@ describe('a refusal no wifi fixes is said at once, as what it is', () => {
     const line = statusLine({ ...base, host: 'the meeting point', phase: linkPhase(conn, t0, t0 + 1_000, false)!, refused: 'unreachable', point: 'ws://localhost:7896' })
     expect(say(line)).toBe("This link meets at ws://localhost:7896, a computer's own relay — this page can't reach it")
     expect(line.tone).toBe('down')
+  })
+
+  it("refused 'no-host': joined with no host named — said at once, with the host field one tap away (no default, 2026-10-11)", () => {
+    const conn = { state: 'offline', refused: 'no-host', since: t0, reopened: false, attempt: 0, clockOffsetMs: 0 }
+    const line = statusLine({ ...base, host: 'the meeting point', words: '', phase: linkPhase(conn, t0, t0 + 1_000, false)!, refused: 'no-host' })
+    expect(say(line)).toBe('No host named — this tab meets nowhere yet · Name the host')
+    expect(line.tone).toBe('down')
+    expect(line.parts.at(-1)?.action).toBe('host')
+    expect(say(line)).not.toMatch(/hypercomb\.com|wifi|Connecting|Reconnecting/)
   })
 
   it("refused 'subscriptions': live, with the reload said in the warn tone", () => {
@@ -181,36 +224,49 @@ describe('a word the relay has not taken', () => {
   })
 })
 
-// ── ZI-1 / ZI-6 (D4): the comparison words ───────────────────────────────
-describe('the room\'s two words fold the meeting point and are one list for every language', () => {
-  it('default-relay rooms keep today\'s words exactly', () => {
-    const today = secretTag('lifecycle\0downtown\0rose', 'en')
-    expect(roomWords('downtown', 'rose')).toBe(today)
-    // The shipped default is wss://hypercomb.com (2026-10-11): a room met there
-    // reads the pair it always read.
-    for (const p of ['', 'hypercomb.com', 'wss://hypercomb.com', 'wss://HyperComb.com/', 'wss://hypercomb.com:443']) expect(roomWords('downtown', 'rose', p)).toBe(today)
-    expect(meetingPointKey('wss://hypercomb.com')).toBe('')
+// ── ROOM IDENTITY (jwize, 2026-10-12; replaces D4's fold-only-when-not-default):
+// the comparison words ─────────────────────────────────────────────────────
+describe('the room\'s two words are its address read aloud: host + room + secret', () => {
+  const pairAt = (point: string): string => secretTag(`lifecycle\u0000downtown\u0000rose\u0000${point}`, 'en')
+
+  it('hypercomb.com however it is written reads one pair — and an empty field reads none: there is no default host (2026-10-11)', () => {
+    const atHost = pairAt('hypercomb.com')
+    for (const p of ['hypercomb.com', 'wss://hypercomb.com', 'wss://HyperComb.com/', 'wss://hypercomb.com:443']) expect([p, roomWords('downtown', 'rose', p)]).toEqual([p, atHost])
+    for (const p of ['', '  ']) expect([p, roomWords('downtown', 'rose', p)]).toEqual([p, ''])
+    expect(roomWords('downtown', 'rose')).toBe('')
+    expect(meetingPointKey('wss://hypercomb.com')).toBe(SHIPPED_POINT)
+    expect(meetingPointKey('')).toBe('')
+    // and the pair from before the host was part of the room is not it
+    expect(atHost).not.toBe(secretTag('lifecycle\u0000downtown\u0000rose', 'en'))
   })
 
   it('jwize.com, the default before, is a point like any other: no shipped default names it', () => {
     expect(meetingPointKey('wss://jwize.com')).toBe('jwize.com')
-    expect(roomWords('downtown', 'rose', 'wss://jwize.com')).not.toBe(roomWords('downtown', 'rose'))
+    expect(roomWords('downtown', 'rose', 'wss://jwize.com')).toBe(pairAt('jwize.com'))
+    expect(roomWords('downtown', 'rose', 'wss://jwize.com')).not.toBe(roomWords('downtown', 'rose', 'hypercomb.com'))
   })
 
   it('two halves of one meeting on different points read different words', () => {
     const atPoint = roomWords('downtown', 'rose', 'wss://pluginthematrix.com')
-    expect(atPoint).not.toBe(roomWords('downtown', 'rose'))
+    expect(atPoint).not.toBe(roomWords('downtown', 'rose', 'hypercomb.com'))
     // however the point is written, one point folds one way
     for (const p of ['pluginthematrix.com', 'wss://pluginthematrix.com/', 'WSS://PluginTheMatrix.com']) expect(roomWords('downtown', 'rose', p)).toBe(atPoint)
     expect(roomWords('downtown', 'rose', 'ws://localhost:7896')).not.toBe(roomWords('downtown', 'rose', 'ws://localhost:7895'))
   })
 
   it('en, ja and fr participants compare the same pair; the reader\'s own pair rides beside it', () => {
-    const words = roomWords('downtown', 'rose')
-    expect(words).toBe('light moss')
-    for (const locale of ['en', 'ja', 'fr', 'de', 'ru']) expect(wordsBeside('downtown', 'rose', '', locale).startsWith(words)).toBe(true)
-    expect(wordsBeside('downtown', 'rose', '', 'en')).toBe('light moss')
-    expect(wordsBeside('downtown', 'rose', '', 'ja')).toBe(`light moss (${secretTag('lifecycle\0downtown\0rose', 'ja')})`)
+    const H = 'hypercomb.com'
+    const words = roomWords('downtown', 'rose', H)
+    expect(words).toBe(pairAt('hypercomb.com'))
+    for (const locale of ['en', 'ja', 'fr', 'de', 'ru']) expect(wordsBeside('downtown', 'rose', H, locale).startsWith(words)).toBe(true)
+    expect(wordsBeside('downtown', 'rose', H, 'en')).toBe(words)
+    expect(wordsBeside('downtown', 'rose', H, 'ja')).toBe(`${words} (${secretTag('lifecycle\u0000downtown\u0000rose\u0000hypercomb.com', 'ja')})`)
+  })
+
+  it('the host offered (never a default) is the relay the mesh ships', () => {
+    const relay = /^const LIVE_RELAY = '([^']+)'/m.exec(readFileSync(join(__dirname, '..', '..', '..', 'hypercomb-essentials', 'src', 'sharing', 'nostr-mesh.drone.ts'), 'utf8'))?.[1] ?? ''
+    expect(new URL(relay).host).toBe(SHIPPED_POINT)
+    expect(meetingPointKey(relay)).toBe(SHIPPED_POINT)
   })
 })
 
@@ -228,6 +284,7 @@ describe('the header glyph follows the line', () => {
   it('a standing refusal no wait cures is down at once, not after 30 s of amber', () => {
     expect(headerLink({ state: 'retrying', since: t0, refused: 'access' }, t0, t0 + 1_000)).toBe('down')
     expect(headerLink({ state: 'retrying', since: t0, refused: 'unreachable' }, t0, t0 + 1_000)).toBe('down')
+    expect(headerLink({ state: 'offline', since: t0, refused: 'no-host' }, t0, t0 + 1_000)).toBe('down')
     expect(headerLink({ state: 'retrying', since: t0 }, t0, t0 + 1_000)).toBe('pending')
     expect(headerLink({ state: 'retrying', since: t0 }, t0, t0 + UNREACHABLE_AFTER_MS)).toBe('down')
   })

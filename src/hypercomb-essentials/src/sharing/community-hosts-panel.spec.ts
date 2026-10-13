@@ -157,20 +157,12 @@ describe('the host directory — the set, apart from the publishing', () => {
     }
   })
 
-  it('seeds ONE known host into an empty pool, and only ever once', () => {
-    // b99e6770e (2026-10-01): hypercomb.com, not jwize.com — jwize.com is personal.
-    expect(HOSTS_DRONE).toMatch(/const SEED_HOST = 'hypercomb\.com'/)
-    expect(HOSTS_DRONE).toMatch(/if \(this\.#zones\.length === 0\) await this\.#seedOnce\(\)/)
-    expect(HOSTS_DRONE).toMatch(/localStorage\.getItem\(SEEDED_KEY\) === '1'\) return/)
-  })
-
-  it('spends the one seed only when it actually landed', () => {
-    const seed = HOSTS_DRONE.slice(HOSTS_DRONE.indexOf('async #seedOnce'))
-    const addAt = seed.indexOf('await addCommunityHost(SEED_HOST)')
-    const setAt = seed.indexOf('localStorage.setItem(SEEDED_KEY')
-    expect(addAt).toBeGreaterThan(-1)
-    expect(setAt).toBeGreaterThan(addAt)
-    expect(seed).toMatch(/if \(!zone\) return\s*\n\s*try \{ localStorage\.setItem\(SEEDED_KEY/)
+  it('seeds NO host into an empty pool — there is no default host (jwize 2026-10-11)', () => {
+    // b99e6770e (2026-10-01) seeded hypercomb.com; "Let's just make sure that
+    // there isn't a default host" took the seed out. The bee lists, and it
+    // still reads again once the Store registers.
+    expect(HOSTS_DRONE).not.toMatch(/\bSEED_HOST\b/)
+    expect(HOSTS_DRONE).not.toMatch(/#seedOnce/)
     expect(HOSTS_DRONE).toMatch(/whenReady\?\.\(STORE_KEY, \(\) => \{ void this\.#read\(\) \}\)/)
   })
 

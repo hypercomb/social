@@ -41,10 +41,10 @@
 //
 // MULTI-TARGET DRAIN (consent-hosting.md §"Transfer"): the drain iterates a
 // LIST of targets — the operator's self-domain plus granted hosts. Phase 1
-// grants exactly one standing host: the PUBLIC content endpoint at the zone
-// ROOT pluginthematrix.com (documentation/read-only-deployment.md — Blossom/
-// NIP-98 worker over R2), behind its own explicit opt-in
-// (localStorage['hc:public-host'] = '1'). Doctrine: swarms resolve around
+// grants one standing host: the PUBLIC content endpoint the participant
+// NAMED (hc:public-host:domain — no default since 2026-10-11; a Blossom/
+// NIP-98 worker over R2, documentation/read-only-deployment.md), behind its
+// own explicit opt-in (localStorage['hc:public-host'] = '1'). Doctrine: swarms resolve around
 // hosts; PUBLIC content posts to the CDN; private/group content NEVER
 // touches the public endpoint. The {sig}.public marker is that gate — a
 // public-only target can only ever receive marker-carrying sigs, and
@@ -77,27 +77,25 @@
 // changes take effect on the next event, no reload required.
 //
 // THE SWARM'S HOSTS ARE RESOLVED PER PAGE (documentation/swarm-host.md,
-// jwize 2026-10-07). A joined tab uploads the tiles it offers on a page to
-// that page's PUBLISH DOMAINS (the host marks of the nearest branch at or
-// above it), else to its MEETING HOST (the host the meeting this tab is in
-// named — its meeting link's, or the facilitator's own meeting point; this
-// tab's `hc:mesh-zone`), else to the primary host of its HOSTS POOL
-// (`community:hosts`, hypercomb.com seeded), else — only then, and only when
-// its card allows participants — to the RELAY it meets at. A changed meeting
-// host is a resolver 'change' like any other: the targets are re-judged and
-// what is owed re-staged. swarm-hosts.ts answers that from
-// caches, synchronously; nothing on connect, join or announce waits on it.
-// Each sig goes where it is SHOWN: a tile where its page goes, a branch's
-// subtree where the pages below go (#publicRoots), and what already went
-// elsewhere is re-staged when a host becomes owed it (#restage). A pool host
-// that cannot take uploads is passed over (#noteSwarmHostFailure) — and so,
-// since 2026-10-10 (D2), is a publish domain or meeting host that refuses,
-// is full, or has never answered: the swarm stops waiting on it.
+// jwize 2026-10-07, 2026-10-11). A joined tab uploads the tiles it offers on a
+// page to that page's PUBLISH DOMAINS (the host marks of the nearest branch at
+// or above it), else to THE HOST FIELD (the meeting point the participant
+// entered — the relay this tab meets at), else nowhere: there is no default
+// host, the hosts pool never picks one, and a meeting point's card decides
+// nothing. A changed host field is a resolver 'change' like any other: the
+// targets are re-judged and what is owed re-staged. swarm-hosts.ts answers
+// that from caches, synchronously; nothing on connect, join or announce waits
+// on it. Each sig goes where it is SHOWN: a tile where its page goes, a
+// branch's subtree where the pages below go (#publicRoots), and what already
+// went elsewhere is re-staged when a host becomes owed it (#restage). A
+// publish domain or host field that refuses, is full, or has never answered
+// is passed over (#noteSwarmHostFailure, D2 2026-10-10): the swarm stops
+// waiting on it.
 // Nothing is stored or picked here: the targets are a function of THIS tab's
 // membership (membership.ts), the roots it offered this join and the pages it
 // offered them on, so a reload, a discarded tab or the update pill brings back
 // the same targets and the receipts on disk count again. Every swarm target is
-// public-only like every granted host; a pool or publish host keeps its zone's
+// public-only like every granted host; a publish host keeps its zone's
 // retired `content.` face receipts (the same store); the meeting relay, however
 // it was named, has none. Its
 // receipt is the host's own answer when it says `stored <sig>` (the relay hashes
@@ -169,6 +167,8 @@ const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const STORE_KEY = '@hypercomb.social/Store'
 const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
+// The swarm names the room's addresses (its lifecycle sig, for D7's beacon).
+const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 // Explicit opt-in gate. Default false → no `content:wrote` handler
 // reaches the signer, so a casual visitor never triggers a Nostr-signer
@@ -188,8 +188,13 @@ const PUBLIC_HOST_KEY = 'hc:public-host'
 // not publish but never choose a destination — and every new domain was a code
 // change. It is a participant decision, so it is a value.
 //
-// Absent = the standing default below, so nothing changes for anyone who never
-// sets it. Changing it changes the target's `hostHash`, and receipts are named
+// Absent = NO public host (jwize 2026-10-11: "make sure that there isn't a
+// default host"). It used to fall back to a standing endpoint, so a
+// participant who turned the gate on, or any side word that asked "where do I
+// publish?", wrote to a host nobody named. Now only a host the participant
+// named takes bytes; with none, the gate above has nowhere to send them and
+// the side words refuse and ask for `@<host>`. Changing it changes the
+// target's `hostHash`, and receipts are named
 // per host, so bytes already confirmed on the old host stay confirmed there and
 // the new host earns its own receipts. Nothing is deleted and nothing is
 // invalidated by re-pointing.
@@ -199,7 +204,7 @@ const PUBLIC_HOST_KEY = 'hc:public-host'
 // `<zone>` (zone-door.ts) and saved folded the next time it is set — the
 // stored history is never rewritten behind the participant's back.
 const PUBLIC_HOST_DOMAIN_KEY = 'hc:public-host:domain'
-const DEFAULT_PUBLIC_HOST_DOMAIN = 'pluginthematrix.com'
+const DEFAULT_PUBLIC_HOST_DOMAIN = ''
 /** A bare hostname: labels joined by dots, no scheme, no path, no port. The
  *  target is concatenated into request URLs, so anything else is refused
  *  rather than normalised — a half-understood value is how you publish to
@@ -241,6 +246,14 @@ const FULL_MIN_BACKOFF_MS = 10 * 60_000
 // (the drain is single-flight) or a verify slot (the semaphore is shared).
 const REQUEST_TIMEOUT_MS = 15_000
 const TIMEOUT_PER_100KB_MS = 1_000
+// NOTHING IN A PASS WAITS FOREVER (2026-10-11). #fetchWithin's deadline ends
+// when the headers arrive; a body read after it, or a signer that never
+// answers, had none — and one hung await held a verify slot, so four of them
+// starved the gate and the drain for minutes (jwize's 4250 tab: every tile
+// name-only, "uploading 27", no host heard for ~630 s). Each such await now
+// has its own deadline.
+const BODY_TIMEOUT_MS = 15_000
+const SIGN_TIMEOUT_MS = 10_000
 // The largest body a common edge (Cloudflare's 100 MB) lets through to a
 // host. Above it the edge answers 413 with no CORS headers, which a browser
 // shows as a bare network error — one entry too large, never a host refusing.
@@ -320,8 +333,8 @@ type SyncTarget = {
 }
 
 /** The drain destinations by name, in order, before their hashes are taken.
- *  `relay`: a swarm host only because the meeting relay hosts participants —
- *  its own heap, with no retired `content.` face. */
+ *  `relay`: the meeting point's own heap (the host field), with no retired
+ *  `content.` face. */
 type TargetSpec = { domain: string; self: boolean; swarm: boolean; marker: boolean; relay: boolean }
 
 /** The swarm gate's per-page scope (isClosureAvailableAt): the page the
@@ -461,8 +474,8 @@ export class HostSyncService extends EventTarget {
   constructor(resolver: SwarmHostResolver = swarmHosts) {
     super()
     this.#resolver = resolver
-    // A page's hosts became known or moved (the pool, a branch's marks, the
-    // relay's card): re-judge the target set, send what is now owed, and let
+    // A page's hosts became known or moved (a branch's marks, the host
+    // field): re-judge the target set, send what is now owed, and let
     // the swarm walk again so names wait no longer than the read did.
     resolver.addEventListener('change', () => {
       // A page whose hosts were pending may now be served: no "not
@@ -506,39 +519,38 @@ export class HostSyncService extends EventTarget {
       void this.drain()
     }, RETRY_MS)
     // A socket that (re)opens is a path that came back: what failed on the
-    // way may have been the path, not the host. Forget every backoff but a
-    // full host's (it named its own wait) and retry at once — a relay that
-    // restarted with participants allowed is shared with immediately.
+    // way may have been the path, not the host. Forget those backoffs and
+    // retry at once.
     //
     // Only a socket that CAME BACK counts — the first open after a join, or
     // the one payload that says reopened. The mesh also announces 'open' when
     // a slow probe is answered, a refusal clears or the ladder resets; none
     // of those is a new path, and resetting on them dissolved a refusing
-    // host's 10-minute pause on every flicker. Only swarm hosts are reset:
-    // the RELAY's whole pause (it is the relay that came back — restarted
-    // with participants allowed, it is shared with at once), any other swarm
-    // host's only when the path was the problem (unreachable, not-live). A
-    // refusal or a full host keeps the window its own answer earned.
+    // host's 10-minute pause on every flicker. Only swarm hosts are reset,
+    // and only when the path was the problem (unreachable, not-live, an
+    // upload that never left the browser). A refusal or a full host keeps the
+    // window its own answer earned — the host field included: it is a host
+    // the participant named, whose 403 ("ask its operator to add your key")
+    // a socket coming back does not change. Clearing it sent a wave of
+    // refused PUT bodies on every reconnect of a phone (decision c: those
+    // tiles are live from this device meanwhile).
     EffectBus.on<{ state?: string; reopened?: boolean }>('mesh:connection', (p) => {
       const prev = this.#meshState
       this.#meshState = String(p?.state ?? '')
       // stalled → open is the same socket answering late, not a return.
       const cameBack = p?.state === 'open' && (p.reopened === true || (prev !== 'open' && prev !== 'stalled'))
       if (!cameBack) return
-      // A pool host that went silent (or answered a page) while the path
-      // itself was down, or whose uploads never left the browser (#putThrew —
-      // a network that changed under them reads the same), is given its
-      // chance again with the path (one that failed while the relay answered
-      // stays passed over — that was the host). Its refusal's evidence starts
-      // over too.
+      // A host whose uploads never left the browser (#putThrew — a network
+      // that changed under them reads the same) is given its chance again
+      // with the path (one that failed while the relay answered stays passed
+      // over — that was the host). Its refusal's evidence starts over too.
       for (const host of [...this.#downWhileOffline]) this.#resolver.markUp(host)
       this.#downWhileOffline.clear()
       this.#putsThrew.clear()
-      const relay = this.#resolver.relayHost()
       for (const domain of this.#swarmSources().keys()) {
         const backoff = this.#hostBackoff.get(domain)
         if (!backoff || backoff.status === 'full') continue
-        if (domain === relay || backoff.status === 'unreachable' || backoff.status === 'not-live' || backoff.threw) this.#hostBackoff.delete(domain)
+        if (backoff.status === 'unreachable' || backoff.status === 'not-live' || backoff.threw) this.#hostBackoff.delete(domain)
       }
       if (this.#anyEnabled()) void this.drain()
     })
@@ -574,21 +586,32 @@ export class HostSyncService extends EventTarget {
    *  relay no longer host-brokers others' bytes; a sig with no endpoint is
    *  an egg, per the byte-path model.) */
   public readonly enable = (selfDomain?: string): void => {
-    try {
-      if (selfDomain) localStorage.setItem(SELF_DOMAIN_KEY, selfDomain.trim())
-      localStorage.setItem(ENABLED_KEY, 'true')
-    } catch { /* private mode — caller still has to honor in-session */ }
+    if (selfDomain) this.setOwnHost(selfDomain)
+    try { localStorage.setItem(ENABLED_KEY, 'true') } catch { /* private mode — caller still has to honor in-session */ }
     // Re-arm after a backoff: enable() is the operator's "I fixed the relay,
     // retry now" signal. Clears every host's window — worst case a
     // still-broken host costs one extra refusal before re-pausing.
     this.#hostBackoff.clear()
     this.#assertedAbsent.clear()
-    this.#pageHosts.clear()
     this.#probedHosts.clear()
     this.#answersPage.clear()
     this.#putsThrew.clear()
     this.#resolver.clearDown()
     void this.drain()
+  }
+
+  /** YOUR OWN HOST (`hc:nostrmesh:self-domain`) — where your backup goes
+   *  and the broker's first door; '' clears it. The one writer of the key:
+   *  `enable` names it here, and so does the host directory (the hosts
+   *  drone, `hosts:own-host`) since the swarm selector stopped carrying it
+   *  (2026-10-12 — a host is replication, never who meets). Naming it never
+   *  switches backup on. */
+  public readonly setOwnHost = (host: string): void => {
+    const clean = String(host ?? '').trim()
+    try {
+      if (clean) localStorage.setItem(SELF_DOMAIN_KEY, clean)
+      else localStorage.removeItem(SELF_DOMAIN_KEY)
+    } catch { /* private mode — in-session only */ }
   }
 
   /** Turn host backup off. Existing queued entries stay on disk (not
@@ -600,7 +623,8 @@ export class HostSyncService extends EventTarget {
   /** True iff the operator opted in to the PUBLIC content endpoint. */
   public readonly isPublicHostEnabled = (): boolean => this.#publicHostEnabled()
 
-  /** Opt in to the public relay target (pluginthematrix.com). Published-public
+  /** Opt in to the public host the participant named (publicHostDomain —
+   *  none named, nothing drains). Published-public
    *  closures (and ONLY those — see markPublic) start draining there.
    *  Effect is immediate. Caller shows the "your public tiles will be
    *  posted to the public content endpoint" consent BEFORE invoking —
@@ -611,7 +635,6 @@ export class HostSyncService extends EventTarget {
     // The operator's "retry now" signal for THIS host.
     this.#hostBackoff.delete(this.publicHostDomain())
     this.#assertedAbsent.clear()
-    this.#pageHosts.clear()
     this.#probedHosts.clear()
     this.#answersPage.clear()
     this.#putsThrew.clear()
@@ -638,9 +661,9 @@ export class HostSyncService extends EventTarget {
    *  CONSENT — AND WHY THIS NEVER FLIPS A SWITCH. Joining a swarm is the
    *  gesture "share these tiles with these people in this zone", and where
    *  they are kept is part of it: the swarm's hosts are RESOLVED from what
-   *  the participant already chose — the page's publish domains, else their
-   *  hosts pool, else a relay that says it hosts participants (#swarmSources)
-   *  — and the join sheet names the host that keeps what you share. Uploading
+   *  the participant already chose — the page's publish domains, else the
+   *  host field (the meeting point they entered; #swarmSources) — and the
+   *  join sheet names the host that keeps what you share. Uploading
    *  to some OTHER named party is a different act the participant never said,
    *  so this answers the question and provisions nothing: `'ready'` (a target
    *  exists), `'opted-out'` (they decided), or `'needs-host'` (not joined, or
@@ -666,8 +689,12 @@ export class HostSyncService extends EventTarget {
     try { return localStorage.getItem(PUBLIC_HOST_KEY) === '1' } catch { return false }
   }
 
-  /** The public host this participant publishes to. Falls back to the standing
-   *  default, so an unset value and a never-asked participant behave alike. */
+  /** The public host that takes bytes: the gate on AND a host named — '' when
+   *  either is missing. A gate left on with no host named sends nothing. */
+  readonly #publicHost = (): string => this.#publicHostEnabled() ? this.publicHostDomain() : ''
+
+  /** The public host this participant named, or '' — never a standing
+   *  default (jwize 2026-10-11). A caller with '' has nowhere to write. */
   public readonly publicHostDomain = (): string => {
     let stored = ''
     try { stored = foldContentLabel(localStorage.getItem(PUBLIC_HOST_DOMAIN_KEY) ?? '') }
@@ -675,8 +702,8 @@ export class HostSyncService extends EventTarget {
     return HOST_DOMAIN_RE.test(stored) ? stored : DEFAULT_PUBLIC_HOST_DOMAIN
   }
 
-  /** The standing default, so a caller can show what "unset" resolves to
-   *  without hardcoding it a second time. */
+  /** What "unset" resolves to — '' (there is no default host), so a caller
+   *  shows it without hardcoding it a second time. */
   public readonly defaultPublicHostDomain = (): string => DEFAULT_PUBLIC_HOST_DOMAIN
 
   /**
@@ -718,7 +745,20 @@ export class HostSyncService extends EventTarget {
    *  handler, the retry timer, and the boot drains. */
   readonly #anyEnabled = (): boolean =>
     !this.#readonlyVisitor()
-    && (this.#isEnabled() || this.#publicHostEnabled() || this.#publishNodes.size > 0 || this.#swarmSources().size > 0)
+    && (this.#isEnabled() || !!this.#publicHost() || this.#publishNodes.size > 0 || this.#swarmSources().size > 0)
+
+  /** A destination that may still take bytes this session: backup, the
+   *  public host, a publish node — or a swarm door not passed over for good
+   *  (swarm-hosts standingDown: refused, or never answered). A FULL host
+   *  named its own wait and is still owed what it will take after it. */
+  readonly #anyTakes = (): boolean => {
+    if (this.#isEnabled() || !!this.#publicHost() || this.#publishNodes.size > 0) return true
+    for (const domain of this.#swarmSources().keys()) {
+      const down = this.#resolver.standingDown?.(domain) ?? ''
+      if (down !== 'refused' && down !== 'unresolved') return true
+    }
+    return false
+  }
 
   /** THE SWARM'S HOSTS, while THIS tab is joined — empty otherwise: every
    *  write door a page this tab offers on resolves to (swarm-hosts.ts), plus
@@ -765,8 +805,8 @@ export class HostSyncService extends EventTarget {
   public readonly swarmHostsFor = (segments: readonly string[] | null | undefined): SwarmHostChoice =>
     this.#resolver.hostsFor(segments)
 
-  /** Start reading where this page's tiles will go (its publish domains,
-   *  the hosts pool) before anything asks — the swarm calls it on arriving at
+  /** Start reading where this page's tiles will go (its publish domains)
+   *  before anything asks — the swarm calls it on arriving at
    *  a page, so its walk finds the answer cached. Never waits. */
   public readonly warmSwarmHosts = (segments: readonly string[] | null | undefined): void =>
     this.#resolver.warm(segments)
@@ -792,6 +832,21 @@ export class HostSyncService extends EventTarget {
    *  file so drain is self-contained and crash-safe. */
   public readonly enqueue = async (sig: string, kind: HostSyncKind, bytes: ArrayBuffer): Promise<void> => {
     if (this.#readonlyVisitor()) return
+    // NOTHING TAKES IT (the live swarm, jwize 2026-10-11): no swarm host, no
+    // backup, no public host, no publish node. A copy in the push pool would
+    // sit there for good — every joined tab with no host copied each offered
+    // tile's bytes into it, and nothing ever drained them. The `.public`
+    // markers and the closure's edges are still recorded (markPublic), so a
+    // host named later is owed the room's tiles and is staged from the LOCAL
+    // bytes then (the resolver's change → #restage → #stageFor → here).
+    if (!this.#anyEnabled()) return
+    // NOTHING TAKES IT THIS SESSION: every destination is a swarm door passed
+    // over for good (it refused this key, or nothing at that name ever
+    // answered). Its tiles are live from this device (decision c); what is
+    // already queued is its retry — the drain asks again when its pause ends,
+    // and a yes (markUp) re-stages the rest from local bytes. Copying each
+    // offered closure into the push pool for it would only sit there.
+    if (!this.#anyTakes()) return
     if (!SIG_RE.test(sig)) return
     // CLOSURE WALK — runs even when this layer is already receipted: a
     // receipt proves THIS sig serves, not its refs. The doctrine is
@@ -885,7 +940,7 @@ export class HostSyncService extends EventTarget {
     const specs: TargetSpec[] = []
     const self = this.#isEnabled() ? this.#hostBase() : ''
     // The meeting relay's own heap is not its zone's retired `content.` face,
-    // whatever named it a host (the relay step, the pool, a publish domain):
+    // whatever named it a host (the host field, a publish domain):
     // receipts earned on that face must never count for it.
     const meetingRelay = this.#resolver.relayHost()
     for (const [domain, sources] of this.#swarmSources()) {
@@ -893,7 +948,8 @@ export class HostSyncService extends EventTarget {
       specs.push({ domain, self: domain === self, swarm: true, marker: false, relay })
     }
     if (self && !specs.some(s => s.domain === self)) specs.push({ domain: self, self: true, swarm: false, marker: false, relay: false })
-    const granted = [...(this.#publicHostEnabled() ? [this.publicHostDomain()] : []), ...this.#publishNodes]
+    const publicHost = this.#publicHost()
+    const granted = [...(publicHost ? [publicHost] : []), ...this.#publishNodes]
     for (const domain of granted) {
       const at = specs.find(s => s.domain === domain)
       if (!at) specs.push({ domain, self: false, swarm: false, marker: false, relay: false })
@@ -1269,9 +1325,9 @@ export class HostSyncService extends EventTarget {
   // The marking walk runs once per sig per session (#markedWalk), and the
   // drain retires an entry once every target owed it AT THAT MOMENT holds it.
   // With one swarm host that was enough. With hosts per page it is not: a
-  // picture shared on /meetup (the pool host) and later on /shop (its publish
-  // domain), a pool that changes, a branch given a publish domain, a pool host
-  // passed over for the relay — each makes a host owed sigs whose queue
+  // picture shared on /meetup (the host field) and later on /shop (its
+  // publish domain), a host field that changes, a branch given a publish
+  // domain, a publish domain passed over — each makes a host owed sigs whose queue
   // entries are long gone. So, per root, whenever the hosts its closure is
   // shown on may have moved (a resolver change, a new page), the closure is
   // walked again IN MEMORY over the recorded edges, and every sig a host is
@@ -1303,6 +1359,20 @@ export class HostSyncService extends EventTarget {
     const out: string[] = []
     for (const segments of pages?.values() ?? []) {
       for (const host of this.#resolver.hostsFor(segments).hosts) if (!out.includes(host)) out.push(host)
+    }
+    return out
+  }
+
+  /** The hosts PASSED OVER for `sig`'s closure (its own page and every page
+   *  below it, as last re-staged) — synchronous. A publish domain worn below
+   *  the offered tile that refuses or never answered sends its pages to the
+   *  next door, and the sharer's line names it where the branch is offered
+   *  (BCL-1), not only while it blocks. */
+  public readonly closurePassedOverOf = (sig: string): string[] => {
+    const pages = this.#closurePagesOf.get(String(sig ?? '').trim().toLowerCase())
+    const out: string[] = []
+    for (const segments of pages?.values() ?? []) {
+      for (const host of this.#resolver.hostsFor(segments).passedOver ?? []) if (!out.includes(host)) out.push(host)
     }
     return out
   }
@@ -1483,7 +1553,7 @@ export class HostSyncService extends EventTarget {
     // anything: a swarm host while joined (resolved per page — a page whose
     // hosts are still being read stages now and drains when they land), the
     // standing public host, or a node a publish named for this act.
-    if (!this.#publicHostEnabled() && this.#publishNodes.size === 0 && !isJoinedHere()) return
+    if (!this.#publicHost() && this.#publishNodes.size === 0 && !isJoinedHere()) return
     const s = String(sig ?? '').trim().toLowerCase()
     if (!SIG_RE.test(s)) return
     // A root the room is offered now, on this page — before the walk dedup,
@@ -1970,7 +2040,7 @@ export class HostSyncService extends EventTarget {
   /** ONE CANARY PER SWARM HOST THAT HAS NOT ANSWERED YET. The batches walk
    *  the queue oldest first, so a host whose entries were staged behind
    *  another's backlog — a branch given its publish domain (or a typo of one)
-   *  while the pool host takes a whole hive — would be asked nothing until
+   *  while the host field takes a whole hive — would be asked nothing until
    *  every earlier batch went, and until its first answer or failure the
    *  status lines have nothing true to say about it. The first entry each
    *  such host is owed (and holds no receipt for) is moved into the first
@@ -2061,16 +2131,12 @@ export class HostSyncService extends EventTarget {
    *  host refuses (401/403/405 — the writers list, a closed door, a static
    *  site; an upload its CORS preflight never lets leave while it answers
    *  everything else — #putThrew; or not-live from a host this tab does not
-   *  meet at), or is full, the resolver passes it over at once — a pool
-   *  host, a publish domain or the meeting host alike (D2: the swarm stops
-   *  waiting on a domain that can never take its bytes; `publish here` still
-   *  needs it). A page where a heap should be already was, at the HEAD
-   *  (#hostHolds), for a pool host. Silence: a pool host that has never
-   *  answered an upload and stays silent while this tab is connected is
-   *  passed over on its second wave; a publish domain or meeting host only
-   *  once nothing at that name has EVER answered, after its third (the
-   *  `hyperccomb.com` typo — #neverAnswered). Then the next door
-   *  (swarm-hosts.ts); the status lines name the host and why. */
+   *  meet at), or is full, the resolver passes it over at once — a publish
+   *  domain or the host field alike (D2: the swarm stops waiting on a domain
+   *  that can never take its bytes; `publish here` still needs it). Silence:
+   *  only once nothing at that name has EVER answered, after its third wave
+   *  (the `hyperccomb.com` typo — #neverAnswered). Then the next door, or
+   *  none (swarm-hosts.ts); the status lines name the host and why. */
   readonly #noteSwarmHostFailure = (target: SyncTarget, failure: PushFailure, streak: number): void => {
     if (!target.swarm) return
     const host = target.domain
@@ -2087,15 +2153,6 @@ export class HostSyncService extends EventTarget {
       return
     }
     if (status !== 'unreachable' || this.#provenHosts.has(host)) return
-    if (this.#resolver.isPoolHost(host)) {
-      if (streak < 2) return
-      // Silence is weak evidence — a 5xx while the host deploys, a timeout, or
-      // the path itself down (given back with the next socket): this page's
-      // only, never remembered across a reload.
-      if (this.#meshState !== 'open') this.#downWhileOffline.add(host)
-      this.#resolver.markDown(host, reason, false)
-      return
-    }
     if (this.#neverAnswered(host, streak, failure.reason)) {
       this.#resolver.markDown(host, `unresolved: ${host} has never answered — check the host name, and that it is running`, false)
     }
@@ -2158,8 +2215,8 @@ export class HostSyncService extends EventTarget {
       // absent while it is.
       ...(why ? { why } : {}),
       swarm: target.swarm === true, missing: this.#missingLocal.size,
-      // Why this host: the page's publish domains, the hosts pool, or the
-      // relay that allows participants (absent for every other target).
+      // Why this host: the page's publish domains or the host field
+      // (absent for every other target).
       ...(target.swarm ? { source: [...(this.#swarmSources().get(target.domain) ?? [])][0] ?? 'none' } : {}),
     })
   }
@@ -2190,8 +2247,8 @@ export class HostSyncService extends EventTarget {
 
   /**
    * WHAT STOPS A HOST TAKING THIS TAB'S UPLOADS, or null — synchronous, from
-   * memory. Its standing failure, or (a pool host the resolver passed over
-   * without a push — it answered a page) why it was passed over; and WHY, as
+   * memory. Its standing failure, or (a host the resolver passed over before
+   * a reload of this tab) why it was passed over; and WHY, as
    * `sync:state` says it. A failure about one file, or one the host itself
    * clears in a moment (`too-large`, `not-live`), is no trouble of the
    * host's. The publish row asks it of each domain a branch publishes to, so
@@ -2218,7 +2275,7 @@ export class HostSyncService extends EventTarget {
     return { host: domain, status, why, reason: down }
   }
 
-  /** Why a pool host was passed over, read back from the reason it was
+  /** Why a host was passed over, read back from the reason it was
    *  passed over with (#hostHolds, #noteSwarmHostFailure: the status word
    *  first) — all a reload of this tab still knows about it. */
   static #whyOfDown(reason: string): HostWhy {
@@ -2348,6 +2405,22 @@ export class HostSyncService extends EventTarget {
    *  sign('host-receipts') pool first, then the legacy `__host_receipts__`
    *  drain source while it still exists — an empty pool must never read as
    *  "nothing receipted" mid-migration (that would re-PUT everything). */
+  /** ONE SIGNED PUT of one atom to one host — the signed swarm link's locked
+   *  package (swarm-link.ts publishSwarmLink, 2026-10-12). Not queued, not
+   *  receipted, not retried: the caller holds the bytes and hands out the
+   *  plain #meet= link on any answer but a stored one. */
+  public readonly putOne = async (host: string, sig: string, bytes: Uint8Array): Promise<{ ok: true } | { ok: false; reason: 'refused' | 'unreachable' }> => {
+    const url = `${HostSyncService.#schemeFor(host)}://${host}/${sig}`
+    const auth = await this.#nip98(url, 'PUT', true)
+    if (!auth) return { ok: false, reason: 'refused' }
+    try {
+      const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+      const res = await HostSyncService.#fetchWithin(url, { method: 'PUT', headers: { Authorization: auth }, body }, bytes.byteLength)
+      try { void res.body?.cancel().catch(() => void 0) } catch { /* nothing to drain */ }
+      return res.ok ? { ok: true } : { ok: false, reason: 'refused' }
+    } catch { return { ok: false, reason: 'unreachable' } }
+  }
+
   public readonly hasReceipt = async (sig: string): Promise<boolean> => {
     if (!SIG_RE.test(sig)) return false
     for (const dir of [
@@ -2395,7 +2468,6 @@ export class HostSyncService extends EventTarget {
     this.#walkedResources.clear()
     this.#verifiedOnHost.clear()
     this.#assertedAbsent.clear()
-    this.#pageHosts.clear()
     this.#probedHosts.clear()
     this.#answersPage.clear()
     this.#putsThrew.clear()
@@ -2874,6 +2946,18 @@ export class HostSyncService extends EventTarget {
     if (b && b.status === 'unreachable' && this.#neverAnswered(domain, b.streak, b.reason)) {
       return { state: 'never-answered', reason: b.reason, why: 'unresolved' }
     }
+    // A door this tab's resolver passed over on a standing answer — in this
+    // page, or remembered from before a reload (swarm-hosts #restoreDown).
+    // Without it a reloaded tab answered "on its way" until its first upload
+    // of the new page was refused again, and a live tile went back to its
+    // name on every peer's grid for that wait.
+    const down = this.#resolver.standingDown?.(domain) ?? ''
+    if (down) {
+      const reason = this.#resolver.downReason(domain).replace(/^[a-z]+:\s*/, '')
+      return down === 'unresolved'
+        ? { state: 'never-answered', reason, why: 'unresolved' }
+        : { state: down, reason, why: down }
+    }
     return null
   }
 
@@ -3272,7 +3356,7 @@ export class HostSyncService extends EventTarget {
       // reads back as below.
       if (target.swarm) {
         let said = ''
-        try { said = (await put.text()).trim() } catch { /* unreadable — read back */ }
+        try { said = (await HostSyncService.#within(put.text(), BODY_TIMEOUT_MS)).trim() } catch { /* unreadable or slow — read back */ }
         if (said === `stored ${entry.sig}` || said === `already held ${entry.sig}`) {
           // It answers for itself: a small atom needs no HEAD before it.
           this.#saysStored.add(host)
@@ -3288,7 +3372,8 @@ export class HostSyncService extends EventTarget {
       // page must never mint a receipt.
       const back = await HostSyncService.#fetchWithin(url, { cache: 'no-store' })
       const served = await this.#servesSig(back, url, entry.sig)
-      try { await back.body?.cancel() } catch { /* already drained/closed */ }
+      // Fire and forget: a body that never closes must not hold the pass.
+      try { void back.body?.cancel().catch(() => void 0) } catch { /* already drained/closed */ }
       if (!served) return { status: 'unreachable', reason: `${back.status} not served back` }
     } catch (err) {
       // The read-back: network, host down, or our own deadline — retry on
@@ -3313,7 +3398,7 @@ export class HostSyncService extends EventTarget {
    *  is online with its socket open; a SECOND upload to it never left since
    *  one last reached it (one error page is not a block); and the host
    *  answers a HEAD at that very address now (a dropped path does not). Even
-   *  then it is `threw`: on the ladder, a pool host passed over for this page
+   *  then it is `threw`: on the ladder, a host passed over for this page
    *  only, given back with the next socket (#noteSwarmHostFailure). A body
    *  larger than an edge takes is that one entry's fate, never the host's. */
   readonly #putThrew = async (target: SyncTarget, url: string, sent: number, err: unknown): Promise<PushFailure> => {
@@ -3373,6 +3458,17 @@ export class HostSyncService extends EventTarget {
     return Number.isFinite(at) ? Math.max(0, at - Date.now()) : 0
   }
 
+  /** A promise with a deadline: rejects with an AbortError-named error when
+   *  `ms` pass first. For awaits #fetchWithin cannot cover (body reads, the
+   *  signer). */
+  static #within<T>(work: Promise<T>, ms: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(Object.assign(new Error('timed out'), { name: 'AbortError' })), ms)
+    })
+    return Promise.race([work, late]).finally(() => clearTimeout(timer))
+  }
+
   /** fetch with a deadline: 15 s, plus 1 s per 100 KB sent. */
   static async #fetchWithin(url: string, init: RequestInit, sentBytes = 0): Promise<Response> {
     const ctrl = new AbortController()
@@ -3402,7 +3498,6 @@ export class HostSyncService extends EventTarget {
         // and whatever uploads once never left, no longer describe it — and
         // it is probed (HEAD-before-PUT) like any heap again.
         this.#provenHosts.add(target.domain)
-        this.#pageHosts.delete(target.domain)
         this.#answersPage.delete(target.domain)
         this.#putsThrew.delete(target.domain)
         this.#resolver.markUp(target.domain)
@@ -3439,9 +3534,9 @@ export class HostSyncService extends EventTarget {
     const etag = (res.headers.get('etag') ?? '').replace(/^W\//i, '').replace(/"/g, '').trim().toLowerCase()
     if (etag === sig) return true
     try {
-      const body = await fetch(url, { cache: 'no-store' })
+      const body = await HostSyncService.#fetchWithin(url, { cache: 'no-store' })
       if (!body.ok) return false
-      return (await SignatureService.sign(await body.arrayBuffer())) === sig
+      return (await SignatureService.sign(await HostSyncService.#within(body.arrayBuffer(), BODY_TIMEOUT_MS))) === sig
     } catch { return false }
   }
 
@@ -3482,13 +3577,8 @@ export class HostSyncService extends EventTarget {
    *  it on its own. */
   readonly #assertedAbsent = new Set<string>()
 
-  /** Pool hosts that answered a page where a sig's bytes should be — not
-   *  probed again this session (#hostHolds). Cleared with #assertedAbsent. */
-  readonly #pageHosts = new Set<string>()
-
-  /** Swarm hosts of any kind (pool hosts and publish domains) that answered
-   *  a page where a sig's bytes should be — the status lines' `page` (#whyOf).
-   *  Cleared with #pageHosts. */
+  /** Swarm hosts that answered a page where a sig's bytes should be — the
+   *  status lines' `page` (#whyOf). Cleared with #assertedAbsent. */
   readonly #answersPage = new Set<string>()
 
   /** Hosts that ANSWERED a request this session — a HEAD of any status, or a
@@ -3520,12 +3610,11 @@ export class HostSyncService extends EventTarget {
     const host = target.domain
     const key = `${host}:${sig}`
     if (this.#assertedAbsent.has(key)) return false
-    if (this.#pageHosts.has(host)) return false // it answers every address with a page
     if (!this.#probedHosts.has(host)) {
       const first = this.#firstProbe.get(host)
       if (first) {
         await first
-        if (this.#assertedAbsent.has(key) || this.#pageHosts.has(host)) return false
+        if (this.#assertedAbsent.has(key)) return false
       } else {
         let settle!: () => void
         this.#firstProbe.set(host, new Promise<void>(resolve => { settle = resolve }))
@@ -3542,7 +3631,7 @@ export class HostSyncService extends EventTarget {
   /** This tab's first probe of a host, while it is in flight (#hostHolds). */
   readonly #firstProbe = new Map<string, Promise<void>>()
   /** Hosts whose first probe settled — asked at the full cap from then on.
-   *  Cleared with #pageHosts, so a host given back is asked alone again. */
+   *  Cleared with #assertedAbsent, so a host given back is asked alone again. */
   readonly #probedHosts = new Set<string>()
 
   /** One held-probe (#hostHolds): the HEAD, under the verify cap and this
@@ -3572,31 +3661,13 @@ export class HostSyncService extends EventTarget {
         // A PAGE WHERE BYTES SHOULD BE: a site's fallback for every address
         // (the hypercomb.com apex answered the Azure shell until 2026-10-10).
         // Any host keeps its per-sig probe — a static door may hold some sigs
-        // as files and fall back for the rest — and is pushed to; a publish
-        // domain is the participant's choice, so its PUSH decides: a refusal
-        // passes it over for the room (#noteSwarmHostFailure, D2), named
-        // honestly (`page`, #whyOf).
+        // as files and fall back for the rest — and is pushed to; every swarm
+        // host is the participant's choice (a publish domain, the host
+        // field), so its PUSH decides: a refusal passes it over for the room
+        // (#noteSwarmHostFailure, D2), named honestly (`page`, #whyOf).
         // A host that already took this tab's uploads and answers a page
         // once is a hiccup (a route or a deploy), never a page host.
-        if (target.swarm && !this.#provenHosts.has(host)) {
-          this.#answersPage.add(host)
-          if (this.#resolver.isPoolHost(host)) {
-            // A POOL host is different: a host that cannot take uploads is
-            // passed over, and a heap answers bytes or 404 — never a page.
-            // THIS HEAD, the one the drain makes anyway, is the probe: passed
-            // over now, before a single PUT waits on it (the 2026-10-10
-            // meeting sat 40 minutes behind two whole failure waves of it).
-            // Its answer to the next sig would be the same page, so it is not
-            // asked again this session; a receipt from it, or the
-            // participant's retry, gives it back. Remembered across a reload
-            // of this tab — unless the socket was down (then the page may
-            // have been the path's, and the next socket gives it back).
-            const pathDown = this.#meshState !== 'open'
-            this.#pageHosts.add(host)
-            if (pathDown) this.#downWhileOffline.add(host)
-            this.#resolver.markDown(host, `${host} answers a page — takes no uploads`, !pathDown)
-          }
-        }
+        if (target.swarm && !this.#provenHosts.has(host)) this.#answersPage.add(host)
         this.#assertedAbsent.add(key)
         return false
       }
@@ -3742,7 +3813,7 @@ export class HostSyncService extends EventTarget {
       content: '',
     }
     try {
-      const signed = await signer.signEvent(evt)
+      const signed = await HostSyncService.#within(signer.signEvent(evt), SIGN_TIMEOUT_MS)
       const json = JSON.stringify(signed)
       return 'Nostr ' + btoa(unescape(encodeURIComponent(json)))
     } catch {
@@ -3766,12 +3837,12 @@ export class HostSyncService extends EventTarget {
     if (!pubkey) return ''
     const createdAt = Math.floor(nowMs / 1000)
     try {
-      const signed = await signer.signEvent({
+      const signed = await HostSyncService.#within(signer.signEvent({
         kind: SWARM_LIFECYCLE_KIND,
         created_at: createdAt,
         tags: [['x', lifecycle], ['d', pubkey], ['expiration', String(createdAt + ALIVE_TTL_SECS)]],
         content: JSON.stringify({ alive: true, v: ALIVE_BEACON_VERSION }),
-      })
+      }), SIGN_TIMEOUT_MS)
       const json = JSON.stringify(signed)
       this.#alive = { at: nowMs, x: lifecycle, json }
       return json
@@ -3780,16 +3851,19 @@ export class HostSyncService extends EventTarget {
 
   #alive: { at: number; x: string; json: string } | null = null
 
-  /** The room's lifecycle sig — sha256 of `lifecycle\0<room>\0<secret>`, the
-   *  swarm's own derivation — or '' when this tab meets in no room. The pair
-   *  is THIS tab's own zone (the one it joined), never the origin-wide
-   *  stores' pre-fill. */
+  /** The room's lifecycle sig — the roster address the SWARM beacons on now
+   *  (SwarmDrone.lifecycleSig: core lifecyclePreimage, `lifecycle \0 room \0
+   *  secret \0 meeting point` since 2026-10-12) — or '' when this tab meets
+   *  in no room. Asked, never derived here: host-sync names no room address
+   *  of its own and reads no relay, so the beacon's `x` is exactly the
+   *  address the room meets at (the point the tab dials, never the host it
+   *  uploads to). Only for THIS tab's own zone (the one it joined), never
+   *  the origin-wide stores' pre-fill. A move to another point re-signs
+   *  (#alive is keyed by `x`). */
   readonly #lifecycleSig = async (): Promise<string> => {
     const zone = ownZone()
-    const room = zone?.room ?? ''
-    const secret = zone?.secret ?? ''
-    if (!room || !secret) return ''
-    try { return await SignatureService.sign(new TextEncoder().encode(`lifecycle\u0000${room}\u0000${secret}`).buffer as ArrayBuffer) }
+    if (!zone?.room || !zone?.secret) return ''
+    try { return String(this.#ioc<{ lifecycleSig?: () => string }>(SWARM_DRONE_KEY)?.lifecycleSig?.() ?? '') }
     catch { return '' }
   }
   /** The participant's host, scheme/slash stripped (e.g. 'jwize.com').

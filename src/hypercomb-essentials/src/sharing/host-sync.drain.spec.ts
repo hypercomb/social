@@ -133,6 +133,7 @@ beforeEach(() => {
   localStorage.setItem('hc:nostrmesh:self-domain', SELF_DOMAIN)
   localStorage.setItem('hc:host-sync:enabled', 'true')
   localStorage.removeItem('hc:public-host')
+  localStorage.removeItem('hc:public-host:domain')
   service = new HostSync()
 })
 
@@ -362,7 +363,10 @@ describe('the drain asks the host before it sends', () => {
     // Two targets: the self-domain and the public host. Public-only targets
     // apply to `.public`-marked sigs alone, so both entries wear the marker.
     localStorage.setItem('hc:public-host', '1')
+    // The public host the participant NAMED — there is no default (2026-10-11).
+    localStorage.setItem('hc:public-host:domain', 'public.example')
     const publicDomain = String((service as unknown as { publicHostDomain: () => string }).publicHostDomain())
+    expect(publicDomain).toBe('public.example')
     const mark = async (sig: string): Promise<void> => {
       const queue = await root.getDirectoryHandle(await poolName('host-push'), { create: true })
       const w = await (await queue.getFileHandle(`${sig}.public`, { create: true })).createWritable()
@@ -399,6 +403,7 @@ describe('the drain asks the host before it sends', () => {
     expect(await receipts()).toContain(second.sig)
     progress.off()
     localStorage.removeItem('hc:public-host')
+    localStorage.removeItem('hc:public-host:domain')
   })
 
   it('(g) a held HTML page served as text/html is not an SPA fallback: its bytes hash to the sig, so it is not re-sent', async () => {

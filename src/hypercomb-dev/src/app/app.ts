@@ -187,9 +187,11 @@ export class App implements AfterViewInit {
     // REFRESH KEEPS THE SWARM, dev exactly like production: mesh-session.ts
     // rewrote `hc:mesh-public` from the tab's session before any drone, and
     // here the mesh network starts to match. (The old dev-only default-ON is retired.)
-    // Joining stays a one-gesture act — the dev relay (ws://localhost:7777)
-    // is still in the relay-list defaults (loadRelays in
-    // nostr-mesh.drone.ts), so a join needs zero extra setup.
+    // Joining names its host, dev exactly like production (2026-10-11: no
+    // default host — loadRelays in nostr-mesh.drone.ts seeds nothing on any
+    // origin): the selector's host field (hypercomb.com offered, one tap),
+    // a meeting link, or a server named to /use-live-relay — the local dev
+    // relay (ws://localhost:7777) is a host like any other, typed there.
     queueMicrotask(() => {
       const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
       // Not persisted: the value is this TAB's (see web's core-adapter).

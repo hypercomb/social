@@ -14,14 +14,14 @@ The shell ships fourteen catalogs (`hypercomb-shared/i18n/*.json`) and they drif
 | Finding it | the host lists every verified catalog for a locale at the pool's derived address `sign('i18n:<locale>')` — the one-file index every published pool uses (`published-pools.ts`) — and at `/<sign('i18n:<locale>')>` for people. No registry: a hive computes the address and asks | worker `serveTranslations` |
 | Healing | `language sync` reads the hosts you follow, verifies each catalog against its signature, and fills ONLY the keys the locale lacks; a shipped string is never replaced by a stranger's, and your overrides stay on top | runtime `LocalizationService.healTranslations` |
 | Replicating | what was placed is kept as one document per locale in the hive's translations pool and re-applied at boot and on every locale change, so the healing survives a reload and a lost host | `language.queen.ts` `healFromPool` |
-| Notifying | `language missing` lists the keys the locale could not answer this session and, with a host, publishes them under your key as `i18n-missing:<locale>`; the host lists who is missing what, so a translator sees the demand | `LocalizationService.missingKeys`, worker `missing` |
+| Notifying | `language missing` lists the keys the locale could not answer this session and, with a host you name, publishes them under your key as `i18n-missing:<locale>`; the host lists who is missing what, so a translator sees the demand | `LocalizationService.missingKeys`, worker `missing` |
 
 ## The words
 
 - `language` — the current locale; `language <locale>` switches.
-- `language offer [<locale>] [@<host>]` — your own translations for the locale (the override layer `i18n-override` writes) become a signed catalog on the host.
+- `language offer [<locale>] @<host>` — your own translations for the locale (the override layer `i18n-override` writes) become a signed catalog on the host you name. There is no default host (jwize 2026-10-11): with no `@<host>` nothing is sent, and the word says how to name one.
 - `language sync [<locale>] [@<host>]` — heal the locale from the hosts you follow (the public host, your community hosts, and `@<host>`).
-- `language missing [<locale>] [@<host>]` — what the locale lacks; published under your key when a host is named or configured.
+- `language missing [<locale>] [@<host>]` — what the locale lacks; published under your key only when you name a host. With none it is shown here and told to nobody.
 
 The three publishing words are the participant's alone: a model never publishes text under somebody's key.
 

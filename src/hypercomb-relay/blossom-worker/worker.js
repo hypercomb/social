@@ -27,9 +27,11 @@
 //      object returns 200 without a rewrite (dedup is free).
 //   2. writer-authorization — a schnorr-signed nostr event proves WHO
 //      without ever sending a secret. Instead of relay.js's static
-//      --writers allowlist, this tier meters an auto-grant guest list:
+//      --writers allowlist, this tier meters a grant ledger:
 //      Pool sign('host:grants')/<pubkey> → { quotaBytes, usedBytes, expiresAt }
-//      (KV GRANTS read as a drain source only).
+//      (KV GRANTS read as a drain source only). Bytes are kept for the
+//      host's own people (hostPeople) — never handed to any key that asks
+//      (AUTO_GRANT defaults off since jwize 2026-10-11).
 //
 // Never logs or echoes request bodies. Only dependency: @noble/curves
 // (schnorr verify — wrangler bundles it).
@@ -149,8 +151,16 @@ function normalizeBinding(rawHost, raw) {
     // THE FARM: other hosts holding the same heap, asked in order for a bare
     // signature this bucket lacks (readThroughFarm). Hostnames only.
     ...(farmHosts(raw.farm).length ? { farm: farmHosts(raw.farm) } : {}),
+    // THE CHANNEL AN ORIGIN HOST INSTALLS: its package pool is derived from
+    // the primary publisher's signed `install:<installs>` (installedPackage).
+    // Read from the var the worker was deployed with, as the farm is.
+    ...(INSTALL_CHANNEL_RE.test(String(raw.installs || '')) ? { installs: String(raw.installs) } : {}),
   }]
 }
+
+/** An install channel name — the `<name>` of `install:<name>`, as publish
+ *  makes one (hypercomb-essentials/scripts/publish.ts). */
+const INSTALL_CHANNEL_RE = /^[a-z][a-z0-9-]{0,47}$/
 
 /** A binding's farm: distinct lowercase hostnames, in the order given. */
 function farmHosts(raw) {
@@ -1713,7 +1723,8 @@ function servesHostDoor(env, hostname) {
 // (the heap, the signed index) and the machine JSON nobody else serves, and
 // hands every other read to that origin unchanged. A pool listing `/<pool>/` is
 // the origin's on purpose: the package pool is there, and an empty listing here
-// would stop the install's walk before it ever asked /content/.
+// would stop the install's walk before it ever asked /content/. (The package
+// under /content/ is the heap's first once it holds it — originHostRead.)
 // The hand-off is fetch(request), which reaches the origin only from a ZONE
 // ROUTE — on a custom domain this worker IS the origin and would call itself —
 // so the list is the deploy var alone, never a binding or a signed record.
@@ -1722,6 +1733,174 @@ const ORIGIN_OWNED_BY_WORKER = /^\/(?:(?:@resource\/)?[0-9a-f]{64}(?:\/[^/]+)?|h
 function servesOrigin(env, hostname) {
   return String(env.ORIGIN_HOSTS || '').split(/[\s,]+/)
     .some(host => host && host.toLowerCase() === String(hostname || '').toLowerCase())
+}
+
+// AN ORIGIN HOST'S PACKAGE, FROM THE HEAP (jwize 2026-10-11: "make each
+// publish leave hypercomb.com current"). A publish moves the signed index here
+// the moment it stamps, but the package lived only in the origin's staged copy,
+// which moves only when someone redeploys the origin — so a cold install, and
+// every Update all, kept being offered the previous package. Two reads are now
+// the heap's first; whenever it cannot answer one, it goes to the origin
+// exactly as it did before:
+//   /content/<sig>                    the heap's bytes; a miss is the origin's.
+//                                     Never the farm: only a bare /<sig> read
+//                                     fills the heap, so the root lands only
+//                                     when the replication puts it there.
+//   /content/<sign('host:packages')>/ and its 8-digit members — only on a host
+//                                     whose binding names the channel it
+//                                     installs (`installs`): DERIVED from the
+//                                     primary publisher's verified index, the
+//                                     one root `install:<installs>` names, and
+//                                     only once the heap holds that root's
+//                                     WHOLE package (heapHoldsPackage) — the
+//                                     worker checks it and never trusts the
+//                                     order anyone pulled files in. Complete
+//                                     or absent: a heap holding the root but
+//                                     not every file under it leaves the
+//                                     origin's pool answering. The publish
+//                                     pulls the package BEFORE it stamps
+//                                     (hypercomb-essentials/scripts/
+//                                     replicate-public-host.ts), so the pool
+//                                     moves the moment the stamp does. No
+//                                     write can make this pool name a root
+//                                     the publisher did not sign.
+const ORIGIN_ATOM_RE = /^\/content\/([0-9a-f]{64})$/
+const ORIGIN_POOL_RE = /^\/content\/([0-9a-f]{64})\/(?:[0-9]{8})?$/
+
+async function originHostRead(request, env, url) {
+  const atom = url.pathname.match(ORIGIN_ATOM_RE)
+  if (atom) return originAtom(request, env, atom[1])
+  const pool = url.pathname.match(ORIGIN_POOL_RE)
+  if (pool && pool[1] === await poolAddress(HOST_PACKAGES_MEANING)) return installedPackage(request, env, url)
+  return null
+}
+
+/** `/content/<sig>` at an origin host: the heap, else the origin as before. */
+async function originAtom(request, env, sig) {
+  const dest = String(request.headers.get('sec-fetch-dest') || '').toLowerCase()
+  const blob = await serveBlob(request, env, sig)
+  if (blob.status === 404) return null
+  return dest === 'script' || dest === 'worker' || dest === 'sharedworker' ? asScript(blob) : blob
+}
+
+/** The package pool an origin host installs from, when its heap holds the
+ *  root the publisher signed — else null, and the origin's own pool answers. */
+async function installedPackage(request, env, url) {
+  const binding = siteBindings(env)[url.hostname.toLowerCase()]
+  const publisher = binding?.publishers?.find((p) => p.primary) || binding?.publishers?.[0]
+  if (!binding?.installs || !publisher) return null
+  try {
+    const index = await verifiedIndex(env, publisher.pubkey)
+    const root = String(index?.roots?.[`install:${binding.installs}`] || '').toLowerCase()
+    if (!SIG_RE.test(root) || !(await heapHoldsPackage(env, root))) return null
+    return await answerPackage(request, url, { root }, binding.installs)
+  } catch { return null }
+}
+
+// ── a package's closure, by its signed structure ─────────────────────────────
+//
+// The Node twin is hypercomb-relay/replicate.js resolvePackageClosure (and the
+// runtime's deriveInventory): child layers through `cells`, the bees and
+// dependencies a layer declares as exact leaves — never 64-hex text mined from
+// anywhere else. Two questions use it: does the heap hold a package WHOLE
+// (heapHoldsPackage), and is a signature part of a package a farm may give
+// (farmMayCopy).
+
+const PACKAGE_CLOSURE_MAX = 8_192
+const PACKAGE_WALK_WIDTH = 6
+// A package found whole is not walked again for this long. Files leave the
+// heap only by an owner's /forget, so the answer is re-earned on this clock
+// rather than trusted for the isolate's life.
+const PACKAGE_WHOLE_MS = 300_000
+const PACKAGE_MEMO_HELD = 16
+// Memos per bucket (siteOpen keys its answer on env.CONTENT the same way).
+const packageMemos = new WeakMap()
+function packageMemo(env) {
+  const key = env.CONTENT ?? packageMemos
+  let memo = packageMemos.get(key)
+  if (!memo) packageMemos.set(key, memo = { whole: new Map(), scopes: new Map(), heads: new Map() })
+  return memo
+}
+function remember(map, key, value) {
+  map.delete(key)
+  if (map.size >= PACKAGE_MEMO_HELD) map.delete(map.keys().next().value)
+  map.set(key, value)
+}
+
+const bareSig = (value) => String(value ?? '').trim().toLowerCase().replace(/\.(?:js|json)$/, '')
+
+/** The references that define a package layer, or null for anything else. */
+function packageLayerRefs(bytes) {
+  let record
+  try { record = JSON.parse(new TextDecoder().decode(bytes)) } catch { return null }
+  if (!record || typeof record !== 'object' || Array.isArray(record) || typeof record.name !== 'string' || !record.name.trim()) return null
+  if (!Array.isArray(record.cells) || !Array.isArray(record.bees) || !Array.isArray(record.dependencies)) return null
+  const sigs = (values, cells) => {
+    const out = []
+    for (const value of values) {
+      const sig = bareSig(typeof value === 'string' ? value : (cells || (value && typeof value === 'object')) ? value?.sig : '')
+      if (!SIG_RE.test(sig)) return null
+      out.push(sig)
+    }
+    return out
+  }
+  const layers = sigs(record.cells, true)
+  const bees = sigs(record.bees)
+  const dependencies = sigs(record.dependencies)
+  return layers && bees && dependencies ? { layers, leaves: [...bees, ...dependencies] } : null
+}
+
+/** Walk `root`'s package, reading each LAYER through `layerBytes` (leaves
+ *  are never read): `{ layers, leaves, missing }`, or null when what was read
+ *  is not a package, or is too large to be one. */
+async function walkPackage(root, layerBytes) {
+  const layers = new Set([root])
+  const leaves = new Set()
+  const missing = []
+  const queue = [root]
+  while (queue.length) {
+    if (layers.size + leaves.size > PACKAGE_CLOSURE_MAX) return null
+    const batch = queue.splice(0, PACKAGE_WALK_WIDTH)
+    const read = await Promise.all(batch.map(async (sig) => [sig, await layerBytes(sig)]))
+    for (const [sig, bytes] of read) {
+      if (!bytes) { missing.push(sig); continue }
+      const refs = packageLayerRefs(bytes)
+      if (!refs) return null
+      for (const child of refs.layers) {
+        if (leaves.has(child)) return null
+        if (!layers.has(child)) { layers.add(child); queue.push(child) }
+      }
+      for (const leaf of refs.leaves) {
+        if (layers.has(leaf)) return null
+        leaves.add(leaf)
+      }
+    }
+  }
+  return { layers, leaves, missing }
+}
+
+/** A layer's bytes from the heap, or null. */
+async function heapLayer(env, sig) {
+  const object = await env.CONTENT?.get?.(sig)
+  return object ? new Uint8Array(await object.arrayBuffer()) : null
+}
+
+/** Does the heap hold `root`'s package WHOLE — every layer, bee and
+ *  dependency? Only a whole package may be named by a derived pool. */
+async function heapHoldsPackage(env, root) {
+  const memo = packageMemo(env).whole
+  const seen = memo.get(root)
+  if (seen !== undefined && Date.now() - seen < PACKAGE_WHOLE_MS) return true
+  if (!(await env.CONTENT?.head?.(root))) return false
+  const walk = await walkPackage(root, (sig) => heapLayer(env, sig))
+  if (!walk || walk.missing.length) return false
+  const leaves = [...walk.leaves]
+  for (let at = 0; at < leaves.length; at += 16) {
+    const held = await Promise.all(leaves.slice(at, at + 16).map((sig) => env.CONTENT.head(sig)))
+    if (held.some((object) => !object)) return false
+  }
+  remember(memo, root, Date.now())
+  return true
 }
 
 // ── the sandbox door ─────────────────────────────────────────────────────
@@ -2640,12 +2819,110 @@ const FARM_MISSES_HELD = 4_096
 const farmReads = new Map()   // `<farm>\n<sig>` → the one read in flight
 const farmMisses = new Map()  // `<farm>\n<sig>` → when every host missed it
 
-/** The farm for `hostname`: its own binding's, else its zone's. Never itself. */
-function farmOf(env, hostname) {
+/** The binding whose farm `hostname` reads through: its own, else its zone's. */
+function farmBindingOf(env, hostname) {
   const bindings = siteBindings(env)
   const host = String(hostname || '').toLowerCase()
-  const binding = [bindings[host], bindings[bindingZoneOf(bindings, host)]].find((b) => b?.farm?.length)
-  return (binding?.farm ?? []).filter((farm) => farm !== host)
+  return [bindings[host], bindings[bindingZoneOf(bindings, host)]].find((b) => b?.farm?.length) ?? null
+}
+
+/** The farm for `hostname`: its own binding's, else its zone's. Never itself. */
+function farmOf(env, hostname) {
+  const host = String(hostname || '').toLowerCase()
+  return (farmBindingOf(env, hostname)?.farm ?? []).filter((farm) => farm !== host)
+}
+
+// A FARM ON A BINDING THAT INSTALLS A CHANNEL GIVES PACKAGES, NOTHING ELSE
+// (2026-10-12). Such a farm is the publisher's own machine (hypercomb.com's is
+// jwize.com), which also serves whatever its relay holds — a swarm
+// participant's uploads among it — to anyone holding the signature. Read
+// through blindly, any of that became a permanent, ownerless copy here, served
+// on every zone this worker routes, and every unknown signature asked was a
+// fetch to that machine. So a signature is read through only when it is part
+// of a package the publisher put out: the root its signed `install:<installs>`
+// names, or the newest member of the farm's own `host:packages` pool — which
+// the publish appends to before it stamps, so a revision's files can be pulled
+// here BEFORE any index names it. A binding with a farm and no `installs` is a
+// heap mirror and reads through as before.
+const FARM_HEAD_MS = 10_000
+
+/** May `sig` be read through `farm` for `binding`? */
+async function farmMayCopy(env, binding, farm, sig) {
+  if (!binding?.installs) return true
+  for (const root of await farmPackageRoots(env, binding, farm)) {
+    if (root === sig || (await farmPackageScope(env, farm, root))?.has(sig)) return true
+  }
+  return false
+}
+
+/** The roots whose packages a farm may give: the signed root, then the
+ *  farm's newest published package. */
+async function farmPackageRoots(env, binding, farm) {
+  const roots = []
+  const publisher = binding.publishers?.find((p) => p.primary) || binding.publishers?.[0]
+  if (publisher) {
+    const index = await verifiedIndex(env, publisher.pubkey).catch(() => null)
+    const signed = String(index?.roots?.[`install:${binding.installs}`] || '').toLowerCase()
+    if (SIG_RE.test(signed)) roots.push(signed)
+  }
+  const head = await farmPoolHead(env, farm)
+  if (head && !roots.includes(head)) roots.push(head)
+  return roots
+}
+
+/** The newest member of the farm's `host:packages` pool — what its machine
+ *  last published. Held for a few seconds at most. */
+async function farmPoolHead(env, farm) {
+  const memo = packageMemo(env).heads
+  const key = farm.join(',')
+  const held = memo.get(key)
+  if (held && Date.now() - held.at < FARM_HEAD_MS) return held.root
+  const pool = await poolAddress(HOST_PACKAGES_MEANING)
+  const deadline = AbortSignal.timeout(FARM_READ_MS)
+  const textOf = async (response, max) => response.ok ? new TextDecoder().decode(await boundedBytes(response, max) ?? new Uint8Array()) : ''
+  let root = null
+  for (const host of farm) {
+    if (deadline.aborted || root) break
+    try {
+      const listing = await textOf(await fetch(`https://${host}/${pool}/`, { headers: { accept: 'text/plain' }, signal: deadline }), 262_144)
+      if (!listing || listing.includes('<')) continue
+      const markers = listing.split(/\r?\n/).map((line) => line.trim()).filter((name) => /^[0-9]{8}$/.test(name)).sort()
+      if (!markers.length) continue
+      const member = await textOf(await fetch(`https://${host}/${pool}/${markers[markers.length - 1]}`, { headers: { accept: 'text/plain' }, signal: deadline }), 1_024)
+      const sig = member.split('\n')[0].trim().toLowerCase()
+      if (SIG_RE.test(sig)) root = sig
+    } catch { /* the next farm host */ }
+  }
+  remember(memo, key, { at: Date.now(), root })
+  return root
+}
+
+/** Every signature in `root`'s package, its layers read from the heap or the
+ *  farm (each hashed, and KEPT NOWHERE — only the read-through stores). A
+ *  whole walk is remembered; a partial one is used once. */
+async function farmPackageScope(env, farm, root) {
+  const memo = packageMemo(env).scopes
+  if (memo.has(root)) return memo.get(root)
+  const walk = await walkPackage(root, async (sig) => (await heapLayer(env, sig)) ?? farmLayer(farm, sig))
+  if (!walk) return null
+  const scope = new Set([...walk.layers, ...walk.leaves])
+  if (!walk.missing.length) remember(memo, root, scope)
+  return scope
+}
+
+/** A layer's bytes from the farm, believed only when they hash to its name. */
+async function farmLayer(farm, sig) {
+  const deadline = AbortSignal.timeout(FARM_READ_MS)
+  for (const host of farm) {
+    if (deadline.aborted) break
+    try {
+      const response = await fetch(`https://${host}/${sig}`, { headers: { accept: '*/*', 'accept-encoding': 'identity' }, signal: deadline })
+      if (!response.ok) { await response.body?.cancel(); continue }
+      const bytes = await boundedBytes(response, FARM_BUFFER_MAX)
+      if (bytes && await sha256Hex(bytes) === sig) return bytes
+    } catch { /* the next farm host */ }
+  }
+  return null
 }
 
 /** A response's bytes, or null past `maxBytes` — counted as they arrive, so
@@ -2687,6 +2964,10 @@ async function readThroughFarm(env, hostname, sig) {
     if (Date.now() - missed < FARM_MISS_MS) return false
     farmMisses.delete(key)
   }
+  // Not a miss: a signature outside every package the farm may give is
+  // refused, and asked again it is weighed again (a publish may have just
+  // made it part of one).
+  if (!(await farmMayCopy(env, farmBindingOf(env, hostname), farm, sig).catch(() => false))) return false
   if (!farmReads.has(key)) {
     farmReads.set(key, readFromFarm(env, farm, sig).then((held) => {
       if (!held) {
@@ -2710,7 +2991,9 @@ async function readFromFarm(env, farm, sig) {
         continue
       }
       // No owner: bytes read through belong to nobody here, so /forget
-      // never takes them, as with anything stored before claims existed.
+      // never takes them, as with anything stored before claims existed. On
+      // a binding that installs a channel they are a published package's
+      // files (farmMayCopy) — load-bearing for every install, as wanted.
       const type = String(response.headers.get('content-type') || '')
       const store = { onlyIf: new Headers({ 'If-None-Match': '*' }),
         ...(type && type.length <= 255 ? { httpMetadata: { contentType: type } } : {}) }
@@ -2870,27 +3153,46 @@ async function verifyBud02(evt, bodyHash) {
   return { ok: true, pubkey: String(evt.pubkey).toLowerCase() }
 }
 
-// ── quota (the auto-grant guest list) ────────────────────────────────────────
+// ── quota (the host's people, and the grant ledger) ──────────────────────────
 //
-// The guest list is a pool of meaning (jwize 2026-09-25: state lives only in
+// The ledger is a pool of meaning (jwize 2026-09-25: state lives only in
 // pools of meaning): each key's grant { quotaBytes, usedBytes, expiresAt } is
 // the member of sign('host:grants') named by the key. Never listed, so never
 // public — only GET /grant hands a key its own row. The KV namespace (GRANTS)
-// that held it before is read as a drain source and never written. Policy
-// via env:
-//   AUTO_GRANT           '1' (default) mints a grant on first valid upload
-//   DEFAULT_QUOTA_BYTES  104857600 (100 MB)
+// that held it before is read as a drain source and never written.
+//
+// WHO GETS BYTES (jwize 2026-10-11: "we can't give hosting away for free";
+// "Then we can share the host with our friends"). A host keeps bytes for its
+// OWN PEOPLE (hostPeople): each zone's operator, every publisher bound to a
+// site here (the aiAdmitted set — a claim binds its claimant to publish, not
+// to be kept), and every key the operator lists in HOST_FRIENDS. They stand
+// on PEOPLE_QUOTA_BYTES at least, their use counted across windows, the
+// window rolled forward while they stay listed. A domain claimant stands on
+// the claim allowance only while it is one of them too (decision d). Anyone
+// else stands on the row they already hold, as it is: an unexpired grant
+// keeps working until its fixed expiresAt (consume never extends it), and
+// is never re-minted. Policy via env:
+//   AUTO_GRANT           '0' (default): no grant is minted for a stranger.
+//                        '1' brings back the open guest list — a fresh
+//                        DEFAULT_QUOTA_BYTES grant on a first upload, and a
+//                        fresh one again when it expires. Never on a host
+//                        that cannot give its storage away.
+//   HOST_FRIENDS         comma list of 64-hex pubkeys the operator shares the
+//                        host with (a redeploy per friend; a self-service
+//                        signed list comes later)
+//   PEOPLE_QUOTA_BYTES   1073741824 (1 GiB) — the host's people
+//   CLAIM_QUOTA_BYTES    1073741824 (1 GiB) — a listed claimant
+//   DEFAULT_QUOTA_BYTES  104857600 (100 MB) — a guest, under AUTO_GRANT
 //   GRANT_TTL_DAYS       90
 //
 // The quota is an anti-abuse throttle, not billing: a malicious uploader
 // can waste granted bytes, never corrupt a reader (every read is sha256-
 // gated at the client). Existing-object PUTs consume nothing — the bytes
-// are already here. Under AUTO_GRANT an EXPIRED grant re-mints fresh, same
-// as an unknown pubkey: the guest list forgets you, it doesn't ban you.
-// With AUTO_GRANT off, missing and expired both close the door (403).
+// are already here. Missing and expired both close the door (403) unless
+// AUTO_GRANT is on. Nothing here ever deletes a byte or a row.
 //
 // Last write wins; two racing uploads can under-count briefly. Acceptable
-// for a guest list — the ceiling holds on the next read.
+// for a throttle — the ceiling holds on the next read.
 
 const HOST_GRANTS_MEANING = 'host:grants'
 const HOST_AI_METERS_MEANING = 'host:ai-meters'
@@ -2926,11 +3228,66 @@ async function writeLedger(env, meaning, member, row) {
 
 const readGrant = (env, pubkey) => readLedger(env, HOST_GRANTS_MEANING, pubkey, pubkey)
 
+/** A byte allowance from a var: the fallback when it is unset or blank — an
+ *  empty var must never read as a 0-byte allowance. */
+function allowance(raw, fallback) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : fallback
+}
+
 function policy(env) {
   return {
-    autoGrant: String(env.AUTO_GRANT ?? '1') === '1',
+    // OFF unless the deployment says '1' (jwize 2026-10-11): a host that
+    // forgets the var gives nothing away.
+    autoGrant: String(env.AUTO_GRANT ?? '0').trim() === '1',
     defaultQuota: Number(env.DEFAULT_QUOTA_BYTES ?? 104_857_600),
+    peopleQuota: allowance(env.PEOPLE_QUOTA_BYTES, 1_073_741_824),
+    claimQuota: allowance(env.CLAIM_QUOTA_BYTES, 1_073_741_824),
     ttlDays: Number(env.GRANT_TTL_DAYS ?? 90),
+  }
+}
+
+/** HOST_FRIENDS: the keys the operator shares this host with — a comma list
+ *  of 64-hex pubkeys, folded to lowercase; anything else in it is ignored. */
+function hostFriends(env) {
+  return String(env.HOST_FRIENDS || '').toLowerCase().split(',').map((s) => s.trim()).filter((s) => SIG_RE.test(s))
+}
+
+/** THE HOST'S PEOPLE — the only keys it keeps bytes for: every key it already
+ *  admitted (aiAdmitted: each zone's operator and every bound publisher, never
+ *  a claimant) and every friend the operator lists. */
+async function hostPeople(env) {
+  const people = await aiAdmitted(env)
+  for (const friend of hostFriends(env)) people.add(friend)
+  return people
+}
+
+/** What a key stands on here: the grant it holds, with the allowance this
+ *  host gives it applied — never persisted (consume() writes it, only after
+ *  bytes land). One person: max(held, PEOPLE_QUOTA_BYTES), raised to
+ *  CLAIM_QUOTA_BYTES while it also holds an active claim (documentation/
+ *  domain-claim.md — a claimed domain's hives live in this bucket), per
+ *  WINDOW as the guest list was: its use counts inside the window it holds,
+ *  and a lapsed (or absent) window starts a fresh one at zero — never a
+ *  lifetime cap on the host's own people. Anyone else — a claimant the host
+ *  does not list among its people too, a friend dropped from HOST_FRIENDS —
+ *  stands on the row it holds until that row's own expiry, capped at the
+ *  guest ceiling (DEFAULT_QUOTA_BYTES): a claim's or a friend's allowance
+ *  ends with its listing (decision d). Upload and GET /grant both ask this,
+ *  so the meter says what an upload would be told. */
+async function standing(env, pubkey, p, now) {
+  const held = await readGrant(env, pubkey)
+  const grant = held && typeof held === 'object' ? held : null
+  if (!(await hostPeople(env)).has(pubkey)) {
+    return grant && { ...grant, quotaBytes: Math.min(Number(grant.quotaBytes || 0), p.defaultQuota) }
+  }
+  const claimed = await holdsActiveClaim(env, pubkey)
+  const open = !!grant && Number(grant.expiresAt || 0) > now
+  return {
+    quotaBytes: Math.max(Number(grant?.quotaBytes || 0), p.peopleQuota, claimed ? p.claimQuota : 0),
+    usedBytes: open ? Number(grant.usedBytes || 0) : 0,
+    expiresAt: open ? Number(grant.expiresAt) : now + p.ttlDays * 86_400,
   }
 }
 
@@ -2940,29 +3297,15 @@ function policy(env) {
 async function admit(env, pubkey, size) {
   const p = policy(env)
   const now = Math.floor(Date.now() / 1000)
-  const held = await readGrant(env, pubkey)
-  let grant = held && typeof held === 'object' ? held : null
-  // A DOMAIN'S CLAIMANT HOSTS IT HERE (documentation/domain-claim.md): the
-  // shared hives a claimed domain serves live in this bucket, replicated up
-  // from the claimant's own hive. While the claim is active the key stands on
-  // the claim allowance, its use counted across windows — the guest list's
-  // refilling 90-day window is for strangers.
-  if (await holdsActiveClaim(env, pubkey)) {
-    const allowance = Number(env.CLAIM_QUOTA_BYTES ?? 1_073_741_824)
-    grant = {
-      quotaBytes: Math.max(Number(grant?.quotaBytes || 0), allowance),
-      usedBytes: Number(grant?.usedBytes || 0),
-      expiresAt: now + p.ttlDays * 86_400,
-    }
-  }
+  let grant = await standing(env, pubkey, p, now)
   const expired = !!grant && Number(grant.expiresAt || 0) <= now
   if (!grant || expired) {
     if (!p.autoGrant) {
       return {
         ok: false, kind: expired ? 'expired' : 'missing',
         reason: expired
-          ? 'your hosting grant has expired — ask the operator for a renewal'
-          : 'no hosting grant for this key and auto-grants are off — ask the operator for one',
+          ? 'your hosting grant has expired — this host keeps bytes for its own people only; ask its operator to add your key'
+          : 'this host keeps bytes for its own people only — ask its operator to add your key',
       }
     }
     grant = { quotaBytes: p.defaultQuota, usedBytes: 0, expiresAt: now + p.ttlDays * 86_400 }
@@ -3086,6 +3429,11 @@ async function serveModule(request, env, sig) {
     response = await env.ASSETS.fetch(new Request(assetUrl, request))
   }
   if (!response || response.status === 404) response = await serveBlob(request, env, sig)
+  return asScript(response)
+}
+
+/** The same bytes, typed as a module — a miss or an error is left as it is. */
+function asScript(response) {
   if (response.status !== 200 && response.status !== 206 && response.status !== 304) return response
   const headers = new Headers(response.headers)
   headers.set('Content-Type', 'text/javascript; charset=utf-8')
@@ -3094,6 +3442,13 @@ async function serveModule(request, env, sig) {
     statusText: response.statusText,
     headers,
   })
+}
+
+/** Bytes the farm just gave this heap say so — the publish's replication
+ *  (replicate-public-host.ts) counts what each run copied by it. */
+function readThrough(response) {
+  if (response.ok) response.headers.set('X-Read-Through', 'farm')
+  return response
 }
 
 // ── write side ───────────────────────────────────────────────────────────────
@@ -3238,17 +3593,19 @@ async function headUpload(request, env) {
 // ── grant status (the quota meter) ───────────────────────────────────────────
 //
 // GET /grant, NIP-98-authenticated (method tag GET, u = this URL): a pubkey
-// may read ITS OWN ledger row — nothing else, nobody else's. Reading never
-// mints or mutates a grant; `state:'none'` with the default quota tells a
-// fresh key what an auto-grant WOULD give it. Feeds the client's share-flow
-// meter ("2.1 MB of 100 MB") and the plain-language over-quota moment.
+// may read ITS OWN standing — nothing else, nobody else's. It is what an
+// upload would be told (standing): one of the host's people reads the
+// allowance it stands on, active, whether or not it has uploaded yet. Reading
+// never mints or mutates a grant; `state:'none'` says what an auto-grant
+// WOULD give a fresh key (0 with AUTO_GRANT off). Feeds the client's
+// share-flow meter ("2.1 MB of 100 MB") and the plain-language over-quota
+// moment, and is how an operator checks a device key before a flip.
 async function getGrant(request, env) {
   const auth = await verifyNip98(request, parseAuthEvent(request), 'GET')
   if (!auth.ok) return text(401, auth.reason)
   const p = policy(env)
   const now = Math.floor(Date.now() / 1000)
-  const held = await readGrant(env, auth.pubkey)
-  const grant = held && typeof held === 'object' ? held : null
+  const grant = await standing(env, auth.pubkey, p, now)
   const state = !grant ? 'none' : Number(grant.expiresAt || 0) <= now ? 'expired' : 'active'
   const body = state === 'active'
     ? { state, quotaBytes: Number(grant.quotaBytes || 0), usedBytes: Number(grant.usedBytes || 0), expiresAt: Number(grant.expiresAt || 0) }
@@ -4124,7 +4481,8 @@ async function aiAdmit(env, pubkey, estimate) {
  *  bound to a site on it (the wrangler var and the operators' signed records).
  *  A claimed domain binds its claimant to publish, not to spend the
  *  operator's AI: a claim is self-service, and this allowance is the
- *  operator's to give. */
+ *  operator's to give. The same set is the root of hostPeople — the keys
+ *  this host keeps bytes for — for the same reason. Returns a fresh Set. */
 async function aiAdmitted(env) {
   const scoped = await bindingsEnv(env)
   const keys = new Set(siteOperators(env).map(([, pubkey]) => pubkey))
@@ -4404,10 +4762,11 @@ const router = {
     if (method === 'OPTIONS') return new Response(null, { status: 204, headers: fromDoor ? DOOR_CORS : CORS })
 
     // AN ORIGIN HOST's own site stays its origin's (servesOrigin): every read
-    // the worker does not own goes there exactly as it arrived.
+    // the worker does not own goes there exactly as it arrived — but for the
+    // package the heap holds (originHostRead), read from the var as deployed.
     if ((method === 'GET' || method === 'HEAD') && servesOrigin(env, requestUrl.hostname)
       && !ORIGIN_OWNED_BY_WORKER.test(pathname)) {
-      return fetch(request)
+      return (await originHostRead(request, deployed, requestUrl)) ?? fetch(request)
     }
 
     // A DOOR RUNS NO WORKER FROM THE HEAP. A worker takes its policy from its
@@ -4547,7 +4906,7 @@ const router = {
             return serveTrials(request, routed.env, routed.implicit ? routed.zone : requestUrl.hostname)
           }
           // A bare signature this bucket lacks: the zone's farm may hold it.
-          if (await readThroughFarm(deployed, requestUrl.hostname, sigMatch[2])) heap = await fromHeap()
+          if (await readThroughFarm(deployed, requestUrl.hostname, sigMatch[2])) heap = readThrough(await fromHeap())
         }
         // An origin host's own root files (its card's pinned bootstrap) live on
         // the origin, not in the heap, so a bare miss asks it. A page there is

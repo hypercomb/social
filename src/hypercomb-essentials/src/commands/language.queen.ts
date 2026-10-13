@@ -7,10 +7,11 @@
 //
 //   language                        the current locale
 //   language <locale>               switch the UI (14 shipped catalogs)
-//   language offer [<locale>] [@<host>]
+//   language offer [<locale>] @<host>
 //                                   YOUR OWN translations for the locale — the
 //                                   override layer `i18n-override` writes —
-//                                   become a signed catalog on the host, named
+//                                   become a signed catalog on the host you
+//                                   name (there is no default host), named
 //                                   in your index as i18n:<locale>. Anyone who
 //                                   syncs that locale from the host heals with
 //                                   them. Never a judgment: Jev is not asked.
@@ -136,11 +137,11 @@ export class LanguageQueenBee extends QueenBee {
   readonly command = 'language'
   override description = 'Switch the UI language; publish, sync or report the community\'s translations'
   override descriptionKey = 'slash.language'
-  override options = [...LOCALES, 'offer [<locale>] [@<host>]', 'sync [<locale>] [@<host>]', 'missing [<locale>] [@<host>]']
+  override options = [...LOCALES, 'offer [<locale>] @<host>', 'sync [<locale>] [@<host>]', 'missing [<locale>] [@<host>]']
   override examples = [
     { input: '/language ja', result: 'UI switches to Japanese' },
     { input: '/language sync ja', result: 'Heals the Japanese UI with catalogs the hosts you follow publish' },
-    { input: '/language offer ja', result: 'Your own Japanese translations become a signed catalog on the host' },
+    { input: '/language offer ja @example.com', result: 'Your own Japanese translations become a signed catalog on example.com' },
   ]
   override machine = {
     forms: 'language | language <locale>',
@@ -181,7 +182,9 @@ export class LanguageQueenBee extends QueenBee {
       return
     }
 
-    const host = zoneDoor(parts.find(p => p.startsWith('@'))?.slice(1) || (PUBLIC_CONTENT_HOSTS[0] ?? ''))
+    // A WRITE goes only to the host the participant names (@<host>) — there is
+    // no default host (jwize 2026-10-11). Sync still READS the public hosts.
+    const host = zoneDoor(parts.find(p => p.startsWith('@'))?.slice(1) ?? '')
     const named = parts.slice(1).find(p => !p.startsWith('@'))
     const locale = cleanLocale(named ? (LOCALE_ALIASES[named.toLowerCase()] ?? named) : i18n.locale)
     if (!locale) { toast(t('language.badlocale', 'Say a locale like ja, zh or es.'), 'warning'); return }
@@ -189,8 +192,9 @@ export class LanguageQueenBee extends QueenBee {
     if (word === 'offer') {
       const keys = await ownOverrides(locale)
       if (!Object.keys(keys).length) { toast(t('language.nooverrides', 'Nothing to publish: you have no {locale} translations of your own yet — say i18n-override {locale} <key> <text> first.', { locale }), 'warning'); return }
-      const deps = host ? publishDeps(host) : null
-      if (!deps) { toast(t('language.unpublished', 'Your {locale} translations were not published: {reason}', { locale, reason: host ? 'the store or the host service is not loaded' : 'no host is configured' }), 'warning'); return }
+      if (!host) { toast(t('language.nohost', 'Your {locale} translations were not published: no host is named — say language offer {locale} @<host>.', { locale }), 'warning'); return }
+      const deps = publishDeps(host)
+      if (!deps) { toast(t('language.unpublished', 'Your {locale} translations were not published: {reason}', { locale, reason: 'the store or the host service is not loaded' }), 'warning'); return }
       const done = await publishCatalog(host, locale, 'app', keys, deps)
       if (!done.ok) { toast(t('language.unpublished', 'Your {locale} translations were not published: {reason}', { locale, reason: done.error }), 'warning'); return }
       toast(t('language.published', 'Published {count} {locale} translations under your key to {host}; anyone who syncs {locale} from there can heal with them.', { count: Object.keys(done.record.keys).length, locale, host }), 'success')
@@ -199,7 +203,7 @@ export class LanguageQueenBee extends QueenBee {
     }
 
     if (word === 'sync') {
-      const hosts = [...new Set([...(parts.some(p => p.startsWith('@')) ? [host] : []), ...PUBLIC_CONTENT_HOSTS, ...(await listCommunityHosts().catch(() => []))].map(zoneDoor).filter(Boolean))]
+      const hosts = [...new Set([...(host ? [host] : []), ...PUBLIC_CONTENT_HOSTS, ...(await listCommunityHosts().catch(() => []))].map(zoneDoor).filter(Boolean))]
       let merged = await placed(locale)
       const filled = new Set<string>()
       const translators = new Set<string>()
@@ -228,8 +232,9 @@ export class LanguageQueenBee extends QueenBee {
     const keys = (i18n.missingKeys?.(locale) ?? []).sort()
     if (!keys.length) { toast(t('language.missingnone', 'Nothing is missing in {locale} this session.', { locale })); return }
     toast(t('language.missingcount', '{count} keys have no {locale} translation this session: {sample}', { count: keys.length, locale, sample: keys.slice(0, SAMPLE).join(', ') + (keys.length > SAMPLE ? ', …' : '') }))
-    if (!parts.some(p => p.startsWith('@')) && !PUBLIC_CONTENT_HOSTS[0]) return
-    const deps = host ? publishDeps(host) : null
+    // Told only to a host the participant names; with none, the list is shown and kept here.
+    if (!host) return
+    const deps = publishDeps(host)
     if (!deps) { toast(t('language.missingunsent', 'The missing list was not published: {reason}', { reason: 'the store or the host service is not loaded' }), 'warning'); return }
     const sent = await publishMissing(host, locale, keys, deps)
     if (!sent.ok) { toast(t('language.missingunsent', 'The missing list was not published: {reason}', { reason: sent.error }), 'warning'); return }

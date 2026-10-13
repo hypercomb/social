@@ -26,7 +26,7 @@
 
 import { createHash } from 'node:crypto'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { lineageKey } from '@hypercomb/core'
+import { lineageKey, roomPreimage } from '@hypercomb/core'
 
 vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
 
@@ -156,8 +156,8 @@ const seedPage = (segments: string[], names: string[]): void => {
     state.public.add(`/${page}|${n}`)
   }
 }
-const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${ROOM}\0${SECRET}`)
-const LIFE = sha(`lifecycle\0${ROOM}\0${SECRET}`)
+const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${roomPreimage(ROOM, SECRET, 'jwize.com')}`)
+const LIFE = sha(`lifecycle\0${roomPreimage(ROOM, SECRET, 'jwize.com')}`)
 const deliver = (sig: string, event: Record<string, unknown>, payload: unknown): void => {
   for (const cb of [...(consumers.get(sig) ?? [])]) cb({ relay: 'wss://jwize.com', sig, event, payload })
 }

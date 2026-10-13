@@ -30,7 +30,6 @@ import { EffectBus, get, mintMetaEnvelope } from '@hypercomb/core'
 import {
   HIVE_LINK_KIND,
   HIVE_LINK_VERSION,
-  PUBLIC_CONTENT_HOSTS,
   encodeHiveLinkBundle,
   type HiveLinkBundle,
 } from './hive-link.js'
@@ -211,7 +210,9 @@ const selfDomain = (): string => {
 
 /** The nodes a branch is served from: its host marks (primary first) as
  *  zone ROOTS, else the participant's STANDING targets — never anything
- *  flipped on for the occasion. Every node is a write door, so every one is
+ *  flipped on for the occasion, and never a host nobody named: a public host
+ *  turned on with no host named is no node (jwize 2026-10-11, "make sure that
+ *  there isn't a default host"). Every node is a write door, so every one is
  *  a zone root: the `content.<zone>` face is retired, and a stored one (an
  *  install from before the retirement) is read as its zone (zone-door.ts). */
 export const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike | undefined): Promise<string[]> => {
@@ -220,7 +221,7 @@ export const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike |
   const self = selfDomain()
   const standing = [
     ...(hostSync?.isEnabled?.() && self ? [self] : []),
-    ...(hostSync?.isPublicHostEnabled?.() ? [zoneDoor(hostSync.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || '')] : []),
+    ...(hostSync?.isPublicHostEnabled?.() ? [zoneDoor(hostSync.publicHostDomain?.() || '')] : []),
   ]
   return [...new Set([...branchZones.map(zoneDoor), ...standing])].filter(Boolean)
 }
