@@ -448,6 +448,7 @@
   "publish-groups.ungroup": "取消分组",
   "publish-groups.done": "已发布 {name}",
   "publish-groups.failed": "{name}：{count} 个未发布",
+  "publish-groups.no-host": "请在“发布”中为此页面开启一个域名——组会发布到其页面所在的地方",
   "groups.not-on": "这里没有开启发布组——`groups on` 开启",
   "groups.asleep": "此蜂巢关闭了发布组——请在 Beehaviors 列表中开启",
   "groups.none": "这里还没有组——`groups new <名称>` 新建一个",

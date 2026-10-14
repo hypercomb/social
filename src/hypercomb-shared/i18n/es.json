@@ -448,6 +448,7 @@
   "publish-groups.ungroup": "Desagrupar",
   "publish-groups.done": "{name} publicado",
   "publish-groups.failed": "{name}: {count} sin publicar",
+  "publish-groups.no-host": "Activa un dominio para esta página en Publicar: un grupo se publica donde se publica su página",
   "groups.not-on": "Los grupos de publicación no están activos aquí — `groups on` los enciende",
   "groups.asleep": "Los grupos de publicación están apagados en esta colmena — enciéndelos en el repertorio de Beehaviors",
   "groups.none": "Aún no hay grupos aquí — `groups new <nombre>` crea uno",

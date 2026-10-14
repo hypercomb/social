@@ -448,6 +448,7 @@
   "publish-groups.ungroup": "فك التجميع",
   "publish-groups.done": "تم نشر {name}",
   "publish-groups.failed": "{name}: لم يُنشر {count}",
+  "publish-groups.no-host": "فعّل نطاقًا لهذه الصفحة في النشر — تُنشر المجموعة حيث تُنشر صفحتها",
   "groups.not-on": "مجموعات النشر غير مفعّلة هنا — `groups on` يفعّلها",
   "groups.asleep": "مجموعات النشر متوقفة في هذه الخلية — فعّلها من قائمة Beehaviors",
   "groups.none": "لا مجموعات هنا بعد — `groups new <الاسم>` ينشئ واحدة",

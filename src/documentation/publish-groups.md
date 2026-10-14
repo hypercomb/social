@@ -25,6 +25,25 @@ signed index and two at once can drop each other's entry. The toast says how
 it went, and why when it could not (no host, no signer — the same
 `publish.failure.*` texts the Publish panel uses).
 
+**A group publishes where its page does** (2026-10-13). The page's domains are
+its own switches at the top of the Publish panel. A member that names no host
+of its own takes them — written as its own host marks (`setBranchHosts`), the
+record every publish reads, so the member's own Publish row then says where it
+went. With no domain on for the page and no own host standing in, the toast
+says where the switch is ("Turn on a domain for this page in Publish …")
+rather than the general "add a host".
+
+**Proven against a real host** (`scripts/drive-publish-groups-live.cjs`, 7
+checks): the content host's own worker served from this machine
+(`node scripts/local-content-host.mjs 4291 <shell>`); a group of two on a page
+of three; `groups publish blog` → "Published Blog"; the HOST's signed index
+(the `hive:indexes` pool, `<pool>/<pubkey>`) names `site/one` and `site/two`
+with door `localhost:4291` — and not `site/three`. Run it against a dev shell
+that does not live-reload (`--live-reload=false --watch=false`): another
+session's edits otherwise reload the page mid-run. Host-sync must have the
+participant's own host and its opt-in (a hive that publishes has both; a fresh
+profile has neither — host-sync.service.ts).
+
 ## The word — `groups`
 
 Every act on the strip has a word (`hypercomb-essentials/src/sharing/groups.queen.ts`),
@@ -50,9 +69,16 @@ keeps its whole line (`rawArgs`) — `publish` is itself a behaviour word, and
 emit the panel's own `features:enable` / `features:remove` with `silent: true`
 (the deposit is the answer; the panel stays shut). `groups new` lights the
 strip here if it was not. Unknown groups, tiles and sub-words are said, never
-guessed, and write nothing. No `machine` grammar: publishing reaches outward,
-and default-deny stays the policy. Proof: `scripts/drive-groups-word.cjs`
+guessed, and write nothing. Proof: `scripts/drive-groups-word.cjs`
 (11 checks).
+
+**A model may say it** (jwize 2026-10-13: "the whole idea is that we can
+publish groups"). `machine` declares `reach: 'editing'`, `scope: 'network'` —
+inside the default grant — pinned in `commands/machine-declarations.spec.ts`.
+Its `refuse` admits every form but three: `ungroup` (a whole group taken off
+the layer — only the participant says it), `add`/`drop` with no tiles named,
+and `new` while the participant has tiles selected (both would act on a
+selection a model cannot see — name the target on the machine seam).
 
 The strip is a hexagons surface: a takeover view, an owner-counted cover (the
 chat window), a published visitor shell or a dormant behaviour takes it away.
@@ -100,7 +126,8 @@ chat window), a published visitor shell or a dormant behaviour takes it away.
   panel's Groups section.
 - Proof: `scripts/drive-publish-groups.cjs` (13 checks),
   `scripts/drive-groups-word.cjs` (11 checks),
-  `scripts/drive-publish-panel-groups.cjs` (5 checks).
+  `scripts/drive-publish-panel-groups.cjs` (5 checks),
+  `scripts/drive-publish-groups-live.cjs` (7 checks, against a real host).
 
 ## In the Publish panel
 

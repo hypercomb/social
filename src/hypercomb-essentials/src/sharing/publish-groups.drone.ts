@@ -34,6 +34,7 @@ import {
 import { removeDecorationAndWait, writeDecoration } from '../commands/decoration-manifest.js'
 import { dropEnrollment, wearEnrollment } from '../pheromones/enrollment-acts.js'
 import { ENABLEMENT_CHANGED, isBehaviorDormant, isPublishedVisitorShell } from './behavior-enablement.js'
+import { hostsOfBranch, setBranchHosts } from './community-hosts.js'
 import { publishBranch } from './publish-branch.js'
 import {
   DEFAULT_GROUP_ICON, GROUP_COLORS, PUBLISH_GROUPS_KIND, PUBLISH_GROUP_KIND,
@@ -458,9 +459,19 @@ export class PublishGroupsDrone extends Drone {
     this.#publishing.set(meaning, progress)
     this.#render()
     const failures: string[] = []
+    // A GROUP PUBLISHES WHERE ITS PAGE DOES. The page's domains are its own
+    // switches at the top of the Publish panel; a member that names no host
+    // of its own takes them — written as its own host marks, the record every
+    // publish reads, so the member's own row says where it went.
+    const pageZones = await hostsOfBranch(segments).catch(() => [] as string[])
     try {
       for (const label of members) {
-        const result = await publishBranch([...segments, label])
+        const memberSegments = [...segments, label]
+        if (pageZones.length > 0 && (await hostsOfBranch(memberSegments).catch(() => [] as string[])).length === 0) {
+          await setBranchHosts(memberSegments, pageZones).catch(err =>
+            console.warn("[publish-groups] could not give a member its page's domains:", err))
+        }
+        const result = await publishBranch(memberSegments)
         if (!result.ok) failures.push(result.failure)
         progress.done++
         this.#render()
@@ -473,9 +484,14 @@ export class PublishGroupsDrone extends Drone {
       this.#toast('success', this.#t('publish-groups.done', `Published ${name}`, { name }))
     } else {
       const why = failures[0]
+      // Nowhere at all: the page names no domain, and nothing stands in. Say
+      // where the switch is, rather than the general "add a host".
+      const message = why === 'no-host' && pageZones.length === 0
+        ? this.#t('publish-groups.no-host', 'Turn on a domain for this page in Publish — a group publishes where its page does')
+        : this.#t(`publish.failure.${why}`, why)
       this.#toast('error',
         this.#t('publish-groups.failed', `${name}: ${failures.length} not published`, { name, count: failures.length }),
-        this.#t(`publish.failure.${why}`, why))
+        message)
     }
     EffectBus.emit('publish:refresh', {})
     return { total: members.length, failures }

@@ -448,6 +448,7 @@
   "publish-groups.ungroup": "그룹 해제",
   "publish-groups.done": "{name} 게시됨",
   "publish-groups.failed": "{name}: {count}개 게시 안 됨",
+  "publish-groups.no-host": "게시에서 이 페이지의 도메인을 켜세요 — 그룹은 페이지가 게시되는 곳에 게시됩니다",
   "groups.not-on": "여기서는 게시 그룹이 꺼져 있습니다 — `groups on`으로 켭니다",
   "groups.asleep": "이 하이브에서는 게시 그룹이 꺼져 있습니다 — Beehaviors 목록에서 켜세요",
   "groups.none": "아직 그룹이 없습니다 — `groups new <이름>`으로 만듭니다",

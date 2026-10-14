@@ -448,6 +448,7 @@
   "publish-groups.ungroup": "Grubu çöz",
   "publish-groups.done": "{name} yayınlandı",
   "publish-groups.failed": "{name}: {count} yayınlanamadı",
+  "publish-groups.no-host": "Yayınla’da bu sayfa için bir alan adı aç — grup, sayfasının yayınlandığı yerde yayınlanır",
   "groups.not-on": "Yayın grupları burada açık değil — `groups on` açar",
   "groups.asleep": "Yayın grupları bu kovan için kapalı — Beehaviors havuzunda aç",
   "groups.none": "Burada henüz grup yok — `groups new <ad>` bir tane oluşturur",

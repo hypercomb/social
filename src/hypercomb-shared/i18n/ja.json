@@ -454,6 +454,7 @@
   "publish-groups.ungroup": "グループ解除",
   "publish-groups.done": "{name} を公開しました",
   "publish-groups.failed": "{name}：{count} 件が未公開",
+  "publish-groups.no-host": "公開でこのページのドメインをオンにしてください — グループはそのページと同じ場所に公開されます",
   "groups.not-on": "ここでは公開グループがオフです — `groups on` でオンにします",
   "groups.asleep": "このハイブでは公開グループがオフです — Beehaviors の一覧でオンにしてください",
   "groups.none": "ここにはまだグループがありません — `groups new <名前>` で作れます",

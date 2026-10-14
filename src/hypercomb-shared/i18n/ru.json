@@ -448,6 +448,7 @@
   "publish-groups.ungroup": "Разгруппировать",
   "publish-groups.done": "{name}: опубликовано",
   "publish-groups.failed": "{name}: не опубликовано — {count}",
+  "publish-groups.no-host": "Включите домен для этой страницы в «Публикации» — группа публикуется там же, где её страница",
   "groups.not-on": "Группы публикации здесь не включены — `groups on` включает их",
   "groups.asleep": "Группы публикации выключены для этого улья — включите их в каталоге Beehaviors",
   "groups.none": "Здесь пока нет групп — `groups new <имя>` создаёт группу",

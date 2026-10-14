@@ -577,6 +577,7 @@
   "publish-groups.ungroup": "Ungroup",
   "publish-groups.done": "Published {name}",
   "publish-groups.failed": "{name}: {count} not published",
+  "publish-groups.no-host": "Turn on a domain for this page in Publish — a group publishes where its page does",
   "groups.not-on": "Publish groups is not on here — `groups on` lights it",
   "groups.asleep": "Publish groups is switched off for this hive — light it in the Beehaviors pool",
   "groups.none": "No groups here yet — `groups new <name>` makes one",

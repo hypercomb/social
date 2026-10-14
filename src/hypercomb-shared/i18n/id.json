@@ -448,6 +448,7 @@
   "publish-groups.ungroup": "Bubarkan grup",
   "publish-groups.done": "{name} diterbitkan",
   "publish-groups.failed": "{name}: {count} tidak diterbitkan",
+  "publish-groups.no-host": "Nyalakan sebuah domain untuk halaman ini di Terbitkan — grup diterbitkan di tempat halamannya diterbitkan",
   "groups.not-on": "Grup terbitan tidak aktif di sini — `groups on` menyalakannya",
   "groups.asleep": "Grup terbitan dimatikan untuk sarang ini — nyalakan di daftar Beehaviors",
   "groups.none": "Belum ada grup di sini — `groups new <nama>` membuatnya",

@@ -448,6 +448,7 @@
   "publish-groups.ungroup": "Gruppe auflösen",
   "publish-groups.done": "{name} veröffentlicht",
   "publish-groups.failed": "{name}: {count} nicht veröffentlicht",
+  "publish-groups.no-host": "Schalte in „Veröffentlichen“ eine Domain für diese Seite ein — eine Gruppe wird dort veröffentlicht, wo ihre Seite es wird",
   "groups.not-on": "Veröffentlichungsgruppen sind hier nicht an — `groups on` schaltet sie ein",
   "groups.asleep": "Veröffentlichungsgruppen sind für diesen Bienenstock aus — schalte sie im Beehaviors-Pool ein",
   "groups.none": "Noch keine Gruppen hier — `groups new <name>` legt eine an",

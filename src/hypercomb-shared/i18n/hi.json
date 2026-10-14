@@ -448,6 +448,7 @@
   "publish-groups.ungroup": "समूह हटाएँ",
   "publish-groups.done": "{name} प्रकाशित हुआ",
   "publish-groups.failed": "{name}: {count} प्रकाशित नहीं हुए",
+  "publish-groups.no-host": "प्रकाशन में इस पेज के लिए कोई डोमेन चालू करें — समूह वहीं प्रकाशित होता है जहाँ उसका पेज",
   "groups.not-on": "यहाँ प्रकाशन समूह चालू नहीं है — `groups on` चालू करता है",
   "groups.asleep": "इस हाइव के लिए प्रकाशन समूह बंद है — इसे Beehaviors सूची में चालू करें",
   "groups.none": "यहाँ अभी कोई समूह नहीं — `groups new <नाम>` एक बनाता है",
