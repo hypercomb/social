@@ -629,6 +629,46 @@ export class NotesService {
   }
 
   /**
+   * One note by its signature, hydrated from whatever is local — null when
+   * its bytes are not here (yet). The read a list of note REFERENCES makes:
+   * a swarm peer's notes arrive as signatures and resolve as their bytes land.
+   */
+  public readonly readNote = async (sig: string): Promise<Note | null> => {
+    const cleaned = String(sig ?? '').trim().toLowerCase()
+    if (!SIG_REGEX.test(cleaned)) return null
+    return this.#hydrateAsync(cleaned)
+  }
+
+  /**
+   * TAKE existing notes onto a cell: append each signature to the cell's
+   * notes, unless it is already there — ONE commit however many, so a take is
+   * one step in history. Shared, never copied — a note keeps its signature,
+   * so a note taken by thirty people is one file. Only notes whose bytes are
+   * already local are taken; returns the signatures that were not.
+   */
+  public async takeAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    noteIds: readonly string[],
+  ): Promise<string[]> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    const wanted = [...new Set((noteIds ?? []).map(id => String(id ?? '').trim().toLowerCase()))]
+      .filter(sig => SIG_REGEX.test(sig))
+    if (!cleanedLabel) return wanted
+    const here: string[] = []
+    const missing: string[] = []
+    for (const sig of wanted) ((await this.#loadNoteLayer(sig)) ? here : missing).push(sig)
+    if (here.length > 0) {
+      await this.#commitCellNotes([...cleanedParents, cleanedLabel], (prior) =>
+        [...prior, ...here.filter(sig => !prior.includes(sig))])
+    }
+    return missing
+  }
+
+  /**
    * Break `noteId` into a one-line head plus one sub-note per part, at an
    * explicit cell location. Headless equivalent of the `note:split`
    * EffectBus handler, and the call a bulk breakdown pass makes.

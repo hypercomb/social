@@ -57,6 +57,7 @@ export const sleepers: readonly Sleeper[] = [
   { command: "meeting", description: "Start or join a video meeting on the selected tile", load: () => import('./meeting/meeting.queen') },
   { command: "layout", description: "Save, apply, list, or remove layout templates", load: () => import('./move/layout.queen') },
   { command: "fit", description: "Zoom to fit all visible content", load: () => import('./navigation/zoom/fit.queen') },
+  { command: "lines", description: "See this page as note lines instead of hexagons — everyone in the swarm writes, takes and keeps notes here", load: () => import('./notes/lines.queen') },
   { command: "screensaver", description: "Idle screensaver: toggle on/off, pick the look (hexagon, circle, thought…) and the motion (bounce, shooting-stars…)", load: () => import('./presentation/screensaver/screensaver.queen') },
   { renders: ["living-brief"], load: () => import('./presentation/tiles/living-brief-view.drone') },
   { renders: ["slides","lightbox","scroller"], load: () => import('./presentation/tiles/slides-view.drone') },
