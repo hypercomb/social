@@ -795,6 +795,49 @@ test('a signed public creation projects one location and keeps its revisions the
     'known signed bytes remain servable after the public switch is off')
 })
 
+test('a card template is offered by its theme and picture, and only once both are held', async () => {
+  const { env } = await fixture()
+  const meaning = 'themes:card'
+  const host = 'pluginthematrix.com'
+  const indexUrl = `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`
+  const publish = async (stamp, offerings) => worker.fetch(new Request(indexUrl, {
+    method: 'PUT', headers: { authorization: await nip98(indexUrl, 'PUT') },
+    body: JSON.stringify(await signedIndex({ pluginthematrix: head, revolucion: head }, stamp, undefined, offerings)),
+  }), env)
+  const leafOf = async (key, label, { holdTheme = true, picture } = {}) => {
+    const theme = JSON.stringify({ label, concept: 'contour' })
+    const themeSig = await sha256Hex(theme)
+    if (holdTheme) await env.CONTENT.put(themeSig, theme)
+    const layer = JSON.stringify({ name: 'card-theme', label, theme: themeSig, ...(picture ? { picture } : {}) })
+    const layerSig = await sha256Hex(layer)
+    const meta = JSON.stringify({ meta: 1, layer: layerSig, relation: meaning })
+    const metaSig = await sha256Hex(meta)
+    await env.CONTENT.put(layerSig, layer)
+    await env.CONTENT.put(metaSig, meta)
+    return { location: await sha256Hex(`${meaning}:${key}`), metaSig }
+  }
+  const pool = await sha256Hex('host:offerings')
+  const offered = async () => {
+    const names = (await (await worker.fetch(new Request(`https://${host}/${pool}/`), env)).text()).trim().split('\n').filter(Boolean)
+    const rows = await Promise.all(names.map(async n => (await worker.fetch(new Request(`https://${host}/${pool}/${n}`), env)).json()))
+    return rows.filter(r => r.kind === 'host:creation' && r.meaning === meaning)
+  }
+
+  const held = await leafOf('a/template/contour', 'Contour')
+  const missing = await leafOf('a/template/photo', 'Photo', { holdTheme: false })
+  const lostPicture = await leafOf('a/template/monogram', 'Monogram', { picture: 'e'.repeat(64) })
+  const declared = {
+    [held.location]: { meaning, key: 'a/template/contour', head: held.metaSig, title: 'Contour', host },
+    [missing.location]: { meaning, key: 'a/template/photo', head: missing.metaSig, title: 'Photo', host },
+    [lostPicture.location]: { meaning, key: 'a/template/monogram', head: lostPicture.metaSig, title: 'Monogram', host },
+  }
+  await publish(1_800_000_101, declared)
+  assert.deepEqual((await offered()).map(r => r.title), ['Contour'],
+    'only the template whose theme (and picture, when it names one) is held is listed')
+  const bag = `https://${host}/content/${held.location}/`
+  assert.deepEqual(await (await worker.fetch(new Request(`${bag}00000000`), env)).json(), { layer: held.metaSig })
+})
+
 test('a public creation waits for staged bytes and rejects a false location', async () => {
   const { env } = await fixture()
   const meaning = 'themes:text'

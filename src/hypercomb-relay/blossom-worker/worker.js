@@ -1165,7 +1165,9 @@ async function listedPool(env, sig, read = indexReader(env)) {
   return (await declaredListing(env, read)).has(sig)
 }
 const ROUTE_MARKER_RE = /^\d{8}$/
-const PUBLIC_LEAF_MEANINGS = new Set(['themes:text'])
+// A business-card template (themes:card) is its theme JSON and an optional
+// default picture — hive: hypercomb-essentials/src/sharing/card-template-offering.ts.
+const PUBLIC_LEAF_MEANINGS = new Set(['themes:text', 'themes:card'])
 
 /** An optional signed public switch, keyed by a creation's stable location.
  *  The ordinary meaning pool stays private: only these selected locations
@@ -1216,6 +1218,7 @@ async function hasCreationHead(env, offer) {
   if (!layerBytes) return false
   let layer
   try { layer = JSON.parse(new TextDecoder().decode(layerBytes)) } catch { return false }
+  if (offer.meaning === 'themes:card') return await cardThemeHeld(env, layer)
   // This first public leaf has no executable reference closure. `source` is
   // only provenance and may name an older revision without being installed.
   return !!layer && typeof layer === 'object' && !Array.isArray(layer)
@@ -1225,6 +1228,24 @@ async function hasCreationHead(env, offer) {
     && typeof layer.code === 'string' && layer.code.length > 0
     && (layer.source === undefined || SIG_RE.test(String(layer.source)))
     && Object.keys(layer).every(key => ['name', 'label', 'read', 'code', 'source'].includes(key))
+}
+/** A card template's leaf names its closure by signature: the theme (a JSON
+ *  object of at most 64 KiB) and, optionally, a default picture (at most
+ *  1 MiB). Both must be held here before the template is listed. */
+async function cardThemeHeld(env, layer) {
+  if (!layer || typeof layer !== 'object' || Array.isArray(layer)
+    || layer.name !== 'card-theme'
+    || typeof layer.label !== 'string' || layer.label.trim().length === 0 || layer.label.length > 80
+    || !SIG_RE.test(String(layer.theme || ''))
+    || (layer.picture !== undefined && !SIG_RE.test(String(layer.picture)))
+    || (layer.source !== undefined && !SIG_RE.test(String(layer.source)))
+    || !Object.keys(layer).every(key => ['name', 'label', 'theme', 'picture', 'source'].includes(key))) return false
+  const themeBytes = await heldCreationBytes(env, layer.theme, 65_536)
+  if (!themeBytes) return false
+  let theme
+  try { theme = JSON.parse(new TextDecoder().decode(themeBytes)) } catch { return false }
+  if (!theme || typeof theme !== 'object' || Array.isArray(theme)) return false
+  return layer.picture === undefined || !!await heldCreationBytes(env, layer.picture)
 }
 
 function creationMember(pubkey, location, offer) {

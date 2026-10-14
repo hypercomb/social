@@ -62,15 +62,23 @@ export function planWear(own: CardRecords, template: CardRecords): WearPlan {
 export interface CardArgs {
   /** The tile the word acts on, relative to where the participant stands ('' = here). */
   target: string
-  /** 'wear' or '' (report what the tile wears). */
-  verb: '' | 'wear'
+  /** 'wear', 'offer' (this template to the community), or '' (report what the tile wears). */
+  verb: '' | 'wear' | 'offer'
   /** The template's route: relative to where the participant stands, or from the hive root with a leading '/'. */
   template: string
+  /** `offer off`: withdraw the offering. */
+  off?: boolean
 }
 
-/** `card` · `card <tile>` · `card wear <template>` · `card <tile> wear <template>`. */
+/** `card` · `card <tile>` · `card wear <template>` · `card <tile> wear <template>` · `card [<tile>] offer [off]`. */
 export function parseCardArgs(raw: string): CardArgs | { error: 'unknown' } {
   const words = raw.trim().split(/\s+/).filter(Boolean)
+  const offer = words.findIndex(w => w.toLowerCase() === 'offer')
+  if (offer >= 0) {
+    const rest = words.slice(offer + 1).map(w => w.toLowerCase())
+    if (offer > 1 || rest.length > 1 || (rest.length === 1 && rest[0] !== 'on' && rest[0] !== 'off')) return { error: 'unknown' }
+    return { target: offer === 1 ? words[0] : '', verb: 'offer', template: '', off: rest[0] === 'off' }
+  }
   const at = words.findIndex(w => w.toLowerCase() === 'wear')
   if (at < 0) {
     if (words.length > 1) return { error: 'unknown' }

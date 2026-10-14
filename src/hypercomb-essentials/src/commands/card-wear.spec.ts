@@ -61,6 +61,13 @@ describe('parseCardArgs', () => {
     expect(parseCardArgs('wear business-card/template/graphite')).toEqual({ target: '', verb: 'wear', template: 'business-card/template/graphite' })
     expect(parseCardArgs('jaime-weise wear /jaime-weise/business-card/template')).toEqual({ target: 'jaime-weise', verb: 'wear', template: '/jaime-weise/business-card/template' })
     expect(parseCardArgs('wear')).toEqual({ target: '', verb: 'wear', template: '' })
+    expect(parseCardArgs('offer')).toEqual({ target: '', verb: 'offer', template: '', off: false })
+    expect(parseCardArgs('offer off')).toEqual({ target: '', verb: 'offer', template: '', off: true })
+    expect(parseCardArgs('business-card/template/contour offer')).toEqual({ target: 'business-card/template/contour', verb: 'offer', template: '', off: false })
+  })
+  it('refuses an offer it cannot read', () => {
+    expect(parseCardArgs('offer maybe')).toEqual({ error: 'unknown' })
+    expect(parseCardArgs('a b offer')).toEqual({ error: 'unknown' })
   })
   it('refuses anything else', () => {
     expect(parseCardArgs('a b')).toEqual({ error: 'unknown' })

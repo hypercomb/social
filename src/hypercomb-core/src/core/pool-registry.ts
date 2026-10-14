@@ -380,6 +380,9 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Discoverable text-theme creations. Members name stable hashed locations;
   // the location's current signed layer is read when a settings menu opens.
   'themes:text',
+  // Discoverable business-card templates (hypercomb-essentials sharing/
+  // card-template-offering.ts): a theme and an optional default picture.
+  'themes:card',
   // Reserved: quick-menu creations (a legacy-app feature kept off the host
   // branch). A hive that already wrote the pool must not have it pruned.
   'menus:quick',

@@ -6,6 +6,8 @@
 //   card jaime-weise                             what that tile's card wears
 //   card wear business-card/template/graphite    this card wears that template
 //   card jaime-weise wear /jaime-weise/business-card/template/emerald
+//   card offer                                   offer the template you stand on to the community
+//   card offer off                               withdraw it (sharing/card-template-offering.ts)
 //
 // Routes are relative to where you stand, or from the hive root with a leading '/'.
 // Wearing is two references and never a copy (card-wear.ts): the tile's page becomes the template's
@@ -19,6 +21,7 @@ import { listDecorations, replaceDecoration } from './decoration-manifest.js'
 import { CARD_DATA_KIND, CARD_PAGE_KIND, planWear, parseCardArgs, routeFrom, type CardRecords } from './card-wear.js'
 import { cardAtHead, type CardAtHead } from './card-read.js'
 import { readAddressHead, readFromHost, type AddressHead } from '../sharing/published-address.js'
+import { setCardTemplateOffering } from '../sharing/card-template-offering.js'
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
 type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
@@ -52,11 +55,12 @@ export class CardQueenBee extends QueenBee {
   readonly command = 'card'
   override description = 'What a business card wears, and wearing a card template'
   override descriptionKey = 'slash.card'
-  override options = ['<tile>', 'wear <template>', '<tile> wear <template>']
+  override options = ['<tile>', 'wear <template>', '<tile> wear <template>', 'offer', 'offer off']
   override examples = [
     { input: '/card', result: 'Says which template and theme this card wears' },
     { input: '/card wear business-card/template/graphite', result: 'This card wears the Graphite template' },
     { input: '/card jaime-weise wear /jaime-weise/business-card/template', result: 'jaime-weise wears the template' },
+    { input: '/card offer', result: 'Offers the template you stand on to the community, on the host you named' },
   ]
 
   // a template's route may contain a behaviour word (`template` is one) — the whole line is this word's
@@ -77,6 +81,22 @@ export class CardQueenBee extends QueenBee {
     if (!parsed.verb) {
       if (!own.page && !own.card) { say(`"${name}" has no card`); return }
       say(`"${name}" wears ${await themeLabel(own.card)}${own.page ? '' : ' (no card page)'}`)
+      return
+    }
+
+    if (parsed.verb === 'offer') {
+      // A template is offered by its theme (and its picture): the page every reader already runs never travels.
+      if (!own.page || !own.card) { say(`card offer: "${name}" is not a card template`, 'error'); return }
+      const themeSig = String(own.card['themeSig'] ?? '')
+      if (!SIG.test(themeSig)) { say(`card offer: "${name}" wears no theme of its own to offer`, 'error'); return }
+      const artSig = String(own.card['artSig'] ?? '')
+      const label = await themeLabel(own.card)
+      const result = await setCardTemplateOffering(
+        { key: target.join('/'), label, themeSig, ...(SIG.test(artSig) ? { pictureSig: artSig } : {}) }, !parsed.off)
+      if (!result.ok) { say(`card offer: ${result.reason}`, 'error'); return }
+      say(result.state === 'on'
+        ? `${label} is offered on ${result.host} — cards whose Hyperdex holds that host can wear it`
+        : `${label} is no longer offered on ${result.host}`)
       return
     }
 

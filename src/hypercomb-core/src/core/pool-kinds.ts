@@ -160,6 +160,7 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['host:offerings', 'set'],
   ['host:adoptions', 'set'],
   ['themes:text', 'set'],
+  ['themes:card', 'set'],
   ['menus:quick', 'set'],
   ['pheromones:content', 'set'],
   ['pheromones:deposits', 'set'],
