@@ -166,13 +166,14 @@ Two decorations and two words. Both words act on the tile you stand in.
 
 | Record | Payload | Meaning |
 |---|---|---|
-| `trait:want` | `{ word }` | this tile leaves the word open; one record per word |
+| `trait:want` | `{ word, own? }` | a trait given to this tile; `own: true` when the creation already fills it itself; one record per word |
 | `trait:fill` | `{ word, sig }` | the filler chosen for the word: the head signature you took, not a route that may move |
 
 ```
 trait                          what traits this tile has, and how each is filled
-trait portrait tagline         open two traits
-trait ~ tagline                close one
+trait portrait tagline         give two needed traits: a tile is made to fill each
+trait own name portrait        give traits the creation already fills itself: no tiles
+trait ~ tagline                forget a trait given here
 fill portrait                 keep what fills it now: the child, or the one tile in this hive
 fill portrait /people/x/face  fill it with that tile, as it is now
 fill portrait <signature>     fill it with that signature

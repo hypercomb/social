@@ -24,6 +24,14 @@ describe('declarations', () => {
     expect(traitSpecs(undefined)).toEqual([])
   })
 
+  it('a given trait has its own version only when its record says so', () => {
+    expect(mergeTraits([], [{ word: 'portrait', own: true }, { word: 'tagline' }, 'logo', { word: 'Portrait' }])).toEqual([
+      { word: 'portrait', own: true },
+      { word: 'tagline', own: false },
+      { word: 'logo', own: false },
+    ])
+  })
+
   it('declared traits come first; an opened trait has no own version; a declared word keeps its spec', () => {
     expect(mergeTraits([{ word: 'portrait', own: true }], [{ word: 'Portrait' }, { word: 'tagline' }])).toEqual([
       { word: 'portrait', own: true },

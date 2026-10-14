@@ -4,6 +4,7 @@
 //
 //   trait                        this tile's traits, and how each is filled
 //   trait portrait tagline       give it two traits: a tile is made to fill each
+//   trait own name portrait      give it traits it already fills itself: no tiles, offers can replace them
 //   trait ~ tagline              forget a trait given here (its tile stays)
 //
 // The tile is the one you stand in. A trait is a requirement some tiles have, an interface; a tile
@@ -23,10 +24,11 @@ export class TraitQueenBee extends QueenBee {
   readonly command = 'trait'
   override description = 'The traits this tile leaves open for a filler'
   override descriptionKey = 'slash.trait'
-  override options = ['<word>', '~ <word>']
+  override options = ['<word>', 'own <word>', '~ <word>']
   override examples = [
     { input: '/trait', result: 'Lists this tile\'s traits and what fills each' },
     { input: '/trait portrait tagline', result: 'Gives this tile two traits and makes a tile to fill each' },
+    { input: '/trait own name portrait', result: 'Says this creation fills name and portrait itself; others can be picked with fill' },
     { input: '/trait ~ tagline', result: 'Forgets the tagline trait; its tile stays' },
   ]
 
@@ -65,12 +67,21 @@ export class TraitQueenBee extends QueenBee {
     const reserved = parsed.words.filter(w => isReservedPoolWord(w))
     if (reserved.length) { say(`trait: ${reserved.join(', ')} is a word the hive keeps for itself`, 'error'); return }
 
+    const own = parsed.verb === 'own'
     const have = traitWords(points.map(p => p.record.payload))
     const opened: string[] = []
     for (const word of parsed.words) {
       if (have.some(w => sameTraitWord(w, word)) || opened.some(w => sameTraitWord(w, word))) continue
-      await writeDecoration<TraitWant>({ kind: TRAIT_WANT_KIND, appliesTo: here, segments: here, payload: { word }, mark: 'persistent' })
+      // `own` is core's TraitWant field; spelled as a plain record so this compiles against an older core build too.
+      const payload = (own ? { word, own: true } : { word }) as TraitWant
+      await writeDecoration<TraitWant>({ kind: TRAIT_WANT_KIND, appliesTo: here, segments: here, payload, mark: 'persistent' })
       opened.push(word)
+    }
+
+    // A trait the creation fills itself needs no tile: it already works (jwize, 2026-10-13).
+    if (own) {
+      say(opened.length ? `"${name}" fills ${opened.join(', ')} itself — fill <trait> <tile> picks another version` : `"${name}" already has ${parsed.words.join(', ')}`)
+      return
     }
 
     // Giving a trait makes its tile (jwize, 2026-10-13: "as soon as you give a trait it should become

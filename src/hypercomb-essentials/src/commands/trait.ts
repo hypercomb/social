@@ -13,9 +13,11 @@ import type { TraitResolution } from '@hypercomb/core'
 export type TraitArgs =
   | { readonly verb: 'list' }
   | { readonly verb: 'open'; readonly words: readonly string[] }
+  | { readonly verb: 'own'; readonly words: readonly string[] }
   | { readonly verb: 'close'; readonly words: readonly string[] }
 
-/** `trait` · `trait <word> [<word> …]` · `trait ~ <word> [<word> …]` (the `~` removal convention). */
+/** `trait` · `trait <word> [<word> …]` · `trait own <word> [<word> …]` · `trait ~ <word> [<word> …]`
+ *  (the `~` removal convention). `own` says the creation already fills those traits itself. */
 export function parseTraitArgs(raw: string): TraitArgs | { error: 'unknown' } {
   const words = raw.trim().split(/\s+/).filter(Boolean)
   if (words.length === 0) return { verb: 'list' }
@@ -24,6 +26,10 @@ export function parseTraitArgs(raw: string): TraitArgs | { error: 'unknown' } {
     return rest.length ? { verb: 'close', words: rest } : { error: 'unknown' }
   }
   if (words.some(w => w === '~')) return { error: 'unknown' }
+  if (words[0].toLowerCase() === 'own') {
+    const rest = words.slice(1)
+    return rest.length ? { verb: 'own', words: rest } : { error: 'unknown' }
+  }
   return { verb: 'open', words }
 }
 

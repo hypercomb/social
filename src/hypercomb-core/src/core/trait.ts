@@ -47,7 +47,9 @@ export const TRAITS_IOC_KEY = '@hypercomb/Traits'
 
 const SIG = /^[0-9a-f]{64}$/
 
-export interface TraitWant { readonly word: string }
+/** A trait given to a tile. `own: true` says the creation already fills it itself (a working version
+ *  exists); absent, the trait is needed and a tile is made to fill it. */
+export interface TraitWant { readonly word: string; readonly own?: boolean }
 export interface TraitFill { readonly word: string; readonly sig: string }
 
 /** How one trait is declared: a plain word (the behaviour has its own working version), or a word
@@ -101,12 +103,15 @@ export function traitSpecs(declared: readonly (TraitDeclaration | null | undefin
   return out
 }
 
-/** A tile's traits: the declared ones first, then the ones opened on the tile itself. An opened
- *  trait has no own version; a word already declared keeps its declared spec. */
+/** A tile's traits: the declared ones first, then the ones given to the tile itself. A given trait
+ *  has its own version only when its record says `own: true`; a word already declared keeps its
+ *  declared spec. */
 export function mergeTraits(declared: readonly TraitSpec[], opened: readonly (string | TraitWant | null | undefined)[]): TraitSpec[] {
   const out = [...declared]
-  for (const word of traitWords(opened)) {
-    if (!out.some(s => sameTraitWord(s.word, word))) out.push({ word, own: false })
+  for (const item of opened) {
+    const word = wordOf(item)
+    if (!word || out.some(s => sameTraitWord(s.word, word))) continue
+    out.push({ word, own: typeof item === 'object' && item?.own === true })
   }
   return out
 }

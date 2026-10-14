@@ -12,6 +12,8 @@ describe('parsing the words', () => {
     expect(parseTraitArgs('portrait tagline')).toEqual({ verb: 'open', words: ['portrait', 'tagline'] })
     expect(parseTraitArgs('~ portrait')).toEqual({ verb: 'close', words: ['portrait'] })
     expect(parseTraitArgs('~')).toEqual({ error: 'unknown' })
+    expect(parseTraitArgs('own name portrait')).toEqual({ verb: 'own', words: ['name', 'portrait'] })
+    expect(parseTraitArgs('own')).toEqual({ error: 'unknown' })
     expect(parseTraitArgs('portrait ~ tagline')).toEqual({ error: 'unknown' })
   })
 
