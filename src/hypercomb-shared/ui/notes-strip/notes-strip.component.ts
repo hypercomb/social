@@ -175,6 +175,19 @@ type NotesService = {
   getNotes(cellLabel: string): Promise<Note[]>
 }
 
+/** A note another participant in the swarm holds on this tile — read from
+ *  their layer for it (essentials notes/swarm-notes.service.ts). */
+type PeerNoteRoot = { note: Note; by: string; holders: readonly string[] }
+type SwarmNotesService = EventTarget & {
+  rootsFor(cell: string): readonly PeerNoteRoot[]
+  holdersOfMine(cell: string): ReadonlyMap<string, readonly string[]>
+  counts(cell: string, own: number): { people: number; notes: number; yours: number; open: number }
+  labelOf(pubkey: string): string
+  colorOf(pubkey: string): string
+  refresh(cell: string): Promise<void>
+  take(cell: string, ids: readonly string[]): Promise<string[]>
+}
+
 type SelectionService = EventTarget & {
   active: string | null
   selected: ReadonlySet<string>
@@ -258,6 +271,7 @@ type InputModeStackLike = {
     './notes-strip.plate.scss',
     './notes-strip.lists.scss',
     './notes-strip.desk.scss',
+    './notes-strip.swarm.scss',
   ],
 })
 export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
@@ -807,6 +821,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   startItemEdit(item: Note, event?: Event): void {
     event?.stopPropagation()
+    // A note someone else holds is theirs to edit — Take it to make it yours.
+    if (this.isPeer(item.id)) return
     this.editingItemId.set(item.id)
     this.itemDraft.set(this.noteDisplayText(item))
   }
@@ -1518,6 +1534,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  the pane's own affordance. Narrow fullscreen has no pane, so there the
    *  click opens the embedded editor as it always has. */
   onRowBodyClick(cellLabel: string, noteId: string, _event: Event, path?: readonly number[]): void {
+    // Someone else's note reads, it never opens an editor.
+    if (this.isPeer(noteId) && !(this.tab() === 'lists' && path)) { this.selectNote(noteId); return }
     // The lists tab has its own pane — a row click there picks WHICH LIST
     // (or which list an item belongs to), never the prose editor.
     if (this.tab() === 'lists' && path) {
@@ -1561,6 +1579,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   #noteDragScope: HTMLElement | null = null
 
   onNoteGripPointerDown(cellLabel: string, noteId: string, event: PointerEvent): void {
+    if (this.isPeer(noteId)) return
     // Primary mouse button / pen / touch primary only. Don't initiate
     // if the user is already mid-panel-drag.
     if (event.button !== 0) return
@@ -1819,8 +1838,87 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     const stored = this.#notesByCell().get(cell) ?? []
     const qa = this.#qaByCell().get(cell) ?? []
     const merged = this.#mergeQaWithNotes(qa, stored)
-    return merged.filter(n => this.#passesFilter(this.noteKind(n)))
+    // The swarm's notes on this tile follow your own — the same tree, never
+    // a second one. A note you already hold is yours and shows once.
+    const own = new Set(stored.map(n => n.id))
+    const peers = this.peerRoots().map(r => r.note).filter(n => !own.has(n.id))
+    return [...merged, ...peers].filter(n => this.#passesFilter(this.noteKind(n)))
   })
+
+  // ── Notes in the swarm ──────────────────────────────────────
+  // Notes are one thing and the swarm is a property of them: everyone in the
+  // room who shares this tile shows here, each root in the colour of who
+  // brought it, with a Take that collects it (the same signature onto your
+  // tile — shared, never copied). Read through the essentials SwarmNotes
+  // service; nothing here writes but a take.
+  readonly #swarmNotes = signal<SwarmNotesService | null>(null)
+  readonly #swarmVersion = signal(0)
+
+  readonly peerRoots = computed<readonly PeerNoteRoot[]>(() => {
+    this.#swarmVersion()
+    const svc = this.#swarmNotes()
+    const cell = this.cell()
+    return svc && cell ? svc.rootsFor(cell) : []
+  })
+
+  /** Every node of every peer tree → who brought its root. */
+  readonly #peerById = computed<ReadonlyMap<string, PeerNoteRoot>>(() => {
+    const out = new Map<string, PeerNoteRoot>()
+    const walk = (n: Note, root: PeerNoteRoot): void => { out.set(n.id, root); for (const c of n.children) walk(c, root) }
+    for (const r of this.peerRoots()) walk(r.note, r)
+    return out
+  })
+
+  /** The room on this tile, counted — null outside a swarm with nobody here. */
+  readonly swarmCounts = computed(() => {
+    this.#swarmVersion()
+    const svc = this.#swarmNotes()
+    const cell = this.cell()
+    if (!svc || !cell) return null
+    const counts = svc.counts(cell, (this.#notesByCell().get(cell) ?? []).length)
+    return counts.people > 1 || counts.open > 0 ? counts : null
+  })
+
+  isPeer(id: string): boolean { return this.#peerById().has(id) }
+  isPeerRoot(id: string): boolean { return this.#peerById().get(id)?.note.id === id }
+  peerColor(id: string): string | null {
+    const r = this.#peerById().get(id)
+    return r ? this.#swarmNotes()?.colorOf(r.by) ?? null : null
+  }
+  peerLabel(id: string): string {
+    const r = this.#peerById().get(id)
+    return r ? this.#swarmNotes()?.labelOf(r.by) ?? '' : ''
+  }
+  /** How many hold this root — a peer root's holders, or yours plus the
+   *  peers who took it. 0 when it is only one participant's. */
+  heldCount(id: string): number {
+    this.#swarmVersion()
+    const r = this.#peerById().get(id)
+    if (r) return r.note.id === id && r.holders.length > 1 ? r.holders.length : 0
+    const cell = this.cell()
+    const others = cell ? this.#swarmNotes()?.holdersOfMine(cell).get(id)?.length ?? 0 : 0
+    return others > 0 ? others + 1 : 0
+  }
+
+  takePeer(id: string, event?: Event): void {
+    event?.stopPropagation()
+    void this.#take([id])
+  }
+
+  takeAllPeers(): void {
+    void this.#take(this.peerRoots().map(r => r.note.id))
+  }
+
+  async #take(ids: readonly string[]): Promise<void> {
+    const svc = this.#swarmNotes()
+    const cell = this.cell()
+    if (!svc || !cell || ids.length === 0) return
+    const missing = await svc.take(cell, ids).catch(() => [...ids])
+    if (missing.length > 0) {
+      const i18n = get<I18nProvider>('@hypercomb.social/I18n')
+      EffectBus.emit('toast:show', { type: 'info', message: i18n?.t('notes.swarm.takeMissing') ?? 'Some notes have not arrived yet — try again in a moment.' })
+    }
+  }
 
   // ── Notes search (within the active tile) ─────────────────
   // Free-text filter over the active tile's notes. The list stays a TREE —
@@ -2544,7 +2642,14 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // so dependent computeds re-read.
     const lineage = get<EventTarget>('@hypercomb.social/Lineage') as unknown as EventTarget | undefined
     if (lineage?.addEventListener) {
+      // Lineage says `change` for a cache invalidation too (a tile created
+      // here), not only a move — only a move leaves the layer.
+      const pathOf = (): string => ((lineage as { explorerSegments?: () => readonly string[] }).explorerSegments?.() ?? []).join('/')
+      let path = pathOf()
       const onLineage = (): void => {
+        const next = pathOf()
+        if (next === path) return
+        path = next
         this.#warmed.set(new Set())
         this.#notesByCell.set(new Map())
         this.#qaByCell.set(new Map())
@@ -2660,6 +2765,20 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
         this.#notesServiceReady.set(true)
       })
     }
+
+    // Notes in the swarm: hold the service when it lands, repaint when a peer's
+    // notes change, and read the swarm for whichever tile is open.
+    window.ioc.whenReady('@diamondcoreprocessor.com/SwarmNotes', (svc: SwarmNotesService) => {
+      const repaint = (): void => this.#swarmVersion.update(v => v + 1)
+      svc.addEventListener('change', repaint)
+      this.#cleanups.push(() => svc.removeEventListener('change', repaint))
+      this.#swarmNotes.set(svc)
+    })
+    effect(() => {
+      const svc = this.#swarmNotes()
+      const cell = this.cell()
+      if (svc && cell) untracked(() => { void svc.refresh(cell) })
+    })
 
     // Mount the hive's tile list as soon as its host is in the DOM (the panel
     // rebuilds its DOM on fullscreen and on re-dock, so this re-runs).
@@ -2786,6 +2905,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
           return next
         })
         this.#rememberFacts(cellLabel, facts)
+        void this.#swarmNotes()?.refresh(cellLabel)
         this.#warmed.update(prev => {
           if (prev.has(cellLabel)) return prev
           const next = new Set(prev)

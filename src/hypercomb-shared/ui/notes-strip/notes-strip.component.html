@@ -380,6 +380,8 @@
         <article class="cv2-note" data-note-row
                  [attr.data-note-id]="note.id"
                  [style.--depth]="depth"
+                 [class.is-peer]="isPeer(note.id)"
+                 [style.--peer]="peerColor(note.id)"
                  [class.is-open-list]="tab() === 'lists' && listRoot()?.id === note.id"
                  [class.is-heading]="roleOf(note) === 'heading'"
                  [class.is-prose]="roleOf(note) === 'prose'"
@@ -411,9 +413,14 @@
           } @else {
             <span class="cv2-note-chevron-spacer" aria-hidden="true"></span>
           }
-          <!-- Grip is a CSS-drawn rail (see .cv2-note-grip) — no glyph. -->
-          <div class="cv2-note-grip" [title]="'notes.dragToReorder' | t"
-               (pointerdown)="onNoteGripPointerDown(cell()!, note.id, $event)"></div>
+          <!-- Grip is a CSS-drawn rail (see .cv2-note-grip) — no glyph. A
+               note someone else holds does not move: Take it first. -->
+          @if (isPeer(note.id)) {
+            <span class="cv2-note-chevron-spacer" aria-hidden="true"></span>
+          } @else {
+            <div class="cv2-note-grip" [title]="'notes.dragToReorder' | t"
+                 (pointerdown)="onNoteGripPointerDown(cell()!, note.id, $event)"></div>
+          }
           <div class="cv2-note-body" (click)="onRowBodyClick(cell()!, note.id, $event, path)">
             @if (noteKind(note) === 'q') {
               <div class="cv2-note-kind">
@@ -438,8 +445,24 @@
               <span class="hc-shape-glyph cv2-note-shape" aria-hidden="true"></span>
             }
             <p class="cv2-note-text">{{ noteDisplayText(note) }}</p>
+            <!-- In the swarm: who brought a note, how many hold it, and a
+                 Take on someone else's root. -->
+            @if (isPeerRoot(note.id) || heldCount(note.id) > 0) {
+              <span class="cv2-peer-meta" (click)="$event.stopPropagation()">
+                @if (isPeerRoot(note.id)) {
+                  <span class="cv2-peer-by">{{ peerLabel(note.id) }}</span>
+                }
+                @if (heldCount(note.id) > 0) {
+                  <span class="cv2-peer-held" [title]="'notes.swarm.held' | t: { count: heldCount(note.id) }">×{{ heldCount(note.id) }}</span>
+                }
+                @if (isPeerRoot(note.id)) {
+                  <button type="button" class="cv2-peer-take" (click)="takePeer(note.id, $event)">{{ 'notes.swarm.take' | t }}</button>
+                }
+              </span>
+            }
           </div>
           <!-- Kebab opens a small popover with Nest / Promote / Delete. -->
+          @if (!isPeer(note.id)) {
           <button class="cv2-note-kebab" type="button"
                   [class.is-open]="kebabOpenId() === note.id"
                   (click)="openKebab(note.id, $event)"
@@ -447,6 +470,7 @@
                   [title]="'notes.moreActions' | t">
             <span class="mat-sym" style="font-size:14px">more_vert</span>
           </button>
+          }
           @if (kebabOpenId() === note.id) {
             <div class="cv2-kebab-menu" (click)="$event.stopPropagation()">
               <button type="button" class="cv2-kebab-item"
@@ -537,7 +561,14 @@
 
       <!-- Editor footer — note count for the active tile. -->
       <footer class="cv2-foot">
-        <span>{{ 'notes.footerCount' | t: { count: notes().length } }} <code>{{ cell() }}</code></span>
+        @if (swarmCounts(); as room) {
+          <span class="cv2-swarm-counts">{{ 'notes.swarm.counts' | t: { people: room.people, notes: room.notes, yours: room.yours, open: room.open } }}</span>
+          @if (room.open > 0) {
+            <button type="button" class="cv2-peer-take" (click)="takeAllPeers()">{{ 'notes.swarm.takeAll' | t }}</button>
+          }
+        } @else {
+          <span>{{ 'notes.footerCount' | t: { count: notes().length } }} <code>{{ cell() }}</code></span>
+        }
       </footer>
     } @else {
       <!-- No active tile — prompt the user to find one in the tile list. -->
@@ -591,6 +622,8 @@
                   <div class="cv2-line" data-note-row
                        [attr.data-note-id]="row.note.id"
                        [style.--depth]="row.depth"
+                       [class.is-peer]="isPeer(row.note.id)"
+                       [style.--peer]="peerColor(row.note.id)"
                        [class.is-editing]="editingItemId() === row.note.id"
                        [class.is-mark-target]="markDropTargetId() === row.note.id"
                        [class.is-dragging]="noteDragSourceId() === row.note.id"

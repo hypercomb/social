@@ -640,6 +640,23 @@ export class NotesService {
   }
 
   /**
+   * A `notes` slot's entries — any layer's, this hive's or a swarm peer's —
+   * as the note trees they name, in order, each once. Entries are note sigs
+   * or the meta envelopes that name them, resolved exactly as this hive's own
+   * reads resolve them. A note whose bytes are not here is left out.
+   */
+  public readonly notesOfEntries = async (entries: readonly unknown[]): Promise<Note[]> => {
+    const sigs = await this.#noteSigsOf(Array.isArray(entries) ? entries : [])
+    const out: Note[] = []
+    for (const sig of sigs) {
+      if (!SIG_REGEX.test(sig)) continue
+      const note = await this.#hydrateAsync(sig)
+      if (note) out.push(note)
+    }
+    return out
+  }
+
+  /**
    * TAKE existing notes onto a cell: append each signature to the cell's
    * notes, unless it is already there — ONE commit however many, so a take is
    * one step in history. Shared, never copied — a note keeps its signature,

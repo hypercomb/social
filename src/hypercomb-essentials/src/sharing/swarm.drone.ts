@@ -168,7 +168,6 @@ const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const HISTORY_SERVICE_KEY = '@diamondcoreprocessor.com/HistoryService'
 const SIGNATURE_STORE_KEY = '@hypercomb/SignatureStore'
 const STORE_KEY = '@hypercomb.social/Store'
-const NOTES_SERVICE_KEY = '@diamondcoreprocessor.com/NotesService'
 const ROOM_STORE_KEY = '@hypercomb.social/RoomStore'
 const SECRET_STORE_KEY = '@hypercomb.social/SecretStore'
 
@@ -425,35 +424,6 @@ interface SwarmLayerPayload {
   // a tile; raw browsing of the visuals payload never touches the
   // resource pipeline.
   visuals: ({ name: string } & Record<string, unknown>)[]
-
-  // THE PAGE'S OWN NOTES (swarm notes, jwize 2026-10-13) — the note
-  // signatures this participant holds on the page they stand on: what they
-  // wrote there and what they took. REFERENCES only; a note is a file, its
-  // bytes are fetched by signature from whoever holds it (the broker,
-  // mesh-first, from the author's device while they are in the room). Said
-  // only at the page itself (depth 0) and only when that page's tile is
-  // public — a public tile's notes already travel with its closure on a take,
-  // so nothing new leaves the device. Absent when there are none; an older
-  // client ignores the field.
-  notes?: string[]
-}
-
-/** How many note references one page event carries — 67 bytes each on the
- *  wire, so a lecture's worth stays well under a relay's event size. */
-const NOTES_MAX = 400
-
-/** A peer's `notes` field, as the trust boundary admits it: lowercase 64-hex
- *  signatures, deduped, order kept, capped. Anything else is dropped. */
-function cleanNoteRefs(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  const out: string[] = []
-  for (const raw of value) {
-    const sig = String(raw ?? '').trim().toLowerCase()
-    if (!/^[0-9a-f]{64}$/.test(sig) || out.includes(sig)) continue
-    out.push(sig)
-    if (out.length >= NOTES_MAX) break
-  }
-  return out
 }
 
 interface MeshEvtLike {
@@ -712,11 +682,9 @@ type NotePeerLiveness = (pubkey: string, sigs: readonly string[], page?: { hoste
  *  first. Said even when `owner` is empty: a root named again WITHOUT the
  *  mark has finished uploading, and that flip re-opens its subtree's miss
  *  windows (BCL-9). Idempotent per (pubkey, sig) inside the broker, so a
- *  heartbeat re-announce costs nothing. The page's `notes` are claimed the
- *  same way as a live entry's atoms: no host keeps them, the peer holds them. */
-function notePeerHolds(note: NotePeerLiveness, pubkey: string, visuals: readonly Record<string, unknown>[], notes: readonly string[] = []): void {
-  const visualRefs = visualArtifactSigs(visuals)
-  const refs = [...visualRefs, ...notes.filter(s => !visualRefs.includes(s))]
+ *  heartbeat re-announce costs nothing. */
+function notePeerHolds(note: NotePeerLiveness, pubkey: string, visuals: readonly Record<string, unknown>[]): void {
+  const refs = visualArtifactSigs(visuals)
   const owner = ownerHeldRefs(visuals)
   if (refs.length === 0 && owner.length === 0) return
   const hosted = visualArtifactSigs(visuals.filter(v => v['served'] !== 'owner'))
@@ -1899,12 +1867,13 @@ export class SwarmDrone extends Drone {
     // ~250ms is comfortably under perceived-instant and well above
     // the layer cascade settle time.
     this.onEffect('cell:0000-changed', () => this.#schedulePropsRepublish())
-    // The page's own notes changed (written or taken): its word carries
-    // their references (SwarmLayerPayload.notes), so say it again. Only the
-    // page this tab stands on — a note elsewhere is not on this page's word.
+    // A tile's notes changed on this page (written or taken): its layer — and
+    // so its layerSig on this page's word — changed with them, and a peer
+    // reads a tile's notes from that layer (notes/swarm-notes.ts). Say the
+    // page again. Only a tile of the page this tab stands on.
     this.onEffect<{ segments?: readonly string[] }>('notes:changed', (p) => {
       const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
-      if (segments.length > 0 && lineageKey(segments) === this.#currentPageKey()) this.#schedulePropsRepublish()
+      if (segments.length > 0 && lineageKey(segments.slice(0, -1)) === this.#currentPageKey()) this.#schedulePropsRepublish()
     })
     // Also covers the bare cell:added → layout cascade race; if the
     // initial publish caught a child mid-write, the property edit that
@@ -2735,29 +2704,6 @@ export class SwarmDrone extends Drone {
     }))
   }
 
-  /** The note references every peer holds on the page this tab stands on —
-   *  one row per (note, holder), each holder's list in its own order, peers
-   *  freshest-first. Same gates as peerTilesAtSig: self excluded, entries past
-   *  their relay slot dropped, so a participant who left takes their untaken
-   *  notes with them. References only; bytes come by signature (the broker). */
-  public peerNotesAtCurrentSig = (): readonly { sig: string; peerPubkey: string }[] => {
-    const sig = this.#currentSig
-    if (!sig) return []
-    const peerLayers = this.#peerLayersBySig.get(sig)
-    if (!peerLayers || peerLayers.size === 0) return []
-    const lastSeenBag = this.#peerLastSeenMsBySig.get(sig) ?? new Map<string, number>()
-    const nowSec = this.#nowSec()
-    const wake = this.#inWakeWindow()
-    const out: { sig: string; peerPubkey: string }[] = []
-    const peers = [...peerLayers.entries()].sort(([a], [b]) => (lastSeenBag.get(b) ?? 0) - (lastSeenBag.get(a) ?? 0))
-    for (const [pubkey, layer] of peers) {
-      if (this.#myPubkey && pubkey === this.#myPubkey) continue
-      if (!wake && this.#isExpired(sig, pubkey, nowSec)) continue
-      for (const note of layer?.notes ?? []) out.push({ sig: note, peerPubkey: pubkey })
-    }
-    return out
-  }
-
   #registerTileSource = (attempts: number): void => {
     const registry = this.#getRegistry()
     if (registry?.register) {
@@ -3432,9 +3378,7 @@ export class SwarmDrone extends Drone {
         const cleaned = sanitizeVisual(v as Record<string, unknown>)
         if (cleaned) cleanVisuals.push(withDeep(cleaned, v as Record<string, unknown>))
       }
-      // A page with only notes on it is still somebody's word here.
-      const recoveredNotes = cleanNoteRefs((raw as { notes?: unknown })?.notes)
-      if (cleanVisuals.length === 0 && recoveredNotes.length === 0) continue
+      if (cleanVisuals.length === 0) continue
 
       // Domain attribution — recovered entries are the ORIGINAL layer
       // events (pubkey/content/tags preserved by the responder), so the
@@ -3458,9 +3402,9 @@ export class SwarmDrone extends Drone {
       // user means by "it should be immediate when participants connect".
       // Same claim as #onEvent — only what is on their device alone — and the
       // same per-claim idempotence.
-      if (broker?.notePeerLiveness) notePeerHolds(broker.notePeerLiveness, pubkey, cleanVisuals, recoveredNotes)
+      if (broker?.notePeerLiveness) notePeerHolds(broker.notePeerLiveness, pubkey, cleanVisuals)
       if (!bag) { bag = new Map(); this.#peerLayersBySig.set(sig, bag) }
-      bag.set(pubkey, recoveredNotes.length > 0 ? { visuals: cleanVisuals, notes: recoveredNotes } : { visuals: cleanVisuals })
+      bag.set(pubkey, { visuals: cleanVisuals })
       this.#noteExpiry(sig, pubkey, entry.tags, createdAtSec)
       let lastSeenBag = this.#peerLastSeenMsBySig.get(sig)
       if (!lastSeenBag) { lastSeenBag = new Map(); this.#peerLastSeenMsBySig.set(sig, lastSeenBag) }
@@ -3691,8 +3635,7 @@ export class SwarmDrone extends Drone {
     if (droppedCount > 0) {
       slog('[swarm] onEvent sanitized', { pubkey: pubkey.slice(0,8), kept: cleanVisuals.length, dropped: droppedCount })
     }
-    const noteRefs = cleanNoteRefs(raw.notes)
-    const layer: SwarmLayerPayload = noteRefs.length > 0 ? { visuals: cleanVisuals, notes: noteRefs } : { visuals: cleanVisuals }
+    const layer: SwarmLayerPayload = { visuals: cleanVisuals }
 
     let bag = this.#peerLayersBySig.get(sig)
     if (!bag) { bag = new Map(); this.#peerLayersBySig.set(sig, bag) }
@@ -3767,7 +3710,7 @@ export class SwarmDrone extends Drone {
     // live swarm), which only they can answer while they are here. A take of
     // either reaches the owner at once. Idempotent per (pubkey, sig) inside
     // the broker, so the heartbeat re-announce costs nothing.
-    if (broker?.notePeerLiveness) notePeerHolds(broker.notePeerLiveness, pubkey, cleanVisuals, noteRefs)
+    if (broker?.notePeerLiveness) notePeerHolds(broker.notePeerLiveness, pubkey, cleanVisuals)
 
     // Auto-resource-pull DISABLED for the exploration-first model.
     // Visuals carry only inert metadata (names, accents, tags, hideText),
@@ -3963,19 +3906,6 @@ export class SwarmDrone extends Drone {
         if (key !== currentKey) void this.#walkPage(segments)
       }
     }, RECEIPT_REWALK_MS)
-  }
-
-  /** The note references this tab says at a page (SwarmLayerPayload.notes):
-   *  the page tile's own notes — written here or taken — only while that tile
-   *  is public. The root has no tile, so it has no notes. */
-  #pageNoteRefs = async (segments: readonly string[]): Promise<string[]> => {
-    if (segments.length === 0) return []
-    const label = segments[segments.length - 1] ?? ''
-    if (!isCellPublic('/' + segments.slice(0, -1).join('/'), label)) return []
-    const notes = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(NOTES_SERVICE_KEY) as
-      { getNotesAtSegments?: (s: readonly string[]) => Promise<{ id: string }[]> } | undefined
-    if (!notes?.getNotesAtSegments) return []
-    try { return cleanNoteRefs((await notes.getNotesAtSegments(segments)).map(n => n.id)) } catch { return [] }
   }
 
   #schedulePropsRepublish = (): void => {
@@ -4325,10 +4255,6 @@ export class SwarmDrone extends Drone {
     const payload: SwarmLayerPayload = myLabel
       ? { label: myLabel, visuals: children }
       : { visuals: children }
-    if (depth === 0) {
-      const notes = await this.#pageNoteRefs(segments)
-      if (notes.length > 0) payload.notes = notes
-    }
 
     // Empty-visual publishes only matter where they can REMOVE something
     // (a peer may hold our earlier non-empty layer at this sig — "empty-

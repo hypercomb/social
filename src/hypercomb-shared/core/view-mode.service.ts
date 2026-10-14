@@ -65,9 +65,6 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // lets a published game be a place somebody visits rather than a gesture
   // somebody makes from inside the hive.
   'game',
-  // The swarm room as note lines (notes/note-lines-view.drone.ts) — the
-  // page's notes, everyone's, with no hexagons under them.
-  'lines',
 ])
 
 /** True when `mode` is a full-surface (canvas-covering) view. The shells
