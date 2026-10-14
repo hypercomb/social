@@ -74,7 +74,19 @@ export function declaredByView(view: string): TraitSpec[] {
 export const declaredAt = (segments: readonly string[]): TraitSpec[] =>
   declaredByView(defaultViewWithinSegments(segments))
 
-/** Every trait a tile has: declared by its view, then opened on it. */
+/** The names of a tile's children, in roster order. */
+export async function childNamesAt(segments: readonly string[]): Promise<string[]> {
+  const h = history(); const s = store()
+  if (!h || !s) return []
+  try { return (await levelRoster(segments, h, s)).map(row => row.name) } catch { return [] }
+}
+
+/**
+ * Every trait a tile has: declared by its view, then given to it. A trait is a requirement some
+ * tiles have, an interface (jwize, 2026-10-13: "they are known as traits because they are an
+ * interface … they aren't tiles … a requirement of some tiles"). An ordinary child is just a tile;
+ * it fills a trait only when its layer has one by its name.
+ */
 export async function traitsAt(segments: readonly string[]): Promise<TraitSpec[]> {
   const opened = (await traitWantsAt(segments)).map(w => w.record.payload)
   return mergeTraits(declaredAt(segments), opened)
@@ -132,4 +144,19 @@ export class TraitService implements TraitProvider {
     const r = (await resolveTraitsAt(segments)).find(x => sameTraitWord(x.word, word))
     return r ? traitFiller(r) : null
   }
+}
+
+/** Create the child tile by that name in the layer the participant stands in, through the shell's own
+ *  create commit (the one `create <name>` runs). Resolves true once it has committed, false when no
+ *  command line is there to take it. */
+export function createTile(name: string): Promise<boolean> {
+  let accepted = false
+  let finish!: (ok: boolean) => void
+  const done = new Promise<boolean>(resolve => { finish = resolve })
+  EffectBus.emitTransient('command:create-cells', {
+    name,
+    accept: () => { accepted = true },
+    complete: (error?: unknown) => finish(error === undefined),
+  })
+  return accepted ? done : Promise.resolve(false)
 }

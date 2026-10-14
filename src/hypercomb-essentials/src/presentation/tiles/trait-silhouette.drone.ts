@@ -5,7 +5,9 @@
 // A tile that wears traits names its next layer before that layer exists. Standing in it, every
 // trait no child answers yet is drawn as a silhouette in the next free slot of the spiral: a faint
 // hexagon, its inner ring, and the word. Pressing one creates the tile by that name through the same
-// commit `create <name>` runs, and the silhouette gives way to the tile on the next render pass.
+// commit `create <name>` runs. Giving a trait with the `trait` word makes its tile at once: the drone
+// hears `trait:given`, draws the silhouette, and when the tile lands it plays the arrival there —
+// the outline brightens, opens out over the new tile and fades.
 //
 // A silhouette is NOT a tile. It never enters the cell list, the counts, the click routing, or any
 // store: it is drawn on its own layer, recomputed from the level's own facts (the tile's `trait:want`
@@ -40,6 +42,12 @@ const SILHOUETTE_Z = 6990
 const PRESS_JITTER_PX = 8
 /** Decoration writes notify before they commit; read again after the commit has landed. */
 const REREAD_MS = 300
+/** The arrival: a given trait's silhouette brightens and opens out over its new tile, then is gone. */
+const ARRIVAL_MS = 520
+/** A given trait whose tile never lands stops being drawn as arriving after this long. */
+const ARRIVING_TTL_MS = 6000
+/** Above the resting silhouettes, so the arrival plays over the tile that just landed. */
+const ARRIVAL_Z = 6991
 
 export class TraitSilhouetteDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -49,7 +57,7 @@ export class TraitSilhouetteDrone extends Drone {
   protected override deps = { axial: '@diamondcoreprocessor.com/AxialService' }
   protected override listens = [
     'render:host-ready', 'render:mesh-offset', 'render:cell-count',
-    'render:geometry-changed', 'render:set-orientation', 'decorations:changed',
+    'render:geometry-changed', 'render:set-orientation', 'decorations:changed', 'trait:given',
   ]
   protected override emits = ['command:create-cells']
 
@@ -57,6 +65,8 @@ export class TraitSilhouetteDrone extends Drone {
   #canvas: HTMLCanvasElement | null = null
   #renderer: { events?: { mapPositionToPoint?: (out: Point, x: number, y: number) => void }; screen: { width: number; height: number } } | null = null
   #layer: Container | null = null
+  #arrivalLayer: Container | null = null
+  #ticker: { add: (fn: () => void) => void; remove: (fn: () => void) => void } | null = null
   #meshOffset = { x: 0, y: 0 }
   #spacing = 38
   #flat = false
@@ -69,6 +79,10 @@ export class TraitSilhouetteDrone extends Drone {
   #readToken = 0
   #rereadTimer: ReturnType<typeof setTimeout> | null = null
   #shown: Silhouette[] = []
+  /** Traits just given here, drawn before their record is read back: word → when it was given. */
+  #arriving = new Map<string, number>()
+  /** Silhouettes playing their arrival over the tile that replaced them. */
+  #arrivals: { node: Container; q: number; r: number }[] = []
   #down: { id: number; x: number; y: number } | null = null
   #wired = false
 
@@ -80,6 +94,7 @@ export class TraitSilhouetteDrone extends Drone {
       this.#container = p.container
       this.#canvas = p.canvas
       this.#renderer = p.renderer as never
+      this.#ticker = (p.app?.ticker ?? null) as never
       this.#initLayer()
       this.#draw()
     })
@@ -94,6 +109,12 @@ export class TraitSilhouetteDrone extends Drone {
       const at = this.#here()
       if (at !== this.#wordsAt) void this.#readWords()
       else this.#draw()
+    })
+    this.onEffect<{ segments?: readonly string[]; words?: readonly string[] }>('trait:given', (p) => {
+      if ((p?.segments ?? []).join('/') !== this.#here()) return
+      const now = Date.now()
+      for (const word of p?.words ?? []) this.#arriving.set(word, now)
+      this.#draw()
     })
     this.onEffect('decorations:changed', () => {
       if (this.#rereadTimer) clearTimeout(this.#rereadTimer)
@@ -110,9 +131,13 @@ export class TraitSilhouetteDrone extends Drone {
     window.removeEventListener('pointerup', this.#onUp)
     window.removeEventListener('pointercancel', this.#onCancel)
     if (this.#rereadTimer) clearTimeout(this.#rereadTimer)
-    this.#layer?.parent?.removeChild(this.#layer)
-    this.#layer?.destroy({ children: true })
+    for (const l of [this.#layer, this.#arrivalLayer]) {
+      l?.parent?.removeChild(l)
+      l?.destroy({ children: true })
+    }
     this.#layer = null
+    this.#arrivalLayer = null
+    this.#arrivals = []
   }
 
   /** The level we stand in, as one string. The hive root never wears traits. */
@@ -145,6 +170,10 @@ export class TraitSilhouetteDrone extends Drone {
     this.#layer.zIndex = SILHOUETTE_Z
     this.#layer.eventMode = 'none'
     this.#container.addChild(this.#layer)
+    this.#arrivalLayer = new Container()
+    this.#arrivalLayer.zIndex = ARRIVAL_Z
+    this.#arrivalLayer.eventMode = 'none'
+    this.#container.addChild(this.#arrivalLayer)
     this.#container.sortableChildren = true
   }
 
@@ -153,15 +182,73 @@ export class TraitSilhouetteDrone extends Drone {
     const layer = this.#layer
     if (!layer) return
     for (const child of layer.removeChildren()) child.destroy({ children: true })
-    const open = this.#wordsAt === this.#here() ? openTraitWords(this.#words, this.#labels) : []
+    const previous = this.#shown
+    const arriving = this.#arrivingWords()
+    const resting = this.#wordsAt === this.#here() ? this.#words : []
+    const open = openTraitWords([...resting, ...arriving.filter(w => !resting.includes(w))], this.#labels)
     const axial = this.resolve<AxialServiceLike>('axial')
     this.#shown = open.length ? silhouetteSlots(open, this.#coords, i => axial?.items?.get(i) ?? null) : []
     for (const s of this.#shown) layer.addChild(this.#node(s.word))
+
+    // A silhouette whose tile has just landed plays its arrival where it stood, then is gone.
+    for (const was of previous) {
+      if (this.#shown.some(s => s.word === was.word)) continue
+      if (!this.#labels.some(label => sameTraitWord(label, was.word))) continue
+      this.#arriving.delete(was.word)
+      this.#playArrival(was)
+    }
     this.#place()
+  }
+
+  /** Given traits still waiting for their tile; a stale one is dropped. */
+  #arrivingWords(): string[] {
+    const now = Date.now()
+    for (const [word, at] of this.#arriving) if (now - at > ARRIVING_TTL_MS) this.#arriving.delete(word)
+    return [...this.#arriving.keys()]
+  }
+
+  /** The silhouette brightens and opens out over the tile that replaced it, then fades. Skipped when
+   *  the participant asks for reduced motion, or when there is no frame clock to drive it. */
+  #playArrival(s: Silhouette): void {
+    const host = this.#arrivalLayer
+    const ticker = this.#ticker
+    let reduced = false
+    try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { /* no media queries */ }
+    if (!host || !ticker || reduced) return
+
+    const node = this.#node(s.word)
+    host.addChild(node)
+    const entry = { node, q: s.q, r: s.r }
+    this.#arrivals.push(entry)
+    this.#place()
+
+    const start = performance.now()
+    const finish = (): void => {
+      ticker.remove(step)
+      clearTimeout(fallback)
+      this.#arrivals = this.#arrivals.filter(a => a !== entry)
+      node.parent?.removeChild(node)
+      node.destroy({ children: true })
+    }
+    const step = (): void => {
+      const t = Math.min(1, (performance.now() - start) / ARRIVAL_MS)
+      const ease = 1 - Math.pow(1 - t, 3)
+      node.scale.set(1 + 0.12 * ease)
+      // Bright at first (the silhouette "takes"), then gone as the tile shows through.
+      node.alpha = t < 0.25 ? 1 : 1 - (t - 0.25) / 0.75
+      if (t >= 1) finish()
+    }
+    // A hidden tab never runs frames; the timeout still clears the node.
+    const fallback = setTimeout(finish, ARRIVAL_MS * 3)
+    ticker.add(step)
   }
 
   /** Move the silhouettes with the mesh; nothing is rebuilt on a pan. */
   #place(): void {
+    for (const a of this.#arrivals) {
+      const p = this.#axialToPixel(a.q, a.r)
+      a.node.position.set(p.x + this.#meshOffset.x, p.y + this.#meshOffset.y)
+    }
     const layer = this.#layer
     if (!layer) return
     this.#shown.forEach((s, i) => {

@@ -2,31 +2,32 @@
 //
 // `trait` — the extension points a tile leaves open (documentation/traits.md).
 //
-//   trait                        what traits this tile has, and how each is filled
-//   trait portrait tagline       open two traits on this tile
-//   trait ~ tagline              close one
+//   trait                        this tile's traits, and how each is filled
+//   trait portrait tagline       give it two traits: a tile is made to fill each
+//   trait ~ tagline              forget a trait given here (its tile stays)
 //
-// The tile is the one you stand in. A trait is a `trait:point` decoration naming one word; opening and
-// closing are ordinary decoration commits, so they undo like any other. Choosing a filler is `fill`
-// (fill.queen.ts). Resolution is trait.ts: the tile's fill mark, then a child named the word, then
-// tiles in this hive named the word. Nothing is minted for an empty trait.
+// The tile is the one you stand in. A trait is a requirement some tiles have, an interface; a tile
+// named the word fills it. Giving a trait keeps a `trait:want` record and makes the tile that fills
+// it, so the requirement outlives the tile: hide the tile and its silhouette returns. Every write is
+// an ordinary commit, so it undoes like any other. Choosing another filler is `fill`
+// (fill.queen.ts); the rules are core's (core/trait.ts).
 //
 // No aliases: a behaviour declares none (aliases are the participant's own).
-import { QueenBee, TRAITS_IOC_KEY, TRAIT_WANT_KIND, isReservedPoolWord, sameTraitWord, traitWords, type TraitWant } from '@hypercomb/core'
+import { EffectBus, QueenBee, TRAITS_IOC_KEY, TRAIT_WANT_KIND, isReservedPoolWord, sameTraitWord, traitWords, type TraitWant } from '@hypercomb/core'
 import { removeDecorationAndWait, writeDecoration } from './decoration-manifest.js'
 import { describeResolution, parseTraitArgs } from './trait.js'
-import { TraitService, resolveTraitsAt, say, traitWantsAt, standing } from './trait-read.js'
+import { TraitService, childNamesAt, createTile, resolveTraitsAt, say, traitWantsAt, standing } from './trait-read.js'
 
 export class TraitQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'trait'
-  override description = 'The extension points this tile leaves open'
+  override description = 'The traits this tile leaves open for a filler'
   override descriptionKey = 'slash.trait'
   override options = ['<word>', '~ <word>']
   override examples = [
     { input: '/trait', result: 'Lists this tile\'s traits and what fills each' },
-    { input: '/trait portrait tagline', result: 'Opens two traits on this tile' },
-    { input: '/trait ~ tagline', result: 'Closes the tagline trait' },
+    { input: '/trait portrait tagline', result: 'Gives this tile two traits and makes a tile to fill each' },
+    { input: '/trait ~ tagline', result: 'Forgets the tagline trait; its tile stays' },
   ]
 
   // a trait word may be a behaviour word (`card`, `template`) — the whole line is this word's
@@ -57,7 +58,7 @@ export class TraitQueenBee extends QueenBee {
         }
       }
       // Only a trait opened here can be closed; one the view declares belongs to the view.
-      say(closed ? `"${name}" closed ${parsed.words.join(', ')}` : `"${name}" has not opened ${parsed.words.join(', ')} — a trait its view declares stays`)
+      say(closed ? `"${name}" forgot ${parsed.words.join(', ')}` : `"${name}" was not given ${parsed.words.join(', ')} here — a trait its view declares stays`)
       return
     }
 
@@ -71,7 +72,18 @@ export class TraitQueenBee extends QueenBee {
       await writeDecoration<TraitWant>({ kind: TRAIT_WANT_KIND, appliesTo: here, segments: here, payload: { word }, mark: 'persistent' })
       opened.push(word)
     }
-    say(opened.length ? `"${name}" now leaves ${opened.join(', ')} open` : `"${name}" already has ${parsed.words.join(', ')}`)
+
+    // Giving a trait makes its tile (jwize, 2026-10-13: "as soon as you give a trait it should become
+    // a tile"): the tile is the intent, before any behaviour fills it. The silhouette drone hears
+    // `trait:given` first and plays the arrival; each tile lands where its silhouette stood.
+    const children = await childNamesAt(here)
+    const toMake = traitWords(parsed.words).filter(w => !children.some(c => sameTraitWord(c, w)))
+    if (toMake.length) EffectBus.emitTransient('trait:given', { segments: [...here], words: toMake })
+    const made: string[] = []
+    for (const word of toMake) if (await createTile(word)) made.push(word)
+
+    if (!opened.length && !made.length) { say(`"${name}" already has ${parsed.words.join(', ')}`); return }
+    say(`"${name}" has ${traitWords([...opened, ...made]).join(', ')}`)
   }
 }
 

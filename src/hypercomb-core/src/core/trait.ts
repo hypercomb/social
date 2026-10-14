@@ -31,7 +31,9 @@
 //   5. MISS   nothing anywhere: the reminder stands.
 // Followed hosts join the offers and the HIVE rung later (documentation/traits.md, step three).
 //
-// Nothing is minted for an empty trait. The only state is the `trait:fill` record.
+// A trait is a requirement some tiles have, never a tile itself. The records are `trait:want` (a
+// requirement given to a tile) and `trait:fill` (a filler chosen); both live on the tile. What can
+// fill a trait lives in the word's pool, sign(word).
 
 import { moleculeKey } from './molecule-address.js'
 

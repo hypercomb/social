@@ -70,8 +70,8 @@ you see it as an extension point that already has a working version."
 behaviour's own. A filler replaces it, and what others have made is offered,
 never swapped in on its own. A trait declared as needed is the other case: a
 reminder that the behaviour works properly only once something is provided. A
-trait a participant opens with the `trait` word has no own version either, so
-it counts as needed.
+trait a participant gives with the `trait` word has no own version either, so
+it counts as needed, and its tile is made at once to fill it.
 
 **A trait fills by rungs, in order:**
 
@@ -219,29 +219,39 @@ domain's statement about the word. Visiting the word across the hosts you
 follow reads all of them. There is no separate documentation resource and no
 colon pool for it: the word is the conventional resource.
 
-## A trait wanted, not a tile waiting
+## A requirement, not a tile
 
 *jwize, 2026-10-07:* "so this gives you the ability to give traits that are
 suggested, or is that just an actual tile that has a design saying it is
 needed to be filled and then changes its beehavior upon being provided?"
 
-A trait is a trait the creation says it wants. Three things follow:
+*jwize, 2026-10-13:* "as soon as you give a trait it should become a tile …
+they are known as traits because they are an interface … they aren't tiles …
+so basically a requirement of some tiles … we have to make it fit, and
+currently wiping out tile or cell makes no sense."
 
-- **Nothing is minted for an empty trait.** The silhouette is a rendering of
-  the parent's trait mark. It is not a tile, has no signature, and holds
-  nothing. A tile that changed upon being provided would have to hold its
-  filler, and that is a parent, which the doctrine forbids.
+A trait is a requirement some tiles have: an interface, never a tile. Tiles
+and cells stay what they are; an ordinary tile is just a tile, and creating
+one adds no trait. Four things follow:
+
+- **The requirement lives on the tile; the implementations live in the pool.**
+  A given trait is a `trait:want` record in the layer's decorations, so it
+  travels, undoes and publishes with the tile. Pools never hold truth. The
+  word's pool `sign(word)` gathers what can fill it, across this hive and the
+  hosts it follows.
+- **Giving a trait makes the tile that fills it.** `trait portrait` records
+  the requirement and creates the child tile called `portrait` at once. Its
+  silhouette is the first frame: it brightens and opens out over the new tile
+  as it lands. Hide that tile later and the silhouette returns, because the
+  requirement outlived it.
 - **The behaviour change lives in the reader.** The bee that renders or runs
-  the creation resolves each trait by the rungs. With no filler it draws
-  the silhouette and offers search or create; with one it uses it. The
-  creation behaves differently once provided, because resolution succeeded,
-  not because a tile transformed.
-- **Suggested traits are the halo.** Wearing the word declares the trait
-  accepted. Fillers listed under the word on followed hosts are the
-  suggestion. Nothing lands until `fill`.
-
-The only state in the whole primitive is the `trait:fill` mark on the
-tile that wears the trait.
+  the creation resolves each trait by the rungs. With no filler it uses its
+  own version, or for a needed trait draws the silhouette; with one it uses
+  it. The creation behaves differently once provided because resolution
+  succeeded, not because a tile transformed.
+- **Suggested fillers are the halo.** Fillers listed under the word on
+  followed hosts are the suggestion. Nothing replaces what fills a trait until
+  `fill`.
 
 ## Passive discovery: a GET, never a join
 
