@@ -37,6 +37,13 @@ layer. A template's parts are its traits: [template addressing](template-address
 fills a placeholder from the child of that name, which is the child rung
 below, asked for one word at a time.
 
+*jwize, 2026-10-13:* "Basically giving traits to a layer is how you design
+things in the hive. It makes perfect sense."
+
+Designing is naming what a layer wants. The traits are the design, the
+silhouettes show it, and each tile made in one is the design being filled in.
+There is no separate plan to keep in step with what gets built.
+
 ## What a trait is
 
 A trait is a mark a tile wears, naming one word: `name`, `portrait`,
