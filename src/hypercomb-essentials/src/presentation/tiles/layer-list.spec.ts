@@ -112,6 +112,22 @@ describe('rows', () => {
     expect(row('meadow')?.querySelector('img')).toBeNull()
   })
 
+  it('a picture not on this device yet (a swarm or host tile) is fetched through the store and painted', async () => {
+    const getResource = vi.fn(async () => new Blob(['webp'], { type: 'image/webp' }))
+    services['@hypercomb.social/Store'] = { getResource }
+    const made = vi.fn(() => 'blob:sunrise')
+    const was = URL.createObjectURL
+    URL.createObjectURL = made
+    try {
+      row('sunrise')?.querySelector('img')?.dispatchEvent(new Event('error'))
+      await vi.waitFor(() => expect(row('sunrise')?.querySelector('img')?.getAttribute('src')).toBe('blob:sunrise'))
+      expect(getResource).toHaveBeenCalledWith('a'.repeat(64))
+    } finally {
+      URL.createObjectURL = was
+      delete services['@hypercomb.social/Store']
+    }
+  })
+
   it('fill the first line of the first note once it lands', async () => {
     await new Promise(r => setTimeout(r, 0))
     expect(row('sunrise')?.querySelector('.hc-ll-sub')?.textContent).toBe('a warm one')

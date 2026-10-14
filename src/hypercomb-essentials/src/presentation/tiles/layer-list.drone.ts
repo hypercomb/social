@@ -540,9 +540,29 @@ export class LayerListDrone extends Drone {
     img.decoding = 'async'
     img.loading = 'lazy'
     img.src = RESOURCE_URL_PREFIX + sig
-    // A picture that will not come (an uncontrolled page, bytes not local
-    // yet) leaves the steel hexagon, never a broken-image glyph.
-    img.addEventListener('error', () => img.remove())
+    // The local address answers only for bytes already on this device. A
+    // tile that came by the swarm or from a host has its picture elsewhere
+    // until something fetches it — the hexagons do when you go in, which is
+    // why a page showed its pictures only after a drill-in (jwize 2026-10-13).
+    // So a miss asks the store, which reads from the swarm and the hosts.
+    img.addEventListener('error', () => { img.remove(); void this.#fetchPaint(thumb, sig) }, { once: true })
+    thumb.replaceChildren(img)
+  }
+
+  /** Paint a picture the store had to fetch. One that will not come at all
+   *  leaves the steel hexagon, never a broken-image glyph. */
+  async #fetchPaint(thumb: HTMLElement, sig: string): Promise<void> {
+    const store = window.ioc?.get?.<{ getResource?: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+    const blob = await store?.getResource?.(sig).catch(() => null)
+    if (!blob || !thumb.isConnected || thumb.querySelector('img')) return
+    const url = URL.createObjectURL(blob)
+    const img = document.createElement('img')
+    img.alt = ''
+    img.decoding = 'async'
+    const done = (): void => URL.revokeObjectURL(url)
+    img.addEventListener('load', done, { once: true })
+    img.addEventListener('error', () => { done(); img.remove() }, { once: true })
+    img.src = url
     thumb.replaceChildren(img)
   }
 
