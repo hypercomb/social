@@ -14,8 +14,9 @@
 // No aliases: a behaviour declares none (aliases are the participant's own).
 import { QueenBee } from '@hypercomb/core'
 import { removeDecorationAndWait, writeDecoration } from './decoration-manifest.js'
-import { TRAIT_FILL_KIND, isSig, parseFillArgs, sameWord, traitWords, type TraitFill } from './trait.js'
-import { headAt, resolveTraitsAt, say, traitFillsAt, traitWantsAt, standing } from './trait-read.js'
+import { TRAIT_FILL_KIND, sameTraitWord, type TraitFill } from '@hypercomb/core'
+import { parseFillArgs } from './trait.js'
+import { headAt, isSig, resolveTraitsAt, say, standing, traitFillsAt, traitsAt } from './trait-read.js'
 import { routeFrom } from './card-wear.js'
 
 export class FillQueenBee extends QueenBee {
@@ -41,11 +42,10 @@ export class FillQueenBee extends QueenBee {
     if (here.length === 0) { say('fill: stand in a tile that has traits', 'error'); return }
     const name = here[here.length - 1]
 
-    const words = traitWords((await traitWantsAt(here)).map(p => p.record.payload))
-    const word = words.find(w => sameWord(w, parsed.word))
+    const word = (await traitsAt(here)).map(t => t.word).find(w => sameTraitWord(w, parsed.word))
     if (!word) { say(`fill: "${name}" has no trait called ${parsed.word} — trait ${parsed.word} opens one`, 'error'); return }
 
-    const prior = (await traitFillsAt(here)).filter(f => sameWord(f.record.payload?.word, word))
+    const prior = (await traitFillsAt(here)).filter(f => sameTraitWord(f.record.payload?.word, word))
 
     if (parsed.verb === 'clear') {
       for (const f of prior) await removeDecorationAndWait({ sig: f.sig, segments: here })
@@ -64,10 +64,11 @@ export class FillQueenBee extends QueenBee {
         if (!sig) { say(`fill: nothing at ${from}`, 'error'); return }
       }
     } else {
-      const now = (await resolveTraitsAt(here)).find(r => sameWord(r.word, word))
+      const now = (await resolveTraitsAt(here)).find(r => sameTraitWord(r.word, word))
       if (!now || now.rung === 'miss') { say(`fill: nothing fills ${word} yet — make a tile called ${word}, or name one`, 'error'); return }
       if (now.rung === 'choose') { say(`fill: ${now.candidates.length} tiles offer ${word} — fill ${word} <tile> to choose`, 'error'); return }
       if (now.rung === 'fill') { say(`${word} on "${name}" is already chosen`); return }
+      if (now.rung === 'own') { say(`${word} on "${name}" uses its own version — fill ${word} <tile> to replace it`); return }
       sig = now.sig
       from = `/${now.route.join('/')}`
     }

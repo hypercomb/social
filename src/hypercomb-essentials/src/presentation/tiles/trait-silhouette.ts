@@ -8,16 +8,17 @@
 //
 // Pure: which traits are open, and which free slots of the spiral they take.
 
-import { sameWord } from '../../commands/trait.js'
+import { sameTraitWord } from '@hypercomb/core'
 
 // The tiles barrel re-exports every module here, so a second Axial declaration is an ambiguous export.
 import type { Axial } from './wave-layout.js'
 export type { Axial }
 export interface Silhouette { readonly word: string; readonly q: number; readonly r: number; readonly index: number }
 
-/** The trait words no tile on this level answers yet, in the order the tile opened them. */
+/** The trait words no tile on this level answers yet, in the order the tile has them. Callers pass
+ *  only traits with no own version: one the behaviour already answers is never drawn as a hole. */
 export function openTraitWords(words: readonly string[], labels: readonly string[]): string[] {
-  return words.filter(word => !labels.some(label => sameWord(label, word)))
+  return words.filter(word => !labels.some(label => sameTraitWord(label, word)))
 }
 
 const key = (q: number, r: number): string => `${q},${r}`

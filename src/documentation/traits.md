@@ -55,20 +55,37 @@ That is the point: the trait is the injection point of the hypergraph, and the
 fillers people make over time, visible by date in the pool, are the
 redundancy.
 
+*jwize, 2026-10-13:* "it is not that they must be fulfilled it is a reminder
+that if you want the behavior to work properly you must provide but more likely
+you see it as an extension point that already has a working version."
+
+**A trait is not owed.** Most traits already have a working version, the
+behaviour's own. A filler replaces it, and what others have made is offered,
+never swapped in on its own. A trait declared as needed is the other case: a
+reminder that the behaviour works properly only once something is provided. A
+trait a participant opens with the `trait` word has no own version either, so
+it counts as needed.
+
 **A trait fills by rungs, in order:**
 
 1. **Fill.** The tile wears a `trait:fill` mark for the word. That filler is
    used. Nothing is re-resolved. What you read is exactly what was chosen.
 2. **Child.** A child of the tile named the word fills it.
-3. **This hive.** Tiles elsewhere in this hive named the word. One fills it.
+3. **Own.** The behaviour's own version stands. Tiles elsewhere named the word
+   are listed as offers and replace it only when the participant picks one
+   with `fill`.
+
+Only a needed trait goes on:
+
+4. **This hive.** Tiles elsewhere in this hive named the word. One fills it.
    Several are offered, never first-wins: the participant picks with `fill`,
    or later a META atom decides.
-4. **Followed hosts.** The pool `sign(word)` on the hosts this hive follows,
+5. **Followed hosts.** The pool `sign(word)` on the hosts this hive follows,
    with the same rule for several.
-5. **Miss.** Nothing anywhere. A miss is an ask, the same path as a retired
-   word read on miss and the bridge's ask screen. The participant, an agent,
-   or a community host answers it, and the answer lands in the pool, so the
-   next reader never misses.
+6. **Miss.** Nothing anywhere: the reminder stands. A miss is an ask, the same
+   path as a retired word read on miss and the bridge's ask screen. The
+   participant, an agent, or a community host answers it, and the answer
+   lands in the pool, so the next reader never misses.
 
 Two spellings of one word are one trait: the molecule fold decides, never the
 display text.
@@ -85,6 +102,56 @@ Three lines not to cross:
   other creations ([website-artifact-paradigm.md](website-artifact-paradigm.md)).
 - **Trait kinds are not pheromone kinds.** A trait classifies by word and pool
   membership. Pheromones stay interest signals ([pheromones.md](pheromones.md)).
+
+## Every behaviour and every view
+
+*jwize, 2026-10-13:* "because trait is a first class citizen it needs to be
+available to all behaviors and minimum views but I expect all."
+
+The rules live in core (`hypercomb-core/src/core/trait.ts`), so every module
+on every platform resolves traits the same way. Two places declare them, and
+both are data read without running anything:
+
+- **A view** declares them on its descriptor in the visual-bee registry, the
+  record every view already registers under its token. Every tile opening as
+  that view has them, and a sleeping view states its traits without loading.
+- **Any behaviour** may declare them on itself: `traits` on the bee base,
+  beside `listens` and `emits`.
+
+A declaration is a word, or `{ word, needs: true }` for the reminder case:
+
+```ts
+traits: ['portrait', 'tagline', { word: 'contact-script', needs: true }]
+```
+
+A tile's traits are its view's declared traits, then the ones opened on the
+tile itself; a word in both is one trait. A view asks for its fillers through
+the provider registered under core's `TRAITS_IOC_KEY`, so a community module
+needs nothing but core:
+
+```ts
+const traits = window.ioc.get<TraitProvider>(TRAITS_IOC_KEY)
+const sig = await traits?.fillerAt(segments, 'portrait') // null: use your own version
+```
+
+## A common dialect, by membrane
+
+*jwize, 2026-10-13:* "the dialectic nature of hypercomb promotes a common
+vocabulary that has orthogonal reach across your communities where those
+pieces will become comparable to the other implementations across servers …
+we hope that the community adopts a common dialect over time but really they
+do because the imprint of the popular items gets a membrane … then you start
+to get the layers that you might want your agents to inspect as input for
+upgrades."
+
+A trait word is a molecule address, so the same word on two servers is the
+same address. Two communities that both declare `portrait` have made two
+implementations of one thing, and they line up side by side with no mapping
+table. Nobody rules on the vocabulary. Popular words gather fillers, and that
+weight is the membrane that makes them the common dialect. The offers under a
+word are then exactly the layers an agent can inspect as input for an
+upgrade: every working version the community has made of that one extension
+point.
 
 ## The words
 
@@ -116,8 +183,8 @@ pure), `trait-read.ts`, `trait.queen.ts` and `fill.queen.ts`.
 when you go to the level you can either search in your public network or you
 can see: oh, I need to create a tile by that name."
 
-Diving into a tile that wears traits renders each unfilled trait as a hexagon
-silhouette named the word: the outline of a tile that is not there yet, drawn
+Diving into a tile that wears traits renders each needed trait nothing fills
+yet as a hexagon silhouette named the word: the outline of a tile that is not there yet, drawn
 the way the welcome hive draws what has not been made
 ([example-hives-first-boot.md](example-hives-first-boot.md)). A silhouette is
 for giving information, not for holding anything. It sits in the grid where
@@ -126,15 +193,14 @@ word, or create a tile by that name. Creating is the ordinary naming gesture.
 A tile named the word joins `sign(word)` by its name, so making it is filling
 it; no list is kept and no second step is owed.
 
-**How it is drawn.** Standing in a tile, every trait no child answers yet
-takes the next free slot of the spiral, in the order the tile opened its
-traits, so a silhouette sits exactly where its tile will land. It is a faint
+**How it is drawn.** Standing in a tile, every needed trait that no child and
+no fill answers yet takes the next free slot of the spiral, in the order the
+tile has its traits, so a silhouette sits exactly where its tile will land. It is a faint
 hexagon with the inner ring and the word. Pressing it creates the tile by that
 name through the same commit `create <name>` runs, and the next render pass
-puts the tile where the silhouette was. A trait filled from elsewhere, by a
-`trait:fill` mark or by another tile in the hive, still shows a silhouette
-here, because no child by that name exists on this level. A silhouette is
-drawn on its own layer: it is never in the cell list, the counts or the click
+puts the tile where the silhouette was. A trait with its own version is never
+drawn: it already works. A needed trait answered by a `trait:fill` mark is
+not drawn either. A silhouette is drawn on its own layer: it is never in the cell list, the counts or the click
 routing, and nothing about it is stored. Drawing one reads only the tile's
 `trait:want` records and the labels already on screen: no search, no network.
 The code is `presentation/tiles/trait-silhouette.ts` (the placement, pure) and
@@ -266,10 +332,13 @@ Nothing here needs a second origin.
 
 | | Status |
 |---|---|
-| `trait:want` and `trait:fill`; the words `trait` and `fill`; the fill, child and this-hive rungs | built. The this-hive rung reads the hive search, so it inherits the search index's reach: a tile the index has not reached is not offered. Not yet proven in the running app |
-| A card wearing a template inherits the template's traits | not built. A trait is read only on the tile that wears it |
+| `trait:want` and `trait:fill`; the words `trait` and `fill`; the fill, child, own and this-hive rungs | built. The this-hive rung reads the hive search, so it inherits the search index's reach: a tile the index has not reached is not offered. Not yet proven in the running app |
+| Traits in core: declarations on views and behaviours, own versions and needed traits, the provider under `TRAITS_IOC_KEY` | built. Not yet proven in the running app |
+| Views declaring their traits | not started. Every view can declare them, and none does yet: which words each view leaves open is that view's design |
+| Behaviour declarations read by the provider | not built. The provider reads view descriptors; a bee's own `traits` is declared but nothing collects it yet |
+| A card wearing a template inherits the template's traits | not built. The card renders through the website view, so its traits belong to the card's own view or template, not to every website |
 | The followed-hosts rung | not built. `vocabulary-search.ts` already asks followed hosts for a word with honest absence and is the reader to reuse |
 | A miss as an ask | not built |
-| Hexagon silhouettes for unfilled traits; pressing one creates the tile | built. Not yet proven in the running app. The search act on a silhouette waits for the followed-hosts rung |
+| Hexagon silhouettes for needed traits nothing fills yet; pressing one creates the tile | built. Not yet proven in the running app. The search act on a silhouette waits for the followed-hosts rung |
 | The halo and count from followed hosts; hover-once; the breathing ring | not built |
 | The `sign('trait:discovery')` pool | not built; the meaning is not yet registered. Every new pool meaning carries a colon (`known-location-pools.md`), so it is `trait:discovery`, never a bare `discovery` |

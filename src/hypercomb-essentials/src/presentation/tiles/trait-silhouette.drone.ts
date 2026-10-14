@@ -14,12 +14,11 @@
 // Geometry is mirrored, as drop-landing.drone and move-preview.drone mirror it: mesh spacing and
 // orientation, the slot coords from `render:cell-count`, the spiral from AxialService.
 
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, sameTraitWord } from '@hypercomb/core'
 import { Container, Graphics, Point, Text } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { trackSceneText } from '../grid/screen-text-resolution.js'
-import { traitWantsAt, standing } from '../../commands/trait-read.js'
-import { traitWords } from '../../commands/trait.js'
+import { traitFillsAt, traitsAt, standing } from '../../commands/trait-read.js'
 import { openTraitWords, silhouetteSlots, type Axial, type Silhouette } from './trait-silhouette.js'
 
 type AxialServiceLike = { items?: Map<number, Axial> }
@@ -125,7 +124,14 @@ export class TraitSilhouetteDrone extends Drone {
     const at = segments.join('/')
     let words: string[] = []
     if (segments.length > 0) {
-      try { words = traitWords((await traitWantsAt(segments)).map(w => w.record.payload)) } catch { words = [] }
+      // A trait with its own version already works, and one filled by choice is answered: only the
+      // ones still waiting for a filler are holes.
+      try {
+        const [specs, fills] = await Promise.all([traitsAt(segments), traitFillsAt(segments)])
+        words = specs
+          .filter(t => !t.own && !fills.some(f => sameTraitWord(f.record.payload?.word, t.word)))
+          .map(t => t.word)
+      } catch { words = [] }
     }
     if (token !== this.#readToken || at !== this.#here()) return
     this.#words = words

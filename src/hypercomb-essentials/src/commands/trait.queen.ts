@@ -12,10 +12,10 @@
 // tiles in this hive named the word. Nothing is minted for an empty trait.
 //
 // No aliases: a behaviour declares none (aliases are the participant's own).
-import { QueenBee, isReservedPoolWord } from '@hypercomb/core'
+import { QueenBee, TRAITS_IOC_KEY, TRAIT_WANT_KIND, isReservedPoolWord, sameTraitWord, traitWords, type TraitWant } from '@hypercomb/core'
 import { removeDecorationAndWait, writeDecoration } from './decoration-manifest.js'
-import { TRAIT_WANT_KIND, describeResolution, parseTraitArgs, sameWord, traitWords, type TraitWant } from './trait.js'
-import { resolveTraitsAt, say, traitWantsAt, standing } from './trait-read.js'
+import { describeResolution, parseTraitArgs } from './trait.js'
+import { TraitService, resolveTraitsAt, say, traitWantsAt, standing } from './trait-read.js'
 
 export class TraitQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -41,7 +41,7 @@ export class TraitQueenBee extends QueenBee {
     const name = here[here.length - 1]
 
     if (parsed.verb === 'list') {
-      const all = await resolveTraitsAt(here)
+      const all = await resolveTraitsAt(here, { offers: true })
       if (all.length === 0) { say(`"${name}" has no traits — trait <word> opens one`); return }
       say(all.map(describeResolution).join('\n'))
       return
@@ -52,11 +52,12 @@ export class TraitQueenBee extends QueenBee {
     if (parsed.verb === 'close') {
       let closed = 0
       for (const word of parsed.words) {
-        for (const p of points.filter(p => sameWord(p.record.payload?.word, word))) {
+        for (const p of points.filter(p => sameTraitWord(p.record.payload?.word, word))) {
           await removeDecorationAndWait({ sig: p.sig, segments: here }); closed++
         }
       }
-      say(closed ? `"${name}" closed ${parsed.words.join(', ')}` : `"${name}" has no trait called ${parsed.words.join(', ')}`)
+      // Only a trait opened here can be closed; one the view declares belongs to the view.
+      say(closed ? `"${name}" closed ${parsed.words.join(', ')}` : `"${name}" has not opened ${parsed.words.join(', ')} — a trait its view declares stays`)
       return
     }
 
@@ -66,7 +67,7 @@ export class TraitQueenBee extends QueenBee {
     const have = traitWords(points.map(p => p.record.payload))
     const opened: string[] = []
     for (const word of parsed.words) {
-      if (have.some(w => sameWord(w, word)) || opened.some(w => sameWord(w, word))) continue
+      if (have.some(w => sameTraitWord(w, word)) || opened.some(w => sameTraitWord(w, word))) continue
       await writeDecoration<TraitWant>({ kind: TRAIT_WANT_KIND, appliesTo: here, segments: here, payload: { word }, mark: 'persistent' })
       opened.push(word)
     }
@@ -76,3 +77,6 @@ export class TraitQueenBee extends QueenBee {
 
 const _trait = new TraitQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/TraitQueenBee', _trait)
+
+// Traits are first-class: every behaviour and view asks this provider (core/trait.ts, TRAITS_IOC_KEY).
+window.ioc.register(TRAITS_IOC_KEY, new TraitService())

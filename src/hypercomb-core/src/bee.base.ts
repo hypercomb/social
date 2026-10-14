@@ -1,5 +1,6 @@
 import { Effect } from "./effect.js"
 import { EffectBus, type EffectHandler } from "./effect-bus.js"
+import type { TraitDeclaration } from './core/trait.js'
 import { GrammarHint } from "./grammar-hint.js"
 import { ProviderLink } from "./provider-link.js"
 import { serviceKey } from "./ioc/service-key.js"
@@ -147,6 +148,13 @@ export abstract class Bee {
   public grammar?: GrammarHint[]
   public links?: ProviderLink[]
   public effects?: readonly Effect[]
+
+  /** The extension points this behaviour leaves open (core/trait.ts). A plain word means the
+   *  behaviour already has its own working version and a filler may replace it; `{ word, needs: true }`
+   *  is a reminder that it works properly only once something is provided. A declaration, like
+   *  `listens` and `emits`: the build and the hive read it without running the bee. A view's traits
+   *  are every tile's traits while it opens as that view. */
+  public readonly traits?: readonly TraitDeclaration[]
 
   // --------------------------------
   // bee mechanics (framework-owned)
