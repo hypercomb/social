@@ -12,17 +12,25 @@
 //              does. Canonical lowercase host[:port] (canonicalSwarmHost) —
 //              the same host the room's identity hashes for the relay a tab
 //              dials (nostr-mesh swarmHost → core meetingPointKey).
-//   location — the room, exactly as typed.
-//   secret   — the room's secret, exactly as typed.
+//   location — the room, as a room names it (core roomText: case folded).
+//   secret   — the room's secret, folded the same way.
 //   code     — the host's access code, only when that host needs one.
-// (Case and Unicode folding happen where the room is hashed, not here: the
-// login carries what was typed.)
+// A link sealed before 2026-10-13 carries the text as typed; it still opens,
+// and the room folds it where it is hashed.
 //
 // THE RULES THAT BIND IT:
 //   - A secret or an access code is never readable in any pool, resource,
 //     event, log, export or on any host. So the payload is SEALED before it
-//     leaves the device, with core's door seal (content-cipher sealToSecret)
-//     under a fresh random 256-bit key per seal. The hosted blob is
+//     leaves the device, with core's door seal (content-cipher sealToSecret).
+//   - ONE COMBO, ONE LINK (jwize, 2026-10-13: "the blob should be the info
+//     right so the key should be fixed for that combo?"). The key is
+//     sha256 of the login's own bytes under a domain tag, and the door seal
+//     derives its nonce from the same bytes, so host + location + secret
+//     (+ code, + page) always seal to the same blob, the same signature and
+//     the same link — anyone who knows them can rebuild it, and the host
+//     keeps one blob. A guessable pair can be tested against the blob, but
+//     no more than against the room addresses the meeting point already
+//     sees: the secret's strength guards both. The hosted blob is
 //     ciphertext only — the `HCS1` seal header, then AES-GCM — addressed by
 //     sha256(blob). The host can serve it and can never read it; a reader
 //     that asks core's needsSecret() sees what it is.
@@ -57,7 +65,7 @@
 // spells the secret out: it carries a key, and the host carries a blob it
 // cannot open.
 
-import { SEAL_OVERHEAD_BYTES, SignatureService, needsSecret, openWithSecret, sealToSecret } from '@hypercomb/core'
+import { SEAL_OVERHEAD_BYTES, SignatureService, needsSecret, openWithSecret, roomText, sealToSecret } from '@hypercomb/core'
 import { isAccessCode, trimLinkTail } from './meeting-invite.js'
 
 export const SWARM_LINK_VERSION = 1
@@ -262,14 +270,28 @@ const keyBytesOf = (key: unknown): Uint8Array | null => {
   return bytes.byteLength === KEY_BYTES && toBase64Url(bytes) === key ? bytes : null
 }
 
-/** Seal a login with core's door seal under a fresh random key, so two seals
- *  of one login are two unrelated blobs. null when the login is not one
- *  (swarmLoginBytes) or this page has no WebCrypto. Never throws. */
+/** The domain a link's key is derived under — never shared with another key. */
+const LINK_KEY_DOMAIN = new TextEncoder().encode('hypercomb/swarm-link/key/v1\0')
+
+/** The login as a room names it: location and secret folded (core roomText),
+ *  so every spelling of one room seals to one link. Anything that is not a
+ *  login passes through for swarmLoginBytes to refuse. */
+const asRoomNamesIt = (login: SwarmLogin): SwarmLogin =>
+  login && typeof login === 'object' && typeof login.location === 'string' && typeof login.secret === 'string'
+    ? { ...login, location: roomText(login.location), secret: roomText(login.secret) }
+    : login
+
+/** Seal a login with core's door seal under the key its own bytes derive
+ *  (one combo, one link). null when the login is not one (swarmLoginBytes)
+ *  or this page has no WebCrypto. Never throws. */
 export async function sealSwarmLogin(login: SwarmLogin): Promise<SealedSwarmLogin | null> {
-  const plain = swarmLoginBytes(login)
+  const plain = swarmLoginBytes(asRoomNamesIt(login))
   if (!plain) return null
   try {
-    const raw = crypto.getRandomValues(new Uint8Array(KEY_BYTES))
+    const material = new Uint8Array(LINK_KEY_DOMAIN.length + plain.length)
+    material.set(LINK_KEY_DOMAIN, 0)
+    material.set(plain, LINK_KEY_DOMAIN.length)
+    const raw = new Uint8Array(await crypto.subtle.digest('SHA-256', exactBuffer(material)))
     const blob = await sealToSecret(plain, raw)
     return { blob, sig: await SignatureService.sign(exactBuffer(blob)), key: toBase64Url(raw) }
   } catch { return null }

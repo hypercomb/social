@@ -2,8 +2,8 @@
 // CIPHERTEXT.
 //
 // jwize, 2026-10-11: "we host the payload and give the link with a
-// signature" — "then the swarm login is retrieved". A login is sealed with a
-// fresh key, the blob is addressed by its own sha256, the key rides only in
+// signature" — "then the swarm login is retrieved". A login is sealed under
+// the key its own bytes derive (one combo, one link — 2026-10-13), the blob is addressed by its own sha256, the key rides only in
 // the #fragment, and opening checks the signature before anything else.
 // Every failure is a reason, never a throw; nothing is logged and nothing
 // goes on the bus.
@@ -72,6 +72,8 @@ const sealRaw = async (host: string, plain: Uint8Array): Promise<{ sig: string; 
 }
 
 const LOGIN: SwarmLogin = { host: 'hypercomb.com', location: 'Garden', secret: 'S3cret phrase' }
+/** LOGIN as a room names it — what a link seals and a guest opens (roomText). */
+const ROOM_LOGIN: SwarmLogin = { host: 'hypercomb.com', location: 'garden', secret: 's3cret phrase' }
 
 const consoleSpies: ReturnType<typeof vi.spyOn>[] = []
 const busSpies: ReturnType<typeof vi.spyOn>[] = []
@@ -186,7 +188,7 @@ describe('the host is canonical', () => {
       if (!published.ok) continue
       expect(published.parts.host).toBe('hypercomb.com')
       const opened = await openSwarmLink(published.parts, get)
-      expect(opened).toEqual({ ok: true, login: { ...LOGIN, host: 'hypercomb.com' } })
+      expect(opened).toEqual({ ok: true, login: ROOM_LOGIN })
     }
   })
 
@@ -243,16 +245,36 @@ describe('sealing', () => {
     expect(sealed.key).toMatch(/^[A-Za-z0-9_-]{43}$/)
     // One wire format for every sealed atom: core sees what it is.
     expect(needsSecret(sealed.blob)).toBe(true)
-    expect(sealed.blob.length).toBe(SEAL_OVERHEAD_BYTES + swarmLoginBytes(LOGIN)!.length)
-    expect(Array.from((await openWithSecret(sealed.blob, keyBytes(sealed.key)))!)).toEqual(Array.from(swarmLoginBytes(LOGIN)!))
+    expect(sealed.blob.length).toBe(SEAL_OVERHEAD_BYTES + swarmLoginBytes(ROOM_LOGIN)!.length)
+    expect(Array.from((await openWithSecret(sealed.blob, keyBytes(sealed.key)))!)).toEqual(Array.from(swarmLoginBytes(ROOM_LOGIN)!))
   })
 
-  it('takes a fresh key for every seal — two seals of one login differ', async () => {
+  // jwize, 2026-10-13: "the blob should be the info right so the key should
+  // be fixed for that combo?"
+  it('one combo, one link — every spelling of a room seals to the same key, blob and signature', async () => {
     const a = (await sealSwarmLogin(LOGIN))!
     const b = (await sealSwarmLogin(LOGIN))!
-    expect(a.key).not.toBe(b.key)
-    expect(a.sig).not.toBe(b.sig)
-    expect(Array.from(a.blob)).not.toEqual(Array.from(b.blob))
+    const shouted = (await sealSwarmLogin({ host: 'HyperComb.com', location: 'GARDEN', secret: 'S3CRET PHRASE' }))!
+    for (const again of [b, shouted]) {
+      expect(again.key).toBe(a.key)
+      expect(again.sig).toBe(a.sig)
+      expect(Array.from(again.blob)).toEqual(Array.from(a.blob))
+    }
+    // Another secret, another code or another page is another link.
+    for (const other of [{ ...LOGIN, secret: 'other' }, { ...LOGIN, code: 'door-7' }, { ...LOGIN, page: ['events'] }]) {
+      const sealed = (await sealSwarmLogin(other))!
+      expect(sealed.key).not.toBe(a.key)
+      expect(sealed.sig).not.toBe(a.sig)
+    }
+  })
+
+  it('a link sealed before the fold (text as typed, a random key) still opens as typed', async () => {
+    const raw = crypto.getRandomValues(new Uint8Array(32))
+    const blob = await sealToSecret(swarmLoginBytes(LOGIN)!, raw)
+    const sig = await sha256(blob)
+    hosted.set(swarmBlobUrl('hypercomb.com', sig), blob)
+    const key = btoa(String.fromCharCode(...raw)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    expect(await openSwarmLink({ sig, host: 'hypercomb.com', key }, get)).toEqual({ ok: true, login: LOGIN })
   })
 
   it('never puts the secret, the room or the code in the blob or the link', async () => {
@@ -352,7 +374,7 @@ describe('the round trip', () => {
     const link = swarmLinkText('https://jwize.com', published.parts)
     const parts = parseSwarmLink(`Tap ${link}.`)
     expect(parts).toEqual(published.parts)
-    expect(await openSwarmLink(parts!, get)).toEqual({ ok: true, login })
+    expect(await openSwarmLink(parts!, get)).toEqual({ ok: true, login: { ...ROOM_LOGIN, code: 'door-7' } })
   })
 
   it('fetches over plain http on a loopback host', async () => {
@@ -378,7 +400,7 @@ describe('opening refuses what it must', () => {
 
   it('a wrong key — locked', async () => {
     const a = await publishSwarmLink(LOGIN, put)
-    const b = await publishSwarmLink(LOGIN, put)
+    const b = await publishSwarmLink({ ...LOGIN, secret: 'another' }, put)
     if (!a.ok || !b.ok) throw new Error('publish failed')
     expect(await openSwarmLink({ ...a.parts, key: b.parts.key }, get)).toEqual({ ok: false, reason: 'locked' })
   })
@@ -535,6 +557,6 @@ describe('the default fetcher', () => {
         return bytes ? response(bytes.slice(), { headers: { 'content-type': 'application/octet-stream' } }) : response(null, { status: 404 })
       }) as typeof fetch,
     })
-    expect(await openSwarmLink(published.parts, fetcher)).toEqual({ ok: true, login: LOGIN })
+    expect(await openSwarmLink(published.parts, fetcher)).toEqual({ ok: true, login: ROOM_LOGIN })
   })
 })

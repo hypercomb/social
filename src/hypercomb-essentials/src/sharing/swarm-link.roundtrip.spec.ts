@@ -28,7 +28,8 @@ describe('a signed swarm link opens into the meeting it was made for', () => {
     expect(opened.ok).toBe(true)
     if (!opened.ok) return
     const meet = parseMeet(meetFragment(opened.login.location, opened.login.secret, opened.login.page ?? [], { relay: swarmRelayUrl(opened.login.host) }))
-    expect(meet).toMatchObject({ room: 'Downtown', secret: 'rose', segments: ['events', 'tonight'] })
+    // The link carries the room as a room names it (folded): 'Downtown' is 'downtown'.
+    expect(meet).toMatchObject({ room: 'downtown', secret: 'rose', segments: ['events', 'tonight'] })
     expect(meet!.relay).toBe('wss://hypercomb.com')
   })
 
@@ -36,7 +37,7 @@ describe('a signed swarm link opens into the meeting it was made for', () => {
     const heap = new Map<string, Uint8Array>()
     const made = await publishSwarmLink({ host: 'hypercomb.com', location: 'a', secret: 'b' }, async ({ sig, bytes }) => { heap.set(sig, bytes); return { ok: true } })
     if (!made.ok) throw new Error('not made')
-    const other = await publishSwarmLink({ host: 'hypercomb.com', location: 'a', secret: 'b' }, async () => ({ ok: true }))
+    const other = await publishSwarmLink({ host: 'hypercomb.com', location: 'a', secret: 'c' }, async () => ({ ok: true }))
     if (!other.ok) throw new Error('not made')
     const opened = await openSwarmLink({ ...made.parts, key: other.parts.key }, async ({ sig }) => {
       const bytes = heap.get(sig)
