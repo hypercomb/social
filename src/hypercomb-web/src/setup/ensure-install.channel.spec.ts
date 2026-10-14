@@ -85,7 +85,7 @@ beforeEach(() => {
 describe('installFromHosts — a first install follows the signed install channel', () => {
   it('takes the root the publisher signed, not the newest member of the seed pool', async () => {
     vi.stubGlobal('fetch', serving({
-      [`https://content.hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT }),
+      [`https://hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT }),
     }))
     vi.mocked(acquire).mockImplementation(async sig => ok(sig))
 
@@ -99,7 +99,7 @@ describe('installFromHosts — a first install follows the signed install channe
   it('falls back to the pool head when the signed root cannot be had from the seed yet', async () => {
     // A publish advances the index at once; the seed host is restaged by hand.
     vi.stubGlobal('fetch', serving({
-      [`https://content.hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT }),
+      [`https://hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT }),
     }))
     vi.mocked(acquire).mockImplementation(async sig => sig === SIGNED_ROOT ? missing(sig) : ok(sig))
 
@@ -120,7 +120,7 @@ describe('installFromHosts — a first install follows the signed install channe
 
   it('installs nothing when the index at the publisher\'s address was signed by someone else', async () => {
     vi.stubGlobal('fetch', serving({
-      [`https://content.hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(generateSecretKey(), { 'install:essentials': SIGNED_ROOT }),
+      [`https://hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(generateSecretKey(), { 'install:essentials': SIGNED_ROOT }),
     }))
     vi.mocked(acquire).mockImplementation(async sig => ok(sig))
 
@@ -140,7 +140,7 @@ describe('installFromHosts — a first install follows the signed install channe
 
     const asked = fetchMock.mock.calls.map(call => String(call[0]))
     expect(asked).toContain(`https://hypercomb.com/${INDEXES}/${SHIPPED_PUBLISHER.pubkey}`)
-    expect(asked).toContain(`https://content.hypercomb.com/${INDEXES}/${SHIPPED_PUBLISHER.pubkey}`)
+    expect(asked).toContain(`https://hypercomb.com/${INDEXES}/${SHIPPED_PUBLISHER.pubkey}`)
   })
 
   it('a pool carrying only another host still installs from DEFAULT_HOST_ZONES too — carried first', async () => {

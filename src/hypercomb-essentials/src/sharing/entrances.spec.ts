@@ -636,6 +636,8 @@ describe('a self-followed entrance, turned on before its page is published', () 
     await new EntranceScoutService().check({
       hosts: async () => [ZONE],
       ownPubkey: async () => PUBKEY,
+      // This hive wrote an index under its key: the scout asks hosts only then (1e9e8abed).
+      published: async () => true,
       skipped: async () => new Set<string>(),
       pageAt: async head => (head === HEAD ? OLDER_PUBLISHED : head === MOVED_HEAD ? MOVED_PAGE : null),
       emit: update => { emitted.push(update) },

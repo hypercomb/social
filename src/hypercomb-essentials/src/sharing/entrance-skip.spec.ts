@@ -98,6 +98,8 @@ const skip = async (host: string): Promise<void> => {
 const scoutDeps = (emitted: unknown[]) => ({
   hosts: async () => [ZONE],
   ownPubkey: async () => OWN,
+  // This hive wrote an index under its key: the scout asks hosts only then (1e9e8abed).
+  published: async () => true,
   fetchManifest: async (_hosts: readonly string[], pubkey: string) => manifests[pubkey] ?? null,
   pageAt: async () => NEWER,
   emit: (update: unknown) => { emitted.push(update) },
