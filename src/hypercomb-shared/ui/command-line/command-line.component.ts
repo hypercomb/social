@@ -4021,6 +4021,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       })
       return
     }
+    // A SAVED ROOT'S NAME IS NOT A TILE (save as, essentials history/saved-roots.ts):
+    // a tile called <name> would open the saved root itself. Say how to reach it.
+    const savedRoots = get('@diamondcoreprocessor.com/SavedRoots') as { isSaved?: (name: string) => boolean } | undefined
+    const saved = parts.find(part => savedRoots?.isSaved?.(part))
+    if (saved) {
+      EffectBus.emit('activity:log', { message: `"${saved}" is a saved root — use ${saved} turns it on.`, icon: 'error' })
+      return
+    }
 
     // Tile creation is a layer-only mutation. Per the architecture
     // doctrine (project_layer_is_primitive) the current layer is the

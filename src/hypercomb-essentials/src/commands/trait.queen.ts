@@ -18,6 +18,7 @@ import { EffectBus, QueenBee, TRAITS_IOC_KEY, TRAIT_WANT_KIND, isReservedPoolWor
 import { removeDecorationAndWait, writeDecoration } from './decoration-manifest.js'
 import { describeResolution, parseTraitArgs } from './trait.js'
 import { TraitService, childNamesAt, createTile, resolveTraitsAt, say, traitWantsAt, standing } from './trait-read.js'
+import { savedRoots } from '../history/saved-roots.js'
 
 export class TraitQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -66,6 +67,8 @@ export class TraitQueenBee extends QueenBee {
 
     const reserved = parsed.words.filter(w => isReservedPoolWord(w))
     if (reserved.length) { say(`trait: ${reserved.join(', ')} is a word the hive keeps for itself`, 'error'); return }
+    const saved = parsed.words.filter(w => savedRoots().isSaved(w))
+    if (saved.length) { say(`trait: ${saved.join(', ')} is a saved root — use ${saved[0]} turns it on`, 'error'); return }
 
     const own = parsed.verb === 'own'
     const have = traitWords(points.map(p => p.record.payload))

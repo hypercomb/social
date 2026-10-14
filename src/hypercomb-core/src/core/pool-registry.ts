@@ -327,6 +327,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // status line) down to its dot (hypercomb-shared/ui/presence-banner).
   // DOCUMENT, per participant, never replicated.
   'presence:strip',
+  // The names this participant's roots are filed under, and which one the
+  // root came from (essentials history/saved-roots.ts — `save as`, `use`).
+  // DOCUMENT, per participant, never replicated.
+  'roots:saved',
   // What participants make that is theirs alone, moved out of localStorage the
   // same way (essentials preferences/participant-document.ts): saved sequences
   // and patterns, Arkanoid and Solomon levels (Solomon's creations and designer

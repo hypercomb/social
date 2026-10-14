@@ -60,7 +60,8 @@ export const ALIAS_SUGGESTIONS: Readonly<Record<string, readonly string[]>> = Ob
   'reference': ['ref'],
   'requires': ['require'],
   'roper': ['worms', 'rope'],
-  'save-session': ['session-save', 'save'],
+  // not 'save': that is `save as` (save.queen.ts)
+  'save-session': ['session-save'],
   'screensaver': ['bounce', 'bubbles'],
   'select': ['pick'],
   'sequence': ['seq'],

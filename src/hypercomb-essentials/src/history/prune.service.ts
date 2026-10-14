@@ -58,6 +58,7 @@ import { I18N_IOC_KEY } from '@hypercomb/core'
 import { ReceiptBuilder, describeReceipt, type Receipt } from '../assistant/receipt.js'
 import { collectBranchNodes, collectPrunedTiles, type BranchNode, type PrunedTile } from './pruned-tiles.js'
 import type { HistoryService, LayerContent } from './history.service.js'
+import { savedRootTileNames, savedRoots, type RootHistory } from './saved-roots.js'
 
 /** Pool of meaning the receipts live in. COLON-CARRYING by rule: a bare word
  *  hashes to the same address as a same-named root tile (see
@@ -500,8 +501,26 @@ export class PruneService extends EventTarget {
     // sig-keyed tombstone would hide a real deletion. A deletion that
     // happened BEFORE the purge is settled; one that happened after is new.
     const purgedAt = await this.#purgedNamesAt(locationSig)
-    if (purgedAt.size === 0) return tiles
-    return tiles.filter(t => t.lastSeenAt > (purgedAt.get(t.name) ?? -Infinity))
+    const scanned = purgedAt.size === 0 ? tiles : tiles.filter(t => t.lastSeenAt > (purgedAt.get(t.name) ?? -Infinity))
+    return this.#notFiledAway(history, locationSig, scanned)
+  }
+
+  /** FILED AWAY IS NOT DELETED (save as, history/saved-roots.ts). At the root,
+   *  a tile a saved root lists left this root's head because the root was filed
+   *  under a name — its page is shared by name and `use` brings it back. Prune
+   *  must never offer it for destruction. Fails closed: with the record
+   *  unreadable, the root offers nothing. */
+  async #notFiledAway(history: HistoryService, locationSig: string, tiles: PrunedTile[]): Promise<PrunedTile[]> {
+    if (tiles.length === 0) return tiles
+    const rootSig = await history.sign({ explorerSegments: () => [] }).catch(() => '')
+    if (!rootSig || rootSig !== locationSig) return tiles
+    const roots = savedRoots()
+    await roots.ready()
+    if (roots.record.saved.length === 0) return tiles
+    try {
+      const filed = await savedRootTileNames(history as unknown as RootHistory, roots.record.saved)
+      return tiles.filter(t => !filed.has(t.name))
+    } catch { return [] }
   }
 
   /** Name → the time of the most recent purge that took it, from every
