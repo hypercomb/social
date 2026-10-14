@@ -9049,6 +9049,15 @@ export class ShowCellDrone extends Drone {
     if (c.external
       && !this.#stackVariantLabels.has(c.label)
       && !this.#wandTakingLabels.has(c.label)) return true
+    // YOURS ARE NEVER SHADED IN A SWARM (Jaime, 2026-10-14: "the tiles are not
+    // recovering from being shaded out when a swarm starts so it is difficult
+    // to see my own tiles. these should be highlighted always in my own theme
+    // or chosen style" — "definitely not shaded out"). In a room the shade
+    // means "somebody else's, not yours yet"; your own tiles wear your style
+    // at full strength whatever a peer offers for them and however their
+    // pictures are still arriving. The two clauses below stay for a hive that
+    // is not in a swarm.
+    if (!c.external && isJoinedHere()) return false
     // A HELD tile a peer is offering something for — "this needs an update" —
     // recedes exactly like a tile you haven't adopted (Jaime, 2026-08-20:
     // "things are grayed out when they're not adopted or they need updates").
