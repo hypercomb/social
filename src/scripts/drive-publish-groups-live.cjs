@@ -8,8 +8,9 @@
 //
 //   1. a page with a group of two (one, two) and a tile outside it (three)
 //   2. with no domain on for the page, publishing says where the switch is
-//   3. the participant's own host (host-sync on); switch it on for the page
-//      in the Publish panel
+//   3. carry the host (no own host, no host-sync opt-in) and switch it on for
+//      the page in the Publish panel — and the PAGE ITSELF publishes (a page with
+//      children; it used to stick at "Still uploading" on a local host)
 //   4. `groups publish blog` → "Published Blog"
 //   5. the HOST's signed index names one and two — and not three
 //   6. the model may say it: the census offers `groups` to a machine
@@ -48,7 +49,7 @@ async function main() {
   const shot = (name) => page.screenshot({ path: path.join(out, name + '.png') })
   const errors = []
   page.on('pageerror', e => errors.push(String(e)))
-  // Toasts survive reloads (naming your own host re-boots the hive): every
+  // Toasts survive a reload (a dev server that live-reloads, a re-boot): every
   // load re-attaches the listener and keeps what it heard in sessionStorage.
   await context.addInitScript(() => {
     const kept = () => { try { return JSON.parse(sessionStorage.getItem('__live') || '[]') } catch { return [] } }
@@ -60,20 +61,6 @@ async function main() {
       bus.on('toast:show', p => { const t = kept(); t.push(p); sessionStorage.setItem('__live', JSON.stringify(t)) })
     }, 50)
   })
-  let navigations = 0
-  page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigations++ })
-  /** Wait until the page has gone `quiet` ms without navigating. */
-  const steady = async (quiet = 10000, cap = 60000) => {
-    const end = Date.now() + cap
-    let seen = navigations
-    let since = Date.now()
-    while (Date.now() < end) {
-      await page.waitForTimeout(500)
-      if (navigations !== seen) { seen = navigations; since = Date.now() }
-      else if (Date.now() - since >= quiet) break
-    }
-    await settle(30000, () => page.evaluate(() => !!window.__hypercombEffectBus && !!window.ioc?.get?.('@hypercomb.social/Navigation')).catch(() => false))
-  }
   const clearToasts = () => page.evaluate(() => sessionStorage.setItem('__live', '[]'))
 
   const hostState = async () => (await fetch(`http://${host}/__state`)).json()
@@ -161,21 +148,11 @@ async function main() {
     const hint = await settle(20000, async () => !!(await toastAbout(/Turn on a domain for this page/)))
     check('with no domain on for the page, publishing says where the switch is', hint, JSON.stringify(await toastAbout(/Blog/)))
 
-    // 3. The participant's own host, with host-sync on — the setup a hive
-    //    that publishes runs (a fresh profile has neither: host-sync is inert
-    //    until both are set, host-sync.service.ts). Carried, and own.
+    // 3. Carry the host — nothing more. No own host, no host-sync opt-in: a
+    //    publish names its own nodes (publish-branch → addPublishNodes), and a
+    //    host on this machine is one (host-sync.service.ts LOOPBACK_HOST_RE).
     await emit('hosts:add', { zone: host })
-    await emit('hosts:own-host', { host })
-    await page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/HostSyncService')?.enable?.()).catch(() => {})
-    // Naming your own host re-boots the hive onto it — ride the reloads.
-    await steady()
-    await go(['site'])
-    await page.waitForTimeout(3000)
-    const hostSyncOn = await page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/HostSyncService')?.isEnabled?.() === true)
-    if (!hostSyncOn) {
-      await page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/HostSyncService')?.enable?.())
-      await page.waitForTimeout(1500)
-    }
+    await page.waitForTimeout(1500)
     await page.evaluate(() => { const a = document.activeElement; if (a && a !== document.body) a.blur() })
     await page.keyboard.press('p')
     await settle(5000, () => page.evaluate(() => !!document.querySelector('.publish-panel')))
@@ -190,8 +167,22 @@ async function main() {
       const row = r?.rows?.find?.(x => x.key === r.currentKey)
       return Array.isArray(row?.doors) && row.doors.length > 0
     }))
-    check('the host is carried, made your own, and switched on for the page', listed && pressed, `listed=${listed} doors=${pressed}`)
+    check('the host is carried and switched on for the page', listed && pressed, `listed=${listed} doors=${pressed}`)
     await shot('03-door-on')
+    // 3b. THE PAGE ITSELF PUBLISHES — a page WITH children, whose sealed root
+    //     is freshly minted (no tile write ever backed it up). It used to end
+    //     "Still uploading" against a host on this machine: `localhost:4291`
+    //     was refused as a publish node, so nothing staged the root
+    //     (host-sync.service.ts LOOPBACK_HOST_RE). Waited out BEFORE the
+    //     group publishes — two publishes at once race on the host's index.
+    const pageDone = await settle(180000, () => page.evaluate(() => window.__live.toasts.some(t =>
+      String(t.title ?? '') === 'Publish' && /^Published|Still uploading|not|couldn|could not|no /i.test(String(t.message ?? '')))))
+    const pageSaid = await page.evaluate(() => window.__live.toasts
+      .filter(t => String(t.title ?? '') === 'Publish').map(t => `${t.type}: ${t.message ?? ''}`).slice(-1)[0] ?? '')
+    const pageRoots = Object.assign({}, ...(await hostIndexes()).map(i => i.roots ?? {}))
+    check('the page itself — a page with children — publishes to the host on this machine',
+      pageDone && /^(success|info): Published/.test(pageSaid) && !!pageRoots['site'],
+      `${pageSaid} · index names site=${!!pageRoots['site']}`)
     await page.locator('.publish-panel .publish-header button').last().click().catch(() => {})
 
     // 4.
@@ -211,15 +202,6 @@ async function main() {
       !!roots['site/one'] && !!roots['site/two'] && !roots['site/three'] && onDoor('one') && onDoor('two'),
       `roots=${JSON.stringify(Object.keys(roots))} doors=${JSON.stringify(doors)} objects ${before.content.length}→${after.content.length}`)
     fs.writeFileSync(path.join(out, 'host-indexes.json'), JSON.stringify(indexes, null, 1))
-
-    // How the PAGE's own publish (the switch press) ended — reported, not
-    // gated: it is the page's publish, outside the group.
-    await settle(150000, () => page.evaluate(() => window.__live.toasts.some(t =>
-      !/Blog|groups|Group/.test(String(t.title ?? '') + String(t.message ?? ''))
-      && /publish|upload|host/i.test(String(t.title ?? '') + ' ' + String(t.message ?? '')))))
-    console.log("  info  the page's own publish:", JSON.stringify(await page.evaluate(() =>
-      window.__live.toasts.filter(t => !/Blog|groups|Group/.test(String(t.title ?? '') + String(t.message ?? '')))
-        .map(t => `${t.type}: ${t.title ?? ''} ${t.message ?? ''}`.trim()).slice(-3))))
 
     // 6.
     const machine = await page.evaluate(() => {

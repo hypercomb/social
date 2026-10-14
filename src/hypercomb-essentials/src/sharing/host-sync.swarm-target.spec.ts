@@ -887,6 +887,35 @@ describe('the publish gate asks the nodes it publishes to', () => {
     expect(await service.isClosureAvailableOn(s, 'resource', true, ['jwize.com'])).toBe(true)
     expect(await service.isClosureAvailableOn(s, 'resource', true, ['not-a-target.example'])).toBe(false)
   })
+
+  // A page with children never finished publishing to a host on this machine
+  // (2026-10-13): `localhost:4291` failed the dotted, port-less shape, so the
+  // publish named no node, `markPublic` staged nothing, and the page's freshly
+  // sealed root — the one atom no tile write had already backed up — never
+  // left. A leaf published only because its seal IS its backed-up head.
+  it('a host on this machine is a publish node — loopback, with its port; nothing else loosens', async () => {
+    const service = (await make()) as Service & {
+      addPublishNodes: (d: readonly string[]) => void
+      publishNodes: () => string[]
+    }
+    service.addPublishNodes(['localhost:4291', '127.0.0.1:8080', 'try-x.localhost:4291', 'lan.example:8080', 'http://x/y', 'not a host'])
+    expect(service.publishNodes()).toEqual(['localhost:4291', '127.0.0.1:8080', 'try-x.localhost:4291'])
+  })
+
+  it('a publish to a node on this machine sends the sealed root, over http', async () => {
+    const field = makeHost()
+    const node = makeHost()
+    vi.stubGlobal('fetch', router({ 'jwize.com': field, 'localhost:4291': node }))
+    const service = (await make()) as Service & {
+      addPublishNodes: (d: readonly string[]) => void
+      markPublic: (sig: string, kind?: string, closure?: boolean, page?: readonly string[] | false) => Promise<void>
+    }
+    const sealed = await layer({ name: 'site' })
+    service.addPublishNodes(['localhost:4291'])
+    await service.markPublic(sealed, 'layer', true, false)
+    await quiesce(service, node)
+    expect(calls(node, 'PUT')).toEqual([`http://localhost:4291/${sealed}`])
+  })
 })
 
 // ── which host (jwize 2026-10-07) ──────────────────────────────────────────

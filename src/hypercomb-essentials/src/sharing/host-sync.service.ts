@@ -210,6 +210,14 @@ const DEFAULT_PUBLIC_HOST_DOMAIN = ''
  *  rather than normalised — a half-understood value is how you publish to
  *  somewhere you did not mean to. */
 const HOST_DOMAIN_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
+/** THIS MACHINE — any `*.localhost` name (RFC 6761), 127.x or ::1, with or
+ *  without a port; spoken over plain http (#schemeFor). The one other shape a
+ *  host may take: a host the participant runs here (local-content-host.mjs,
+ *  hypercomb-serve on this box). HOST_DOMAIN_RE's dotted, port-less shape
+ *  refused it as a publish node, and with no node `markPublic` staged
+ *  nothing — a page with children never finished publishing, because its
+ *  freshly sealed root is the one atom no tile write had already backed up. */
+const LOOPBACK_HOST_RE = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d{1,5})?$/i
 // Queue-pool sidecar marker: `{sig}.public` = this sig belongs to a
 // published-public closure. THE doctrine gate for the CDN target — written
 // only by markPublic() (fed by the swarm publish walk, which enumerates
@@ -900,7 +908,7 @@ export class HostSyncService extends EventTarget {
     for (const raw of domains) {
       // A node is a write door — the zone root, never a `content.` face.
       const domain = foldContentLabel(String(raw ?? '').trim().toLowerCase())
-      if (!HOST_DOMAIN_RE.test(domain)) continue
+      if (!HOST_DOMAIN_RE.test(domain) && !LOOPBACK_HOST_RE.test(domain)) continue
       if (this.#hostBackoff.delete(domain)) { this.#putsThrew.delete(domain); this.#receiptEpoch++; kick = true }
       if (this.#publishNodes.has(domain)) continue
       this.#publishNodes.add(domain)
@@ -3545,7 +3553,7 @@ export class HostSyncService extends EventTarget {
    *  rule for the probe, the push, the read-back and the audit, so they can
    *  never disagree about which origin is "the host". */
   static #schemeFor(host: string): 'http' | 'https' {
-    return /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
+    return LOOPBACK_HOST_RE.test(host) ? 'http' : 'https'
   }
 
   /** Bounded fan-out that keeps the input order. */
@@ -3709,7 +3717,7 @@ export class HostSyncService extends EventTarget {
     if (!domain) return { ok: false, error: 'no host to publish to' }
     // Any *.localhost name is loopback (RFC 6761): a zone's content face on
     // one machine is content.localhost.
-    const scheme = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(domain) ? 'http' : 'https'
+    const scheme = LOOPBACK_HOST_RE.test(domain) ? 'http' : 'https'
     let sent = 0
     let held = 0
     for (const sig of sigs) {

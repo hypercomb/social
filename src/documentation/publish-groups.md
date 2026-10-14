@@ -33,16 +33,27 @@ went. With no domain on for the page and no own host standing in, the toast
 says where the switch is ("Turn on a domain for this page in Publish …")
 rather than the general "add a host".
 
-**Proven against a real host** (`scripts/drive-publish-groups-live.cjs`, 7
+**Proven against a real host** (`scripts/drive-publish-groups-live.cjs`, 8
 checks): the content host's own worker served from this machine
 (`node scripts/local-content-host.mjs 4291 <shell>`); a group of two on a page
-of three; `groups publish blog` → "Published Blog"; the HOST's signed index
-(the `hive:indexes` pool, `<pool>/<pubkey>`) names `site/one` and `site/two`
-with door `localhost:4291` — and not `site/three`. Run it against a dev shell
-that does not live-reload (`--live-reload=false --watch=false`): another
-session's edits otherwise reload the page mid-run. Host-sync must have the
-participant's own host and its opt-in (a hive that publishes has both; a fresh
-profile has neither — host-sync.service.ts).
+of three; the host only CARRIED and switched on for the page — no own host, no
+host-sync opt-in. The page itself publishes ("Published — its host is serving
+it."), then `groups publish blog` → "Published Blog", and the HOST's signed
+index (the `hive:indexes` pool, `<pool>/<pubkey>`) names `site`, `site/one`
+and `site/two` on door `localhost:4291` — and not `site/three`. Run it against
+a dev shell that does not live-reload (`--live-reload=false --watch=false`):
+another session's edits otherwise reload the page mid-run.
+
+**A host on this machine is a publish node** (2026-10-13). Until then a page
+WITH children never finished publishing to one — "Still uploading" after the
+120 s wait, while leaves published in seconds. `addPublishNodes` admitted only
+a dotted, port-less name, so `localhost:4291` was dropped, `markPublic` (no
+node, no public host) staged nothing, and the page's freshly sealed root —
+the one atom no tile write had already backed up — never left; a leaf's seal
+IS its backed-up head, which is why leaves worked. Loopback hosts (any
+`*.localhost`, 127.x, ::1, with a port) are now nodes, by the same rule that
+already chose http for them (`LOOPBACK_HOST_RE`, host-sync.service.ts; pinned
+in host-sync.swarm-target.spec.ts). Other hosts keep the strict shape.
 
 ## The word — `groups`
 
