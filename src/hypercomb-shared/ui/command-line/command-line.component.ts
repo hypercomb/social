@@ -4402,24 +4402,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     if (op === 'remove' || op === 'rm' || op === 'delete' || op === 'del') {
-      const dir = await this.lineage.explorerDir()
       await this.#removeLabels(labels)
       selection.clear()
       this.clear()
-
-      // if all cells removed, navigate to parent
-      if (dir) {
-        let hasCells = false
-        for await (const [name, handle] of dir.entries()) {
-          if (handle.kind === 'directory' && !name.startsWith('__')) { hasCells = true; break }
-        }
-        if (!hasCells) {
-          const segments = this.navigation.segmentsRaw()
-          if (segments.length > 0) {
-            this.navigation.goRaw(segments.slice(0, -1))
-          }
-        }
-      }
       return
     }
 
@@ -4586,27 +4571,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   /** Remove each label (a `/`-separated path) under the current location.
-   *  Deepest paths first so a child is gone before its ancestor. Shared by the
-   *  `[…]/remove` op and the `~name` per-item operator. */
+   *  Shared by the `[…]/remove` op and the `~name` per-item operator, and done
+   *  by the word's own queen: the same layer commit `/remove` makes, so the
+   *  tile leaves the page and every earlier layer still holds it (a hide), and
+   *  the confirm and the receipt are the word's. */
   async #removeLabels(labels: readonly string[]): Promise<void> {
     if (labels.length === 0) return
-    const dir = await this.lineage.explorerDir()
-    if (!dir) return
-    const sorted = [...labels].sort((a, b) => b.split('/').length - a.split('/').length)
-    for (const label of sorted) {
-      const segments = label.split('/').filter(Boolean)
-      const leaf = segments[segments.length - 1]
-      let parent: FileSystemDirectoryHandle | null = dir
-      for (let i = 0; i < segments.length - 1 && parent; i++) {
-        try { parent = await parent.getDirectoryHandle(segments[i], { create: false }) }
-        catch { parent = null }
-      }
-      if (!parent) continue
-      try {
-        await parent.removeEntry(leaf, { recursive: true })
-        EffectBus.emit('cell:removed', { cell: leaf })
-      } catch { /* already gone — skip */ }
-    }
+    const queen = get('@diamondcoreprocessor.com/RemoveQueenBee') as { invoke?(args: string): Promise<void> } | undefined
+    try { await queen?.invoke?.(`[${labels.join(', ')}]`) }
+    catch (error) { this.#behaviourDidNotRun('remove', error) }
     await new hypercomb().act()
   }
 

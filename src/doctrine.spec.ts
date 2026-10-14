@@ -1412,11 +1412,12 @@ describe('doctrine ratchets', () => {
       // it never enumerates the root looking for things to delete.
       'hypercomb-shared/core/packed-store-scale-probe.ts',
       // ── Inert under the current model ───────────────────────────────────
-      // Both resolve a PLAINTEXT label under `lineage.explorerDir()`, and no
+      // Resolves a PLAINTEXT label under `lineage.explorerDir()`, and no
       // plaintext directory exists at the OPFS root, so the call is swallowed
-      // by its own catch. They become live only if plaintext addressing is
+      // by its own catch. It becomes live only if plaintext addressing is
       // ever reintroduced — at which point this ratchet is the reminder.
-      'hypercomb-shared/ui/command-line/command-line.component.ts',
+      // (command-line.component.ts left this list on 2026-10-14: its remove
+      // ops now commit through /remove's queen.)
       'hypercomb-shared/ui/command-line/cut-paste.behavior.ts',
       // ── The retired Angular app ─────────────────────────────────────────
       'hypercomb-legacy/src/app/common/opfs/file-explorer/opfs-file-explorer.component.ts',
