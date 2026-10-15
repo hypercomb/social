@@ -53,10 +53,14 @@ const TREE_WALK: WalkCeiling = { depth: MAX_DEPTH, nodes: MAX_NODES, bytes: MAX_
  *  /solomon-maze-v1, named it unfinished, and the model either searched it
  *  route by route or said "the only one" about branches nobody read — Jev
  *  then refused the answer (supported .19). A find returns its hits, not its
- *  nodes, so the count and the bytes only guard memory; its twelve seconds
- *  decide where it stops. */
+ *  nodes, so the count and the bytes only guard memory; its time decides
+ *  where it stops. THIRTY SECONDS, ONCE (2026-10-15): warm, the whole hive
+ *  walks in 3–5 s; the first find after a reload, cold, ran out of twelve
+ *  with 20 branches unfinished, and the model then spent six rounds and
+ *  54k tokens searching them one by one (88 s) where one longer read
+ *  finishes. */
 export const FIND_WALK_NODES = 12_000
-const FIND_WALK: WalkCeiling = { depth: MAX_RECORD_DEPTH, nodes: FIND_WALK_NODES, bytes: 1_500_000, ms: 12_000, partial: true, fair: true }
+const FIND_WALK: WalkCeiling = { depth: MAX_RECORD_DEPTH, nodes: FIND_WALK_NODES, bytes: 1_500_000, ms: 30_000, partial: true, fair: true }
 /** Unfinished branches one find names; `unfinishedCount` says how many in all. */
 const MAX_UNFINISHED = 20
 /** Children a walk opens at once. */
