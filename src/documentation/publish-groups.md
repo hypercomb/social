@@ -140,7 +140,7 @@ chat window), a published visitor shell or a dormant behaviour takes it away.
 - Proof: `scripts/drive-publish-groups.cjs` (13 checks),
   `scripts/drive-groups-word.cjs` (11 checks),
   `scripts/drive-publish-panel-groups.cjs` (5 checks),
-  `scripts/drive-publish-groups-live.cjs` (7 checks, against a real host).
+  `scripts/drive-publish-groups-live.cjs` (8 checks, against a real host).
 
 ## In the Publish panel
 
