@@ -1,7 +1,7 @@
 // pixi/show-cell.drone.ts
 import { Drone, EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
-import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
+import { Application, BufferImageSource, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { publishOwnedProjection } from './derived-projection-cache.js'
@@ -253,6 +253,9 @@ function hexToRgbTriple(css: string): [number, number, number] | null {
     parseInt(raw.slice(4, 6), 16) / 255,
   ]
 }
+
+/** Texels per tile row in the holders texture: six holder colours + the count. */
+const HOLDER_TEXELS = 8
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range.
  *  `sat`/`lit` default to the quiet tile identity; a participant's own colour
@@ -1366,6 +1369,13 @@ export class ShowCellDrone extends Drone {
   // it). Read by the GPU write loop to mark tiles that have versions
   // underneath, so multiplicity is visible BEFORE you roll.
   #stackDepthByLabel = new Map<string, number>()
+  /** WHAT PEOPLE ARE ACTIVELY USING (jwize, 2026-10-15): per label, the
+   *  participants in the room who hold the tile right now ('' = you), in
+   *  stack order. A live count of the present — never recorded, never kept
+   *  (feedback: only concurrent counts). Rebuilt with the stacks each pass. */
+  #holdersByLabel = new Map<string, readonly string[]>()
+  /** Per-tile holder colours + count for the shader (holdersTexture). */
+  #holdersTexture: Texture | null = null
 
   // mesh scoping — space + secret feed into the signature key
   #space = ''
@@ -4126,6 +4136,7 @@ export class ShowCellDrone extends Drone {
     // location's multiplicity marks.
     const previousVariantLabels = new Set(this.#stackVariantLabels)
     this.#stackDepthByLabel = new Map()
+    this.#holdersByLabel = new Map()
     this.#stackVariantLabels = new Set()
     // Quiet: this is the pre-resolution reset, not a finding. Announcing it
     // would tell the depth ornaments every peer had left, a fifth of a second
@@ -4207,6 +4218,9 @@ export class ShowCellDrone extends Drone {
         setTileStacks(stacks)
         this.#stackDepthByLabel = new Map(
           [...stacks].map(([label, variants]) => [label, variants.length]),
+        )
+        this.#holdersByLabel = new Map(
+          [...stacks].map(([label, variants]) => [label, variants.map(v => v.pubkey)]),
         )
 
         // Surfacing a participant's layer swaps YOUR version of every
@@ -5295,6 +5309,7 @@ export class ShowCellDrone extends Drone {
 
     if (!this.shader) {
       this.shader = new HexSdfTextureShader(labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
+      if (this.#holdersTexture) this.shader.setHolders(this.#holdersTexture)
       const [ar, ag, ab] = this.#accentColor
       this.shader.setAccentColor(ar, ag, ab)
     } else {
@@ -11196,8 +11211,14 @@ export class ShowCellDrone extends Drone {
     // Per-tile portal flag — a reference tile (doorway to another lineage) gets
     // the magical hover shimmer instead of the plain pathway/leaf ring.
     const portal = new Float32Array(cells.length * 4)
-    // Per-tile "theirs": 1 wears its participant's colour boldly (shader vOwned).
+    // Per-tile "theirs": 1 wears its participant's colour boldly; 2 is POPULAR —
+    // two or more people hold it, and the shader reads its holders' colours
+    // and count from the holders texture (shader vOwned).
     const owned = new Float32Array(cells.length * 4)
+    // HOLDERS TEXTURE: one row per tile, HOLDER_TEXELS wide. Texels 0..5 are the
+    // holders' colours in stack order (alpha 255 = present); texel 6's red is
+    // the holder count. A dive never writes it (foreign): its tiles read 0.
+    const holdersData = foreign ? null : new Uint8Array(HOLDER_TEXELS * Math.max(1, cells.length) * 4)
     const idx = new Uint32Array(cells.length * 6)
 
     let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0, pp = 0
@@ -11298,7 +11319,22 @@ export class ShowCellDrone extends Drone {
       const isOwned = !!cellPubkey && (spotlit === null
         ? (this.#stackDepthByLabel.get(c.label) ?? 0) <= 1
         : spotlit === cellPubkey)
-      const ow = isOwned ? 1 : 0
+      // POPULAR: two or more people in the room hold this tile — what they
+      // are actively using. The rim wears each holder's colour (yours keeps
+      // the tile's own border) and the face lifts with the count. A tile the
+      // spotlit layer owns keeps that layer's colour instead.
+      const holders = foreign ? undefined : this.#holdersByLabel.get(c.label)
+      const popular = !isOwned && !!holders && holders.length >= 2 && !!holdersData
+      if (popular && holdersData) {
+        const row = ci * HOLDER_TEXELS * 4
+        holders!.slice(0, 6).forEach((pk, h) => {
+          const [hr, hg, hb] = pk ? labelToRgb(pk, 1, 0.64) : [bcr, bcg, bcb]
+          holdersData.set([Math.round(hr * 255), Math.round(hg * 255), Math.round(hb * 255), 255], row + h * 4)
+        })
+        // Alpha 255: a texel with alpha 0 reads back as black once premultiplied.
+        holdersData.set([Math.min(255, holders!.length), 0, 0, 255], row + 6 * 4)
+      }
+      const ow = isOwned ? 1 : popular ? 2 : 0
       owned.set([ow, ow, ow, ow], ci * 4)
       if (cellPubkey) {
         const [pr, pg, pb] = isOwned ? labelToRgb(cellPubkey, 1, 0.64) : labelToRgb(cellPubkey)
@@ -11384,6 +11420,17 @@ export class ShowCellDrone extends Drone {
     // in-place attribute updates to the GPU without rebuilding geometry
     // A dive's buffers are its own (see #diveLabelToIndex) — the page's
     // in-place update path must keep pointing at the page's geometry.
+    if (!foreign && holdersData) {
+      // Bind the new texture BEFORE destroying the old one: destroying a
+      // texture the shader's bind group still holds tears the group down.
+      const previous = this.#holdersTexture
+      this.#holdersTexture = new Texture({
+        source: new BufferImageSource({ resource: holdersData, width: HOLDER_TEXELS, height: Math.max(1, cells.length), scaleMode: 'nearest', format: 'rgba8unorm', alphaMode: 'no-premultiply-alpha' }),
+      })
+      this.shader?.setHolders(this.#holdersTexture)
+      previous?.destroy(true)
+    }
+
     if (!foreign) {
       this.#buf = { pos, labelUV, imageUV, hasImage, heat, identityColor, branch, borderColor, divergence, shaded }
       this.#labelToIndex.clear()

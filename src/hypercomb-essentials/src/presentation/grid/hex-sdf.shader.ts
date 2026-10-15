@@ -1,5 +1,5 @@
 // pixi/hex-sdf.shader.ts
-import { Shader, Texture } from 'pixi.js'
+import { BufferImageSource, Shader, Texture } from 'pixi.js'
 
 type Vec2 = [number, number]
 
@@ -67,6 +67,11 @@ export class HexSdfTextureShader {
         uniforms: uniformDefs,
         u_label: this.toSource(labelAtlas),
         u_cellImages: this.toSource(cellImageAtlas),
+        // Per-tile holders (show-cell's holders texture): until the first page
+        // writes one, a single empty row — every tile reads "no holders".
+        u_holders: this.toSource(new Texture({
+          source: new BufferImageSource({ resource: new Uint8Array(8 * 4), width: 8, height: 1, scaleMode: 'nearest', format: 'rgba8unorm', alphaMode: 'no-premultiply-alpha' }),
+        })),
       },
     })
 
@@ -175,6 +180,12 @@ export class HexSdfTextureShader {
 
   public setLabelAtlas = (t: Texture): void => {
     ;(this.shader.resources as any).u_label = this.toSource(t)
+  }
+
+  /** The page's per-tile holders texture (colours of who holds each tile, and
+   *  how many) — read only by tiles flagged popular (vOwned == 2). */
+  public setHolders = (t: Texture): void => {
+    ;(this.shader.resources as any).u_holders = this.toSource(t)
   }
 
   public setCellImageAtlas = (t: Texture): void => {
@@ -296,6 +307,7 @@ export class HexSdfTextureShader {
 
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
+    uniform sampler2D u_holders;
 
     out vec4 fragColor;
 
@@ -561,7 +573,18 @@ export class HexSdfTextureShader {
       // wash over the face here, and a bold solid rim inside the edge after the
       // readiness shade below. Static — no glow, no motion. Shared tiles keep
       // the stack marker; yours keep the default look.
-      if (vOwned > 0.5) base.rgb = mix(base.rgb, vBorderColor, 0.18);
+      if (vOwned > 0.5 && vOwned < 1.5) base.rgb = mix(base.rgb, vBorderColor, 0.18);
+
+      // WHAT PEOPLE ARE ACTIVELY USING (jwize, 2026-10-15). vOwned == 2: two or
+      // more people in the room hold this tile right now. The face lifts in
+      // steps of that one count — 2, 3-4, 5+ — saturation and light together.
+      // Static: nothing moves. The holders' colours ride the rim below.
+      if (vOwned > 1.5) {
+        float holderCount = floor(texelFetch(u_holders, ivec2(6, int(vCellIndex + 0.5)), 0).r * 255.0 + 0.5);
+        float lift = holderCount >= 5.0 ? 0.42 : (holderCount >= 3.0 ? 0.28 : 0.14);
+        float luma = dot(base.rgb, vec3(0.299, 0.587, 0.114));
+        base.rgb = clamp(mix(vec3(luma), base.rgb, 1.0 + lift) * (1.0 + lift * 0.45), 0.0, 1.0);
+      }
 
       vec4 color = base;
 
@@ -777,11 +800,28 @@ export class HexSdfTextureShader {
 
       // The participant's rim goes on AFTER the shade: a tile that is not yours
       // yet still says, at full strength, whose it is.
-      if (vOwned > 0.5) {
+      if (vOwned > 0.5 && vOwned < 1.5) {
         float rimW = max(u_radiusPx * 0.075, 3.0);
         float ownedRim = (1.0 - smoothstep(rimW - aa, rimW + aa, -d)) * hexAlpha;
         color.rgb = mix(color.rgb, vBorderColor, ownedRim * 0.92);
         color.a = mix(color.a, 1.0, ownedRim);
+      }
+
+      // The popular tile's rim: one segment per holder, each in that person's
+      // colour (yours is the tile's own border), so the rim says WHO is using
+      // it while the face says how many. Up to six — one per edge.
+      if (vOwned > 1.5) {
+        int cell = int(vCellIndex + 0.5);
+        float holderCount = floor(texelFetch(u_holders, ivec2(6, cell), 0).r * 255.0 + 0.5);
+        float segments = clamp(holderCount, 1.0, 6.0);
+        // Sector boundaries on the corners, so each holder takes whole edges.
+        float sector = mod(floor((atan(rotated.y, rotated.x) + 3.14159265) / 1.04719755), 6.0);
+        int holder = int(floor(sector * segments / 6.0));
+        vec3 holderColor = texelFetch(u_holders, ivec2(holder, cell), 0).rgb;
+        float rimW = max(u_radiusPx * 0.075, 3.0);
+        float popRim = (1.0 - smoothstep(rimW - aa, rimW + aa, -d)) * hexAlpha;
+        color.rgb = mix(color.rgb, holderColor, popRim * 0.92);
+        color.a = mix(color.a, 1.0, popRim);
       }
 
       // hover accent: TWO distinct border highlights so a pathway tile (has
