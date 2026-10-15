@@ -66,6 +66,7 @@ import { lineageKey } from '../history/lineage-key.js'
 import { hostsOfBranch } from './community-hosts.js'
 import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-public.js'
 import { knownRoots, listPublishRecords, writePublishRecord, type PublishRecord } from './publish-heads.js'
+import { recordPublishResult } from './publish-results.js'
 import { wornKindsWithin, writePublishLights } from '../commands/publish-lights.js'
 import { readGlobalOnKinds } from './behavior-enablement.js'
 
@@ -525,12 +526,18 @@ export async function publishBranch(
   // 9. Confirm: the world must be able to READ what we just wrote.
   report({ phase: 'confirming' })
   const confirmed = await confirmPublished(indexHost, pubkey, key, sealed, hostSync)
+  const status = confirmed && stagesReceipted ? 'confirmed' : 'unconfirmed'
+
+  // 10. The running list of results (publish-results.ts): what is open now,
+  //     for the domain-link rule and anyone else who asks. Never blocks the
+  //     act it records.
+  void recordPublishResult({ op: 'publish', at: Date.now(), segments: [...segs], lineageKey: key, host: indexHost, address, sealed, status })
 
   return {
     ok: true,
     // A pointer a stranger can read must find its atoms: an unreceipted
     // stage list makes the publish `unconfirmed`, like an unnamed head.
-    status: confirmed && stagesReceipted ? 'confirmed' : 'unconfirmed',
+    status,
     sealed,
     pubkey,
     host: indexHost,
@@ -645,6 +652,7 @@ export async function unpublishBranch(
   const parentLocation = '/' + segs.slice(0, -1).join('/')
   const name = segs[segs.length - 1] ?? ''
   if (isBranchPublic(parentLocation, name)) setBranchPublic(parentLocation, name, false)
+  void recordPublishResult({ op: 'unpublish', at: Date.now(), segments: [...segs], lineageKey: key, host: indexHost, sealed: head })
   return { ok: true, removed: true }
 }
 
