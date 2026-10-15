@@ -71,11 +71,16 @@ const CHILD_SHADE = (() => { try { return localStorage.getItem('hc:child-shade')
 // a long tail, so branch tiles sat dark for a long time and read as "no
 // background images at all". A faded tile must still show what it is; only its
 // readiness is in question, never its content.
-// Escape hatch to turn it off: localStorage 'hc:tile-fade' = '0'. NOTE the key
-// changed with the default: profiles that debugged the old opt-in flag still
-// carry 'hc:tile-shade' values, and a stale one there would silently suppress
-// the fade for exactly the people who have been testing it.
-const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-fade') !== '0' } catch { return true } })()
+//
+// OFF BY DEFAULT since 2026-10-14 (jwize: "the problem is the screen always
+// seems half loaded" — "just show without transparency to start and load the
+// cells on demand"). Every tile paints at full opacity on arrival; a click on
+// a tile that is not warm yet still lands at the front of the line, and the
+// passive warm below runs biggest branch first. The readiness truth is still
+// computed and published (#preloadingLabels) — only the look is gone. Opt back
+// in with localStorage 'hc:tile-fade' = '1'. The swarm's shade (somebody
+// else's tile) and the divergence shade are not readiness and stay on.
+const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-fade') === '1' } catch { return false } })()
 /** How long a released tile takes to fade from faded to full. Short enough to
  *  feel like arrival, long enough that the eye catches WHICH tile landed. */
 const SHADE_FADE_MS = 280
@@ -9031,7 +9036,7 @@ export class ShowCellDrone extends Drone {
   #cellIsShaded(c: Cell): boolean {
     // Shade off and hover affect presentation only. Neither can weaken the
     // independent readiness predicate the payload publishes.
-    if (!TILE_SHADE || this.#hoverOpaqueLabel === c.label) return false
+    if (this.#hoverOpaqueLabel === c.label) return false
     // THE SWARM'S SHADE — A STANDING STATE, NOT A MODIFIER PREVIEW (Jaime,
     // 2026-08-20: "when you go into a swarm there should be tiles shaded").
     // In a zone, every tile you don't own yet recedes, from the moment you
@@ -9067,7 +9072,7 @@ export class ShowCellDrone extends Drone {
     if (!c.external
       && !this.#wandTakingLabels.has(c.label)
       && peerDivergesAt(c.label)) return true
-    return this.#cellIsPreloading(c)
+    return TILE_SHADE && this.#cellIsPreloading(c)
   }
 
   #preloadingLabels(): string[] {
@@ -9926,6 +9931,11 @@ export class ShowCellDrone extends Drone {
       try {
         window.addEventListener('navigate', () => {
           this.#readinessGen++
+          // STOP AT ONCE. The warm queue belongs to the page being left; the
+          // fetches already in flight finish, nothing queued starts. The new
+          // page's compute refills it after that page's own images landed.
+          this.#childWarmQueue.length = 0
+          this.#childWarmQueued.clear()
           // RE-SEED ON EVERY NAVIGATION, not only on cold render passes. The
           // pass-stamp lives on the path that resolves a layer from scratch;
           // a back-navigation takes the WARM path, which skipped it — so the
@@ -10058,6 +10068,12 @@ export class ShowCellDrone extends Drone {
           }
         }
       } catch { /* unknown structure → fail-open below */ }
+      // BIGGEST BRANCH FIRST (jwize 2026-10-14: "preload the ones with more
+      // tiles passively"). A tile with more inside is the slowest to enter
+      // cold, so it warms first; ties keep display order (stable sort).
+      // Structure only — nothing about where the participant goes is kept.
+      branchCells.sort((a, b) =>
+        (grandkidsByLabel.get(b.label)?.length ?? 0) - (grandkidsByLabel.get(a.label)?.length ?? 0))
       const livePropsIndex: Record<string, string> = readTilePropsIndex()
       // Per-label sig cache under this parent (content-addressed → stable).
       let cachedSigs = this.#childImageSigsByParent.get(parentLayerSig)
@@ -10070,7 +10086,7 @@ export class ShowCellDrone extends Drone {
         }
       }
 
-      // IN DISPLAY ORDER: check the pending branch tiles SERIALLY. A tile
+      // BIGGEST FIRST: check the pending branch tiles SERIALLY. A tile
       // whose children are all present/concluded is released IMMEDIATELY —
       // its own repaint, not one batch flip at the end — so tiles brighten
       // one by one. Misses enqueue in this same order. Nothing about which
