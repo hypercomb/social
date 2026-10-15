@@ -20,9 +20,9 @@
 // the hive (no reload — views keep us inside, documentation/views). Any other
 // link is an ordinary web link to another host: leaving is what it is for.
 
-import { Drone, get, lineageKey } from '@hypercomb/core'
+import { Drone, EffectBus, get, lineageKey } from '@hypercomb/core'
 import { hostsOfBranchKnown, hostZone } from './community-hosts.js'
-import { compileDoors, DOMAIN_LINK_CLASS, linkify, type LinkEntry } from './domain-links.js'
+import { compileDoors, DOMAIN_LINK_CLASS, LINK_CONTROL_CLASS, linkControl, linkify, type LinkEntry } from './domain-links.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { hasIncidenceRecord, incidenceKey, mintIncidenceRecord, readIncidences, tableSignature, type LinkIncidence } from './link-incidences.js'
 import { doorsOfIndex, PUBLISH_RESULT_EFFECT, publishedDoors, type PublishedDoor } from './publish-results.js'
@@ -57,6 +57,13 @@ export class DomainLinksDrone extends Drone {
   /** The doors a visitor's page was read against (empty in the authoring hive). */
   #served: PublishedDoor[] = []
   #pending: PendingIncidences | null = null
+  /** Every door in the table, by `<lineageKey>@<zone>` — what a link's attributes name. */
+  #doors = new Map<string, PublishedDoor>()
+  #control: HTMLElement | null = null
+  #controlFor: HTMLAnchorElement | null = null
+  #hideTimer = 0
+  #over: ((e: Event) => void) | null = null
+  #out: ((e: Event) => void) | null = null
   #bodyWatch: MutationObserver | null = null
   #hostWatch: MutationObserver | null = null
   #host: HTMLElement | null = null
@@ -90,16 +97,79 @@ export class DomainLinksDrone extends Drone {
     this.#hostWatch.observe(host, { childList: true, subtree: true, characterData: true })
     this.#click = (e: Event): void => this.#onClick(e)
     host.addEventListener('click', this.#click)
+    // Resting on a coloured name shows its words (the link control); leaving
+    // both the name and the control hides them after a beat.
+    this.#over = (e: Event): void => {
+      const a = (e.target as Element | null)?.closest?.('a.' + DOMAIN_LINK_CLASS) as HTMLAnchorElement | null
+      if (a) this.#show(a)
+    }
+    this.#out = (e: Event): void => {
+      const to = (e as MouseEvent).relatedTarget as Element | null
+      if (to?.closest?.('a.' + DOMAIN_LINK_CLASS + ', .' + LINK_CONTROL_CLASS)) return
+      this.#hideSoon()
+    }
+    host.addEventListener('mouseover', this.#over)
+    host.addEventListener('focusin', this.#over)
+    host.addEventListener('mouseout', this.#out)
+    host.addEventListener('focusout', this.#out)
     this.#schedule()
   }
 
   #release(): void {
     this.#hostWatch?.disconnect()
     this.#hostWatch = null
-    if (this.#host && this.#click) this.#host.removeEventListener('click', this.#click)
+    if (this.#host) {
+      if (this.#click) this.#host.removeEventListener('click', this.#click)
+      if (this.#over) { this.#host.removeEventListener('mouseover', this.#over); this.#host.removeEventListener('focusin', this.#over) }
+      if (this.#out) { this.#host.removeEventListener('mouseout', this.#out); this.#host.removeEventListener('focusout', this.#out) }
+    }
     this.#click = null
+    this.#over = null
+    this.#out = null
     this.#host = null
+    this.#hide()
     if (this.#frame) { cancelAnimationFrame(this.#frame); this.#frame = 0 }
+  }
+
+  /** Show the control for the door a link names, under the link. */
+  #show(a: HTMLAnchorElement): void {
+    if (this.#hideTimer) { clearTimeout(this.#hideTimer); this.#hideTimer = 0 }
+    if (this.#controlFor === a) return
+    this.#hide()
+    const door = this.#doors.get(`${a.getAttribute('data-lineage') ?? ''}@${a.getAttribute('data-domain') ?? ''}`)
+    if (!door) return
+    const control = linkControl(document, door, sentence => this.#say(sentence))
+    control.addEventListener('mouseenter', () => { if (this.#hideTimer) { clearTimeout(this.#hideTimer); this.#hideTimer = 0 } })
+    control.addEventListener('mouseleave', () => this.#hideSoon())
+    const r = a.getBoundingClientRect()
+    control.style.left = `${Math.max(4, Math.min(r.left, window.innerWidth - 260))}px`
+    control.style.top = `${Math.min(r.bottom + 4, window.innerHeight - 40)}px`
+    document.body.appendChild(control)
+    this.#control = control
+    this.#controlFor = a
+  }
+
+  #hideSoon(): void {
+    if (this.#hideTimer) clearTimeout(this.#hideTimer)
+    this.#hideTimer = window.setTimeout(() => { this.#hideTimer = 0; this.#hide() }, 350)
+  }
+
+  #hide(): void {
+    this.#control?.remove()
+    this.#control = null
+    this.#controlFor = null
+  }
+
+  /** Say a sentence: the word's queen when it is awake here, else the command
+   *  line, which wakes the word. The control is only ever the words. */
+  #say(sentence: string): void {
+    this.#hide()
+    const word = sentence.split(/\s+/)[0] ?? ''
+    const args = sentence.slice(word.length).trim()
+    const key = `@diamondcoreprocessor.com/${word.charAt(0).toUpperCase()}${word.slice(1)}QueenBee`
+    const queen = get<{ invoke?: (args: string) => Promise<void> }>(key)
+    if (queen?.invoke) { void queen.invoke(args); return }
+    EffectBus.emit('command-line:remote-submit', { text: sentence })
   }
 
   /** One pass per animation frame, however many mutations asked for it. */
@@ -150,7 +220,9 @@ export class DomainLinksDrone extends Drone {
         const own = await publishedDoors().catch(() => [] as PublishedDoor[])
         this.#own = new Map(own.map(d => [d.lineageKey, d]))
         this.#served = own.length === 0 ? await this.#servedDoors() : []
-        return compileDoors([...own, ...this.#served])
+        const all = [...own, ...this.#served]
+        this.#doors = new Map(all.map(d => [`${d.lineageKey}@${d.zone}`, d]))
+        return compileDoors(all)
       })()
     }
     return this.#entries

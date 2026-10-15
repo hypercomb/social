@@ -85,3 +85,27 @@ can move through.
 
 The same links are what an agent spiders: see
 [agent-harness](agent-harness.md), section 13.
+
+## The words on a coloured name (built 2026-10-15)
+
+Resting on a domain link shows its **control**: the zone's colour and the
+words a reader can say about the link. The control is nothing but those
+words, each a sentence on the command line said by a click, so a reader
+learns the dialect by using it and an agent says the same sentences.
+
+- `raise <name|address>` — bring the creation's layer to the top. One of
+  yours is already in the hive: raise walks to it. Another host's is read at
+  its live head and **offered**, the shaded peer the publications view also
+  places, then walked to. Nothing is copied or kept; the publications view
+  puts it back. The addresses never move — a raise is a twist of the cube,
+  another face on top.
+- `recommend <name|address> <word>` — leave a signed word on the creation's
+  head: a pheromone (`pheromones.md`), shown to readers whose interests
+  match the word and to nobody else. The control asks for the word in place.
+
+Not yet: `hold`, a link becoming a row in the Hyperdex (a link tile inside
+the private `/hyperdex` collection, `business-card.md`). The link intake
+only lands where you stand and nothing mints `/hyperdex` yet, so holding
+needs both before it can be a word. Replacements (a publisher's signed
+pointer from an old door to a new one, offered as an update to whoever holds
+it) are also owed.

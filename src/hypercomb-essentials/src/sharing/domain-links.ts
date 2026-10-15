@@ -128,6 +128,87 @@ export const domainAnchor = (doc: Document, door: PublishedDoor, text: string, p
   return a
 }
 
+// ── the link control ──────────────────────────────────────────────────────
+//
+// THE WORDS ON A COLOURED NAME (jwize, 2026-10-15). Resting on a domain link
+// shows the acts a reader can say about it, and each is a sentence on the
+// command line said by a click: `raise <address>` brings its layer to the
+// top; `recommend <address> <word>` leaves a signed word on it. The control
+// is nothing but those words — an agent says the same sentences.
+
+export const LINK_CONTROL_CLASS = 'hc-domain-link-control'
+
+export interface LinkWord {
+  readonly word: string
+  /** The sentence takes one more word from the reader (recommend <what> <word>). */
+  readonly asks?: string
+}
+
+export const LINK_WORDS: readonly LinkWord[] = [
+  { word: 'raise' },
+  { word: 'recommend', asks: 'a word' },
+]
+
+/** Build the control for one door. `say` receives the full sentence. The
+ *  control's own text is the words, so a reader learns the dialect by using it. */
+export const linkControl = (
+  doc: Document,
+  door: PublishedDoor,
+  say: (sentence: string) => void,
+  words: readonly LinkWord[] = LINK_WORDS,
+): HTMLElement => {
+  const box = doc.createElement('span')
+  box.className = LINK_CONTROL_CLASS
+  box.setAttribute('role', 'group')
+  box.setAttribute('aria-label', `${door.name} · ${door.zone}`)
+  box.style.cssText =
+    'position:fixed;z-index:59990;display:inline-flex;align-items:center;gap:.35rem;' +
+    'padding:.2rem .45rem;border-radius:4px;background:rgba(20,18,16,.92);color:#f4efe6;' +
+    'font:500 .72rem/1.4 system-ui,sans-serif;letter-spacing:.04em;box-shadow:0 2px 10px rgba(0,0,0,.35);' +
+    `border-left:3px solid ${domainColour(door.zone)}`
+  const name = doc.createElement('span')
+  name.textContent = door.zone
+  name.style.cssText = 'opacity:.7;margin-right:.15rem'
+  box.appendChild(name)
+  for (const w of words) {
+    const b = doc.createElement('button')
+    b.type = 'button'
+    b.textContent = w.word
+    b.setAttribute('data-word', w.word)
+    b.style.cssText =
+      'all:unset;cursor:pointer;padding:.1rem .35rem;border-radius:2px;color:inherit;' +
+      'text-decoration:none;font:inherit;outline-offset:2px'
+    b.onmouseenter = () => { b.style.background = 'rgba(255,255,255,.12)' }
+    b.onmouseleave = () => { b.style.background = '' }
+    b.onclick = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!w.asks) { say(`${w.word} ${door.address}`); return }
+      // The sentence wants one more word: ask for it in place, Enter says it.
+      const input = doc.createElement('input')
+      input.type = 'text'
+      input.placeholder = w.asks
+      input.setAttribute('aria-label', `${w.word} ${door.name}: ${w.asks}`)
+      input.style.cssText =
+        'all:unset;min-width:6rem;padding:.1rem .35rem;border-radius:2px;background:rgba(255,255,255,.1);' +
+        'color:inherit;font:inherit'
+      input.onkeydown = (k) => {
+        if (k.key === 'Enter') {
+          const word = input.value.trim().split(/\s+/)[0] ?? ''
+          if (word) say(`${w.word} ${door.address} ${word}`)
+          input.replaceWith(b)
+        } else if (k.key === 'Escape') {
+          input.replaceWith(b)
+        }
+      }
+      b.replaceWith(input)
+      input.focus()
+    }
+    box.appendChild(b)
+  }
+  return box
+}
+
 /** Turn every name in `root`'s copy into a link. Returns how many were made.
  *  Idempotent: links it made are skipped the next time. */
 export const linkify = (root: ParentNode, entries: readonly LinkEntry[], options: LinkifyOptions = {}): number => {

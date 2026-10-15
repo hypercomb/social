@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 
 ;(globalThis as unknown as { window: { ioc: unknown } }).window ??= { ioc: { register() {}, get() { return undefined } } }
 
-import { compileDoors, domainColour, linkify, nameMatcher } from './domain-links.js'
+import { compileDoors, domainColour, linkControl, linkify, nameMatcher } from './domain-links.js'
 import { doorsOfIndex, doorsOfResults, type PublishResultRecord, type PublishedDoor } from './publish-results.js'
 
 const door = (name: string, zone: string, extra: Partial<PublishedDoor> = {}): PublishedDoor => ({
@@ -147,6 +147,22 @@ describe('linkify', () => {
     )
     expect(linkify(host, entries, { selfAddress: 'https://business-card.jwize.com/' })).toBe(0)
     expect(linkify(host, entries)).toBe(1)
+  })
+
+  it('the control is the words: raise says the address, recommend asks a word first', () => {
+    const said: string[] = []
+    const control = linkControl(document, door('Business Card', 'jwize.com'), s => said.push(s))
+    const buttons = Array.from(control.querySelectorAll('button')).map(b => b.textContent)
+    expect(buttons).toEqual(['raise', 'recommend'])
+    ;(control.querySelector('button[data-word="raise"]') as HTMLButtonElement).click()
+    expect(said).toEqual(['raise https://business-card.jwize.com'])
+    ;(control.querySelector('button[data-word="recommend"]') as HTMLButtonElement).click()
+    const input = control.querySelector('input') as HTMLInputElement
+    expect(input.placeholder).toBe('a word')
+    input.value = 'cigars'
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+    expect(said[1]).toBe('recommend https://business-card.jwize.com cigars')
+    expect(control.querySelector('input')).toBeNull()
   })
 
   it('changes nothing the second time', () => {
