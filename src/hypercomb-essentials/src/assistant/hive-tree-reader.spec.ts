@@ -655,6 +655,23 @@ describe('a page history cannot pin to one signature', () => {
     expect(found.ok && found.matches).toEqual([{ name: 'Deep Betz', path: pathOf(route) }])
   })
 
+  // 2026-10-15: right after a reload the hive is still saving, and a find
+  // that went stale once answered from hints alone.
+  it('walks again when the tree changed under the walk, and answers whole', async () => {
+    const fx = fixture()
+    const route = deepBetz(fx, 1)
+    const current = fx.history['currentLayerRefAt'] as ReturnType<typeof vi.fn>
+    const original = current.getMockImplementation()! as (location: string, stats?: { cold?: boolean }) => Promise<unknown>
+    let changes = 1
+    current.mockImplementation(async (location: string, stats?: { cold?: boolean }) => {
+      if (location === sig(102) && changes > 0) { changes--; fx.epoch.value++ }
+      return original(location, stats)
+    })
+    const found = await fx.reader.find('betz', [])
+    expect(found).toMatchObject({ ok: true, truncated: false, matches: [{ path: pathOf(route) }] })
+    expect(found).not.toHaveProperty('walkFailed')
+  })
+
   it('still says the tree changed when the walk went stale, unless a hint was read live', async () => {
     // Any record, even one with no matching row, turned a stale walk into an
     // ok "nothing found" whose snapshot held no heads (2026-10-12).

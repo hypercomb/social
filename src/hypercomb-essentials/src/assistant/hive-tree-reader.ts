@@ -61,6 +61,8 @@ const TREE_WALK: WalkCeiling = { depth: MAX_DEPTH, nodes: MAX_NODES, bytes: MAX_
  *  finishes. */
 export const FIND_WALK_NODES = 12_000
 const FIND_WALK: WalkCeiling = { depth: MAX_RECORD_DEPTH, nodes: FIND_WALK_NODES, bytes: 1_500_000, ms: 30_000, partial: true, fair: true }
+/** Walks again after a tree changed under one, while the find's time lasts. */
+const STALE_WALK_RETRIES = 3
 /** Unfinished branches one find names; `unfinishedCount` says how many in all. */
 const MAX_UNFINISHED = 20
 /** Children a walk opens at once. */
@@ -998,10 +1000,22 @@ export class HypercombHiveTreeReader {
     // answered a confident "not found" for /dolphin/associates/betz. A record
     // is a derived cache — a hint, never completeness: it never changes the
     // verdict, whole or partial or failed, only adds names it read live.
-    const epoch = await this.#settledEpoch(options.signal)
-    const walk = await this.#readTreeLive(segments, {
+    // A TREE THAT CHANGED UNDER THE WALK IS WALKED AGAIN (2026-10-15). Right
+    // after a reload the hive is still saving — drains, heals, a swarm page
+    // arriving — and a find then failed "stale-read", answered only from
+    // search-index hints, named no unfinished branch, and the model swept
+    // the root route by route (9 rounds, 94k tokens). The same walk, settled,
+    // opens all 6,368 tiles in a quarter of a second.
+    let epoch = await this.#settledEpoch(options.signal)
+    const walkOnce = (): Promise<WalkRead> => this.#readTreeLive(segments, {
       maxDepth: FIND_WALK.depth, maxNodes: FIND_WALK.nodes, maxBytes: FIND_WALK.bytes, signal: options.signal,
     }, epoch !== undefined, FIND_WALK)
+    const walkStarted = Date.now()
+    let walk = await walkOnce()
+    for (let again = 0; !walk.ok && walk.code === 'stale-read' && again < STALE_WALK_RETRIES && Date.now() - walkStarted < FIND_WALK.ms; again++) {
+      epoch = await this.#settledEpoch(options.signal)
+      walk = await walkOnce()
+    }
     const limit = Math.max(1, boundedInteger(options.maxNodes, 48, MAX_NODES))
     const hits = walk.ok ? walk.nodes.filter(node => node.depth > 0 && node.name.toLowerCase().includes(needle)).map(node => ({ name: node.name, path: node.path })) : []
     const partial = !walk.ok || walk.truncated
