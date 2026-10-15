@@ -64,5 +64,21 @@ Every mention is an incidence: copy on one domain naming a creation on
 another is a mark that content wears. Collected across hosts, those marks
 are a graph of who talks about whom — clusters across domains — and they
 are a derivation of signed content, so they can be minted in the optimize
-phase and rebuilt by any cold client. Not built yet; the doors and the
-marks are here.
+phase and rebuilt by any cold client. The next section is that build.
+
+## Clusters across domains (built the same day)
+
+Every link the rule makes is an **incidence**: this page names that
+creation. `sharing/link-incidences.ts` reads them off a page after the pass
+and the drone holds them for the **optimize phase**, which mints one record
+per `(page content sig, door table sig)` into the `links:incidences` pool —
+a derived cache by the litmus test (a cold client mounts the page and runs
+the rule again), keyed by its inputs so a new domain means a new table, a
+new key and a fresh derivation on the next visit. Never load-bearing.
+
+`clustersOf(records)` folds them, newest record per page, to a graph keyed
+by lineage key: **inbound** (who names this creation, by zone) and
+**outbound** (whom its page names). A page naming itself is no edge, and a
+page nobody owns makes none. The publications view shows both lines under a
+plate, each name coloured by its zone, no underline — the cluster a reader
+can move through.

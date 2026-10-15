@@ -251,6 +251,12 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // turns a page's copy into. TRUTH POOL — the record of remote acts,
   // never derivable from layers, never minted from the optimize phase.
   'publish:results',
+  // WHO NAMES WHOM across domains (essentials sharing/link-incidences.ts):
+  // one record per (page content sig, door table sig) — the creations a
+  // hosted page's copy links to, as the domain-link rule read them.
+  // DERIVED-CACHE POOL: a cold client mounts the page and runs the rule
+  // again; minted only from the optimize phase, never load-bearing.
+  'links:incidences',
   // The community's HOSTS — one member per host artifact, the living
   // primitive behind `host:<zone>` marks (essentials/sharing/community-hosts.ts,
   // and read back by ADDRESS alone from runtime/host-zones.ts so the runtime

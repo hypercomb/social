@@ -967,6 +967,8 @@
   "discover.usage": "ドメインを指定してください — 例: /discover hypercomb.com",
   "discover.unreachable": "{host} の公開台帳に到達できませんでした。",
   "publications.hint": "プレートをくぐると作品を訪れます",
+  "publications.namedBy": "名を挙げている",
+  "publications.names": "名を挙げる",
   "publications.empty": "まだ何も共有されていません。",
   "publications.emptySub": "作品が公開されると、そのプレートは自動的にこのページに現れます。",
   "publications.unreachable": "台帳を読み込めませんでした。",

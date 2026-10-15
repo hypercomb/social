@@ -1219,6 +1219,8 @@
   "discover.usage": "Name a domain — try /discover hypercomb.com",
   "discover.unreachable": "No publication ledger answered at {host}.",
   "publications.hint": "step through a plate to visit a creation",
+  "publications.namedBy": "named by",
+  "publications.names": "names",
   "publications.empty": "Nothing has been shared here yet.",
   "publications.emptySub": "When a creation is published, its plate appears on this page by itself.",
   "publications.unreachable": "The ledger cannot be read right now.",
