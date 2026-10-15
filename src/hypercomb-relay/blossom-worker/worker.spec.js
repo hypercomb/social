@@ -5213,3 +5213,24 @@ test('a room member is refused unless it is the caller\'s own claim on this pool
   env.CONTENT.held.set(`${bag}/00000001`, enc('a marker'))
   assert.equal((await putMember(env, bag, await roomMember(bag, head))).status, 403, 'never into an address holding anything but members')
 })
+
+// A deep link into a site is answered at its own path. The asset store holds
+// no file at `/2026-10-14` and answers a 307 to `/` (not a 404); passing that
+// through dropped the route, and every shared link to a page opened the site's
+// front page instead (minutes.hypercomb.com, 2026-10-15).
+test('a deep link into a site serves the shell at that path — a redirect from the asset store is a miss, not an answer', async () => {
+  const { env, assetRequests } = await fixture()
+  const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+  env.ASSETS.fetch = async (request) => {
+    const path = new URL(request.url).pathname
+    assetRequests.push(path)
+    if (path === '/index.html') return new Response(shell, { headers: { 'content-type': 'text/html' } })
+    return new Response(null, { status: 307, headers: { Location: '/' } })
+  }
+  const response = await worker.fetch(page('https://revolucion.pluginthematrix.com/2026-10-14'), env)
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('location'), null)
+  const html = await response.text()
+  assert(html.includes('<meta property="og:url" content="https://revolucion.pluginthematrix.com/2026-10-14">'))
+  assert(pages(assetRequests).includes('/index.html'), 'the shell was fetched for the asked path')
+})

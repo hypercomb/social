@@ -2417,7 +2417,14 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
   // as a member that will not parse, and the old 307 to / read as a host that
   // does not answer.
   if (response.status === 404 && !spa) return text(404, 'not in this package')
-  if (response.status === 404) {
+  // A page the asset store does not hold is the shell's to route: the visitor
+  // reads the page's route from `location.pathname` (main.visitor.ts), so a
+  // deep link into a site (`/2026-10-14`) must be answered AT that path. The
+  // store answers an unknown path with a 404 or, for a path shaped like a
+  // page, a 307 to `/` — which drops the route and lands every shared link on
+  // the site's front page. Either miss is the shell at the asked path.
+  const miss = response.status === 404 || (response.status >= 300 && response.status < 400)
+  if (miss) {
     const url = new URL(request.url)
     url.pathname = '/index.html'
     response = await env.ASSETS.fetch(new Request(url, request))
