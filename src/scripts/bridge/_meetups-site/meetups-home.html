@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hypercomb Meetup</title>
+<meta name="description" content="A regular get-together for people building and using Hypercomb. No account, no email. Just open the link and come in.">
+<style>
+  /* Modernist, from the Claude Design "Meetups Home" handoff. Scoped under
+     .mh: the hive mounts a page inline, so nothing here may touch the shell. */
+  @font-face{font-family:"Archivo";font-style:normal;font-weight:400 800;font-display:swap;
+    src:url("resource:8f704806dbedeaaeca334b11ec348bc3ac3a439d6431544b3afb54f534ee4967") format("woff2");
+    unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+  @font-face{font-family:"Archivo";font-style:normal;font-weight:400 800;font-display:swap;
+    src:url("resource:ff4f17d21930e36d6d93baba663e624cb767afc3feebf7adaebd82242638de05") format("woff2");
+    unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C4,U+2113,U+2C60-2C7F,U+A720-A7FF}
+
+  .mh{--bg:#f3f2f2;--surface:#eae9e9;--text:#201e1d;--accent:#ec3013;
+    --divider:color-mix(in srgb,#201e1d 40%,transparent);
+    --n200:#eae7e7;--n700:#605d5d;--n800:#444141;--n900:#2d2b2b;
+    --a600:#dd2b0f;--a700:#ae1800;
+    --font:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s6:24px;--s8:32px;
+    display:block;min-height:100vh;background:var(--n200);color:var(--text);
+    font:400 15px/1.55 var(--font);text-wrap:pretty;-webkit-font-smoothing:antialiased}
+  /* Standing alone, the page owns its edges. Mounted in the hive it sits in a
+     host element, so this never reaches the shell's body. */
+  body:has(> .mh){margin:0}
+  .mh *,.mh *::before,.mh *::after{box-sizing:border-box;margin:0;padding:0}
+  .mh a{color:var(--accent);text-underline-offset:3px}
+  .mh a:hover{color:var(--a600)}
+  .mh :focus{outline:none}
+  .mh :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .mh ::selection{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+  .mh .page{max-width:560px;min-height:100vh;margin:0 auto;background:var(--bg);padding-bottom:96px}
+  @media (min-width:600px){.mh .page{border-left:1px solid var(--divider);border-right:1px solid var(--divider)}}
+  .mh h1,.mh h2,.mh h3{font-family:var(--font);font-weight:800;letter-spacing:-.015em}
+  .mh .hr{height:2px;border:0;background:var(--divider);margin:0 var(--s4)}
+  .mh .kicker{display:block;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--a700)}
+  .mh .mini{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--n700)}
+  .mh .grayscale{filter:grayscale(1) contrast(1.08)}
+
+  /* buttons: square, Modernist */
+  .mh .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;text-decoration:none;
+    font:800 14px/1.2 var(--font);color:var(--text);background:transparent;border:1px solid transparent;border-radius:0;
+    padding:var(--s2) calc(var(--s3) * 1.2);min-height:44px;transition:background .18s ease,color .18s ease}
+  .mh .btn svg{display:block;flex:none}
+  .mh .btn-primary{background:var(--accent);color:var(--bg)}
+  .mh .btn-primary:hover{background:var(--a600);color:var(--bg)}
+  .mh .btn-primary:active{background:var(--a700)}
+  .mh .btn-secondary{border-color:var(--divider)}
+  .mh .btn-secondary:hover{background:color-mix(in srgb,var(--text) 7%,transparent)}
+  .mh .btn-secondary:active{background:color-mix(in srgb,var(--text) 14%,transparent)}
+  .mh .btn-icon{width:40px;height:40px;min-height:40px;padding:0}
+
+  /* masthead */
+  .mh .nav{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);padding:var(--s3) var(--s4);
+    border-bottom:2px solid var(--divider)}
+  .mh .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
+
+  /* opening */
+  .mh .open{padding:var(--s8) var(--s4) var(--s6)}
+  .mh h1{font-size:40px;line-height:1.04;letter-spacing:-.02em;margin:0 0 var(--s4) -.05em}
+  .mh .lede{font-size:16px;color:var(--n800);max-width:34ch}
+  .mh figure{margin:var(--s6) 0 0;border-top:2px solid var(--divider);padding-top:var(--s3)}
+  .mh .hero{width:100%;aspect-ratio:16/10;overflow:hidden;background:var(--n900)}
+  .mh .hero img{display:block;width:100%;height:100%;object-fit:cover}
+  .mh figcaption{font-size:11px;margin-top:var(--s1);color:var(--n700)}
+
+  .mh .sec{padding:var(--s4) var(--s4) var(--s6)}
+
+  /* next meeting */
+  .mh .head{display:flex;align-items:center;gap:var(--s2);margin-bottom:var(--s3)}
+  .mh .live{display:none;font-size:11px;font-weight:600;letter-spacing:.02em;padding:3px 10px;background:var(--accent);color:var(--bg)}
+  .mh[data-status="live"] .live{display:inline-flex}
+  .mh .facts{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid var(--divider)}
+  .mh .facts > div{padding:var(--s3) var(--s3) var(--s3) 0}
+  .mh .facts > div + div{padding:var(--s3) 0 var(--s3) var(--s3);border-left:1px solid var(--divider)}
+  .mh .big{font-weight:800;font-size:22px;line-height:1.1;margin-top:4px}
+  .mh .sub{font-size:14px;color:var(--n800);margin-top:2px}
+  .mh .agenda{border-top:1px solid var(--divider);padding:var(--s3) 0}
+  .mh .agenda ol{list-style:none;display:grid;gap:6px;font-size:15px;margin-top:6px}
+  .mh .agenda li{display:grid;grid-template-columns:28px 1fr;gap:var(--s2)}
+  .mh .num{font-weight:800;font-feature-settings:"tnum"}
+  .mh .actions{border-top:1px solid var(--divider);padding:var(--s3) 0 0;display:flex;gap:var(--s2);flex-wrap:wrap}
+  .mh .actions .btn-primary{flex:1;justify-content:flex-start}
+
+  /* how joining works */
+  .mh .three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:2px solid var(--divider);margin-top:var(--s3)}
+  .mh .three > div{padding:var(--s3) var(--s2) 0 0}
+  .mh .three > div + div{padding:var(--s3) var(--s2) 0;border-left:1px solid var(--divider)}
+  .mh .three > div:last-child{padding-right:0}
+  .mh .cell{width:64px;height:72px;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:var(--n900);margin-bottom:var(--s2)}
+  .mh .cell img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 48%}
+  .mh .step{font-weight:800;font-size:24px;color:var(--accent);line-height:1}
+  .mh .step-title{font-weight:800;font-size:15px;margin-top:var(--s2);line-height:1.2}
+  .mh .step-body{margin-top:4px;font-size:13px;color:var(--n800)}
+
+  /* nine promises */
+  .mh h2{font-size:26px;line-height:1.1;margin:var(--s1) 0 var(--s3)}
+  .mh .promises{border-bottom:2px solid var(--divider)}
+  .mh details{border-top:1px solid var(--divider)}
+  .mh summary{list-style:none;display:grid;grid-template-columns:32px minmax(0,1fr) 20px;gap:var(--s3);align-items:start;
+    padding:var(--s3) 0;cursor:pointer;transition:background .15s ease}
+  .mh summary::-webkit-details-marker{display:none}
+  .mh summary:hover{background:color-mix(in srgb,var(--text) 5%,transparent)}
+  .mh summary:active{background:color-mix(in srgb,var(--text) 10%,transparent)}
+  .mh summary .num{font-size:14px;padding-top:3px}
+  .mh summary .title{font-weight:800;font-size:17px;line-height:1.2}
+  .mh summary svg{margin-top:4px;color:var(--n700);transition:transform .18s ease}
+  .mh details[open] summary svg{transform:rotate(180deg)}
+  .mh details p{padding:0 0 var(--s3) calc(32px + var(--s3));margin-top:calc(var(--s2) * -1);
+    font-size:14px;line-height:1.5;color:var(--n800);padding-right:calc(20px + var(--s3))}
+
+  /* the promise */
+  .mh .promise{background:var(--accent);color:var(--bg);padding:var(--s8) var(--s4)}
+  .mh .promise h3{font-size:34px;line-height:1.06;margin-left:-.05em}
+  .mh .promise .btn{margin-top:var(--s6);color:var(--bg);border:1px solid var(--bg);padding-inline:14px}
+  .mh .promise .btn:hover{background:var(--bg);color:var(--accent)}
+
+  .mh footer{padding:var(--s4) var(--s4) var(--s6);font-size:13px;line-height:1.5;color:var(--n700)}
+  .mh footer b{display:block;font-weight:800;color:var(--text)}
+
+  .mh .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  /* quiet motion, only where it can never hide anything */
+  .mh.motion [data-reveal]{opacity:0;transform:translateY(10px);
+    transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);transition-delay:var(--d,0ms)}
+  .mh.motion [data-reveal].in{opacity:1;transform:none}
+  .mh.motion .hero img{transform:scale(1.04);transition:transform 2.4s cubic-bezier(.2,.7,.2,1)}
+  .mh.motion [data-reveal].in .hero img{transform:none}
+  .mh.motion details[open] p{animation:mh-open .25s ease}
+  @keyframes mh-open{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){
+    .mh.motion [data-reveal],.mh.motion .hero img{opacity:1;transform:none;transition:none}
+    .mh.motion details[open] p{animation:none}
+    .mh summary svg{transition:none}
+  }
+</style>
+</head>
+<body>
+<div class="mh" data-status="upcoming">
+<div class="page">
+
+  <nav class="nav" aria-label="Hypercomb Meetup">
+    <span class="brand">Hypercomb Meetup</span>
+    <button type="button" class="btn btn-secondary btn-icon" aria-label="Share this page" data-share>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg>
+    </button>
+  </nav>
+
+  <section class="open">
+    <h1 data-reveal>You are here!</h1>
+    <p class="lede" data-reveal>A regular get-together for people building and using Hypercomb. No account, no email — just open the link and come in.</p>
+    <figure class="grayscale" data-reveal>
+      <div class="hero"><img src="resource:c83e3cacb01593e4f92801de0bd732fa4d91ea387f91c123b5fbb3d9ebb45161" alt="The Hypercomb workspace — a honeycomb of cells"></div>
+      <figcaption>Inside Hypercomb: every cell is a space. This meetup is one of them.</figcaption>
+    </figure>
+  </section>
+
+  <hr class="hr">
+
+  <section class="sec" data-reveal aria-labelledby="next">
+    <div class="head">
+      <span class="kicker" id="next">Next meeting</span>
+      <span class="live">Live now</span>
+    </div>
+    <div class="facts">
+      <div>
+        <div class="mini">When</div>
+        <div class="big">Sat 17 Oct</div>
+        <div class="sub">Every Saturday · time posted here</div>
+      </div>
+      <div>
+        <div class="mini">Where</div>
+        <div class="big">Yaletown</div>
+        <div class="sub">Vancouver · free, all welcome</div>
+      </div>
+    </div>
+    <div class="agenda">
+      <div class="mini">On the agenda</div>
+      <ol>
+        <li><span class="num">01</span>Say hello — how joining works</li>
+        <li><span class="num">02</span>Show and tell: what's new in Hypercomb</li>
+        <li><span class="num">03</span>Open floor: your questions</li>
+      </ol>
+    </div>
+    <div class="actions">
+      <a class="btn btn-primary" href="#joining" data-join>Join the meeting<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></a>
+      <button type="button" class="btn btn-secondary" data-calendar>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4"/><path d="M3 10h18"/></svg><span data-calendar-label>Calendar</span></button>
+    </div>
+  </section>
+
+  <hr class="hr">
+
+  <section class="sec" id="joining" data-reveal aria-labelledby="how">
+    <span class="kicker" id="how">How joining works</span>
+    <div class="three">
+      <div>
+        <div class="cell grayscale"><img src="resource:cd554c78bccd0af216c2b11496a276508c34d720a24d56aad5cbf909affbdca5" alt="Hypercomb cell"></div>
+        <div class="step">1</div>
+        <div class="step-title">Open the link</div>
+        <p class="step-body">On your phone or computer — no app to install.</p>
+      </div>
+      <div>
+        <div class="cell grayscale"><img src="resource:28a96fc9b0b24be5a468904b84c626c68e7d3f360bed3d16378d23451d5a07a2" alt="People cell"></div>
+        <div class="step">2</div>
+        <div class="step-title">Pick a name</div>
+        <p class="step-body">Just a name you choose. No email, no password.</p>
+      </div>
+      <div>
+        <div class="cell grayscale"><img src="resource:63b5fec4df0d61e772cf8408d906e397d9010d2be7deca7cec160a15983ffd5a" alt="Bee cell"></div>
+        <div class="step">3</div>
+        <div class="step-title">You're in</div>
+        <p class="step-body">A member lets you in, like being introduced at the door.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="hr">
+
+  <section class="sec" data-reveal aria-labelledby="promises">
+    <span class="kicker">What makes it different</span>
+    <h2 id="promises">Nine promises we make to everyone who joins.</h2>
+    <div class="promises">
+      <details><summary><span class="num">01</span><span class="title">No email or personal information</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>You never give us an email, phone number or name. Your phone or computer creates a private key that stands in for you.</p></details>
+      <details><summary><span class="num">02</span><span class="title">Security by community</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Instead of a company checking your identity, the people already in the group vouch for newcomers — the way a real community does.</p></details>
+      <details><summary><span class="num">03</span><span class="title">Domain agnostic</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>The meetup can be reached from any website address. If one goes away, the group carries on at another.</p></details>
+      <details><summary><span class="num">04</span><span class="title">Platform agnostic</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Works the same on phone, tablet and computer, in any web browser. Nothing to download.</p></details>
+      <details><summary><span class="num">05</span><span class="title">Pure edge computing</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Everything happens on your own device. There is no central server that stores or reads your data.</p></details>
+      <details><summary><span class="num">06</span><span class="title">Decentralized protocol</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Messages travel through nostr, an open network nobody owns. Anyone can help carry them; no single point can switch it off.</p></details>
+      <details><summary><span class="num">07</span><span class="title">Open software platform</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>The code is public. Anyone can read it, check it, improve it or start their own version.</p></details>
+      <details><summary><span class="num">08</span><span class="title">Global signature hashing</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Everything shared carries a digital signature and fingerprint, so anyone can confirm it is genuine and untouched.</p></details>
+      <details><summary><span class="num">09</span><span class="title">One primitive for all data</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Every piece of information uses the same simple building block, which keeps things reliable and easy to move or back up.</p></details>
+    </div>
+  </section>
+
+  <section class="promise" data-reveal>
+    <h3>Your data stays<br>with you.<br>Always.</h3>
+    <button type="button" class="btn" data-share data-share-label>Share this page</button>
+  </section>
+
+  <footer>
+    <b>meetups.hypercomb.com</b>
+    Free and open software. Share this page with anyone you'd like to bring along.
+  </footer>
+
+  <span class="sr" role="status" aria-live="polite" data-said></span>
+</div>
+</div>
+<script>
+(function () {
+  var roots = document.querySelectorAll('.mh:not([data-ready])');
+  var root = roots[roots.length - 1];
+  if (!root) return;
+  root.setAttribute('data-ready', '');
+
+  // THE MEETING — the one place to change when the next one is set.
+  var MEETING = {
+    date: '2026-10-17',            // all-day until a time is set
+    title: 'Hypercomb Meetup',
+    where: 'Yaletown, Vancouver',
+    url: 'https://meetups.hypercomb.com/'
+  };
+
+  var said = root.querySelector('[data-said]');
+  var say = function (text) { if (said) said.textContent = text; };
+  var flash = function (el, text) {
+    if (!el) return;
+    var was = el.textContent;
+    el.textContent = text;
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.textContent = was; }, 1800);
+  };
+
+  // Share: the device's share sheet where there is one, else copy the link.
+  root.querySelectorAll('[data-share]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var label = button.hasAttribute('data-share-label') ? button : null;
+      if (navigator.share) {
+        navigator.share({ title: MEETING.title, url: MEETING.url }).catch(function () {});
+        return;
+      }
+      var done = function () { say('Link copied'); flash(label, 'Link copied'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(MEETING.url).then(done, function () { say(MEETING.url); });
+      else say(MEETING.url);
+    });
+  });
+
+  // Calendar: a real calendar file for the next meeting, made here, sent nowhere.
+  var cal = root.querySelector('[data-calendar]');
+  if (cal) cal.addEventListener('click', function () {
+    var d = MEETING.date.replace(/-/g, '');
+    var next = new Date(MEETING.date + 'T00:00:00Z'); next.setUTCDate(next.getUTCDate() + 1);
+    var end = next.toISOString().slice(0, 10).replace(/-/g, '');
+    var stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+    var ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Hypercomb//Meetup//EN', 'BEGIN:VEVENT',
+      'UID:meetup-' + d + '@meetups.hypercomb.com', 'DTSTAMP:' + stamp,
+      'DTSTART;VALUE=DATE:' + d, 'DTEND;VALUE=DATE:' + end,
+      'SUMMARY:' + MEETING.title, 'LOCATION:' + MEETING.where.replace(/,/g, '\\,'),
+      'URL:' + MEETING.url, 'DESCRIPTION:Time posted at ' + MEETING.url,
+      'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
+    a.download = 'hypercomb-meetup-' + MEETING.date + '.ics';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+    var label = root.querySelector('[data-calendar-label]');
+    if (label) label.textContent = 'Added';
+    say('Calendar file saved');
+  });
+
+  // Quiet motion, never where it could hide content.
+  var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (still || !('IntersectionObserver' in window) || !window.innerHeight) return;
+  var marks = root.querySelectorAll('[data-reveal]');
+  var shown = 0;
+  var show = function (el) { if (!el.classList.contains('in')) { el.classList.add('in'); shown++; } };
+  root.classList.add('motion');
+  var seen = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { if (e.isIntersecting) { show(e.target); seen.unobserve(e.target); } });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.06 });
+  for (var i = 0; i < marks.length; i++) {
+    marks[i].style.setProperty('--d', (i < 3 ? i * 110 : 0) + 'ms');
+    if (marks[i].getBoundingClientRect().top < window.innerHeight) {
+      (function (el) { requestAnimationFrame(function () { show(el); }); })(marks[i]);
+    } else seen.observe(marks[i]);
+  }
+  setTimeout(function () { if (shown === 0) { seen.disconnect(); root.classList.remove('motion'); } }, 2500);
+})();
+</script>
+</body>
+</html>
