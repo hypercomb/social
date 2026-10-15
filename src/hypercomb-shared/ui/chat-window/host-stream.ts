@@ -67,6 +67,15 @@ const runs = new Map<string, HostRun>()
  *  stream is not one pool write per chunk. */
 const CHECKPOINT_MS = 1_200
 
+/** What a turn that never finished says, filed at the next boot in place of
+ *  the answer it was becoming. A TURN IS CHECKPOINTED FROM ITS FIRST MOMENT
+ *  (2026-10-15): checkpointed only once words arrived, a page that went away
+ *  during the reads — before the first word — left nothing to file, and the
+ *  conversation said "waiting for reply…" for good (28 of them, two days). */
+export const STOPPED_BEFORE_ANSWER = 'This turn stopped before an answer came back — the page reloaded or closed while it was running. Send it again, or say "Continue."'
+/** Said under the words a turn had written when the page went away. */
+export const STOPPED_PART_WAY = '\n\n(The answer stopped here — the page reloaded or closed while it was running. Say "Continue." to carry it on.)'
+
 /** The text an in-flight answer has produced so far, or null when the
  *  conversation has nothing streaming. What a re-attaching window paints. */
 export const liveHostRun = (convoId: string): { text: string } | null => {
@@ -122,14 +131,35 @@ export const startHostRun = (
   const promise = (async (): Promise<HostOutcome> => {
     let checkpointedAt = 0
     let aborted = false
+    // Checkpoints are written one after another, and none once the run has
+    // settled: a late write landing after the final clear would file the
+    // answer a second time at the next boot.
+    let settled = false
+    let writing = Promise.resolve()
 
-    const checkpoint = async (force = false): Promise<void> => {
-      if (!store.saveStreamCheckpoint) return
-      const now = Date.now()
-      if (!force && now - checkpointedAt < CHECKPOINT_MS) return
-      checkpointedAt = now
-      try { await store.saveStreamCheckpoint(convoId, run.text) } catch { /* the turn is still the truth */ }
+    const write = (): Promise<void> => {
+      writing = writing.then(async () => {
+        if (settled) return
+        const text = run.text.trim() ? run.text + STOPPED_PART_WAY : STOPPED_BEFORE_ANSWER
+        try { await store.saveStreamCheckpoint?.(convoId, text) } catch { /* the turn is still the truth */ }
+      })
+      return writing
     }
+    // The first words are written at once; after them, once a beat.
+    const checkpoint = (): Promise<void> => {
+      if (!store.saveStreamCheckpoint) return writing
+      const now = Date.now()
+      if (now - checkpointedAt < CHECKPOINT_MS) return writing
+      checkpointedAt = now
+      return write()
+    }
+    /** The run is over: no checkpoint after this one. Empty text forgets. */
+    const settle = async (text: string): Promise<void> => {
+      settled = true
+      await writing
+      try { await store.saveStreamCheckpoint?.(convoId, text) } catch { /* next boot */ }
+    }
+    if (store.saveStreamCheckpoint) void write()
 
     try {
       const ask = host.ask as HostAsk
@@ -147,6 +177,9 @@ export const startHostRun = (
       // Stop, which arrives here as the fetch's own abort.
       aborted = controller.signal.aborted
       if (!aborted && !run.text) {
+        // Declined, not stopped: another tier takes the question, so the
+        // first-moment checkpoint must not file "stopped" over it.
+        await settle('')
         runs.delete(convoId)
         EffectBus.emit('chat:host-done', { convoId, text: '', outcome: 'declined' })
         return 'declined'
@@ -168,9 +201,10 @@ export const startHostRun = (
     // The checkpoint is cleared LAST and ONLY for a turn that really landed.
     // An answer the threads pool refused stays on disk as a checkpoint, so the
     // next boot files it rather than the words being lost twice over.
+    // A run that said nothing — declined, or stopped by the participant —
+    // forgets its first-moment checkpoint too.
+    await settle(stored || !full.trim() ? '' : full)
     runs.delete(convoId)
-    if (stored) { try { await store.saveStreamCheckpoint?.(convoId, '') } catch { /* next boot */ } }
-    else if (full.trim()) { try { await store.saveStreamCheckpoint?.(convoId, full) } catch { /* nothing left to try */ } }
     EffectBus.emit('chat:host-done', { convoId, text: full, outcome })
     return outcome
   })()

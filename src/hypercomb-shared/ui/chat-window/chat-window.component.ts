@@ -3121,6 +3121,9 @@ export class ChatWindowComponent implements OnDestroy {
   // otherwise come back "failed" with no reason (2026-10-02).
   readonly #turnFailures = new Map<string, string>()
   readonly #asksSeen = new Set<string>()
+  /** Conversations an outside ask is running in. Their questions are never
+   *  handed to the bridge queue — see send(). */
+  readonly #outsideConvos = new Set<string>()
   #askStarting = false
 
   async #drainAsks(): Promise<void> {
@@ -3174,6 +3177,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (ask.trust) this.#trustConversation(ask.convoId, true)
     let failure = ''
     await this.#load(ask.convoId)
+    this.#outsideConvos.add(ask.convoId)
     const turn = this.send(ask.text).catch(error => { failure = error instanceof Error ? error.message : String(error) })
     await Promise.race([begun, turn])
     // Put back what the participant was looking at, unless they moved on
@@ -3183,9 +3187,10 @@ export class ChatWindowComponent implements OnDestroy {
     // The rest happens beside whatever starts next.
     void turn.then(async () => {
       for (const off of offs) off()
+      this.#outsideConvos.delete(ask.convoId)
       const turns = await this.#threads()?.readTurns(ask.convoId).catch(() => []) ?? []
       const last = [...turns].reverse().find(entry => entry.role === 'assistant' && entry.at >= since)
-      if (!failure && receipt?.outcome === 'failed') failure = this.#turnFailures.get(ask.convoId) ?? ''
+      if (!failure && (receipt?.outcome === 'failed' || this.#turnFailures.has(ask.convoId))) failure = this.#turnFailures.get(ask.convoId) ?? ''
       this.#turnFailures.delete(ask.convoId)
       if (answered) return
       answered = true
@@ -6210,6 +6215,19 @@ export class ChatWindowComponent implements OnDestroy {
     if (routed === 'answered') { void this.#continueIfLeft(convoId) }
     if (routed === 'answered' || routed === 'aborted') return
 
+    // A MANAGER'S ASK IS ANSWERED BY THE HIVE'S OWN MODELS OR NOT AT ALL
+    // (2026-10-15). Handed to the bridge queue, it waited for a Claude session
+    // parked on the bridge — and the broker the managers ride is always up,
+    // whether or not one is — so the conversation said "waiting for reply…"
+    // for good. The failure is the answer, in the conversation and to the
+    // asker.
+    if (this.#outsideConvos.has(convoId)) {
+      const reason = this.#turnFailures.get(convoId) ?? this.#declineReason.get(convoId) ?? 'no model took the question'
+      this.#turnFailures.set(convoId, reason)
+      await this.#landFailure(convoId, `The model could not answer: ${reason}. Check the providers console, then ask again.`)
+      return
+    }
+
     // The two legacy transports remain honest fallbacks.
     //
     // With a session on the bridge, the question goes to it: that is the deep
@@ -7844,7 +7862,7 @@ export class ChatWindowComponent implements OnDestroy {
         if (opts?.signal?.aborted) throw error
         const detail = error instanceof Error ? error.message : String(error)
         component.#turnFailures.set(convoId, detail)
-        if (!firstAt && listening()) {
+        if (!firstAt && listening() && !component.#outsideConvos.has(convoId)) {
           console.warn('[chat] no model took the question — the bridge session takes it:', detail)
           return ''
         }

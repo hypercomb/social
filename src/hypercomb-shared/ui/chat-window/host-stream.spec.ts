@@ -19,7 +19,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
-import { liveHostRun, isHostRunLive, liveHostConvos, startHostRun, stopHostRun } from './host-stream'
+import { liveHostRun, isHostRunLive, liveHostConvos, startHostRun, stopHostRun, STOPPED_BEFORE_ANSWER, STOPPED_PART_WAY } from './host-stream'
 
 /** A host whose answer arrives one chunk at a time, on demand. */
 const scriptedHost = (chunks: string[], opts: { hang?: boolean } = {}) => {
@@ -130,7 +130,7 @@ describe('host-stream — the answer outlives the window that asked for it', () 
     const run = startHostRun('chat:durable-4', 'q', host, store)
 
     host.release()
-    await vi.waitFor(() => expect(store.checkpoints.get('chat:durable-4')).toBe('first '))
+    await vi.waitFor(() => expect(store.checkpoints.get('chat:durable-4')).toBe(`first ${STOPPED_PART_WAY}`))
     expect(liveHostConvos().has('chat:durable-4')).toBe(true)
 
     host.release()
@@ -138,6 +138,29 @@ describe('host-stream — the answer outlives the window that asked for it', () 
     // The turn is the truth; the checkpoint only existed to protect it.
     expect(store.turns[0]?.text).toBe('first second')
     expect(store.checkpoints.has('chat:durable-4')).toBe(false)
+    stopListening()
+  })
+
+  // 2026-10-15: checkpointed only once words arrived, a page that went away
+  // during the reads left nothing to file — "waiting for reply…" for good.
+  it('checkpoints a turn from its first moment, before any words, as stopped', async () => {
+    const store = makeStore()
+    const host = scriptedHost(['late'], { hang: true })
+    const run = startHostRun('chat:durable-4a', 'q', host, store)
+    await vi.waitFor(() => expect(store.checkpoints.get('chat:durable-4a')).toBe(STOPPED_BEFORE_ANSWER))
+    host.release()
+    await run
+    expect(store.turns[0]?.text).toBe('late')
+    expect(store.checkpoints.has('chat:durable-4a')).toBe(false)
+    stopListening()
+  })
+
+  it('forgets the first-moment checkpoint when the host declines, so another tier answers', async () => {
+    const store = makeStore()
+    const outcome = await startHostRun('chat:durable-4b', 'q', scriptedHost([]), store)
+    expect(outcome).toBe('declined')
+    expect(store.turns.length).toBe(0)
+    expect(store.checkpoints.has('chat:durable-4b')).toBe(false)
     stopListening()
   })
 
