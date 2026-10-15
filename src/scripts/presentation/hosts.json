@@ -32,6 +32,21 @@
       "title": "jaime-weise"
     },
     {
+      "host": "meetings.hypercomb.com",
+      "label": "meetings",
+      "title": "meetings"
+    },
+    {
+      "host": "meetups.hypercomb.com",
+      "label": "meetups",
+      "title": "meetups"
+    },
+    {
+      "host": "minutes.hypercomb.com",
+      "label": "minutes",
+      "title": "minutes"
+    },
+    {
       "host": "pluginthematrix.hypercomb.com",
       "label": "pluginthematrix",
       "title": "pluginthematrix"
