@@ -410,7 +410,106 @@ for a hand for the rest of the conversation. A label, version or host that is
 not plainly one is taught as `?`, and a revision nobody's signature vouches
 for is not taught at all.
 
-Still owed: building as another user or in a container.
+**A draft's build runs in a box (2026-10-15).** Building a draft runs its
+author's code, and a builder trusts an author to send honest drafts, not to
+read the disk. So every step of a build runs in a sandbox
+(`hypercomb-shim/host/sandbox.mjs`): a container (Docker or Podman, on any
+platform), or bubblewrap on Linux (user namespaces; no daemon, no root). The
+box shows the build:
+
+- its own tree and the pools it stages into, writable; the builder's npm
+  cache, writable only for the one step in which npm alone runs (the fetch
+  with scripts held back) and read-only for every step that runs the draft's
+  code, so no build leaves a package there for a later one (npm is given a
+  read-only cache through a shadow in the box's `/tmp` — the index copied,
+  the content linked — since it rewrites index buckets even to read them) —
+  and nothing
+  else of the machine: not the builder's home, its pools, a key kept in a
+  file, or another build's directories. The system's programs are read-only,
+  and npm's global config under them (`<prefix>/etc/npmrc`, where a registry
+  token is kept) is shown empty; `/tmp` and the build's home are fresh and
+  vanish with it, and npm's logs and global config are read and written
+  there, never in the cache;
+- an environment of its own (`buildEnv`), never the builder's — and, read-only,
+  the one file that environment names: a certificate bundle
+  (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`) a proxy makes npm trust;
+- the network only while the install fetches from the registry. The install
+  is two passes for that: `npm ci --ignore-scripts` with the registry
+  reachable, run on the manifests alone — the package.json files without
+  their `scripts`, the lockfile, `.npmrc`, in a tree of their own, since npm
+  still runs a workspace's `prepare` with scripts held back — then `npm ci
+  --offline` in the draft's tree, which runs every script — the
+  dependencies' and the workspaces' `prepare` — from the cache with no
+  network. The repository's build scripts and the draft's tests run with no
+  network either, so nothing the draft's code reads in the box can be sent
+  out of it.
+
+Before the box opens, the builder reads the lockfile the install will run
+with — the draft's, else the base's — and refuses the ask unless every
+entry is a registry package (resolved over https, from a host name — never
+an address, which is a way to call on a port here, loopback or LAN, mapped
+or not; a public name that resolves here cannot be told apart — and none of
+this machine's or its network by name; or by name and version), bundled, or
+a link to a workspace the tree declares, and every key a path that stays
+inside the tree (the builder resolves them, outside any box): `npm ci
+--ignore-scripts` still makes a dependency it must fetch from git or pack
+from a directory, scripts and all.
+A draft that changes `.npmrc` or adds a shrinkwrap is refused the same way:
+those set how an install fetches. After the build, before anything is
+adopted or signed, every file the build left in its pools must be a plain
+file (a link planted there is followed by nothing), and every record it
+staged must be a revision of the story it was staged as, naming only
+signatures and paths that stay inside a tree.
+
+The builder picks a container engine that answers, else bubblewrap, and
+proves the box before taking anything — one empty build must run: `npm
+--version` in the exact box, over empty directories, with the environment a
+step gets, and the box's last line is said when it does not — so a kernel that
+refuses user namespaces, an engine that cannot run its image, or a node
+that needs files the box does not show (Homebrew's; npm kept under
+`libexec` is shown, its libraries are not), is the builder's trouble at
+startup, never a draft's failure later;
+a box that does not open during a build (it says so with a line before the
+step's command runs) is tried again next pass, never answered. With neither
+box it refuses to build and says what to install. Under bubblewrap the
+node the builder runs is shown read-only — its programs, npm and its
+headers, never the whole prefix — and a node whose prefix is this user's
+home, or holds the builder's pools, is refused. The cache must be the
+builder's own: this user's home, npm's own cache (what `npx` runs from) or
+a directory over the pools is refused at startup. A work tree kept with
+`--keep` is handed back without its `.git`, since the build could have
+written hooks or a config into it. `--sandbox none`
+(`HYPERCOMB_BUILDER_SANDBOX=none`) runs unboxed, for authors the operator
+would let run code on the machine; it is never picked by itself. Under
+bubblewrap the build runs the builder's own node and npm; in a container,
+the image's (`node:22`; pin a digest with `HYPERCOMB_BUILDER_IMAGE` for a
+revision that does not move with the tag). A container that outlives its
+command is ended by name; a bubblewrap box dies with the builder. Behind a
+proxy on the machine's loopback the builder prefers bubblewrap, which has
+the host's network; a container reaches such a proxy only if it listens past
+loopback, and the builder says so.
+
+In a container the three directories sit at `/work`, `/pools` and `/cache`
+(every path the environment names is rewritten to them, so a Windows host
+builds too), a certificate bundle the environment names is mounted beside
+them, a proxy on the machine's loopback is reached as `host.docker.internal`
+(`host.containers.internal` under Podman), and under a rootless engine the
+build runs as the container's root, which already is this user.
+
+What the box does not do: while the install fetches, the box has the
+machine's network — under bubblewrap the host's own, loopback included; in a
+container, the engine's bridge — and reaches only the hosts the lockfile
+names, which is why those are names, never addresses, and none of this
+machine's; the build's output is
+a way out of the box, so what the box shows is only what its author may
+have anyway — the system's programs, a few files of `/etc`, the registry
+packages in the cache (shared for reading across the builder's authors) and
+the author's own tree, never anything of the builder's; a build may use as
+much CPU, memory and disk as the machine gives it (a container is limited to
+4,096 processes; a step is still ended after thirty minutes); and a kernel
+flaw is a flaw in either box. Running the
+builder as its own user, on a machine of its own, is still the floor for a
+builder that takes asks from many.
 
 ## 4. What changes in the code, in order
 

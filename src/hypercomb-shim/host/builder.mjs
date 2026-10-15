@@ -7,7 +7,7 @@
 // and sends it, with a signed ASK, to a host under its grant (essentials
 // sharing/version-drafts.ts). This takes it from there:
 //
-//   node host/builder.mjs <host> <ask sig> [--to <dir>] [--test] [--keep]
+//   node host/builder.mjs <host> <ask sig> [--to <dir>] [--test] [--keep] [--sandbox <box>]
 //   (or: node host/builds.mjs build-draft <host> <ask sig> …)
 //
 //   1. the ask: fetched by its signature, kept only if it hashes to it, a
@@ -27,7 +27,7 @@
 //
 // THE BUILDER AT WORK, by itself (watchAsks):
 //
-//   node host/builder.mjs watch <host> [--once] [--interval <seconds>] [--test]
+//   node host/builder.mjs watch <host> [--once] [--interval <seconds>] [--test] [--sandbox <box>]
 //   (or: node host/builds.mjs builder <host> …)
 //
 // Each pass lists the asks the host holds for this builder (listAsks), builds
@@ -41,23 +41,36 @@
 // author it does not trust is held, unanswered: trusting them later builds it.
 // Answers are kept in this builder's own pool, so each ask is answered once.
 //
-// BUILDING A DRAFT RUNS THE AUTHOR'S CODE. The draft's files are laid over
-// the base before anything runs, so `npm ci` installs from the DRAFT's
-// lockfile and the build runs the draft's scripts and configs (and its tests
-// with --test), as this machine's user. A builder is lending its tooling: a
-// builder that does not trust an author does not take the ask. What the
-// build is never handed is this builder's key — every step runs with an
-// environment of its own (buildEnv), and the key is read only afterwards, by
-// promote, outside the build. A key kept in a FILE is still a file this user
-// can read: until the build runs as another user or in a container, run a
-// builder only for authors you would let run code on this machine.
+// BUILDING A DRAFT RUNS THE AUTHOR'S CODE, IN A BOX. The draft's files are
+// laid over the base before anything runs, so `npm ci` installs from the
+// DRAFT's lockfile and the build runs the draft's scripts and configs (and
+// its tests with --test). A builder is lending its tooling: a builder that
+// does not trust an author does not take the ask. What the build is never
+// handed is this builder's key — every step runs with an environment of its
+// own (buildEnv), and the key is read only afterwards, by promote, outside
+// the build. And every step runs in a SANDBOX (host/sandbox.mjs): a
+// container, or bubblewrap on Linux, that shows the build its own tree, the
+// pools it stages into and the npm cache, and nothing else of this machine —
+// not the builder's home, its pools, or a key kept in a file — with the
+// network only while the install fetches from the registry. The install is
+// two passes for that: `npm ci --ignore-scripts` on the manifests alone, in
+// a tree of their own (fetchSkeleton: npm still runs a workspace's `prepare`
+// with scripts held back) with the registry reachable, then `npm ci
+// --offline` in the draft's tree, which runs every script from the cache
+// with no network, so neither the dependencies' scripts nor the draft's own
+// can send anything out. With no box on the machine the builder refuses to
+// build; `--sandbox none` runs unboxed, for authors you would let run code
+// here.
 
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { link, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { isIP } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { BOX_OPENED, chooseSandbox } from './sandbox.mjs'
+import { walkTree } from './source-tree.mjs'
 import {
   AUTHOR_SCRIPTS, BUILDS_MEANING, GENERATED_FILES, INSTALL_WORKSPACES, SIGNATURES_MEANING,
   adoptStaged, carryPools, checkout, closureOf, collect, draftsLabel, findRevision, isDraftsLabel, localFile, poolDir, promote, pullPools,
@@ -147,6 +160,121 @@ export const buildEnv = (work, from = process.env, { pools } = {}) => ({
 /** A path a draft may write: inside the tree, plain, and never into the
  *  repository's own machinery or installed dependencies — the same rule as
  *  core work-words.ts `draftPathRefusal`, which the browser stages under. */
+/** What a draft may not change: how and where an install fetches, past the
+ *  lockfile the builder reads first. `.npmrc` sets npm's own switches (the
+ *  registry every resolved address is rewritten to, the shell scripts run
+ *  in); a shrinkwrap replaces the lockfile unread. */
+export const installRefusal = path =>
+  /(^|\/)(\.npmrc|npm-shrinkwrap\.json)$/.test(String(path ?? '')) ? `${path} is not a draft's to change: it sets how an install fetches` : null
+
+/** A path that stays inside a tree, as a revision's layers and tree may name
+ *  one: plain, relative, no step up — never a path of this machine's that
+ *  writing the revision out would follow. Returns why not, or null. */
+export const strayPath = path => {
+  const text = String(path ?? '')
+  if (!text || text.length > 1000 || /[\\:\u0000-\u001f\u007f]/.test(text)) return `${text.slice(0, 40) || '(empty)'} is not a plain path`
+  if (text.startsWith('/') || text.split('/').some(part => part === '' || part === '.' || part === '..')) return `${text.slice(0, 60)} is not a path inside the tree`
+  return null
+}
+
+/** Hosts an install must never fetch from: this machine and its network. */
+/** A host of this machine's or its network: any address at all (a registry
+ *  package is named by a host name; an address in a lockfile is a way to
+ *  make the fetch call on a port here, loopback or LAN, mapped or not), and
+ *  the names that are local by convention. A public name that resolves here
+ *  cannot be told apart. */
+const LOCAL_NAME = /^(localhost|localhost6|ip6-localhost)$|\.(localhost|localdomain|local|internal|lan|home|test)$/i
+const localHost = hostname => isIP(hostname.replace(/^\[|\]$/g, '')) !== 0 || LOCAL_NAME.test(hostname)
+
+/**
+ * A LOCKFILE AN INSTALL MAY RUN WITH SCRIPTS HELD BACK. `npm ci
+ * --ignore-scripts` still runs `prepare` for a dependency it must make
+ * itself — one fetched from git, or packed from a directory — and fetches a
+ * tarball from wherever `resolved` says. So every entry must be a registry
+ * package (resolved over https from no host of this machine's, or unresolved
+ * and fetched by name and version), bundled, or a link to a workspace the
+ * tree declares. Returns why it may not run, or null.
+ */
+export const lockfileRefusal = (lock, workspaces = []) => {
+  const packages = lock?.packages
+  if (!packages || typeof packages !== 'object' || Array.isArray(packages)) return 'the lockfile has no packages (lockfileVersion 2 or 3 is what an install reads)'
+  const declared = [...new Set(workspaces.map(w => String(w).replace(/\/+$/, '')).filter(Boolean))]
+  const isWorkspace = key => declared.some(w => w.includes('*') ? new RegExp(`^${w.split('*').map(escaped).join('[^/]*')}$`).test(key) : w === key)
+  for (const [key, entry] of Object.entries(packages)) {
+    if (key === '') continue
+    // A key is a path the builder resolves under the tree, outside any box
+    // (fetchSkeleton): one that would leave it is refused whatever it names.
+    if (!insideTree(key)) return `${key} is not a path inside the tree`
+    if (!entry || typeof entry !== 'object') return `${key} is not a package entry`
+    if (entry.link) {
+      const target = String(entry.resolved ?? '')
+      if (!isWorkspace(target) || !packages[target]) return `${key} links to ${target || 'nothing'}, which is not a workspace the tree declares`
+      continue
+    }
+    if (!key.includes('node_modules/')) {
+      if (!isWorkspace(key)) return `${key} is a package in the tree that is not a workspace the tree declares`
+      continue
+    }
+    if (entry.inBundle) continue
+    if (entry.resolved === undefined) continue
+    let url
+    try { url = new URL(String(entry.resolved)) } catch { return `${key} resolves to ${String(entry.resolved).slice(0, 60)}, which is not an address` }
+    if (url.protocol !== 'https:') return `${key} resolves to ${url.protocol.slice(0, -1)}: — an install with scripts held back still makes what it fetches from git or a directory, and fetches only over https`
+    if (localHost(url.hostname)) return `${key} resolves to ${url.host}, ${isIP(url.hostname.replace(/^\[|\]$/g, '')) ? 'an address: a registry package is named by a host name' : 'a host of this machine\'s or its network'}`
+  }
+  return null
+}
+
+/** Everything in a directory, and under it, is a plain file or a directory.
+ *  A build that leaves a link in its pools (to a file of this machine's,
+ *  say) stages nothing: nothing of it is read. */
+export const plainFilesUnder = async dir => {
+  for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (entry.isSymbolicLink() || !(entry.isFile() || entry.isDirectory())) throw new Error(`the build left ${entry.name.slice(0, 12)} in its pools as something other than a plain file`)
+    if (entry.isDirectory()) await plainFilesUnder(resolve(dir, entry.name))
+  }
+}
+
+/**
+ * THE RECORDS A BUILD STAGED, before any is adopted or signed: each a
+ * revision of the story it was staged as, naming only signatures, and paths
+ * that stay inside a tree — in its layers and in its tree alike — since
+ * writing a revision out follows every path it names. Returns why not, or
+ * null.
+ */
+export const stagedRefusal = async (pools, stagedIn, labels = BUILT_LABELS) => {
+  const pool = resolve(pools, signOf(BUILDS_MEANING))
+  const read = async sig => { try { return JSON.parse(await readFile(resolve(pool, sig), 'utf8')) } catch { return null } }
+  for (const label of labels) {
+    const sig = stagedIn?.[label]?.record
+    if (sig === undefined) continue
+    if (!SIG.test(String(sig))) return `${label} is staged as something that is not a signature`
+    const record = await read(sig)
+    if (record?.name !== 'build') return `${label} is staged as something that is not a revision`
+    if (record.label !== label) return `${label} is staged as a revision of "${String(record.label).slice(0, 40)}"`
+    for (const part of ['install', 'source', 'workspace']) {
+      if (record[part] === undefined || record[part] === null) continue
+      if (!SIG.test(String(record[part]))) return `${label}'s ${part} is not a signature`
+      const layer = await read(record[part])
+      if (!layer?.files || typeof layer.files !== 'object' || Array.isArray(layer.files)) return `${label}'s ${part} is not a files layer`
+      for (const [path, file] of Object.entries(layer.files)) {
+        const stray = strayPath(path)
+        if (stray) return `${label}'s ${part} names ${stray}`
+        if (file !== null && !SIG.test(String(file))) return `${label}'s ${part} names ${path.slice(0, 60)} as something that is not a signature`
+      }
+    }
+    if (record.tree !== undefined && record.tree !== null) {
+      if (!SIG.test(String(record.tree))) return `${label}'s tree is not a signature`
+      const { files } = await walkTree(record.tree, read)
+      for (const path of files.keys()) { const stray = strayPath(path); if (stray) return `${label}'s tree names ${stray}` }
+    }
+    for (const list of ['atoms', 'conversations']) {
+      if (record[list] !== undefined && !(Array.isArray(record[list]) && record[list].every(s => SIG.test(String(s))))) return `${label}'s ${list} are not signatures`
+    }
+  }
+  return null
+}
+
 export const draftPathRefusal = path => {
   const text = String(path ?? '')
   if (!text || text.length > 300 || /[\\:\u0000-\u001f\u007f]/.test(text)) return `${text || '(empty)'} is not a plain path`
@@ -198,7 +326,7 @@ export const takeAsk = async (host, ask, { get = fetch, now = new Date() } = {})
   if (layer?.name !== 'draft-files' || !layer.files || typeof layer.files !== 'object') throw refusal('the draft\'s files are not a files layer')
   const files = new Map()
   for (const [path, sig] of Object.entries(layer.files)) {
-    const refused = draftPathRefusal(path)
+    const refused = draftPathRefusal(path) ?? installRefusal(path)
     if (refused) throw refusal(refused)
     if (sig === null) { files.set(path, null); continue }
     if (!SIG.test(sig)) throw refusal(`${path} names no file`)
@@ -261,6 +389,7 @@ export const listAsks = async (host, { get = fetch, now = new Date(), key } = {}
 
 /** npm's words for a network it could not reach. */
 const NETWORK_TROUBLE = /\b(ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|socket hang up|network (?:request|timeout))\b/i
+
 /** How long one step of a draft's build may run before it is stopped and
  *  answered failed: a script in watch mode never ends on its own. */
 export const STEP_MINUTES = 30
@@ -272,9 +401,10 @@ const INSTALL_FILES = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|package\.j
  * builder's signal) or the time limit ends the whole group — npm and
  * everything it started — and a terminal's Ctrl-C reaches only this builder,
  * which decides. Resolves to `{ code, signal, said, timedOut, stopped }`;
- * `said` is the tail of what it printed.
+ * `said` is the tail of what it printed. `end` is a box's own way to end what
+ * it runs (a container by name), called with the group.
  */
-export const buildStep = (command, args, { cwd, env, signal, minutes = STEP_MINUTES } = {}) => new Promise(done => {
+export const buildStep = (command, args, { cwd, env, signal, minutes = STEP_MINUTES, end: endBox } = {}) => new Promise(done => {
   let said = ''
   const keep = chunk => { said = (said + chunk).slice(-(1 << 20)) }
   let timedOut = false
@@ -285,6 +415,7 @@ export const buildStep = (command, args, { cwd, env, signal, minutes = STEP_MINU
   child.stdout.on('data', keep)
   child.stderr.on('data', keep)
   const end = () => {
+    try { endBox?.() } catch { /* the group is ended below regardless */ }
     try { process.kill(-child.pid, 'SIGTERM') } catch { child.kill('SIGTERM') }
     // Whatever ignores the first word is ended.
     setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL') } catch { child.kill('SIGKILL') } }, 10_000).unref()
@@ -310,19 +441,99 @@ export const buildStep = (command, args, { cwd, env, signal, minutes = STEP_MINU
  * builder's trouble, and waits for as long as it lasts. A step over its time,
  * or ended by a signal this builder did not send, is the draft's: failed.
  */
-export const stepTrouble = (label, args, result, { touchesInstall = false } = {}) => {
+export const stepTrouble = (label, args, result, { touchesInstall = false, boxed = false } = {}) => {
   if (result.code === 0 && !result.timedOut && !result.stopped) return null
-  const tail = String(result.said ?? '').split('\n').slice(-25).join('\n')
+  const lines = String(result.said ?? '').split('\n')
+  const tail = lines.filter(line => line.trim() !== BOX_OPENED).slice(-25).join('\n')
   const said = `${label} failed:\n${tail}`
   if (result.stopped) return transient('this builder is stopping')
   if (result.error && result.code === null && !result.signal) return transient(`${label} could not start: ${result.error.message}`)
+  // A box that never said it opened never ran the step: the builder's
+  // trouble, never answered as the draft's.
+  if (boxed && !lines.some(line => line.trim() === BOX_OPENED)) return transient(`the box could not open for ${label}: ${lines.map(l => l.trim()).filter(Boolean)[0]?.slice(0, 160) ?? 'it said nothing'}`)
   if (result.timedOut) return new Error(`${label} ran past ${STEP_MINUTES} minutes and was stopped`)
   if (result.signal) return new Error(`${label} was ended by ${result.signal}:\n${tail}`)
   if (args[0] === 'ci' && NETWORK_TROUBLE.test(said)) return Object.assign(transient(said), { network: touchesInstall })
   return new Error(said)
 }
 
-export const buildDraft = async (host, ask, { to = null, test = false, keepWork = false, untrusted = false, log = console.log, get = fetch, now = new Date(), signal, me } = {}) => {
+/** Where this builder's npm cache lives: its own, shown to every build,
+ *  writable — so never this user's home or npm's own cache (what `npx` runs
+ *  from), nor anything over the builder's pools. */
+export const npmCacheDir = ({ env = process.env, home = homedir() } = {}) => {
+  const dir = env.HYPERCOMB_BUILDER_NPM_CACHE ? resolve(env.HYPERCOMB_BUILDER_NPM_CACHE) : localFile('npm-cache')
+  const pools = dirname(dirname(localFile('npm-cache')))
+  const within = (path, root) => path === root || path.startsWith(root.endsWith('/') ? root : `${root}/`)
+  if (dir === '/' || dir === home || within(dir, resolve(home, '.npm')) || within(pools, dir)) {
+    throw new Error(`HYPERCOMB_BUILDER_NPM_CACHE=${dir} is this user's home, npm's own cache or a directory over the builder's pools: every build writes the cache, so it must be the builder's own (the default is <pools>/local/npm-cache)`)
+  }
+  return dir
+}
+
+/**
+ * THE MANIFESTS ALONE, for the fetch: the root's package.json and lockfile,
+ * `.npmrc`, and every workspace's package.json, each without its `scripts` —
+ * in a tree of their own. `npm ci --ignore-scripts` still runs a workspace's
+ * `prepare`, so the fetch runs on a tree that has no script to run: what it
+ * reads of the draft is data (its dependencies), never its code. The
+ * lockfile names the workspaces (lockfileRefusal let only declared ones in).
+ */
+/** A relative path that stays under its root: no empty, `.` or `..` step,
+ *  no backslash, no NUL. */
+export const insideTree = path => typeof path === 'string' && path.split('/').every(step => step && step !== '.' && step !== '..' && !/[\\\0]/.test(step))
+
+export const fetchSkeleton = async (tree, into, lock) => {
+  const read = async path => { try { return await readFile(resolve(tree, path), 'utf8') } catch { return null } }
+  const manifest = async path => {
+    const text = await read(path)
+    if (text === null) return null
+    let parsed
+    try { parsed = JSON.parse(text.replace(/^\uFEFF/, '')) } catch (error) { throw refusal(`${path} is not JSON: ${error.message}`) }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw refusal(`${path} is not a manifest`)
+    delete parsed.scripts
+    return JSON.stringify(parsed)
+  }
+  const files = new Map([['src/package.json', await manifest('src/package.json')], ['src/package-lock.json', await read('src/package-lock.json')], ['src/.npmrc', await read('src/.npmrc')]])
+  for (const key of Object.keys(lock?.packages ?? {})) {
+    if (key === '' || !insideTree(key) || key.includes('node_modules/') || lock.packages[key]?.link) continue
+    files.set(`src/${key}/package.json`, await manifest(`src/${key}/package.json`))
+  }
+  for (const [path, text] of files) {
+    if (text === null) continue
+    await mkdir(dirname(resolve(into, path)), { recursive: true })
+    await writeFile(resolve(into, path), text)
+  }
+  return [...files.keys()].filter(path => files.get(path) !== null)
+}
+
+/**
+ * THE STEPS OF A BUILD, in order, each with whether it may reach the
+ * network. The install is two passes: the first fetches from the registry
+ * with every script held back, on the manifests alone (fetchSkeleton); the
+ * second installs the same lockfile in the draft's tree from the cache,
+ * offline, and runs every script — the dependencies' install scripts and the
+ * workspaces' `prepare` — exactly as one `npm ci` would, only with nothing
+ * to send to. Then the repository's own build scripts, offline.
+ */
+export const buildSteps = () => {
+  const install = ['ci', ...INSTALL_WORKSPACES.flatMap(w => ['-w', w]), '--include-workspace-root', '--no-audit', '--no-fund']
+  // The cache is written by npm alone — the fetch, before any script of the
+  // draft's runs — and read by everything after, so no build can leave a
+  // package there for a later one.
+  return [
+    { args: [...install, '--ignore-scripts'], label: 'npm ci on the manifests alone, scripts held back (the registry reachable)', network: true, cacheWritable: true, skeleton: true },
+    { args: [...install, '--offline'], label: 'npm ci in the draft\'s tree from the cache, every script run, with no network', network: false, cacheWritable: false },
+    ...AUTHOR_SCRIPTS.map(script => ({ args: ['run', script], label: `npm run ${script}`, network: false, cacheWritable: false })),
+  ]
+}
+
+export const buildDraft = async (host, ask, { to = null, test = false, keepWork = false, untrusted = false, log = console.log, get = fetch, now = new Date(), signal, me, sandbox = null } = {}) => {
+  // The box first, before anything is fetched or run; none here is this
+  // builder's trouble, never the draft's — and so is a cache that is not
+  // the builder's own.
+  const box = sandbox ?? await chooseSandbox({ log }).catch(error => { throw held(error.message) })
+  let cache
+  try { cache = npmCacheDir() } catch (error) { throw held(error.message) }
   const taken = await takeAsk(host, ask, { get, now })
   log(`[builder] ask ${ask.slice(0, 12)} from ${taken.author.slice(0, 12)}: ${taken.files.size} file(s) over ${taken.record.base.slice(0, 12)}`)
   // WHOSE CODE RUNS HERE. Building runs the draft's code on this machine:
@@ -359,8 +570,20 @@ export const buildDraft = async (host, ask, { to = null, test = false, keepWork 
     else expected[path] = sha(bytes)
   }
 
+  // THE LOCKFILE THE INSTALL WILL READ — the draft's, else the base's — may
+  // only fetch registry packages (lockfileRefusal): the first install runs
+  // with scripts held back and the network on, and npm still makes a
+  // dependency it must fetch from git or pack from a directory.
+  const treeFile = async path => taken.files.has(path) ? taken.files.get(path) : expected[path] ? await readFile(resolve(poolDir(BUILDS_MEANING), expected[path])).catch(() => null) : null
+  const parsed = async path => { const bytes = await treeFile(path); try { return bytes ? JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, '')) : null } catch { return null } }
+  const lock = await parsed('src/package-lock.json')
+  if (!lock) throw refusal('the tree has no lockfile an install can read (src/package-lock.json)')
+  const unfit = lockfileRefusal(lock, (await parsed('src/package.json'))?.workspaces ?? [])
+  if (unfit) throw refusal(`the lockfile is not one an install may run: ${unfit}`)
+  await mkdir(cache, { recursive: true })
   const work = await mkdtemp(resolve(tmpdir(), 'hc-builder-'))
   const pools = await mkdtemp(resolve(tmpdir(), 'hc-builder-pools-'))
+  const skeleton = await mkdtemp(resolve(tmpdir(), 'hc-builder-fetch-'))
   try {
     await rm(work, { recursive: true, force: true })
     await checkout(base.sig, work)
@@ -372,19 +595,26 @@ export const buildDraft = async (host, ask, { to = null, test = false, keepWork 
     const src = resolve(work, 'src')
     const env = buildEnv(work, process.env, { pools })
     const touchesInstall = [...taken.files.keys()].some(path => INSTALL_FILES.test(path))
-    const run = async (args, label) => {
+    // Every step inside the box: its tree, its pools and the cache writable,
+    // the network only where the step says.
+    // The fetch sees the manifests alone, in a tree of their own.
+    await fetchSkeleton(work, skeleton, lock)
+    const inBox = (command, args, { network = false, cacheWritable = false, tree = work } = {}) => {
+      const step = box.wrap({ command, args, cwd: resolve(tree, 'src'), env, network, cacheWritable, work: tree, pools, cache })
+      return buildStep(step.command, step.args, { cwd: step.cwd, env: step.env, signal, end: step.end })
+    }
+    const run = async ({ args, label, network, cacheWritable, skeleton: onSkeleton }) => {
       if (signal?.aborted) throw transient('this builder is stopping')
       log(`[builder] ${label}`)
-      const trouble = stepTrouble(label, args, await buildStep('npm', args, { cwd: src, env, signal }), { touchesInstall })
+      const trouble = stepTrouble(label, args, await inBox('npm', args, { network, cacheWritable, tree: onSkeleton ? skeleton : work }), { touchesInstall, boxed: box.name !== 'none' })
       if (trouble) throw trouble
     }
-    await run(['ci', ...INSTALL_WORKSPACES.flatMap(w => ['-w', w]), '--include-workspace-root', '--no-audit', '--no-fund'], 'npm ci from the draft\'s tree (its lockfile, if it changed one)')
-    for (const script of AUTHOR_SCRIPTS) await run(['run', script], `npm run ${script}`)
+    for (const step of buildSteps()) await run(step)
     if (test) {
       log('[builder] the draft\'s tests')
-      const r = await buildStep('npx', ['vitest', 'run'], { cwd: src, env, signal })
+      const r = await inBox('npx', ['vitest', 'run'])
       if (r.code !== 0 || r.timedOut || r.stopped) {
-        const trouble = stepTrouble('the draft\'s tests', ['test'], r)
+        const trouble = stepTrouble('the draft\'s tests', ['test'], r, { boxed: box.name !== 'none' })
         throw r.code !== null && !r.timedOut && !r.stopped
           ? new Error(`the draft's tests fail:\n${r.said.split('\n').filter(l => /×|FAIL|Test Files|Tests /.test(l)).slice(-20).join('\n')}`)
           : trouble
@@ -394,8 +624,11 @@ export const buildDraft = async (host, ask, { to = null, test = false, keepWork 
     // VERIFY, THEN SIGN. The build's own pools hold what it staged; nothing
     // is taken from them, let alone signed, unless the host revision's tree
     // is the draft over its base (and the files a build writes itself).
+    await plainFilesUnder(pools)
     const stagedIn = JSON.parse(await readFile(resolve(pools, 'local', 'stage.json'), 'utf8').catch(() => '{}'))
     if (!stagedIn.host?.record) throw new Error('the build staged no host revision')
+    const unsound = await stagedRefusal(pools, stagedIn)
+    if (unsound) throw new Error(`the build staged a revision this builder will not sign: ${unsound}`)
     const builtTree = await workspaceOf(stagedIn.host.record, resolve(pools, signOf(BUILDS_MEANING)))
     const differs = [...new Set([...Object.keys(expected), ...Object.keys(builtTree)])]
       .filter(path => expected[path] !== builtTree[path] && !GENERATED_FILES.includes(path)).sort()
@@ -416,7 +649,12 @@ export const buildDraft = async (host, ask, { to = null, test = false, keepWork 
     if (to) log(`[builder] carried ${await carryPools(resolve(to), { atoms: true })} file(s) into ${to}`)
     return { ...taken, promoted, work: keepWork ? work : null }
   } finally {
-    if (!keepWork) await rm(work, { recursive: true, force: true })
+    // A tree kept for the operator to look at is handed back without its
+    // .git: the build could have written hooks or a config into it that git
+    // would run on this machine at the first `git status`.
+    if (keepWork) { await rm(resolve(work, '.git'), { recursive: true, force: true }); log(`[builder] kept ${work} (without its .git)`) }
+    else await rm(work, { recursive: true, force: true })
+    await rm(skeleton, { recursive: true, force: true })
     await rm(pools, { recursive: true, force: true })
   }
 }
@@ -633,7 +871,7 @@ const NETWORK_TRIES = 3
  */
 export const watchAsks = async (host, {
   interval = 60, once = false, test = false, log = console.log, get = fetch, send = fetch,
-  now = () => new Date(), signal, key, build = buildDraft, carry = sync,
+  now = () => new Date(), signal, key, build = buildDraft, carry = sync, sandbox = null,
 } = {}) => {
   const secret = key ?? await signerKey()
   const { getPublicKey } = await import('nostr-tools/pure')
@@ -696,7 +934,7 @@ export const watchAsks = async (host, {
         return
       }
       try {
-        promoted = (await build(listed.origin, listed.ask, { test, log, get, now: now(), signal, me })).promoted
+        promoted = (await build(listed.origin, listed.ask, { test, log, get, now: now(), signal, me, sandbox })).promoted
       } catch (error) {
         if (error.held) { tell(listed.ask, `[builder] held: ${whyOf(error)}`); return }
         const tries = error.network ? (networkTries.get(listed.ask) ?? 0) + 1 : 0
@@ -781,24 +1019,37 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }).catch(e => { console.error(`[builder] ${e.message}`); process.exit(1) })
 } else if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === 'watch') {
   const args = process.argv.slice(3)
-  const host = args.find((arg, i) => !arg.startsWith('--') && args[i - 1] !== '--interval')
+  const valued = ['--interval', '--sandbox']
+  const host = args.find((arg, i) => !arg.startsWith('--') && !valued.includes(args[i - 1]))
   const at = args.indexOf('--interval')
   const interval = at >= 0 ? Number(args[at + 1]) : 60
-  if (!host || !(interval >= 5)) { console.error('usage: node host/builder.mjs watch <host> [--once] [--interval <seconds, at least 5>] [--test]'); process.exit(2) }
+  if (!host || !(interval >= 5)) { console.error('usage: node host/builder.mjs watch <host> [--once] [--interval <seconds, at least 5>] [--test] [--sandbox container|bubblewrap|none]'); process.exit(2) }
   const stop = new AbortController()
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { if (!stop.signal.aborted) console.log('[builder] stopping after this step'); stop.abort() })
-  console.log(`[builder] watching ${originOf(host)}${args.includes('--once') ? ' once' : ` every ${interval}s`} — trusted authors: builds.mjs trust <pubkey>`)
-  watchAsks(host, { once: args.includes('--once'), interval, test: args.includes('--test'), signal: stop.signal })
-    .catch(e => { console.error(`[builder] ${e.message}`); process.exit(1) })
+  const boxAt = args.indexOf('--sandbox')
+  if (boxAt >= 0 && (!args[boxAt + 1] || args[boxAt + 1].startsWith('--'))) { console.error('usage: --sandbox wants a name: container, bubblewrap or none'); process.exit(2) }
+  // The box first: with none here, nothing is watched.
+  chooseSandbox({ ...(boxAt >= 0 ? { prefer: args[boxAt + 1] } : {}), keepOut: [dirname(dirname(localFile('npm-cache')))], stepEnv: ({ work, pools }) => buildEnv(work, process.env, { pools }) }).then(sandbox => {
+    npmCacheDir()
+    console.log(`[builder] watching ${originOf(host)}${args.includes('--once') ? ' once' : ` every ${interval}s`} — trusted authors: builds.mjs trust <pubkey>`)
+    return watchAsks(host, { once: args.includes('--once'), interval, test: args.includes('--test'), signal: stop.signal, sandbox })
+  }).catch(e => { console.error(`[builder] ${e.message}`); process.exit(1) })
 } else if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const at = process.argv.indexOf('--to')
-  const [host, ask] = process.argv.slice(2).filter((a, i) => !a.startsWith('--') && !(at >= 0 && i + 2 === at + 1))
-  if (!host || !ask) {
-    console.error('usage: node host/builder.mjs <host> <ask sig> [--to <dir>] [--test] [--keep] [--untrusted]')
+  const args = process.argv.slice(2)
+  const valued = ['--to', '--sandbox']
+  const [host, ask] = args.filter((a, i) => !a.startsWith('--') && !valued.includes(args[i - 1]))
+  const at = args.indexOf('--to')
+  const boxAt = args.indexOf('--sandbox')
+  if (!host || !ask || (boxAt >= 0 && (!args[boxAt + 1] || args[boxAt + 1].startsWith('--')))) {
+    console.error('usage: node host/builder.mjs <host> <ask sig> [--to <dir>] [--test] [--keep] [--untrusted] [--sandbox container|bubblewrap|none]')
     process.exit(2)
   }
   builderLock(`building ${ask.slice(0, 12)}`).then(async release => {
-    try { await buildDraft(host, ask, { to: at >= 0 ? process.argv[at + 1] : null, test: process.argv.includes('--test'), keepWork: process.argv.includes('--keep'), untrusted: process.argv.includes('--untrusted') }) }
+    try {
+      const sandbox = await chooseSandbox({ ...(boxAt >= 0 ? { prefer: args[boxAt + 1] } : {}), keepOut: [dirname(dirname(localFile('npm-cache')))], stepEnv: ({ work, pools }) => buildEnv(work, process.env, { pools }) })
+      npmCacheDir()
+      await buildDraft(host, ask, { to: at >= 0 ? args[at + 1] : null, test: args.includes('--test'), keepWork: args.includes('--keep'), untrusted: args.includes('--untrusted'), sandbox })
+    }
     finally { await release() }
   }).catch(e => { console.error(`[builder] ${e.message}`); process.exit(1) })
 }

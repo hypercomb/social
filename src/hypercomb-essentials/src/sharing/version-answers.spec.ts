@@ -93,7 +93,7 @@ const asked = async (io: PoolIo, host: ReturnType<typeof hostOf>, author: Return
     host.flat.set(url.split('/').at(-1)!, init.body as unknown as Uint8Array)
     return new Response('', { status: 201 })
   }
-  const outcome = await askBuild(draft, host.origin, { io, sign: author, put: sent })
+  const outcome = await askBuild(draft, host.origin, { io, sign: author, put: sent, now: new Date(NOW) })
   if (!outcome.ok) throw new Error(outcome.error)
   host.readers.add(author.pubkey)
   return { base, draft, ask: outcome.ask, a, workspace }

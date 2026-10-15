@@ -6,9 +6,10 @@
 // revision it builds carries its provenance.
 
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 
@@ -81,7 +82,89 @@ describe('the builder takes an ask', () => {
       const bad = hosting({ path })
       await expect(takeAsk('http://h.test', bad.ask, { get: bad.get, now: NOW })).rejects.toThrow(/\.git or node_modules|not a plain path/)
     }
+    // How an install fetches is not a draft's to change.
+    for (const path of ['src/.npmrc', '.npmrc', 'src/npm-shrinkwrap.json']) {
+      const bad = hosting({ path })
+      await expect(takeAsk('http://h.test', bad.ask, { get: bad.get, now: NOW })).rejects.toThrow(/sets how an install fetches/)
+    }
   })
+
+  it('lets an install run with scripts held back only on a lockfile of registry packages and declared workspaces', async () => {
+    const { lockfileRefusal } = await import('./builder.mjs')
+    const lock = JSON.parse(await readFile(resolve(import.meta.dirname, '..', '..', 'package-lock.json'), 'utf8'))
+    const { workspaces } = JSON.parse(await readFile(resolve(import.meta.dirname, '..', '..', 'package.json'), 'utf8'))
+    expect(lockfileRefusal(lock, workspaces)).toBeNull()
+    const registry = { resolved: 'https://registry.npmjs.org/x/-/x-1.0.0.tgz', integrity: 'sha512-x' }
+    const withEntry = (key: string, entry: Record<string, unknown>) => ({ lockfileVersion: 3, packages: { '': {}, 'hypercomb-core': { version: '1' }, 'node_modules/hypercomb-core': { resolved: 'hypercomb-core', link: true }, 'node_modules/ok': registry, [key]: entry } })
+    const ws = ['hypercomb-core', 'packages/*']
+    expect(lockfileRefusal(withEntry('node_modules/plain', { version: '1.0.0' }), ws)).toBeNull()
+    // A key is a path the builder resolves under the tree, outside any box: one that leaves it is refused even when declared.
+    for (const key of ['../../../root', '/etc', 'x/../../y', './x', 'x//y', 'x\\y']) {
+      expect(lockfileRefusal(withEntry(key, { name: 'x', version: '1.0.0' }), [...ws, key])).toMatch(/is not a path inside the tree/)
+    }
+    expect(lockfileRefusal(withEntry('node_modules/bundled', { inBundle: true }), ws)).toBeNull()
+    expect(lockfileRefusal(withEntry('node_modules/x', { resolved: 'git+https://attacker.example/x.git#abc' }), ws)).toMatch(/resolves to git\+https:/)
+    expect(lockfileRefusal(withEntry('node_modules/x', { resolved: 'file:vendor/x' }), ws)).toMatch(/resolves to file:/)
+    expect(lockfileRefusal(withEntry('node_modules/x', { resolved: 'http://registry.npmjs.org/x/-/x-1.0.0.tgz' }), ws)).toMatch(/resolves to http:/)
+    expect(lockfileRefusal(withEntry('node_modules/x', { resolved: 'https://127.0.0.1:4977/x.tgz' }), ws)).toMatch(/an address/)
+    expect(lockfileRefusal(withEntry('node_modules/x', { resolved: 'https://relay.local/x.tgz' }), ws)).toMatch(/a host of this machine's/)
+    expect(lockfileRefusal(withEntry('node_modules/x', { resolved: 'https://10.0.0.5/x.tgz' }), ws)).toMatch(/an address/)
+    // Any address at all, mapped or unspecified or public: a registry package is named by a host name. Local names by convention; a name that merely starts with one is not.
+    for (const host of ['[::ffff:127.0.0.1]', '[::ffff:7f00:1]', '[::]', '[64:ff9b::7f00:1]', '[2001:db8::1]', '1.2.3.4', '[::1]', '[fe80::1]']) {
+      expect(lockfileRefusal(withEntry('node_modules/x', { resolved: `https://${host}/x.tgz` }), ws)).toMatch(/an address/)
+    }
+    for (const host of ['localhost', 'localhost6', 'relay.localdomain', 'relay.internal', 'a.b.lan']) {
+      expect(lockfileRefusal(withEntry('node_modules/x', { resolved: `https://${host}/x.tgz` }), ws)).toMatch(/a host of this machine's/)
+    }
+    expect(lockfileRefusal(withEntry('node_modules/x', { resolved: 'https://localhost.corp.example/x.tgz' }), ws)).toBeNull()
+    expect(lockfileRefusal(withEntry('node_modules/x', { resolved: 'not an address' }), ws)).toMatch(/not an address/)
+    expect(lockfileRefusal(withEntry('node_modules/x', { resolved: 'vendor/x', link: true }), ws)).toMatch(/links to vendor\/x, which is not a workspace/)
+    expect(lockfileRefusal({ lockfileVersion: 3, packages: { ...withEntry('node_modules/x', { resolved: 'packages/x', link: true }).packages, 'packages/x': { version: '1' } } }, ws)).toBeNull()
+    expect(lockfileRefusal(withEntry('vendor/x', { version: '1' }), ws)).toMatch(/not a workspace the tree declares/)
+    expect(lockfileRefusal({ lockfileVersion: 1, dependencies: {} }, ws)).toMatch(/no packages/)
+  })
+
+  it('signs nothing a build staged that names a path outside a tree, or anything that is not a plain file', async () => {
+    const { plainFilesUnder, stagedRefusal, strayPath } = await import('./builder.mjs')
+    const { sign } = await import('./builds.mjs')
+    const { mkdir, symlink, writeFile } = await import('node:fs/promises')
+    expect(strayPath('src/a.ts')).toBeNull()
+    expect(strayPath('node_modules/x/pure.js')).toBeNull()
+    for (const bad of ['/etc/passwd', '../x', 'a/../../x', 'a//b', 'a\\b', 'C:x', '']) expect(strayPath(bad)).not.toBeNull()
+    const pools = resolve(root, 'build-pools')
+    const pool = resolve(pools, sign('host:builds'))
+    await mkdir(pool, { recursive: true })
+    await mkdir(resolve(pools, 'local'), { recursive: true })
+    const keep = async (value: unknown) => { const bytes = enc(value); await writeFile(resolve(pool, sha(bytes)), bytes); return sha(bytes) }
+    const meta = (payload: Record<string, unknown>) => keep({ meta: 1, ...payload })
+    const file = await keep('bytes')
+    const tree = async (name: string) => keep({ name: 'host', children: [await meta({ layer: await keep({ name: 'unit', children: [await meta({ layer: await keep({ name, content: await meta({ resource: file, relation: 'content' }) }), relation: 'children' })] }), relation: 'children' })] })
+    const staged = async (record: Record<string, unknown>) => ({ host: { record: await keep({ name: 'build', label: 'host', version: 'staged', ...record }) } })
+    const sound = await staged({ install: await keep({ name: 'install', files: { 'main.js': file } }), workspace: await keep({ name: 'workspace', files: { 'src/a.ts': file, 'docs/old.md': null } }), tree: await tree('src/main.ts'), atoms: [file] })
+    expect(await stagedRefusal(pools, sound)).toBeNull()
+    expect(await stagedRefusal(pools, await staged({ install: await keep({ name: 'install', files: { '/home/op/.bashrc': file } }) }))).toMatch(/host's install names \/home\/op\/.bashrc is not a path inside the tree/)
+    expect(await stagedRefusal(pools, await staged({ workspace: await keep({ name: 'workspace', files: { '../../.ssh/authorized_keys': file } }) }))).toMatch(/host's workspace names/)
+    expect(await stagedRefusal(pools, await staged({ tree: await tree('../../x') }))).toMatch(/host's tree names/)
+    expect(await stagedRefusal(pools, await staged({ workspace: await keep({ name: 'workspace', files: { 'src/a.ts': 'not a signature' } }) }))).toMatch(/not a signature/)
+    expect(await stagedRefusal(pools, await staged({ label: 'hypercomb-essentials' }))).toMatch(/staged as a revision of "hypercomb-essentials"/)
+    expect(await stagedRefusal(pools, { host: { record: await keep({ name: 'draft' }) } })).toMatch(/not a revision/)
+    expect(await stagedRefusal(pools, await staged({ atoms: ['x'] }))).toMatch(/atoms are not signatures/)
+    await expect(plainFilesUnder(pools)).resolves.toBeUndefined()
+    await symlink('/etc/hostname', resolve(pool, 'c'.repeat(64)))
+    await expect(plainFilesUnder(pools)).rejects.toThrow(/something other than a plain file/)
+  })
+
+  it('keeps the npm cache the builder\'s own: never this user\'s home, npm\'s cache, or a directory over the pools', async () => {
+    const { npmCacheDir } = await import('./builder.mjs')
+    const home = resolve(root, 'home')
+    expect(npmCacheDir({ env: {}, home })).toBe(resolve(root, 'pools', 'local', 'npm-cache'))
+    expect(npmCacheDir({ env: { HYPERCOMB_BUILDER_NPM_CACHE: resolve(root, 'elsewhere') }, home })).toBe(resolve(root, 'elsewhere'))
+    for (const theirs of [home, resolve(home, '.npm'), resolve(home, '.npm', '_cacache'), resolve(root, 'pools'), root, '/']) {
+      expect(() => npmCacheDir({ env: { HYPERCOMB_BUILDER_NPM_CACHE: theirs }, home })).toThrow(/must be the builder's own/)
+    }
+  })
+
+
 })
 
 describe('a draft\'s build', () => {
@@ -534,6 +617,105 @@ describe('a watching builder', () => {
     await watchAsks(ORIGIN, { once: true, key: builder, get: theirs.get, send: theirs.send, now: () => NOW, log: l => { lines.push(l) }, carry: async () => [] })
     expect(theirs.puts).toEqual([])
     expect(lines.some(l => l.startsWith('[builder] held: that ask was built already'))).toBe(true)
+  })
+
+  it('builds in two installs and the repository\'s scripts, the registry reachable only for the first, which runs on the manifests alone', async () => {
+    const { buildSteps } = await import('./builder.mjs')
+    const steps = buildSteps()
+    expect(steps.map(s => s.network)).toEqual([true, false, false, false, false, false])
+    // npm alone writes the cache: the one step before any script runs.
+    expect(steps.map(s => s.cacheWritable)).toEqual([true, false, false, false, false, false])
+    // The fetch sees no script: it runs in the skeleton, every other step in the draft's tree.
+    expect(steps.map(s => s.skeleton === true)).toEqual([true, false, false, false, false, false])
+    expect(steps[0]!.args).toEqual(expect.arrayContaining(['ci', '--ignore-scripts', '-w', 'hypercomb-essentials', '--include-workspace-root']))
+    expect(steps[0]!.args).not.toContain('--offline')
+    expect(steps[1]!.args).toEqual(expect.arrayContaining(['ci', '--offline']))
+    expect(steps[1]!.args).not.toContain('--ignore-scripts')
+    expect(steps.slice(2).map(s => s.args)).toEqual([['run', 'build:core'], ['run', 'build:runtime'], ['run', 'build:module'], ['run', 'build:shim:pure']])
+  })
+
+  it('the fetch skeleton is the manifests without their scripts, the lockfile and .npmrc, and nothing else of the tree', async () => {
+    const { fetchSkeleton } = await import('./builder.mjs')
+    // Everything under one directory of its own, the tree two steps down, so a key that climbs out of the tree still lands inside it.
+    const base = await mkdtemp(resolve(tmpdir(), 'hc-skel-'))
+    const tree = resolve(base, 'a', 'b', 'tree')
+    const into = resolve(base, 'into')
+    await mkdir(tree, { recursive: true })
+    await mkdir(into)
+    try {
+      const file = async (path: string, text: string) => { await mkdir(dirname(resolve(tree, path)), { recursive: true }); await writeFile(resolve(tree, path), text) }
+      const lock = { packages: { '': { workspaces: ['hypercomb-essentials', 'tools/x'] }, 'hypercomb-essentials': { name: 'hypercomb-essentials', version: '1.0.0' }, 'tools/x': { name: 'x' }, 'node_modules/hypercomb-essentials': { resolved: 'hypercomb-essentials', link: true }, 'node_modules/esbuild': { version: '0.1.0', resolved: 'https://registry.npmjs.org/esbuild/-/esbuild-0.1.0.tgz', hasInstallScript: true }, 'hypercomb-essentials/node_modules/y': { version: '1.0.0' } } }
+      await file('src/package.json', JSON.stringify({ name: 'root', scripts: { prepare: 'node steal.js', build: 'x' }, workspaces: ['hypercomb-essentials', 'tools/x'], devDependencies: { esbuild: '0.1.0' } }))
+      await file('src/package-lock.json', JSON.stringify(lock))
+      await file('src/.npmrc', 'legacy-peer-deps=true\n')
+      await file('src/hypercomb-essentials/package.json', JSON.stringify({ name: 'hypercomb-essentials', version: '1.0.0', scripts: { prepare: 'node steal.js' } }))
+      await file('src/tools/x/package.json', JSON.stringify({ name: 'x', scripts: { postinstall: 'curl evil' } }))
+      await file('src/steal.js', 'process.exit(0)')
+      await file('src/hypercomb-essentials/src/index.ts', 'export {}')
+      await file('src/hypercomb-essentials/node_modules/y/package.json', JSON.stringify({ name: 'y' }))
+      const written = await fetchSkeleton(tree, into, lock)
+      expect(written.sort()).toEqual(['src/.npmrc', 'src/hypercomb-essentials/package.json', 'src/package-lock.json', 'src/package.json', 'src/tools/x/package.json'])
+      // No manifest keeps a script; the lockfile and .npmrc are byte for byte the tree's.
+      for (const path of written.filter(p => p.endsWith('package.json'))) expect(JSON.parse(await readFile(resolve(into, path), 'utf8'))).not.toHaveProperty('scripts')
+      expect(JSON.parse(await readFile(resolve(into, 'src/package.json'), 'utf8'))).toEqual({ name: 'root', workspaces: ['hypercomb-essentials', 'tools/x'], devDependencies: { esbuild: '0.1.0' } })
+      expect(await readFile(resolve(into, 'src/package-lock.json'), 'utf8')).toBe(JSON.stringify(lock))
+      expect(await readFile(resolve(into, 'src/.npmrc'), 'utf8')).toBe('legacy-peer-deps=true\n')
+      // Nothing else: no source, no script file, no nested node_modules.
+      const all: string[] = []
+      const walk = async (dir: string, at = ''): Promise<void> => { for (const entry of await readdir(dir, { withFileTypes: true })) { const path = at ? `${at}/${entry.name}` : entry.name; if (entry.isDirectory()) await walk(resolve(dir, entry.name), path); else all.push(path) } }
+      await walk(into)
+      expect(all.sort()).toEqual(written.sort())
+      // A manifest with a byte-order mark is read as npm reads it; one that is not JSON refuses the draft, naming the file.
+      await file('src/tools/x/package.json', '\uFEFF' + JSON.stringify({ name: 'x', scripts: { postinstall: 'curl evil' } }))
+      const bom = resolve(base, 'bom')
+      await mkdir(bom)
+      await fetchSkeleton(tree, bom, lock)
+      expect(await readFile(resolve(bom, 'src/tools/x/package.json'), 'utf8')).toBe(JSON.stringify({ name: 'x' }))
+      await file('src/tools/x/package.json', '{ not json')
+      await expect(fetchSkeleton(tree, resolve(base, 'bad'), lock)).rejects.toMatchObject({ refused: true, message: expect.stringMatching(/src\/tools\/x\/package.json is not JSON/) })
+      await file('src/tools/x/package.json', JSON.stringify({ name: 'x', scripts: { postinstall: 'curl evil' } }))
+      // A key that would leave the tree (refused before any build) is skipped here too: nothing is read or written outside.
+      const escaping = { packages: { ...lock.packages, '../../escape': { name: 'escape' } } }
+      await file('../../escape/package.json', JSON.stringify({ name: 'escape', scripts: { prepare: 'x' } }))
+      expect(existsSync(resolve(base, 'a', 'escape', 'package.json'))).toBe(true)
+      expect((await fetchSkeleton(tree, into, escaping)).some(path => path.includes('escape'))).toBe(false)
+      expect(await readFile(resolve(base, 'a', 'escape', 'package.json'), 'utf8')).toContain('prepare')
+      expect(existsSync(resolve(base, 'escape'))).toBe(false)
+      // A tree without .npmrc or a workspace manifest: those are simply not written.
+      await rm(resolve(tree, 'src/.npmrc'))
+      const less = resolve(base, 'less')
+      await mkdir(less)
+      expect((await fetchSkeleton(tree, less, lock)).sort()).toEqual(['src/hypercomb-essentials/package.json', 'src/package-lock.json', 'src/package.json', 'src/tools/x/package.json'])
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  it('a box that did not open is the builder\'s trouble, never answered as the draft\'s; a draft saying a box\'s words is', async () => {
+    const { stepTrouble } = await import('./builder.mjs')
+    const step = (said: string) => ({ code: 1, signal: null, said, timedOut: false, stopped: false })
+    const boxed = { boxed: true }
+    expect(stepTrouble('npm run build:core', ['run'], step('bwrap: No permissions to create a new namespace\n'), boxed)).toMatchObject({ transient: true, message: expect.stringMatching(/the box could not open for npm run build:core: bwrap: No permissions/) })
+    expect(stepTrouble('npm ci', ['ci'], step('docker: Error response from daemon: No such image: node:22.\nSee \'docker run --help\'.'), boxed)).toMatchObject({ transient: true })
+    expect(stepTrouble('npm ci', ['ci'], step(''), boxed)).toMatchObject({ transient: true, message: expect.stringMatching(/it said nothing/) })
+    // Opened, then failed: the draft's — and the box's line is not in what is said back.
+    const failed = stepTrouble('npm run build:core', ['run'], step(['[box] opened', '> build:core', 'src/a.ts(1,1): error TS1', 'npm error Lifecycle script `build:core` failed'].join('\n')), boxed)!
+    expect(failed.transient).toBeUndefined()
+    expect(failed.message).not.toContain('[box] opened')
+    expect(failed.message).toContain('error TS1')
+    // Unboxed, nothing is owed a line.
+    expect(stepTrouble('npm run build:core', ['run'], step('bwrap: pretending')).transient).toBeUndefined()
+  })
+
+  it('ends a box its own way too, with the group', async () => {
+    const { buildStep } = await import('./builder.mjs')
+    let ended = 0
+    const stop = new AbortController()
+    const running = buildStep(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { signal: stop.signal, end: () => { ended++ } })
+    await new Promise(done => setTimeout(done, 300))
+    stop.abort()
+    expect((await running).stopped).toBe(true)
+    expect(ended).toBe(1)
   })
 
   it('runs each build step as a group it can end: past its time, or when this builder stops', async () => {

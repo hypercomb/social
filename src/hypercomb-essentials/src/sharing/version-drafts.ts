@@ -146,7 +146,7 @@ export type AskOutcome =
 export const askBuild = async (
   draft: string,
   host: string,
-  { io = opfsPools(), sign = signerHere(), put = (url: string, init: RequestInit) => fetch(url, init) }: { io?: PoolIo; sign?: Signer; put?: (url: string, init: RequestInit) => Promise<Response> } = {},
+  { io = opfsPools(), sign = signerHere(), put = (url: string, init: RequestInit) => fetch(url, init), now = new Date() }: { io?: PoolIo; sign?: Signer; put?: (url: string, init: RequestInit) => Promise<Response>; now?: Date } = {},
 ): Promise<AskOutcome> => {
   if (!sign) return { ok: false, error: 'no signer here: the ask is signed by the author' }
   const closure = await draftClosure(draft, io)
@@ -159,7 +159,7 @@ export const askBuild = async (
   const origin = originOf(host)
   const total = [...bytesOf.values()].reduce((n, bytes) => n + bytes.byteLength, 0)
   const event = await sign.signEvent({
-    kind: ASK_KIND, created_at: Math.floor(Date.now() / 1000), content: askPreimage(draft),
+    kind: ASK_KIND, created_at: Math.floor(now.getTime() / 1000), content: askPreimage(draft),
     tags: [['d', draft], ['h', origin], ['bytes', String(total)], ['count', String(closure.length)]],
   })
   const askBytes = encode(JSON.stringify(event))

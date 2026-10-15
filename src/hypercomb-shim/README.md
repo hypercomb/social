@@ -349,7 +349,7 @@ builder takes it from there:
 ```bash
 node host/builds.mjs asks <host>                  # the asks the host holds for this builder's key
 node host/builds.mjs trust <author pubkey>        # once: whose drafts this builder builds
-HYPERCOMB_SIGNER_KEY=<builder key> node host/builds.mjs build-draft <host> <ask> [--to <dir>] [--test] [--untrusted]
+HYPERCOMB_SIGNER_KEY=<builder key> node host/builds.mjs build-draft <host> <ask> [--to <dir>] [--test] [--untrusted] [--sandbox <box>]
 ```
 
 It verifies the ask and every file, checks the base out of its pools, lays
@@ -364,13 +364,37 @@ in the newest host revision. `/versions drafts` and `/versions ask <host>`
 are the same acts by word, and `@diamondcoreprocessor.com/VersionDrafts` is
 the same acts for the harness (a model acting for the participant).
 
-**A builder runs the author's code.** The draft's lockfile, scripts, configs
-and tests are what install and build, as the builder's user. The build is
-never handed the signing key (each step gets an environment of its own,
-without it, and promote reads the key afterwards), but a key kept in a file
-is still a file that user can read. Until a draft builds as another user or
-in a container, run `build-draft` only for authors you would let run code on
-the machine.
+**A builder runs the author's code, in a box.** The draft's lockfile,
+scripts, configs and tests are what install and build. The build is never
+handed the signing key (each step gets an environment of its own, without
+it, and promote reads the key afterwards), and every step runs in a sandbox
+(`host/sandbox.mjs`) that shows it only its own tree, the pools it stages
+into and this builder's npm cache — never the builder's home, pools, a key
+kept in a file, or another build — with the network only while `npm ci`
+fetches from the registry (the install is two passes: `--ignore-scripts` on
+the manifests alone, with the registry reachable and the cache writable —
+npm still runs a workspace's `prepare` with scripts held back, so the fetch
+sees no script at all — then `--offline` in the draft's tree, which runs
+every script from the cache, read-only from then on, with no network). The
+box is proved at startup: one empty build, `npm --version` in the exact box,
+must run. Under bubblewrap the build runs this builder's node; in a
+container, the image's. Before the box opens, the lockfile the install
+will read must name only registry packages (over https, from a host name —
+never an address — and none of this machine's) and links to declared
+workspaces — an install with scripts held
+back still makes what it fetches from git or a directory — and a draft that
+changes `.npmrc` or adds a shrinkwrap is refused. After the build, nothing
+is adopted or signed unless every file in the build's pools is a plain file
+and every staged record is a revision naming only signatures and paths
+inside a tree. The box is a Docker or Podman container on any platform, or
+bubblewrap on Linux (`apt install bubblewrap`; the node the builder runs is
+shown read-only, and one whose prefix is your home is refused); with neither
+the builder refuses to build. `--sandbox none` (or
+`HYPERCOMB_BUILDER_SANDBOX=none`) runs unboxed, only for authors you would
+let run code on the machine. `HYPERCOMB_BUILDER_IMAGE` names the container
+image (`node:22`), `HYPERCOMB_BUILDER_NPM_CACHE` the cache
+(`<pools>/local/npm-cache`; every build writes it, so never your home or
+`~/.npm`). A tree kept with `--keep` comes back without its `.git`.
 
 **Finding the asks.** A host that keeps grants notes each ask its author
 uploads there in the private pool `host:asks` (`hypercomb-relay/build-asks.js`)
@@ -413,7 +437,7 @@ node host/builds.mjs adopt <version>             # the channel's next, signed as
 answers every one it takes:
 
 ```bash
-HYPERCOMB_SIGNER_KEY=<builder key> node host/builds.mjs builder <host> [--once] [--interval <seconds>] [--test]
+HYPERCOMB_SIGNER_KEY=<builder key> node host/builds.mjs builder <host> [--once] [--interval <seconds>] [--test] [--sandbox <box>]
 ```
 
 Each pass (once a minute by default) lists the asks the host holds for this
