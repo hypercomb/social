@@ -260,6 +260,41 @@ than fall back to it.
 The share-sheet gesture in `host-gesture.ts` surfaces the same signal as a
 follow-up toast pointing at `/publish`.
 
+### Two writes, one index (2026-10-15)
+
+**The race.** Every writer reads the index, edits its copy and hands the whole
+copy to `putHiveManifest` — and a publish reads it minutes before it writes,
+waiting on its bytes. Two writers in one tab (a page's switch and a publish
+group, two groups, a group and a row's own Publish) each wrote back the list
+they read plus only their own entry. The host refuses an index no newer than
+the one it holds, so landing in the same second made the second publish fail
+loudly; landing a second or more apart made it SUCCEED and drop the first's
+branch from the index — bytes still on the host, the address no longer
+named, and nothing said until a later sweep showed the row not live.
+
+**The rule now** (`hive-pointer.ts`, one place under every writer — publish,
+unpublish, doors, own address, entrances, `setHiveRoot`, listings, offerings,
+profile):
+
+- **One write at a time per host, in this tab.** The fresh read, the signing
+  and the PUT run in that host's lane (pinned on `globalThis`, so two bundled
+  copies of the module share it).
+- **Never over a newer index.** When that fresh read is newer than the index
+  the caller started from (`replaces`), the caller's edits are re-applied on
+  top of it, and its stamp moves past it. Roots and doors: every key the
+  caller set, changed or removed relative to its starting copy
+  (`previousContent`). Other fields (addresses, offerings, entrances): the
+  same, when the exact index the caller read is remembered (verified reads are
+  kept by stamp for the session); otherwise the caller's copy stands.
+
+The lane closes the race inside a tab; the rebase also absorbs a write from
+another device that landed before this one's read-back. Two devices writing
+in the very same moment can still collide — the host's monotonic stamp turns
+that into a refused write, never a silent one. Proof: `hive-pointer.spec.ts`
+("two writes from one read both land" — each half of the fix fails it alone)
+and `scripts/drive-publish-groups-live.cjs`, which publishes a page and a group
+at once against the content host's own worker and finds both in the index.
+
 ## Row states
 
 One row per candidate branch. Candidates are the union of: every ledger record

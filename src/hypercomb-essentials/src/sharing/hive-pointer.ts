@@ -143,6 +143,7 @@ function hiveIndexOf(evt: Record<string, unknown>, key: string): HiveIndexResult
   const addresses = readAddresses(signedContent['addresses'], roots)
   const doors = readDoors(signedContent['doors'], roots)
   const entrances = readEntrances(signedContent['entrances'], { roots, addresses, doors })
+  rememberRead(key, Number(evt['created_at'] ?? 0), signedContent)
   return { ok: true, manifest: {
     roots, createdAt: Number(evt['created_at'] ?? 0), pubkey: key,
     doors,
@@ -222,7 +223,19 @@ export interface PutHiveResult {
 /** Sign and PUT the participant's own hive index to one host. `roots` is
  *  the COMPLETE public map (lineageKey → sealed head sig) — the index is
  *  replaceable, not mergeable, so callers merge before writing (see the
- *  /host queen). Never throws. */
+ *  /host queen). Never throws.
+ *
+ *  ONE WRITE AT A TIME PER HOST, AND NEVER OVER A NEWER INDEX (2026-10-15).
+ *  Every writer reads the index, edits its copy, and hands the whole copy
+ *  here — and a publish reads it minutes before it writes. Two of them in
+ *  this tab (a page's switch and a group, two groups) each wrote back the
+ *  list they read plus only their own entry: the later write dropped the
+ *  earlier one's branch from the index, silently when they landed a second
+ *  or more apart. So the write runs in the host's lane, and when the read it
+ *  makes right before signing is NEWER than the one the caller started from
+ *  (`replaces`), the caller's edits are re-applied on top of it (rebaseOnto)
+ *  and its stamp moves past it. The lane closes the race in this tab; the
+ *  rebase also absorbs a write from another device that landed earlier. */
 export async function putHiveManifest(
   host: string,
   roots: Record<string, string>,
@@ -237,16 +250,45 @@ export async function putHiveManifest(
   previousContent?: Record<string, unknown>,
   options: PutHiveOptions = {},
 ): Promise<PutHiveResult> {
+  return inWriteLane(host, () => putHiveManifestNow(host, roots, doors, replaces, previousContent, options))
+}
+
+async function putHiveManifestNow(
+  host: string,
+  callerRoots: Record<string, string>,
+  callerDoors: Record<string, string[]>,
+  callerReplaces: number,
+  callerPrevious: Record<string, unknown> | undefined,
+  options: PutHiveOptions,
+): Promise<PutHiveResult> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
   if (!signer?.signEvent) return { ok: false, pubkey: '', createdAt: 0, reason: 'no signer' }
+  let roots = callerRoots
+  let doors = callerDoors
+  let replaces = Number(callerReplaces) || 0
+  let previousContent = callerPrevious
+
+  // ONE FRESH READ, right before signing, inside this host's lane — nothing
+  // else from this tab can land between it and the PUT below.
+  const pubkeyNow = String((await signer.getPublicKeyHex?.().catch(() => null)) ?? '').toLowerCase()
+  const read = SIG_RE.test(pubkeyNow) ? await fetchHiveIndex(host, pubkeyNow).catch(() => null) : null
 
   // THE ENTRANCES ARE NEVER CARRIED FROM A STALE READ. Every other writer read
   // the index some time ago — a publish waits minutes for its bytes — and the
   // participant may have turned an address's powers off since. Carrying the
-  // old map forward would silently turn them back on. So, right before
-  // signing, the index is read again and its entrances are the ones this write
-  // keeps. Only setEntrance changes them, and says so (`setsEntrances`).
-  const fresh = options.setsEntrances ? undefined : await freshEntrances(host, signer, replaces)
+  // old map forward would silently turn them back on. So the fresh read's
+  // entrances are the ones this write keeps. Only setEntrance changes them,
+  // and says so (`setsEntrances`).
+  const fresh = options.setsEntrances ? undefined : entrancesOf(read, replaces)
+
+  // THE INDEX MOVED ON since the caller read it — re-apply its edits on top.
+  if (read?.ok && read.manifest.createdAt > replaces) {
+    const rebased = rebaseOnto(read.manifest, { roots, doors, previousContent }, rememberedRead(pubkeyNow, replaces))
+    roots = rebased.roots
+    doors = rebased.doors
+    previousContent = rebased.previousContent
+    replaces = read.manifest.createdAt
+  }
 
   let signed: Record<string, unknown>
   try {
@@ -333,13 +375,96 @@ const NO_INDEX = Symbol('no index')
  *  the write otherwise). Falling back is the lesser harm: dropping the map
  *  would forget every entrance on one failed read, and a read older than the
  *  index being replaced (a lagging edge) knows less than the caller does. */
-async function freshEntrances(host: string, signer: SignerLike, replaces: number): Promise<unknown | null | undefined | typeof NO_INDEX> {
-  const pubkey = String((await signer.getPublicKeyHex?.().catch(() => null)) ?? '').toLowerCase()
-  if (!SIG_RE.test(pubkey)) return undefined
-  const read = await fetchHiveIndex(host, pubkey).catch(() => null)
+function entrancesOf(read: HiveIndexResult | null, replaces: number): unknown | null | undefined | typeof NO_INDEX {
   if (read && !read.ok && read.reason === 'http' && read.status === 404) return NO_INDEX
   if (!read?.ok || read.manifest.createdAt < (Number(replaces) || 0)) return undefined
   return read.manifest.signedContent?.['entrances'] ?? null
+}
+
+/** THE WRITE LANES — one per host: a write waits for the one before it.
+ *  PINNED ON globalThis like EffectBus: this module can be bundled into more
+ *  than one namespace, and two copies of a lane are no lane at all. */
+const writeLanes: Map<string, Promise<unknown>> =
+  ((globalThis as { __hypercombIndexWriteLanes?: Map<string, Promise<unknown>> }).__hypercombIndexWriteLanes ??= new Map())
+
+function inWriteLane<T>(host: string, task: () => Promise<T>): Promise<T> {
+  const lane = String(host ?? '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  const run = (writeLanes.get(lane) ?? Promise.resolve()).then(task, task)
+  const tail = run.then(() => undefined, () => undefined)
+  writeLanes.set(lane, tail)
+  void tail.then(() => { if (writeLanes.get(lane) === tail) writeLanes.delete(lane) })
+  return run
+}
+
+/** VERIFIED READS, by `<pubkey>|<created_at>` — a stamp names one signed
+ *  index. A write names the index it started from (`replaces`), so this is
+ *  how the rebase tells an edit the caller made inside `previousContent`
+ *  from a field it merely carried. Session memory, a handful of entries;
+ *  pinned on globalThis for the same reason as the lanes. */
+const readsByStamp: Map<string, Record<string, unknown>> =
+  ((globalThis as { __hypercombIndexReads?: Map<string, Record<string, unknown>> }).__hypercombIndexReads ??= new Map())
+const READS_KEPT = 32
+
+function rememberRead(pubkey: string, createdAt: number, signedContent: Record<string, unknown>): void {
+  if (!SIG_RE.test(pubkey) || !(createdAt > 0)) return
+  const key = `${pubkey}|${createdAt}`
+  readsByStamp.delete(key)
+  readsByStamp.set(key, signedContent)
+  while (readsByStamp.size > READS_KEPT) readsByStamp.delete(readsByStamp.keys().next().value!)
+}
+
+function rememberedRead(pubkey: string, createdAt: number): Record<string, unknown> | undefined {
+  return readsByStamp.get(`${pubkey}|${createdAt}`)
+}
+
+const isPlainMap = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value)
+
+const sameJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+
+/** One map's three-way merge: start from `now`, and apply every key the
+ *  caller CHANGED relative to `base` — set, replaced or removed. A key the
+ *  caller left as it found it takes whatever `now` holds. */
+function rebaseMap<T>(base: Record<string, T>, mine: Record<string, T>, now: Record<string, T>): Record<string, T> {
+  const out: Record<string, T> = { ...now }
+  for (const key of new Set([...Object.keys(base), ...Object.keys(mine)])) {
+    if (sameJson(mine[key], base[key])) continue
+    if (key in mine) out[key] = mine[key]
+    else delete out[key]
+  }
+  return out
+}
+
+/** A caller's write, moved onto the index that is there NOW. Roots and doors
+ *  are measured against the index it read — `previousContent` is that read
+ *  for every caller, which edits roots and doors as arguments, never inside
+ *  it. Every other field (addresses, offerings, what this build does not
+ *  know) only when that exact read is remembered (`base`): an edit made
+ *  inside `previousContent` is then told apart from a field merely carried,
+ *  and an untouched field takes the newer index's value. Without it the
+ *  caller's copy of those fields stands — the behaviour before the rebase. */
+function rebaseOnto(
+  now: HiveManifest,
+  mine: { roots: Record<string, string>; doors: Record<string, string[]>; previousContent?: Record<string, unknown> },
+  base: Record<string, unknown> | undefined,
+): { roots: Record<string, string>; doors: Record<string, string[]>; previousContent?: Record<string, unknown> } {
+  const prev = mine.previousContent ?? {}
+  const baseRoots = (isPlainMap(base?.['roots']) ? base!['roots'] : isPlainMap(prev['roots']) ? prev['roots'] : {}) as Record<string, string>
+  const baseDoors = readDoors(base ? base['doors'] : prev['doors'], baseRoots)
+  const roots = rebaseMap(baseRoots, mine.roots, now.roots)
+  const doors = rebaseMap(baseDoors, mine.doors, now.doors ?? {})
+  if (!base) return { roots, doors, previousContent: mine.previousContent }
+  const next: Record<string, unknown> = { ...(now.signedContent ?? {}) }
+  for (const key of new Set([...Object.keys(base), ...Object.keys(prev)])) {
+    if (key === 'v' || key === 'roots' || key === 'doors') continue
+    if (sameJson(prev[key], base[key])) continue
+    if (isPlainMap(prev[key]) && isPlainMap(base[key])) {
+      next[key] = rebaseMap(base[key] as Record<string, unknown>, prev[key] as Record<string, unknown>,
+        isPlainMap(next[key]) ? next[key] as Record<string, unknown> : {})
+    } else if (prev[key] === undefined) delete next[key]
+    else next[key] = prev[key]
+  }
+  return { roots, doors, previousContent: next }
 }
 
 /** The doors a write carries: only keys it also names as roots, and omitted

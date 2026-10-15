@@ -269,3 +269,97 @@ describe('setHostListing — a host lists a pool past the floor only by its oper
     expect(puts).toHaveLength(0)
   })
 })
+
+// ── two writes, one index (2026-10-15) ──────────────────────────────────────
+//
+// Every writer reads the index, edits its copy, and hands the whole copy to
+// putHiveManifest. Two of them from one read (a page's switch and a group)
+// each wrote back the list they read plus only their own entry, so the later
+// write dropped the earlier one's branch. A host here keeps ONE signed index
+// and refuses an older-or-same stamp, exactly as the worker does.
+describe('putHiveManifest: two writes from one read both land', () => {
+  const secret = new Uint8Array(32).fill(9)
+  const pubkey = getPublicKey(secret)
+  const S1 = '1'.repeat(64)
+  const S2 = '2'.repeat(64)
+
+  const withHost = async (initial: Record<string, unknown>, body: (stored: () => Record<string, unknown>) => Promise<void>) => {
+    const shell = globalThis as unknown as { ioc?: { get: (key: string) => unknown } }
+    const original = shell.ioc
+    const fetchBefore = globalThis.fetch
+    let held = finalizeEvent({ kind: 30564, created_at: 1700000000, tags: [], content: JSON.stringify(initial) }, secret) as unknown as Record<string, unknown>
+    shell.ioc = { get: key => key === '@diamondcoreprocessor.com/NostrSigner'
+      ? {
+          getPublicKeyHex: async () => pubkey,
+          signEvent: async (event: { kind: number; created_at: number; tags: string[][]; content: string }) => finalizeEvent(event, secret),
+        }
+      : original?.get(key) }
+    globalThis.fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method !== 'PUT') return Response.json(held)
+      const event = JSON.parse(String(init.body)) as Record<string, unknown>
+      if (Number(event['created_at']) <= Number(held['created_at'])) return new Response('rollback', { status: 409 })
+      held = event
+      return new Response('', { status: 200 })
+    }) as typeof fetch
+    try { await body(() => JSON.parse(String(held['content'])) as Record<string, unknown>) }
+    finally { shell.ioc = original; globalThis.fetch = fetchBefore }
+  }
+
+  it('the second write is moved onto the first — both branches are in the index', async () => {
+    await withHost({ v: 1, roots: { site: OTHER } }, async stored => {
+      const read = await fetchHiveIndex(HOST, pubkey)
+      expect(read.ok).toBe(true)
+      if (!read.ok) return
+      const { roots, createdAt, signedContent } = read.manifest
+      const [a, b] = await Promise.all([
+        putHiveManifest(HOST, { ...roots, 'site/one': S1 }, {}, createdAt, signedContent),
+        putHiveManifest(HOST, { ...roots, 'site/two': S2 }, {}, createdAt, signedContent),
+      ])
+      expect(a.ok && b.ok).toBe(true)
+      expect(stored()['roots']).toEqual({ site: OTHER, 'site/one': S1, 'site/two': S2 })
+    })
+  })
+
+  it('a removal survives the move — the other write does not bring it back', async () => {
+    await withHost({ v: 1, roots: { site: OTHER, old: SIG } }, async stored => {
+      const read = await fetchHiveIndex(HOST, pubkey)
+      if (!read.ok) throw new Error('read failed')
+      const { roots, createdAt, signedContent } = read.manifest
+      const { old: _gone, ...without } = roots
+      await Promise.all([
+        putHiveManifest(HOST, { ...roots, 'site/one': S1 }, {}, createdAt, signedContent),
+        putHiveManifest(HOST, without, {}, createdAt, signedContent),
+      ])
+      expect(stored()['roots']).toEqual({ site: OTHER, 'site/one': S1 })
+    })
+  })
+
+  it('doors move per branch, like the roots', async () => {
+    await withHost({ v: 1, roots: { site: OTHER } }, async stored => {
+      const read = await fetchHiveIndex(HOST, pubkey)
+      if (!read.ok) throw new Error('read failed')
+      const { roots, createdAt, signedContent } = read.manifest
+      await Promise.all([
+        putHiveManifest(HOST, { ...roots, 'site/one': S1 }, { 'site/one': ['localhost:4291'] }, createdAt, signedContent),
+        putHiveManifest(HOST, { ...roots, 'site/two': S2 }, { 'site/two': ['example.com'] }, createdAt, signedContent),
+      ])
+      expect(stored()['doors']).toEqual({ 'site/one': ['localhost:4291'], 'site/two': ['example.com'] })
+    })
+  })
+
+  it('a field edited inside previousContent survives; a field only carried takes the newer value', async () => {
+    await withHost({ v: 1, roots: { site: OTHER }, offerings: { theme: { a: 1 } } }, async stored => {
+      const read = await fetchHiveIndex(HOST, pubkey)
+      if (!read.ok) throw new Error('read failed')
+      const { roots, doors, createdAt, signedContent } = read.manifest
+      await Promise.all([
+        // An offering write: roots as read, the edit inside previousContent.
+        putHiveManifest(HOST, roots, doors ?? {}, createdAt, { ...signedContent, offerings: { theme: { a: 1 }, card: { b: 2 } } }),
+        // A publish from the same read: carries the old offerings untouched.
+        putHiveManifest(HOST, { ...roots, 'site/one': S1 }, {}, createdAt, signedContent),
+      ])
+      expect(stored()['roots']).toEqual({ site: OTHER, 'site/one': S1 })
+      expect(stored()['offerings']).toEqual({ theme: { a: 1 }, card: { b: 2 } })
+    })
+  })
+})

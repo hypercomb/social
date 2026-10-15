@@ -38,9 +38,11 @@ checks): the content host's own worker served from this machine
 (`node scripts/local-content-host.mjs 4291 <shell>`); a group of two on a page
 of three; the host only CARRIED and switched on for the page — no own host, no
 host-sync opt-in. The page itself publishes ("Published — its host is serving
-it."), then `groups publish blog` → "Published Blog", and the HOST's signed
-index (the `hive:indexes` pool, `<pool>/<pubkey>`) names `site`, `site/one`
-and `site/two` on door `localhost:4291` — and not `site/three`. Run it against
+it.") and, WHILE it does, `groups publish blog` → "Published Blog"; the HOST's
+signed index (the `hive:indexes` pool, `<pool>/<pubkey>`) names `site`,
+`site/one` and `site/two` on door `localhost:4291` — neither publish dropped
+the other (publish-differential.md, "Two writes, one index") — and not
+`site/three`. Run it against
 a dev shell that does not live-reload (`--live-reload=false --watch=false`):
 another session's edits otherwise reload the page mid-run.
 

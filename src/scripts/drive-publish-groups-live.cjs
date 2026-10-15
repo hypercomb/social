@@ -11,7 +11,7 @@
 //   3. carry the host (no own host, no host-sync opt-in) and switch it on for
 //      the page in the Publish panel — and the PAGE ITSELF publishes (a page with
 //      children; it used to stick at "Still uploading" on a local host)
-//   4. `groups publish blog` → "Published Blog"
+//   4. `groups publish blog` WHILE the page publishes → "Published Blog"
 //   5. the HOST's signed index names one and two — and not three
 //   6. the model may say it: the census offers `groups` to a machine
 //
@@ -169,28 +169,29 @@ async function main() {
     }))
     check('the host is carried and switched on for the page', listed && pressed, `listed=${listed} doors=${pressed}`)
     await shot('03-door-on')
-    // 3b. THE PAGE ITSELF PUBLISHES — a page WITH children, whose sealed root
-    //     is freshly minted (no tile write ever backed it up). It used to end
-    //     "Still uploading" against a host on this machine: `localhost:4291`
-    //     was refused as a publish node, so nothing staged the root
-    //     (host-sync.service.ts LOOPBACK_HOST_RE). Waited out BEFORE the
-    //     group publishes — two publishes at once race on the host's index.
-    const pageDone = await settle(180000, () => page.evaluate(() => window.__live.toasts.some(t =>
-      String(t.title ?? '') === 'Publish' && /^Published|Still uploading|not|couldn|could not|no /i.test(String(t.message ?? '')))))
-    const pageSaid = await page.evaluate(() => window.__live.toasts
-      .filter(t => String(t.title ?? '') === 'Publish').map(t => `${t.type}: ${t.message ?? ''}`).slice(-1)[0] ?? '')
-    const pageRoots = Object.assign({}, ...(await hostIndexes()).map(i => i.roots ?? {}))
-    check('the page itself — a page with children — publishes to the host on this machine',
-      pageDone && /^(success|info): Published/.test(pageSaid) && !!pageRoots['site'],
-      `${pageSaid} · index names site=${!!pageRoots['site']}`)
+    // 3b + 4. THE PAGE AND THE GROUP PUBLISH AT ONCE. Pressing the switch
+    //    publishes the page (a page WITH children — its freshly sealed root
+    //    once never left a host on this machine, host-sync.service.ts
+    //    LOOPBACK_HOST_RE); the group is published while that is still under
+    //    way. Both end by rewriting the one signed index, and the later write
+    //    used to drop the earlier one's branch — so they now take turns at the
+    //    host and the second is moved onto the first (hive-pointer.ts
+    //    putHiveManifest). Both entries must be there.
     await page.locator('.publish-panel .publish-header button').last().click().catch(() => {})
-
-    // 4.
     await clearToasts()
     await say('/groups publish blog')
-    const done = await settle(240000, async () => !!(await toastAbout(/^(Published Blog|Blog: \d+ not published)/)))
+    const settledBoth = await settle(240000, () => page.evaluate(() => {
+      const t = window.__live.toasts
+      const pageDone = t.some(x => String(x.title ?? '') === 'Publish' && /^Published|Still uploading|not|couldn|could not|no /i.test(String(x.message ?? '')))
+      const groupDone = t.some(x => /^(Published Blog|Blog: \d+ not published)/.test(String(x.title ?? '')))
+      return pageDone && groupDone
+    }))
+    const pageSaid = await page.evaluate(() => window.__live.toasts
+      .filter(t => String(t.title ?? '') === 'Publish').map(t => `${t.type}: ${t.message ?? ''}`).slice(-1)[0] ?? '')
+    check('the page itself — a page with children — publishes to the host on this machine',
+      settledBoth && /^(success|info): Published/.test(pageSaid), pageSaid)
     const toast = await toastAbout(/Blog/)
-    check('`groups publish blog` → Published Blog', done && /^Published Blog/.test(String(toast?.title ?? '')), JSON.stringify(toast))
+    check('`groups publish blog`, at the same time → Published Blog', /^Published Blog/.test(String(toast?.title ?? '')), JSON.stringify(toast))
 
     // 5.
     const after = await hostState()
@@ -198,8 +199,8 @@ async function main() {
     const roots = Object.assign({}, ...indexes.map(i => i.roots ?? {}))
     const doors = Object.assign({}, ...indexes.map(i => i.doors ?? {}))
     const onDoor = (label) => (doors[`site/${label}`] ?? []).includes(host)
-    check("the host's signed index names one and two, on the page's domain — and not three",
-      !!roots['site/one'] && !!roots['site/two'] && !roots['site/three'] && onDoor('one') && onDoor('two'),
+    check("the host's signed index names the page, one and two — neither publish dropped the other — and not three",
+      !!roots['site'] && !!roots['site/one'] && !!roots['site/two'] && !roots['site/three'] && onDoor('one') && onDoor('two'),
       `roots=${JSON.stringify(Object.keys(roots))} doors=${JSON.stringify(doors)} objects ${before.content.length}→${after.content.length}`)
     fs.writeFileSync(path.join(out, 'host-indexes.json'), JSON.stringify(indexes, null, 1))
 
