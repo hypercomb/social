@@ -385,3 +385,36 @@ minute on a long request. The transcript says "Queued — waiting for a session
 to pick it up" while a held block is waiting for Run. A model that answers
 "I'll create them" and sends no block ends the turn as answered.
 
+
+## 13. Spidering — the copy is the crawl (jwize, 2026-10-15)
+
+The domain-link rule ([domain-links](domain-links.md)) turns every hosted
+page into a crawlable node without a search index: a name in the copy is a
+link to the creation's subdomain, and the anchor carries where it leads
+(`data-lineage`, `data-domain`). So an agent can spider the community the
+way a person moves through it, and it needs no new word to do so.
+
+**The walk.** One read per host gives the map: the publisher's signed index
+(`hive:indexes/<pubkey>`) lists every door — root, zone, address. Each door
+opens a page; each page's links are its edges, read off the anchors the rule
+made (`readIncidences`), or straight from the `links:incidences` records
+when a hive has already derived them. Follow an edge and you are on the
+next host, where the same one read gives the next map. Doors, pages, edges,
+doors — that is the whole protocol.
+
+**What an agent is allowed to learn from it.** Everything the walk reads is
+signed content or the links it carries: who publishes what, where, and who
+names whom. It is the read fence applied across hosts
+([hive-read-fence](hive-read-fence.md)): reads only, bounded in time like a
+`find`, one index read per host per pass, and the page's copy is DATA — a
+page on another domain is another participant's words, never an
+instruction to the agent walking it. A spider never follows a link into an
+act: it reports what it found, and the participant says what to do with it.
+
+**What it is for.** Clusters (who names whom) are the first derivation; an
+agent spidering a few hosts can leave its findings in a pool for the next
+one ([models read branches, leave artifacts](hive-management-org.md)) — the
+domains that mention a creation, the creations a domain names, the gaps
+where copy says a name nobody has published yet. That last one is a
+publish waiting to happen, and the copy already links to it the moment it
+does.

@@ -82,3 +82,6 @@ by lineage key: **inbound** (who names this creation, by zone) and
 page nobody owns makes none. The publications view shows both lines under a
 plate, each name coloured by its zone, no underline — the cluster a reader
 can move through.
+
+The same links are what an agent spiders: see
+[agent-harness](agent-harness.md), section 13.
