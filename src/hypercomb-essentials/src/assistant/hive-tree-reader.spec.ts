@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { HypercombHiveTreeReader } from './hive-tree-reader.js'
+import { FIND_WALK_NODES, HypercombHiveTreeReader } from './hive-tree-reader.js'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
 
@@ -957,7 +957,7 @@ describe('a find shares its walk among the route’s branches', () => {
   it('finds a small branch’s depth-three tile behind a huge branch, on the same budget, and names the huge branch as unfinished', async () => {
     const fx = fixture()
     const ends = branchedHive(fx, [
-      { name: 'huge', leaves: 2_100 },
+      { name: 'huge', leaves: FIND_WALK_NODES + 100 },
       { name: 'dolphin', chain: ['associates', 'betz'] },
       { name: 'notes', leaves: 3 },
     ])
@@ -967,14 +967,14 @@ describe('a find shares its walk among the route’s branches', () => {
       matches: [{ name: 'betz', path: pathOf(ends['dolphin']) }],
       unfinished: ['/huge'], unfinishedCount: 1,
     })
-    // The same budget: no more pages opened than a find's 2,000 nodes, and
+    // The same budget: no more pages opened than a find's FIND_WALK_NODES, and
     // the huge branch cut short, not walked whole.
     const signed = (fx.history['sign'] as ReturnType<typeof vi.fn>).mock.calls
       .map(([lineage]) => (lineage as { explorerSegments(): readonly string[] }).explorerSegments())
     const hugeOpened = signed.filter(path => path.length === 2 && path[0] === 'huge').length
-    expect(hugeOpened).toBeGreaterThan(1_900)
-    expect(hugeOpened).toBeLessThan(2_000)
-    expect(signed.length).toBeLessThanOrEqual(2_000)
+    expect(hugeOpened).toBeGreaterThan(FIND_WALK_NODES - 100)
+    expect(hugeOpened).toBeLessThan(FIND_WALK_NODES)
+    expect(signed.length).toBeLessThanOrEqual(FIND_WALK_NODES)
     // /tree keeps its level-by-level picture of the hive.
     const tree = await fx.reader.readTree([], { maxDepth: 3 })
     expect(tree.ok && tree.nodes.map(node => node.path).slice(0, 5)).toEqual(['/', '/huge', '/dolphin', '/notes', '/huge/huge-0'])
@@ -983,7 +983,7 @@ describe('a find shares its walk among the route’s branches', () => {
 
   it('names the first twenty unfinished branches in the route’s order and counts them all', async () => {
     const fx = fixture()
-    branchedHive(fx, Array.from({ length: 25 }, (_, b) => ({ name: `b${b}`, leaves: 100 })))
+    branchedHive(fx, Array.from({ length: 25 }, (_, b) => ({ name: `b${b}`, leaves: 500 })))
     const found = await fx.reader.find('nothing', [])
     expect(found).toMatchObject({ ok: true, truncated: true, matches: [], unfinishedCount: 25 })
     expect(found.ok && found.unfinished).toEqual(Array.from({ length: 20 }, (_, b) => `/b${b}`))
@@ -998,7 +998,7 @@ describe('a find shares its walk among the route’s branches', () => {
 
     const games = fixture()
     const page: LayerContent = { name: 'games', children: [sig(40_000), sig(40_001)] }
-    branchedHive(games, [{ name: 'solomon', leaves: 2_100 }, { name: 'small', leaves: 2 }])
+    branchedHive(games, [{ name: 'solomon', leaves: FIND_WALK_NODES + 100 }, { name: 'small', leaves: 2 }])
     games.layers.set(sig(9), page)
     games.locations.set('games', sig(109))
     games.refs.set(sig(109), { locationSig: sig(109), layerSig: sig(9), layer: page })
@@ -1067,12 +1067,13 @@ describe('a walk whose budget is spent stops there', () => {
   it('a find cut on bytes opens no page past the batch it was cut in, and names the cut branch', async () => {
     const fx = fixture()
     const long = 'w'.repeat(240)
-    branchedHive(fx, [{ name: long, leaves: 1_500 }])
+    branchedHive(fx, [{ name: long, leaves: 3_000 }])
     const found = await fx.reader.find('nothing', [])
     expect(found).toMatchObject({ ok: true, truncated: true, matches: [], unfinished: [`/${long}`], unfinishedCount: 1 })
-    // About 510 of these nodes fill 400,000 bytes: the root, the branch,
+    // About 1,920 of these nodes fill 1,500,000 bytes: the root, the branch,
     // the pages kept, and the rest of the one batch the cut fell in.
-    expect(signedPaths(fx).length).toBeLessThan(560)
+    expect(signedPaths(fx).length).toBeGreaterThan(1_800)
+    expect(signedPaths(fx).length).toBeLessThan(1_970)
   })
 })
 
@@ -1082,7 +1083,7 @@ describe('a find whose matches outrun its limit says so', () => {
   // matches were in /small.
   it('marks more matches than the limit shows, beside the unfinished branches', async () => {
     const fx = fixture()
-    branchedHive(fx, [{ name: 'huge', leaves: 2_100 }, { name: 'small', leaves: 60 }])
+    branchedHive(fx, [{ name: 'huge', leaves: FIND_WALK_NODES + 100 }, { name: 'small', leaves: 60 }])
     const found = await fx.reader.find('small', [], { maxNodes: 48 })
     expect(found).toMatchObject({ ok: true, truncated: true, unfinished: ['/huge'], unfinishedCount: 1, moreMatches: true })
     expect(found.ok && found.matches.length).toBe(48)

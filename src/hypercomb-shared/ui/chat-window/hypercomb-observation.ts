@@ -839,7 +839,10 @@ const scopeNoteOf = (root: string, grammar: string, reachedEvery: boolean): stri
  *  request needs every match; where it names none, the old advice stands.
  *  A list the limit cut is said first: its unshown matches can sit in a
  *  finished branch, and a note naming only the unfinished ones sent the
- *  model past them (review of the 2026-10-12 fair walk). */
+ *  model past them (review of the 2026-10-12 fair walk). Told only to
+ *  search them "if the request needs completeness", a model answered "the
+ *  only tile named practice-modules" over 18 branches nobody read, and
+ *  walked `-ii` routes it guessed from their names (harness, 2026-10-15). */
 const cutNoteOf = (found: Extract<HypercombFindRead, { ok: true }>): Record<string, unknown> => {
   const unfinished = found.unfinished ?? []
   const capped = found.moreMatches
@@ -854,7 +857,7 @@ const cutNoteOf = (found: Extract<HypercombFindRead, { ok: true }>): Record<stri
     unfinished,
     ...(more ? { unfinishedCount: count } : {}),
     truncatedNote: (capped ? `${capped}; and ` : '')
-      + `the walk did not finish these branches; search under them only if the request needs completeness: find ${found.query} <branch>`
+      + `the walk did not finish these branches, so until a find under each one finishes, never say a match is the only one, that a branch holds none, or that every branch was searched; a request for every match searches each, one find per branch named here, never a route guessed from their names: find ${found.query} <branch>`
       + (more ? `; ${count} branches in all, the first ${unfinished.length} listed` : ''),
   }
 }

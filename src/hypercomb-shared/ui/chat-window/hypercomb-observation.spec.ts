@@ -385,7 +385,7 @@ describe('/find under a route', () => {
     expect(cut).toMatchObject({
       root: '/', truncated: true, matches: [{ name: 'betz', path: '/people/betz' }],
       unfinished: ['/solomon-maze-v1', '/bubble-bobble-dos-v1'],
-      truncatedNote: 'the walk did not finish these branches; search under them only if the request needs completeness: find betz <branch>',
+      truncatedNote: 'the walk did not finish these branches, so until a find under each one finishes, never say a match is the only one, that a branch holds none, or that every branch was searched; a request for every match searches each, one find per branch named here, never a route guessed from their names: find betz <branch>',
     })
     expect(String(cut['truncatedNote'])).not.toMatch(/narrower route/)
     // Every branch is listed: no count to add.
@@ -407,7 +407,7 @@ describe('/find under a route', () => {
     const both = await receiptOf(cutFind({ unfinished: ['/huge'], unfinishedCount: 1, moreMatches: true }))
     expect(both).toMatchObject({ truncated: true, unfinished: ['/huge'] })
     expect(both['truncatedNote']).toBe('more matches exist than are shown (in any branch, finished or not); to see them, narrow the word or the route: find <word> /path'
-      + '; and the walk did not finish these branches; search under them only if the request needs completeness: find betz <branch>')
+      + '; and the walk did not finish these branches, so until a find under each one finishes, never say a match is the only one, that a branch holds none, or that every branch was searched; a request for every match searches each, one find per branch named here, never a route guessed from their names: find betz <branch>')
 
     // A whole walk the limit cut: not "stopped before the whole route".
     const capped = await receiptOf(cutFind({ moreMatches: true }))
