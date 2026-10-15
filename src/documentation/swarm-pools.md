@@ -97,9 +97,26 @@ followed community domains) against hotlinking; it is not security.
    The worker marks members with `member: '1'` metadata and refuses any
    address that already holds anything else. No `check-host.mjs` probe: a
    room's address is a capability the checker doesn't have.
-2. **Room pool on the client.** Derive the address, write your share-head member
-   when you share, and read the members (template first) on arrival. Generalize
-   `probePool` beyond `host:packages`.
+2. **Room pool on the client. BUILT.** `sharing/room-pool.ts` (address,
+   member shape and check, what stands) and `room-pool.service.ts`
+   (`@diamondcoreprocessor.com/RoomPool`, registered by `room-pool.drone.ts`).
+   - **Write.** When the relay takes this tab's word for a page, the word goes
+     to the room's host as an atom (`putOne`), and a member
+     `['head', sha256(word)] ['page', <room page sig>]` is signed and written,
+     once per changed word, settled for a moment.
+   - **Read.** On joining, the listing is read and every new member is fetched
+     and verified; the newest member per signer per page stands.
+   - **Address.** It is never derived through the pool registry, because that
+     registry lists every meaning it derives and this one carries the secret.
+     `probePool` stayed as it is: it is wired to `host:packages`, so the service
+     fetches the listing itself.
+   - **Older hosts.** A host that predates room pools refuses the member, and
+     the room still works live.
+   - **Proof.** `scripts/drive-swarm-room-pool.cjs` runs against a scratch relay
+     of this tree, 7/7: the member is written, it names the exact word held on
+     the host, a joiner reads it back, and it is still there after the sharer
+     leaves.
+   - **Template-first ordering** comes with step 3.
 3. **The template.** Publishing a branch into a room pool makes it the
    host-signed template member.
 4. **Arrive = join.** A link carries the room words; the shell installs the

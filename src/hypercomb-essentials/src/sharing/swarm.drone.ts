@@ -2415,6 +2415,11 @@ export class SwarmDrone extends Drone {
   /** Own tiles at this page that stay private — from its last walk. */
   public privateCountHere = (): number => this.#privateHere
 
+  /** The word a relay TOOK for the page at `sig` — the exact page-event
+   *  content this tab shares there — or null. What a room pool member points
+   *  at (sharing/room-pool.service.ts). */
+  public takenWord = (sig: string): string | null => this.#takenBySig.get(sig) ?? null
+
   /** A relay took this tab's word for a page (mesh publish's onTaken). The
    *  page this tab stands on is in the room from now: `swarm:page-announced`
    *  {location, segments} — its address only. */
@@ -2431,7 +2436,7 @@ export class SwarmDrone extends Drone {
       this.#takenBySig.delete(oldest)
     }
     if (lineageKey(segments) === this.#currentPageKey() && isJoinedHere()) {
-      this.emitEffect('swarm:page-announced', { location, segments: [...segments] })
+      this.emitEffect('swarm:page-announced', { location, segments: [...segments], sig })
     }
     // The sharer's line says the page is in the room now (`taken`).
     if (this.#shareStatus?.sig === sig) this.#emitShareStatus()
@@ -4356,7 +4361,7 @@ export class SwarmDrone extends Drone {
       // Unchanged: this meeting's word for the page went out within
       // LAYER_REFRESH_MS and the relay took it, so arriving back here is an
       // arrival all the same — the page is in the room.
-      this.emitEffect('swarm:page-announced', { location: publicLocation, segments: [...segments] })
+      this.emitEffect('swarm:page-announced', { location: publicLocation, segments: [...segments], sig })
     }
     sayStatus()
 
