@@ -53,6 +53,8 @@ const BLOSSOM_KIND = 24242    // Blossom BUD-02 upload auth
 const HIVE_KIND = 30564       // hive index — publisher-signed {lineageKey → head sig} manifest
 const AUTH_SKEW_SECS = 60     // freshness window — bounds replay of a captured token
 const HIVE_MAX_BYTES = 65_536 // a hive index is a small map, never a byte store
+const ROOM_MEMBER_KIND = 30567 // a swarm room member — a key's signed claim in a room pool
+const ROOM_MEMBER_MAX_BYTES = 4_096 // a claim names a head; it never carries content
 
 // ── published application domains ───────────────────────────────────────────
 //
@@ -1634,6 +1636,12 @@ async function serveOfferingsPool(request, env, member) {
 
 async function servePoolListing(request, env, sig) {
   const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
+  // A ROOM POOL is listed to whoever asks its address — its members only.
+  if (!await listedPool(env, sig) && await isRoomPool(env, sig)) {
+    const names = await roomMemberNames(env, sig)
+    names.sort()
+    return new Response(request.method === 'HEAD' ? null : (names.length ? names.join('\n') + '\n' : ''), { status: 200, headers })
+  }
   if (!await listedPool(env, sig)) {
     return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
       status: 404, headers: { ...headers, 'X-Reason': 'no pool at this address' },
@@ -3935,6 +3943,95 @@ async function getHive(request, env, pubkey) {
   })
 }
 
+// ── swarm room pools (documentation/swarm-pools.md) ──────────────────────────
+//
+// A room is a POOL on this host's one root store: `sign('swarm:' + room
+// preimage)`. Its address holds the room's secret, so it cannot be guessed —
+// whoever asks it was given it, and that is the whole access to READ it. Its
+// members are flat files, each named by its own signature and holding one
+// key's signed claim (kind ROOM_MEMBER_KIND, tagged `['pool', <address>]`): the
+// host's template, a participant's share head.
+//
+// PUT /<pool>/<member> — NIP-98 proves the caller; the body is a nostr event
+// signed by that same key, tagged with this pool, hashing to `<member>`. The
+// writer must be one this host already keeps bytes for (admit). Never into a
+// pool this host itself lists or keeps private, and never into an address
+// already holding anything but room members — a room pool is made only by
+// room members. Listed by address (servePoolListing); read by name below.
+
+/** Does this address hold room members (and nothing else)? One object read. */
+async function isRoomPool(env, sig) {
+  if (!env.CONTENT?.list) return false
+  const page = await env.CONTENT.list({ prefix: `${sig}/`, limit: 1, include: ['customMetadata'] })
+  const first = (page.objects ?? [])[0]
+  return !!first && first.customMetadata?.member === '1'
+}
+
+async function roomMemberNames(env, sig) {
+  const prefix = `${sig}/`
+  const names = []
+  let cursor
+  do {
+    const page = await env.CONTENT.list({ prefix, cursor, limit: 1000, include: ['customMetadata'] })
+    for (const obj of page.objects ?? []) {
+      const name = String(obj.key ?? '').slice(prefix.length)
+      if (SIG_RE.test(name) && obj.customMetadata?.member === '1') names.push(name)
+    }
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+  return names
+}
+
+async function putRoomMember(request, env, pool, member) {
+  const auth = await verifyNip98(request, parseAuthEvent(request))
+  if (!auth.ok) return text(401, auth.reason)
+  if (!env.CONTENT?.put || !env.CONTENT?.list) return text(503, 'this host holds no pools')
+  const reserved = await listedPool(env, pool)
+    || (await Promise.all(PRIVATE_POOL_MEANINGS.map(poolAddress))).includes(pool)
+  if (reserved) return text(403, 'this pool belongs to the host')
+  const first = ((await env.CONTENT.list({ prefix: `${pool}/`, limit: 1, include: ['customMetadata'] })).objects ?? [])[0]
+  if (first && first.customMetadata?.member !== '1') return text(403, 'this address is not a room pool')
+
+  const body = await request.arrayBuffer()
+  if (body.byteLength > ROOM_MEMBER_MAX_BYTES) return text(413, 'a room member is a claim, not content')
+  if (await sha256Hex(body) !== member) return text(400, 'member bytes do not hash to their name')
+  let evt
+  try { evt = JSON.parse(new TextDecoder().decode(body)) } catch { return text(400, 'body is not a JSON nostr event') }
+  if (Number(evt?.kind) !== ROOM_MEMBER_KIND) return text(400, `wrong event kind (expected room member ${ROOM_MEMBER_KIND})`)
+  if (String(evt?.pubkey || '').toLowerCase() !== auth.pubkey) return text(403, 'member is signed by another key than the caller')
+  if (String(tagValue(evt, 'pool') || '').toLowerCase() !== pool) return text(400, 'member is not tagged with this pool')
+  if (!(await verifyEventSig(evt))) return text(401, 'invalid member signature')
+
+  const key = `${pool}/${member}`
+  if (await env.CONTENT.head(key)) return text(200, `member ${member}`)
+  const adm = await admit(env, auth.pubkey, body.byteLength)
+  if (!adm.ok) return text(403, adm.reason)
+  await env.CONTENT.put(key, body, {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+    customMetadata: { owner: auth.pubkey, member: '1' },
+  })
+  await consume(env, auth.pubkey, adm.grant, body.byteLength)
+  return text(201, `member ${member}`)
+}
+
+/** GET /<pool>/<member> — the member's bytes, or null when it is not one (the
+ *  caller then falls through to the `/<sig>/<name>` read alias). Immutable:
+ *  the name is the hash of the bytes. */
+async function getRoomMember(request, env, pool, member) {
+  const obj = await env.CONTENT?.get?.(`${pool}/${member}`)
+  if (!obj || obj.customMetadata?.member !== '1') return null
+  return new Response(request.method === 'HEAD' ? null : obj.body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': IMMUTABLE,
+      'ETag': `"${member}"`,
+      'X-Content-Type-Options': 'nosniff',
+      ...CORS,
+    },
+  })
+}
+
 // ── claiming a domain (documentation/domain-claim.md) ────────────────────────
 //
 // POST /claim        NIP-98 (method POST, and a `payload` tag holding the
@@ -4886,6 +4983,18 @@ const router = {
     if (offeringPath && offeringPath[1] === await poolAddress(HOST_OFFERINGS_MEANING)) {
       if (method === 'GET' || method === 'HEAD') return serveOfferingsPool(request, env, offeringPath[2])
       return text(405, 'method not allowed')
+    }
+
+    // A SWARM ROOM's member (putRoomMember) — before the flat endpoint, whose
+    // `/<sig>/<name>` read alias would answer it with the POOL's bytes. A read
+    // that is not a stored member falls through to that alias unchanged.
+    const roomMemberPath = pathname.match(/^\/([0-9a-f]{64})\/([0-9a-f]{64})$/)
+    if (roomMemberPath) {
+      if (method === 'PUT') return putRoomMember(request, env, roomMemberPath[1], roomMemberPath[2])
+      if (method === 'GET' || method === 'HEAD') {
+        const held = await getRoomMember(request, env, roomMemberPath[1], roomMemberPath[2])
+        if (held) return held
+      }
     }
 
     // Flat sig endpoint — the canonical read: https://<host>/<sig>.

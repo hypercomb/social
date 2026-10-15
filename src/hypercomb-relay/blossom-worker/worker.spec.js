@@ -97,12 +97,16 @@ async function fixture(event, bindings = ONE_ZONE) {
 }
 
 function contentBag(held = new Map()) {
+  // Custom metadata rides beside the bytes, as R2 keeps it (a room member's
+  // `member: '1'` is what makes an address a room pool).
+  const meta = new Map()
   return {
     held,
-    head: async key => held.has(key) ? { size: held.get(key).byteLength } : null,
+    head: async key => held.has(key) ? { size: held.get(key).byteLength, customMetadata: meta.get(key) } : null,
     get: async key => held.has(key) ? {
       size: held.get(key).byteLength,
       body: held.get(key),
+      customMetadata: meta.get(key),
       arrayBuffer: async () => held.get(key).slice().buffer,
     } : null,
     put: async (key, body, options) => {
@@ -113,13 +117,15 @@ function contentBag(held = new Map()) {
         throw new Error('put: the bytes do not match their sha256')
       }
       held.set(key, bytes)
+      if (options?.customMetadata) meta.set(key, options.customMetadata)
+      else meta.delete(key)
       return { key }
     },
     // Each object's etag is a digest of its bytes, as R2's is: a record
     // rewritten by hand is a new etag, the same bytes are the same one.
     list: async ({ prefix }) => ({
       objects: await Promise.all([...held.keys()].filter(key => key.startsWith(prefix)).map(async key =>
-        ({ key, etag: hex(new Uint8Array(await crypto.subtle.digest('SHA-256', held.get(key)))) }))),
+        ({ key, customMetadata: meta.get(key), etag: hex(new Uint8Array(await crypto.subtle.digest('SHA-256', held.get(key)))) }))),
       truncated: false,
     }),
     delete: async key => { held.delete(key) },
@@ -5140,4 +5146,70 @@ test('both byte hosts stay open until adoption: AUTO_GRANT "1", no friend listed
     assert.equal(value('HOST_FRIENDS'), '', file)
     assert.equal(value('PEOPLE_QUOTA_BYTES'), '1073741824', file)
   }
+})
+
+// ── swarm room pools (documentation/swarm-pools.md) ──────────────────────────
+
+/** A room member: kind 30567, signed by `key`, tagged with its pool. */
+async function roomMember(pool, head, key = sk) {
+  const event = { pubkey: pubOf(key), created_at: nowSeconds(), kind: 30567, tags: [['pool', pool], ['head', head]], content: '' }
+  event.id = await sha256Hex(JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]))
+  event.sig = hex(schnorr.sign(event.id, key))
+  return JSON.stringify(event)
+}
+
+async function putMember(env, pool, body, key = sk, name) {
+  const url = `https://${WRITE_FACE}/${pool}/${name ?? await sha256Hex(body)}`
+  const res = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', key) }, body }), env)
+  return { status: res.status, text: (await res.text()).trim() }
+}
+
+test('a room is a pool: an admitted key writes its signed member, anyone holding the address lists and reads it', async () => {
+  const env = peopleEnv({ AUTO_GRANT: '1', DEFAULT_QUOTA_BYTES: '4096' })
+  const pool = await sha256Hex('swarm:lecture\0a-secret\0hypercomb.com')
+  const member = await roomMember(pool, 'c'.repeat(64))
+  const name = await sha256Hex(member)
+  assert.deepEqual(await putMember(env, pool, member), { status: 201, text: `member ${name}` })
+  assert.equal((await putMember(env, pool, member)).status, 200, 'the same member again is already held')
+
+  const listing = await worker.fetch(new Request(`https://${WRITE_FACE}/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(await listing.text(), `${name}\n`)
+  const read = await worker.fetch(new Request(`https://${WRITE_FACE}/${pool}/${name}`), env)
+  assert.equal(read.status, 200)
+  assert.equal(await read.text(), member)
+
+  // An address nobody wrote to is not a pool at all.
+  const unknown = await worker.fetch(new Request(`https://${WRITE_FACE}/${'d'.repeat(64)}/`), env)
+  assert.equal(unknown.status, 404)
+})
+
+test('a room member is refused unless it is the caller\'s own claim on this pool, from a key the host keeps', async () => {
+  const pool = await sha256Hex('swarm:lecture\0a-secret\0hypercomb.com')
+  const open = () => peopleEnv({ AUTO_GRANT: '1', DEFAULT_QUOTA_BYTES: '4096' })
+  const head = 'c'.repeat(64)
+
+  const otherPool = await roomMember(await sha256Hex('swarm:elsewhere'), head)
+  assert.equal((await putMember(open(), pool, otherPool)).status, 400, 'tagged with another pool')
+
+  const theirs = await roomMember(pool, head, keyOf(7))
+  assert.equal((await putMember(open(), pool, theirs)).status, 403, 'signed by another key than the caller')
+
+  const mine = await roomMember(pool, head)
+  assert.equal((await putMember(open(), pool, mine, sk, 'e'.repeat(64))).status, 400, 'bytes that do not hash to their name')
+
+  const closed = peopleEnv({ AUTO_GRANT: '0' })
+  const strangerKey = keyOf(31)
+  const stranger = await roomMember(pool, head, strangerKey)
+  const refused = await putMember(closed, pool, stranger, strangerKey)
+  assert.equal(refused.status, 403, 'a key this host does not keep')
+  assert.match(refused.text, /own people only/)
+
+  const packages = await sha256Hex('host:packages')
+  assert.equal((await putMember(open(), packages, await roomMember(packages, head))).status, 403, 'never into a pool the host lists')
+
+  const env = open()
+  const bag = await sha256Hex('a door bag')
+  env.CONTENT.held.set(`${bag}/00000001`, enc('a marker'))
+  assert.equal((await putMember(env, bag, await roomMember(bag, head))).status, 403, 'never into an address holding anything but members')
 })

@@ -80,18 +80,23 @@ followed community domains) against hotlinking; it is not security.
 | Hosts serve `/<poolSig>/` listings (relay `readdir`, worker R2 prefix) | Exists. Listings are gated to the floor's meanings plus the operator's signed index, so room pools need their own rule (below). |
 | Static shim serves a pool listing | Partial. It serves a shipped `index.html` but 404s a pool without one. |
 | Participants write flat atoms (NIP-98, admitted through `host:grants`) | Exists. |
-| Participants write a **pool member** | **Missing.** The relay returns 409 for pool addresses, and the worker's only pool write is the owner's own hive index. |
+| Participants write a **pool member** | **Built (step 1).** `PUT /<pool>/<member>` (kind 30567 claim) on the Cloudflare worker (`putRoomMember`) and the relay (`tryWriteRoomMember`). A static shim host takes no writes by design; it serves a *shipped* room pool (members plus the listing as `index.html`) unchanged. |
 | Room identity as a 64-hex signature | Exists, but as a channel address, not a pool. The pool address above is new. |
 | Reading a pool's members across hosts | Partial. It exists for `host:packages` only, and the first host to answer wins. |
 
 ## Build order
 
-1. **Room pool on the host.** Admitted participants write members as
+1. **Room pool on the host. BUILT.** Admitted participants write members as
    `PUT /<poolSig>/<memberSig>` with NIP-98. The member must hash to its name and
    carry a claim signed by the writer. The pool is listed to anyone who asks its
    address, because an unknown address reads as "not held" and is
-   indistinguishable from nothing. Build it in the worker, the relay and the
-   shim's `serve.mjs`, plus a check in `check-host.mjs`.
+   indistinguishable from nothing. Built in the worker and the relay, each
+   with tests (`worker.spec.js`, `relay.room-pool.test.js`). The relay counts
+   an address as a room pool only while every entry verifies as a member claim
+   on it, so a history bag or an absent address still reads as "not held".
+   The worker marks members with `member: '1'` metadata and refuses any
+   address that already holds anything else. No `check-host.mjs` probe: a
+   room's address is a capability the checker doesn't have.
 2. **Room pool on the client.** Derive the address, write your share-head member
    when you share, and read the members (template first) on arrival. Generalize
    `probePool` beyond `host:packages`.

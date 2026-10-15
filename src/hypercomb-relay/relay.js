@@ -1817,7 +1817,20 @@ function tryServeContent(req, res) {
     // Only a LISTED pool is listed (listedPool). Any other directory, such as
     // a history bag or a molecule pool, answers "not held", the exact answer
     // an absent pool gets, so the 404 reveals nothing.
-    if (!listedPool(dirMatch[1])) { respondText(res, 404, 'pool not held'); return true }
+    if (!listedPool(dirMatch[1])) {
+      // A ROOM POOL is listed to whoever asks its address (swarm-pools.md) —
+      // its verified members only. Anything else answers as before.
+      const members = roomMembers(dirMatch[1])
+      if (!members) { respondText(res, 404, 'pool not held'); return true }
+      const body = Buffer.from(members.length ? members.join('\n') + '\n' : '', 'utf8')
+      res.writeHead(200, {
+        'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': String(body.length),
+        'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store', 'Permissions-Policy': PERMISSIONS_POLICY,
+      })
+      if (req.method === 'HEAD') { res.end(); return true }
+      res.end(body)
+      return true
+    }
     const dir = join(resolve(cfg.contentDir), dirMatch[1])
     let names
     try {
@@ -1877,6 +1890,21 @@ function tryServeContent(req, res) {
     // which bags and pools this host holds. The listing is gated above, and a
     // guessable member name must not be a second way in.
     const head = urlPath.match(/^\/([0-9a-f]{64})\//)
+    // A ROOM POOL's member, read by name (swarm-pools.md) — only a verified
+    // member of a verified room pool; every other path under an unlisted
+    // directory still reads as absent.
+    const member = urlPath.match(/^\/([0-9a-f]{64})\/([0-9a-f]{64})$/)
+    if (member && !listedPool(member[1]) && roomMembers(member[1])?.includes(member[2])) {
+      const bytes = readFileSync(join(resolve(cfg.contentDir), member[1], member[2]))
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8', 'Content-Length': String(bytes.length),
+        'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=31536000, immutable',
+        'X-Content-Type-Options': 'nosniff',
+      })
+      if (req.method === 'HEAD') { res.end(); return true }
+      res.end(bytes)
+      return true
+    }
     if (head && !listedPool(head[1])) return false
     resolved = resolve(cfg.contentDir, '.' + urlPath)
     const rootDir = resolve(cfg.contentDir)
@@ -2340,6 +2368,120 @@ function tryServeReceipts(req, res) {
   return true
 }
 
+// ── swarm room pools (documentation/swarm-pools.md) ──────────────────────────
+//
+// A room is a POOL on this host: `sign('swarm:' + room preimage)`, an address
+// holding the room's secret, so whoever asks it was given it. Its members are
+// flat files named by their own signature, each a key's signed claim (kind
+// ROOM_MEMBER_KIND, tagged ['pool', <address>]). An address is a room pool only
+// while EVERY entry verifies as such a claim on it; a history bag, an absent
+// address, anything else, answers exactly as before ("not held").
+const ROOM_MEMBER_KIND = 30567
+const ROOM_MEMBER_MAX_BYTES = 4096
+/** Verified member names per pool. Members are immutable, so a name verified
+ *  once stays verified. */
+const roomMembersSeen = new Map()
+
+function roomMemberEvent(pool, name, bytes) {
+  if (bytes.length > ROOM_MEMBER_MAX_BYTES) return null
+  if (createHash('sha256').update(bytes).digest('hex') !== name) return null
+  let evt
+  try { evt = JSON.parse(bytes.toString('utf8')) } catch { return null }
+  if (Number(evt?.kind) !== ROOM_MEMBER_KIND) return null
+  const tag = Array.isArray(evt.tags) ? evt.tags.find(t => Array.isArray(t) && t[0] === 'pool') : null
+  if (String(tag?.[1] ?? '').toLowerCase() !== pool) return null
+  try { if (!verifyEvent(evt)) return null } catch { return null }
+  return evt
+}
+
+/** The verified members of the room pool at `pool`, or null when the address
+ *  is not one: absent, a file, empty, or holding anything but members. */
+function roomMembers(pool) {
+  const dir = join(resolve(cfg.contentDir), pool)
+  let names
+  try {
+    if (!statSync(dir).isDirectory()) return null
+    names = readdirSync(dir).filter(n => !n.startsWith('.')).sort()
+  } catch { return null }
+  if (names.length === 0) return null
+  const seen = roomMembersSeen.get(pool) ?? new Set()
+  for (const name of names) {
+    if (seen.has(name)) continue
+    if (!/^[0-9a-f]{64}$/.test(name)) return null
+    let bytes
+    try { bytes = readFileSync(join(dir, name)) } catch { return null }
+    if (!roomMemberEvent(pool, name, bytes)) return null
+    seen.add(name)
+  }
+  roomMembersSeen.set(pool, seen)
+  return names
+}
+
+// PUT /<pool>/<member> — NIP-98 proves the caller (a writer, or a participant
+// this host takes); the body is that same key's signed claim on this pool,
+// hashing to <member>. Never into a pool the host lists or reserves, and never
+// into an address holding anything but room members.
+function tryWriteRoomMember(req, res) {
+  if (req.method !== 'PUT') return false
+  const urlPath = (req.url || '').split('?')[0]
+  const match = urlPath.match(/^\/([0-9a-f]{64})\/([0-9a-f]{64})$/)
+  if (!match) return false
+  const [, pool, member] = match
+  if (RESERVED_ADDRESSES.has(pool) || listedPool(pool)) { respondText(res, 403, 'this pool belongs to the host'); return true }
+  const dir = join(resolve(cfg.contentDir), pool)
+  let held = 'none'
+  try { held = statSync(dir).isDirectory() ? 'dir' : 'file' } catch { held = 'none' }
+  const occupied = held === 'dir' && readdirSync(dir).some(n => !n.startsWith('.'))
+  if (held === 'file' || (occupied && !roomMembers(pool))) { respondText(res, 403, 'this address is not a room pool'); return true }
+
+  const auth = verifyWriteAuth(req)
+  if (!auth.ok) { respondText(res, auth.denied ? 403 : 401, auth.denied ? 'participants-closed' : auth.reason); return true }
+  const participant = auth.role === 'participant'
+  const ip = participant ? requestIp(req) : null
+
+  const chunks = []
+  let size = 0
+  let aborted = false
+  req.on('data', (c) => {
+    if (aborted) return
+    size += c.length
+    if (size > ROOM_MEMBER_MAX_BYTES) {
+      aborted = true
+      respondText(res, 413, 'a room member is a claim, not content')
+      req.destroy()
+      return
+    }
+    chunks.push(c)
+  })
+  req.on('end', async () => {
+    if (aborted) return
+    const bytes = Buffer.concat(chunks, size)
+    const evt = roomMemberEvent(pool, member, bytes)
+    if (!evt) { respondText(res, 400, 'not a signed room member of this pool that hashes to its name'); return }
+    if (String(evt.pubkey || '').toLowerCase() !== auth.pubkey) { respondText(res, 403, 'member is signed by another key than the caller'); return }
+    const target = join(dir, member)
+    if (await isHeldAtom(target)) { respondText(res, 200, `member ${member}`); return }
+    const now = Date.now()
+    if (participant) {
+      const refusal = participantRefusal(auth.pubkey, ip, size, now)
+      if (refusal) { refuseParticipant(req, res, refusal, size); return }
+      chargeParticipant(auth.pubkey, ip, size, now)
+    }
+    try {
+      await writeAtom(target, bytes)
+    } catch (e) {
+      if (participant) chargeParticipant(auth.pubkey, ip, -size, now)
+      respondText(res, 500, 'write failed: ' + (e?.message || 'unknown'))
+      return
+    }
+    const seen = roomMembersSeen.get(pool) ?? new Set()
+    seen.add(member)
+    roomMembersSeen.set(pool, seen)
+    respondText(res, 201, `member ${member}`)
+  })
+  return true
+}
+
 function tryWriteContent(req, res) {
   if (req.method !== 'PUT') return false
 
@@ -2670,6 +2812,10 @@ const server = createServer((req, res) => {
   if (tryForget(req, res)) return
 
   if (tryReplicate(req, res)) return
+
+  // A swarm room's member — before the flat write, which refuses a second
+  // path segment.
+  if (tryWriteRoomMember(req, res)) return
 
   // Write side: PUT content into the sig pool (gated). Returns true if handled.
   if (tryWriteContent(req, res)) return
