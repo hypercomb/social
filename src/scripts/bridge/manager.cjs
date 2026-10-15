@@ -19,6 +19,7 @@
 //   node scripts/bridge/manager.cjs held                     what waits on the participant in Execution
 //   node scripts/bridge/manager.cjs do "<behaviour sentence>"      one line through the command line
 //   node scripts/bridge/manager.cjs op '<request json>'      a raw bridge request
+//   node scripts/bridge/manager.cjs find <word> [/route]     the chat's own find, no model: matches + how the walk went
 //   node scripts/bridge/manager.cjs tidy [minutes|dry]       put away one-off job conversations: answered + quiet that long (default 10), or unanswered an hour; dry = list only
 //   node scripts/bridge/manager.cjs roster                   the managers, as the hive holds them
 //   node scripts/bridge/manager.cjs install                  put the managers into the hive (idempotent)
@@ -250,6 +251,13 @@ const main = async () => {
     case 'convo': {
       const letters = Array.from({ length: 6 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('')
       return print(`chat:tile:/::${Date.now()}-${letters}`)
+    }
+    case 'find': {
+      // The chat's own find, no model: matches, and how the walk went
+      // (walked, stoppedBy, walkFailed, ms). Withheld tiles are never named.
+      if (!first) return fail('find needs a word, and optionally a /route')
+      const reply = await send({ op: 'hive-find', cell: first, segments: segmentsOf(second.trim() || '/') }, 90_000)
+      return reply.ok ? print(reply.data) : fail(reply.error)
     }
     case 'tidy': {
       // Put away the one-off job conversations: answered and quiet, or never

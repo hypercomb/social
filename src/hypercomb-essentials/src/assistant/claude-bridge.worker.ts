@@ -6,6 +6,7 @@ import {
   BRIDGE_CODE_STORE_IOC_KEY, bridgeCodeStore,
   type RemoteSubmitRequest, type RemoteSubmitOutcome, type BridgeCodeStore,
 } from '@hypercomb/core'
+import { HIVE_TREE_READER_IOC_KEY } from './hive-tree-reader.js'
 import { deliverTurnSig, listConversations, readTurns, setConversationArchived, setConversationGoalReached } from './chat-thread.js'
 import { appendStep, nextSeq as ledgerNextSeq, readSteps, runForAsk } from './chat-steps.js'
 import { MUTATING_OPS, STEP_SILENT_OPS } from './bridge-ops.js'
@@ -615,6 +616,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'chat-reply':   return this.#chatReply(req)
       case 'chat-goal-reached': return this.#chatGoalReached(req)
       case 'chat-tidy':    return this.#chatTidy(req)
+      case 'hive-find':    return this.#hiveFind(req)
       case 'thread-read':  return this.#threadRead(req)
       case 'agent-progress': return this.#agentProgress(req)
       case 'agents-announce': return this.#agentsAnnounce(req)
@@ -1005,6 +1007,40 @@ export class ClaudeBridgeWorker extends Worker {
     let archived = 0
     for (const convo of putAway) if (await setConversationArchived(convo.convoId, true)) archived++
     return { id: req.id, ok: true, data: { archived, unanswered: putAway.filter(convo => !convo.replied).length, passed } }
+  }
+
+  // ─── hive-find ─────────────────────────────────────────────────────
+  //
+  // THE CHAT'S OWN FIND, WITHOUT A MODEL (2026-10-15). A cold whole-hive find
+  // came back cut, and the turn kept none of its reads, so nobody could say
+  // whether the walk ran out of time, of tiles, or failed outright — a
+  // manager could only ask a model and read its prose (9 rounds, 94k tokens).
+  // This runs the very reader the chat's `find` runs and answers what it
+  // returned, how long it took, how many tiles it opened, and why it stopped.
+  // Read-only. Its callers speak for outside models, so a withheld tile is
+  // never named: not as a match, not as an unfinished branch.
+  async #hiveFind(req: BridgeRequest): Promise<BridgeResponse> {
+    const query = typeof req.cell === 'string' ? req.cell.trim() : ''
+    if (!query) return { id: req.id, ok: false, error: 'hive-find requires `cell` (the word)' }
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    type Found = { readonly ok: boolean; readonly matches?: readonly { readonly path: string }[]; readonly unfinished?: readonly string[] } & Record<string, unknown>
+    const reader = get<{ find?: (query: string, segments: readonly string[], options?: { maxNodes?: number }) => Promise<Found> }>(HIVE_TREE_READER_IOC_KEY)
+    if (!reader?.find) return { id: req.id, ok: false, error: 'the hive tree reader is not loaded' }
+    const withheld = get<{ covers?: (s: readonly string[]) => boolean }>('@hypercomb.social/AiWithheld')
+    const hidden = (route: string): boolean => !!withheld?.covers?.(route.split('/').filter(Boolean))
+    const startedAt = Date.now()
+    const found = await reader.find(query, segments, { maxNodes: 200 })
+    const ms = Date.now() - startedAt
+    const { snapshot: _snapshot, ...rest } = found
+    return {
+      id: req.id, ok: true,
+      data: {
+        ...rest,
+        ...(found.matches ? { matches: found.matches.filter(match => !hidden(match.path)) } : {}),
+        ...(found.unfinished ? { unfinished: found.unfinished.filter(route => !hidden(route)) } : {}),
+        ms,
+      },
+    }
   }
 
   // ─── thread-read ───────────────────────────────────────────────────

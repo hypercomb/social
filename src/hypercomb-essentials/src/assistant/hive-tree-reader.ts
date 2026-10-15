@@ -209,13 +209,22 @@ export type HypercombFindRead =
     /** The walk found more matches than the limit shows — finished branches
      *  included, so naming the unfinished ones does not say where the rest are. */
     readonly moreMatches?: true
+    /** HOW THE WALK WENT, for whoever diagnoses a cut find (the bridge's
+     *  hive-find): the tiles it opened, and why it stopped short — or the
+     *  code it failed with when only search-index hints answered. */
+    readonly walked?: number
+    readonly stoppedBy?: WalkStop
+    readonly walkFailed?: 'not-found' | 'incomplete-read' | 'stale-read' | 'budget-exceeded' | 'unavailable'
     readonly snapshot: string
   }
   | { readonly ok: false; readonly root: string; readonly code: 'not-found' | 'incomplete-read' | 'stale-read' | 'budget-exceeded' | 'unavailable' }
 
 /** A walk's read, and on a fair walk the route's children it did not finish
  *  (every one, in the route's order: find bounds the list it shows). */
-type WalkRead = HypercombTreeRead & { readonly unfinished?: readonly string[] }
+/** Why a walk stopped short: its time, its tiles, its bytes, its depth, or
+ *  pages it could not open whole. The first reason wins. */
+export type WalkStop = 'time' | 'nodes' | 'bytes' | 'depth' | 'pages'
+type WalkRead = HypercombTreeRead & { readonly unfinished?: readonly string[]; readonly stoppedBy?: WalkStop }
 
 export type HypercombSummaryRead =
   | {
@@ -592,6 +601,8 @@ export class HypercombHiveTreeReader {
       const keys: (readonly number[])[] = [[]]
       // The route's children whose subtree the walk did not finish, by index.
       const unfinished = new Set<number>()
+      let stoppedBy: WalkStop | undefined
+      const stop = (why: WalkStop): void => { truncated = true; stoppedBy ??= why }
       const cut = (key: readonly number[], parent?: Parent): void => {
         if (key.length) unfinished.add(key[0])
         else if (parent) for (let at = parent.from; at < parent.children.length; at++) unfinished.add(at)
@@ -599,7 +610,7 @@ export class HypercombHiveTreeReader {
       const pending = (branch: Branch): boolean => branch.next < branch.queue.length
       const enqueue = (branch: Branch, parent: Parent): void => {
         if (!parent.children.length) return
-        if (parent.depth >= maxDepth) { truncated = true; cut(parent.key, parent); return }
+        if (parent.depth >= maxDepth) { stop('depth'); cut(parent.key, parent); return }
         branch.queue.push(parent)
       }
       const take = (branch: Branch): Item => {
@@ -640,15 +651,15 @@ export class HypercombHiveTreeReader {
       // the gap (review of the 2026-10-12 fair walk).
       while (!exhausted && (pending(trunk) || branches.some(pending))) {
         guard()
-        if (nodes.length >= maxNodes || Date.now() > stopAt) { truncated = true; exhausted = true; break }
+        if (nodes.length >= maxNodes || Date.now() > stopAt) { stop(nodes.length >= maxNodes ? 'nodes' : 'time'); exhausted = true; break }
         const batch = batchOf(Math.min(WALK_CONCURRENCY, maxNodes - nodes.length))
         const opened = await Promise.all(batch.map(item => openChild(item.carried, [...item.parent.path, item.carried.name])))
         guard()
         for (let at = 0; at < batch.length; at++) {
           const { branch, parent, carried, key } = batch[at]
           const got = opened[at]
-          if (!got) { truncated = true; cut(key); continue }
-          if (got.partial) { truncated = true; cut(key) }
+          if (!got) { stop('pages'); cut(key); continue }
+          if (got.partial) { stop('pages'); cut(key) }
           const path = [...parent.path, carried.name]
           const node: HypercombTreeNode = {
             path: rootLabel(path),
@@ -658,7 +669,7 @@ export class HypercombHiveTreeReader {
           }
           const cost = outputBytes(node)
           if (bytes + cost > maxBytes) {
-            truncated = true
+            stop('bytes')
             exhausted = true
             for (const left of batch.slice(at)) cut(left.key)
             break
@@ -692,6 +703,7 @@ export class HypercombHiveTreeReader {
       return {
         ok: true, root, nodes: order.map(at => nodes[at]), truncated, snapshot,
         unfinished: rootChildren.flatMap((child, at) => unfinished.has(at) ? [rootLabel([...segments, child.name])] : []),
+        ...(stoppedBy ? { stoppedBy } : {}),
       }
     } catch (error) {
       if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
@@ -1044,6 +1056,7 @@ export class HypercombHiveTreeReader {
       // branches sent the model to the wrong place for them (review of the
       // 2026-10-12 fair walk).
       ...(hits.length > limit ? { moreMatches: true as const } : {}),
+      ...(walk.ok ? { walked: walk.nodes.length, ...((walk as WalkRead).stoppedBy ? { stoppedBy: (walk as WalkRead).stoppedBy } : {}) } : { walkFailed: walk.code }),
       snapshot,
     }
   }
