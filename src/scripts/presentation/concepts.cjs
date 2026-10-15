@@ -22,6 +22,8 @@ const path = require('path')
 const crypto = require('crypto')
 const { execFileSync, spawnSync } = require('child_process')
 
+const { fontsCss } = require('./build.cjs')
+
 const ROOT = __dirname
 const OUT = path.join(ROOT, 'concepts')
 const WORK = path.join(OUT, 'frames')
@@ -34,13 +36,15 @@ const RATE = '+2%'
 const W = 1440, H = 492
 const FPS = 12                       // drawn rate; encoded at 30
 const HOLD = 1.6                     // the world keeps breathing after the last word
+const LEAD = 0.5                     // the first frames hold the title and the world, never a blank pane
 let STRIP_ROWS = 10
 
 for (const d of [OUT, WORK, MEDIA]) fs.mkdirSync(d, { recursive: true })
 
-// design tokens lifted from the real template, so the clips cannot drift
+// design tokens and faces lifted from the real template, so the clips cannot drift:
+// the ink ground, the hairlines, the two honeys, the embedded Inter / JetBrains Mono
 const shell = fs.readFileSync(path.join(ROOT, 'template.html'), 'utf8')
-const STYLE = (shell.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || ''
+const STYLE = ((shell.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '').replace('{{FONTS}}', () => fontsCss())
 
 // ---------- narration timing -------------------------------------------------
 // The scene's cached mp3 is the clock. Sentences are found by matching the
@@ -109,9 +113,10 @@ function hexPoints(cx, cy, r) {
   }
   return p.join(' ')
 }
-// honey fill marks what the moment just made or marked; white is what was there
+// honey tint marks what the moment just made or marked; the panel is what was there
 const hex = (cx, cy, r, o = {}) => r <= 0.5 || (o.op ?? 1) <= 0.004 ? '' :
-  `<polygon points="${hexPoints(cx, cy, r)}" fill="${o.fill ?? (o.made ? 'var(--honey-glow)' : '#fff')}" ` +
+  `<polygon points="${hexPoints(cx, cy, r)}" fill="${o.fill ?? (o.made ? 'var(--honey-tint)' : 'var(--panel)')}" ` +
+  `${o.fo != null ? `fill-opacity="${o.fo.toFixed(3)}" ` : ''}` +
   `stroke="${o.stroke ?? (o.made ? 'var(--honey)' : 'var(--honey-deep)')}" stroke-width="${o.sw ?? 2}" ` +
   `${o.dash ? `stroke-dasharray="${o.dash}" ` : ''}opacity="${(o.op ?? 1).toFixed(3)}"/>`
 const link = (x1, y1, x2, y2, op, o = {}) => op <= 0.01 ? '' :
@@ -122,11 +127,17 @@ const ring = (cx, cy, r, op, o = {}) => op <= 0.01 || r <= 0.5 ? '' :
   `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="none" ` +
   `stroke="${o.stroke ?? 'var(--honey)'}" stroke-width="${o.sw ?? 2}" ` +
   `${o.dash ? `stroke-dasharray="${o.dash}" ` : ''}opacity="${op.toFixed(3)}"/>`
+// no font-family here: the page's sheet owns the faces (text = sans, text.m = mono)
 const txt = (x, y, s, o = {}) => (o.op ?? 1) <= 0.01 ? '' :
-  `<text x="${x}" y="${y}" font-family="${o.font ?? "'Cascadia Code','Consolas',monospace"}" ` +
-  `font-size="${o.size ?? 13}" fill="${o.fill ?? 'var(--dim)'}" text-anchor="${o.anchor ?? 'middle'}" ` +
+  `<text x="${x}" y="${y}"${o.sans ? '' : ' class="m"'} ` +
+  `font-size="${o.size ?? 16}" fill="${o.fill ?? 'var(--dim)'}" text-anchor="${o.anchor ?? 'middle'}" ` +
   `${o.spacing ? `letter-spacing="${o.spacing}" ` : ''}${o.weight ? `font-weight="${o.weight}" ` : ''}` +
   `opacity="${(o.op ?? 1).toFixed(3)}">${s}</text>`
+// hairline geometry instead of glyphs: a check, a typing cursor, a two-hex bee, a six-spoke mark
+const check = (x, y, k = 1, o = {}) => (o.op ?? 1) <= 0.01 || k <= 0.01 ? '' :
+  `<path d="M${(x - 6 * k).toFixed(1)},${y.toFixed(1)} L${(x - 1.5 * k).toFixed(1)},${(y + 4.5 * k).toFixed(1)} L${(x + 7 * k).toFixed(1)},${(y - 5 * k).toFixed(1)}" fill="none" stroke="${o.stroke ?? 'var(--honey)'}" stroke-width="${o.sw ?? 2.2}" opacity="${(o.op ?? 1).toFixed(3)}"/>`
+const cursor = (x, y, h = 18, op = 1) => `<rect x="${x.toFixed(1)}" y="${(y - h * 0.8).toFixed(1)}" width="2.5" height="${h}" fill="var(--honey-fill)" opacity="${op.toFixed(3)}"/>`
+const MONO_ADV = 0.6                 // JetBrains Mono advance, em per character
 // content lines inside a tile — the universal “this cell holds something”
 function contentLines(cx, cy, e, scale = 1, op = 1) {
   const rows = [[-16, 44, 'var(--honey)', 4.5], [-4, 38, 'var(--faint)', 3], [6, 30, 'var(--faint)', 3], [16, 36, 'var(--faint)', 3]]
@@ -137,19 +148,31 @@ function contentLines(cx, cy, e, scale = 1, op = 1) {
   })
   return s
 }
+// the bee the plates and the sprite draw: two hexagons and two wing strokes, head first
 function beeGlyph(x, y, ang, T, scale = 1, op = 1) {
   if (op <= 0.01) return ''
-  const wing = Math.sin(T * Math.PI * 14) * 26
+  const wing = Math.sin(T * Math.PI * 14) * 9
   return `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${ang.toFixed(1)}) scale(${scale})" opacity="${op.toFixed(3)}">` +
-    `<ellipse cx="-3" cy="-8" rx="9" ry="5" fill="rgba(120,138,160,.45)" transform="rotate(${(-20 + wing).toFixed(1)} -3 -8)"/>` +
-    `<ellipse cx="-3" cy="8" rx="9" ry="5" fill="rgba(120,138,160,.45)" transform="rotate(${(20 - wing).toFixed(1)} -3 8)"/>` +
-    `<ellipse cx="0" cy="0" rx="11" ry="7.5" fill="var(--honey-bright)" stroke="var(--honey-deep)" stroke-width="1.4"/>` +
-    `<path d="M-4,-7 L-4,7 M1.5,-7.4 L1.5,7.4" stroke="var(--honey-deep)" stroke-width="2.6" fill="none"/>` +
-    `<circle cx="12.5" cy="0" r="4.6" fill="var(--ink)"/></g>`
+    `<polygon points="${hexPoints(-2, 1, 9)}" fill="var(--honey-fill)"/><polygon points="${hexPoints(11, -3, 5)}" fill="var(--honey-fill)"/>` +
+    `<g transform="rotate(${(-wing).toFixed(1)} 0 -6)"><path d="M1,-7 C-1,-15 -8,-17 -13,-14 M-4,-7 C-7,-13 -13,-14 -17,-11" fill="none" stroke="var(--honey)" stroke-width="1.3"/></g></g>`
 }
+// a pheromone: six spokes and a honey dot, turning into place
 const mark = (x, y, e, op = 1) => e <= 0.01 ? '' :
-  `<text x="${x}" y="${y + 8}" font-size="${(24 * e).toFixed(1)}" text-anchor="middle" fill="var(--honey)" ` +
-  `opacity="${(op * clamp01(e * 1.4)).toFixed(3)}" transform="rotate(${(1 - e) * 140} ${x} ${y})">✽</text>`
+  `<g transform="translate(${x},${y}) rotate(${((1 - e) * 140).toFixed(1)}) scale(${e.toFixed(3)})" opacity="${(op * clamp01(e * 1.4)).toFixed(3)}">` +
+  `<path d="M0,-10V10M-8.7,-5L8.7,5M-8.7,5L8.7,-5" fill="none" stroke="var(--honey)" stroke-width="2"/><circle r="2.6" fill="var(--honey-fill)"/></g>`
+// the six words, as geometry: hive, tile, layer, signature, bee, pheromone
+function glyph(name, x, y, e) {
+  const g = inner => `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)}) scale(${e.toFixed(3)})" opacity="${e.toFixed(3)}">${inner}</g>`
+  switch (name) {
+    case 'hive': return g(`<polygon points="${hexPoints(0, 0, 15)}" fill="none" stroke="var(--honey)" stroke-width="1.6"/><polygon points="${hexPoints(0, 0, 6)}" fill="var(--honey-fill)"/>`)
+    case 'tile': return g(`<polygon points="${hexPoints(0, 0, 13)}" fill="var(--honey-fill)"/>`)
+    case 'layer': return g(`<polygon points="${hexPoints(0, 0, 15)}" fill="none" stroke="var(--honey)" stroke-width="1.6" opacity=".55"/><polygon points="${hexPoints(0, 0, 9)}" fill="none" stroke="var(--honey)" stroke-width="1.6"/>`)
+    case 'signature': return g(txt(0, 8, '#', { size: 26, fill: 'var(--honey)', weight: 600 }))
+    case 'bee': return g(beeGlyph(0, 2, 0, 0, 0.9, 1))
+    case 'pheromone': return g(mark(0, 0, 1))
+  }
+  return ''
+}
 
 // ---------- the three worlds -------------------------------------------------
 // Each world is ONE coordinate space; beats add to it and the camera travels.
@@ -162,13 +185,13 @@ function vocabularyWorld(T, p) {
   let s = ''
 
   // beat 0 — the language: six words, precise
-  const GLY = [['⬡', 'hive'], ['⬢', 'tile'], ['▤', 'layer'], ['#', 'signature'], ['🐝', 'bee'], ['✽', 'pheromone']]
-  GLY.forEach(([g, w], k) => {
+  const GLY = ['hive', 'tile', 'layer', 'signature', 'bee', 'pheromone']
+  GLY.forEach((w, k) => {
     const e = easeOut(sp(0, 0.04 + k * 0.11, 0.34 + k * 0.11)); if (e <= 0) return
     const x = 720 + (k - 2.5) * 150, y = 246 + 16 * (1 - e)
     s += hex(x, y, 46 * e, { sw: 1.8, op: e })
-    s += txt(x, y - 2, g, { size: 26, fill: 'var(--honey-bright)', font: "'Segoe UI',sans-serif", op: e })
-    s += txt(x, y + 24, w, { size: 10, fill: 'var(--dim)', spacing: '.06em', op: e })
+    s += glyph(w, x, y - 8, e)
+    s += txt(x, y + 30, w, { size: 16, fill: 'var(--dim)', spacing: '.06em', op: e })
   })
 
   // the tree — one participant's whole tree (beat 1), grown once, lived-in after
@@ -186,7 +209,7 @@ function vocabularyWorld(T, p) {
     s += link(L1[k].x + L1[k].r * 0.8, L1[k].y, n.x - 28 * e, n.y, e)
   }))
   s += hex(ROOT.x, ROOT.y, ROOT.r * eR, { sw: 2.4, op: eR })
-  s += txt(ROOT.x, ROOT.y + 5, '⬡', { size: 30, fill: 'var(--honey-bright)', font: "'Segoe UI',sans-serif", op: eR * 0.9 })
+  s += glyph('hive', ROOT.x, ROOT.y, eR * 0.9)
 
   // versions behind the focus tile — one immutable version of a place (beat 3)
   for (let k = 3; k >= 1; k--) {
@@ -209,7 +232,7 @@ function vocabularyWorld(T, p) {
     const restyled = isPerch ? easeOut(sp(6, 0.55, 0.85)) : 0
     s += hex(n.x, n.y, 30 * e * (1 + 0.12 * restyled), {
       sw: 1.8 + restyled, op: e,
-      fill: restyled > 0.3 ? 'var(--honey-glow)' : acted > 0 ? `rgba(224,165,32,${(0.22 * acted).toFixed(2)})` : '#fff',
+      fill: restyled > 0.3 ? 'var(--honey-tint)' : acted > 0 ? 'var(--honey-fill)' : 'var(--panel)', fo: restyled > 0.3 ? 1 : acted > 0 ? 0.22 * acted : 1,
       stroke: restyled > 0.3 ? 'var(--honey)' : 'var(--honey-deep)',
     })
   }))
@@ -223,8 +246,9 @@ function vocabularyWorld(T, p) {
     const conv = easeOut(sp(4, 0, 0.3))
     ;[-26, 0, 26].forEach(dx => { s += link(FOCUS.x + dx, FOCUS.y + 34, FOCUS.x, FOCUS.y + 62, conv, { dim: 0.35 }) })
     const chars = Math.ceil(SIG8.length * clamp01(sp(4, 0.12, 0.72)))
-    s += txt(FOCUS.x, FOCUS.y + 84, SIG8.slice(0, chars) + (chars < SIG8.length ? '▌' : ''), { size: 15, fill: 'var(--honey-deep)', weight: 600 })
-    s += txt(FOCUS.x + 92, FOCUS.y + 84, '✓', { size: 15, fill: 'var(--honey)', op: easeOut(sp(4, 0.78, 0.95)) })
+    s += txt(FOCUS.x, FOCUS.y + 84, SIG8.slice(0, chars), { size: 18, fill: 'var(--honey)', weight: 600 })
+    if (chars < SIG8.length) s += cursor(FOCUS.x + (chars - SIG8.length / 2) * 18 * MONO_ADV + 2, FOCUS.y + 84)
+    s += check(FOCUS.x + 114, FOCUS.y + 80, 1, { op: easeOut(sp(4, 0.78, 0.95)) })
   }
 
   // beat 5 — a bee senses, then acts. beat 6 lifts it away again.
@@ -263,7 +287,7 @@ function vocabularyWorld(T, p) {
     R2L.forEach(n => { s += link(R2.x - R2.r * 0.8, R2.y, n.x + n.r, n.y, eT) })
     s += link(R2.x - R2.r * 0.8, R2.y, SLOT.x + SLOT.r, SLOT.y, eT, { dash: '4 5', dim: 0.4 })
     s += hex(R2.x, R2.y, R2.r * eT, { sw: 2.2, op: eT })
-    s += txt(R2.x, R2.y + 5, '⬡', { size: 26, fill: 'var(--honey-bright)', font: "'Segoe UI',sans-serif", op: eT * 0.9 })
+    s += glyph('hive', R2.x, R2.y, eT * 0.9)
     R2L.forEach(n => { s += hex(n.x, n.y, n.r * eT, { sw: 1.8, op: eT }) })
     const tt = easeInOut(sp(7, 0.3, 0.88))
     if (tt > 0 && tt < 1) {
@@ -285,7 +309,7 @@ function vocabularyWorld(T, p) {
     const burst = sp(8, 0.55, 0.82)
     const done = easeOut(sp(8, 0.62, 0.9))
     s += hex(SLOT.x, SLOT.y, SLOT.r, { dash: done > 0.5 ? '' : '5 4', op: 0.9, sw: 1.8 + done, made: done > 0.5 })
-    if (brood > 0 && done < 0.5) s += hex(SLOT.x, SLOT.y, SLOT.r * 0.82 * brood, { fill: 'var(--honey-glow)', stroke: 'var(--honey-bright)', sw: 1.2, op: 0.85 })
+    if (brood > 0 && done < 0.5) s += hex(SLOT.x, SLOT.y, SLOT.r * 0.82 * brood, { fill: 'var(--honey-tint)', stroke: 'var(--honey-fill)', sw: 1.2, op: 0.85 })
     if (burst > 0 && burst < 1) {
       s += ring(SLOT.x, SLOT.y, 30 + 40 * burst, (1 - burst) * 0.9, { sw: 2.4 })
       for (let k = 0; k < 6; k++) {
@@ -330,11 +354,14 @@ function integrityWorld(T, p) {
   ;[-22, 0, 22].forEach(dy => { s += link(EM.x + EM.r * 0.85, EM.y + dy, EM.x + EM.r + 46, EM.y, conv, { dim: 0.4 }) })
   const SIGT = '#f02ee1cb2faf6d1b'
   const chars = Math.ceil(SIGT.length * sp(0, 0.42, 0.8))
-  if (chars > 0) s += txt(EM.x + EM.r + 58, EM.y + 5, SIGT.slice(0, chars) + (chars < SIGT.length ? '▌' : ''), { size: 17, fill: 'var(--honey-deep)', weight: 600, anchor: 'start' })
+  if (chars > 0) {
+    s += txt(EM.x + EM.r + 58, EM.y + 6, SIGT.slice(0, chars), { size: 20, fill: 'var(--honey)', weight: 600, anchor: 'start' })
+    if (chars < SIGT.length) s += cursor(EM.x + EM.r + 58 + chars * 20 * MONO_ADV + 2, EM.y + 6, 20)
+  }
   const e0c = easeOut(sp(0, 0.82, 0.98))
   if (e0c > 0) {
-    s += ring(EM.x + EM.r + 152, EM.y, 26 * e0c, e0c * 0.9, { sw: 2 })
-    s += txt(EM.x + EM.r + 152, EM.y + 7, '✓', { size: 22 * e0c, fill: 'var(--honey)', op: e0c })
+    s += ring(EM.x + EM.r + 326, EM.y, 26 * e0c, e0c * 0.9, { sw: 2 })
+    s += check(EM.x + EM.r + 326, EM.y, 1.3 * e0c, { op: e0c })
   }
 
   // beat 1 — a branch is shared as signatures; the machine proves every byte
@@ -349,25 +376,25 @@ function integrityWorld(T, p) {
       s += hex(n.x, n.y, n.r * eT, { sw: 2, op: eT })
       s += contentLines(n.x, n.y, eT, n.r / 52, 0.8)
     })
-    s += `<rect x="${MACH.x}" y="${MACH.y}" width="${MACH.w}" height="${MACH.h}" rx="14" fill="#fff" stroke="var(--line)" stroke-width="2" opacity="${eT.toFixed(2)}"/>`
-    s += txt(MACH.x + MACH.w / 2, MACH.y + 28, 'your machine', { size: 12, spacing: '.3em', op: eT * 0.9 })
+    s += `<rect x="${MACH.x}" y="${MACH.y}" width="${MACH.w}" height="${MACH.h}" rx="4" fill="var(--bg)" stroke="var(--line)" stroke-width="1.5" opacity="${eT.toFixed(2)}"/>`
+    s += txt(MACH.x + MACH.w / 2, MACH.y + 30, 'your machine', { size: 16, spacing: '.12em', fill: 'var(--faint-text)', op: eT * 0.9 })
     SIGS13.forEach((sig, k) => {
       const y = MACH.y + 74 + k * 56
       const tt = easeInOut(sp(1, 0.08 + k * 0.09, 0.42 + k * 0.09))
       const from = BR[k], to = { x: MACH.x + 64, y }
       if (tt > 0) {
         const q = qbez(from, { x: (from.x + to.x) / 2, y: from.y - 66 }, to, tt)
-        s += `<rect x="${q.x - 34}" y="${q.y - 13}" width="68" height="26" rx="6" fill="#fff" stroke="var(--honey-deep)" stroke-width="1.4" opacity=".95"/>`
-        s += txt(q.x, q.y + 5, sig, { size: 13, fill: 'var(--honey-deep)', weight: 600 })
+        s += `<rect x="${q.x - 38}" y="${q.y - 14}" width="76" height="28" rx="2" fill="var(--bg)" stroke="var(--honey-deep)" stroke-width="1.4" opacity=".95"/>`
+        s += txt(q.x, q.y + 6, sig, { size: 16, fill: 'var(--honey)', weight: 600 })
       }
       const fill = sp(1, 0.44 + k * 0.09, 0.72 + k * 0.09)
       if (fill > 0) {
         s += `<rect x="${MACH.x + 116}" y="${y - 5}" width="180" height="10" rx="5" fill="none" stroke="var(--line)" stroke-width="1.5"/>`
-        s += `<rect x="${MACH.x + 116}" y="${y - 5}" width="${180 * easeOut(fill)}" height="10" rx="5" fill="var(--honey-bright)" opacity=".8"/>`
-        s += txt(MACH.x + 116 + 90, y + 26, 'hash(bytes) ≟ sig', { size: 10, fill: 'var(--faint)', op: clamp01(fill * 2) * 0.9 })
+        s += `<rect x="${MACH.x + 116}" y="${y - 5}" width="${180 * easeOut(fill)}" height="10" rx="5" fill="var(--honey-fill)" opacity=".8"/>`
+        s += txt(MACH.x + 116 + 90, y + 28, 'hash(bytes) = sig', { size: 15, fill: 'var(--faint-text)', op: clamp01(fill * 2) * 0.9 })
       }
       const ok = easeOut(sp(1, 0.74 + k * 0.09, 0.88 + k * 0.09))
-      if (ok > 0) s += txt(MACH.x + 336, y + 7, '✓', { size: 21 * ok, fill: 'var(--honey)', op: ok })
+      if (ok > 0) s += check(MACH.x + 336, y, 1.3 * ok, { op: ok })
     })
   }
 
@@ -380,8 +407,8 @@ function integrityWorld(T, p) {
     const MESH = [[0, 1], [1, 2], [2, 3], [0, 3], [1, 3]]
     MESH.forEach(([a, b]) => { s += link(PEERS[a].x, PEERS[a].y, PEERS[b].x, PEERS[b].y, eT * 0.5, { dash: '2 6', dim: 0.5 }) })
     PEERS.forEach((n, k) => {
-      s += `<circle cx="${n.x}" cy="${n.y}" r="30" fill="#fff" stroke="${k === 0 ? 'var(--honey)' : 'var(--line)'}" stroke-width="${k === 0 ? 2.4 : 2}" opacity="${eT.toFixed(2)}"/>`
-      s += txt(n.x, n.y + 4, k === 0 ? 'you' : 'peer', { size: 10.5, spacing: '.14em', fill: k === 0 ? 'var(--honey)' : 'var(--faint)', op: eT })
+      s += `<circle cx="${n.x}" cy="${n.y}" r="30" fill="var(--bg)" stroke="${k === 0 ? 'var(--honey)' : 'var(--steel)'}" stroke-width="${k === 0 ? 2.4 : 1.5}" opacity="${eT.toFixed(2)}"/>`
+      s += txt(n.x, n.y + 5, k === 0 ? 'you' : 'peer', { size: 15, spacing: '.06em', fill: k === 0 ? 'var(--honey)' : 'var(--steel)', op: eT })
     })
     const collapse = easeInOut(sp(2, 0.12, 0.42))
     PEERS.forEach((n, k) => {
@@ -391,7 +418,7 @@ function integrityWorld(T, p) {
     })
     if (collapse >= 1) {
       s += hex(C.x, C.y, 29, { made: true, sw: 2.4 })
-      s += txt(C.x, C.y + 52, '#e3a1 · one copy', { size: 12, fill: 'var(--honey-deep)', weight: 600 })
+      s += txt(C.x, C.y + 56, '#e3a1 · one copy', { size: 16, fill: 'var(--honey)', weight: 600 })
     }
     const out = easeInOut(sp(2, 0.6, 0.76)), back = easeInOut(sp(2, 0.78, 0.94))
     if (out > 0 && back < 1) {
@@ -400,7 +427,7 @@ function integrityWorld(T, p) {
       s += `<circle cx="${at.x.toFixed(1)}" cy="${at.y.toFixed(1)}" r="${back > 0 ? 9 : 5}" fill="var(--honey)" opacity=".9"/>`
       if (back > 0) s += hex(at.x, at.y, 13, { made: true, sw: 1.4, op: 0.95 })
     }
-    if (back >= 1) { s += hex(PEERS[0].x, PEERS[0].y - 46, 14, { made: true, sw: 1.5 }); s += txt(PEERS[0].x + 26, PEERS[0].y - 41, '✓', { size: 14, fill: 'var(--honey)' }) }
+    if (back >= 1) { s += hex(PEERS[0].x, PEERS[0].y - 46, 14, { made: true, sw: 1.5 }); s += check(PEERS[0].x + 30, PEERS[0].y - 46, 0.9) }
   }
 
   // beat 3 — sharing a hash is sharing a proof
@@ -411,7 +438,7 @@ function integrityWorld(T, p) {
     const spin = (T * 40) % 360
     s += `<g transform="rotate(${spin.toFixed(1)} ${C.x} ${C.y + 8})">` + ring(C.x, C.y + 8, 84 * seal, seal * 0.5, { dash: '2 12', sw: 2 }) + '</g>'
     const ck = easeOut(sp(3, 0.45, 0.7))
-    if (ck > 0) s += txt(C.x, C.y + 10 + 9 * ck, '✓', { size: 26 * ck, fill: 'var(--honey-deep)', weight: 600, op: ck })
+    if (ck > 0) s += check(C.x, C.y + 8, 2.2 * ck, { op: ck, sw: 2.6 })
   }
   return s
 }
@@ -463,12 +490,12 @@ function timeWorld(T, p) {
     // beat 5 — the ripple back through every immutable state
     const rip = sp(5, 0.06 + (expandN - 1 - k) * 0.05, 0.2 + (expandN - 1 - k) * 0.05)
     const lift = Math.sin(Math.PI * clamp01(rip)) * 6
-    s += `<rect x="${(x - CW / 2).toFixed(1)}" y="${(y - CH / 2 - lift).toFixed(1)}" width="${CW}" height="${CH}" rx="10" ` +
-      `fill="${exp ? 'var(--bg2)' : '#fff'}" stroke="${rip > 0.5 ? 'var(--honey)' : exp ? 'var(--honey-deep)' : 'var(--line)'}" ` +
+    s += `<rect x="${(x - CW / 2).toFixed(1)}" y="${(y - CH / 2 - lift).toFixed(1)}" width="${CW}" height="${CH}" rx="3" ` +
+      `fill="${exp ? 'var(--panel)' : 'var(--bg)'}" stroke="${rip > 0.5 ? 'var(--honey)' : exp ? 'var(--honey-deep)' : 'var(--line)'}" ` +
       `stroke-width="${rip > 0.5 ? 2 : 1.6}" ${exp ? 'stroke-dasharray="6 4" ' : ''}opacity="${(e * dim).toFixed(2)}"/>`
     s += pageAt(x, y - lift, k, 1, e * dim)
     const sigOn = p(5) > 0 ? clamp01(rip * 2) : 0
-    s += txt(x, y + 48, '#' + hex4(k + 3), { size: k === 0 && sp(5, 0.75, 0.95) > 0 ? 13 : 10, fill: sigOn > 0.4 ? 'var(--honey-deep)' : 'var(--faint)', weight: sigOn > 0.4 ? 600 : 400, op: e * (0.65 + 0.35 * sigOn) })
+    s += txt(x, y + 52, '#' + hex4(k + 3), { size: k === 0 && sp(5, 0.75, 0.95) > 0 ? 18 : 15, fill: sigOn > 0.4 ? 'var(--honey)' : 'var(--faint-text)', weight: sigOn > 0.4 ? 600 : 400, op: e * (0.65 + 0.35 * sigOn) })
   }
   // the oldest state, as reachable as the head
   const eOld = easeOut(sp(5, 0.75, 0.95))
@@ -485,8 +512,8 @@ function timeWorld(T, p) {
   // beat 2 — the rewind window scrubs what the page used to look like
   const eWin = easeOut(sp(2, 0, 0.18)) * (1 - easeInOut(sp(3, 0, 0.25)))
   if (eWin > 0.01) {
-    s += `<rect x="560" y="64" width="320" height="168" rx="12" fill="#fff" stroke="var(--honey-deep)" stroke-width="2" opacity="${eWin.toFixed(2)}"/>`
-    s += txt(720, 88, 'rewind', { size: 11, spacing: '.3em', fill: 'var(--honey)', op: eWin * 0.9 })
+    s += `<rect x="560" y="64" width="320" height="168" rx="4" fill="var(--bg)" stroke="var(--honey-deep)" stroke-width="1.5" opacity="${eWin.toFixed(2)}"/>`
+    s += txt(720, 90, 'rewind', { size: 16, spacing: '.12em', fill: 'var(--honey)', op: eWin * 0.9 })
     s += pageAt(720, 152, scrubU, 2.1, eWin)
     s += link(cardX(headU), 232, cardX(headU), CY - CH / 2 - 30, eWin * 0.7, { dash: '3 5', dim: 0.6 })
   }
@@ -496,8 +523,8 @@ function timeWorld(T, p) {
     const e = easeOut(sp(3, a, b)); if (e <= 0) return
     const x = cardX(u), ty = CY - CH / 2 - 58 + (1 - e) * -26
     s += link(x, ty + 12, x, CY - CH / 2 - 2, e * 0.8, { dim: 0.6 })
-    s += `<rect x="${x - 37}" y="${ty - 13}" width="74" height="24" rx="6" fill="var(--honey-glow)" stroke="var(--honey)" stroke-width="1.4" opacity="${e.toFixed(2)}"/>`
-    s += txt(x, ty + 3, name, { size: 11, fill: 'var(--honey-deep)', weight: 600, op: e })
+    s += `<rect x="${x - 44}" y="${ty - 14}" width="88" height="28" rx="2" fill="var(--honey-tint)" stroke="var(--honey)" stroke-width="1.4" opacity="${e.toFixed(2)}"/>`
+    s += txt(x, ty + 6, name, { size: 16, fill: 'var(--honey)', weight: 600, op: e })
   })
 
   // beat 4 — the checkpoint pin, then the experiments it protects against
@@ -506,7 +533,7 @@ function timeWorld(T, p) {
     const x = cardX(8)
     s += link(x, CY - CH / 2 - 40 * ePin, x, CY - CH / 2 - 2, ePin * 0.9, { dim: 0.8, sw: 2 })
     s += hex(x, CY - CH / 2 - 46, 11 * ePin, { made: true, sw: 2 })
-    s += txt(x, CY - CH / 2 - 64, 'checkpoint', { size: 10, spacing: '.16em', fill: 'var(--honey-deep)', op: ePin })
+    s += txt(x, CY - CH / 2 - 66, 'checkpoint', { size: 16, spacing: '.08em', fill: 'var(--honey)', op: ePin })
   }
   return s
 }
@@ -552,11 +579,14 @@ const CLIPS = {
 
 // ---------- frame assembly ---------------------------------------------------
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+// the pane is the plate's material: panel ground, the stage comb barely there, the page's faces
 const PAGE_CSS = `${STYLE}
-  html,body{width:${W}px;background:var(--bg)}
-  .pane{position:relative;width:${W}px;height:${H}px;overflow:hidden;background:var(--bg)}
-  .pane svg.comb{position:absolute;inset:0;width:100%;height:100%;opacity:.5}
-  .pane svg.stage{position:absolute;inset:0;width:100%;height:100%}`
+  html,body{width:${W}px;background:var(--panel)}
+  .pane{position:relative;width:${W}px;height:${H}px;overflow:hidden;background:var(--panel)}
+  .pane svg.comb{position:absolute;inset:0;width:100%;height:100%;opacity:.7}
+  .pane svg.stage{position:absolute;inset:0;width:100%;height:100%}
+  .pane svg.stage text{font-family:var(--sans);font-weight:400}
+  .pane svg.stage text.m{font-family:var(--mono)}`
 const COMB = `<svg class="comb"><defs>
   <pattern id="hexp" width="56" height="97" patternUnits="userSpaceOnUse" patternTransform="scale(1.6)">
     <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1"/>
@@ -564,7 +594,8 @@ const COMB = `<svg class="comb"><defs>
     <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1" transform="translate(-28,48.5)"/>
   </pattern></defs><rect width="120%" height="120%" fill="url(#hexp)"/></svg>`
 
-function paneAt(clip, starts, audioDur, T) {
+function paneAt(clip, starts, audioDur, T0) {
+  const T = Math.max(T0, LEAD)              // the lead-in: the first half second holds the opened world
   const i = Math.max(0, starts.findLastIndex(t => T >= t))
   const winEnd = j => j + 1 < starts.length ? starts[j + 1] : audioDur
   const pOf = j => T <= starts[j] ? 0 : T >= winEnd(j) ? 1 : (T - starts[j]) / (winEnd(j) - starts[j])
@@ -581,8 +612,8 @@ function paneAt(clip, starts, audioDur, T) {
   const fadeIn = clamp01((T - starts[i]) / 0.45)
   const prev = i > 0 && fadeIn < 1 ? clip.beats[i - 1] : null
   const put = (b, op) =>
-    txt(46, 62, esc(b.term), { size: 24, fill: 'var(--honey)', anchor: 'start', spacing: '.06em', weight: 600, op }) +
-    txt(47, 88, esc(b.gloss).toUpperCase(), { size: 10.5, fill: 'var(--faint)', anchor: 'start', spacing: '.26em', op: op * 0.9 })
+    txt(46, 66, esc(b.term), { size: 30, fill: 'var(--honey)', anchor: 'start', weight: 500, sans: true, op }) +
+    txt(47, 94, esc(b.gloss).toUpperCase(), { size: 17, fill: 'var(--faint-text)', anchor: 'start', spacing: '.2em', op: op * 0.9 })
   labels += put(clip.beats[i], fadeIn)
   if (prev) labels += put(prev, 1 - fadeIn)
 

@@ -4,12 +4,9 @@
 //   template.html          — layout + player engine (visual chunks live here)
 //   hosts.json             — the doors under hypercomb.com (hosts.cjs derives them)
 //   media/*.mp4            — live-capture clips
+//   fonts/*.woff2          — the vendored faces, embedded as data URIs
 //   audio-cache/<h16>.mp3  — narration audio, named by sha256(voice|say)
 //   dist/hypercomb-presentation.html — the assembled, self-contained deliverable
-//
-// Edit a scene's `say` (or sync it from its hive note), re-run build — only
-// that scene's audio is regenerated; everything else is a cache hit. Same
-// content, same hash, no work: the signature idea applied to the build.
 //
 //   node scripts/presentation/build.cjs             # assemble (regenerates stale audio)
 //   node scripts/presentation/build.cjs --check     # report stale audio without network
@@ -26,23 +23,14 @@ const RATE = '+2%'
 const scenes = fs.readdirSync(path.join(ROOT, 'scenes')).filter(f => f.endsWith('.json')).sort()
   .map(f => JSON.parse(fs.readFileSync(path.join(ROOT, 'scenes', f), 'utf8')))
 
-// Pronunciation rules rewrite what the VOICE reads; captions keep the real text.
-// Because the cache key is the spoken form, fixing a pronunciation regenerates
-// exactly the scenes that say the word — and nothing else.
 const rulesPath = path.join(ROOT, 'pronunciations.json')
 const RULES = fs.existsSync(rulesPath) ? JSON.parse(fs.readFileSync(rulesPath, 'utf8')) : []
-// [pause] in a narration is DIRECTION, not text: the line is spoken either side
-// of it and the silence is cut in between, because the Edge voice endpoint
-// rejects SSML <break> and <mstts:silence> outright. [pause:1400] for a longer
-// one. The caption never shows the marker.
 const PAUSE = /\[pause(?::(\d+))?\]/g
 const spokenOf = say => RULES.reduce((text, r) =>
   r && r.match && r.say ? text.split(r.match).join(r.say) : text, say)
 /** what the viewer reads — the direction is stripped out */
 const captionOf = say => say.replace(PAUSE, ' ').replace(/\s{2,}/g, ' ').replace(/\s+([.,;:!?])/g, '$1').trim()
-
 const hashOf = say => crypto.createHash('sha256').update(`${VOICE}|${RATE}|${spokenOf(say)}`).digest('hex').slice(0, 16)
-
 const cachePath = say => {
   const p = path.join(ROOT, 'audio-cache', hashOf(say) + '.mp3')
   return fs.existsSync(p) ? p : null
@@ -59,7 +47,6 @@ async function ensureAudio() {
   if (!stale.length) return
   const { MsEdgeTTS, OUTPUT_FORMAT, ProsodyOptions } = require('msedge-tts')
   const { execFileSync } = require('child_process')
-
   const speak = async text => {
     const tts = new MsEdgeTTS()
     await tts.setMetadata(VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
@@ -70,13 +57,10 @@ async function ensureAudio() {
     tts.close()
     return Buffer.concat(chunks)
   }
-
   const tmp = path.join(ROOT, 'audio-cache', '.tmp')
   fs.mkdirSync(tmp, { recursive: true })
-
   for (const s of stale) {
     const out = path.join(ROOT, 'audio-cache', hashOf(s.say) + '.mp3')
-    // split on the direction: odd entries are the pause lengths the regex captured
     const parts = spokenOf(s.say).split(PAUSE)
     if (parts.length === 1) {
       fs.writeFileSync(out, await speak(parts[0]))
@@ -84,163 +68,175 @@ async function ensureAudio() {
       const pieces = []
       for (const [i, part] of parts.entries()) {
         const file = path.join(tmp, `p${i}.mp3`)
-        if (i % 2 === 0) {                                   // spoken text
-          if (!part.trim()) continue
-          fs.writeFileSync(file, await speak(part.trim()))
-        } else {                                             // the silence between
+        if (i % 2 === 0) { if (!part.trim()) continue; fs.writeFileSync(file, await speak(part.trim())) }
+        else {
           const secs = (Number(part) || 700) / 1000
-          execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi',
-            '-i', 'anullsrc=r=24000:cl=mono', '-t', String(secs),
-            '-c:a', 'libmp3lame', '-b:a', '48k', file], { stdio: 'ignore' })
+          execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', String(secs), '-c:a', 'libmp3lame', '-b:a', '48k', file], { stdio: 'ignore' })
         }
         pieces.push(file)
       }
       const list = path.join(tmp, 'list.txt')
       fs.writeFileSync(list, pieces.map(f => `file '${f.replace(/\\/g, '/')}'`).join('\n'))
-      execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0',
-        '-i', list, '-c', 'copy', out], { stdio: 'ignore' })
+      execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', out], { stdio: 'ignore' })
       for (const f of [...pieces, list]) { try { fs.unlinkSync(f) } catch {} }
     }
-    console.log(`regenerated audio: scene ${s.n} (${s.name})${parts.length > 1 ? ` · ${Math.floor(parts.length / 2)} pause(s)` : ''}`)
+    console.log(`regenerated audio: scene ${s.n} (${s.name})`)
   }
   try { fs.rmdirSync(tmp) } catch {}
 }
 
 // --- instructions → scene HTML ----------------------------------------------
-// The template is the shell: styles, chrome, and the player engine. Every scene
-// is compiled here from its instruction, so editing a tile's instruction and
-// recompiling is the whole authoring loop.
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+// smart punctuation for on-screen copy only — never the narration
+const smart = s => String(s).replace(/(\w)'(\w)/g, '$1’$2').replace(/"([^"]*)"/g, '“$1”').replace(/'/g, '’')
 // *asterisks* are the emphasis a participant types; they become the honey <b>
-const emph = (s, tag = 'b') => esc(s).replace(/\*([^*]+)\*/g, `<${tag}>$1</${tag}>`)
+const emph = (s, tag = 'b') => esc(smart(s)).replace(/\*([^*]+)\*/g, `<${tag}>$1</${tag}>`)
+const plain = s => smart(s).replace(/\*/g, '')
 const ACT_OF = { 'what is hypercomb': 'what', 'why hypercomb': 'why', roadmap: 'roadmap' }
+const icon = name => `<svg class="g" aria-hidden="true"><use href="#i-${name}"/></svg>`
+const HEX = '50,0 100,28.87 100,86.6 50,115.47 0,86.6 0,28.87'
+const HEX_IN = '50,4.62 96,31.18 96,84.29 50,110.85 4,84.29 4,31.18'
+const hexSvg = () => `<svg class="h" viewBox="0 0 100 115.47" aria-hidden="true"><polygon class="o" points="${HEX}"/><polygon class="in" points="${HEX_IN}"/></svg>`
+const MARK14 = `<svg class="mk" viewBox="0 0 14 16" aria-hidden="true"><polygon points="7,0.5 13.06,4 13.06,12 7,15.5 0.94,12 0.94,4"/></svg>`
+
+const CLIP = {
+  navigate: { kind: 'live', title: 'a real hive' }, zoom: { kind: 'live', title: 'the whole hive' },
+  children: { kind: 'live', title: 'building structure' }, create: { kind: 'live', title: 'the first tile' },
+  vocabulary: { kind: 'drawn', title: 'vocabulary' }, integrity: { kind: 'drawn', title: 'integrity' }, time: { kind: 'drawn', title: 'time' },
+}
+const RATIO = { live: '960/328', drawn: '1440/492' }
+// the sig stamp (scene field "sig": true): the caption's own sha-256, first eight hex in honey
+const stamp = s => { const h = crypto.createHash('sha256').update(captionOf(s.say)).digest('hex'); return `<span class="sig" title="sha-256 of the caption"><b>${h.slice(0, 8)}</b>${h.slice(8, 16)}…</span>` }
+const figcap = (kind, title, sig = '') => `<div class="figcap ${kind}">${icon('hex')}<span>${esc(kind)} · ${esc(title)}</span>${sig}</div>`
 
 function visualHtml(s) {
   const rows = s.visualData || []
-  switch ((s.visual || 'none').split(':')[0]) {
+  const [kind, arg] = (s.visual || 'none').split(':').map(x => (x || '').trim())
+  switch (kind) {
     case 'film': {
-      const clip = (s.visual.split(':')[1] || '').trim()
-      // drawn concept clips (concepts.cjs) are labelled as drawings, not captures
-      const DRAWN = { vocabulary: 'the flow of it', integrity: 'proof, not trust', time: 'the past, kept' }
-      const tag = { navigate: 'localhost hive', zoom: 'the whole hive at a glance',
-                    create: 'your first tile', children: 'creating structure' }[clip] || DRAWN[clip] || 'live capture'
-      const cls = DRAWN[clip] ? 'filmtag drawn' : 'filmtag'
-      return `\n  <div class="filmwrap"><span class="${cls}">${DRAWN[clip] ? 'drawn' : 'live capture'} · ${esc(tag)}</span>` +
-             `<video muted playsinline loop src="{{${clip}}}"></video></div>`
+      const c = CLIP[arg]; if (!c) throw new Error(`unknown clip ${arg} on scene ${s.n}`)
+      return `<div class="figbox"><div class="fig film" style="--ratio:${RATIO[c.kind]}">` +
+        `<video muted playsinline preload="metadata" data-clip="${arg}"${c.kind === 'drawn' ? ' data-drawn="1"' : ''}></video></div>${figcap(c.kind, c.title)}</div>`
     }
     case 'hexes':
-      return `\n  <div class="hexrow">` + rows.map(r => {
-        const [glyph, ...rest] = String(r).trim().split(/\s+/)
-        return `<div class="hexb"><span class="g">${esc(glyph)}</span><span class="t">${esc(rest.join(' '))}</span></div>`
+      return `<div class="fig hexrow">` + rows.map((r, i) => {
+        const m = String(r).trim().match(/^icon:(\S+)\s+(.*)$/)
+        if (!m) throw new Error(`badge row needs icon:<name> <label> on scene ${s.n}: ${r}`)
+        if (m[2].length > 12) console.warn(`scene ${s.n}: badge label over 12 characters: ${m[2]}`)
+        return `<div class="hexb" style="--i:${i}"><div class="hx">${hexSvg()}${icon(m[1])}</div><span class="t">${esc(m[2])}</span></div>`
       }).join('') + `</div>`
-    case 'stack':
-      return `\n  <div class="stack">` + rows.map(r => {
+    case 'stack': case 'list':
+      return `<div class="fig ${kind}">` + rows.map((r, i) => {
         const head = /^\*\s/.test(r)
-        const [left, right] = String(r).replace(/^\*\s/, '').split('|').map(x => (x || '').trim())
-        const m = head ? ' class="m"' : ''
-        return `<div class="lay${head ? ' head' : ''}"><span${m}>${esc(left)}</span><span${m}>${esc(right)}</span></div>`
+        const parts = String(r).replace(/^\*\s/, '').split('|').map(x => x.trim())
+        if (parts[1] && parts[1].length > 36) console.warn(`scene ${s.n}: row value over 36 characters: ${parts[1]}`)
+        const cls = ['lay', head ? 'head' : '', parts.length === 1 ? 'one' : ''].filter(Boolean).join(' ')
+        return `<div class="${cls}" style="--i:${i}">` + parts.map(p => `<span>${esc(smart(p))}</span>`).join('') + `</div>`
       }).join('') + `</div>`
-    case 'road':
-      return `\n  <div class="road">` + rows.map(r => {
+    case 'road': {
+      const state = arg || 'landed'
+      return `<div class="fig road">` + rows.map((r, i) => {
         const [title, ...rest] = String(r).split('—')
-        return `<div class="mile"><div class="dot"></div><div><div class="mt">${esc(title.trim())}</div>` +
-               `<div class="md">${esc(rest.join('—').trim())}</div></div></div>`
+        if (rest.length !== 1) console.warn(`scene ${s.n}: roadmap row needs exactly one em dash: ${r}`)
+        return `<div class="mile ${state}" style="--i:${i}">${MARK14}<div><div class="mt">${esc(smart(title.trim()))}</div>` +
+               `<div class="md">${esc(smart(rest.join('—').trim()))}</div></div></div>`
       }).join('') + `</div>`
-    case 'sig':
-      return rows.length ? `\n  <div class="sig">${emph(rows[0], 'em')}</div>` : ''
+    }
     // a drawn plate: the file is inlined, so it scales with the stage and carries no payload
     case 'plate': {
-      const name = (s.visual.split(':')[1] || '').trim()
-      const svg = fs.readFileSync(path.join(ROOT, 'visuals', name + '.svg'), 'utf8').trim()
-      // the plate's own viewBox decides the frame: tall plates stay portrait,
-      // wide ones get the film's cinematic width — one CSS rule can't know
-      const vb = svg.match(/viewBox="([-\d.\s]+)"/)
-      const [, , w, h] = (vb ? vb[1].trim().split(/\s+/) : [0, 0, 580, 596]).map(Number)
-      // an inline svg with no width/height has a 300x150 intrinsic size, and the
-      // centred flex column shrinks the frame to it — stamp the real one on
-      const sized = svg.replace(/^<svg /, `<svg width="${w}" height="${h}" `)
-      // wide plates cap at 36vh so the sub line always clears the caption box
-      const wide = w / h > 1.4
-      const style = `aspect-ratio:${w}/${h};max-width:min(${wide ? 1040 : 520}px,${wide ? 88 : 70}vw)${wide ? ';max-height:36vh' : ''}`
-      const cap = rows.length ? `<span class="platecap">${esc(rows[0])}</span>` : ''
-      return `\n  <div class="platewrap" style="${style}">${sized}${cap}</div>`
+      let svg = fs.readFileSync(path.join(ROOT, 'visuals', arg + '.svg'), 'utf8').trim()
+      if (!/viewBox="0 0 960 400"/.test(svg)) throw new Error(`plate ${arg} is not on the 960x400 frame`)
+      if (/font-family|@keyframes|feGaussianBlur|Gradient|<style/.test(svg)) throw new Error(`plate ${arg} carries styling the page owns`)
+      const title = rows[0] || arg.replace(/-/g, ' ')
+      return `<div class="figbox"><div class="fig plate" style="--ratio:960/400">${svg}</div>${figcap('plate', title, s.sig ? stamp(s) : '')}</div>`
     }
-    default: return ''
+    case 'none': return ''
+    default: throw new Error(`unknown visual ${kind} on scene ${s.n}`)
   }
 }
 
 function sceneObject(s) {
-  const parts = [`\n  <h1>${emph(s.headline)}</h1>`]
-  const vis = visualHtml(s)
-  // a film sits under the headline; badge rows and diagrams sit under the sub line
-  if ((s.visual || '').startsWith('film')) parts.push(vis)
-  if (s.sub) parts.push(`\n  <p class="sub">${emph(s.sub)}</p>`)
-  if (vis && !(s.visual || '').startsWith('film')) parts.splice(1, 0, vis)
-  if (s.link) parts.push(`\n  <a class="golink" href="${esc(s.link.href)}" target="_blank" rel="noopener">${esc(s.link.label)}</a>`)
-  const o = { act: ACT_OF[s.chapter], name: s.name, eyebrow: s.eyebrow, html: parts.join('') }
-  if ((s.visual || '').startsWith('film')) o.media = s.visual.split(':')[1]
-  o.say = captionOf(s.say)
-  return o
+  const parts = [`<h1>${emph(s.headline)}</h1>`, `<div class="fz">${visualHtml(s)}</div>`]
+  if (s.sub) parts.push(`<p class="sub">${emph(s.sub)}</p>`)
+  if (s.link) parts.push(`<a class="cta" href="${esc(s.link.href)}" target="_blank" rel="noopener">${esc(smart(s.link.label))}${icon('external')}</a>`)
+  return { act: ACT_OF[s.chapter], name: plain(s.headline).replace(/[.]$/, ''), eyebrow: esc(smart(s.eyebrow)), html: parts.join(''), say: captionOf(s.say) }
 }
 
 // --- the zone directory ------------------------------------------------------
-// Every hive published under hypercomb.com is a door on the splash. The list is
-// derived and PROVEN by hosts.cjs and baked in here, because the page itself is
-// one self-contained file that asks nobody for anything at view time.
-// The deployed nodes are an operator's view: baked in, but shown only to a
-// browser holding `hc:show-deployed-nodes` — the same flag the host card reads.
 function doorsHtml(doors) {
   if (!doors.length) return ''
-  // a new tab: a door is a place to go, not a way to lose the deck you are watching
+  const sorted = [...doors].sort((a, b) => a.title.localeCompare(b.title, 'en', { sensitivity: 'base' }))
   const chip = d => `
-      <a class="door" href="https://${esc(d.host)}/" target="_blank" rel="noopener">` +
-    `<b>${esc(d.title)}</b><span>${esc(d.host)}</span></a>`
+      <a class="door" href="https://${esc(d.host)}/" target="_blank" rel="noopener"><b>${esc(d.title)}</b><span>${esc(d.host)}</span></a>`
   return `  <nav id="doors" aria-label="Hives published on ${hosts.ZONE}" hidden>
-` +
-    `    <p class="lbl">live on ${hosts.ZONE} · ${doors.length} ${doors.length === 1 ? 'hive' : 'hives'}</p>
-` +
-    `    <div id="doorrow">${doors.map(chip).join('')}
+    <p class="lbl">Live on ${hosts.ZONE} · ${doors.length} ${doors.length === 1 ? 'hive' : 'hives'}</p>
+    <div id="doorrow">${sorted.map(chip).join('')}
     </div>
   </nav>
   <script>try{var v=localStorage.getItem('hc:show-deployed-nodes');if(v==='1'||v==='true')document.getElementById('doors').hidden=false}catch(e){}</script>`
 }
 
-function assemble(doors) {
-  let html = fs.readFileSync(path.join(ROOT, 'template.html'), 'utf8')
-  // One master mark for the whole platform — the shells link the built files,
-  // this page carries the same bytes inline so the standalone deliverable is
-  // still marked when opened from disk. Rebuilt by scripts/build-favicons.cjs.
-  const mark = path.join(ROOT, '..', '..', 'hypercomb-web', 'public', 'favicon.svg')
-  if (!fs.existsSync(mark)) throw new Error('the mark is missing — run `node scripts/build-favicons.cjs`')
-  html = html.replace('{{FAVICON}}', () =>
-    'data:image/svg+xml;base64,' + fs.readFileSync(mark).toString('base64'))
-  html = html.replace('{{SCENES}}', () => JSON.stringify(scenes.map(sceneObject), null, 1))
-  html = html.replace('{{DOORS}}', () => doorsHtml(doors))
-  const vuri = f => 'data:video/mp4;base64,' + fs.readFileSync(path.join(ROOT, 'media', f)).toString('base64')
-  const auri = s => 'data:audio/mpeg;base64,' + fs.readFileSync(cachePath(s.say)).toString('base64')
-  html = html
-    .replace('{{VID_NAVIGATE}}', vuri('hive-navigate.mp4'))
-    .replace('{{VID_ZOOM}}', vuri('hive-zoom.mp4'))
-    .replace('{{VID_CREATE}}', vuri('hive-create.mp4'))
-    .replace('{{VID_CHILDREN}}', vuri('hive-children.mp4'))
-    .replace('{{VID_VOCABULARY}}', vuri('concept-vocabulary.mp4'))
-    .replace('{{VID_INTEGRITY}}', vuri('concept-integrity.mp4'))
-    .replace('{{VID_TIME}}', vuri('concept-time.mp4'))
-    .replace('{{AUDIO_JSON}}', JSON.stringify(scenes.map(auri)))
-  const out = path.join(ROOT, 'dist', 'hypercomb-presentation.html')
-  fs.writeFileSync(out, html)
-  console.log(`assembled ${out} (${(fs.statSync(out).size / 1e6).toFixed(2)} MB, ${scenes.length} scenes, ${doors.length} door(s))`)
+// --- fonts: the vendored faces, embedded -------------------------------------
+// The faces are the ones the shells already vendor (scripts/fetch-fonts.cjs,
+// documentation/no-third-party-requests.md) — read from there, never a second
+// copy: one file per face in the repository, inlined here so the deliverable
+// still carries them when opened from disk.
+const FONT_DIRS = {
+  dev: path.join(ROOT, '..', '..', 'hypercomb-dev', 'public', 'fonts'),
+  shared: path.join(ROOT, '..', '..', 'hypercomb-shared', 'fonts'),
+}
+const FONTS = [
+  { family: 'Inter', dir: 'dev', file: 'inter-latin.woff2', weight: '300 700' },
+  { family: 'JetBrains Mono', dir: 'shared', file: 'JetBrainsMono-Regular.woff2', weight: '400' },
+  { family: 'JetBrains Mono', dir: 'shared', file: 'JetBrainsMono-SemiBold.woff2', weight: '600' },
+]
+function fontsCss() {
+  return FONTS.map(f => {
+    const p = path.join(FONT_DIRS[f.dir], f.file)
+    if (!fs.existsSync(p)) throw new Error(`vendored face missing: ${p} — run scripts/fetch-fonts.cjs`)
+    const b64 = fs.readFileSync(p).toString('base64')
+    return `  @font-face{font-family:"${f.family}";font-style:normal;font-weight:${f.weight};font-display:block;src:url(data:font/woff2;base64,${b64}) format("woff2")}`
+  }).join('\n')
 }
 
-// The directory is refreshed on every build so a hive published today is on the
-// page today — but a build must never fail because a host was slow, so an
-// unreachable ledger falls back to the committed list and says so.
+function assemble(doors) {
+  let html = fs.readFileSync(path.join(ROOT, 'template.html'), 'utf8')
+  const mark = path.join(ROOT, '..', '..', 'hypercomb-web', 'public', 'favicon.svg')
+  if (!fs.existsSync(mark)) throw new Error('the mark is missing — run `node scripts/build-favicons.cjs`')
+  const markSvg = fs.readFileSync(mark, 'utf8').trim()
+    .replace(/ width="32" height="32"/, '').replace(/id="(\w+)"/g, 'id="mk-$1"').replace(/url\(#(\w+)\)/g, 'url(#mk-$1)')
+  // the narrated length, from the cached mp3s (48 kbit/s constant rate)
+  const secs = scenes.reduce((t, s) => t + fs.statSync(cachePath(s.say)).size * 8 / 48000, 0) + scenes.length * 0.8
+  const minutes = Math.round(secs / 60)
+  html = html.replace('{{FAVICON}}', () => 'data:image/svg+xml;base64,' + fs.readFileSync(mark).toString('base64'))
+  let marks = 0
+  html = html.replace(/\{\{MARK\}\}/g, () => markSvg.replace(/mk-/g, `mk${++marks}-`))
+  html = html.replace('{{MINUTES}}', String(minutes))
+  html = html.replace('{{FONTS}}', () => fontsCss())
+  html = html.replace('{{SCENES}}', () => JSON.stringify(scenes.map(sceneObject), null, 1))
+  html = html.replace('{{DOORS}}', () => doorsHtml(doors))
+  // media follow the engine as inert text blocks, read lazily on first use
+  const blocks = []
+  const clips = { navigate: 'hive-navigate.mp4', zoom: 'hive-zoom.mp4', create: 'hive-create.mp4', children: 'hive-children.mp4',
+    vocabulary: 'concept-vocabulary.mp4', integrity: 'concept-integrity.mp4', time: 'concept-time.mp4' }
+  scenes.forEach((s, i) => blocks.push(`<template id="aud-${String(i).padStart(2, '0')}">data:audio/mpeg;base64,${fs.readFileSync(cachePath(s.say)).toString('base64')}</template>`))
+  for (const [k, f] of Object.entries(clips)) blocks.push(`<template id="vid-${k}">data:video/mp4;base64,${fs.readFileSync(path.join(ROOT, 'media', f)).toString('base64')}</template>`)
+  html = html.replace('{{MEDIA}}', () => blocks.join('\n'))
+  const out = path.join(ROOT, 'dist', 'hypercomb-presentation.html')
+  fs.mkdirSync(path.dirname(out), { recursive: true })
+  fs.writeFileSync(out, html)
+  console.log(`assembled ${out} (${(fs.statSync(out).size / 1e6).toFixed(2)} MB, ${scenes.length} scenes, ${minutes} min, ${doors.length} door(s))`)
+}
+
 async function currentDoors() {
   if (process.argv.includes('--no-hosts')) return hosts.load().doors
   try { return (await hosts.refresh()).doors }
   catch (e) { console.warn(`hosts: ${e.message} — using the committed hosts.json`); return hosts.load().doors }
 }
 
-ensureAudio()
+// the pieces other recipes share (concepts.cjs draws its clips with the same fonts and caption text)
+module.exports = { fontsCss, captionOf, spokenOf, hashOf, VOICE, RATE }
+
+if (require.main === module) ensureAudio()
   .then(async () => { if (!process.argv.includes('--check')) assemble(await currentDoors()) })
   .catch(e => { console.error('build failed:', e.message); process.exit(1) })

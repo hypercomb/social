@@ -3,15 +3,15 @@
   "name": "next",
   "chapter": "roadmap",
   "slug": "next",
-  "eyebrow": "next",
-  "headline": "Roadmap · *next*",
+  "eyebrow": "in progress",
+  "headline": "What comes *next*",
   "sub": "",
-  "visual": "road",
+  "visual": "road:next",
   "visualData": [
-    "AI, deeper — model registry · your own keys · an orchestrator dispatching work across sessions",
-    "Workflow pulses — scheduled audits that walk your tree and file reports as tiles",
-    "Contract fulfillment — remote participants ask your hive for work — and receive signed results",
-    "Native Windows client — already running, held to the protocol by conformance vectors — one contract, many shells"
+    "AI, deeper — model registry · your own keys · an orchestrator across sessions",
+    "Workflow pulses — scheduled audits walk your tree and file reports as tiles",
+    "Contract fulfillment — remote participants ask your hive for work and receive signed results",
+    "Native Windows client — already running · held to the protocol by conformance vectors"
   ],
   "say": "Next: A.I., deeper — a model registry, your own keys, and an orchestrator that dispatches work across live sessions. Workflow pulses — scheduled audits that walk your tree and file their reports as tiles. Contract fulfillment — a protocol where remote participants can ask your hive for work and receive signed results. And the native Windows client — already running, and held to the same protocol by conformance vectors generated from the reference implementation. One contract, many shells."
 }

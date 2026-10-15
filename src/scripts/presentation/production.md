@@ -10,18 +10,27 @@ nothing.
 
 A scene instruction has these fields:
 
-  eyebrow     the small uppercase line above the headline
-  headline    the big line — wrap the emphasised words in *asterisks*
-  sub         the calm sentence under it (optional)
+  eyebrow     the small mono line above the headline — a topic noun, never a headline word
+  headline    the big line — wrap the one emphasised word in *asterisks*
+  sub         the calm sentence under it (optional; one line)
   visual      one of:
-                none          just words
-                film:<clip>   a live screen capture (navigate, zoom, create, children)
-                hexes         a row of hexagon badges — one "- glyph label" line each
-                stack         stacked layer bars — one "- left | right" line each
-                road          a milestone list — one "- title — detail" line each
-                sig           a single monospace signature line
-  link        an outbound call to action, "label -> url" (optional)
+                none            just words
+                film:<clip>     a live capture (navigate, zoom, create, children)
+                                or a drawn concept clip (vocabulary, integrity, time)
+                plate:<name>    a drawn SVG plate from plates.cjs — the first row is its title
+                hexes           a row of hexagon badges — one "icon:<name> <label>" row each,
+                                labels of at most 12 characters
+                list            one block of rows — "left | right" each; "* " opens the head row
+                stack           the same block, newest on top (history only)
+                road:<state>    milestones — "title — detail" rows; state = landed | next | vision
+  visualData  the rows the visual needs
+  link        the one call to action, {href, label} — the last scene only
+  sig         true stamps the caption's own signature on the figure strip
   narration   what the voice says; it is also the on-screen caption
+
+Every figure sits in one frame with a strip beneath it — kind · title — and
+nothing is drawn over a figure. Icons are named from the sprite (source, format,
+platform, network, layers, resource, bee, deps, content); there are no glyphs.
 
 Rules the compiler keeps:
 

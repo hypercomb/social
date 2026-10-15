@@ -1,14 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
-<title>Hypercomb — The Hive Is Yours</title>
-<!-- The mark, inlined. The apex is the FIRST Hypercomb page most people
-     see, and this deliverable also has to play straight from the folder,
-     so build.cjs base64s hypercomb-web/public/favicon.svg (the same master
-     scripts/build-favicons.cjs mints for every shell) into the tag rather
-     than linking a file that only exists once deployed. -->
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Hypercomb — a new way to bee</title>
+<!-- The mark, inlined: this deliverable plays straight from the folder, so
+     build.cjs base64s hypercomb-web/public/favicon.svg into the tag. -->
 <link rel="icon" href="{{FAVICON}}" type="image/svg+xml">
-<meta name="description" content="An open software platform. What Hypercomb is, why you want it, and the road ahead - with live footage from a real hive.">
+<meta name="description" content="An open software platform. What Hypercomb is, why you want it, and the road ahead — with live footage from a real hive.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Hypercomb - a new way to be">
+<meta property="og:title" content="Hypercomb — a new way to bee">
 <meta property="og:description" content="No server. No account. Your work lives with you. A narrated tour of an open software platform, with live footage from a real hive.">
 <meta property="og:image" content="https://hypercomb.com/og.png">
 <meta property="og:image:width" content="1200">
@@ -16,206 +17,372 @@
 <meta property="og:url" content="https://hypercomb.com/">
 <meta property="og:site_name" content="Hypercomb">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Hypercomb - a new way to be">
+<meta name="twitter:title" content="Hypercomb — a new way to bee">
 <meta name="twitter:description" content="No server. No account. Your work lives with you.">
 <meta name="twitter:image" content="https://hypercomb.com/og.png">
 <style>
-  /* A deck, not a document: it commits to one ground. The accent is a DEEPER
-     honey than the dark build used — #f2b632 on white is about 1.9:1, which is
-     unreadable at caption size; #9a6408 carries the same colour at 5.6:1. The
-     bright honey survives only as a fill behind large glyphs. */
+{{FONTS}}
+  /* ------------------------------------------------------------------
+     Dark stage: the deck shares the ink of the live captures; honey is
+     light, not pigment — it appears only where something is yours or alive.
+     Every size is a stage unit (1/100 of a 16:9 stage width); pixels exist
+     for hairlines and radii only.
+     ------------------------------------------------------------------ */
   :root{
-    color-scheme: light;
-    --bg:#ffffff; --bg2:#faf9f6; --panel:#f7f6f2; --line:#e4e2dc;
-    --ink:#17191d; --dim:#585f68; --faint:#8a9099;
-    --honey:#9a6408; --honey-bright:#e0a520; --honey-deep:#7d5107;
-    --honey-glow:rgba(154,100,8,.13); --hexline:#eeece7;
-    --mono:"Cascadia Code","Consolas",ui-monospace,monospace;
-    --sans:"Segoe UI",system-ui,-apple-system,sans-serif;
+    color-scheme:dark;
+    --u:min(1vw,1.7778vh);
+    --col:min(74 * var(--u), 92vw);
+    --bg:#15181c; --bg2:#191d22; --panel:#1c2027;
+    --line:rgba(255,255,255,.12); --line-strong:rgba(255,255,255,.2); --hexline:rgba(255,255,255,.04);
+    --ink:#eef1f4; --dim:#b4bcc6; --faint:#8b94a1; --faint-text:#8b94a1; --steel:#7f8da0;
+    --honey:#f0c050; --honey-deep:#c08a1a; --honey-fill:#e0a520; --honey-text:#d19a22; --honey-tint:rgba(224,165,32,.12);
+    --danger:#d9605a;
+    --sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"Cascadia Code",Consolas,monospace;
+    --track-eyebrow:.24em; --track-label:.12em; --track-data:.03em; --track-display:-.015em;
+    --r-ctl:2px; --r-card:3px; --r-float:4px;
+    --t-eyebrow:max(11px, 1 * var(--u));
+    --t-data:max(12px, 1.05 * var(--u));
+    --t-caption:min(26px, max(15px, 1.25 * var(--u)));
+    --t-small:max(14px, 1.35 * var(--u));
+    --t-sub:max(16px, 1.7 * var(--u));
+    --t-h1:min(112px, max(34px, 5.2 * var(--u)));
+    --t-display:min(112px, max(38px, 6.4 * var(--u)));
+    --ease:cubic-bezier(.2,.6,.2,1);
+    --bar:56px;
+    --zone:calc(var(--bar) + 14px + 12px + 4 * var(--t-caption) * 1.5);
+    --capH:calc(max(12px, 1 * var(--u)) * 1.3 + 5px);
+    --shadow:0 1px 0 rgba(0,0,0,.25), 0 10px 28px -18px rgba(0,0,0,.6);
   }
-  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--sans);overflow:hidden;height:100%}
   *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:var(--sans);font-synthesis:none;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  button{font:inherit;color:inherit}
+  :focus-visible{outline:2px solid var(--honey);outline-offset:2px}
+  [hidden]{display:none!important}
+  svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
 
-  /* ---------- ambient honeycomb ---------- */
-  #comb{position:fixed;inset:0;opacity:.5;pointer-events:none}
-  @media (prefers-reduced-motion: no-preference){
-    #comb{animation:drift 90s linear infinite alternate}
-    @keyframes drift{from{transform:translate3d(0,0,0) scale(1.02)}to{transform:translate3d(-40px,-24px,0) scale(1.06)}}
-  }
+  /* ---------- the comb: full-bleed, static, barely there ----------
+     masked radially behind the stage centre: strongest where the figure sits,
+     gone under the top band and the caption dock. The splash carries a copy
+     (one <pattern>, two rects) so splash, stage and end card are one material. */
+  .comb{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;
+    -webkit-mask-image:radial-gradient(ellipse 58% 38% at 50% 46%,#000 0%,rgba(0,0,0,.5) 55%,transparent 100%);
+    mask-image:radial-gradient(ellipse 58% 38% at 50% 46%,#000 0%,rgba(0,0,0,.5) 55%,transparent 100%)}
+  #splash .comb{position:absolute;z-index:-1}
 
-  /* ---------- stage ---------- */
-  #stage{position:fixed;inset:0;display:grid;place-items:center}
-  .scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:2.2vh;padding:4vh 6vw 25vh;opacity:0;visibility:hidden;transition:opacity .9s ease;text-align:center}
-  .scene.on{opacity:1;visibility:visible}
-  /* each line of a scene arrives on its own beat — the eyebrow first, then the
-     headline, the figure, the sub. Outgoing scenes leave as one (no delays):
-     the delays live on .on children only. */
-  @media (prefers-reduced-motion: no-preference){
-    .scene>*{opacity:0;transform:translateY(16px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.6,.2,1)}
-    .scene.on>*{opacity:1;transform:none}
-    .scene.on>*:nth-child(2){transition-delay:.12s}
-    .scene.on>*:nth-child(3){transition-delay:.26s}
-    .scene.on>*:nth-child(4){transition-delay:.4s}
-    .scene.on>*:nth-child(5){transition-delay:.54s}
-  }
-  .eyebrow{font-family:var(--mono);font-size:clamp(10px,1.2vw,13px);letter-spacing:.42em;text-transform:uppercase;color:var(--honey);opacity:.9}
-  .scene h1{font-weight:200;font-size:clamp(34px,6.2vw,88px);line-height:1.04;margin:0;letter-spacing:-.01em;text-wrap:balance}
-  .scene h1 b{font-weight:600;color:var(--honey)}
-  .scene .sub{color:var(--dim);font-weight:300;font-size:clamp(15px,1.7vw,22px);max-width:62ch;margin:0;text-wrap:balance}
-  .sig{font-family:var(--mono);color:var(--faint);font-size:clamp(9px,1vw,12px);letter-spacing:.06em;word-break:break-all;max-width:70ch}
-  .sig em{color:var(--honey);font-style:normal}
+  /* ---------- stage and the one grid ---------- */
+  #stage{position:fixed;inset:0}
+  .scene{position:absolute;inset:0;width:var(--col);margin:0 auto;display:grid;
+    grid-template-rows:auto auto minmax(0,1fr) auto auto;align-content:start;justify-items:center;
+    padding:7.2vh 0 var(--zone);text-align:center;
+    opacity:0;visibility:hidden;transition:opacity .35s ease,visibility 0s linear .35s;pointer-events:none}
+  .scene.on{opacity:1;visibility:visible;transition:opacity 0s,visibility 0s;pointer-events:auto}
+  .scene.off{display:none}
+  .scene>*{opacity:0;transform:translateY(16px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
+  .scene:not(.on)>*{transform:none;transition:none}
+  .scene.on>*{opacity:1;transform:none}
+  .scene.on>:nth-child(2){transition-delay:.12s}
+  .scene.on>:nth-child(3){transition-delay:.26s}
+  .scene.on>:nth-child(4){transition-delay:.40s}
+  .scene.on>:nth-child(5){transition-delay:.54s}
+  .scene.on>:nth-child(6){transition-delay:.68s}
+  .mile,.lay,.hexb{opacity:0;transform:translateY(12px);transition:opacity .6s var(--ease),transform .6s var(--ease)}
+  .scene:not(.on) :is(.mile,.lay,.hexb){transform:none;transition:none}
+  .scene.on :is(.mile,.lay,.hexb){opacity:1;transform:none;transition-delay:calc(.26s + var(--i,0) * .08s)}
 
-  /* Bounded by HEIGHT as well as width, the way the plates are. Sized only by
-     width, a 2.93:1 clip is 375px tall — which on a 720-tall stage runs past
-     the caption and under the control bar. Let it keep its ratio and give way. */
-  .filmwrap{flex:0 1 auto;aspect-ratio:960/328;max-height:40vh;max-width:min(1100px,88vw);width:auto;
-    border:1px solid var(--line);border-radius:10px;overflow:hidden;
-    box-shadow:0 1px 2px rgba(23,25,29,.06),0 18px 50px -22px rgba(23,25,29,.35);position:relative}
-  .filmwrap video{display:block;width:100%;height:100%;object-fit:cover}
-  .filmtag{position:absolute;top:10px;left:12px;font-family:var(--mono);font-size:10px;letter-spacing:.3em;
-    text-transform:uppercase;color:var(--ink);background:rgba(255,255,255,.86);border:1px solid var(--line);
-    padding:5px 10px;border-radius:4px}
-  .filmtag::before{content:"●";color:#e5484d;margin-right:8px;animation:blink 1.6s steps(1) infinite}
-  @keyframes blink{50%{opacity:.25}}
-  /* drawn concept clips carry the comb, not the REC dot — and sit at the foot
-     of the pane, clear of the drawing's own beat labels in the top-left */
-  .filmtag.drawn{top:auto;bottom:10px}
-  .filmtag.drawn::before{content:"⬡";color:var(--honey);animation:none}
+  .eyebrow{font-family:var(--mono);font-size:var(--t-eyebrow);line-height:1.3;letter-spacing:var(--track-eyebrow);
+    padding-inline-start:var(--track-eyebrow);text-transform:uppercase;color:var(--honey-deep);margin:0 0 .7em}
+  .scene h1{font-weight:300;font-size:var(--t-h1);line-height:1.06;margin:0 0 2.2vh;letter-spacing:var(--track-display);
+    width:100%;max-width:var(--col);min-height:1.1em;text-wrap:balance;color:var(--ink)}
+  .scene h1 b{font-weight:500;color:var(--honey-text)}
+  .scene .sub{color:var(--dim);font-weight:400;font-size:var(--t-sub);line-height:1.35;max-width:56ch;margin:2.4vh 0 0;text-wrap:balance}
 
-  /* drawn plates — a sheet laid on the stage, framed like the film */
-  /* the scene is a flex column, so the plate is bounded by height and keeps its ratio — never cropped */
-  .platewrap{flex:0 1 auto;aspect-ratio:580/596;max-height:48vh;max-width:min(520px,70vw);
-    border:1px solid var(--line);border-radius:10px;overflow:hidden;
-    box-shadow:0 1px 2px rgba(23,25,29,.06),0 18px 50px -22px rgba(23,25,29,.35);position:relative}
-  .platewrap svg{display:block;width:100%;height:100%}
-  .platecap{position:absolute;bottom:10px;right:12px;font-family:var(--mono);font-size:10px;letter-spacing:.3em;
-    text-transform:uppercase;color:var(--dim);background:rgba(255,255,255,.86);border:1px solid var(--line);
-    padding:5px 10px;border-radius:4px}
+  /* the figure zone never yields: the frame is sized from the zone's own height.
+     Every figure starts where the plates start — top-anchored under the headline;
+     only the badge row, a banner, sits on the zone's centre. */
+  .fz{min-height:0;width:100%;container-type:size;display:grid;align-items:start;justify-items:center}
+  .fz>.hexrow{align-self:center}
+  .figbox{display:grid;grid-template-rows:minmax(0,1fr) auto;row-gap:5px;max-height:100%;justify-items:start}
+  .fig.film,.fig.plate{width:min(100cqw, calc((100cqh - var(--capH)) * var(--ratio)));aspect-ratio:var(--ratio);
+    border:1px solid var(--line-strong);border-radius:var(--r-card);overflow:hidden;background:var(--panel);box-shadow:var(--shadow)}
+  .fig.film video{display:block;width:100%;height:100%;object-fit:cover;background:#111419}
+  .fig.plate svg{display:block;width:100%;height:100%}
+  .figcap{width:100%;height:calc(var(--capH) - 5px);display:flex;align-items:center;gap:.7em;font-family:var(--mono);
+    font-size:max(12px, 1 * var(--u));line-height:1.3;letter-spacing:var(--track-label);text-transform:uppercase;color:var(--faint-text);white-space:nowrap}
+  .figcap .g{color:var(--honey);font-size:1.05em}
+  .figcap.live .g{fill:var(--honey-fill);stroke:var(--honey-fill)}
+  /* the sig stamp: build.cjs hashes the caption; the first eight hex are honey */
+  .figcap .sig{margin-left:auto;letter-spacing:var(--track-data);text-transform:none;color:var(--dim)}
+  .figcap .sig b{font-weight:400;color:var(--honey)}
+  .plate text{font-family:var(--sans);fill:var(--ink)}
+  .plate text.m{font-family:var(--mono)}
+  .plate text.k{font-weight:500}
+  .plate .d{fill:var(--dim)} .plate .f{fill:var(--faint-text)} .plate .hy{fill:var(--honey)} .plate .st{fill:var(--steel)} .plate .dg{fill:var(--danger)}
+  /* the one statement of plate motion: a flow line (plates.cjs: class "flow", pathLength="1") draws once after the plate has risen */
+  .flow{stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset .9s cubic-bezier(.2,.6,.2,1) .6s}
+  .scene.on .flow{stroke-dashoffset:0}
+  .scene:not(.on) .flow{stroke-dashoffset:1;transition:none}
 
-  /* hex badge rows (DNA, reasons) */
-  .hexrow{display:flex;gap:clamp(10px,2vw,26px);flex-wrap:wrap;justify-content:center}
-  .hexb{width:clamp(96px,12vw,150px);aspect-ratio:1/1.08;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
-    clip-path:polygon(25% 3%,75% 3%,99% 50%,75% 97%,25% 97%,1% 50%);
-    background:linear-gradient(160deg,#fffdf8,var(--panel));border:1px solid var(--line);position:relative}
-  .hexb::after{content:"";position:absolute;inset:1px;clip-path:polygon(25% 3%,75% 3%,99% 50%,75% 97%,25% 97%,1% 50%);
-    border:1px solid rgba(154,100,8,.28);pointer-events:none}
-  .hexb .g{font-size:clamp(20px,2.6vw,34px);color:var(--honey-bright)}
-  .hexb .t{font-family:var(--mono);font-size:clamp(9px,1vw,12px);letter-spacing:.14em;text-transform:uppercase;color:var(--dim);max-width:74%;text-align:center;line-height:1.35;word-break:break-word}
+  /* hex badges: one regular pointy-top hexagon, a sprite icon, one label slot */
+  .fig.hexrow{display:flex;flex-wrap:wrap;justify-content:center;gap:calc(2.2 * var(--u));width:fit-content;max-width:100cqw}
+  .hexb{width:calc(11 * var(--u));min-width:96px;display:flex;flex-direction:column;align-items:center;gap:.6em}
+  .hexb .hx{position:relative;width:100%;aspect-ratio:.866/1}
+  .hexb .hx svg.h{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+  .hexb .hx .o{fill:var(--panel);stroke:var(--line-strong);stroke-width:1;vector-effect:non-scaling-stroke}
+  .hexb .hx .in{fill:none;stroke:var(--honey-deep);stroke-width:1;vector-effect:non-scaling-stroke;opacity:.6}
+  .hexb .hx svg.g{position:absolute;left:50%;top:50%;width:34%;height:34%;transform:translate(-50%,-50%);color:var(--honey);stroke-width:1.4}
+  .hexb .t{font-family:var(--mono);font-size:var(--t-data);line-height:1.4;height:1.4em;letter-spacing:var(--track-label);padding-inline-start:var(--track-label);
+    text-transform:uppercase;color:var(--dim);white-space:nowrap}
 
-  /* layer stack diagram */
-  .stack{display:flex;flex-direction:column-reverse;gap:8px;align-items:center}
-  .lay{width:min(520px,70vw);border:1px solid var(--line);background:linear-gradient(90deg,#fffdf8,var(--panel));
-    border-radius:6px;padding:10px 18px;font-family:var(--mono);font-size:clamp(10px,1.2vw,13px);color:var(--dim);
-    display:flex;justify-content:space-between;letter-spacing:.08em}
-  .lay.head{border-color:var(--honey-deep);color:var(--ink);box-shadow:0 0 40px -12px var(--honey-glow)}
-  .lay.head .m{color:var(--honey)}
+  /* layer stack / list: one block, hairline rows */
+  .fig.stack,.fig.list{display:flex;flex-direction:column;width:calc(56 * var(--u));max-width:100cqw;
+    border:1px solid var(--line);border-radius:var(--r-card);background:var(--panel);overflow:hidden;text-align:left}
+  .fig.stack{flex-direction:column-reverse}
+  .lay{display:grid;grid-template-columns:max-content 1fr;column-gap:calc(2 * var(--u));align-items:baseline;
+    padding:calc(.8 * var(--u)) calc(1.6 * var(--u));font-family:var(--mono);font-size:var(--t-data);line-height:1.4;
+    letter-spacing:var(--track-data);color:var(--dim);border-top:1px solid var(--line)}
+  .fig.list .lay:first-child{border-top:0}
+  .fig.stack .lay:last-child{border-top:0}
+  .lay>span:first-child{white-space:nowrap;color:var(--ink)}
+  .lay>span:last-child{text-align:right}
+  .lay.one{grid-template-columns:1fr}
+  .lay.one>span{text-align:left}
+  .lay.head{box-shadow:inset 2px 0 0 var(--honey-deep);background:var(--honey-tint)}
+  .lay.head>span:first-child{color:var(--honey)}
+  .lay.head>span:last-child{color:var(--ink)}
 
-  /* roadmap */
-  .road{display:flex;flex-direction:column;gap:14px;width:min(760px,86vw);text-align:left}
-  .mile{display:grid;grid-template-columns:14px 1fr;gap:16px;align-items:start}
-  .mile .dot{width:10px;height:10px;margin-top:7px;background:var(--honey);clip-path:polygon(25% 3%,75% 3%,99% 50%,75% 97%,25% 97%,1% 50%)}
-  .mile.dim .dot{background:var(--faint)}
-  .mile .mt{font-weight:600;font-size:clamp(15px,1.8vw,21px)}
-  .mile .md{color:var(--dim);font-weight:300;font-size:clamp(13px,1.5vw,17px)}
+  /* roadmap: a rail, three marker states */
+  .fig.road{position:relative;width:fit-content;max-width:100cqw;display:grid;row-gap:calc(1.2 * var(--u));text-align:left;padding-left:2px}
+  .fig.road::before{content:"";position:absolute;left:8px;top:.6em;bottom:.6em;width:1px;background:var(--line)}
+  .mile{display:grid;grid-template-columns:14px 1fr;column-gap:calc(1.8 * var(--u));align-items:start;position:relative}
+  .mile svg.mk{width:14px;height:16px;margin-top:calc(var(--t-sub) * .6 - 8px);fill:var(--bg);stroke:var(--faint);stroke-width:1.5;overflow:visible}
+  .mile.landed svg.mk{fill:var(--honey-fill);stroke:var(--honey-fill)}
+  .mile.next svg.mk{fill:var(--bg);stroke:var(--honey-deep)}
+  .mile.vision svg.mk{fill:var(--bg);stroke:var(--faint)}
+  .mile .mt{font-weight:500;font-size:var(--t-sub);line-height:1.2;color:var(--ink)}
+  .mile .md{color:var(--dim);font-weight:400;font-size:var(--t-small);line-height:1.35;max-width:58ch;margin-top:.15em}
 
-  /* ---------- chrome ---------- */
-  #caption{position:fixed;left:50%;bottom:6.5vh;transform:translateX(-50%);width:min(940px,88vw);text-align:center;
-    color:var(--ink);font-weight:300;font-size:clamp(13px,1.55vw,18px);line-height:1.55;
-    background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:10px;padding:14px 22px;
-    backdrop-filter:blur(6px);opacity:0;transition:opacity .6s;z-index:40}
-  #caption.on{opacity:1}
-  #caption .q{color:var(--honey)}
+  /* the one CTA */
+  .cta{display:inline-flex;align-items:center;gap:.6em;font-weight:500;font-size:max(13px, 1 * var(--u));line-height:1;
+    color:var(--honey);text-decoration:none;border:1px solid var(--honey-deep);border-radius:var(--r-ctl);padding:10px 18px;
+    margin-top:3vh;transition:background .15s,border-color .15s;white-space:nowrap}
+  .cta:hover{background:var(--honey-tint);border-color:var(--honey)}
+  .cta.quiet{color:var(--faint-text);border-color:transparent;padding:8px 12px;margin:0}
+  .cta.quiet:hover{color:var(--dim);background:transparent;border-color:var(--line)}
 
-  #bar{position:fixed;left:0;right:0;bottom:0;height:8vh;min-height:52px;display:flex;align-items:center;gap:14px;
-    padding:0 20px;background:linear-gradient(180deg,transparent,rgba(255,255,255,.94) 35%);z-index:50}
-  #ticks{flex:1;display:flex;gap:4px;height:22px;align-items:center}
-  .tick{flex:1;height:3px;background:var(--line);border-radius:2px;cursor:pointer;transition:background .3s,height .15s;position:relative}
-  .tick:hover{height:6px}
-  .tick.done{background:var(--honey-deep)}
-  .tick.now{background:var(--honey);box-shadow:0 0 10px var(--honey-glow)}
-  .btn{background:none;border:1px solid var(--line);color:var(--ink);font-family:var(--mono);font-size:11px;
-    letter-spacing:.14em;text-transform:uppercase;border-radius:6px;padding:8px 13px;cursor:pointer;transition:border-color .2s,color .2s;white-space:nowrap}
-  .btn:hover{border-color:var(--honey);color:var(--honey)}
-  .btn:focus-visible{outline:2px solid var(--honey);outline-offset:2px}
-  #actlbl{font-family:var(--mono);font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--faint);white-space:nowrap}
-  #actlbl em{color:var(--honey);font-style:normal}
+  /* ---------- the dock: caption + bar are one bottom unit ---------- */
+  #dock{position:fixed;left:0;right:0;bottom:0;z-index:50;display:flex;flex-direction:column;align-items:center;pointer-events:none}
+  /* The caption is a strip, not a box: one hairline across the column (the ::before),
+     the text capped at 72ch at the column's left edge, left-aligned, 400. The figure
+     zone is the caption's height, so showCaption() measures the text on the probe
+     and sets ONE of these classes when the default does not hold five lines:
+       (none)  72ch, line-height 1.5
+       .wide   the column, line-height 1.45    — a longer narration takes the column
+       .small  the column, one type step down  — the longest narrations (six lines of
+                                                 the column) keep the plates at their
+                                                 share of the stage; never over 24% */
+  #caption,#capprobe{position:relative;width:min(72ch, var(--col), 100vw - 32px);margin:0 auto 14px calc((100% - var(--col)) / 2);
+    text-align:left;color:var(--ink);font-weight:400;font-size:var(--t-caption);line-height:1.5;text-wrap:pretty;hyphens:auto;
+    padding:12px 0 0;pointer-events:auto;opacity:0;transition:opacity .2s ease}
+  #caption::before,#capprobe::before{content:"";position:absolute;left:0;top:0;width:var(--col);height:1px;background:var(--line)}
+  #caption .ct,#capprobe .ct{display:block;margin:0}
+  #caption.wide,#capprobe.wide{width:min(var(--col), 100vw - 32px);line-height:1.45}
+  #caption.small,#capprobe.small{font-size:var(--t-data)}
+  #caption.on{opacity:1;transition:opacity .35s ease}
+  #caption:not(.on){pointer-events:none}
+  #capprobe{position:fixed;left:0;right:0;bottom:0;visibility:hidden;pointer-events:none;z-index:-1}
+  #caption b{font-weight:500;color:var(--honey)}
 
-  /* splash */
+  /* the tick run shares the column's edges with the headline, the figure and the caption:
+     the transport sits in the left margin, the counter and the right group in the right margin */
+  #bar{height:var(--bar);width:100%;display:grid;grid-template-columns:calc((100% - var(--col)) / 2) minmax(0,1fr) auto auto;align-items:center;
+    background:var(--bg);border-top:1px solid var(--line);pointer-events:auto;font-size:12px}
+  #bar[hidden]{display:none}
+  .grp{display:flex;align-items:center;gap:2px}
+  #bar>.grp:first-child{padding-left:12px}
+  #bar>.grp:last-child{padding:0 12px 0 8px}
+  .ib{width:32px;height:32px;display:inline-grid;place-items:center;background:none;border:1px solid transparent;border-radius:var(--r-ctl);
+    color:var(--dim);cursor:pointer;padding:0;position:relative;transition:border-color .15s,background .15s,color .15s}
+  .ib svg.g{width:16px;height:16px}
+  .ib:hover{border-color:var(--line);background:var(--honey-tint);color:var(--ink)}
+  #pp{color:var(--ink)}
+  #pp .i-pause,#pp.paused .i-play{display:none}
+  #pp.paused .i-pause{display:none}
+  #pp.paused .i-play{display:block}
+  #pp:not(.paused) .i-pause{display:block}
+  #voice .i-muted,#voice[aria-pressed="true"] .i-speaker{display:none}
+  #voice[aria-pressed="true"] .i-muted{display:block}
+  #anns .n{position:absolute;top:2px;right:2px;min-width:14px;height:14px;padding:0 3px;border-radius:var(--r-ctl);background:var(--honey-fill);color:#15181c;
+    font-family:var(--mono);font-size:10px;line-height:14px;font-weight:600}
+  #anns .n:empty{display:none}
+  #ticks{min-width:160px;display:flex;gap:3px;height:24px;align-items:center;padding:0}
+  .tick{flex:1;height:24px;background:none;border:0;padding:0;cursor:pointer;position:relative;border-radius:0}
+  .tick::after{content:"";position:absolute;left:0;right:0;top:11px;height:2px;background:var(--line);transition:background .3s,transform .3s;transform-origin:center}
+  .tick.done::after{background:var(--honey-deep)}
+  .tick.now::after{background:var(--honey-fill);transform:scaleY(2)}
+  .tick:hover::after{background:var(--dim)}
+  .tick.act2,.tick.act3{margin-left:10px}
+  #counter{display:flex;align-items:center;gap:10px;color:var(--dim);white-space:nowrap;padding-left:24px}
+  #num{font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums;letter-spacing:var(--track-data);min-width:5.2em}
+  #actlbl{font-size:12px;font-weight:500;min-width:11em;overflow:hidden;text-overflow:ellipsis}
+
+  /* ---------- splash ---------- */
   #splash{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:3.4vh;background:radial-gradient(120vw 90vh at 50% 42%,var(--bg2) 0%,var(--bg) 62%);transition:opacity 1s;text-align:center;padding:0 6vw}
+    padding:4vh 6vw;text-align:center;background:var(--bg);transition:opacity .45s ease}
   #splash.gone{opacity:0;pointer-events:none}
-  #splash .word{font-family:var(--mono);font-weight:600;font-size:clamp(26px,4.6vw,58px);letter-spacing:.58em;margin-left:.58em}
-  #splash .tag{color:var(--dim);font-weight:300;font-size:clamp(14px,1.8vw,21px);max-width:52ch;text-wrap:balance}
-  #enter{background:none;border:1px solid var(--honey-deep);color:var(--honey);font-family:var(--mono);
-    font-size:clamp(12px,1.4vw,15px);letter-spacing:.34em;text-transform:uppercase;padding:16px 34px 16px 40px;border-radius:8px;cursor:pointer;
-    transition:background .3s,box-shadow .3s}
-  #enter:hover{background:var(--honey-glow);box-shadow:0 0 60px -10px var(--honey-glow)}
-  #splash .meta{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint)}
-  #hexmark{width:clamp(64px,8vw,104px);filter:drop-shadow(0 0 30px var(--honey-glow))}
+  #splash .mark{width:calc(7 * var(--u));min-width:72px;max-width:128px;height:auto;margin-bottom:calc(1.5 * var(--u))}
+  #splash .mark svg{width:100%;height:auto;display:block}
+  #splash .word{font-weight:500;font-size:calc(4.2 * var(--u));line-height:1;letter-spacing:var(--track-display);margin-bottom:calc(2 * var(--u))}
+  #splash .tag{color:var(--dim);font-weight:400;font-size:max(15px, 1.5 * var(--u));line-height:1.4;max-width:46ch;text-wrap:balance;margin-bottom:calc(3.5 * var(--u))}
+  #enter{display:inline-flex;align-items:center;gap:.6em;height:42px;padding:0 20px;border:1px solid var(--honey-fill);border-radius:var(--r-ctl);
+    background:var(--honey-fill);color:#15181c;font-weight:500;font-size:max(14px, 1.1 * var(--u));cursor:pointer;
+    transition:background .15s,border-color .15s;margin-bottom:calc(1.2 * var(--u))}
+  #enter:hover{background:var(--honey);border-color:var(--honey)}
+  #enter:disabled{opacity:.7;cursor:progress}
+  #enter svg.g{stroke-width:2}
+  #splash .meta{color:var(--dim);font-size:max(12px, 1 * var(--u));line-height:1.5}
+  #splash .meta.kbd{color:var(--faint-text);margin-top:.2em}
+  #splash .meta kbd{display:inline-block;font-family:var(--mono);font-size:.9em;line-height:1.6;min-width:1.9em;text-align:center;color:var(--dim);
+    border:1px solid var(--line);border-radius:var(--r-ctl);padding:0 .45em;margin:0 .1em}
+  #splash .skip{margin-top:calc(3 * var(--u))}
+  #startnote{color:var(--faint-text)}
+  #startnote em{color:var(--honey);font-style:normal}
 
-  .golink{display:inline-flex;align-items:center;gap:10px;font-family:var(--mono);font-size:clamp(11px,1.3vw,14px);
-    letter-spacing:.22em;text-transform:uppercase;color:var(--honey);text-decoration:none;
-    border:1px solid var(--honey-deep);border-radius:8px;padding:13px 24px;transition:background .3s,box-shadow .3s}
-  .golink:hover{background:var(--honey-glow);box-shadow:0 0 50px -12px var(--honey-glow)}
-  .golink:focus-visible{outline:2px solid var(--honey);outline-offset:3px}
-  #splash .golink{font-size:clamp(10px,1.1vw,12px);padding:9px 18px;border-color:var(--line);color:var(--dim)}
-  #splash .golink:hover{border-color:var(--honey-deep);color:var(--honey)}
+  /* the zone directory, flag-gated — a footer under a rule */
+  #doors{margin-top:calc(3 * var(--u));padding-top:calc(1.5 * var(--u));border-top:1px solid var(--line);
+    width:min(1000px,92vw);display:flex;flex-direction:column;align-items:center;gap:10px}
+  #doors .lbl{font-family:var(--mono);font-size:12px;letter-spacing:var(--track-label);padding-inline-start:var(--track-label);text-transform:uppercase;color:var(--dim);margin:0}
+  #doorrow{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;max-height:26vh;overflow-y:auto}
+  .door{display:flex;flex-direction:column;gap:2px;text-align:left;text-decoration:none;border:1px solid var(--line);border-radius:var(--r-card);padding:7px 12px;transition:border-color .15s}
+  .door b{font-weight:500;font-size:13px;color:var(--ink)}
+  .door span{font-family:var(--mono);font-size:12px;letter-spacing:var(--track-data);color:var(--faint-text)}
+  .door:hover{border-color:var(--honey-deep)}
 
-  /* the zone directory — every hive published under hypercomb.com. Baked in by
-     hosts.cjs at build time, so the splash never reaches out to list itself. */
-  #doors{display:flex;flex-direction:column;align-items:center;gap:1.3vh;max-width:min(1000px,92vw)}
-  #doors[hidden]{display:none}
-  #doors .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--faint);margin:0}
-  #doorrow{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;max-height:30vh;overflow-y:auto}
-  .door{display:flex;flex-direction:column;gap:3px;text-align:left;text-decoration:none;
-    border:1px solid var(--line);border-radius:8px;padding:9px 15px;
-    transition:border-color .2s,background .3s,box-shadow .3s}
-  .door b{font-weight:500;font-size:clamp(12px,1.3vw,14px);color:var(--dim)}
-  .door span{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--faint)}
-  .door:hover{border-color:var(--honey-deep);background:var(--honey-glow);box-shadow:0 0 44px -14px var(--honey-glow)}
-  .door:hover b{color:var(--honey)}
-  .door:focus-visible{outline:2px solid var(--honey);outline-offset:3px}
-  /* short or narrow: the chip keeps the name and drops the address it links to */
-  @media (max-width:720px),(max-height:760px){ .door{padding:7px 12px} .door span{display:none} }
-  /* ---------- pronunciation flags ---------- */
-  #annbtn{position:fixed;z-index:70;display:none;align-items:center;gap:7px;font-family:var(--mono);
-    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#17191d;background:var(--honey-bright);
-    border:none;border-radius:6px;padding:8px 12px;cursor:pointer;box-shadow:0 8px 22px -8px rgba(23,25,29,.35)}
+  /* ---------- end card ---------- */
+  #endcard{grid-template-rows:auto auto auto auto auto auto;align-content:center;padding:7vh 0 var(--zone)}
+  #endcard .mark{width:calc(6 * var(--u));min-width:64px;height:auto;margin-bottom:calc(1.5 * var(--u))}
+  #endcard .mark svg{width:100%;height:auto;display:block}
+  #endcard h1{font-size:var(--t-display);margin-bottom:calc(1.6 * var(--u))}
+  #endcard .rule{width:calc(10 * var(--u));height:1px;border:0;margin:0 0 calc(1.8 * var(--u));background:var(--line)}
+  #endcard .end{color:var(--dim);font-size:var(--t-sub);line-height:1.4;max-width:44ch;text-wrap:balance;margin:0 0 calc(2.6 * var(--u))}
+  #endcard .acts{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center}
+  #endcard .cta{margin:0;height:40px;padding:0 18px}
+  #again{width:40px;height:40px;border-color:var(--line-strong);color:var(--dim)}
+  #again svg.g{width:18px;height:18px}
+  #again:hover{border-color:var(--ink);color:var(--ink);background:none}
+
+  /* ---------- annotation UI (behaviour unchanged, chrome demoted) ---------- */
+  #annbtn{position:fixed;z-index:70;display:none;align-items:center;gap:6px;font-size:12px;font-weight:500;color:#fff;background:var(--ink);
+    border:0;border-radius:var(--r-ctl);padding:7px 10px;cursor:pointer;color:var(--bg)}
   #annbtn.on{display:inline-flex}
-  #annform{position:fixed;z-index:71;display:none;flex-direction:column;gap:12px;width:min(420px,90vw);
-    background:var(--panel);border:1px solid var(--honey-deep);border-radius:10px;padding:18px;
-    box-shadow:0 18px 50px -18px rgba(23,25,29,.28)}
+  #annscrim{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.4);display:none}
+  #annscrim.on{display:block}
+  #annform{position:fixed;z-index:71;display:none;flex-direction:column;gap:12px;width:min(440px,92vw);
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--r-float);padding:18px;box-shadow:var(--shadow)}
   #annform.on{display:flex}
-  #annform .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--honey)}
+  .lbl{font-size:12px;color:var(--dim)}
   #annform .heard{font-size:15px;color:var(--ink);line-height:1.4}
-  #annform input{background:#fff;border:1px solid var(--line);border-radius:6px;padding:11px 12px;
-    color:var(--ink);font-family:var(--mono);font-size:13px;width:100%}
+  #annform input{background:var(--bg);border:1px solid var(--line);border-radius:var(--r-ctl);padding:10px 12px;color:var(--ink);font-family:var(--mono);font-size:13px;width:100%}
   #annform input:focus{outline:none;border-color:var(--honey-deep)}
-  #annform .hint{font-size:12px;color:var(--faint);line-height:1.45}
-  #annform .row{display:flex;gap:9px;justify-content:flex-end}
-  #annpanel{position:fixed;right:16px;bottom:calc(8vh + 14px);z-index:72;display:none;flex-direction:column;gap:10px;
-    width:min(520px,92vw);max-height:62vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;
-    padding:16px;box-shadow:0 18px 50px -18px rgba(23,25,29,.28)}
+  #annform .hint{font-size:12px;color:var(--faint-text);line-height:1.45}
+  .row{display:flex;gap:8px;justify-content:flex-end;align-items:center}
+  .seg{display:flex;flex-wrap:wrap;gap:4px}
+  .seg button{background:none;border:1px solid var(--line);border-radius:var(--r-ctl);padding:5px 9px;font-size:12px;color:var(--dim);cursor:pointer}
+  .seg button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+  .tb{background:none;border:1px solid transparent;border-radius:var(--r-ctl);padding:7px 12px;font-size:13px;font-weight:500;color:var(--dim);cursor:pointer}
+  .tb:hover{color:var(--ink);border-color:var(--line)}
+  .pb{background:var(--honey-fill);border:1px solid var(--honey-fill);border-radius:var(--r-ctl);padding:7px 14px;font-size:13px;font-weight:500;color:#15181c;cursor:pointer}
+  .pb:hover{background:var(--honey)}
+  #annpanel{position:fixed;right:0;top:0;bottom:var(--bar);z-index:72;display:none;flex-direction:column;gap:12px;width:min(440px,92vw);
+    background:var(--panel);border-left:1px solid var(--line);border-radius:var(--r-float) 0 0 0;padding:18px;box-shadow:var(--shadow)}
   #annpanel.on{display:flex}
-  #annlist{overflow-y:auto;display:flex;flex-direction:column;gap:9px}
-  .annrow{border-left:2px solid var(--honey-deep);padding:8px 0 8px 12px;font-size:13px;line-height:1.45}
-  .annrow .meta{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+  #annpanel h2{font-size:14px;font-weight:500;margin:0;color:var(--ink)}
+  #annlist{overflow-y:auto;display:flex;flex-direction:column;gap:8px;flex:1}
+  .annrow{border-left:2px solid var(--honey-deep);padding:6px 0 6px 12px;font-size:13px;line-height:1.45;position:relative}
+  .annrow .meta{font-family:var(--mono);font-size:12px;letter-spacing:var(--track-data);color:var(--faint-text)}
   .annrow .said{color:var(--ink)}
   .annrow .fix{color:var(--honey);font-family:var(--mono);font-size:12px}
-  .annrow button{background:none;border:none;color:var(--faint);cursor:pointer;font-size:14px;float:right;padding:0 4px}
-  .annrow button:hover{color:#e5484d}
-  #anns.has{border-color:var(--honey-deep);color:var(--honey)}
-  #endcard{display:none}
+  .annrow button{position:absolute;right:0;top:4px;background:none;border:0;color:var(--faint-text);cursor:pointer;width:24px;height:24px;display:grid;place-items:center;padding:0}
+  .annrow button:hover{color:var(--danger)}
+  .annrow button svg.g{width:14px;height:14px}
+
+  /* ---------- responsive ---------- */
+  @media (max-width:1024px){ :root{--col:90vw} #bar{grid-template-columns:auto minmax(0,1fr) auto auto} #ticks{padding-left:12px} }
+  @media (max-width:900px){ #actlbl{display:none} }
+  @media (max-height:700px){
+    .scene{padding-top:5vh}
+    .fig.road{grid-template-columns:1fr 1fr;column-gap:calc(3 * var(--u))}
+    .fig.road::before{display:none}
+  }
   @media (max-width:700px){
-    #caption{bottom:9vh;font-size:13px}
-    .scene{padding-bottom:30vh}
+    :root{--col:calc(100vw - 32px);--capH:28px}
+    .scene{padding:12px 16px calc(var(--zone));row-gap:0}
+    .scene h1{font-size:28px;max-width:100%;margin-bottom:12px}
+    .eyebrow{margin-bottom:6px}
+    .scene .sub{font-size:15px;margin-top:12px}
+    .fig.film,.fig.plate{width:min(100cqw, calc((100cqh - var(--capH)) * var(--ratio)))}
+    .hexb{width:clamp(88px,28vw,120px);min-width:0}
+    .hexb .t{font-size:11px;overflow-wrap:normal;hyphens:manual}
+    .fig.stack,.fig.list{width:100%}
+    .lay{grid-template-columns:1fr;row-gap:2px;font-size:12px}
+    .lay>span:last-child{text-align:left}
+    .mile .mt{font-size:15px}.mile .md{font-size:13px}
+    .fig.road{grid-template-columns:1fr}
+    #caption,#capprobe{max-height:30dvh;overflow-y:auto;font-size:14px;line-height:1.5;width:calc(100vw - 24px);margin:0 12px 12px;padding:10px 0 0}
+    #caption::before,#capprobe::before{width:100%}
+    .figcap .sig{display:none}
+    #bar{height:auto;display:flex;flex-wrap:wrap;padding:0 8px env(safe-area-inset-bottom);gap:4px}
+    #bar>.grp:first-child,#bar>.grp:last-child{padding:0}
+    #ticks{order:-1;flex-basis:100%;min-width:0;height:14px;padding:0 4px;max-width:none}
+    #counter{padding-left:0}
+    .tick{height:14px}.tick::after{top:6px}
+    .ib{width:40px;height:40px}
+    #counter{margin-left:auto}
+    #num{min-width:0}
+    #splash{padding:24px 16px}
+    #splash .tag{max-width:34ch}
+    #annpanel{width:100vw;border-radius:0}
+  }
+
+  /* ---------- the one reduced-motion gate ---------- */
+  @media (prefers-reduced-motion:reduce){
+    .scene,.scene>*,.mile,.lay,.hexb,#caption,#splash,.tick::after,.flow{transition:none!important;transform:none!important}
+    .scene.on>*,.scene.on :is(.mile,.lay,.hexb){opacity:1}
+    .flow{stroke-dashoffset:0!important}
   }
 </style>
+</head>
+<body>
 
-<svg id="comb" aria-hidden="true"><defs>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+  <symbol id="i-hex" viewBox="0 0 24 24"><polygon points="12,2 20.66,7 20.66,17 12,22 3.34,17 3.34,7"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><polygon points="12,6 17.2,9 17.2,15 12,18 6.8,15 6.8,9"/><path d="M12,2 20.66,7 20.66,17 12,22 3.34,17 3.34,7Z" opacity=".55"/></symbol>
+  <symbol id="i-resource" viewBox="0 0 24 24"><path d="M6,3h8l5,5v13H6z M14,3v5h5"/><path d="M8,17l3-3.5 2.2,2.4L15,14l2,3"/><circle cx="10" cy="10.5" r="1"/></symbol>
+  <symbol id="i-bee" viewBox="0 0 24 24"><polygon points="14,7.5 19.2,10.5 19.2,16.5 14,19.5 8.8,16.5 8.8,10.5"/><polygon points="5.5,7 8.5,8.7 8.5,12.2 5.5,13.9 2.5,12.2 2.5,8.7"/><path d="M12,8.5c1-3 4-4.5 6.5-3.5M15.5,8c1.5-2.4 4.2-3 6-1.8"/><path d="M12.5,13.5h5M12.5,16h5"/></symbol>
+  <symbol id="i-deps" viewBox="0 0 24 24"><polygon points="8,3.5 12.33,6 12.33,11 8,13.5 3.67,11 3.67,6"/><polygon points="16,10.5 20.33,13 20.33,18 16,20.5 11.67,18 11.67,13"/></symbol>
+  <symbol id="i-content" viewBox="0 0 24 24"><path d="M6,3h8l5,5v13H6z M14,3v5h5"/><path d="M9,12h6M9,15.5h6M9,19h4"/></symbol>
+  <symbol id="i-source" viewBox="0 0 24 24"><polygon points="12,2 20.66,7 20.66,17 12,22 3.34,17 3.34,7"/><path d="M9.5,9l-3,3 3,3M14.5,9l3,3-3,3"/></symbol>
+  <symbol id="i-format" viewBox="0 0 24 24"><polygon points="12,2 20.66,7 20.66,17 12,22 3.34,17 3.34,7"/><path d="M8,9.5h8M8,12.5h5M8,15.5h7"/></symbol>
+  <symbol id="i-platform" viewBox="0 0 24 24"><path d="M12,2 20.66,7 20.66,17 12,22 3.34,17 3.34,7Z"/><path d="M9.5,12.5v-3h5v3a2.5,2.5 0 0 1-5,0zM11,9.5V7.5M13,9.5V7.5"/></symbol>
+  <symbol id="i-network" viewBox="0 0 24 24"><polygon points="12,3 15.46,5 15.46,9 12,11 8.54,9 8.54,5"/><polygon points="6,13 9.46,15 9.46,19 6,21 2.54,19 2.54,15"/><polygon points="18,13 21.46,15 21.46,19 18,21 14.54,19 14.54,15"/><path d="M12,11v1.5M9.46,15l1.6-1.1M14.54,15l-1.6-1.1"/></symbol>
+  <symbol id="i-fork" viewBox="0 0 24 24"><path d="M12,21V12M12,12 5,5M12,12l7-7"/><circle cx="5" cy="4.5" r="1.5"/><circle cx="19" cy="4.5" r="1.5"/><circle cx="12" cy="20" r="1.5"/></symbol>
+  <symbol id="i-licence" viewBox="0 0 24 24"><polygon points="12,2 20.66,7 20.66,17 12,22 3.34,17 3.34,7"/><circle cx="12" cy="12" r="4"/><path d="M13.6,10.6a2.2,2.2 0 1 0 0,2.8"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7,4.5v15l12-7.5z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8,5v14M16,5v14"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M14.5,6l-6,6 6,6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M9.5,6l6,6-6,6"/></symbol>
+  <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M4,9.5v5h3.5L13,19V5L7.5,9.5z"/><path d="M16,9.5a3.5,3.5 0 0 1 0,5M18.5,7a7,7 0 0 1 0,10"/></symbol>
+  <symbol id="i-muted" viewBox="0 0 24 24"><path d="M4,9.5v5h3.5L13,19V5L7.5,9.5z"/><path d="M16.5,9.5l5,5M21.5,9.5l-5,5"/></symbol>
+  <symbol id="i-annotate" viewBox="0 0 24 24"><path d="M6,21V4h11l-3,4 3,4H6"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14,5h5v5M19,5l-9,9M17,13v6H5V7h6"/></symbol>
+  <symbol id="i-restart" viewBox="0 0 24 24"><path d="M4.5,12a7.5,7.5 0 1 0 2.2-5.3"/><path d="M4,4v4.5h4.5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6,6l12,12M18,6 6,18"/></symbol>
+</defs></svg>
+
+<svg id="comb" class="comb" aria-hidden="true"><defs>
   <pattern id="hexp" width="56" height="97" patternUnits="userSpaceOnUse" patternTransform="scale(1.6)">
-    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1" transform="translate(0,0)"/>
+    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1"/>
     <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1" transform="translate(28,48.5)"/>
     <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1" transform="translate(-28,48.5)"/>
   </pattern></defs>
@@ -224,300 +391,334 @@
 
 <div id="stage" aria-live="polite"></div>
 
-<div id="caption"></div>
-
-<div id="bar" hidden>
-  <button class="btn" id="pp" title="play / pause (space)">pause</button>
-  <button class="btn" id="prev" title="previous scene (←)">‹</button>
-  <button class="btn" id="next" title="next scene (→)">›</button>
-  <div id="ticks"></div>
-  <span id="actlbl"></span>
-  <button class="btn" id="anns" title="annotations on this presentation">⌁ 0</button>
-  <button class="btn" id="voice" title="toggle narration voice">voice on</button>
-</div>
-
-<button id="annbtn">⌁ annotate</button>
-
-<div id="annform" role="dialog" aria-label="Add an annotation">
-  <div class="lbl" id="annsceneref"></div>
-  <div class="heard" id="annquote"></div>
-  <div class="lbl">what kind</div>
-  <div class="row" id="annkinds" style="justify-content:flex-start;flex-wrap:wrap"></div>
-  <div class="lbl" id="annfixlbl">how it should sound</div>
-  <input id="annfix" autocomplete="off" spellcheck="false">
-  <div class="hint" id="annhint"></div>
-  <div class="row">
-    <button class="btn" id="anncancel">cancel</button>
-    <button class="btn" id="annsave" style="border-color:var(--honey-deep);color:var(--honey)">save</button>
+<div id="endcard" class="scene" aria-label="The end of the tour">
+  <div class="mark">{{MARK}}</div>
+  <div class="eyebrow">the tour</div>
+  <h1>The hive is <b>yours</b>.</h1>
+  <hr class="rule">
+  <p class="end">That is the tour. Replay any scene from the bar, or press play to start again.</p>
+  <div class="acts">
+    <a class="cta" href="https://hypercomb.com/" target="_blank" rel="noopener">Start your hive <svg class="g"><use href="#i-external"/></svg></a>
+    <button id="again" class="ib" aria-label="Play again"><svg class="g"><use href="#i-restart"/></svg></button>
   </div>
 </div>
 
-<div id="annpanel" role="dialog" aria-label="Annotations">
-  <div class="lbl" style="font-family:var(--mono);font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--honey)">annotations for the next revision</div>
-  <div id="annlist"></div>
-  <div class="hint" id="annempty" style="font-size:12px;color:var(--faint)">Highlight any narration or on-screen text, then choose <b>⌁ annotate</b>. Notes are kept in this browser until you export them.</div>
+<div id="capprobe" aria-hidden="true"><p class="ct"></p></div>
+<div id="dock">
+  <div id="caption"><p class="ct"></p></div>
+  <div id="bar" hidden>
+    <div class="grp">
+      <button class="ib" id="pp" aria-label="Pause"><svg class="g i-play"><use href="#i-play"/></svg><svg class="g i-pause"><use href="#i-pause"/></svg></button>
+      <button class="ib" id="prev" aria-label="Previous scene"><svg class="g"><use href="#i-left"/></svg></button>
+      <button class="ib" id="next" aria-label="Next scene"><svg class="g"><use href="#i-right"/></svg></button>
+    </div>
+    <nav id="ticks" aria-label="Scenes"></nav>
+    <div id="counter"><span id="num">01 / 24</span><span id="actlbl"></span></div>
+    <div class="grp">
+      <button class="ib" id="anns" aria-label="Annotations" hidden><svg class="g"><use href="#i-annotate"/></svg><b class="n"></b></button>
+      <button class="ib" id="voice" aria-label="Mute" aria-pressed="false"><svg class="g i-speaker"><use href="#i-speaker"/></svg><svg class="g i-muted"><use href="#i-muted"/></svg></button>
+    </div>
+  </div>
+</div>
+
+<button id="annbtn"><svg class="g"><use href="#i-annotate"/></svg>Annotate</button>
+<div id="annscrim"></div>
+<div id="annform" role="dialog" aria-label="Add a note">
+  <div class="lbl" id="annsceneref"></div>
+  <div class="heard" id="annquote"></div>
+  <div class="lbl">What kind of note</div>
+  <div class="seg" id="annkinds"></div>
+  <label class="lbl" id="annfixlbl" for="annfix">How it should sound</label>
+  <input id="annfix" autocomplete="off" spellcheck="false">
+  <div class="hint" id="annhint"></div>
   <div class="row">
-    <button class="btn" id="annclear">clear all</button>
-    <button class="btn" id="anncopy">copy json</button>
-    <button class="btn" id="anndownload" style="border-color:var(--honey-deep);color:var(--honey)">download</button>
-    <button class="btn" id="annclose">close</button>
+    <button class="tb" id="anncancel">Cancel</button>
+    <button class="pb" id="annsave">Save</button>
+  </div>
+</div>
+<div id="annpanel" role="dialog" aria-label="Your notes on this tour">
+  <h2>Your notes on this tour</h2>
+  <div id="annlist"></div>
+  <div class="hint" id="annempty" style="font-size:12px;color:var(--faint-text)">Select any narration or on-screen text, then choose Annotate. Notes are kept in this browser until you export them.</div>
+  <div class="row">
+    <button class="tb" id="annclear">Clear</button>
+    <button class="tb" id="anncopy">Copy</button>
+    <button class="tb" id="annclose">Close</button>
+    <button class="pb" id="anndownload">Download</button>
   </div>
 </div>
 
 <div id="splash">
-  <svg id="hexmark" viewBox="-52 -52 104 104"><polygon points="50,0 25,43.3 -25,43.3 -50,0 -25,-43.3 25,-43.3" fill="none" stroke="#f2b632" stroke-width="2.5"/><polygon points="30,0 15,26 -15,26 -30,0 -15,-26 15,-26" fill="none" stroke="#f2b632" stroke-width="1.2" opacity=".5"/><circle r="4" fill="#f2b632"/></svg>
-  <div class="word">hypercomb</div>
+  <svg class="comb" aria-hidden="true"><rect width="120%" height="120%" fill="url(#hexp)"/></svg>
+  <div class="mark">{{MARK}}</div>
+  <div class="word">Hypercomb</div>
   <div class="tag">An open software platform. What it is, why you want it, and the road ahead — with live footage from a real hive.</div>
-  <button id="enter">▸ &nbsp;press play</button>
-  <div class="meta">≈ 19 minutes · 24 scenes · narrated, with captions · space = pause · ← → = skip</div>
-  <div class="meta" id="startnote" style="display:none"></div>
-  <a class="golink" href="https://hypercomb.io" target="_blank" rel="noopener">skip the tour · open hypercomb.io ↗</a>
+  <button id="enter"><svg class="g"><use href="#i-play"/></svg><span>Play the tour</span></button>
+  <div class="meta">{{MINUTES}} minutes · 24 scenes · narrated and captioned</div>
+  <div class="meta kbd"><kbd>Space</kbd> pauses · <kbd>←</kbd> <kbd>→</kbd> skip</div>
+  <div class="meta" id="startnote" hidden></div>
+  <a class="cta quiet skip" href="https://hypercomb.com/" target="_blank" rel="noopener">Skip the tour · open hypercomb.com</a>
 {{DOORS}}
 </div>
 
 <script>
 /* ============================ scenes ============================ */
-const V = {
-  navigate:   "{{VID_NAVIGATE}}",
-  zoom:       "{{VID_ZOOM}}",
-  create:     "{{VID_CREATE}}",
-  children:   "{{VID_CHILDREN}}",
-  vocabulary: "{{VID_VOCABULARY}}",
-  integrity:  "{{VID_INTEGRITY}}",
-  time:       "{{VID_TIME}}",
-};
-
 const SCENES = {{SCENES}};
+/* media follow this script as inert <template> blocks; they are read on first use */
+const uri = id => { const el = document.getElementById(id); return el ? (el.content ? el.content.textContent : el.textContent).trim() : '' };
 
 /* ============================ engine ============================ */
-const stage=document.getElementById('stage'), cap=document.getElementById('caption'),
+const stage=document.getElementById('stage'), cap=document.getElementById('caption'), probe=document.getElementById('capprobe'),
       bar=document.getElementById('bar'), ticks=document.getElementById('ticks'),
-      actlbl=document.getElementById('actlbl'), ppBtn=document.getElementById('pp'),
-      voiceBtn=document.getElementById('voice');
-const ACT={what:'I · what it is',why:'II · why you want it',roadmap:'III · the road ahead'};
-let idx=-1, playing=false, voiceOn=true, token=0, timer=null, chosenVoice=null;
-const startIndex=(()=>{ 
-  const q=new URLSearchParams(location.search).get('scene')||(location.hash.match(/^#s(d+)/)||[])[1];
+      actlbl=document.getElementById('actlbl'), numlbl=document.getElementById('num'), ppBtn=document.getElementById('pp'),
+      voiceBtn=document.getElementById('voice'), endcard=document.getElementById('endcard'), splash=document.getElementById('splash');
+const ACT={what:'Act I · What it is',why:'Act II · Why you want it',roadmap:'Act III · The road ahead'};
+let idx=-1, playing=false, voiceOn=true, token=0, timer=null, ended=false;
+const startIndex=(()=>{
+  const q=new URLSearchParams(location.search).get('scene')||(location.hash.match(/^#s(\d+)/)||[])[1];
   const n=parseInt(q,10);
   return Number.isFinite(n) && n>=1 ? Math.min(n,SCENES.length)-1 : 0;
 })();
 
 SCENES.forEach((s,i)=>{
-  const d=document.createElement('div');d.className='scene';
-  d.innerHTML=`<div class="eyebrow">${s.eyebrow}</div>${Object.entries(V).reduce((h,[k,v])=>h.replaceAll('{{'+k+'}}',v),s.html)}`;
+  const d=document.createElement('div');d.className='scene off';
+  d.innerHTML=`<div class="eyebrow">${s.eyebrow}</div>${s.html}`;
   stage.appendChild(d); s.el=d;
-  const t=document.createElement('div');t.className='tick';t.title=`scene ${i+1}`;
+  const t=document.createElement('button');t.className='tick'+(s.act==='why'&&SCENES[i-1]&&SCENES[i-1].act!=='why'?' act2':'')+(s.act==='roadmap'&&SCENES[i-1]&&SCENES[i-1].act!=='roadmap'?' act3':'');
+  t.setAttribute('aria-label',`Scene ${i+1} · ${s.name}`);
   t.addEventListener('click',()=>goto(i,true)); ticks.appendChild(t); s.tick=t;
 });
 
-const AUDIO = {{AUDIO_JSON}};
 let voiceTrack = null; /* one Audio per scene — handlers can never cross scenes */
-
 function fallbackSecs(text){ return Math.max(8, text.split(/\s+/).length/2.4); }
+const sceneVideos=s=>[...s.el.querySelectorAll('video')];
+function loadMedia(s){
+  sceneVideos(s).forEach(v=>{ if(!v.src&&v.dataset.clip){ v.src=uri('vid-'+v.dataset.clip); } });
+}
+function pauseAll(){ document.querySelectorAll('video').forEach(v=>{ try{v.pause()}catch(e){} }); }
 
 function narrate(s,myToken){
   clearTimeout(timer);
   if(voiceTrack){ voiceTrack.onended=null; voiceTrack.onerror=null; voiceTrack.pause(); }
-  if(voiceOn && AUDIO[idx]){
-    const a=new Audio(AUDIO[idx]); voiceTrack=a;
+  const src=voiceOn?uri('aud-'+String(idx).padStart(2,'0')):'';
+  if(src){
+    const a=new Audio(src); voiceTrack=a;
     a.onended=()=>{ if(myToken===token&&playing&&voiceTrack===a) timer=setTimeout(()=>advance(myToken),800); };
     a.onerror=()=>{ if(myToken===token&&playing&&voiceTrack===a) timer=setTimeout(()=>advance(myToken),fallbackSecs(s.say)*1000); };
     a.play().catch(()=>{ if(myToken===token&&playing&&voiceTrack===a) timer=setTimeout(()=>advance(myToken),fallbackSecs(s.say)*1000); });
   } else {
-    timer=setTimeout(()=>advance(myToken),fallbackSecs(s.say)*1000);
+    const v=sceneVideos(s)[0];
+    const secs=v&&isFinite(v.duration)&&v.duration>0?Math.max(v.duration+1,fallbackSecs(s.say)):fallbackSecs(s.say);
+    timer=setTimeout(()=>advance(myToken),secs*1000);
   }
 }
 function advance(myToken){ if(myToken!==token)return; if(idx<SCENES.length-1)goto(idx+1,false); else finish(); }
 
+/* The caption is the floor of the stage. Its height is measured on a hidden
+   probe BEFORE the swap, so the figure zone is right from the first frame.
+   fitCaption() writes the text and picks the measure (see the #caption rules):
+   72ch while it holds five lines, else the column at 1.45 while THAT holds five
+   lines, else one type step down — so the caption never exceeds 24% of the
+   stage and the plates keep their share. */
+function setZone(h){ document.documentElement.style.setProperty('--zone',(h+14+bar.offsetHeight+6)+'px'); }
+function fitCaption(el,text,scene){
+  el.classList.remove('wide','small'); el.firstElementChild.textContent=text;
+  if(!text) return 0;
+  const lines=()=>(el.offsetHeight-parseFloat(getComputedStyle(el).paddingTop))/parseFloat(getComputedStyle(el).lineHeight);
+  if(lines()>5.5) el.classList.add('wide');
+  if(lines()>5.5){ /* six lines of the column: step the type down only where the stage needs the room back */
+    setZone(el.offsetHeight);
+    const fig=scene&&scene.el.querySelector('.fig.plate,.fig.film');
+    if(fig?fig.getBoundingClientRect().width<innerWidth*.6:el.offsetHeight>innerHeight*.24) el.classList.add('small');
+  }
+  return el.offsetHeight;
+}
+function fitScene(){ if(cap.firstElementChild.textContent){ setZone(fitCaption(cap,cap.firstElementChild.textContent,SCENES[idx])); } }
+function showCaption(text){
+  setZone(fitCaption(probe,text,SCENES[idx]));
+  cap.classList.remove('on');
+  setTimeout(()=>{ fitCaption(cap,text,SCENES[idx]); fitScene(); cap.classList.add('on'); },200);
+}
+
 function goto(i,manual){
-  token++; const myToken=token; clearTimeout(timer);
+  token++; const myToken=token; clearTimeout(timer); ended=false;
   if(voiceTrack)voiceTrack.pause();
   const ab=document.getElementById('annbtn'); if(ab)ab.classList.remove('on');
-  if(idx>=0){SCENES[idx].el.classList.remove('on');SCENES[idx].tick.classList.remove('now');}
+  if(endcard.classList.contains('on')){ endcard.classList.remove('on'); setTimeout(()=>{ if(!endcard.classList.contains('on')) endcard.classList.add('off'); },400); }
+  if(idx>=0){ const prev=SCENES[idx]; sceneVideos(prev).forEach(v=>{try{v.pause()}catch(e){}}); prev.el.classList.remove('on'); prev.tick.classList.remove('now'); prev.tick.removeAttribute('aria-current');
+    setTimeout(()=>{ if(!prev.el.classList.contains('on')) prev.el.classList.add('off'); },400); }
   idx=i; const s=SCENES[i];
-  s.el.classList.add('on');
-  SCENES.forEach((x,k)=>{x.tick.classList.toggle('done',k<i);x.tick.classList.remove('now');});
-  s.tick.classList.add('now');
-  actlbl.innerHTML=`act <em>${ACT[s.act]}</em> · ${i+1}/${SCENES.length}`;
-  cap.classList.add('on'); cap.textContent=s.say;
-  fitScene(s,myToken);
-  s.el.querySelectorAll('video').forEach(v=>{try{v.currentTime=0;v.play().catch(()=>{});}catch(e){}});
-  setTimeout(()=>{ if(myToken===token) s.el.querySelectorAll('video').forEach(v=>{ if(v.paused) v.play().catch(()=>{}); }); },500);
-  if(manual&&!playing){/* stay paused, just show */}
+  loadMedia(s);
+  s.el.classList.remove('off'); void s.el.offsetWidth; s.el.classList.add('on');
+  SCENES.forEach((x,k)=>{x.tick.classList.toggle('done',k<i);x.tick.classList.remove('now');x.tick.removeAttribute('aria-current');});
+  s.tick.classList.add('now'); s.tick.setAttribute('aria-current','step');
+  numlbl.textContent=`${String(i+1).padStart(2,'0')} / ${SCENES.length}`; actlbl.textContent=ACT[s.act];
+  showCaption(s.say);
+  sceneVideos(s).forEach(v=>{try{v.currentTime=0;if(playing||manual)v.play().catch(()=>{});}catch(e){}});
+  setTimeout(()=>{ if(myToken===token&&playing) sceneVideos(s).forEach(v=>{ if(v.paused&&!v.ended) v.play().catch(()=>{}); }); },500);
   if(playing)narrate(s,myToken);
 }
-
-/* The caption is the floor of the stage. Its height follows the narration, so
-   a fixed scene padding either wastes space under short captions or drowns the
-   sub line under long ones. Measure the real caption, keep the scene above it,
-   and when a plate or film still runs past the line, hand the difference back
-   out of the figure — it keeps its aspect and everything stays readable. */
-function fitScene(s,myToken){
-  requestAnimationFrame(()=>{
-    if(myToken!==token)return;
-    const zone=cap.offsetHeight+innerHeight*0.065+26;
-    s.el.style.paddingBottom=zone+'px';
-    const wrap=s.el.querySelector('.platewrap,.filmwrap');
-    if(!wrap)return;
-    if(wrap.dataset.mh0===undefined)wrap.dataset.mh0=wrap.style.maxHeight||'';
-    wrap.style.maxHeight=wrap.dataset.mh0;
-    requestAnimationFrame(()=>{
-      if(myToken!==token)return;
-      const kids=[...s.el.children];
-      const last=kids[kids.length-1];
-      const floor=innerHeight-zone+6;
-      const over=last.getBoundingClientRect().bottom+16-floor; /* +16: entrance rise */
-      if(over>0)wrap.style.maxHeight=Math.max(120,wrap.offsetHeight-over)+'px';
-    });
-  });
-}
-addEventListener('resize',()=>{ if(idx>=0)fitScene(SCENES[idx],token); });
+addEventListener('resize',()=>{ fitScene(); });
 
 function setPlaying(p){
-  playing=p; ppBtn.textContent=p?'pause':'play';
-  if(!p){ clearTimeout(timer); if(voiceTrack)voiceTrack.pause(); }
+  playing=p; ppBtn.classList.toggle('paused',!p); ppBtn.setAttribute('aria-label',p?'Pause':'Play');
+  if(!p){ clearTimeout(timer); if(voiceTrack)voiceTrack.pause(); if(idx>=0)sceneVideos(SCENES[idx]).forEach(v=>{try{v.pause()}catch(e){}}); }
   else if(idx>=0){
     /* resume mid-scene if the narration was paused partway, else restart the scene */
-    if(voiceOn && voiceTrack && voiceTrack.currentTime>0 && !voiceTrack.ended){ voiceTrack.play().catch(()=>goto(idx,false)); }
+    if(voiceOn && voiceTrack && voiceTrack.currentTime>0 && !voiceTrack.ended){
+      const t=voiceTrack.currentTime;
+      sceneVideos(SCENES[idx]).forEach(v=>{ try{ if(v.dataset.drawn)v.currentTime=Math.min(t,Math.max(0,(v.duration||t)-.05)); if(!v.ended)v.play().catch(()=>{}); }catch(e){} });
+      voiceTrack.play().catch(()=>goto(idx,false));
+    }
     else goto(idx,false);
   }
 }
-function finish(){ setPlayingSilent(false); if(voiceTrack)voiceTrack.pause(); cap.textContent='∎ — replay any scene from the bar below, or press play to run it again from the top.'; }
-function setPlayingSilent(p){ playing=p; ppBtn.textContent=p?'pause':'play'; }
+function setPlayingSilent(p){ playing=p; ppBtn.classList.toggle('paused',!p); ppBtn.setAttribute('aria-label',p?'Pause':'Play'); }
+function finish(){
+  setPlayingSilent(false); ended=true; if(voiceTrack)voiceTrack.pause(); pauseAll();
+  SCENES.forEach(x=>{ x.tick.classList.add('done'); x.tick.classList.remove('now'); x.tick.removeAttribute('aria-current'); }); /* the tour is done: every tick, the 24th included */
+  if(idx>=0){ const prev=SCENES[idx]; prev.el.classList.remove('on');
+    setTimeout(()=>{ if(!prev.el.classList.contains('on')) prev.el.classList.add('off'); },400); }
+  cap.classList.remove('on'); setTimeout(()=>{ if(ended){ fitCaption(cap,''); setZone(0); } },200);
+  endcard.classList.remove('off'); void endcard.offsetWidth; endcard.classList.add('on');
+  numlbl.textContent=`${SCENES.length} / ${SCENES.length}`;
+}
+function restart(){ setPlayingSilent(true); goto(0,false); }
 
-ppBtn.onclick=()=>{ if(!playing&&idx===SCENES.length-1&&(!voiceTrack||voiceTrack.ended||voiceTrack.paused)){ setPlayingSilent(true); goto(0,false);} else setPlaying(!playing); };
+ppBtn.onclick=()=>{ if(ended){ restart(); return; } setPlaying(!playing); };
+document.getElementById('again').onclick=restart;
 let lastNav=0; const throttled=fn=>()=>{const now=Date.now(); if(now-lastNav<250)return; lastNav=now; fn();};
-document.getElementById('prev').onclick=throttled(()=>goto(Math.max(0,idx-1),!playing));
-document.getElementById('next').onclick=throttled(()=>{ if(idx<SCENES.length-1)goto(idx+1,!playing); else finish(); });
-voiceBtn.onclick=()=>{ voiceOn=!voiceOn; voiceBtn.textContent=voiceOn?'voice on':'voice off';
+document.getElementById('prev').onclick=throttled(()=>goto(Math.max(0,ended?SCENES.length-1:idx-1),!playing));
+document.getElementById('next').onclick=throttled(()=>{ if(ended)return; if(idx<SCENES.length-1)goto(idx+1,!playing); else finish(); });
+voiceBtn.onclick=()=>{ voiceOn=!voiceOn; voiceBtn.setAttribute('aria-pressed',voiceOn?'false':'true'); voiceBtn.setAttribute('aria-label',voiceOn?'Mute':'Unmute');
   if(voiceTrack)voiceTrack.pause(); if(playing&&idx>=0)goto(idx,false); };
 addEventListener('keydown',e=>{
+  if(!splash.classList.contains('gone'))return; /* the splash owns the keyboard until play */
   const typing=/^(INPUT|TEXTAREA)$/.test(e.target.tagName)||e.target.isContentEditable;
   if(typing)return; /* the annotation box owns the keyboard while it is focused */
-  if(e.code==='Space'){e.preventDefault();ppBtn.click();}
+  if(e.code==='Space'){ if(e.target.tagName==='BUTTON'||e.target.tagName==='A')return; e.preventDefault();ppBtn.click(); }
   if(e.key==='ArrowRight')document.getElementById('next').click();
   if(e.key==='ArrowLeft')document.getElementById('prev').click();
 });
-document.getElementById('enter').onclick=()=>{
-  document.getElementById('splash').classList.add('gone'); bar.hidden=false;
-  setPlayingSilent(true); goto(startIndex,false); /* click is the user gesture that unlocks audio */
-};
+const enter=document.getElementById('enter');
+let started=false;
+function start(){
+  if(started)return; started=true;
+  splash.classList.add('gone'); bar.hidden=false;
+  const retire=()=>{ splash.hidden=true; splash.inert=true; };
+  splash.addEventListener('transitionend',retire,{once:true}); setTimeout(retire,700);
+  setTimeout(()=>{ if(idx<0&&!ended){ setPlayingSilent(true); goto(startIndex,false); } },420); /* click is the user gesture that unlocks audio */
+}
+/* The media follow this script as inert blocks, so the button is live before they
+   arrive: it counts the blocks parsed so far and reads "Play the tour" once the
+   blocks the first scene needs exist. A click before that queues the start. */
+const clipOf=s=>(s.html.match(/data-clip="(\w+)"/)||[])[1];
+const BLOCKS=SCENES.length+new Set(SCENES.map(clipOf).filter(Boolean)).size;
+const NEED=['aud-'+String(startIndex).padStart(2,'0')].concat(clipOf(SCENES[startIndex])?['vid-'+clipOf(SCENES[startIndex])]:[]);
+let wantStart=false;
+function loadState(){ return { n:document.querySelectorAll('template[id^="aud-"],template[id^="vid-"]').length, ready:NEED.every(id=>document.getElementById(id)) }; }
+function paintEnter(){
+  const {n,ready}=loadState(), lbl=enter.querySelector('span');
+  if(ready){ lbl.textContent='Play the tour'; enter.disabled=false; enter.removeAttribute('aria-busy'); if(wantStart)start(); return true; }
+  lbl.textContent=`Loading ${n}/${BLOCKS}`; enter.setAttribute('aria-busy','true'); return false;
+}
+if(!paintEnter()){ const poll=setInterval(()=>{ if(paintEnter())clearInterval(poll); },120); }
+enter.onclick=()=>{ if(loadState().ready){ start(); return; } wantStart=true; enter.disabled=true; paintEnter(); };
 addEventListener('visibilitychange',()=>{ if(document.hidden&&playing)setPlaying(false); });
+if(startIndex>0){const el=document.getElementById("startnote");el.hidden=false;el.innerHTML="Starts at scene "+(startIndex+1)+" · <em>"+SCENES[startIndex].name+"</em>";}
 
 /* ====================== annotations ======================
-   Highlight any narration or on-screen text and file a note against the
+   Select any narration or on-screen text and file a note against the
    scene it belongs to. Notes live in this browser until exported; the
-   exported JSON is what the next revision reads — ingest-annotations.cjs
-   turns pronunciation notes into spoken-form rules the build applies, and
-   files the rest as notes on the scene's tile. */
+   exported JSON is what the next revision reads. The chrome is demoted:
+   the bar button shows with a count, or always under the review flag. */
 const KINDS=[
-  {k:'pronunciation', label:'pronunciation', lbl:'how it should sound',
+  {k:'pronunciation', label:'Pronunciation', lbl:'How it should sound',
    hint:'Write it the way it should be said — "A-G-P-L" as "ay gee pee ell". The next build feeds this spelling to the voice while the caption keeps the real text.'},
-  {k:'wording', label:'wording', lbl:'what it should say',
-   hint:'A better line for this passage. Rewrites the narration and the caption together.'},
-  {k:'accuracy', label:'accuracy', lbl:'what is wrong',
-   hint:'Something stated here is not true, or not true any more.'},
-  {k:'pacing', label:'pacing', lbl:'what to change',
-   hint:'Too fast, too slow, too long, needs a pause.'},
-  {k:'visual', label:'visual', lbl:'what to change',
-   hint:'Something about how this scene looks — layout, a diagram, a clip.'},
-  {k:'note', label:'note', lbl:'your note', hint:'Anything else worth remembering.'},
+  {k:'wording', label:'Wording', lbl:'What it should say', hint:'A better line for this passage. Rewrites the narration and the caption together.'},
+  {k:'accuracy', label:'Accuracy', lbl:'What is wrong', hint:'Something stated here is not true, or not true any more.'},
+  {k:'pacing', label:'Pacing', lbl:'What to change', hint:'Too fast, too slow, too long, needs a pause.'},
+  {k:'visual', label:'Visual', lbl:'What to change', hint:'Something about how this scene looks — layout, a diagram, a clip.'},
+  {k:'note', label:'Note', lbl:'Your note', hint:'Anything else worth remembering.'},
 ];
 const STORE='hc:presentation:annotations';
-const annBtn=document.getElementById('annbtn'), annForm=document.getElementById('annform'),
+const REVIEW=(()=>{ try{ return localStorage.getItem('hc:presentation:review')==='1'||new URLSearchParams(location.search).get('review')==='1' }catch(e){ return false } })();
+const annBtn=document.getElementById('annbtn'), annForm=document.getElementById('annform'), annScrim=document.getElementById('annscrim'),
       annPanel=document.getElementById('annpanel'), annList=document.getElementById('annlist'),
       annCount=document.getElementById('anns'), annQuote=document.getElementById('annquote'),
       annFix=document.getElementById('annfix'), annHint=document.getElementById('annhint'),
       annFixLbl=document.getElementById('annfixlbl'), annKinds=document.getElementById('annkinds'),
       annSceneRef=document.getElementById('annsceneref'), annEmpty=document.getElementById('annempty');
 let pending=null, kind='pronunciation';
-
 const load=()=>{ try{ return JSON.parse(localStorage.getItem(STORE)||'[]') }catch{ return [] } };
 const save=list=>{ try{ localStorage.setItem(STORE,JSON.stringify(list)) }catch{} ; paintCount(); };
-function paintCount(){ const n=load().length; annCount.textContent='⌁ '+n; annCount.classList.toggle('has',n>0); }
-
-KINDS.forEach(k=>{
-  const b=document.createElement('button'); b.className='btn'; b.textContent=k.label; b.dataset.k=k.k;
-  b.onclick=()=>setKind(k.k); annKinds.appendChild(b);
-});
-function setKind(k){
-  kind=k; const def=KINDS.find(x=>x.k===k);
-  annFixLbl.textContent=def.lbl; annHint.textContent=def.hint;
-  [...annKinds.children].forEach(b=>{
-    const on=b.dataset.k===k;
-    b.style.borderColor=on?'var(--honey-deep)':'var(--line)';
-    b.style.color=on?'var(--honey)':'var(--ink)';
-  });
-}
-
+function paintCount(){ const n=load().length; annCount.querySelector('.n').textContent=n>0?String(n):''; annCount.hidden=!(REVIEW||n>0); }
+KINDS.forEach(k=>{ const b=document.createElement('button'); b.type='button'; b.textContent=k.label; b.dataset.k=k.k; b.onclick=()=>setKind(k.k); annKinds.appendChild(b); });
+function setKind(k){ kind=k; const def=KINDS.find(x=>x.k===k); annFixLbl.textContent=def.lbl; annHint.textContent=def.hint;
+  [...annKinds.children].forEach(b=>b.classList.toggle('on',b.dataset.k===k)); }
 document.addEventListener('mouseup',e=>{
   if(annForm.classList.contains('on')||annPanel.contains(e.target))return;
   setTimeout(()=>{
     const sel=window.getSelection(); const text=String(sel).trim();
-    if(!text||text.length<2||document.getElementById('splash').classList.contains('gone')===false){ annBtn.classList.remove('on'); return }
+    if(!text||text.length<2||!splash.classList.contains('gone')){ annBtn.classList.remove('on'); return }
     const r=sel.getRangeAt(0).getBoundingClientRect();
-    annBtn.style.left=Math.max(12,Math.min(innerWidth-150,r.left+r.width/2-70))+'px';
-    annBtn.style.top=Math.max(12,r.top-46)+'px';
+    annBtn.style.left=Math.max(12,Math.min(innerWidth-150,r.left+r.width/2-60))+'px';
+    annBtn.style.top=Math.max(12,r.top-44)+'px';
     annBtn.classList.add('on');
   },10);
 });
-
+function closeForm(){ annForm.classList.remove('on'); annScrim.classList.remove('on'); pending=null }
 annBtn.onclick=()=>{
   const sel=window.getSelection(); const text=String(sel).trim(); if(!text)return;
   const inCaption=cap.contains(sel.anchorNode)||cap.contains(sel.anchorNode?.parentElement);
-  pending={ scene:idx+1, sceneName:(SCENES[idx]&&SCENES[idx].name)||'', quote:text,
-            where:inCaption?'narration':'on-screen',
+  pending={ scene:idx+1, sceneName:(SCENES[idx]&&SCENES[idx].name)||'', quote:text, where:inCaption?'narration':'on-screen',
             at:voiceTrack?Math.round(voiceTrack.currentTime*10)/10:null };
   if(playing)setPlaying(false);
   annBtn.classList.remove('on');
-  annSceneRef.textContent=`scene ${pending.scene} · ${pending.sceneName} · ${pending.where}`;
+  annSceneRef.textContent=`Scene ${pending.scene} · ${pending.sceneName} · ${pending.where}`;
   annQuote.textContent='“'+text+'”';
   annFix.value=''; setKind('pronunciation');
-  annForm.style.left=Math.max(12,Math.min(innerWidth-440,(innerWidth-420)/2))+'px';
+  annForm.style.left=Math.max(12,Math.min(innerWidth-452,(innerWidth-440)/2))+'px';
   annForm.style.top=Math.max(12,Math.min(innerHeight-380,innerHeight/2-190))+'px';
-  annForm.classList.add('on'); annFix.focus();
+  annScrim.classList.add('on'); annForm.classList.add('on'); annFix.focus();
 };
-document.getElementById('anncancel').onclick=()=>{ annForm.classList.remove('on'); pending=null };
+annScrim.onclick=closeForm;
+document.getElementById('anncancel').onclick=closeForm;
 document.getElementById('annsave').onclick=()=>{
   if(!pending)return;
-  const list=load();
-  list.push({...pending, kind, fix:annFix.value.trim(), stamp:new Date().toISOString()});
-  save(list); annForm.classList.remove('on'); pending=null;
-  window.getSelection().removeAllRanges();
+  const list=load(); list.push({...pending, kind, fix:annFix.value.trim(), stamp:new Date().toISOString()});
+  save(list); closeForm(); window.getSelection().removeAllRanges();
 };
-annFix.addEventListener('keydown',e=>{ if(e.key==='Enter')document.getElementById('annsave').click();
-  if(e.key==='Escape')document.getElementById('anncancel').click(); });
-
+annFix.addEventListener('keydown',e=>{ if(e.key==='Enter')document.getElementById('annsave').click(); if(e.key==='Escape')closeForm(); });
 function paintList(){
   const list=load(); annList.innerHTML='';
   annEmpty.style.display=list.length?'none':'block';
   list.forEach((a,i)=>{
     const row=document.createElement('div'); row.className='annrow';
-    row.innerHTML=`<button title="remove">✕</button>
+    row.innerHTML=`<button aria-label="Remove"><svg class="g"><use href="#i-close"/></svg></button>
       <div class="meta">scene ${a.scene} · ${a.sceneName} · ${a.kind}${a.at!=null?' · '+a.at+'s':''}</div>
-      <div class="said">“${a.quote}”</div>${a.fix?`<div class="fix">→ ${a.fix}</div>`:''}`;
+      <div class="said">“${a.quote}”</div>${a.fix?`<div class="fix">${a.fix}</div>`:''}`;
     row.querySelector('button').onclick=()=>{ const l=load(); l.splice(i,1); save(l); paintList() };
     annList.appendChild(row);
   });
 }
 annCount.onclick=()=>{ annPanel.classList.toggle('on'); if(annPanel.classList.contains('on')){ paintList(); if(playing)setPlaying(false) } };
 document.getElementById('annclose').onclick=()=>annPanel.classList.remove('on');
-document.getElementById('annclear').onclick=()=>{ if(confirm('Remove all annotations kept in this browser?')){ save([]); paintList() } };
-const exportJson=()=>JSON.stringify({ presentation:'hypercomb', scenes:SCENES.length,
-  exported:new Date().toISOString(), annotations:load() }, null, 2);
-document.getElementById('anncopy').onclick=async()=>{
-  const b=document.getElementById('anncopy');
-  try{ await navigator.clipboard.writeText(exportJson()); b.textContent='copied'; }
-  catch{ b.textContent='copy failed'; }
-  setTimeout(()=>b.textContent='copy json',1600);
-};
+document.getElementById('annclear').onclick=()=>{ if(confirm('Remove all notes kept in this browser?')){ save([]); paintList() } };
+const exportJson=()=>JSON.stringify({ presentation:'hypercomb', scenes:SCENES.length, exported:new Date().toISOString(), annotations:load() }, null, 2);
+document.getElementById('anncopy').onclick=async()=>{ const b=document.getElementById('anncopy');
+  try{ await navigator.clipboard.writeText(exportJson()); b.textContent='Copied'; } catch{ b.textContent='Copy failed'; }
+  setTimeout(()=>b.textContent='Copy',1600); };
 document.getElementById('anndownload').onclick=()=>{
   const blob=new Blob([exportJson()],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='presentation-annotations.json'; a.click();
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='presentation-annotations.json'; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),4000);
 };
-addEventListener('keydown',e=>{ if(e.key==='Escape'){ annForm.classList.remove('on'); annBtn.classList.remove('on') } });
+addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeForm(); annBtn.classList.remove('on'); annPanel.classList.remove('on') } });
 paintCount();
-if(startIndex>0){const el=document.getElementById("startnote");el.style.display="block";el.innerHTML="starts at scene "+(startIndex+1)+" · <em style='color:var(--honey);font-style:normal'>"+SCENES[startIndex].name+"</em>";}
+</script>
+{{MEDIA}}
+<script>
+/* media parsed: the deck is whole */
+document.documentElement.dataset.whole='1';
 </script>

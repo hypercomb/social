@@ -12,7 +12,9 @@ without touching the rest.
 | Scene instructions | `scenes/scene-NN.json` | the whole scene — words, visual, narration |
 | The recipe | `production.md`, mirrored onto the `presentation` tile | what a scene may contain |
 | Shell (styles, chrome, player) | `template.html` | the look and the controls, never a scene |
-| Live-capture clips | `media/*.mp4` | replace a clip, keep the filename |
+| The drawn plates | `plates/<name>.cjs` → `visuals/<name>.svg` | one module per plate; `plates/lib.cjs` is the shared hand |
+| Live-capture clips | `media/hive-*.mp4` | replace a clip, keep the filename |
+| Drawn concept clips | `media/concept-*.mp4` | never by hand — `concepts.cjs` draws them from the template's tokens |
 | The splash directory | `hosts.json` | never by hand — `hosts.cjs` derives it |
 | Pronunciation rules | `pronunciations.json` | how a word is said (`say`) and heard (`hear`) |
 | Narration audio | `audio-cache/<h16>.mp3` | never by hand — `record.cjs` or `voice.cjs` |
@@ -21,14 +23,43 @@ without touching the rest.
 A scene instruction has these fields:
 
 ```
-eyebrow    the small uppercase line above the headline
-headline   the big line — wrap emphasised words in *asterisks*
-sub        the calm sentence under it (optional)
-visual     none | film:<clip> | hexes | stack | road | sig
-visualData the rows that visual needs (optional)
-link       an outbound call to action (optional)
+eyebrow    the small mono line above the headline — a topic noun, never a headline word
+headline   the big line — wrap the one emphasised word in *asterisks*
+sub        the calm sentence under it (optional; one line)
+visual     none | film:<clip> | plate:<name> | hexes | stack | list | road:<state>
+visualData the rows that visual needs (optional) — see production.md for each shape
+link       {href, label} — the one call to action, scene 24 only (optional)
+sig        true to stamp the caption's sha-256 on the figure strip (scene 5)
 say        what the voice says — this is also the caption
 ```
+
+The visual vocabulary, all compiled by `visualHtml()` in `build.cjs`:
+
+- `film:<clip>` — a live capture (`navigate`, `zoom`, `children`, `create`) or a
+  drawn concept clip (`vocabulary`, `integrity`, `time`), in one width-driven frame.
+- `plate:<name>` — one of the eight SVG plates, inlined from `visuals/<name>.svg`;
+  `visualData[0]` is its title on the strip. Plates come from `plates.cjs`
+  (`node plates.cjs [name]`): tokens only, 960x400, no fonts or motion inside —
+  the page's `:root` is the one sheet, and the single flow line per plate
+  (`class="flow"`, `pathLength="1"`) is drawn once by the template.
+- `hexes` — a row of badges, one `icon:<name> <label>` per row (a sprite icon, a
+  label of at most 12 characters).
+- `list` / `stack` — one bordered block of `left | right` rows; `* ` opens the
+  head row. `list` reads top-down, `stack` is newest-on-top (scene 7 only).
+- `road:<state>` — milestones, one `title — detail` per row; the state (`landed`,
+  `next`, `vision`) sets the marker.
+
+Every figure carries a `.figcap` strip underneath — `[hex] KIND · TITLE`, where
+KIND is `live`, `drawn` or `plate` — and nothing is ever drawn over a figure.
+Icons come from one inline SVG sprite at the top of the template (`#i-<name>`);
+there are no glyph icons anywhere. The faces are the shells' own vendored Inter
+and JetBrains Mono, embedded as data URIs, and every colour is a token of the
+ink ground (`--bg`, `--panel`, `--line`, `--honey`, `--honey-fill`, `--steel`,
+`--dim`). `build.cjs` fills the template's placeholders: `{{FONTS}}` (the
+`@font-face` blocks), `{{MARK}}` (the favicon's SVG, inlined where the mark is
+shown), `{{MINUTES}}` (the narrated length from the cached mp3s), `{{FAVICON}}`,
+`{{SCENES}}`, `{{DOORS}}` and `{{MEDIA}}` (the audio and clips as inert blocks
+after the engine, so the splash button is live before they arrive).
 
 The audio cache is keyed by `sha256(voice|rate|spoken(say))`, so changing one
 scene's words regenerates that scene alone; visual-only edits cost no audio at
@@ -57,6 +88,8 @@ drawing, is the cost. Narration comes from the same `audio-cache` the full
 build fills, keyed by the same words.
 
 ```bash
+node plates.cjs            # visuals/*.svg — all eight plates
+node plates.cjs ai-door    # one plate
 node concepts.cjs          # media/concept-{vocabulary,integrity,time}.mp4
 node concepts.cjs time --probe   # stills at each beat, to eyeball a world
 ```
@@ -70,6 +103,10 @@ beats are timed to the narration's own sentence boundaries — measured from the
 cached mp3 with silencedetect, matched by word-count expectation. Editing a
 scene's `say` re-times the clip on the next run; `film:vocabulary` /
 `film:integrity` / `film:time` in the scene instruction is what mounts them.
+The clips are drawn on the deck's own material — the template's `<style>` and
+the embedded faces are read at run time, so the world sits on the panel ground
+in the same tokens as the plates — and the first half second holds the opened
+world, so a clip never starts on a blank pane.
 
 ## The ecosystem composition, narrated
 
@@ -264,9 +301,10 @@ Two things that will bite when reading back over the bridge:
 ## Annotations — highlight, then say what's wrong
 
 Watch it and **highlight any text** — narration in the caption or anything on
-screen. A `⌁ annotate` chip appears; choose a kind, write the fix, save. The
-reel pauses while you type. The bar's `⌁ N` button opens the list, where you can
-remove entries, **copy json**, or **download** them.
+screen. An **Annotate** chip appears; choose a kind, write the fix, save. The
+reel pauses while you type. The bar's annotation button (shown once there is a
+note, or always under `localStorage hc:presentation:review=1` / `?review=1`)
+opens the list, where you can remove entries, **copy json**, or **download** them.
 
 Kinds: `pronunciation` · `wording` · `accuracy` · `pacing` · `visual` · `note`.
 Each records the scene, its name, the exact quote, whether it came from the

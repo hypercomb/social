@@ -3,15 +3,15 @@
   "name": "now",
   "chapter": "roadmap",
   "slug": "now",
-  "eyebrow": "already landed",
-  "headline": "Roadmap · *landed*",
+  "eyebrow": "shipped",
+  "headline": "What has already *landed*",
   "sub": "",
-  "visual": "road",
+  "visual": "road:landed",
   "visualData": [
-    "Example hives & tutorials — first boot lands somewhere alive; the hive teaches the hive",
-    "Build revisions — every build of the software itself tracked as a named, adoptable revision",
-    "Mobile, usable-first — the close-up becomes the phone's home screen; a shared link opens a live hive",
-    "The participant stack — one hexagon with depth; the wheel rolls through everyone's version of a cell"
+    "Example hives and tutorials — first boot lands somewhere alive · the hive teaches the hive",
+    "Build revisions — every build of the software is a named, adoptable revision",
+    "Mobile, usable first — the close-up is the phone’s home screen · a link opens a live hive",
+    "The participant stack — one hexagon with depth · everyone’s version of a cell"
   ],
   "say": "So where is it going? Start with what has already landed since this presentation was first recorded — this roadmap has a habit of turning into the changelog. Example hives and tutorial courses: first boot lands somewhere alive, and the hive teaches the hive. Build revisions: every build of the software itself is tracked as a named, adoptable revision. Mobile, usable first: the close-up becomes the phone's home screen, and a shared link opens a live hive. And the participant stack — one hexagon with depth, where the wheel rolls through everyone's version of a cell — straight off this presentation's own vision slide."
 }
