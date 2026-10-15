@@ -19,7 +19,7 @@
 //   node scripts/bridge/manager.cjs held                     what waits on the participant in Execution
 //   node scripts/bridge/manager.cjs do "<behaviour sentence>"      one line through the command line
 //   node scripts/bridge/manager.cjs op '<request json>'      a raw bridge request
-//   node scripts/bridge/manager.cjs tidy [minutes]           put away answered one-off job conversations quiet that long (default 10)
+//   node scripts/bridge/manager.cjs tidy [minutes|dry]       put away one-off job conversations: answered + quiet that long (default 10), or unanswered an hour; dry = list only
 //   node scripts/bridge/manager.cjs roster                   the managers, as the hive holds them
 //   node scripts/bridge/manager.cjs install                  put the managers into the hive (idempotent)
 //
@@ -252,8 +252,10 @@ const main = async () => {
       return print(`chat:tile:/::${Date.now()}-${letters}`)
     }
     case 'tidy': {
-      // Put away the answered one-off job conversations (never the managers' own).
-      const reply = await send({ op: 'chat-tidy', keep: Object.values(MANAGERS), olderThanMs: Number(first) > 0 ? Number(first) * 60_000 : undefined })
+      // Put away the one-off job conversations: answered and quiet, or never
+      // answered and an hour old (never the managers' own). `tidy dry` lists.
+      const dry = first === 'dry'
+      const reply = await send({ op: 'chat-tidy', keep: Object.values(MANAGERS), dryRun: dry, olderThanMs: !dry && Number(first) > 0 ? Number(first) * 60_000 : undefined })
       return reply.ok ? print(reply.data) : fail(reply.error)
     }
     case 'roster': {

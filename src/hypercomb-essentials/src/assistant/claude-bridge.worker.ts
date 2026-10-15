@@ -975,20 +975,36 @@ export class ClaudeBridgeWorker extends Worker {
   // away — archived, not deleted; the window's archive lists them and un-files
   // with one click — each of those that is answered, not waiting on the
   // participant, quiet for `olderThanMs` (default 10 minutes), and not in
-  // `keep` (the managers' own conversations). The participant's own chats and
-  // every tile's chat are never touched.
+  // `keep` (the managers' own conversations). A JOB NOBODY ANSWERED is put
+  // away too once quiet for `staleMs` (default an hour): an ask that hung
+  // never replies, and tidy passing over every unanswered one left a column
+  // of "waiting for reply… find betz /" two days old (jwize, 2026-10-15). An
+  // ask waits fifteen minutes at most, so an hour is never a live one.
+  // `dryRun` lists what it would put away and what it passed over, by
+  // reason, and changes nothing. The participant's own chats and every tile's
+  // chat are never touched.
   async #chatTidy(req: BridgeRequest): Promise<BridgeResponse> {
-    const extra = req as unknown as { keep?: unknown; olderThanMs?: unknown }
+    const extra = req as unknown as { keep?: unknown; olderThanMs?: unknown; staleMs?: unknown; dryRun?: unknown }
     const keep = new Set(Array.isArray(extra.keep) ? extra.keep.map(String) : [])
     const olderThanMs = typeof extra.olderThanMs === 'number' ? extra.olderThanMs : 600_000
+    const staleMs = typeof extra.staleMs === 'number' ? extra.staleMs : 3_600_000
+    const dryRun = extra.dryRun === true
     const now = Date.now()
-    const archived: string[] = []
+    const putAway: { convoId: string; title: string; replied: boolean }[] = []
+    const passed: Record<string, number> = {}
+    const pass = (why: string): void => { passed[why] = (passed[why] ?? 0) + 1 }
     for (const convo of await listConversations()) {
-      if (convo.archived || !convo.replied || convo.asking || keep.has(convo.convoId)) continue
-      if (!convo.convoId.startsWith('chat:tile:/::') || now - convo.lastAt < olderThanMs) continue
-      if (await setConversationArchived(convo.convoId, true)) archived.push(convo.convoId)
+      if (convo.archived) continue
+      if (!convo.convoId.startsWith('chat:tile:/::')) { pass(convo.convoId.startsWith('chat:tile:') ? 'tile chat' : 'participant chat'); continue }
+      if (keep.has(convo.convoId)) { pass('manager'); continue }
+      if (convo.asking) { pass('waiting on the participant'); continue }
+      if (now - convo.lastAt < (convo.replied ? olderThanMs : staleMs)) { pass(convo.replied ? 'recent' : 'unanswered, still young'); continue }
+      putAway.push({ convoId: convo.convoId, title: convo.title, replied: convo.replied })
     }
-    return { id: req.id, ok: true, data: { archived: archived.length } }
+    if (dryRun) return { id: req.id, ok: true, data: { wouldArchive: putAway, passed } }
+    let archived = 0
+    for (const convo of putAway) if (await setConversationArchived(convo.convoId, true)) archived++
+    return { id: req.id, ok: true, data: { archived, unanswered: putAway.filter(convo => !convo.replied).length, passed } }
   }
 
   // ─── thread-read ───────────────────────────────────────────────────
