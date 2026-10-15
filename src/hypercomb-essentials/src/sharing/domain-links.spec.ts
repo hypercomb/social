@@ -84,6 +84,19 @@ describe('doorsOfResults', () => {
       ['arkanoid', 'https://jwize.com/games/arkanoid'],
     ])
   })
+
+  it('links a top-level creation to its subdomain even when the result recorded a root path', () => {
+    const doors = doorsOfResults([
+      r('publish', 'Meetings', 1, 'https://jwize.com/Meetings'),
+      { v: 1, op: 'publish', at: 2, segments: ['games', 'arkanoid'], lineageKey: 'games/arkanoid', host: 'jwize.com', address: 'https://jwize.com/games/arkanoid' },
+      { v: 1, op: 'publish', at: 3, segments: ['card'], lineageKey: 'card', host: 'jwize.com', address: 'https://me.jwize.com' },
+    ])
+    expect(doors.map(d => d.address)).toEqual([
+      'https://meetings.jwize.com',
+      'https://jwize.com/games/arkanoid',
+      'https://me.jwize.com',
+    ])
+  })
 })
 
 describe('linkify', () => {

@@ -27,7 +27,7 @@
 
 import { EffectBus, get, lineageKey, registerPoolMeaning } from '@hypercomb/core'
 import type { HiveManifest } from './hive-pointer.js'
-import { creationUrl } from './zone-door.js'
+import { creationUrl, foldDnsLabel, originOf, ownAddressHost } from './zone-door.js'
 
 export const PUBLISH_RESULTS_POOL = 'publish:results'
 /** Emitted with the record after every result lands in the pool. */
@@ -84,6 +84,23 @@ const zoneOfAddress = (address: string): string => {
  *  both fold to the host that published them. */
 const zoneOf = (record: { host: string; address?: string }): string =>
   String(record.host ?? '').trim().toLowerCase() || zoneOfAddress(record.address ?? '')
+
+/** WHERE A DOOR LEADS: THE SUBDOMAIN (jwize, 2026-10-15: "the text in the
+ *  copy needs to be auto href to the subdomains that match the text"). An
+ *  own address signed in the index wins. Without one, a top-level creation
+ *  is still served at `<name>.<zone>` — the host's implicit door maps the
+ *  first label to the lineage — so that is the link. Only a nested lineage
+ *  keeps its root path: the wildcard maps one label, never a path. */
+export const doorAddress = (zone: string, segments: readonly string[], key: string, recorded?: string): string => {
+  const z = String(zone ?? '').trim().toLowerCase()
+  const given = String(recorded ?? '').trim()
+  if (given && zoneOfAddress(given) && zoneOfAddress(given) !== z) return given   // an own address
+  if (segments.length === 1) {
+    const own = originOf(ownAddressHost(foldDnsLabel(key), z))
+    if (own) return own
+  }
+  return given || creationUrl(z, segments, key)
+}
 
 const validate = (raw: unknown): PublishResultRecord | null => {
   if (!raw || typeof raw !== 'object') return null
@@ -164,7 +181,8 @@ export const doorsOfResults = (results: readonly PublishResultRecord[]): Publish
     if (r.op !== 'publish' || !r.address) continue
     const name = r.segments[r.segments.length - 1] ?? ''
     if (!name) continue
-    doors.push({ name, segments: r.segments, lineageKey: r.lineageKey, zone: zoneOf(r), address: r.address, at: r.at })
+    const zone = zoneOf(r)
+    doors.push({ name, segments: r.segments, lineageKey: r.lineageKey, zone, address: doorAddress(zone, r.segments, r.lineageKey, r.address), at: r.at })
   }
   return doors
 }
@@ -187,7 +205,7 @@ export const doorsOfIndex = (manifest: Pick<HiveManifest, 'roots' | 'doors' | 'a
       segments,
       lineageKey: key,
       zone,
-      address: creationUrl(zone, segments, key, manifest.addresses),
+      address: doorAddress(zone, segments, key, creationUrl(zone, segments, key, manifest.addresses)),
       at: (Number(manifest.createdAt) || 0) * 1000,
     })
   }
