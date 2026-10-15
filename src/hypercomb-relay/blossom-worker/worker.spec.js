@@ -1244,10 +1244,10 @@ test('under /content/ a miss is an honest 404, never the SPA page — the pool w
   const gap = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/00000001`), env)
   assert.equal(gap.status, 404)
   assert.match(gap.headers.get('content-type'), /text\/plain/)
-  // the page itself still falls back to index.html
+  // the page itself still falls back to the shell, asked at `/`
   const deep = await worker.fetch(page('https://revolucion.pluginthematrix.com/some/route'), env)
   assert.equal(deep.status, 404)
-  assert.deepEqual(assetRequests.slice(-2), ['/some/route', '/index.html'])
+  assert.deepEqual(assetRequests.slice(-2), ['/some/route', '/'])
 })
 
 // ── Plan A: the allowlist as content (documentation/signed-site-bindings.md) ──
@@ -5224,7 +5224,9 @@ test('a deep link into a site serves the shell at that path — a redirect from 
   env.ASSETS.fetch = async (request) => {
     const path = new URL(request.url).pathname
     assetRequests.push(path)
-    if (path === '/index.html') return new Response(shell, { headers: { 'content-type': 'text/html' } })
+    // The store serves the shell at `/` and redirects everything it does not
+    // hold — `/index.html` included — to `/`.
+    if (path === '/') return new Response(shell, { headers: { 'content-type': 'text/html' } })
     return new Response(null, { status: 307, headers: { Location: '/' } })
   }
   const response = await worker.fetch(page('https://revolucion.pluginthematrix.com/2026-10-14'), env)
@@ -5232,5 +5234,5 @@ test('a deep link into a site serves the shell at that path — a redirect from 
   assert.equal(response.headers.get('location'), null)
   const html = await response.text()
   assert(html.includes('<meta property="og:url" content="https://revolucion.pluginthematrix.com/2026-10-14">'))
-  assert(pages(assetRequests).includes('/index.html'), 'the shell was fetched for the asked path')
+  assert(pages(assetRequests).includes('/'), 'the shell was fetched for the asked path')
 })

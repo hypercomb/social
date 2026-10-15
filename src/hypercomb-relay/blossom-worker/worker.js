@@ -2425,8 +2425,11 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
   // the site's front page. Either miss is the shell at the asked path.
   const miss = response.status === 404 || (response.status >= 300 && response.status < 400)
   if (miss) {
+    // Ask for `/`, never `/index.html`: the store redirects the file name to
+    // its directory, so asking by name only produced the same 307 again.
     const url = new URL(request.url)
-    url.pathname = '/index.html'
+    url.pathname = '/'
+    url.search = ''
     response = await env.ASSETS.fetch(new Request(url, request))
   }
   const headers = new Headers(response.headers)
