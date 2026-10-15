@@ -146,6 +146,7 @@ export interface LinkWord {
 
 export const LINK_WORDS: readonly LinkWord[] = [
   { word: 'raise' },
+  { word: 'hold' },
   { word: 'recommend', asks: 'a word' },
 ]
 

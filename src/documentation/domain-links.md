@@ -103,9 +103,14 @@ learns the dialect by using it and an agent says the same sentences.
   head: a pheromone (`pheromones.md`), shown to readers whose interests
   match the word and to nobody else. The control asks for the word in place.
 
-Not yet: `hold`, a link becoming a row in the Hyperdex (a link tile inside
-the private `/hyperdex` collection, `business-card.md`). The link intake
-only lands where you stand and nothing mints `/hyperdex` yet, so holding
-needs both before it can be a word. Replacements (a publisher's signed
-pointer from an old door to a new one, offered as an update to whoever holds
-it) are also owed.
+- `hold <name|address>` — the link becomes a row in your **Hyperdex**
+  (`business-card.md`): a link tile named after the creation, whose link is
+  its address, inside the `/sets/hyperdex` collection — collections are the
+  tiles under `/sets`, so it is listed in the collections entrance like any
+  other. Minted on the first hold; a creation already held is a no-op, and a
+  tile of that name holding a different link is never replaced. The row is
+  an ordinary link tile, so the card page's held-address read and update
+  notice apply to it unchanged.
+
+Owed: replacements — a publisher's signed pointer from an old door to a new
+one, offered as an update to whoever holds it.

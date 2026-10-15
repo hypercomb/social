@@ -153,15 +153,17 @@ describe('linkify', () => {
     const said: string[] = []
     const control = linkControl(document, door('Business Card', 'jwize.com'), s => said.push(s))
     const buttons = Array.from(control.querySelectorAll('button')).map(b => b.textContent)
-    expect(buttons).toEqual(['raise', 'recommend'])
+    expect(buttons).toEqual(['raise', 'hold', 'recommend'])
     ;(control.querySelector('button[data-word="raise"]') as HTMLButtonElement).click()
-    expect(said).toEqual(['raise https://business-card.jwize.com'])
+    ;(control.querySelector('button[data-word="hold"]') as HTMLButtonElement).click()
+    expect(said).toEqual(['raise https://business-card.jwize.com', 'hold https://business-card.jwize.com'])
+    said.length = 0
     ;(control.querySelector('button[data-word="recommend"]') as HTMLButtonElement).click()
     const input = control.querySelector('input') as HTMLInputElement
     expect(input.placeholder).toBe('a word')
     input.value = 'cigars'
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
-    expect(said[1]).toBe('recommend https://business-card.jwize.com cigars')
+    expect(said).toEqual(['recommend https://business-card.jwize.com cigars'])
     expect(control.querySelector('input')).toBeNull()
   })
 

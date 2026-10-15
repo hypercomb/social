@@ -955,6 +955,7 @@
   "slash.go": "Walk to a tile: a name on this page, a path, .. for up, / for the root; /go <tile>",
   "slash.raise": "Bring a linked creation to the top: yours by name or address, another host's shown shaded in your hive; /raise <name>",
   "slash.recommend": "Leave a word on a linked creation, signed, for readers whose interests match it; /recommend <name> <word>",
+  "slash.hold": "Hold a linked creation in your Hyperdex: a link tile named after it in /sets/hyperdex; /hold <name>",
   "slash.create": "Make a tile here — the only way to create one in beehaviour mode; create <name>",
   "slash.move": "Toggle move mode for drag-reordering tiles",
   "slash.revise": "Toggle revision mode (history clock)",

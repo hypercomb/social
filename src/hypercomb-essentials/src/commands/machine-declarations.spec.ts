@@ -38,6 +38,7 @@ await import('./create.queen.js')
 await import('./go.queen.js')
 await import('../sharing/raise.queen.js')
 await import('../sharing/recommend.queen.js')
+await import('../sharing/hold.queen.js')
 await import('./language.queen.js')
 await import('./postit.queen.js')
 await import('./title.queen.js')
@@ -104,6 +105,8 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   raise: ['additive', 'hive'],         // walks to ours; offers another host's creation shaded
                                        // (a view, withdrawn like any other), then walks to it
   recommend: ['additive', 'hive'],     // one signed pheromone deposit on a creation's head
+  hold: ['additive', 'hive'],          // a link tile in /sets/hyperdex, minted on first use;
+                                       // never replaces a link already there
 }
 
 describe('every machine declaration, as audited', () => {
