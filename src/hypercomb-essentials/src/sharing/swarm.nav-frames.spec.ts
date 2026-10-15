@@ -25,7 +25,7 @@
 
 import { createHash } from 'node:crypto'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { EffectBus, lineageKey } from '@hypercomb/core'
+import { EffectBus, lineageKey, roomPreimage } from '@hypercomb/core'
 
 vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
 
@@ -55,8 +55,8 @@ vi.mock('../commands/decoration-kind-index.js', async (importOriginal) => ({
   referenceTargetForLabel: () => null,
 }))
 
-const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${ROOM}\0${SECRET}`)
-const LIFE = sha(`lifecycle\0${ROOM}\0${SECRET}`)
+const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${roomPreimage(ROOM, SECRET, 'relay')}`)
+const LIFE = sha(`lifecycle\0${roomPreimage(ROOM, SECRET, 'relay')}`)
 const nowSec = (): number => Math.floor(Date.now() / 1000)
 
 // The sharer's tree: root → p0..p119 → one leaf each.

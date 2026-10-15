@@ -21,8 +21,10 @@
 // `groups add "my blog" one, two`. `rawArgs`: `publish` is itself a behaviour
 // word, and the whole line is this word's.
 //
-// No `machine` grammar: publishing reaches outward, and default-deny stays
-// the policy until someone decides a model may say it.
+// A MODEL MAY SAY IT (jwize 2026-10-13: "the whole idea is that we can
+// publish groups"): `machine` below admits every form but `ungroup`, names
+// its ceiling honestly (editing, network — publish leaves the machine), and
+// refuses the forms that would act on a selection a model cannot see.
 //
 // No aliases: a behaviour declares none (aliases are the participant's own).
 
@@ -54,6 +56,9 @@ const NAMES_A_GROUP = new Set(['add', 'drop', 'rename', 'color', 'icon', 'publis
 
 const get = <T,>(key: string): T | undefined => window.ioc?.get?.<T>(key)
 
+const selectionSize = (): number =>
+  get<{ selected?: ReadonlySet<string> }>('@diamondcoreprocessor.com/SelectionService')?.selected?.size ?? 0
+
 export class GroupsQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'groups'
@@ -71,6 +76,50 @@ export class GroupsQueenBee extends QueenBee {
 
   // `publish` is itself a behaviour word — the whole line is this word's.
   override rawArgs = true
+
+  override machine = {
+    forms: 'publish <group> | new <name> | add <group> <tiles> | drop <group> <tiles> | '
+      + 'rename <group> <name> | color <group> <colour> | icon <group> <icon> | on | off',
+    example: '/groups publish blog',
+    // Bare `groups` reads this layer's groups — a whole call on its own.
+    bare: true,
+    // EDITING at most: add, drop, rename, colour and icon change marks and
+    // records on this layer, all undoable; new and publish add. `ungroup` —
+    // a whole group taken off the layer — is refused below, so nothing a model
+    // may say here is the far end of the scale.
+    reach: 'editing' as const,
+    // NETWORK: `publish` signs an index under the participant's key and puts
+    // every member's branch on its host. The ceiling is where the worst case
+    // lands, not where most calls do.
+    scope: 'network' as const,
+    consequence: "publish puts every member's branch on its host under the participant's key — "
+      + "public, and seen by whoever follows that host; every other form changes this layer's groups and undoes",
+    refuse: (args: string): string | undefined => {
+      const act = parseGroupsLine(args)
+      switch (act.verb) {
+        case 'ungroup':
+          return 'groups ungroup takes a whole group off the layer — only the participant says it'
+        case 'add':
+        case 'drop':
+          // NAME THE TARGET ON THE MACHINE SEAM: the selection is the
+          // participant's, and a model cannot see it.
+          return act.tiles.length ? undefined : `groups ${act.verb} needs its tiles named — the selection is the participant's`
+        case 'new':
+          // A new group takes in the selected tiles; a model cannot see which.
+          return selectionSize() > 0
+            ? 'groups new would take in the tiles the participant has selected — make it with nothing selected, then name the tiles with groups add'
+            : undefined
+        case 'color':
+          return resolveGroupColor(act.value) ? undefined : 'groups color takes blue, amber, green, pink, red, violet, 1–6 or #rrggbb'
+        case 'needs-group':
+          return `groups ${act.word} needs a group name`
+        case 'unknown':
+          return `groups has no ${act.word} — it says ${GROUPS_WORDS.filter(w => w !== 'ungroup').join(', ')}`
+        default:
+          return undefined
+      }
+    },
+  }
 
   override slashComplete(args: string): readonly string[] {
     const words = args.trimStart().split(/\s+/)

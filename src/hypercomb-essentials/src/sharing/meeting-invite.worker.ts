@@ -41,6 +41,7 @@ import {
   PENDING_INVITE_KEY,
   PENDING_INVITE_SECRET_KEY,
   SWARM_INVITE_KIND,
+  meetFragment,
   parseMeet,
   validateInviteBundle,
   type InviteDecorationPayload,
@@ -48,6 +49,11 @@ import {
 import { loadBundleJson, loadInviteBundle, joinMeetingPlace } from './meeting-invite.join.js'
 import { PENDING_DOOR_KEY, hiveDoorOf, validateHiveLinkBundle } from './hive-link.js'
 import { listDecorations } from '../commands/decoration-manifest.js'
+import { openSwarmLink, parseSwarmLink, swarmRelayUrl } from './swarm-link.js'
+
+/** The shell's stash of a #swarm= link — MIRRORED: hypercomb-shared/core/
+ *  invite-capture.ts PENDING_SWARM_KEY. */
+const SWARM_LINK_KEY = 'hc:pending-swarm'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const ROOM_KEY = '@hypercomb.social/RoomStore'
@@ -104,7 +110,8 @@ export class MeetingInviteWorker extends Worker {
 
     // A `#meet=` meeting link captured at boot — and any the shell stashes
     // later, from a link opened in this tab while it is on the hive.
-    this.onEffect('meet:pending', this.#takeMeet)
+    this.onEffect('meet:pending', () => { void this.#takeSwarm(); this.#takeMeet() })
+    void this.#takeSwarm()
     this.#takeMeet()
 
     // One-shot: a /<sig> invite link captured at boot. sessionStorage
@@ -134,6 +141,41 @@ export class MeetingInviteWorker extends Worker {
     // where the reader was standing is theirs alone.
     this.emitEffect('hive:link', door.at.length ? { ...door.bundle, at: [...door.at] } : door.bundle)
   }
+
+  /** A SIGNED SWARM LINK stashed by the shell (#swarm=, swarm-link.ts):
+   *  fetch the locked login from its host by signature, check it, open it
+   *  with the key the link carried — then it is a #meet= link like any other
+   *  (room, secret, page, the host as its meeting point, the code), stashed
+   *  and joined through the one sheet. A link that cannot be opened is said
+   *  so, by reason; nothing is joined. */
+  #takeSwarm = async (): Promise<void> => {
+    if (this.#swarmTaking) return
+    let held = ''
+    try { held = sessionStorage.getItem(SWARM_LINK_KEY) ?? '' } catch { held = '' }
+    if (!held) return
+    this.#swarmTaking = true
+    try {
+      try { sessionStorage.removeItem(SWARM_LINK_KEY) } catch { /* ignore */ }
+      const parts = parseSwarmLink(held)
+      const opened = parts ? await openSwarmLink(parts) : { ok: false as const, reason: 'malformed' as const }
+      if (!opened.ok) {
+        this.emitEffect('toast:show', {
+          type: 'warning',
+          title: this.#tr('invite.meet.title', 'Meeting link'),
+          message: `${this.#tr('meet.swarm-link-unopened', 'This swarm link could not be opened — ask whoever shared it for a fresh one.')} (${opened.reason})`,
+        })
+        return
+      }
+      const login = opened.login
+      const fragment = meetFragment(login.location, login.secret, login.page ?? [], {
+        relay: swarmRelayUrl(login.host),
+        ...(login.code ? { code: login.code } : {}),
+      })
+      try { sessionStorage.setItem(MEET_KEY, fragment) } catch { return }
+      this.#takeMeet()
+    } finally { this.#swarmTaking = false }
+  }
+  #swarmTaking = false
 
   #heldMeet = (): string => {
     try { return sessionStorage.getItem(MEET_KEY) ?? '' } catch { return '' }

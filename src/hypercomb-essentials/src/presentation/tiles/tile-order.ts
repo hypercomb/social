@@ -17,6 +17,7 @@
 
 import { writeTilePropertiesAt, readTilePropertiesAt, cellLocationSig } from '../../editor/tile-properties.js'
 import { slotAt, type AxialLike } from '../../sequence/pattern.js'
+import { seatUnindexed } from './unindexed-seating.js'
 import type { HistoryService } from '../../history/history.service.js'
 import type { HistoryCursorService } from '../../history/history-cursor.service.js'
 import { resolveChildNames } from './layer-membership.js'
@@ -235,56 +236,35 @@ export class TileOrder {
     // user-spec wants.
     unindexed.sort((a, b) => a.localeCompare(b))
 
-    // Place each unindexed cell at the best free slot. #bestFreeSlotByScore
-    // scores empty slots by off-screen distance, then whitespace, then
-    // center proximity (lowest-free fallback when the viewport tracker isn't
-    // ready) — the SAME helper the pinned incremental-add path uses, so a
-    // cell created via the fast path and one placed in a full render land on
-    // identical slots.
-    const placedUnindexed: string[] = []
-    for (const name of unindexed) {
-      // Session-cache short-circuit. If this tile was already placed in a
-      // prior render (local-no-index path during a persistence race, or any
-      // peer tile) and the slot is still free, drop it back into the same
-      // slot. Pans don't change cached assignments; only manual reorganize
-      // clears this map.
-      const cachedSlot = this.#sessionSlots.get(name)
-      let placed: number
-      if (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && sparse[cachedSlot] === '') {
-        placed = cachedSlot
-      } else if (navPass) {
-        // Navigation pass: the camera on screen (and the persisted
-        // lastZoom/lastPan the CenterSlotTracker scores derive from) still
-        // belongs to the OUTGOING page — the destination viewport is applied
-        // AFTER ordering. Scoring against it places tiles relative to the
-        // page the user just left. Take the lowest free slot instead:
-        // deterministic, camera-independent, stable across re-renders (the
-        // session cache above pins it for the rest of the tab session).
-        placed = -1
-        for (let i = 0; i <= maxSlot; i++) {
-          const v = sparse[i]
-          if (v === '' || v == null) { placed = i; break }
-        }
-        if (placed < 0) continue  // grid genuinely full
-      } else {
-        placed = this.#bestFreeSlotByScore(sparse, maxSlot)
-        if (placed < 0) continue  // grid genuinely full
-      }
-
-      sparse[placed] = name
-      placedUnindexed.push(`${name}→${placed}`)
-      // TRANSIENT reindex only. The session cache keeps the placement
-      // stable across re-renders (pan, peer churn, synchronize passes)
-      // for the lifetime of the tab — but a render pass must NEVER
-      // persist an index. Score-picked slots are a display decision,
-      // not content: stamping them into the layer made accidental
-      // placements permanent, generated a commit cascade per tile on
-      // every cold render, and was the write vector behind the
-      // cross-layer graft. Durable indexes come only from deliberate
-      // actions — cell creation (placeNew), explicit
-      // place-at (placeAt), and the move drone.
-      this.#sessionSlots.set(name, placed)
+    // Seat the pile (unindexed-seating.ts): a tile this session already
+    // seated takes that seat back while it is free — pans, peer churn and
+    // repaints never move it — and only a tile with no free seat is given a
+    // new one. #bestFreeSlotByScore scores empty slots by off-screen distance,
+    // then whitespace, then center proximity (lowest-free fallback when the
+    // viewport tracker isn't ready) — the SAME helper the pinned
+    // incremental-add path uses, so a cell created via the fast path and one
+    // placed in a full render land on identical slots.
+    //
+    // Navigation pass: the camera on screen (and the persisted lastZoom/lastPan
+    // the CenterSlotTracker scores derive from) still belongs to the OUTGOING
+    // page — the destination viewport is applied AFTER ordering. Scoring
+    // against it places tiles relative to the page the user just left. Take
+    // the lowest free slot instead: deterministic, camera-independent, stable
+    // across re-renders (the session seat pins it for the rest of the tab).
+    //
+    // TRANSIENT reindex only. A render pass must NEVER persist an index.
+    // Score-picked slots are a display decision, not content: stamping them
+    // into the layer made accidental placements permanent, generated a commit
+    // cascade per tile on every cold render, and was the write vector behind
+    // the cross-layer graft. Durable indexes come only from deliberate actions
+    // — cell creation (placeNew), explicit place-at (placeAt), and the move
+    // drone.
+    const lowestFree = (s: readonly string[]): number => {
+      for (let i = 0; i <= maxSlot; i++) { const v = s[i]; if (v === '' || v == null) return i }
+      return -1
     }
+    const placedUnindexed = seatUnindexed(sparse, unindexed, maxSlot, this.#sessionSlots,
+      navPass ? lowestFree : (s) => this.#bestFreeSlotByScore(s, maxSlot))
 
     // Stage diagnosis: which cells came in with a persisted index vs which
     // had to be score-filled this pass (lost/never-had index, or slot

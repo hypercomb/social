@@ -29,6 +29,7 @@
 
 import { Drone, EffectBus, I18N_IOC_KEY, isReservedPoolWord, type I18nProvider } from '@hypercomb/core'
 import { MOBILE_MODE_EFFECT, MOBILE_MODE_IOC_KEY } from '../../preferences/mobile-pheromones.js'
+import { savedRoots } from '../../history/saved-roots.js'
 
 export const ADD_SHEET_SURFACE = 'hc-add-sheet'
 export const ADD_SHEET_KEY = '@diamondcoreprocessor.com/AddSheetDrone'
@@ -301,6 +302,11 @@ export class AddSheetDrone extends Drone {
       const reserved = text.split('/').map(p => p.trim()).find(p => isReservedPoolWord(p))
       if (reserved) {
         this.#say(this.#t('add-sheet.reserved', `"${reserved}" is a reserved word — choose another name`).replace('{name}', reserved))
+        return
+      }
+      const saved = text.split('/').map(p => p.trim()).find(p => savedRoots().isSaved(p))
+      if (saved) {
+        this.#say(`"${saved}" is a saved root — use ${saved} turns it on`)
         return
       }
       let accepted = false

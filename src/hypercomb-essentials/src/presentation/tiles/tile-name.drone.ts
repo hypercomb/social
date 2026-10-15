@@ -151,6 +151,8 @@ export class TileNameDrone extends Drone {
   #root: HTMLDivElement | null = null
   #world: HTMLDivElement | null = null
   #spans = new Map<string, HTMLSpanElement>()
+  /** What each name's span was last placed with (#place) — its styles as set. */
+  #placedAs = new WeakMap<HTMLSpanElement, string>()
   /** The dive's names while one is up (null: the page is showing). Its own
    *  spans, so a dive tile sharing a page tile's name never borrows its span. */
   #dive: Map<string, DiveName> | null = null
@@ -408,9 +410,18 @@ export class TileNameDrone extends Drone {
     const scale = em / LAYOUT_PX
     // Cut, never spill. maxWidth is in the span's own layout units, so it is
     // the world bound divided back through the scale the span is drawn at.
-    span.style.maxWidth = `${(MAX_WIDTH_R * R) / scale}px`
+    const maxWidth = `${(MAX_WIDTH_R * R) / scale}px`
     const rotate = this.#pivot ? ' rotate(90deg)' : ''
-    span.style.transform = `translate(${x}px,${y}px)${rotate} scale(${scale}) translate(-50%,-50%)`
+    const transform = `translate(${x}px,${y}px)${rotate} scale(${scale}) translate(-50%,-50%)`
+    // A name that has not moved is not written again: every render pass places
+    // every name, and at a meeting of a thousand tiles re-setting two styles
+    // per name (each parsed again by the browser) was a cost of every pass —
+    // the participant's own create among them (SCALE-1).
+    const placed = `${maxWidth}|${transform}`
+    if (this.#placedAs.get(span) === placed) return
+    this.#placedAs.set(span, placed)
+    span.style.maxWidth = maxWidth
+    span.style.transform = transform
   }
 
   #axialToPixel(q: number, r: number): { x: number; y: number } {

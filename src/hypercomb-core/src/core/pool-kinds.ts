@@ -164,6 +164,7 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['host:build-signatures', 'set'],
   ['host:adoptions', 'set'],
   ['themes:text', 'set'],
+  ['themes:card', 'set'],
   ['menus:quick', 'set'],
   ['pheromones:content', 'set'],
   ['pheromones:deposits', 'set'],
@@ -200,6 +201,8 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // The meeting point a new tab's selector is pre-filled with (hypercomb-
   // shared/core/mesh-session.ts): one current record, never replicated.
   ['mesh:meet-point', 'document'],
+  ['presence:strip', 'document'],
+  ['roots:saved', 'document'],
   // What participants make, moved out of localStorage the same way
   // (essentials preferences/participant-document.ts).
   ['sequences:palette', 'document'],

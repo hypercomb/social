@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join as joinPath } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { EffectBus, lineageKey } from '@hypercomb/core'
+import { EffectBus, lineageKey, roomPreimage } from '@hypercomb/core'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
 import { hideStorageKey } from '../presentation/tiles/tile-public.js'
 
@@ -202,7 +202,7 @@ EffectBus.on<Record<string, unknown>>('tile:public-changed', p => { tilePublicCh
 
 afterAll(() => { worker.markDisposed(); swarm.markDisposed(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
-const pageSig = (segments: readonly string[], room = roomStore.value): string => sha(`${lineageKey(segments)}\0${room}\0${SECRET}`)
+const pageSig = (segments: readonly string[], room = roomStore.value): string => sha(`${lineageKey(segments)}\0${roomPreimage(room, SECRET, 'jwize.com')}`)
 const asks = (): Extract<Line, { what: 'ask' }>[] => timeline.filter((l): l is Extract<Line, { what: 'ask' }> => l.what === 'ask')
 const publishesAt = (segments: readonly string[], room?: string): Extract<Line, { what: 'publish' }>[] =>
   timeline.filter((l): l is Extract<Line, { what: 'publish' }> => l.what === 'publish' && l.sig === pageSig(segments, room))

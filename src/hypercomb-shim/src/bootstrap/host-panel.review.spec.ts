@@ -118,6 +118,13 @@ afterEach(() => {
   localStorage.removeItem('hypercomb:gallery:pins')
 })
 
+it('a card at host.<zone> speaks for its zone', async () => {
+  const { cardZone } = await import('./host-panel')
+  expect(cardZone('host.pointblanksolutions.ca')).toBe('pointblanksolutions.ca')
+  expect(cardZone('pointblanksolutions.ca')).toBe('pointblanksolutions.ca')
+  expect(cardZone('host.com')).toBe('host.com')
+})
+
 it('shows a returned tile in local revision review and activates only after a click', async () => {
   const publisher = 'a'.repeat(64)
   const offer = {

@@ -753,7 +753,7 @@ test('a phone that locks twice: a socket silent since the newer beacon inherits 
   for (let i = 0; i < 3; i++) { clock.advance(25_000); probe(peer) }
   const s2 = open(); beacon(s2)    // the wake
   clock.advance(20_000); probe(peer)
-  s2.drop()                         // lock 2, with a FIN — S1 silent 95 s, past HEIR_HEARD_MS
+  s2.drop()                         // lock 2, with a FIN — S1 silent 95 s
   assert.equal(meeting.pendingWills, 1, 'the zombie socket is passed over: the will waits out its grace')
   clock.advance(15_000)
   assert.equal(lefts(), 1, 'heard 15 s after lock 2, not when the zombie is reaped')
@@ -771,7 +771,38 @@ test('a phone that locks twice: a socket silent since the newer beacon inherits 
   assert.equal(peer.events('life').filter((m) => m[2].pubkey === other && m[2].sig === '').length, 0, 'and nobody is told it left')
 })
 
-test('a hidden second tab heard a minute ago inherits, and one that speaks during the grace takes the will — its own death is still heard', () => {
+// MS6 at the meeting point, on the hunt's own timeline (zombie-heir.test.mjs):
+// the zombie is silent only 50 s at lock 2 — as quiet as a hidden tab, so no
+// window of silence can pass it over. It is ASKED and says nothing.
+test("a phone that locks twice, the hunt's timeline: the zombie silent 50 s is asked, says nothing, and the room hears the leave 15 s after lock 2", () => {
+  for (const [wake, lock] of [[30_000, 20_000], [1_000, 1_000]]) {
+    const { open, clock, nowSec, meeting } = setup({ verify: () => true })
+    const me = 'b'.repeat(64)
+    const zone = sha('lifecycle zone')
+    const beacon = (s) => s.send(['EVENT', unsigned(me, 30206, zone, '{"alive":true,"v":2}', [['d', me], ['expiration', String(nowSec() + 90)]], nowSec())])
+    const tombs = (s, subId) => s.events(subId).filter((m) => m[2].pubkey === me && m[2].sig === '' && JSON.parse(m[2].content).left === true).length
+    const probe = (s) => s.send(['REQ', 'hc-live', { '#x': ['hc:live'], limit: 0 }])
+    const peer = open()
+    assert.equal(ask(peer, 'life', { '#x': [zone], kinds: [30206] }), 'EOSE')
+
+    // The phone's tab listens on its room's lifecycle channel, as every joined tab does.
+    const s1 = open(); assert.equal(ask(s1, 'mine', { '#x': [zone], kinds: [30206] }), 'EOSE'); beacon(s1)
+    clock.advance(wake); probe(peer)   // lock 1, silent: S1 is never closed by the network
+    const s2 = open(); assert.equal(ask(s2, 'mine', { '#x': [zone], kinds: [30206] }), 'EOSE'); beacon(s2)   // the wake
+    clock.advance(lock); probe(peer)
+    s2.drop()                          // lock 2, with a FIN
+    const silent = `S1 silent ${(wake + lock) / 1000} s`
+    assert.equal(meeting.pendingWills, 1, `${silent}: passed over, the will waits out its grace`)
+    assert.equal(tombs(s1, 'mine'), 1, `${silent}: asked — the tombstone the room would hear, on its own subscription`)
+    assert.equal(tombs(peer, 'life'), 0, `${silent}: the room is not told yet`)
+    clock.advance(14_999); probe(peer)
+    assert.equal(tombs(peer, 'life'), 0, `${silent}: nothing before the grace`)
+    clock.advance(1)
+    assert.equal(tombs(peer, 'life'), 1, `${silent}: heard 15 s after lock 2, not when the zombie is reaped`)
+  }
+})
+
+test('a hidden second tab is asked, not assumed: its answer keeps the will, and one that speaks during the grace takes it — its own death is still heard', () => {
   const { open, clock, nowSec, meeting } = setup({ verify: () => true })
   const me = 'e'.repeat(64)
   const zone = sha('two tabs zone')
@@ -779,25 +810,47 @@ test('a hidden second tab heard a minute ago inherits, and one that speaks durin
   const peer = open()
   assert.equal(ask(peer, 'life', { '#x': [zone], kinds: [30206] }), 'EOSE')
   const lefts = () => peer.events('life').filter((m) => m[2].pubkey === me && m[2].sig === '').length
+  const asked = (s) => s.events('mine').filter((m) => m[2].pubkey === me && m[2].sig === '' && JSON.parse(m[2].content).left === true).length
   const probe = (s) => s.send(['REQ', 'hc-live', { '#x': ['hc:live'], limit: 0 }])
+  // A joined tab listens on its room's lifecycle channel and beacons.
+  const joined = () => { const s = open(); assert.equal(ask(s, 'mine', { '#x': [zone], kinds: [30206] }), 'EOSE'); beacon(s); return s }
 
   // Hidden tab B beacons, then is throttled to a frame a minute; visible tab A beacons after it.
-  const tabB = open(); beacon(tabB)
+  const tabB = joined()
   clock.advance(30_000)
-  const tabA = open(); beacon(tabA)
+  const tabA = joined()
   clock.advance(15_000); probe(peer)
-  tabA.drop()                        // B not heard since A's beacon, but 45 s ago
-  assert.equal(meeting.pendingWills, 0, 'the hidden tab inherits')
+  tabA.drop()                        // B not heard since A's beacon (45 s ago)
+  assert.equal(meeting.pendingWills, 1, 'a quiet tab is asked, never assumed')
+  assert.equal(asked(tabB), 1, 'B hears the tombstone under its own key, on its own lifecycle subscription')
+  assert.equal(lefts(), 0, 'the room does not')
+  // The swarm reads a {left} under its own key and beacons again a second
+  // later (#reassertAfterStaleTombstone): that beacon takes the will.
+  clock.advance(1_050); beacon(tabB)
+  assert.equal(meeting.pendingWills, 0, 'B answered: the will is its own')
   clock.advance(20_000); probe(peer)
   assert.equal(lefts(), 0, 'nobody is told the participant left')
 
-  // Now B is quiet past the window when a third tab dies: the will waits …
+  // Any frame within the grace is an answer — here the tab's liveness probe:
+  // asked again when the grace ends, B inherits then.
+  const tabD = joined()
+  clock.advance(10_000); probe(peer)
+  tabD.drop()
+  assert.equal(meeting.pendingWills, 1)
+  assert.equal(asked(tabB), 2)
+  clock.advance(3_000); probe(tabB)
+  clock.advance(12_000); probe(peer)
+  assert.equal(meeting.pendingWills, 0)
+  assert.equal(lefts(), 0, 'a probe within the grace keeps the will')
+
+  // Now B is quiet when a third tab dies: the will waits …
   probe(tabB)
   clock.advance(1_000)
-  const tabC = open(); beacon(tabC)
+  const tabC = joined()
   for (let i = 0; i < 4; i++) { clock.advance(24_000); probe(tabC); probe(peer) }
-  tabC.drop()                        // B silent 97 s: past the window, short of the reap
+  tabC.drop()                        // B silent 97 s, short of the reap
   assert.equal(meeting.pendingWills, 1)
+  assert.equal(asked(tabB), 3)
   // … B speaks inside the grace (a page layer): it TAKES the will …
   clock.advance(5_000)
   tabB.send(['EVENT', unsigned(me, 30200, sha('a page'), '{}', [['d', sha('a page')], ['expiration', String(nowSec() + 90)]], nowSec())])

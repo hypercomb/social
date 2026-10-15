@@ -245,6 +245,18 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // (optimize-phase.md litmus). It is also what makes the index safe to
   // rewrite — see the wipe guard in publish-branch.ts.
   'publish:heads',
+  // THE RUNNING LIST OF PUBLISH AND UNPUBLISH RESULTS (essentials
+  // sharing/publish-results.ts): one document, every outcome in order,
+  // folded at read time to the doors open now — what the domain-link rule
+  // turns a page's copy into. TRUTH POOL — the record of remote acts,
+  // never derivable from layers, never minted from the optimize phase.
+  'publish:results',
+  // WHO NAMES WHOM across domains (essentials sharing/link-incidences.ts):
+  // one record per (page content sig, door table sig) — the creations a
+  // hosted page's copy links to, as the domain-link rule read them.
+  // DERIVED-CACHE POOL: a cold client mounts the page and runs the rule
+  // again; minted only from the optimize phase, never load-bearing.
+  'links:incidences',
   // The community's HOSTS — one member per host artifact, the living
   // primitive behind `host:<zone>` marks (essentials/sharing/community-hosts.ts,
   // and read back by ADDRESS alone from runtime/host-zones.ts so the runtime
@@ -323,6 +335,14 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // access code (hypercomb-shared/core/mesh-session.ts). DOCUMENT, per
   // participant, never replicated.
   'mesh:meet-point',
+  // Whether this participant folded the room's strip (badges, names, the
+  // status line) down to its dot (hypercomb-shared/ui/presence-banner).
+  // DOCUMENT, per participant, never replicated.
+  'presence:strip',
+  // The names this participant's roots are filed under, and which one the
+  // root came from (essentials history/saved-roots.ts — `save as`, `use`).
+  // DOCUMENT, per participant, never replicated.
+  'roots:saved',
   // What participants make that is theirs alone, moved out of localStorage the
   // same way (essentials preferences/participant-document.ts): saved sequences
   // and patterns, Arkanoid and Solomon levels (Solomon's creations and designer
@@ -383,6 +403,9 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Discoverable text-theme creations. Members name stable hashed locations;
   // the location's current signed layer is read when a settings menu opens.
   'themes:text',
+  // Discoverable business-card templates (hypercomb-essentials sharing/
+  // card-template-offering.ts): a theme and an optional default picture.
+  'themes:card',
   // Reserved: quick-menu creations (a legacy-app feature kept off the host
   // branch). A hive that already wrote the pool must not have it pruned.
   'menus:quick',

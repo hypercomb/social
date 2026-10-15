@@ -76,11 +76,16 @@ const DIAG = (() => { try { return localStorage.getItem('hc:diag') === '1' } cat
 // a long tail, so branch tiles sat dark for a long time and read as "no
 // background images at all". A faded tile must still show what it is; only its
 // readiness is in question, never its content.
-// Escape hatch to turn it off: localStorage 'hc:tile-fade' = '0'. NOTE the key
-// changed with the default: profiles that debugged the old opt-in flag still
-// carry 'hc:tile-shade' values, and a stale one there would silently suppress
-// the fade for exactly the people who have been testing it.
-const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-fade') !== '0' } catch { return true } })()
+//
+// OFF BY DEFAULT since 2026-10-14 (jwize: "the problem is the screen always
+// seems half loaded" — "just show without transparency to start and load the
+// cells on demand"). Every tile paints at full opacity on arrival; a click on
+// a tile that is not warm yet still lands at the front of the line, and the
+// passive warm below runs biggest branch first. The readiness truth is still
+// computed and published (#preloadingLabels) — only the look is gone. Opt back
+// in with localStorage 'hc:tile-fade' = '1'. The swarm's shade (somebody
+// else's tile) and the divergence shade are not readiness and stay on.
+const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-fade') === '1' } catch { return false } })()
 /** How long a released tile takes to fade from faded to full. Short enough to
  *  feel like arrival, long enough that the eye catches WHICH tile landed. */
 const SHADE_FADE_MS = 280
@@ -6085,6 +6090,9 @@ export class ShowCellDrone extends Drone {
     coords: { q: number; r: number }[]
     branchLabels: string[]
     externalLabels: string[]
+    /** Cells that are a peer's ALONE: no tile of this hive stands under the
+     *  name here, so there is no local layer to read for them. */
+    peerOnlyLabels: string[]
     swarmTakeLabels: string[]
     noImageLabels: string[]
     substrateLabels: string[]
@@ -6136,6 +6144,16 @@ export class ShowCellDrone extends Drone {
         ? cells.map(c => c.label)
         : cells.filter(c => c.hasBranch || this.#peerCellSet.has(c.label)).map(c => c.label),
       externalLabels: cells.filter(c => c.external).map(c => c.label),
+      // External minus the spotlit stack variants (YOUR tile showing a
+      // participant's version): what is left has no layer of this hive at
+      // all. Per-cell readers of local layers (the decoration index walk)
+      // skip these — at a meeting of a thousand peer tiles that walk asked
+      // history for a thousand absent layers on every render pass, each a
+      // lineage sign, a bag miss and a parent-manifest read, and the own
+      // create's publish queued behind them (SCALE-1).
+      peerOnlyLabels: cells
+        .filter(c => c.external && !this.#stackVariantLabels.has(c.label))
+        .map(c => c.label),
       // FIRST CLICK ADOPTS, SECOND CLICK ENTERS (Jaime, 2026-08-20): the
       // tiles whose next click is a TAKE rather than a walk — external and
       // still receding. Computed hover-free by construction, because the
@@ -6380,7 +6398,7 @@ export class ShowCellDrone extends Drone {
   #cellIsShaded(c: Cell): boolean {
     // Shade off and hover affect presentation only. Neither can weaken the
     // independent readiness predicate the payload publishes.
-    if (!TILE_SHADE || this.#hover.opaque === c.label) return false
+    if (this.#hover.opaque === c.label) return false
     // THE SWARM'S SHADE — A STANDING STATE, NOT A MODIFIER PREVIEW (Jaime,
     // 2026-08-20: "when you go into a swarm there should be tiles shaded").
     // In a zone, every tile you don't own yet recedes, from the moment you
@@ -6398,6 +6416,15 @@ export class ShowCellDrone extends Drone {
     if (c.external
       && !this.#stackVariantLabels.has(c.label)
       && !this.#wandTakingLabels.has(c.label)) return true
+    // YOURS ARE NEVER SHADED IN A SWARM (Jaime, 2026-10-14: "the tiles are not
+    // recovering from being shaded out when a swarm starts so it is difficult
+    // to see my own tiles. these should be highlighted always in my own theme
+    // or chosen style" — "definitely not shaded out"). In a room the shade
+    // means "somebody else's, not yours yet"; your own tiles wear your style
+    // at full strength whatever a peer offers for them and however their
+    // pictures are still arriving. The two clauses below stay for a hive that
+    // is not in a swarm.
+    if (!c.external && isJoinedHere()) return false
     // A HELD tile a peer is offering something for — "this needs an update" —
     // recedes exactly like a tile you haven't adopted (Jaime, 2026-08-20:
     // "things are grayed out when they're not adopted or they need updates").
@@ -6407,7 +6434,7 @@ export class ShowCellDrone extends Drone {
     if (!c.external
       && !this.#wandTakingLabels.has(c.label)
       && peerDivergesAt(c.label)) return true
-    return this.#cellIsPreloading(c)
+    return TILE_SHADE && this.#cellIsPreloading(c)
   }
 
   #preloadingLabels(): string[] {

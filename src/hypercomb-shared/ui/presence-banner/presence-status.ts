@@ -22,7 +22,7 @@
 // The parts are catalog KEYS (plus the two raw words, room and pair, which
 // are the participant's own); the template pipes them through `t`.
 
-import { secretTag } from '@hypercomb/core'
+import { lifecyclePreimage, meetingPointKey as corePointKey, secretTag } from '@hypercomb/core'
 
 /** How long without an OPEN socket before "Reconnecting…" becomes
  *  "Can't reach <host>" — and the header glyph goes from amber to off. */
@@ -60,6 +60,9 @@ export interface ShareStatus {
   offered?: number
   uploading?: number
   nameOnly?: number
+  /** Tiles offered whole from this device because no host keeps them (the
+   *  live swarm, 2026-10-11): never uploading, never held. */
+  live?: number
   private?: number
   host?: string
   hosts?: readonly string[]
@@ -78,10 +81,18 @@ export interface ShareStatus {
    *  tiles each holds back. Absent on an older swarm. */
   held?: readonly HeldHost[]
   /** Hosts passed over this session (refused, full, silent) — this page's,
-   *  and its offered branches' (a publish domain that refuses, D2). */
+   *  and its offered branches' at any depth (a publish domain that refuses,
+   *  D2, worn by the branch itself or by a page below it — BCL-1). */
   passedOver?: readonly string[]
+  /** Tiles the room can take whose deeper pages are still only on this
+   *  device, a host still taking them (D1) — the sharer is asked to stay. */
+  deepOnDevice?: number
   /** Whether the relay has taken this page's newest word (its NIP-01 OK). */
   taken?: boolean
+  /** How long the oldest of this tab's own frames — this page's word, the
+   *  beacon — has gone untaken, as of this status (0: all taken). The age
+   *  the line counts "Sending…" from: a status said again never restarts it. */
+  unackedMs?: number
 }
 
 /** One host that holds tiles back as names (SwarmDrone share-status held). */
@@ -177,58 +188,98 @@ export function headerLink(conn: MeshConnection | null, downSince: number | null
   if (!phase) return null
   if (phase === 'open' || slowLink(conn, now)) return 'open'
   const refused = refusalOf(conn)
-  if (refused === 'access' || refused === 'unreachable') return 'down'
+  if (refused === 'access' || refused === 'unreachable' || refused === 'no-host') return 'down'
   return phase === 'down' ? 'down' : 'pending'
 }
 
-/** The shipped default meeting point (nostr-mesh LIVE_RELAY): a room met
- *  there keeps the words it always had. wss://hypercomb.com since 2026-10-11
- *  (the open, always-online meeting point); jwize.com, the default before it,
- *  is now a point like any other — a room an operator meets at there reads
- *  its own pair. Keep in step with LIVE_RELAY (a spec holds them together). */
+/** hypercomb.com, the open always-online meeting point (nostr-mesh
+ *  LIVE_RELAY, core SHIPPED_MEETING_POINT) — offered, never a default
+ *  (2026-10-11). It is named here only for a package from before 2026-10-12,
+ *  whose words left it out (D4); jwize.com, that package's default before
+ *  2026-10-11, is a host like any other. Keep in step with LIVE_RELAY
+ *  (doctrine.spec and status.truth.spec hold them together). */
 export const SHIPPED_POINT = 'hypercomb.com'
 
-/** A meeting point as the words fold it: its host[:port], lowercase, from a
- *  relay URL or a bare name ('wss://Point.example/' → 'point.example',
- *  'ws://localhost:7896' → 'localhost:7896'). '' for none — and for the
- *  shipped default, so a default-relay room's words never change. */
+/** A host as the room's identity folds it — core meetingPointKey: its
+ *  host[:port], lowercase, from a relay URL or a bare name
+ *  ('wss://Point.example/' → 'point.example', 'ws://localhost:7896' →
+ *  'localhost:7896'). '' for an empty field: there is no default host, and
+ *  no host is no room (2026-10-11). Never the page's own domain. */
 export function meetingPointKey(point: string): string {
-  let text = String(point ?? '').trim()
-  if (!text) return ''
-  if (!/^wss?:\/\//i.test(text)) text = `wss://${text}`
-  try {
-    const host = new URL(text).host.toLowerCase()
-    return host && host !== SHIPPED_POINT ? host : ''
-  } catch { return '' }
+  return corePointKey(point)
 }
 
-/** THE ROOM'S TWO WORDS — from the room, the secret and the meeting point,
- *  never the page, so everyone in one room reads the same pair wherever they
- *  stand and can check it out loud. The preimage is the swarm's own
- *  lifecycle channel (`lifecycle \0 room \0 secret`), the one roster every
- *  member of the room beacons on — plus the meeting point when it is not the
- *  shipped default (D4, 2026-10-10): a meeting split across two relays is
- *  two rooms, and its halves now read two pairs. Always from the ENGLISH
- *  list, whatever the reader's language: a bilingual room compares one pair
- *  out loud (the localized pair may be shown beside it — `wordsBeside`).
- *  Empty when there is no room at all. */
-export function roomWords(room: string, secret: string, point = ''): string {
+/** THE WORDS WITH THEIR HOST BESIDE THEM — 'marble cove · hypercomb.com'
+ *  (jwize, 2026-10-11): wherever the room's two words show, the host they
+ *  were drawn at shows with them, so two tabs reading different words can
+ *  see at once that they named two hosts. The host is the one in the
+ *  preimage (meetingPointKey) — never the page's own domain. The words
+ *  alone when no host is named; '' when there are no words. */
+export function wordsAtHost(words: string, point: string): string {
+  const host = corePointKey(point)
+  return words && host ? `${words} · ${host}` : words
+}
+
+/** THE ROOM IDENTITY THE LOADED SWARM DERIVES ITS ADDRESSES WITH — read
+ *  synchronously from the swarm in this page (`SwarmDrone.roomIdentity`),
+ *  never asked of anyone and never carried anywhere. 2 since 2026-10-12: the
+ *  meeting point + room + secret (core lifecyclePreimage). A package from
+ *  before has no marker and hashes `lifecycle \0 room \0 secret` — the
+ *  point folded into the WORDS only, and only when it is not the default
+ *  (D4). The shell and the package update apart, so the words follow the
+ *  package that actually addresses the room: a pair is the readable form of
+ *  the address this tab meets at, or it is no check at all. With no swarm
+ *  loaded yet, the current identity. */
+export const ROOM_IDENTITY = 2
+const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
+export function loadedRoomIdentity(): number {
+  try {
+    const swarm = (globalThis as { ioc?: { get?: (key: string) => unknown } }).ioc?.get?.(SWARM_KEY) as
+      | { roomIdentity?: unknown } | null | undefined
+    if (!swarm || typeof swarm !== 'object') return ROOM_IDENTITY
+    return typeof swarm.roomIdentity === 'number' ? swarm.roomIdentity : 1
+  } catch { return ROOM_IDENTITY }
+}
+
+/** The text a room's words are drawn from, as `identity` derives it — ''
+ *  when that identity has no room without a host. */
+function wordsPreimage(room: string, secret: string, point: string, identity: number): string {
+  if (identity >= 2) return lifecyclePreimage(room, secret, point)
+  // Before 2026-10-12 (D4): the address had no point, and the words folded
+  // one only when it was not the shipped default. That package meets at its
+  // own default with no host named, so its words need none.
+  const p = corePointKey(point)
+  return p && p !== SHIPPED_POINT ? `lifecycle\0${room}\0${secret}\0${p}` : `lifecycle\0${room}\0${secret}`
+}
+
+/** THE ROOM'S TWO WORDS — the readable form of the room's address (jwize,
+ *  2026-10-12: "host+location+secret, gen keywords from those"): drawn from
+ *  the room's lifecycle preimage, `lifecycle \0 room \0 secret \0 host`
+ *  (core lifecyclePreimage), the one roster every member of the room beacons
+ *  on. Same host + room + secret ⇔ the same pair ⇔ they meet; the same room
+ *  text at two hosts is two rooms with two pairs. NO HOST, NO WORDS: with no
+ *  host named there is no room (there is no default host, 2026-10-11).
+ *  Never the page — its own domain, its path: everyone in one room reads the
+ *  same pair wherever they stand and can check it out loud. Always from the
+ *  ENGLISH list, whatever the reader's language: a bilingual room compares
+ *  one pair out loud (the localized pair may be shown beside it —
+ *  `wordsBeside`). Empty when there is no room at all. `identity` is the
+ *  loaded swarm's (loadedRoomIdentity): an older package's room reads the
+ *  pair of the address that package meets at. */
+export function roomWords(room: string, secret: string, point = '', identity = loadedRoomIdentity()): string {
   const r = String(room ?? '').trim()
   const s = String(secret ?? '').trim()
   if (!r && !s) return ''
-  const p = meetingPointKey(point)
-  return secretTag(p ? `lifecycle\0${r}\0${s}\0${p}` : `lifecycle\0${r}\0${s}`, 'en')
+  const text = wordsPreimage(r, s, point, identity)
+  return text ? secretTag(text, 'en') : ''
 }
 
 /** The comparison words with the reader's own pair beside them when their
  *  language has its own list: 'light moss (うるわしい しま)'. */
-export function wordsBeside(room: string, secret: string, point = '', locale = 'en'): string {
-  const words = roomWords(room, secret, point)
+export function wordsBeside(room: string, secret: string, point = '', locale = 'en', identity = loadedRoomIdentity()): string {
+  const words = roomWords(room, secret, point, identity)
   if (!words || !locale || locale === 'en') return words
-  const p = meetingPointKey(point)
-  const r = String(room ?? '').trim()
-  const s = String(secret ?? '').trim()
-  const local = secretTag(p ? `lifecycle\0${r}\0${s}\0${p}` : `lifecycle\0${r}\0${s}`, locale)
+  const local = secretTag(wordsPreimage(String(room ?? '').trim(), String(secret ?? '').trim(), point, identity), locale)
   return local && local !== words ? `${words} (${local})` : words
 }
 
@@ -279,7 +330,7 @@ export interface StatusPart {
   key?: string
   params?: Record<string, string | number>
   text?: string
-  action?: 'invite' | 'share' | 'code'
+  action?: 'invite' | 'share' | 'code' | 'host'
 }
 
 export interface StatusLine {
@@ -304,6 +355,8 @@ export interface StatusInput {
    *  upload lines name. Empty: the relay, as an older swarm had it. */
   uploadHost?: string
   room: string
+  /** The room's words as shown — with their host beside them
+   *  (`wordsAtHost`: 'marble cove · hypercomb.com'). */
   words: string
   /** Everyone live in the room, you included. */
   roomCount: number
@@ -320,10 +373,12 @@ export interface StatusInput {
    *  which the mesh retries itself); '' when none is current. */
   rejected: string
   /** The relay's standing refusal of the connection (refusalOf): 'access',
-   *  'unreachable', 'subscriptions', 'clock' — '' or absent when none. */
+   *  'unreachable', 'no-host', 'subscriptions', 'clock' — '' or absent when
+   *  none. */
   refused?: string
-  /** The meeting point this tab is joined at, as named ('' = the default) —
-   *  what the 'unreachable' line names when the page cannot dial it. */
+  /** The meeting point this tab is joined at, as named ('' = none named in
+   *  its zone) — what the 'unreachable' line names when the page cannot dial
+   *  it. */
   point?: string
   /** The socket is open but slow to answer (slowLink). */
   slow?: boolean
@@ -345,9 +400,10 @@ const HOST_HELD: Readonly<Record<string, string>> = {
   'full': 'swarm.share.full',
   'too-large': 'swarm.share.too-large',
   'unreachable': 'swarm.share.unreachable',
-  // A host no HTTP status ever came from (a name that does not resolve):
-  // as unreachable, with the near-miss spelling offered beside it.
-  'never-answered': 'swarm.share.unreachable',
+  // A host no HTTP status ever came from (a name that does not resolve): a
+  // standing answer, so its tiles go live from this device (decision c) —
+  // with the near-miss spelling offered beside it.
+  'never-answered': 'swarm.share.never-answered',
   'not-live': 'swarm.share.not-live',
 }
 
@@ -363,6 +419,19 @@ const BRANCH_HELD: Readonly<Record<string, string>> = {
 /** A host that has never answered (a name that does not resolve, the
  *  `hyperccomb.com` typo) is the one a near-miss spelling is offered for. */
 const NEVER_ANSWERED = new Set(['never-answered', 'unresolved'])
+
+/** THE HOST KEEPS NOTHING — the host this page's tiles go to is not taking
+ *  them: it refused this key, is full, answers a page where a heap belongs,
+ *  or nothing at that name has ever answered. Then no one keeps what is
+ *  shared; the room gets it from this device while the sharer is here (the
+ *  live swarm, decision c 2026-10-11). The host's live word (`sync`) wins
+ *  over the walk's snapshot. A moment's trouble (unreachable, not-live) or
+ *  one file too large is not this. */
+export function hostKeepsNothing(share: ShareStatus | null | undefined, sync: SyncState | null | undefined): boolean {
+  const word = String(sync ? (sync.state ?? sync.status ?? '') : (share?.hostState ?? ''))
+  const why = String((sync ? sync.why : share?.why) ?? '')
+  return word === 'refused' || word === 'full' || NEVER_ANSWERED.has(word) || NEVER_ANSWERED.has(why) || why === 'page'
+}
 
 const branchPart = (b: BlockedBranch): StatusPart => ({
   key: BRANCH_HELD[String(b.why ?? '')] ?? BRANCH_HELD[String(b.state ?? '')]
@@ -417,6 +486,12 @@ export function statusLine(i: StatusInput): StatusLine {
     // with the one remedy: the newest meeting link (or its code).
     parts.push({ key: 'mesh.state.access', params: { host } }, { key: 'mesh.state.access-action', action: 'code' })
     tone = 'down'
+  } else if (refused === 'no-host' && i.phase !== 'open') {
+    // Joined with no host named (there is no default, 2026-10-11): no room,
+    // no words, nothing to dial. Said at once, with the one remedy — the
+    // host field — never "connecting" for ever.
+    parts.push({ key: 'mesh.state.no-host' }, { key: 'mesh.state.no-host-action', action: 'host' })
+    tone = 'down'
   } else if (refused === 'unreachable' && i.phase !== 'open') {
     // Joined at a meeting point this page may not dial (a computer's own
     // ws://localhost relay, opened from a real host): it meets nowhere.
@@ -465,7 +540,10 @@ export function statusLine(i: StatusInput): StatusLine {
     const share = i.share
     const hostWord = i.sync ? (i.sync.state ?? i.sync.status ?? '') : (share?.hostState ?? '')
     const tooLarge = hostWord === 'too-large'
-    const held = tooLarge ? undefined : HOST_HELD[hostWord]
+    // Unreachable from a name that has NEVER answered, while this page's
+    // tiles already go out live: said as never answered — never "names only".
+    const neverAnswered = hostWord === 'unreachable' && NEVER_ANSWERED.has(String(i.sync?.why ?? share?.why ?? '')) && count(share?.live) > 0
+    const held = tooLarge ? undefined : neverAnswered ? HOST_HELD['never-answered'] : HOST_HELD[hostWord]
     // A BRANCH A HOST HOLDS is named — the branch, the host, and why (a name
     // that does not resolve, a page where a heap belongs, a refusal) —
     // instead of reading as "uploading" for ever. This page's own host is
@@ -511,6 +589,15 @@ export function statusLine(i: StatusInput): StatusLine {
         named.add(String(deepWorst.host))
         tone = 'warn'
       }
+      // THE SHARER IS TOLD TOO (BCL-3, D1): tiles the room can take whose
+      // deeper pages a host is still taking — only this device has them yet,
+      // so leaving now leaves the takers blank pages. Said while no host
+      // refuses them (that is the line above), never in the all-is-well tone.
+      const onDevice = count(share?.deepOnDevice)
+      if (onDevice > 0 && !heldHosts.some(h => h.deep === true)) {
+        parts.push({ key: 'share.held.on-device', params: { count: onDevice } })
+        tone = 'warn'
+      }
       // Name-only tiles whose closure reaches content no store here holds
       // and no host serves: they stay names until someone who holds it shares.
       const notHeld = /missing|not-held/.test(share?.reason ?? '') || count(i.sync?.missing) > 0
@@ -533,13 +620,13 @@ export function statusLine(i: StatusInput): StatusLine {
       named.add(String(b.host))
       tone = 'warn'
     }
-    // Hosts passed over — this page's, and its branches' (a publish domain
-    // that refuses or never answered, D2): said whenever there is one, also
-    // once the tiles went by the pool and can be taken, so a mistyped domain
-    // never reads as the one hosting the branch.
-    const passed = (share?.passedOver ?? []).map(String).filter(h => !!h && !named.has(h))
+    // Hosts passed over — this page's, and its branches' at any depth (a
+    // publish domain that refuses or never answered, D2/BCL-1): said
+    // whenever there is one, also once the tiles went by the pool and can be
+    // taken, so a mistyped domain never reads as the one hosting the branch.
+    const passed = [...new Set((share?.passedOver ?? []).map(String))].filter(h => !!h && !named.has(h))
     if (share && passed.length > 0) {
-      parts.push({ key: 'share.passed-over', params: { host: passed.join(', ') } })
+      parts.push({ key: 'share.passed-over', params: { host: passed.join(', '), count: passed.length } })
     }
     if (share && count(share.private) > 0) {
       parts.push(

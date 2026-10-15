@@ -109,11 +109,32 @@ describe('resuming after a reload', () => {
     localStorage.setItem('hc:room', 'meetup')
     localStorage.setItem('hc:secret', '4417')
     await load()
+    // jsdom serves localhost — and the page names no point (2026-10-11).
     expect(zone()).toEqual({ room: 'meetup', secret: '4417' })
     // …and from then on it is this tab's.
     localStorage.setItem('hc:room', 'another')
     const { RoomStore } = await import('./room-store')
     expect(new RoomStore().value).toBe('meetup')
+  })
+
+  it('THE PAGE NAMES NO POINT: a resumed loopback tab is never pinned to the dev relay its old mesh seeded (2026-10-11)', async () => {
+    expect(location.hostname).toBe('localhost')
+    sessionStorage.setItem('hc:mesh-session', 'true')
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'studio', secret: 'downtown' }))
+    await load()
+    expect(zone()).toEqual({ room: 'studio', secret: 'downtown' })
+    expect(sessionStorage.getItem('hc:mesh-point-crossing')).toBeNull()
+    expect((await load()).readMeetPointPrefill()).toBe('')
+  })
+
+  it('a point the tab named is kept as named', async () => {
+    sessionStorage.setItem('hc:mesh-session', 'true')
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's', relay: 'ws://localhost:7777' }))
+    await load()
+    expect(zone()?.relay).toBe('ws://localhost:7777')
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's', relay: 'wss://point.example' }))
+    await load()
+    expect(zone()?.relay).toBe('wss://point.example')
   })
 
   it('a new tab has no zone: it is pre-filled from the origin-wide pair and boots private', async () => {

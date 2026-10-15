@@ -362,10 +362,13 @@ These are gaps, written down rather than papered over.
   `collisions`; the panel names the collision rather than showing one green row
   for both. There is no resolution mechanism — naming it is the whole remedy
   today.
-- **The panel reads one host; a link may prefer another.** Both the sweep and
-  `publishBranch` use `PUBLIC_CONTENT_HOSTS[0]`
-  (`content.pluginthematrix.com`) as the
-  index host, while the link bundle lists `[selfDomain, ...PUBLIC_CONTENT_HOSTS]`
+- **The panel reads one host; a link may prefer another.** The sweep reads an
+  unmarked branch through the public host the participant NAMED, else the
+  compiled public content host (`PUBLIC_CONTENT_HOSTS[0]`) — a READ door only:
+  since 2026-10-11 there is no default WRITE host, so `publishBranch` and the
+  panel's writes (arrival, the participant-only set, an entrance) go only to a
+  branch's marks or a host the participant named, and refuse otherwise. The
+  link bundle lists `[selfDomain, ...PUBLIC_CONTENT_HOSTS]`
   when host sync is enabled. A self-domain-first visitor can therefore resolve
   bytes from a host the differential never probed, and a row can read `gone`
   or `unknown` for content a visitor is being served. Multi-host status is not

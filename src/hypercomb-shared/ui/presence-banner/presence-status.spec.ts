@@ -14,7 +14,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { secretTag } from '@hypercomb/core'
 import {
-  UNREACHABLE_AFTER_MS, clockRefused, linkPhase, roomWords, statusLine,
+  ROOM_IDENTITY, UNREACHABLE_AFTER_MS, clockRefused, hostKeepsNothing, linkPhase, loadedRoomIdentity, meetingPointKey, roomWords, statusLine, wordsAtHost, wordsBeside,
   type StatusInput, type StatusLine,
 } from './presence-status'
 
@@ -86,23 +86,25 @@ describe('the status line — one state, one sentence', () => {
       .toBe('Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 4 · 1 uploading')
   })
 
-  it('host refuses, host full, picture too large — names only, and why', () => {
-    const refused = statusLine({ ...live, share: { offered: 2, hostState: 'refused' } })
-    expect(say(refused)).toContain("jwize.com isn't taking uploads from guests — others see your tile names only")
+  it('host refuses, host full — the tiles go live from this device; picture too large — and why', () => {
+    // jwize 2026-10-11: a host you named that refuses you leaves your tiles
+    // to your device, served while you are in the room.
+    const refused = statusLine({ ...live, share: { offered: 2, live: 2, hostState: 'refused' } })
+    expect(say(refused)).toContain("jwize.com isn't taking uploads from guests — the room gets your tiles from this device while you're here")
     expect(refused.tone).toBe('warn')
     expect(say(statusLine({ ...live, sync: { state: 'full' } })))
-      .toContain('jwize.com is full — others see your tile names only')
+      .toContain("jwize.com is full — the room gets your tiles from this device while you're here")
     expect(say(statusLine({ ...live, share: { hostState: 'too-large' } })))
       .toContain('A picture is too large for jwize.com')
   })
 
   it('the upload lines name the page\'s host; the connection lines name the relay', () => {
-    // 2026-10-07: a page's tiles go to its publish domains, else the hosts
-    // pool, else a relay that hosts participants — never the relay merely
-    // because it is where we meet.
+    // A page's tiles go to its publish domains, else the host field
+    // (2026-10-11) — the upload lines name where they go, which need not be
+    // the relay the connection lines name.
     const pooled = { ...live, uploadHost: 'hypercomb.com' }
     const refused = say(statusLine({ ...pooled, share: { offered: 2, host: 'hypercomb.com', hostSource: 'pool', hostState: 'refused' } }))
-    expect(refused).toContain("hypercomb.com isn't taking uploads from guests — others see your tile names only")
+    expect(refused).toContain("hypercomb.com isn't taking uploads from guests — the room gets your tiles from this device while you're here")
     expect(refused).not.toContain('jwize.com')
     expect(say(statusLine({ ...pooled, sync: { state: 'full', host: 'hypercomb.com' } }))).toContain('hypercomb.com is full')
     expect(say(statusLine({ ...pooled, share: { offered: 4 }, sync: { state: 'too-large' } }))).toContain('A picture is too large for hypercomb.com')
@@ -110,9 +112,9 @@ describe('the status line — one state, one sentence', () => {
     expect(say(statusLine({ ...pooled, phase: 'down' }))).toContain("Can't reach jwize.com")
   })
 
-  it('nothing hosts the tiles: said once, names only', () => {
-    const line = statusLine({ ...live, uploadHost: '', share: { offered: 3, uploading: 3, nameOnly: 3, host: '', hostSource: 'none', hostState: 'no-host' } })
-    expect(say(line)).toBe('Live · meetup · amber falcon · 7 in the room (3 here) · No host keeps your tiles yet — others see your tile names only')
+  it('nothing hosts the tiles: said once — the room gets them live from this device', () => {
+    const line = statusLine({ ...live, uploadHost: '', share: { offered: 3, live: 3, host: '', hostSource: 'none', hostState: 'no-host' } })
+    expect(say(line)).toBe("Live · meetup · amber falcon · 7 in the room (3 here) · No host keeps your tiles — the room gets them from this device while you're here")
     expect(line.tone).toBe('warn')
   })
 
@@ -156,6 +158,34 @@ describe('the status line — one state, one sentence', () => {
     // The host answered since: the walk's snapshot of it says nothing.
     expect(say(statusLine({ ...live, uploadHost: 'hyperccomb.com', share, sync: { state: 'backed-up', host: 'hyperccomb.com' } })))
       .toBe('Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 3 · 3 uploading')
+  })
+
+  // THE LIVE SWARM (decision c, 2026-10-11): a host field nothing at that
+  // name ever answered is a standing answer — its tiles go out live from
+  // this device, so the line never says "names only" for it.
+  it('a host field that has never answered, with this page\'s tiles live: the room gets them from this device — never "names only"', () => {
+    const share = { offered: 4, live: 4, nameOnly: 0, host: 'hyperccomb.com', hostSource: 'meeting', hostState: 'unreachable', why: 'unresolved' }
+    const line = say(statusLine({ ...live, uploadHost: 'hyperccomb.com', share, sync: { state: 'unreachable', why: 'unresolved', host: 'hyperccomb.com' } }))
+    expect(line).toContain("Nothing at hyperccomb.com has ever answered — the room gets your tiles from this device while you're here")
+    expect(line).not.toContain('names only')
+    // A moment's trouble at a host that HAS answered stays "names only" —
+    // nothing went live for it.
+    const passing = say(statusLine({ ...live, uploadHost: 'jwize.com', share: { offered: 2, nameOnly: 2, host: 'jwize.com', hostState: 'unreachable', why: 'unreachable' }, sync: { state: 'unreachable', why: 'unreachable', host: 'jwize.com' } }))
+    expect(passing).toContain("Can't upload to jwize.com right now")
+  })
+
+  it('who keeps what is shared: no one, while the host refused this key, is full or never answered — its live word first', () => {
+    expect(hostKeepsNothing({ host: 'friend.example', hostState: 'refused' }, null)).toBe(true)
+    expect(hostKeepsNothing({ host: 'friend.example', hostState: 'backed-up' }, { state: 'refused' })).toBe(true)
+    expect(hostKeepsNothing({ host: 'friend.example' }, { state: 'full' })).toBe(true)
+    expect(hostKeepsNothing({ host: 'typo.example' }, { state: 'unreachable', why: 'unresolved' })).toBe(true)
+    expect(hostKeepsNothing({ host: 'door.example' }, { state: 'refused', why: 'page' })).toBe(true)
+    // Taking bytes, or a moment's trouble, or one file too large: it keeps them.
+    expect(hostKeepsNothing({ host: 'jwize.com', hostState: 'refused' }, { state: 'backed-up' })).toBe(false)
+    expect(hostKeepsNothing({ host: 'jwize.com' }, { state: 'syncing' })).toBe(false)
+    expect(hostKeepsNothing({ host: 'jwize.com' }, { state: 'unreachable', why: 'unreachable' })).toBe(false)
+    expect(hostKeepsNothing({ host: 'jwize.com' }, { state: 'too-large', why: 'too-large' })).toBe(false)
+    expect(hostKeepsNothing(null, null)).toBe(false)
   })
 
   it('content this device does not hold', () => {
@@ -223,10 +253,69 @@ describe('the socket as a person reads it', () => {
 })
 
 describe("the room's two words", () => {
-  it('come from the room and the secret only — the lifecycle preimage', () => {
-    expect(roomWords('meetup', '4417')).toBe(secretTag('lifecycle\u0000meetup\u00004417'))
-    expect(roomWords(' meetup ', ' 4417 ')).toBe(roomWords('meetup', '4417'))
-    expect(roomWords('', '')).toBe('')
+  it('come from the host, the room and the secret — the lifecycle preimage (2026-10-12)', () => {
+    const H = 'hypercomb.com'
+    expect(roomWords('meetup', '4417', H)).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000hypercomb.com'))
+    expect(roomWords('meetup', '4417', 'wss://HyperComb.com/')).toBe(roomWords('meetup', '4417', H))
+    expect(roomWords('meetup', '4417', 'wss://point.example')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000point.example'))
+    expect(roomWords(' meetup ', ' 4417 ', H)).toBe(roomWords('meetup', '4417', H))
+    expect(roomWords('', '', H)).toBe('')
+  })
+
+  it('NO HOST, NO WORDS — there is no default host (2026-10-11)', () => {
+    expect(roomWords('meetup', '4417')).toBe('')
+    expect(roomWords('meetup', '4417', '')).toBe('')
+    expect(roomWords('meetup', '4417', '   ')).toBe('')
+    expect(wordsBeside('meetup', '4417', '', 'ja')).toBe('')
+    expect(meetingPointKey('')).toBe('')
+  })
+
+  it('show the host beside them — "marble cove · hypercomb.com" — the host in the preimage, never the page', () => {
+    const words = roomWords('meetup', '4417', 'wss://HyperComb.com/')
+    expect(wordsAtHost(words, 'wss://HyperComb.com/')).toBe(`${words} · hypercomb.com`)
+    expect(wordsAtHost('faint dew', 'ws://localhost:7777')).toBe('faint dew · localhost:7777')
+    expect(wordsAtHost('faded lynx', 'wss://jwize.com')).toBe('faded lynx · jwize.com')
+    // the words alone with no host; nothing with no words
+    expect(wordsAtHost('faint dew', '')).toBe('faint dew')
+    expect(wordsAtHost('', 'hypercomb.com')).toBe('')
+    // jwize's two tabs (2026-10-11): one relay under two names reads two
+    // pairs AND two hosts — the split shows at a glance.
+    const dev = wordsAtHost(roomWords('r', 's', 'ws://localhost:7777'), 'ws://localhost:7777')
+    const live = wordsAtHost(roomWords('r', 's', 'wss://jwize.com'), 'wss://jwize.com')
+    expect(dev).not.toBe(live)
+    expect(dev.endsWith(' · localhost:7777')).toBe(true)
+    expect(live.endsWith(' · jwize.com')).toBe(true)
+  })
+
+  it('follow the package that addresses the room — a shell newer than its package reads that package\'s pair', () => {
+    const ioc = globalThis as { ioc?: unknown }
+    const prior = ioc.ioc
+    const swarm: { roomIdentity?: number } = {}
+    ioc.ioc = { get: (key: string) => key === '@diamondcoreprocessor.com/SwarmDrone' ? swarm : undefined }
+    try {
+      // A package from before 2026-10-12 (no marker) meets at `lifecycle \0
+      // room \0 secret`, the point folded into the words only off the
+      // default (D4): its words are that address's, whatever this shell is.
+      expect(loadedRoomIdentity()).toBe(1)
+      expect(roomWords('meetup', '4417')).toBe(secretTag('lifecycle\u0000meetup\u00004417'))
+      expect(roomWords('meetup', '4417', 'wss://hypercomb.com')).toBe(secretTag('lifecycle\u0000meetup\u00004417'))
+      expect(roomWords('meetup', '4417', 'wss://point.example')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000point.example'))
+      expect(wordsBeside('meetup', '4417', '', 'ja')).toContain(secretTag('lifecycle\u0000meetup\u00004417', 'ja'))
+      // The package that marks itself 2 meets at host + room + secret — and
+      // with no host, nowhere.
+      swarm.roomIdentity = 2
+      expect(loadedRoomIdentity()).toBe(ROOM_IDENTITY)
+      expect(roomWords('meetup', '4417', 'hypercomb.com')).toBe(secretTag('lifecycle\u0000meetup\u00004417\u0000hypercomb.com'))
+      expect(roomWords('meetup', '4417')).toBe('')
+    } finally { ioc.ioc = prior }
+    // No swarm loaded yet: the current identity.
+    expect(loadedRoomIdentity()).toBe(ROOM_IDENTITY)
+  })
+
+  it('the swarm says which identity it derives with — the marker the shell reads', () => {
+    const swarm = readFileSync(join(UI, '..', '..', 'hypercomb-essentials', 'src', 'sharing', 'swarm.drone.ts'), 'utf8')
+    expect(swarm).toContain(`public readonly roomIdentity = ${ROOM_IDENTITY}`)
+    expect(swarm).toContain('roomPreimage(room, secret, this.#swarmHost())')
   })
 
   it('are the same on every page: no word surface hashes the page any more', () => {
@@ -236,19 +325,34 @@ describe("the room's two words", () => {
     // own beside it (D4, 2026-10-10).
     const bar = readFileSync(join(UI, 'controls-bar', 'controls-bar.component.ts'), 'utf8')
     const crumb = bar.slice(bar.indexOf('readonly secretWords = computed('), bar.indexOf('readonly hasSecret'))
-    expect(crumb).toContain('roomWords(this.#room$(), this.#secret$(), this.#meetPoint$())')
+    // the words, and the host they are drawn at beside them (2026-10-11)
+    expect(crumb).toContain('wordsAtHost(roomWords(this.#room$(), this.#secret$(), this.#meetPoint$()), this.#meetPoint$())')
     expect(crumb).not.toMatch(/#lineageKey|segmentsRaw|#locale/)
+    expect(crumb).not.toMatch(/location\??\.(host|hostname|origin)\b/)
     expect(bar).not.toContain('secretTag(')
 
     const modal = readFileSync(join(UI, 'mesh-modal', 'mesh-modal.component.ts'), 'utf8')
-    // the drafts as START will store them (D6), the point, the reader's locale — never the page
-    expect(modal).toMatch(/wordsBeside\(\s*this\.#asStored\(this\.roomDraft\(\), this\.#roomStore\?\.value\),\s*this\.#asStored\(this\.secretDraft\(\), this\.#secretStore\?\.value\),\s*this\.#wordsPoint\(\), this\.#locale\(\)\)/)
+    // the drafts as START will store them (D6), the host, the reader's locale — never the page
+    expect(modal).toContain('const point = this.#wordsPoint()')
+    expect(modal).toMatch(/wordsAtHost\(wordsBeside\(\s*this\.#asStored\(this\.roomDraft\(\), this\.#roomStore\?\.value\),\s*this\.#asStored\(this\.secretDraft\(\), this\.#secretStore\?\.value\),\s*point, this\.#locale\(\)\), point\)/)
     expect(modal).not.toContain('secretTag(')
     expect(modal).not.toContain('#lineageKey')
+    // the page's own domain picks no host there either
+    expect(modal).not.toMatch(/location\??\.(host|hostname|origin)\b/)
 
     const banner = readFileSync(join(UI, 'presence-banner', 'presence-banner.component.ts'), 'utf8')
-    expect(banner).toContain('wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale())')
+    expect(banner).toContain('wordsAtHost(wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale()), this.#swarmHost())')
     expect(banner).not.toContain('secretTag(')
+    expect(banner).not.toMatch(/location\??\.(host|hostname|origin)\b/)
+  })
+
+  it("the crumb's root is never the page's domain while in a swarm — it reads as home; the host stands beside the words (2026-10-11)", () => {
+    const html = readFileSync(join(UI, 'controls-bar', 'controls-bar.component.html'), 'utf8').replace(/\r\n/g, '\n')
+    const root = html.slice(html.indexOf('<div class="breadcrumb-top"'), html.indexOf('@for (seg of pathSegments()'))
+    // activeDomain() (the page's hostname) only in the private branch
+    const at = root.indexOf('activeDomain()')
+    expect(at).toBeGreaterThan(root.indexOf('} @else {', root.indexOf('@if (meshPublic())')))
+    expect(root.slice(root.indexOf('@if (meshPublic())'), root.indexOf('} @else {', root.indexOf('@if (meshPublic())')))).not.toContain('activeDomain()')
   })
 
   it('the command line never autocorrects either: a room typed there is the room (ZI-8)', () => {

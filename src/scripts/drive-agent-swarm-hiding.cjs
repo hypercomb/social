@@ -174,6 +174,10 @@ async function main() {
     args: ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'],
   })
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  // The swarm it joins is a local one: a loopback page meets at the LIVE open
+  // point wss://hypercomb.com by default since 2026-10-12, so the dev relay is
+  // named before any page script runs — a proof never walks onto the live one.
+  await context.addInitScript(() => { localStorage.setItem('hc:nostrmesh:relays', JSON.stringify(['ws://localhost:7777'])) })
   const page = await context.newPage()
   page.on('pageerror', e => log('page error:', e.message))
 

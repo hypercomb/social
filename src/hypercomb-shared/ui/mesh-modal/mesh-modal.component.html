@@ -9,7 +9,22 @@
 
     <div class="mesh-modal-body">
 
-      <!-- 1. Alias (display name / "label") -->
+      <!-- ONLY WHAT DEFINES THE MEETING (2026-10-12): a room is its meeting
+           point + room + secret, and the selector shows those three — and the
+           access code when a coded point needs one. Your own host (where a
+           backup goes — replication, never who meets) is set in the host
+           directory; your name on the presence line.
+
+           1. The host you meet at — never the page's own domain, and never
+           filled for you: EMPTY on a new install, hypercomb.com OFFERED
+           beside it (one tap fills it), and START needs it (no host, no
+           room) — and, when a coded point needs one, its access code. Both are THIS tab's, and ride in the meeting link the
+           share button copies; the code is ALWAYS masked — the secret's eye
+           never reveals it (a shared screen would hand the point to every
+           viewer) — and never shown anywhere else. -->
+      <!-- YOUR NAME (jwize, 2026-10-12: "where did the name field go?") — how
+           others see you in the swarm. Never part of the room: same host +
+           location + secret is one room whatever anyone is called. -->
       <section class="mesh-modal-section">
         <label class="mesh-modal-label" for="mesh-modal-label-input">{{ 'mesh-modal.label-label' | t }}</label>
         <input
@@ -25,22 +40,72 @@
         />
       </section>
 
-      <!-- 2. Host (which domain you're connected through — every participant has one) -->
       <section class="mesh-modal-section">
-        <label class="mesh-modal-label" for="mesh-modal-host-input">{{ 'mesh-modal.host-label' | t }}</label>
+        <label class="mesh-modal-label" for="mesh-modal-point-input">{{ 'mesh-modal.point-label' | t }}</label>
         <input
-          id="mesh-modal-host-input"
-          class="mesh-modal-input mesh-modal-host"
+          id="mesh-modal-point-input"
+          class="mesh-modal-input mesh-modal-point"
           type="text"
-          [placeholder]="'mesh-modal.host-placeholder' | t"
-          [value]="hostDraft()"
-          (input)="onHostInput($event)"
+          [placeholder]="'mesh-modal.point-placeholder' | t"
+          [value]="pointDraft()"
+          [disabled]="!pointSupported()"
+          [style.opacity]="pointSupported() ? null : 0.55"
+          [class.mesh-modal-input-missing]="missingField() === 'point' || missingField() === 'host'"
+          (input)="onPointInput($event)"
+          autocapitalize="off"
+          autocorrect="off"
           autocomplete="off"
           spellcheck="false"
         />
+        @if (offerShown()) {
+          <div class="mesh-modal-chips">
+            <button class="mesh-modal-chip mesh-modal-offer" type="button"
+                    [attr.aria-label]="'mesh-modal.offer-point' | t: { host: offeredPoint }"
+                    (click)="offerPoint()">
+              <span class="mesh-modal-chip-text">{{ offeredPoint }}</span>
+            </button>
+          </div>
+        }
+        @if (missingField() === 'host') {
+          <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.needs-point' | t }}</p>
+        }
+        @if (missingField() === 'point') {
+          <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.bad-point' | t }}</p>
+        }
+        @if (codeShown()) {
+        <div class="mesh-modal-secret-row">
+          <input
+            id="mesh-modal-code-input"
+            class="mesh-modal-input mesh-modal-code"
+            type="password"
+            [placeholder]="'mesh-modal.code-placeholder' | t"
+            [attr.aria-label]="'mesh-modal.code-label' | t"
+            [value]="codeDraft()"
+            [disabled]="!pointSupported()"
+            [style.opacity]="pointSupported() ? null : 0.55"
+            [class.mesh-modal-input-missing]="missingField() === 'code'"
+            (input)="onCodeInput($event)"
+            autocapitalize="off"
+            autocorrect="off"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+        }
+        @if (missingField() === 'code') {
+          <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.bad-code' | t }}</p>
+        }
+        <!-- An older package forgets a meeting point on its first refresh and
+             cannot carry a code: the fields stay disabled, with the way out. -->
+        @if (!pointSupported()) {
+          <p class="mesh-modal-missing" role="status">
+            {{ 'zone.point-needs-update' | t }}
+            <button class="mesh-modal-chip mesh-modal-update" type="button" (click)="openPackages()">{{ 'zone.point-update' | t }}</button>
+          </p>
+        }
       </section>
 
-      <!-- 3. Location (room — folds into the subscription sig) -->
+      <!-- 2. Location (the room — folds into every room address) -->
       <section class="mesh-modal-section">
         <label class="mesh-modal-label" for="mesh-modal-room-input">{{ 'mesh-modal.location-label' | t }}</label>
         <input
@@ -74,7 +139,7 @@
         }
       </section>
 
-      <!-- 4. Secret (folds into the subscription sig) -->
+      <!-- 3. Secret (folds into every room address) -->
       <section class="mesh-modal-section">
         <div class="mesh-modal-label-row">
           <label class="mesh-modal-label" for="mesh-modal-secret-input">{{ 'mesh-modal.secret-label' | t }}</label>
@@ -111,69 +176,14 @@
         @if (missingField() === 'secret') {
           <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.needs-secret' | t }}</p>
         }
-        <!-- The room's two words (room + secret, and the meeting point when it
-             is not the default — never the page; the English pair, the
-             reader's own beside it), live
+        <!-- The room's two words (host + room + secret — never the page; the
+             English pair, the reader's own beside it, and the host beside
+             them: 'marble cove · hypercomb.com'), live
              as the fields change — dressed like the crumb (◆ pair ◆) so the
              pair up top and on the presence line is recognisably THIS room
              once the window closes, for everyone in it. -->
         @if (zoneWords()) {
           <p class="mesh-modal-words" aria-live="polite"><span class="mesh-modal-words-sep">◆</span><span class="mesh-modal-words-pair">{{ zoneWords() }}</span><span class="mesh-modal-words-sep">◆</span></p>
-        }
-      </section>
-
-      <!-- 5. Meeting point (empty = the default relay) and its access code.
-           Both are THIS tab's, and ride in the meeting link the share button
-           copies; the code is masked like the secret and never shown again
-           anywhere else. -->
-      <section class="mesh-modal-section">
-        <label class="mesh-modal-label" for="mesh-modal-point-input">{{ 'mesh-modal.point-label' | t }}</label>
-        <input
-          id="mesh-modal-point-input"
-          class="mesh-modal-input mesh-modal-point"
-          type="text"
-          [placeholder]="'mesh-modal.point-placeholder' | t"
-          [value]="pointDraft()"
-          [disabled]="!pointSupported()"
-          [style.opacity]="pointSupported() ? null : 0.55"
-          [class.mesh-modal-input-missing]="missingField() === 'point'"
-          (input)="onPointInput($event)"
-          autocapitalize="off"
-          autocorrect="off"
-          autocomplete="off"
-          spellcheck="false"
-        />
-        @if (missingField() === 'point') {
-          <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.bad-point' | t }}</p>
-        }
-        <div class="mesh-modal-secret-row">
-          <input
-            id="mesh-modal-code-input"
-            class="mesh-modal-input mesh-modal-code"
-            [type]="secretInputType()"
-            [placeholder]="'mesh-modal.code-placeholder' | t"
-            [attr.aria-label]="'mesh-modal.code-label' | t"
-            [value]="codeDraft()"
-            [disabled]="!pointSupported()"
-            [style.opacity]="pointSupported() ? null : 0.55"
-            [class.mesh-modal-input-missing]="missingField() === 'code'"
-            (input)="onCodeInput($event)"
-            autocapitalize="off"
-            autocorrect="off"
-            autocomplete="off"
-            spellcheck="false"
-          />
-        </div>
-        @if (missingField() === 'code') {
-          <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.bad-code' | t }}</p>
-        }
-        <!-- An older package forgets a meeting point on its first refresh and
-             cannot carry a code: the fields stay disabled, with the way out. -->
-        @if (!pointSupported()) {
-          <p class="mesh-modal-missing" role="status">
-            {{ 'zone.point-needs-update' | t }}
-            <button class="mesh-modal-chip mesh-modal-update" type="button" (click)="openPackages()">{{ 'zone.point-update' | t }}</button>
-          </p>
         }
       </section>
 

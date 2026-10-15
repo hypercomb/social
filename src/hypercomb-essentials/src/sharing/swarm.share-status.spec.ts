@@ -203,7 +203,10 @@ describe('the line names what holds each tile back (BCL-2/TS-1)', () => {
     }])
   })
 
-  it('a tile nothing is carrying — every host it needs is backed up and owes nothing — is "not queued", never "uploading" for ever', async () => {
+  // The live swarm (jwize 2026-10-11): while its owner is in the room a tile
+  // whose upload is owed, stalled or never queued goes out WHOLE from this
+  // device — never a name, never "uploading" for ever.
+  it('a tile nothing is carrying, or whose upload is still owed, is live — never a name, never "uploading" for ever', async () => {
     // `hole` is a name (its closure has an atom no store here holds and no
     // host serves: nothing is queued, so its hosts say backed-up, pending 0).
     // `busy` is a name too, with an upload still owed on the page below it.
@@ -212,14 +215,14 @@ describe('the line names what holds each tile back (BCL-2/TS-1)', () => {
     hostSays('pool-a.example', 'backed-up', 0)
     hostSays('pool-b.example', 'syncing', 37)
     await go(['sh1'])
-    expect(lastAt('/sh1')).toMatchObject({ offered: 2, nameOnly: 2, uploading: 1, notQueued: 1, held: [] })
-    // The drain finishes: nothing owed anywhere — and still not served.
+    expect(lastAt('/sh1')).toMatchObject({ offered: 2, live: 2, nameOnly: 0, uploading: 0, held: [] })
+    // The drain finishes: nothing owed anywhere — still live, still never "uploading".
     hostSays('pool-b.example', 'backed-up', 0)
     await tick(1_000)
-    expect(lastAt('/sh1')).toMatchObject({ uploading: 0, notQueued: 2 })
+    expect(lastAt('/sh1')).toMatchObject({ live: 2, nameOnly: 0, uploading: 0 })
   })
 
-  it('the gate\'s own word names the atom\'s host: an apex that cannot be reached holds the tiles that need it', async () => {
+  it('an apex that cannot be reached holds nothing back while the owner is here: the tiles that need it are live', async () => {
     seedPage(['apex'], ['fav-1', 'fav-2', 'mine'])
     state.tileServed.add(sealOf('apex/mine'))
     hostSays('pool-a.example', 'backed-up', 0)
@@ -229,8 +232,8 @@ describe('the line names what holds each tile back (BCL-2/TS-1)', () => {
     try {
       await go(['apex'])
       const s = lastAt('/apex')!
-      expect(s['held']).toEqual([{ host: 'hypercomb.com', state: 'unreachable', reason: 'timed out', why: 'unreachable', count: 2, names: ['fav-1', 'fav-2'] }])
-      expect(s).toMatchObject({ offered: 3, nameOnly: 2, uploading: 0 })
+      expect(s['held']).toEqual([])
+      expect(s).toMatchObject({ offered: 3, live: 2, nameOnly: 0, uploading: 0 })
     } finally { delete hostSync['closureVerdict'] }
   })
 })
@@ -257,5 +260,34 @@ describe('the line says whether the relay took the page (TS-7)', () => {
     await tick(4_500)
     expect(lastAt('/ack')).toMatchObject({ taken: true, unackedMs: 0 })
     state.ackMs.set(30200, 5)
+  })
+})
+
+describe('a publish domain worn DEEPER than the offered tile is named once passed over (BCL-1)', () => {
+  it('smoke1: lt-typo/c01 wears typo.localhost, which never answered — its pages went to the pool; the root names it', async () => {
+    // The root offers lt-typo (a branch); the domain is worn by c01 BELOW
+    // it, so neither this page's hosts nor lt-typo's own page say so. Only
+    // host-sync, which re-staged lt-typo's closure, knows where c01's pages
+    // went instead.
+    seedPage(['bcl1'], ['lt-typo', 'plain'], ['lt-typo'])
+    state.tileServed.add(sealOf('bcl1/lt-typo'))
+    state.deepServed.add(sealOf('bcl1/lt-typo'))
+    state.tileServed.add(sealOf('bcl1/plain'))
+    state.deepServed.add(sealOf('bcl1/plain'))
+    state.closureHosts.set(sealOf('bcl1/lt-typo'), ['pool-a.example'])
+    hostSays('pool-a.example', 'synced', 0)
+    hostSync['closurePassedOverOf'] = (sig: string) => (sig === sealOf('bcl1/lt-typo') ? ['typo.localhost', 'hypercomb.com'] : ['hypercomb.com'])
+    try {
+      await go(['bcl1'])
+      const s = lastAt('/bcl1')!
+      expect([...(s['passedOver'] as string[])].sort()).toEqual(['hypercomb.com', 'typo.localhost'])
+      // A tile only (not a branch): its deeper pages are not offered, so a
+      // domain worn below it is nobody's business here.
+      hostSync['closurePassedOverOf'] = () => ['elsewhere.localhost']
+      state.branch.delete('/bcl1|lt-typo')
+      await go(['bcl1', 'x'], 200)
+      await go(['bcl1'])
+      expect(lastAt('/bcl1')!['passedOver']).toEqual(['hypercomb.com'])
+    } finally { delete hostSync['closurePassedOverOf'] }
   })
 })

@@ -56,6 +56,8 @@ const LIST_ORDER = 300
 const ROW_HEIGHT = '3.75rem'
 /** A press this long lifts the row (drag to reorder; let go to open its page). */
 const HOLD_MS = 420
+/** While a thumbnail is bare, look again after each of these (about half a minute in all). */
+const LOOK_AGAIN_MS = [800, 1600, 3200, 6400, 12800, 25600]
 const HEX = 'polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)'
 const STYLE_ID = 'hc-layer-list-css'
 
@@ -109,7 +111,7 @@ export class LayerListDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
 
   protected override deps = { lineage: '@hypercomb.social/Lineage' }
-  protected override listens = ['render:cell-count', MOBILE_MODE_EFFECT, 'view:active', 'phone:face-set']
+  protected override listens = ['render:cell-count', MOBILE_MODE_EFFECT, 'view:active', 'phone:face-set', 'content:arrived']
   protected override emits = ['tile:enter-request', 'tile:view-open', 'layer:deck-open', 'phone:face', 'viewport:inset']
 
   /** THE FACE — list or hexagons (the rails), one at a time, never both
@@ -165,6 +167,8 @@ export class LayerListDrone extends Drone {
     this.onEffect<{ face?: string }>('phone:face-set', payload => {
       this.setFace(payload?.face === 'hexagons' ? 'hexagons' : 'list')
     })
+    // Bytes just landed from a host or a peer: a bare thumbnail may now resolve.
+    this.onEffect('content:arrived', () => { this.#refreshPictures(this.#generation) })
     EffectBus.emit('phone:face', { face: this.#face })
     window.addEventListener('navigate', this.#onNavigate)
   }
@@ -362,22 +366,42 @@ export class LayerListDrone extends Drone {
       const pictures = this.#pictureSigs()
       for (const row of this.#rows) list.appendChild(this.#rowEl(row, pictures.get(row.label), gen))
       // The renderer resolves pictures AFTER it announces the cells (props
-      // arrive, the atlas paints, no second announcement follows). Look
-      // again once it has had a moment, and fill any thumbnail still bare.
-      setTimeout(() => this.#refreshPictures(gen), 1500)
+      // arrive, the atlas paints, no second announcement follows), and in a
+      // swarm a page's pictures come from peers many seconds later. So while
+      // any thumbnail is bare, look again on a widening backoff — and on every
+      // content arrival (the content:arrived listener) — for about half a
+      // minute (jwize, 2026-10-15: the first list showed no pictures, the
+      // level below did).
+      this.#lookAgain(gen, 0)
     }
     el.appendChild(list)
   }
 
-  #refreshPictures(gen: number): void {
-    if (gen !== this.#generation || !this.#element) return
+  #lookAgain(gen: number, step: number): void {
+    const delay = LOOK_AGAIN_MS[step]
+    if (delay === undefined) return
+    setTimeout(() => {
+      if (gen === this.#generation && this.#refreshPictures(gen)) this.#lookAgain(gen, step + 1)
+    }, delay)
+  }
+
+  /** Fill every thumbnail still bare: the renderer's capture when it has one
+   *  now, else the tile's own properties read again (a peer's props may have
+   *  landed since). True while any thumbnail is still bare. */
+  #refreshPictures(gen: number): boolean {
+    if (gen !== this.#generation || !this.#element) return false
     const pictures = this.#pictureSigs()
+    let bare = false
     for (const row of this.#element.querySelectorAll<HTMLElement>('[data-role="list-row"]')) {
       const thumb = row.querySelector<HTMLElement>('.hc-ll-hex')
       if (!thumb || thumb.querySelector('img')) continue
-      const sig = pictures.get(row.dataset['label'] ?? '')
+      bare = true
+      const label = row.dataset['label'] ?? ''
+      const sig = pictures.get(label)
       if (sig) this.#paint(thumb, sig)
+      else if (this.#rows.find(r => r.label === label)?.picture) void this.#fillPicture(label, thumb, gen)
     }
+    return bare
   }
 
   #rowEl(row: Row, imageSig: string | undefined, gen: number): HTMLElement {
@@ -540,9 +564,29 @@ export class LayerListDrone extends Drone {
     img.decoding = 'async'
     img.loading = 'lazy'
     img.src = RESOURCE_URL_PREFIX + sig
-    // A picture that will not come (an uncontrolled page, bytes not local
-    // yet) leaves the steel hexagon, never a broken-image glyph.
-    img.addEventListener('error', () => img.remove())
+    // The local address answers only for bytes already on this device. A
+    // tile that came by the swarm or from a host has its picture elsewhere
+    // until something fetches it — the hexagons do when you go in, which is
+    // why a page showed its pictures only after a drill-in (jwize 2026-10-13).
+    // So a miss asks the store, which reads from the swarm and the hosts.
+    img.addEventListener('error', () => { img.remove(); void this.#fetchPaint(thumb, sig) }, { once: true })
+    thumb.replaceChildren(img)
+  }
+
+  /** Paint a picture the store had to fetch. One that will not come at all
+   *  leaves the steel hexagon, never a broken-image glyph. */
+  async #fetchPaint(thumb: HTMLElement, sig: string): Promise<void> {
+    const store = window.ioc?.get?.<{ getResource?: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+    const blob = await store?.getResource?.(sig).catch(() => null)
+    if (!blob || !thumb.isConnected || thumb.querySelector('img')) return
+    const url = URL.createObjectURL(blob)
+    const img = document.createElement('img')
+    img.alt = ''
+    img.decoding = 'async'
+    const done = (): void => URL.revokeObjectURL(url)
+    img.addEventListener('load', done, { once: true })
+    img.addEventListener('error', () => { done(); img.remove() }, { once: true })
+    img.src = url
     thumb.replaceChildren(img)
   }
 

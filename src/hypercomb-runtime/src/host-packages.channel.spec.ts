@@ -80,28 +80,27 @@ describe('readInstallFollow — the same record the update scout reads', () => {
 })
 
 describe('indexDoors', () => {
-  it('reads each zone root first, then its retired content face', () => {
-    expect(indexDoors(['content.hypercomb.com', 'example.org']))
-      .toEqual(['hypercomb.com', 'example.org', 'content.hypercomb.com', 'content.example.org'])
+  it('reads each zone root only — a content face folds to its zone', () => {
+    expect(indexDoors(['content.hypercomb.com', 'example.org', 'hypercomb.com']))
+      .toEqual(['hypercomb.com', 'example.org'])
   })
 
-  it('gives a loopback zone no content face', () => {
+  it('reads a loopback zone as itself', () => {
     expect(indexDoors(['localhost:4270'])).toEqual(['localhost:4270'])
   })
 })
 
 describe('readInstallChannel — the signed install root', () => {
-  it('takes the root the publisher signed, read past an apex that answers with its page', async () => {
+  it('takes the root the publisher signed, asking the zone root and nothing else', async () => {
     const fetchMock = serving({
-      [await indexUrl('hypercomb.com')]: PAGE,
-      [await indexUrl('content.hypercomb.com')]: { body: JSON.stringify(index(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT, site: OTHER })) },
+      [await indexUrl('hypercomb.com')]: { body: JSON.stringify(index(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT, site: OTHER })) },
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    expect(await readInstallChannel(FOLLOW, verify))
+    expect(await readInstallChannel({ ...FOLLOW, hosts: ['content.hypercomb.com'] }, verify))
       .toEqual({ state: 'named', packageSig: SIGNED_ROOT, zone: 'hypercomb.com', createdAt: 1_791_578_080 })
     expect(fetchMock.mock.calls.map(call => String(call[0])))
-      .toEqual([await indexUrl('hypercomb.com'), await indexUrl('content.hypercomb.com')])
+      .toEqual([await indexUrl('hypercomb.com')])
   })
 
   it('reads the channel the follow names', async () => {
@@ -135,9 +134,10 @@ describe('readInstallChannel — the signed install root', () => {
   it('lets a verified door answer even when another door substituted the index', async () => {
     vi.stubGlobal('fetch', serving({
       [await indexUrl('hypercomb.com')]: { body: JSON.stringify(index(STRANGER_KEY, { 'install:essentials': OTHER })) },
-      [await indexUrl('content.hypercomb.com')]: { body: JSON.stringify(index(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT })) },
+      [await indexUrl('example.org')]: { body: JSON.stringify(index(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT })) },
     }))
-    expect(await readInstallChannel(FOLLOW, verify)).toMatchObject({ state: 'named', packageSig: SIGNED_ROOT })
+    expect(await readInstallChannel({ ...FOLLOW, hosts: ['hypercomb.com', 'example.org'] }, verify))
+      .toMatchObject({ state: 'named', packageSig: SIGNED_ROOT })
   })
 
   it('says so when the verified index names nothing for the channel', async () => {

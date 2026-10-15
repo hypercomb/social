@@ -76,6 +76,28 @@ const MEET_PREFIX = '#meet='               // mirror of MEET_PREFIX
  *  A reload that finds the stash still unanswered starts from it. */
 let meetCopy = ''
 
+/** THE SIGNED SWARM LINK — `#swarm=<sig>@<host>~<key>` (2026-10-12): the
+ *  login is a locked package on the host; the key rides this fragment and
+ *  nothing else. Stashed under its own key, the URL cleaned at once (the key
+ *  leaves the address bar before anything reads it); the package's worker
+ *  opens it (meeting-invite.worker.ts) into the same join a #meet= link
+ *  takes. MIRRORED: essentials meeting-invite.worker.ts SWARM_LINK_KEY. */
+const SWARM_PREFIX = '#swarm='
+const PENDING_SWARM_KEY = 'hc:pending-swarm'
+
+/** Take a `#swarm=` fragment from the address bar. True when there was one. */
+const captureSwarmLink = (): boolean => {
+  try {
+    const hash = window.location.hash ?? ''
+    if (!hash.startsWith(SWARM_PREFIX)) return false
+    try { sessionStorage.setItem(PENDING_SWARM_KEY, hash) } catch { /* no storage: nothing can open it */ }
+    const clean = window.location.pathname + (window.location.search ?? '')
+    window.history.replaceState(window.history.state, '', clean)
+    return true
+  } catch { return false } // never block boot on capture
+}
+captureSwarmLink()
+
 /** Take a `#meet=` fragment from the address bar. True when there was one. */
 const captureMeetLink = (): boolean => {
   try {
@@ -106,6 +128,7 @@ const onFragment = (): void => {
   // A link put back for a guest whose storage is blocked stays put — the
   // shell's own synthetic popstate (bootstrap-history) must not take it again.
   if (restoredLink) return
+  if (captureSwarmLink()) { EffectBus.emitTransient('meet:pending', { at: Date.now() }); return }
   if (!captureMeetLink()) return
   EffectBus.emitTransient('meet:pending', { at: Date.now() })
   if (watching) watchPendingMeet(watching)
@@ -204,7 +227,13 @@ export interface PendingMeetTiming {
 /** What a sentence or a chat app's linkifier leaves stuck to the END of a
  *  link — never the link's own. MIRROR of essentials meeting-invite.ts
  *  trimLinkTail (invite-capture.robust.spec.ts holds the two together). */
+const LINK_BODY_MAX = 8192
 const trimLinkTail = (text: string): string => {
+  // A link body longer than any real one is no link (2026-10-12): the loop
+  // below rescans the whole text per character it trims, so a crafted
+  // 100,000-character tail froze the tab (found reviewing the signed swarm
+  // link, swarm-link.ts, which caps its own body at 512).
+  if (text.length > LINK_BODY_MAX) return ''
   let body = text
   for (;;) {
     let next = body.replace(/[.,;:!?'"\]}>]+$/, '')

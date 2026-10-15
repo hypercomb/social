@@ -35,6 +35,7 @@ await import('../assistant/file.queen.js')
 await import('../assistant/module.queen.js')
 await import('../clipboard/clipboard.queen.js')
 await import('./create.queen.js')
+await import('./go.queen.js')
 await import('./language.queen.js')
 await import('./postit.queen.js')
 await import('./title.queen.js')
@@ -49,6 +50,7 @@ await import('../references/gather/feed.queen.js')
 await import('../references/gather/from.queen.js')
 await import('../references/gather/references.queen.js')
 await import('../sharing/profile.queen.js')
+await import('../sharing/groups.queen.js')
 
 type Declared = { reach?: string; scope?: string; refuse?: (args: string) => string | undefined }
 const census = (ioc.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
@@ -88,6 +90,15 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   bridge: ['destructive', 'local'],    // a ceiling only: every form is refused (who may reach
                                        // this machine is the participant's to say); declared so
                                        // the queen stays awake and the remote door finds `refuse`
+  // Judged on arrival (2026-10-13, publish groups — "the whole idea is that we
+  // can publish groups").
+  groups: ['editing', 'network'],      // add/drop/rename/colour/icon edit marks and records on the
+                                       // layer; publish signs an index and puts each member on its
+                                       // host. ungroup is refused, so nothing admitted is destructive
+  // Judged on arrival (2026-10-15, speak don't bridge — "make it possible to do
+  // everything by behavior").
+  go: ['additive', 'local'],           // moves where you stand; writes nothing, refuses a place
+                                       // with no tile
 }
 
 describe('every machine declaration, as audited', () => {
@@ -103,6 +114,26 @@ describe('every machine declaration, as audited', () => {
 })
 
 describe('what the corrections refuse', () => {
+  it('/groups lets a machine publish, and never acts on a selection it cannot see', () => {
+    const refuse = declared.get('groups')!.refuse!
+    expect(refuse('')).toBeUndefined()
+    expect(refuse('publish blog')).toBeUndefined()
+    expect(refuse('add blog one, two')).toBeUndefined()
+    expect(refuse('rename blog Notes')).toBeUndefined()
+    expect(refuse('ungroup blog')).toBe('groups ungroup takes a whole group off the layer — only the participant says it')
+    expect(refuse('add blog')).toBe("groups add needs its tiles named — the selection is the participant's")
+    expect(refuse('drop blog')).toContain('needs its tiles named')
+    expect(refuse('color blog teal')).toContain('blue, amber, green')
+    expect(refuse('publish')).toBe('groups publish needs a group name')
+    const selection = (labels: readonly string[]): void =>
+      ioc.register('@diamondcoreprocessor.com/SelectionService', { selected: new Set(labels) })
+    selection([])
+    expect(refuse('new Blog')).toBeUndefined()
+    selection(['one'])
+    expect(refuse('new Blog')).toContain('would take in the tiles the participant has selected')
+    selection([])
+  })
+
   it('/bridge refuses a machine every form, the bare word included', () => {
     const refuse = declared.get('bridge')!.refuse!
     for (const line of ['', 'give susan', 'add susan', 'withdraw susan']) {

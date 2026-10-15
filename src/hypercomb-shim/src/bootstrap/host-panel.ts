@@ -340,6 +340,13 @@ const tileArt = (title: string, kind: string, signature: string,
   return art
 }
 
+/** The zone a card speaks for: host.<zone> is a front-door zone's card door
+ *  (HOST_DOOR_LABEL in the worker), so it names <zone>, never itself. */
+export const cardZone = (host: string): string => {
+  const zone = hostZone(host)
+  return /^host\.[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/.test(zone) ? zone.slice('host.'.length) : zone
+}
+
 /** A module is named `<sig>.js` in one record and `<sig>` in another. */
 const bareSig = (sig: string): string => sig.trim().toLowerCase().replace(/\.(?:js|json)$/, '')
 
@@ -488,8 +495,9 @@ class HostPanelElement extends HTMLElement {
   #pending: PendingSelection[] = []
   #nativeUnlisten: (() => void) | null = null
   /** The origin you are standing on, as a zone — `` when it is not one
-   *  (a file:// preview, an address with no dots that is not loopback). */
-  readonly #self = hostZone(location.host)
+   *  (a file:// preview, an address with no dots that is not loopback).
+   *  The card's own door, host.<zone>, speaks for its zone. */
+  readonly #self = cardZone(location.host)
   #galleryPins: Set<string> | null = null
   #galleryOffers = new Map<string, Offering[]>()
   #galleryCreations = new Map<string, PublicCreation[]>()

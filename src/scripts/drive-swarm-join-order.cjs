@@ -115,7 +115,7 @@ async function scenario(name, fn) {
 }
 
 async function main() {
-  H.log('boot', `url=${H.URL_} relay=${H.RELAY ?? '(shell default)'} slow=${SLOW} mode=${MODE} engine=${ENGINE}`)
+  H.log('boot', `url=${H.URL_} relay=${H.RELAY ?? H.LOCAL_RELAY} slow=${SLOW} mode=${MODE} engine=${ENGINE}`)
   // ── 1. late joiner ────────────────────────────────────────────────
   await scenario('late joiner', async (browser) => {
     const z = zone('late')

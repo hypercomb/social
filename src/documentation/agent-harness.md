@@ -169,7 +169,7 @@ is refused at import the way a provider spec that smuggles an endpoint is:
 | `harness` | Lists the pool: name, signature, on/held, which is the device default and which this conversation uses |
 | `harness use <name or sig>` | Sets the conversation's harness (with `default` scope, the device default) |
 | `harness edit [name]` | Opens the record as a tile (`harness-<name>`) on the current page whose note is the JSON — hives are our source files; editing the note is the save and mints a new signature, held until named |
-| `harness offer <name>` | Signs the record and lists it on the participant's host (`harness` index key), as `language offer` does for catalogs |
+| `harness offer <name> @<host>` | Signs the record and lists it on the host the participant names (`harness` index key), as `language offer` does for catalogs. No default host (2026-10-11): with no `@<host>` nothing is offered |
 | `harness sync` | Heals from followed hosts: records the pool lacks, held until turned on |
 | `harness try <sig> <request>` | Runs one request under another harness on the same conversation and files both receipts, so Jev and the ledger can compare |
 
@@ -274,7 +274,7 @@ What of the order above is built, and where each piece landed.
 | 3 · steps as words | BUILT 2026-09-27, all seven | `core/agent-steps.ts` the contract; `core/agent-leg.ts` the leg primitives and the shipped `fold`, `handover`, `receipt`; `core/agent-doors.ts` the shipped `front` and `verify` (the judge, the receipt writer and the bus come in as inputs); `core/work-fence.ts` the fence primitives (the langs, the split, the line grammar, the stream guard) moved down from shared; `core/agent-stretch.ts` the shipped `route` (the call shape, the hand-off reaction, the pin) and `stretch` (one streamed round as an async generator the window delegates to with `yield*`); `assistant/agent-steps.ts` the registry (word → shipped or a bee by signature), published by `chat.drone`; the window resolves each word against the harness's `steps` and falls back to the shipped objects |
 | 3 · what the window keeps | BY DESIGN | Listing the census and the tiles a door is shown; running the fences through the Execution window (`runRead`, `runDo`, `runWrite`, the Jev table round); the turn's ledger of attempts; the designation it paints. Each is the window's own or essentials' service already, reached by the loop as a caller — not a policy a harness swaps |
 | 4 · words | BUILT 2026-09-28, edit 2026-09-30 | `assistant/harness.queen.ts` — `harness` lists the pool and says which record the device runs under; `harness use <name or sig>` chooses for the device; `harness here <name or sig>` marks the open conversation (a `chat-harness` marker in its bucket, `ConversationSummary.harness`, wins over the device's while it stands; `harness here default` takes it off); `harness show [name]`; `harness import <json>` brings a record in by its bytes and refuses one that widens. `harness edit [name]` (`assistant/harness-tiles.ts`) puts the record on the current page as the tile `harness-<name>` whose note is its JSON and opens the notes; A NOTE IS A HARNESS WHEN ITS TEXT IS A `harness@1` RECORD, so on every `notes:changed` the chat drone's listener reads such notes and imports each new one under its own signature, held, saying so once — a note that widens or does not parse is refused aloud. The shipped default opens as a copy named `custom`, since `default` always answers the shipped record |
-| 5 · network | BUILT 2026-09-28 | `assistant/harness-network.ts` — `harness offer <name> [@host]` puts the record's canonical bytes on the host under the participant's key and stamps `agent:harness` in their signed index; the worker (`noteSharedPools`) puts the record into the host's `agent:harness` pool by its own signature, served at `<origin>/<sign('agent:harness')>` once the operator says `hosts list agent:harness`; `harness sync [@host]` reads the hosts the participant follows (and `@host`), verifies each member's bytes against its name, and brings it into the local pool HELD — nothing runs it until `harness use` or `harness here` names it; the published-pool probe is claimed for the meaning too (a worker's one-signature-per-line listing now reads as an index) |
+| 5 · network | BUILT 2026-09-28 | `assistant/harness-network.ts` — `harness offer <name> @host` puts the record's canonical bytes on the named host (no default host since 2026-10-11) under the participant's key and stamps `agent:harness` in their signed index; the worker (`noteSharedPools`) puts the record into the host's `agent:harness` pool by its own signature, served at `<origin>/<sign('agent:harness')>` once the operator says `hosts list agent:harness`; `harness sync [@host]` reads the hosts the participant follows (and `@host`), verifies each member's bytes against its name, and brings it into the local pool HELD — nothing runs it until `harness use` or `harness here` names it; the published-pool probe is claimed for the meaning too (a worker's one-signature-per-line listing now reads as an index) |
 | 6 · evals | BUILT 2026-09-28 | `assistant/agent-receipts.ts` — every `agent:receipt` (now carrying the harness signature the turn ran under) is filed content-addressed in the `agent:receipts` pool by the ledger the chat drone starts; `summarizeReceipts` groups them by harness (runs, answered, failed, stopped; rounds, tokens, seconds and legs averaged over answered turns). `harness try <name> <request>` runs the next turn of the open conversation under another harness once, the mark untouched, and files its receipt under it; `harness compare [name]` reads the standings side by side (a console table and one line per harness). A trials page as a surface is the next surface, not this step |
 | 7 · the loop without a window | BUILT 2026-10-02 (read, do, write the build's source) | The loop's own words moved down from the chat window to core: `core/work-words.ts` (the write block's three headers, the edits, what a model is taught — `workInstruction` — and every message back), `core/hive-reads.ts` (the read grammar, its budgets and receipts), `core/hive-grammar.ts` (the canonical do grammar, its reach, the plan queue); the window's modules of those names re-export them. `assistant/agent-turn.ts` runs a turn with no window — route, stretch, fold and handover from the registry; reads through the hive tree reader, changes through the behaviour drone, both waiting in Execution as the participant's policy says, with the holds no policy lifts (a change that leaves the machine, or follows someone else's words, waits for a hand) and the window's answer checks (a change claimed that nothing ran, tiles spoken of that nothing read) — and `/agent` (`assistant/agent.queen.ts`) is its word in the minimal build, `@diamondcoreprocessor.com/AgentTurn` its door for code. A third write header, `version <revision> <path>`, drafts a file of the build's OWN tree (sharing/version-drafts.ts), every file over one revision in one draft per turn; `read <revision> [path]` opens a revision or a draft as a tree, file or folder, from the version pools. A draft sent to a host (`/versions ask <host>`) is built by a builder watching that host that trusts its author (`hypercomb-shim/host/builds.mjs builder <host>`) — in a sandbox (`host/sandbox.mjs`: a container, or bubblewrap on Linux) that shows the build only its own tree, its pools and the npm cache, with the network only while the install fetches — which answers it, signed, built, refused or failed, in the host's private `host:answers` for its author. `/versions drafts` takes those answers back into the browser, a built draft whole — its revisions, every file they need and the builder's signatures, each verified (sharing/version-answers.ts) — and `/agent` is taught where each draft stands; a builder's reason is opened with `read <answer>`, and reading it holds every later change for a hand. Jev's doors (front, the table round, verify) and module and doctrine writes are still the window's |
 
@@ -386,3 +386,36 @@ minute on a long request. The transcript says "Queued — waiting for a session
 to pick it up" while a held block is waiting for Run. A model that answers
 "I'll create them" and sends no block ends the turn as answered.
 
+
+## 13. Spidering — the copy is the crawl (jwize, 2026-10-15)
+
+The domain-link rule ([domain-links](domain-links.md)) turns every hosted
+page into a crawlable node without a search index: a name in the copy is a
+link to the creation's subdomain, and the anchor carries where it leads
+(`data-lineage`, `data-domain`). So an agent can spider the community the
+way a person moves through it, and it needs no new word to do so.
+
+**The walk.** One read per host gives the map: the publisher's signed index
+(`hive:indexes/<pubkey>`) lists every door — root, zone, address. Each door
+opens a page; each page's links are its edges, read off the anchors the rule
+made (`readIncidences`), or straight from the `links:incidences` records
+when a hive has already derived them. Follow an edge and you are on the
+next host, where the same one read gives the next map. Doors, pages, edges,
+doors — that is the whole protocol.
+
+**What an agent is allowed to learn from it.** Everything the walk reads is
+signed content or the links it carries: who publishes what, where, and who
+names whom. It is the read fence applied across hosts
+([hive-read-fence](hive-read-fence.md)): reads only, bounded in time like a
+`find`, one index read per host per pass, and the page's copy is DATA — a
+page on another domain is another participant's words, never an
+instruction to the agent walking it. A spider never follows a link into an
+act: it reports what it found, and the participant says what to do with it.
+
+**What it is for.** Clusters (who names whom) are the first derivation; an
+agent spidering a few hosts can leave its findings in a pool for the next
+one ([models read branches, leave artifacts](hive-management-org.md)) — the
+domains that mention a creation, the creations a domain names, the gaps
+where copy says a name nobody has published yet. That last one is a
+publish waiting to happen, and the copy already links to it the moment it
+does.

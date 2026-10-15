@@ -71,6 +71,7 @@ import {
   PLATFORM_DESKTOP,
   PLATFORM_MOBILE,
 } from '../preferences/mobile-pheromones.js'
+import type { TraitDeclaration } from '@hypercomb/core'
 import type { AgentAvatarSpec } from '../presentation/avatars/agent-avatar.js'
 
 /**
@@ -192,6 +193,15 @@ export type VisualBeeDescriptor = {
    * into sub-bees).
    */
   readonly decorationKind: string
+
+  /**
+   * The extension points this view leaves open (documentation/traits.md, core/trait.ts). Every tile
+   * opening as this view has them. A plain word: the view has its own working version and a filler
+   * may replace it. `{ word, needs: true }`: a reminder that the view works properly only once
+   * something is provided. Data on the descriptor, so a sleeping view states its traits without
+   * being loaded.
+   */
+  readonly traits?: readonly TraitDeclaration[]
 
   /**
    * RETIRED kind strings this bee still answers for. A rename mints a new

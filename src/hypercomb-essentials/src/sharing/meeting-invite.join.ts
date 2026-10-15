@@ -17,6 +17,15 @@
 // is joined through the one toggle door. "Not now" writes NOTHING: every
 // write waits for the answer, so a declined invite leaves the participant
 // exactly where they were — and never writes a stale pair over another tab's.
+//
+// A LINK THAT NAMES NO HOST (jwize, 2026-10-11: "Let's just make sure that
+// there isn't a default host"): a link from a package before 2026-10-12, and
+// every tile invite (a stored bundle never carries a meeting point), lands
+// nowhere by itself. The guest meets at the host THEY already meet at, when
+// this tab has one (their choice, kept); with none, the sheet says the link
+// names no host, and Join opens the selector on its host field with the
+// room and secret already in — one host typed (or hypercomb.com tapped) and
+// START. Never the default relay: there is none.
 
 import { EffectBus, get, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { resolveInviteSecret, validateInviteBundle, meetingRelayOf, meetingHostOf, isAccessCode, type MeetingInviteBundle, type MeetingPoint } from './meeting-invite.js'
@@ -189,8 +198,9 @@ export const meetingPointLabel = (relay: string): string => relay.replace(/^wss?
 
 /**
  * POINT THIS TAB'S MESH AT ITS MEETING POINT, now. The zone must already hold
- * it (the dial reads the access code from there). '' = the default relay: the
- * mesh reloads its own defaults on the announcement. Re-pointing to the relay
+ * it (the dial reads the access code from there). '' = no point of its own:
+ * the mesh goes back to the relay list the page chose, or to nothing (there
+ * is no default). Re-pointing to the relay
  * the mesh already dials does nothing — that tore a live socket down.
  * Announces `mesh:zone` {relay} — never the code.
  */
@@ -232,6 +242,11 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   const bundle = { ...stored, secret: opened }
   const point = pointOf(bundle)
   const tab = readTabZone()
+  // Where the guest will meet: the link's host, else the one this tab
+  // already meets at (with its access code), else none — and then the
+  // selector asks for it after the sheet. Never a default.
+  const relay = point.relay || (tab?.relay ?? '')
+  const code = point.relay ? point.code : (tab?.code ?? '')
 
   // Already in this room AT THIS MEETING POINT, joined — there is nothing to
   // switch and nothing to ask. At most the guest walks to the page the link
@@ -244,14 +259,14 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   // new access code is taken quietly only while the meeting point is refusing
   // this tab's code (a recycle — the very case a fresh link is for); a tab the
   // meeting point lets in is asked before its working code is replaced.
-  const hereAlready = room.value === bundle.room && secret.value === bundle.secret && (tab?.relay ?? '') === point.relay && isJoinedHere()
+  const hereAlready = !!relay && room.value === bundle.room && secret.value === bundle.secret && (tab?.relay ?? '') === relay && isJoinedHere()
   const newKeeper = !!point.host && point.host !== (tab?.host ?? '')
   const newCode = !!point.code && point.code !== (tab?.code ?? '')
   if (hereAlready && !newKeeper && (!newCode || refusedAccess())) {
     if (newCode) {
       writeTabZone({ code: point.code })
       // The mesh dials the new code at once, past its refusal.
-      EffectBus.emit('mesh:zone', { relay: point.relay })
+      EffectBus.emit('mesh:zone', { relay })
     }
     if (!sameSegments(hereSegments(nav), bundle.segments)) walkTo(nav, bundle.segments)
     toast('tip', tr('invite.join.title', 'Meeting place'), tr('invite.already-here', `You're already in "${label}".`, { label }))
@@ -261,16 +276,14 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   // The sheet names the meeting point (when the link names one) and who keeps
   // what the guest shares (keeperOf) — never the access code. Still not known
   // after the short wait: the sheet names no keeper.
-  const host = await keeperOf(bundle.segments, point.host)
-  const at = point.relay ? meetingPointLabel(point.relay) : ''
+  const host = relay ? await keeperOf(bundle.segments, point.host) : ''
+  const at = relay ? meetingPointLabel(relay) : ''
   const params = { room: bundle.room, host, point: at }
   const message = at
     ? host
       ? tr('invite.meet.join.message-at', `Join the room “${bundle.room}” at ${at}? You'll see everyone here. Tiles you add while joined are shared with the room and kept by ${host}.`, params)
       : tr('invite.meet.join.message-at-local', `Join the room “${bundle.room}” at ${at}? You'll see everyone here. Tiles you add while joined are shared with the room.`, params)
-    : host
-      ? tr('invite.meet.join.message', `Join the room “${bundle.room}”? You'll see everyone here. Tiles you add while joined are shared with the room and kept by ${host}.`, params)
-      : tr('invite.meet.join.message-local', `Join the room “${bundle.room}”? You'll see everyone here. Tiles you add while joined are shared with the room.`, params)
+    : tr('invite.meet.join.message-no-host', `Join the room “${bundle.room}”? This link names no host — next, name the host the room meets at.`, params)
   const confirmed = await requestConfirm({
     title: tr('invite.meet.join.title', 'Join the room'),
     message,
@@ -288,14 +301,19 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   // inviter still in a pre-fold room — a curly quote recorded before the fold
   // — must not split the room in two). Then the page. The stores hold the
   // carried text first, so writeTabZone below records it as held, verbatim.
+  //
+  // The link's meeting point becomes this tab's, whole — and FIRST: every
+  // address of the room names its point (core roomPreimage, 2026-10-12), and
+  // the stores' change below resyncs a joined tab's swarm at once, so the
+  // point it reads there must already be the link's. A link that names none
+  // keeps the point (and code) this tab already meets at — there is no
+  // default to drop it for.
+  writeTabZone({ relay, host: point.host, code })
   room.set(bundle.room, true)
   secret.set(bundle.secret, true)
-  // The link's meeting point becomes this tab's, whole: a link that names
-  // none meets at the default, so a point this tab held from an earlier
-  // meeting is dropped with its code.
-  writeTabZone({ room: bundle.room, secret: bundle.secret, relay: point.relay, host: point.host, code: point.code })
-  if (point.relay !== (tab?.relay ?? '')) pointMeshAt(point.relay)
-  else if (point.code !== (tab?.code ?? '')) EffectBus.emit('mesh:zone', { relay: point.relay })
+  writeTabZone({ room: bundle.room, secret: bundle.secret })
+  if (relay !== (tab?.relay ?? '')) pointMeshAt(relay)
+  else if (code !== (tab?.code ?? '')) EffectBus.emit('mesh:zone', { relay })
   EffectBus.emit('mesh:room', { room: bundle.room })
   // A notice, never the secret: the bus replays its last value to every late
   // subscriber, so listeners re-read the SecretStore `secret.set()` wrote above.
@@ -306,6 +324,13 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   // command and silently dropped. Joining a room is joining to make tiles.
   try { localStorage.setItem(STANCE_KEY, 'tiles') } catch { /* the effect below still lands */ }
   EffectBus.emit('command-line:stance', { stance: 'tiles' })
+  // NO HOST: nothing to join yet. The selector opens on the host field,
+  // with the room and secret just set; its START is the join.
+  if (!relay) {
+    EffectBus.emit('mesh:open-modal', { join: true, focus: 'point' })
+    toast('tip', tr('invite.join.title', 'Meeting place'), tr('invite.meet.needs-host', 'This link names no host — name the host the room meets at (or tap hypercomb.com), then start.'))
+    return false
+  }
   // THE ONE DOOR in: the same toggle the control, the shortcut and the
   // `join` word use (its zone guard lives in runtime-initializer). Only
   // when this tab is not already a member — a toggle would make it leave.

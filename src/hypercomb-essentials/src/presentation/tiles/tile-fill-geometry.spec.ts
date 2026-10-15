@@ -1,7 +1,7 @@
 // tile-fill-geometry.spec.ts — THE TILES AS THE GPU DRAWS THEM, on their own.
 // One quad per tile at its axial position; a name hidden only behind a
-// picture (and never for the hovered tile); a peer's hue on its border, a
-// stack's depth on yours; shade and launcher silhouettes as the look says;
+// picture (and never for the hovered tile); a peer's hue on its border (their
+// badge's own, boldly, when theirs alone or spotlit), a stack's depth on yours; shade and launcher silhouettes as the look says;
 // a dive reads nothing location-scoped; and the key moves exactly when a
 // baked geometry would be wrong.
 import { describe, expect, it, vi } from 'vitest'
@@ -64,12 +64,27 @@ describe('the fill geometry', () => {
     expect([...attr(dive, 'aLabelUV').slice(0, 4)].map(v => +v.toFixed(2))).toEqual([0.1, 0.2, 0.3, 0.4])
   })
 
-  it('wears a peer\'s hue on the border, dimmed while another peer is in the spotlight', () => {
+  it('wears a peer\'s hue on the border: boldly when theirs alone or spotlit, dimmed while another peer is in the spotlight', () => {
+    const alice = (over: Partial<TileLook> = {}) => look({ peerPubkey: l => l === 'garden' ? 'npub-alice' : undefined, ...over })
     const [pr] = labelToRgb('npub-alice')
-    const plain = buildFillQuad(cells, 10, 2, 5, 5, look({ peerPubkey: l => l === 'garden' ? 'npub-alice' : undefined }))
-    expect(attr(plain, 'aBorderColor')[0]).toBeCloseTo(pr * 0.85)
-    const other = buildFillQuad(cells, 10, 2, 5, 5, look({ peerPubkey: l => l === 'garden' ? 'npub-alice' : undefined, spotlight: () => 'npub-bob' }))
+    const [boldR] = labelToRgb('npub-alice', 1, 0.64)
+    // Theirs ALONE (no one else holds it) and no spotlight: their badge's own
+    // hue at full strength, and the shader is told so (aOwned).
+    const alone = buildFillQuad(cells, 10, 2, 5, 5, alice())
+    expect(attr(alone, 'aBorderColor')[0]).toBeCloseTo(boldR)
+    expect([...attr(alone, 'aOwned')]).toEqual([1, 1, 1, 1, 0, 0, 0, 0])
+    // Shared at rest (a stack under the name): the quiet group hue, uniform brightness.
+    const shared = buildFillQuad(cells, 10, 2, 5, 5, alice({ stackDepth: l => l === 'garden' ? 2 : 1 }))
+    expect(attr(shared, 'aBorderColor')[0]).toBeCloseTo(pr * 0.85)
+    expect(attr(shared, 'aOwned')[0]).toBe(0)
+    // Another peer in the spotlight: recede so the active group pops.
+    const other = buildFillQuad(cells, 10, 2, 5, 5, alice({ spotlight: () => 'npub-bob' }))
     expect(attr(other, 'aBorderColor')[0]).toBeCloseTo(pr * 0.45)
+    expect(attr(other, 'aOwned')[0]).toBe(0)
+    // Theirs on top while cycling layers: bold again, shared or not.
+    const spotlit = buildFillQuad(cells, 10, 2, 5, 5, alice({ stackDepth: l => l === 'garden' ? 2 : 1, spotlight: () => 'npub-alice' }))
+    expect(attr(spotlit, 'aBorderColor')[0]).toBeCloseTo(boldR)
+    expect(attr(spotlit, 'aOwned')[0]).toBe(1)
   })
 
   it('reports the tiles it baked shaded and each tile\'s launcher silhouette', () => {
@@ -87,6 +102,7 @@ describe('the fill geometry', () => {
     const dive = buildFillQuad(cells, 10, 2, 5, 5, page, { portals: new Set(['kitchen']), reveal: null })
     expect(dive.shadedLabels).toEqual([])
     expect([...attr(dive, 'aShaded')].every(v => v === 0)).toBe(true)
+    expect([...attr(dive, 'aOwned')].every(v => v === 0)).toBe(true)
     expect([...attr(dive, 'aIsPortal')]).toEqual([0, 0, 0, 0, 1, 1, 1, 1])
     expect(dive.shapeModes).toEqual([['garden', 0], ['kitchen', 0]])
   })

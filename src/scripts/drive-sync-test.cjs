@@ -62,6 +62,8 @@ async function configure(page) {
       // ON for actual network traffic.
       localStorage.setItem('hc:mesh-public', 'true')
       localStorage.setItem('hc:nostrmesh:network', '1')
+      // The dev relay, named: a loopback page meets at wss://hypercomb.com by default (2026-10-12).
+      localStorage.setItem('hc:nostrmesh:relays', JSON.stringify(['ws://localhost:7777']))
     } catch (e) {
       console.warn('[driver] localStorage write failed', e)
     }

@@ -195,3 +195,17 @@ export const dispatchedVerbsOf = (
   line: string,
   featureOf: (line: string) => FeatureReading | null = () => null,
 ): readonly string[] => [...new Set(dispatchedCallsOf(line, featureOf).map(call => call.verb))]
+
+/** DOES A REMOTE LINE SPEAK THE STRUCTURAL GRAMMAR — a selection `[a, b]`, a
+ *  sigil (`~` `#` `?` `>` `.`), a path `a/b`, a mark `:` or a view `@`?
+ *
+ *  The remote door hands a line no behaviour matched to the legacy pipeline,
+ *  and that pipeline reads plain words as the NAME OF A TILE TO MAKE. A person
+ *  typing a name means exactly that; a session saying a sentence does not.
+ *  Measured 2026-10-15: `go meetups`, said before `go` was loaded, minted a
+ *  tile called `go-meetups`. So plain prose with no word in it is refused at
+ *  the door (say `create <name>` to make a tile), while a line that uses the
+ *  structural grammar keeps the path that grammar runs on. */
+export const speaksStructure = (line: string): boolean =>
+  /^\s*[[~#?>.]/.test(line) || /[\/@:\[\]]/.test(line)
+

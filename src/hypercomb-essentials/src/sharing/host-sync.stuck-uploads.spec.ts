@@ -10,16 +10,18 @@
 // a reload forgot the pass-over; and a branch whose publish domain could never
 // take a write (`hyperccomb.com`, NXDOMAIN) read as uploading for ever.
 //
-//   (A) the HEAD the drain already makes is the probe: a pool host that
-//       answers a page is passed over right there, before any PUT — unless
-//       it already took this tab's uploads (a hiccup, never a page host);
+//   (A) the HEAD the drain already makes is asked once, alone, and a page
+//       there is named (`page`) — but it passes nothing over: every swarm
+//       host is the participant's choice (a publish domain, the host field;
+//       jwize 2026-10-11 — the pool tier that passed a page host over at its
+//       HEAD is gone), so its uploads decide;
 //   (B) an upload the CORS preflight blocks, from a host that answered, is a
 //       refusal — one wave, not two — but only on evidence a dropped path
 //       cannot give (two uploads that never left, the host answering a HEAD
 //       right after, the tab online), and never remembered past the socket;
 //   (C) this tab remembers the pass-over across a reload (sessionStorage,
-//       bounded, an hour) — only on positive evidence (a page, the host's own
-//       4xx) — and a receipt or the participant's retry forgets it;
+//       bounded, an hour) — only on positive evidence (the host's own 4xx) —
+//       and a receipt or the participant's retry forgets it;
 //   (D) the drain reconciles and sends in batches, so the first PUT — and the
 //       progress line — never wait on the whole queue, nor a new host's first
 //       answer on another host's backlog;
@@ -150,11 +152,13 @@ let root: MemoryDir
 const resources = new Map<string, Uint8Array>()
 
 // ── where the bytes go ─────────────────────────────────────────────────────
-// Defaults: the pool's hypercomb.com, and a relay (jwize.com) whose card
-// allows participants — the next door when a pool host is passed over.
-let pool: string[] | null = ['hypercomb.com']
+// Defaults: the host field (the meeting point the participant entered) is the
+// hypercomb.com apex. Where a test needs a door AFTER a failing host, the
+// failing host is a branch's publish domain and the host field is the door
+// below it. Each service reads the field it was made with, so a later test's
+// field never moves an earlier test's service.
+let field = 'hypercomb.com'
 let marks = new Map<string, string[]>()
-let participants: unknown = 'all'
 /** THIS TAB's session storage, as the resolver sees it: what a reload keeps. */
 let session = new Map<string, string>()
 const sessionLike = {
@@ -162,29 +166,30 @@ const sessionLike = {
   setItem: (k: string, v: string) => { session.set(k, String(v)) },
   removeItem: (k: string) => { session.delete(k) },
 }
-const deps = {
-  readPool: async () => pool,
+type Box = { field: string }
+const depsOf = (box: Box) => ({
   readMarks: async (segments: readonly string[]) => marks.get(segments.join('/')) ?? [],
-  relay: () => ({ host: 'jwize.com', participants }),
+  relay: () => ({ host: box.field }),
   originLoopback: () => false,
-  meetingHost: () => '',
   session: () => sessionLike,
-}
+})
 const DOWN_KEY = 'hc:swarm-hosts:down'
 
 const settle = async (turns = 40): Promise<void> => {
   for (let i = 0; i < turns; i++) await new Promise<void>(resolve => setImmediate(resolve))
 }
 
-/** A tab a moment after boot — or after a RELOAD: a fresh resolver over the
- *  same session, and a fresh service over it. */
-const make = async (...pages: string[][]): Promise<Service> => {
-  const resolver = new Resolver(deps)
+const makeWith = async (box: Box, ...pages: string[][]): Promise<Service> => {
+  const resolver = new Resolver(depsOf(box))
   resolver.warm(null)
   for (const page of pages) resolver.warm(page)
   await settle(10)
   return new HostSync(resolver)
 }
+
+/** A tab a moment after boot — or after a RELOAD: a fresh resolver over the
+ *  same session, and a fresh service over it. */
+const make = (...pages: string[][]): Promise<Service> => makeWith({ field }, ...pages)
 
 const join = (joined: boolean): void => { EffectBus.emit('mesh:public-changed', { public: joined }) }
 const meshState = (state: string): void => { EffectBus.emit('mesh:connection', { state }) }
@@ -204,17 +209,15 @@ beforeAll(async () => {
 beforeEach(() => {
   root = new MemoryDir('')
   resources.clear()
-  pool = ['hypercomb.com']
+  field = 'hypercomb.com'
   marks = new Map()
-  participants = 'all'
   session = new Map()
-  EffectBus.emit('hosts:render', { open: false, zones: [], loaded: false })
   registry.set('@hypercomb.social/Store', {
     opfsRoot: root,
     getResourceLocal: async (s: string) => { const b = resources.get(s); return b ? { arrayBuffer: async () => b.slice().buffer } : null },
     getLayerPoolBytes: async () => null,
   })
-  registry.set(MESH_KEY, { swarmHost: () => 'jwize.com' })
+  registry.set(MESH_KEY, { swarmHost: () => field })
   localStorage.clear()
   localStorage.setItem('hc:nostrmesh:self-domain', 'hypercomb.io')
   // The meeting socket is open: a host silent now is the host, not the path.
@@ -315,59 +318,56 @@ const router = (byHost: Record<string, Host>): FetchMock => vi.fn(async (input: 
 const calls = (host: Host, method: string): string[] =>
   host.fetch.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === method).map(([url]) => String(url))
 
-/** Stage `count` entries while the pool is still being read (so nothing
- *  drains), then let the pool land: the first pass meets a FULL queue —
- *  more entries than the four concurrent probe slots. */
+/** Mark `count` entries before the participant has entered a host (so
+ *  nothing drains — and, the live swarm 2026-10-11, nothing is queued for
+ *  no one), with the queue a previous session left for them — written
+ *  exactly as enqueue leaves an entry — then enter the host: the first pass
+ *  meets a FULL queue — more entries than the four concurrent probe slots. */
 const stageThenLand = async (count: number, label: string): Promise<{ service: Service; sigs: string[] }> => {
-  const readPool = deps.readPool
-  let land!: () => void
-  const landed = new Promise<void>(resolve => { land = resolve })
-  deps.readPool = async () => { await landed; return pool }
-  try {
-    const service = await make()
-    const sigs: string[] = []
-    for (let i = 0; i < count; i++) sigs.push(await resource(`{"name":"${label} ${i}"}`))
-    for (const s of sigs) await service.markPublic(s, 'resource')
-    await settle()
-    expect((await queued()).length).toBe(count)
-    land()
-    await settle()
-    return { service, sigs }
-  } finally {
-    deps.readPool = readPool
+  const box: Box = { field: '' }
+  const service = await makeWith(box)
+  const sigs: string[] = []
+  for (let i = 0; i < count; i++) sigs.push(await resource(`{"name":"${label} ${i}"}`))
+  for (const s of sigs) await service.markPublic(s, 'resource')
+  await settle()
+  expect(await queued()).toEqual([])
+  const pool = await root.getDirectoryHandle(await poolName('host-push'), { create: true })
+  for (const s of sigs) {
+    const w = await (await pool.getFileHandle(`${s}.resource`, { create: true })).createWritable()
+    await w.write(resources.get(s)!.slice())
+    await w.close()
   }
+  expect((await queued()).length).toBe(count)
+  box.field = field
+  service.swarmHostsFor(null) // the resolver looks again: its host field moved
+  await settle()
+  return { service, sigs }
 }
 
-// ── (A) the HEAD is the probe ──────────────────────────────────────────────
+// ── (A) the HEAD is asked, but a chosen host's uploads decide ──────────────
 
-describe('(A) a pool host that answers a page is passed over at its first HEAD', () => {
-  it('passed over after that one HEAD — before a single PUT — and the relay takes the page', async () => {
+describe('(A) a host that answers a page at its HEAD is named — and pushed to', () => {
+  it('the host field answering a page passes nothing over at its HEAD: asked per sig (a static door may hold some), then its blocked uploads decide — refused, never remembered', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
     const apex = pageSite()
-    const relay = heap()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
-    const service = await make()
-    const sigs = [await resource('{"name":"one"}'), await resource('{"name":"two"}'), await resource('{"name":"three"}')]
-    for (const s of sigs) await service.markPublic(s, 'resource')
-    await waitFor(async () => calls(relay, 'PUT').length === sigs.length && (await queued()).length === 0)
-    expect(calls(apex, 'PUT')).toEqual([])
-    expect(calls(apex, 'HEAD').length).toBeGreaterThan(0)
-    expect(calls(apex, 'HEAD').length).toBeLessThanOrEqual(sigs.length)
-    expect(calls(relay, 'PUT').sort()).toEqual(sigs.map(s => `https://jwize.com/${s}`).sort())
-    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['jwize.com'], source: 'relay', pending: false, passedOver: ['hypercomb.com'] })
-    // The status lines can say why, though no upload was ever tried there.
-    expect(service.hostTrouble('hypercomb.com')).toMatchObject({ host: 'hypercomb.com', why: 'page' })
-  })
-
-  it('ONE HEAD asks it, however full the first batch is — the rest of the batch waits on that answer', async () => {
-    const apex = pageSite()
-    const relay = heap()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
-    const { service, sigs } = await stageThenLand(9, 'entry')
+    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex }))
+    const { service } = await stageThenLand(9, 'entry')
     await service.drain()
-    await waitFor(async () => calls(relay, 'PUT').length === sigs.length && (await queued()).length === 0)
-    expect(calls(apex, 'HEAD')).toHaveLength(1)
-    expect(calls(apex, 'PUT')).toEqual([])
-    expect(service.swarmHostsFor(null)).toMatchObject({ hosts: ['jwize.com'], passedOver: ['hypercomb.com'] })
+    await settle()
+    // Never more than one HEAD per queued entry in a pass.
+    expect(calls(apex, 'HEAD').length).toBeGreaterThanOrEqual(1)
+    expect(calls(apex, 'HEAD').length).toBeLessThanOrEqual(9)
+    expect(service.hostTrouble('hypercomb.com')).toMatchObject({ host: 'hypercomb.com', why: 'page' })
+    // Still the room's host: a page at its door is not enough — its uploads decide.
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false })
+    for (let step = 0; step < 80 && calls(apex, 'PUT').length < 2; step++) { await vi.advanceTimersByTimeAsync(100); await settle() }
+    expect(calls(apex, 'PUT').length).toBeGreaterThanOrEqual(2)
+    // Its second blocked upload is a refusal (B) — read from the browser's
+    // side, so never remembered past this page. No door after it: it keeps
+    // the page, named, with why.
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false })
+    expect(service.hostTrouble('hypercomb.com')).toMatchObject({ why: 'page' })
+    expect(session.has(DOWN_KEY)).toBe(false)
   })
 
   it('a heap that answers 404 or the bytes is never passed over', async () => {
@@ -376,15 +376,13 @@ describe('(A) a pool host that answers a page is passed over at its first HEAD',
     // without a HEAD first (BCL-4) — the HEAD is asked of what is worth it.
     const held = await resource(JSON.stringify({ name: 'the heap holds me', pad: 'x'.repeat(20_000) }))
     const apex = heap(new Map([[held, resources.get(held)!]]))
-    const relay = heap()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
+    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex }))
     const service = await make()
     await service.markPublic(lacking, 'resource')
     await service.markPublic(held, 'resource')
     await waitFor(async () => (await queued()).length === 0)
     expect(calls(apex, 'PUT')).toEqual([`https://hypercomb.com/${lacking}`])
-    expect(relay.fetch).not.toHaveBeenCalled()
-    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false })
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false })
     expect(service.hostTrouble('hypercomb.com')).toBeNull()
     expect(session.has(DOWN_KEY)).toBe(false)
   })
@@ -405,17 +403,17 @@ describe('(A) a pool host that answers a page is passed over at its first HEAD',
     expect(state.seen.filter(p => p.host === 'shop.example').pop()).toMatchObject({ why: 'page', swarm: true })
     expect(service.hostTrouble('shop.example')).toMatchObject({ host: 'shop.example', why: 'page' })
     // Its second blocked upload is a refusal (B): the swarm stops waiting on
-    // it (D2) — the shop's jar goes to the pool, the domain named as passed
-    // over, still `page` — and its uploads are not tried again this page.
+    // it (D2) — the shop's jar goes to the host field, the domain named as
+    // passed over, still `page` — and its uploads are not tried again this page.
     await waitFor(() => (service.swarmHostsFor(['shop']).passedOver ?? []).includes('shop.example'), 15_000)
-    expect(service.swarmHostsFor(['shop'])).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['shop.example'] })
+    expect(service.swarmHostsFor(['shop'])).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false, passedOver: ['shop.example'] })
     await waitFor(async () => calls(apex, 'PUT').includes(`https://hypercomb.com/${jar}`) && (await queued()).length === 0, 15_000)
     expect(calls(shop, 'PUT').length).toBe(2)
     expect(service.hostTrouble('shop.example')).toMatchObject({ host: 'shop.example', why: 'page' })
     state.off()
   })
 
-  it('a pool host that already took this tab\'s uploads and answers a page once is not passed over — a hiccup, not a page host', async () => {
+  it('a host that already took this tab\'s uploads and answers a page once is not named a page host — a hiccup', async () => {
     let hiccup = false
     const apexHeap = heap()
     const site = pageSite()
@@ -427,8 +425,7 @@ describe('(A) a pool host that answers a page is passed over at its first HEAD',
       }),
       held: apexHeap.held,
     }
-    const relay = heap()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
+    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex }))
     const service = await make()
     await service.markPublic(await resource('{"name":"the first upload"}'), 'resource')
     await waitFor(async () => calls(apex, 'PUT').length === 1 && (await queued()).length === 0)
@@ -440,22 +437,9 @@ describe('(A) a pool host that answers a page is passed over at its first HEAD',
     await waitFor(async () => (await queued()).length === 0)
     expect(hiccup).toBe(false) // the page was answered
     expect(calls(apex, 'PUT')).toContain(`https://hypercomb.com/${second}`)
-    expect(relay.fetch).not.toHaveBeenCalled()
-    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false })
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false })
     expect(service.hostTrouble('hypercomb.com')).toBeNull()
     expect(session.has(DOWN_KEY)).toBe(false)
-  })
-
-  it('a page answered while no socket is open is passed over for this page only, and the socket coming back gives it back', async () => {
-    meshState('offline')
-    const apex = pageSite()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': heap() }))
-    const service = await make()
-    await service.markPublic(await resource('{"name":"a page, while offline"}'), 'resource')
-    await waitFor(() => (service.swarmHostsFor(null).passedOver ?? []).includes('hypercomb.com'))
-    expect(session.has(DOWN_KEY)).toBe(false)
-    EffectBus.emit('mesh:connection', { state: 'open', reopened: true })
-    expect(service.swarmHostsFor(null).hosts).toEqual(['hypercomb.com'])
   })
 })
 
@@ -472,20 +456,23 @@ describe('(B) an upload the CORS preflight blocks is a refusal — on evidence, 
   }
 
   /** Three tiles: more than one upload, as any real page has. */
-  const three = async (service: Service, label: string): Promise<string[]> => {
+  const three = async (service: Service, label: string, page?: readonly string[]): Promise<string[]> => {
     const sigs = [await resource(`{"name":"${label} one"}`), await resource(`{"name":"${label} two"}`), await resource(`{"name":"${label} three"}`)]
-    for (const s of sigs) await service.markPublic(s, 'resource')
+    for (const s of sigs) await (page ? service.markPublic(s, 'resource', true, page) : service.markPublic(s, 'resource'))
     return sigs
   }
 
-  it('a pool host whose HEAD answered and whose uploads never left — and that still answers a HEAD — is refused and passed over at its second blocked upload, for this page only', async () => {
+  it('a publish domain whose HEAD answered and whose uploads never left — and that still answers a HEAD — is refused and passed over at its second blocked upload, for this page only', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    // The apex is the shop's publish domain; the host field is the door below it.
+    marks = new Map([['shop', ['hypercomb.com']]])
+    field = 'jwize.com'
     const apex = corsHeap()
     const relay = heap()
     vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
     const state = listen<{ host: string; status: string; reason: string; why?: string }>('sync:state')
-    const service = await make()
-    const sigs = await three(service, 'blocked at the preflight')
+    const service = await make(['shop'])
+    const sigs = await three(service, 'blocked at the preflight', ['shop'])
     // The first blocked upload alone could be one error page: it waits one
     // ladder step (2 s). The second, with the host still answering a HEAD,
     // decides — a refusal, never the silent host's two whole failure waves.
@@ -494,13 +481,13 @@ describe('(B) an upload the CORS preflight blocks is a refusal — on evidence, 
     expect(calls(relay, 'PUT').sort()).toEqual(sigs.map(s => `https://jwize.com/${s}`).sort())
     expect(state.seen.find(p => p.host === 'hypercomb.com' && p.status === 'refused')).toMatchObject({ why: 'refused' })
     expect(service.hostTrouble('hypercomb.com')).toMatchObject({ status: 'refused', why: 'refused' })
-    expect(service.swarmHostsFor(null)).toMatchObject({ hosts: ['jwize.com'], source: 'relay', passedOver: ['hypercomb.com'] })
+    expect(service.swarmHostsFor(['shop'])).toMatchObject({ hosts: ['jwize.com'], source: 'meeting', passedOver: ['hypercomb.com'] })
     // Read from the browser's side, so a network that changed under the
     // uploads would read the same: never remembered past this page…
     expect(session.has(DOWN_KEY)).toBe(false)
     // …and given back when the socket comes back.
     EffectBus.emit('mesh:connection', { state: 'open', reopened: true })
-    expect(service.swarmHostsFor(null).hosts).toEqual(['hypercomb.com'])
+    expect(service.swarmHostsFor(['shop']).hosts).toEqual(['hypercomb.com'])
     state.off()
   })
 
@@ -516,8 +503,7 @@ describe('(B) an upload the CORS preflight blocks is a refusal — on evidence, 
       }),
       held: apexHeap.held,
     }
-    const relay = heap()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
+    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex }))
     const state = listen<{ host: string; status: string }>('sync:state')
     const service = await make()
     const sigs = await three(service, 'one error page')
@@ -525,12 +511,11 @@ describe('(B) an upload the CORS preflight blocks is a refusal — on evidence, 
     expect((await queued()).length).toBe(0)
     expect([...apexHeap.held.keys()]).toEqual(expect.arrayContaining(sigs))
     expect(state.seen.some(p => p.host === 'hypercomb.com' && p.status === 'refused')).toBe(false)
-    expect(relay.fetch).not.toHaveBeenCalled()
-    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false })
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false })
     state.off()
   })
 
-  it('the network dropped under the uploads (the HEAD after them gets no answer either): unreachable, never refused, never remembered', async () => {
+  it('the network dropped under the uploads (the HEAD after them gets no answer either): unreachable, never refused, never passed over', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
     let down = false
     const apex: Host = {
@@ -541,8 +526,7 @@ describe('(B) an upload the CORS preflight blocks is a refusal — on evidence, 
       }),
       held: new Map(),
     }
-    const relay = heap()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
+    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex }))
     const state = listen<{ host: string; status: string }>('sync:state')
     const service = await make()
     await three(service, 'the wifi dropped')
@@ -552,10 +536,10 @@ describe('(B) an upload the CORS preflight blocks is a refusal — on evidence, 
     // The first wave: on the ladder, still the room's host.
     expect(state.seen.some(p => p.host === 'hypercomb.com' && p.status === 'refused')).toBe(false)
     expect(service.swarmHostsFor(null).hosts).toEqual(['hypercomb.com'])
-    // Silent on the next wave too (the ladder's rule passes it over) — still
-    // weak evidence: this page's only, a reload asks it again.
-    for (let step = 0; step < 40 && !(service.swarmHostsFor(null).passedOver ?? []).length; step++) { await vi.advanceTimersByTimeAsync(250); await settle() }
-    expect(service.swarmHostsFor(null).passedOver).toEqual(['hypercomb.com'])
+    // Silent on the next waves too — weak evidence, and it answered before:
+    // a host the participant chose is never passed over for silence alone.
+    for (let step = 0; step < 40; step++) { await vi.advanceTimersByTimeAsync(250); await settle() }
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false })
     expect(state.seen.some(p => p.host === 'hypercomb.com' && p.status === 'refused')).toBe(false)
     expect(session.has(DOWN_KEY)).toBe(false)
     state.off()
@@ -565,7 +549,7 @@ describe('(B) an upload the CORS preflight blocks is a refusal — on evidence, 
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
     vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
     const apex = corsHeap()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': heap() }))
+    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex }))
     const state = listen<{ host: string; status: string; why?: string }>('sync:state')
     const service = await make()
     await three(service, 'offline by the browser')
@@ -580,16 +564,14 @@ describe('(B) an upload the CORS preflight blocks is a refusal — on evidence, 
   it('with no socket open it is the path, not the host: unreachable, on the ladder, not passed over', async () => {
     meshState('offline')
     const apex = corsHeap()
-    const relay = heap()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
+    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex }))
     const state = listen<{ host: string; status: string }>('sync:state')
     const service = await make()
     const s = await resource('{"name":"offline, maybe"}')
     await service.markPublic(s, 'resource')
     await waitFor(() => state.seen.some(p => p.host === 'hypercomb.com' && p.status === 'unreachable'))
     expect(state.seen.some(p => p.host === 'hypercomb.com' && p.status === 'refused')).toBe(false)
-    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false })
-    expect(relay.fetch).not.toHaveBeenCalled()
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false })
     state.off()
   })
 })
@@ -597,120 +579,133 @@ describe('(B) an upload the CORS preflight blocks is a refusal — on evidence, 
 // ── (C) this tab remembers ─────────────────────────────────────────────────
 
 describe('(C) a pass-over survives a reload of this tab — bounded, within the hour', () => {
+  // The apex is the shop's publish domain; the host field (jwize.com) is the
+  // door below it, so a pass-over shows as the page moving there.
+  beforeEach(() => {
+    marks = new Map([['shop', ['hypercomb.com']]])
+    field = 'jwize.com'
+  })
+
   const warmed = async (): Promise<ResolverLike> => {
-    const r = new Resolver(deps)
+    const r = new Resolver(depsOf({ field }))
     r.warm(null)
+    r.warm(['shop'])
     await settle(10)
     return r
   }
 
   it('a reload keeps it; a receipt (markUp) or a retry (clearDown) forgets it — in this page and the next', async () => {
     const first = await warmed()
-    first.markDown('hypercomb.com', 'hypercomb.com answers a page — takes no uploads')
+    first.markDown('hypercomb.com', 'refused: 403 not on the writers list')
     expect(session.has(DOWN_KEY)).toBe(true)
     const reloaded = await warmed()
-    expect(reloaded.hostsFor(null)).toEqual({ hosts: ['jwize.com'], source: 'relay', pending: false, passedOver: ['hypercomb.com'] })
-    expect(reloaded.downReason('hypercomb.com')).toContain('answers a page')
+    expect(reloaded.hostsFor(['shop'])).toEqual({ hosts: ['jwize.com'], source: 'meeting', pending: false, passedOver: ['hypercomb.com'] })
+    expect(reloaded.downReason('hypercomb.com')).toContain('writers list')
 
     reloaded.markUp('hypercomb.com')
     expect(session.has(DOWN_KEY)).toBe(false)
-    expect((await warmed()).hostsFor(null).hosts).toEqual(['hypercomb.com'])
+    expect((await warmed()).hostsFor(['shop']).hosts).toEqual(['hypercomb.com'])
 
     const again = await warmed()
-    again.markDown('hypercomb.com', 'refused')
+    again.markDown('hypercomb.com', 'refused: 403')
     again.clearDown()
     expect(session.has(DOWN_KEY)).toBe(false)
-    expect((await warmed()).hostsFor(null).hosts).toEqual(['hypercomb.com'])
+    expect((await warmed()).hostsFor(['shop']).hosts).toEqual(['hypercomb.com'])
+  })
+
+  it('a page or silence alone never passes a chosen host over — even remembered from an older package', async () => {
+    const r = await warmed()
+    r.markDown('hypercomb.com', 'hypercomb.com answers a page — takes no uploads')
+    expect((await warmed()).hostsFor(['shop'])).toEqual({ hosts: ['hypercomb.com'], source: 'publish', pending: false })
+    session.clear()
+    const s = await warmed()
+    s.markDown('hypercomb.com', 'unreachable: timed out', false)
+    expect(s.hostsFor(['shop'])).toEqual({ hosts: ['hypercomb.com'], source: 'publish', pending: false })
   })
 
   it('an hour later it is asked again; only the newest few are kept; a path-time failure is this page\'s only', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     const r = await warmed()
-    r.markDown('hypercomb.com', 'refused')
+    r.markDown('hypercomb.com', 'refused: 403')
     vi.setSystemTime(Date.now() + 59 * 60_000)
-    expect((await warmed()).hostsFor(null).passedOver).toEqual(['hypercomb.com'])
+    expect((await warmed()).hostsFor(['shop']).passedOver).toEqual(['hypercomb.com'])
     vi.setSystemTime(Date.now() + 2 * 60_000)
-    expect((await warmed()).hostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false })
+    expect((await warmed()).hostsFor(['shop'])).toEqual({ hosts: ['hypercomb.com'], source: 'publish', pending: false })
 
     session.clear()
     const many = await warmed()
-    for (let i = 0; i < 12; i++) { vi.setSystemTime(Date.now() + 1_000); many.markDown(`host${i}.example`, 'refused') }
+    for (let i = 0; i < 12; i++) { vi.setSystemTime(Date.now() + 1_000); many.markDown(`host${i}.example`, 'refused: 403') }
     const rows = JSON.parse(session.get(DOWN_KEY)!) as [string, string, number][]
     expect(rows.map(row => row[0])).toEqual([11, 10, 9, 8, 7, 6, 5, 4].map(i => `host${i}.example`))
 
     session.clear()
     const offline = await warmed()
-    offline.markDown('hypercomb.com', 'unreachable', false)
-    expect(offline.hostsFor(null).passedOver).toEqual(['hypercomb.com'])
+    // Read from the browser's side (#putThrew): this page's only.
+    offline.markDown('hypercomb.com', 'refused: hypercomb.com answers, but lets no upload from this page through', false)
+    expect(offline.hostsFor(['shop']).passedOver).toEqual(['hypercomb.com'])
     expect(session.has(DOWN_KEY)).toBe(false)
   })
 
   it('it lives in THIS TAB\'s sessionStorage — never localStorage, never another tab', () => {
     expect(liveSession?.()).toBe(globalThis.sessionStorage)
-    const r = new Resolver({ ...deps, session: () => globalThis.sessionStorage })
-    r.markDown('hypercomb.com', 'refused')
+    const r = new Resolver({ ...depsOf({ field }), session: () => globalThis.sessionStorage })
+    r.markDown('hypercomb.com', 'refused: 403')
     expect(globalThis.sessionStorage.getItem(DOWN_KEY)).toContain('hypercomb.com')
     expect(localStorage.getItem(DOWN_KEY)).toBeNull()
     r.clearDown()
     expect(globalThis.sessionStorage.getItem(DOWN_KEY)).toBeNull()
   })
 
-  it('a reload keeps the relay as the room\'s host: the page-answering apex is not asked again', async () => {
-    const apex = pageSite()
+  /** The shop's domain: refuses every upload with its own 403. */
+  const closedDoor = (): Host => ({
+    fetch: vi.fn(async (_input: string, init?: RequestInit) => (init?.method === 'PUT' ? new Response('not on the writers list', { status: 403 }) : new Response(null, { status: 404 }))),
+    held: new Map(),
+  })
+
+  it('a reload keeps the host field as the shop\'s host: the refusing domain is not asked again', async () => {
+    const apex = closedDoor()
     const relay = heap()
     vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
-    const before = await make()
-    await before.markPublic(await resource('{"name":"before the reload"}'), 'resource')
+    const before = await make(['shop'])
+    await before.markPublic(await resource('{"name":"before the reload"}'), 'resource', true, ['shop'])
     await waitFor(async () => calls(relay, 'PUT').length === 1 && (await queued()).length === 0)
     apex.fetch.mockClear()
 
-    const after = await make() // the reload: a new resolver over the same tab session
-    expect(after.swarmHostsFor(null)).toEqual({ hosts: ['jwize.com'], source: 'relay', pending: false, passedOver: ['hypercomb.com'] })
-    // …and still knows why: a page, not a name that reaches nothing.
-    expect(after.hostTrouble('hypercomb.com')).toMatchObject({ host: 'hypercomb.com', why: 'page' })
+    const after = await make(['shop']) // the reload: a new resolver over the same tab session
+    expect(after.swarmHostsFor(['shop'])).toEqual({ hosts: ['jwize.com'], source: 'meeting', pending: false, passedOver: ['hypercomb.com'] })
+    // …and still knows why: its own refusal, not a name that reaches nothing.
+    expect(after.hostTrouble('hypercomb.com')).toMatchObject({ host: 'hypercomb.com', why: 'refused' })
     const s = await resource('{"name":"after the reload"}')
-    await after.markPublic(s, 'resource')
+    await after.markPublic(s, 'resource', true, ['shop'])
     await waitFor(async () => calls(relay, 'PUT').length === 2 && (await queued()).length === 0)
     expect(apex.fetch).not.toHaveBeenCalled()
   })
 
-  it('a receipt from it gives it back — the pool\'s primary again, and nothing left to remember', async () => {
-    marks = new Map([['shop', ['hypercomb.com']]]) // the apex is also the shop's chosen domain
+  it('a receipt from it gives it back — and nothing left to remember', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    // The host field alone: refused, it keeps the page (no door after it) and
+    // is asked again once its own wait is over.
+    marks = new Map()
+    field = 'hypercomb.com'
     let fixed = false
-    const site = pageSite()
+    const closed = closedDoor()
     const apexHeap = heap()
-    const apex: Host = { fetch: vi.fn(async (input: string, init?: RequestInit) => (fixed ? apexHeap : site).fetch(input, init)), held: apexHeap.held }
-    const relay = heap()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
-    const service = await make(['shop'])
-    await service.markPublic(await resource('{"name":"a root tile"}'), 'resource')
-    await waitFor(async () => calls(relay, 'PUT').length === 1 && (await queued()).length === 0)
-    expect(service.swarmHostsFor(null).source).toBe('relay')
-    expect(session.has(DOWN_KEY)).toBe(true) // a reload now would keep it
+    const apex: Host = { fetch: vi.fn(async (input: string, init?: RequestInit) => (fixed ? apexHeap : closed).fetch(input, init)), held: apexHeap.held }
+    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex }))
+    const service = await make()
+    const s = await resource('{"name":"a root tile"}')
+    await service.markPublic(s, 'resource')
+    await advanceUntil(() => session.has(DOWN_KEY), 100, 100)
+    expect(service.hostTrouble('hypercomb.com')).toMatchObject({ why: 'refused' })
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false })
 
-    fixed = true // the apex is routed through a worker that takes signed writes
-    const jar = await resource('{"name":"on the shop, at its chosen domain"}')
-    await service.markPublic(jar, 'resource', true, ['shop'])
-    await waitFor(async () => (await receipts()).includes(`${jar}.${await hostHash('hypercomb.com')}`))
-    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false })
+    fixed = true // the host lists this key now
+    await advanceUntil(async () => (await receipts()).includes(`${s}.${await hostHash('hypercomb.com')}`), 30_000, 40)
+    expect(await receipts()).toContain(`${s}.${await hostHash('hypercomb.com')}`)
     expect(session.has(DOWN_KEY)).toBe(false)
-    // The page it once answered no longer describes it: a later, passing
-    // failure is that failure — never "answers with a web page" — and its
-    // HEAD-before-PUT check is back (no re-upload of what it holds).
     expect(service.hostTrouble('hypercomb.com')).toBeNull()
-    const state = listen<{ host: string; status: string; why?: string }>('sync:state')
-    apexHeap.fetch.mockImplementation(async (_input: string, init?: RequestInit) =>
-      (init?.method === 'PUT' ? new Response('deploying', { status: 503 }) : new Response(null, { status: 404 })))
-    const heads = calls(apex, 'HEAD').length
-    // Large: the HEAD-before-PUT check is for what is worth asking about.
-    const lid = await resource(JSON.stringify({ name: 'a lid, during a deploy', pad: 'x'.repeat(20_000) }))
-    await service.markPublic(lid, 'resource', true, ['shop'])
-    await waitFor(() => state.seen.some(p => p.host === 'hypercomb.com' && p.status === 'unreachable'))
-    expect(state.seen.filter(p => p.host === 'hypercomb.com' && p.status === 'unreachable').pop()).toMatchObject({ why: 'unreachable' })
-    expect(service.hostTrouble('hypercomb.com')).toMatchObject({ why: 'unreachable' })
-    expect(calls(apex, 'HEAD').slice(heads)).toContain(`https://hypercomb.com/${lid}`)
-    state.off()
-    expect((await make(['shop'])).swarmHostsFor(null).hosts).toEqual(['hypercomb.com']) // and after a reload
+    vi.useRealTimers()
+    expect((await make()).hostTrouble('hypercomb.com')).toBeNull() // and after a reload
   })
 
   it('only positive evidence is remembered: the host\'s own 4xx is, a full host (it named its own wait) is not', async () => {
@@ -722,9 +717,9 @@ describe('(C) a pass-over survives a reload of this tab — bounded, within the 
       'hypercomb.com': answering(() => new Response('slow down', { status: 429, headers: { 'retry-after': '30' } })),
       'jwize.com': heap(),
     }))
-    const full = await make()
-    await full.markPublic(await resource('{"name":"to a full host"}'), 'resource')
-    await waitFor(() => (full.swarmHostsFor(null).passedOver ?? []).includes('hypercomb.com'))
+    const full = await make(['shop'])
+    await full.markPublic(await resource('{"name":"to a full host"}'), 'resource', true, ['shop'])
+    await waitFor(() => (full.swarmHostsFor(['shop']).passedOver ?? []).includes('hypercomb.com'))
     expect(full.hostTrouble('hypercomb.com')).toMatchObject({ why: 'full' })
     expect(session.has(DOWN_KEY)).toBe(false)
 
@@ -732,22 +727,21 @@ describe('(C) a pass-over survives a reload of this tab — bounded, within the 
       'hypercomb.com': answering(() => new Response('not on the writers list', { status: 403 })),
       'jwize.com': heap(),
     }))
-    const closed = await make()
-    await closed.markPublic(await resource('{"name":"to a closed door"}'), 'resource')
+    const closed = await make(['shop'])
+    await closed.markPublic(await resource('{"name":"to a closed door"}'), 'resource', true, ['shop'])
     await waitFor(() => session.has(DOWN_KEY))
-    expect((await make()).swarmHostsFor(null)).toMatchObject({ hosts: ['jwize.com'], passedOver: ['hypercomb.com'] })
+    expect((await make(['shop'])).swarmHostsFor(['shop'])).toMatchObject({ hosts: ['jwize.com'], passedOver: ['hypercomb.com'] })
   })
 
   it('the participant\'s retry forgets it, after a reload too', async () => {
-    const apex = pageSite()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': heap() }))
-    const service = await make()
-    await service.markPublic(await resource('{"name":"passed over"}'), 'resource')
-    await waitFor(() => service.swarmHostsFor(null).source === 'relay')
+    vi.stubGlobal('fetch', router({ 'hypercomb.com': closedDoor(), 'jwize.com': heap() }))
+    const service = await make(['shop'])
+    await service.markPublic(await resource('{"name":"passed over"}'), 'resource', true, ['shop'])
+    await waitFor(() => (service.swarmHostsFor(['shop']).passedOver ?? []).includes('hypercomb.com'))
     expect(session.has(DOWN_KEY)).toBe(true)
     await service.reDrain()
     expect(session.has(DOWN_KEY)).toBe(false)
-    expect((await make()).swarmHostsFor(null).hosts).toEqual(['hypercomb.com'])
+    expect((await make(['shop'])).swarmHostsFor(['shop']).hosts).toEqual(['hypercomb.com'])
   })
 })
 
@@ -809,7 +803,7 @@ describe('(D) the drain sends in batches', () => {
   }, 60_000) // staging 3,000 signed entries is the slow part, never the drain
 
   it('a host whose first entry sits behind another host\'s backlog is asked in the first batch, not after the backlog', async () => {
-    // The pool's apex is taking a big backlog (held at a gate so the whole
+    // The host field's apex is taking a big backlog (held at a gate so the whole
     // queue is staged first); then `favorites` is given its publish domain —
     // a typo that reaches nothing. Its first request must not wait for 200
     // uploads to the apex: until it fails, nothing true can be said of it.
@@ -875,8 +869,8 @@ describe('(E) a publish domain that cannot take writes says so', () => {
     await waitFor(() => state.seen.some(p => p.host === 'closed.example' && p.status === 'refused'))
     expect(service.hostTrouble('closed.example')).toMatchObject({ why: 'refused', reason: '403 not on the writers list' })
     // D2 (2026-10-10): the swarm stops waiting on it — the club's tiles go to
-    // the pool, and the domain is named as passed over, with why.
-    expect(service.swarmHostsFor(['club'])).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false, passedOver: ['closed.example'] })
+    // the host field, and the domain is named as passed over, with why.
+    expect(service.swarmHostsFor(['club'])).toEqual({ hosts: ['hypercomb.com'], source: 'meeting', pending: false, passedOver: ['closed.example'] })
 
     meshState('offline')
     const offline = await make(['far'])
@@ -929,7 +923,7 @@ describe('(A) the first probe of a host goes alone — and only the first', () =
         throw new TypeError('Failed to fetch')
       }),
     }
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': gone, 'jwize.com': heap() }))
+    vi.stubGlobal('fetch', router({ 'hypercomb.com': gone }))
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const { service } = await stageThenLand(6, 'unanswered')
     await service.drain()

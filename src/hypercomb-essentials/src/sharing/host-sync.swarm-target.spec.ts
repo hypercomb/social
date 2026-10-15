@@ -1,16 +1,17 @@
 // host-sync.swarm-target.spec.ts — THE SWARM'S HOSTS ARE RESOLVED PER PAGE.
 //
 // A joined tab uploads the tiles it offers on a page to that page's publish
-// domains, else its hosts pool's primary, else — only then, and only when its
-// card allows participants — the relay it meets at (swarm-hosts.ts). Nothing
-// is stored or picked, so a reload finds the same targets and the receipts on
-// disk count again. A host's `201 stored <sig>` is the receipt (no read-back),
-// uploads go four at a time, and every failure backs off per host with the
-// host's own reason.
+// domains, else the host field — the meeting point the participant entered
+// (the mesh's swarmHost) — else nowhere (swarm-hosts.ts; jwize 2026-10-11:
+// there is no default host, the hosts pool picks nothing, the meeting point's
+// card decides nothing). Nothing is stored or picked, so a reload finds the
+// same targets and the receipts on disk count again. A host's `201 stored
+// <sig>` is the receipt (no read-back), uploads go four at a time, and every
+// failure backs off per host with the host's own reason.
 //
-// Most of this file exercises the drain through the LAST resort — an empty
-// pool and a relay that allows participants — because its mechanics are the
-// same for every swarm host; "which host" has its own block at the end.
+// Most of this file exercises the drain through the host field — the meeting
+// point's own heap — because its mechanics are the same for every swarm
+// host; "which host" has its own block at the end.
 //
 // The drain reads OPFS through the Store's `opfsRoot`, so the fake root and
 // the fake local store are handed over through IoC, as is the mesh stub (for
@@ -141,20 +142,16 @@ let swarmHost = 'jwize.com'
 let signedAt: number[] = []
 
 // ── where the bytes go: the world the resolver reads ───────────────────────
-// Defaults: an EMPTY pool and a relay whose card allows participants — the
-// last resort, so the relay is the swarm's host as it used to be by default.
-let pool: string[] | null = []
+// Defaults: no publish marks, and the host field (`swarmHost`, the meeting
+// point the participant entered) is the swarm's host. The card's policy is
+// handed over only to show that nothing reads it.
 let marks = new Map<string, string[]>()
 let participants: unknown = 'all'
 let originLoopback = false
-/** The host this tab's meeting named (its `hc:mesh-zone`), '' = none. */
-let meetingHost = ''
 const deps = {
-  readPool: async () => pool,
   readMarks: async (segments: readonly string[]) => marks.get(segments.join('/')) ?? [],
   relay: () => ({ host: swarmHost, participants }),
   originLoopback: () => originLoopback,
-  meetingHost: () => meetingHost,
 }
 
 /** A service whose resolver has read the world (the root's answer, and any
@@ -189,14 +186,9 @@ beforeEach(() => {
   layers.clear()
   signedAt = []
   swarmHost = 'jwize.com'
-  pool = []
   marks = new Map()
   participants = 'all'
   originLoopback = false
-  meetingHost = ''
-  // The bus replays its last value to every new resolver: a pool an earlier
-  // test announced must not become this test's pool.
-  EffectBus.emit('hosts:render', { open: false, zones: [], loaded: false })
   registry.set('@hypercomb.social/Store', {
     opfsRoot: root,
     getResourceLocal: async (s: string) => { const b = resources.get(s); return b ? { arrayBuffer: async () => b.slice().buffer } : null },
@@ -359,7 +351,7 @@ describe('the swarm host is a derived target', () => {
     expect(await service.isClosureAvailable(s, 'resource')).toBe(true)
   })
 
-  it('ws://localhost:7793 is http://localhost:7793; a port on a real host is no target at all', async () => {
+  it('ws://localhost:7793 is http://localhost:7793; a port on a real host the participant entered is kept; none is no target', async () => {
     swarmHost = 'localhost:7793'
     originLoopback = true // the harness page is itself local
     const host = makeHost()
@@ -370,8 +362,11 @@ describe('the swarm host is a derived target', () => {
     await quiesce(service, host)
     expect(calls(host, 'PUT')).toEqual([`http://localhost:7793/${s}`])
 
-    swarmHost = 'evil.example:8443'
-    expect(service.ensureSwarmTarget()).toBe('needs-host')
+    // A self-hosted machine on :8443 is the host the participant entered.
+    originLoopback = false
+    swarmHost = 'home.example.net:8443'
+    expect(service.ensureSwarmTarget()).toBe('ready')
+    expect(service.swarmHosts()).toEqual(['home.example.net:8443'])
     swarmHost = ''
     expect(service.ensureSwarmTarget()).toBe('needs-host')
     registry.delete(MESH_KEY) // no mesh at all — tolerated, no target
@@ -757,10 +752,12 @@ describe('the room is owed only what it is offered now', () => {
   })
 
   it('the swarm host\'s receipt is announced at once, while another host still owes the entry', async () => {
+    // A public host the participant NAMED — there is no default (2026-10-11).
     localStorage.setItem('hc:public-host', '1')
+    localStorage.setItem('hc:public-host:domain', 'cdn.example')
     const host = makeHost()
     const fetch = vi.fn(async (input: string, init?: RequestInit) =>
-      new URL(String(input)).host === 'pluginthematrix.com' && init?.method === 'PUT'
+      new URL(String(input)).host === 'cdn.example' && init?.method === 'PUT'
         ? new Response('not on the writers list', { status: 401 })
         : host.fetch(input, init))
     vi.stubGlobal('fetch', fetch)
@@ -776,17 +773,33 @@ describe('the room is owed only what it is offered now', () => {
     receipted.off()
   })
 
-  it('only a socket that came back ends the swarm host\'s pause — a late probe answer does not', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
-    const host = makeHost({ put: () => ({ status: 403, body: 'participants-closed' }) })
+  it('a public host turned on with NO host named takes nothing — no default host stands in (2026-10-11)', async () => {
+    localStorage.setItem('hc:public-host', '1')
+    const host = makeHost()
     vi.stubGlobal('fetch', host.fetch)
     const service = await make()
-    EffectBus.emit('mesh:connection', { state: 'open', reopened: false })
-    const s = await resource('{"name":"a closed host"}')
+    const s = await resource('{"name":"shared with the gate on and no host named"}')
     await service.markPublic(s, 'resource')
     await service.drain()
     await settle()
-    expect(calls(host, 'PUT')).toHaveLength(1)   // refused: paused 10 min
+    // The room's host took it; nothing was sent anywhere else.
+    expect(calls(host, 'PUT')).toHaveLength(1)
+    expect(host.fetch.mock.calls.every(([url]) => new URL(String(url)).host === 'jwize.com')).toBe(true)
+    expect(await queued()).toEqual([])
+  })
+
+  it('only a socket that came back ends a path failure\'s pause — a late probe answer does not', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    // The host is deploying (503): the PATH may be the trouble, not the host.
+    const host = makeHost({ put: (n) => (n === 1 ? { status: 503, body: 'deploying' } : null) })
+    vi.stubGlobal('fetch', host.fetch)
+    const service = await make()
+    EffectBus.emit('mesh:connection', { state: 'open', reopened: false })
+    const s = await resource('{"name":"a host on its way back"}')
+    await service.markPublic(s, 'resource')
+    await service.drain()
+    await settle()
+    expect(calls(host, 'PUT')).toHaveLength(1)   // paused on the ladder
 
     EffectBus.emit('mesh:connection', { state: 'stalled', reopened: false })
     EffectBus.emit('mesh:connection', { state: 'open', reopened: false })
@@ -796,6 +809,44 @@ describe('the room is owed only what it is offered now', () => {
 
     EffectBus.emit('mesh:connection', { state: 'open', reopened: true })
     await vi.advanceTimersByTimeAsync(100)
+    await settle()
+    expect(calls(host, 'PUT')).toHaveLength(2)
+  })
+
+  it('a host field that REFUSES this key keeps its 10 min pause through a socket that came back, and nothing new is copied for it (decision c: its tiles are live meanwhile)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    const host = makeHost({ put: () => ({ status: 403, body: 'this host keeps bytes for its own people only' }) })
+    vi.stubGlobal('fetch', host.fetch)
+    const service = await make()
+    EffectBus.emit('mesh:connection', { state: 'open', reopened: false })
+    const s = await resource('{"name":"shared with a host that says no"}')
+    await service.markPublic(s, 'resource')
+    await service.drain()
+    await settle()
+    expect(calls(host, 'PUT')).toHaveLength(1)   // refused: paused 10 min
+    // No door after it: the host field keeps the page, with its why — and
+    // the room's tiles go live meanwhile.
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['jwize.com'], source: 'meeting', pending: false })
+
+    // A phone's socket drops and comes back, again and again: no refused
+    // upload rides any of those returns.
+    for (let i = 0; i < 3; i++) {
+      EffectBus.emit('mesh:connection', { state: 'closed', reopened: false })
+      EffectBus.emit('mesh:connection', { state: 'open', reopened: true })
+      await vi.advanceTimersByTimeAsync(100)
+      await settle()
+    }
+    expect(calls(host, 'PUT')).toHaveLength(1)
+
+    // A tile shared now is not copied into the push pool for a host that
+    // will not take it — its marker is kept, so a yes later stages it.
+    const later = await resource('{"name":"shared after the refusal"}')
+    await service.markPublic(later, 'resource')
+    await settle()
+    expect(await queued()).toEqual([`${s}.resource`])
+
+    // The pause ends on its own clock: what is queued asks again, once.
+    await vi.advanceTimersByTimeAsync(10 * 60_000 + 1_000)
     await settle()
     expect(calls(host, 'PUT')).toHaveLength(2)
   })
@@ -836,6 +887,35 @@ describe('the publish gate asks the nodes it publishes to', () => {
     expect(await service.isClosureAvailableOn(s, 'resource', true, ['jwize.com'])).toBe(true)
     expect(await service.isClosureAvailableOn(s, 'resource', true, ['not-a-target.example'])).toBe(false)
   })
+
+  // A page with children never finished publishing to a host on this machine
+  // (2026-10-13): `localhost:4291` failed the dotted, port-less shape, so the
+  // publish named no node, `markPublic` staged nothing, and the page's freshly
+  // sealed root — the one atom no tile write had already backed up — never
+  // left. A leaf published only because its seal IS its backed-up head.
+  it('a host on this machine is a publish node — loopback, with its port; nothing else loosens', async () => {
+    const service = (await make()) as Service & {
+      addPublishNodes: (d: readonly string[]) => void
+      publishNodes: () => string[]
+    }
+    service.addPublishNodes(['localhost:4291', '127.0.0.1:8080', 'try-x.localhost:4291', 'lan.example:8080', 'http://x/y', 'not a host'])
+    expect(service.publishNodes()).toEqual(['localhost:4291', '127.0.0.1:8080', 'try-x.localhost:4291'])
+  })
+
+  it('a publish to a node on this machine sends the sealed root, over http', async () => {
+    const field = makeHost()
+    const node = makeHost()
+    vi.stubGlobal('fetch', router({ 'jwize.com': field, 'localhost:4291': node }))
+    const service = (await make()) as Service & {
+      addPublishNodes: (d: readonly string[]) => void
+      markPublic: (sig: string, kind?: string, closure?: boolean, page?: readonly string[] | false) => Promise<void>
+    }
+    const sealed = await layer({ name: 'site' })
+    service.addPublishNodes(['localhost:4291'])
+    await service.markPublic(sealed, 'layer', true, false)
+    await quiesce(service, node)
+    expect(calls(node, 'PUT')).toEqual([`http://localhost:4291/${sealed}`])
+  })
 })
 
 // ── which host (jwize 2026-10-07) ──────────────────────────────────────────
@@ -856,125 +936,137 @@ const blossom = (held: Map<string, Uint8Array> = new Map()) => {
   return host
 }
 
-describe('which host: publish domains, then the hosts pool, then the relay', () => {
-  it('a fresh install uploads to its pool\'s hypercomb.com — its zone root, read back — never to the relay it meets at', async () => {
-    pool = ['hypercomb.com']
+describe('which host: publish domains, then the host field, then none (jwize 2026-10-11)', () => {
+  it('no host field: no target — nothing is sent, whatever the pool holds', async () => {
+    swarmHost = ''
     const apex = blossom()
-    const relay = makeHost()
-    const fetch = router({ 'hypercomb.com': apex, 'jwize.com': relay })
-    vi.stubGlobal('fetch', fetch)
-    const service = await make()
-    expect(service.swarmHosts()).toEqual(['hypercomb.com'])
-    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['hypercomb.com'], source: 'pool', pending: false })
+    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex }))
+    const service = await make(['meetup'])
+    expect(service.swarmHosts()).toEqual([])
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: [], source: 'none', pending: false })
+    expect(service.swarmHostsFor(['meetup'])).toEqual({ hosts: [], source: 'none', pending: false })
+    expect(service.ensureSwarmTarget()).toBe('needs-host')
     const s = await resource('{"name":"a newcomer\'s first tile"}')
-    await service.markPublic(s, 'resource')
+    await service.markPublic(s, 'resource', true, ['meetup'])
     await quiesce(service, apex)
-    expect(calls(apex, 'PUT')).toEqual([`https://hypercomb.com/${s}`])
-    expect(calls(apex, 'GET')).toEqual([`https://hypercomb.com/${s}`]) // no `stored <sig>` — read back
-    expect(relay.fetch).not.toHaveBeenCalled()
-    expect(await receipts()).toEqual([`${s}.${await hostHash('hypercomb.com')}`])
-    expect(await service.isClosureAvailable(s, 'resource')).toBe(true)
-  })
-
-  it('a meeting that names its host uploads there — ahead of the pool\'s hypercomb.com, with the host\'s own receipt', async () => {
-    pool = ['hypercomb.com']
-    meetingHost = 'meet.example'
-    const meet = makeHost()
-    const apex = blossom()
-    vi.stubGlobal('fetch', router({ 'meet.example': meet, 'hypercomb.com': apex }))
-    const service = await make()
-    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['meet.example'], source: 'meeting', pending: false })
-    expect(service.swarmHosts()).toEqual(['meet.example'])
-    const s = await resource('{"name":"shared at the meeting point"}')
-    await service.markPublic(s, 'resource')
-    await quiesce(service, meet)
-    expect(calls(meet, 'PUT')).toEqual([`https://meet.example/${s}`])
-    expect(calls(meet, 'GET')).toEqual([]) // `stored <sig>` is the receipt
+    // No default host: hypercomb.com is never asked to keep anyone's bytes.
     expect(apex.fetch).not.toHaveBeenCalled()
   })
 
-  it('a pool host honours receipts earned on its zone\'s retired content face', async () => {
-    pool = ['hypercomb.com']
-    vi.stubGlobal('fetch', router({}))
-    const s = await resource('{"name":"pushed to the content face long ago"}')
-    await writeReceipt(`${s}.${await hostHash('content.hypercomb.com')}`)
-    expect(await (await make()).isClosureAvailable(s, 'resource')).toBe(true)
+  // THE LIVE SWARM (jwize 2026-10-11): with no host the tiles go out from
+  // this device; nothing is copied into the push pool to sit there for good.
+  it('no host: nothing is queued — and a host field entered later is staged from the local bytes', async () => {
+    swarmHost = ''
+    const friend = makeHost()
+    vi.stubGlobal('fetch', router({ 'friend.example': friend }))
+    const service = await make(['meetup'])
+    const pic = await resource('{"name":"a picture shared live"}')
+    const tile = await layer({ name: 'tile', images: [pic] })
+    await service.markPublic(tile, 'layer', false, ['meetup'])
+    await quiesce(service, friend)
+    expect(await queued()).toEqual([])
+    expect(friend.fetch).not.toHaveBeenCalled()
+
+    // The participant enters a host: the room's tiles are owed to it now —
+    // read again from this device, no queue copy needed.
+    swarmHost = 'friend.example'
+    EffectBus.emit('mesh:zone', { relay: 'wss://friend.example' })
+    await settle()
+    expect(service.swarmHosts()).toEqual(['friend.example'])
+    await quiesce(service, friend)
+    expect(calls(friend, 'PUT').sort()).toEqual([`https://friend.example/${tile}`, `https://friend.example/${pic}`].sort())
+    expect(await queued()).toEqual([])
   })
 
-  it('publish domains override the pool for a page that wears them — each page\'s tiles go to its own host', async () => {
-    pool = ['hypercomb.com']
-    marks = new Map([['shop', ['pointblank.example']]])
+  it('the host field is the upload host — whatever the meeting point\'s card says — with the host\'s own receipt', async () => {
+    swarmHost = 'friend.example'
+    participants = false // the card says the point hosts nobody: it decides nothing
+    const friend = makeHost()
     const apex = blossom()
+    vi.stubGlobal('fetch', router({ 'friend.example': friend, 'hypercomb.com': apex }))
+    const service = await make()
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['friend.example'], source: 'meeting', pending: false })
+    expect(service.swarmHosts()).toEqual(['friend.example'])
+    expect(service.ensureSwarmTarget()).toBe('ready')
+    const s = await resource('{"name":"shared at the friend\'s host"}')
+    await service.markPublic(s, 'resource')
+    await quiesce(service, friend)
+    expect(calls(friend, 'PUT')).toEqual([`https://friend.example/${s}`])
+    expect(calls(friend, 'GET')).toEqual([]) // `stored <sig>` is the receipt
+    expect(apex.fetch).not.toHaveBeenCalled()
+    expect(await service.isClosureAvailable(s, 'resource')).toBe(true)
+  })
+
+  it('a hosts pool change (hosts:render) moves nothing', async () => {
+    const friend = makeHost()
+    vi.stubGlobal('fetch', router({ 'jwize.com': friend }))
+    const service = await make()
+    EffectBus.emit('hosts:render', { open: false, zones: ['alpha.example', 'hypercomb.com'], loaded: true })
+    await settle()
+    expect(service.swarmHosts()).toEqual(['jwize.com'])
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['jwize.com'], source: 'meeting', pending: false })
+  })
+
+  it('publish domains override the host field for a page that wears them — each page\'s tiles go to its own host', async () => {
+    marks = new Map([['shop', ['pointblank.example']]])
+    const field = makeHost()
     const shopHost = makeHost()
-    const relay = makeHost()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'pointblank.example': shopHost, 'jwize.com': relay }))
+    const apex = blossom()
+    vi.stubGlobal('fetch', router({ 'jwize.com': field, 'pointblank.example': shopHost, 'hypercomb.com': apex }))
     const service = await make(['shop'], ['shop', 'shelf'], ['meetup'])
     expect(service.swarmHostsFor(['shop', 'shelf'])).toEqual({ hosts: ['pointblank.example'], source: 'publish', pending: false })
+    expect(service.swarmHostsFor(['meetup'])).toEqual({ hosts: ['jwize.com'], source: 'meeting', pending: false })
     const jar = await resource('{"name":"a jar on the shop shelf"}')
     const flyer = await resource('{"name":"a flyer at the meetup"}')
     await service.markPublic(jar, 'resource', true, ['shop', 'shelf'])
     await service.markPublic(flyer, 'resource', true, ['meetup'])
     await quiesce(service, shopHost)
-    await quiesce(service, apex)
+    await quiesce(service, field)
     expect(calls(shopHost, 'PUT')).toEqual([`https://pointblank.example/${jar}`])
-    expect(calls(apex, 'PUT')).toEqual([`https://hypercomb.com/${flyer}`])
-    expect(relay.fetch).not.toHaveBeenCalled()
-    expect(service.swarmHosts().sort()).toEqual(['hypercomb.com', 'pointblank.example'])
+    expect(calls(field, 'PUT')).toEqual([`https://jwize.com/${flyer}`])
+    expect(apex.fetch).not.toHaveBeenCalled()
+    expect(service.swarmHosts().sort()).toEqual(['jwize.com', 'pointblank.example'])
     // The share gate asks the page's own host.
     const on = service as Service & { isClosureAvailableOn: (sig: string, kind: string, closure: boolean, d: readonly string[]) => Promise<boolean> }
     expect(await on.isClosureAvailableOn(jar, 'resource', true, ['pointblank.example'])).toBe(true)
-    expect(await on.isClosureAvailableOn(jar, 'resource', true, ['hypercomb.com'])).toBe(false)
+    expect(await on.isClosureAvailableOn(jar, 'resource', true, ['jwize.com'])).toBe(false)
   })
 
-  it('the relay only when publish domains and the pool are both empty AND its card allows participants', async () => {
-    pool = []
-    participants = false
-    const relay = makeHost()
-    vi.stubGlobal('fetch', router({ 'jwize.com': relay }))
-    const service = await make()
-    expect(service.ensureSwarmTarget()).toBe('needs-host')
-    const s = await resource('{"name":"nobody hosts me yet"}')
-    await service.markPublic(s, 'resource')
-    await quiesce(service, relay)
-    expect(relay.fetch).not.toHaveBeenCalled()
-
-    // The relay's card changes its word: it hosts participants now.
-    participants = 'all'
-    EffectBus.emit('mesh:host-card', { relay: 'wss://jwize.com', participants: 'all' })
-    await settle()
-    expect(service.ensureSwarmTarget()).toBe('ready')
-    await quiesce(service, relay)
-    expect(calls(relay, 'PUT')).toEqual([`https://jwize.com/${s}`])
+  it('a publish domain honours receipts earned on its zone\'s retired content face', async () => {
+    marks = new Map([['shop', ['pointblank.example']]])
+    const shopHost = blossom()
+    vi.stubGlobal('fetch', router({ 'pointblank.example': shopHost, 'jwize.com': makeHost() }))
+    const s = await resource('{"name":"pushed to the content face long ago"}')
+    await writeReceipt(`${s}.${await hostHash('content.pointblank.example')}`)
+    const service = (await make(['shop'])) as Service & { isClosureAvailableOn: (sig: string, kind: string, closure: boolean, d: readonly string[]) => Promise<boolean> }
+    await service.markPublic(s, 'resource', true, ['shop'])
+    await quiesce(service, shopHost)
+    expect(calls(shopHost, 'PUT')).toEqual([])
+    expect(await service.isClosureAvailableOn(s, 'resource', true, ['pointblank.example'])).toBe(true)
   })
 
-  it('a pool that changes moves the uploads with it — no reload — and what was already shared follows', async () => {
-    pool = ['hypercomb.com']
-    const apex = blossom()
+  it('a host field that changes moves the uploads with it — no reload — and what was already shared follows', async () => {
+    swarmHost = 'friend.example'
+    const friend = makeHost()
     const alpha = makeHost()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'alpha.example': alpha }))
+    vi.stubGlobal('fetch', router({ 'friend.example': friend, 'alpha.example': alpha }))
     const service = await make()
-    const first = await resource('{"name":"before the pool changed"}')
+    const first = await resource('{"name":"before the point moved"}')
     await service.markPublic(first, 'resource')
-    await quiesce(service, apex)
-    expect(calls(apex, 'PUT')).toEqual([`https://hypercomb.com/${first}`])
+    await quiesce(service, friend)
+    expect(calls(friend, 'PUT')).toEqual([`https://friend.example/${first}`])
     expect(await queued()).toEqual([]) // its entry is retired
 
-    // Following another host never moves the uploads: the first added stays.
-    pool = ['hypercomb.com', 'alpha.example']
-    EffectBus.emit('hosts:render', { open: false, zones: ['alpha.example', 'hypercomb.com'], loaded: true })
-    await settle()
-    expect(service.swarmHosts()).toEqual(['hypercomb.com'])
-
-    // The participant drops hypercomb.com: alpha is the host now.
-    pool = ['alpha.example']
-    EffectBus.emit('hosts:render', { open: false, zones: ['alpha.example'], loaded: true })
+    // The participant enters another meeting point (a link, the selector).
+    swarmHost = 'alpha.example'
+    EffectBus.emit('mesh:zone', { relay: 'wss://alpha.example' })
     await settle()
     expect(service.swarmHosts()).toEqual(['alpha.example'])
-    const second = await resource('{"name":"after the pool changed"}')
+    const second = await resource('{"name":"after the point moved"}')
     await service.markPublic(second, 'resource')
     await quiesce(service, alpha)
     expect(calls(alpha, 'PUT')).toContain(`https://alpha.example/${second}`)
-    expect(calls(apex, 'PUT')).not.toContain(`https://hypercomb.com/${second}`)
+    expect(calls(friend, 'PUT')).not.toContain(`https://friend.example/${second}`)
     // What the room was already offered reaches the new host too, though
     // its entry left the queue long ago — no tile is stranded by the move.
     expect(calls(alpha, 'PUT')).toContain(`https://alpha.example/${first}`)
@@ -982,18 +1074,17 @@ describe('which host: publish domains, then the hosts pool, then the relay', () 
   })
 
   it('a picture shown on two pages with different hosts reaches both', async () => {
-    pool = ['hypercomb.com']
     marks = new Map([['shop', ['pointblank.example']]])
-    const apex = blossom()
+    const field = makeHost()
     const shopHost = makeHost()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'pointblank.example': shopHost }))
+    vi.stubGlobal('fetch', router({ 'jwize.com': field, 'pointblank.example': shopHost }))
     const service = await make(['shop'], ['meetup'])
     const pic = await resource('{"name":"one photo, two pages"}')
     const flyer = await layer({ name: 'flyer', images: [pic] })
     const jar = await layer({ name: 'jar', images: [pic] })
     await service.markPublic(flyer, 'layer', false, ['meetup'])
-    await quiesce(service, apex)
-    expect(calls(apex, 'PUT').sort()).toEqual([`https://hypercomb.com/${flyer}`, `https://hypercomb.com/${pic}`].sort())
+    await quiesce(service, field)
+    expect(calls(field, 'PUT').sort()).toEqual([`https://jwize.com/${flyer}`, `https://jwize.com/${pic}`].sort())
     expect(await queued()).toEqual([])
 
     await service.markPublic(jar, 'layer', false, ['shop'])
@@ -1004,11 +1095,10 @@ describe('which host: publish domains, then the hosts pool, then the relay', () 
   })
 
   it('a branch shared at a page keeps its subtree on its OWN publish domains; only its tile goes where the page goes', async () => {
-    pool = ['hypercomb.com']
     marks = new Map([['shop', ['pointblank.example']]])
-    const apex = blossom()
+    const field = makeHost()
     const shopHost = makeHost()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'pointblank.example': shopHost }))
+    vi.stubGlobal('fetch', router({ 'jwize.com': field, 'pointblank.example': shopHost }))
     const service = await make(['shop'], ['shop', 'jar'])
     const label = await resource('{"name":"the jar\'s label"}')
     const inner = await layer({ name: 'jar', notes: [label] })
@@ -1016,10 +1106,10 @@ describe('which host: publish domains, then the hosts pool, then the relay', () 
     // The walk at the hive root offers the shop tile with its closure.
     await service.markPublic(branch, 'layer', true, [])
     await quiesce(service, shopHost)
-    await quiesce(service, apex)
-    expect(calls(apex, 'PUT')).toEqual([`https://hypercomb.com/${branch}`])
+    await quiesce(service, field)
+    expect(calls(field, 'PUT')).toEqual([`https://jwize.com/${branch}`])
     expect(calls(shopHost, 'PUT').sort()).toEqual([`https://pointblank.example/${inner}`, `https://pointblank.example/${label}`].sort())
-    expect(service.swarmHosts().sort()).toEqual(['hypercomb.com', 'pointblank.example'])
+    expect(service.swarmHosts().sort()).toEqual(['jwize.com', 'pointblank.example'])
     const at = service as Service & {
       isClosureAvailableAt: (sig: string, kind: string, closure: boolean, page: readonly string[]) => Promise<boolean | null>
       isClosureAvailableOn: (sig: string, kind: string, closure: boolean, d: readonly string[]) => Promise<boolean>
@@ -1028,126 +1118,107 @@ describe('which host: publish domains, then the hosts pool, then the relay', () 
     // The gate judges each part where it is shown, and the root page's
     // event can name where the subtree went.
     expect(await at.isClosureAvailableAt(branch, 'layer', true, [])).toBe(true)
-    expect(await at.isClosureAvailableOn(branch, 'layer', true, ['hypercomb.com'])).toBe(false)
-    expect(at.closureHostsOf(branch).sort()).toEqual(['hypercomb.com', 'pointblank.example'])
+    expect(await at.isClosureAvailableOn(branch, 'layer', true, ['jwize.com'])).toBe(false)
+    expect(at.closureHostsOf(branch).sort()).toEqual(['jwize.com', 'pointblank.example'])
   })
 
   it('a page still being read deep in a closure is unknown to the gate, never "no"', async () => {
-    pool = ['hypercomb.com']
     const hang = new Promise<never>(() => undefined)
     const slow = new Resolver({ ...deps, readMarks: (segments: readonly string[]) => segments.length > 1 ? hang : Promise.resolve([]) })
     slow.warm(null)
     slow.warm(['shop'])
     await settle(10)
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': blossom() }))
+    vi.stubGlobal('fetch', router({ 'jwize.com': makeHost() }))
     const service = new HostSync(slow) as Service & { isClosureAvailableAt: (sig: string, kind: string, closure: boolean, page: readonly string[]) => Promise<boolean | null> }
     const inner = await layer({ name: 'deep' })
     const mid = await layer({ name: 'jar', children: [inner] })
     const branch = await layer({ name: 'shop', children: [mid] })
-    await writeReceipt(`${branch}.${await hostHash('hypercomb.com')}`)
-    await writeReceipt(`${mid}.${await hostHash('hypercomb.com')}`)
+    await writeReceipt(`${branch}.${await hostHash('jwize.com')}`)
+    await writeReceipt(`${mid}.${await hostHash('jwize.com')}`)
     expect(await service.isClosureAvailableAt(branch, 'layer', true, [])).toBeNull()
   })
 
-  it('a publish while joined is not a room offer: it goes to the nodes the publish names, never the pool host', async () => {
-    pool = ['hypercomb.com']
-    const apex = blossom()
+  it('a publish while joined is not a room offer: it goes to the nodes the publish names, never the host field', async () => {
+    const field = makeHost()
     const node = makeHost()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'node.example': node }))
+    vi.stubGlobal('fetch', router({ 'jwize.com': field, 'node.example': node }))
     const service = (await make()) as Service & { addPublishNodes: (d: readonly string[]) => void; markPublic: (sig: string, kind?: string, closure?: boolean, page?: readonly string[] | false) => Promise<void> }
     const sealed = await layer({ name: 'shop' })
     service.addPublishNodes(['node.example'])
     await service.markPublic(sealed, 'layer', true, false)
     await quiesce(service, node)
     expect(calls(node, 'PUT')).toEqual([`https://node.example/${sealed}`])
-    expect(calls(apex, 'PUT')).toEqual([])
+    expect(calls(field, 'PUT')).toEqual([])
   })
 
-  it('a pool host that refuses is passed over for the next — then a relay that hosts participants: never a strand', async () => {
-    pool = ['hypercomb.com']
-    const apex = makeHost({ put: () => ({ status: 403, body: 'no grant for this key' }) })
-    const relay = makeHost()
-    vi.stubGlobal('fetch', router({ 'hypercomb.com': apex, 'jwize.com': relay }))
-    const service = await make()
-    const s = await resource('{"name":"refused by the apex"}')
+  it('a publish domain that refuses is passed over for the host field: never a strand', async () => {
+    marks = new Map([['shop', ['pointblank.example']]])
+    const shopHost = makeHost({ put: () => ({ status: 403, body: 'no grant for this key' }) })
+    const field = makeHost()
+    vi.stubGlobal('fetch', router({ 'pointblank.example': shopHost, 'jwize.com': field }))
+    const service = await make(['shop'])
+    const s = await resource('{"name":"refused by the shop host"}')
+    await service.markPublic(s, 'resource', true, ['shop'])
+    await quiesce(service, field)
+    await quiesce(service, field)
+    expect(calls(shopHost, 'PUT')).toEqual([`https://pointblank.example/${s}`])
+    expect(calls(field, 'PUT')).toEqual([`https://jwize.com/${s}`])
+    expect(service.swarmHostsFor(['shop'])).toMatchObject({ hosts: ['jwize.com'], source: 'meeting', passedOver: ['pointblank.example'] })
+  })
+
+  it('a host field that refuses keeps the page, named with its why — never a pool host or the relay card', async () => {
+    const field = makeHost({ put: () => ({ status: 403, body: 'no grant for this key' }) })
+    const apex = blossom()
+    vi.stubGlobal('fetch', router({ 'jwize.com': field, 'hypercomb.com': apex }))
+    const service = (await make()) as Service & { hostTrouble: (host: string) => { why: string } | null }
+    const s = await resource('{"name":"the friend\'s host does not list me"}')
     await service.markPublic(s, 'resource')
-    await quiesce(service, relay)
-    await quiesce(service, relay)
-    expect(calls(apex, 'PUT')).toEqual([`https://hypercomb.com/${s}`])
-    expect(calls(relay, 'PUT')).toEqual([`https://jwize.com/${s}`])
-    expect(service.swarmHostsFor(null)).toMatchObject({ hosts: ['jwize.com'], source: 'relay', passedOver: ['hypercomb.com'] })
-    expect(await service.isClosureAvailable(s, 'resource')).toBe(true)
+    await quiesce(service, field)
+    expect(calls(field, 'PUT')).toEqual([`https://jwize.com/${s}`])
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['jwize.com'], source: 'meeting', pending: false })
+    expect(service.hostTrouble('jwize.com')).toMatchObject({ why: 'refused' })
+    expect(apex.fetch).not.toHaveBeenCalled()
   })
 
-  it('a pool host that never answers an upload while the relay does is passed over after a second wave', async () => {
+  it('a host field that answers a PAGE where bytes should be is pushed to — its own answer decides', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
-    pool = ['hypercomb.com']
-    const relay = makeHost()
-    // An apex the browser cannot talk to at all: every request blocked by
-    // CORS before an answer is readable — no answer, ever.
-    const apexFetch = vi.fn(async (_input: string, _init?: RequestInit): Promise<Response> => { throw new TypeError('Failed to fetch') })
-    vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) =>
-      new URL(String(input)).host === 'hypercomb.com' ? apexFetch(input, init) : relay.fetch(input, init)))
-    const service = await make()
-    EffectBus.emit('mesh:connection', { state: 'open' })
-    const s = await resource('{"name":"the apex cannot take me"}')
-    await service.markPublic(s, 'resource')
-    for (let step = 0; step < 80 && calls(relay, 'PUT').length === 0; step++) { await vi.advanceTimersByTimeAsync(250); await settle() }
-    expect(calls(relay, 'PUT')).toEqual([`https://jwize.com/${s}`])
-    expect(service.swarmHostsFor(null)).toMatchObject({ source: 'relay', passedOver: ['hypercomb.com'] })
-  })
-
-  it('a pool host that answers a PAGE where bytes should be is probed once, and passed over at that probe', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
-    pool = ['hypercomb.com']
-    const relay = makeHost()
-    // The apex until 2026-10-10: the Azure shell answered every address with
-    // its page, and a PUT never left the browser (its CORS preflight allowed
-    // no PUT). The HEAD alone passes it over (host-sync.stuck-uploads.spec).
-    const apexFetch = vi.fn(async (_input: string, init?: RequestInit): Promise<Response> => {
-      if ((init?.method ?? 'GET') === 'PUT') throw new TypeError('Failed to fetch')
+    // A static apex answers every address with its page; a PUT to it is
+    // refused (405). The HEAD alone passes nothing over — the participant
+    // entered this host — its PUT's refusal does.
+    const pageFetch = vi.fn(async (_input: string, init?: RequestInit): Promise<Response> => {
+      if ((init?.method ?? 'GET') === 'PUT') return new Response('Method Not Allowed', { status: 405 })
       return new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html' } })
     })
-    vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) =>
-      new URL(String(input)).host === 'hypercomb.com' ? apexFetch(input, init) : relay.fetch(input, init)))
-    const service = await make()
+    vi.stubGlobal('fetch', pageFetch)
+    const service = (await make()) as Service & { hostTrouble: (host: string) => { why: string } | null }
     EffectBus.emit('mesh:connection', { state: 'open' })
-    const sigs = [await resource('{"name":"one"}'), await resource('{"name":"two"}'), await resource('{"name":"three"}')]
-    for (const s of sigs) await service.markPublic(s, 'resource')
-    for (let step = 0; step < 80 && calls(relay, 'PUT').length < sigs.length; step++) { await vi.advanceTimersByTimeAsync(250); await settle() }
-    expect(calls(relay, 'PUT').sort()).toEqual(sigs.map(s => `https://jwize.com/${s}`).sort())
-    // One wave of probes at most — never a HEAD per queued sig per pass.
-    const heads = apexFetch.mock.calls.filter(([, init]) => init?.method === 'HEAD')
-    expect(heads.length).toBeLessThanOrEqual(sigs.length)
-    expect(service.swarmHostsFor(null)).toMatchObject({ source: 'relay', passedOver: ['hypercomb.com'] })
+    const s = await resource('{"name":"one"}')
+    await service.markPublic(s, 'resource')
+    for (let step = 0; step < 40 && !pageFetch.mock.calls.some(([, init]) => init?.method === 'PUT'); step++) { await vi.advanceTimersByTimeAsync(250); await settle() }
+    expect(pageFetch.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['jwize.com'], source: 'meeting', pending: false })
+    expect(service.hostTrouble('jwize.com')).toMatchObject({ why: 'page' })
   })
 
-  it('the meeting relay named as a pool host never honours its zone\'s content-face receipts', async () => {
-    pool = ['jwize.com']
-    vi.stubGlobal('fetch', router({ 'jwize.com': makeHost() }))
-    const s = await resource('{"name":"on the R2 face, not the relay heap"}')
-    await writeReceipt(`${s}.${await hostHash('content.jwize.com')}`)
-    expect(await (await make()).isClosureAvailable(s, 'resource')).toBe(false)
-  })
-
-  it('nothing on the join, mark or announce path waits for a pool or a branch read', async () => {
+  it('nothing on the join, mark or announce path waits for a branch read — and the root answers at once', async () => {
     const hang = new Promise<never>(() => undefined)
     const stuck = new Resolver({
-      readPool: () => hang,
       readMarks: () => hang,
-      relay: () => ({ host: 'jwize.com', participants: 'all' }),
+      relay: () => ({ host: 'jwize.com' }),
       originLoopback: () => false,
     })
     vi.stubGlobal('fetch', router({}))
     const service = new HostSync(stuck)
-    const s = await resource('{"name":"offered while the pool is unread"}')
+    const s = await resource('{"name":"offered while a page is unread"}')
     const within = <T>(p: Promise<T>): Promise<T | 'late'> =>
       Promise.race([p, new Promise<'late'>(r => setTimeout(() => r('late'), 1_000))])
     expect(service.swarmHostsFor(['meetup'])).toEqual({ hosts: [], source: 'none', pending: true })
-    expect(service.ensureSwarmTarget()).toBe('needs-host')
+    // The root wears no marks: the host field answers it with no read at all.
+    expect(service.swarmHostsFor(null)).toEqual({ hosts: ['jwize.com'], source: 'meeting', pending: false })
+    expect(service.ensureSwarmTarget()).toBe('ready')
     expect(await within(service.markPublic(s, 'resource', true, ['meetup']))).toBeUndefined()
     expect(await within(service.isClosureAvailable(s, 'resource'))).toBe(false)
-    // Unread is not empty: the relay is never taken as a stand-in meanwhile.
-    expect(service.swarmHosts()).toEqual([])
+    // Unread is not empty: the host field never stands in for the page meanwhile.
+    expect(service.swarmHostsFor(['meetup']).hosts).toEqual([])
   })
 })

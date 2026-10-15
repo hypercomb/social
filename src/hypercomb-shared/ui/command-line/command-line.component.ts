@@ -36,7 +36,7 @@ import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { isSelectOp, BRACKET_CMD_RE, normalizeSelectInput } from './select-ops'
-import { dispatchedCallsOf, viewCommandOf, type FeatureReading, type SpokenCall } from './remote-verbs'
+import { dispatchedCallsOf, speaksStructure, viewCommandOf, type FeatureReading, type SpokenCall } from './remote-verbs'
 import { cutBackToWords, isSensitiveLine } from './command-history'
 import { parseTargetedKeywordsInput } from '../../core/targeted-keywords-input'
 
@@ -2409,6 +2409,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         return
       }
 
+      // PROSE THAT NAMED NO WORD IS NOT A TILE NAME FROM A REMOTE CALLER. The
+      // legacy pipeline would mint a tile called whatever was said (measured:
+      // `go meetups` made `go-meetups`). Refuse it, nothing runs; a session
+      // that means a tile says `create <name>`.
+      if (prose && !speaksStructure(line)) {
+        settle({ kind: 'refused', reason: 'no word in this line matched a behaviour, so nothing ran — to make a tile, say: create <name>' })
+        return
+      }
+
       // The legacy tag/slash pipeline resolves through fire-and-forget
       // branches, so awaiting it would prove delivery and not completion.
       // Rather than mint a fake receipt it answers UNKNOWN — the same law the
@@ -4021,6 +4030,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       })
       return
     }
+    // A SAVED ROOT'S NAME IS NOT A TILE (save as, essentials history/saved-roots.ts):
+    // a tile called <name> would open the saved root itself. Say how to reach it.
+    const savedRoots = get('@diamondcoreprocessor.com/SavedRoots') as { isSaved?: (name: string) => boolean } | undefined
+    const saved = parts.find(part => savedRoots?.isSaved?.(part))
+    if (saved) {
+      EffectBus.emit('activity:log', { message: `"${saved}" is a saved root — use ${saved} turns it on.`, icon: 'error' })
+      return
+    }
 
     // Tile creation is a layer-only mutation. Per the architecture
     // doctrine (project_layer_is_primitive) the current layer is the
@@ -4394,24 +4411,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     if (op === 'remove' || op === 'rm' || op === 'delete' || op === 'del') {
-      const dir = await this.lineage.explorerDir()
       await this.#removeLabels(labels)
       selection.clear()
       this.clear()
-
-      // if all cells removed, navigate to parent
-      if (dir) {
-        let hasCells = false
-        for await (const [name, handle] of dir.entries()) {
-          if (handle.kind === 'directory' && !name.startsWith('__')) { hasCells = true; break }
-        }
-        if (!hasCells) {
-          const segments = this.navigation.segmentsRaw()
-          if (segments.length > 0) {
-            this.navigation.goRaw(segments.slice(0, -1))
-          }
-        }
-      }
       return
     }
 
@@ -4578,27 +4580,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   /** Remove each label (a `/`-separated path) under the current location.
-   *  Deepest paths first so a child is gone before its ancestor. Shared by the
-   *  `[…]/remove` op and the `~name` per-item operator. */
+   *  Shared by the `[…]/remove` op and the `~name` per-item operator, and done
+   *  by the word's own queen: the same layer commit `/remove` makes, so the
+   *  tile leaves the page and every earlier layer still holds it (a hide), and
+   *  the confirm and the receipt are the word's. */
   async #removeLabels(labels: readonly string[]): Promise<void> {
     if (labels.length === 0) return
-    const dir = await this.lineage.explorerDir()
-    if (!dir) return
-    const sorted = [...labels].sort((a, b) => b.split('/').length - a.split('/').length)
-    for (const label of sorted) {
-      const segments = label.split('/').filter(Boolean)
-      const leaf = segments[segments.length - 1]
-      let parent: FileSystemDirectoryHandle | null = dir
-      for (let i = 0; i < segments.length - 1 && parent; i++) {
-        try { parent = await parent.getDirectoryHandle(segments[i], { create: false }) }
-        catch { parent = null }
-      }
-      if (!parent) continue
-      try {
-        await parent.removeEntry(leaf, { recursive: true })
-        EffectBus.emit('cell:removed', { cell: leaf })
-      } catch { /* already gone — skip */ }
-    }
+    const queen = get('@diamondcoreprocessor.com/RemoveQueenBee') as { invoke?(args: string): Promise<void> } | undefined
+    try { await queen?.invoke?.(`[${labels.join(', ')}]`) }
+    catch (error) { this.#behaviourDidNotRun('remove', error) }
     await new hypercomb().act()
   }
 

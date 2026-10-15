@@ -62,6 +62,8 @@ vi.mock('./hive-pointer.js', () => ({
       return {
         isEnabled: () => false,
         isPublicHostEnabled: () => true,
+        // The participant NAMED this host: there is no default (2026-10-11).
+        publicHostDomain: () => 'host.example',
         enablePublicHost: () => void 0,
         markPublic: async () => void 0,
         drain: async () => void 0,
@@ -106,6 +108,28 @@ describe('where the bytes go', () => {
       expect(result).toMatchObject({ ok: false, failure: 'no-host' })
       expect(putCalls).toEqual([])
       expect(enableCalls).toBe(0)
+    } finally { ioc.get = original }
+  })
+
+  it('a public host turned on with NO host named is no node — no default host stands in (2026-10-11)', async () => {
+    const ioc = (window as unknown as { ioc: { get: (k: string) => unknown } }).ioc
+    const original = ioc.get
+    const named: string[][] = []
+    ioc.get = (key: string): unknown => {
+      if (key !== '@diamondcoreprocessor.com/HostSyncService') return original(key)
+      return {
+        ...(original(key) as object),
+        isPublicHostEnabled: () => true,
+        publicHostDomain: () => '',
+        addPublishNodes: (domains: readonly string[]) => { named.push([...domains]) },
+      }
+    }
+    try {
+      indexRead = { ok: false, reason: 'http', status: 404 }
+      const result = await publishBranch(['site'])
+      expect(result).toMatchObject({ ok: false, failure: 'no-host' })
+      expect(putCalls).toEqual([])
+      expect(named).toEqual([])
     } finally { ioc.get = original }
   })
 

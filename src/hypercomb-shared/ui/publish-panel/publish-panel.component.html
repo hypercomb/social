@@ -265,6 +265,41 @@
 
       <!-- THE DETAILS, folded — one section open at a time, all closed on
            arrival (ui/accordion.ts). -->
+      <!-- PUBLISH GROUPS on this layer (publish-groups.md) — each publishes
+           every tile in it, from here as from the strip at the top of the
+           hive, and from inside a view, where the strip is not drawn. -->
+      @if (groupsHere().length > 0) {
+        <section class="psec">
+          <button
+            class="psec-head"
+            type="button"
+            [attr.aria-expanded]="sectionsOpen.isOpen('groups')"
+            (click)="sectionsOpen.toggle('groups')"
+          >{{ 'publish.groups' | t }} ({{ groupsHere().length }})</button>
+          @if (sectionsOpen.isOpen('groups')) {
+            <div class="psec-body pgroups">
+              @for (g of groupsHere(); track g.meaning) {
+                <div class="pgroup" [style.--pg]="g.color">
+                  <span class="mat-sym pgroup-icon" aria-hidden="true">{{ g.icon }}</span>
+                  <span class="pgroup-name" [title]="g.name">{{ g.name }}</span>
+                  <button
+                    class="pgroup-act"
+                    type="button"
+                    [disabled]="!!g.publishing || g.count === 0"
+                    (click)="publishGroup(g)"
+                  >
+                    @if (g.publishing; as p) {
+                      {{ 'publish-groups.publishing' | t: { done: p.done, total: p.total } }}
+                    } @else {
+                      {{ 'publish-groups.publish' | t: { count: g.count } }}
+                    }
+                  </button>
+                </div>
+              }
+            </div>
+          }
+        </section>
+      }
       @if (row.segments.length > 0 && viewsFor(row).length > 0) {
         <section class="psec">
           <button

@@ -173,6 +173,13 @@ if (meshResumed) {
   }
 }
 
+// NO POINT FROM THE PAGE (2026-10-11). A crossing used to pin
+// ws://localhost:7777 into a resumed loopback tab's zone — the dev relay an
+// older mesh SEEDED there because the page was local. That was the page's
+// own domain choosing the host (and a seed recorded as a choice), so it is
+// gone: a tab's point is only what someone named — the selector, a meeting
+// link, a server given to /use-live-relay, a relay list.
+
 // ── the meeting point, as the selector writes it ─────────────────────────
 // MIRRORS of essentials sharing/meeting-invite.ts (isAccessCode,
 // meetingRelayOf, relayDomainOf) — the shell never imports a module.
@@ -217,25 +224,31 @@ export const relayDomainOf = (relay: string): string => {
 
 // ── the meeting point a new tab is pre-filled with ─────────────────────────
 
-/** One current record — the canonical point, '' for the default relay — in
- *  this participant's `mesh:meet-point` document pool. Read synchronously;
- *  written through to the pool. */
+/** One current record — the canonical point, '' for none (a meeting from
+ *  before 2026-10-12 at the old default) — in this participant's
+ *  `mesh:meet-point` document pool. Read synchronously; written through to
+ *  the pool. It only ever holds a point someone chose (the selector, a
+ *  link, a server given to `use-live-relay`) — no shipped package wrote a
+ *  default into a zone (R4, 2026-10-11) — so it is what a new tab's host
+ *  field pre-fills with: this device's own remembered host. */
 const meetPoint = new ParticipantDocument<string>({
   meaning: MEET_POINT_MEANING,
   parse: raw => (typeof raw === 'string' ? meetingRelayOf(raw) : null),
   empty: '',
 })
 
-/** Keep `relay` (canonical, never a code) as the next tab's pre-fill; '' —
- *  the default relay — is kept too: the pre-fill follows the last meeting. */
+/** Keep `relay` (canonical, never a code) as the next tab's pre-fill; ''
+ *  (no point of its own) is kept too: the pre-fill follows the last
+ *  meeting. */
 const recordMeetPoint = (relay: string): void => {
   const point = meetingRelayOf(relay)
   if (meetPoint.value !== point) meetPoint.write(point)
 }
 
 /** The meeting point of the last meeting on this device — what a NEW tab's
- *  selector pre-fills beside the origin-wide room and secret. '' = the
- *  default relay. A tab with a point of its own reads its zone instead. */
+ *  selector pre-fills beside the origin-wide room and secret. '' = none:
+ *  the host field stays empty (there is no default — hypercomb.com is only
+ *  offered). A tab with a point of its own reads its zone instead. */
 export const readMeetPointPrefill = (): string => meetingRelayOf(meetPoint.value)
 
 /** This tab's membership as last announced — seeded from the resume, so the

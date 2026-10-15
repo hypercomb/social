@@ -73,6 +73,11 @@ function arg(name, fallback = null) {
 }
 const URL_ = arg('url', 'http://localhost:4250/')
 const RELAY = arg('relay', null)
+// A client given no relay dials THIS, explicitly — never the shell default.
+// A loopback page meets at wss://hypercomb.com by default since 2026-10-12
+// (the live open meeting point); a harness that leaned on the old loopback
+// default would have walked onto it. The dev relay keeps them local.
+const LOCAL_RELAY = 'ws://localhost:7777'
 const ENGINE_A = arg('engine-a', 'chromium')
 const ENGINE_B = arg('engine-b', 'chromium')
 const SHOTS = arg('shots', null)   // dir: save what the swarm LOOKS like
@@ -158,7 +163,7 @@ async function newClient(browser, label, zone = { room: ROOM, secret: SECRET, re
       localStorage.setItem('hc:nostrmesh:allow-loopback', '1')
     }
     for (const [k, v] of Object.entries(seed ?? {})) localStorage.setItem(k, v)
-  }, { room: zone.room, secret: zone.secret, relay: zone.relay ?? null, seed: zone.seed ?? {} })
+  }, { room: zone.room, secret: zone.secret, relay: zone.relay ?? LOCAL_RELAY, seed: zone.seed ?? {} })
   const page = await ctx.newPage()
   page.on('pageerror', e => log(label, 'PAGE ERROR:', String(e).slice(0, 200)))
   // The shell fires several router navigations while it boots, and IoC is
@@ -992,7 +997,7 @@ async function main() {
 // Same as newClient but with no zone seeded — a first-time visitor. A relay,
 // when given, is pinned the same way (so even this client never dials the
 // shell's default relay); the zone stays empty.
-async function newClientNoZone(browser, label, relay = null) {
+async function newClientNoZone(browser, label, relay = LOCAL_RELAY) {
   const ctx = await browser.newContext()
   if (relay) {
     await ctx.addInitScript(({ relay, seed }) => {
@@ -1023,7 +1028,7 @@ if (require.main === module) main().catch(e => { console.error('[fatal]', e); st
 // The helpers double as a library for the other swarm harnesses
 // (drive-swarm-join-order.cjs) — same clients, same join gesture, same probes.
 module.exports = {
-  URL_, RELAY, HEADED, KEEP, launcherFor, log, sleep, check, results, finish,
+  URL_, RELAY, LOCAL_RELAY, HEADED, KEEP, launcherFor, log, sleep, check, results, finish,
   startScratchRelay, stopScratchRelay, swarmSeed, hostOfRelay,
   newClient, newClientNoZone, waitForShell, waitForReady, installIfNeeded, settle,
   joinSwarm, meshState, swarmState, pubkeyOf, addTile, ownChildren, navTo,

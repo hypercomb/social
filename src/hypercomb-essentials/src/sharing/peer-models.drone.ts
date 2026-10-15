@@ -6,8 +6,8 @@
 // A local model (Ollama and friends) is the one tier nobody can share by
 // publishing an address: `localhost:11434` means something different on every
 // machine, and a peer's browser cannot reach it. So the MACHINE answers, not
-// the address. Three records, one shape each, on room+secret-scoped channels
-// exactly like feedback-swarm and client-presence:
+// the address. Three records, one shape each, on room-scoped channels (room,
+// secret and meeting point — core roomPreimage) like client-presence:
 //
 //   OFFER   30215  broadcast, replaceable per pubkey, short TTL.
 //                  "these models can answer from my machine right now."
@@ -41,7 +41,7 @@
 // machine it is. It appears in `/providers` beside everything else and the
 // dispatch routes it here. Nothing else in the app learns that peers exist.
 
-import { Drone, EffectBus, isSignature } from '@hypercomb/core'
+import { Drone, EffectBus, isSignature, roomPreimage } from '@hypercomb/core'
 import { setPeerModelCaller } from '../assistant/llm-dispatch.js'
 import { llmProviderRegistry } from '../assistant/llm-provider-registry.js'
 import { compileProviderSpec, parseProviderSpec } from '../assistant/providers/provider-spec.js'
@@ -91,6 +91,8 @@ type MeshSub = { close: () => void }
 interface MeshLike {
   publish: (kind: number, sig: string, payload: unknown, extraTags?: string[][]) => Promise<boolean>
   subscribe: (sig: string, cb: (e: MeshEvt) => void, opts?: { sinceSec?: number | null }) => MeshSub
+  /** The meeting point this tab meets at (host[:port]); '' = the default. */
+  swarmHost?: () => string
 }
 interface SignatureStoreLike { signText: (s: string) => Promise<string> }
 interface SignerLike { getPublicKeyHex: () => Promise<string | null> }
@@ -160,6 +162,8 @@ export class PeerModelsDrone extends Drone {
     EffectBus.on('mesh:public-changed', () => void this.#resubscribe())
     EffectBus.on('mesh:room', () => void this.#resubscribe())
     EffectBus.on('mesh:secret', () => void this.#resubscribe())
+    // Another meeting point is another room (core roomPreimage).
+    EffectBus.on('mesh:zone', () => void this.#resubscribe())
 
     // Renew while the tab is open; expire what peers stopped renewing.
     this.#offerTimer = setInterval(() => {
@@ -172,16 +176,23 @@ export class PeerModelsDrone extends Drone {
 
   #mesh = (): MeshLike | undefined => ioc()?.get<MeshLike>(MESH_KEY)
 
-  /** Channel sigs, derived exactly like feedback-swarm's: a label, scoped to
-   *  the room+secret, so every participant in one room computes the same
-   *  address with no exchange. The broadcast channel names no peer. */
+  /** Channel sigs: a label, scoped to the room as every address names it —
+   *  room, secret and the meeting point the tab meets at (core
+   *  roomPreimage, 2026-10-12) — so every participant in one room computes
+   *  the same address with no exchange, and the same pair at another point
+   *  is another room. The broadcast channel names no peer. */
   async #channel(label: string, pubkey = ''): Promise<string> {
     const sig = ioc()?.get<SignatureStoreLike>(SIGSTORE_KEY)
-    const room = ioc()?.get<ValueLike>(ROOM_KEY)?.value ?? ''
-    const secret = ioc()?.get<ValueLike>(SECRET_KEY)?.value ?? ''
+    const room = (ioc()?.get<ValueLike>(ROOM_KEY)?.value ?? '').trim()
+    const secret = (ioc()?.get<ValueLike>(SECRET_KEY)?.value ?? '').trim()
     if (!sig?.signText || !room || !secret) return ''
     if (pubkey && !HEX64.test(pubkey)) return ''
-    try { return await sig.signText(`${label}:${pubkey}\0${room}\0${secret}`) } catch { return '' }
+    let point = ''
+    try { point = String(this.#mesh()?.swarmHost?.() ?? '') } catch { /* no host */ }
+    // No host named: no room, so no channel (there is no default host).
+    const tail = roomPreimage(room, secret, point)
+    if (!tail) return ''
+    try { return await sig.signText(`${label}:${pubkey}\0${tail}`) } catch { return '' }
   }
 
   async #me(): Promise<string> {

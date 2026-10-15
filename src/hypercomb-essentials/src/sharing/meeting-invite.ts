@@ -154,6 +154,9 @@ export const MEET_PREFIX = '#meet='
 
 const MEET_PART_MAX = 512
 const MEET_SEGMENTS_MAX = 64
+/** The longest link body read at all — MIRRORED: the shell's
+ *  invite-capture.ts. */
+export const LINK_BODY_MAX = 8192
 const RELAY_MAX = 256
 const CODE_MAX = 128
 
@@ -243,6 +246,11 @@ const strictPart = (text: string): string =>
  *  invite-capture.ts (trimLinkTail) — invite-capture.robust.spec.ts holds
  *  the two to the same answers. */
 export function trimLinkTail(text: string): string {
+  // A link body longer than any real one is no link (2026-10-12): the loop
+  // below rescans the whole text per character it trims, so a crafted
+  // 100,000-character tail froze the tab (found reviewing the signed swarm
+  // link, swarm-link.ts, which caps its own body at 512).
+  if (text.length > LINK_BODY_MAX) return ''
   let body = text
   for (;;) {
     let next = body.replace(/[.,;:!?'"\]}>]+$/, '')

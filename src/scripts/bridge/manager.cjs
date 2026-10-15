@@ -19,6 +19,7 @@
 //   node scripts/bridge/manager.cjs held                     what waits on the participant in Execution
 //   node scripts/bridge/manager.cjs do "<behaviour sentence>"      one line through the command line
 //   node scripts/bridge/manager.cjs op '<request json>'      a raw bridge request
+//   node scripts/bridge/manager.cjs tidy [minutes|dry]       put away one-off job conversations: answered + quiet that long (default 10), or unanswered an hour; dry = list only
 //   node scripts/bridge/manager.cjs roster                   the managers, as the hive holds them
 //   node scripts/bridge/manager.cjs install                  put the managers into the hive (idempotent)
 //
@@ -236,6 +237,11 @@ const main = async () => {
           const { outcome, rounds, reads, tokens, answer, left, error, held } = reply.data
           // Held for jwize: the change waits in Execution; nothing ran yet.
           if (outcome === 'held') return print({ convoId, outcome, held, note: 'waiting for jwize in Execution — report it; do not try to get around the hold' })
+          // A ONE-OFF JOB IS PUT AWAY once answered (jwize, 2026-10-12: the
+          // job conversations piled up past reading). Archived, never deleted:
+          // `thread <convoId>` still reads it and the window's archive lists it.
+          // A manager's own conversation, and one that stopped mid-leg, stay.
+          if (!Object.values(MANAGERS).includes(convoId) && !left) await send({ op: 'chat-tidy', keep: Object.values(MANAGERS), olderThanMs: 0 })
           return print({ convoId, outcome, rounds, reads, ...(reads === 0 ? { warning: 'nothing was read in this turn: check every claim about the hive yourself' } : {}), tokens, ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
         }
       }
@@ -244,6 +250,13 @@ const main = async () => {
     case 'convo': {
       const letters = Array.from({ length: 6 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('')
       return print(`chat:tile:/::${Date.now()}-${letters}`)
+    }
+    case 'tidy': {
+      // Put away the one-off job conversations: answered and quiet, or never
+      // answered and an hour old (never the managers' own). `tidy dry` lists.
+      const dry = first === 'dry'
+      const reply = await send({ op: 'chat-tidy', keep: Object.values(MANAGERS), dryRun: dry, olderThanMs: !dry && Number(first) > 0 ? Number(first) * 60_000 : undefined })
+      return reply.ok ? print(reply.data) : fail(reply.error)
     }
     case 'roster': {
       const fromHive = await hiveRoster()

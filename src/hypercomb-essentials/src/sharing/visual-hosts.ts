@@ -1,3 +1,9 @@
+/** The largest atom one participant serves, or assembles, over the mesh — a
+ * content-broker answer (chunked, sha256-gated). Beyond it only an HTTP host
+ * carries the bytes, so a tile no host keeps (the live swarm) whose own atom
+ * is larger stays a name (swarm.drone #liveHold). One number, read by both. */
+export const MESH_ANSWER_MAX_BYTES = 8 * 1024 * 1024
+
 /** The artifact signatures an already-sanitized visual refers to: its layer
  * and every image variant the sanitizer admits. Discovery, not a fetch —
  * bytes still resolve on demand, and sha256 still gates every one. */

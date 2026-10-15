@@ -196,8 +196,8 @@ export async function fetchHiveManifestFromAny(hosts: readonly string[], pubkey:
   // the pinned key, it answers with no round trip; otherwise ask the hosts.
   const carried = carriedHiveIndex(pubkey)
   if (carried) return carried
-  // Zone roots first, then the retired `content.<zone>` faces — a READ may
-  // still meet an index only the old face held (zone-door.ts).
+  // Zone roots only — the retired `content.<zone>` face serves the same heap
+  // (zone-door.ts).
   for (const host of readDoorsOf(hosts)) {
     const manifest = await fetchHiveManifest(host, pubkey)
     if (manifest) return manifest

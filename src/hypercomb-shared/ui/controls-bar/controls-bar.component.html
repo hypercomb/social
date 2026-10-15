@@ -99,7 +99,14 @@
   } @else {
     <span class="private-crumb">{{ 'breadcrumb.private' | t }}</span><span class="sep-crumb">◆</span>
   }
-  <span class="domain-crumb crumb-link" (click)="navigateTo([])">{{ activeDomain() }}</span>
+  <!-- The root. While in a swarm it reads as home, never the page's own
+       domain: "public · hypercomb.io" read as where the room meets, and the
+       page is never that (2026-10-11) — the host shows beside the words. -->
+  @if (meshPublic()) {
+    <span class="domain-crumb root-crumb crumb-link" (click)="navigateTo([])" [title]="'controls.home' | t" [attr.aria-label]="'controls.home' | t"><span class="mat-sym" aria-hidden="true">home</span></span>
+  } @else {
+    <span class="domain-crumb crumb-link" (click)="navigateTo([])">{{ activeDomain() }}</span>
+  }
   @for (seg of pathSegments(); track seg.target.length; let last = $last) {
     @if (last) {
       <span class="sep-crumb">◆</span><span class="branch-crumb"><span class="branch-bracket">[</span>{{ seg.name }}<span class="branch-bracket">]</span></span>

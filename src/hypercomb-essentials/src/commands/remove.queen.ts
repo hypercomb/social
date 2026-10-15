@@ -19,7 +19,12 @@ import { removeTilesAt, type HistoryServiceLike, type LayerCommitterLike, type L
  *   /remove                         — remove currently selected tiles
  *   /remove tileName                — remove a single tile
  *   /remove [tile1, tile2, tile3]   — remove multiple tiles
+ *   /remove a/b                     — remove `b` from the page `a`, under here
  *   [a,b]/remove                    — chained: select then remove
+ *
+ * A target may be a `/`-path under the current page: targets are grouped by
+ * the page they sit on and each page is committed on its own, deepest first,
+ * so a tile goes before the branch that holds it.
  */
 export class RemoveQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -53,15 +58,31 @@ export class RemoveQueenBee extends QueenBee {
       .map(s => String(s ?? '').trim())
       .filter(Boolean)
 
-    const landed = await removeTilesAt(segments, targets, {
-      // Removing a tile takes its whole branch with it. Count what's nested and
-      // confirm (the dialog is skipped when nothing is nested — see helper).
-      confirm: async (history, parent) => {
-        if (!(await confirmRemoval(history, parent, targets))) return false
-        selectionToClear?.clear()
-        return true
-      },
-    })
+    // One commit per page the targets sit on, deepest page first.
+    const byPage = new Map<string, string[]>()
+    for (const target of targets) {
+      const parts = target.split('/')
+      const leaf = parts.pop()!
+      const page = parts.join('/')
+      byPage.set(page, [...(byPage.get(page) ?? []), leaf])
+    }
+    const depth = (page: string): number => (page ? page.split('/').length : 0)
+    const pages = [...byPage.keys()].sort((a, b) => depth(b) - depth(a))
+
+    let landed = true
+    for (const page of pages) {
+      const leaves = byPage.get(page)!
+      const at = page ? [...segments, ...page.split('/')] : segments
+      landed = await removeTilesAt(at, leaves, {
+        // Removing a tile takes its whole branch with it. Count what's nested and
+        // confirm (the dialog is skipped when nothing is nested — see helper).
+        confirm: async (history, parent) => {
+          if (!(await confirmRemoval(history, parent, leaves))) return false
+          selectionToClear?.clear()
+          return true
+        },
+      }) && landed
+    }
 
     // A DECLINED OR IMPOSSIBLE REMOVAL MUST NOT RESOLVE CLEAN. `removeTilesAt`
     // answers false when the participant cancels the dialog, when the services
@@ -89,13 +110,19 @@ function parseRemoveArgs(args: string): string[] {
   if (bracketMatch) {
     return bracketMatch[1]
       .split(',')
-      .map(s => normalizeName(s.trim()))
+      .map(normalizePath)
       .filter(Boolean)
   }
 
   // Single name
-  const name = normalizeName(trimmed)
+  const name = normalizePath(trimmed)
   return name ? [name] : []
+}
+
+/** A name, or a `/`-path of names under the current page — each part
+ *  normalized on its own, empty parts dropped. */
+function normalizePath(s: string): string {
+  return s.split('/').map(normalizeName).filter(Boolean).join('/')
 }
 
 /** Minimal normalization — lowercase, collapse whitespace to hyphens, strip non-alphanumeric. */

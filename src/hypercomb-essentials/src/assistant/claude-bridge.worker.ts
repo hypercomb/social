@@ -6,7 +6,7 @@ import {
   BRIDGE_CODE_STORE_IOC_KEY, bridgeCodeStore,
   type RemoteSubmitRequest, type RemoteSubmitOutcome, type BridgeCodeStore,
 } from '@hypercomb/core'
-import { deliverTurnSig, readTurns, setConversationGoalReached } from './chat-thread.js'
+import { deliverTurnSig, listConversations, readTurns, setConversationArchived, setConversationGoalReached } from './chat-thread.js'
 import { appendStep, nextSeq as ledgerNextSeq, readSteps, runForAsk } from './chat-steps.js'
 import { MUTATING_OPS, STEP_SILENT_OPS } from './bridge-ops.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
@@ -57,6 +57,14 @@ type BridgeRequest = {
   layer?: { name?: string } & { [slot: string]: unknown }
   /** Resource bytes for `put-resource`. One of `text` / `base64` is required. */
   base64?: string
+  /** `submit`: files that ride WITH the sentence, the remote twin of a drop.
+   *  Each is stored by its own signature before the line runs, so the words
+   *  name it by that signature (`website page <sig>`). `sig`, when given, must
+   *  equal SHA-256 of the bytes or nothing runs. */
+  files?: { name?: string; base64?: string; text?: string; sig?: string }[]
+  /** `submit`: how long (ms) to keep listening for what the hive says after
+   *  the line is dispatched. Default 1500, capped at ten minutes. */
+  listen?: number
   /** Resource sig for `get-resource`. */
   sig?: string
   /** Bag manipulation. */
@@ -606,6 +614,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'optimization-add':    return this.#optimizationAdd(req)
       case 'chat-reply':   return this.#chatReply(req)
       case 'chat-goal-reached': return this.#chatGoalReached(req)
+      case 'chat-tidy':    return this.#chatTidy(req)
       case 'thread-read':  return this.#threadRead(req)
       case 'agent-progress': return this.#agentProgress(req)
       case 'agents-announce': return this.#agentsAnnounce(req)
@@ -956,6 +965,46 @@ export class ClaudeBridgeWorker extends Worker {
     return stored
       ? { id: req.id, ok: true, data: { convoId } }
       : { id: req.id, ok: false, error: 'chat-goal-reached could not be stored' }
+  }
+
+  // ─── chat-tidy ─────────────────────────────────────────────────────
+  //
+  // PUT AWAY THE JOBS. Every one-off `manager.cjs ask` is a conversation of
+  // its own (`chat:tile:/::<ms>-<letters>`), and they piled up in the chat
+  // window faster than anyone could read them (jwize, 2026-10-12). This puts
+  // away — archived, not deleted; the window's archive lists them and un-files
+  // with one click — each of those that is answered, not waiting on the
+  // participant, quiet for `olderThanMs` (default 10 minutes), and not in
+  // `keep` (the managers' own conversations). A JOB NOBODY ANSWERED is put
+  // away too once quiet for `staleMs` (default an hour): an ask that hung
+  // never replies, and tidy passing over every unanswered one left a column
+  // of "waiting for reply… find betz /" two days old (jwize, 2026-10-15). An
+  // ask waits fifteen minutes at most, so an hour is never a live one.
+  // `dryRun` lists what it would put away and what it passed over, by
+  // reason, and changes nothing. The participant's own chats and every tile's
+  // chat are never touched.
+  async #chatTidy(req: BridgeRequest): Promise<BridgeResponse> {
+    const extra = req as unknown as { keep?: unknown; olderThanMs?: unknown; staleMs?: unknown; dryRun?: unknown }
+    const keep = new Set(Array.isArray(extra.keep) ? extra.keep.map(String) : [])
+    const olderThanMs = typeof extra.olderThanMs === 'number' ? extra.olderThanMs : 600_000
+    const staleMs = typeof extra.staleMs === 'number' ? extra.staleMs : 3_600_000
+    const dryRun = extra.dryRun === true
+    const now = Date.now()
+    const putAway: { convoId: string; title: string; replied: boolean }[] = []
+    const passed: Record<string, number> = {}
+    const pass = (why: string): void => { passed[why] = (passed[why] ?? 0) + 1 }
+    for (const convo of await listConversations()) {
+      if (convo.archived) continue
+      if (!convo.convoId.startsWith('chat:tile:/::')) { pass(convo.convoId.startsWith('chat:tile:') ? 'tile chat' : 'participant chat'); continue }
+      if (keep.has(convo.convoId)) { pass('manager'); continue }
+      if (convo.asking) { pass('waiting on the participant'); continue }
+      if (now - convo.lastAt < (convo.replied ? olderThanMs : staleMs)) { pass(convo.replied ? 'recent' : 'unanswered, still young'); continue }
+      putAway.push({ convoId: convo.convoId, title: convo.title, replied: convo.replied })
+    }
+    if (dryRun) return { id: req.id, ok: true, data: { wouldArchive: putAway, passed } }
+    let archived = 0
+    for (const convo of putAway) if (await setConversationArchived(convo.convoId, true)) archived++
+    return { id: req.id, ok: true, data: { archived, unanswered: putAway.filter(convo => !convo.replied).length, passed } }
   }
 
   // ─── thread-read ───────────────────────────────────────────────────
@@ -2023,6 +2072,58 @@ export class ClaudeBridgeWorker extends Worker {
   async #submit(req: BridgeRequest): Promise<BridgeResponse> {
     const text = req.text
     if (typeof text !== 'string') return { id: req.id, ok: false, error: 'no text provided' }
+
+    // FILES RIDE WITH THE SENTENCE. A participant drops a file and the hive
+    // holds it by signature; a session sends it with its line. Stored first,
+    // verified against the signature the sender computed, and inert until a
+    // word names it — bytes by signature, never a second way to change a tile.
+    const stored: { name: string; sig: string; size: number }[] = []
+    if (Array.isArray(req.files) && req.files.length > 0) {
+      const store = get<{ putResource?: (blob: Blob) => Promise<string> }>('@hypercomb.social/Store')
+      if (!store?.putResource) return { id: req.id, ok: false, error: 'Store.putResource not available; nothing ran' }
+      for (const file of req.files.slice(0, 64)) {
+        const name = String(file?.name ?? '').slice(0, 200)
+        let bytes: Uint8Array
+        if (typeof file?.base64 === 'string') bytes = Uint8Array.from(atob(file.base64), c => c.charCodeAt(0))
+        else if (typeof file?.text === 'string') bytes = new TextEncoder().encode(file.text)
+        else return { id: req.id, ok: false, error: `file "${name}" carries no bytes; nothing ran` }
+        const sig = await store.putResource(new Blob([bytes as BlobPart]))
+        const said = String(file?.sig ?? '').toLowerCase()
+        if (said && said !== sig) {
+          return { id: req.id, ok: false, error: `file "${name}" arrived as ${sig}, not the ${said} it was sent as; nothing ran` }
+        }
+        stored.push({ name, sig, size: bytes.byteLength })
+      }
+    }
+
+    // WHAT THE HIVE SAYS while the line runs — the same activity lines and
+    // toasts a participant reads. This is how a session READS by speaking:
+    // a word that answers (`opens meetups`, `website list`) answers here.
+    // `on` replays the last value synchronously; `live` skips that replay.
+    const heard: { kind: 'activity' | 'toast'; text: string; type?: string }[] = []
+    let live = false
+    const unhearActivity = EffectBus.on<{ message?: unknown }>('activity:log', (p) => {
+      if (live && typeof p?.message === 'string') heard.push({ kind: 'activity', text: p.message })
+    })
+    const unhearToast = EffectBus.on<{ message?: unknown; title?: unknown; type?: unknown }>('toast:show', (p) => {
+      if (!live) return
+      const said = [p?.title, p?.message].filter(x => typeof x === 'string' && x).join(': ')
+      if (said) heard.push({ kind: 'toast', text: said, type: typeof p?.type === 'string' ? p.type : undefined })
+    })
+    live = true
+    const listenMs = Math.max(0, Math.min(Number.isFinite(req.listen) ? Number(req.listen) : 1500, 600_000))
+    try {
+      const answer = await this.#submitLine(req, text)
+      if (!answer.ok) return answer
+      if (listenMs > 0) await new Promise(resolve => setTimeout(resolve, listenMs))
+      return { ...answer, data: { ...(answer.data as Record<string, unknown>), files: stored, heard } }
+    } finally {
+      unhearActivity()
+      unhearToast()
+    }
+  }
+
+  async #submitLine(req: BridgeRequest, text: string): Promise<BridgeResponse> {
 
     let accepted = false
     let settle!: (outcome: RemoteSubmitOutcome) => void

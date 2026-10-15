@@ -84,7 +84,11 @@ const skip = (id, text) => line('SKIP', id, text)
 
 const sk = generateSecretKey()
 const pk = getPublicKey(sk)
-const lifecycleSig = sign(`lifecycle\u0000${ROOM}\u0000${SECRET}`)
+// The room's lifecycle address names its meeting point (core
+// lifecyclePreimage, 2026-10-12): the relay this run meets at, as its
+// lowercase host[:port] — what a `--allow-participants=<lifecycleSig>` relay
+// must list for this zone.
+const lifecycleSig = sign(`lifecycle\u0000${ROOM}\u0000${SECRET}\u0000${relayUrl.host.toLowerCase()}`)
 
 function nip98(url, method, body) {
   const tags = [['u', url], ['method', method]]

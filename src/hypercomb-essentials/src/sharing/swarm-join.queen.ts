@@ -53,9 +53,22 @@ export class JoinQueenBee extends QueenBee {
   override descriptionKey = 'slash.join'
   override examples = [
     { input: '/join', result: 'Joins the swarm in the zone this tab is in; a tab with none of its own opens the selector, pre-filled' },
+    { input: '/join downtown downtown hypercomb.com', result: 'Meets in that location with that secret at that host, and joins — no selector' },
+    { input: '/join mynewroom mynewpass', result: 'A new location and secret at the host this tab already meets at, and joins' },
   ]
+  // The values are the zone's identity as typed (the room folds case itself).
+  override rawArgs = true
 
-  protected async execute(): Promise<void> {
+  protected async execute(args: string): Promise<void> {
+    // WITH VALUES (jwize, 2026-10-12: "when the values are set you can just
+    // say join … or you can use those overrides"): location, secret and an
+    // optional host — the same one step as /use-live-relay and the selector's
+    // START, so all three leave the tab in the same room. Never the selector
+    // unless a value is missing.
+    if (String(args ?? '').trim()) {
+      const step = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/UseLiveRelayQueenBee') as { invoke?: (a: string) => void } | undefined
+      if (step?.invoke) { step.invoke(args); return }
+    }
     if (inSwarm()) { say('swarm.join.already', 'you are already in the swarm here') ; return }
     if (!ownZone()) { EffectBus.emit('mesh:open-modal', { join: true }) ; return }
     toggle()

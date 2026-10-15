@@ -34,6 +34,9 @@
 //   7. Walking into a tile you ALREADY took REFRESHES its provenance;
 //      walking into a held tile you never took mints no record (the
 //      genome means "I took this", and the collection rim reads it).
+//   8. A LIVE tile (`served: 'owner'` — no host keeps it, the live swarm)
+//      lands its pictures at the take, through the broker, so it still
+//      paints after its sharer leaves; a hosted take fetches nothing.
 //
 // Real machinery runs (writeTilePropertiesAt's read-merge-commit,
 // resolveCurrentLayer, childLayerOf); only IoC leaves — history, store,
@@ -59,7 +62,7 @@ let headByLoc: Map<string, Layer>
 let putBodies: string[]
 let store: { getResource: ReturnType<typeof vi.fn>; putResource: ReturnType<typeof vi.fn> }
 let committer: { commitSlotSet: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; importTree: ReturnType<typeof vi.fn> }
-let broker: { adopt: ReturnType<typeof vi.fn>; getKnownDomains: ReturnType<typeof vi.fn> }
+let broker: { adopt: ReturnType<typeof vi.fn>; getKnownDomains: ReturnType<typeof vi.fn>; fetchBySig: ReturnType<typeof vi.fn> }
 let cursor: { state: { rewound: boolean }; currentLayerSig?: string }
 let commitLands: boolean
 let setTitle: ReturnType<typeof vi.fn>
@@ -167,6 +170,7 @@ const freshWorld = () => {
   broker = {
     adopt: vi.fn(async () => ({ layers: 1, leaves: 0, failed: 0 })),
     getKnownDomains: vi.fn(() => ['bees.example']),
+    fetchBySig: vi.fn(async () => new Uint8Array([1])),
   }
 }
 
@@ -364,6 +368,81 @@ describe('the wand is the keep', () => {
     expect(visitRecordAt(['garden'])).toBeNull()
     expect(localStorage.getItem('hc:synced-publisher-roots')).toBeNull()
     expect(localStorage.getItem('hc:adopted-roots')).toBeNull()
+  })
+
+  // THE LIVE SWARM (jwize 2026-10-11): a tile no host keeps is served from
+  // its sharer's device while they are in the room (`served: 'owner'`). A
+  // peer who TAKES one keeps it — pictures included: they land at the take.
+  it('taking a LIVE tile lands its pictures now, through the broker — never its layer; a hosted take fetches nothing', async () => {
+    freshWorld()
+    inZone()
+    const SMALL = '7'.repeat(64)
+    peerTiles = [{ ...GARDEN_OFFER, served: 'owner', small: { image: SMALL } }]
+
+    wandGarden()
+    await settle()
+
+    expect(committer.importTree).toHaveBeenCalled()
+    const fetched = broker.fetchBySig.mock.calls.map(([s, t]) => `${s}:${t}`).sort()
+    expect(fetched).toEqual([`${IMG}:resource`, `${SMALL}:resource`].sort())
+    // The taken 0000 never carries the swarm's word about where it was served.
+    const body = JSON.parse(putBodies[putBodies.length - 1]) as Record<string, unknown>
+    expect(body['served']).toBeUndefined()
+    expect(body['small']).toEqual({ image: SMALL })
+
+    // A hosted tile's pictures stay where its host keeps them: read lazily.
+    freshWorld()
+    inZone()
+    wandGarden()
+    await settle()
+    expect(committer.importTree).toHaveBeenCalled()
+    expect(broker.fetchBySig).not.toHaveBeenCalled()
+  })
+
+  it("a LIVE take asks past the broker's miss window, and asks a picture that did not arrive once more", async () => {
+    freshWorld()
+    inZone()
+    const SMALL = '8'.repeat(64)
+    peerTiles = [{ ...GARDEN_OFFER, served: 'owner', small: { image: SMALL } }]
+    const lifted: string[] = []
+    const withRetry = broker as typeof broker & { allowFetchRetry: (sig: string) => void }
+    withRetry.allowFetchRetry = (sig: string) => { lifted.push(sig) }
+    // SMALL lost a mesh race a moment ago: the first ask answers nothing.
+    let firstSmall = true
+    broker.fetchBySig.mockImplementation(async (sig: string) => {
+      if (sig === SMALL && firstSmall) { firstSmall = false; return null }
+      return new Uint8Array([1])
+    })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      wandGarden()
+      for (let i = 0; i < 8; i++) { await Promise.resolve(); await vi.advanceTimersByTimeAsync(0) }
+      expect(committer.importTree).toHaveBeenCalled()
+      // Every picture's window was lifted before it was asked — the take is a gesture.
+      expect([...lifted].sort()).toEqual([IMG, SMALL].sort())
+      expect(broker.fetchBySig.mock.calls.filter(([s]) => s === SMALL)).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(2_000)
+      for (let i = 0; i < 4; i++) await Promise.resolve()
+      // Asked once more (window lifted again); a picture that arrived is not.
+      expect(broker.fetchBySig.mock.calls.filter(([s]) => s === SMALL)).toHaveLength(2)
+      expect(broker.fetchBySig.mock.calls.filter(([s]) => s === IMG)).toHaveLength(1)
+      expect(lifted.filter(s => s === SMALL)).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+      delete (withRetry as Partial<typeof withRetry>).allowFetchRetry
+    }
+  })
+
+  it('a LIVE take that did not land fetches nothing', async () => {
+    freshWorld()
+    inZone()
+    commitLands = false
+    peerTiles = [{ ...GARDEN_OFFER, served: 'owner' }]
+
+    wandGarden()
+    await settle()
+
+    expect(broker.fetchBySig).not.toHaveBeenCalled()
   })
 
   it('a rewound history cursor refuses the take up front', async () => {

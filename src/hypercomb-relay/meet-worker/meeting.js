@@ -100,12 +100,9 @@ export const BULK_KINDS = new Set([ANSWER_KIND, 30201, 20400, 20402])
  *  a FIN is found by its silence: every live client probes at least every
  *  30 s (hidden) and a throttled hidden tab about once a minute. */
 export const REAP_IDLE_MS = 120_000
+/** How long a will waits before the room hears it — and the time a quiet
+ *  heir has to answer the meeting point's question (see "soft wills"). */
 export const WILL_GRACE_MS = 15_000
-/** An heir heard within this long counts as there, whenever the dying
- *  connection last beaconed: past a throttled hidden tab's minute cadence
- *  (it cannot be pinged — see above), short of the silence a locked phone's
- *  zombie socket keeps before the reap. */
-export const HEIR_HEARD_MS = 90_000
 export const LIFECYCLE_KIND = 30206
 const LIFECYCLE_WILL_TTL = 300   // seconds a synthesized tombstone lingers for late joiners
 const FUTURE_SKEW_SECS = 15 * 60
@@ -1033,13 +1030,24 @@ export class Meeting {
   // EVENT on a connection that beaconed it, hands the will to that connection
   // (it is still here); another open connection that beaconed the slot
   // inherits it instead — but only one HEARD FROM since the dying
-  // connection's newest beacon for the slot, or within HEIR_HEARD_MS. A phone
-  // that locked without a FIN leaves a silent socket until the reap; when its
-  // wake's socket dies too, a zombie silent that long must not hold the will
-  // for the minutes the reap takes, while a throttled hidden tab of the same
-  // key (heard once a minute) still does. The tombstone is unsigned (the
-  // meeting point cannot sign as the participant) and can only remove a
-  // peer's tiles, never add content.
+  // connection's newest beacon for the slot (MS6).
+  //
+  // A QUIET CANDIDATE IS ASKED, NEVER ASSUMED. A phone that locked without a
+  // FIN leaves a silent socket until the reap; when its wake's socket dies
+  // too, that zombie must not hold the will for the minutes the reap takes.
+  // A hidden second tab of the same key is just as quiet (throttled to a
+  // frame a minute), and a Worker cannot ping either of them — silence alone
+  // cannot tell them apart, so no window of it decides. Instead each quiet
+  // candidate is sent, on its own subscriptions only, the tombstone the room
+  // would hear: never stored, never fanned out. A live tab runs its socket's
+  // handlers however throttled its timers are; reading a {left} under its
+  // own key on its lifecycle channel, the swarm beacons again a second later
+  // (#reassertAfterStaleTombstone, shipped since 2026-09-25), and that beacon
+  // takes the will. A zombie says nothing, and the room hears the leave when
+  // the grace ends — 15 s, not the reap's minutes. A tab that cannot answer
+  // (frozen, suspended) is away, and its next beacon brings it back. The
+  // tombstone is unsigned (the meeting point cannot sign as the participant)
+  // and can only remove a peer's tiles, never add content.
 
   #lifecycleInfo(evt) {
     const x = tagValue(evt, 'x')
@@ -1079,14 +1087,10 @@ export class Meeting {
     for (const other of this.#clients) if (other !== client) other.lifecycle.delete(key)
   }
 
-  /** An open connection that beaconed the slot and is still THERE: spoken
-   *  since `since` (the dying connection's newest beacon for the slot), or
-   *  within HEIR_HEARD_MS — a hidden second tab, throttled to a frame a
-   *  minute and never pinged (a Worker cannot), must not lose the will to a
-   *  beacon it did not happen to follow. */
+  /** An open connection that beaconed the slot and is still THERE: heard
+   *  from since `since` (the dying connection's newest beacon for the slot). */
   #willHeir(key, except, since) {
-    const heard = Math.min(since, this.#now() - HEIR_HEARD_MS)
-    for (const c of this.#clients) if (c !== except && !c.closed && c.beaconed.has(key) && c.lastInboundMs >= heard) return c
+    for (const c of this.#clients) if (c !== except && !c.closed && c.beaconed.has(key) && c.lastInboundMs >= since) return c
     return null
   }
 
@@ -1099,18 +1103,33 @@ export class Meeting {
       if (held) this.#clearTimer(held.timer)
       // The tombstone is charged to the source whose connection died.
       this.#pendingWills.set(key, { ...will, since, source: client.source, timer: this.#setTimer(() => this.#fireWill(key), this.#willGraceMs) })
+      this.#askQuietHeirs(key, will, client)
     }
     client.lifecycle.clear()
   }
 
-  #fireWill(key) {
-    const will = this.#pendingWills.get(key)
-    if (!will) return
-    this.#pendingWills.delete(key)
-    // Asked again at the end of the grace: a second tab that has spoken since
-    // inherits; a zombie that has not, does not.
-    const heir = this.#willHeir(key, null, will.since)
-    if (heir) { if (!heir.lifecycle.has(key)) heir.lifecycle.set(key, { x: will.x, d: will.d, pubkey: will.pubkey }); return }
+  /** Every other open connection that beaconed the slot is quiet (heard from
+   *  since the dying one's beacon, it would have inherited): each is sent the
+   *  would-be tombstone on its own subscriptions that hear it — one frame per
+   *  subscription, the room none. Its answer is any frame within the grace. */
+  #askQuietHeirs(key, will, dying) {
+    let tomb = null
+    let body = null
+    for (const c of this.#clients) {
+      if (c === dying || c.closed || !c.beaconed.has(key)) continue
+      for (const [subId, route] of c.routes) {
+        if (!route.xs.has(will.x)) continue
+        tomb ??= this.#tombstone(will)
+        const filters = c.subs.get(subId)
+        if (!filters || !matchesAny(filters, tomb)) continue
+        body ??= JSON.stringify(tomb)
+        try { c.socket.send(`["EVENT",${JSON.stringify(subId)},${body}]`) } catch {}
+      }
+    }
+  }
+
+  /** The {left} the meeting point says for a will, stamped now. */
+  #tombstone(will) {
     const nowSec = Math.floor(this.#now() / 1000)
     const tomb = {
       pubkey: will.pubkey, created_at: nowSec, kind: LIFECYCLE_KIND,
@@ -1119,6 +1138,18 @@ export class Meeting {
     }
     tomb.id = eventId(tomb)
     tomb.sig = ''  // made by the meeting point (see above)
+    return tomb
+  }
+
+  #fireWill(key) {
+    const will = this.#pendingWills.get(key)
+    if (!will) return
+    this.#pendingWills.delete(key)
+    // Asked again at the end of the grace: a tab that has spoken since (its
+    // answer was a frame, not a beacon) inherits; a zombie that has not, does not.
+    const heir = this.#willHeir(key, null, will.since)
+    if (heir) { if (!heir.lifecycle.has(key)) heir.lifecycle.set(key, { x: will.x, d: will.d, pubkey: will.pubkey }); return }
+    const tomb = this.#tombstone(will)
     try { this.#insert(tomb, will.source ?? '') } catch {}
     this.#broadcast(tomb, null)
     this.#census.willsFired++

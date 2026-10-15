@@ -48,10 +48,11 @@ import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { fromRuntime } from '../../core/from-runtime'
 import {
-  SENDING_AFTER_MS, SLOW_FOR_MS, UNREACHABLE_AFTER_MS, clockRefused, linkPhase, refusalOf, slowLink, statusLine, wordsBeside,
+  SENDING_AFTER_MS, SLOW_FOR_MS, UNREACHABLE_AFTER_MS, clockRefused, hostKeepsNothing, linkPhase, refusalOf, slowLink, statusLine, wordsAtHost, wordsBeside,
   type MeshConnection, type ShareStatus, type StatusLine, type SyncState,
 } from './presence-status'
 import { readMeshZone } from '../../core/mesh-session'
+import { ParticipantDocument } from '../../core/participant-document'
 
 interface PresencePayload {
   sig?: string
@@ -142,6 +143,18 @@ interface Badge {
   where: 'self' | 'here' | 'visiting' | 'elsewhere' | 'away'
 }
 
+/** FOLDED TO ITS DOT (jwize, 2026-10-13: "the live label with participants
+ *  need to be able to be hidden and it gets in the way frequently on
+ *  mobile"). The whole strip — badges, names, the status line, the panel —
+ *  folds to the one status dot, which keeps the connection's colour and
+ *  unfolds on a tap. Off until the participant folds it, then sticky: one
+ *  current record per participant, never replicated (presence:strip). */
+const stripFolded = new ParticipantDocument<boolean>({
+  meaning: 'presence:strip',
+  parse: raw => (typeof raw === 'boolean' ? raw : null),
+  empty: false,
+})
+
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const SWARM_FILTER_KEY = '@diamondcoreprocessor.com/SwarmFilterService'
 const NAMES_KEY = '@diamondcoreprocessor.com/NameService'
@@ -212,6 +225,9 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   /** Expanded participant panel state. Toggles on peer-badge click. */
   readonly expanded = signal(false)
 
+  /** The strip folded to its dot (stripFolded). */
+  readonly folded = signal(stripFolded.value)
+
   /** Inline name editor state + draft. */
   readonly editingName = signal(false)
   readonly draftName = signal('')
@@ -266,16 +282,20 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   #sendingTimer: ReturnType<typeof setTimeout> | null = null
 
   /** The meeting point this tab is joined at, as named in its zone ('' =
-   *  the default) — what the 'unreachable' line names. */
+   *  none named there) — what the 'unreachable' line names. */
   readonly #point = signal('')
   /** DELIVERY, NOT THE SOCKET (TS-7). The relay never echoes our own event
    *  back, so its OK (swarm:page-announced) is the only proof the room has
-   *  this page's word. #offered: when this page's newest word went out (its
-   *  walk's share status); #taken: when the relay last took a word, by page.
-   *  Until a swarm has ever said page-announced (an older essentials), every
-   *  word counts as taken — the line reads as it always did. */
+   *  this page's word. #offered: since when this tab's own frames at a page
+   *  have gone untaken — `exact` when the swarm counted it (share-status
+   *  `unackedMs`: the page's word or the beacon, aged from when it went out,
+   *  so a status said again never restarts the count); else since this tab
+   *  first heard the page's word was on its way. #taken: when the relay last
+   *  took a word, by page. Until a swarm has ever said page-announced, or
+   *  that a frame of ours is late (an older essentials), every word counts
+   *  as taken — the line reads as it always did. */
   readonly #announceSeen = signal(false)
-  readonly #offered = signal<{ location: string; at: number } | null>(null)
+  readonly #offered = signal<{ location: string; at: number; exact: boolean } | null>(null)
   readonly #taken = signal<ReadonlyMap<string, number>>(new Map())
 
   /** The relay this tab meets at, as `jwize.com` — what the connection
@@ -330,19 +350,21 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   /** The host the upload lines name: where this page's tiles go. */
   readonly #uploadHost = computed(() => String(this.#share()?.host ?? ''))
 
-  /** THIS page's newest word: whether the relay ever took a word of ours
-   *  for it (`arrived`), whether it took the newest (`taken`), and since when
-   *  the newest has been on its way (null while there is nothing on its way). */
-  readonly #delivery = computed<{ arrived: boolean; taken: boolean; since: number | null }>(() => {
-    if (!this.#announceSeen()) return { arrived: true, taken: true, since: null }
+  /** THIS page: whether the relay ever took a word of ours for it
+   *  (`arrived`), and since when a frame of ours here has been on its way
+   *  untaken (null while nothing is). */
+  readonly #delivery = computed<{ arrived: boolean; since: number | null }>(() => {
+    if (!this.#announceSeen()) return { arrived: true, since: null }
     const share = this.#share()
     const at = this.#hereLocation() ?? String(share?.location ?? '')
     const taken = this.#taken().get(at)
-    if (share?.taken === true) return { arrived: true, taken: true, since: null }
     const offered = this.#offered()
-    const mine = offered && offered.location === at ? offered : null
-    if (taken !== undefined && (!mine || taken >= mine.at)) return { arrived: true, taken: true, since: null }
-    return { arrived: taken !== undefined, taken: false, since: mine ? mine.at : null }
+    let mine = offered && offered.location === at ? offered : null
+    // A swarm that does not count its own frames: the page's OK after its
+    // word went out (or a status that says taken) is the word taken. A count
+    // the swarm keeps is cleared only by the swarm (or the page's OK).
+    if (mine && !mine.exact && (share?.taken === true || (taken !== undefined && taken >= mine.at))) mine = null
+    return { arrived: share?.taken === true || taken !== undefined, since: mine ? mine.at : null }
   })
 
   /** The line, or null for the old rendering. */
@@ -361,12 +383,14 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     const room = new Set([...this.#zone(), ...peersHere])
     for (const pk of away) room.delete(pk)
     // You are here once the relay has taken your word for this page — until
-    // then the room does not see you here, and the line says "Sending…".
-    // A re-said word on its way for less than SENDING_AFTER_MS keeps you
-    // counted: the count never blinks on every walk of the page.
-    const { arrived, taken, since } = this.#delivery()
-    const sending = !taken && since !== null && now - since >= SENDING_AFTER_MS
-    const selfHere = taken || (arrived && !sending)
+    // then the room does not see you here. A frame of yours untaken for
+    // SENDING_AFTER_MS (the page's word, the beacon) says "Sending…", and
+    // you are not counted here while it does, whatever the socket says. A
+    // re-said word on its way for less than that keeps you counted: the
+    // count never blinks on every walk of the page.
+    const { arrived, since } = this.#delivery()
+    const sending = since !== null && now - since >= SENDING_AFTER_MS
+    const selfHere = arrived && !sending
     this.#labelVersion() // dependency: a sharer's name landing renames the line
     const deepOwners = this.#deepOwners().map(pk => this.#labelOf(pk))
     return statusLine({
@@ -374,7 +398,9 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
       host: this.#swarmHost() || this.#t('mesh.state.no-host-name'),
       uploadHost: this.#uploadHost(),
       room: this.#room().trim(),
-      words: wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale()),
+      // The words with the host they were drawn at beside them ('marble
+      // cove · hypercomb.com') — never the page's own domain (2026-10-11).
+      words: wordsAtHost(wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale()), this.#swarmHost()),
       roomCount: room.size + 1,
       hereCount: standing.length + (selfHere ? 1 : 0),
       share: this.#share(),
@@ -419,9 +445,13 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
     // Self badge always leads the strip.
     const myLabel = this.#myLabel().trim()
+    // Your badge wears the default style, never a hue (jwize, 2026-10-13:
+    // "our color should be fixed to a default style"): the colours belong to
+    // the others, and their tiles wear the same ones.
     out.push({
       key: 'self',
-      ...this.#chip(myLabel || 'me'),
+      color: '',
+      glow: '',
       initials: myLabel ? this.#initials(myLabel) : '+',
       isSelf: true,
       unnamed: !myLabel,
@@ -509,6 +539,10 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   })
 
   ngOnInit(): void {
+    // The record arrives from disk after the first paint: follow it.
+    const onFolded = (): void => this.folded.set(stripFolded.value)
+    stripFolded.addEventListener('change', onFolded)
+    this.#unsubs.push(() => stripFolded.removeEventListener('change', onFolded))
     const swarm = this.#swarm()
     if (swarm) {
       try { this.#myLabel.set(swarm.myLabel() ?? '') } catch { /* default empty */ }
@@ -612,12 +646,15 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         this.#shares.set(next)
         this.#lastShare.set(p)
         this.#readHere()
-        // A walk of the page we stand on sends (or re-says) its word: from
-        // now it is on its way until the relay takes it.
-        if (at === (this.#hereLocation() ?? at) && p.taken !== true) this.#noteOffered(at)
+        // A walk of the page we stand on sends (or re-says) its word: it is
+        // on its way until the relay takes it — for as long as the swarm says
+        // its frames have gone untaken, never from this status's arrival.
+        if (at === (this.#hereLocation() ?? at)) this.#noteOffered(at, p)
       }),
 
       // The relay took this tab's word for the page it stands on (its OK).
+      // The swarm says its status again at once if anything of ours (the
+      // beacon) is still on its way.
       EffectBus.on<{ location?: string }>('swarm:page-announced', (p) => {
         const at = String(p?.location ?? '')
         this.#announceSeen.set(true)
@@ -626,6 +663,7 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         next.set(at, Date.now())
         while (next.size > 64) next.delete(next.keys().next().value as string)
         this.#taken.set(next)
+        if (this.#offered()?.exact && this.#offered()?.location === at) this.#offered.set(null)
         this.#clock.set(Date.now())
       }),
 
@@ -702,10 +740,15 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
    *  word, with nothing selected); `share` offers this page's private tiles
    *  after one confirmation — tile by tile, their insides stay private;
    *  `code` opens the selector on the access code (the meeting point refused
-   *  this tab's — paste the newest one). */
-  async onStatusAction(action: 'invite' | 'share' | 'code' | undefined): Promise<void> {
+   *  this tab's — paste the newest one); `host` opens it on the host field
+   *  (joined with no host named — there is no default). */
+  async onStatusAction(action: 'invite' | 'share' | 'code' | 'host' | undefined): Promise<void> {
     if (action === 'code') {
       EffectBus.emit('mesh:open-modal', { focus: 'code' })
+      return
+    }
+    if (action === 'host') {
+      EffectBus.emit('mesh:open-modal', { focus: 'point' })
       return
     }
     if (action === 'invite') {
@@ -723,9 +766,13 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     // merely because it is where we meet. An older swarm names no host (the
     // relay was its host); a page with no host, or one not known yet, names
     // no keeper — the confirmation must never promise one that is not there.
+    // Nor one that is not taking the bytes (it refused this key, is full,
+    // never answered): its tiles go live from this device (decision c).
     const share = this.#share()
     const named = share && typeof share.host === 'string'
-    const keeper = named ? this.#uploadHost() : (this.#swarmHost() || this.#t('mesh.state.no-host-name'))
+    const keeper = named
+      ? (hostKeepsNothing(share, this.#sync()) ? '' : this.#uploadHost())
+      : (this.#swarmHost() || this.#t('mesh.state.no-host-name'))
     const ok = await requestConfirm({
       title: 'swarm.share.confirm.title',
       message: keeper ? 'swarm.share.confirm.message' : 'swarm.share.confirm.message-local',
@@ -749,6 +796,20 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     if (b.where === 'visiting') return 'presence.room-visiting'
     if (b.where === 'away') return 'presence.room-away'
     return 'presence.filter-toggle'
+  }
+
+  /** Fold the whole strip to its dot — remembered for this participant. */
+  onFold(): void {
+    this.expanded.set(false)
+    this.editingName.set(false)
+    this.folded.set(true)
+    stripFolded.write(true)
+  }
+
+  /** The dot unfolds the strip again. */
+  onUnfold(): void {
+    this.folded.set(false)
+    stripFolded.write(false)
   }
 
   /** The caret toggles the expanded participant panel (expansion no
@@ -887,18 +948,40 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     } catch { /* keep the last one */ }
   }
 
-  /** The meeting point named in this tab's zone ('' = the default). */
+  /** The meeting point named in this tab's zone ('' = none named there). */
   #readPoint(): void {
     this.#point.set(String(readMeshZone()?.relay ?? ''))
   }
 
-  /** This page's word went out (or was re-said) at `location`: "Sending…"
-   *  shows if the relay has not taken it SENDING_AFTER_MS from now. */
-  #noteOffered(location: string): void {
-    const at = Date.now()
-    this.#offered.set({ location, at })
-    if (this.#sendingTimer) clearTimeout(this.#sendingTimer)
-    this.#sendingTimer = setTimeout(() => { this.#sendingTimer = null; this.#clock.set(Date.now()) }, SENDING_AFTER_MS + 50)
+  /** The swarm said its status for `location`, the page we stand on:
+   *  "Sending…" shows once a frame of ours there has gone untaken for
+   *  SENDING_AFTER_MS. TS-7: the swarm says its status again exactly when
+   *  that age is reached, so restarting the count on every status meant the
+   *  line never said it. A swarm that counts (`unackedMs`) gives the age
+   *  itself; one that does not keeps the first time its untaken word was
+   *  heard of, until the relay takes it. */
+  #noteOffered(location: string, p: ShareStatus): void {
+    const now = Date.now()
+    const unacked = typeof p.unackedMs === 'number' && Number.isFinite(p.unackedMs) ? Math.max(0, p.unackedMs) : null
+    const prev = this.#offered()
+    let next: { location: string; at: number; exact: boolean } | null
+    if (unacked !== null) {
+      // Nothing of ours on its way: nothing to say. A frame already late
+      // proves the swarm reports delivery even before its first OK.
+      next = unacked > 0 ? { location, at: now - unacked, exact: true } : null
+      if (unacked >= SENDING_AFTER_MS) this.#announceSeen.set(true)
+    } else {
+      if (p.taken === true) return
+      const taken = this.#taken().get(location)
+      const untaken = prev && prev.location === location && !prev.exact && !(taken !== undefined && taken >= prev.at)
+      next = untaken ? prev : { location, at: now, exact: false }
+    }
+    if (next !== prev) this.#offered.set(next)
+    this.#clock.set(now)
+    if (this.#sendingTimer) { clearTimeout(this.#sendingTimer); this.#sendingTimer = null }
+    if (next && next.at + SENDING_AFTER_MS > now) {
+      this.#sendingTimer = setTimeout(() => { this.#sendingTimer = null; this.#clock.set(Date.now()) }, next.at + SENDING_AFTER_MS - now + 50)
+    }
   }
 
   /** Hosts this device knows — the pool, the page's hosts, every host heard

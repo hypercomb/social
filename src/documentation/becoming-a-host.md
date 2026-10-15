@@ -42,8 +42,10 @@ To host today a participant has to:
 
 What goes wrong:
 
-- **Seven words for nearby things:** host (the field), hosts (the
-  directory), public host, self-domain, zone, door, the `content.` face.
+- **Seven words for nearby things:** host (the field — "Your own host",
+  in the host directory since 2026-10-12; it left the swarm selector, which
+  shows only what defines a meeting), hosts (the directory), public host,
+  self-domain, zone, door, the `content.` face.
 - **No single place to start.** There is deliberately no `/host` behaviour
   (`host-gesture.ts`: hosting infrastructure and publishing a branch are
   different acts), so nothing walks a newcomer through it.

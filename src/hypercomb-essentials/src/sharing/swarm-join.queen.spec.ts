@@ -58,3 +58,20 @@ describe('leave', () => {
     expect(seen).toEqual([['toggle', { cmd: 'mesh.togglePublic', binding: null, event: null }]])
   })
 })
+
+describe('join with values (2026-10-12: "or you can use those overrides")', () => {
+  it('location, secret and host ride the one step /use-live-relay and the selector share — never the selector itself', async () => {
+    const calls: string[] = []
+    registry.set('@diamondcoreprocessor.com/UseLiveRelayQueenBee', { invoke: (a: string) => { calls.push(a) } })
+    try {
+      await join.invoke('downtown downtown hypercomb.com')
+      await join.invoke('mynewroom mynewpass')
+      expect(calls).toEqual(['downtown downtown hypercomb.com', 'mynewroom mynewpass'])
+      expect(seen).toEqual([])
+    } finally { registry.delete('@diamondcoreprocessor.com/UseLiveRelayQueenBee') }
+  })
+
+  it('keeps the values as typed (the room folds case itself)', () => {
+    expect((join as { rawArgs?: boolean }).rawArgs).toBe(true)
+  })
+})

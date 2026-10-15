@@ -75,7 +75,9 @@ beforeEach(() => {
   room = cred('boot-copy')
   secret = cred('boot-secret')
   // The mesh as this package ships it: it follows the tab's meeting point
-  // (ownRelays is the page's own list, never the point).
+  // (ownRelays is the page's own list as chosen, never the point). Here the
+  // device chose hypercomb.com earlier (a relay list); a NEW install's list is
+  // empty — see 'no default host' below.
   mesh = {
     relays: ['wss://hypercomb.com'],
     configureRelays: vi.fn((urls: string[]) => { mesh.relays = [...urls] }),
@@ -201,12 +203,18 @@ describe('the meeting point and its access code', () => {
     expect(seen.filter(s => s.effect === 'mesh:zone')).toEqual([{ effect: 'mesh:zone', payload: { relay: '' } }])
   })
 
-  it('refuses a code with no meeting point (it would reach the default relay), a bad code and a bad point', () => {
+  it('refuses a code with no meeting point, a bad code and a bad point — and a join with no host at all', () => {
     stashMeet('r/s/')
     const modal = open({ join: true, meet: true })
+    typeInto(modal.onPointInput, '')
     typeInto(modal.onCodeInput, 'sekrit')
     modal.save()
-    expect(modal.missingField()).toBe('point')
+    expect(modal.missingField()).toBe('host')                // no host, no room
+    const quiet = open({ meet: true })                       // a save that joins nothing
+    typeInto(quiet.onPointInput, '')
+    typeInto(quiet.onCodeInput, 'sekrit')
+    quiet.save()
+    expect(quiet.missingField()).toBe('point')               // a code needs its point
     typeInto(modal.onPointInput, 'ws://pluginthematrix.com')
     modal.save()
     expect(modal.missingField()).toBe('point')
@@ -309,40 +317,289 @@ describe('ZI-1: a new tab pre-fills the point the origin last met at — never i
     expect(modal.codeDraft()).toBe('')
   })
 
-  it('a tab with a zone of its own keeps its own point — the default included', () => {
+  it('a tab with a point of its own keeps it, and its code — never another tab\'s last meeting', () => {
     meshSession.writeMeshZone({ relay: 'wss://pluginthematrix.com' })
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's', relay: 'wss://own.example', code: 'own-code' }))
+    const modal = open({ join: true })
+    expect(modal.pointDraft()).toBe('own.example')
+    expect(modal.codeDraft()).toBe('own-code')
+  })
+
+  it('a zone that names NO point names no host: the host this device remembers is offered (R4), never with a code', () => {
+    // Every door that opens the field for a missing host (`use-live-relay
+    // <room> <secret>`, a link with no host, `join`) writes the room first.
+    meshSession.writeMeshZone({ relay: 'wss://pluginthematrix.com' })
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's', code: 'stray' }))
+    const modal = open({ join: true, focus: 'point' })
+    expect(modal.pointDraft()).toBe('pluginthematrix.com')
+    expect(modal.codeDraft()).toBe('')
+    // Nothing remembered: where its page's own list meets (the field is the
+    // only place the host comes from, so it is shown)…
+    meshSession.writeMeshZone({ relay: '' })
     sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's' }))
+    expect(open({ join: true }).pointDraft()).toBe('hypercomb.com')
+    // …and with no list either, nothing — there is no default
+    mesh.ownRelays = () => []
     expect(open({ join: true }).pointDraft()).toBe('')
   })
 })
 
 describe('ZI-1 / ZI-6: the selector\'s words', () => {
-  it('preview the zone START will store: typed text folds (D6), the store\'s own value is read as held', async () => {
+  it('preview the zone START will store: typed text folds (D6), and so does a pair the store held from before — one room for everyone', async () => {
     const { secretTag } = await import('@hypercomb/core')
-    const plain = secretTag('lifecycle\0downtown\0joe\'s', 'en')
+    const plain = `${secretTag('lifecycle\0downtown\0joe\'s\0hypercomb.com', 'en')} · hypercomb.com`
     const modal = openStashed({ room: 'ｄｏｗｎｔｏｗｎ', secret: 'joe’s' })
     expect(modal.zoneWords()).toBe(plain)        // what a friend typing plain text reads
-    // A pair the store already holds (recorded before the fold) previews as held.
+    // A pair the store already holds (recorded before the fold): the ROOM
+    // folds it too (core roomText, 2026-10-12), so everyone reads one pair.
     room.value = 'joe’s place'
     const held = openStashed({ room: 'joe’s place', secret: 'joe’s' })
-    expect(held.zoneWords()).toBe(secretTag('lifecycle\0joe’s place\0joe\'s', 'en'))
+    expect(held.zoneWords()).toBe(`${secretTag('lifecycle\0joe\'s place\0joe\'s\0hypercomb.com', 'en')} · hypercomb.com`)
     typeInto(held.onRoomInput, 'joe’s place ')
-    expect(held.zoneWords()).toBe(secretTag('lifecycle\0joe’s place\0joe\'s', 'en'))
+    expect(held.zoneWords()).toBe(`${secretTag('lifecycle\0joe\'s place\0joe\'s\0hypercomb.com', 'en')} · hypercomb.com`)
   })
 
-  it('fold the point typed — the default keeps today\'s pair — from the English list, the reader\'s own beside it', async () => {
+  it('are drawn at the host START meets at, with that host beside them — from the English list, the reader\'s own beside it', async () => {
     const { secretTag } = await import('@hypercomb/core')
-    const today = secretTag('lifecycle\0downtown\0rose', 'en')
+    const pair = secretTag('lifecycle\0downtown\0rose\0hypercomb.com', 'en')
+    const today = `${pair} · hypercomb.com`
+    // the pair from before the host was part of the room is not it
+    expect(pair).not.toBe(secretTag('lifecycle\0downtown\0rose', 'en'))
     const modal = openStashed({ room: 'downtown', secret: 'rose' })
     expect(modal.zoneWords()).toBe(today)
     typeInto(modal.onPointInput, 'pluginthematrix.com')
-    const atPoint = modal.zoneWords()
-    expect(atPoint).not.toBe(today)
-    typeInto(modal.onPointInput, 'wss://hypercomb.com')
-    expect(modal.zoneWords()).toBe(today)
+    expect(modal.zoneWords()).toBe(`${secretTag('lifecycle\0downtown\0rose\0pluginthematrix.com', 'en')} · pluginthematrix.com`)
+    // hypercomb.com however it is written
+    for (const p of ['wss://hypercomb.com', 'hypercomb.com', 'wss://HyperComb.com/']) {
+      typeInto(modal.onPointInput, p)
+      expect([p, modal.zoneWords()]).toEqual([p, today])
+    }
+    // an empty field names no host: no room, no words — never a default's
+    typeInto(modal.onPointInput, '')
+    expect(modal.zoneWords()).toBe('')
 
     services.set('@hypercomb.social/I18n', { locale: 'ja' })
     const ja = openStashed({ room: 'downtown', secret: 'rose' })
-    expect(ja.zoneWords()).toBe(`${today} (${secretTag('lifecycle\0downtown\0rose', 'ja')})`)
+    expect(ja.zoneWords()).toBe(`${pair} (${secretTag('lifecycle\0downtown\0rose\0hypercomb.com', 'ja')}) · hypercomb.com`)
+  })
+
+  it('NO HOST, NO WORDS: an empty field on a page whose list names no host shows no pair — never a default\'s', () => {
+    mesh.ownRelays = () => []
+    mesh.relays = []
+    const modal = openStashed({ room: 'downtown', secret: 'rose' })
+    expect(modal.pointDraft()).toBe('')
+    expect(modal.zoneWords()).toBe('')
+    typeInto(modal.onPointInput, 'hypercomb.com')
+    expect(modal.zoneWords()).toContain(' · hypercomb.com')
+  })
+
+  it('THE PAGE NEVER PICKS THE HOST: the same list reads the same point and the same words on localhost and on hypercomb.io (2026-10-11)', async () => {
+    const { secretTag } = await import('@hypercomb/core')
+    mesh.ownRelays = () => ['ws://localhost:7777', 'wss://hypercomb.com']
+    const atDev = `${secretTag('lifecycle\0downtown\0rose\0localhost:7777', 'en')} · localhost:7777`
+    const read = (): [string, string] => {
+      const modal = openStashed({ room: 'downtown', secret: 'rose' })
+      return [modal.pointDraft(), modal.zoneWords()]
+    }
+    expect(location.hostname).toBe('localhost')
+    const local = read()
+    expect(local).toEqual(['ws://localhost:7777', atDev])
+    const original = Object.getOwnPropertyDescriptor(window, 'location')!
+    for (const hostname of ['hypercomb.io', 'jwize.com', 'myroom.hypercomb.io']) {
+      Object.defineProperty(window, 'location', { value: { hostname, host: hostname, origin: `https://${hostname}` }, writable: true, configurable: true })
+      try {
+        sessionStorage.clear()
+        expect([hostname, ...read()]).toEqual([hostname, ...local])
+      } finally { Object.defineProperty(window, 'location', original) }
+    }
+    // Cleared, there is no host — and no pair (never a default's).
+    const modal = openStashed({ room: 'downtown', secret: 'rose' })
+    typeInto(modal.onPointInput, '')
+    expect(modal.zoneWords()).toBe('')
+  })
+})
+
+// ── ONLY WHAT DEFINES THE MEETING (jwize, 2026-10-12) ─────────────────────
+describe('the selector shows the meeting point, the room and the secret — and a code only when a coded point needs one', () => {
+  const html = async (): Promise<string> => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    return readFileSync(join(__dirname, 'mesh-modal.component.html'), 'utf8')
+  }
+
+  it('its fields are your name, then the meeting point, the room and the secret, in that order, and the code — nothing else', async () => {
+    const tpl = await html()
+    const ids = [...tpl.matchAll(/<input[^>]*?\sid="([^"]+)"/g)].map(m => m[1])
+    // Your name came back (jwize, 2026-10-12: "where did the name field
+    // go?") — never part of the room.
+    expect(ids).toEqual(['mesh-modal-label-input', 'mesh-modal-point-input', 'mesh-modal-code-input', 'mesh-modal-room-input', 'mesh-modal-secret-input'])
+    // the replication host is not the meeting's: it lives in the host directory
+    for (const gone of ['mesh-modal-host-input', "'mesh-modal.host-label'"]) expect(tpl).not.toContain(gone)
+    const at = tpl.indexOf('id="mesh-modal-code-input"')
+    expect(tpl.lastIndexOf('@if (codeShown())', at)).toBeGreaterThan(tpl.indexOf('id="mesh-modal-point-input"'))
+  })
+
+  it('the code shows for a point other than hypercomb.com, a code already held, or an opener asking — never for an empty field or hypercomb.com', () => {
+    mesh.ownRelays = () => []
+    const modal = open({ join: true })
+    expect(modal.pointDraft()).toBe('')
+    expect(modal.codeShown()).toBe(false)
+    for (const p of ['hypercomb.com', 'wss://HyperComb.com/']) {
+      typeInto(modal.onPointInput, p)
+      expect([p, modal.codeShown()]).toEqual([p, false])
+    }
+    typeInto(modal.onPointInput, 'wss://pluginthematrix.com')
+    expect(modal.codeShown()).toBe(true)
+    typeInto(modal.onPointInput, '')
+    typeInto(modal.onCodeInput, 'k-1')
+    expect(modal.codeShown()).toBe(true)
+    expect(open({ point: 'wss://pluginthematrix.com', focus: 'code' }).codeShown()).toBe(true)
+  })
+
+  it('a list the page chose is SHOWN in the field, never hidden — and an emptied field is no host: START refuses it', () => {
+    // An older command saved this origin's list at another relay.
+    mesh.ownRelays = () => ['wss://jwize.com']
+    const modal = open({ join: true })
+    expect(modal.pointDraft()).toBe('jwize.com')            // shown, not hidden
+    typeInto(modal.onPointInput, '')
+    typeInto(modal.onRoomInput, 'garden')
+    typeInto(modal.onSecretInput, 'rose')
+    modal.save()
+    // There is no default to hold the tab at: the field is asked for.
+    expect(modal.missingField()).toBe('host')
+    expect(modal.open()).toBe(true)
+    expect(zone()).toBeNull()
+    expect(seen.map(s => s.effect)).not.toContain('mesh:join')
+    expect(room.set).not.toHaveBeenCalled()
+  })
+
+  it("the point is written BEFORE the room and the secret — the swarm's first address after the move is at the new point", () => {
+    const atRoomSet: string[] = []
+    room.set = vi.fn((v: string) => { atRoomSet.push(String(zone()?.relay ?? '')); room.value = v })
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'garden', secret: 'rose' }))
+    const modal = open({ join: true })
+    typeInto(modal.onPointInput, 'wss://other.example')
+    typeInto(modal.onRoomInput, 'garden2')
+    modal.save()
+    expect(atRoomSet).toEqual(['wss://other.example'])
+  })
+
+  it("the access code is always masked — the secret's eye never reveals it", async () => {
+    const tpl = await html()
+    const at = tpl.indexOf('id="mesh-modal-code-input"')
+    const input = tpl.slice(at, tpl.indexOf('/>', at))
+    expect(input).toContain('type="password"')
+    expect(input).not.toContain('secretInputType')
+  })
+
+  it('save writes no host and no label: your own host is never part of the meeting', () => {
+    localStorage.setItem('hc:nostrmesh:self-domain', 'mine.example')
+    const setMyLabel = vi.fn()
+    services.set('@diamondcoreprocessor.com/SwarmDrone', { myLabel: () => 'me', setMyLabel })
+    const hosts: unknown[] = []
+    offs.push(EffectBus.on('mesh:host', (p) => { hosts.push(p) }))
+    hosts.length = 0
+    const modal = open({ join: true })
+    typeInto(modal.onRoomInput, 'river')
+    typeInto(modal.onSecretInput, 'stone')
+    modal.save()
+    expect(localStorage.getItem('hc:nostrmesh:self-domain')).toBe('mine.example')
+    expect(setMyLabel).not.toHaveBeenCalled()
+    expect(hosts).toEqual([])
+    expect(seen.map(s => s.effect)).toContain('mesh:join')
+  })
+})
+
+// ── NO DEFAULT HOST (jwize, 2026-10-11) ─────────────────────────────────────
+describe('no default host: a new install names its host, hypercomb.com offered', () => {
+  beforeEach(() => {
+    // A new install: no list of its own, no meeting on this device yet.
+    mesh.ownRelays = () => []
+    mesh.relays = []
+  })
+
+  it('the host field is EMPTY, hypercomb.com is OFFERED beside it, and there are no words yet', () => {
+    const modal = openStashed({ room: 'downtown', secret: 'rose' }, { join: true })
+    expect(modal.pointDraft()).toBe('')
+    expect(modal.offerShown()).toBe(true)
+    expect(modal.offeredPoint).toBe('hypercomb.com')
+    expect(modal.zoneWords()).toBe('')
+  })
+
+  it('START with no host refuses and names the field — nothing written, nothing joined', () => {
+    const modal = openStashed({ room: 'downtown', secret: 'rose' }, { join: true })
+    modal.save()
+    expect(modal.missingField()).toBe('host')
+    expect(modal.open()).toBe(true)
+    expect(room.set).not.toHaveBeenCalled()
+    expect(zone()).toBeNull()
+    expect(seen).toEqual([])
+  })
+
+  it('one tap fills hypercomb.com; START then joins there — the point named in this tab, no code', async () => {
+    const { secretTag } = await import('@hypercomb/core')
+    const modal = openStashed({ room: 'downtown', secret: 'rose' }, { join: true })
+    modal.save()
+    modal.offerPoint()
+    expect(modal.pointDraft()).toBe('hypercomb.com')
+    expect(modal.missingField()).toBe(null)
+    expect(modal.offerShown()).toBe(false)                   // it is what the field holds now
+    expect(modal.codeShown()).toBe(false)                    // the open point takes no code
+    expect(modal.zoneWords()).toBe(`${secretTag('lifecycle\0downtown\0rose\0hypercomb.com', 'en')} · hypercomb.com`)
+    modal.save()
+    expect(zone()).toMatchObject({ relay: 'wss://hypercomb.com' })
+    expect(room.set).toHaveBeenCalledWith('downtown')
+    expect(zone()?.code ?? '').toBe('')
+    expect(mesh.configureRelays).toHaveBeenCalledWith(['wss://hypercomb.com'], false)
+    expect(seen.map(s => s.effect)).toContain('mesh:join')
+  })
+
+  it('any other host typed is met at — the offer stays beside it', () => {
+    const modal = openStashed({ room: 'downtown', secret: 'rose' }, { join: true })
+    typeInto(modal.onPointInput, 'pluginthematrix.com')
+    expect(modal.offerShown()).toBe(true)
+    modal.save()
+    expect(zone()).toMatchObject({ relay: 'wss://pluginthematrix.com' })
+  })
+
+  it('a host this device met at before is pre-filled — one tap on START, as fast as ever', () => {
+    meshSession.writeMeshZone({ relay: 'wss://pluginthematrix.com' })   // the last meeting
+    sessionStorage.clear()
+    const modal = openStashed({ room: 'downtown', secret: 'rose' }, { join: true })
+    expect(modal.pointDraft()).toBe('pluginthematrix.com')
+    modal.save()
+    expect(seen.map(s => s.effect)).toContain('mesh:join')
+  })
+
+  it('share needs a host too — a link with none would land nobody anywhere', async () => {
+    const meetingLink = vi.fn(async () => {})
+    services.set('@diamondcoreprocessor.com/InviteQueenBee', { invoke: vi.fn(), meetingLink })
+    const modal = openStashed({ room: 'downtown', secret: 'rose' })
+    await modal.copyShareLink()
+    expect(modal.missingField()).toBe('host')
+    expect(meetingLink).not.toHaveBeenCalled()
+  })
+
+  it('a non-join save may clear the host — going quiet is allowed', () => {
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'r', secret: 's', relay: 'wss://a.example', code: 'k' }))
+    const modal = open()
+    typeInto(modal.onPointInput, '')
+    typeInto(modal.onCodeInput, '')
+    modal.save()
+    expect(modal.missingField()).toBe(null)
+    expect(zone()).toEqual({ room: 'r', secret: 's' })
+  })
+
+  it('the template labels the field as the host you meet at, and offers hypercomb.com as a one-tap chip', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const tpl = readFileSync(join(__dirname, 'mesh-modal.component.html'), 'utf8')
+    expect(tpl).toContain("'mesh-modal.point-label' | t")
+    expect(tpl).toContain('@if (offerShown())')
+    expect(tpl).toContain('(click)="offerPoint()"')
+    expect(tpl).toContain("'mesh-modal.needs-point' | t")
+    const en = JSON.parse(readFileSync(join(__dirname, '../../i18n/en.json'), 'utf8')) as Record<string, string>
+    expect(en['mesh-modal.point-label']).toBe('host you meet at')
+    expect(en['mesh-modal.point-placeholder']).not.toMatch(/default/i)
   })
 })

@@ -27,6 +27,7 @@
 // shell performs it — one implementation, two ways to say it.
 
 import { QueenBee, EffectBus, isReservedPoolWord } from '@hypercomb/core'
+import { savedRoots } from '../history/saved-roots.js'
 
 const BACKSLASH = String.fromCharCode(92)
 
@@ -70,6 +71,8 @@ export class CreateQueenBee extends QueenBee {
       // hear a refusal, not a create that never happened.
       const reserved = parts.find(part => isReservedPoolWord(part))
       if (reserved) return `"${reserved}" is a reserved word — it is the address of a system pool; choose another name`
+      const saved = parts.find(part => savedRoots().isSaved(part))
+      if (saved) return `"${saved}" is a saved root — use ${saved} turns it on`
       return undefined
     },
   }

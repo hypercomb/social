@@ -1,0 +1,71 @@
+// hypercomb-shared/ui/notes-strip/notes-strip.swarm.scss
+//
+// NOTES IN THE SWARM — the same tree, with everyone in the room in it. A note
+// someone else holds wears their colour down its left edge (`--peer`, one
+// colour per participant everywhere), names who brought it, says how many
+// hold it, and offers a Take. Your own notes are untouched; one another
+// people took shows its ×count.
+//
+// One of the notes strip's surface stylesheets (see the component's
+// `styleUrls`) — a surface of its own, so no other sheet grows.
+
+@use './notes-strip-shared' as *;
+
+.cv2-note.is-peer,
+.cv2-line.is-peer {
+  box-shadow: inset 3px 0 0 var(--peer, #{$steel});
+}
+
+.cv2-note.is-peer .cv2-note-text {
+  color: var(--md-on-surface-variant, inherit);
+}
+
+.cv2-note-body:has(> .cv2-peer-meta) {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.cv2-peer-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-left: 8px;
+  font-size: scaled(10.5px);
+  color: var(--md-on-surface-faint);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.cv2-peer-by {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--peer, #{$steel});
+}
+
+.cv2-peer-held {
+  font-variant-numeric: tabular-nums;
+}
+
+.cv2-peer-take {
+  appearance: none;
+  border: 1px solid rgba($steel, 0.35);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: scaled(10.5px);
+  padding: 1px 7px;
+  border-radius: var(--hc-radius-control, 2px);
+  cursor: pointer;
+
+  &:hover {
+    border-color: rgba($steel, 0.8);
+    color: $steel;
+  }
+}
+
+.cv2-swarm-counts {
+  flex: 1;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}

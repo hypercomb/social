@@ -34,6 +34,7 @@ import {
 import { removeDecorationAndWait, writeDecoration } from '../commands/decoration-manifest.js'
 import { dropEnrollment, wearEnrollment } from '../pheromones/enrollment-acts.js'
 import { ENABLEMENT_CHANGED, isBehaviorDormant, isPublishedVisitorShell } from './behavior-enablement.js'
+import { hostsOfBranch, setBranchHosts } from './community-hosts.js'
 import { publishBranch } from './publish-branch.js'
 import {
   DEFAULT_GROUP_ICON, GROUP_COLORS, PUBLISH_GROUPS_KIND, PUBLISH_GROUP_KIND,
@@ -113,9 +114,11 @@ export class PublishGroupsDrone extends Drone {
   protected override deps = { lineage: '@hypercomb.social/Lineage' }
   protected override listens = [
     'decorations:changed', 'history:cursor-changed', 'selection:changed', 'view:active',
-    'render:cell-count', ENABLEMENT_CHANGED, ICON_PICK_RESULT, ICON_PICKER_OPEN,
+    'render:cell-count', ENABLEMENT_CHANGED, ICON_PICK_RESULT, ICON_PICKER_OPEN, 'publish-groups:publish',
   ]
-  protected override emits = ['group:preview', 'toast:show', 'publish:refresh', ICON_PICK_REQUEST]
+  protected override emits = [
+    'group:preview', 'toast:show', 'publish:refresh', 'publish-groups:render', ICON_PICK_REQUEST,
+  ]
 
   #bound = false
   #element: HTMLElement | null = null
@@ -165,6 +168,13 @@ export class PublishGroupsDrone extends Drone {
       this.#render()
     })
     this.onEffect<{ open?: boolean }>(ICON_PICKER_OPEN, (payload) => { this.#pickerOpen = payload?.open === true })
+    // The Publish panel's own Groups section — a group publishes from there
+    // too, and from inside a view, where the strip is not drawn.
+    this.onEffect<{ segments?: unknown; meaning?: unknown }>('publish-groups:publish', (p) => {
+      const segments = Array.isArray(p?.segments) ? p.segments.map(s => String(s ?? '').trim()).filter(Boolean) : null
+      const meaning = typeof p?.meaning === 'string' ? p.meaning : ''
+      if (segments && meaning) void this.publishGroup(segments, meaning)
+    })
     this.onEffect<IconPickResult>(ICON_PICK_RESULT, (result) => {
       const pick = this.#iconPick
       if (!pick || result?.token !== pick.token) return
@@ -219,7 +229,9 @@ export class PublishGroupsDrone extends Drone {
   async #refresh(): Promise<void> {
     const gen = ++this.#gen
     const segments = this.#currentSegments()
-    if (isPublishedVisitorShell() || this.#covered()) {
+    // A covering view hides the STRIP (#render asks), not the groups: the
+    // Publish panel lists them over a view as well.
+    if (isPublishedVisitorShell()) {
       this.#settle(gen, segments, false, [])
       return
     }
@@ -447,9 +459,19 @@ export class PublishGroupsDrone extends Drone {
     this.#publishing.set(meaning, progress)
     this.#render()
     const failures: string[] = []
+    // A GROUP PUBLISHES WHERE ITS PAGE DOES. The page's domains are its own
+    // switches at the top of the Publish panel; a member that names no host
+    // of its own takes them — written as its own host marks, the record every
+    // publish reads, so the member's own row says where it went.
+    const pageZones = await hostsOfBranch(segments).catch(() => [] as string[])
     try {
       for (const label of members) {
-        const result = await publishBranch([...segments, label])
+        const memberSegments = [...segments, label]
+        if (pageZones.length > 0 && (await hostsOfBranch(memberSegments).catch(() => [] as string[])).length === 0) {
+          await setBranchHosts(memberSegments, pageZones).catch(err =>
+            console.warn("[publish-groups] could not give a member its page's domains:", err))
+        }
+        const result = await publishBranch(memberSegments)
         if (!result.ok) failures.push(result.failure)
         progress.done++
         this.#render()
@@ -462,9 +484,14 @@ export class PublishGroupsDrone extends Drone {
       this.#toast('success', this.#t('publish-groups.done', `Published ${name}`, { name }))
     } else {
       const why = failures[0]
+      // Nowhere at all: the page names no domain, and nothing stands in. Say
+      // where the switch is, rather than the general "add a host".
+      const message = why === 'no-host' && pageZones.length === 0
+        ? this.#t('publish-groups.no-host', 'Turn on a domain for this page in Publish — a group publishes where its page does')
+        : this.#t(`publish.failure.${why}`, why)
       this.#toast('error',
         this.#t('publish-groups.failed', `${name}: ${failures.length} not published`, { name, count: failures.length }),
-        this.#t(`publish.failure.${why}`, why))
+        message)
     }
     EffectBus.emit('publish:refresh', {})
     return { total: members.length, failures }
@@ -557,10 +584,28 @@ export class PublishGroupsDrone extends Drone {
 
   // ── the strip ──────────────────────────────────────────────────────
 
+  /** The layer's groups for the Publish panel (shell — it cannot ask the
+   *  drone, so it is told). Last-value replayed: a panel opened later reads
+   *  the layer it opens on. Empty where the behaviour is not lit. */
+  #announce(): void {
+    EffectBus.emit('publish-groups:render', {
+      segments: [...this.#segments],
+      groups: this.#lit ? this.#shown.map(({ group, members }) => ({
+        meaning: group.meaning,
+        name: group.name,
+        icon: group.icon,
+        color: group.color,
+        count: members.size,
+        publishing: this.#publishing.has(group.meaning) ? { ...this.#publishing.get(group.meaning)! } : null,
+      })) : [],
+    })
+  }
+
   #render(): void {
+    this.#announce()
     const el = this.#element
     if (!el) return
-    if (!this.#lit) {
+    if (!this.#lit || this.#covered()) {
       el.hidden = true
       el.replaceChildren()
       return

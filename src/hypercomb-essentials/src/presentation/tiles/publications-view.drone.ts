@@ -31,6 +31,8 @@ import { listDecorations } from '../../commands/decoration-manifest.js'
 import { fetchPublicationCards, type PublicationCard } from '../../sharing/publications-ledger.js'
 import { offerFromCard } from '../../sharing/static-peers.js'
 import { nameService } from '../../sharing/names.service.js'
+import { domainColour } from '../../sharing/domain-links.js'
+import { clustersOf, listIncidenceRecords, type Cluster, type ClusterEnd } from '../../sharing/link-incidences.js'
 import { lineageKey } from '../../history/lineage-key.js'
 import { trackScrollGutter } from './scroll-gutter.js'
 import { openExternalLink } from './document-view-links.js'
@@ -65,6 +67,8 @@ export class PublicationsViewDrone extends Drone {
   /** Each plate's "shared … · {label}" line, repainted in place when a host
    *  vouches for a name — never a re-read of the ledger. */
   #nameLines: (() => void)[] = []
+  /** The clusters (link-incidences.ts), read once per page build. */
+  #clusters: Promise<Map<string, Cluster>> | null = null
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
@@ -219,6 +223,7 @@ export class PublicationsViewDrone extends Drone {
     const host = document.createElement('section')
     host.className = 'hc-publications-view'
     host.innerHTML = `<style>${SCENE_CSS}</style>`
+    this.#clusters = null
     // The page scrolls like a page; the hex wheel-zoom handler must not
     // preventDefault our wheel events (same hatch the site view uses).
     host.setAttribute('data-consumes-wheel', '')
@@ -284,6 +289,35 @@ export class PublicationsViewDrone extends Drone {
   /** One published site, one plate: honeycomb monogram, title, address,
    *  who shared it when. The plate's click is an EXTERNAL door; the door
    *  beneath it OFFERS the creation in your hive (shaded), or withdraws it. */
+  /** THE CLUSTER LINES under a plate: who names this creation, whom its
+   *  page names — from the links:incidences derived cache, shown when it
+   *  is there and nothing when it is not (the page is whole without it).
+   *  Each name wears its zone's colour, no underline, like the links in
+   *  the copy that made it. */
+  async #paintLinks(into: HTMLElement, card: PublicationCard): Promise<void> {
+    this.#clusters ??= listIncidenceRecords().then(clustersOf).catch(() => new Map<string, Cluster>())
+    const cluster = (await this.#clusters).get(card.lineage)
+    if (!cluster || !into.isConnected) return
+    const line = (label: string, ends: readonly ClusterEnd[]): void => {
+      if (ends.length === 0) return
+      const row = document.createElement('span')
+      row.className = 'pv-links-row'
+      row.appendChild(document.createTextNode(label + ' '))
+      ends.forEach((end, i) => {
+        if (i) row.appendChild(document.createTextNode(' · '))
+        const name = document.createElement('span')
+        name.className = 'pv-links-name'
+        name.textContent = end.lineageKey.split('/').pop() ?? end.lineageKey
+        name.title = `${end.lineageKey} · ${end.zone}`
+        name.style.color = domainColour(end.zone)
+        row.appendChild(name)
+      })
+      into.appendChild(row)
+    }
+    line(this.#t('publications.namedBy', 'named by'), cluster.inbound)
+    line(this.#t('publications.names', 'names'), cluster.outbound)
+  }
+
   #plate(card: PublicationCard, index: number): HTMLElement {
     const wrap = document.createElement('div')
     wrap.className = 'pv-plate-wrap'
@@ -344,6 +378,11 @@ export class PublicationsViewDrone extends Drone {
     address.className = 'pv-address'
     address.textContent = card.host
     plate.appendChild(address)
+
+    const links = document.createElement('span')
+    links.className = 'pv-links'
+    plate.appendChild(links)
+    void this.#paintLinks(links, card)
 
     if (card.publishedAt) {
       const shared = document.createElement('span')
@@ -432,6 +471,10 @@ const SCENE_CSS = `
 .pv-plate:hover .pv-monogram{color:#3a2a1c}
 .pv-caption{color:#3a2a1c;font:600 .92rem/1.3 Georgia,'Times New Roman',serif;letter-spacing:.1em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pv-address{color:#8a7657;font:400 .72rem/1.3 Georgia,serif;letter-spacing:.12em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-links{display:flex;flex-direction:column;gap:.15rem;margin-top:.3rem;font:400 .68rem/1.3 Georgia,serif;color:#8a7657;letter-spacing:.04em}
+.pv-links:empty{display:none}
+.pv-links-row{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-links-name{text-decoration:none;font-weight:600}
 .pv-shared{color:rgba(138,118,87,.85);font:400 .68rem/1.4 Georgia,serif;letter-spacing:.06em}
 .pv-still{margin:auto;max-width:34rem;text-align:center;animation:pv-fade 1s ease .2s backwards}
 .pv-still-line{margin:0;color:#5c4630;font:italic 400 1.35rem/1.5 Georgia,serif}

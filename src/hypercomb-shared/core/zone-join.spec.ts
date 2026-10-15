@@ -17,6 +17,10 @@
 //         a second meeting under the same two words. It keeps its point.
 //   ZI-8  `/use-live-relay Garden Rose` is room 'Garden', secret 'Rose'; a
 //         room with a space is given in quotes, straight or curly.
+//   NO DEFAULT HOST (jwize, 2026-10-11): a join with no host named anywhere
+//         — not in the tab's zone, not in the page's own chosen list — opens
+//         the selector on its host field; another room keeps the host the
+//         tab meets at.
 
 import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -37,10 +41,20 @@ g.ioc = { get: g.get, register: g.register }
 ;(window as unknown as { ioc: unknown }).ioc = g.ioc
 
 let relays: string[] = []
+/** The relay the page's own list names as chosen — what the real mesh's
+ *  meetingRelay answers for a tab with no point of its own ('' for none). */
+let ownPoint = ''
 const mesh = {
   configureRelays: vi.fn((urls: string[]) => { relays = [...urls] }),
   connectAll: vi.fn(),
   getDebug: () => ({ relays }),
+  meetingRelay: () => {
+    try {
+      const relay = JSON.parse(sessionStorage.getItem('hc:mesh-zone') ?? 'null')?.relay
+      if (sessionStorage.getItem('hc:mesh-session') === 'true' && typeof relay === 'string' && relay) return relay
+    } catch { /* no zone */ }
+    return ownPoint
+  },
 }
 
 type Store = { value: string; set: (v: string) => void }
@@ -101,6 +115,7 @@ const lastWeek = (): void => {
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
+  ownPoint = ''
 })
 
 describe('ZI-4 — a new tab is never put in last week\'s meeting (or hive/hive) without asking', () => {
@@ -109,7 +124,8 @@ describe('ZI-4 — a new tab is never put in last week\'s meeting (or hive/hive)
     const tab = await openTab()
     expect([tab.room.value, tab.secret.value]).toEqual(['downtown', 'rose'])   // the pre-fill
     tab.useLiveRelay('')
-    expect(tab.seen.modal).toEqual([{ join: true }])
+    // no host named anywhere: the selector opens on the host field
+    expect(tab.seen.modal).toEqual([{ join: true, focus: 'point' }])
     expect(tab.seen.joined).toEqual([])
     expect(tab.isJoinedHere()).toBe(false)
   })
@@ -117,7 +133,7 @@ describe('ZI-4 — a new tab is never put in last week\'s meeting (or hive/hive)
   it('bare /use-live-relay on fresh device A: the selector — never the world-shared hive/hive', async () => {
     const tab = await openTab()
     tab.useLiveRelay('')
-    expect(tab.seen.modal).toEqual([{ join: true }])
+    expect(tab.seen.modal).toEqual([{ join: true, focus: 'point' }])
     expect(tab.seen.joined).toEqual([])
     expect([tab.room.value, tab.secret.value]).toEqual(['', ''])
     expect(x(tab.room.value, tab.secret.value)).not.toBe('64b3daa81ae0')
@@ -139,8 +155,9 @@ describe('ZI-4 — a new tab is never put in last week\'s meeting (or hive/hive)
     expect(tab.seen.joined).toEqual([])
   })
 
-  it('a named zone still joins at once, even when the store already held that pair', async () => {
+  it('a named zone at a host still joins at once, even when the store already held that pair', async () => {
     lastWeek()
+    ownPoint = 'wss://hypercomb.com'                   // a host this device chose
     const tab = await openTab()
     tab.useLiveRelay('downtown rose')
     expect(tab.seen.modal).toEqual([])
@@ -149,14 +166,37 @@ describe('ZI-4 — a new tab is never put in last week\'s meeting (or hive/hive)
     expect(x(tab.room.value, tab.secret.value)).toBe('166d0590ac44')
   })
 
+  it('a named zone with NO host anywhere: the words are kept, the selector opens on the host field — no join', async () => {
+    const tab = await openTab()
+    tab.useLiveRelay('downtown rose')
+    expect(tab.seen.modal).toEqual([{ join: true, focus: 'point' }])
+    expect(tab.seen.joined).toEqual([])
+    expect(tab.zone()).toEqual({ room: 'downtown', secret: 'rose' })
+    expect([tab.room.value, tab.secret.value]).toEqual(['downtown', 'rose'])
+  })
+
   it('a tab with a zone of its own: the bare words rejoin it, no question', async () => {
-    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'uptown', secret: 'lily' }))
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'uptown', secret: 'lily', relay: 'wss://hypercomb.com' }))
     lastWeek()                                         // another meeting's pre-fill
     const tab = await openTab()
     await tab.join()
     expect(tab.seen.modal).toEqual([])
     expect(tab.seen.joined).toEqual([true])
     expect([tab.room.value, tab.secret.value]).toEqual(['uptown', 'lily'])
+  })
+
+  it('a zone of its own but NO host: `join` and the shortcut open the selector on the host field — no join', async () => {
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'uptown', secret: 'lily' }))
+    const tab = await openTab()
+    await tab.join()
+    expect(tab.seen.modal).toEqual([{ join: true, focus: 'point' }])
+    tab.shortcut()
+    expect(tab.seen.modal).toEqual([{ join: true, focus: 'point' }, { join: true, focus: 'point' }])
+    expect(tab.seen.joined).toEqual([])
+    // the page's own chosen list is a host: then it joins
+    ownPoint = 'wss://own.example'
+    await tab.join()
+    expect(tab.seen.joined).toEqual([true])
   })
 
   it('a reload of a joined tab resumes with no gesture at all', async () => {
@@ -193,22 +233,25 @@ describe('ZI-1 — retyping the room keeps this tab\'s meeting point', () => {
     expect(mesh.configureRelays).not.toHaveBeenCalled()
   })
 
-  it('another room is another meeting: at the default, the point and code left behind', async () => {
+  it('another room keeps the host this tab meets at — its point and code (there is no default to fall back to)', async () => {
     atPoint()
     const tab = await openTab()
+    relays = ['wss://pluginthematrix.com']
     tab.useLiveRelay('uptown lily')
-    expect(tab.zone()).toEqual({ room: 'uptown', secret: 'lily' })
-    expect(relays).toEqual(['wss://hypercomb.com'])
+    expect(tab.zone()).toEqual({ room: 'uptown', secret: 'lily', relay: 'wss://pluginthematrix.com', code: 'k-7' })
+    expect(relays).toEqual(['wss://pluginthematrix.com'])
+    expect(mesh.configureRelays).not.toHaveBeenCalled()
   })
 
-  it('the toast names no second word formula — it points at the room line', async () => {
+  it('the toast names the words with the host they were drawn at — the point it kept, never the page (2026-10-11)', async () => {
     atPoint()
     const tab = await openTab()
     tab.useLiveRelay('downtown rose')
     const toast = tab.seen.toasts.at(-1)!
     expect(toast.type).toBe('success')
-    expect(toast.message).toContain('room line')
-    expect(toast.message).toContain('wss://pluginthematrix.com')
+    const { lifecyclePreimage, secretTag } = await import('@hypercomb/core')
+    expect(toast.message).toContain(`${secretTag(lifecyclePreimage('downtown', 'rose', 'wss://pluginthematrix.com'), 'en')} · pluginthematrix.com`)
+    expect(toast.message).not.toContain('hypercomb.io')
   })
 })
 

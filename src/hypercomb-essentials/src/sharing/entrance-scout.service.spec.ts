@@ -62,11 +62,17 @@ beforeEach(async () => {
 const deps = (emitted: EntranceUpdate[], skipped: string[] = []) => ({
   hosts: async () => [ZONE],
   ownPubkey: async () => OWN,
+  published: async () => true,
   skipped: async () => new Set(skipped),
   emit: (update: EntranceUpdate) => { emitted.push(update) },
 })
 
 describe('the entrance scout', () => {
+  it('asks no host for an index this hive never wrote', async () => {
+    expect(await new EntranceScoutService().check({ ...deps([]), published: async () => false })).toEqual([])
+    expect(requests).toEqual([])
+  })
+
   it('announces a newer page the followed head wears — once', async () => {
     const scout = new EntranceScoutService()
     const emitted: EntranceUpdate[] = []

@@ -77,7 +77,12 @@ describe('typed artifacts over immutable HTTP', () => {
     const pending = broker.fetchBySig('a'.repeat(64), 'bee')
     await vi.advanceTimersByTimeAsync(3_000)
     expect(await pending).toBeNull()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // One timeout for the host, never a second at another URL layout. (The
+    // shipped byte mirrors are asked too since 2026-10-12 — a loopback page
+    // resolves where every install does — each once, at its own address.)
+    const asked = fetchMock.mock.calls.map(([url]) => String(url))
+    expect(asked.filter(url => url.includes('offline.example'))).toHaveLength(1)
+    expect(new Set(asked).size).toBe(asked.length)
   })
 
   it('resolves, verifies, and locally caches a bee without putting code on Swarm', async () => {

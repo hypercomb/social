@@ -1,6 +1,6 @@
 // commands/card-wear.spec.ts — the rule behind `card wear <template>`.
 import { describe, it, expect } from 'vitest'
-import { planWear, parseCardArgs, routeFrom } from './card-wear.js'
+import { planCommunityWear, planWear, parseCardArgs, routeFrom } from './card-wear.js'
 
 const s = (c: string) => c.repeat(64)
 const PAGE_V1 = s('a'), PAGE_V3 = s('b'), MINE = s('c'), SLOTS = s('d'), GRAPHITE = s('e'), PIC = s('f'), TPL_PIC = s('1')
@@ -61,6 +61,17 @@ describe('parseCardArgs', () => {
     expect(parseCardArgs('wear business-card/template/graphite')).toEqual({ target: '', verb: 'wear', template: 'business-card/template/graphite' })
     expect(parseCardArgs('jaime-weise wear /jaime-weise/business-card/template')).toEqual({ target: 'jaime-weise', verb: 'wear', template: '/jaime-weise/business-card/template' })
     expect(parseCardArgs('wear')).toEqual({ target: '', verb: 'wear', template: '' })
+    expect(parseCardArgs('offer')).toEqual({ target: '', verb: 'offer', template: '', off: false })
+    expect(parseCardArgs('offer off')).toEqual({ target: '', verb: 'offer', template: '', off: true })
+    expect(parseCardArgs('business-card/template/contour offer')).toEqual({ target: 'business-card/template/contour', verb: 'offer', template: '', off: false })
+  })
+  it('reads the community forms', () => {
+    expect(parseCardArgs('templates')).toEqual({ target: '', verb: 'templates', template: '' })
+    expect(parseCardArgs('wear jwize.com:contour')).toEqual({ target: '', verb: 'wear', template: 'jwize.com:contour' })
+  })
+  it('refuses an offer it cannot read', () => {
+    expect(parseCardArgs('offer maybe')).toEqual({ error: 'unknown' })
+    expect(parseCardArgs('a b offer')).toEqual({ error: 'unknown' })
   })
   it('refuses anything else', () => {
     expect(parseCardArgs('a b')).toEqual({ error: 'unknown' })
@@ -74,5 +85,23 @@ describe('routeFrom', () => {
     expect(routeFrom(['jaime-weise'], 'business-card/template/graphite')).toEqual(['jaime-weise', 'business-card', 'template', 'graphite'])
     expect(routeFrom(['somewhere'], '/jaime-weise/business-card/template')).toEqual(['jaime-weise', 'business-card', 'template'])
     expect(routeFrom([], '')).toEqual([])
+  })
+})
+
+describe('planCommunityWear — a card takes a community template by its theme', () => {
+  const own = { page: { htmlSig: PAGE_V3 }, card: { dataSig: MINE, themeSig: GRAPHITE } }
+  const CONTOUR = s('2')
+  it('keeps the page and the details, takes the theme', () => {
+    expect(planCommunityWear(own, { themeSig: CONTOUR })).toEqual({ card: { dataSig: MINE, themeSig: CONTOUR } })
+  })
+  it('takes the template picture only when the card has none of its own', () => {
+    expect(planCommunityWear(own, { themeSig: CONTOUR, pictureSig: TPL_PIC })).toEqual({ card: { dataSig: MINE, themeSig: CONTOUR, artSig: TPL_PIC } })
+    const pictured = { ...own, card: { ...own.card, artSig: PIC } }
+    expect(planCommunityWear(pictured, { themeSig: CONTOUR, pictureSig: TPL_PIC })).toEqual({ card: { dataSig: MINE, themeSig: CONTOUR, artSig: PIC } })
+  })
+  it('says when nothing would change, and refuses a tile with no card', () => {
+    expect(planCommunityWear(own, { themeSig: GRAPHITE })).toEqual({ same: true })
+    expect(planCommunityWear({ page: null, card: null }, { themeSig: CONTOUR })).toEqual({ refuse: 'no-card' })
+    expect(planCommunityWear(own, { themeSig: 'nope' })).toEqual({ refuse: 'not-a-template' })
   })
 })

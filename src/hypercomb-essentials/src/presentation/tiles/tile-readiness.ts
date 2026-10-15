@@ -303,6 +303,11 @@ export class TileReadiness {
    *  asked for. */
   #onReadinessNavigate = (): void => {
     this.#readinessGen++
+    // STOP AT ONCE. The warm queue belongs to the page being left; the
+    // fetches already in flight finish, nothing queued starts. The new
+    // page's compute refills it after that page's own images landed.
+    this.#childWarmQueue.length = 0
+    this.#childWarmQueued.clear()
     void this.#reseedReadinessFromNavigation()
   }
 
@@ -446,6 +451,12 @@ export class TileReadiness {
           }
         }
       } catch { /* unknown structure → fail-open below */ }
+      // BIGGEST BRANCH FIRST (jwize 2026-10-14: "preload the ones with more
+      // tiles passively"). A tile with more inside is the slowest to enter
+      // cold, so it warms first; ties keep display order (stable sort).
+      // Structure only — nothing about where the participant goes is kept.
+      branchCells.sort((a, b) =>
+        (grandkidsByLabel.get(b.label)?.length ?? 0) - (grandkidsByLabel.get(a.label)?.length ?? 0))
       const livePropsIndex: Record<string, string> = readTilePropsIndex()
       // Per-label sig cache under this parent (content-addressed → stable).
       let cachedSigs = this.#childImageSigsByParent.get(parentLayerSig)
@@ -458,7 +469,7 @@ export class TileReadiness {
         }
       }
 
-      // IN DISPLAY ORDER: check the pending branch tiles SERIALLY. A tile
+      // BIGGEST FIRST: check the pending branch tiles SERIALLY. A tile
       // whose children are all present/concluded is released IMMEDIATELY —
       // its own repaint, not one batch flip at the end — so tiles brighten
       // one by one. Misses enqueue in this same order. Nothing about which

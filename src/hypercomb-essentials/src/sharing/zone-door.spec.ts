@@ -55,25 +55,22 @@ describe('the write door is the zone root', () => {
   })
 })
 
-describe('reads fall back to the retired content face — after every root', () => {
-  it('asks each root first, then each old face, never for loopback', () => {
-    expect(zone.readDoorsOf(['pluginthematrix.com'])).toEqual(['pluginthematrix.com', 'content.pluginthematrix.com'])
-    expect(zone.readDoorsOf(['content.example.com', 'jwize.com', 'localhost:4270']))
-      .toEqual(['example.com', 'jwize.com', 'localhost:4270', 'content.example.com', 'content.jwize.com'])
+describe('reads ask zone roots only — never the retired content face', () => {
+  it('folds a content face to its zone and asks nothing else', () => {
+    expect(zone.readDoorsOf(['pluginthematrix.com'])).toEqual(['pluginthematrix.com'])
+    expect(zone.readDoorsOf(['content.example.com', 'jwize.com', 'localhost:4270', 'example.com']))
+      .toEqual(['example.com', 'jwize.com', 'localhost:4270'])
     expect(zone.legacyContentFace('localhost:4270')).toBe('')
   })
 
-  it('a reader still finds an index only the old content face holds', async () => {
-    const event = finalizeEvent({ kind: 30564, created_at: 1_700_000_000, tags: [],
-      content: JSON.stringify({ v: 1, roots: { site: HEAD } }) }, SECRET)
+  it('a miss on the root is a miss — the content face is never asked', async () => {
     const asked: string[] = []
     globalThis.fetch = vi.fn(async (url: string) => {
       asked.push(new URL(url).host)
-      return new URL(url).host.startsWith('content.') ? Response.json(event) : new Response(null, { status: 404 })
+      return new Response(null, { status: 404 })
     }) as unknown as typeof fetch
-    const manifest = await pointer.fetchHiveManifestFromAny(['example.com'], PUB)
-    expect(manifest?.roots).toEqual({ site: HEAD })
-    expect(asked).toEqual(['example.com', 'content.example.com'])
+    expect(await pointer.fetchHiveManifestFromAny(['example.com'], PUB)).toBeNull()
+    expect(asked).toEqual(['example.com'])
   })
 })
 
@@ -198,8 +195,9 @@ describe('stored settings carry over on update — folded on read, never rewritt
 
   it('hc:public-host:domain stored as content.<zone> publishes to <zone>', async () => {
     const { hostSyncService } = await import('./host-sync.service.js')
-    expect(hostSyncService.defaultPublicHostDomain()).toBe('pluginthematrix.com')
-    expect(hostSyncService.publicHostDomain()).toBe('pluginthematrix.com')
+    // No host is named for the participant (jwize, 2026-10-11): unset is none.
+    expect(hostSyncService.defaultPublicHostDomain()).toBe('')
+    expect(hostSyncService.publicHostDomain()).toBe('')
     localStorage.setItem('hc:public-host:domain', 'content.cafesociety.buzz')
     expect(hostSyncService.publicHostDomain()).toBe('cafesociety.buzz')
     // Read-only: the stored value is untouched until the participant sets one.

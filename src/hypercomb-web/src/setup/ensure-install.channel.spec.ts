@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { acquire, headPackage } from '@hypercomb/runtime/acquire'
 import { _resetSettledBases } from '@hypercomb/runtime/host-packages'
+import { listHostZones } from '@hypercomb/runtime/host-zones'
 import SHIPPED_PUBLISHER from './install-publisher.json'
 import { installFromHosts } from './ensure-install'
 
@@ -28,7 +29,7 @@ vi.mock('@hypercomb/runtime/store', () => ({ Store: class Store {} }))
 vi.mock('./resolve-import-map', () => ({ cacheImportMap: vi.fn(async () => undefined) }))
 vi.mock('@hypercomb/runtime/host-zones', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  // A cold client carries nothing: the seed is the only zone.
+  // A cold client carries nothing: the known read host is the only zone.
   listHostZones: vi.fn(async () => []),
 }))
 vi.mock('@hypercomb/runtime/acquire', () => ({
@@ -84,7 +85,7 @@ beforeEach(() => {
 describe('installFromHosts — a first install follows the signed install channel', () => {
   it('takes the root the publisher signed, not the newest member of the seed pool', async () => {
     vi.stubGlobal('fetch', serving({
-      [`https://content.hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT }),
+      [`https://hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT }),
     }))
     vi.mocked(acquire).mockImplementation(async sig => ok(sig))
 
@@ -98,7 +99,7 @@ describe('installFromHosts — a first install follows the signed install channe
   it('falls back to the pool head when the signed root cannot be had from the seed yet', async () => {
     // A publish advances the index at once; the seed host is restaged by hand.
     vi.stubGlobal('fetch', serving({
-      [`https://content.hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT }),
+      [`https://hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT }),
     }))
     vi.mocked(acquire).mockImplementation(async sig => sig === SIGNED_ROOT ? missing(sig) : ok(sig))
 
@@ -119,7 +120,7 @@ describe('installFromHosts — a first install follows the signed install channe
 
   it('installs nothing when the index at the publisher\'s address was signed by someone else', async () => {
     vi.stubGlobal('fetch', serving({
-      [`https://content.hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(generateSecretKey(), { 'install:essentials': SIGNED_ROOT }),
+      [`https://hypercomb.com/${INDEXES}/${PUBLISHER}`]: signedIndex(generateSecretKey(), { 'install:essentials': SIGNED_ROOT }),
     }))
     vi.mocked(acquire).mockImplementation(async sig => ok(sig))
 
@@ -139,7 +140,32 @@ describe('installFromHosts — a first install follows the signed install channe
 
     const asked = fetchMock.mock.calls.map(call => String(call[0]))
     expect(asked).toContain(`https://hypercomb.com/${INDEXES}/${SHIPPED_PUBLISHER.pubkey}`)
-    expect(asked).toContain(`https://content.hypercomb.com/${INDEXES}/${SHIPPED_PUBLISHER.pubkey}`)
+    expect(asked).toContain(`https://hypercomb.com/${INDEXES}/${SHIPPED_PUBLISHER.pubkey}`)
+  })
+
+  it('a pool carrying only another host still installs from DEFAULT_HOST_ZONES too — carried first', async () => {
+    // No host is seeded any more (2026-10-11): a hive that carries only a
+    // friend's host must not cold-install from that friend alone. The known
+    // host is a READ source beside it, never instead of it.
+    vi.mocked(listHostZones).mockResolvedValueOnce(['friend.example'])
+    vi.stubGlobal('fetch', serving({}))
+    vi.mocked(acquire).mockImplementation(async sig => ok(sig))
+
+    expect(await installFromHosts()).toBe(true)
+
+    expect(vi.mocked(headPackage).mock.calls.map(call => call[0])).toEqual(['friend.example', 'hypercomb.com'])
+    expect(acquired()).toEqual([POOL_HEAD])
+    expect(vi.mocked(acquire).mock.calls[0]![1]).toEqual(['friend.example', 'hypercomb.com'])
+  })
+
+  it('the known read host is asked once, not twice, when the pool already carries it', async () => {
+    vi.mocked(listHostZones).mockResolvedValueOnce(['hypercomb.com'])
+    vi.stubGlobal('fetch', serving({}))
+    vi.mocked(acquire).mockImplementation(async sig => ok(sig))
+
+    expect(await installFromHosts()).toBe(true)
+
+    expect(vi.mocked(acquire).mock.calls[0]![1]).toEqual(['hypercomb.com'])
   })
 
   it('a sandbox door runs the package its own pool names and reads no channel', async () => {

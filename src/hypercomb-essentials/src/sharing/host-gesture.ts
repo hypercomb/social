@@ -48,11 +48,14 @@ const toast = (type: string, title: string, message: string): void => {
   EffectBus.emit('toast:show', { type, title, message })
 }
 
-export const hostCurrentBranch = async (): Promise<void> => {
+export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> => {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     const lineage = get<LineageLike>(LINEAGE_KEY)
 
-    const segments = (lineage?.explorerSegments?.() ?? [])
+    // THE TILE IS READ ONCE. A caller that already read it (`publish on`)
+    // passes it in: reading the tab again could publish whatever tile the tab
+    // moved to meanwhile — measured 2026-10-15, two sessions sharing one tab.
+    const segments = (at ?? lineage?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean)
     if (segments.length === 0) {
       // The whole hive root is not a branch — name the gesture precisely.
@@ -62,7 +65,8 @@ export const hostCurrentBranch = async (): Promise<void> => {
     }
     const name = segments[segments.length - 1] ?? ''
 
-    // 1. Consent — names the CDN and the signer before anything happens.
+    // 1. Consent — names where the bytes go (the hosts named for the
+    //    branch; there is no default host) and the signer, before anything.
     const confirmed = await requestConfirm({
       title: 'host.confirm.title',
       message: 'host.confirm.message',
@@ -75,7 +79,7 @@ export const hostCurrentBranch = async (): Promise<void> => {
     let nextNote = 0
     const onProgress = (p: PublishProgress): void => {
       if (p.phase === 'staging') {
-        activity(t(i18n, 'host.uploading', 'uploading branch to the public host…'), '●')
+        activity(t(i18n, 'host.uploading', 'uploading branch to its hosts…'), '●')
         nextNote = Date.now() + PROGRESS_NOTE_MS
         return
       }
@@ -166,7 +170,7 @@ export const hostCurrentBranch = async (): Promise<void> => {
       result.status === 'confirmed'
         ? doneMsg
         : t(i18n, 'host.done-unconfirmed',
-          'Branch published — the public host has not served it back yet. Open /publish to watch it go live. {link}',
+          'Branch published — its host has not served it back yet. Open /publish to watch it go live. {link}',
           { link: linkText }))
 
     // Evidence of a past index wipe (or a publish from another device): our

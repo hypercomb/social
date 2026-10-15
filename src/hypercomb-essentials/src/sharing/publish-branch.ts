@@ -30,7 +30,6 @@ import { EffectBus, get, mintMetaEnvelope } from '@hypercomb/core'
 import {
   HIVE_LINK_KIND,
   HIVE_LINK_VERSION,
-  PUBLIC_CONTENT_HOSTS,
   encodeHiveLinkBundle,
   type HiveLinkBundle,
 } from './hive-link.js'
@@ -67,6 +66,7 @@ import { lineageKey } from '../history/lineage-key.js'
 import { hostsOfBranch } from './community-hosts.js'
 import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-public.js'
 import { knownRoots, listPublishRecords, writePublishRecord, type PublishRecord } from './publish-heads.js'
+import { recordPublishResult } from './publish-results.js'
 import { wornKindsWithin, writePublishLights } from '../commands/publish-lights.js'
 import { readGlobalOnKinds } from './behavior-enablement.js'
 
@@ -211,7 +211,9 @@ const selfDomain = (): string => {
 
 /** The nodes a branch is served from: its host marks (primary first) as
  *  zone ROOTS, else the participant's STANDING targets — never anything
- *  flipped on for the occasion. Every node is a write door, so every one is
+ *  flipped on for the occasion, and never a host nobody named: a public host
+ *  turned on with no host named is no node (jwize 2026-10-11, "make sure that
+ *  there isn't a default host"). Every node is a write door, so every one is
  *  a zone root: the `content.<zone>` face is retired, and a stored one (an
  *  install from before the retirement) is read as its zone (zone-door.ts). */
 export const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike | undefined): Promise<string[]> => {
@@ -220,7 +222,7 @@ export const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike |
   const self = selfDomain()
   const standing = [
     ...(hostSync?.isEnabled?.() && self ? [self] : []),
-    ...(hostSync?.isPublicHostEnabled?.() ? [zoneDoor(hostSync.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || '')] : []),
+    ...(hostSync?.isPublicHostEnabled?.() ? [zoneDoor(hostSync.publicHostDomain?.() || '')] : []),
   ]
   return [...new Set([...branchZones.map(zoneDoor), ...standing])].filter(Boolean)
 }
@@ -524,12 +526,18 @@ export async function publishBranch(
   // 9. Confirm: the world must be able to READ what we just wrote.
   report({ phase: 'confirming' })
   const confirmed = await confirmPublished(indexHost, pubkey, key, sealed, hostSync)
+  const status = confirmed && stagesReceipted ? 'confirmed' : 'unconfirmed'
+
+  // 10. The running list of results (publish-results.ts): what is open now,
+  //     for the domain-link rule and anyone else who asks. Never blocks the
+  //     act it records.
+  void recordPublishResult({ op: 'publish', at: Date.now(), segments: [...segs], lineageKey: key, host: indexHost, address, sealed, status })
 
   return {
     ok: true,
     // A pointer a stranger can read must find its atoms: an unreceipted
     // stage list makes the publish `unconfirmed`, like an unnamed head.
-    status: confirmed && stagesReceipted ? 'confirmed' : 'unconfirmed',
+    status,
     sealed,
     pubkey,
     host: indexHost,
@@ -644,6 +652,7 @@ export async function unpublishBranch(
   const parentLocation = '/' + segs.slice(0, -1).join('/')
   const name = segs[segs.length - 1] ?? ''
   if (isBranchPublic(parentLocation, name)) setBranchPublic(parentLocation, name, false)
+  void recordPublishResult({ op: 'unpublish', at: Date.now(), segments: [...segs], lineageKey: key, host: indexHost, sealed: head })
   return { ok: true, removed: true }
 }
 

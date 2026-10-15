@@ -18,6 +18,11 @@
 //   /website                         — toggle hexagons ↔ website view (global)
 //   /website on | web | site | view  — switch to website view (global)
 //   /website off | hex | hexagons    — switch to hexagons view (global)
+//   /website page <sig>              — dress THIS tile with the page whose
+//                                      HTML is resource <sig> (it must already
+//                                      be in the hive — a file that rode in
+//                                      with the sentence, or a drop). One page
+//                                      per tile: an earlier page is replaced.
 //   /website here | mark             — flag THIS cell for the next gen pass
 //                                      (drops a visual:website:pending
 //                                      decoration; re-run to unflag)
@@ -57,7 +62,9 @@ import { ensureWebsiteBoundAt } from './website-binding.js'
 // `/website here` writes a build-intent marker as a decoration on the
 // current cell, and toggles it off on re-run. The named imports also anchor
 // the decoration-manifest module (slot registration) against tree-shaking.
-import { writeDecoration, listDecorations, removeDecoration } from './decoration-manifest.js'
+import { writeDecoration, listDecorations, removeDecoration, replaceDecoration } from './decoration-manifest.js'
+import { extractPageRefSigs } from '../sharing/decoration-closure.js'
+import { markAuthored } from '../sharing/authored-sigs.js'
 // Side-effect imports: ensure foundational modules load at startup.
 // Some bundler configurations drop modules whose value exports aren't
 // directly imported elsewhere; the explicit imports here anchor them
@@ -385,8 +392,14 @@ export class WebsiteQueenBee extends QueenBee {
     return []
   }
 
-  protected execute(args: string): void {
+  protected execute(args: string): void | Promise<void> {
     const trimmed = args.trim().toLowerCase()
+
+    // `/website page <sig>` — the page itself, said in words. Awaited, and it
+    // THROWS when nothing was written, so a remote receipt never says "ran"
+    // for a page that did not land.
+    const page = trimmed.match(/^page(?:\s+(\S+))?$/)
+    if (page) return this.#page(page[1] ?? '')
 
     // `/website here` — flag THIS cell for the next gen pass. Drops a
     // `visual:website:pending` build-intent decoration on the current cell
@@ -489,6 +502,36 @@ export class WebsiteQueenBee extends QueenBee {
       case 'error': console.warn(`[/website] ${parsed.message}`); return
       case 'export': return void this.#export(parsed.target)
     }
+  }
+
+  /** Dress the tile you stand on with the page whose HTML is resource `sig`.
+   *  The same record the website build writes: `visual:website:page` with the
+   *  body's own embedded resources declared as its closure, so the page
+   *  travels whole when the branch is published. */
+  async #page(sig: string): Promise<void> {
+    const lineage = get('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined
+    const segments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const fail = (message: string): never => {
+      toast('warning', 'website page', message)
+      throw new Error(message)
+    }
+    if (segments.length === 0) fail('Go into the tile the page is for first — the hive root is not a page.')
+    if (!isSignature(sig)) fail('Say the page by its signature: website page <64-hex signature>.')
+    const store = get('@hypercomb.social/Store') as { getResource?: (s: string) => Promise<Blob | null> } | undefined
+    const body = await store?.getResource?.(sig)
+    if (!body) fail(`There is no resource ${sig.slice(0, 12)}… in this hive yet.`)
+    const refs = [sig, ...extractPageRefSigs(await body!.text())]
+    markAuthored(sig)
+    const name = segments[segments.length - 1]
+    await replaceDecoration({
+      kind: 'visual:website:page',
+      appliesTo: segments,
+      segments,
+      payload: { htmlSig: sig, icon: 'web', label: name, order: 0 },
+      mark: 'persistent',
+      refs,
+    })
+    EffectBus.emit('activity:log', { message: `website page: "${name}" now wears page ${sig.slice(0, 12)}…`, icon: '◫' })
   }
 
   async #export(targetSpec: string | null): Promise<void> {
