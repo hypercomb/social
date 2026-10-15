@@ -34,8 +34,10 @@ services['@diamondcoreprocessor.com/MobileMode'] = { get active() { return mobil
 services['@diamondcoreprocessor.com/ModeRegistry'] = { isActive: () => viewActiveNow }
 services['@hypercomb.social/Lineage'] = { explorerSegments: () => segments }
 services['@hypercomb.social/Navigation'] = nav
+// Pictures the renderer learns AFTER it announced the cells (a peer's, in a swarm) are pushed here by a test.
+let laterCells: { q: number; r: number; label: string; imageSig?: string }[] = []
 services['@diamondcoreprocessor.com/ShowCellDrone'] = {
-  snapshotCells: () => [{ q: 0, r: 0, label: 'sunrise', imageSig: 'a'.repeat(64) }],
+  snapshotCells: () => [{ q: 0, r: 0, label: 'sunrise', imageSig: 'a'.repeat(64) }, ...laterCells],
 }
 services['@diamondcoreprocessor.com/NotesService'] = {
   getNotes: async (label: string) => label === 'sunrise' ? [{ text: 'a warm one\nsecond line' }] : [],
@@ -68,6 +70,7 @@ const payload = () => ({
 })
 
 beforeEach(() => {
+  laterCells = []
   mobileActive = true
   viewActiveNow = false
   segments = ['honey-garden']
@@ -110,6 +113,25 @@ describe('rows', () => {
     const img = row('sunrise')?.querySelector('img')
     expect(img?.getAttribute('src')).toContain('a'.repeat(64))
     expect(row('meadow')?.querySelector('img')).toBeNull()
+  })
+
+  it('a picture the renderer learns after the list painted is filled on the look-again backoff', () => {
+    vi.useFakeTimers()
+    try {
+      EffectBus.emit('render:cell-count', payload())
+      expect(row('comb')?.querySelector('img')).toBeNull()
+      laterCells = [{ q: 1, r: 0, label: 'comb', imageSig: 'c'.repeat(64) }]
+      vi.advanceTimersByTime(900)
+      expect(row('comb')?.querySelector('img')?.getAttribute('src')).toContain('c'.repeat(64))
+      expect(row('meadow')?.querySelector('img')).toBeNull()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('content arriving from a host or a peer fills a bare thumbnail at once', () => {
+    expect(row('comb')?.querySelector('img')).toBeNull()
+    laterCells = [{ q: 1, r: 0, label: 'comb', imageSig: 'd'.repeat(64) }]
+    EffectBus.emit('content:arrived', { sig: 'e'.repeat(64), kind: 'layer' })
+    expect(row('comb')?.querySelector('img')?.getAttribute('src')).toContain('d'.repeat(64))
   })
 
   it('a picture not on this device yet (a swarm or host tile) is fetched through the store and painted', async () => {
