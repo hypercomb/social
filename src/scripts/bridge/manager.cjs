@@ -237,6 +237,11 @@ const main = async () => {
           const { outcome, rounds, reads, tokens, answer, left, error, held } = reply.data
           // Held for jwize: the change waits in Execution; nothing ran yet.
           if (outcome === 'held') return print({ convoId, outcome, held, note: 'waiting for jwize in Execution — report it; do not try to get around the hold' })
+          // A ONE-OFF JOB IS PUT AWAY once answered (jwize, 2026-10-12: the
+          // job conversations piled up past reading). Archived, never deleted:
+          // `thread <convoId>` still reads it and the window's archive lists it.
+          // A manager's own conversation, and one that stopped mid-leg, stay.
+          if (!Object.values(MANAGERS).includes(convoId) && !left) await send({ op: 'chat-tidy', keep: Object.values(MANAGERS), olderThanMs: 0 })
           return print({ convoId, outcome, rounds, reads, ...(reads === 0 ? { warning: 'nothing was read in this turn: check every claim about the hive yourself' } : {}), tokens, ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
         }
       }
