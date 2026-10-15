@@ -9,11 +9,16 @@
 //   1. boot a fresh hive (Start empty)
 //   2. open Beehaviors from the rail — and confirm the rail no longer carries
 //      a Views button of its own
-//   3. read the rows: a VIEW row must stand on its own ground, a behaviour row
-//      must not
-//   4. turn a view ON here (the bulb), then press its ICON — the layer's
-//      DEFAULT — and confirm the icon lights and only ONE row carries it
-//   5. cycle the lens through all -> views -> behaviors -> global
+//   3. read the rows: some are views, some are not
+//   4. turn a view ON here (the bulb) — a lit view stands on its own ground
+//      (the quiet list: the hue is there ONLY while lit) — then press its
+//      ICON, the layer's DEFAULT, and confirm only ONE row carries it
+//   5. the two controls above the list: the KIND (Beehaviors / Views, exactly
+//      one lit; Views narrows the list to views) and the SCOPE (this layer /
+//      the pool)
+//   6. close the panel — while it shows, the surface is held on hexagons
+//      (view.bee.ts) — reload, and the layer OPENS AS its default; Escape
+//      back to the hexagons sticks
 //
 // Vendor-neutral: Playwright against the dev server, no bridge, no renderer to
 // attach to. `--engine chrome` is the one that has a GPU: headless chromium
@@ -59,8 +64,12 @@ async function main() {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const page = await context.newPage()
   const errors = []
+  const missing = new Set()
   page.on('pageerror', e => errors.push(String(e)))
-  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
+  // A console 404 names no URL; the response does. Misses are listed apart —
+  // a fresh hive probes for content it does not hold yet.
+  page.on('console', m => { if (m.type() === 'error' && !/^Failed to load resource/.test(m.text())) errors.push(m.text()) })
+  page.on('response', r => { if (r.status() >= 400) missing.add(r.status() + ' ' + new URL(r.url()).pathname) })
 
   try {
     await page.goto(url, { waitUntil: 'load' })
@@ -106,18 +115,6 @@ async function main() {
     check('some rows are VIEWS, some are not', views > 0 && views < total,
       views + ' of ' + total + ' rows are views')
 
-    if (views > 0) {
-      const grounds = await page.evaluate(() => {
-        const bg = (el) => getComputedStyle(el).backgroundImage + '|' + getComputedStyle(el).borderColor
-        const all = [...document.querySelectorAll('.features-panel .features-row')]
-        const v = all.find(e => e.classList.contains('view'))
-        const b = all.find(e => !e.classList.contains('view'))
-        return { view: v ? bg(v) : null, behavior: b ? bg(b) : null }
-      })
-      check('a view row stands on different ground', !!grounds.view && grounds.view !== grounds.behavior,
-        'view=' + String(grounds.view).slice(0, 60))
-    }
-
     // ── 4. the bulb, then the icon ─────────────────────────────────────
     // Pick a view row that is not lit and not inherited, turn it on, then
     // press its icon.
@@ -130,6 +127,21 @@ async function main() {
       await shot('03-deposited')
     }
     check('a view was turned on here', named !== '', named)
+
+    // The quiet list: a view is told apart by its hue, and ONLY while lit —
+    // a dark view row looks like any other dark row.
+    const grounds = await page.evaluate(() => {
+      const bg = (el) => el ? getComputedStyle(el).backgroundColor : null
+      const all = [...document.querySelectorAll('.features-panel .features-row')]
+      return {
+        litView: bg(all.find(e => e.classList.contains('view') && e.classList.contains('lit'))),
+        darkView: bg(all.find(e => e.classList.contains('view') && e.classList.contains('off'))),
+        darkOther: bg(all.find(e => !e.classList.contains('view') && e.classList.contains('off'))),
+      }
+    })
+    check('a lit view stands on its own ground; a dark one does not',
+      !!grounds.litView && grounds.litView !== grounds.darkView && grounds.darkView === grounds.darkOther,
+      JSON.stringify(grounds))
 
     const litView = panel.locator('.features-row.view.lit').first()
     const iconBtn = litView.locator('.feature-icon.as-default')
@@ -156,21 +168,54 @@ async function main() {
       console.log('  info  layer =', JSON.stringify(record.segs))
     }
 
-    // ── 5. the lens ────────────────────────────────────────────────────
-    const lensBtn = panel.locator('.features-mode').first()
-    const seen = []
-    for (let i = 0; i < 4; i++) {
-      seen.push((await lensBtn.locator('.mat-sym').innerText().catch(() => '')).trim())
-      await lensBtn.click()
-      await page.waitForTimeout(1400)
+    // ── 5. the kind and the scope ──────────────────────────────────────
+    // KIND: a choice between two, exactly one lit; Views narrows the same
+    // list to the views, Beehaviors (views included) filters nothing.
+    const kinds = async () => ({
+      behaviors: await panel.locator('.scope-kind.behaviors.on').count(),
+      views: await panel.locator('.scope-kind.views.on').count(),
+      rows: await panel.locator('.features-row').count(),
+      viewRows: await panel.locator('.features-row.view').count(),
+    })
+    const asBehaviors = await kinds()
+    await panel.locator('.scope-kind.views').first().click()
+    await page.waitForTimeout(800)
+    const asViews = await kinds()
+    await panel.locator('.scope-kind.behaviors').first().click()
+    await page.waitForTimeout(800)
+    const back = await kinds()
+    check('the kind is a choice of two — Views narrows the list to views, Beehaviors filters nothing',
+      asBehaviors.behaviors === 1 && asBehaviors.views === 0
+        && asViews.views === 1 && asViews.behaviors === 0
+        && asViews.rows === asViews.viewRows && asViews.rows === asBehaviors.viewRows
+        && back.rows === asBehaviors.rows,
+      `beehaviors ${asBehaviors.rows} rows, views ${asViews.rows}, back ${back.rows}`)
+
+    // SCOPE: one toggle — this layer, or the pool (no kind choice there).
+    await panel.locator('.scope-toggle').first().click()
+    await page.waitForTimeout(1200)
+    const inPool = {
+      pressed: await panel.locator('.scope-toggle.pool').count(),
+      store: await panel.locator('.features-scroll.store').count(),
+      kinds: await panel.locator('.scope-kind').count(),
     }
-    check('the lens cycles four positions', new Set(seen).size === 4, seen.join(' -> '))
-    await shot('05-lens')
+    await shot('05-pool')
+    await panel.locator('.scope-toggle').first().click()
+    await page.waitForTimeout(1200)
+    const backHere = await panel.locator('.features-scroll.store').count()
+    check('the scope toggles between this layer and the pool',
+      inPool.pressed === 1 && inPool.store === 1 && inPool.kinds === 0 && backHere === 0,
+      JSON.stringify({ ...inPool, backHere }))
 
     // ── 6. ARRIVAL — the whole point ───────────────────────────────────
-    // Reload onto the layer that names a default. The surface must come up as
-    // that view rather than as hexagons, and it must survive the boot guard
-    // (one settled paint) rather than racing it.
+    // Close the panel first: while it shows, the surface is held on the
+    // hexagons (view.bee.ts — Beehaviors is an assignment). Then reload onto
+    // the layer that names a default. The surface must come up as that view
+    // rather than as hexagons, and it must survive the boot guard (one
+    // settled paint) rather than racing it.
+    await panel.locator('.features-close').first().click()
+    await page.waitForTimeout(1500)
+    check('the panel closes', (await page.locator('.features-panel').count()) === 0)
     const wanted = await page.evaluate(() =>
       window.ioc?.get?.('@hypercomb.social/ViewMode')?.mode ?? '')
     await page.reload({ waitUntil: 'load' })
@@ -194,6 +239,7 @@ async function main() {
     const real = errors.filter(e => !/Could not initialize shader|favicon|ResizeObserver/i.test(e))
     if (real.length) console.log('\npage errors:\n  ' + real.slice(0, 8).join('\n  '))
     else console.log('\nno page errors')
+    if (missing.size) console.log('\nmisses (info):\n  ' + [...missing].slice(0, 12).join('\n  '))
     console.log('\nshots in ' + out)
     const failed = results.filter(r => !r.ok).length
     console.log(failed ? failed + ' CHECK(S) FAILED' : 'all ' + results.length + ' checks passed')
