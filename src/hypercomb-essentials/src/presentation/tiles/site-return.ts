@@ -40,6 +40,20 @@ export function sameSiteSegments(a: readonly string[], b: readonly string[]): bo
 }
 
 /**
+ * The floor of a site session: how far up `..` and a right-click may walk.
+ * Normally where the reader stood when the site opened (`here`). On a
+ * published door the reader can ARRIVE anywhere inside the creation — a shared
+ * link opens `/minutes/2026-10-14` cold — and the site they are in is still
+ * the whole published creation, so its floor is the published ROOT whenever
+ * the arrival page lies under it. A root that is not above `here` says nothing
+ * about this site and leaves the floor where the reader stood.
+ */
+export function siteFloorFor(here: readonly string[], publishedRoot: readonly string[] | null): readonly string[] {
+  if (!publishedRoot || publishedRoot.length === 0 || publishedRoot.length > here.length) return here
+  return publishedRoot.every((seg, i) => seg === here[i]) ? publishedRoot : here
+}
+
+/**
  * Where leaving a website lands. `current` is where the reader stands now
  * (the last page they read inside the site) and is the answer for everything
  * the spawn record cannot say: an INDIRECT session (booted straight into

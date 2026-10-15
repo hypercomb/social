@@ -6,7 +6,7 @@
 // staring at the raw grid.
 
 import { describe, expect, it } from 'vitest'
-import { HEXAGONS_SURFACE, sameSiteSegments, siteReturnTarget } from './site-return.js'
+import { HEXAGONS_SURFACE, sameSiteSegments, siteFloorFor, siteReturnTarget } from './site-return.js'
 
 describe('siteReturnTarget', () => {
 
@@ -60,5 +60,25 @@ describe('sameSiteSegments', () => {
     expect(sameSiteSegments(['a', 'b'], ['b', 'a'])).toBe(false)
     expect(sameSiteSegments(['a'], ['a', 'b'])).toBe(false)
     expect(sameSiteSegments([], [])).toBe(true)
+  })
+})
+
+describe('siteFloorFor', () => {
+  // A shared link opens minutes.hypercomb.com/2026-10-14 cold: the reader
+  // stands on the page, the published creation is /minutes, and `..` must
+  // reach the list (2026-10-15).
+  it('a cold arrival inside a published creation has the creation root as its floor', () => {
+    expect(siteFloorFor(['minutes', '2026-10-14'], ['minutes'])).toEqual(['minutes'])
+  })
+  it('arriving at the root itself keeps the root', () => {
+    expect(siteFloorFor(['minutes'], ['minutes'])).toEqual(['minutes'])
+  })
+  it('with no published root the floor is where the reader stood', () => {
+    expect(siteFloorFor(['a', 'b'], null)).toEqual(['a', 'b'])
+    expect(siteFloorFor(['a', 'b'], [])).toEqual(['a', 'b'])
+  })
+  it('a published root that is not above the reader says nothing about this site', () => {
+    expect(siteFloorFor(['games', 'arkanoid'], ['minutes'])).toEqual(['games', 'arkanoid'])
+    expect(siteFloorFor(['minutes'], ['minutes', '2026-10-14'])).toEqual(['minutes'])
   })
 })

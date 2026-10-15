@@ -26,7 +26,7 @@ import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
 import { scopeCellPageCss } from './cell-page-css-scope.js'
 import { hoistPageStylesheets, stylesheetsSettled } from './cell-page-stylesheets.js'
-import { HEXAGONS_SURFACE, sameSiteSegments, siteReturnTarget, type SiteSpawn } from './site-return.js'
+import { HEXAGONS_SURFACE, sameSiteSegments, siteFloorFor, siteReturnTarget, type SiteSpawn } from './site-return.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -160,6 +160,11 @@ export class SiteViewDrone extends Drone {
    * hexagon hierarchy. Null while not in a website session.
    */
   #siteEntrySegments: readonly string[] | null = null
+  /** The published creation's root on a visitor door (`preview:mode`), the
+   *  floor of any site session that opens inside it — a cold deep link
+   *  arrives on a page, not at the root. */
+  #publishedRoot: readonly string[] | null = null
+  #publishedRootBound = false
 
   /**
    * THE VIEW AND THE PAGE THAT SPAWNED THIS SITE — the one destination
@@ -272,6 +277,18 @@ export class SiteViewDrone extends Drone {
       window.addEventListener('contextmenu', this.#onGlobalContextMenu, true)
       this.#globalContextMenuBound = true
     }
+    if (!this.#publishedRootBound) {
+      // Last-value replay covers the boot order: the visit engine mounts the
+      // creation (and says where) before this view's first capture.
+      this.onEffect<{ active?: boolean; segments?: readonly string[] }>('preview:mode', (preview) => {
+        const root = preview?.active ? [...(preview.segments ?? [])].map(s => String(s ?? '').trim()).filter(Boolean) : []
+        this.#publishedRoot = root.length ? root : null
+        if (this.#siteEntrySegments && this.#publishedRoot) {
+          this.#siteEntrySegments = siteFloorFor(this.#siteEntrySegments, this.#publishedRoot)
+        }
+      })
+      this.#publishedRootBound = true
+    }
     if (!this.#featureVerifiedBound) {
       // A review→accept (or bypass) in the features panel flips a foreign
       // website from quarantined to verified; re-reconcile so it mounts now.
@@ -357,7 +374,7 @@ export class SiteViewDrone extends Drone {
   #captureSiteEntry(): void {
     const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
     const here = [...(lineage?.explorerSegments?.() ?? [])]
-    this.#siteEntrySegments = here
+    this.#siteEntrySegments = siteFloorFor(here, this.#publishedRoot)
     const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
       ?.get<{ previous?: string }>('@hypercomb.social/ViewMode')
     // The spawning PLACE starts as "right here"; a `view:arrival` verdict for
