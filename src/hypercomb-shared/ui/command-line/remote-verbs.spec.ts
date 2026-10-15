@@ -543,6 +543,15 @@ describe('the reading and the dispatch cannot disagree', () => {
       .toContain("import { normalizeSelectInput } from './select-ops'")
   })
 
+  it('a bracket word nothing answers to is reported — never a cut-paste destination', () => {
+    // The `[items]/dest` form is retired (2026-10-15): it placed nothing once
+    // tiles became layers, and an unmatched line must not fall through to
+    // minting tiles out of the bracket text.
+    expect(component).not.toContain('CutPasteBehavior')
+    expect(component).toContain('if (unknownOp && !isSelectOp(unknownOp)) {')
+    expect(component).toContain('this.#behaviourDidNotRun(unknownOp, new Error(`no behaviour is called ${unknownOp}`))')
+  })
+
   it('the per-item `~` removes, in the bracket pre-pass and in the `~` behaviour', () => {
     const items = member('async #applyBracketItemOps(v: string): Promise<string> {')
     expect(items).toContain("} else if (t.startsWith('~')) {")

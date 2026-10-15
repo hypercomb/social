@@ -60,7 +60,6 @@ standing rather than borrowed for one line.
 | [bracket-select](#bracket-select) | `[a,b]` | Enter | built-in |
 | [bracket-item-ops](#bracket-item-ops) | `[+new, ~old, keep]` | Enter | built-in |
 | [select-op](#select-op) | `[a,b]/cut` etc. | Enter | built-in |
-| [cut-paste](#cut-paste) | `[items]/destination` | Enter | pluggable |
 | [hash-marker](#hash-marker) | `cell#Drone` | Enter | pluggable |
 | [slash-behaviour](#slash-behaviour) | `/behaviour args` | Enter | pluggable |
 
@@ -208,29 +207,17 @@ items select. Mix freely in one bracket.
 A known operation after the bracket executes it on the selection. Known ops:
 `cut`, `copy`, `move(N)`/`move[swapTile]`, `remove`/`rm`/`delete`/`del`,
 `keyword`/`kw`/`tag`, `format`/`fmt`/`fp`, `opus`/`o`, `sonnet`/`s`,
-`haiku`/`h`; `:tag` tags the selection. Anything else after `/` is a
-cut-paste destination (below).
+`haiku`/`h`; `:tag` tags the selection, and any registered behaviour runs on
+it. A word after `/` that no behaviour answers to is reported in the activity
+strip and the line is kept. (The `[items]/destination` cut-paste form is
+retired, 2026-10-15 — it never placed anything once tiles became layers. To
+move tiles, cut them and paste where they belong.)
 
 ```
 [a,b]/cut       → cuts a and b to the clipboard
 [a,b]/remove    → removes a and b
 [a,b]:urgent    → tags a and b with "urgent"
 [a]/move(3)     → moves a to index 3
-```
-
----
-
-### cut-paste
-
-**Trigger** — Enter · **Type** — pluggable · **File** — `cut-paste.behavior.ts`
-
-Bracket-path syntax with a destination that is NOT a known select op: copy
-items from the current directory to that destination. Trailing `/` navigates
-to the destination after pasting.
-
-```
-[cigars,whiskey]/interests   → copies cigars and whiskey into interests/
-[photos]/archive/            → copies photos into archive/ and navigates there
 ```
 
 ---

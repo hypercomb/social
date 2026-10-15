@@ -32,7 +32,6 @@ import { BracketBehavior } from './bracket.behavior'
 import { PasteUrlNavigateBehavior } from './paste-url-navigate.behavior'
 import { RemoveCellBehavior } from './remove-cell.behavior'
 import { GoParentBehavior } from './go-parent.behavior'
-import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { isSelectOp, BRACKET_CMD_RE, normalizeSelectInput } from './select-ops'
@@ -129,9 +128,9 @@ function isSelectExecution(v: string): boolean {
   if (close <= 1) return false
   // Bare `[a,b]` (closed, no op) — BracketBehavior owns the Enter. `:tag`
   // executes here. A trailing `/op` executes here ONLY when op is a known
-  // select op — anything else is a cut-paste destination (`[items]/dest`,
-  // CutPasteBehavior). Consuming every `/xxx` here silently ate cut-paste:
-  // the dispatcher found no known op and collapsed to a bare select.
+  // select op or behaviour; any other `/word` is answered just after this, as
+  // a word nothing answers to (the old `[items]/dest` cut-paste form is
+  // retired — cut and paste move tiles).
   if (v[close + 1] === ':') return true
   if (v[close + 1] !== '/') return false
   const m = v.slice(close + 2).match(/^(\w+)/)
@@ -768,7 +767,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     new GoParentBehavior(),
     new SlashBehaviourBehavior(),
     new RemoveCellBehavior(),
-    new CutPasteBehavior(),
     new HashMarkerBehavior(),
     new PasteUrlNavigateBehavior(),
     new BracketBehavior(),
@@ -3905,6 +3903,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.shell?.setValue(normalizeSelectInput(v))
       this.value.set(this.shell?.value() ?? '')
       void this.#executeSelectCommand()
+      return
+    }
+
+    // `[items]/word` that no behaviour answers to: say so and keep the line.
+    // It is not a destination (cut and paste move tiles), and it must never
+    // fall through to minting tiles out of the bracket text.
+    const unknownOp = v.startsWith('[') ? v.match(/^\[[^\]]*\]\/([\w-]+)/)?.[1] : undefined
+    if (unknownOp && !isSelectOp(unknownOp)) {
+      this.#behaviourDidNotRun(unknownOp, new Error(`no behaviour is called ${unknownOp}`))
       return
     }
 

@@ -103,7 +103,7 @@ export const SELECT_BUILTIN_OPS: ReadonlySet<string> = new Set([
 /** THE OP AFTER A LEADING BRACKET, and any `~item` inside it. The op is found
  *  as `#executeSelectCommand` finds it — legacy `/select[…]` normalised, the
  *  first `]`, then `/word` — and a `~item` is the per-item remove that
- *  `#applyBracketItemOps` (and `CutPasteBehavior`) carry out. Any other op is
+ *  `#applyBracketItemOps` carries out. Any other op is
  *  handed to the registry with the words after it, so it carries them. The
  *  dispatch stops the word at a hyphen (`\w+`); the hyphenated word is judged
  *  as well, so the day it reads `[x]/break-apart` whole the door already does. */
