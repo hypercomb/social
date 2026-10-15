@@ -952,6 +952,7 @@
   "slash.format": "Copy visual formatting from the active tile",
   "slash.layout": "Save, apply, list, or remove layout templates",
   "slash.into": "Move the selected tiles inside another tile — they leave this page; /into <cell>",
+  "slash.go": "Walk to a tile: a name on this page, a path, .. for up, / for the root; /go <tile>",
   "slash.create": "Make a tile here — the only way to create one in beehaviour mode; create <name>",
   "slash.move": "Toggle move mode for drag-reordering tiles",
   "slash.revise": "Toggle revision mode (history clock)",

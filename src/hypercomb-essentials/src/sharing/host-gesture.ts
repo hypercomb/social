@@ -48,11 +48,14 @@ const toast = (type: string, title: string, message: string): void => {
   EffectBus.emit('toast:show', { type, title, message })
 }
 
-export const hostCurrentBranch = async (): Promise<void> => {
+export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> => {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     const lineage = get<LineageLike>(LINEAGE_KEY)
 
-    const segments = (lineage?.explorerSegments?.() ?? [])
+    // THE TILE IS READ ONCE. A caller that already read it (`publish on`)
+    // passes it in: reading the tab again could publish whatever tile the tab
+    // moved to meanwhile — measured 2026-10-15, two sessions sharing one tab.
+    const segments = (at ?? lineage?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean)
     if (segments.length === 0) {
       // The whole hive root is not a branch — name the gesture precisely.

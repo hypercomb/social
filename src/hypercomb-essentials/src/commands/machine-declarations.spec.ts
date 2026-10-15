@@ -35,6 +35,7 @@ await import('../assistant/file.queen.js')
 await import('../assistant/module.queen.js')
 await import('../clipboard/clipboard.queen.js')
 await import('./create.queen.js')
+await import('./go.queen.js')
 await import('./language.queen.js')
 await import('./postit.queen.js')
 await import('./title.queen.js')
@@ -94,6 +95,10 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   groups: ['editing', 'network'],      // add/drop/rename/colour/icon edit marks and records on the
                                        // layer; publish signs an index and puts each member on its
                                        // host. ungroup is refused, so nothing admitted is destructive
+  // Judged on arrival (2026-10-15, speak don't bridge — "make it possible to do
+  // everything by behavior").
+  go: ['additive', 'local'],           // moves where you stand; writes nothing, refuses a place
+                                       // with no tile
 }
 
 describe('every machine declaration, as audited', () => {

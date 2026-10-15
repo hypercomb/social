@@ -689,6 +689,7 @@
   "slash.format": "Etkin döşemenin görsel biçimini kopyala",
   "slash.layout": "Düzen şablonlarını kaydet, uygula, listele veya kaldır",
   "slash.into": "Seçili döşemeleri başka bir döşemenin içine taşı — bu sayfadan ayrılırlar; /into <cell>",
+  "slash.go": "Bir döşemeye git: bu sayfadaki bir ad, bir yol, yukarı için .., kök için /; /go <tile>",
   "slash.create": "Buraya bir döşeme oluştur — davranış modunda oluşturmanın tek yolu; create <name>",
   "slash.swirl": "Döşemeleri dizin spirali olarak düzenle",
   "slash.move": "Döşemeleri sürükleyerek yeniden sıralama modunu değiştir",

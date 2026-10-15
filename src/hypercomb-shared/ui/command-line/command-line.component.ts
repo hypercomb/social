@@ -36,7 +36,7 @@ import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { isSelectOp, BRACKET_CMD_RE, normalizeSelectInput } from './select-ops'
-import { dispatchedCallsOf, viewCommandOf, type FeatureReading, type SpokenCall } from './remote-verbs'
+import { dispatchedCallsOf, speaksStructure, viewCommandOf, type FeatureReading, type SpokenCall } from './remote-verbs'
 import { cutBackToWords, isSensitiveLine } from './command-history'
 import { parseTargetedKeywordsInput } from '../../core/targeted-keywords-input'
 
@@ -2406,6 +2406,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
             kind: 'unknown',
             reason: error instanceof Error ? error.message : String(error),
           }))
+        return
+      }
+
+      // PROSE THAT NAMED NO WORD IS NOT A TILE NAME FROM A REMOTE CALLER. The
+      // legacy pipeline would mint a tile called whatever was said (measured:
+      // `go meetups` made `go-meetups`). Refuse it, nothing runs; a session
+      // that means a tile says `create <name>`.
+      if (prose && !speaksStructure(line)) {
+        settle({ kind: 'refused', reason: 'no word in this line matched a behaviour, so nothing ran — to make a tile, say: create <name>' })
         return
       }
 

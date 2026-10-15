@@ -689,6 +689,7 @@
   "slash.format": "Copiar formatação visual do bloco ativo",
   "slash.layout": "Salvar, aplicar, listar ou remover modelos de layout",
   "slash.into": "Mover os blocos selecionados para dentro de outro bloco — eles saem desta página; /into <cell>",
+  "slash.go": "Ir para um bloco: um nome nesta página, um caminho, .. para subir, / para a raiz; /go <tile>",
   "slash.create": "Criar um bloco aqui — a única forma de criar um no modo de comportamentos; create <name>",
   "slash.swirl": "Organizar blocos na espiral de índice",
   "slash.move": "Alternar modo de mover para reordenar blocos arrastando",

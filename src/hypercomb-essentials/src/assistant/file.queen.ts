@@ -31,6 +31,11 @@ export class FileQueenBee extends QueenBee {
   override examples = [
     { input: '/file call the printer company about toner', result: 'Puts the note on the tile it belongs to, or here' },
   ]
+  // The note is the participant's words, kept exactly: never read for other
+  // words. Without this a remote `file on /meetings: … from your first hive …`
+  // was read as /file + /from + /hive + /tutorial, and the note was cut at
+  // "from" and lowercased (2026-10-15).
+  override rawArgs = true
   override machine = {
     forms: '<text> | on <tile>: <text> | on /<route>: <text>',
     example: '/file on printers: call the company about toner',

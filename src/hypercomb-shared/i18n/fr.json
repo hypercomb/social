@@ -689,6 +689,7 @@
   "slash.format": "Copier le format visuel de la tuile active",
   "slash.layout": "Enregistrer, appliquer, lister ou supprimer des modèles de disposition",
   "slash.into": "Déplacer les tuiles sélectionnées dans une autre tuile — elles quittent cette page ; /into <cell>",
+  "slash.go": "Aller à une tuile : un nom sur cette page, un chemin, .. pour remonter, / pour la racine ; /go <tile>",
   "slash.create": "Créer une tuile ici — la seule façon d’en créer une en mode comportements ; create <name>",
   "slash.swirl": "Disposer les tuiles en spirale d'index",
   "slash.move": "Basculer le mode déplacement pour réorganiser les tuiles",

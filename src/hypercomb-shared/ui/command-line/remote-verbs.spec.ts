@@ -22,7 +22,7 @@ import {
   type AdmissionEntry, type MachineAdmission, type MachineGrant,
 } from '@hypercomb/core'
 import {
-  SELECT_BUILTIN_OPS, dispatchedCallsOf, dispatchedVerbsOf, slashVerbsOf, viewCommandOf,
+  SELECT_BUILTIN_OPS, dispatchedCallsOf, dispatchedVerbsOf, slashVerbsOf, speaksStructure, viewCommandOf,
   type FeatureReading, type SpokenCall,
 } from './remote-verbs'
 
@@ -603,3 +603,16 @@ describe('a behaviour that could not act, at the keyboard', () => {
     expect(report.slice(0, 400)).toContain("EffectBus.emit('activity:log', { message, icon: 'error' })")
   })
 })
+
+describe('a remote line that named no word is never a tile name', () => {
+  it('plain prose does not speak the structural grammar, so the door refuses it', () => {
+    expect(speaksStructure('go meetups')).toBe(false)
+    expect(speaksStructure('meetups')).toBe(false)
+  })
+  it('selection, sigils, paths, marks and views keep their path', () => {
+    for (const line of ['[a, b]/remove', '~drafts', '?susan', '#tag', '..', 'parent/child', 'meetup@postit', 'name:mark']) {
+      expect(speaksStructure(line), line).toBe(true)
+    }
+  })
+})
+

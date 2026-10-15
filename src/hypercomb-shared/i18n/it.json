@@ -689,6 +689,7 @@
   "slash.format": "Copia la formattazione visiva dalla tessera attiva",
   "slash.layout": "Salva, applica, elenca o rimuovi modelli di layout",
   "slash.into": "Sposta le tessere selezionate dentro un'altra tessera — lasciano questa pagina; /into <cell>",
+  "slash.go": "Vai a una tessera: un nome in questa pagina, un percorso, .. per salire, / per la radice; /go <tile>",
   "slash.create": "Crea una tessera qui — l’unico modo per crearne una in modalità comportamenti; create <name>",
   "slash.swirl": "Disponi le tessere a spirale secondo l'indice",
   "slash.move": "Alterna modalità spostamento per riordinare tessere trascinando",
