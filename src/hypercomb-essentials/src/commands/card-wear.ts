@@ -59,20 +59,39 @@ export function planWear(own: CardRecords, template: CardRecords): WearPlan {
   return { page, card }
 }
 
+/** Wearing a COMMUNITY template (`<host>:<name>`, sharing/card-templates.ts): the template is its theme and
+ *  maybe a default picture, already brought into this hive. The tile keeps its page and its details; it takes
+ *  the theme, and the template's picture only when it has none of its own (planWear's picture rule). */
+export function planCommunityWear(own: CardRecords, template: { themeSig: string; pictureSig?: string }):
+  { refuse: 'not-a-template' | 'no-card' } | { same: true } | { card: Record<string, unknown> } {
+  const themeSig = sigOf(template.themeSig)
+  if (!themeSig) return { refuse: 'not-a-template' }
+  const dataSig = sigOf(own.card?.['dataSig'])
+  if (!sigOf(own.page?.['htmlSig']) || !dataSig) return { refuse: 'no-card' }
+  const artSig = sigOf(own.card?.['artSig']) || sigOf(template.pictureSig)
+  const card: Record<string, unknown> = { ...(own.card ?? {}), dataSig, themeSig }
+  if (artSig) card['artSig'] = artSig
+  else delete card['artSig']
+  if (sigOf(own.card?.['themeSig']) === themeSig && sigOf(own.card?.['artSig']) === artSig) return { same: true }
+  return { card }
+}
+
 export interface CardArgs {
   /** The tile the word acts on, relative to where the participant stands ('' = here). */
   target: string
-  /** 'wear', 'offer' (this template to the community), or '' (report what the tile wears). */
-  verb: '' | 'wear' | 'offer'
+  /** 'wear', 'offer' (this template to the community), 'templates' (what the community offers), or '' (report). */
+  verb: '' | 'wear' | 'offer' | 'templates'
   /** The template's route: relative to where the participant stands, or from the hive root with a leading '/'. */
   template: string
   /** `offer off`: withdraw the offering. */
   off?: boolean
 }
 
-/** `card` · `card <tile>` · `card wear <template>` · `card <tile> wear <template>` · `card [<tile>] offer [off]`. */
+/** `card` · `card <tile>` · `card wear <template>` · `card <tile> wear <template>` · `card [<tile>] offer [off]` ·
+ *  `card templates`. A template is a route, or a community template as `<host>:<name>`. */
 export function parseCardArgs(raw: string): CardArgs | { error: 'unknown' } {
   const words = raw.trim().split(/\s+/).filter(Boolean)
+  if (words.length === 1 && words[0].toLowerCase() === 'templates') return { target: '', verb: 'templates', template: '' }
   const offer = words.findIndex(w => w.toLowerCase() === 'offer')
   if (offer >= 0) {
     const rest = words.slice(offer + 1).map(w => w.toLowerCase())

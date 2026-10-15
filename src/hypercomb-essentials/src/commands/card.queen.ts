@@ -8,6 +8,8 @@
 //   card jaime-weise wear /jaime-weise/business-card/template/emerald
 //   card offer                                   offer the template you stand on to the community
 //   card offer off                               withdraw it (sharing/card-template-offering.ts)
+//   card templates                               what your host and the hosts you follow offer
+//   card wear example.com:contour                wear a community template (sharing/card-templates.ts)
 //
 // Routes are relative to where you stand, or from the hive root with a leading '/'.
 // Wearing is two references and never a copy (card-wear.ts): the tile's page becomes the template's
@@ -18,10 +20,11 @@
 // No aliases: a behaviour declares none (aliases are the participant's own).
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { listDecorations, replaceDecoration } from './decoration-manifest.js'
-import { CARD_DATA_KIND, CARD_PAGE_KIND, planWear, parseCardArgs, routeFrom, type CardRecords } from './card-wear.js'
+import { CARD_DATA_KIND, CARD_PAGE_KIND, planCommunityWear, planWear, parseCardArgs, routeFrom, type CardRecords } from './card-wear.js'
 import { cardAtHead, type CardAtHead } from './card-read.js'
 import { readAddressHead, readFromHost, type AddressHead } from '../sharing/published-address.js'
 import { setCardTemplateOffering } from '../sharing/card-template-offering.js'
+import { bringCardTemplate, communityTemplateHosts, findCardTemplates, parseTemplateHandle } from '../sharing/card-templates.js'
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
 type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
@@ -55,12 +58,14 @@ export class CardQueenBee extends QueenBee {
   readonly command = 'card'
   override description = 'What a business card wears, and wearing a card template'
   override descriptionKey = 'slash.card'
-  override options = ['<tile>', 'wear <template>', '<tile> wear <template>', 'offer', 'offer off']
+  override options = ['<tile>', 'wear <template>', '<tile> wear <template>', 'offer', 'offer off', 'templates', 'wear <host>:<template>']
   override examples = [
     { input: '/card', result: 'Says which template and theme this card wears' },
     { input: '/card wear business-card/template/graphite', result: 'This card wears the Graphite template' },
     { input: '/card jaime-weise wear /jaime-weise/business-card/template', result: 'jaime-weise wears the template' },
     { input: '/card offer', result: 'Offers the template you stand on to the community, on the host you named' },
+    { input: '/card templates', result: 'Lists the card templates your host and the hosts you follow offer' },
+    { input: '/card wear example.com:contour', result: 'This card wears the Contour template offered on example.com' },
   ]
 
   // a template's route may contain a behaviour word (`template` is one) — the whole line is this word's
@@ -68,7 +73,18 @@ export class CardQueenBee extends QueenBee {
 
   protected async execute(args: string): Promise<void> {
     const parsed = parseCardArgs(args)
-    if ('error' in parsed) { say('card: say "card", "card <tile>", or "card wear <template>"', 'error'); return }
+    if ('error' in parsed) { say('card: say "card", "card <tile>", "card wear <template>", "card offer" or "card templates"', 'error'); return }
+
+    if (parsed.verb === 'templates') {
+      // What the community offers: your own host, then the hosts you follow (sharing/card-templates.ts).
+      const hosts = await communityTemplateHosts()
+      if (hosts.length === 0) { say('card templates: name your host or follow hosts first — community templates come from them'); return }
+      const found = await findCardTemplates({ hosts: async () => hosts })
+      if (found.length === 0) { say(`card templates: none offered on ${hosts.join(', ')} yet — "card offer" on a template shares one`); return }
+      for (const t of found) EffectBus.emit('activity:log', { message: `${t.label} — card wear ${t.host}:${t.handle}`, icon: '▣' })
+      say(`card templates: ${found.length} offered — ${found.map(t => `${t.host}:${t.handle}`).join(', ')}`)
+      return
+    }
 
     const here = (window.ioc.get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean)
@@ -95,12 +111,30 @@ export class CardQueenBee extends QueenBee {
         { key: target.join('/'), label, themeSig, ...(SIG.test(artSig) ? { pictureSig: artSig } : {}) }, !parsed.off)
       if (!result.ok) { say(`card offer: ${result.reason}`, 'error'); return }
       say(result.state === 'on'
-        ? `${label} is offered on ${result.host} — cards whose Hyperdex holds that host can wear it`
+        ? `${label} is offered on ${result.host} — anyone who follows it finds it with "card templates"`
         : `${label} is no longer offered on ${result.host}`)
       return
     }
 
     if (!parsed.template) { say('card wear: say which template — card wear <template>', 'error'); return }
+
+    // A community template, `<host>:<name>`: its theme (and default picture) is brought into this hive by
+    // signature and the card takes it; the card keeps its page, its details and a picture of its own.
+    const community = parseTemplateHandle(parsed.template)
+    if (community) {
+      const needsCard = `card wear: "${name}" needs a card first — wear a template from your hive, then this one`
+      if (!own.page || !own.card) { say(needsCard, 'error'); return }
+      const brought = await bringCardTemplate(community.host, community.handle)
+      if ('error' in brought) { say(`card wear: ${brought.error}`, 'error'); return }
+      const plan = planCommunityWear(own, brought.offer)
+      if ('refuse' in plan) { say(needsCard, 'error'); return }
+      if ('same' in plan) { say(`"${name}" already wears ${brought.offer.label}`); return }
+      await replaceDecoration({ kind: CARD_DATA_KIND, appliesTo: target, segments: target, payload: plan.card, mark: 'persistent' })
+      window.dispatchEvent(new CustomEvent('hypercomb-card', { detail: { type: 'hypercomb-card:wear', segments: [...target] } }))
+      say(`"${name}" now wears ${brought.offer.label} from ${community.host} — publish to show visitors`)
+      return
+    }
+
     const templateRoute = routeFrom(here, parsed.template)
     const plan = planWear(own, await recordsAt(templateRoute))
     const shown = templateRoute.join('/')
