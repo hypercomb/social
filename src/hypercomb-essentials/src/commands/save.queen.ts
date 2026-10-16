@@ -8,11 +8,11 @@
 // jwize, 2026-10-10: "no new hive functionality just save as then you are on an
 // empty slate". The model, the record and the guards: history/saved-roots.ts.
 //
-// HIDDEN ON PURPOSE. `save` is a sub-word of `layout save`, `template save` and
+// LINE START ONLY. `save` is a sub-word of `layout save`, `template save` and
 // `website save`, and the command line runs every behaviour word on a line —
-// so `save` never lights mid-line (slashHidden: prose never claims a hidden
-// word). Typed at the start of a line it runs, in either stance. Everything
-// after the word is this queen's, verbatim (rawArgs).
+// so `save` never lights mid-line (lineStart). It is listed in autocomplete,
+// and typed at the start of a line it runs, in either stance. Everything after
+// the word is this queen's, verbatim (rawArgs).
 
 import { EffectBus, get, I18N_IOC_KEY, QueenBee, isReservedPoolWord, validatePoolSpelling, type I18nProvider } from '@hypercomb/core'
 import type { HistoryService } from '../history/history.service.js'
@@ -31,7 +31,8 @@ export class SaveQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'save'
   override rawArgs = true
-  override slashHidden = true
+  /** Listed in autocomplete; runs only as the first word of a line. */
+  readonly lineStart = true
   override description = 'Save as <name> — file this root under a name and start on an empty root'
   override descriptionKey = 'slash.save'
   override options = ['as <name>']

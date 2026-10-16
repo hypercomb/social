@@ -11,9 +11,10 @@
 // tiles on it is refused — "save as <name> first" — so nothing is ever lost.
 // The model and the record: history/saved-roots.ts.
 //
-// HIDDEN ON PURPOSE. `use` is a sub-word of `harness use <name>`, and the
+// LINE START ONLY. `use` is a sub-word of `harness use <name>`, and the
 // command line runs every behaviour word on a line — so `use` never lights
-// mid-line (slashHidden). Typed at the start of a line it runs.
+// mid-line (lineStart). It is listed in autocomplete; typed at the start of a
+// line it runs.
 
 import { EffectBus, get, I18N_IOC_KEY, QueenBee, type I18nProvider } from '@hypercomb/core'
 import type { HistoryService } from '../history/history.service.js'
@@ -32,7 +33,8 @@ export class UseQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'use'
   override rawArgs = true
-  override slashHidden = true
+  /** Listed in autocomplete; runs only as the first word of a line. */
+  readonly lineStart = true
   override description = 'Use <name> — turn a saved root back on as your root'
   override descriptionKey = 'slash.use'
   override options = ['<name>']

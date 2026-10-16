@@ -14,6 +14,7 @@ const LEXICON: readonly UtteranceLexiconEntry[] = [
   { name: 'images', description: 'Room pictures for a tile' },
   { name: 'lightbox', aliases: ['gallery', 'images'], description: 'Picture lightbox' },
   { name: 'flatten', hidden: true, description: 'Collapse history (destructive, typed in full)' },
+  { name: 'save', lineStart: true, description: 'Save as <name> — a sub-word of layout save' },
 ]
 
 const roles = (text: string) =>
@@ -81,6 +82,12 @@ describe('readUtterance', () => {
   it('hidden behaviours never light from prose', () => {
     const r = readUtterance('flatten everything now', LEXICON)
     expect(r.hasAction).toBe(false)
+  })
+
+  // jwize, 2026-10-16: "I don't see save as" — listed, but a sub-word elsewhere.
+  it('a line-start word never lights from prose either — first-word dispatch runs it', () => {
+    expect(readUtterance('please save the layout', LEXICON).hasAction).toBe(false)
+    expect(readUtterance('help then save', LEXICON).actions).toEqual([{ command: 'help', args: 'then save' }])
   })
 
   it('span offsets index the original text exactly', () => {

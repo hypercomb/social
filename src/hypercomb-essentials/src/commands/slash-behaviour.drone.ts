@@ -1081,6 +1081,8 @@ const wrapQueen = (queen: ReturnType<typeof isQueen> extends true ? never : any)
     // the command line (`rawArgs()` above) before it reads the line itself.
     // Present only on a word that said so; every other row is as it was.
     ...(queen.rawArgs === true ? { rawArgs: true } : {}),
+    // Listed, but run only as the first word of a line (a sub-word elsewhere).
+    ...(queen.lineStart === true ? { lineStart: true } : {}),
   }],
   execute(_behaviourName: string, args: string): Promise<void> | void {
     // The walk hands back a dotted path; the behaviour parses spaces. This is

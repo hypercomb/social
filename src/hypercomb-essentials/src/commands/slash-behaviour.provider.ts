@@ -23,6 +23,15 @@ export interface SlashBehaviour {
    */
   readonly hidden?: boolean
   /**
+   * LINE START ONLY (jwize, 2026-10-16: "I don't see save as" / "I don't see
+   * use either"). Listed in autocomplete like any word, but never lit from
+   * prose — it runs only as the first word of a line. For a word that is also
+   * a sub-word of another behaviour (`save` in `layout save`, `use` in
+   * `harness use`): the command line runs every behaviour word on a line, so
+   * without this the sub-word would run as its own action.
+   */
+  readonly lineStart?: boolean
+  /**
    * STRUCTURED USAGE DOCS — supplied by the author at creation (QueenBee's
    * `options` / `examples` flow straight through the auto-wrap). Reference
    * surfaces read these fields; they never parse the description string.

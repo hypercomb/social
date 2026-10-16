@@ -18,7 +18,7 @@ interface SlashBehaviourDroneLike {
    *  (one entry per alias, each still carrying the full aliases array), so
    *  reading it would claim every word once per alias and misname the
    *  claimants of an ambiguity. */
-  entries?(): readonly { name: string; description?: string; aliases?: readonly string[]; hidden?: boolean }[]
+  entries?(): readonly { name: string; description?: string; aliases?: readonly string[]; hidden?: boolean; lineStart?: boolean }[]
 }
 interface TagRegistryLike { color?(name: string): string | undefined }
 

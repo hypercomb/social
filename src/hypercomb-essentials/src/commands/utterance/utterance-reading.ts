@@ -25,6 +25,8 @@ export interface UtteranceLexiconEntry {
   readonly aliases?: readonly string[]
   readonly description?: string
   readonly hidden?: boolean
+  /** Runs only as the first word of a line — never lit from prose. */
+  readonly lineStart?: boolean
 }
 
 export interface UtteranceSpan {
@@ -105,7 +107,7 @@ export function readUtterance(
   // prose must never light them).
   const claims = new Map<string, Map<string, string>>()   // word → (command → description)
   for (const e of entries) {
-    if (e.hidden) continue
+    if (e.hidden || e.lineStart) continue
     const words = [e.name, ...(e.aliases ?? [])]
     for (const w of words) {
       const key = w.toLowerCase()
