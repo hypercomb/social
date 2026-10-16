@@ -183,6 +183,15 @@ type SwarmNotesService = EventTarget & {
   holdersOfMine(cell: string): ReadonlyMap<string, readonly string[]>
   counts(cell: string, own: number): { people: number; notes: number; yours: number; open: number }
   seenAt(id: string): number | undefined
+  ignore(pubkey: string, always?: boolean): void
+  unignore(pubkey: string): void
+  ignored(): { pubkey: string; always: boolean }[]
+  setRoomHidden(hidden: boolean): void
+  roomHidden(): boolean
+  dismiss(id: string): void
+  undismissAll(): void
+  dismissedCount(): number
+  inSwarm(): boolean
   labelOf(pubkey: string): string
   colorOf(pubkey: string): string
   refresh(cell: string): Promise<void>
@@ -1925,7 +1934,11 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     const cell = this.cell()
     if (!svc || !cell) return null
     const counts = svc.counts(cell, (this.#notesByCell().get(cell) ?? []).length)
-    return counts.people > 1 || counts.open > 0 ? counts : null
+    // The footer stays while anything here is hidden by your own hand — an
+    // ignore, a dismiss, the room — so the way back is always on screen. Only
+    // in a swarm: outside one none of it means anything.
+    const hiding = svc.inSwarm() && (svc.ignored().length > 0 || svc.roomHidden() || svc.dismissedCount() > 0)
+    return counts.people > 1 || counts.open > 0 || hiding ? counts : null
   })
 
   isPeer(id: string): boolean { return this.#peerById().has(id) }
@@ -1948,6 +1961,35 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     const others = cell ? this.#swarmNotes()?.holdersOfMine(cell).get(id)?.length ?? 0 : 0
     return others > 0 ? others + 1 : 0
   }
+
+  /** Click a name: that participant's notes leave the list for this session. */
+  ignorePeer(id: string, event?: Event): void {
+    event?.stopPropagation()
+    const r = this.#peerById().get(id)
+    if (r) this.#swarmNotes()?.ignore(r.by)
+  }
+
+  /** Who is ignored right now, labelled, and whether it is for good. */
+  readonly ignoredPeople = computed(() => {
+    this.#swarmVersion()
+    const svc = this.#swarmNotes()
+    return (svc?.ignored() ?? []).map(i => ({ ...i, label: svc!.labelOf(i.pubkey), color: svc!.colorOf(i.pubkey) }))
+  })
+
+  readonly roomHidden = computed(() => { this.#swarmVersion(); return this.#swarmNotes()?.roomHidden() ?? false })
+
+  unignorePeer(pubkey: string): void { this.#swarmNotes()?.unignore(pubkey) }
+
+  /** ✓'s other half: wave the line off for this session. */
+  dismissPeer(id: string, event?: Event): void {
+    event?.stopPropagation()
+    this.#swarmNotes()?.dismiss(id)
+  }
+
+  readonly dismissedCount = computed(() => { this.#swarmVersion(); return this.#swarmNotes()?.dismissedCount() ?? 0 })
+  undismissAll(): void { this.#swarmNotes()?.undismissAll() }
+  ignoreAlways(pubkey: string): void { this.#swarmNotes()?.ignore(pubkey, true) }
+  toggleRoomHidden(): void { const svc = this.#swarmNotes(); svc?.setRoomHidden(!svc.roomHidden()) }
 
   takePeer(id: string, event?: Event): void {
     event?.stopPropagation()

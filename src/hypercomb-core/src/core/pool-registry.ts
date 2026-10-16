@@ -629,6 +629,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // keeps its hive awake and in the swarm while nobody is at it. One document,
   // this machine's own setting; it never travels with content.
   'swarm:keep-alive',
+  // IGNORED (essentials/notes/swarm-notes.service.ts): the keys whose notes
+  // this participant ignores ALWAYS. One document, a reading preference — never
+  // a layer, never travels with content.
+  'swarm:ignored',
   // TRANSFER PACKS (atomic-modules-plan.md): one member per package, named by
   // the package's root signature and holding the signature of a pack — one
   // content-addressed file carrying that package's bytes, so a cold install

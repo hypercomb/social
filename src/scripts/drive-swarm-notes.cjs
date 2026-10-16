@@ -68,15 +68,16 @@ const desk = (c) => H.evalSafe(() => c.page.evaluate(() => {
     colour: r.style.getPropertyValue('--peer'),
     by: r.querySelector('.cv2-peer-by')?.textContent ?? '',
     held: r.querySelector('.cv2-peer-held')?.textContent ?? '',
-    take: !!r.querySelector('.cv2-peer-take'),
+    take: !!r.querySelector('.cv2-peer-check'),
+    dismiss: !!r.querySelector('.cv2-ignored-act'),
   }))
-  return { rows, counts: el?.querySelector('.cv2-swarm-counts')?.textContent?.trim() ?? '' }
+  return { rows, counts: el?.querySelector('.cv2-swarm-counts')?.textContent?.trim() ?? '', footer: el?.querySelector('.cv2-foot')?.textContent?.replace(/\s+/g, ' ').trim() ?? '' }
 }))
 
 const take = (c, text) => H.evalSafe(() => c.page.evaluate((text) => {
   const row = [...document.querySelectorAll('hc-notes-strip .cv2-note[data-note-id]')]
     .find(r => r.querySelector('.cv2-note-text')?.textContent?.trim() === text)
-  const btn = row?.querySelector('.cv2-peer-take')
+  const btn = row?.querySelector('.cv2-peer-check')
   if (!btn) return false
   btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
   return true
@@ -140,6 +141,16 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
   H.check('TAKE makes it yours', taken.ok, JSON.stringify(row(taken.value, 'alpha — Ana wrote this')))
   const two = await H.waitFor(() => desk(a), v => row(v, 'alpha — Ana wrote this')?.held === '×2', 45000, 750)
   H.check('one note, two holders — never a copy', two.ok, JSON.stringify(row(two.value, 'alpha — Ana wrote this')))
+
+  // DISMISS waves a line off for the session; the footer brings it back.
+  await write(a, TILE, 'delta — Ben dismisses this')
+  await H.waitFor(() => desk(b), v => !!row(v, 'delta — Ben dismisses this'), 45000, 750)
+  await H.evalSafe(() => b.page.evaluate(() => {
+    const r = [...document.querySelectorAll('hc-notes-strip .cv2-note[data-note-id]')].find(x => x.querySelector('.cv2-note-text')?.textContent?.trim() === 'delta — Ben dismisses this')
+    r?.querySelector('.cv2-ignored-act')?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+  }))
+  const dismissed = await H.waitFor(() => desk(b), v => !row(v, 'delta — Ben dismisses this') && /dismissed/.test(v.footer ?? ''), 10000, 300)
+  H.check('dismiss hides the line and the footer says so', dismissed.ok, JSON.stringify(dismissed.value?.footer))
 
   await write(a, TILE, 'gamma — Ben never takes this')
   const gamma = await H.waitFor(() => desk(b), v => !!row(v, 'gamma — Ben never takes this'), 45000, 750)

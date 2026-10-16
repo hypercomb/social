@@ -450,13 +450,19 @@
             @if (isPeerRoot(note.id) || heldCount(note.id) > 0) {
               <span class="cv2-peer-meta" (click)="$event.stopPropagation()">
                 @if (isPeerRoot(note.id)) {
-                  <span class="cv2-peer-by">{{ peerLabel(note.id) }}</span>
+                  <button type="button" class="cv2-peer-by" (click)="ignorePeer(note.id, $event)"
+                          [title]="'notes.swarm.ignore' | t: { name: peerLabel(note.id) }">{{ peerLabel(note.id) }}</button>
                 }
                 @if (heldCount(note.id) > 0) {
                   <span class="cv2-peer-held" [title]="'notes.swarm.held' | t: { count: heldCount(note.id) }">×{{ heldCount(note.id) }}</span>
                 }
                 @if (isPeerRoot(note.id)) {
-                  <button type="button" class="cv2-peer-take" (click)="takePeer(note.id, $event)">{{ 'notes.swarm.take' | t }}</button>
+                  <button type="button" class="cv2-peer-check" (click)="takePeer(note.id, $event)"
+                          [title]="'notes.swarm.takeHint' | t" [attr.aria-label]="'notes.swarm.take' | t">
+                    <span class="mat-sym" aria-hidden="true">check</span>
+                  </button>
+                  <button type="button" class="cv2-ignored-act" (click)="dismissPeer(note.id, $event)"
+                          [title]="'notes.swarm.dismissHint' | t">{{ 'notes.swarm.dismiss' | t }}</button>
                 }
               </span>
             }
@@ -573,6 +579,22 @@
       <footer class="cv2-foot">
         @if (swarmCounts(); as room) {
           <span class="cv2-swarm-counts">{{ 'notes.swarm.counts' | t: { people: room.people, notes: room.notes, yours: room.yours, open: room.open } }}</span>
+          @for (who of ignoredPeople(); track who.pubkey) {
+            <span class="cv2-ignored" [style.--peer]="who.color">
+              <span class="cv2-ignored-name">{{ 'notes.swarm.ignored' | t: { name: who.label } }}</span>
+              <button type="button" class="cv2-ignored-act" (click)="unignorePeer(who.pubkey)">{{ 'notes.swarm.show' | t }}</button>
+              @if (!who.always) {
+                <button type="button" class="cv2-ignored-act" (click)="ignoreAlways(who.pubkey)">{{ 'notes.swarm.always' | t }}</button>
+              }
+            </span>
+          }
+          @if (dismissedCount() > 0) {
+            <span class="cv2-ignored">
+              <span>{{ 'notes.swarm.dismissed' | t: { count: dismissedCount() } }}</span>
+              <button type="button" class="cv2-ignored-act" (click)="undismissAll()">{{ 'notes.swarm.show' | t }}</button>
+            </span>
+          }
+          <button type="button" class="cv2-peer-take" (click)="toggleRoomHidden()">{{ (roomHidden() ? 'notes.swarm.showRoom' : 'notes.swarm.hideRoom') | t }}</button>
           @if (room.open > 0) {
             <button type="button" class="cv2-peer-take" (click)="takeAllPeers()">{{ 'notes.swarm.takeAll' | t }}</button>
           }

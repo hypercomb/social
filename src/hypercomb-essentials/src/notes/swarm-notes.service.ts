@@ -44,6 +44,19 @@ type BrokerShape = { fetchBySig?: (sig: string, type: 'layer' | 'resource', time
 type LineageShape = { explorerSegments?: () => readonly string[] }
 
 const SIG = /^[0-9a-f]{64}$/
+
+/** The keys this participant ignores ALWAYS — a reading preference, so a
+ *  device pool, never a layer or a history item: it is not the hive's
+ *  content and must never travel with it. One document, `{ keys: [...] }`. */
+export const IGNORED_POOL = 'swarm:ignored'
+
+type PoolStoreShape = {
+  initialize?: () => Promise<void>
+  getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
+  openPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
+  getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined) => Promise<ArrayBuffer | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer) => Promise<string | null>
+}
 const FETCH_TIMEOUT_MS = 8_000
 /** Bytes walked per note tree — a lecture's list, not a library. */
 const WALK_MAX = 400
@@ -60,6 +73,14 @@ export class SwarmNotes extends EventTarget {
    *  A note carries no time; arrival order is what makes the room ONE list. */
   #firstSeen = new Map<string, number>()
   #reading = new Map<string, Promise<void>>()
+  // IGNORE — the reader's own choice of whose notes reach their list. For the
+  // session it is memory (a reload brings everyone back); ALWAYS is the
+  // IGNORED_POOL document. A note someone not ignored also holds still shows.
+  #ignoredSession = new Set<string>()
+  #ignoredAlways = new Set<string>()
+  #roomHidden = false
+  /** Lines waved off with `dismiss`, for this session only. */
+  #dismissed = new Set<string>()
   #again = new Set<string>()
 
   constructor() {
@@ -69,7 +90,100 @@ export class SwarmNotes extends EventTarget {
       EffectBus.on(effect, () => { for (const cell of this.#roots.keys()) void this.refresh(cell) })
     }
     EffectBus.on<{ segments?: readonly string[]; sigs?: readonly string[] }>('notes:changed', (p) => { void this.#shareFirstNote(p) })
+    void this.#loadIgnored()
   }
+
+  // ── ignore ──────────────────────────────────────────────────
+
+  /** Stop showing `pubkey`'s notes — for this session, or `always`. */
+  ignore(pubkey: string, always = false): void {
+    const key = String(pubkey ?? '').toLowerCase()
+    if (!SIG.test(key)) return
+    this.#ignoredSession.add(key)
+    if (always && !this.#ignoredAlways.has(key)) { this.#ignoredAlways.add(key); void this.#saveIgnored({ add: key }) }
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  /** Show `pubkey`'s notes again — and forget an ALWAYS for them. */
+  unignore(pubkey: string): void {
+    const key = String(pubkey ?? '').toLowerCase()
+    this.#ignoredSession.delete(key)
+    if (this.#ignoredAlways.delete(key)) void this.#saveIgnored({ remove: key })
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  /** Everyone ignored right now, and whether it is for good. */
+  ignored(): { pubkey: string; always: boolean }[] {
+    const keys = new Set([...this.#ignoredSession, ...this.#ignoredAlways])
+    return [...keys].map(pubkey => ({ pubkey, always: this.#ignoredAlways.has(pubkey) }))
+  }
+
+  /** Hide everyone else's notes for this session (and show them again). */
+  setRoomHidden(hidden: boolean): void {
+    if (this.#roomHidden === hidden) return
+    this.#roomHidden = hidden
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  roomHidden(): boolean { return this.#roomHidden }
+
+  #isIgnored(pubkey: string): boolean {
+    return this.#ignoredSession.has(pubkey) || this.#ignoredAlways.has(pubkey)
+  }
+
+  async #loadIgnored(): Promise<void> {
+    const store = get<PoolStoreShape>('@hypercomb.social/Store')
+    await store?.initialize?.().catch(() => {})
+    // A read never creates the pool: a hive that never ignored anyone grows no directory.
+    const pool = await store?.openPool?.(IGNORED_POOL).catch(() => null)
+    const bytes = pool ? await store?.getPoolDoc?.(pool).catch(() => null) : null
+    if (!bytes) return
+    try {
+      const keys = (JSON.parse(new TextDecoder().decode(bytes)) as { keys?: unknown }).keys
+      for (const key of Array.isArray(keys) ? keys : []) if (typeof key === 'string' && SIG.test(key)) this.#ignoredAlways.add(key)
+      if (this.#ignoredAlways.size > 0) this.dispatchEvent(new CustomEvent('change'))
+    } catch { /* an unreadable document ignores no one */ }
+  }
+
+  /** Apply ONE change to the stored list — re-read first, so a change made
+   *  meanwhile (another tab) is never written over. */
+  async #saveIgnored(change: { add?: string; remove?: string }): Promise<void> {
+    const store = get<PoolStoreShape>('@hypercomb.social/Store')
+    await store?.initialize?.().catch(() => {})
+    const pool = await store?.getPool?.(IGNORED_POOL).catch(() => null)
+    if (!pool || !store?.putPoolDoc) return
+    const keys = new Set<string>()
+    try {
+      const held = await store.getPoolDoc?.(pool)
+      const stored = held ? (JSON.parse(new TextDecoder().decode(held)) as { keys?: unknown }).keys : []
+      for (const key of Array.isArray(stored) ? stored : []) if (typeof key === 'string' && SIG.test(key)) keys.add(key)
+    } catch { /* unreadable: start from this change alone */ }
+    if (change.add) keys.add(change.add)
+    if (change.remove) keys.delete(change.remove)
+    const bytes = new TextEncoder().encode(JSON.stringify({ keys: [...keys].sort() })).buffer as ArrayBuffer
+    await store.putPoolDoc(pool, bytes).catch(() => null)
+  }
+
+  // ── dismiss ─────────────────────────────────────────────────
+
+  /** Wave a line off: it leaves your list for this session. */
+  dismiss(id: string): void {
+    if (!SIG.test(id) || this.#dismissed.has(id)) return
+    this.#dismissed.add(id)
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  /** Bring every dismissed line back. */
+  undismissAll(): void {
+    if (this.#dismissed.size === 0) return
+    this.#dismissed.clear()
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  dismissedCount(): number { return this.#dismissed.size }
+
+  /** In a swarm right now — the only place the room's footer means anything. */
+  inSwarm(): boolean { return isJoinedHere() }
 
   /** WRITE AND SHARE BY DEFAULT. Your FIRST note on a tile the room shares,
    *  written (or taken) in the swarm, shares your tile — as a tile made in
@@ -122,7 +236,18 @@ export class SwarmNotes extends EventTarget {
    *  last read. Synchronous; `refresh` reads. Empty outside a swarm. */
   rootsFor(cell: string): readonly PeerNoteRoot[] {
     this.#syncPage()
-    return isJoinedHere() ? (this.#roots.get(moleculeKey(cell)) ?? []) : []
+    if (!isJoinedHere() || this.#roomHidden) return []
+    const roots = this.#roots.get(moleculeKey(cell)) ?? []
+    if (this.#ignoredSession.size === 0 && this.#ignoredAlways.size === 0 && this.#dismissed.size === 0) return roots
+    const out: PeerNoteRoot[] = []
+    for (const r of roots) {
+      if (this.#dismissed.has(r.note.id)) continue
+      const holders = r.holders.filter(h => !this.#isIgnored(h))
+      if (holders.length === 0) continue
+      // Still here because someone you did not ignore holds it: it is theirs to show.
+      out.push(holders.length === r.holders.length ? r : { ...r, holders, by: holders.includes(r.by) ? r.by : holders[0] })
+    }
+    return out
   }
 
   /** Peers also holding one of YOUR roots on `cell` (id → pubkeys). */
