@@ -88,8 +88,11 @@ async function fixture(event, bindings = ONE_ZONE) {
       CONTENT: contentBag(held),
       ASSETS: {
         fetch: async (request) => {
-          assetRequests.push(new URL(request.url).pathname)
-          return new Response('visitor engine', { headers: { 'content-type': 'text/html' } })
+          const { pathname } = new URL(request.url)
+          assetRequests.push(pathname)
+          // The store types what it holds: a mark is a picture, the rest the page.
+          const type = /\.svg$/.test(pathname) ? 'image/svg+xml' : /\.(png|ico)$/.test(pathname) ? 'image/png' : 'text/html'
+          return new Response('visitor engine', { headers: { 'content-type': type } })
         },
       },
     },
@@ -3634,7 +3637,7 @@ test('a page that is missing, fails its hash, or fails the script check gets a p
       assert.equal(res.status, 503, why)
       assert.match(res.headers.get('content-security-policy'), /^sandbox; default-src 'none'/, why)
       assert.equal(res.headers.get('permissions-policy'), NO_DEVICES, why)
-      assert.equal(res.headers.get('cache-control'), 'no-store, private', why)
+      assert.equal(res.headers.get('cache-control'), 'no-store, private, no-transform', why)
       assert.doesNotMatch(await res.text(), /<script/i, why)
     })
     assert.deepEqual(asked, [], `${why}: never the visitor shell`)
@@ -3653,7 +3656,7 @@ test('every entrance answer is kept by no cache — no-store, no Vary, no ETag �
     ]
     assert.deepEqual(answers.map((r) => r.status), [200, 200, 200, 200])
     for (const res of answers) {
-      assert.equal(res.headers.get('cache-control'), 'no-store, private')
+      assert.equal(res.headers.get('cache-control'), 'no-store, private, no-transform')
       assert.equal(res.headers.get('vary'), null, 'one answer for every device')
       assert.equal(res.headers.get('etag'), null)
     }
@@ -4040,7 +4043,7 @@ const sandboxedCard = async (res, H, why) => {
   assert.equal(await bodyHash(res), H, why)
   assert.match(res.headers.get('content-security-policy'), /^sandbox allow-scripts; script-src /, why)
   assert.equal(res.headers.get('permissions-policy'), NO_DEVICES, why)
-  assert.equal(res.headers.get('cache-control'), 'no-store, private', why)
+  assert.equal(res.headers.get('cache-control'), 'no-store, private, no-transform', why)
 }
 
 test('nothing but the card runs on a card-door origin — every path, every device, powers on or off', async () => {
@@ -4289,7 +4292,7 @@ test('an index read that fails runs nothing on an address that served its card, 
         const res = await worker.fetch(request, env)
         assert.equal(res.status, 503, why)
         assert.match(res.headers.get('content-security-policy'), /^sandbox; default-src 'none'/)
-        assert.equal(res.headers.get('cache-control'), 'no-store, private')
+        assert.equal(res.headers.get('cache-control'), 'no-store, private, no-transform')
         assert.doesNotMatch(await res.text(), /<script/i)
       }
       assert.ok(failures >= 3, 'each request asks again: an unreadable answer is never held')
@@ -5235,4 +5238,33 @@ test('a deep link into a site serves the shell at that path — a redirect from 
   const html = await response.text()
   assert(html.includes('<meta property="og:url" content="https://revolucion.pluginthematrix.com/2026-10-14">'))
   assert(pages(assetRequests).includes('/'), 'the shell was fetched for the asked path')
+})
+
+// The edge is a third party too: with Web Analytics on a zone, Cloudflare
+// appends its beacon (static.cloudflareinsights.com) to every HTML answer it
+// proxies. `no-transform` is the directive it documents as leaving a response
+// alone, so every page leaves with it — and nothing else does.
+test('every page leaves with no-transform — the edge may not rewrite it into a third-party request', async () => {
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head }))
+  const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html', 'cache-control': 'public, max-age=0, must-revalidate' } })
+  // The visitor document.
+  const document = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
+  assert.equal(document.status, 200)
+  assert.match(document.headers.get('content-type'), /^text\/html/)
+  assert.equal(document.headers.get('cache-control'), 'no-store, no-transform')
+  // The page a door does not hold.
+  const { env: one } = await fixture(await signedIndex({ pluginthematrix: head }))
+  const missing = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), one)
+  assert.equal(missing.status, 404)
+  assert.match(missing.headers.get('content-type'), /^text\/html/)
+  assert.equal(missing.headers.get('cache-control'), 'no-store, no-transform')
+  // A page already carrying it is left as it is.
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html', 'cache-control': 'no-transform' } })
+  const carried = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/x.html'), env)
+  assert.equal((carried.headers.get('cache-control').match(/no-transform/g) || []).length, 1, 'said once')
+  // Machine answers are not pages: untouched.
+  const registry = await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)
+  assert.match(registry.headers.get('content-type'), /json/)
+  assert.equal(registry.headers.get('cache-control'), 'no-store')
 })

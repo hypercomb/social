@@ -4781,19 +4781,41 @@ function meetingPointFor(request, env, url) {
 export default {
   async fetch(request, env, ctx) {
     const scope = {}
-    const response = await router.fetch(request, env, ctx, scope)
+    let response = await router.fetch(request, env, ctx, scope)
     // THE LAST GUARD ON A CARD-DOOR ORIGIN. Every branch is meant to answer
     // such an apex with machine data or its card. Should one ever hand back
     // something a browser would run as a page, a page that runs nothing goes
     // out instead — never other code beside what visitors kept.
-    if (!runsAsPage(response) || cardDoorAnswers.has(response) || !scope.cardDoorAt) return response
-    let card
-    try { card = await scope.cardDoorAt() } catch {
-      const host = new URL(request.url).hostname
-      card = cardDoorHost(env, host) || boundBelowZone(env, host) ? { unreadable: true } : null
+    if (runsAsPage(response) && !cardDoorAnswers.has(response) && scope.cardDoorAt) {
+      let card
+      try { card = await scope.cardDoorAt() } catch {
+        const host = new URL(request.url).hostname
+        card = cardDoorHost(env, host) || boundBelowZone(env, host) ? { unreadable: true } : null
+      }
+      if (card) response = cardDoorUnavailable(request)
     }
-    return card ? cardDoorUnavailable(request) : response
+    return untransformed(response)
   },
+}
+
+// NOTHING REWRITES A PAGE ON ITS WAY OUT. The edge offers to "improve" the
+// HTML it proxies: with Web Analytics on a zone, Cloudflare injects its beacon
+// (`static.cloudflareinsights.com/beacon.min.js`) into every text/html answer
+// — a third-party script no page here asked for, reporting every visitor to a
+// host we do not run (documentation/no-third-party-requests.md). Found
+// 2026-10-16 on arkanoid.pluginthematrix.com, where the document's CSP blocked
+// it; on the apexes without one it loaded. `no-transform` is the directive the
+// edge honours — Cloudflare documents that a Cache-Control carrying it is left
+// alone — so every page leaves with it, whatever the account's analytics
+// switch says and whichever zone this script is routed on next. Only pages:
+// the edge rewrites nothing else, and a WebSocket answer must pass untouched.
+function untransformed(response) {
+  if (!/^\s*text\/html\b/i.test(response?.headers?.get?.('content-type') || '')) return response
+  const cache = response.headers.get('cache-control') || ''
+  if (/(?:^|,)\s*no-transform\s*(?:,|$)/i.test(cache)) return response
+  const page = new Response(response.body, response)
+  page.headers.set('Cache-Control', cache ? `${cache}, no-transform` : 'no-transform')
+  return page
 }
 
 const router = {

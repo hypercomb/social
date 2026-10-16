@@ -34,6 +34,19 @@
 /content/44150aa24d2f2a1c1b544530e2f7e177cde71130f882f37984d0cdba16bf2363/*
   Cache-Control: no-cache, no-store, must-revalidate
 
+# THE PAGE LEAVES AS WRITTEN. With Web Analytics on a zone, Cloudflare injects
+# its beacon (static.cloudflareinsights.com) into every HTML answer it proxies
+# — a third-party script no page here asked for. `no-transform` is the
+# directive the edge honours (documented: such a Cache-Control is left alone),
+# so the document carries it whatever the account's analytics switch says.
+# Pages' own default for HTML is the rest of the value.
+/
+  Cache-Control: public, max-age=0, must-revalidate, no-transform
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate, no-transform
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate, no-transform
+
 /vendor/*
   Cache-Control: public, max-age=0, must-revalidate
 /core/*

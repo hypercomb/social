@@ -192,6 +192,36 @@ grep -rn "fonts\.googleapis\|fonts\.gstatic\|jsdelivr\|unpkg\|cdnjs\|googletagma
 The truthful check is the network panel: load the page, filter by domain, and
 confirm every request is same-origin.
 
+## The edge is a third party too
+
+Cloudflare's **Web Analytics** rewrites the HTML it proxies: with automatic
+setup on a zone, every `text/html` answer leaves the edge with
+`<script src="https://static.cloudflareinsights.com/beacon.min.js/...">`
+appended — a third-party script no page asked for, reporting every visitor to a
+host we do not run. Found 2026-10-16 on `arkanoid.pluginthematrix.com`, where
+the document's CSP blocked it (the console error was the policy doing its job);
+on `pluginthematrix.com`, `hypercomb.com`, `inspiredbyhumans.org`,
+`pointblanksolutions.ca` and `realones.online`, which send no document CSP, it
+loaded. `curl` without browser navigation headers does not see the injection;
+send `Accept: text/html` and `Sec-Fetch-Mode: navigate` to reproduce.
+
+Two defences, both owed:
+
+- **The account switch** — Cloudflare dashboard → Web Analytics → *Manage
+  site* → automatic setup **Disable**, for every zone in the account. The only
+  fix for the Pages-served documents (`jwize.com`, `hypercomb.com`,
+  `inspiredbyhumans.org`), whose HTML never passes our Worker. The wrangler
+  OAuth login has no analytics scope, so this is a dashboard act.
+- **`Cache-Control: no-transform` on every page** — the directive Cloudflare
+  documents as the one that leaves a response alone. The host Worker sets it at
+  its single egress (`untransformed()` in `blossom-worker/worker.js`) on every
+  `text/html` answer, and the shim's `_headers` carries it on `/`,
+  `/index.html` and `/*.html`. This holds whatever the switch says and on
+  whichever zone the script is routed next. `hypercomb-web/public/_headers`
+  does NOT carry it: its HTML on a Worker-less Pages host (`jwize.com`) is
+  served at every SPA route, and a `/*` Cache-Control there would combine with
+  the immutable asset rules.
+
 ## Known gaps
 
 - **No page-level CSP.** `hypercomb-web/public/_headers` sets
