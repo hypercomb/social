@@ -81,7 +81,7 @@ describe('doorsOfResults', () => {
     })
     expect(doors.map(d => [d.name, d.address])).toEqual([
       ['business-card', 'https://business-card.jwize.com'],
-      ['arkanoid', 'https://jwize.com/games/arkanoid'],
+      ['arkanoid', 'https://games.jwize.com/arkanoid'],
     ])
   })
 

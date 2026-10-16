@@ -75,6 +75,16 @@ describe('reads ask zone roots only — never the retired content face', () => {
 })
 
 describe('where a creation lives', () => {
+  it('without an own address, under the subdomain of its top place — root paths are off on the hosts', () => {
+    expect(zone.creationUrl('hypercomb.com', ['jaime-weise'], 'jaime-weise')).toBe('https://jaime-weise.hypercomb.com')
+    expect(zone.creationUrl('jwize.com', ['jaime-weise', 'business-card'], 'jaime-weise/business-card')).toBe('https://jaime-weise.jwize.com/business-card')
+    expect(zone.creationUrl('hypercomb.com', ['Honey Garden', 'rituals'], 'honey-garden/rituals')).toBe('https://honey-garden.hypercomb.com/rituals')
+    expect(zone.creationUrl('hypercomb.com', [], '')).toBe('https://hypercomb.com')
+    expect(zone.creationUrl('localhost:4291', ['a'], 'a')).toBe('http://localhost:4291/a')
+    expect(zone.creationUrl('hypercomb.com', ['content'], 'content')).toBe('https://hypercomb.com/content')
+  })
+
+
   it('by default at the zone root path', () => {
     expect(zone.rootPathUrl('cafesociety.buzz', ['honey-garden', 'rituals'])).toBe('https://cafesociety.buzz/honey-garden/rituals')
     expect(zone.rootPathUrl('content.cafesociety.buzz', ['honey garden'])).toBe('https://cafesociety.buzz/honey%20garden')
@@ -87,8 +97,8 @@ describe('where a creation lives', () => {
     expect(zone.creationUrl('cafesociety.buzz', ['honey-garden', 'rituals'], 'honey-garden/rituals', addresses))
       .toBe('https://rituals.cafesociety.buzz')
     expect(zone.creationUrl('pluginthematrix.com', ['honey-garden', 'rituals'], 'honey-garden/rituals', addresses))
-      .toBe('https://pluginthematrix.com/honey-garden/rituals')
-    expect(zone.creationUrl('cafesociety.buzz', ['shop'], 'shop', addresses)).toBe('https://cafesociety.buzz/shop')
+      .toBe('https://honey-garden.pluginthematrix.com/rituals')
+    expect(zone.creationUrl('cafesociety.buzz', ['shop'], 'shop', addresses)).toBe('https://shop.cafesociety.buzz')
     expect(zone.ownLabelOn(addresses, 'cafesociety.buzz', 'honey-garden/rituals')).toBe('rituals')
   })
 })

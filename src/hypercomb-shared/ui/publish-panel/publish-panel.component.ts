@@ -396,13 +396,20 @@ export class PublishPanelComponent implements OnDestroy {
   }
 
   /** Where ONE creation lives on a domain: the drone's answer (its own
-   *  address when it has one), else the zone's ROOT PATH — the default
-   *  address, `https://<zone>/<path>`. The hive root is the zone itself. */
+   *  address when it has one, else its subdomain), and for a domain the drone
+   *  has not answered for, the same rule here — `<top>.<zone>/<the rest>`.
+   *  Root paths are off on the hosts, so `<zone>/<path>` opened nothing
+   *  (jwize, 2026-10-15: "we need to go to the subdomains"). The hive root is
+   *  the zone itself. */
   addressUrl(row: PublishRow | null, zone: string): string {
     const given = row?.urls?.[zone]
     if (given) return given
-    const path = (row?.segments ?? []).map(s => encodeURIComponent(s)).join('/')
-    return `https://${zone}${path ? `/${path}` : ''}`
+    const [top, ...rest] = (row?.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (!top) return `https://${zone}`
+    const label = top.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63).replace(/-+$/g, '')
+    const path = rest.map(s => encodeURIComponent(s)).join('/')
+    return label ? `https://${label}.${zone}${path ? `/${path}` : ''}` : `https://${zone}`
   }
 
   // ── OWN ADDRESS ──────────────────────────────────────────────────────

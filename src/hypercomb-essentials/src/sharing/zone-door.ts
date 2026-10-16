@@ -366,8 +366,12 @@ export const ownLabelOn = (addresses: Record<string, string> | undefined, zone: 
   return ''
 }
 
-/** Where a creation is shown on `zone`: its own address when it has one, its
- *  root path otherwise. */
+/** Where a creation is shown on `zone`: its own address when it has one, else
+ *  under its top place's name — `<top>.<zone>/<the rest>`, which the host
+ *  answers by reading the first label as the place (jwize, 2026-10-15: "we
+ *  need to go to the subdomains"; root paths are off on the hosts, ROOT_PATHS
+ *  unset, so `<zone>/<path>` opened nothing). The root path is left only where
+ *  no subdomain can be named: a loopback zone, or a reserved first name. */
 export const creationUrl = (
   zone: unknown,
   segments: readonly string[],
@@ -376,7 +380,19 @@ export const creationUrl = (
 ): string => {
   const label = ownLabelOn(addresses, zone, key)
   const own = label ? ownAddressHost(label, zone) : ''
-  return own ? originOf(own) : rootPathUrl(zone, segments)
+  if (own) return originOf(own)
+  return subdomainUrl(zone, segments) || rootPathUrl(zone, segments)
+}
+
+/** `<top>.<zone>/<the rest>` for a place, or '' when its top name cannot be a
+ *  subdomain there (the hive root, a loopback zone, a reserved name). */
+export const subdomainUrl = (zone: unknown, segments: readonly string[]): string => {
+  const parts = (segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+  if (parts.length === 0) return ''
+  const origin = originOf(ownAddressHost(foldDnsLabel(parts[0]), zone))
+  if (!origin) return ''
+  const rest = parts.slice(1).map(encodeURIComponent).join('/')
+  return rest ? `${origin}/${rest}` : origin
 }
 
 /** The next `addresses` map after giving `key` the own address `label` on

@@ -89,8 +89,8 @@ const zoneOf = (record: { host: string; address?: string }): string =>
  *  copy needs to be auto href to the subdomains that match the text"). An
  *  own address signed in the index wins. Without one, a top-level creation
  *  is still served at `<name>.<zone>` — the host's implicit door maps the
- *  first label to the lineage — so that is the link. Only a nested lineage
- *  keeps its root path: the wildcard maps one label, never a path. */
+ *  first label to the lineage — so that is the link. A nested lineage is its
+ *  top place's subdomain and the rest as a path (creationUrl). */
 export const doorAddress = (zone: string, segments: readonly string[], key: string, recorded?: string): string => {
   const z = String(zone ?? '').trim().toLowerCase()
   const given = String(recorded ?? '').trim()

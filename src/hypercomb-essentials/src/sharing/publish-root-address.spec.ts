@@ -120,10 +120,10 @@ describe('the nodes a branch publishes through are zone roots', () => {
 })
 
 describe('the share address', () => {
-  it('is the root path on the primary domain by default', async () => {
+  it('is the subdomain of its top place on the primary domain by default — root paths are off on the hosts', async () => {
     marks = ['cafesociety.buzz']
     const result = await publishBranch(SEGS)
-    expect(result.ok && result.address).toBe('https://cafesociety.buzz/honey-garden/rituals')
+    expect(result.ok && result.address).toBe('https://honey-garden.cafesociety.buzz/rituals')
   })
 
   it('is the own address when the signed index gives the creation one there', async () => {
