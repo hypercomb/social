@@ -506,13 +506,19 @@
               [attr.aria-label]="(conversation.archived ? 'chat.archive.restore' : 'chat.archive.put') | t"
             ><span class="mat-sym" aria-hidden="true">{{ conversation.archived ? 'unarchive' : 'archive' }}</span></button>
           }
-          <!-- Arms on the first press, deletes on the second. -->
-          <button class="chat-list-del" type="button"
-            [class.armed]="armed() === conversation.convoId"
-            (click)="remove(conversation.convoId, $event)"
-            [title]="(armed() === conversation.convoId ? 'chat.delete.confirm' : 'chat.delete') | t"
-            [attr.aria-label]="(armed() === conversation.convoId ? 'chat.delete.confirm' : 'chat.delete') | t"
-          ><span class="mat-sym" aria-hidden="true">{{ armed() === conversation.convoId ? 'delete_forever' : 'close' }}</span></button>
+          <!-- HIDE FIRST, DELETE SECOND (documentation/hide-first-delete-second.md):
+               Delete is offered only on a conversation already put away — or
+               where there is nothing to put away (a row with no turns, or a
+               build that cannot archive). Arms on the first press, deletes on
+               the second. -->
+          @if (conversation.archived || !canArchive() || !conversation.turnCount) {
+            <button class="chat-list-del" type="button"
+              [class.armed]="armed() === conversation.convoId"
+              (click)="remove(conversation.convoId, $event)"
+              [title]="(armed() === conversation.convoId ? 'chat.delete.confirm' : 'chat.delete') | t"
+              [attr.aria-label]="(armed() === conversation.convoId ? 'chat.delete.confirm' : 'chat.delete') | t"
+            ><span class="mat-sym" aria-hidden="true">{{ armed() === conversation.convoId ? 'delete_forever' : 'close' }}</span></button>
+          }
         </li>
       </ng-template>
     }
