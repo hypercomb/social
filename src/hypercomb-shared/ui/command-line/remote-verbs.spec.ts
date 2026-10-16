@@ -199,8 +199,15 @@ describe('the op after a bracket is a verb, and is judged as one', () => {
     expect(dispatchedVerbsOf('/fp[a]/remove')).toEqual(['fp', 'format'])
   })
 
-  it('judges the hyphenated word beside the one the dispatch stops at', () => {
-    expect(dispatchedVerbsOf('[a]/break-apart')).toEqual(['break', 'break-apart'])
+  it('judges a hyphenated word whole, as the dispatch now reads it', () => {
+    expect(dispatchedVerbsOf('[a]/break-apart')).toEqual(['break-apart'])
+  })
+
+  it('the routing and the dispatch read a hyphenated op whole', () => {
+    // `[x]/break-apart` used to read `break`, find no behaviour, and fall
+    // through to the default — the behaviour never ran.
+    expect(component).toContain('const m = v.slice(close + 2).match(/^([\\w-]+)/)')
+    expect(component).toContain('const opMatch = afterBracket.match(/^\\/([\\w-]+)/)')
   })
 
   it('names nothing where there is no op', () => {
@@ -223,7 +230,7 @@ describe('the op after a bracket is a verb, and is judged as one', () => {
     expect(door('/select[x]/prune')).toEqual(door('/prune'))
   })
 
-  it('still admits the ops an operator may say, and a destination is only a word', () => {
+  it('still admits the ops an operator may say, and a word no behaviour answers to is only a word', () => {
     expect(door('[a, b]/copy')).toBeNull()
     expect(door('[a]/move(3)')).toBeNull()
     expect(door('[a, b]:focus')).toBeNull()
@@ -519,7 +526,7 @@ describe('the reading and the dispatch cannot disagree', () => {
     const body = component.slice(component.indexOf('readonly #executeSelectCommand = async'), component.indexOf('// per-item bracket operators'))
     expect(body).toContain("const bracketClose = v.indexOf(']')")
     expect(body).toContain('const afterBracket = v.slice(bracketClose + 1)')
-    expect(body).toContain('const opMatch = afterBracket.match(/^\\/(\\w+)/)')
+    expect(body).toContain('const opMatch = afterBracket.match(/^\\/([\\w-]+)/)')
     expect(body).toContain("const op = opMatch ? opMatch[1].toLowerCase() : ''")
     // …and hands any registered word to the registry, which is why the op is
     // judged as a verb and not as one of a list of names.

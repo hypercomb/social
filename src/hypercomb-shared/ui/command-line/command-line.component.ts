@@ -133,7 +133,7 @@ function isSelectExecution(v: string): boolean {
   // retired — cut and paste move tiles).
   if (v[close + 1] === ':') return true
   if (v[close + 1] !== '/') return false
-  const m = v.slice(close + 2).match(/^(\w+)/)
+  const m = v.slice(close + 2).match(/^([\w-]+)/)
   return !!m && isSelectOp(m[1])
 }
 
@@ -4326,7 +4326,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const afterBracket = v.slice(bracketClose + 1)
 
     // Parse operation: /cut, /copy, /move...
-    const opMatch = afterBracket.match(/^\/(\w+)/)
+    const opMatch = afterBracket.match(/^\/([\w-]+)/)
     const op = opMatch ? opMatch[1].toLowerCase() : ''
 
     const selection = get('@diamondcoreprocessor.com/SelectionService') as any

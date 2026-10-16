@@ -105,21 +105,19 @@ export const SELECT_BUILTIN_OPS: ReadonlySet<string> = new Set([
  *  first `]`, then `/word` — and a `~item` is the per-item remove that
  *  `#applyBracketItemOps` carries out. Any other op is
  *  handed to the registry with the words after it, so it carries them. The
- *  dispatch stops the word at a hyphen (`\w+`); the hyphenated word is judged
- *  as well, so the day it reads `[x]/break-apart` whole the door already does. */
+ *  word runs to a hyphen and past it (`[x]/break-apart` is `break-apart`),
+ *  exactly as the dispatch reads it. */
 const bracketCallsOf = (line: string): readonly SpokenCall[] => {
   const v = normalizeSelectInput(line.trim())
   const close = v.indexOf(']')
   if (!v.startsWith('[') || close < 0) return []
   const tail = v.slice(close + 1)
-  const word = tail.match(/^\/(\w+)/)
+  const word = tail.match(/^\/([\w-]+)/)
   const op = word?.[1].toLowerCase()
-  const hyphenated = tail.toLowerCase().match(/^\/([\w-]+)/)?.[1]
   const removes = v.slice(1, close).split(',').map(item => item.trim())
     .some(item => item.startsWith('~') && !takesTagOff(item))
   return [
     ...(op && word ? [SELECT_BUILTIN_OPS.has(op) ? { verb: op } : { verb: op, args: tail.slice(word[0].length).trim() }] : []),
-    ...(hyphenated && hyphenated !== op ? [{ verb: hyphenated }] : []),
     ...(removes ? [{ verb: 'remove' }] : []),
   ]
 }
