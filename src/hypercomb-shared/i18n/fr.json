@@ -692,6 +692,8 @@
   "slash.go": "Aller à une tuile : un nom sur cette page, un chemin, .. pour remonter, / pour la racine ; /go <tile>",
   "slash.find": "Trouver les tuiles dont le nom contient un mot : ici et en dessous, / pour toute la ruche, /<route> sous un chemin ; /find <word> /",
   "slash.chats": "Ranger les conversations de tâches terminées : chats tidy, ou chats tidy dry pour les voir d'abord ; /chats tidy",
+  "slash.read": "Dire ce que contient une tuile : ses tuiles et ses notes — ici, / pour la racine, ou /<route> ; /read /<route>",
+  "slash.unfile": "Retirer une note d'une tuile, désignée par son début ; /unfile on /<route>: <first words>",
   "slash.create": "Créer une tuile ici — la seule façon d’en créer une en mode comportements ; create <name>",
   "slash.swirl": "Disposer les tuiles en spirale d'index",
   "slash.move": "Basculer le mode déplacement pour réorganiser les tuiles",

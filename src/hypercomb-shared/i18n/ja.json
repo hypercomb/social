@@ -801,6 +801,8 @@
   "slash.go": "タイルへ移動:このページの名前、パス、.. で上へ、/ でルートへ; /go <tile>",
   "slash.find": "名前に単語を含むタイルを探す:ここと配下、/ でハイブ全体、/<route> でそのルート配下; /find <word> /",
   "slash.chats": "終わったジョブの会話を片付ける:chats tidy、先に確認するなら chats tidy dry; /chats tidy",
+  "slash.read": "タイルの中身を言う:配下のタイルとノート — ここ、/ でルート、または /<route>; /read /<route>",
+  "slash.unfile": "タイルからノートを外す(書き出しの言葉で指定); /unfile on /<route>: <first words>",
   "slash.raise": "リンク先の作品を最前面へ:自分のものは名前かアドレスで、他ホストのものは自分の巣に影付きで表示; /raise <name>",
   "slash.recommend": "リンク先の作品に言葉を残す:署名付きで、関心が合う読者に見える; /recommend <name> <word>",
   "slash.hold": "リンク先の作品をハイパーデックスに保持:/sets/hyperdex にその名のリンクタイル; /hold <name>",

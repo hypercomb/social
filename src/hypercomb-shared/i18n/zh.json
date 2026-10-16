@@ -692,6 +692,8 @@
   "slash.go": "前往一个格子:本页上的名称、路径、.. 返回上级、/ 回到根; /go <tile>",
   "slash.find": "查找名称包含某个词的格子:此处及以下,/ 为整个蜂巢,/<route> 为某路径之下; /find <word> /",
   "slash.chats": "收起已完成的任务对话:chats tidy,或先用 chats tidy dry 查看; /chats tidy",
+  "slash.read": "说出一个格子里有什么:它的子格子和笔记 — 此处、/ 为根,或 /<route>; /read /<route>",
+  "slash.unfile": "从格子上取下一条笔记(按开头的词指定); /unfile on /<route>: <first words>",
   "slash.create": "在此创建一个磁贴 — 这是行为模式中创建磁贴的唯一方式；create <name>",
   "slash.swirl": "将磁贴排列为索引螺旋",
   "slash.move": "切换拖拽排序移动模式",

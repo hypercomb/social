@@ -6,12 +6,10 @@
 // request answered by its own id, so any number of managers can work at the
 // same time without reading each other's answers.
 //
-//   node scripts/bridge/manager.cjs tree [/route]            the tiles under a route
-//   node scripts/bridge/manager.cjs read /route              one tile: properties and notes
-//   node scripts/bridge/manager.cjs notes /route             the notes on a tile
+//   node scripts/bridge/manager.cjs read [/route]            says `read /route`: the tiles under it (as routes) and its notes (tree, notes = the same)
 //   node scripts/bridge/manager.cjs dates /route             a tile's versions, oldest first, with create dates (null = unknown)
-//   node scripts/bridge/manager.cjs note /route "<text>"     add a note to a tile
-//   node scripts/bridge/manager.cjs unnote /route <noteId>   take a note off a tile (a list change; history keeps it)
+//   node scripts/bridge/manager.cjs note /route "<text>"     says `file on /route: <text>`
+//   node scripts/bridge/manager.cjs unnote /route "<first words>"   says `unfile on /route: <first words>` (a list change; history keeps it)
 //   node scripts/bridge/manager.cjs thread <manager|convoId> [n]   the last n turns
 //   node scripts/bridge/manager.cjs report <manager> "<text>"      write into the manager's own conversation
 //   node scripts/bridge/manager.cjs ask <manager|convoId> "<request>"   hand work to the hive's own models, wait, print the result
@@ -168,22 +166,14 @@ const main = async () => {
   }
   const second = rest.join(' ')
   switch (verb) {
-    case 'tree': {
-      // Managers are outside models: the hive leaves its withheld tiles out.
-      const reply = await send({ op: 'list-at', segments: segmentsOf(first), withhold: true })
-      return reply.ok ? print(reply.data) : fail(reply.error)
-    }
-    case 'read': {
-      const segments = segmentsOf(first)
-      if (!segments.length) return fail('read needs a tile route; the root has no notes of its own')
-      const [tile, notes] = await Promise.all([
-        send({ op: 'inspect', segments }),
-        send({ op: 'note-list', segments }),
-      ])
-      // Both failed: that is a failure, not an empty tile.
-      if (!tile.ok && !notes.ok) return fail(tile.error || notes.error)
-      // noteCount is the top-level count, as the chat's read reports it.
-      return print({ tile: tile.ok ? tile.data : tile.error, ...(notes.ok && Array.isArray(notes.data) ? { noteCount: notes.data.length } : {}), notes: notes.ok ? notes.data : notes.error })
+    case 'tree':
+    case 'read':
+    case 'notes': {
+      // SAID, NOT BRIDGED (2026-10-15): the hive's own word `read`, which says
+      // the tiles under a route (as routes) and its notes. A withheld tile is
+      // never read to a session: the door refuses a line that names one and
+      // masks one wherever a word says it.
+      return hear(`read ${first && first.trim() ? '/' + segmentsOf(first).join('/') : '/'}`, 3_000)
     }
     case 'dates': {
       // Markers written since 2026-10-02 carry their create date; older ones
@@ -192,25 +182,19 @@ const main = async () => {
       if (!reply.ok) return fail(reply.error)
       return print(reply.data.map(entry => ({ index: entry.index, sig: entry.layerSig, at: entry.at ? new Date(entry.at).toISOString() : null })))
     }
-    case 'notes': {
-      const reply = await send({ op: 'note-list', segments: segmentsOf(first) })
-      return reply.ok ? print(reply.data) : fail(reply.error)
-    }
     case 'note': {
+      // SAID: `file on /<route>: <text>` — the note holds the text alone.
       const segments = segmentsOf(first)
       if (!segments.length || !second.trim()) return fail('note needs a tile route and the text')
-      const reply = await send({ op: 'note-add', segments: segments.slice(0, -1), cell: segments.at(-1), text: second })
-      return reply.ok ? print(reply.data ?? 'filed') : fail(reply.error)
+      return hear(`file on /${segments.join('/')}: ${second.trim()}`, 2_000)
     }
     case 'unnote': {
-      // A LIST CHANGE, never a deletion: the note leaves the tile's notes
-      // list as a new layer; its bytes stay and history holds the list it
-      // left, so undo puts it back. Only on a yes, per the rules.
+      // SAID: `unfile on /<route>: <first words>` — the note is named by how it
+      // starts, and the words must fit exactly one note. A list change, never a
+      // deletion: history keeps it, undo puts it back. Only on a yes, per the rules.
       const segments = segmentsOf(first)
-      const noteId = second.trim()
-      if (!segments.length || !/^[0-9a-f]{64}$/.test(noteId)) return fail('unnote needs a tile route and the note id (64 hex, from notes)')
-      const reply = await send({ op: 'note-delete', segments: segments.slice(0, -1), cell: segments.at(-1), sig: noteId })
-      return reply.ok ? print(`unlinked from /${segments.join('/')}; history keeps it`) : fail(reply.error)
+      if (!segments.length || !second.trim()) return fail('unnote needs a tile route and the first words of the note')
+      return hear(`unfile on /${segments.join('/')}: ${second.trim()}`, 2_000)
     }
     case 'thread': {
       if (!first) return fail(`thread needs a manager (${Object.keys(MANAGERS).join(', ')}) or a convoId`)

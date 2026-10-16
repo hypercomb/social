@@ -34,6 +34,8 @@ await import('../assistant/bridge.queen.js')
 await import('../assistant/chats.queen.js')
 await import('../assistant/file.queen.js')
 await import('../assistant/find.queen.js')
+await import('../assistant/read.queen.js')
+await import('../assistant/unfile.queen.js')
 await import('../assistant/module.queen.js')
 await import('../clipboard/clipboard.queen.js')
 await import('./create.queen.js')
@@ -110,6 +112,10 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
                                        // walk went; writes nothing
   chats: ['editing', 'local'],         // archives this browser's finished job conversations;
                                        // never deletes, never a participant's own chat
+  read: ['additive', 'local'],         // reads only: a tile's tiles (as routes) and notes; a
+                                       // withheld tile is never read out
+  unfile: ['editing', 'hive'],         // a note leaves its tile's list; history keeps it, and the
+                                       // words must fit exactly one note
   raise: ['additive', 'hive'],         // walks to ours; offers another host's creation shaded
                                        // (a view, withdrawn like any other), then walks to it
   recommend: ['additive', 'hive'],     // one signed pheromone deposit on a creation's head

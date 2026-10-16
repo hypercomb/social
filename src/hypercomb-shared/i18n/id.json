@@ -692,6 +692,8 @@
   "slash.go": "Pergi ke ubin: nama di halaman ini, sebuah jalur, .. untuk naik, / untuk akar; /go <tile>",
   "slash.find": "Cari ubin yang namanya memuat sebuah kata: di sini dan di bawahnya, / untuk seluruh sarang, /<route> di bawah sebuah jalur; /find <word> /",
   "slash.chats": "Simpan percakapan tugas yang sudah selesai: chats tidy, atau chats tidy dry untuk melihatnya dulu; /chats tidy",
+  "slash.read": "Sebutkan isi sebuah ubin: ubin dan catatannya — di sini, / untuk akar, atau /<route>; /read /<route>",
+  "slash.unfile": "Lepaskan catatan dari ubin, disebut dari awal kalimatnya; /unfile on /<route>: <first words>",
   "slash.create": "Buat ubin di sini — satu-satunya cara membuatnya dalam mode perilaku; create <name>",
   "slash.swirl": "Susun ubin ke dalam spiral indeks",
   "slash.move": "Alihkan mode pindah untuk menyusun ulang ubin dengan seret",

@@ -692,6 +692,8 @@
   "slash.go": "Zu einer Kachel gehen: ein Name auf dieser Seite, ein Pfad, .. nach oben, / zur Wurzel; /go <tile>",
   "slash.find": "Kacheln finden, deren Name ein Wort enthält: hier und darunter, / für den ganzen Stock, /<route> unter einem Pfad; /find <word> /",
   "slash.chats": "Erledigte Auftragsgespräche wegräumen: chats tidy, oder chats tidy dry, um sie zuerst zu sehen; /chats tidy",
+  "slash.read": "Sagen, was eine Kachel enthält: ihre Kacheln und Notizen — hier, / für die Wurzel oder /<route>; /read /<route>",
+  "slash.unfile": "Eine Notiz von einer Kachel nehmen, benannt nach ihrem Anfang; /unfile on /<route>: <first words>",
   "slash.create": "Eine Kachel hier anlegen — der einzige Weg, im Verhaltensmodus eine zu erstellen; create <name>",
   "slash.swirl": "Kacheln in der Indexspirale anordnen",
   "slash.move": "Verschiebemodus zum Neuanordnen von Kacheln umschalten",

@@ -692,6 +692,8 @@
   "slash.go": "Vai a una tessera: un nome in questa pagina, un percorso, .. per salire, / per la radice; /go <tile>",
   "slash.find": "Trova le tessere il cui nome contiene una parola: qui e sotto, / per tutto l'alveare, /<route> sotto un percorso; /find <word> /",
   "slash.chats": "Metti via le conversazioni di lavoro finite: chats tidy, oppure chats tidy dry per vederle prima; /chats tidy",
+  "slash.read": "Dire cosa contiene una tessera: le sue tessere e le sue note — qui, / per la radice, o /<route>; /read /<route>",
+  "slash.unfile": "Togliere una nota da una tessera, indicata da come inizia; /unfile on /<route>: <first words>",
   "slash.create": "Crea una tessera qui — l’unico modo per crearne una in modalità comportamenti; create <name>",
   "slash.swirl": "Disponi le tessere a spirale secondo l'indice",
   "slash.move": "Alterna modalità spostamento per riordinare tessere trascinando",

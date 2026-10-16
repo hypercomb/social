@@ -692,6 +692,8 @@
   "slash.go": "Ir a una celda: un nombre en esta página, una ruta, .. para subir, / para la raíz; /go <tile>",
   "slash.find": "Buscar celdas cuyo nombre contiene una palabra: aquí y debajo, / para toda la colmena, /<route> bajo una ruta; /find <word> /",
   "slash.chats": "Guardar las conversaciones de tareas terminadas: chats tidy, o chats tidy dry para verlas antes; /chats tidy",
+  "slash.read": "Decir qué contiene una celda: sus celdas y sus notas — aquí, / para la raíz, o /<route>; /read /<route>",
+  "slash.unfile": "Quitar una nota de una celda, nombrada por cómo empieza; /unfile on /<route>: <first words>",
   "slash.create": "Crear un mosaico aquí — la única forma de crear uno en el modo de comportamientos; create <name>",
   "slash.swirl": "Organizar mosaicos en la espiral de índice",
   "slash.move": "Alternar modo de mover para reordenar mosaicos",

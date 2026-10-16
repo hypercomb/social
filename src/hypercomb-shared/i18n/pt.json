@@ -692,6 +692,8 @@
   "slash.go": "Ir para um bloco: um nome nesta página, um caminho, .. para subir, / para a raiz; /go <tile>",
   "slash.find": "Encontrar blocos cujo nome contém uma palavra: aqui e abaixo, / para toda a colmeia, /<route> sob um caminho; /find <word> /",
   "slash.chats": "Guardar conversas de tarefas terminadas: chats tidy, ou chats tidy dry para vê-las antes; /chats tidy",
+  "slash.read": "Dizer o que um bloco contém: seus blocos e suas notas — aqui, / para a raiz, ou /<route>; /read /<route>",
+  "slash.unfile": "Tirar uma nota de um bloco, nomeada pelo seu começo; /unfile on /<route>: <first words>",
   "slash.create": "Criar um bloco aqui — a única forma de criar um no modo de comportamentos; create <name>",
   "slash.swirl": "Organizar blocos na espiral de índice",
   "slash.move": "Alternar modo de mover para reordenar blocos arrastando",

@@ -51,15 +51,18 @@ reply. `--listen <ms>` keeps listening for slow acts such as a publish.
 | `publish off <domain>` | Takes it off that domain; the last door off withdraws it. |
 
 | `find <word>`, `find <word> /`, `find <word> /<route>` | Names the tiles whose name holds the word, and how the walk went: how many tiles it opened, how long it took, and why it stopped short when it did. The chat's models already read with the same grammar. |
+| `read`, `read /`, `read /<route>` | Says what a tile holds: the tiles under it, as routes, and its notes (replies indented, a very long one cut and said so). A withheld tile is never read out. |
+| `unfile on /<route>: <first words>` | Takes a note off a tile, named by how it starts; the words must fit exactly one note. A list change: history keeps the note, undo puts it back. |
 | `chats tidy`, `chats tidy dry` | Puts away (archives, never deletes) the one-off job conversations sessions hand the hive: answered and quiet ten minutes, or never answered and an hour old. Never a manager's own conversation, a tile's chat, or the participant's own chat. `dry` lists them and moves nothing. |
 
 Notes already had a word: `file on /<route>: <text>`.
 
-Both of the last two were bridge ops for one day (`hive-find`, `chat-tidy`,
+`find` and `chats tidy` were bridge ops for one day (`hive-find`, `chat-tidy`,
 2026-10-15) and were retired for words the same day. What a session HEARS
 never names a withheld tile: the door masks every route the participant
 withheld from outside models as `/(withheld)`, whichever word said it, while
-the participant's own screen still shows their own tiles.
+the participant's own screen still shows their own tiles. A line that NAMES a withheld
+route — `read /susan`, `file on /susan: …` — is refused before anything runs.
 
 ## Defects the first run found, and their fixes
 
@@ -87,12 +90,16 @@ retired by writing its word, then moving its callers to sentences.
 | `put-resource` | files ride with the sentence |
 | `decoration-add` | `website page <sig>` for pages; other kinds have none yet |
 | `note-add` | `file on /<route>: <text>` |
-| `note-delete`, `note-split` | none yet |
+| `note-delete` | `unfile on /<route>: <first words>` |
+| `note-split` | none yet |
 | `effect-emit publish:*` | `publish on`/`off`, `publish here` |
 | `stamp` | `title`, `accent`, `keyword` cover parts |
 | `build-record` | `builds` |
 | `remove` | `remove`, a participant's act (refused remotely by design) |
 | `update`, `bag-add`, `bag-remove`, `bag-set` | none yet |
 | `hive-root-set` | none yet |
+| `list-at`, `note-list` | `read /<route>` |
+| `hive-find` (one day only) | `find <word> /<route>` |
+| `chat-tidy` (one day only) | `chats tidy` |
 | reads (`layer-at`, `get-resource`, `inflate`, `ui-state`, …) | words that answer, heard in the reply; most have none yet |
 | the manager loop (`chat-*`, `thread-read`, `optimization-*`, `summary-*`) | the hive's own chat; a separate retirement |

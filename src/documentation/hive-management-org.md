@@ -137,8 +137,15 @@ reported several of these the other way round.
 - **`ask` prints `reads`.** `reads: 0` on an answer about the hive means
   nothing was read; such an answer is also sent back once to read first.
   Treat any claim from a 0-read answer as unverified.
-- **Removing a note is a list change** (`manager.cjs unnote`): the note leaves
-  the tile's list as a new layer, its bytes stay, history restores it.
+- **Removing a note is a list change** (`manager.cjs unnote /route "<first
+  words>"`, which says `unfile on /route: <first words>`): the note leaves the
+  tile's list as a new layer, its bytes stay, history restores it. The words
+  must fit exactly one note.
+- **Managers speak, they do not bridge** (2026-10-15,
+  documentation/speak-dont-bridge.md): `read`, `note`, `unnote`, `find` and
+  `tidy` say the hive's own words (`read`, `file on`, `unfile on`, `find`,
+  `chats tidy`); what the hive says back is printed. A line that names a
+  withheld tile is refused before anything runs.
 
 ## A pass
 

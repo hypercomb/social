@@ -2035,6 +2035,15 @@ export class ClaudeBridgeWorker extends Worker {
     const text = req.text
     if (typeof text !== 'string') return { id: req.id, ok: false, error: 'no text provided' }
 
+    // A SESSION NEVER SPEAKS OF A WITHHELD TILE (2026-10-15). It is an outside
+    // model: a line naming a route the participant withheld from those —
+    // `read /susan`, `file on /susan: …` — is refused before anything runs,
+    // and what it hears masks such routes wherever a word says them.
+    const withheld = get<{ covers?: (s: readonly string[]) => boolean }>('@hypercomb.social/AiWithheld')
+    const covered = (route: string): boolean => !!withheld?.covers?.(route.split('/').filter(Boolean))
+    const named = (text.match(ROUTE_IN_TEXT) ?? []).find(covered)
+    if (named) return { id: req.id, ok: false, error: 'the line names a tile withheld from outside models; nothing ran' }
+
     // FILES RIDE WITH THE SENTENCE. A participant drops a file and the hive
     // holds it by signature; a session sends it with its line. Stored first,
     // verified against the signature the sender computed, and inert until a
@@ -2068,10 +2077,7 @@ export class ClaudeBridgeWorker extends Worker {
     // session is an outside model, and the routes the participant withheld
     // from those are masked in what it hears, whichever word said them.
     const heard: { kind: 'activity' | 'toast'; text: string; type?: string }[] = []
-    const withheld = get<{ covers?: (s: readonly string[]) => boolean }>('@hypercomb.social/AiWithheld')
-    const masked = (text: string): string => withheld?.covers
-      ? text.replace(ROUTE_IN_TEXT, route => withheld.covers!(route.split('/').filter(Boolean)) ? '/(withheld)' : route)
-      : text
+    const masked = (said: string): string => said.replace(ROUTE_IN_TEXT, route => covered(route) ? '/(withheld)' : route)
     let live = false
     const unhearActivity = EffectBus.on<{ message?: unknown }>('activity:log', (p) => {
       if (live && typeof p?.message === 'string') heard.push({ kind: 'activity', text: masked(p.message) })

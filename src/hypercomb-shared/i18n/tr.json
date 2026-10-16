@@ -692,6 +692,8 @@
   "slash.go": "Bir döşemeye git: bu sayfadaki bir ad, bir yol, yukarı için .., kök için /; /go <tile>",
   "slash.find": "Adında bir kelime geçen döşemeleri bul: burada ve altında, tüm kovan için /, bir yolun altında /<route>; /find <word> /",
   "slash.chats": "Biten iş konuşmalarını kaldır: chats tidy ya da önce görmek için chats tidy dry; /chats tidy",
+  "slash.read": "Bir döşemenin içindekileri söyle: döşemeleri ve notları — burada, kök için / ya da /<route>; /read /<route>",
+  "slash.unfile": "Bir döşemeden notu kaldır, başlangıç sözleriyle; /unfile on /<route>: <first words>",
   "slash.create": "Buraya bir döşeme oluştur — davranış modunda oluşturmanın tek yolu; create <name>",
   "slash.swirl": "Döşemeleri dizin spirali olarak düzenle",
   "slash.move": "Döşemeleri sürükleyerek yeniden sıralama modunu değiştir",
