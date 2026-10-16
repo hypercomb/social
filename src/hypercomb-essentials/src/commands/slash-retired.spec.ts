@@ -61,6 +61,13 @@ describe('the words this census retired', () => {
     expect(drone.has('layout')).toBe(false)
   })
 
+  it('/brief, /atlas and /studio went with their document views, and the tiles they read stay', () => {
+    expect(drone.retired('brief')).toEqual({ word: 'brief', note: 'the Living Brief view is retired — your tiles and notes are all still here' })
+    expect(drone.retired('atlas')).toEqual({ word: 'atlas', note: 'the Evidence Atlas view is retired — your tiles and notes are all still here' })
+    expect(drone.retired('studio')).toEqual({ word: 'studio', note: 'the Knowledge Studio view is retired — your tiles and notes are all still here' })
+    for (const word of ['brief', 'atlas', 'studio']) expect(drone.has(word)).toBe(false)
+  })
+
   it('folds the word as the registry folds a name', () => {
     expect(drone.retired('  Delete ')).toEqual({ word: 'delete', by: 'remove' })
   })

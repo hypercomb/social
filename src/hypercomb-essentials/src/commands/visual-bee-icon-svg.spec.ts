@@ -2,11 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { visualBeeIconSvg } from './visual-bee-icon-svg.js'
 
 const DECLARED_VIEW_ICONS = [
-  ['living-brief', 'description'],
   ['lightbox', 'photo_library'],
   ['slides', 'slideshow'],
-  ['evidence-atlas', 'hub'],
-  ['knowledge-studio', 'view_carousel'],
   ['website', 'web'],
   ['tutor', 'school'],
   ['tree', 'account_tree'],

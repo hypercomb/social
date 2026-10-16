@@ -50,7 +50,9 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // tombstone so an existing browser cannot boot into a mode whose renderer
   // has been removed and strand the participant on a blank canvas.
   'website', 'home', 'slides', 'tree', 'lightbox', 'tutor', 'workflow',
-  'living-brief', 'evidence-atlas', 'knowledge-studio', 'postit', 'document',
+  'postit', 'document',
+  // The three document views retired 2026-10-16 — tombstones, like `home`.
+  'living-brief', 'evidence-atlas', 'knowledge-studio',
   // `revolucion-welcome` is retired (renamed to `square-tile-view`
   // 2026-08-23) — tombstone for older builds that persisted it.
   'square-tile-view', 'revolucion-welcome', 'revolucion-room',

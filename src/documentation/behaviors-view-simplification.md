@@ -295,9 +295,9 @@ tutorial's lesson 140 follows the surface rather than dying with it: it now
 requires `hc-features-viewer` and teaches the lens.
 
 **The manage affordance is generic on purpose.** A row grows the `tune` button
-only when it has something to decide — today that is a view's reach
-(`sourceScopes` declaring both `layer` and `hierarchy`: brief, evidence-atlas,
-knowledge-studio), and the panel asks the owning bee for the change exactly as
+only when it has something to decide — a view's reach (`sourceScopes`
+declaring both `layer` and `hierarchy`; the brief, evidence-atlas and
+knowledge-studio views that did retired 2026-10-16), and the panel asks the owning bee for the change exactly as
 it asks for everything else it cannot write itself. Any behaviour could earn
 one later without a new surface.
 

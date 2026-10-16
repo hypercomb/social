@@ -1027,6 +1027,12 @@ _slashBehaviours.retire({ word: 'forget', note: 'the command line no longer lear
 // Retired 2026-10-15: it saved and read named orders in per-level folders that
 // no longer exist, so none of its parts did anything.
 _slashBehaviours.retire({ word: 'layout', note: 'arrange keeps the layouts you had on each page — press it to step back through them' })
+// Retired 2026-10-16 with the three document views they opened (jwize): the
+// Living Brief, the Evidence Atlas and the Knowledge Studio. A tile that wore
+// one keeps its mark and every note it read; nothing renders the mark now.
+_slashBehaviours.retire({ word: 'brief', note: 'the Living Brief view is retired — your tiles and notes are all still here' })
+_slashBehaviours.retire({ word: 'atlas', note: 'the Evidence Atlas view is retired — your tiles and notes are all still here' })
+_slashBehaviours.retire({ word: 'studio', note: 'the Knowledge Studio view is retired — your tiles and notes are all still here' })
 
 // ── auto-discovery of QueenBees ─────────────────────────
 //

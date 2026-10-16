@@ -402,8 +402,9 @@ window.ioc.whenReady<LayerSlotRegistry>('@diamondcoreprocessor.com/LayerSlotRegi
     view: DOCUMENT_VIEW,
     slashCommand: '/document',
     iconName: 'description',
-    // 'description' already belongs to living-brief — the registry enforces
-    // one ligature per view, and a duplicate THROWS at module load.
+    // 'description' was living-brief's toggle (retired 2026-10-16) — the
+    // registry enforces one ligature per view, and a duplicate THROWS at
+    // module load.
     toggleIcon: 'edit_document',
     // `slot` is what makes the toggle appear: view.bee.ts lights a view when
     // its first-class slot holds a non-empty sig array. Gating on the

@@ -25,10 +25,8 @@
 
 export const ALIAS_SUGGESTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   'arkanoid': ['breakout', 'bricks'],
-  'atlas': ['evidence', 'evidence-atlas'],
   'behavior': ['behaviour', 'beehaviour'],
   'block-peer': ['blockpeer', 'block-pubkey', 'kick-peer'],
-  'brief': ['document', 'living-brief'],
   'bubble': ['bobble'],
   'builds': ['build'],
   'clear-mesh': ['clearmesh', 'clear-relay', 'wipe-mesh'],
@@ -68,7 +66,6 @@ export const ALIAS_SUGGESTIONS: Readonly<Record<string, readonly string[]>> = Ob
   'snapshot': ['snapshots'],
   'solomon': ['game', 'dana'],
   'square-tile-view': ['welcome', 'threshold'],
-  'studio': ['knowledge-studio'],
   'theme': ['themes'],
   'translate-sweep': ['translate'],
   'tree': ['mindmap', 'branches'],

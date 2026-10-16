@@ -642,7 +642,7 @@ export class PostitViewDrone extends Drone {
     const lineage = window.ioc?.get<LineageShape>('@hypercomb.social/Lineage')
     const segments = this.#targetSegments ?? [...(lineage?.explorerSegments?.() ?? [])]
     if (isBehaviorDormant(POSTIT_KIND, segments) || await isFeatureHidden(segments, POSTIT_KIND)) {
-      // OFF means the ordinary hive owns the surface (see living-brief).
+      // OFF means the ordinary hive owns the surface.
       this.#targetSegments = null
       this.#teardownPost()
       this.#vm()?.setMode('hexagons')

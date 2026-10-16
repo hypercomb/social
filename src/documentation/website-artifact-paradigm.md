@@ -469,8 +469,8 @@ same shape and is owed the same pass, one at a time:
 | ~~workflow~~ | `/workflow` | ~~steps were child cells, ordered by `children`~~ — **done** |
 | website | `/website` | pages are child cells, routed by lineage |
 | tree | `/tree` | the subtree under the marked cell |
-| brief | `/brief` | `sourceScopes: hierarchy` |
-| view-library | `/views` | `sourceScopes: hierarchy` |
+| ~~brief~~ | ~~`/brief`~~ | ~~`sourceScopes: hierarchy`~~ — **retired 2026-10-16** |
+| ~~view-library~~ | `/views` | ~~`sourceScopes: hierarchy`~~ — its atlas and studio **retired 2026-10-16** |
 
 Related: [signature-system.md](signature-system.md) ·
 [group-signatures.md](group-signatures.md) ·
