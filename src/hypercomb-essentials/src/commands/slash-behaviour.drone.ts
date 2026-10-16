@@ -1024,6 +1024,9 @@ for (const word of ['flatten', 'compact', 'collapse-history']) {
 // Retired with the habits it emptied (2026-10-04): the line kept a tally of
 // what you ran and how you said it, and we keep no tally of anyone.
 _slashBehaviours.retire({ word: 'forget', note: 'the command line no longer learns your habits, so there is nothing to forget' })
+// Retired 2026-10-15: it saved and read named orders in per-level folders that
+// no longer exist, so none of its parts did anything.
+_slashBehaviours.retire({ word: 'layout', note: 'arrange keeps the layouts you had on each page — press it to step back through them' })
 
 // ── auto-discovery of QueenBees ─────────────────────────
 //

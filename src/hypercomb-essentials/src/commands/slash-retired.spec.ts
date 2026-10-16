@@ -53,6 +53,14 @@ describe('the words this census retired', () => {
     expect(drone.has('forget')).toBe(false)
   })
 
+  it('/layout went with the folders it saved into, and arrange keeps your layouts', () => {
+    expect(drone.retired('layout')).toEqual({
+      word: 'layout',
+      note: 'arrange keeps the layouts you had on each page — press it to step back through them',
+    })
+    expect(drone.has('layout')).toBe(false)
+  })
+
   it('folds the word as the registry folds a name', () => {
     expect(drone.retired('  Delete ')).toEqual({ word: 'delete', by: 'remove' })
   })

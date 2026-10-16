@@ -55,7 +55,6 @@ export const sleepers: readonly Sleeper[] = [
   { command: "consolidate-history", description: "Relocate leftover legacy history bags to the root and remove the drained folder", load: () => import('./history/consolidate-history.queen') },
   { wakesOn: ["history:promoted"], load: () => import('./history/rewound-commit.drone') },
   { command: "meeting", description: "Start or join a video meeting on the selected tile", load: () => import('./meeting/meeting.queen') },
-  { command: "layout", description: "Save, apply, list, or remove layout templates", load: () => import('./move/layout.queen') },
   { command: "fit", description: "Zoom to fit all visible content", load: () => import('./navigation/zoom/fit.queen') },
   { command: "screensaver", description: "Idle screensaver: toggle on/off, pick the look (hexagon, circle, thought…) and the motion (bounce, shooting-stars…)", load: () => import('./presentation/screensaver/screensaver.queen') },
   { renders: ["living-brief"], load: () => import('./presentation/tiles/living-brief-view.drone') },

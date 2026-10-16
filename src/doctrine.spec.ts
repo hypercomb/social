@@ -335,7 +335,6 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/commands/website-archive.queen.ts',
       'hypercomb-essentials/src/editor/viewport-store.ts',
       'hypercomb-essentials/src/history/history.service.ts',
-      'hypercomb-essentials/src/move/layout.queen.ts',
       'hypercomb-essentials/src/move/layout.service.ts',
       'hypercomb-essentials/src/sharing/content-broker.boot.drone.ts',
       'hypercomb-essentials/src/sharing/feedback-channel.drone.ts',

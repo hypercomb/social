@@ -9,7 +9,6 @@
     "hypercomb-essentials/src/concealment/concealment.ts": 1,
     "hypercomb-essentials/src/editor/viewport-store.ts": 4,
     "hypercomb-essentials/src/history/history.service.ts": 9,
-    "hypercomb-essentials/src/move/layout.queen.ts": 1,
     "hypercomb-essentials/src/pheromones/pheromone-marks.ts": 1,
     "hypercomb-essentials/src/presentation/tiles/tile-public.ts": 1,
     "hypercomb-essentials/src/sharing/code-trust.ts": 1,
