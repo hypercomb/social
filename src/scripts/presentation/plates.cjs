@@ -1,4 +1,4 @@
-// The eight plates, drawn in one language on the 960x400 frame.
+// The plates, drawn in one language on the 960x400 frame.
 // Tokens only (the page's :root is the one sheet); no fonts, gradients, filters or motion inside.
 // The shared helpers and tokens live in plates/lib.cjs; each plate is one module in
 // plates/<name>.cjs exporting a function that returns the SVG string.

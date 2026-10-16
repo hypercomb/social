@@ -212,6 +212,7 @@ function assemble(doors) {
   let marks = 0
   html = html.replace(/\{\{MARK\}\}/g, () => markSvg.replace(/mk-/g, `mk${++marks}-`))
   html = html.replace('{{MINUTES}}', String(minutes))
+  html = html.replace('{{SCENE_COUNT}}', String(scenes.length))
   html = html.replace('{{FONTS}}', () => fontsCss())
   html = html.replace('{{SCENES}}', () => JSON.stringify(scenes.map(sceneObject), null, 1))
   html = html.replace('{{DOORS}}', () => doorsHtml(doors))

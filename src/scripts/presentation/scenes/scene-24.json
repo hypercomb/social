@@ -1,21 +1,13 @@
 {
   "n": 24,
-  "name": "how to bee",
+  "name": "the invitation",
   "chapter": "roadmap",
-  "slug": "how-to-bee",
-  "eyebrow": "your first day",
-  "headline": "How to *bee*.",
-  "sub": "Type help, and it is all laid out for you.",
-  "visual": "list",
-  "visualData": [
-    "basics | go in · go out · zoom · pan · select",
-    "everyday | create · edit · copy · paste · undo",
-    "together | present · website · publish · swarm",
-    "* tutorial | a bee flies it with you"
-  ],
-  "link": {
-    "href": "https://hypercomb.com/",
-    "label": "Start your hive · hypercomb.com"
-  },
-  "say": "One last thing, because a place you cannot find your way into is not yours either. Type help, and everything you can do is laid out for you: the first gestures, then the everyday words, then the rest, when you are ready. Type tutorial, pick a course, and a bee flies it with you. That is the last idea, and it is the same as the first: this is a new way to be. So here is how to bee. The hive is yours."
+  "slug": "the-invitation",
+  "eyebrow": "the invitation",
+  "headline": "The hive is *yours*.",
+  "sub": "",
+  "visual": "film:create",
+  "visualData": [],
+  "media": "create",
+  "say": "Hypercomb is a bet that the internet can be shaped like a community instead of like a corporation. Small cells. Simple rules. Signatures instead of authority. History instead of forgetting. People instead of platforms. It grows the way a colony grows: everyone who joins adds what they need, and shares it back. You have seen the real thing running. Type a name, press Enter, and you have begun. The hive is yours."
 }

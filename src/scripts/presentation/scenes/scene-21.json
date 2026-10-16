@@ -1,16 +1,17 @@
 {
   "n": 21,
-  "name": "vision",
+  "name": "next",
   "chapter": "roadmap",
-  "slug": "vision",
-  "eyebrow": "further out",
-  "headline": "The *vision*",
+  "slug": "next",
+  "eyebrow": "in progress",
+  "headline": "What comes *next*",
   "sub": "",
-  "visual": "road:vision",
+  "visual": "road:next",
   "visualData": [
-    "Superimposable trees — your view and mine of one place, stacked and reconciled",
-    "Interests, not feeds — only what meets your private interests reaches you",
-    "One decoration model — a filter is a bouquet of marks, not a hardcoded type"
+    "One app on every desktop — Windows, macOS and Linux · one protocol · hosts your hive",
+    "Source in the hive — read it, change it, try it on your own domain",
+    "Scheduled checks — walk your tree and file their reports as tiles",
+    "Hives that ask hives — request work, receive results you can verify"
   ],
-  "say": "Further out. Superimposable trees: your view and my view of the same place, stacked, and reconciled like layers. Interests instead of feeds: people leave interests on what they read, and only what matches your own private interests reaches you. And one decoration model, where a filter is a bouquet of marks instead of a hardcoded type."
+  "say": "What comes next. One app for every desktop, Windows, macOS and Linux, held to the same open protocol, and able to host your hive itself. The platform's own source, living in the hive, so anyone can read it, change it, and try the change on their own domain. Scheduled checks that walk your tree, and file their reports as tiles. And hives that can ask each other for work, and receive results they can verify."
 }

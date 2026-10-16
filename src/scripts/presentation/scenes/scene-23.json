@@ -1,13 +1,14 @@
 {
   "n": 23,
-  "name": "the invitation",
+  "name": "the hive is a computer",
   "chapter": "roadmap",
-  "slug": "the-invitation",
-  "eyebrow": "the invitation",
-  "headline": "The hive is *yours*.",
+  "slug": "the-hive-is-a-computer",
+  "eyebrow": "the horizon",
+  "headline": "The hive is a *computer*",
   "sub": "",
-  "visual": "film:create",
-  "visualData": [],
-  "media": "create",
-  "say": "Hypercomb is a bet that the internet can be shaped like a community instead of like a corporation. Small cells. Simple rules. Signatures instead of authority. History instead of forgetting. People instead of platforms. It grows the way a colony grows: everyone who joins adds what they need, and shares it back. You have seen the real thing running. Type a name, press Enter, and you have begun. The hive is yours."
+  "visual": "plate:hive-computer",
+  "visualData": [
+    "junctions compute"
+  ],
+  "say": "And the horizon: the hive as a computer. A script and its input give a result, and the result has a signature of its own. Compute something once, and nobody ever has to compute it again. Junctions in the tree become processors, and the shape of your hive becomes the program. The pieces, signatures, layers, and behaviors that always give the same answer, are already in your hands. The road ahead is the staircase from here to there."
 }

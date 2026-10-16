@@ -1,14 +1,13 @@
 {
   "n": 17,
-  "name": "together without a middleman",
+  "name": "served by everyone",
   "chapter": "why hypercomb",
-  "slug": "together-without-a-middleman",
-  "eyebrow": "reason six",
-  "headline": "Together, without a *middleman*",
+  "slug": "served-by-everyone",
+  "eyebrow": "reason five",
+  "headline": "Served by *everyone*",
   "sub": "",
-  "visual": "plate:no-middleman",
-  "visualData": [
-    "hive to hive"
-  ],
-  "say": "Reason six: being together, without a middleman. Open a swarm, and the people in the room share tiles live. Take what you like, and it lands in your own hive. When people leave, their tiles leave with them. When you want something to stay, publish it to a host. Either way, two hives exchange work directly, by signature. No accounts to reconcile, and no feed deciding what you see."
+  "visual": "film:zoom",
+  "visualData": [],
+  "media": "zoom",
+  "say": "Reason five: it is carried by its community. Hosts are run by the people who use them, and a host can be shared with friends. Work is copied from host to host and checked byte by byte, so every copy proves itself, and the more people care about something, the more places it lives. Your peers keep each other safe: trust is an allowance you give, never a switch that is on by default. And nothing tracks you; not one statistic about you is collected. It is source control for everyone's work, secured by your peers, and served by everyone."
 }

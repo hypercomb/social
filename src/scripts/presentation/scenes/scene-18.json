@@ -1,14 +1,14 @@
 {
   "n": 18,
-  "name": "ai on your terms",
+  "name": "together without a middleman",
   "chapter": "why hypercomb",
-  "slug": "ai-on-your-terms",
-  "eyebrow": "reason seven",
-  "headline": "*AI*, on your terms",
+  "slug": "together-without-a-middleman",
+  "eyebrow": "reason six",
+  "headline": "Together, without a *middleman*",
   "sub": "",
-  "visual": "plate:ai-door",
+  "visual": "plate:no-middleman",
   "visualData": [
-    "a door you open"
+    "hive to hive"
   ],
-  "say": "Reason seven: A.I., on your terms. Your hive has an assistant of its own, and you choose the model: one in the cloud with your own key, or one that runs on your own machine. It reads what you allow, proposes what to change, and waits for your hand before anything changes. Whatever you keep private stays private, from every model but your own. The A.I. does not scrape your life through someone else's cloud. It walks in through a door you open, and its work lands in your hive, with history."
+  "say": "Reason six: being together, without a middleman. Open a swarm, and the people in the room share tiles live. Take what you like, and it lands in your own hive. When people leave, their tiles leave with them. When you want something to stay, publish it to a host. Either way, two hives exchange work directly, by signature. No accounts to reconcile, and no feed deciding what you see."
 }

@@ -1,17 +1,14 @@
 {
   "n": 19,
-  "name": "shown by its creations",
-  "chapter": "roadmap",
-  "slug": "shown-by-its-creations",
-  "eyebrow": "taking shape",
-  "headline": "Shown by its *creations*",
+  "name": "ai on your terms",
+  "chapter": "why hypercomb",
+  "slug": "ai-on-your-terms",
+  "eyebrow": "reason seven",
+  "headline": "*AI*, on your terms",
   "sub": "",
-  "visual": "road:landed",
+  "visual": "plate:ai-door",
   "visualData": [
-    "The business card — your card, your links, your people · passed on with a scan",
-    "The Hyperdex — the people and domains you hold · your phone’s front page",
-    "Websites and games — published straight from tiles",
-    "Communities — meetups and gathering places, in hives"
+    "a door you open"
   ],
-  "say": "Here is the pattern, shown through what people make with it. The business card: your card, your links and your people, passed on with a scan, with nothing to sign up for. The Hyperdex: the people and the domains you hold, as your phone's front page, and it starts with you. Websites and games, published straight from tiles. And real communities, gathering in hives: meetups, study groups, and centres where people belong. Each one is the same simple pattern, in a different shape."
+  "say": "Reason seven: A.I., on your terms. Your hive has an assistant of its own, and you choose the model: one in the cloud with your own key, or one that runs on your own machine. It reads what you allow, proposes what to change, and waits for your hand before anything changes. Whatever you keep private stays private, from every model but your own. The A.I. does not scrape your life through someone else's cloud. It walks in through a door you open, and its work lands in your hive, with history."
 }

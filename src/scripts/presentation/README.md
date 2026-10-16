@@ -1,6 +1,6 @@
 # Hypercomb video presentation — instructions, compiled
 
-The full "What is Hypercomb / why it matters / the road ahead" presentation. 24
+The full "What is Hypercomb / why it matters / the road ahead" presentation. 25
 scenes, ~12 minutes, narrated. It is **not** a video file: every scene is an
 instruction, compiled into one self-playing page, so any piece can change
 without touching the rest.

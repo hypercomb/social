@@ -1,14 +1,16 @@
 {
   "n": 22,
-  "name": "the hive is a computer",
+  "name": "vision",
   "chapter": "roadmap",
-  "slug": "the-hive-is-a-computer",
-  "eyebrow": "the horizon",
-  "headline": "The hive is a *computer*",
+  "slug": "vision",
+  "eyebrow": "further out",
+  "headline": "The *vision*",
   "sub": "",
-  "visual": "plate:hive-computer",
+  "visual": "road:vision",
   "visualData": [
-    "junctions compute"
+    "Superimposable trees — your view and mine of one place, stacked and reconciled",
+    "Interests, not feeds — only what meets your private interests reaches you",
+    "One decoration model — a filter is a bouquet of marks, not a hardcoded type"
   ],
-  "say": "And the horizon: the hive as a computer. A script and its input give a result, and the result has a signature of its own. Compute something once, and nobody ever has to compute it again. Junctions in the tree become processors, and the shape of your hive becomes the program. The pieces, signatures, layers, and behaviors that always give the same answer, are already in your hands. The road ahead is the staircase from here to there."
+  "say": "Further out. Superimposable trees: your view and my view of the same place, stacked, and reconciled like layers. Interests instead of feeds: people leave interests on what they read, and only what matches your own private interests reaches you. And one decoration model, where a filter is a bouquet of marks instead of a hardcoded type."
 }

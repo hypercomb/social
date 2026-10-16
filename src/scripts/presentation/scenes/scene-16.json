@@ -1,13 +1,14 @@
 {
   "n": 16,
-  "name": "served by everyone",
+  "name": "the hyperdex",
   "chapter": "why hypercomb",
-  "slug": "served-by-everyone",
-  "eyebrow": "reason five",
-  "headline": "Served by *everyone*",
+  "slug": "the-hyperdex",
+  "eyebrow": "the first impression",
+  "headline": "The *Hyperdex*",
   "sub": "",
-  "visual": "film:zoom",
-  "visualData": [],
-  "media": "zoom",
-  "say": "Reason five: it is carried by its community. Hosts are run by the people who use them, and a host can be shared with friends. Work is copied from host to host and checked byte by byte, so every copy proves itself, and the more people care about something, the more places it lives. Your peers keep each other safe: trust is an allowance you give, never a switch that is on by default. And nothing tracks you; not one statistic about you is collected. It is source control for everyone's work, secured by your peers, and served by everyone."
+  "visual": "plate:hyperdex",
+  "visualData": [
+    "hyper + index"
+  ],
+  "say": "And here is the first thing anyone sees: the Hyperdex. The name joins two words, hyper and index. The root of every domain is a Hyperdex: an index, and the first impression anyone has of you. It is part of the platform itself, not a feature of one creation. Every host serves one at its root, and every visitor's hive knows how to read it. Your business card is not the index; it is one entry in it. And a Hyperdex can take many shapes: a list, a honeycomb, a wall of cards, whichever view suits the people who come to it. Visit someone's domain, and their Hyperdex is how they greet you."
 }

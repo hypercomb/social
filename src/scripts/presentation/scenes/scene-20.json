@@ -1,17 +1,17 @@
 {
   "n": 20,
-  "name": "next",
+  "name": "shown by its creations",
   "chapter": "roadmap",
-  "slug": "next",
-  "eyebrow": "in progress",
-  "headline": "What comes *next*",
+  "slug": "shown-by-its-creations",
+  "eyebrow": "taking shape",
+  "headline": "Shown by its *creations*",
   "sub": "",
-  "visual": "road:next",
+  "visual": "road:landed",
   "visualData": [
-    "One app on every desktop — Windows, macOS and Linux · one protocol · hosts your hive",
-    "Source in the hive — read it, change it, try it on your own domain",
-    "Scheduled checks — walk your tree and file their reports as tiles",
-    "Hives that ask hives — request work, receive results you can verify"
+    "The business card — your card and your links · one entry in your index",
+    "Websites and games — published straight from tiles",
+    "The language — translated by its community into fourteen tongues",
+    "Communities — meetups and gathering places, in hives"
   ],
-  "say": "What comes next. One app for every desktop, Windows, macOS and Linux, held to the same open protocol, and able to host your hive itself. The platform's own source, living in the hive, so anyone can read it, change it, and try the change on their own domain. Scheduled checks that walk your tree, and file their reports as tiles. And hives that can ask each other for work, and receive results they can verify."
+  "say": "Here is the pattern, shown through what people make with it. The business card: your card and your links, passed on with a scan, with nothing to sign up for, and one entry in your index. Websites and games, published straight from tiles. The language itself, translated by its community into fourteen tongues. And real communities, gathering in hives: meetups, study groups, and centres where people belong. Each one is the same simple pattern, in a different shape."
 }
