@@ -257,7 +257,12 @@ const main = async () => {
     }
     case 'convo': {
       const letters = Array.from({ length: 6 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('')
-      return print(`chat:tile:/::${Date.now()}-${letters}`)
+      // MARKED AS A JOB (2026-10-15). `chat:tile:/::<ms>-<id>` is also the id
+      // the chat window gives a conversation the participant starts on the
+      // root tile, so a tidy keyed on it put away jwize's own chats with the
+      // jobs. `job-` is a seed the window never mints; `chats tidy` touches
+      // only conversations that carry it.
+      return print(`chat:tile:/::job-${Date.now()}-${letters}`)
     }
     case 'find': {
       // SAID, NOT BRIDGED (2026-10-15): the hive's own word `find`, which

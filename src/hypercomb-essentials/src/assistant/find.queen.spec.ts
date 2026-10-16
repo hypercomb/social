@@ -39,3 +39,16 @@ describe('find — the word', () => {
     expect(lines[1]).toContain('The walk failed (stale-read)')
   })
 })
+
+const { isJobConversation } = await import('./chat-tidy.js')
+
+describe('chats tidy — which conversations are jobs', () => {
+  // 2026-10-15: `chat:tile:/::<ms>-<id>` is also a conversation the
+  // participant starts on the root tile; only a `job-` seed marks a job.
+  it('takes only the job seed, never a root-tile chat, a tile chat or a free chat', () => {
+    expect(isJobConversation('chat:tile:/::job-1792124451798-wnikrq')).toBe(true)
+    expect(isJobConversation('chat:tile:/::1792057391491-dsutwo')).toBe(false)
+    expect(isJobConversation('chat:tile:/dolphin/site')).toBe(false)
+    expect(isJobConversation('chat:1792057391491-x1y2z3')).toBe(false)
+  })
+})
