@@ -1,18 +1,17 @@
 {
   "n": 6,
-  "name": "dna",
+  "name": "the simplest pattern",
   "chapter": "what is hypercomb",
-  "slug": "dna",
-  "eyebrow": "the substrate",
-  "headline": "The *DNA* of a hive",
-  "sub": "Five kinds of artifact. Nothing else.",
+  "slug": "the-simplest-pattern",
+  "eyebrow": "the primitive",
+  "headline": "The simplest *pattern*",
+  "sub": "Overlooked, because it is so simple.",
   "visual": "hexes",
   "visualData": [
-    "icon:layers layers",
-    "icon:resource resources",
-    "icon:bee beehaviors",
-    "icon:deps dependencies",
-    "icon:content content"
+    "icon:content a name",
+    "icon:resource its content",
+    "icon:format signature",
+    "icon:layers more inside"
   ],
-  "say": "Five kinds of artifact compose everything. Hypercomb calls them its D N A — Distributed Network Artifacts. Layers: the structure — each one an immutable snapshot linking to its children by signature. Resources: the content bytes — images, text, files. Bees — short for beehaviors — small modules of code that give the hive life. Dependencies: the libraries those bees rely on. And content: everything a tile carries. All five are content-addressed, immutable, merkle-versioned, and shareable across the network. Your entire hive is just these five kinds, combined."
+  "say": "One pattern ties all of it together, and it is so simple that it was overlooked. A thing has a name. What it holds is named by its own signature. And anything it holds can hold more of the same. That is the whole of it. A picture, a page, a game, a whole community: each one is built from that one pattern, cell inside cell. Hypercomb does not ask you to study it. It shows it to you, in everything people make with it."
 }

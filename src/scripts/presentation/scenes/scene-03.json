@@ -3,11 +3,11 @@
   "name": "the hive",
   "chapter": "what is hypercomb",
   "slug": "the-hive",
-  "eyebrow": "the workspace",
+  "eyebrow": "the hive",
   "headline": "A workspace made of *cells*",
   "sub": "",
   "visual": "film:navigate",
   "visualData": [],
   "media": "navigate",
-  "say": "Hypercomb is a live, presence-based workspace. Your content lives on a hexagonal grid of cells — tiles. A tile can hold anything: a picture, a note, a document, a game, a whole website. Click a tile and you travel into it — every tile can open into another full honeycomb of its own. That is the whole navigation model: the hive is a tree of honeycombs, and you fly through it. What you're watching was recorded live from a real hive — a journal, a garden, an archive — each tile opening into a honeycomb of its own, all tiles, all the way down."
+  "say": "Here is what it looks like. Your work lives on a grid of cells, called tiles. A tile can hold anything: a picture, a note, a document, a game, a whole website. Open a tile and you travel into it, and every tile can open into a honeycomb of its own. What you are watching was recorded live: a journal, a garden, an archive. Cells inside cells, all the way down."
 }

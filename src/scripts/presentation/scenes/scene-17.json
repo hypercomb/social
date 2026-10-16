@@ -1,14 +1,14 @@
 {
   "n": 17,
-  "name": "sharing without a middleman",
+  "name": "together without a middleman",
   "chapter": "why hypercomb",
-  "slug": "sharing-without-a-middleman",
+  "slug": "together-without-a-middleman",
   "eyebrow": "reason six",
-  "headline": "Sharing without a *middleman*",
+  "headline": "Together, without a *middleman*",
   "sub": "",
   "visual": "plate:no-middleman",
   "visualData": [
     "hive to hive"
   ],
-  "say": "Reason six: sharing without a middleman. Publishing a branch is one command. Content travels over open relays, and visiting is adopting: click a shared tile and it lands in your own hive, on a named revision line — carry it forward, and still rewind to exactly what was shipped. Collaboration becomes two hives exchanging signed layers. No accounts to reconcile, no permissions matrix. Cryptography instead of bureaucracy."
+  "say": "Reason six: being together, without a middleman. Open a swarm, and the people in the room share tiles live. Take what you like, and it lands in your own hive. When people leave, their tiles leave with them. When you want something to stay, publish it to a host. Either way, two hives exchange work directly, by signature. No accounts to reconcile, and no feed deciding what you see."
 }

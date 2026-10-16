@@ -10,5 +10,5 @@
   "visualData": [
     "junctions compute"
   ],
-  "say": "And the horizon we're building toward: the hive as a computer. Every computation is content-addressed — script plus input equals a signed result. Compute something once, and the whole network never computes it again: a global memoization mesh. Junctions in the tree become processors; the geometry of your hive becomes the program. That's not a slogan — the primitives, signatures, layers, deterministic modules, are already in your hands. The roadmap is the staircase from here to there."
+  "say": "And the horizon: the hive as a computer. A script and its input give a result, and the result has a signature of its own. Compute something once, and nobody ever has to compute it again. Junctions in the tree become processors, and the shape of your hive becomes the program. The pieces, signatures, layers, and behaviors that always give the same answer, are already in your hands. The road ahead is the staircase from here to there."
 }

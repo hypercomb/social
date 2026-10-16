@@ -1,16 +1,16 @@
 {
   "n": 15,
-  "name": "open source",
+  "name": "your domain",
   "chapter": "why hypercomb",
-  "slug": "open-source",
+  "slug": "your-domain",
   "eyebrow": "reason four",
-  "headline": "*Open* source, as a promise",
-  "sub": "AGPL code · CC BY‑SA docs · signed modules",
+  "headline": "Your *domain*, your rules",
+  "sub": "Sovereignty is hosting your own domain and content.",
   "visual": "hexes",
   "visualData": [
-    "icon:source AGPL · code",
-    "icon:content CC BY-SA",
-    "icon:bee signed · bees"
+    "icon:platform your host",
+    "icon:network your domain",
+    "icon:layers your content"
   ],
-  "say": "Reason four: it's open source — and here that's a promise, not a marketing line. The code is A G P L: free to use, free to study, free to change, and any hosted version has to stay free too. The documentation is Creative Commons. Every module carries a signature, so a fork is verifiable — you can prove exactly what you're running, byte for byte. And if Hypercomb ever goes in a direction you don't like, you can take it in yours, and your hive still opens. That's what open actually has to mean."
+  "say": "Reason four: digital sovereignty that is real. It comes from one thing: hosting your own domain, and your own content. Hypercomb guides you there in steps. Start in your browser. Share through a friend's host. Then run your own, on your own machine, under your own domain. Your domain becomes your front door, and the people who follow it get your work straight from you. No platform decides who gets to see you. You do."
 }

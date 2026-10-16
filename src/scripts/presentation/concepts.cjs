@@ -408,7 +408,7 @@ function integrityWorld(T, p) {
     MESH.forEach(([a, b]) => { s += link(PEERS[a].x, PEERS[a].y, PEERS[b].x, PEERS[b].y, eT * 0.5, { dash: '2 6', dim: 0.5 }) })
     PEERS.forEach((n, k) => {
       s += `<circle cx="${n.x}" cy="${n.y}" r="30" fill="var(--bg)" stroke="${k === 0 ? 'var(--honey)' : 'var(--steel)'}" stroke-width="${k === 0 ? 2.4 : 1.5}" opacity="${eT.toFixed(2)}"/>`
-      s += txt(n.x, n.y + 5, k === 0 ? 'you' : 'peer', { size: 15, spacing: '.06em', fill: k === 0 ? 'var(--honey)' : 'var(--steel)', op: eT })
+      s += txt(n.x, n.y + 5, k === 0 ? 'you' : 'host', { size: 15, spacing: '.06em', fill: k === 0 ? 'var(--honey)' : 'var(--steel)', op: eT })
     })
     const collapse = easeInOut(sp(2, 0.12, 0.42))
     PEERS.forEach((n, k) => {
@@ -533,7 +533,7 @@ function timeWorld(T, p) {
     const x = cardX(8)
     s += link(x, CY - CH / 2 - 40 * ePin, x, CY - CH / 2 - 2, ePin * 0.9, { dim: 0.8, sw: 2 })
     s += hex(x, CY - CH / 2 - 46, 11 * ePin, { made: true, sw: 2 })
-    s += txt(x, CY - CH / 2 - 66, 'checkpoint', { size: 16, spacing: '.08em', fill: 'var(--honey)', op: ePin })
+    s += txt(x, CY - CH / 2 - 66, 'snapshot', { size: 16, spacing: '.08em', fill: 'var(--honey)', op: ePin })
   }
   return s
 }
@@ -544,13 +544,13 @@ const CLIPS = {
     scene: 8, file: 'concept-vocabulary.mp4', world: vocabularyWorld,
     beats: [
       { term: 'the language', gloss: 'precise words', cam: { x: 720, y: 246, s: 1.0 } },
-      { term: 'hive', gloss: "one participant's whole tree", cam: { x: 2215, y: 246, s: 1.25 } },
-      { term: 'tile', gloss: 'one hexagon of content', cam: { x: 2238, y: 246, s: 2.5 } },
-      { term: 'layer', gloss: 'one immutable version of a place', cam: { x: 2200, y: 238, s: 2.0 } },
-      { term: 'signature', gloss: 'the name computed from the content', cam: { x: 2230, y: 282, s: 2.0 } },
+      { term: 'hive', gloss: 'where you and your people meet', cam: { x: 2215, y: 246, s: 1.25 } },
+      { term: 'tile', gloss: 'one cell of content', cam: { x: 2238, y: 246, s: 2.5 } },
+      { term: 'layer', gloss: 'one moment of a place, kept', cam: { x: 2200, y: 238, s: 2.0 } },
+      { term: 'signature', gloss: 'the name the content gives itself', cam: { x: 2230, y: 282, s: 2.0 } },
       { term: 'bee', gloss: 'senses, then acts', cam: { x: 2280, y: 226, s: 1.25 } },
-      { term: 'pheromone', gloss: 'a mark that says what it is', cam: { x: 2400, y: 212, s: 1.65 } },
-      { term: 'pollination', gloss: 'work crossing between hives', cam: { x: 2740, y: 240, s: 0.56 } },
+      { term: 'pheromone', gloss: 'an interest someone leaves', cam: { x: 2400, y: 212, s: 1.65 } },
+      { term: 'replication', gloss: 'work crossing between hives', cam: { x: 2740, y: 240, s: 0.56 } },
       { term: 'brooding · eclosion', gloss: 'prepared, then hatched', cam: { x: 3010, y: 246, s: 2.2 } },
       { term: 'colony', gloss: 'no central authority', cam: { x: 2620, y: 246, s: 0.55 } },
     ],
@@ -560,18 +560,18 @@ const CLIPS = {
     beats: [
       { term: 'integrity', gloss: 'verify, don’t trust', cam: { x: 760, y: 240, s: 1.15 } },
       { term: 'share = signatures', gloss: 'every byte proven on arrival', cam: { x: 1990, y: 240, s: 0.92 } },
-      { term: 'one copy', gloss: 'the network is a global cache', cam: { x: 3585, y: 235, s: 0.76 } },
+      { term: 'one copy', gloss: 'any host can serve it', cam: { x: 3585, y: 235, s: 0.76 } },
       { term: 'proof', gloss: 'sharing a hash is sharing a proof', cam: { x: 3575, y: 262, s: 1.55 } },
     ],
   },
   time: {
     scene: 14, file: 'concept-time.mp4', world: timeWorld,
     beats: [
-      { term: 'time', gloss: 'a feature, not an accident', cam: { x: 720, y: 288, s: 1.0 } },
+      { term: 'time', gloss: 'on your side', cam: { x: 720, y: 288, s: 1.0 } },
       { term: 'undo', gloss: 'across sessions', cam: { x: 720, y: 288, s: 1.0 } },
       { term: 'rewind', gloss: 'scrub what a page used to be', cam: { x: 720, y: 240, s: 1.0 } },
-      { term: 'revisions', gloss: 'named on adopt and upgrade', cam: { x: 720, y: 270, s: 1.0 } },
-      { term: 'checkpoints', gloss: 'before risky experiments', cam: { x: 880, y: 278, s: 0.9 } },
+      { term: 'revisions', gloss: 'updates wait for you', cam: { x: 720, y: 270, s: 1.0 } },
+      { term: 'snapshots', gloss: 'try something risky, come back', cam: { x: 880, y: 278, s: 0.9 } },
       { term: 'immutable', gloss: 'the past is one signature away', cam: { x: 840, y: 282, s: 0.86 } },
     ],
   },

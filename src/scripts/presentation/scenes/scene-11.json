@@ -1,17 +1,17 @@
 {
   "n": 11,
-  "name": "scriptable building blocks",
+  "name": "every act has a word",
   "chapter": "what is hypercomb",
-  "slug": "scriptable-building-blocks",
-  "eyebrow": "composition",
-  "headline": "The building *blocks*",
+  "slug": "every-act-has-a-word",
+  "eyebrow": "the dialect",
+  "headline": "Every act has a *word*",
   "sub": "",
   "visual": "list",
   "visualData": [
     "type a name | a tile exists",
-    "/present | the tile becomes a slideshow",
-    "/website | the tile becomes a site",
-    "* your bee | a new verb for everyone"
+    "present | the tile becomes a slideshow",
+    "website | the tile becomes a site",
+    "* say it again | teach it to a friend"
   ],
-  "say": "Everything is a scriptable building block. The command line is the primary interface: type a name to create, type a path to travel, and use slash commands as verbs — rewind a page, publish a website, open a game, ask an A.I. Behaviors attach to any tile, so the same tile becomes a slideshow, a website, a study deck, or a tree view depending on what you mark it with. And because behaviors are modules, the vocabulary itself is extensible: write a bee, sign it, share it — and it becomes a verb anyone can use. You're not filling in someone else's forms. You're composing your own blocks."
+  "say": "And you do everything by saying it. The command line speaks plain words, with no symbols to remember. Type a name to make a tile. Say present, and a tile becomes a slideshow. Say website, and it becomes a site. Every act in Hypercomb has a word, so whatever you do, you can say again, teach to a friend, and remember. The language belongs to its community, too: people translate it into their own tongue, and their words travel to every hive that follows them."
 }

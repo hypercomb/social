@@ -10,5 +10,5 @@
   "visualData": [
     "a door you open"
   ],
-  "say": "And reason seven: A.I. is a first-class citizen — on your terms. The bridge lets A.I. sessions work inside the hive. You ask a question from the command line, and an A.I. answers as a note pinned to the tile you asked about. It can build structures, generate study decks from your notes, assemble websites from your tiles, run feedback loops. The A.I. doesn't scrape your life through somebody's cloud — it walks into your hive through a door you open, and its work lands as content you own, with history."
+  "say": "Reason seven: A.I., on your terms. Your hive has an assistant of its own, and you choose the model: one in the cloud with your own key, or one that runs on your own machine. It reads what you allow, proposes what to change, and waits for your hand before anything changes. Whatever you keep private stays private, from every model but your own. The A.I. does not scrape your life through someone else's cloud. It walks in through a door you open, and its work lands in your hive, with history."
 }

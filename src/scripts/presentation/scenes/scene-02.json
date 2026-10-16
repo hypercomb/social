@@ -1,17 +1,17 @@
 {
   "n": 2,
-  "name": "welcome",
+  "name": "an open protocol",
   "chapter": "what is hypercomb",
-  "slug": "welcome",
-  "eyebrow": "an open platform",
-  "headline": "Welcome to *Hypercomb*",
+  "slug": "an-open-protocol",
+  "eyebrow": "for humanity",
+  "headline": "An open *protocol*",
   "sub": "",
   "visual": "hexes",
   "visualData": [
-    "icon:source source",
-    "icon:format format",
-    "icon:platform platform",
-    "icon:network network"
+    "icon:network people",
+    "icon:format protocol",
+    "icon:platform your domain",
+    "icon:source community"
   ],
-  "say": "Welcome to Hypercomb. Hypercomb is an open software platform — and open in every sense that matters. The source is open: it's free software, and the documentation is Creative Commons. The format is open: your content is plain, content-addressed bytes, not a proprietary database anyone else controls. The platform is open: every feature is a module you can write, fork, and share. And the network is open: participants exchange work directly over public relays, with no gatekeeper in the middle. It's built in the open, by a community, for people who want their tools to belong to them."
+  "say": "Welcome to Hypercomb. It is not another app to sign up for. It is an open protocol for people: one shared way of naming, keeping and passing on what we make, that anyone can speak and no one owns. Your work is plain content, named by its own fingerprint. Its history is kept, step by step. And all of it is carried by the people who use it: your friends, your community, your own domain. Its code is public, under a licence that keeps every copy open, for everyone who wants their corner of the internet to belong to them."
 }

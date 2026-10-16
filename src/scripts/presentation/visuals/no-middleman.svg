@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" role="img" aria-label="two hives exchange signed layers directly over open relays; the platform in the middle is crossed out" stroke-linecap="round" stroke-linejoin="round">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" role="img" aria-label="two hives exchange signed layers directly, by signature, through hosts; the platform in the middle is crossed out" stroke-linecap="round" stroke-linejoin="round">
 <defs><marker id="nm-ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1,1 L8,5 L1,9" fill="none" stroke="var(--honey)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
 <polygon points="170,188 196,203 196,233 170,248 144,233 144,203" fill="var(--honey-fill)" fill-opacity=".16" stroke="var(--honey)" stroke-width="2"/><polygon points="222,188 247.9,203 247.9,233 222,248 196,233 196,203" fill="var(--panel)" stroke="var(--honey-deep)" stroke-width="1.5"/><polygon points="196,143 222,158 222,188 196,203 170,188 170,158" fill="var(--panel)" stroke="var(--honey-deep)" stroke-width="1.5"/><polygon points="144,143 170,158 170,188 144,203 118,188 118,158" fill="var(--panel)" stroke="var(--honey-deep)" stroke-width="1.5"/><polygon points="118,188 144,203 144,233 118,248 92.1,233 92.1,203" fill="var(--panel)" stroke="var(--honey-deep)" stroke-width="1.5"/><polygon points="144,233 170,248 170,278 144,293 118,278 118,248" fill="var(--panel)" stroke="var(--honey-deep)" stroke-width="1.5"/><polygon points="196,233 222,248 222,278 196,293 170,278 170,248" fill="var(--panel)" stroke="var(--honey-deep)" stroke-width="1.5"/>
 <text class="hy" x="170" y="322" font-size="18" text-anchor="middle" >your hive</text>
@@ -12,7 +12,7 @@
 <polygon points="365,284 378.9,292 378.9,308 365,316 351.1,308 351.1,292" fill="var(--panel)" stroke="var(--steel)" stroke-width="1.5"/>
 <polygon points="480,300 493.9,308 493.9,324 480,332 466.1,324 466.1,308" fill="var(--panel)" stroke="var(--steel)" stroke-width="1.5"/>
 <polygon points="595,284 608.9,292 608.9,308 595,316 581.1,308 581.1,292" fill="var(--panel)" stroke="var(--steel)" stroke-width="1.5"/>
-<text class="st" x="480" y="354" font-size="18" text-anchor="middle" >open relays</text>
+<text class="st" x="480" y="354" font-size="18" text-anchor="middle" >hosts</text>
 <polygon points="292,266 300.7,271 300.7,281 292,286 283.3,281 283.3,271" fill="var(--honey-fill)"/>
 <text class="m hy" x="292" y="258" font-size="13" text-anchor="middle" >3f2a…</text>
 <polygon points="668,266 676.7,271 676.7,281 668,286 659.3,281 659.3,271" fill="var(--honey-fill)"/>

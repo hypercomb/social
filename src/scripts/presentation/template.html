@@ -7,10 +7,10 @@
 <!-- The mark, inlined: this deliverable plays straight from the folder, so
      build.cjs base64s hypercomb-web/public/favicon.svg into the tag. -->
 <link rel="icon" href="{{FAVICON}}" type="image/svg+xml">
-<meta name="description" content="An open software platform. What Hypercomb is, why you want it, and the road ahead — with live footage from a real hive.">
+<meta name="description" content="An open protocol for people. What Hypercomb is, why it matters, and the road ahead — with live footage from a real hive.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Hypercomb — a new way to bee">
-<meta property="og:description" content="No server. No account. Your work lives with you. A narrated tour of an open software platform, with live footage from a real hive.">
+<meta property="og:description" content="No account. Your work lives with you, and goes where you send it. A narrated tour of an open protocol that brings people together, with live footage from a real hive.">
 <meta property="og:image" content="https://hypercomb.com/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -18,7 +18,7 @@
 <meta property="og:site_name" content="Hypercomb">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Hypercomb — a new way to bee">
-<meta name="twitter:description" content="No server. No account. Your work lives with you.">
+<meta name="twitter:description" content="No account. Your work lives with you, and goes where you send it.">
 <meta name="twitter:image" content="https://hypercomb.com/og.png">
 <style>
 {{FONTS}}
@@ -452,7 +452,7 @@
   <svg class="comb" aria-hidden="true"><rect width="120%" height="120%" fill="url(#hexp)"/></svg>
   <div class="mark">{{MARK}}</div>
   <div class="word">Hypercomb</div>
-  <div class="tag">An open software platform. What it is, why you want it, and the road ahead — with live footage from a real hive.</div>
+  <div class="tag">An open protocol that brings people together. What it is, why it matters, and the road ahead — with live footage from a real hive.</div>
   <button id="enter"><svg class="g"><use href="#i-play"/></svg><span>Play the tour</span></button>
   <div class="meta">{{MINUTES}} minutes · 24 scenes · narrated and captioned</div>
   <div class="meta kbd"><kbd>Space</kbd> pauses · <kbd>←</kbd> <kbd>→</kbd> skip</div>
@@ -472,7 +472,7 @@ const stage=document.getElementById('stage'), cap=document.getElementById('capti
       bar=document.getElementById('bar'), ticks=document.getElementById('ticks'),
       actlbl=document.getElementById('actlbl'), numlbl=document.getElementById('num'), ppBtn=document.getElementById('pp'),
       voiceBtn=document.getElementById('voice'), endcard=document.getElementById('endcard'), splash=document.getElementById('splash');
-const ACT={what:'Act I · What it is',why:'Act II · Why you want it',roadmap:'Act III · The road ahead'};
+const ACT={what:'Act I · What it is',why:'Act II · Why it matters',roadmap:'Act III · The road ahead'};
 let idx=-1, playing=false, voiceOn=true, token=0, timer=null, ended=false;
 const startIndex=(()=>{
   const q=new URLSearchParams(location.search).get('scene')||(location.hash.match(/^#s(\d+)/)||[])[1];

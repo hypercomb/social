@@ -8,5 +8,5 @@
   "sub": "",
   "visual": "film:integrity",
   "visualData": [],
-  "say": "Reason two: integrity you can verify instead of trust. When someone shares a branch of their hive, you receive signatures, and your machine verifies that every byte matches. Identical content collapses into one copy no matter how many people reference it, and the network becomes a global cache — if anyone near you already holds a resource, the signature finds it. Sharing a hash is sharing a proof."
+  "say": "Reason two: integrity you can check for yourself, instead of trust you are asked to give. When someone shares their work with you, you receive signatures, and your own machine checks every byte as it arrives. The same content is kept once, no matter how many people hold it, and any host that holds it can hand you a copy. Sharing a signature is sharing a proof."
 }

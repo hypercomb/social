@@ -3,12 +3,12 @@
   "name": "presence is permission",
   "chapter": "what is hypercomb",
   "slug": "presence-is-permission",
-  "eyebrow": "no server · no account",
+  "eyebrow": "no account",
   "headline": "*Presence* is permission",
   "sub": "",
   "visual": "plate:presence-permission",
   "visualData": [
     "the edge is yours"
   ],
-  "say": "Here's the part that sounds impossible: there is no server. No account. No sign-up. Hypercomb runs entirely in your browser, and your content is stored on your own device, in the browser's private file system. Presence is permission — the data exists where you are. Publishing is optional and explicit: nothing leaves your machine until you decide to share it. And when you do share, it travels peer to peer over open relays — not into a company's database."
+  "say": "Here is the part that surprises people. There is no account, and no sign-up. Hypercomb runs in your browser, or as an app on your desktop, and your work is kept on your own device. Nothing leaves it until you decide. When you do share, your work goes to a host: a home for it on the open web. That can be your own machine, your own domain, or the host of a friend you trust. Presence is permission. Your work is where you are, and it goes only where you send it."
 }

@@ -35,10 +35,10 @@ const OUT = path.join(__dirname, 'dist', 'welcome.json')
 // first time either file has been downloadable from this domain.
 const compose = (doors) => ({
   title: 'hypercomb',
-  tagline: 'An open software platform. Your work is named by its own content, '
+  tagline: 'An open protocol that brings people together. Your work is named by its own content, '
     + 'kept in your hands, and carried by the people who use it.',
   links: [
-    { label: 'Watch the tour', href: '/tour/', note: '≈ 19 minutes · narrated, with captions' },
+    { label: 'Watch the tour', href: '/tour/', note: '≈ 12 minutes · narrated, with captions' },
     { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the main app — start a hive of your own' },
     { label: 'Minimal host', href: '/hosts', note: 'manage domains and replicate signed packages' },
     { label: 'Downloads', href: '/downloads/', note: 'desktop app · Windows, macOS, Linux' },

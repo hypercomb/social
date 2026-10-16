@@ -4,7 +4,7 @@
   "chapter": "what is hypercomb",
   "slug": "history-is-the-data",
   "eyebrow": "nothing overwritten",
-  "headline": "History *is* the data",
+  "headline": "History *is* the work",
   "sub": "",
   "visual": "stack",
   "visualData": [
@@ -13,5 +13,5 @@
     "0002 | changed a picture",
     "* 0003 | current — the newest marker"
   ],
-  "say": "Every change you make becomes a new layer — nothing is ever overwritten. The history of a place is a bag of numbered markers, and the newest marker is the current state. That has a beautiful consequence: undo isn't a trick — it's just reading an older layer. You can rewind any page, restore any moment, name a revision, or snapshot the whole hive before an experiment. Your history is not a log about the data; it is the data. Deploying, backing up, and remembering become the same operation."
+  "say": "Every change you make becomes a new layer, and nothing is ever overwritten. The history of a place is a numbered list, and the newest entry is how it looks now. So undo is not a trick: it is reading an earlier step. You can rewind any page, restore any moment, or take a snapshot of everything before you try something bold. This is source control for everything you make, not only for code. Your history is not a log about your work. It is your work."
 }
