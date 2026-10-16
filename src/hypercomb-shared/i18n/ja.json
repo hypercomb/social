@@ -1773,6 +1773,7 @@
   "notes.promoteToTopLevel": "最上位に昇格",
   "notes.noValidParents": "有効な親ノートがありません",
   "notes.footerCount": "{count} 件のノート —",
+  "notes.inline.placeholder": "ここに書く — Enter でリストに追加",
   "notes.swarm.take": "受け取る",
   "notes.swarm.takeAll": "すべて受け取る",
   "notes.swarm.held": "{count} 人がこのノートを持っています",

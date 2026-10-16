@@ -56,6 +56,9 @@ export class SwarmNotes extends EventTarget {
   #roots = new Map<string, PeerNoteRoot[]>()
   #heldMine = new Map<string, Map<string, string[]>>()
   #firstHolder = new Map<string, string>()
+  /** When this desk first saw each root on this page — yours and everyone's.
+   *  A note carries no time; arrival order is what makes the room ONE list. */
+  #firstSeen = new Map<string, number>()
   #reading = new Map<string, Promise<void>>()
   #again = new Set<string>()
 
@@ -147,6 +150,10 @@ export class SwarmNotes extends EventTarget {
 
   colorOf(pubkey: string): string { return participantColor(pubkey) }
 
+  /** When this desk first saw the root `id`, or undefined (not seen yet —
+   *  a line just written, still on its way). */
+  seenAt(id: string): number | undefined { return this.#firstSeen.get(id) }
+
   /** Read every peer's notes on `cell`. Coalesced per tile: a read asked for
    *  while one runs runs once more after it. Dispatches 'change' with
    *  `{ detail: { cell } }` when it lands. */
@@ -199,6 +206,13 @@ export class SwarmNotes extends EventTarget {
     }))
     const own = await this.#ownRootIds(cell)
     const { roots, heldMine } = foldPeerRoots(own, peers, this.#firstHolder)
+    // Stamp what is new, yours in your order first: the room reads as one
+    // list in the order its lines arrived here.
+    let tick = 0
+    const now = Date.now()
+    for (const id of [...own, ...roots.map(r => r.note.id)]) {
+      if (!this.#firstSeen.has(id)) this.#firstSeen.set(id, now + tick++ / 1000)
+    }
     this.#set(cell, key, roots, heldMine)
   }
 
@@ -241,6 +255,7 @@ export class SwarmNotes extends EventTarget {
     this.#roots.clear()
     this.#heldMine.clear()
     this.#firstHolder.clear()
+    this.#firstSeen.clear()
   }
 
   #segments(): string[] {

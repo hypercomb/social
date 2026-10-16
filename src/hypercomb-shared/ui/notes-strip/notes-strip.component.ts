@@ -182,6 +182,7 @@ type SwarmNotesService = EventTarget & {
   rootsFor(cell: string): readonly PeerNoteRoot[]
   holdersOfMine(cell: string): ReadonlyMap<string, readonly string[]>
   counts(cell: string, own: number): { people: number; notes: number; yours: number; open: number }
+  seenAt(id: string): number | undefined
   labelOf(pubkey: string): string
   colorOf(pubkey: string): string
   refresh(cell: string): Promise<void>
@@ -1842,7 +1843,55 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // a second one. A note you already hold is yours and shows once.
     const own = new Set(stored.map(n => n.id))
     const peers = this.peerRoots().map(r => r.note).filter(n => !own.has(n.id))
-    return [...merged, ...peers].filter(n => this.#passesFilter(this.noteKind(n)))
+    const all = [...merged, ...peers].filter(n => this.#passesFilter(this.noteKind(n)))
+    // In a swarm the room is ONE list, in the order its lines arrived — not
+    // yours first and then each participant's block. A line not seen yet (one
+    // you just wrote) goes last.
+    const svc = this.#swarmNotes()
+    if (!svc || peers.length === 0) return all
+    this.#swarmVersion()
+    const at = (n: Note): number => svc.seenAt(n.id) ?? Number.MAX_SAFE_INTEGER
+    return all.map((n, i) => ({ n, i })).sort((a, b) => at(a.n) - at(b.n) || a.i - b.i).map(x => x.n)
+  })
+
+  // ── Writing in the list ─────────────────────────────────────
+  // The line at the foot of the notes list: type where you read. Enter adds
+  // the line where everyone sees it, clears the field and keeps the caret, so
+  // the next line is just more typing — the lists tab's own rhythm. Pinned to
+  // the bottom while you are at the bottom, as a conversation is.
+  readonly inlineLine = viewChild<ElementRef<HTMLInputElement>>('inlineLine')
+  readonly notesList = viewChild<ElementRef<HTMLElement>>('notesList')
+  #stickToBottom = true
+
+  onInlineLineKey(event: KeyboardEvent): void {
+    if (event.key !== 'Enter' || event.isComposing) return
+    event.preventDefault()
+    const input = event.target as HTMLInputElement
+    const text = input.value.trim()
+    const cell = this.cell()
+    if (!text || !cell) return
+    input.value = ''
+    EffectBus.emit('note:commit', { cellLabel: cell, text, mark: null })
+    this.#paintOptimistic(cell, text, null, null)
+    this.#stickToBottom = true
+    this.#scrollListToBottom()
+  }
+
+  onNotesListScroll(event: Event): void {
+    const el = event.target as HTMLElement
+    this.#stickToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+  }
+
+  #scrollListToBottom(): void {
+    setTimeout(() => {
+      const el = this.notesList()?.nativeElement
+      if (el) el.scrollTop = el.scrollHeight
+    }, 0)
+  }
+
+  readonly #followNewLines = effect(() => {
+    this.visibleNotes().length
+    if (untracked(() => this.#stickToBottom)) untracked(() => this.#scrollListToBottom())
   })
 
   // ── Notes in the swarm ──────────────────────────────────────

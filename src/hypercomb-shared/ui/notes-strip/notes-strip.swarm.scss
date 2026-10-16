@@ -69,3 +69,29 @@
   min-width: 0;
   font-variant-numeric: tabular-nums;
 }
+
+// The line at the foot of the notes list — write where you read. Sticky, so
+// it stays under the last line however long the list grows.
+.cv2-inline-line {
+  position: sticky;
+  bottom: 0;
+  padding: 6px 8px 8px;
+  background: var(--md-surface-c);
+}
+
+.cv2-inline-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 2.1rem;
+  padding: 0 10px;
+  font: inherit;
+  color: inherit;
+  background: rgba($steel, 0.06);
+  border: 1px solid rgba($steel, 0.25);
+  border-radius: var(--hc-radius-control, 2px);
+  outline: none;
+
+  &:focus {
+    border-color: rgba($steel, 0.7);
+  }
+}

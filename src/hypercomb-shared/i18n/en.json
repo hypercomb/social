@@ -2084,6 +2084,7 @@
   "notes.promoteToTopLevel": "Promote to top level",
   "notes.noValidParents": "No valid parent notes.",
   "notes.footerCount": "{count} notes in",
+  "notes.inline.placeholder": "Write here — Enter adds it to the list",
   "notes.swarm.take": "Take",
   "notes.swarm.takeAll": "Take all",
   "notes.swarm.held": "{count} participants hold this note",

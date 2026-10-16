@@ -530,9 +530,10 @@
 
       <!-- Notes tree body. Roots render through the recursive template,
            filtered by the search above. -->
-      <div class="cv2-list thin-scroll notes-strip-body"
+      <div class="cv2-list thin-scroll notes-strip-body" #notesList
            data-note-drag-scope="tree"
-           [class.has-root-drop]="noteDropMode() === 'root'">
+           [class.has-root-drop]="noteDropMode() === 'root'"
+           (scroll)="onNotesListScroll($event)">
         @for (root of visibleNotes(); track trackById($index, root)) {
           <ng-container *ngTemplateOutlet="rowTpl; context: { note: root, depth: 0, path: [$index] }"></ng-container>
         } @empty {
@@ -556,6 +557,15 @@
               }
             </div>
           }
+        }
+        <!-- WRITE WHERE YOU READ: the line at the foot of the list. Enter adds
+             it to the one list everyone in the room sees. -->
+        @if (tab() === 'notes') {
+          <div class="cv2-inline-line">
+            <input #inlineLine type="text" class="cv2-inline-input" autocomplete="off" enterkeyhint="send"
+                   [placeholder]="'notes.inline.placeholder' | t"
+                   (keydown)="onInlineLineKey($event)" />
+          </div>
         }
       </div>
 
