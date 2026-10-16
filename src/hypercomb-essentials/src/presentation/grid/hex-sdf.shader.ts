@@ -1,5 +1,5 @@
 // pixi/hex-sdf.shader.ts
-import { BufferImageSource, Shader, Texture } from 'pixi.js'
+import { Shader, Texture } from 'pixi.js'
 
 type Vec2 = [number, number]
 
@@ -67,11 +67,6 @@ export class HexSdfTextureShader {
         uniforms: uniformDefs,
         u_label: this.toSource(labelAtlas),
         u_cellImages: this.toSource(cellImageAtlas),
-        // Per-tile holders (show-cell's holders texture): until the first page
-        // writes one, a single empty row — every tile reads "no holders".
-        u_holders: this.toSource(new Texture({
-          source: new BufferImageSource({ resource: new Uint8Array(8 * 4), width: 8, height: 1, scaleMode: 'nearest', format: 'rgba8unorm', alphaMode: 'no-premultiply-alpha' }),
-        })),
       },
     })
 
@@ -182,12 +177,6 @@ export class HexSdfTextureShader {
     ;(this.shader.resources as any).u_label = this.toSource(t)
   }
 
-  /** The page's per-tile holders texture (colours of who holds each tile, and
-   *  how many) — read only by tiles flagged popular (vOwned == 2). */
-  public setHolders = (t: Texture): void => {
-    ;(this.shader.resources as any).u_holders = this.toSource(t)
-  }
-
   public setCellImageAtlas = (t: Texture): void => {
     ;(this.shader.resources as any).u_cellImages = this.toSource(t)
   }
@@ -213,7 +202,7 @@ export class HexSdfTextureShader {
     in float aShaded;
     in float aShapeMode;
     in float aIsPortal;
-    in float aOwned;
+    in vec2 aPresence;
 
     out vec2 vUV;
     out vec4 vLabelUV;
@@ -229,7 +218,7 @@ export class HexSdfTextureShader {
     out float vShaded;
     out float vShapeMode;
     out float vIsPortal;
-    out float vOwned;
+    out vec2 vPresence;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
@@ -266,7 +255,7 @@ export class HexSdfTextureShader {
       vShaded = aShaded;
       vShapeMode = aShapeMode;
       vIsPortal = aIsPortal;
-      vOwned = aOwned;
+      vPresence = aPresence;
     }
   `
 
@@ -287,7 +276,7 @@ export class HexSdfTextureShader {
     in float vShaded;
     in float vShapeMode;
     in float vIsPortal;
-    in float vOwned;
+    in vec2 vPresence;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
@@ -307,7 +296,6 @@ export class HexSdfTextureShader {
 
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
-    uniform sampler2D u_holders;
 
     out vec4 fragColor;
 
@@ -567,23 +555,30 @@ export class HexSdfTextureShader {
       base.rgb += vec3(1.0) * highlightStrength;
       base.rgb -= vec3(1.0) * shadowStrength;
 
-      // THEIRS ALONE (jwize, 2026-10-13: "each should have their own color that
-      // prominently highlights the tiles"). A tile only one other participant
-      // holds wears their colour (aBorderColor, the hue of their badge): a light
-      // wash over the face here, and a bold solid rim inside the edge after the
-      // readiness shade below. Static — no glow, no motion. Shared tiles keep
-      // the stack marker; yours keep the default look.
-      if (vOwned > 0.5 && vOwned < 1.5) base.rgb = mix(base.rgb, vBorderColor, 0.18);
-
-      // WHAT PEOPLE ARE ACTIVELY USING (jwize, 2026-10-15). vOwned == 2: two or
-      // more people in the room hold this tile right now. The face lifts in
-      // steps of that one count — 2, 3-4, 5+ — saturation and light together.
-      // Static: nothing moves. The holders' colours ride the rim below.
-      if (vOwned > 1.5) {
-        float holderCount = floor(texelFetch(u_holders, ivec2(6, int(vCellIndex + 0.5)), 0).r * 255.0 + 0.5);
-        float lift = holderCount >= 5.0 ? 0.42 : (holderCount >= 3.0 ? 0.28 : 0.14);
-        float luma = dot(base.rgb, vec3(0.299, 0.587, 0.114));
-        base.rgb = clamp(mix(vec3(luma), base.rgb, 1.0 + lift) * (1.0 + lift * 0.45), 0.0, 1.0);
+      // WAX, NOT COLOURS (jwize, 2026-10-15: "we can create a kind of waxy
+      // graphic perhaps as there is more presence on a tile"). vPresence.x is
+      // how many people in the room hold this tile, you among them. Past one,
+      // wax builds up inside the walls the way a cell fills: a soft lining
+      // whose inner edge is a rounded hexagon, so it pools in the corners
+      // first, and thickens with each holder, easing out (two make a film,
+      // six a full lining). One beeswax tone for everyone, and a faint lip
+      // that catches the light. Static, and drawn under the name.
+      if (vPresence.x > 1.5) {
+        float wax = 1.0 - exp(-(vPresence.x - 1.0) * 0.55);
+        float waxW = u_radiusPx * mix(0.07, 0.24, wax);
+        float waxRound = waxW * 0.9;
+        float dWax = sdHex(rotated, u_radiusPx - waxW - waxRound) - waxRound;
+        float waxZone = smoothstep(-aa, aa, dWax) * hexAlpha;
+        float waxDepth = clamp(dWax / max(waxW, 1.0), 0.0, 1.0);
+        vec3 waxColor = vec3(0.98, 0.83, 0.46);
+        // The body: thin and see-through at the lip, near opaque at the wall.
+        base.rgb = mix(base.rgb, waxColor, waxZone * mix(0.30, 0.78, sqrt(waxDepth)) * mix(0.65, 1.0, wax));
+        // Wax is translucent: a little of its light spills past the lip.
+        float waxSpill = (1.0 - smoothstep(0.0, waxW * 0.9, -dWax)) * (1.0 - waxZone);
+        base.rgb = mix(base.rgb, waxColor, waxSpill * 0.16 * wax);
+        // The lip catches the light on the side facing it.
+        float waxLip = (1.0 - smoothstep(0.0, aa * 1.6, abs(dWax))) * (0.35 + 0.65 * max(-bevelDot, 0.0));
+        base.rgb = mix(base.rgb, vec3(1.0, 0.97, 0.88), waxLip * 0.55 * wax);
       }
 
       vec4 color = base;
@@ -783,6 +778,16 @@ export class HexSdfTextureShader {
         color.a *= 0.7;
       }
 
+      // LAYERS (jwize, 2026-10-15: "it needs to be layers you can switch the
+      // top layer by clicking the member"). One layer is on top: yours, until
+      // you click a member and theirs comes up. A tile the top layer does not
+      // hold sits below it, quieter, never gone, and still there to click.
+      if (vPresence.y > 0.5) {
+        float lgray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+        color.rgb = mix(color.rgb, vec3(lgray), 0.45);
+        color.rgb *= 0.62;
+      }
+
       // readiness shade: this tile's content is still arriving (image/props
       // fetch in flight) — desaturated + faded so a warming tile reads as "not
       // ready yet" while still plainly showing WHAT it is. Static by design (no
@@ -796,32 +801,6 @@ export class HexSdfTextureShader {
         color.rgb = mix(color.rgb, vec3(sgray), 0.6 * k);
         color.rgb *= mix(1.0, 0.55, k);
         color.a *= mix(1.0, 0.5, k);
-      }
-
-      // The participant's rim goes on AFTER the shade: a tile that is not yours
-      // yet still says, at full strength, whose it is.
-      if (vOwned > 0.5 && vOwned < 1.5) {
-        float rimW = max(u_radiusPx * 0.075, 3.0);
-        float ownedRim = (1.0 - smoothstep(rimW - aa, rimW + aa, -d)) * hexAlpha;
-        color.rgb = mix(color.rgb, vBorderColor, ownedRim * 0.92);
-        color.a = mix(color.a, 1.0, ownedRim);
-      }
-
-      // The popular tile's rim: one segment per holder, each in that person's
-      // colour (yours is the tile's own border), so the rim says WHO is using
-      // it while the face says how many. Up to six — one per edge.
-      if (vOwned > 1.5) {
-        int cell = int(vCellIndex + 0.5);
-        float holderCount = floor(texelFetch(u_holders, ivec2(6, cell), 0).r * 255.0 + 0.5);
-        float segments = clamp(holderCount, 1.0, 6.0);
-        // Sector boundaries on the corners, so each holder takes whole edges.
-        float sector = mod(floor((atan(rotated.y, rotated.x) + 3.14159265) / 1.04719755), 6.0);
-        int holder = int(floor(sector * segments / 6.0));
-        vec3 holderColor = texelFetch(u_holders, ivec2(holder, cell), 0).rgb;
-        float rimW = max(u_radiusPx * 0.075, 3.0);
-        float popRim = (1.0 - smoothstep(rimW - aa, rimW + aa, -d)) * hexAlpha;
-        color.rgb = mix(color.rgb, holderColor, popRim * 0.92);
-        color.a = mix(color.a, 1.0, popRim);
       }
 
       // hover accent: TWO distinct border highlights so a pathway tile (has

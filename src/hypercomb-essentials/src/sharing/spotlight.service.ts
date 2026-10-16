@@ -1,22 +1,24 @@
 // sharing/spotlight.service.ts
 //
-// SpotlightService — global "which peer's layer is surfaced" state for
-// the swarm canvas.
+// SpotlightService — global "whose layer is on top" state for the swarm
+// canvas.
 //
 // Model: at the current swarm location there may be N peers actively
-// publishing visuals. The default render composites all of them
-// together. Spotlight cycles through `[off, peerA, peerB, …, peerN]`:
-// when `activePeer` is set, render paints that peer's tiles with their
-// glow color and (eventually) fades the rest. When `activePeer` is
-// null, normal merged render.
+// publishing visuals, each one a layer over the same tiles. Yours is on
+// top until you pick another (jwize, 2026-10-15: "it needs to be layers
+// you can switch the top layer by clicking the member"). Spotlight cycles
+// through `[you, peerA, peerB, …, peerN]`: when `activePeer` is set, their
+// versions of shared tiles show and every tile they do not hold sits below
+// (show-cell + hex-sdf vPresence). When `activePeer` is null, yours is on
+// top. No layer wears a colour.
 //
 // State is global per the current swarm sig. Switching locations
 // resets to `off` (the participant set changes; carrying a peer key
 // across locations would be meaningless).
 //
 // Drives:
-//   - layer-cycle-strip (the UI list) — reads `activePeer` + the
-//     ordered participant list
+//   - the presence badges (shared presence-banner) — a member's badge
+//     sets them on top, theirs or yours again dismisses
 //   - show-cell render hook — paints spotlit tiles
 //   - spotlight-scroll input — alt+wheel cycles through participants
 //

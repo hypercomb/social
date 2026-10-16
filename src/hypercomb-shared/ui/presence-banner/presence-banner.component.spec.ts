@@ -338,9 +338,8 @@ describe('ZI-1 / ZI-6: the words fold the host the tab meets at, from one list �
 })
 
 // jwize, 2026-10-13: "the live label with participants need to be able to be
-// hidden and it gets in the way frequently on mobile" — and "our color should
-// be fixed to a default style".
-describe('the room bar folds to its dot, and your badge wears no hue', () => {
+// hidden and it gets in the way frequently on mobile".
+describe('the room bar folds to its dot', () => {
   it('starts unfolded, folds the whole bar (closing the panel) and unfolds again; a second bar remembers the fold', () => {
     const banner = mount()
     expect(banner.folded()).toBe(false)
@@ -354,10 +353,70 @@ describe('the room bar folds to its dot, and your badge wears no hue', () => {
     expect(mount().folded()).toBe(false)
   })
 
-  it('your own badge has no identity colour — the hues are the others\'', () => {
-    const banner = mount()
-    const self = banner.badges().find(b => b.isSelf)
-    expect(self?.color).toBe('')
-    expect(self?.glow).toBe('')
+})
+
+// jwize, 2026-10-15: "swarm should not be rainbow like that it needs to be
+// layers you can switch the top layer by clicking the member".
+describe('a member\'s badge brings their layer to the top', () => {
+  const ana = 'a'.repeat(64), bo = 'b'.repeat(64), gone = 'c'.repeat(64)
+  let calls: (string | null)[] = []
+  const room = (): Banner => {
+    calls = []
+    services.set('@diamondcoreprocessor.com/SpotlightService', {
+      set: (pk: string | null) => { calls.push(pk); EffectBus.emit('spotlight:changed', { activePeer: pk }) },
+      dismiss: () => { calls.push(null); EffectBus.emit('spotlight:changed', { activePeer: null }) },
+    })
+    const b = mount()
+    connect('open')
+    EffectBus.emit('swarm:presence-changed', { sig: 's', peers: [ana, bo], alone: false })
+    return b
+  }
+  const lit = (b: Banner): string[] => b.badges().filter(x => x.top).map(x => x.key)
+
+  it('yours is on top at first; a member\'s badge puts theirs there, and only theirs stands lit', () => {
+    const b = room()
+    expect(lit(b)).toEqual(['self'])
+    expect(b.badgeTitleKey(b.badges()[1]!)).toBe('presence.layer-top')
+    b.onPeerBadgeClick(ana)
+    expect(calls).toEqual([ana])
+    expect(lit(b)).toEqual([ana])
+    b.onPeerBadgeClick(bo)
+    expect(lit(b)).toEqual([bo])
+  })
+
+  it('their badge again, or your own, brings yours back, and your own then opens the name field', () => {
+    const b = room()
+    b.onPeerBadgeClick(ana)
+    expect(b.badgeTitleKey(b.badges()[1]!)).toBe('presence.layer-mine')
+    b.onPeerBadgeClick(ana)
+    expect(lit(b)).toEqual(['self'])
+    b.onPeerBadgeClick(bo)
+    expect(b.badgeTitleKey(b.badges()[0]!)).toBe('presence.layer-mine')
+    b.onSelfBadgeClick()
+    expect(lit(b)).toEqual(['self'])
+    expect(b.editingName()).toBe(false)
+    b.onSelfBadgeClick()
+    expect(b.editingName()).toBe(true)
+  })
+
+  it('someone not on this page has no layer here: their badge does nothing', () => {
+    const b = room()
+    b.onPeerBadgeClick(gone)
+    expect(calls).toEqual([])
+    expect(lit(b)).toEqual(['self'])
+  })
+
+  it('the panel\'s names still filter: they toggle the participant filter, never the layer', () => {
+    const toggled: string[] = []
+    services.set('@diamondcoreprocessor.com/SwarmFilterService', { selected: new Set<string>(), toggle: (pk: string) => { toggled.push(pk) } })
+    const b = room()
+    b.onFilterToggle(ana)
+    expect(toggled).toEqual([ana])
+    expect(calls).toEqual([])
+  })
+
+  it('no badge wears a colour of its own', () => {
+    const b = room()
+    for (const badge of b.badges()) expect('color' in badge || 'glow' in badge).toBe(false)
   })
 })

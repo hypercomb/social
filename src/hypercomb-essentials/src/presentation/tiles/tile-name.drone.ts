@@ -100,9 +100,9 @@ const FONT_STACK = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace'
  *  that have no light cut. --hc-tile-name-weight overrides. */
 const NAME_WEIGHT = 400
 
-/** THE HOLDER COUNT wears the grey-blue show-cell mixes into a stacked tile's
- *  border (STACK_BORDER), so the number and the tint read as one cue. */
-const HOLDERS_INK = '#9eadc7'
+/** THE HOLDER COUNT wears the beeswax tone the shader lines a held tile with
+ *  (hex-sdf, vPresence), so the number and the wax read as one cue. */
+const HOLDERS_INK = '#f7d180'
 
 const STYLE = `
 .hc-tile-names{position:absolute;left:0;top:0;overflow:hidden;pointer-events:none;user-select:none;z-index:1}

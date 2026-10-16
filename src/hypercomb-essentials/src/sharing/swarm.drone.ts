@@ -2342,8 +2342,8 @@ export class SwarmDrone extends Drone {
    *  tab is just waking, #inWakeWindow). Sorted by the last time each one's
    *  word here CHANGED — most recent at index 0.
    *
-   *  Backing for SpotlightService.participants(), the badge filter and the
-   *  layer-cycle strip UI: a member whose tiles stay here while they walk on
+   *  Backing for SpotlightService.participants() and the participant
+   *  filter: a member whose tiles stay here while they walk on
    *  can still be isolated by their tiles. Who STANDS here — the "(N here)"
    *  count — is participantsStandingAtCurrentSig. Reads in-memory cache
    *  live; multiple peer updates during a debounce window all reflect in

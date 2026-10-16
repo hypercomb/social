@@ -465,7 +465,7 @@ already build imperative DOM — the muscle exists.
   `preview-banner` (191)
 - [ ] Utility band: `toast`, `confirm-dialog`, `trust-prompt`, `action-card`,
   `camera-capture`, `format-painter`, `icon-picker`, `shortcut-sheet`,
-  `activity-log`, `layer-cycle-strip`, `command-palette`, `context-window`
+  `activity-log`, `command-palette`, `context-window`
 - [ ] Viewer band: `files-viewer`, `observe-viewer`, `notes-viewer`,
   `youtube-viewer`, `docs-overlay`, `pools-of-meaning`, `pheromone-tiles`,
   `example-hives`, `presence-banner`, `contact-card`, `mesh-modal`,

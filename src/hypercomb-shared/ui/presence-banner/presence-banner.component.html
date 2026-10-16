@@ -8,8 +8,9 @@
 } @else if (visible()) {
   <div class="presence-wrapper">
 
-    <!-- Initials badge strip: you first, then each peer. Peer badges
-         toggle the participant filter; the caret expands the panel. -->
+    <!-- Initials badge strip: you first, then each peer. A badge brings
+         that member's layer to the top (yours again on a second click, or
+         on your own); the caret expands the panel. -->
     <div class="badge-strip" role="group" [attr.aria-label]="'presence.panel-label' | t">
       @for (b of badges(); track b.key) {
         @if (b.isSelf && editingName()) {
@@ -34,12 +35,12 @@
             [class.self]="b.isSelf"
             [class.add-name]="b.unnamed"
             [class.selected]="b.selected"
+            [class.top]="b.top"
             [class.elsewhere]="b.where === 'elsewhere' || b.where === 'visiting'"
             [class.visiting]="b.where === 'visiting'"
             [class.away]="b.where === 'away'"
-            [style.--presence-identity]="b.color"
             (click)="b.isSelf ? onSelfBadgeClick() : onPeerBadgeClick(b.key)"
-            [attr.aria-pressed]="b.where === 'here' || b.where === 'visiting' ? b.selected : null"
+            [attr.aria-pressed]="b.where === 'here' || b.where === 'visiting' ? b.top : null"
             [attr.aria-label]="badgeTitleKey(b) | t"
             [title]="badgeTitleKey(b) | t">
             {{ b.initials }}
@@ -116,7 +117,7 @@
               <button
                 class="participant-label"
                 type="button"
-                (click)="onPeerBadgeClick(row.pubkey)"
+                (click)="onFilterToggle(row.pubkey)"
                 [attr.aria-pressed]="row.selected"
                 [title]="'presence.filter-toggle' | t">{{ row.label }}</button>
               <div class="participant-actions">

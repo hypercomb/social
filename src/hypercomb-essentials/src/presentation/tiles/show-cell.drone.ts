@@ -1,7 +1,7 @@
 // pixi/show-cell.drone.ts
 import { Drone, EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
-import { Application, BufferImageSource, Container, Geometry, Mesh, Texture } from 'pixi.js'
+import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { publishOwnedProjection } from './derived-projection-cache.js'
@@ -224,15 +224,6 @@ const WITNESSED_BORDER: [number, number, number] = [0.302, 0.365, 0.447]
  *  the COLLECTED green. Prominent by design: taking must read as taking
  *  at the moment of the gesture, not a beat later. */
 const WAND_TAKING_BORDER: [number, number, number] = [1.0, 0.83, 0.42]
-/** Cold grey-blue for a tile that more than one participant holds, mixed into
- *  its own border while YOUR version is the one showing. It marks depth, not
- *  ownership — the moment you roll onto a participant the border takes that
- *  publisher's identity hue instead, so the two readings never overlap. */
-const STACK_BORDER: [number, number, number] = [0.62, 0.68, 0.78]
-/** How much of STACK_BORDER a stacked tile takes. Enough to read as "there is
- *  something under this one" across a page, well short of a state change — a
- *  tile you can roll is still an ordinary tile. */
-const STACK_BORDER_MIX = 0.5
 /** How far a launcher tile may wander while drifting, as a fraction of the hex
  *  circumradius. Small on purpose: the drifted tile must stay inside its home
  *  hex's pointer→axial catchment so clicking the floating tile still opens its
@@ -254,18 +245,15 @@ function hexToRgbTriple(css: string): [number, number, number] | null {
   ]
 }
 
-/** Texels per tile row in the holders texture: six holder colours + the count. */
-const HOLDER_TEXELS = 8
-
-/** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range.
- *  `sat`/`lit` default to the quiet tile identity; a participant's own colour
- *  passes their badge's (presence-banner `#chip`: the same hue, 100% / 64%). */
-function labelToRgb(label: string, sat = 0.5, lit = 0.6): [number, number, number] {
+/** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
+function labelToRgb(label: string): [number, number, number] {
   let hash = 5381
   for (let i = 0; i < label.length; i++) hash = ((hash << 5) + hash + label.charCodeAt(i)) | 0
   hash = hash >>> 0
 
   const hue = (hash % 360) / 360
+  const sat = 0.5
+  const lit = 0.6
 
   const c = (1 - Math.abs(2 * lit - 1)) * sat
   const x = c * (1 - Math.abs(((hue * 6) % 2) - 1))
@@ -1351,10 +1339,10 @@ export class ShowCellDrone extends Drone {
   // check anyway, but a fresh cache per location avoids leaks).
   #sessionSlotByLabel = new Map<string, number>()
 
-  // Currently spotlit peer pubkey (from SpotlightService), or null
-  // when no layer is surfaced. Subscribed on the first heartbeat so
-  // the service is registered by then. Render reads this in
-  // buildCellsFromAxial to override borderColor for matching tiles.
+  // The participant whose layer is on top (from SpotlightService), or
+  // null while yours is. Subscribed on the first heartbeat so the
+  // service is registered by then. The GPU write loop reads it to sink
+  // every tile the top layer does not hold.
   #spotlightPubkey: string | null = null
 
   // Labels rendering the SPOTLIT participant's version of a tile you
@@ -1365,17 +1353,11 @@ export class ShowCellDrone extends Drone {
   // name is in localCellSet. Empty whenever no peer is spotlit.
   #stackVariantLabels = new Set<string>()
 
-  // Depth of each label's participant stack (1 = only one of you holds
-  // it). Read by the GPU write loop to mark tiles that have versions
-  // underneath, so multiplicity is visible BEFORE you roll.
-  #stackDepthByLabel = new Map<string, number>()
   /** WHAT PEOPLE ARE ACTIVELY USING (jwize, 2026-10-15): per label, the
    *  participants in the room who hold the tile right now ('' = you), in
    *  stack order. A live count of the present — never recorded, never kept
    *  (feedback: only concurrent counts). Rebuilt with the stacks each pass. */
   #holdersByLabel = new Map<string, readonly string[]>()
-  /** Per-tile holder colours + count for the shader (holdersTexture). */
-  #holdersTexture: Texture | null = null
 
   // mesh scoping — space + secret feed into the signature key
   #space = ''
@@ -4135,7 +4117,6 @@ export class ShowCellDrone extends Drone {
     // isn't up yet) reads as unstacked instead of inheriting the last
     // location's multiplicity marks.
     const previousVariantLabels = new Set(this.#stackVariantLabels)
-    this.#stackDepthByLabel = new Map()
     this.#holdersByLabel = new Map()
     this.#stackVariantLabels = new Set()
     // Quiet: this is the pre-resolution reset, not a finding. Announcing it
@@ -4185,7 +4166,7 @@ export class ShowCellDrone extends Drone {
         // yours as a variant underneath instead of being dropped.
         //
         // Order is the participant order the swarm resolved (freshest
-        // publisher first, matching the layer-cycle strip), with YOU at
+        // publisher first, matching the spotlight cycle), with YOU at
         // index 0 wherever you hold the label: rolling always starts
         // from your own version and comes back to it.
         const stacks = new Map<string, StackVariant[]>()
@@ -4216,9 +4197,6 @@ export class ShowCellDrone extends Drone {
           })
         }
         setTileStacks(stacks)
-        this.#stackDepthByLabel = new Map(
-          [...stacks].map(([label, variants]) => [label, variants.length]),
-        )
         this.#holdersByLabel = new Map(
           [...stacks].map(([label, variants]) => [label, variants.map(v => v.pubkey)]),
         )
@@ -5309,7 +5287,6 @@ export class ShowCellDrone extends Drone {
 
     if (!this.shader) {
       this.shader = new HexSdfTextureShader(labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
-      if (this.#holdersTexture) this.shader.setHolders(this.#holdersTexture)
       const [ar, ag, ab] = this.#accentColor
       this.shader.setAccentColor(ar, ag, ab)
     } else {
@@ -9066,9 +9043,7 @@ export class ShowCellDrone extends Drone {
     // tile": under superimposition it is the SAME tile seen through their
     // layer, and you hold it. It rides the external path for the BYTES
     // (their streamed image), which must not read as "you don't have this".
-    if (c.external
-      && !this.#stackVariantLabels.has(c.label)
-      && !this.#wandTakingLabels.has(c.label)) return true
+    if (this.#cellIsTheirs(c)) return true
     // YOURS ARE NEVER SHADED IN A SWARM (Jaime, 2026-10-14: "the tiles are not
     // recovering from being shaded out when a swarm starts so it is difficult
     // to see my own tiles. these should be highlighted always in my own theme
@@ -10746,8 +10721,19 @@ export class ShowCellDrone extends Drone {
 
   /** Current shade strength for a cell: 1 while it is still preloading, then
    *  ramping 1 → 0 across SHADE_FADE_MS once it has been released. */
+  /** Somebody else's tile you have not taken: the swarm's standing shade. */
+  #cellIsTheirs(c: Cell): boolean {
+    return c.external
+      && !this.#stackVariantLabels.has(c.label)
+      && !this.#wandTakingLabels.has(c.label)
+  }
+
   #shadeValueFor(c: Cell): number {
-    if (this.#cellIsShaded(c)) return 1
+    // A tile shaded only for being theirs keeps the shade on the page's lists
+    // but not on its face: the layer on top draws it (vPresence.y), so a
+    // member's tiles come up bright with their layer and sit below, once,
+    // under yours (jwize, 2026-10-15).
+    if (this.#cellIsShaded(c)) return this.#cellIsTheirs(c) ? 0 : 1
     const startedAt = this.#shadeFadeStartedAt.get(c.label)
     if (startedAt === undefined) return 0
     const elapsed = performance.now() - startedAt
@@ -11211,14 +11197,10 @@ export class ShowCellDrone extends Drone {
     // Per-tile portal flag — a reference tile (doorway to another lineage) gets
     // the magical hover shimmer instead of the plain pathway/leaf ring.
     const portal = new Float32Array(cells.length * 4)
-    // Per-tile "theirs": 1 wears its participant's colour boldly; 2 is POPULAR —
-    // two or more people hold it, and the shader reads its holders' colours
-    // and count from the holders texture (shader vOwned).
-    const owned = new Float32Array(cells.length * 4)
-    // HOLDERS TEXTURE: one row per tile, HOLDER_TEXELS wide. Texels 0..5 are the
-    // holders' colours in stack order (alpha 255 = present); texel 6's red is
-    // the holder count. A dive never writes it (foreign): its tiles read 0.
-    const holdersData = foreign ? null : new Uint8Array(HOLDER_TEXELS * Math.max(1, cells.length) * 4)
+    // Per-tile presence (shader vPresence): x is how many people in the room
+    // hold the tile (the wax), y is 1 when the layer on top does not hold it
+    // (it sits below). A dive writes zeros: its tiles are nobody's here.
+    const presence = new Float32Array(cells.length * 8)
     const idx = new Uint32Array(cells.length * 6)
 
     let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0, pp = 0
@@ -11294,69 +11276,19 @@ export class ShowCellDrone extends Drone {
         const bgray = bcr * 0.3 + bcg * 0.3 + bcb * 0.3
         bcr = bgray * 0.5; bcg = bgray * 0.5; bcb = bgray * 0.5
       }
-      // Group accent for peer tiles — every peer-contributed tile gets
-      // the publisher's deterministic pubkey-derived color as its
-      // border, ALWAYS (not just in spotlight mode). Each contributor
-      // is visually identifiable at a glance: Alice's tiles glow one
-      // hue, Bob's another. Same labelToRgb hash used for label-based
-      // identity colors, just keyed on pubkey — uniform "identity
-      // color" architecture across own tiles and peer groups.
-      //
-      // Spotlight emphasis: when a peer's layer is surfaced via the
-      // layer-cycle strip / alt+scroll, their tiles render at full
-      // brightness; other peer groups dim slightly so the active layer
-      // pops without losing the rest. Own tiles keep their normal
-      // borderColor (label or substrate-derived).
-      const cellPubkey = foreign ? undefined : this.#peerPubkeyByLabel.get(c.label)
-      // THEIRS, BOLDLY (jwize, 2026-10-13): a tile wears its participant's
-      // colour — their badge's own hue — as a solid rim and a light wash when
-      // it is theirs ALONE (no one else holds it, you included) or, while you
-      // cycle layers, when theirs is the layer on top: every tile of the
-      // surfaced participant, shared ones swapped to their version too. Your
-      // own tiles keep the default look; a shared tile at rest keeps the
-      // stack marker.
-      const spotlit = this.#spotlightPubkey
-      const isOwned = !!cellPubkey && (spotlit === null
-        ? (this.#stackDepthByLabel.get(c.label) ?? 0) <= 1
-        : spotlit === cellPubkey)
-      // POPULAR: two or more people in the room hold this tile — what they
-      // are actively using. The rim wears each holder's colour (yours keeps
-      // the tile's own border) and the face lifts with the count. A tile the
-      // spotlit layer owns keeps that layer's colour instead.
+      // LAYERS, NOT COLOURS (jwize, 2026-10-15: "swarm should not be rainbow
+      // like that it needs to be layers you can switch the top layer by
+      // clicking the member"). No tile wears a participant's colour. One
+      // layer is on top: yours, or the member you clicked, whose versions of
+      // shared tiles are the ones showing (#stackVariantLabels). A tile that
+      // layer does not hold sits below it. And presence is wax: the more
+      // people in the room hold a tile, the more wax lines its walls.
       const holders = foreign ? undefined : this.#holdersByLabel.get(c.label)
-      const popular = !isOwned && !!holders && holders.length >= 2 && !!holdersData
-      if (popular && holdersData) {
-        const row = ci * HOLDER_TEXELS * 4
-        holders!.slice(0, 6).forEach((pk, h) => {
-          const [hr, hg, hb] = pk ? labelToRgb(pk, 1, 0.64) : [bcr, bcg, bcb]
-          holdersData.set([Math.round(hr * 255), Math.round(hg * 255), Math.round(hb * 255), 255], row + h * 4)
-        })
-        // Alpha 255: a texel with alpha 0 reads back as black once premultiplied.
-        holdersData.set([Math.min(255, holders!.length), 0, 0, 255], row + 6 * 4)
-      }
-      const ow = isOwned ? 1 : popular ? 2 : 0
-      owned.set([ow, ow, ow, ow], ci * 4)
-      if (cellPubkey) {
-        const [pr, pg, pb] = isOwned ? labelToRgb(cellPubkey, 1, 0.64) : labelToRgb(cellPubkey)
-        const brightness = isOwned ? 1.0
-          : spotlit === null
-            ? 0.85                                        // no spotlight — all groups at uniform group brightness
-            : (spotlit === cellPubkey ? 1.0               // this peer is active — full intensity
-              : 0.45)                                     // other peer — recede so the active group pops
-        bcr = pr * brightness
-        bcg = pg * brightness
-        bcb = pb * brightness
-      } else if (!foreign && (this.#stackDepthByLabel.get(c.label) ?? 0) > 1) {
-        // Yours is the version showing, but other participants hold
-        // this tile too. Mark the depth on the border so a stacked tile
-        // is findable without hovering every hex — this is the whole
-        // affordance for the wheel roll, and an unmarked stack is a
-        // feature nobody discovers.
-        const m = STACK_BORDER_MIX
-        bcr = bcr * (1 - m) + STACK_BORDER[0] * m
-        bcg = bcg * (1 - m) + STACK_BORDER[1] * m
-        bcb = bcb * (1 - m) + STACK_BORDER[2] * m
-      }
+      const top = this.#spotlightPubkey ?? ''
+      const below = !foreign && (holders ? !holders.includes(top) : top !== '')
+      const held = holders?.length ?? 0
+      const lowered = below ? 1 : 0
+      presence.set([held, lowered, held, lowered, held, lowered, held, lowered], ci * 8)
       borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
       bcp += 12
 
@@ -11413,24 +11345,13 @@ export class ShowCellDrone extends Drone {
       ; (g as any).addAttribute('aShaded', shaded, 1)
       ; (g as any).addAttribute('aShapeMode', shapeAttr, 1)
       ; (g as any).addAttribute('aIsPortal', portal, 1)
-      ; (g as any).addAttribute('aOwned', owned, 1)
+      ; (g as any).addAttribute('aPresence', presence, 2)
       ; (g as any).addIndex(idx)
 
     // save buffer references + label→index map so tile:saved can push
     // in-place attribute updates to the GPU without rebuilding geometry
     // A dive's buffers are its own (see #diveLabelToIndex) — the page's
     // in-place update path must keep pointing at the page's geometry.
-    if (!foreign && holdersData) {
-      // Bind the new texture BEFORE destroying the old one: destroying a
-      // texture the shader's bind group still holds tears the group down.
-      const previous = this.#holdersTexture
-      this.#holdersTexture = new Texture({
-        source: new BufferImageSource({ resource: holdersData, width: HOLDER_TEXELS, height: Math.max(1, cells.length), scaleMode: 'nearest', format: 'rgba8unorm', alphaMode: 'no-premultiply-alpha' }),
-      })
-      this.shader?.setHolders(this.#holdersTexture)
-      previous?.destroy(true)
-    }
-
     if (!foreign) {
       this.#buf = { pos, labelUV, imageUV, hasImage, heat, identityColor, branch, borderColor, divergence, shaded }
       this.#labelToIndex.clear()

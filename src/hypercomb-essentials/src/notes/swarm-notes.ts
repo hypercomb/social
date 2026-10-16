@@ -67,8 +67,7 @@ export function foldPeerRoots(
 }
 
 /** The colour a note wears for the participant who brought it — DJB2 → HSL,
- *  the same algorithm the layer-cycle strip uses for a participant, so one
- *  participant is one colour on the canvas, the strip and the notes. */
+ *  so one participant is one colour across the notes. */
 export function participantColor(pubkey: string): string {
   if (!pubkey) return 'rgb(126, 182, 214)'
   let hash = 5381

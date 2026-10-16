@@ -14,8 +14,8 @@
 // This module holds the other half. Per render pass show-cell publishes
 // the variants it resolved; the stack is ORDERED BY PARTICIPANT — index
 // 0 is you whenever you hold the label, then each publisher in the
-// swarm's freshness order (the same order the layer-cycle strip and the
-// spotlight cycle use, so rolling never disagrees with the strip).
+// swarm's freshness order (the same order the spotlight cycle uses, so
+// rolling never disagrees with alt+wheel).
 //
 // Rolling a stack is a LAYER move, not a tile move: it sets the global
 // SpotlightService to that participant, so every tile they publish

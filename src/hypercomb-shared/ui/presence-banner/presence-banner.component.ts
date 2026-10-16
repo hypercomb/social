@@ -122,22 +122,28 @@ interface SwarmFilterApi {
   clear?: () => void
 }
 
+/** Whose layer is on top (essentials SpotlightService), consumed via IoC
+ *  at runtime — shared never imports modules. */
+interface LayersApi {
+  set: (pubkey: string | null) => void
+  dismiss: () => void
+}
+
 /** One participant chip in the top strip. */
 interface Badge {
   /** Stable track key — pubkey for peers, 'self' for you. */
   key: string
   /** Two-letter initials (or '+' for an unnamed self badge). */
   initials: string
-  /** Fluorescent text colour, hashed from identity. */
-  color: string
-  /** Matching neon glow for text-shadow. */
-  glow: string
   isSelf: boolean
   /** True on the self badge when no label is set yet — renders the
    *  "add name" affordance instead of letters. */
   unnamed: boolean
   /** True when this peer is in the participant-filter selection. */
   selected: boolean
+  /** True when this participant's layer is on top: yours until you click a
+   *  member, then theirs. */
+  top: boolean
   /** Where in the room they are: on this page, sharing here while standing
    *  elsewhere (a page they visited), elsewhere, or away. */
   where: 'self' | 'here' | 'visiting' | 'elsewhere' | 'away'
@@ -157,6 +163,7 @@ const stripFolded = new ParticipantDocument<boolean>({
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const SWARM_FILTER_KEY = '@diamondcoreprocessor.com/SwarmFilterService'
+const LAYERS_KEY = '@diamondcoreprocessor.com/SpotlightService'
 const NAMES_KEY = '@diamondcoreprocessor.com/NameService'
 const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const INVITE_KEY = '@diamondcoreprocessor.com/InviteQueenBee'
@@ -212,6 +219,10 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
   /** True when the swarm published a presence event and we're alone. */
   readonly #alone = signal(true)
+
+  /** The member whose layer is on top, or null while yours is
+   *  (`spotlight:changed`). */
+  readonly #top = signal<string | null>(null)
 
   /** Our own chosen label. Seeded from the swarm on mount, updated
    *  locally the instant we rename (setMyLabel persists it). */
@@ -443,19 +454,18 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     const swarm = this.#swarm()
     const out: Badge[] = []
 
-    // Self badge always leads the strip.
+    // Self badge always leads the strip. Every badge wears the one default
+    // style (jwize, 2026-10-15: "swarm should not be rainbow like that"); the
+    // badge whose layer is on top is the one that stands lit.
     const myLabel = this.#myLabel().trim()
-    // Your badge wears the default style, never a hue (jwize, 2026-10-13:
-    // "our color should be fixed to a default style"): the colours belong to
-    // the others, and their tiles wear the same ones.
+    const top = this.#top()
     out.push({
       key: 'self',
-      color: '',
-      glow: '',
       initials: myLabel ? this.#initials(myLabel) : '+',
       isSelf: true,
       unnamed: !myLabel,
       selected: false,
+      top: top === null,
       where: 'self',
     })
 
@@ -490,13 +500,11 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         || (swarm?.labelFor?.(pk) ?? '').trim()
       out.push({
         key: pk,
-        // Colour seeds from the stable pubkey, not the label — a peer
-        // keeps their hue even before (and across) a rename.
-        ...this.#chip(pk),
         initials: label ? this.#initials(label) : pk.slice(0, 2).toUpperCase(),
         isSelf: false,
         unnamed: false,
         selected: selected.has(pk),
+        top: top === pk,
         where,
       })
     }
@@ -607,6 +615,13 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         if (this.#downTimer) { clearTimeout(this.#downTimer); this.#downTimer = null }
         const conn = this.#conn()
         if (pub && conn) this.#onConnection(conn, true)
+      }),
+
+      // The layer on top — mirror so the lit badge follows it, wherever it
+      // was switched from (a badge, alt+wheel, the service's own reconcile
+      // when the member on top leaves).
+      EffectBus.on<{ activePeer?: string | null }>('spotlight:changed', (p) => {
+        this.#top.set(typeof p?.activePeer === 'string' && p.activePeer ? p.activePeer : null)
       }),
 
       // Participant-filter selection — mirror so badges/rows relight
@@ -720,11 +735,23 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     this.#readPoint()
   }
 
-  /** Click a peer badge (or their row name) → toggle that participant
-   *  in the canvas filter. No selection = everyone shows. Only someone on
-   *  this page has tiles here to filter to — a badge for someone elsewhere
-   *  or away says where they are and does nothing else. */
+  /** Click a member's badge → their layer comes to the top (jwize,
+   *  2026-10-15: "you can switch the top layer by clicking the member"):
+   *  their versions of the tiles you share show, and what they do not hold
+   *  sits below. Click them again, or yourself, and yours comes back. Only
+   *  someone on this page has a layer here: a badge for someone elsewhere or
+   *  away says where they are and does nothing else. */
   onPeerBadgeClick(pubkey: string): void {
+    const layers = this.#layers()
+    if (!layers) return
+    if (this.#top() === pubkey) { layers.dismiss(); return }
+    if (!this.#peers().includes(pubkey)) return
+    layers.set(pubkey)
+  }
+
+  /** Click a member's name in the panel → toggle them in the canvas
+   *  filter. No selection = everyone shows. */
+  onFilterToggle(pubkey: string): void {
     if (!this.#peers().includes(pubkey) && !this.#selected().has(pubkey)) return
     this.#filter()?.toggle(pubkey)
   }
@@ -791,11 +818,12 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
   /** Title for a peer badge: what tapping it does, or where they are. */
   badgeTitleKey(b: Badge): string {
-    if (b.isSelf) return 'presence.set-name'
+    if (b.isSelf) return b.top ? 'presence.set-name' : 'presence.layer-mine'
+    if (b.top) return 'presence.layer-mine'
     if (b.where === 'elsewhere') return 'presence.room-elsewhere'
     if (b.where === 'visiting') return 'presence.room-visiting'
     if (b.where === 'away') return 'presence.room-away'
-    return 'presence.filter-toggle'
+    return 'presence.layer-top'
   }
 
   /** Fold the whole strip to its dot — remembered for this participant. */
@@ -819,8 +847,10 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     this.expanded.set(!this.expanded())
   }
 
-  /** Click your own badge → open the inline name editor. */
+  /** Click your own badge → your layer back on top if a member's is;
+   *  otherwise open the inline name editor. */
   onSelfBadgeClick(): void {
+    if (this.#top() !== null) { this.#layers()?.dismiss(); return }
     this.draftName.set(this.#myLabel())
     this.editingName.set(true)
   }
@@ -895,6 +925,10 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
   #filter(): SwarmFilterApi | undefined {
     return (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(SWARM_FILTER_KEY) as SwarmFilterApi | undefined
+  }
+
+  #layers(): LayersApi | undefined {
+    return (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(LAYERS_KEY) as LayersApi | undefined
   }
 
   #t(key: string): string {
@@ -1054,25 +1088,6 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
   #head(s: string): string {
     return Array.from(s)[0] ?? ''
-  }
-
-  /** Fluorescent chip colour + glow, hashed from a seed so each
-   *  identity gets a stable, distinct neon hue. */
-  #chip(seed: string): { color: string; glow: string } {
-    const hue = this.#hue(seed)
-    return {
-      color: `hsl(${hue} 100% 64%)`,
-      glow: `0 0 6px hsl(${hue} 100% 58% / 0.7), 0 0 2px hsl(${hue} 100% 74% / 0.85)`,
-    }
-  }
-
-  /** DJB2 → hue in [0, 360). */
-  #hue(seed: string): number {
-    let h = 5381
-    for (let i = 0; i < seed.length; i++) {
-      h = ((h << 5) + h + seed.charCodeAt(i)) >>> 0
-    }
-    return h % 360
   }
 }
 

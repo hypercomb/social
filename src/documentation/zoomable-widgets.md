@@ -80,10 +80,11 @@ Scale clamps to `0.6`–`2.5` in `0.05` steps. Double-click the slider to reset 
 
 ## Rollout
 
-**Opted in (11):** `shortcut-sheet` (reference) · `command-palette` ·
+**Opted in (10):** `shortcut-sheet` (reference) · `command-palette` ·
 `mesh-modal` · `portal` · `instruction-catalog` · `swarm-adopt` · `contact-form`
-· `notes-viewer` · `format-painter` (top-right drawer) · `layer-cycle-strip`
-(bottom pill) · `atomizer-bar` (left toolbar). These are centered modals or
+· `notes-viewer` · `format-painter` (top-right drawer) · `atomizer-bar` (left
+toolbar). (`layer-cycle-strip` retired 2026-10-15: the presence badges switch
+the top layer.) These are centered modals or
 small, content-sized floating panels/toolbars — the shapes `zoom` handles
 cleanly.
 

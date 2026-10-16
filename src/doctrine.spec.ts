@@ -437,7 +437,6 @@ describe('doctrine ratchets', () => {
       "history-viewer/history-viewer.component",
       "icon-picker/icon-picker.component",
       "landing-badge/landing-badge.component",
-      "layer-cycle-strip/layer-cycle-strip.component",
       "layout-designer/layout-designer.component",
       "markup-overlay/markup-overlay.component",
       "mesh-modal/mesh-modal.component",
