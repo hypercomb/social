@@ -690,6 +690,8 @@
   "slash.layout": "레이아웃 템플릿 저장, 적용, 목록 또는 제거",
   "slash.into": "선택한 타일을 다른 타일 안으로 이동 — 이 페이지에서는 사라집니다; /into <cell>",
   "slash.go": "타일로 이동: 이 페이지의 이름, 경로, 위로는 .., 루트는 /; /go <tile>",
+  "slash.find": "이름에 단어가 들어 있는 타일 찾기: 여기와 그 아래, 하이브 전체는 /, 경로 아래는 /<route>; /find <word> /",
+  "slash.chats": "끝난 작업 대화 정리: chats tidy, 먼저 보려면 chats tidy dry; /chats tidy",
   "slash.create": "여기에 타일을 만듭니다 — 비헤이비어 모드에서 만드는 유일한 방법입니다; create <name>",
   "slash.swirl": "타일을 인덱스 나선형으로 배열",
   "slash.move": "타일 드래그 재정렬 이동 모드 전환",

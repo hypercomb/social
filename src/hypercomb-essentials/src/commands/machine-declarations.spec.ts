@@ -31,7 +31,9 @@ const ioc = (window as unknown as { ioc: { register(key: string, value: unknown)
 
 await import('./slash-behaviour.drone.js')
 await import('../assistant/bridge.queen.js')
+await import('../assistant/chats.queen.js')
 await import('../assistant/file.queen.js')
+await import('../assistant/find.queen.js')
 await import('../assistant/module.queen.js')
 await import('../clipboard/clipboard.queen.js')
 await import('./create.queen.js')
@@ -102,6 +104,12 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   // everything by behavior").
   go: ['additive', 'local'],           // moves where you stand; writes nothing, refuses a place
                                        // with no tile
+  // Judged on arrival (2026-10-15, two bridge ops retired for words — "retire
+  // the bridge and fix the dialect whenever we reach for the bridge").
+  find: ['additive', 'local'],         // reads only: names the tiles a word is in and how the
+                                       // walk went; writes nothing
+  chats: ['editing', 'local'],         // archives this browser's finished job conversations;
+                                       // never deletes, never a participant's own chat
   raise: ['additive', 'hive'],         // walks to ours; offers another host's creation shaded
                                        // (a view, withdrawn like any other), then walks to it
   recommend: ['additive', 'hive'],     // one signed pheromone deposit on a creation's head

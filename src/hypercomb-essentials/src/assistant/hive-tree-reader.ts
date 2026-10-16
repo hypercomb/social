@@ -211,8 +211,8 @@ export type HypercombFindRead =
     /** The walk found more matches than the limit shows — finished branches
      *  included, so naming the unfinished ones does not say where the rest are. */
     readonly moreMatches?: true
-    /** HOW THE WALK WENT, for whoever diagnoses a cut find (the bridge's
-     *  hive-find): the tiles it opened, and why it stopped short — or the
+    /** HOW THE WALK WENT, for whoever diagnoses a cut find (the `find`
+     *  word says it): the tiles it opened, and why it stopped short — or the
      *  code it failed with when only search-index hints answered. */
     readonly walked?: number
     readonly stoppedBy?: WalkStop

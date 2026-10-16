@@ -50,7 +50,16 @@ reply. `--listen <ms>` keeps listening for slow acts such as a publish.
 | `publish on <domain>` | Names the domain for the tile you stand on, then publishes it (consent asked). |
 | `publish off <domain>` | Takes it off that domain; the last door off withdraws it. |
 
+| `find <word>`, `find <word> /`, `find <word> /<route>` | Names the tiles whose name holds the word, and how the walk went: how many tiles it opened, how long it took, and why it stopped short when it did. The chat's models already read with the same grammar. |
+| `chats tidy`, `chats tidy dry` | Puts away (archives, never deletes) the one-off job conversations sessions hand the hive: answered and quiet ten minutes, or never answered and an hour old. Never a manager's own conversation, a tile's chat, or the participant's own chat. `dry` lists them and moves nothing. |
+
 Notes already had a word: `file on /<route>: <text>`.
+
+Both of the last two were bridge ops for one day (`hive-find`, `chat-tidy`,
+2026-10-15) and were retired for words the same day. What a session HEARS
+never names a withheld tile: the door masks every route the participant
+withheld from outside models as `/(withheld)`, whichever word said it, while
+the participant's own screen still shows their own tiles.
 
 ## Defects the first run found, and their fixes
 

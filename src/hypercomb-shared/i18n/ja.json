@@ -799,6 +799,8 @@
   "slash.layout": "レイアウトテンプレートの保存・適用・一覧・削除",
   "slash.into": "選択したタイルを別のタイルの中へ移動 — このページからは消えます; /into <cell>",
   "slash.go": "タイルへ移動:このページの名前、パス、.. で上へ、/ でルートへ; /go <tile>",
+  "slash.find": "名前に単語を含むタイルを探す:ここと配下、/ でハイブ全体、/<route> でそのルート配下; /find <word> /",
+  "slash.chats": "終わったジョブの会話を片付ける:chats tidy、先に確認するなら chats tidy dry; /chats tidy",
   "slash.raise": "リンク先の作品を最前面へ:自分のものは名前かアドレスで、他ホストのものは自分の巣に影付きで表示; /raise <name>",
   "slash.recommend": "リンク先の作品に言葉を残す:署名付きで、関心が合う読者に見える; /recommend <name> <word>",
   "slash.hold": "リンク先の作品をハイパーデックスに保持:/sets/hyperdex にその名のリンクタイル; /hold <name>",

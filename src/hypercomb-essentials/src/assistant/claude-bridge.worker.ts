@@ -6,8 +6,7 @@ import {
   BRIDGE_CODE_STORE_IOC_KEY, bridgeCodeStore,
   type RemoteSubmitRequest, type RemoteSubmitOutcome, type BridgeCodeStore,
 } from '@hypercomb/core'
-import { HIVE_TREE_READER_IOC_KEY } from './hive-tree-reader.js'
-import { deliverTurnSig, listConversations, readTurns, setConversationArchived, setConversationGoalReached } from './chat-thread.js'
+import { deliverTurnSig, readTurns, setConversationGoalReached } from './chat-thread.js'
 import { appendStep, nextSeq as ledgerNextSeq, readSteps, runForAsk } from './chat-steps.js'
 import { MUTATING_OPS, STEP_SILENT_OPS } from './bridge-ops.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
@@ -164,6 +163,9 @@ const HEALTH_PROBE_DEADLINE_MS = 1_000
  *  sentence can still surface there as a client-side timeout. That belongs to
  *  the caller to raise; it is not a reason to go back to lying. */
 const SUBMIT_DEADLINE_MS = 8_000
+
+/** A hive route said in a line of text: `/people/betz`. */
+const ROUTE_IN_TEXT = /\/[^\s,;:()"'“”]+/g
 
 export class ClaudeBridgeWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -615,8 +617,6 @@ export class ClaudeBridgeWorker extends Worker {
       case 'optimization-add':    return this.#optimizationAdd(req)
       case 'chat-reply':   return this.#chatReply(req)
       case 'chat-goal-reached': return this.#chatGoalReached(req)
-      case 'chat-tidy':    return this.#chatTidy(req)
-      case 'hive-find':    return this.#hiveFind(req)
       case 'thread-read':  return this.#threadRead(req)
       case 'agent-progress': return this.#agentProgress(req)
       case 'agents-announce': return this.#agentsAnnounce(req)
@@ -967,80 +967,6 @@ export class ClaudeBridgeWorker extends Worker {
     return stored
       ? { id: req.id, ok: true, data: { convoId } }
       : { id: req.id, ok: false, error: 'chat-goal-reached could not be stored' }
-  }
-
-  // ─── chat-tidy ─────────────────────────────────────────────────────
-  //
-  // PUT AWAY THE JOBS. Every one-off `manager.cjs ask` is a conversation of
-  // its own (`chat:tile:/::<ms>-<letters>`), and they piled up in the chat
-  // window faster than anyone could read them (jwize, 2026-10-12). This puts
-  // away — archived, not deleted; the window's archive lists them and un-files
-  // with one click — each of those that is answered, not waiting on the
-  // participant, quiet for `olderThanMs` (default 10 minutes), and not in
-  // `keep` (the managers' own conversations). A JOB NOBODY ANSWERED is put
-  // away too once quiet for `staleMs` (default an hour): an ask that hung
-  // never replies, and tidy passing over every unanswered one left a column
-  // of "waiting for reply… find betz /" two days old (jwize, 2026-10-15). An
-  // ask waits fifteen minutes at most, so an hour is never a live one.
-  // `dryRun` lists what it would put away and what it passed over, by
-  // reason, and changes nothing. The participant's own chats and every tile's
-  // chat are never touched.
-  async #chatTidy(req: BridgeRequest): Promise<BridgeResponse> {
-    const extra = req as unknown as { keep?: unknown; olderThanMs?: unknown; staleMs?: unknown; dryRun?: unknown }
-    const keep = new Set(Array.isArray(extra.keep) ? extra.keep.map(String) : [])
-    const olderThanMs = typeof extra.olderThanMs === 'number' ? extra.olderThanMs : 600_000
-    const staleMs = typeof extra.staleMs === 'number' ? extra.staleMs : 3_600_000
-    const dryRun = extra.dryRun === true
-    const now = Date.now()
-    const putAway: { convoId: string; title: string; replied: boolean }[] = []
-    const passed: Record<string, number> = {}
-    const pass = (why: string): void => { passed[why] = (passed[why] ?? 0) + 1 }
-    for (const convo of await listConversations()) {
-      if (convo.archived) continue
-      if (!convo.convoId.startsWith('chat:tile:/::')) { pass(convo.convoId.startsWith('chat:tile:') ? 'tile chat' : 'participant chat'); continue }
-      if (keep.has(convo.convoId)) { pass('manager'); continue }
-      if (convo.asking) { pass('waiting on the participant'); continue }
-      if (now - convo.lastAt < (convo.replied ? olderThanMs : staleMs)) { pass(convo.replied ? 'recent' : 'unanswered, still young'); continue }
-      putAway.push({ convoId: convo.convoId, title: convo.title, replied: convo.replied })
-    }
-    if (dryRun) return { id: req.id, ok: true, data: { wouldArchive: putAway, passed } }
-    let archived = 0
-    for (const convo of putAway) if (await setConversationArchived(convo.convoId, true)) archived++
-    return { id: req.id, ok: true, data: { archived, unanswered: putAway.filter(convo => !convo.replied).length, passed } }
-  }
-
-  // ─── hive-find ─────────────────────────────────────────────────────
-  //
-  // THE CHAT'S OWN FIND, WITHOUT A MODEL (2026-10-15). A cold whole-hive find
-  // came back cut, and the turn kept none of its reads, so nobody could say
-  // whether the walk ran out of time, of tiles, or failed outright — a
-  // manager could only ask a model and read its prose (9 rounds, 94k tokens).
-  // This runs the very reader the chat's `find` runs and answers what it
-  // returned, how long it took, how many tiles it opened, and why it stopped.
-  // Read-only. Its callers speak for outside models, so a withheld tile is
-  // never named: not as a match, not as an unfinished branch.
-  async #hiveFind(req: BridgeRequest): Promise<BridgeResponse> {
-    const query = typeof req.cell === 'string' ? req.cell.trim() : ''
-    if (!query) return { id: req.id, ok: false, error: 'hive-find requires `cell` (the word)' }
-    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
-    type Found = { readonly ok: boolean; readonly matches?: readonly { readonly path: string }[]; readonly unfinished?: readonly string[] } & Record<string, unknown>
-    const reader = get<{ find?: (query: string, segments: readonly string[], options?: { maxNodes?: number }) => Promise<Found> }>(HIVE_TREE_READER_IOC_KEY)
-    if (!reader?.find) return { id: req.id, ok: false, error: 'the hive tree reader is not loaded' }
-    const withheld = get<{ covers?: (s: readonly string[]) => boolean }>('@hypercomb.social/AiWithheld')
-    const hidden = (route: string): boolean => !!withheld?.covers?.(route.split('/').filter(Boolean))
-    const startedAt = Date.now()
-    const found = await reader.find(query, segments, { maxNodes: 200 })
-    const ms = Date.now() - startedAt
-    const { snapshot: _snapshot, ...rest } = found
-    return {
-      id: req.id, ok: true,
-      data: {
-        ...rest,
-        ...(found.matches ? { matches: found.matches.filter(match => !hidden(match.path)) } : {}),
-        ...(found.unfinished ? { unfinished: found.unfinished.filter(route => !hidden(route)) } : {}),
-        ms,
-      },
-    }
   }
 
   // ─── thread-read ───────────────────────────────────────────────────
@@ -2136,15 +2062,24 @@ export class ClaudeBridgeWorker extends Worker {
     // toasts a participant reads. This is how a session READS by speaking:
     // a word that answers (`opens meetups`, `website list`) answers here.
     // `on` replays the last value synchronously; `live` skips that replay.
+    //
+    // WHAT A SESSION HEARS NEVER NAMES A WITHHELD TILE (2026-10-15). The
+    // participant's own screen shows their own tiles, `find` included; a
+    // session is an outside model, and the routes the participant withheld
+    // from those are masked in what it hears, whichever word said them.
     const heard: { kind: 'activity' | 'toast'; text: string; type?: string }[] = []
+    const withheld = get<{ covers?: (s: readonly string[]) => boolean }>('@hypercomb.social/AiWithheld')
+    const masked = (text: string): string => withheld?.covers
+      ? text.replace(ROUTE_IN_TEXT, route => withheld.covers!(route.split('/').filter(Boolean)) ? '/(withheld)' : route)
+      : text
     let live = false
     const unhearActivity = EffectBus.on<{ message?: unknown }>('activity:log', (p) => {
-      if (live && typeof p?.message === 'string') heard.push({ kind: 'activity', text: p.message })
+      if (live && typeof p?.message === 'string') heard.push({ kind: 'activity', text: masked(p.message) })
     })
     const unhearToast = EffectBus.on<{ message?: unknown; title?: unknown; type?: unknown }>('toast:show', (p) => {
       if (!live) return
       const said = [p?.title, p?.message].filter(x => typeof x === 'string' && x).join(': ')
-      if (said) heard.push({ kind: 'toast', text: said, type: typeof p?.type === 'string' ? p.type : undefined })
+      if (said) heard.push({ kind: 'toast', text: masked(said), type: typeof p?.type === 'string' ? p.type : undefined })
     })
     live = true
     const listenMs = Math.max(0, Math.min(Number.isFinite(req.listen) ? Number(req.listen) : 1500, 600_000))

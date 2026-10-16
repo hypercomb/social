@@ -19,8 +19,8 @@
 //   node scripts/bridge/manager.cjs held                     what waits on the participant in Execution
 //   node scripts/bridge/manager.cjs do "<behaviour sentence>"      one line through the command line
 //   node scripts/bridge/manager.cjs op '<request json>'      a raw bridge request
-//   node scripts/bridge/manager.cjs find <word> [/route]     the chat's own find, no model: matches + how the walk went
-//   node scripts/bridge/manager.cjs tidy [minutes|dry]       put away one-off job conversations: answered + quiet that long (default 10), or unanswered an hour; dry = list only
+//   node scripts/bridge/manager.cjs find <word> [/route]     says `find <word> <route>`: matches + how the walk went
+//   node scripts/bridge/manager.cjs tidy [dry]               says `chats tidy`: puts away answered (10 min) and abandoned (1 h) job conversations; dry = list only
 //   node scripts/bridge/manager.cjs roster                   the managers, as the hive holds them
 //   node scripts/bridge/manager.cjs install                  put the managers into the hive (idempotent)
 //
@@ -116,6 +116,13 @@ const unshelled = value => {
   let rest = posix.slice(MSYS_ROOT.length)
   while (rest.startsWith('/')) rest = rest.slice(1)
   return `/${rest}`
+}
+/** Say a sentence on the hive's command line and print what the hive said. */
+const hear = async (sentence, listen) => {
+  const reply = await send({ op: 'submit', text: sentence, listen }, listen + 30_000)
+  if (!reply.ok) return fail(reply.error)
+  const heard = (reply.data?.heard ?? []).map(entry => entry.text)
+  return print(heard.length ? heard.join('\n') : (reply.data?.summary ?? 'the hive said nothing'))
 }
 const segmentsOf = route => unshelled(route ?? '/').split('/').map(part => part.trim()).filter(Boolean)
 const GROUP = 'managers'
@@ -242,7 +249,7 @@ const main = async () => {
           // job conversations piled up past reading). Archived, never deleted:
           // `thread <convoId>` still reads it and the window's archive lists it.
           // A manager's own conversation, and one that stopped mid-leg, stay.
-          if (!Object.values(MANAGERS).includes(convoId) && !left) await send({ op: 'chat-tidy', keep: Object.values(MANAGERS), olderThanMs: 0 })
+          if (!Object.values(MANAGERS).includes(convoId) && !left) await send({ op: 'submit', text: 'chats tidy', listen: 0 })
           return print({ convoId, outcome, rounds, reads, ...(reads === 0 ? { warning: 'nothing was read in this turn: check every claim about the hive yourself' } : {}), tokens, ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
         }
       }
@@ -253,18 +260,16 @@ const main = async () => {
       return print(`chat:tile:/::${Date.now()}-${letters}`)
     }
     case 'find': {
-      // The chat's own find, no model: matches, and how the walk went
-      // (walked, stoppedBy, walkFailed, ms). Withheld tiles are never named.
+      // SAID, NOT BRIDGED (2026-10-15): the hive's own word `find`, which
+      // answers with the matches and how its walk went. A cold first walk
+      // after a reload takes ~40 s, so the reply listens that long.
       if (!first) return fail('find needs a word, and optionally a /route')
-      const reply = await send({ op: 'hive-find', cell: first, segments: segmentsOf(second.trim() || '/') }, 90_000)
-      return reply.ok ? print(reply.data) : fail(reply.error)
+      return hear(`find ${first} ${second.trim() || '/'}`, 45_000)
     }
     case 'tidy': {
-      // Put away the one-off job conversations: answered and quiet, or never
-      // answered and an hour old (never the managers' own). `tidy dry` lists.
-      const dry = first === 'dry'
-      const reply = await send({ op: 'chat-tidy', keep: Object.values(MANAGERS), dryRun: dry, olderThanMs: !dry && Number(first) > 0 ? Number(first) * 60_000 : undefined })
-      return reply.ok ? print(reply.data) : fail(reply.error)
+      // SAID, NOT BRIDGED: `chats tidy` puts away answered and abandoned job
+      // conversations (never a manager's own, never jwize's); `tidy dry` lists.
+      return hear(first === 'dry' ? 'chats tidy dry' : 'chats tidy', 3_000)
     }
     case 'roster': {
       const fromHive = await hiveRoster()

@@ -690,6 +690,8 @@
   "slash.layout": "Enregistrer, appliquer, lister ou supprimer des modèles de disposition",
   "slash.into": "Déplacer les tuiles sélectionnées dans une autre tuile — elles quittent cette page ; /into <cell>",
   "slash.go": "Aller à une tuile : un nom sur cette page, un chemin, .. pour remonter, / pour la racine ; /go <tile>",
+  "slash.find": "Trouver les tuiles dont le nom contient un mot : ici et en dessous, / pour toute la ruche, /<route> sous un chemin ; /find <word> /",
+  "slash.chats": "Ranger les conversations de tâches terminées : chats tidy, ou chats tidy dry pour les voir d'abord ; /chats tidy",
   "slash.create": "Créer une tuile ici — la seule façon d’en créer une en mode comportements ; create <name>",
   "slash.swirl": "Disposer les tuiles en spirale d'index",
   "slash.move": "Basculer le mode déplacement pour réorganiser les tuiles",

@@ -690,6 +690,8 @@
   "slash.layout": "Layout-Vorlagen speichern, anwenden, auflisten oder entfernen",
   "slash.into": "Die ausgewählten Kacheln in eine andere Kachel verschieben — sie verlassen diese Seite; /into <cell>",
   "slash.go": "Zu einer Kachel gehen: ein Name auf dieser Seite, ein Pfad, .. nach oben, / zur Wurzel; /go <tile>",
+  "slash.find": "Kacheln finden, deren Name ein Wort enthält: hier und darunter, / für den ganzen Stock, /<route> unter einem Pfad; /find <word> /",
+  "slash.chats": "Erledigte Auftragsgespräche wegräumen: chats tidy, oder chats tidy dry, um sie zuerst zu sehen; /chats tidy",
   "slash.create": "Eine Kachel hier anlegen — der einzige Weg, im Verhaltensmodus eine zu erstellen; create <name>",
   "slash.swirl": "Kacheln in der Indexspirale anordnen",
   "slash.move": "Verschiebemodus zum Neuanordnen von Kacheln umschalten",
