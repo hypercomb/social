@@ -79,6 +79,8 @@ type StoreLike = {
   /** The raw bytes at a sig — an envelope stays an envelope. */
   getResourceLocal?: (sig: string) => Promise<Blob | null>
   resolve: <T = unknown>(sig: string) => Promise<T>
+  /** Mint a typed incidence around an artifact (runtime Store). */
+  putArtifactMeta?: (kind: 'resource', artifactSig: string, incidence?: Record<string, unknown>) => Promise<string>
 }
 
 type LayerCommitterLike = {
@@ -645,6 +647,32 @@ export class NotesService {
    * or the meta envelopes that name them, resolved exactly as this hive's own
    * reads resolve them. A note whose bytes are not here is left out.
    */
+  /**
+   * When each note arrived on a `notes` slot — any layer's, this hive's or a
+   * swarm peer's — read from the incidence that files it (`at`, ms). A note
+   * filed before arrival times existed has none and is simply absent.
+   */
+  public readonly arrivalsOf = async (entries: readonly unknown[]): Promise<Map<string, number>> => {
+    const out = new Map<string, number>()
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (typeof entry !== 'string' || !SIG_REGEX.test(entry.toLowerCase())) continue
+      try {
+        const blob = await (store?.getResourceLocal ?? store?.getResource)?.(entry.toLowerCase())
+        if (!blob || blob.size > 64 * 1024) continue
+        const parsed: unknown = JSON.parse(await blob.text())
+        if (!isMetaEnvelope(parsed)) continue
+        const payload = metaPayloadOf(parsed)
+        const at = Number((parsed as { at?: unknown }).at)
+        if (payload?.kind !== 'resource' || !Number.isFinite(at)) continue
+        const sig = await this.#noteSigOf(entry.toLowerCase())
+        const held = out.get(sig)
+        if (held === undefined || at < held) out.set(sig, at)
+      } catch { /* a reference that does not read has no arrival */ }
+    }
+    return out
+  }
+
   public readonly notesOfEntries = async (entries: readonly unknown[]): Promise<Note[]> => {
     const sigs = await this.#noteSigsOf(Array.isArray(entries) ? entries : [])
     const out: Note[] = []
@@ -1055,7 +1083,32 @@ export class NotesService {
     const base: { name?: string; [k: string]: unknown } = priorLayer
       ? { ...priorLayer }
       : { name: segments[segments.length - 1] ?? '' }
-    base[NOTES_SLOT] = nextNotes.slice()
+    // ARRIVAL TIME RIDES THE ENVELOPE, never the note: a note that was already
+    // on this list keeps the very entry it had (and with it the time it
+    // arrived); a note new to the list is filed under a fresh incidence
+    // `{ resource: note, relation: 'notes', at }`. The note's bytes never
+    // change, so the same words written by two people stay ONE note — only
+    // each one's own reference to it carries when it arrived on their list.
+    const priorEntries = Array.isArray(priorLayer?.[NOTES_SLOT])
+      ? (priorLayer[NOTES_SLOT] as readonly unknown[]).filter((x): x is string => typeof x === 'string')
+      : []
+    const entryOf = new Map<string, string>()
+    for (const entry of priorEntries) {
+      const sig = await this.#noteSigOf(entry)
+      if (!entryOf.has(sig)) entryOf.set(sig, entry)
+    }
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    const now = Date.now()
+    base[NOTES_SLOT] = await Promise.all(nextNotes.map(async (sig) => {
+      const held = entryOf.get(sig)
+      if (held) return held
+      if (!SIG_REGEX.test(sig) || !store?.putArtifactMeta) return sig
+      try {
+        const entry = await store.putArtifactMeta('resource', sig, { relation: NOTES_SLOT, at: now })
+        this.#noteSigByEntry.set(entry, sig)
+        return entry
+      } catch { return sig }
+    }))
     // `nameSlots: new Set()` is critical. The default `new Set(['children'])`
     // is for callers passing children as NAMES (e.g. the `#add` path which
     // emits `cell:added` events that the committer translates to a name

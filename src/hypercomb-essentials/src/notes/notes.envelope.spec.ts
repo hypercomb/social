@@ -59,18 +59,23 @@ const services: Record<string, unknown> = {
     getResource: async (sig: string) => { const t = resolved(sig); return t === null ? null : blobOf(t) },
     getResourceLocal: async (sig: string) => { const t = raw.get(sig); return t === undefined ? null : blobOf(t) },
     resolve: async (sig: string) => { const t = resolved(sig); return t === null ? null : JSON.parse(t) },
+    putArtifactMeta: async (_kind: 'resource', sig: string, incidence: Record<string, unknown> = {}) =>
+      put(JSON.stringify(mintMetaEnvelope({ resource: sig, ...incidence }))),
   },
   '@diamondcoreprocessor.com/HistoryService': {
     sign: async (lineage: { explorerSegments: () => readonly string[] }) => lineage.explorerSegments().join('/'),
     currentLayerAt: async (loc: string) => layers.get(loc) ?? null,
     peekCurrentLayer: (loc: string) => layers.get(loc) ?? null,
   },
-  // The commit heals the slot as the life primitive does: each note sig
-  // becomes the envelope that names it.
+  // The commit heals the slot as the life primitive does: a bare note sig
+  // becomes the envelope that names it, and an entry that already IS an
+  // envelope is kept as it stands (healLegacyLayer — the incidence, and the
+  // arrival time it carries, survive every later commit).
   '@diamondcoreprocessor.com/LayerCommitter': {
     update: async (segments: readonly string[], layer: Record<string, unknown>) => {
       const notes = Array.isArray(layer['notes']) ? layer['notes'] as string[] : []
-      layers.set(segments.join('/'), { ...layer, notes: await Promise.all(notes.map(envelopeOf)) })
+      const isEnvelope = (sig: string): boolean => { try { return JSON.parse(raw.get(sig) ?? 'null')?.meta === 1 } catch { return false } }
+      layers.set(segments.join('/'), { ...layer, notes: await Promise.all(notes.map(n => isEnvelope(n) ? n : envelopeOf(n))) })
     },
   },
 }
@@ -131,5 +136,18 @@ describe('a note is one note, however a list names it', () => {
     await notes.addAtSegments(['games'], 'arkanoid', 'UPDATE 2026-10-11')
     const read = await notes.getNotesAtSegments(['games', 'arkanoid'])
     expect(read.map(n => n.text)).toEqual(['REQUIREMENT 3 (present, untested)', 'GATE (open): arrival', 'UPDATE 2026-10-11'])
+  })
+
+  it('a note new to the list is filed with its arrival time; the notes already there keep theirs', async () => {
+    const before = Date.now()
+    await notes.addAtSegments(['games'], 'arkanoid', 'ARRIVED 2026-10-16')
+    const slot = layers.get('games/arkanoid')!['notes'] as string[]
+    const arrivals = await notes.arrivalsOf(slot)
+    const added = (await notes.getNotesAtSegments(['games', 'arkanoid'])).find(n => n.text === 'ARRIVED 2026-10-16')!
+    expect(arrivals.get(added.id)).toBeGreaterThanOrEqual(before)
+    // A second commit keeps the entry — and so the time — it already had.
+    const entry = slot[slot.length - 1]
+    await notes.addAtSegments(['games'], 'arkanoid', 'LATER')
+    expect((layers.get('games/arkanoid')!['notes'] as string[])).toContain(entry)
   })
 })

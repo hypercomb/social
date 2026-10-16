@@ -35,10 +35,15 @@ type SwarmShape = {
   labelFor?: (pubkey: string) => string
 }
 type NotesShape = {
+  arrivalsOf?(entries: readonly unknown[]): Promise<Map<string, number>>
   notesOfEntries(entries: readonly unknown[]): Promise<SwarmNote[]>
   takeAtSegments(parent: readonly string[], label: string, sigs: readonly string[]): Promise<string[]>
 }
-type HistoryShape = { getLayerBySig(sig: string): Promise<Record<string, unknown> | null> }
+type HistoryShape = {
+  getLayerBySig(sig: string): Promise<Record<string, unknown> | null>
+  sign?(lineage: { explorerSegments: () => readonly string[] }): Promise<string>
+  currentLayerAt?(locationSig: string): Promise<Record<string, unknown> | null>
+}
 type StoreShape = { getResource?: (sig: string) => Promise<Blob | null> }
 type BrokerShape = { fetchBySig?: (sig: string, type: 'layer' | 'resource', timeoutMs?: number) => Promise<Uint8Array | null> }
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -315,6 +320,14 @@ export class SwarmNotes extends EventTarget {
     const tiles = (swarm.peerTilesAtCurrentSig?.() ?? [])
       .filter(t => typeof t.layerSig === 'string' && SIG.test(t.layerSig) && moleculeKey(t.name) === key)
     const peers: { pubkey: string; notes: SwarmNote[] }[] = []
+    // When each line arrived on its writer's list (the incidence's `at`):
+    // the room reads in the order lines were WRITTEN, the same for everyone
+    // and across reloads. Earliest claim wins when several hold one note.
+    const arrived = new Map<string, number>()
+    const noteArrivals = async (slot: readonly unknown[]): Promise<void> => {
+      const times = await notes.arrivalsOf?.(slot).catch(() => null)
+      for (const [sig, at] of times ?? []) if (!arrived.has(sig) || at < arrived.get(sig)!) arrived.set(sig, at)
+    }
     await Promise.all(tiles.map(async (t) => {
       const layerSig = t.layerSig as string
       let layer = await history.getLayerBySig(layerSig).catch(() => null)
@@ -327,16 +340,24 @@ export class SwarmNotes extends EventTarget {
       const seen = new Set<string>()
       for (const entry of slot) if (typeof entry === 'string') await this.#ensure(entry, 'resource', seen)
       const trees = await notes.notesOfEntries(slot).catch(() => [])
+      await noteArrivals(slot)
       if (trees.length > 0) peers.push({ pubkey: t.peerPubkey, notes: trees })
     }))
     const own = await this.#ownRootIds(cell)
+    try {
+      const here = [...this.#segments(), cell]
+      const mine = await history.currentLayerAt?.(await history.sign!({ explorerSegments: () => here }))
+      if (Array.isArray(mine?.['notes'])) await noteArrivals(mine!['notes'] as unknown[])
+    } catch { /* no own layer yet */ }
     const { roots, heldMine } = foldPeerRoots(own, peers, this.#firstHolder)
     // Stamp what is new, yours in your order first: the room reads as one
     // list in the order its lines arrived here.
     let tick = 0
     const now = Date.now()
     for (const id of [...own, ...roots.map(r => r.note.id)]) {
-      if (!this.#firstSeen.has(id)) this.#firstSeen.set(id, now + tick++ / 1000)
+      const at = arrived.get(id)
+      if (at !== undefined) this.#firstSeen.set(id, at)
+      else if (!this.#firstSeen.has(id)) this.#firstSeen.set(id, now + tick++ / 1000)
     }
     this.#set(cell, key, roots, heldMine)
   }

@@ -155,6 +155,13 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
   await write(a, TILE, 'gamma — Ben never takes this')
   const gamma = await H.waitFor(() => desk(b), v => !!row(v, 'gamma — Ben never takes this'), 45000, 750)
   H.check('a third note arrives', gamma.ok, `${gamma.waitedMs}ms`)
+
+  // ONE LIST, THE SAME FOR EVERYONE: lines read in the order they were
+  // written (each writer's arrival time), not "mine first" on each desk.
+  const order = (v) => (v?.rows ?? []).map(r => r.text).filter(t => !t.startsWith('delta'))
+  const same = await H.waitFor(async () => [order(await desk(a)), order(await desk(b))],
+    ([x, y]) => x.length >= 3 && JSON.stringify(x) === JSON.stringify(y), 20000, 750)
+  H.check('both desks show the room in the same written order', same.ok, JSON.stringify(same.value))
   await word(a, '/leave')
   const gone = await H.waitFor(() => desk(b), v => !row(v, 'gamma — Ben never takes this'), 90000, 1000)
   H.check('leaving takes the untaken note away', gone.ok, `${gone.waitedMs}ms — ${JSON.stringify(gone.value?.rows?.map(r => r.text))}`)
