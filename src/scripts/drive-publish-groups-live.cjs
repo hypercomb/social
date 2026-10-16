@@ -15,8 +15,10 @@
 //   5. the HOST's signed index names one and two — and not three
 //   6. the model may say it: the census offers `groups` to a machine
 //
-// Needs the host running first:
+// Needs a host running first — the content host's own worker:
 //   node scripts/local-content-host.mjs 4291 http://localhost:4253
+// or the relay (the host a tunnel puts in front of a home machine):
+//   node hypercomb-relay/relay.js --port 4293 --content-dir <empty dir> --dev-open-writes
 // Usage: node scripts/drive-publish-groups-live.cjs --url http://localhost:4253 [--host localhost:4291]
 //        [--engine chrome|msedge|chromium] [--out test-results/publish-groups-live]
 
@@ -63,18 +65,18 @@ async function main() {
   })
   const clearToasts = () => page.evaluate(() => sessionStorage.setItem('__live', '[]'))
 
-  const hostState = async () => (await fetch(`http://${host}/__state`)).json()
-  /** Every publisher's signed index this host holds — the worker keeps them
-   *  in the `hive:indexes` pool as `<pool>/<pubkey>` (worker.js). */
+  /** This publisher's signed index, read where every host serves it —
+   *  `/<sign('hive:indexes')>/<pubkey>` (hive-pointer.ts hiveIndexUrl) — so
+   *  the same check reads the worker (`local-content-host.mjs`) and the relay
+   *  (`hypercomb-relay/relay.js`) alike. */
   const hostIndexes = async () => {
     const pool = require('node:crypto').createHash('sha256').update('hive:indexes').digest('hex')
-    const keys = (await hostState()).content.filter(k => k.startsWith(pool + '/'))
-    const out = []
-    for (const key of keys) {
-      const event = await (await fetch(`http://${host}/${key}`)).json()
-      out.push(typeof event.content === 'string' ? JSON.parse(event.content) : event.content)
-    }
-    return out
+    const pubkey = await page.evaluate(async () =>
+      String(await window.ioc?.get?.('@diamondcoreprocessor.com/NostrSigner')?.getPublicKeyHex?.() ?? ''))
+    const res = await fetch(`http://${host}/${pool}/${pubkey}`)
+    if (!res.ok) return []
+    const event = await res.json()
+    return [typeof event.content === 'string' ? JSON.parse(event.content) : event.content]
   }
   const emit = (name, payload) => page.evaluate(({ n, p }) => window.__hypercombEffectBus?.emit?.(n, p), { n: name, p: payload })
   const go = (segs) => page.evaluate((s) => window.ioc?.get?.('@hypercomb.social/Navigation')?.go?.(s), segs)
@@ -110,9 +112,9 @@ async function main() {
   })
 
   try {
-    const before = await hostState().catch(() => null)
-    check('the host answers', !!before, before ? `${before.content.length} objects, ${Object.keys(before.hives).length} hive(s)` : 'start scripts/local-content-host.mjs first')
-    if (!before) return
+    const answers = await fetch(`http://${host}/`).then(r => r.status).catch(() => 0)
+    check('the host answers', answers > 0, answers ? `GET / → ${answers}` : 'start the host first (see the header)')
+    if (!answers) return
 
     await page.goto(url, { waitUntil: 'load' })
     await page.waitForTimeout(9000)
@@ -194,14 +196,13 @@ async function main() {
     check('`groups publish blog`, at the same time → Published Blog', /^Published Blog/.test(String(toast?.title ?? '')), JSON.stringify(toast))
 
     // 5.
-    const after = await hostState()
     const indexes = await hostIndexes()
     const roots = Object.assign({}, ...indexes.map(i => i.roots ?? {}))
     const doors = Object.assign({}, ...indexes.map(i => i.doors ?? {}))
     const onDoor = (label) => (doors[`site/${label}`] ?? []).includes(host)
     check("the host's signed index names the page, one and two — neither publish dropped the other — and not three",
       !!roots['site'] && !!roots['site/one'] && !!roots['site/two'] && !roots['site/three'] && onDoor('one') && onDoor('two'),
-      `roots=${JSON.stringify(Object.keys(roots))} doors=${JSON.stringify(doors)} objects ${before.content.length}→${after.content.length}`)
+      `roots=${JSON.stringify(Object.keys(roots))} doors=${JSON.stringify(doors)}`)
     fs.writeFileSync(path.join(out, 'host-indexes.json'), JSON.stringify(indexes, null, 1))
 
     // 6.

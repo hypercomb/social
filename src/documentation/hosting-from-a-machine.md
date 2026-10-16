@@ -192,7 +192,16 @@ nssm set hypercomb-relay AppParameters "C:\Projects\hypercomb\social\src\hyperco
 - A restart empties the relay's memory: events, wills, hive indexes and the
   map of live participants. Clients reconnect and reassert within seconds, and
   the bytes on disk are untouched. Still, restart at least 24 h before a
-  meeting.
+  meeting. A published index is NOT reasserted: the next publish rebuilds it
+  from empty and reports the other branches as missing.
+- A publish completes on a relay since 2026-10-15. The relay accepts an index
+  only from its owner and only with the body bound in the NIP-98 header (a
+  `payload` tag); until then the client signed the index without it, so the
+  bytes landed and the index write got `401 auth payload tag mismatch` — no
+  publish ever finished on a relay. The worker never asked for the tag.
+  Proof: `hive-pointer.spec.ts` runs the relay's own check, and
+  `scripts/drive-publish-groups-live.cjs --host localhost:4293` publishes to a
+  relay started with `--dev-open-writes`.
 - To roll back, remove the flag and restart. Participants then share names
   only, and their status line says the host isn't taking uploads.
 

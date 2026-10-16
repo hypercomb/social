@@ -14,7 +14,7 @@
 // authenticates the HTTP write with a NIP-98 header — the same envelope
 // HostSyncService uses for byte PUTs.
 
-import { get, poolKindOfMeaning, registerPoolMeaning } from '@hypercomb/core'
+import { get, poolKindOfMeaning, registerPoolMeaning, SignatureService } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { HIVE_INDEX_EVENT_KIND, HIVE_LINK_VERSION } from './hive-link.js'
 import { isPoweredEntrance, readAddresses, readDoorsOf, readEntrances, type ZoneEntrance } from './zone-door.js'
@@ -340,14 +340,20 @@ async function putHiveManifestNow(
   if (!SIG_RE.test(pubkey)) return { ok: false, pubkey: '', createdAt, reason: 'signer returned no pubkey' }
 
   const url = await hiveIndexUrl(host, pubkey)
-  const auth = await nip98Header(signer, url, 'PUT')
+  // The header binds THIS body (its sha256 as the `payload` tag). A relay
+  // refuses an index write without it (relay.js tryServeHiveIndex verifies
+  // `payload: body`); the worker never asked, which is why an index signed
+  // without it landed on every worker and never on a relay.
+  const body = JSON.stringify(signed)
+  const payload = await SignatureService.sign(new TextEncoder().encode(body).buffer as ArrayBuffer)
+  const auth = await nip98Header(signer, url, 'PUT', payload)
   if (!auth) return { ok: false, pubkey, createdAt, reason: 'nip-98 signing failed' }
 
   try {
     const res = await fetch(url, {
       method: 'PUT',
       headers: { Authorization: auth, 'Content-Type': 'application/json' },
-      body: JSON.stringify(signed),
+      body,
     })
     if (!res.ok) return { ok: false, pubkey, createdAt, reason: `host said ${res.status}: ${res.headers.get('X-Reason') ?? ''}`.trim() }
     return { ok: true, pubkey, createdAt }

@@ -3,6 +3,8 @@
 // no network, no IoC.
 
 import { describe, expect, it, vi } from 'vitest'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { clearHiveRoot, setHostListing, fetchHiveIndex, ownHiveRoot, putHiveManifest, setHiveRoot, type HiveIndexResult, type PutHiveResult } from './hive-pointer.js'
 import { HIVE_LINK_VERSION } from './hive-link.js'
@@ -361,5 +363,46 @@ describe('putHiveManifest: two writes from one read both land', () => {
       expect(stored()['roots']).toEqual({ site: OTHER, 'site/one': S1 })
       expect(stored()['offerings']).toEqual({ theme: { a: 1 }, card: { b: 2 } })
     })
+  })
+})
+
+// ── what a relay accepts ────────────────────────────────────────────
+
+describe('putHiveManifest: an index write a relay accepts', () => {
+  it('signs the body it sends — the relay\'s own check (http-auth.js, payload: body) admits it', async () => {
+    const relay = await import(/* @vite-ignore */ pathToFileURL(join(__dirname, '..', '..', '..', 'hypercomb-relay', 'http-auth.js')).href) as {
+      verifyNip98: (req: unknown, writers: Set<string>, options: { payload: Uint8Array }) => { ok: boolean; reason?: string }
+    }
+    const secret = new Uint8Array(32).fill(5)
+    const pubkey = getPublicKey(secret)
+    const shell = globalThis as unknown as { ioc?: { get: (key: string) => unknown } }
+    const original = shell.ioc
+    const fetchBefore = globalThis.fetch
+    const verdicts: { ok: boolean; reason?: string }[] = []
+    shell.ioc = { get: key => key === '@diamondcoreprocessor.com/NostrSigner'
+      ? {
+          getPublicKeyHex: async () => pubkey,
+          signEvent: async (event: { kind: number; created_at: number; tags: string[][]; content: string }) => finalizeEvent(event, secret),
+        }
+      : original?.get(key) }
+    globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method !== 'PUT') return new Response('no index for this publisher', { status: 404 })
+      // The request as relay.js sees it behind a tunnel: TLS ended in front,
+      // the public name in Host, the scheme in X-Forwarded-Proto.
+      const url = new URL(String(input))
+      const headers = new Headers(init.headers)
+      verdicts.push(relay.verifyNip98({
+        method: 'PUT',
+        url: url.pathname,
+        headers: { authorization: headers.get('Authorization'), host: url.host, 'x-forwarded-proto': 'https' },
+        socket: {},
+      }, new Set([pubkey]), { payload: new TextEncoder().encode(String(init.body)) }))
+      return new Response('', { status: verdicts.at(-1)?.ok ? 200 : 401 })
+    }) as typeof fetch
+    try {
+      const put = await putHiveManifest('relay.example.com', { site: SIG }, {}, 0)
+      expect(verdicts).toEqual([{ ok: true, pubkey, role: 'writer' }])
+      expect(put.ok).toBe(true)
+    } finally { shell.ioc = original; globalThis.fetch = fetchBefore }
   })
 })
