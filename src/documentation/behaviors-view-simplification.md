@@ -141,7 +141,13 @@ existing hive goes dark and first-boot in-house behaviors stay lit; from
 then on every NEW or foreign kind arrives dark until lit in the pool.
 `hc:behavior-global-off` stays as a written mirror because the swarm's
 withheld wire (kind 30208) needs an enumerable list. Wake exceptions,
-bindings, hidden records: unchanged.
+bindings, hidden records: unchanged. A kind that carries a record but that
+no module declares is listed as a FOREIGN behaviour waiting on its module —
+unless a retirement names it (`RetiredWord.kinds`, read through
+`SlashBehaviourDrone.retiredKind` after the live census missed): a retired
+view's mark stays on its tiles and in the lit-list, and the pool says
+nothing about it (2026-10-16, when the three retired document views came
+back as foreign rows).
 
 **Deleted from the panel:** the OPEN/×/✓ row buttons, the bind (belongs-here)
 button (bindings still display; the drone's `features:bind` listener was

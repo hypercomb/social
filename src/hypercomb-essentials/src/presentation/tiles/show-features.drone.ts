@@ -99,6 +99,7 @@ const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
 const SITE_VIEW_KEY = '@diamondcoreprocessor.com/SiteViewDrone'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
+const SLASH_BEHAVIOUR_KEY = '@diamondcoreprocessor.com/SlashBehaviourDrone'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -690,13 +691,17 @@ export class ShowFeaturesDrone extends Drone {
     // Kinds nobody here declares but that carry a record — lit or explicitly
     // off on another device, or bound to a tile ahead of their module
     // arriving. Named from the kind, still switchable and still freeable,
-    // so no exception can strand itself.
+    // so no exception can strand itself. A RETIRED kind is the exception to
+    // the exception: its view is not arriving, its record is the lit-list
+    // nobody rewrites, and listing it would offer a view that is gone (the
+    // three document views retired 2026-10-16 came back this way). Asked
+    // only here, after the live census above missed, so live always wins.
     for (const kind of new Set([
       ...readGlobalOffKinds(),
       ...(readGlobalOnKinds() ?? []),
       ...Object.keys(allBindings()),
     ])) {
-      if (seen.has(kind)) continue
+      if (seen.has(kind) || this.#isRetiredKind(kind)) continue
       seen.add(kind)
       const moduleName = moduleFromKind(kind)
       rows.push({
@@ -973,6 +978,12 @@ export class ShowFeaturesDrone extends Drone {
 
   #ioc = () => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
 
+  /** True when a retirement names this decoration kind (`RetiredWord.kinds`,
+   *  declared in code by the module that retired the view). Asked only after
+   *  the live lookup missed — never before it. */
+  #isRetiredKind = (kind: string): boolean =>
+    !!this.#ioc()?.get<{ retiredKind?: (k: string) => unknown }>(SLASH_BEHAVIOUR_KEY)?.retiredKind?.(kind)
+
   /** True when this label carries a registered visual-bee feature — the
    *  honest "has features" signal the selection menu's button gates on.
    *  Synchronous: kindsForLabel is the hot decoration index and
@@ -1068,7 +1079,9 @@ export class ShowFeaturesDrone extends Drone {
       // decide about. Surfaced for visual:* kinds only (tags, images and
       // attachments are decorations, not features); inert until its module
       // arrives, and toggleable meanwhile.
-      if (kind.startsWith('visual:') && !appliedViews.has(kind)) {
+      // A RETIRED kind is not foreign and waits on nothing: the tile keeps
+      // the mark, and this list says nothing about it.
+      if (kind.startsWith('visual:') && !appliedViews.has(kind) && !this.#isRetiredKind(kind)) {
         appliedViews.add(kind)
         const moduleName = moduleFromKind(kind)
         applied.push({

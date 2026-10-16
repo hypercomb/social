@@ -190,6 +190,7 @@ export class SlashBehaviourDrone extends EventTarget {
   }
 
   #retired = new Map<string, RetiredWord>()
+  #retiredKinds = new Map<string, RetiredWord>()
 
   /** RETIRE A WORD — said in code by the module that retired it, the way a
    *  view keeps its `legacyKinds`. Not a pool and not a list anyone can add to
@@ -197,7 +198,24 @@ export class SlashBehaviourDrone extends EventTarget {
    *  switch off a live word, and here nothing can (see `retired`). */
   retire(record: RetiredWord): void {
     const word = record.word.toLowerCase().trim()
-    if (word) this.#retired.set(word, { ...record, word })
+    if (!word) return
+    const kept = { ...record, word }
+    this.#retired.set(word, kept)
+    for (const kind of record.kinds ?? []) {
+      const folded = String(kind ?? '').trim()
+      if (folded) this.#retiredKinds.set(folded, kept)
+    }
+  }
+
+  /** The retirement that names a decoration kind, or undefined. A retired
+   *  view leaves its mark on every tile that wore it AND in the participant's
+   *  lit-list, which is never rewritten — so the Beehaviors pool would list
+   *  the mark forever as a foreign behaviour waiting on a module that will
+   *  never arrive. Read by a lister only after no live bee answered for the
+   *  kind: a module that brings the kind back is live, and live always wins. */
+  retiredKind(kind: string): RetiredWord | undefined {
+    const folded = String(kind ?? '').trim()
+    return folded ? this.#retiredKinds.get(folded) : undefined
   }
 
   /** What a word that no longer runs used to be, or undefined. For a door
@@ -253,8 +271,15 @@ export class SlashBehaviourDrone extends EventTarget {
 }
 
 /** A word that no longer runs: what does it now (`by`), or why nothing does
- *  (`note`). Read by the doors only after their own lookup missed. */
-export type RetiredWord = { readonly word: string; readonly by?: string; readonly note?: string }
+ *  (`note`). Read by the doors only after their own lookup missed. `kinds`
+ *  are the decoration kinds the word's view wore — a tile keeps the mark,
+ *  but no list offers it as a behaviour (see `retiredKind`). */
+export type RetiredWord = {
+  readonly word: string
+  readonly by?: string
+  readonly note?: string
+  readonly kinds?: readonly string[]
+}
 
 /** A behaviour as the auto-wrap carries it: the queen's `rawArgs` rides beside
  *  the declared fields. */
@@ -1030,9 +1055,12 @@ _slashBehaviours.retire({ word: 'layout', note: 'arrange keeps the layouts you h
 // Retired 2026-10-16 with the three document views they opened (jwize): the
 // Living Brief, the Evidence Atlas and the Knowledge Studio. A tile that wore
 // one keeps its mark and every note it read; nothing renders the mark now.
-_slashBehaviours.retire({ word: 'brief', note: 'the Living Brief view is retired — your tiles and notes are all still here' })
-_slashBehaviours.retire({ word: 'atlas', note: 'the Evidence Atlas view is retired — your tiles and notes are all still here' })
-_slashBehaviours.retire({ word: 'studio', note: 'the Knowledge Studio view is retired — your tiles and notes are all still here' })
+// Each record names the mark too, so the Beehaviors pool — which lists every
+// lit kind nobody declares as a foreign behaviour waiting on its module —
+// stops offering a view that is not coming back (jwize, same day).
+_slashBehaviours.retire({ word: 'brief', note: 'the Living Brief view is retired — your tiles and notes are all still here', kinds: ['visual:document:living-brief'] })
+_slashBehaviours.retire({ word: 'atlas', note: 'the Evidence Atlas view is retired — your tiles and notes are all still here', kinds: ['visual:document:evidence-atlas'] })
+_slashBehaviours.retire({ word: 'studio', note: 'the Knowledge Studio view is retired — your tiles and notes are all still here', kinds: ['visual:document:knowledge-studio'] })
 
 // ── auto-discovery of QueenBees ─────────────────────────
 //

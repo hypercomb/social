@@ -10,6 +10,15 @@ read; nothing renders the mark any more, and the Views window no longer lists
 it. Their modes stay as tombstones in `view-mode.service.ts`, so a browser that
 saved one cannot boot into a blank canvas.
 
+Nor does the Beehaviors pool offer them (jwize, same day). The pool lists
+every lit kind no module declares as a *foreign* behaviour waiting on its
+module, and a retired view leaves exactly that record behind: its mark was
+lit while it lived, and the lit-list is never rewritten. Each retire record
+therefore names the mark its view wore (`RetiredWord.kinds`), and
+`show-features` asks `SlashBehaviourDrone.retiredKind(kind)` — only after its
+live census missed, so a module that brings a kind back is listed as live —
+before it lists a kind as foreign, in the pool and in a tile's own list alike.
+
 What remains on this page is the Views window.
 
 ## Views toolwindow

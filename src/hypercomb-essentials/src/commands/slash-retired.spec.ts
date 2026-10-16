@@ -62,10 +62,20 @@ describe('the words this census retired', () => {
   })
 
   it('/brief, /atlas and /studio went with their document views, and the tiles they read stay', () => {
-    expect(drone.retired('brief')).toEqual({ word: 'brief', note: 'the Living Brief view is retired — your tiles and notes are all still here' })
-    expect(drone.retired('atlas')).toEqual({ word: 'atlas', note: 'the Evidence Atlas view is retired — your tiles and notes are all still here' })
-    expect(drone.retired('studio')).toEqual({ word: 'studio', note: 'the Knowledge Studio view is retired — your tiles and notes are all still here' })
+    expect(drone.retired('brief')).toEqual({ word: 'brief', note: 'the Living Brief view is retired — your tiles and notes are all still here', kinds: ['visual:document:living-brief'] })
+    expect(drone.retired('atlas')).toEqual({ word: 'atlas', note: 'the Evidence Atlas view is retired — your tiles and notes are all still here', kinds: ['visual:document:evidence-atlas'] })
+    expect(drone.retired('studio')).toEqual({ word: 'studio', note: 'the Knowledge Studio view is retired — your tiles and notes are all still here', kinds: ['visual:document:knowledge-studio'] })
     for (const word of ['brief', 'atlas', 'studio']) expect(drone.has(word)).toBe(false)
+  })
+
+  it('a retirement names the mark its view wore, so no list offers the view as a behaviour', () => {
+    expect(drone.retiredKind('visual:document:living-brief')?.word).toBe('brief')
+    expect(drone.retiredKind('visual:document:evidence-atlas')?.word).toBe('atlas')
+    expect(drone.retiredKind('visual:document:knowledge-studio')?.word).toBe('studio')
+    expect(drone.retiredKind(' visual:document:knowledge-studio ')?.word).toBe('studio')
+    // A word retired without a view names no kind; a kind nobody retired is nobody's.
+    expect(drone.retiredKind('visual:postit:note')).toBeUndefined()
+    expect(drone.retiredKind('')).toBeUndefined()
   })
 
   it('folds the word as the registry folds a name', () => {
