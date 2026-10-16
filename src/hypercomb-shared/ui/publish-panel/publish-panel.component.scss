@@ -910,3 +910,7 @@ $bulb-warm: #ffcd64;
 // "Publish / <tile>": the tile's name reads louder than the panel's own word.
 .publish-crumb { color: var(--hc-window-ink-quiet); }
 .publish-crumb b { font-weight: 620; color: var(--hc-window-ink-loud); }
+
+.pdoor-noaddress {
+  font-style: italic;
+}

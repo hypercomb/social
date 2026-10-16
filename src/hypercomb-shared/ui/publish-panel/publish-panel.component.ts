@@ -395,21 +395,20 @@ export class PublishPanelComponent implements OnDestroy {
     return this.addressUrl(row, zone).replace(/^https?:\/\//, '')
   }
 
-  /** Where ONE creation lives on a domain: the drone's answer (its own
-   *  address when it has one, else its subdomain), and for a domain the drone
-   *  has not answered for, the same rule here — `<top>.<zone>/<the rest>`.
-   *  Root paths are off on the hosts, so `<zone>/<path>` opened nothing
-   *  (jwize, 2026-10-15: "we need to go to the subdomains"). The hive root is
+  /** Where ONE creation lives on a domain: the drone's answer — its own
+   *  address, else the host's implicit door where the host opens one, else ''
+   *  (the domain has no address for it until it is given its own). For a
+   *  domain the drone has not answered for yet, only the one case that needs
+   *  no index: a top-level place whose key already is its subdomain label.
+   *  The host maps the label to the place verbatim, and root paths are off,
+   *  so anything else would open "nothing published here". The hive root is
    *  the zone itself. */
   addressUrl(row: PublishRow | null, zone: string): string {
-    const given = row?.urls?.[zone]
-    if (given) return given
-    const [top, ...rest] = (row?.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
-    if (!top) return `https://${zone}`
-    const label = top.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63).replace(/-+$/g, '')
-    const path = rest.map(s => encodeURIComponent(s)).join('/')
-    return label ? `https://${label}.${zone}${path ? `/${path}` : ''}` : `https://${zone}`
+    if (row?.urls && zone in row.urls) return row.urls[zone] ?? ''
+    const parts = (row?.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (parts.length === 0) return `https://${zone}`
+    const key = row?.key ?? ''
+    return parts.length === 1 && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(key) ? `https://${key}.${zone}` : ''
   }
 
   // ── OWN ADDRESS ──────────────────────────────────────────────────────

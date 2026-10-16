@@ -92,7 +92,7 @@ import {
   type ZoneEntranceIntent,
 } from './publish-branch.js'
 import {
-  APEX_LABEL, creationUrl, entranceAddresses, entranceHost, foldDnsLabel, isPoweredEntrance, ownAddressRefusal, ownLabelOn,
+  APEX_LABEL, creationUrl, topOpenIn, entranceAddresses, entranceHost, foldDnsLabel, isPoweredEntrance, ownAddressRefusal, ownLabelOn,
   zoneDoor, type ZoneEntrance,
 } from './zone-door.js'
 
@@ -757,7 +757,7 @@ export class PublishStatusDrone extends Drone {
         const row = this.#draftRow(key, segments, live, entry)
         row.doors = indexes.get(hostFor(key))?.doors[key] ?? null
         row.versions = versionsByKey.get(key) ?? []
-        this.#addressRow(row, indexes.get(hostFor(key))?.addresses ?? {})
+        this.#addressRow(row, indexes.get(hostFor(key)))
         this.#entranceRow(row, indexes.get(hostFor(key))?.addresses ?? {}, indexes.get(hostFor(key))?.entrances ?? {})
         draft.push(row)
       }
@@ -986,15 +986,20 @@ export class PublishStatusDrone extends Drone {
     } catch { return null }
   }
 
-  /** Every zone's address for one row, from the signed `addresses` map: the
-   *  own address where the index gives one, the root path everywhere else.
-   *  The row's link is its primary OPEN domain's address. */
-  #addressRow(row: PublishRow, addresses: Record<string, string>): void {
+  /** Every zone's address for one row, from its signed index: the own
+   *  address where the index gives one, else the host's implicit door where
+   *  it opens one, else '' — that domain has no address for it until it is
+   *  given one. The row's link is its primary OPEN domain's address. */
+  #addressRow(
+    row: PublishRow,
+    index: { roots: Record<string, string>; doors: Record<string, string[]>; addresses: Record<string, string> } | undefined,
+  ): void {
+    const addresses = index?.addresses ?? {}
     const zones = [...new Set([...this.#knownZones(), ...row.zones])]
     const urls: Record<string, string> = {}
     const ownLabels: Record<string, string> = {}
     for (const zone of zones) {
-      urls[zone] = creationUrl(zone, row.segments, row.key, addresses)
+      urls[zone] = creationUrl(zone, row.segments, row.key, addresses, topOpenIn(index?.roots, index?.doors, zone))
       const label = ownLabelOn(addresses, zone, row.key)
       if (label) ownLabels[zone] = label
     }
@@ -1002,9 +1007,7 @@ export class PublishStatusDrone extends Drone {
     row.ownLabels = ownLabels
     const open = row.live ? (row.doors ?? row.zones) : []
     const primary = row.zones.find(z => open.includes(z)) ?? open[0] ?? ''
-    row.link = primary && row.segments.length > 0
-      ? (urls[primary] ?? creationUrl(primary, row.segments, row.key, addresses))
-      : null
+    row.link = primary && row.segments.length > 0 ? (urls[primary] || null) : null
   }
 
   /** The opens-as choices: the hexagons ground first, then every registered

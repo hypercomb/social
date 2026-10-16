@@ -120,10 +120,17 @@ describe('the nodes a branch publishes through are zone roots', () => {
 })
 
 describe('the share address', () => {
-  it('is the subdomain of its top place on the primary domain by default — root paths are off on the hosts', async () => {
+  it('is the subdomain of its top place when that place is open there — the host walks the rest', async () => {
     marks = ['cafesociety.buzz']
+    indexRead = { ok: true, manifest: { roots: { 'honey-garden': OTHER_HEAD }, doors: { 'honey-garden': ['cafesociety.buzz'] }, createdAt: 1_700_000_000, pubkey: PUBKEY } }
     const result = await publishBranch(SEGS)
     expect(result.ok && result.address).toBe('https://honey-garden.cafesociety.buzz/rituals')
+  })
+
+  it('is nothing to share when the top place is not open — root paths are off, and the host would answer nothing', async () => {
+    marks = ['cafesociety.buzz']
+    const result = await publishBranch(SEGS)
+    expect(result.ok && result.address).toBe('')
   })
 
   it('is the own address when the signed index gives the creation one there', async () => {

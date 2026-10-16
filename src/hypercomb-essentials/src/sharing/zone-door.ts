@@ -23,10 +23,13 @@
 //   it as well only doubled every miss in the console (and a zone with no
 //   `content.` record in DNS failed to resolve outright).
 //
-// And the address a creation lives at: by default the zone's ROOT PATH
-// (`https://<zone>/<lineage path>`), or — when the participant gave it one —
-// its OWN ADDRESS `https://<label>.<zone>`, declared in the signed hive index
-// as `addresses: { "<label>.<zone>": "<lineage key>" }`.
+// And the address a creation lives at: its OWN ADDRESS `https://<label>.<zone>`
+// when the participant gave it one, declared in the signed hive index as
+// `addresses: { "<label>.<zone>": "<lineage key>" }`, else the host's implicit
+// door at its top place's subdomain where the host opens one (creationUrl).
+// Root paths are off on the hosts.
+
+import { lineageKey } from '../history/lineage-key.js'
 
 const LOOPBACK_RE = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d{1,5})?$/i
 const CONTENT_LABEL = 'content.'
@@ -366,22 +369,62 @@ export const ownLabelOn = (addresses: Record<string, string> | undefined, zone: 
   return ''
 }
 
-/** Where a creation is shown on `zone`: its own address when it has one, else
- *  under its top place's name — `<top>.<zone>/<the rest>`, which the host
- *  answers by reading the first label as the place (jwize, 2026-10-15: "we
- *  need to go to the subdomains"; root paths are off on the hosts, ROOT_PATHS
- *  unset, so `<zone>/<path>` opened nothing). The root path is left only where
- *  no subdomain can be named: a loopback zone, or a reserved first name. */
+/** Where a creation is shown on `zone` — only an address the host opens
+ *  (worker resolveSite + publishedRoot), never one that answers "nothing
+ *  published here":
+ *
+ *    - its own address, when the signed index gives it one (a label or `@`);
+ *    - else `<top>.<zone>/<the rest>` (jwize, 2026-10-15: "we need to go to the
+ *      subdomains") — but the host maps the label to the lineage VERBATIM, so
+ *      only when the top key already is that label (`Meetings` has no
+ *      subdomain), and for a nested creation only when its top place is
+ *      itself open there (`topOpen`; the wildcard maps one label, never a path);
+ *    - on a loopback zone, the root path a local host still serves.
+ *
+ *  '' when there is none: the creation needs an own address to be reached. */
 export const creationUrl = (
   zone: unknown,
   segments: readonly string[],
   key: string,
   addresses?: Record<string, string>,
+  topOpen: (topKey: string) => boolean = () => false,
 ): string => {
   const label = ownLabelOn(addresses, zone, key)
   const own = label ? ownAddressHost(label, zone) : ''
   if (own) return originOf(own)
-  return subdomainUrl(zone, segments) || rootPathUrl(zone, segments)
+  // The hive root is the zone itself; a local host still serves root paths.
+  if (isLoopbackHost(zone) || !(segments ?? []).some(s => String(s ?? '').trim())) return rootPathUrl(zone, segments)
+  return implicitUrl(zone, segments, key, topOpen)
+}
+
+/** Whether a top place is open on `zone` by a signed index: published, and
+ *  either listing that zone among its doors or listing none (open wherever
+ *  the index is served) — creationUrl's `topOpen` for a nested creation. */
+export const topOpenIn = (
+  roots: Record<string, string> | undefined,
+  doors: Record<string, readonly string[]> | undefined,
+  zone: unknown,
+): ((topKey: string) => boolean) => {
+  const z = foldContentLabel(zone)
+  return topKey => !!roots && topKey in roots
+    && (doors?.[topKey] === undefined || (doors[topKey] ?? []).some(d => foldContentLabel(d) === z))
+}
+
+/** The host's implicit door for a creation with no own address, or '' (see
+ *  creationUrl): the top key must already be a DNS label, and a nested
+ *  creation's top place must be open on the zone. */
+export const implicitUrl = (
+  zone: unknown,
+  segments: readonly string[],
+  key: string,
+  topOpen: (topKey: string) => boolean = () => false,
+): string => {
+  const parts = (segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+  if (parts.length === 0) return ''
+  const topKey = parts.length > 1 ? lineageKey([parts[0]]) : String(key ?? '')
+  if (!topKey || foldDnsLabel(topKey) !== topKey) return ''
+  if (parts.length > 1 && !topOpen(topKey)) return ''
+  return subdomainUrl(zone, parts)
 }
 
 /** `<top>.<zone>/<the rest>` for a place, or '' when its top name cannot be a

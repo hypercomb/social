@@ -27,7 +27,7 @@
 
 import { EffectBus, get, lineageKey, registerPoolMeaning } from '@hypercomb/core'
 import type { HiveManifest } from './hive-pointer.js'
-import { foldDnsLabel, originOf, ownAddressHost, ownLabelOn, subdomainUrl } from './zone-door.js'
+import { implicitUrl, originOf, ownAddressHost, ownLabelOn, subdomainUrl } from './zone-door.js'
 
 export const PUBLISH_RESULTS_POOL = 'publish:results'
 /** Emitted with the record after every result lands in the pool. */
@@ -118,11 +118,6 @@ const ownOf = (record: PublishResultRecord, zone: string): string => {
   return address
 }
 
-/** A name the host maps to a lineage as it is: the implicit door at
- *  `<label>.<zone>` opens `roots[label]`, verbatim — so only a key that is
- *  already a DNS label has one. `Meetings` never opens at meetings.<zone>. */
-const isImplicitLabel = (key: string): boolean => !!key && foldDnsLabel(key) === key
-
 /** WHERE A DOOR LEADS — only somewhere the host will open (the worker's
  *  resolveSite and publishedRoot), never a page that answers "nothing
  *  published here" (jwize, 2026-10-15: "the text in the copy needs to be auto
@@ -143,16 +138,7 @@ export const doorAddress = (
   key: string,
   own = '',
   topOpen: (topKey: string) => boolean = () => false,
-): string => {
-  const given = String(own ?? '').trim()
-  if (given) return given
-  const z = String(zone ?? '').trim().toLowerCase()
-  const top = String(segments[0] ?? '').trim()
-  const topKey = segments.length > 1 ? lineageKey([top]) : key
-  if (!z || !isImplicitLabel(topKey)) return ''
-  if (segments.length > 1 && !topOpen(topKey)) return ''
-  return subdomainUrl(z, segments)
-}
+): string => String(own ?? '').trim() || implicitUrl(String(zone ?? '').trim().toLowerCase(), segments, key, topOpen)
 
 const validate = (raw: unknown): PublishResultRecord | null => {
   if (!raw || typeof raw !== 'object') return null

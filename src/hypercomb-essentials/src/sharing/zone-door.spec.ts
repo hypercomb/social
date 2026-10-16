@@ -75,13 +75,24 @@ describe('reads ask zone roots only — never the retired content face', () => {
 })
 
 describe('where a creation lives', () => {
-  it('without an own address, under the subdomain of its top place — root paths are off on the hosts', () => {
+  it('without an own address, only where the host opens one — never a dead subdomain or root path', () => {
+    const open = zone.topOpenIn({ 'jaime-weise': 'a' }, { 'jaime-weise': ['jwize.com'] }, 'jwize.com')
     expect(zone.creationUrl('hypercomb.com', ['jaime-weise'], 'jaime-weise')).toBe('https://jaime-weise.hypercomb.com')
-    expect(zone.creationUrl('jwize.com', ['jaime-weise', 'business-card'], 'jaime-weise/business-card')).toBe('https://jaime-weise.jwize.com/business-card')
-    expect(zone.creationUrl('hypercomb.com', ['Honey Garden', 'rituals'], 'honey-garden/rituals')).toBe('https://honey-garden.hypercomb.com/rituals')
+    expect(zone.creationUrl('jwize.com', ['jaime-weise', 'business-card'], 'jaime-weise/business-card', {}, open))
+      .toBe('https://jaime-weise.jwize.com/business-card')
+    // the top place is not open there: the host would answer "nothing published here"
+    expect(zone.creationUrl('jwize.com', ['jaime-weise', 'business-card'], 'jaime-weise/business-card')).toBe('')
+    // the host maps the label to the place verbatim, so a cased key has no subdomain
+    expect(zone.creationUrl('hypercomb.com', ['Meetings'], 'Meetings')).toBe('')
+    expect(zone.creationUrl('hypercomb.com', ['Honey Garden', 'rituals'], 'Honey-Garden/rituals', {}, () => true)).toBe('')
     expect(zone.creationUrl('hypercomb.com', [], '')).toBe('https://hypercomb.com')
     expect(zone.creationUrl('localhost:4291', ['a'], 'a')).toBe('http://localhost:4291/a')
-    expect(zone.creationUrl('hypercomb.com', ['content'], 'content')).toBe('https://hypercomb.com/content')
+    expect(zone.creationUrl('hypercomb.com', ['content'], 'content')).toBe('')
+  })
+
+  it('reads a top place as open by its index: listed on the zone, or listing no doors at all', () => {
+    const open = zone.topOpenIn({ games: 'a', solo: 'b', shop: 'c' }, { games: ['jwize.com'], shop: ['pblank.ca'] }, 'jwize.com')
+    expect(['games', 'solo', 'shop', 'gone'].map(open)).toEqual([true, true, false, false])
   })
 
 
@@ -96,8 +107,9 @@ describe('where a creation lives', () => {
     const addresses = { 'rituals.cafesociety.buzz': 'honey-garden/rituals' }
     expect(zone.creationUrl('cafesociety.buzz', ['honey-garden', 'rituals'], 'honey-garden/rituals', addresses))
       .toBe('https://rituals.cafesociety.buzz')
-    expect(zone.creationUrl('pluginthematrix.com', ['honey-garden', 'rituals'], 'honey-garden/rituals', addresses))
+    expect(zone.creationUrl('pluginthematrix.com', ['honey-garden', 'rituals'], 'honey-garden/rituals', addresses, () => true))
       .toBe('https://honey-garden.pluginthematrix.com/rituals')
+    expect(zone.creationUrl('pluginthematrix.com', ['honey-garden', 'rituals'], 'honey-garden/rituals', addresses)).toBe('')
     expect(zone.creationUrl('cafesociety.buzz', ['shop'], 'shop', addresses)).toBe('https://shop.cafesociety.buzz')
     expect(zone.ownLabelOn(addresses, 'cafesociety.buzz', 'honey-garden/rituals')).toBe('rituals')
   })
@@ -252,7 +264,7 @@ describe('publish.own.* — catalog parity', () => {
 
   it('finds all fourteen catalogs and the keys to compare', () => {
     expect(catalogs.length).toBeGreaterThanOrEqual(14)
-    expect(keys.length).toBe(13)
+    expect(keys.length).toBe(14)
   })
 
   for (const file of catalogs) {

@@ -109,9 +109,13 @@
           >
             <div class="pdoor-meta">
               <span class="pdoor-zone">{{ zone }}</span>
-              <span class="pdoor-address">{{ address(current(), zone) }}</span>
+              @if (address(current(), zone); as shown) {
+                <span class="pdoor-address">{{ shown }}</span>
+              } @else {
+                <span class="pdoor-address pdoor-noaddress">{{ 'publish.own.needed' | t }}</span>
+              }
             </div>
-            @if (doorOn(current(), zone)) {
+            @if (doorOn(current(), zone) && addressUrl(current(), zone)) {
               <a
                 class="pdoor-go"
                 [href]="addressUrl(current(), zone)"

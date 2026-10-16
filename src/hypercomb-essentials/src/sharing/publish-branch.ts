@@ -46,7 +46,7 @@ import {
 import { isReservedRootKey } from './hive-link.js'
 import {
   ENTRANCES_MAX, ENTRANCE_POWERS, boundLineage, creationUrl, entranceHost, foldContentLabel, isPoweredEntrance, ownAddressHost,
-  ownAddressRefusal, ownLabelOn, readEntrance, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
+  ownAddressRefusal, ownLabelOn, readEntrance, topOpenIn, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
 } from './zone-door.js'
 import type { ModuleAssessmentRecord } from '../assistant/module-review.js'
 
@@ -503,9 +503,12 @@ export async function publishBranch(
   const scheme = LOOPBACK_RE.test(linkHost) ? 'http' : 'https'
   const url = `${scheme}://${linkHost}/${bundleSig}`
   // The address a person shares: the branch's primary open domain, at its
-  // root path unless the signed index gives it an own address there.
+  // own address there, else the host's implicit door when it opens one ('' —
+  // none to share — for a cased top name or a nested place under a closed top).
   const primary = (doors[key] ?? [])[0] || answering[0] || ''
-  const address = primary ? creationUrl(primary, segs, key, read.ok ? read.manifest.addresses : undefined) : ''
+  const address = primary
+    ? creationUrl(primary, segs, key, read.ok ? read.manifest.addresses : undefined, topOpenIn(roots, doors, primary))
+    : ''
 
   // 8. Write the ledger record BEFORE confirming. The PUT already happened —
   //    if the tab closes during confirmation the act still has to be on
