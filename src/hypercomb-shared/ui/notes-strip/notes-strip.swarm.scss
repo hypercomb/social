@@ -153,3 +153,103 @@
     color: $steel;
   }
 }
+
+// QUIET ROWS. A line someone else wrote shows its words, its author's colour
+// down the edge and, quietly, who and how many. Its two acts — ✓ take and ✕
+// dismiss — appear only while the line is hovered or focused (always on a
+// touch screen), so a full room still reads as a list, not a control panel.
+.cv2-note.is-peer .cv2-peer-meta {
+  gap: 8px;
+  align-self: center;
+}
+
+.cv2-note.is-peer .cv2-peer-by {
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+.cv2-peer-acts {
+  display: inline-flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--md-dur-short, 120ms) ease;
+}
+
+.cv2-note:hover .cv2-peer-acts,
+.cv2-note:focus-within .cv2-peer-acts {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .cv2-peer-acts { opacity: 1; }
+}
+
+.cv2-peer-acts .cv2-peer-check {
+  width: 22px;
+  height: 22px;
+  border-color: transparent;
+  background: rgba($steel, 0.1);
+
+  &:hover { border-color: rgba($steel, 0.6); }
+}
+
+.cv2-peer-acts .cv2-peer-dismiss:hover {
+  color: var(--md-error, #e57373);
+  border-color: currentColor;
+}
+
+// ── RHYTHM ─────────────────────────────────────────────────────────────────
+// One vertical rhythm for every line in the list, yours and the room's: an
+// 8px beat, 1.5 leading, a hairline between lines, the meta on one quiet
+// sans line beside the text — and the same gutter on the write line and the
+// footer, so the column lines up from the first line to the last.
+.cv2-list .cv2-note {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-right: 12px;
+  align-items: center;
+  border-bottom: 1px solid rgba($steel, 0.08);
+}
+
+.cv2-list .cv2-note .cv2-note-text {
+  font-size: scaled(14.5px);
+  line-height: 1.5;
+}
+
+.cv2-peer-meta,
+.cv2-peer-by,
+.cv2-peer-held {
+  font-family: var(--hc-face-sans);
+  font-size: scaled(11.5px);
+  letter-spacing: 0;
+}
+
+.cv2-peer-meta {
+  margin-left: 16px;
+  gap: 10px;
+}
+
+.cv2-inline-line {
+  padding: 10px 12px 12px;
+}
+
+.cv2-inline-input {
+  font-family: var(--hc-notes-face);
+  font-size: scaled(14.5px);
+  min-height: 2.5rem;
+  padding: 0 12px;
+}
+
+.cv2-foot:has(.cv2-swarm-counts) {
+  gap: 14px;
+  padding: 10px 12px;
+  font-family: var(--hc-face-sans);
+  font-size: scaled(11.5px);
+  letter-spacing: 0;
+}
+
+.cv2-foot .cv2-peer-take {
+  font-family: var(--hc-face-sans);
+  font-size: scaled(11.5px);
+  padding: 4px 10px;
+}

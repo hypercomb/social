@@ -390,8 +390,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     (() => {
       try {
         const stored = localStorage.getItem(NOTES_STRIP_FACE_KEY) as NotesFace | null
-        return stored && (NOTES_FACES as readonly string[]).includes(stored) ? stored : 'mono'
-      } catch { return 'mono' }
+        return stored && (NOTES_FACES as readonly string[]).includes(stored) ? stored : 'sans'
+      } catch { return 'sans' }
     })()
   )
 

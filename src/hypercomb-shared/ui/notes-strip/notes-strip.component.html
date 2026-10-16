@@ -449,20 +449,24 @@
                  Take on someone else's root. -->
             @if (isPeerRoot(note.id) || heldCount(note.id) > 0) {
               <span class="cv2-peer-meta" (click)="$event.stopPropagation()">
-                @if (isPeerRoot(note.id)) {
-                  <button type="button" class="cv2-peer-by" (click)="ignorePeer(note.id, $event)"
-                          [title]="'notes.swarm.ignore' | t: { name: peerLabel(note.id) }">{{ peerLabel(note.id) }}</button>
-                }
                 @if (heldCount(note.id) > 0) {
                   <span class="cv2-peer-held" [title]="'notes.swarm.held' | t: { count: heldCount(note.id) }">×{{ heldCount(note.id) }}</span>
                 }
                 @if (isPeerRoot(note.id)) {
-                  <button type="button" class="cv2-peer-check" (click)="takePeer(note.id, $event)"
-                          [title]="'notes.swarm.takeHint' | t" [attr.aria-label]="'notes.swarm.take' | t">
-                    <span class="mat-sym" aria-hidden="true">check</span>
-                  </button>
-                  <button type="button" class="cv2-ignored-act" (click)="dismissPeer(note.id, $event)"
-                          [title]="'notes.swarm.dismissHint' | t">{{ 'notes.swarm.dismiss' | t }}</button>
+                  <button type="button" class="cv2-peer-by" (click)="ignorePeer(note.id, $event)"
+                          [title]="'notes.swarm.ignore' | t: { name: peerLabel(note.id) }">{{ peerLabel(note.id) }}</button>
+                }
+                @if (isPeerRoot(note.id)) {
+                  <span class="cv2-peer-acts">
+                    <button type="button" class="cv2-peer-check" (click)="takePeer(note.id, $event)"
+                            [title]="'notes.swarm.takeHint' | t" [attr.aria-label]="'notes.swarm.take' | t">
+                      <span class="mat-sym" aria-hidden="true">check</span>
+                    </button>
+                    <button type="button" class="cv2-peer-check cv2-peer-dismiss" (click)="dismissPeer(note.id, $event)"
+                            [title]="'notes.swarm.dismissHint' | t" [attr.aria-label]="'notes.swarm.dismiss' | t">
+                      <span class="mat-sym" aria-hidden="true">close</span>
+                    </button>
+                  </span>
                 }
               </span>
             }

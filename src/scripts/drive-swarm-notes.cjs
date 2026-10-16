@@ -69,7 +69,7 @@ const desk = (c) => H.evalSafe(() => c.page.evaluate(() => {
     by: r.querySelector('.cv2-peer-by')?.textContent ?? '',
     held: r.querySelector('.cv2-peer-held')?.textContent ?? '',
     take: !!r.querySelector('.cv2-peer-check'),
-    dismiss: !!r.querySelector('.cv2-ignored-act'),
+    dismiss: !!r.querySelector('.cv2-peer-dismiss'),
   }))
   return { rows, counts: el?.querySelector('.cv2-swarm-counts')?.textContent?.trim() ?? '', footer: el?.querySelector('.cv2-foot')?.textContent?.replace(/\s+/g, ' ').trim() ?? '' }
 }))
@@ -147,7 +147,7 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
   await H.waitFor(() => desk(b), v => !!row(v, 'delta — Ben dismisses this'), 45000, 750)
   await H.evalSafe(() => b.page.evaluate(() => {
     const r = [...document.querySelectorAll('hc-notes-strip .cv2-note[data-note-id]')].find(x => x.querySelector('.cv2-note-text')?.textContent?.trim() === 'delta — Ben dismisses this')
-    r?.querySelector('.cv2-ignored-act')?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    r?.querySelector('.cv2-peer-dismiss')?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
   }))
   const dismissed = await H.waitFor(() => desk(b), v => !row(v, 'delta — Ben dismisses this') && /dismissed/.test(v.footer ?? ''), 10000, 300)
   H.check('dismiss hides the line and the footer says so', dismissed.ok, JSON.stringify(dismissed.value?.footer))
