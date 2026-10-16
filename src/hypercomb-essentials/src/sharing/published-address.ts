@@ -16,8 +16,12 @@
 //
 // Every read is bounded in time and size. Pure: fetch and the index read are passed in for tests. A root-path
 // address (https://<zone>/<path>) is not read here yet; its door record is carried only inside its page.
+//
+// A NESTED creation is shown under its top place's door, `<top>.<zone>/<the rest>` (creationUrl). The host keeps
+// no record for the rest, so the top door is read and verified as above, and the nested head is the one the same
+// signed index names for `<top lineage>/<the rest>` — the index is the proof for every key it signs.
 
-import { SignatureService } from '@hypercomb/core'
+import { lineageKey, SignatureService } from '@hypercomb/core'
 import { fetchHiveIndex, type HiveIndexResult } from './hive-pointer.js'
 
 const SIG = /^[0-9a-f]{64}$/
@@ -79,9 +83,22 @@ const boundTo = (host: string, lineage: string, index: { addresses?: Record<stri
   return Array.isArray(doors) && doors.some(z => { const zone = String(z ?? '').toLowerCase(); return !!zone && (host === zone || host.endsWith('.' + zone)) })
 }
 
+/** An address split at its door: the host root, and the route below it (`<top>.<zone>/<the rest>`). */
+const splitAtDoor = (address: string): { door: string; rest: string[] } | null => {
+  const raw = String(address ?? '').trim()
+  if (!raw) return null
+  try {
+    const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : 'https://' + raw)
+    if (url.username || url.password) return null
+    const rest = url.pathname.split('/').filter(Boolean).map(part => decodeURIComponent(part).trim()).filter(Boolean)
+    return { door: `${url.protocol}//${url.host}/`, rest }
+  } catch { return null }
+}
+
 export async function readAddressHead(address: string, deps: AddressHeadDeps = {}): Promise<AddressHead> {
-  const url = doorUrlOf(address)
-  if (!url) return { error: 'not-an-address' }
+  const split = splitAtDoor(address)
+  const url = split ? doorUrlOf(split.door) : null
+  if (!url || !split) return { error: 'not-an-address' }
   const get = deps.fetch ?? fetch
   const host = url.hostname.toLowerCase()
   const location = await SignatureService.sign(new TextEncoder().encode(host).buffer as ArrayBuffer)
@@ -116,8 +133,18 @@ export async function readAddressHead(address: string, deps: AddressHeadDeps = {
   if (String(index.manifest.roots[lineage] ?? '').toLowerCase() !== head) return { error: 'unverified' }
   if (!boundTo(host, lineage, index.manifest)) return { error: 'unverified' }
 
+  const publishedAt = Number(index.manifest.createdAt) || 0
+  if (split.rest.length > 0) {
+    // the nested creation's own head, from the index that just verified its top door — only under a top
+    // place's door, the one shape creationUrl gives a route below a door
+    if (lineage.includes('/')) return { error: 'no-door' }
+    const key = `${lineage}/${lineageKey(split.rest)}`
+    const nested = String(index.manifest.roots[key] ?? '').toLowerCase()
+    if (!SIG.test(nested)) return { error: 'no-door' }
+    return { head: nested, pubkey, lineage: key, title: split.rest[split.rest.length - 1]!.slice(0, 120), host: url.host, publishedAt }
+  }
   const title = typeof record['title'] === 'string' ? record['title'].trim().slice(0, 120) : ''
-  return { head, pubkey, lineage, title, host: url.host, publishedAt: Number(index.manifest.createdAt) || 0 }
+  return { head, pubkey, lineage, title, host: url.host, publishedAt }
 }
 
 /** Bytes by signature, read from one host only (the card's own) and checked against the name. Nothing about the

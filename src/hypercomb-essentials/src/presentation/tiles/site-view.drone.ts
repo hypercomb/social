@@ -809,6 +809,9 @@ export class SiteViewDrone extends Drone {
     // Move <body> children into a host div pinned over the viewport.
     const host = document.createElement('div')
     host.id = 'hc-site-view-host'
+    // The page's content sig on the host itself, so a page with no inline
+    // <style> is still named (the domain links key what it names by it).
+    host.setAttribute('data-hc-cell-page', pageSig)
     host.style.cssText =
       // Inset by any docked panel's reservation (`--hc-inset-<side>`, mirrored
       // from `viewport:inset`) so the Views window can stay open beside the page.

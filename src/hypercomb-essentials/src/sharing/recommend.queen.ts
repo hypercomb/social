@@ -14,7 +14,7 @@
 // the creation, as `raise` reads it. The link control says this word on a
 // click, asking for the word first.
 
-import { EffectBus, QueenBee, type MachineGrammar } from '@hypercomb/core'
+import { EffectBus, get, QueenBee, type MachineGrammar } from '@hypercomb/core'
 import { readLinkHead, resolveLink, splitLastWord } from './link-acts.js'
 import { mintDeposit } from '../pheromones/pheromone-deposits.js'
 import { latestByLineageKey } from './publish-heads.js'
@@ -38,10 +38,10 @@ export class RecommendQueenBee extends QueenBee {
 
   protected async execute(args: string): Promise<void> {
     const { head: what, last: word } = splitLastWord(args)
-    if (!what || !word) { this.#say('Recommend: say which and the word, for example "recommend business-card cigars"'); return }
+    if (!what || !word) { this.#say(this.#t('recommend.usage', 'Recommend: say which and the word, for example "recommend business-card cigars"')); return }
 
     const link = await resolveLink(what)
-    if (link.kind === 'none') { this.#say(`Recommend: nothing published is called "${what}"`); return }
+    if (link.kind === 'none') { this.#say(this.#t('recommend.none', 'Recommend: nothing published is called "{what}"', { what })); return }
 
     let target = ''
     let label = what
@@ -51,20 +51,28 @@ export class RecommendQueenBee extends QueenBee {
       label = link.door.name
       if (!target) {
         const read = await readLinkHead(link.door.address)
-        if ('error' in read) { this.#say(`Recommend: ${link.door.name} has no published head to deposit on (${read.error})`); return }
+        if ('error' in read) { this.#say(this.#t('recommend.no-head', 'Recommend: {name} has no published head to deposit on ({error})', { name: link.door.name, error: read.error })); return }
         target = read.head
       }
     } else {
       const read = await readLinkHead(link.address)
-      if ('error' in read) { this.#say(`Recommend: ${link.address} could not be read (${read.error})`); return }
+      if ('error' in read) { this.#say(this.#t('recommend.unread', 'Recommend: {address} could not be read ({error})', { address: link.address, error: read.error })); return }
       target = read.head
       label = read.title || link.address
     }
 
     const minted = await mintDeposit(target, word)
-    if (!minted.ok) { this.#say(`Recommend: the deposit was refused (${minted.reason})`); return }
-    this.#say(`Recommend: "${word}" left on ${label}, signed by you`)
-    EffectBus.emit('toast:show', { type: 'success', message: `"${word}" left on ${label}` })
+    if (!minted.ok) { this.#say(this.#t('recommend.refused', 'Recommend: the deposit was refused ({reason})', { reason: minted.reason })); return }
+    this.#say(this.#t('recommend.left', 'Recommend: "{word}" left on {label}, signed by you', { word, label }))
+    EffectBus.emit('toast:show', { type: 'success', message: this.#t('recommend.toast', '"{word}" left on {label}', { word, label }) })
+  }
+
+  /** Localized text; `t()` hands the key back when it has none. */
+  #t(key: string, fallback: string, params?: Record<string, unknown>): string {
+    const i18n = get<{ t(k: string, p?: Record<string, unknown>): string }>('@hypercomb.social/I18n')
+    const text = i18n?.t?.(key, params)
+    if (text && text !== key) return text
+    return fallback.replace(/\{(\w+)\}/g, (all, token: string) => params && token in params ? String(params[token]) : all)
   }
 
   #say(message: string): void {

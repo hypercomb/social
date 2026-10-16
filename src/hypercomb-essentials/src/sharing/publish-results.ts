@@ -27,7 +27,7 @@
 
 import { EffectBus, get, lineageKey, registerPoolMeaning } from '@hypercomb/core'
 import type { HiveManifest } from './hive-pointer.js'
-import { creationUrl, foldDnsLabel, originOf, ownAddressHost } from './zone-door.js'
+import { foldDnsLabel, originOf, ownAddressHost, ownLabelOn, subdomainUrl } from './zone-door.js'
 
 export const PUBLISH_RESULTS_POOL = 'publish:results'
 /** Emitted with the record after every result lands in the pool. */
@@ -46,8 +46,15 @@ export interface PublishResultRecord {
   /** Bare domain the index was written through. */
   host: string
   /** Where the creation opens (publish only): its own address on the primary
-   *  domain, else that domain's root path. */
+   *  domain, else the address the rule gives it there. */
   address?: string
+  /** The primary domain the address is on — not always the host the index
+   *  was written through (the primary may not answer yet). Absent on results
+   *  from before it was recorded. */
+  zone?: string
+  /** True when `address` is an own address the publisher signed, so no rule
+   *  derives it. Absent on results from before it was recorded. */
+  own?: boolean
   sealed?: string
   status?: 'confirmed' | 'unconfirmed'
 }
@@ -75,31 +82,76 @@ type StoreLike = {
   ) => Promise<string | null>
 }
 
-const zoneOfAddress = (address: string): string => {
-  try { return new URL(address).hostname.toLowerCase() } catch { return '' }
+const urlOf = (address: string): URL | null => {
+  try { return new URL(address) } catch { return null }
 }
 
-/** The zone a door's address lives on: the apex the index was written
- *  through. An own address `<label>.<zone>` and a root path `<zone>/<path>`
- *  both fold to the host that published them. */
-const zoneOf = (record: { host: string; address?: string }): string =>
-  String(record.host ?? '').trim().toLowerCase() || zoneOfAddress(record.address ?? '')
+/** The zone a result's door is on: the primary it recorded. An older result
+ *  recorded only the host the index was written through, which is the zone
+ *  unless the address says otherwise — a root path names its zone, a
+ *  subdomain the zone below its first label. */
+const zoneOf = (record: Pick<PublishResultRecord, 'host' | 'address' | 'zone'>): string => {
+  const recorded = String(record.zone ?? '').trim().toLowerCase()
+  if (recorded) return recorded
+  const host = String(record.host ?? '').trim().toLowerCase()
+  const url = urlOf(String(record.address ?? ''))
+  const at = url?.hostname.toLowerCase() ?? ''
+  if (!at || at === host || at.endsWith(`.${host}`)) return host || at
+  if (url && url.pathname !== '/' && url.pathname !== '') return at
+  const below = at.split('.').slice(1).join('.')
+  return below.includes('.') ? below : at
+}
 
-/** WHERE A DOOR LEADS: THE SUBDOMAIN (jwize, 2026-10-15: "the text in the
- *  copy needs to be auto href to the subdomains that match the text"). An
- *  own address signed in the index wins. Without one, a top-level creation
- *  is still served at `<name>.<zone>` — the host's implicit door maps the
- *  first label to the lineage — so that is the link. A nested lineage is its
- *  top place's subdomain and the rest as a path (creationUrl). */
-export const doorAddress = (zone: string, segments: readonly string[], key: string, recorded?: string): string => {
+/** A result's own address: the one the publisher signed, which no rule
+ *  derives. An older result did not say, so it is read off the address — the
+ *  bare zone is the apex own address, a root path or the derived subdomain is
+ *  not one, and any other host on the zone is. */
+const ownOf = (record: PublishResultRecord, zone: string): string => {
+  const address = String(record.address ?? '').trim()
+  if (!address) return ''
+  if (record.own !== undefined) return record.own ? address : ''
+  const url = urlOf(address)
+  if (!url) return ''
+  const at = url.hostname.toLowerCase()
+  if (at === zone) return url.pathname === '/' || url.pathname === '' ? url.origin : ''
+  if (address.replace(/\/+$/, '') === subdomainUrl(zone, record.segments)) return ''
+  return address
+}
+
+/** A name the host maps to a lineage as it is: the implicit door at
+ *  `<label>.<zone>` opens `roots[label]`, verbatim — so only a key that is
+ *  already a DNS label has one. `Meetings` never opens at meetings.<zone>. */
+const isImplicitLabel = (key: string): boolean => !!key && foldDnsLabel(key) === key
+
+/** WHERE A DOOR LEADS — only somewhere the host will open (the worker's
+ *  resolveSite and publishedRoot), never a page that answers "nothing
+ *  published here" (jwize, 2026-10-15: "the text in the copy needs to be auto
+ *  href to the subdomains that match the text"):
+ *
+ *    - an own address the publisher signed, on its label or the apex;
+ *    - `<key>.<zone>`, the host's implicit door, for a top-level creation
+ *      whose key is already a DNS label;
+ *    - `<top>.<zone>/<rest>` for a nested one, when its top place is itself
+ *      open on that zone — the host serves the top place and the rest is a
+ *      walk inside it. The wildcard maps one label, never a path.
+ *
+ *  Anything else has no address a reader could open: '' — no door, and the
+ *  name stays text. Root paths are off on the hosts. */
+export const doorAddress = (
+  zone: string,
+  segments: readonly string[],
+  key: string,
+  own = '',
+  topOpen: (topKey: string) => boolean = () => false,
+): string => {
+  const given = String(own ?? '').trim()
+  if (given) return given
   const z = String(zone ?? '').trim().toLowerCase()
-  const given = String(recorded ?? '').trim()
-  if (given && zoneOfAddress(given) && zoneOfAddress(given) !== z) return given   // an own address
-  if (segments.length === 1) {
-    const own = originOf(ownAddressHost(foldDnsLabel(key), z))
-    if (own) return own
-  }
-  return given || creationUrl(z, segments, key)
+  const top = String(segments[0] ?? '').trim()
+  const topKey = segments.length > 1 ? lineageKey([top]) : key
+  if (!z || !isImplicitLabel(topKey)) return ''
+  if (segments.length > 1 && !topOpen(topKey)) return ''
+  return subdomainUrl(z, segments)
 }
 
 const validate = (raw: unknown): PublishResultRecord | null => {
@@ -112,6 +164,8 @@ const validate = (raw: unknown): PublishResultRecord | null => {
   if (!op || segments.length === 0) return null
   const key = String(o['lineageKey'] ?? '').trim() || lineageKey(segments)
   const address = String(o['address'] ?? '').trim()
+  const zone = String(o['zone'] ?? '').trim().toLowerCase()
+  const own = typeof o['own'] === 'boolean' ? o['own'] : undefined
   const sealed = String(o['sealed'] ?? '').trim().toLowerCase()
   const status = o['status'] === 'confirmed' || o['status'] === 'unconfirmed' ? o['status'] : undefined
   return {
@@ -122,6 +176,8 @@ const validate = (raw: unknown): PublishResultRecord | null => {
     lineageKey: key,
     host: String(o['host'] ?? '').trim().toLowerCase(),
     ...(address ? { address } : {}),
+    ...(zone ? { zone } : {}),
+    ...(own !== undefined ? { own } : {}),
     ...(sealed ? { sealed } : {}),
     ...(status ? { status } : {}),
   }
@@ -152,62 +208,114 @@ export async function listPublishResults(): Promise<PublishResultRecord[]> {
   return parse(await store.getPoolDoc(pool))
 }
 
-/** Append one result and say so. Complete-or-absent: the document is one
- *  write through the store's queue, so two results landing together cannot
- *  interleave. */
-export async function recordPublishResult(result: Omit<PublishResultRecord, 'v'>): Promise<boolean> {
+/** The last result per creation decides its door (doorsOfResults), so
+ *  bounding the list drops only results a later one for the same creation
+ *  has superseded, oldest first — never the one that says a creation is
+ *  open. A participant with more creations than the bound keeps them all. */
+export const compactResults = (results: readonly PublishResultRecord[], max = MAX_RESULTS): PublishResultRecord[] => {
+  if (results.length <= max) return [...results]
+  const deciding = new Map<string, number>()
+  results.forEach((r, i) => {
+    const at = deciding.get(r.lineageKey)
+    if (at === undefined || (results[at]?.at ?? 0) <= r.at) deciding.set(r.lineageKey, i)
+  })
+  const keep = new Set(deciding.values())
+  const superseded = results.map((r, i) => ({ r, i })).filter(({ i }) => !keep.has(i))
+    .sort((a, b) => a.r.at - b.r.at || a.i - b.i)
+  const drop = new Set(superseded.slice(0, Math.max(0, results.length - max)).map(({ i }) => i))
+  return results.filter((_, i) => !drop.has(i))
+}
+
+/** Whether the pool already holds a document — so a read that came back
+ *  empty is a failed read, not an empty list. */
+const holdsDocument = async (pool: FileSystemDirectoryHandle): Promise<boolean> => {
+  try {
+    for await (const name of (pool as unknown as { keys(): AsyncIterable<string> }).keys()) {
+      if (/^[0-9a-f]{64}$/.test(name)) return true
+    }
+  } catch { return true }
+  return false
+}
+
+/** Results are written one at a time, each reading the list the one before
+ *  it wrote: two publishes finishing together must both be on the list. */
+let writing: Promise<unknown> = Promise.resolve()
+
+/** Append one result and say so. Complete-or-absent: an unreadable list is
+ *  never rewritten as a list of one. */
+export function recordPublishResult(result: Omit<PublishResultRecord, 'v'>): Promise<boolean> {
+  const next = writing.then(() => appendResult(result), () => appendResult(result))
+  writing = next.catch(() => false)
+  return next
+}
+
+async function appendResult(result: Omit<PublishResultRecord, 'v'>): Promise<boolean> {
   const record = validate({ ...result, v: 1 })
   if (!record) return false
   const store = get<StoreLike>(STORE_KEY)
-  if (!store?.getPool || !store.putPoolDoc) return false
+  if (!store?.getPool || !store.putPoolDoc || !store.getPoolDoc) return false
   const pool = await store.getPool(PUBLISH_RESULTS_POOL)
   if (!pool) return false
-  const before = store.getPoolDoc ? parse(await store.getPoolDoc(pool)) : []
-  const next = [...before, record].slice(-MAX_RESULTS)
-  const bytes = new TextEncoder().encode(JSON.stringify({ meaning: PUBLISH_RESULTS_POOL, results: next }))
-  const sig = await store.putPoolDoc(pool, bytes.buffer as ArrayBuffer, undefined, { keep: 'current' })
+  const bytes = await store.getPoolDoc(pool)
+  if (!bytes && await holdsDocument(pool)) return false
+  const list = compactResults([...parse(bytes), record])
+  const out = new TextEncoder().encode(JSON.stringify({ meaning: PUBLISH_RESULTS_POOL, results: list }))
+  const sig = await store.putPoolDoc(pool, out.buffer as ArrayBuffer, undefined, { keep: 'current' })
   if (!sig) return false
   EffectBus.emit(PUBLISH_RESULT_EFFECT, record)
   return true
 }
 
 /** Fold a result list to the doors open now: the LAST result per lineage
- *  key decides, and only a publish with an address is a door. */
+ *  key decides, only a publish with an address is open, and only an open
+ *  creation with an address a reader can reach is a door. */
 export const doorsOfResults = (results: readonly PublishResultRecord[]): PublishedDoor[] => {
   const last = new Map<string, PublishResultRecord>()
   for (const r of [...results].sort((a, b) => a.at - b.at)) last.set(r.lineageKey, r)
+  const open = [...last.values()].filter(r => r.op === 'publish' && !!r.address)
+  const openOn = new Set(open.map(r => `${r.lineageKey}@${zoneOf(r)}`))
   const doors: PublishedDoor[] = []
-  for (const r of last.values()) {
-    if (r.op !== 'publish' || !r.address) continue
+  for (const r of open) {
     const name = r.segments[r.segments.length - 1] ?? ''
     if (!name) continue
     const zone = zoneOf(r)
-    doors.push({ name, segments: r.segments, lineageKey: r.lineageKey, zone, address: doorAddress(zone, r.segments, r.lineageKey, r.address), at: r.at })
+    const address = doorAddress(zone, r.segments, r.lineageKey, ownOf(r, zone), top => openOn.has(`${top}@${zone}`))
+    if (!address) continue
+    doors.push({ name, segments: r.segments, lineageKey: r.lineageKey, zone, address, at: r.at })
   }
   return doors
 }
 
-/** The same doors, read off a publisher's signed index: every root that has
- *  a door on some zone, at the address that zone gives it. The segments are
- *  the key's own (a canonical key is `a/b/c`), so the name is its last part. */
-export const doorsOfIndex = (manifest: Pick<HiveManifest, 'roots' | 'doors' | 'addresses' | 'createdAt'>): PublishedDoor[] => {
+/** The same doors, read off a publisher's signed index: every root that is
+ *  open on some zone, at the address that zone gives it. A root with no
+ *  doors entry opens wherever its index is served (the host's opensOn), so
+ *  it is a door on `readZone`, the zone the index was read from. The
+ *  segments are the key's own (a canonical key is `a/b/c`), so the name is
+ *  its last part. */
+export const doorsOfIndex = (
+  manifest: Pick<HiveManifest, 'roots' | 'doors' | 'addresses' | 'createdAt'>,
+  readZone = '',
+): PublishedDoor[] => {
+  const roots = manifest.roots ?? {}
+  const listed = manifest.doors ?? {}
+  const zoneOfKey = (key: string): string =>
+    String((listed[key] === undefined ? readZone : listed[key]?.[0]) ?? '').trim().toLowerCase()
+  const opensOn = (key: string, zone: string): boolean => key in roots && (listed[key] === undefined
+    ? zoneOfKey(key) === zone
+    : (listed[key] ?? []).some(z => String(z).toLowerCase() === zone))
   const doors: PublishedDoor[] = []
-  for (const key of Object.keys(manifest.roots ?? {})) {
+  for (const key of Object.keys(roots)) {
     if (key.includes(':')) continue   // stage and pool pointers are not creations
-    const zones = (manifest.doors ?? {})[key] ?? []
-    const zone = String(zones[0] ?? '').trim().toLowerCase()
+    const zone = zoneOfKey(key)
     if (!zone) continue
     const segments = key.split('/').filter(Boolean)
     const name = segments[segments.length - 1] ?? ''
     if (!name) continue
-    doors.push({
-      name,
-      segments,
-      lineageKey: key,
-      zone,
-      address: doorAddress(zone, segments, key, creationUrl(zone, segments, key, manifest.addresses)),
-      at: (Number(manifest.createdAt) || 0) * 1000,
-    })
+    const label = ownLabelOn(manifest.addresses, zone, key)
+    const own = label ? originOf(ownAddressHost(label, zone)) : ''
+    const address = doorAddress(zone, segments, key, own, top => opensOn(top, zone))
+    if (!address) continue
+    doors.push({ name, segments, lineageKey: key, zone, address, at: (Number(manifest.createdAt) || 0) * 1000 })
   }
   return doors
 }

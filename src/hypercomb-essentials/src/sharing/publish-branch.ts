@@ -46,7 +46,7 @@ import {
 import { isReservedRootKey } from './hive-link.js'
 import {
   ENTRANCES_MAX, ENTRANCE_POWERS, boundLineage, creationUrl, entranceHost, foldContentLabel, isPoweredEntrance, ownAddressHost,
-  ownAddressRefusal, readEntrance, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
+  ownAddressRefusal, ownLabelOn, readEntrance, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
 } from './zone-door.js'
 import type { ModuleAssessmentRecord } from '../assistant/module-review.js'
 
@@ -531,7 +531,10 @@ export async function publishBranch(
   // 10. The running list of results (publish-results.ts): what is open now,
   //     for the domain-link rule and anyone else who asks. Never blocks the
   //     act it records.
-  void recordPublishResult({ op: 'publish', at: Date.now(), segments: [...segs], lineageKey: key, host: indexHost, address, sealed, status })
+  void recordPublishResult({
+    op: 'publish', at: Date.now(), segments: [...segs], lineageKey: key, host: indexHost, address, sealed, status,
+    ...(primary ? { zone: primary, own: !!ownLabelOn(read.ok ? read.manifest.addresses : undefined, primary, key) } : {}),
+  })
 
   return {
     ok: true,
@@ -609,11 +612,18 @@ export async function unpublishBranch(
   const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
   // The same guard as publishing, for the same reason: a rewrite we cannot
   // base on a verified read is a rewrite that drops everything we cannot see.
+  // An index that does not name the key (withdrawn elsewhere, or never
+  // written) still answers the participant: it is not published, and the
+  // running list says so too, or its name keeps linking.
+  const already = (): { ok: true; removed: false } => {
+    void recordPublishResult({ op: 'unpublish', at: Date.now(), segments: [...segs], lineageKey: key, host: indexHost })
+    return { ok: true, removed: false }
+  }
   if (!read.ok) {
-    if (read.reason === 'http' && read.status === 404) return { ok: true, removed: false }
+    if (read.reason === 'http' && read.status === 404) return already()
     return { ok: false, failure: 'index-unsafe', reason: read.reason }
   }
-  if (!(key in read.manifest.roots)) return { ok: true, removed: false }
+  if (!(key in read.manifest.roots)) return already()
   const roots = { ...read.manifest.roots }
   const head = String(roots[key] ?? '').toLowerCase()
   delete roots[key]
@@ -723,7 +733,27 @@ export async function setBranchDoors(
   const put = await putHiveManifest(indexHost, roots, doors,
     read.manifest.createdAt, read.manifest.signedContent)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
+  // Where it opens changed, so the running list learns its new door.
+  recordMovedDoor(segs, key, indexHost, wanted[0] ?? '', read.manifest.addresses, head)
   return { ok: true }
+}
+
+/** A creation whose doors or own address changed without a publish: one
+ *  more result, so the list's last word on it is where it opens now. */
+function recordMovedDoor(
+  segs: readonly string[],
+  key: string,
+  indexHost: string,
+  primary: string,
+  addresses: Record<string, string> | undefined,
+  head: string,
+): void {
+  if (!primary) return
+  void recordPublishResult({
+    op: 'publish', at: Date.now(), segments: [...segs], lineageKey: key, host: indexHost,
+    address: creationUrl(primary, segs, key, addresses), zone: primary, own: !!ownLabelOn(addresses, primary, key),
+    ...(SIG_RE.test(head) ? { sealed: head } : {}),
+  })
 }
 
 /** Why an own address could not be set. */
@@ -766,6 +796,8 @@ export async function setBranchAddress(
   const put = await putHiveManifest(indexHost, read.manifest.roots, read.manifest.doors ?? {},
     read.manifest.createdAt, { ...read.manifest.signedContent, addresses })
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
+  recordMovedDoor(segs, key, indexHost, (read.manifest.doors?.[key] ?? [])[0] || z, addresses,
+    String(read.manifest.roots[key] ?? '').toLowerCase())
   return { ok: true, host: label ? ownAddressHost(label, z) || `${label}.${z}` : z }
 }
 

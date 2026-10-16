@@ -54,14 +54,16 @@ export function openExternalLink(href: string): void {
       console.warn('[document-view] host could not open', href, err))
     return
   }
-  // A popup blocker (or an embedding pane) answers window.open with null —
-  // the click must still go somewhere, so the refusal falls back to walking
-  // the document there. External departure is sanctioned ("external links
-  // are fine"); a click that silently does nothing is not.
-  const opened = window.open(href, '_blank', 'noopener,noreferrer')
-  if (!opened) {
-    try { window.location.assign(href) } catch { /* fully sandboxed — nothing left to try */ }
-  }
+  // An anchor of its own, clicked: a new tab with no opener and no referrer,
+  // and this document stays where it is. window.open with 'noopener' answers
+  // null even when the tab opened, so it cannot tell a blocked popup from an
+  // opened one — the old fallback walked this document away on every click.
+  // A click the person made is not a popup a blocker refuses.
+  const a = document.createElement('a')
+  a.href = href
+  a.target = '_blank'
+  a.rel = 'noopener noreferrer'
+  a.click()
 }
 
 /** A contents/rail entry. A button, not an anchor, precisely because an

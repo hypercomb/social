@@ -37,9 +37,21 @@ the fast local source; the index is the public one.
 - A name matches as a **phrase**, case-blind, with any run of non-letters
   between its words. `point blank solutions`, `Point-Blank Solutions` and
   `POINT  BLANK  SOLUTIONS` all say the creation named *Point Blank
-  Solutions*. Whole words only: `card` never links inside `cardigan`. The
-  longest name wins where two overlap.
-- A match becomes an `<a>` at the door's address. **No underline.** The link
+  Solutions*. Whole words only: `card` never links inside `cardigan`, nor
+  inside `<b>card</b>igan`; beside a script written without spaces
+  (Japanese, Chinese, Thai…) there is no word edge, so a name links inside
+  running text there. Where two names overlap the longest wins, wherever it
+  starts: `New York Pizza` links *York Pizza* over *New York*. Names and copy
+  are read in NFC, combining marks counted as letters. Where two zones
+  published the same name, a page links the door on its own zone; a name
+  one of whose doors is the page itself stays text.
+- A match becomes an `<a>` at the door's address — only an address the
+  host will open: an own address the publisher signed (a label or the
+  apex), `<key>.<zone>` when the key is already a DNS label (the host maps
+  the label to the lineage verbatim, so `Meetings` has no implicit door),
+  or `<top>.<zone>/<rest>` when the top place is itself open there. Root
+  paths are off on the hosts. A creation with none of these is no door; its
+  name stays text. **No underline.** The link
   wears the **colour of its domain** — one hue per zone, derived from the
   zone's name, so every page on every host agrees without a palette to ship.
   A link whose zone differs from the page's own carries `data-cross`.
@@ -71,15 +83,21 @@ phase and rebuilt by any cold client. The next section is that build.
 Every link the rule makes is an **incidence**: this page names that
 creation. `sharing/link-incidences.ts` reads them off a page after the pass
 and the drone holds them for the **optimize phase**, which mints one record
-per `(page content sig, door table sig)` into the `links:incidences` pool —
+per `(page content sig, door table sig, source creation)` into the
+`links:incidences` pool —
 a derived cache by the litmus test (a cold client mounts the page and runs
 the rule again), keyed by its inputs so a new domain means a new table, a
 new key and a fresh derivation on the next visit. Never load-bearing.
 
-`clustersOf(records)` folds them, newest record per page, to a graph keyed
-by lineage key: **inbound** (who names this creation, by zone) and
-**outbound** (whom its page names). A page naming itself is no edge, and a
-page nobody owns makes none. The publications view shows both lines under a
+`clustersOf(records, table)` folds them to a graph keyed by creation and
+zone (`lineageKey@zone`, so two publishers' same-named creations stay
+apart): **inbound** (who names this creation, by zone) and **outbound** (whom
+its page names). Only records made against the current door table count —
+what a cold client would derive — and of those the newest per source
+creation, so an edited page's older versions drop out. After a publish
+changes the table, a creation's lines are blank until its page is read
+again. A page naming itself is no edge, and a page nobody owns makes none.
+A large pool is read across a few views and answers only once read whole. The publications view shows both lines under a
 plate, each name coloured by its zone, no underline — the cluster a reader
 can move through.
 

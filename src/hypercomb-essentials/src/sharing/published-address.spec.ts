@@ -83,8 +83,30 @@ describe('readAddressHead — the head an address serves, when its publisher sig
     expect(await readAddressHead(HOST, { fetch: down, index: index({}) })).toEqual({ error: 'unreachable' })
   })
 
-  it('is not an address when it is a path', async () => {
-    expect(await readAddressHead('https://hypercomb.com/jaime-weise')).toEqual({ error: 'not-an-address' })
+  it('is not an address with a login in it', async () => {
+    expect(await readAddressHead('https://me:pw@jaime-weise.hypercomb.com/people')).toEqual({ error: 'not-an-address' })
+  })
+
+  it('reads a nested creation under its top door: the head the same signed index names for its route', async () => {
+    const NESTED = s('d')
+    const got = await readAddressHead(`https://${HOST}/Team%20People/`, {
+      fetch: await doorOf(record),
+      index: index({ 'jaime-weise': HEAD, 'jaime-weise/Team-People': NESTED }),
+    })
+    expect(got).toEqual({ head: NESTED, pubkey: KEY, lineage: 'jaime-weise/Team-People', title: 'Team People', host: HOST, publishedAt: 1700000000 })
+  })
+
+  it('finds no door for a route the index does not sign, or below a door that is not a top place', async () => {
+    expect(await readAddressHead(`https://${HOST}/people`, { fetch: await doorOf(record), index: index({ 'jaime-weise': HEAD }) })).toEqual({ error: 'no-door' })
+    const own = { ...record, lineage: 'cards/jaime' }
+    expect(await readAddressHead(`https://${HOST}/people`, {
+      fetch: await doorOf(own),
+      index: index({ 'cards/jaime': HEAD, 'cards/jaime/people': s('d') }, { addresses: { [HOST]: 'cards/jaime' } }),
+    })).toEqual({ error: 'no-door' })
+  })
+
+  it('still verifies the top door before it reads below it', async () => {
+    expect(await readAddressHead(`https://${HOST}/people`, { fetch: await doorOf(record), index: index({ 'jaime-weise': OLD, 'jaime-weise/people': s('d') }) })).toEqual({ error: 'unverified' })
   })
 })
 

@@ -31,8 +31,9 @@ import { listDecorations } from '../../commands/decoration-manifest.js'
 import { fetchPublicationCards, type PublicationCard } from '../../sharing/publications-ledger.js'
 import { offerFromCard } from '../../sharing/static-peers.js'
 import { nameService } from '../../sharing/names.service.js'
-import { domainColour } from '../../sharing/domain-links.js'
-import { clustersOf, listIncidenceRecords, type Cluster, type ClusterEnd } from '../../sharing/link-incidences.js'
+import { compileDoors, domainColour, PAPER_INK_LUMINANCE } from '../../sharing/domain-links.js'
+import { clusterAt, clustersOf, listIncidenceRecords, tableSignature, type Cluster, type ClusterEnd } from '../../sharing/link-incidences.js'
+import { publishedDoors } from '../../sharing/publish-results.js'
 import { lineageKey } from '../../history/lineage-key.js'
 import { trackScrollGutter } from './scroll-gutter.js'
 import { openExternalLink } from './document-view-links.js'
@@ -295,8 +296,15 @@ export class PublicationsViewDrone extends Drone {
    *  Each name wears its zone's colour, no underline, like the links in
    *  the copy that made it. */
   async #paintLinks(into: HTMLElement, card: PublicationCard): Promise<void> {
-    this.#clusters ??= listIncidenceRecords().then(clustersOf).catch(() => new Map<string, Cluster>())
-    const cluster = (await this.#clusters).get(card.lineage)
+    this.#clusters ??= this.#readClusters()
+    // A creation is its key on a zone: only the zones this plate answers on
+    // (each host, and the apex above an own address) may lend it lines.
+    const zones = card.hosts.flatMap(h => {
+      const host = h.host.toLowerCase()
+      const apex = host.split('.').slice(1).join('.')
+      return apex.includes('.') ? [host, apex] : [host]
+    })
+    const cluster = clusterAt(await this.#clusters, card.lineage, zones)
     if (!cluster || !into.isConnected) return
     const line = (label: string, ends: readonly ClusterEnd[]): void => {
       if (ends.length === 0) return
@@ -309,13 +317,25 @@ export class PublicationsViewDrone extends Drone {
         name.className = 'pv-links-name'
         name.textContent = end.lineageKey.split('/').pop() ?? end.lineageKey
         name.title = `${end.lineageKey} · ${end.zone}`
-        name.style.color = domainColour(end.zone)
+        name.style.color = domainColour(end.zone, PAPER_INK_LUMINANCE)
         row.appendChild(name)
       })
       into.appendChild(row)
     }
     line(this.#t('publications.namedBy', 'named by'), cluster.inbound)
     line(this.#t('publications.names', 'names'), cluster.outbound)
+  }
+
+  /** The clusters for the doors as they stand now: the same table the link
+   *  rule runs with here, so a record made with a door since withdrawn is
+   *  not shown. A visitor has no own doors and no table to match; there the
+   *  newest record per creation stands. */
+  async #readClusters(): Promise<Map<string, Cluster>> {
+    try {
+      const [records, own] = await Promise.all([listIncidenceRecords(), publishedDoors().catch(() => [])])
+      const table = own.length ? await tableSignature(compileDoors(own)) : undefined
+      return clustersOf(records, table)
+    } catch { return new Map<string, Cluster>() }
   }
 
   #plate(card: PublicationCard, index: number): HTMLElement {
