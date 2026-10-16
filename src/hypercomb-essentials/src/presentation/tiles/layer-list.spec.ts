@@ -251,6 +251,52 @@ describe("the row's own doors", () => {
   })
 })
 
+describe('the names slide away, and come back', () => {
+  type NamesShape = { readonly names: boolean; setNames(on: boolean): void }
+  const names = () => drone as unknown as NamesShape
+  const rowsEl = () => el.querySelector('[data-role="list-rows"]') as HTMLElement
+  const stroke = (dx: number, dy: number, id: number) => {
+    const at = rows()[0]
+    at.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: id, button: 0, clientX: 200, clientY: 100 }))
+    at.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: id, clientX: 200 + dx / 2, clientY: 100 + dy / 2 }))
+    at.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: id, clientX: 200 + dx, clientY: 100 + dy }))
+    at.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: id, clientX: 200 + dx, clientY: 100 + dy }))
+    at.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  }
+  afterEach(() => { names().setNames(true) })
+
+  it('a swipe left leaves a grid of pictures, opens nothing, and is remembered', () => {
+    expect(names().names).toBe(true)
+    stroke(-90, 6, 11)
+    expect(names().names).toBe(false)
+    expect(rowsEl().classList.contains('is-pictures')).toBe(true)
+    expect(out.enter).not.toHaveBeenCalled()
+    expect(out.view).not.toHaveBeenCalled()
+    expect(localStorage.getItem('hc:phone-names')).toBe('off')
+    expect(row('sunrise')?.getAttribute('aria-label')).toBe('sunrise')
+  })
+
+  it('the icon brings the names back, and so does a swipe right', () => {
+    names().setNames(false)
+    const icon = action('names')
+    expect(icon).toBeTruthy()
+    icon.click()
+    expect(names().names).toBe(true)
+    expect(action('names')).toBeNull()
+    names().setNames(false)
+    stroke(90, -4, 12)
+    expect(names().names).toBe(true)
+    expect(localStorage.getItem('hc:phone-names')).toBe('on')
+  })
+
+  it('a stroke that is mostly up or down is a scroll, never a slide', () => {
+    stroke(-40, 120, 13)
+    expect(names().names).toBe(true)
+    stroke(-30, 4, 14)   // too short to commit
+    expect(names().names).toBe(true)
+  })
+})
+
 describe('the face', () => {
   it('the header carries no list · hexagons switch — the face arrives from the controls bar', () => {
     expect(el.querySelector('[data-role="list-faces"]')).toBeNull()

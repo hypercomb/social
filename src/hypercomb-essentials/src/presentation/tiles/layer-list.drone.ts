@@ -53,9 +53,14 @@ const LIST_Z = 59990
 /** Registry order — before the activity log (360) so its toast paints over
  *  the rows at the same z. */
 const LIST_ORDER = 300
-const ROW_HEIGHT = '3.75rem'
+// The thumbnail is twice its first size (jwize, 2026-10-13: in a scroller you might as well see what you are doing).
+const ROW_HEIGHT = '6.1rem'
 /** A press this long lifts the row (drag to reorder; let go to open its page). */
 const HOLD_MS = 420
+/** A sideways stroke this long reads as a swipe; past COMMIT it slides the names off or back. */
+const SWIPE_START_PX = 14
+const SWIPE_COMMIT_PX = 56
+const SWIPE_MAX_PX = 120
 /** While a thumbnail is bare, look again after each of these (about half a minute in all). */
 const LOOK_AGAIN_MS = [800, 1600, 3200, 6400, 12800, 25600]
 const HEX = 'polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)'
@@ -88,9 +93,18 @@ type NotesShape = { getNotes?: (label: string) => Promise<{ text?: string }[]> }
 type SnapshotShape = { snapshotCells?: () => { label: string; imageSig?: string }[] }
 export type PhoneFace = 'list' | 'hexagons'
 const FACE_KEY = 'hc:phone-face'
+/** Names shown on the rows, or slid away to leave the pictures (jwize, 2026-10-13). */
+const NAMES_KEY = 'hc:phone-names'
 
 function readFace(): PhoneFace {
   try { return localStorage.getItem(FACE_KEY) === 'hexagons' ? 'hexagons' : 'list' } catch { return 'list' }
+}
+function readNames(): boolean {
+  try { return localStorage.getItem(NAMES_KEY) !== 'off' } catch { return true }
+}
+/** A participant posture on this device, never tile truth — the one place this file writes storage. */
+function keepPosture(key: string, value: string): void {
+  try { localStorage.setItem(key, value) } catch { /* posture only */ }
 }
 
 /** The element the registry mounts — it exists at the registry's order and
@@ -123,6 +137,7 @@ export class LayerListDrone extends Drone {
    *  and reaches this drone through `phone:face-set {face}` (any other
    *  caller may send the same). */
   #face: PhoneFace = readFace()
+  #names: boolean = readNames()
 
   #registered = false
   #bound = false
@@ -179,9 +194,19 @@ export class LayerListDrone extends Drone {
   setFace(face: PhoneFace): void {
     if (face === this.#face) return
     this.#face = face
-    try { localStorage.setItem(FACE_KEY, face) } catch { /* posture only */ }
+    keepPosture(FACE_KEY, face)
     EffectBus.emit('phone:face', { face })
     this.#sync()
+  }
+
+  /** Names on the rows, or slid away to leave a grid of pictures. */
+  get names(): boolean { return this.#names }
+
+  setNames(on: boolean): void {
+    if (on === this.#names) return
+    this.#names = on
+    keepPosture(NAMES_KEY, on ? 'on' : 'off')
+    this.#render()
   }
 
   /** Called by the element when the registry mounts it. */
@@ -350,6 +375,22 @@ export class LayerListDrone extends Drone {
     const list = document.createElement('div')
     list.dataset['role'] = 'list-rows'
     list.setAttribute('data-consumes-wheel', '')
+    // Names slid away leave the pictures: a grid of big hexagons, and one
+    // small icon that brings the names back (a swipe right does too).
+    if (!this.#names) {
+      list.classList.add('is-pictures')
+      const show = document.createElement('button')
+      show.type = 'button'
+      show.dataset['action'] = 'names'
+      show.className = 'hc-ll-glyph hc-ll-names'
+      show.appendChild(this.#glyph('label'))
+      const said = this.#t('layer-list.names-show', 'show the names')
+      show.setAttribute('aria-label', said)
+      show.title = said
+      show.addEventListener('click', () => this.setNames(true))
+      list.appendChild(show)
+    }
+    this.#bindSwipe(list)
     if (this.#stale) {
       // Between a navigate and its first pass: nothing, never the old page.
     } else if (this.#rows.length === 0) {
@@ -412,6 +453,7 @@ export class LayerListDrone extends Drone {
     el.dataset['label'] = row.label
     el.dataset['kind'] = row.branch ? 'branch' : 'leaf'
     if (row.hidden || row.blocked) el.classList.add('is-dim')
+    if (!this.#names) el.setAttribute('aria-label', row.label)   // the picture alone still says whose it is
 
     const thumb = document.createElement('span')
     thumb.className = 'hc-ll-hex'
@@ -453,6 +495,48 @@ export class LayerListDrone extends Drone {
     this.#bindHold(el, row)
     void this.#fillNote(row.label, sub, gen)
     return el
+  }
+
+  // ── swipe: the names slide off (left) and come back (right) ──
+  //
+  // jwize, 2026-10-13: "the names and the label section [should be] hidable —
+  // slide them off, and then have an icon show to reshow them." A sideways
+  // stroke across the list is never a scroll (the rows pan only up and down)
+  // and never a hold: the moment it reads as sideways the pending hold is
+  // dropped, and the click it would leave behind is swallowed.
+
+  #bindSwipe(list: HTMLElement): void {
+    let s: { id: number; x: number; y: number; dx: number; on: boolean } | null = null
+    list.addEventListener('pointerdown', e => {
+      if (e.button === 0) s = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, on: false }
+    })
+    list.addEventListener('pointermove', e => {
+      if (!s || s.id !== e.pointerId || this.#drag?.lifted) return
+      const dx = e.clientX - s.x, dy = e.clientY - s.y
+      if (!s.on) {
+        if (Math.abs(dy) > SWIPE_START_PX && Math.abs(dy) >= Math.abs(dx)) { s = null; return }   // a scroll
+        if (Math.abs(dx) < SWIPE_START_PX || Math.abs(dx) < Math.abs(dy) * 1.5) return
+        s.on = true
+        this.#dropHold()
+        list.classList.add('is-sliding')
+      }
+      s.dx = dx
+      list.style.setProperty('--hc-ll-slide', `${Math.max(-SWIPE_MAX_PX, Math.min(SWIPE_MAX_PX, dx))}px`)
+    })
+    const end = (e: PointerEvent) => {
+      if (!s || s.id !== e.pointerId) return
+      const { on, dx } = s
+      s = null
+      list.classList.remove('is-sliding')
+      list.style.removeProperty('--hc-ll-slide')
+      if (!on) return
+      this.#consumeClick = true
+      setTimeout(() => { this.#consumeClick = false }, 0)
+      if (dx <= -SWIPE_COMMIT_PX) this.setNames(false)
+      else if (dx >= SWIPE_COMMIT_PX) this.setNames(true)
+    }
+    list.addEventListener('pointerup', end)
+    list.addEventListener('pointercancel', end)
   }
 
   // ── hold: lift the row; drag to reorder; release still → the tile page ──
@@ -701,10 +785,10 @@ ${S} [data-role="list-path"]{flex:0 0 auto;display:flex;flex-direction:column;bo
 ${S} .hc-ll-crumb{appearance:none;border:0;background:none;color:inherit;font:inherit;text-align:left;min-height:2.6rem;padding-right:0.9rem;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .hc-ll-crumb[aria-current]{font-weight:600;color:rgba(var(--hc-chrome-accent,20,96,180),0.95);}
 ${S} [data-role="list-rows"]{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;padding-bottom:calc(max(var(--hc-controls-bottom,0px),env(safe-area-inset-bottom,0px)) + 1.6rem);}
-${S} .hc-ll-row{appearance:none;border:0;border-bottom:1px solid rgba(var(--hc-chrome-rule,62,74,94),0.16);background:none;color:inherit;font:inherit;width:100%;display:grid;grid-template-columns:2.9rem 1fr auto;align-items:center;gap:0.65rem;min-height:${ROW_HEIGHT};padding:0.35rem 0.9rem 0.35rem 0.75rem;text-align:left;cursor:pointer;}
+${S} .hc-ll-row{appearance:none;border:0;border-bottom:1px solid rgba(var(--hc-chrome-rule,62,74,94),0.16);background:none;color:inherit;font:inherit;width:100%;display:grid;grid-template-columns:5.3rem 1fr auto;align-items:center;gap:0.65rem;min-height:${ROW_HEIGHT};padding:0.35rem 0.9rem 0.35rem 0.75rem;text-align:left;cursor:pointer;}
 ${S} .hc-ll-row:active{background:rgba(var(--hc-chrome-accent,20,96,180),0.08);}
 ${S} .hc-ll-row.is-dim{opacity:0.42;}
-${S} .hc-ll-hex{display:block;width:2.4rem;height:2.7rem;clip-path:${HEX};background:rgba(var(--hc-chrome-rule,62,74,94),0.55);justify-self:center;overflow:hidden;}
+${S} .hc-ll-hex{display:block;width:4.8rem;height:5.4rem;clip-path:${HEX};background:rgba(var(--hc-chrome-rule,62,74,94),0.55);justify-self:center;overflow:hidden;}
 ${S} .hc-ll-hex img{display:block;width:100%;height:100%;object-fit:cover;}
 ${S} .hc-ll-text{min-width:0;display:flex;flex-direction:column;justify-content:center;gap:0.15rem;}
 ${S} .hc-ll-name{display:block;font-weight:600;font-size:1rem;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -715,6 +799,14 @@ ${S} .hc-ll-row-more{appearance:none;border:0;background:none;color:rgba(var(--h
 ${S} .hc-ll-row{touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;transition:transform .12s ease,box-shadow .12s ease,background .12s ease;}
 ${S} .hc-ll-row.is-lifted{position:relative;z-index:1;background:rgb(var(--hc-chrome-glass,250,251,253));box-shadow:0 6px 18px rgba(0,0,0,0.22);transform:scale(1.02);touch-action:none;}
 @media (prefers-reduced-motion:reduce){${S} .hc-ll-row{transition:none;}}
+${S} .hc-ll-text{transition:transform .2s ease,opacity .2s ease;}
+${S} [data-role="list-rows"].is-sliding .hc-ll-text{transition:none;transform:translateX(var(--hc-ll-slide,0px));opacity:0.6;}
+${S} [data-role="list-rows"].is-pictures{display:grid;grid-template-columns:repeat(auto-fill,minmax(6.4rem,1fr));align-content:start;column-gap:0.25rem;padding-left:0.45rem;padding-right:0.45rem;}
+${S} .is-pictures .hc-ll-row{grid-template-columns:1fr;justify-items:center;border-bottom:0;min-height:0;padding:0.3rem 0.15rem;}
+${S} .is-pictures .hc-ll-text,${S} .is-pictures .hc-ll-tail{display:none;}
+${S} .is-pictures .hc-ll-hex{width:100%;max-width:7.2rem;height:auto;aspect-ratio:8 / 9;}
+${S} .hc-ll-names{grid-column:1 / -1;justify-self:end;position:sticky;top:0.4rem;z-index:2;min-width:2.6rem;min-height:2.6rem;margin:0.35rem 0.1rem -0.2rem;border-radius:50%;background:rgb(var(--hc-chrome-glass,250,251,253));box-shadow:0 1px 6px rgba(0,0,0,0.18);}
+@media (prefers-reduced-motion:reduce){${S} .hc-ll-text{transition:none;}}
 ${S} [data-role="list-empty"]{padding:2.5rem 1.4rem calc(2.5rem + max(var(--hc-controls-bottom,0px),env(safe-area-inset-bottom,0px)));text-align:center;}
 ${S} [data-role="list-empty"] p{margin:0 0 0.5rem;}
 ${S} .hc-ll-hint{color:rgba(var(--hc-chrome-ink,26,33,48),var(--hc-ink-a-quiet,0.62));font-size:0.9rem;}
