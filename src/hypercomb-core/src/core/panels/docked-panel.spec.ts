@@ -16,6 +16,7 @@
 // panel-settings.ts and moves without this file caring.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { EffectBus } from '../../index.js'
 import { attachDockedPanel, DockedPanel } from './docked-panel.js'
 import { laneOccupants, resetLanes } from './dock-lanes.js'
 import { registerTextTheme, setTextThemeWriter } from './panel-groups.js'
@@ -257,6 +258,123 @@ describe('being pushed out of a full lane', () => {
 
     expect(parked).toBe(1)
     expect(asked).toBe(0)
+  })
+})
+
+describe('the pair a window brings', () => {
+  // The two windows are halves of one gesture: the notes desk declares the
+  // pheromone palette as its pair and the shell brings it up beside the desk.
+  // Until 2026-10-18 the pair outlived the window that brought it: close the
+  // desk and the palette stood alone on the right, with the hive inset by its
+  // width. The round trip (brought → window goes → pair goes) is pinned here,
+  // and so is the asymmetry that keeps it honest: a pair the participant
+  // opened themselves is not the window's to take.
+  const unsubscribe: (() => void)[] = []
+  afterEach(() => { for (const off of unsubscribe.splice(0)) off() })
+  const flush = () => new Promise(resolve => setTimeout(resolve, 0))
+  const session = (parked: { count: number }) =>
+    ({ park: () => { parked.count++ }, unpark: () => {} })
+
+  it('is parked when the window that brought it is disposed', async () => {
+    const parked = { count: 0 }
+    // The shell's half: the open effect mounts the pair, as the palette's
+    // own door does.
+    unsubscribe.push(EffectBus.on('spec:pair-open-brought', () => {
+      attach(makePanel(), { id: 'palette-brought', hcSession: session(parked) })
+    }))
+    const desk = attach(makePanel(), {
+      id: 'desk-brought', pairWindow: 'palette-brought', pairOpenEffect: 'spec:pair-open-brought',
+    })
+    await flush()
+    expect(laneOccupants('right').map(m => m.laneId)).toEqual(['desk-brought', 'palette-brought'])
+    expect(parked.count).toBe(0)
+
+    desk.dispose()   // close or park — the element goes either way
+    expect(parked.count).toBe(1)
+  })
+
+  it('is left alone when the participant opened it themselves', async () => {
+    const parked = { count: 0 }
+    let opens = 0
+    unsubscribe.push(EffectBus.on('spec:pair-open-by-hand', () => { opens++ }))
+    // Already up before the window arrives: not brought by it.
+    attach(makePanel(), { id: 'palette-by-hand', hcSession: session(parked) })
+    const desk = attach(makePanel(), {
+      id: 'desk-by-hand', pairWindow: 'palette-by-hand', pairOpenEffect: 'spec:pair-open-by-hand',
+    })
+    await flush()
+    expect(opens).toBe(0)
+
+    desk.dispose()
+    expect(parked.count).toBe(0)
+  })
+
+  it('is still the window\'s to take after Escape parks both and puts both back', async () => {
+    // The sweep parks the desk AND the palette; the press after unparks both
+    // (tool-windows.ts), so the palette comes back beside the desk WITHOUT the
+    // desk bringing it. The close after that must still take it along.
+    const parked = { count: 0 }
+    const palette = () => attach(makePanel(), { id: 'palette-back', hcSession: session(parked) })
+    const desk = () => attach(makePanel(), {
+      id: 'desk-back', pairWindow: 'palette-back', pairOpenEffect: 'spec:pair-open-back',
+    })
+    unsubscribe.push(EffectBus.on('spec:pair-open-back', () => { palette() }))
+    const first = desk()
+    await flush()
+    expect(laneOccupants('right').map(m => m.laneId)).toEqual(['desk-back', 'palette-back'])
+
+    // Escape: both parked, both elements gone.
+    first.dispose()
+    expect(parked.count).toBe(1)
+    for (const panel of attached.splice(0)) panel.dispose()
+    document.body.innerHTML = ''
+    // The put-back: both remount in one pass, in no promised order.
+    palette()
+    const second = desk()
+    await flush()
+    expect(laneOccupants('right').map(m => m.laneId).sort()).toEqual(['desk-back', 'palette-back'])
+
+    second.dispose()
+    expect(parked.count).toBe(2)
+  })
+
+  it('forgets a pair the participant brings back alone after the window went', async () => {
+    const parked = { count: 0 }
+    const palette = () => attach(makePanel(), { id: 'palette-alone', hcSession: session(parked) })
+    const desk = () => attach(makePanel(), {
+      id: 'desk-alone', pairWindow: 'palette-alone', pairOpenEffect: 'spec:pair-open-alone',
+    })
+    unsubscribe.push(EffectBus.on('spec:pair-open-alone', () => { palette() }))
+    const first = desk()
+    await flush()
+    first.dispose()
+    expect(parked.count).toBe(1)
+    for (const panel of attached.splice(0)) panel.dispose()
+    document.body.innerHTML = ''
+
+    // Opened by hand, with the desk nowhere: the participant's own now.
+    palette()
+    await flush()
+    const second = desk()
+    await flush()
+    second.dispose()
+    expect(parked.count).toBe(1)
+  })
+
+  it('respects a pairing switched off in the gear', async () => {
+    // Pairing off: the window brings nothing, so there is nothing to take.
+    localStorage.setItem('hc:panel-pair:desk-off', '0')
+    const parked = { count: 0 }
+    unsubscribe.push(EffectBus.on('spec:pair-open-off', () => {
+      attach(makePanel(), { id: 'palette-off', hcSession: session(parked) })
+    }))
+    const desk = attach(makePanel(), {
+      id: 'desk-off', pairWindow: 'palette-off', pairOpenEffect: 'spec:pair-open-off',
+    })
+    await flush()
+    expect(laneOccupants('right').map(m => m.laneId)).toEqual(['desk-off'])
+    desk.dispose()
+    expect(parked.count).toBe(0)
   })
 })
 

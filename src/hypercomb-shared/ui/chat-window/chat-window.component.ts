@@ -1601,14 +1601,41 @@ export class ChatWindowComponent implements OnDestroy {
   readonly session = signalSession(this.visible, open => {
     EffectBus.emit('chat:window-state', { open })
     rememberChatVisibility(open)
-    this.#claimSurface(open && !this.peeking())
     this.#applyFold()
     // PARKED IS OFF SCREEN: a keymap the wizard or the route was holding is
     // let go, or the whole hive stays deaf behind a window nobody can see.
     // The open question itself survives as a record and is drawn again on
     // unpark — without re-firing the arrival focus (`#questionArrived`).
     if (!open) { this.#releaseQuestionKeys(); this.#releaseRouteKeys() }
+  }, {
+    // ESCAPE, DECLARED HERE AND NOWHERE ELSE. The keymap hears the press in
+    // the capture phase and the cascade asks the focused window to unwind ONE
+    // level; only when nothing was consumed does the sweep park the window.
+    // The window used to answer the same keydown a second time from its own
+    // bubbling listener — after the sweep had already parked it — and a fold
+    // unwound on a window no longer showing re-claimed the surface for
+    // nothing: hidden canvas, hidden header, no window (2026-10-18).
+    dismiss: () => this.#dismissOne(),
   })
+
+  /** Unwind ONE level of this window's own state, smallest commitment first,
+   *  and say whether anything was there to unwind. False means the press is
+   *  not about anything inside the window, and the cascade takes the window
+   *  itself away (parked, so the next press can bring it back). */
+  #dismissOne(): boolean {
+    // A full-bleed picture is the innermost surface standing.
+    if (this.viewing()) { this.closePicture(); return true }
+    // The flyout is the smallest thing open over the transcript.
+    if (this.clipboardOpen()) { this.clipboardOpen.set(false); return true }
+    // Folded away is a smaller commitment than the window itself: Escape
+    // brings the conversation back before it takes the window down.
+    if (this.peeking()) { this.togglePeek(); return true }
+    // Then the RAIL'S OWN picks; a reference on the shelf is let go with its
+    // × or by dragging it back, never by a keystroke that means "go up".
+    if (this.#railSeen.size) { this.#rail?.clearSelection(); return true }
+    if (this.railSubject()) { this.#rail?.clearSubject(); return true }
+    return false
+  }
 
   readonly conversations = signal<readonly ConversationSummary[]>([])
   readonly activeId = signal('')
@@ -1949,8 +1976,8 @@ export class ChatWindowComponent implements OnDestroy {
     if (layer) queueMicrotask(() => layer.focus())
   })
 
-  /** The viewer's own keys. Escape also unwinds through the window's cascade
-   *  (see onKey) for when focus never reached the overlay. */
+  /** The viewer's own keys. Escape also unwinds through the window's session
+   *  (`#dismissOne`) for when focus never reached the overlay. */
   onPictureKey(event: KeyboardEvent): void {
     if (event.key === 'ArrowRight') { event.preventDefault(); this.stepPicture(1); return }
     if (event.key === 'ArrowLeft') { event.preventDefault(); this.stepPicture(-1); return }
@@ -4637,7 +4664,6 @@ export class ChatWindowComponent implements OnDestroy {
     // show. Closed, not merely hidden: an invisible surface still standing is
     // one Escape would unwind before the fold, which reads as a dead key.
     if (next) { this.clipboardOpen.set(false); this.listOpen.set(false); this.closePicture() }
-    this.#claimSurface(!next)
     this.#applyFold()
     if (!next) this.#focus()
   }
@@ -4676,6 +4702,16 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** Whether the fold is currently holding viewport persistence down. */
   #foldSuspendedViewport = false
+
+  /** THE CLAIM FOLLOWS WHAT IS ON SCREEN, reactively — the same reading the
+   *  notes desk makes (notes-strip.component.ts). Open, close, park, unpark
+   *  and the fold all move `visible` or `peeking`, and the claim is a function
+   *  of those two and nothing else, so no path can strand it: a window that is
+   *  not showing cannot be claiming the surface. It used to be claimed
+   *  imperatively from each of those paths, and one of them (the fold
+   *  unwinding on a keydown that had already parked the window) left
+   *  `view:active` owned by a window nobody could see. */
+  readonly #surfaceClaim = effect(() => this.#claimSurface(this.visible() && !this.peeking()))
 
   /** THE SURFACE IS OWNED, and the owner is counted (ModeRegistry). A full
    *  screen window is a view covering the canvas by any honest reading, and
@@ -5042,7 +5078,6 @@ export class ChatWindowComponent implements OnDestroy {
     this.#refreshDesignation()
     EffectBus.emit('chat:window-state', { open: this.visible() })
     if (this.visible()) {
-      this.#claimSurface(true)
       this.#refreshContext()
       void this.#resume()
     }
@@ -5498,7 +5533,6 @@ export class ChatWindowComponent implements OnDestroy {
     rememberChatVisibility(true)
     // Reopening always lands on the conversation, never folded away.
     this.peeking.set(false)
-    this.#claimSurface(true)
     this.#applyFold()
     // Announce symmetrically with close() — the controls-bar launcher light
     // (and anything else watching) reads this state.
@@ -5573,7 +5607,6 @@ export class ChatWindowComponent implements OnDestroy {
     this.visible.set(false)
     rememberChatVisibility(false)
     this.peeking.set(false)
-    this.#claimSurface(false)
     this.#applyFold()
     this.listOpen.set(false)
     this.armed.set('')
@@ -5708,24 +5741,6 @@ export class ChatWindowComponent implements OnDestroy {
     if (event.key === 'ArrowLeft') { event.preventDefault(); this.#setRouteSideWidth(current + step) }
     else if (event.key === 'ArrowRight') { event.preventDefault(); this.#setRouteSideWidth(current - step) }
     else if (event.key === 'Home') { event.preventDefault(); this.resetRouteSideWidth() }
-  }
-
-  onKey(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return
-    event.preventDefault()
-    // The cascade unwinds the smallest commitment first: the tile you are
-    // talking to, then the window — matching the escape-cascade's
-    // outermost-first rule.
-    // The flyout is the smallest thing open, so it unwinds first.
-    if (this.clipboardOpen()) { this.clipboardOpen.set(false); return }
-    // Folded away is a smaller commitment than the window itself: Escape
-    // brings the conversation back before it takes the window down.
-    if (this.peeking()) { this.togglePeek(); return }
-    // Then the RAIL'S OWN picks; a reference on the shelf is let go with its
-    // × or by dragging it back, never by a keystroke that means "go up".
-    if (this.#railSeen.size) { this.#rail?.clearSelection(); return }
-    if (this.railSubject()) { this.#rail?.clearSubject(); return }
-    this.close()
   }
 
   // ── conversations ───────────────────────────────────────────────────────
@@ -8087,19 +8102,19 @@ export class ChatWindowComponent implements OnDestroy {
    * Propagation is stopped on EVERY key, not just the ones handled here: the
    * hive binds bare letters as shortcuts, so a message typed into an input that
    * let its keys through would drive the canvas as it was written.
+   *
+   * Escape is NOT handled here. The keymap already heard it in the capture
+   * phase and the cascade asked this window's session to unwind one level
+   * (`#dismissOne`) — the caret lives in this box, so that is the press it
+   * answers. Answering it a second time from here is how a parked window
+   * went on claiming the surface.
    */
   onInputKey(event: KeyboardEvent): void {
     event.stopPropagation()
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       void this.send()
-      return
     }
-    // Through the SAME cascade the window itself runs — the caret lives in
-    // this box (every focus() lands here), so an Escape that closed the whole
-    // window directly would throw away picked tiles and the drilled trail
-    // from the one place Escape is most likely to be pressed.
-    if (event.key === 'Escape') this.onKey(event)
   }
 
   /** Grow with the message, to a ceiling — past that the box scrolls, so the

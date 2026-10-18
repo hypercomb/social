@@ -140,6 +140,14 @@ const t = (key: string, fallback: string, params?: Record<string, unknown>): str
 /** Every mounted docked panel — the chrome-side view of `members`, used to
  *  repaint gears and popovers when grouping changes anywhere. */
 const live = new Set<DockedPanel>()
+/** WHICH WINDOW BROUGHT WHICH PAIR — pair id → bringer id. Module-level, not
+ *  a field, because the panel instance dies with its element on every park
+ *  (the window's `@if` takes the DOM, and the directive with it) while the
+ *  question "is the palette the desk's to take" has to survive exactly that:
+ *  Escape parks both, the press after brings both back, and the close after
+ *  THAT must still take the palette with the desk. Written by
+ *  `#openPairIfWanted`, read by `dispose`, ended by `#forgetIfAlone`. */
+const broughtBy = new Map<string, string>()
 textThemeChanges.addEventListener('change', () => {
   for (const panel of live) panel.refreshTextThemeChoices()
 })
@@ -489,6 +497,8 @@ export class DockedPanel implements GroupMember, LaneMember {
     // no place in the lane yet may still have a pair) so the room check sees
     // the lane this window is actually leaving behind.
     queueMicrotask(() => { if (live.has(this)) this.#openPairIfWanted() })
+    // And, as somebody's pair, settle whose it is (see `#forgetIfAlone`).
+    this.#forgetIfAlone()
     this.#group = readMembership(this.id)
     // A grouped panel opens at its GROUP's width rather than its own remembered
     // one — that is what "shares attributes" has to mean for a window that
@@ -550,8 +560,14 @@ export class DockedPanel implements GroupMember, LaneMember {
    *  session hold taken in `init` is given back here. */
   dispose(): void {
     this.#initialized = false
-    live.delete(this)
+    const wasLive = live.delete(this)
     members.delete(this)
+    // The pair this window brought goes with it (parked, so it comes back
+    // when this window does). Before the lane is released, so the pair is
+    // still where the lane put it when its own dispose gives the place back.
+    // Once per mount: a second dispose of the same instance (safe, by the
+    // contract below) must not park a pair that has since come back.
+    if (wasLive) this.#releaseBroughtPair()
     // Out of the lane — whoever is left slides outward to close the gap.
     releaseLane(this)
     // Closed, or parked — either way it is no longer showing. A parked window's
@@ -617,13 +633,56 @@ export class DockedPanel implements GroupMember, LaneMember {
     for (const panel of live) if (panel.id === this.pairWindow) return
     if (!laneHasRoom(this.dockSide)) return
     EffectBus.emit(this.pairOpenEffect, undefined)
+    // Remembered, so the pair leaves with this window (`dispose`). A pair that
+    // was already up when this window opened is not ours — see the guard above.
+    broughtBy.set(this.pairWindow, this.id)
   }
 
   /** Put the pair away — the condition that justified it has lapsed. Only ever
    *  fired on that transition, so a pair the participant opened for their own
-   *  reasons in some other mode is not swept up by it.
+   *  reasons in some other mode is not swept up by it. From here on the pair is
+   *  not this window's to take, which is why the memory is cleared with it. */
+  #closePair(): void {
+    if (broughtBy.get(this.pairWindow) === this.id) broughtBy.delete(this.pairWindow)
+    this.#parkPair()
+  }
+
+  /** THE PAIR LEAVES WITH THE WINDOW THAT BROUGHT IT. `dispose` runs on a
+   *  close AND on a park (both take the element away), and until 2026-10-18
+   *  neither touched the pair: close the notes desk and the pheromone palette
+   *  the desk had brought stayed standing alone on the right, the hive inset
+   *  by its width, tiles sitting left of where they were. On unpark the
+   *  element remounts, `init()` runs again and `#openPairIfWanted` brings the
+   *  pair back — so this is a park, never a close, and the round trip costs
+   *  the participant nothing.
    *
-   *  It PARKS the pair where it can, rather than closing it: this is the shell
+   *  The memory is NOT cleared here: Escape's put-back brings the pair back
+   *  beside this window without going through `#openPairIfWanted` (both were
+   *  parked by the sweep, both return by it), and the pair must still be this
+   *  window's to take on the close after. `#forgetIfAlone` is where the memory
+   *  ends — when the pair is up and this window is not. */
+  #releaseBroughtPair(): void {
+    if (broughtBy.get(this.pairWindow) !== this.id) return
+    this.#parkPair()
+  }
+
+  /** THE OTHER HALF OF THE MEMORY, asked by the PAIR as it comes up: was I
+   *  brought by a window that is not here? Then I am here on the participant's
+   *  own account (opened by hand after the desk went), and no window may take
+   *  me away as its pair. Deferred a microtask because the put-back remounts
+   *  the pair and its bringer in one pass, in no promised order — by the
+   *  microtask both are up, and a bringer that is up keeps its claim. */
+  #forgetIfAlone(): void {
+    if (broughtBy.get(this.id) === undefined) return
+    queueMicrotask(() => {
+      const by = broughtBy.get(this.id)
+      if (by === undefined) return
+      for (const panel of live) if (panel.id === by) return
+      broughtBy.delete(this.id)
+    })
+  }
+
+  /** It PARKS the pair where it can, rather than closing it: this is the shell
    *  taking back a window the shell brought, so it must cost nothing — the same
    *  rule the lane already follows when it pushes an occupant out. A pair with
    *  no session of its own falls back to the close effect, which is all such a
@@ -632,7 +691,7 @@ export class DockedPanel implements GroupMember, LaneMember {
    *  The `readPairing` guard matters as much as any of it: switch the pairing
    *  off in the gear, open the pair yourself, and leaving the mode used to shut
    *  it anyway — the exact asymmetry `#openPairIfWanted` does not have. */
-  #closePair(): void {
+  #parkPair(): void {
     if (!this.pairWindow) return
     if (!readPairing(this.id)) return
     for (const panel of live) {
