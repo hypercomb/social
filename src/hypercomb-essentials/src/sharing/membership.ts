@@ -20,7 +20,8 @@
 // whatever pair the origin-wide store holds — perhaps another tab's meeting.
 // When the zone this tab joined is known and the stores disagree, the tab is
 // NOT rejoined silently somewhere else: it is put back in its own pair, left
-// unjoined, and the selector opens on it — one START and it is back.
+// unjoined, and told so — a toast whose Start opens the selector on it. A
+// reload is not a request for a window, so the selector waits for the tap.
 //
 // ONE TEXT, ONE ZONE: a room or secret written here that is not what its
 // store already holds is entered text (a link's, a typed word's) and is
@@ -39,7 +40,7 @@
 // Seeded once from the session, then it follows `mesh:public-changed`, which
 // every join and leave path announces.
 
-import { EffectBus, canonicalZoneText } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, canonicalZoneText } from '@hypercomb/core'
 
 const MESH_SESSION_KEY = 'hc:mesh-session'
 /** MIRRORED: hypercomb-shared/core/mesh-session.ts MESH_ZONE_KEY. */
@@ -126,6 +127,14 @@ const pinFromStores = (): void => {
   if (typeof room === 'string' && typeof secret === 'string') writeTabZone({ room, secret })
 }
 
+/** The catalog's words, else English — `t()` answers a missing key with the
+ *  key itself. */
+const tr = (key: string, fallback: string): string => {
+  let s: unknown
+  try { s = ((globalThis as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(I18N_IOC_KEY) as { t?: (k: string) => string } | undefined)?.t?.(key) } catch { s = undefined }
+  return typeof s === 'string' && s && s !== key ? s : fallback
+}
+
 /** Joined, with a zone recorded, and the stores holding another pair. */
 const resumedElsewhere = (): TabZone | null => {
   const zone = readTabZone()
@@ -146,12 +155,23 @@ if (elsewhere) {
   try { sessionStorage.setItem(MESH_SESSION_KEY, 'false') } catch { /* the effect below still flips this tab */ }
   // After this module's importers have wired their listeners: put the tab
   // back in its own pair (the selector pre-fills from it), let every surface
-  // see the tab is not joined, and offer the START that rejoins it.
+  // see the tab is not joined, and offer the START that rejoins it — on a
+  // toast, never by opening the selector unasked (a reload is not a tap).
   queueMicrotask(() => {
     ioc(ROOM_KEY)?.set?.(elsewhere.room ?? '')
     ioc(SECRET_KEY)?.set?.(elsewhere.secret ?? '')
     EffectBus.emit('mesh:public-changed', { public: false })
-    EffectBus.emit('mesh:open-modal', { join: true })
+    EffectBus.emit('toast:show', {
+      type: 'info',
+      // Sticky: emitted at boot, maybe before the toast host has mounted, and
+      // the only word that the tab was unjoined — a timer must not eat it.
+      duration: 0,
+      title: tr('swarm.title', 'swarm'),
+      message: tr('swarm.resume-elsewhere', 'Not rejoined — this tab was in another meeting. Start to rejoin it.'),
+      actionLabel: tr('swarm.resume-start', 'Start'),
+      actionEffect: 'mesh:open-modal',
+      actionPayload: { join: true },
+    })
   })
 }
 

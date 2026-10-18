@@ -107,6 +107,11 @@ export class ComfyQueenBee extends QueenBee {
     { input: '/comfy reroll', result: 'Makes this tile’s picture again with a new seed' },
   ]
 
+  // The argument is a sentence (see the module comment), so the whole line is
+  // this word's: `comfy models` is the checkpoints, never the models window,
+  // and a prompt that says `images` runs nothing else.
+  override rawArgs = true
+
   override slashComplete(args: string): readonly string[] {
     // Only complete while the line is still a verb. Once it is prose, a
     // dropdown offering `host` under a half-typed sentence is noise.
@@ -172,10 +177,10 @@ export class ComfyQueenBee extends QueenBee {
     const results = await comfyService.run({ positive: prompt, cell, attach: true })
     if (!results.length) { this.#log(comfyService.job.message ?? 'no picture'); return }
     if (results.length > 1) {
-      // The rest of a batch is not lost — the window is holding it, and that
-      // is where you choose between them.
-      this.#log(`${results.length} made — the window holds the rest`, '◇')
-      EffectBus.emit('comfy:open', {})
+      // The rest of a batch is not lost — the window is holding it. The run
+      // only says so: the window opens from its own word, never from a run
+      // finishing (and a bare toggle here closed it when it was already up).
+      this.#log(`${results.length} made — the rest wait in the ComfyUI window (comfy)`, '◇')
     }
   }
 

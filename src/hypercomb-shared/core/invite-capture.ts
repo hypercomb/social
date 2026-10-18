@@ -205,9 +205,10 @@ export const keepRestoredMeetLink = (): string => {
 // and secret: nothing is joined until START). An older worker and a link it
 // REFUSES — one naming a meeting point (by design, so it never joins the
 // wrong place) or holding a slash in its room or secret — needs the newer
-// package: the shell puts it back in the stash, opens the update door and
-// says why; the update reloads the tab and the link opens itself (VO-1). No
-// worker at all after the long wait → the selector.
+// package: the shell puts it back in the stash and says why, with the update
+// door on the toast — a window opens only when the guest asks for it; the
+// update reloads the tab and the link opens itself (VO-1). No worker at all
+// after the long wait → the selector.
 
 const MEETING_INVITE_WORKER_KEY = '@diamondcoreprocessor.com/MeetingInviteWorker'
 /** The update door — what the shell's update pill emits (web
@@ -325,15 +326,18 @@ const tr = (key: string, fallback: string): string => {
 }
 
 /** THE LINK NEEDS THE NEWER PACKAGE. Back in the stash, where the newer
- *  worker reads it once the update reloads the tab; the update door opens,
- *  and the guest is told why — never nothing at all. */
+ *  worker reads it once the update reloads the tab, and the guest is told
+ *  why — never nothing at all. The Packages window is not opened for them
+ *  (this runs from a polling timer, not a tap): the toast carries its door. */
 const offerUpdate = (link: string): void => {
   try { sessionStorage.setItem(PENDING_MEET_KEY, link) } catch { /* the copy stays in this page */ }
-  EffectBus.emit(UPDATE_DOOR, {})
   EffectBus.emit('toast:show', {
     type: 'info',
     title: tr('invite.meet.title', 'Meeting link'),
     message: tr('meet.needs-update', 'This meeting needs the newer Hypercomb — update and the link opens itself.'),
+    actionLabel: tr('zone.point-update', 'Update'),
+    actionEffect: UPDATE_DOOR,
+    actionPayload: {},
   })
 }
 

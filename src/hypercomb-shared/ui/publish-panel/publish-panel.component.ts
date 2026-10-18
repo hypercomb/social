@@ -206,10 +206,17 @@ export class PublishPanelComponent implements OnDestroy {
 
   readonly visible = signal(false)
 
-  /** Put away while the hive is covered, brought back on the way home. No
-   *  `publish:close` on the park — that would stop the drone's sweep, and we
-   *  are hiding a window, not ending an observation. */
-  readonly session = signalSession(this.visible, undefined, { close: () => this.close() })
+  /** Put away while the hive is covered, brought back on the way home —
+   *  announced BOTH ways, because the drone holds the open flag: a park it
+   *  never heard of let the next background render carry open:true and bring
+   *  the panel back by itself. Not `publish:close` — parking hides a window,
+   *  it does not end the preview or the sweep's subject. Transient: a park is
+   *  a moment, never a state to replay to a drone that loads later. */
+  readonly session = signalSession(
+    this.visible,
+    (open) => { EffectBus.emitTransient('publish:shown', { open }) },
+    { close: () => this.close() },
+  )
 
   /** The STANDING default zone — what a branch that never chose rides. */
   readonly zone = signal('')

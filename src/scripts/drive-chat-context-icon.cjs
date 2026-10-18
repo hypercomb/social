@@ -85,10 +85,10 @@ async function main() {
   await page.waitForTimeout(6000)
   // A fresh hive opens on the first-boot offer, which covers the canvas.
   // A REAL TILE FIRST — the level roster needs a real signature to resolve,
-  // and the hive is where tiles are made. The chat window boots open over the
-  // command line, so it goes away for this part.
-  await page.locator('hc-chat-window .chat-close').click()
-  await page.waitForTimeout(1200)
+  // and the hive is where tiles are made. The chat window boots SHUT, even
+  // with the local bridge on: a window opens only from its own door.
+  check('the chat window does not open on its own at first visit',
+    (await page.locator('hc-chat-window .chat-panel').count()) === 0)
   const startEmpty = page.locator('text=Start empty')
   if (await startEmpty.count()) { await startEmpty.first().click(); await page.waitForTimeout(1500) }
   const box = page.locator('hc-command-line input, hc-command-line textarea').first()

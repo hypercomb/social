@@ -6,8 +6,15 @@
 
 > **Behaviours are managed ONLY from the context layer (Jaime, 2026-09-10:
 > "We only manage behaviors from the context layer").** The Beehaviors panel
-> opens by `features:context-open` — the top rail switch, or an empty layer —
-> and is always about the layer you stand in. Every per-tile door is removed
+> opens by `features:context-open` — the top rail switch or the empty-layer
+> card's Beehaviors button (the `views` word reaches it by `features:lens`) —
+> and is always about the layer you stand in. It opens ONLY from a door (jwize, 2026-10-16: "window pop up
+> in response to other things. This is bad in most scenarios especially the
+> behaviors"): an empty layer shows its card and offers the panel, never
+> raises it; a join's toast carries the roster's door instead of opening it;
+> and every answer that only refreshes a group (a write landing, navigation,
+> a called attach like `meetup@postit("Doors at 7")`) is marked `refresh`
+> and dropped while the panel is down. Every per-tile door is removed
 > or deprecated: the tile overlay's puzzle-piece icon and the panel's
 > canvas-selection button are REMOVED; `selection:has-features`,
 > `controls:action {features}`, the adopt landing on the adopted tile, the

@@ -20,8 +20,12 @@ const { watchPendingMeet } = await import('./invite-capture')
 
 const pending: unknown[] = []
 EffectBus.on('meet:pending', (p) => { if (p) pending.push(p) })
+// The update door rides a toast; the Packages window itself never opens from
+// the shell's watch — only from the guest's tap on Update.
 const offered: unknown[] = []
-EffectBus.on('packages:open', (p) => { if (p) offered.push(p) })
+EffectBus.on<{ actionEffect?: string }>('toast:show', (p) => { if (p?.actionEffect === 'packages:open') offered.push(p) })
+const opened: unknown[] = []
+EffectBus.on('packages:open', (p) => { if (p) opened.push(p) })
 
 describe('a link arriving by a same-document navigation', () => {
   it('an older package (its worker read the stash once, at boot): the shell watches again and answers it', async () => {
@@ -33,6 +37,7 @@ describe('a link arriving by a same-document navigation', () => {
       await vi.advanceTimersByTimeAsync(500)
       expect(sessionStorage.getItem('hc:pending-meet')).toBe(LINK)
       expect(offered).toHaveLength(1) // it names a meeting point: the update door, never silence
+      expect(opened).toEqual([]) // offered on the toast, not opened for the guest
     } finally { vi.useRealTimers() }
   })
 
@@ -47,6 +52,7 @@ describe('a link arriving by a same-document navigation', () => {
     expect(window.location.href).not.toContain('NEWCODE')
     expect(pending).toHaveLength(before + 1)
     expect(offered).toHaveLength(1) // the current worker answers it; the shell stands aside
+    expect(opened).toEqual([])
   })
 
   it('any other fragment is left alone', async () => {

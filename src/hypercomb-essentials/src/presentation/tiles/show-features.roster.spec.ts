@@ -45,11 +45,13 @@ await import('./show-features.drone.js')
 
 type Row = { kind: string; foreign?: boolean }
 
-/** Open the pool and read the rows it answers with. */
+/** Open the pool and read the rows it answers with. The answer is transient
+ *  (it never replays to a later subscriber), so listen before asking. */
 const roster = (): Row[] => {
   let rows: Row[] = []
+  const off = EffectBus.on<{ rows: Row[] }>('features:roster', p => { rows = p.rows })
   EffectBus.emit('features:roster-open', {})
-  EffectBus.on<{ rows: Row[] }>('features:roster', p => { rows = p.rows })()
+  off()
   return rows
 }
 

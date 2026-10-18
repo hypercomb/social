@@ -37,6 +37,17 @@ export class AskQueenBee extends QueenBee {
     { input: '/ask host example.org', result: 'Point at a different AI host' },
   ]
 
+  // The question is prose, verbatim: no word in it is another behaviour's.
+  // Read as a sentence, `ask how do I publish my files` also ran `publish`
+  // and opened its window beside the chat.
+  override rawArgs = true
+
+  // rawArgs takes ask out of the derived completion, so name its one verb.
+  override slashComplete(args: string): readonly string[] {
+    const t = String(args ?? '').trimStart().toLowerCase()
+    return !t.includes(' ') && 'host'.startsWith(t) ? ['host '] : []
+  }
+
   protected execute(args: string): void {
     const raw = args.trim()
 

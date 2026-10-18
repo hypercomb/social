@@ -269,7 +269,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   //
   // There is NO `features` icon on a tile, earned or standing. Behaviours are
   // managed ONLY from the context layer — the layer you stand in, through the
-  // top rail's Beehaviors switch or an empty layer raising the panel by itself
+  // top rail's Beehaviors switch or the empty-layer card's Beehaviors button
   // (collection-empty-prompt.drone.ts). Asking the behaviour question about
   // the tile under the pointer is the misaligned door (Jaime, 2026-09-10: "We
   // only manage behaviors from the context layer"). Never re-register it.

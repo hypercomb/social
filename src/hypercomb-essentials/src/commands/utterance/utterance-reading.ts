@@ -27,6 +27,13 @@ export interface UtteranceLexiconEntry {
   readonly hidden?: boolean
   /** Runs only as the first word of a line — never lit from prose. */
   readonly lineStart?: boolean
+  /** Everything after this word is its argument, verbatim (`QueenBee.rawArgs`)
+   *  — wherever on the line the word stands, no later word is another action. */
+  readonly rawArgs?: boolean
+  /** The forms the behaviour documents (`QueenBee.options`). A literal form's
+   *  first word, or any word when a form is a `<slot>`, is read as this
+   *  word's argument when it comes directly after it. */
+  readonly options?: readonly string[]
 }
 
 export interface UtteranceSpan {
@@ -93,6 +100,20 @@ function tokenize(text: string): Token[] {
   return tokens
 }
 
+/** Does `entry` take the word directly after it as its own argument? Yes when
+ *  the word opens one of its literal forms (`vocabulary publish`, `meeting
+ *  join`), or when a form is a `<slot>` the participant fills (`tree docs`,
+ *  `create docs`) — a slot holds any name, behaviour words included. A
+ *  connective is never a slot's filler: `tree and record` still runs both. */
+function takesNextWord(entry: UtteranceLexiconEntry, lower: string): boolean {
+  const options = entry.options ?? []
+  for (const form of options) {
+    const first = form.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? ''
+    if (first && !first.startsWith('<') && first === lower) return true
+  }
+  return !CONNECTIVES.has(lower) && options.some(form => form.trim().startsWith('<'))
+}
+
 /**
  * The pure reading. `resolutions` maps an ambiguity span's START offset to
  * the chosen command — a pinned choice turns that span into a plain action.
@@ -106,8 +127,10 @@ export function readUtterance(
   // hidden behaviours are destructive/dev surfaces typed in full on purpose —
   // prose must never light them).
   const claims = new Map<string, Map<string, string>>()   // word → (command → description)
+  const entryOf = new Map<string, UtteranceLexiconEntry>()  // command → its row (rawArgs, options)
   for (const e of entries) {
     if (e.hidden || e.lineStart) continue
+    if (!entryOf.has(e.name)) entryOf.set(e.name, e)
     const words = [e.name, ...(e.aliases ?? [])]
     for (const w of words) {
       const key = w.toLowerCase()
@@ -123,7 +146,11 @@ export function readUtterance(
   const commands: (string | undefined)[] = new Array(tokens.length)
   const candidates: ({ name: string; description: string }[] | undefined)[] = new Array(tokens.length)
 
-  // Pass 1 — what does each word claim to be?
+  // Pass 1 — what does each word claim to be? An action's own words are
+  // claimed first: a word that keeps the rest of the line (rawArgs) and a
+  // word its forms name are its ARGUMENT, never a second action. Read as
+  // actions, `vocabulary publish` ran publish and `please ask how do I
+  // publish my files` ran ask AND publish — a window nobody asked for.
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
     const claim = claims.get(t.lower)
@@ -136,6 +163,18 @@ export function readUtterance(
     } else {
       roles[i] = 'ambiguity'
       candidates[i] = names.map(n => ({ name: n, description: claim.get(n) ?? '' }))
+      continue
+    }
+    const entry = entryOf.get(commands[i]!)
+    if (!entry) continue
+    if (entry.rawArgs) {
+      for (let j = i + 1; j < tokens.length; j++) roles[j] = 'argument'
+      break
+    }
+    const next = tokens[i + 1]
+    if (next && !resolutions?.has(next.start) && takesNextWord(entry, next.lower)) {
+      roles[i + 1] = 'argument'
+      i++
     }
   }
 

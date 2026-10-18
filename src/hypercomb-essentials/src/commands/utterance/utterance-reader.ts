@@ -18,7 +18,14 @@ interface SlashBehaviourDroneLike {
    *  (one entry per alias, each still carrying the full aliases array), so
    *  reading it would claim every word once per alias and misname the
    *  claimants of an ambiguity. */
-  entries?(): readonly { name: string; description?: string; aliases?: readonly string[]; hidden?: boolean; lineStart?: boolean }[]
+  entries?(): readonly {
+    name: string; description?: string; aliases?: readonly string[]; hidden?: boolean; lineStart?: boolean
+    /** Rides the census row — the auto-wrap carries a queen's (wrapQueen),
+     *  and a hand-written provider may declare them (the model words do).
+     *  The reader lets such a word keep the rest of the line and claim its
+     *  own forms' words. */
+    rawArgs?: boolean; options?: readonly string[]
+  }[]
 }
 interface TagRegistryLike { color?(name: string): string | undefined }
 

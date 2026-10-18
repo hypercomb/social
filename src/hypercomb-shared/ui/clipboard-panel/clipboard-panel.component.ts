@@ -12,8 +12,10 @@
 //   • reads   `clipboard:changed` ({ items, count }) — last-value
 //             replayed on subscribe, so the panel reflects current state
 //             the instant it mounts.
-//   • opens   on `clipboard:captured` (a fresh copy/cut) and on
-//             `clipboard:panel` ({ visible }) (the controls-bar button).
+//   • opens   on `clipboard:panel` ({ visible }) only — the rail button, or
+//             the Clipboard action on the capture toast. A copy or cut
+//             answers in place: the copied tiles flash and an info toast
+//             names them and carries the window's door.
 //   • closes  on `clipboard:close` (escape-cascade) and Escape.
 //   • places  via `controls:action` ({ action:'paste' }) for "place all"
 //             and `clipboard:place-items` ({ labels }) for a single tile.
@@ -193,11 +195,6 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
    *  the cost of filling the window grew with what was already in it. Numbers
    *  only; drilling in and back out costs nothing the second time. */
   #countCache = new Map<string, number>()
-  // Guards the auto-open: EffectBus replays the LAST `clipboard:captured`
-  // to a late subscriber, which would pop the panel open on every mount.
-  // We only auto-open for captures that arrive AFTER the initial sync.
-  #ready = false
-
   // Left-grip resize drag. Width grows as the pointer moves LEFT (the panel
   // is docked to the right edge), so we track the start anchor and width.
   #resizeStartX = 0
@@ -222,12 +219,34 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
       this.#syncDisplay(next)
     }))
 
-    // A fresh copy/cut opens the panel. Ignored during the initial
-    // last-value replay (see `#ready`).
-    this.#cleanups.push(EffectBus.on('clipboard:captured', () => {
-      if (!this.#ready) return
-      if (this.items().length > 0) this.#setVisible(true)
+    // A copy or cut answers in place: a toast that carries the window's door.
+    // The panel itself stays shut (a window opens only from its own door, and
+    // popping it here parked whatever the participant had open, the chat
+    // among them). The replay delivered at subscribe time is not a capture.
+    let live = false
+    this.#cleanups.push(EffectBus.on<{ labels?: string[]; op?: string }>('clipboard:captured', (p) => {
+      if (!live || this.visible()) return
+      const labels = Array.isArray(p?.labels) ? p!.labels!.filter(Boolean) : []
+      if (!labels.length) return
+      const shown = labels.length > 3 ? `${labels.slice(0, 3).join(', ')}…` : labels.join(', ')
+      const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
+        ?.get?.('@hypercomb.social/I18n') as { t?: (k: string) => string } | undefined
+      const tr = (key: string, fallback: string): string => {
+        const out = i18n?.t?.(key)
+        return out && out !== key ? out : fallback
+      }
+      const message = p?.op === 'cut'
+        ? tr('clipboard.captured.cut', 'Cut to the clipboard: {labels}')
+        : tr('clipboard.captured.copy', 'Copied to the clipboard: {labels}')
+      EffectBus.emit('toast:show', {
+        type: 'info',
+        message: message.replace('{labels}', shown),
+        actionLabel: tr('clipboard.title', 'Clipboard'),
+        actionEffect: 'clipboard:panel',
+        actionPayload: { visible: true },
+      })
     }))
+    live = true
 
     // The controls-bar clipboard button toggles the panel. Opening only
     // takes effect when there is something to place.
@@ -261,9 +280,6 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
       window.removeEventListener('keyup', this.#onModifier, true)
       window.removeEventListener('blur', this.#clearModifier)
     })
-
-    // Subscriptions wired; allow auto-open from here on.
-    this.#ready = true
   }
 
   #onModifier = (e: KeyboardEvent): void => {

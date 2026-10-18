@@ -35,6 +35,9 @@ export class FeaturesQueenBee extends QueenBee {
     { input: 'features publish example.com', result: 'Sends the set, signed, to example.com' },
   ]
 
+  // `publish` is itself a behaviour word — the whole line is this word's.
+  override rawArgs = true
+
   protected async execute(args: string): Promise<void> {
     const [verb = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)
     if (verb === 'participant') {

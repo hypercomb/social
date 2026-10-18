@@ -146,7 +146,11 @@ export class WorkflowQueenBee extends QueenBee {
       return
     }
 
-    EffectBus.emit('workflow:view-open', {})
+    // A run answers in place: the surface draws its run-state and the runner
+    // toasts how it ended (or why it refused). The designer is not raised by
+    // a run. A STEP-through is the exception: it waits on the designer's Next,
+    // the only control that advances it, so stepping is that window's door.
+    if (stepThrough) EffectBus.emit('workflow:view-open', {})
     EffectBus.emit('workflow:run', { segments, stepThrough })
   }
 

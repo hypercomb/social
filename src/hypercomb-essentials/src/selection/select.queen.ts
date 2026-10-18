@@ -20,7 +20,9 @@ export class SelectQueenBee extends QueenBee {
   readonly command = 'select'
   override description = 'Pick tiles by tapping them, then act on the set'
   override descriptionKey = 'slash.select'
-  override options = ['on', 'off', 'all', 'none', 'options']
+  // `menu` is listed so `select menu` reads as this word's form, never as the
+  // menu word opening its own window.
+  override options = ['on', 'off', 'all', 'none', 'options', 'menu']
   override examples = [
     { input: '/select', result: 'Arms picking — tapping a tile picks it instead of entering it' },
     { input: '/select all', result: 'Picks every tile on this page' },

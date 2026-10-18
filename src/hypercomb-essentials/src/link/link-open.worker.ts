@@ -21,11 +21,18 @@ export class LinkOpenWorker extends Worker {
 
   protected override emits: string[] = ['viewer:open']
 
+  protected override listens: string[] = ['tile:action']
+
   protected override act = async (): Promise<void> => {
-    EffectBus.on<TileActionPayload>('tile:action', (payload) => {
-      if (payload.action !== 'open') return
+    // Only a tap made while this worker listens opens a link. The bus replays
+    // the last `tile:action` to a new subscriber, and an old `open` replayed
+    // here would raise the photo view or a new tab nobody asked for.
+    let live = false
+    this.onEffect<TileActionPayload>('tile:action', (payload) => {
+      if (!live || payload?.action !== 'open') return
       void this.#handleOpen(payload.label)
     })
+    live = true
   }
 
   async #handleOpen(label: string): Promise<void> {

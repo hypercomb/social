@@ -45,7 +45,9 @@ export class TutorQueenBee extends QueenBee {
   readonly command = 'tutor'
   override description = 'Study games — turn this hive into spaced-repetition games'
   override descriptionKey = 'slash.tutor'
-  override options = ['on', 'off', 'here', 'build', 'list']
+  // `upgrade` is listed so `tutor upgrade` reads as this word's form, never as
+  // the upgrade word opening its own window.
+  override options = ['on', 'off', 'here', 'build', 'list', 'upgrade']
   override examples = [{ input: '/tutor here', result: 'Opens study games for the current cell' }]
 
   override slashComplete(args: string): readonly string[] {

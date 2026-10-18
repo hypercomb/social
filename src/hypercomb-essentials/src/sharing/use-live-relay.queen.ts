@@ -261,12 +261,9 @@ export class UseLiveRelayQueenBee {
     // THIS tab is not already joined.
     if (!isJoinedHere()) this.#togglePublic()
 
-    // 4. The WARM-UP PLACE (Jaime, 2026-08-20): joining opens the global
-    // Beehaviors roster so the participant explicitly decides which
-    // BEHAVIORS travel with what they share (the withheld list is the
-    // 30208 broadcast) — the tile half of the ritual is world mode's
-    // share toggles, named in the toast.
-    EffectBus.emit('features:roster-open', {})
+    // 4. The roster is OFFERED, never raised: a window opens only when the
+    // participant asks for it, so the joined toast carries its door (which
+    // behaviors travel with what they share) instead of the join popping it.
 
     const relayNote = meetAt
     console.log(`[use-live-relay] participant setup: room='${room}' relay=${relayNote}`)
@@ -281,7 +278,11 @@ export class UseLiveRelayQueenBee {
         { room, words, host: hostKey })
       : tr('use-live-relay.joined',
         `you're in "${room}" via ${relayNote} — compare the two words on the room line out loud; the roster picks which behaviors you share, world mode picks the tiles`,
-        { room, relay: relayNote }))
+        { room, relay: relayNote }), {
+      actionLabel: tr('features.viewer.title', 'Beehaviors'),
+      actionEffect: 'features:roster-open',
+      actionPayload: {},
+    })
   }
 
   /** Point the mesh at `url` — only when it is not already the one relay
@@ -300,8 +301,9 @@ export class UseLiveRelayQueenBee {
     EffectBus.emit('keymap:invoke', { cmd: 'mesh.togglePublic', binding: null, event: null })
   }
 
-  #toast(type: string, message: string): void {
-    EffectBus.emit('toast:show', { type, title: '/use-live-relay', message, duration: 6000 })
+  /** `door` is a toast action — the way to a window this word only offers. */
+  #toast(type: string, message: string, door?: { actionLabel: string; actionEffect: string; actionPayload?: unknown }): void {
+    EffectBus.emit('toast:show', { type, title: '/use-live-relay', message, duration: 6000, ...door })
   }
 }
 

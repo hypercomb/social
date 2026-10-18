@@ -18,6 +18,10 @@ export class KeywordsQueenBee extends QueenBee {
     { input: 'meeting@keywords We agreed to ship in September', result: 'Targets the meeting tile; review opens from the ready icon' },
   ]
 
+  // A transcript is prose, verbatim: a word in it (`publish`, `meeting`) is
+  // what was said, never another behaviour to run.
+  override rawArgs = true
+
   protected async execute(args: string): Promise<void> {
     EffectBus.emit('keywords:open', { transcript: args.trim() })
   }

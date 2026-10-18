@@ -294,12 +294,14 @@ export class NotesViewerComponent implements OnDestroy {
   // ── Editing (delegated) ─────────────────────────────────
 
   /** Edit the focused note — routes to the command line in capture mode
-   *  with a prefill, and closes the reader (capture mode owns the UI). */
+   *  with a prefill, and closes the reader (capture mode owns the UI).
+   *  Transient: a stored capture would reopen the notes form on any later
+   *  mount of its listener, long after this click. */
   edit(): void {
     const cellLabel = this.cell()
     const note = this.focused()?.note
     if (!cellLabel || !note) return
-    EffectBus.emit('note:capture', {
+    EffectBus.emitTransient('note:capture', {
       cellLabel,
       prefill: note.text,
       editId: note.id,
@@ -312,7 +314,7 @@ export class NotesViewerComponent implements OnDestroy {
   addAnother(): void {
     const cellLabel = this.cell()
     if (!cellLabel) return
-    EffectBus.emit('note:capture', { cellLabel })
+    EffectBus.emitTransient('note:capture', { cellLabel })
     this.close()
   }
 

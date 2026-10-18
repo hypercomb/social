@@ -45,7 +45,7 @@ export class ObserveDrone extends Drone {
     'Read-only observation of the swarm at the current location: lists attributed data points (who is here, what they share) ranked by live interest, with an observer-local filter. Selecting adopt routes through the existing adopt verb. Live — re-emits as the swarm breathes.'
 
   protected override listens: string[] = [
-    'observe:toggle', 'observe:close', 'observe:set-filter',
+    'observe:toggle', 'observe:shown', 'observe:close', 'observe:set-filter',
     'swarm:presence-changed', 'swarm:peers-changed',
   ]
   protected override emits: string[] = ['observe:render']
@@ -55,17 +55,39 @@ export class ObserveDrone extends Drone {
   constructor() {
     super()
 
+    // A press is a press NOW: the bus replays the last toggle to a listener
+    // as it subscribes, and a drone loading after some earlier press would
+    // open the panel nobody just asked for.
+    let live = false
     this.onEffect('observe:toggle', () => {
+      if (!live) return
       // THE ICON ASKS THE SCREEN, NEVER THE FLAG.
       //
       // A docked panel is PARKED — not closed — whenever another window opens
-      // (window-rule.ts): its DOM goes, this drone is never told, and `#open`
-      // stays true over an empty edge. The next press on the glyph then only
-      // cleared a flag nobody could see, and it took a SECOND press to get the
-      // panel back. `isWindowShowing` is the panel's own registration in the
-      // window session, dropped the moment it stops showing — so parked and
-      // closed read alike, which is exactly what the participant means.
+      // (window-rule.ts): its DOM goes, and a shell older than `observe:shown`
+      // never tells this drone, so `#open` can still read true over an empty
+      // edge. A press that flipped the flag then cleared one nobody could see,
+      // and it took a SECOND press to get the panel back. `isWindowShowing` is
+      // the panel's own registration in the window session, dropped the moment
+      // it stops showing — so parked and closed read alike, which is exactly
+      // what the participant means.
       this.#open = !isWindowShowing('observe-viewer')
+      this.#publish()
+    })
+    live = true
+
+    // PARKED IS NOT SHOWING. The panel says when the one-window rule parks it
+    // and when it comes back: with `#open` left true, the swarm breathing
+    // re-published open:true and the parked panel returned by itself.
+    this.onEffect<{ open?: boolean }>('observe:shown', (p) => {
+      if (p?.open === true) {
+        if (this.#open) return
+        this.#open = true
+        this.#publish()
+        return
+      }
+      if (!this.#open) return
+      this.#open = false
       this.#publish()
     })
 

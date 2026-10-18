@@ -122,7 +122,13 @@ export class HostsDrone extends Drone {
   constructor() {
     super()
 
+    // A press is a press NOW: the bus replays the last toggle to a listener
+    // as it subscribes, and a drone loading after some earlier press would
+    // open the directory nobody just asked for. `hosts:open` and
+    // `packages:open` keep their replay — they are the late-load door.
+    let live = false
     this.onEffect('hosts:view-toggle', () => {
+      if (!live) return
       // THE ICON ASKS THE SCREEN, NEVER THE FLAG.
       //
       // A docked panel is PARKED — not closed — whenever another window opens
@@ -136,6 +142,7 @@ export class HostsDrone extends Drone {
       this.#emit()
       if (this.#open) { this.#loadView(); void this.#read() }
     })
+    live = true
 
     // Cross-surface navigation is an OPEN, never a toggle. A docked panel can
     // be parked while its drone remains open; toggling from Publish would then

@@ -119,13 +119,14 @@ describe("the tab's zone", () => {
 describe('resuming on a shell older than the zone', () => {
   beforeEach(() => { services.clear() })
 
-  it('the stores came back in ANOTHER tab\'s pair: not rejoined there — put back, unjoined, and the selector opens', async () => {
+  it('the stores came back in ANOTHER tab\'s pair: not rejoined there — put back, unjoined, and told, the selector one tap away', async () => {
     sessionStorage.setItem('hc:mesh-session', 'true')
     sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ room: 'downtown', secret: 'downtown' }))
     const { room, secret } = withStores('xtab-b', 'xtab-b-secret') // the old shell read localStorage
     const seen: unknown[] = []
     EffectBus.on('mesh:public-changed', (p) => { seen.push(['public', p]) })
     EffectBus.on('mesh:open-modal', (p) => { seen.push(['modal', p]) })
+    EffectBus.on('toast:show', (p) => { seen.push(['toast', p]) })
     seen.length = 0
     const isJoinedHere = await load()
     expect(isJoinedHere()).toBe(false)
@@ -133,7 +134,18 @@ describe('resuming on a shell older than the zone', () => {
     await flush()
     expect(room.value).toBe('downtown')
     expect(secret.value).toBe('downtown')
-    expect(seen).toEqual([['public', { public: false }], ['modal', { join: true }]])
+    // A reload is not a request for the selector: it rides the toast's Start.
+    expect(seen).toEqual([
+      ['public', { public: false }],
+      ['toast', expect.objectContaining({
+        type: 'info',
+        message: expect.stringMatching(/another meeting/),
+        actionLabel: 'Start',
+        duration: 0,
+        actionEffect: 'mesh:open-modal',
+        actionPayload: { join: true },
+      })],
+    ])
   })
 
   it('the stores came back in its own pair: rejoined silently, nothing asked', async () => {
@@ -142,6 +154,7 @@ describe('resuming on a shell older than the zone', () => {
     withStores('downtown', 'downtown')
     const modals: unknown[] = []
     EffectBus.on('mesh:open-modal', (p) => { if (p) modals.push(p) })
+    EffectBus.on('toast:show', (p) => { if (p) modals.push(p) })
     const isJoinedHere = await load()
     await flush()
     expect(isJoinedHere()).toBe(true)

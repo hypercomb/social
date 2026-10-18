@@ -13,6 +13,18 @@ vi.hoisted(() => {
   }
 })
 
+// A take whose code the brood holds — the real take needs the brood roster,
+// so the outcome is handed in for the one case that pins the held answer.
+const heldTake = vi.hoisted(() => ({ next: null as null | { taken: string[]; refused: { path: string; error: string }[]; held: number } }))
+vi.mock('./module-review.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./module-review.js')>()
+  return {
+    ...real,
+    takeTrial: (...args: Parameters<typeof real.takeTrial>) =>
+      heldTake.next ? Promise.resolve(heldTake.next) : real.takeTrial(...args),
+  }
+})
+
 const { ModuleQueenBee } = await import('./module.queen.js')
 
 const AUDITED = 'a'.repeat(64)
@@ -38,6 +50,7 @@ const audited = (root: string): void => {
 }
 
 beforeEach(() => {
+  heldTake.next = null
   toasts.length = 0
   revisionsOf.mockClear()
   localStorage.clear()
@@ -67,5 +80,24 @@ describe('module take after module audit', () => {
     doorNames(SWAPPED)
     await new ModuleQueenBee().invoke('take fresh-rooms games')
     expect(revisionsOf).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('module take with held code', () => {
+  // A window opens only from its own door: the take answers in a toast that
+  // names the brood word, and never opens the brood itself.
+  it('says brood in the toast and emits no brood:open', async () => {
+    doorNames(AUDITED)
+    heldTake.next = { taken: ['games'], refused: [], held: 1 }
+    const opens: unknown[] = []
+    const off = EffectBus.on('brood:open', p => { opens.push(p) })
+    opens.length = 0 // drop any replay delivered at subscribe time
+    await new ModuleQueenBee().invoke('take fresh-rooms games')
+    off()
+    expect(opens).toEqual([])
+    expect(toasts.at(-1)?.type).toBe('success')
+    expect(toasts.at(-1)?.message).toContain('brood')
+    // ...and the toast carries the brood's door, for a tap.
+    expect((toasts.at(-1) as { actionEffect?: string } | undefined)?.actionEffect).toBe('brood:open')
   })
 })

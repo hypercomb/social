@@ -335,7 +335,7 @@ export class PublishStatusDrone extends Drone {
     'The publish differential: one row per publishable branch comparing the head the signed hive index names (what the world sees) against the head sealing would produce now (what is here), with an honest online proof — schnorr-verified index, monotonic freshness against our own publish ledger, and a 404-only absence rule. Publishes, republishes and unpublishes per row.'
 
   protected override listens: string[] = [
-    'publish:view-toggle', 'publish:close', 'publish:refresh', 'sync:state',
+    'publish:view-toggle', 'publish:shown', 'publish:close', 'publish:refresh', 'sync:state',
     'publish:run', 'publish:unpublish', 'publish:inspect', 'publish:copy-link',
     'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
@@ -404,13 +404,38 @@ export class PublishStatusDrone extends Drone {
   constructor() {
     super()
 
-    this.onEffect('publish:view-toggle', () => this.#toggle())
+    // A PRESS IS A PRESS NOW, never the echo of one. The bus replays the last
+    // toggle to a listener as it subscribes; a drone that loads (or reloads)
+    // after some earlier press would open the panel nobody just asked for.
+    let live = false
+    this.onEffect('publish:view-toggle', () => { if (live) this.#toggle() })
 
     // `p` (keyboard/default-keymap.ts) is the same act through the keymap's
     // one lane — and the way to publish from inside a view, where the rail
     // is not on screen.
     this.onEffect<{ cmd?: string }>('keymap:invoke', (p) => {
-      if (p?.cmd === 'publish.toggle') this.#toggle()
+      if (live && p?.cmd === 'publish.toggle') this.#toggle()
+    })
+    live = true
+
+    // PARKED IS NOT SHOWING. The one-window rule parks the panel when another
+    // window opens, and the panel says so here: with `#open` left true, every
+    // background render (a commit, a walk, a behaviour lit) carried open:true
+    // and the panel came back by itself. Parking is not closing — the preview
+    // and the inspected row stay, and no `publish:close` sweep runs; coming
+    // back re-arms and looks again.
+    this.onEffect<{ open?: boolean }>('publish:shown', (p) => {
+      if (p?.open === true) {
+        if (this.#open) return
+        this.#open = true
+        this.#emit()
+        void this.#refresh()
+        return
+      }
+      if (!this.#open) return
+      if (this.#debounce) { clearTimeout(this.#debounce); this.#debounce = null }
+      this.#open = false
+      this.#emit()
     })
 
     this.onEffect('publish:close', () => {
@@ -572,12 +597,12 @@ export class PublishStatusDrone extends Drone {
    *
    *  THE ICON ASKS THE SCREEN, NEVER THE FLAG. A docked panel is PARKED — not
    *  closed — whenever another window opens (window-rule.ts): its DOM goes,
-   *  this drone is never told, and `#open` stays true over an empty edge. The
-   *  next press on the glyph then only cleared a flag nobody could see, and it
-   *  took a SECOND press to get the panel back. `isWindowShowing` is the
-   *  panel's own registration in the window session, dropped the moment it
-   *  stops showing — so parked and closed read alike, which is exactly what
-   *  the participant means. */
+   *  and a shell older than `publish:shown` never tells this drone, so `#open`
+   *  can still read true over an empty edge. A press that flipped the flag
+   *  then cleared one nobody could see, and it took a SECOND press to get the
+   *  panel back. `isWindowShowing` is the panel's own registration in the
+   *  window session, dropped the moment it stops showing — so parked and
+   *  closed read alike, which is exactly what the participant means. */
   #toggle(): void {
     this.#open = !isWindowShowing('publish-panel')
     this.#emit()

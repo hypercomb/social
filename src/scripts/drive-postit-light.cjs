@@ -148,9 +148,9 @@ async function main() {
     await page.waitForTimeout(1500)
     await typeCommand(page, 'inner@postit Doors at 7')
     await page.waitForTimeout(3000)
-    // The panel legitimately raised itself when /folder WAS empty (before
-    // `inner` existed). Put it away, so what we measure next is the ARRIVAL,
-    // not that leftover.
+    // An empty layer no longer raises the Beehaviors panel (a window opens
+    // only from its own door), so this is a no-op kept as a guard: whatever
+    // is up, put it away so what we measure next is the ARRIVAL.
     await closePanel(page)
     // Leave and come back: arriving is what asks the emptiness question.
     await goTo(page, [])

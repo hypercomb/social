@@ -75,6 +75,11 @@ export class HarnessQueenBee extends QueenBee {
     { input: '/harness here default', result: 'The open conversation runs under the device\'s harness again' },
   ]
 
+  // A request (`harness try <name> <request>`) is prose and an import is JSON:
+  // the whole line is this word's — no dot a walk, no colon a tag, no word in
+  // it another behaviour's.
+  override rawArgs = true
+
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
     const words = ['use ', 'here ', 'show ', 'edit ', 'import ', 'offer ', 'sync ', 'try ', 'compare ']

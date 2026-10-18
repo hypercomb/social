@@ -108,7 +108,7 @@ export class WorkflowViewDrone extends Drone {
   protected override listens = [
     'workflow:state', 'workflow:run-state', 'viewport:inset', 'workflow:view-state',
   ]
-  protected override emits = ['workflow:step-focus', 'workflow:view-open']
+  protected override emits = ['workflow:step-focus', 'workflow:view-open', 'workflow:refresh']
 
   #wired = false
   #mount: Mount | null = null
@@ -171,9 +171,11 @@ export class WorkflowViewDrone extends Drone {
   #sync(): void {
     if (this.#active()) {
       if (!this.#mount) this.#mountShell()
-      // The panel is how you EDIT what this canvas shows; opening one without
-      // the other leaves you looking at a flow you cannot change.
-      EffectBus.emit('workflow:view-open', {})
+      // Entering the surface (or arriving on a workflow layer) only draws the
+      // flow. The designer opens from its own door, the toolbar's `edit` or
+      // the `workflow` word, never because the canvas changed mode. A refresh
+      // keeps the drawn steps current without raising any window.
+      EffectBus.emitTransient('workflow:refresh', {})
       this.#render()
       return
     }
@@ -229,6 +231,8 @@ export class WorkflowViewDrone extends Drone {
       zoomLabel,
       this.#button('+', () => this.#setZoom(this.#zoom + 0.15)),
       this.#button(this.#t('workflow.view.fit', 'fit'), () => this.#fit()),
+      // The designer's door on this surface: its meaning is "open the editor".
+      this.#button(this.#t('workflow.view.edit', 'edit'), () => EffectBus.emit('workflow:view-open', {})),
       this.#button(this.#t('workflow.view.exit', 'hexagons'), () => this.#exit()),
     )
     host.appendChild(toolbar)
@@ -363,7 +367,7 @@ export class WorkflowViewDrone extends Drone {
     if (!steps.length) {
       mount.empty.textContent = this.#t(
         'workflow.view.empty',
-        'No steps yet. Drag a kind from the palette onto this canvas.',
+        'No steps yet. Press edit to open the designer, then drag a kind from its palette onto this canvas.',
       )
     }
 

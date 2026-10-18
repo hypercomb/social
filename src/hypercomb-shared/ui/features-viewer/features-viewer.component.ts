@@ -220,6 +220,9 @@ interface FeaturesOpenPayload {
   adopted?: boolean
   /** The view this layer OPENS AS — '' when it has none. */
   defaultView?: string
+  /** An update of a group this panel may already show. Dropped while the
+   *  panel is down: a refresh never reveals the window. */
+  refresh?: boolean
 }
 
 /** Shell-safe slice of the essentials picker, resolved through IoC. */
@@ -228,6 +231,9 @@ const SELECT_MODE_KEY = '@diamondcoreprocessor.com/SelectModeDrone'
 
 /** Sticky pool filter: '0' = anchored (tile-bound) behaviors hidden. */
 const ANCHORED_PREF_KEY = 'hc:behaviors-pool-anchored'
+
+/** Has a roster answer landed this session? See the one-shot re-ask below. */
+let rosterAnswered = false
 
 @Component({
   selector: 'hc-features-viewer',
@@ -256,8 +262,8 @@ export class FeaturesViewerComponent implements OnDestroy {
   //
   // The panel has TWO doors and they mean different things:
   //
-  //   • the top rail's switch (and an empty layer, which sends the same
-  //     signal on arrival) — no tile in hand, so the subject is the CONTEXT:
+  //   • the top rail's switch (and the empty-layer card's Beehaviors
+  //     button, which sends the same signal when pressed) — no tile in hand, so the subject is the CONTEXT:
   //     the layer that is loaded. Walk deeper and the subject walks with
   //     you; every arrival lands on self again.
   //   • the selection menu's features button — that TILE becomes the
@@ -431,8 +437,9 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.storeRows.set(this.storeRows().map(r => r.kind === row.kind ? { ...r, on: next } : r))
   }
 
-  /** Open the store (header button; WORLD stage and the join selector emit
-   *  the same effect). show-features answers with the rows. */
+  /** Open the store (header button; the join selector's shared-behaviors
+   *  button and the joined toast's action are the same door).
+   *  show-features answers with the rows. */
   readonly openStore = (): void => {
     EffectBus.emit('features:roster-open', {})
   }
@@ -453,21 +460,23 @@ export class FeaturesViewerComponent implements OnDestroy {
   #refreshGroup(): void {
     const g = this.group()
     if (!g) return
-    this.#openAt(g.segments, g.cell)
+    this.#openAt(g.segments, g.cell, true)
   }
 
   /** Ask the drone to describe a LOCATION — the one way this panel changes
    *  subject, whether the trigger is navigation, the rail switch, the crumb's
    *  self step or a roster flip. Empty segments are the hive ROOT and must
    *  say so: `root: true` is what tells the drone not to resolve the label as
-   *  a tile at the current location. */
-  #openAt(segments: readonly string[], rootLabel = 'hypercomb'): void {
+   *  a tile at the current location. `refresh` marks a re-read of what the
+   *  panel already shows; its answer can never raise a panel that is down. */
+  #openAt(segments: readonly string[], rootLabel = 'hypercomb', refresh = false): void {
     const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+    const flag = refresh ? { refresh: true } : {}
     if (segs.length === 0) {
-      EffectBus.emit('tile:action', { action: 'features', label: rootLabel, segments: [], root: true })
+      EffectBus.emit('tile:action', { action: 'features', label: rootLabel, segments: [], root: true, ...flag })
       return
     }
-    EffectBus.emit('tile:action', { action: 'features', label: segs[segs.length - 1], segments: segs })
+    EffectBus.emit('tile:action', { action: 'features', label: segs[segs.length - 1], segments: segs, ...flag })
   }
 
   /** Where the participant is standing, read fresh from lineage. */
@@ -581,6 +590,25 @@ export class FeaturesViewerComponent implements OnDestroy {
     )
     this.#cleanups.push(EffectBus.on<FeaturesOpenPayload>('features:open', (p) => {
       if (!p?.cell) return
+      // A refresh answers a write, a navigation or a flip — never a request
+      // for this window. While the panel is down it never reveals it, so an
+      // act elsewhere (a write landing after close) never pops it. A PARKED
+      // panel still holds its group: take the fresh rows silently, so it comes
+      // back showing the switch the participant just flipped.
+      if (p.refresh === true && !this.visible()) {
+        const held = this.group()
+        const segments = Array.isArray(p.segments) ? p.segments : []
+        if (held && held.segments.join('/') === segments.join('/')) {
+          this.group.set({
+            ...held,
+            applied: Array.isArray(p.applied) ? p.applied : [],
+            available: Array.isArray(p.available) ? p.available : [],
+            adopted: p.adopted === true,
+          })
+          this.defaultView.set(String(p.defaultView ?? '').trim())
+        }
+        return
+      }
       // No sibling is closed here — see the note in files-viewer. The lane
       // decides what fits on an edge, and it parks rather than closes.
       const group: FeatureGroup = {
@@ -621,7 +649,22 @@ export class FeaturesViewerComponent implements OnDestroy {
     }))
 
     // ── THE STORE arriving (features:roster-open → show-features) ──
+    //
+    // The drone answers TRANSIENTLY, so a door pressed before this panel
+    // mounted would have its answer go to nobody. The request is stored: when
+    // one is already standing as this panel subscribes, ask again now that
+    // someone is listening for the rows.
+    // ONE-SHOT: once any roster has landed this session, a stored request is
+    // old news, and a later remount must not raise the store on it.
+    let rosterLive = false
+    let rosterAskedEarly = false
+    this.#cleanups.push(EffectBus.on('features:roster-open', () => {
+      if (!rosterLive) rosterAskedEarly = true
+    }))
+    rosterLive = true
+    if (rosterAskedEarly && !rosterAnswered) queueMicrotask(() => EffectBus.emit('features:roster-open', {}))
     this.#cleanups.push(EffectBus.on<{ rows?: StoreRow[] }>('features:roster', (p) => {
+      rosterAnswered = true
       const rows = Array.isArray(p?.rows) ? p!.rows! : []
       this.storeRows.set(rows)
       this.query.set('')
@@ -679,7 +722,7 @@ export class FeaturesViewerComponent implements OnDestroy {
         // participant is no longer standing on. (#openAt raises `root: true`
         // for the empty path, which is what tells the drone to describe the
         // hive rather than resolve the label at the current location.)
-        this.#openAt(segs)
+        this.#openAt(segs, 'hypercomb', true)
       }
       lineage.addEventListener('change', onNav)
       this.#cleanups.push(() => lineage.removeEventListener('change', onNav))
@@ -1089,7 +1132,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     ;(row.feat as FeatureRow).sourceScope = scope
     row.sourceScope = scope
     await queen.invoke('scope ' + scope)
-    this.#openAt(group.segments, group.cell)
+    this.#openAt(group.segments, group.cell, true)
   }
 
   /** ENTER a lit view behaviour — the hover-only Open. Navigates to the

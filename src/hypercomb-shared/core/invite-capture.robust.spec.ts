@@ -3,7 +3,8 @@
 //
 //   VO-1  an older package drains a link naming a meeting point and refuses
 //         it (by design) — the shell kept its own copy, so it puts the link
-//         back, opens the update door and says why.
+//         back and says why, the update door riding the toast: the Packages
+//         window opens only when the guest taps Update.
 //   VO-3  a link the shell itself answers with the selector carries its
 //         access code into the tab's zone, so a reload resumes with it.
 //   CC-2  where storage is blocked the link is never destroyed: the address
@@ -48,8 +49,19 @@ afterEach(() => {
 
 const named = (name: string) => fx.filter(e => e.name === name).map(e => e.p)
 
+/** The update door, offered — a toast whose action opens the Packages window,
+ *  and the window itself never opened from a timer. */
+const offeredUpdate = (): void => {
+  expect(named('packages:open')).toEqual([])
+  expect(named('toast:show')).toEqual([expect.objectContaining({
+    message: expect.stringMatching(/needs the newer Hypercomb/),
+    actionLabel: 'Update',
+    actionEffect: 'packages:open',
+  })])
+}
+
 describe('VO-1 — an older package that drains a link it refuses', () => {
-  it('the shell kept its copy: the link goes back, the update door opens, and the guest is told why', async () => {
+  it('the shell kept its copy: the link goes back, and the guest is told why with the update door on the toast', async () => {
     window.history.replaceState(null, '', '/#meet=' + POINT_LINK)
     const { watchPendingMeet } = await load()
     expect(sessionStorage.getItem('hc:pending-meet')).toBe(POINT_LINK)
@@ -59,8 +71,7 @@ describe('VO-1 — an older package that drains a link it refuses', () => {
     sessionStorage.removeItem('hc:pending-meet')
     await vi.advanceTimersByTimeAsync(300)
     expect(sessionStorage.getItem('hc:pending-meet')).toBe(POINT_LINK) // back, for the newer worker
-    expect(named('packages:open')).toHaveLength(1)
-    expect(named('toast:show')).toEqual([expect.objectContaining({ message: expect.stringMatching(/needs the newer Hypercomb/) })])
+    offeredUpdate()
     expect(named('mesh:open-modal')).toEqual([]) // never the selector: it would meet at the default
   })
 
@@ -72,7 +83,7 @@ describe('VO-1 — an older package that drains a link it refuses', () => {
     watchPendingMeet({ pollMs: 100 })
     await vi.advanceTimersByTimeAsync(200)
     expect(sessionStorage.getItem('hc:pending-meet')).toBe(POINT_LINK)
-    expect(named('packages:open')).toHaveLength(1)
+    offeredUpdate()
   })
 
   it('a slash in the room — which an older reader refuses too — goes the same way', async () => {
@@ -84,7 +95,7 @@ describe('VO-1 — an older package that drains a link it refuses', () => {
     watchPendingMeet({ pollMs: 100 })
     await vi.advanceTimersByTimeAsync(200)
     expect(sessionStorage.getItem('hc:pending-meet')).toBe(link)
-    expect(named('packages:open')).toHaveLength(1)
+    offeredUpdate()
   })
 
   it('a plain link the older worker drained: it is answering it — the shell stays out', async () => {
@@ -98,7 +109,7 @@ describe('VO-1 — an older package that drains a link it refuses', () => {
     expect(sessionStorage.getItem('hc:pending-meet')).toBeNull()
   })
 
-  it('the Sep 30 package, which never reads the stash: a point link opens the update door after the grace, the stash kept', async () => {
+  it('the Sep 30 package, which never reads the stash: a point link offers the update door after the grace, the stash kept', async () => {
     sessionStorage.setItem('hc:pending-meet', POINT_LINK)
     const { watchPendingMeet } = await load()
     services.set(WORKER_KEY, {})
@@ -106,7 +117,7 @@ describe('VO-1 — an older package that drains a link it refuses', () => {
     await vi.advanceTimersByTimeAsync(900)
     expect(fx).toEqual([])
     await vi.advanceTimersByTimeAsync(300)
-    expect(named('packages:open')).toHaveLength(1)
+    offeredUpdate()
     expect(named('mesh:open-modal')).toEqual([])
     expect(sessionStorage.getItem('hc:pending-meet')).toBe(POINT_LINK)
   })

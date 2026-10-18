@@ -64,10 +64,16 @@ export class ObserveViewerComponent implements OnDestroy {
 
   readonly visible = signal(false)
 
-  /** Put away while the hive is covered. No `observe:close` — that stops the
-   *  drone observing, and we are hiding a window, not ending an observation;
-   *  the walk keeps feeding the panel so it is current when it comes back. */
-  readonly session = signalSession(this.visible, undefined, { close: () => this.close() })
+  /** Put away while the hive is covered, brought back on the way home —
+   *  announced BOTH ways, because the drone holds the open flag: a park it
+   *  never heard of let the swarm's next breath re-publish open:true and bring
+   *  the panel back by itself. Coming back, the drone reads the swarm afresh.
+   *  Transient: a park is a moment, never a state to replay. */
+  readonly session = signalSession(
+    this.visible,
+    (open) => { EffectBus.emitTransient('observe:shown', { open }) },
+    { close: () => this.close() },
+  )
 
   readonly groups = signal<ObservationGroup[]>([])
   readonly showNames = signal(true)

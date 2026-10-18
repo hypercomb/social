@@ -50,6 +50,9 @@ import type { TileEditorService } from './tile-editor.service.js'
 const define = vi.spyOn(customElements, 'define')
 state.services.set('@hypercomb.social/Store', { getResource: async () => null, putResource: async () => '' })
 state.services.set('@hypercomb.social/Lineage', { explorerSegments: () => [] })
+// An edit stored on the bus BEFORE the bee listens: the replay it receives at
+// construction is not a tap, so it must open (and load) nothing.
+EffectBus.emit('tile:action', { action: 'edit', label: 'replayed', q: 0, r: 0, index: 0 })
 await import('./tile-editor.drone.js')
 
 const service = (): TileEditorService => state.services.get('@diamondcoreprocessor.com/TileEditorService') as TileEditorService
@@ -66,9 +69,12 @@ afterAll(() => {
 })
 
 describe('tile editor — the panel arrives with the first edit', () => {
-  it('adds the surface at boot and leaves the element undefined', () => {
+  it('adds the surface at boot and leaves the element undefined', async () => {
+    await new Promise(resolve => setTimeout(resolve, 0))
     expect(state.added).toEqual([{ name: TAG, owner: VIEW_KEY, element: TAG, order: 220 }])
     expect(customElements.get(TAG)).toBeUndefined()
+    // The edit replayed at construction opened nothing.
+    expect(service().mode).not.toBe('editing')
     // The Escape cascade asks the view's face synchronously: nothing to unwind.
     expect((state.services.get(VIEW_KEY) as { dismissInner(): boolean }).dismissInner()).toBe(false)
   })

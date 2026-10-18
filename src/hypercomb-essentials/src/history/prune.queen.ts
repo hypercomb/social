@@ -15,12 +15,11 @@
 // parameters, and the mode always opens at the location they are standing
 // on.
 //
-// Opening also raises the history window: the deleted tiles ARE history, the
-// window is where the toggle for this mode lives, and a participant who
-// arrived here by typing should be able to see the same control they could
-// have clicked.
+// The word answers on the canvas: the deleted tiles appear where you stand.
+// It does not raise the history window. A window opens only from its own
+// door, and `history` (or its icon) is that door if you want the toggle.
 
-import { QueenBee, EffectBus } from '@hypercomb/core'
+import { EffectBus, QueenBee } from '@hypercomb/core'
 import { PruneService } from './prune.service.js'
 
 export class PruneQueenBee extends QueenBee {
@@ -38,10 +37,25 @@ export class PruneQueenBee extends QueenBee {
     const prune = get('@diamondcoreprocessor.com/PruneService') as PruneService | undefined
     if (!prune) return
     // Idempotent: saying it twice while already standing on the layer is not
-    // a request to leave. The toggle in the history window is the way out,
-    // as is Escape or the back gesture.
-    if (!prune.active) await prune.enter()
-    EffectBus.emit('history:view-open', undefined)
+    // a request to leave. Escape or the back gesture is the way out, as is the
+    // toggle in the history window when you have opened it yourself.
+    if (prune.active) return
+    await prune.enter()
+    // The hive's one destructive mode, entered with no window raised: say
+    // where you are in place, and carry History's door on the toast.
+    const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
+      ?.get?.('@hypercomb.social/I18n') as { t?: (k: string) => string } | undefined
+    const tr = (key: string, fallback: string): string => {
+      const out = i18n?.t?.(key)
+      return out && out !== key ? out : fallback
+    }
+    EffectBus.emit('toast:show', {
+      type: 'info',
+      message: tr('prune.entered', 'Deleted tiles. Delete destroys them for good here; Escape leaves.'),
+      actionLabel: tr('prune.history', 'History'),
+      actionEffect: 'history:view-open',
+      actionPayload: undefined,
+    })
   }
 }
 

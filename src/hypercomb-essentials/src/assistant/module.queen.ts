@@ -454,8 +454,15 @@ export class ModuleQueenBee extends QueenBee {
       if (kept?.root === site.package) await (await import('./module-audit.js')).wearAudit(kept).catch(() => undefined)
       const took = { paths: outcome.taken.join(', '), name, held: outcome.held }
       if (outcome.held) {
-        toast(t('module.tookheld', 'Took {paths} from {name}. Its new code is held ({held}) and does not run until you accept it: brood list shows it, brood accept 1 lets it run, then reload.', took), 'success')
-        EffectBus.emit('brood:open', { at: Date.now() })
+        // The take answers in a toast; the brood stays shut. A window opens
+        // only from its own door, so the toast carries it (and names the word).
+        EffectBus.emit('toast:show', {
+          type: 'success',
+          message: t('module.tookheld', 'Took {paths} from {name}. Its new code is held ({held}) and does not run until you accept it: say brood to see it, brood accept 1 lets it run, then reload.', took),
+          actionLabel: t('module.brood', 'Brood'),
+          actionEffect: 'brood:open',
+          actionPayload: {},
+        })
       } else {
         toast(t('module.took', 'Took {paths} from {name} — reload to run it.', took), 'success')
       }

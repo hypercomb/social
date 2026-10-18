@@ -133,3 +133,109 @@ describe('readUtterance', () => {
     expect(r.spans[1].text).toBe('—')
   })
 })
+
+// A WINDOW OPENS ONLY FROM ITS OWN DOOR (jwize, 2026-10-16: "window pop up in
+// response to other things. This is bad in most scenarios especially the
+// behaviors"). A word an action owns — the rest of the line for a rawArgs
+// word, a form it documents, the name in its slot — is its argument, never a
+// second behaviour that opens its own window beside it.
+const OWNED: readonly UtteranceLexiconEntry[] = [
+  { name: 'vocabulary', options: ['publish', 'withdraw'] },
+  { name: 'publish' },
+  { name: 'tree', options: ['<name>', '<64-hex signature>', '/path/to/tile', 'insight <name>', 'insights', 'rings <n>', 'off'] },
+  { name: 'docs' },
+  { name: 'create', options: ['<name>', '<parent>/<child>'] },
+  { name: 'go', rawArgs: true, options: ['<tile>', '<path>/<tile>', '/<path>', '..', '/'] },
+  { name: 'meeting', options: ['join', 'leave', 'cascade', 'cascade:19'] },
+  { name: 'join', rawArgs: true },
+  { name: 'comfy', rawArgs: true, options: ['<prompt>', 'host', 'models', 'reroll'] },
+  { name: 'models', rawArgs: true },
+  { name: 'select', options: ['on', 'off', 'all', 'none', 'options', 'menu'] },
+  { name: 'menu', options: ['<name>', 'list'] },
+  { name: 'ask', rawArgs: true, options: ['<question>', 'host <domain>'] },
+  { name: 'opus', rawArgs: true },
+  { name: 'providers' },
+  // copy's real forms (clipboard.queen.ts) — it HAS a <tile> slot.
+  { name: 'copy', options: ['<tile>', '[<tile>, <tile>, ...]', ''] },
+  { name: 'paste' },
+  { name: 'record' },
+]
+const run = (text: string) => readUtterance(text, OWNED).actions
+
+describe('readUtterance — an action keeps its own words', () => {
+  it('a word one of its forms names is its argument: vocabulary publish', () => {
+    expect(run('vocabulary publish')).toEqual([{ command: 'vocabulary', args: 'publish' }])
+  })
+
+  it('a behaviour word in a <slot> is the name it fills: tree docs', () => {
+    expect(run('tree docs')).toEqual([{ command: 'tree', args: 'docs' }])
+  })
+
+  it('create docs then go docs — each word names the tile, no docs window', () => {
+    expect(run('create docs then go docs')).toEqual([
+      { command: 'create', args: 'docs' },
+      { command: 'go', args: 'docs' },
+    ])
+  })
+
+  it('meeting join is the meeting form, not the join word', () => {
+    expect(run('meeting join')).toEqual([{ command: 'meeting', args: 'join' }])
+  })
+
+  it('comfy models is the checkpoints, not the models window', () => {
+    expect(run('comfy models')).toEqual([{ command: 'comfy', args: 'models' }])
+  })
+
+  it('select menu is the selection ring, not the menu word', () => {
+    expect(run('select menu')).toEqual([{ command: 'select', args: 'menu' }])
+  })
+
+  it('a rawArgs word keeps the rest of the line even after leading filler', () => {
+    const r = readUtterance('please ask how do I publish my files', OWNED)
+    expect(r.actions).toEqual([{ command: 'ask', args: 'how do I publish my files' }])
+    expect(r.spans.find(s => s.text === 'publish')!.role).toBe('argument')
+  })
+
+  it('a model word keeps its question: opus which providers are cheapest', () => {
+    expect(run('opus which providers are cheapest')).toEqual([
+      { command: 'opus', args: 'which providers are cheapest' },
+    ])
+  })
+
+  it('a rawArgs word later on the line still takes the rest', () => {
+    expect(run('copy then ask why')).toEqual([
+      { command: 'copy', args: '' },
+      { command: 'ask', args: 'why' },
+    ])
+  })
+
+  // Chaining stays through a connective: two genuine words on one line both
+  // run, in order. Without one, a word with a <slot> takes the next word as
+  // the name it fills (the rule that keeps `tree docs` from opening docs), so
+  // `copy paste` copies the tile named paste. Say `copy then paste`.
+  it('two genuine words still chain — copy then paste', () => {
+    expect(run('copy then paste')).toEqual([
+      { command: 'copy', args: '' },
+      { command: 'paste', args: '' },
+    ])
+    expect(run('copy paste')).toEqual([{ command: 'copy', args: 'paste' }])
+  })
+
+  it('a word that is not one of its forms is still an action: select copy', () => {
+    expect(run('select copy').map(a => a.command)).toEqual(['select', 'copy'])
+  })
+
+  it('only the word directly after is claimed — the next word chains again', () => {
+    expect(run('meeting join then copy')).toEqual([
+      { command: 'meeting', args: 'join' },
+      { command: 'copy', args: '' },
+    ])
+  })
+
+  it('a connective is never a slot filler: tree and record runs both', () => {
+    expect(run('tree and record')).toEqual([
+      { command: 'tree', args: '' },
+      { command: 'record', args: '' },
+    ])
+  })
+})

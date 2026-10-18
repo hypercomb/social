@@ -5,11 +5,14 @@
 // `features:open` so the shell-side right-docked panel can list them.
 //
 // BEHAVIOURS ARE MANAGED ONLY FROM THE CONTEXT LAYER — the layer you stand in
-// (Jaime, 2026-09-10). The doors are the top rail's Beehaviors switch and an
-// empty layer raising the panel by itself (collection-empty-prompt.drone.ts),
+// (Jaime, 2026-09-10). The doors are the top rail's Beehaviors switch and the
+// empty-layer card's Beehaviors button (collection-empty-prompt.drone.ts) —
 // both `features:context-open`, which the panel turns into the `tile:action`
-// payload handled here with the current layer's own segments. Every PER-TILE
-// door is gone or DEPRECATED: the overlay's puzzle piece is removed; the
+// payload handled here with the current layer's own segments. An empty layer
+// no longer raises the panel by itself, and every answer that only refreshes
+// a group is marked `refresh` so it never raises a panel that is down: a
+// window opens only when the participant asks for it. Every PER-TILE door is
+// gone or DEPRECATED: the overlay's puzzle piece is removed; the
 // selection button, the adopt landing, the asleep-icon route and the
 // `?features=` intent no longer aim the panel at a tile you are not standing
 // in. Do not add a door that names a tile other than the context.
@@ -69,7 +72,7 @@
 // branchSig: the installable branch is the ancestor's, not this tile's, so
 // they stage as metadata-only (still listed, for provenance).
 
-import { Drone } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
 import { kindsForLabel, countLabelsWithKind, DEFAULT_VIEW_DECORATION_KIND } from '../../commands/decoration-kind-index.js'
 import { defaultViewAt, writeDefaultView, clearDefaultView, nextDefaultViewAt } from '../../commands/view-default.js'
@@ -374,11 +377,16 @@ interface FeaturesOpenPayload {
   /** The view this layer OPENS AS — its default ('' when it has none). One
    *  per layer; the panel lights that row's icon. */
   defaultView?: string
+  /** A REFRESH of a group the panel may already show — the answer to a write,
+   *  a navigation or a flip. A refresh never reveals: the panel drops it when
+   *  it is not showing. Only a door's request (no flag) raises the panel. */
+  refresh?: boolean
 }
 
 interface TileActionPayload {
   action?: string
   label?: string
+  refresh?: boolean
 }
 
 interface SwarmDroneLike {
@@ -455,7 +463,7 @@ export class ShowFeaturesDrone extends Drone {
       // through this flag; a plain empty `segments` still means "resolve the
       // label at the current location".
       const root = (payload as { root?: unknown }).root === true
-      void this.#open(label, root ? [] : (segments && segments.length ? segments : undefined))
+      void this.#open(label, root ? [] : (segments && segments.length ? segments : undefined), payload?.refresh === true)
     })
 
     // DEPRECATED (2026-09-10) — the selection door. It aimed the panel at a
@@ -482,7 +490,8 @@ export class ShowFeaturesDrone extends Drone {
     // The panel's ADD switch on an addable available row. Attaches the feature
     // AT THE TILE'S OWN SEGMENTS (explicit — never "wherever the participant
     // happens to stand", the wrong-target failure the slash route had), then
-    // re-opens the group so the row moves into "On this layer".
+    // refreshes the group so the row moves into "On this layer" — a refresh,
+    // so a panel closed while the write was in flight stays closed.
     //
     // `silent` is a word's (`groups on`), as it is the rail's on
     // `features:default`: the deposit is the whole answer, and popping the
@@ -501,7 +510,7 @@ export class ShowFeaturesDrone extends Drone {
     // The panel's REMOVE on an applied row. Membership is positive — the
     // decorations ARE the applied behaviors — so removing the tile's records
     // of the kind is the whole off. Answers with `features:outcome` and
-    // re-opens the group so the row leaves "on this tile".
+    // refreshes the group so the row leaves "on this tile".
     this.onEffect<{ cell?: string; segments?: string[]; kind?: string; silent?: boolean }>('features:remove', (p) => {
       const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
       const kind = String(p?.kind ?? '')
@@ -562,8 +571,9 @@ export class ShowFeaturesDrone extends Drone {
     // The GLOBAL ROSTER — the pool of behaviors. No tile subject, no
     // belonging: every behavior the app knows, one light each. Off =
     // dormant everywhere AND withheld from every swarm (one switch, one
-    // meaning). Opened pre-swarm from the WORLD stage / join selector, and
-    // any time from the panel header. This drone owns the census (registry
+    // meaning). Opened only by a door: the panel header, the join selector's
+    // shared-behaviors button, or the joined toast's action — a join itself
+    // never raises it. This drone owns the census (registry
     // + CAPABILITIES + GAMES + lit/off kinds whose module isn't here — those
     // must stay listed or they could never be flipped again).
     this.onEffect('features:roster-open', () => { this.#emitRoster() })
@@ -720,7 +730,9 @@ export class ShowFeaturesDrone extends Drone {
         ...boundOf(kind),
       })
     }
-    this.emitEffect('features:roster', { rows })
+    // Transient for the same reason as `features:open`: the answer belongs to
+    // the request just made, never to a panel that mounts afterwards.
+    EffectBus.emitTransient('features:roster', { rows })
   }
 
   /** Attach (or detach) an ATTACHABLE view behaviour at `segments` by writing
@@ -812,7 +824,7 @@ export class ShowFeaturesDrone extends Drone {
       // came back dark, and the second press wrote a decoration at the
       // phantom path just to make the bulb light. One press, one light.
       // ([] = the hive-root group, and an explicit empty array says so.)
-      if (label && !silent) await this.#open(label, segments)
+      if (label && !silent) await this.#open(label, segments, true)
     } catch (err) {
       console.warn('[show-features] enable failed', { kind, segments, err })
       this.emitEffect('activity:log', { message: `couldn't add "${kind}" to "${label}"`, icon: '○' })
@@ -837,7 +849,7 @@ export class ShowFeaturesDrone extends Drone {
       }
       this.emitEffect('activity:log', { message: `${kind} off "${label}"`, icon: '○' })
       this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
-      if (label && !silent) await this.#open(label, segments)   // refresh the panel group in place
+      if (label && !silent) await this.#open(label, segments, true)   // refresh the panel group in place
     } catch (err) {
       console.warn('[show-features] remove failed', { kind, segments, err })
       this.emitEffect('activity:log', { message: `couldn't remove "${kind}" from "${label}"`, icon: '○' })
@@ -883,7 +895,10 @@ export class ShowFeaturesDrone extends Drone {
     try {
       await queen.applyCall({ segments: [...segments], args: [...args], named: { ...named } })
       this.emitEffect('features:outcome', { cell: label, kind: bee?.decorationKind ?? '', ok: true, message: '' })
-      await this.#open(label, segments)
+      // A word's act answers in place, as the plain attach does: a log line
+      // and the outcome. No panel read — `segments` is the TARGET tile, and
+      // even a refresh would swap a showing panel's context layer for it.
+      this.emitEffect('activity:log', { message: `${view} on "${label}"`, icon: '▶' })
     } catch (err) {
       console.warn('[show-features] called attach failed', { view, segments, err })
       this.emitEffect('features:outcome', { cell: label, kind: bee?.decorationKind ?? '', ok: false, message: `couldn't apply "${view}" to "${label}"` })
@@ -918,7 +933,7 @@ export class ShowFeaturesDrone extends Drone {
           await this.#settleKind(segments, DEFAULT_VIEW_DECORATION_KIND)
           this.emitEffect('activity:log', { message: `"${label}" opens as hexagons — the branch's view stops here`, icon: '○' })
           this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: true, message: '' })
-          if (label && !silent) await this.#open(label, segments)
+          if (label && !silent) await this.#open(label, segments, true)
           return
         }
         // Only a REGISTERED RENDER view can be a surface to arrive on. A
@@ -938,11 +953,10 @@ export class ShowFeaturesDrone extends Drone {
       }
       this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: true, message: '' })
       // Same rule as the enable above: refresh the layer we wrote, not the
-      // label resolved at wherever the participant happens to stand. A SILENT
-      // write (the header rail's ctrl-click) skips it — the refresh opens the
-      // Beehaviors panel, which is right when the gesture happened inside it
-      // and wrong when it happened on the rail.
-      if (label && !silent) await this.#open(label, segments)
+      // label resolved at wherever the participant happens to stand. It is a
+      // refresh: it updates the panel when it is showing and never raises it.
+      // A SILENT write (the header rail's ctrl-click) skips even the read.
+      if (label && !silent) await this.#open(label, segments, true)
     } catch (err) {
       console.warn('[show-features] default view failed', { view, segments, clear, err })
       this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: false, message: `couldn't set how "${label}" opens` })
@@ -997,7 +1011,10 @@ export class ShowFeaturesDrone extends Drone {
     return false
   }
 
-  async #open(label: string, segmentsOverride?: readonly string[]): Promise<void> {
+  /** Describe a location to the panel. `refresh` marks the answer as an
+   *  update of what the panel may already show — the panel drops it unless it
+   *  is up, so only a door's request ever raises the window. */
+  async #open(label: string, segmentsOverride?: readonly string[], refresh = false): Promise<void> {
     const ioc = this.#ioc()
     const registry = ioc?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)
     if (!registry) return
@@ -1238,10 +1255,13 @@ export class ShowFeaturesDrone extends Drone {
       }
     }
 
-    this.emitEffect<FeaturesOpenPayload>('features:open', {
+    // TRANSIENT: an answer is for the panel listening now. Stored, it replayed
+    // to a panel mounting later and raised a stale group nobody asked for.
+    EffectBus.emitTransient<FeaturesOpenPayload>('features:open', {
       cell, segments, applied, available,
       adopted: isWithinAdoptedRoot(segments),
       defaultView: await defaultViewAt(segments),
+      ...(refresh ? { refresh: true } : {}),
     })
   }
 

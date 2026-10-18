@@ -1594,20 +1594,35 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // The swarm reports that it is public but has nowhere to publish — it
     // composes its sig from (path, room, secret) and declines without both.
     // Left alone this is invisible: relay socket up, swarm chrome on, no
-    // peers, ever. Say it and reopen the selector on the missing field.
-    // Edge-triggered by the drone, so a participant who dismisses it is not
-    // nagged; it speaks again only after the zone goes good and bad again.
+    // peers, ever. Say it, with the selector on the toast's action: this
+    // fires from a boot or navigation sync, never a tap, so the selector
+    // waits to be asked. Edge-triggered by the drone; it speaks again only
+    // after the zone goes good and bad. The effect replays to a late mount
+    // (the boot sync can beat the shell), so read the live stores first: a
+    // zone fixed since then says nothing. Sticky (duration 0): it is the only
+    // sign of a standing dead swarm, so it stays until tapped or dismissed.
     this.#swarmZoneUnsub = EffectBus.on<{ hasRoom?: boolean; hasSecret?: boolean }>(
       'swarm:zone-incomplete',
-      ({ hasRoom }) => {
+      (p) => {
+        if (!p) return
+        if (this.roomStore?.value?.trim() && this.secretStore?.value?.trim()) return
+        const hasRoom = p.hasRoom
+        const i18n = get('@hypercomb.social/I18n') as { t?: (k: string) => string } | undefined
+        const tr = (key: string, fallback: string): string => {
+          const s = i18n?.t?.(key)
+          return s && s !== key ? s : fallback
+        }
         EffectBus.emit('toast:show', {
-          type: 'error',
-          title: 'swarm',
+          type: 'warning',
+          title: tr('swarm.title', 'swarm'),
           message: hasRoom
-            ? 'This swarm has no secret, so nothing can reach it. Set one to join.'
-            : 'This swarm has no location, so nothing can reach it. Pick one to join.',
+            ? tr('swarm.zone-no-secret', 'This swarm has no secret, so nothing can reach it. Set one to join.')
+            : tr('swarm.zone-no-room', 'This swarm has no location, so nothing can reach it. Pick one to join.'),
+          duration: 0,
+          actionLabel: tr('swarm.zone-set', 'Set it'),
+          actionEffect: 'mesh:open-modal',
+          actionPayload: { join: true },
         })
-        EffectBus.emit('mesh:open-modal', { join: true })
       },
     )
 

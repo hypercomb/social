@@ -96,8 +96,8 @@ async function main() {
     await page.goto(`${url}/?claudeBridge=1`, { waitUntil: 'load' })
     await page.waitForTimeout(9000)
     // A fresh profile opens on the first-boot offer, which covers the canvas.
-    // ?claudeBridge=1 also opens the chat window, which lies OVER the offer —
-    // force past it rather than closing it, since the run wants the bridge up.
+    // ?claudeBridge=1 no longer opens the chat window on a first visit (a
+    // window opens only from its own door); force past anything that covers it.
     const startEmpty = page.getByText('Start empty', { exact: true })
     if (await startEmpty.count()) {
       await startEmpty.first().click({ force: true })

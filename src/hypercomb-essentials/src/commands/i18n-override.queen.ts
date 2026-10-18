@@ -47,6 +47,10 @@ export class I18nOverrideQueenBee extends QueenBee {
     { input: '/i18n-override reset ja', result: 'Clears all ja overrides (reload to apply)' },
   ]
 
+  // The value is the translator's text, verbatim — its case kept, and no word
+  // in it another behaviour's.
+  override rawArgs = true
+
   override slashComplete(args: string): readonly string[] {
     const parts = args.split(/\s+/)
     const locales = ['en', 'ja', 'zh', 'es', 'ar', 'pt', 'fr', 'de', 'ko', 'ru', 'hi', 'id', 'tr', 'it']

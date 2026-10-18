@@ -12,14 +12,12 @@
 //
 // Named for the first case it served; it owns the empty-layer message now.
 //
-// AN EMPTY LAYER ALSO OPENS THE BEEHAVIORS PANEL. Nothing here is the one
-// moment you are most likely to want to give this layer a BEHAVIOUR rather
-// than a tile — a website page, a game, a view — and with the puzzle-piece
-// icon gone from tiles (tile-actions.drone.ts) the panel needs a door where
-// the question is actually asked. `features:context-open` is the same signal
-// the top rail's Beehaviors switch sends: no tile in hand, so the subject is
-// the LOADED LAYER. Offered ONCE per arrival — closing it stands, and a
-// `synchronize` over the same empty layer never raises it again.
+// AN EMPTY LAYER NO LONGER RAISES THE BEEHAVIORS PANEL. A window opens only
+// when the participant asks for it, and arriving somewhere is not asking. The
+// card OFFERS the panel instead: its Beehaviors button sends the same
+// `features:context-open` the top rail's switch sends (no tile in hand, so the
+// subject is the LOADED LAYER) — a door where the question is asked, never a
+// popup.
 
 import { EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import { childNamesOf } from '../../history/layer-placement.js'
@@ -62,13 +60,6 @@ class CollectionEmptyPromptDrone {
   #viewModeBound = false
   #lastSettledEmpty = false
   #checkSeq = 0
-  /** Path we have already offered the beehaviors panel for, so a repeat
-   *  reconcile over the same empty layer cannot re-open what was closed.
-   *  Cleared on navigation — arriving somewhere new asks again. */
-  #behaviorsOfferedFor: string | null = null
-  /** Whether the panel is up. Already open means already answered; raising
-   *  it again would only yank it out of the store mid-flip. */
-  #behaviorsPanelOpen = false
   /** True while the first-boot EXAMPLE HIVES offer owns the screen. It fires on
    *  exactly our `root` condition (empty hive root, first boot), so the two
    *  cards used to stack. The offer is the single view now: it carries our
@@ -102,9 +93,6 @@ class CollectionEmptyPromptDrone {
       this.#lastSettledEmpty = false
     })
     EffectBus.on('cell:removed', () => { void this.#reconcile() })
-    EffectBus.on<{ open?: boolean }>('features:viewer-state', payload => {
-      this.#behaviorsPanelOpen = payload?.open === true
-    })
     // A surface claiming or releasing the canvas is the notice's cue too: it
     // must leave with whatever covers the hexagons and come back with them.
     EffectBus.on('view:active', () => { void this.#reconcile() })
@@ -121,7 +109,6 @@ class CollectionEmptyPromptDrone {
     this.#lineage = lineage
     lineage.addEventListener('change', () => {
       this.#lastSettledEmpty = false
-      this.#behaviorsOfferedFor = null
       this.#hide()
       void this.#reconcile()
     })
@@ -184,9 +171,8 @@ class CollectionEmptyPromptDrone {
     // A TAKEOVER IS NOT AN ABSENCE. `render:cell-count` counts hexagons, and a
     // cell claimed by a takeover view has none (`replacesTileRender` — its
     // sticky IS its presence), so a layer holding nothing but post-its reported
-    // itself EMPTY: "Your hive is empty · Add a tile" over a hive with content,
-    // and the beehaviors panel raised on top of the notes. Ask the layer, not
-    // the glass. Registry-driven: no view is named here or in the index helper.
+    // itself EMPTY: "Your hive is empty · Add a tile" over a hive with content.
+    // Ask the layer, not the glass. Registry-driven: no view is named here or in the index helper.
     if (await this.#claimedTilesHere(segments)) {
       if (seq !== this.#checkSeq) return
       this.#hide()
@@ -206,20 +192,6 @@ class CollectionEmptyPromptDrone {
     const isCollection = segments.length === 1 && await this.#isCollectionRoot(name)
     if (seq !== this.#checkSeq) return
     this.#show(name, isCollection ? 'collection' : 'layer')
-    this.#offerBehaviors(segments)
-  }
-
-  /** Raise the beehaviors panel on THIS layer, once per arrival. The hive
-   *  root is deliberately excluded: its empty state is the onboarding path
-   *  (the examples offer / welcome notice), and a docked panel over a first
-   *  boot is noise, not help. */
-  #offerBehaviors(segments: readonly string[]): void {
-    if (segments.length === 0) return
-    const key = segments.join('/')
-    if (this.#behaviorsOfferedFor === key) return
-    this.#behaviorsOfferedFor = key
-    if (this.#behaviorsPanelOpen) return
-    EffectBus.emit('features:context-open', {})
   }
 
   /** Does this layer hold at least one cell a takeover view has claimed? Such
@@ -333,6 +305,7 @@ class CollectionEmptyPromptDrone {
       variant === 'collection' ? 'collections.empty.action' : 'layer.empty.action',
       'Add a tile',
     )
+    const behaviorsText = this.#t('features.viewer.title', 'Beehaviors')
 
     if (this.#host) {
       const title = this.#host.querySelector('[data-role="title"]')
@@ -341,6 +314,8 @@ class CollectionEmptyPromptDrone {
       if (body) body.textContent = bodyText
       const action = this.#host.querySelector('[data-role="action"]')
       if (action) action.textContent = actionText
+      const behaviors = this.#host.querySelector('[data-role="behaviors"]')
+      if (behaviors) behaviors.textContent = behaviorsText
       return
     }
 
@@ -381,13 +356,40 @@ class CollectionEmptyPromptDrone {
     button.addEventListener('pointerdown', requestFocus, true)
     button.addEventListener('mousedown', requestFocus, true)
     button.addEventListener('click', requestFocus, true)
-    panel.addEventListener('pointerdown', requestFocus, true)
-    panel.addEventListener('mousedown', requestFocus, true)
-    panel.addEventListener('click', requestFocus, true)
+
+    // THE BEEHAVIORS DOOR. An empty layer is where giving it a behaviour (a
+    // page, a game, a view) is most likely wanted, so the card offers the
+    // panel — the participant opens it; the layer never does.
+    const behaviors = document.createElement('button')
+    behaviors.type = 'button'
+    behaviors.dataset['role'] = 'behaviors'
+    behaviors.style.cssText =
+      'border:1px solid transparent;border-radius:var(--hc-radius-control, 2px);padding:8px 10px;font:inherit;font-size:13px;font-weight:600;' +
+      'color:var(--hc-chrome-ink-quiet);background:transparent;cursor:pointer;'
+    behaviors.textContent = behaviorsText
+    behaviors.addEventListener('click', (event: Event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      EffectBus.emit('features:context-open', {})
+    })
+
+    // The whole card is the "Add a tile" target — except the Beehaviors door.
+    const onPanel = (event: Event): void => {
+      if ((event.target as Element | null)?.closest?.('[data-role="behaviors"]')) return
+      requestFocus(event)
+    }
+    panel.addEventListener('pointerdown', onPanel, true)
+    panel.addEventListener('mousedown', onPanel, true)
+    panel.addEventListener('click', onPanel, true)
+
+    const actions = document.createElement('div')
+    actions.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;'
+    actions.appendChild(button)
+    actions.appendChild(behaviors)
 
     panel.appendChild(title)
     panel.appendChild(body)
-    panel.appendChild(button)
+    panel.appendChild(actions)
     host.appendChild(panel)
     document.body.appendChild(host)
     this.#host = host

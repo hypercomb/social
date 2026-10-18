@@ -115,7 +115,12 @@ export class TileEditorDrone {
   #saving = false
 
   constructor() {
-    EffectBus.on<TileActionPayload>('tile:action', this.#onTileAction)
+    // Only a tap made while this drone listens opens the editor. The bus
+    // replays the last `tile:action` to a new subscriber, and an old edit
+    // replayed at construction is not a request to edit now.
+    let live = false
+    EffectBus.on<TileActionPayload>('tile:action', payload => { if (live) this.#onTileAction(payload) })
+    live = true
 
     // Self-register the 'edit' tile icon. The arranger (tile-actions)
     // merges this with its own catalog, computes positions, and emits

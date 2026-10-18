@@ -1487,8 +1487,10 @@ const writeFlag = (key: string): void => {
  *  Not what was intended: the shell parks this window on Escape and whenever
  *  another tool window opens, and a reload must agree with the screen the
  *  participant walked away from (see `session` below).
- *  With no choice yet, preserve the configured local bridge's companion-view
- *  default. Storage can be unavailable in private/locked-down browsers. */
+ *  With no choice yet the window starts shut, whatever is configured: a
+ *  window opens only from its own door, and a bridge being on is not a
+ *  request to see the chat. Storage can be unavailable in private/locked-down
+ *  browsers. */
 const rememberedChatVisibility = (fallback: boolean): boolean => {
   try {
     const stored = globalThis.localStorage?.getItem(CHAT_VISIBLE_STORAGE_KEY)
@@ -1569,10 +1571,9 @@ export class ChatWindowComponent implements OnDestroy {
   readonly enabled = computed(() => this.providerReady() || this.bridgeConfigured() || this.hostConfigured())
 
   /** Whether the window was on screen when the page was last left survives a
-   *  refresh. On the first visit only, a configured local bridge keeps the
-   *  established companion-view default; everyone else begins with the
-   *  launcher. */
-  readonly visible = signal(rememberedChatVisibility(this.bridgeConfigured()))
+   *  refresh. A first visit begins with the launcher for everyone; the chat
+   *  icon is the door. */
+  readonly visible = signal(rememberedChatVisibility(false))
 
   /** Parked while the hive is covered and brought back intact — the thread is
    *  durable, but the scroll position and the half-typed message are not.

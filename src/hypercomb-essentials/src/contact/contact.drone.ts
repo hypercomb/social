@@ -71,7 +71,7 @@ export class ContactDrone extends Drone {
 
   protected override emits = ['contact:form-open', 'contact:hover-show', 'contact:hover-hide', 'contact:hover-pin']
   protected override listens = [
-    'tile:action', 'tile:hover', 'tile:click', 'render:cell-count',
+    'tile:action', 'tile:hover', 'render:cell-count',
     'contact:form-submit', 'contact:remove', 'contacts:changed',
   ]
 
@@ -107,19 +107,17 @@ export class ContactDrone extends Drone {
     // Contact icon clicked → open the form for that tile (prefilled if a
     // single card already exists, so the icon also edits). Tapping the tile
     // BODY (the default `open` action) instead PINS the details panel so it
-    // stays put until the viewer closes it.
+    // stays put until the viewer closes it. A selection or modifier click
+    // (`tile:click`) does NOT pin: a window opens only from its own door, and
+    // selecting a tile is not a request for its card. The bus replays the last
+    // `tile:action` at subscribe time; that replay is not a tap.
+    let live = false
     this.onEffect<{ action: string; label: string }>('tile:action', (p) => {
-      if (!p?.label) return
+      if (!live || !p?.label) return
       if (p.action === 'contact') { void this.#openForm(p.label); return }
       if (p.action === 'open') void this.#pin(p.label)
     })
-
-    // Selection/modifier clicks route through `tile:click` rather than the
-    // default `open` action — pin from there too so any tap on a contact
-    // tile locks its details open.
-    this.onEffect<{ label?: string }>('tile:click', (p) => {
-      if (p?.label) void this.#pin(p.label)
-    })
+    live = true
 
     // Form submitted detail fields → persist (the name comes from the tile).
     this.onEffect<{ segments?: string[]; label?: string; contact?: Partial<ContactPayload> }>('contact:form-submit', (p) => {
@@ -218,13 +216,14 @@ export class ContactDrone extends Drone {
   }
 
   /** Pin the details panel to a contact tile so it persists until the viewer
-   *  closes it. Every tile tap routes through here, so it's a silent no-op
-   *  for tiles that carry no cards. */
+   *  closes it. Every body tap routes through here, so it's a silent no-op
+   *  for tiles that carry no cards. Transient: a pin is a gesture, and a
+   *  stored one would re-pin the card on a late-mounted hover panel. */
   async #pin(label: string): Promise<void> {
     if (!this.#service()?.hasCards(label)) return
     const cards = await this.#cardsFor(label).catch(() => [])
     if (cards.length === 0) return
-    EffectBus.emit('contact:hover-pin', {
+    EffectBus.emitTransient('contact:hover-pin', {
       label,
       segments: [...this.#parentSegments(), label],
       contacts: cards.map(c => ({ ...c.payload, decorationSig: c.sig })),

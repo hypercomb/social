@@ -411,6 +411,10 @@ export class LlmQueenBee extends QueenBee {
 
 // ── slash provider ──────────────────────────────────────
 
+/** A model word as the census carries it: `rawArgs` rides beside the declared
+ *  fields, as it does on an auto-wrapped queen's row. */
+type ModelWord = SlashBehaviour & { readonly rawArgs?: boolean }
+
 class LlmProvider implements SlashBehaviourProvider {
   readonly name = 'llm-provider'
   readonly priority = 100
@@ -427,15 +431,19 @@ class LlmProvider implements SlashBehaviourProvider {
   // `agent-bridge` provider per installed CLI, and the models it declares
   // become commands below with no code change. That is the whole point of
   // the bridge tier being a provider — one roster, one place to look.
-  static readonly #BUILT_IN: SlashBehaviour[] = [
-    { name: 'opus', description: 'Open the chat with Claude Opus', descriptionKey: 'slash.opus' },
-    { name: 'sonnet', description: 'Open the chat with Claude Sonnet', descriptionKey: 'slash.sonnet' },
-    { name: 'haiku', description: 'Open the chat with Claude Haiku', descriptionKey: 'slash.haiku' },
-    { name: 'fable', description: 'Open the chat with Claude Fable', descriptionKey: 'slash.fable' },
+  //
+  // Every model word keeps the rest of the line (`rawArgs`): what follows it
+  // is the question, verbatim. Read as a sentence, `opus which providers are
+  // cheapest` also ran `providers` and opened its window beside the chat.
+  static readonly #BUILT_IN: ModelWord[] = [
+    { name: 'opus', description: 'Open the chat with Claude Opus', descriptionKey: 'slash.opus', rawArgs: true },
+    { name: 'sonnet', description: 'Open the chat with Claude Sonnet', descriptionKey: 'slash.sonnet', rawArgs: true },
+    { name: 'haiku', description: 'Open the chat with Claude Haiku', descriptionKey: 'slash.haiku', rawArgs: true },
+    { name: 'fable', description: 'Open the chat with Claude Fable', descriptionKey: 'slash.fable', rawArgs: true },
   ]
 
   get behaviours(): SlashBehaviour[] {
-    const words = new Map<string, SlashBehaviour>(
+    const words = new Map<string, ModelWord>(
       LlmProvider.#BUILT_IN.map(behaviour => [behaviour.name, behaviour]),
     )
     // Bridges only. An HTTP vendor's models are NOT command words: typing
@@ -450,7 +458,7 @@ class LlmProvider implements SlashBehaviourProvider {
       for (const model of provider.models ?? []) {
         const name = String(model?.name ?? '').trim().toLowerCase()
         if (!name || words.has(name)) continue
-        words.set(name, { name, description: `Ask ${provider.label} (${name})` })
+        words.set(name, { name, description: `Ask ${provider.label} (${name})`, rawArgs: true })
       }
     }
     return [...words.values()]

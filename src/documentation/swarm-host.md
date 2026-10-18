@@ -987,9 +987,10 @@ frames are the relay's one NOTICE and the idle-only probes.
   takes; a newer link that arrives while a sheet is up is kept.
 - A package from before meeting points (or one that refuses a slash in the
   room or secret) gets the UPDATE DOOR, never the selector: the shell keeps
-  its own copy of the link, writes it back to the stash, opens the packages
-  panel and says "This meeting needs the newer Hypercomb — update and the
-  link opens itself". Where the selector is still the fallback (no worker at
+  its own copy of the link, writes it back to the stash and says "This
+  meeting needs the newer Hypercomb — update and the link opens itself" in a
+  toast whose Update action opens the packages panel. The panel opens only
+  when the guest taps it. Where the selector is still the fallback (no worker at
   all), the link's point is put in this tab's zone first (never the next
   tab's pre-fill — that waits for the guest's START) and restored on cancel.
 - Opening it shows one sheet: "Join the room 'meetup'? You'll see everyone

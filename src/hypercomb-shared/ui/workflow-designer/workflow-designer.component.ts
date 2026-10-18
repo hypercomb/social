@@ -218,12 +218,19 @@ export class WorkflowDesignerComponent implements OnDestroy {
   #flush(): void { try { this.#cdr.detectChanges() } catch { /* view gone */ } }
 
   constructor() {
+    // Only a request made while this panel is listening opens it. The bus
+    // replays the LAST `workflow:view-open` to a new subscriber, and that
+    // stored request can be minutes old (or an older package's surface
+    // entry), so the replay delivered at subscribe time is ignored.
+    let live = false
     this.#cleanups.push(EffectBus.on('workflow:view-open', () => {
+      if (!live) return
       this.visible.set(true)
       EffectBus.emit('workflow:refresh', {})
       EffectBus.emit('workflow:view-state', { open: true })
       this.#flush()
     }))
+    live = true
     this.#cleanups.push(EffectBus.on('workflow:view-close', () => this.close()))
 
     this.#cleanups.push(EffectBus.on<WorkflowStateMsg>('workflow:state', (p) => {

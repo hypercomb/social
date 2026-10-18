@@ -109,6 +109,13 @@ whose argument legitimately contains braces is not silently eaten.
 canvas order and executes each step's record. Per-step status is broadcast
 live on `workflow:run-state` (sticky).
 
+A run answers in place: `/workflow run` (and the ring's run) leaves the
+designer where it is — the surface draws the run-state and the runner toasts
+how it ended. The designer opens only from its own doors: `/workflow`,
+`/workflow new <name>`, the ring's new, the surface's **edit** button, and
+`/workflow step` (a step-through waits on the designer's Next, the only
+control that advances it).
+
 Three rules the runner does not bend:
 
 1. **A run never navigates.** Steps run where the participant stands; a step
@@ -242,7 +249,9 @@ same shape as the website and tutor takeovers, driven by `ViewMode`.
   rather than shrinking. Fit-to-width is a button, never the default: a
   20-step skill squeezed into 900px is not a diagram.
 - **It docks beside the designer**, not under it — the canvas starts where the
-  palette ends, so the two are usable together.
+  palette ends, so the two are usable together. Entering the surface does
+  **not** open the designer (arriving on a layer whose view is workflow only
+  draws the flow); the toolbar's **edit** button is the designer's door here.
 - **One node per step**, in `children` order, joined by connectors, each
   carrying its position, tile name, kind, and what it will actually do. A step
   with children says it has its own steps.

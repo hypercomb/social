@@ -285,6 +285,20 @@ describe('/use-live-relay', () => {
     expect(toasts.at(-1)?.message).not.toContain(secretTag('lifecycle\0garden\0rose', 'en'))
     expect(toasts.at(-1)?.message).not.toContain(location.hostname)
   })
+
+  it('a join never raises the Beehaviors roster — the joined toast carries its door instead', () => {
+    const rosterOpens: unknown[] = []
+    const off = EffectBus.on('features:roster-open', (p) => { rosterOpens.push(p) })
+    rosterOpens.length = 0                              // drop any stored value replayed at subscribe
+    sessionStorage.setItem('hc:mesh-zone', JSON.stringify({ relay: 'wss://hypercomb.com' }))
+    queen.invoke('garden rose')
+    off()
+    expect(rosterOpens).toEqual([])
+    const toast = toasts.at(-1) as { type: string; actionEffect?: string; actionLabel?: string } | undefined
+    expect(toast?.type).toBe('success')
+    expect(toast?.actionEffect).toBe('features:roster-open')
+    expect(toast?.actionLabel).toBeTruthy()
+  })
 })
 
 describe('the host as a person writes it (2026-10-12: join downtown downtown hypercomb.com)', () => {

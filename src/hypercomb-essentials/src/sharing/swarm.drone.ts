@@ -2872,11 +2872,14 @@ export class SwarmDrone extends Drone {
   #zoneIncomplete = false
 
   /** Report a public-but-unreachable swarm. `hasRoom`/`hasSecret` name the
-   *  field that is missing so the shell can open the selector focused on it
-   *  rather than asking the participant to guess. */
+   *  field that is missing so the shell's toast can say which one; the
+   *  selector opens from that toast's action, never by itself. */
   #announceZoneIncomplete = (hasRoom: boolean, hasSecret: boolean): void => {
     if (this.#zoneIncomplete) return
     this.#zoneIncomplete = true
+    // Stored, so the boot sync (which can run before the shell mounts) still
+    // reaches the bar. The bar checks the live stores, so a replay of a zone
+    // long since fixed says nothing.
     this.emitEffect('swarm:zone-incomplete', { hasRoom, hasSecret })
   }
 

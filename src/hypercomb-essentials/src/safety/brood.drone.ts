@@ -4,8 +4,9 @@
 // registration is the bee's act). The brood's surface — every held automaton,
 // with Read · Accept · Refuse — is a dependency atom (brood.view.ts) that only
 // exports. This bee adds its element to the ShellSurfaceRegistry and defines
-// it, so `brood:open` — from the `brood` word, or a trial taken by hand whose
-// code is waiting — always has a panel to open.
+// it, so `brood:open` — from the `brood` word or the sandbox's "open the
+// brood" button, its only doors — always has a panel to open. A trial taken
+// by hand does not open it; its toast names the word instead.
 //
 // THE DRAFT AUDIT'S READER. When a draft lands (runtime module-drafts.ts
 // announces `module:drafted`), this bee has the change read
