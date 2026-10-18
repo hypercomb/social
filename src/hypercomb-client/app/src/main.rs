@@ -1075,6 +1075,20 @@ impl hypercomb_serve::HiveSource for AppHive {
         names.dedup();
         Some(names)
     }
+
+    // The gate (hypercomb-serve `genome.rs`) finds doors by bag, reads heads
+    // by one lookup, and re-derives the current hive only after a write.
+    fn bags(&self) -> Vec<String> {
+        self.0.state::<Host>().raw_bags().unwrap_or_default()
+    }
+
+    fn head(&self, sig: &str) -> Option<(String, Vec<u8>)> {
+        self.0.state::<Host>().raw_head(sig).ok().flatten()
+    }
+
+    fn writes(&self) -> Option<u64> {
+        Some(self.0.state::<Host>().writes())
+    }
 }
 
 /// The running host, or nothing. Managed state so the menu can stop what the
@@ -1458,7 +1472,7 @@ fn main() {
                         let serve_item = serve_item.clone();
                         let serve_stop = serve_stop.clone();
                         std::thread::spawn(move || {
-                            use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                            use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
                             if id == "hive-serve-stop" {
                                 let was_serving = stop_hosting(&app);
@@ -1479,6 +1493,32 @@ fn main() {
                                 return;
                             }
 
+                            // ASK FIRST. Serving binds every interface the moment
+                            // it starts, so the choice comes before it — and says
+                            // what becomes readable, not only how it is checked.
+                            let agreed = app
+                                .dialog()
+                                .message(
+                                    "Anyone who can reach this computer will be able to read \
+                                     your hive as it is now: every tile in it, its notes, \
+                                     pictures and decorations, and every site you have switched \
+                                     on here. That includes tiles you never published.\n\n\
+                                     Earlier versions, restore points, removed tiles and your \
+                                     private pools stay on this computer.\n\n\
+                                     It starts on your local network. A tunnel or forwarded port \
+                                     in front of it puts it on the internet.",
+                                )
+                                .title("Serve This Hive?")
+                                .kind(MessageDialogKind::Warning)
+                                .buttons(MessageDialogButtons::OkCancelCustom(
+                                    "Serve".to_string(),
+                                    "Cancel".to_string(),
+                                ))
+                                .blocking_show();
+                            if !agreed {
+                                return;
+                            }
+
                             match start_hosting(&app) {
                                 Ok(url) => {
                                     let _ = serve_item.set_enabled(false);
@@ -1490,10 +1530,11 @@ fn main() {
                                     app.dialog()
                                         .message(format!(
                                             "This hive is being served at\n\n    {url}\n\n\
-                                             Anyone who can reach that address can open the hive and \
-                                             replicate from it. Every byte they take is checked \
-                                             against its own signature, so a host can cost them a \
-                                             404 but never a wrong answer.\n\n\
+                                             Anyone who can reach that address can read your hive as \
+                                             it is now. Earlier versions, restore points, removed \
+                                             tiles and your private pools are not served. Every byte \
+                                             a reader takes is checked against its own signature, so \
+                                             a host can cost them a 404 but never a wrong answer.\n\n\
                                              It speaks plain HTTP and holds no certificate. To put \
                                              it on the internet, forward the port, or run a tunnel \
                                              or a reverse proxy in front of it.",

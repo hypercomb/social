@@ -30,9 +30,18 @@
 //! - **A `document` floor pool lists only its current version**: the max
 //!   marker and the atom it names. A `set` floor pool lists its members.
 //! - **A floor pool serves only what its listing shows.**
-//! - **Any other directory serves its head marker and nothing else.** A
-//!   replicating node still reads where a bag is now; every earlier marker and
-//!   every member answers 404.
+//! - **Any other directory serves its head marker and nothing else** — and
+//!   only when the CURRENT tree reaches that location ([`genome`]). A
+//!   replicating node still reads where a bag is now; every earlier marker,
+//!   every member, a personal pool's head, a removed tile's bag and a root
+//!   filed away by `save as` answer 404.
+//! - **Content is served only when the current tree reaches it.** Every
+//!   earlier layer of every tile is still in the store, and a parent still
+//!   names the generation it last carried; a restore point names a whole
+//!   earlier hive. None of it leaves: `/<sig>` answers 404 — exactly as for
+//!   an atom never held — unless the current genome reaches `sig`. jwize
+//!   2026-10-18: "only the head identifier is exposed", and an old signature
+//!   a crawler saved earlier buys it nothing.
 //!
 //! The staged shell is the published build — every byte of it is public on
 //! any static host serving the same `dist/` — so a real file there still wins
@@ -78,8 +87,10 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+mod genome;
 mod http;
 
+pub use genome::{collect, Genome};
 pub use http::{Body, Reply};
 
 use std::io::BufReader;
@@ -111,6 +122,34 @@ pub trait HiveSource: Send + Sync + 'static {
     /// put in `index.html`. `None` means the directory is not held and must be
     /// an honest 404, never an empty success or the SPA shell.
     fn entries(&self, sig: &str) -> Option<Vec<String>>;
+
+    /// Every bag address held — where the gate looks for DOORS: a hostname's
+    /// bag whose head is a `host:activation` (hypercomb-runtime
+    /// `host-activation.ts`). A source that cannot list its bags serves no
+    /// door, which is the safe answer.
+    fn bags(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// A reading that changes whenever the hive does, when the source can
+    /// tell. `None` means it cannot, and a running host re-derives on a short
+    /// timer instead.
+    fn writes(&self) -> Option<u64> {
+        None
+    }
+
+    /// A directory's head marker: its max 8-digit entry, name and bytes. A
+    /// store that can find it without listing every revision says so here.
+    fn head(&self, sig: &str) -> Option<(String, Vec<u8>)> {
+        let names = self.entries(sig)?;
+        let head = names
+            .iter()
+            .filter_map(|name| hypercomb_protocol::marker_index(name).map(|index| (index, name)))
+            .max_by_key(|(index, _)| *index)
+            .map(|(_, name)| name.clone())?;
+        let bytes = self.entry(sig, &head)?;
+        Some((head, bytes))
+    }
 }
 
 impl HiveSource for hypercomb_host::Host {
@@ -138,6 +177,18 @@ impl HiveSource for hypercomb_host::Host {
         names.sort();
         names.dedup();
         Some(names)
+    }
+
+    fn bags(&self) -> Vec<String> {
+        self.raw_bags().unwrap_or_default()
+    }
+
+    fn head(&self, sig: &str) -> Option<(String, Vec<u8>)> {
+        self.raw_head(sig).ok().flatten()
+    }
+
+    fn writes(&self) -> Option<u64> {
+        Some(hypercomb_host::Host::writes(self))
     }
 }
 
@@ -388,7 +439,8 @@ fn floor_listing(
 }
 
 /// Is `entry` the head marker of a directory that is NOT a floor pool? The
-/// only entry such a directory gives up.
+/// only entry such a directory may give up — and only when the current tree
+/// reaches it too (`Genome::admits_head`).
 fn is_hive_head(hive: &dyn HiveSource, sig: &str, entry: &str) -> bool {
     hypercomb_protocol::marker_index(entry).is_some()
         && hive
@@ -409,8 +461,20 @@ fn pool_not_held() -> Reply {
 ///
 /// Pure in the way that matters: it touches the shell directory and the hive,
 /// and nothing else. That is what lets the whole contract be asserted without
-/// binding a port.
+/// binding a port. The current genome is collected afresh when a request
+/// needs it; a running host reuses one collection briefly ([`serve`]).
 pub fn resolve(shell: &Path, hive: &dyn HiveSource, method: &str, target: &str) -> Reply {
+    let held = OnceLock::new();
+    resolve_with(shell, hive, &|| held.get_or_init(|| Arc::new(collect(hive))).clone(), method, target)
+}
+
+fn resolve_with(
+    shell: &Path,
+    hive: &dyn HiveSource,
+    genome: &dyn Fn() -> Arc<Genome>,
+    method: &str,
+    target: &str,
+) -> Reply {
     // CORS is not decoration. Without it every cross-origin replication dies as
     // an opaque "Failed to fetch" — no status, no diagnosis — and the host
     // looks exactly like one that publishes nothing. `*` is correct rather than
@@ -491,7 +555,7 @@ pub fn resolve(shell: &Path, hive: &dyn HiveSource, method: &str, target: &str) 
                 }
                 true
             }
-            None => is_hive_head(hive, dir, entry),
+            None => is_hive_head(hive, dir, entry) && genome().admits_head(dir, entry),
         };
         if admitted {
             if let Some(bytes) = hive.entry(dir, entry) {
@@ -528,6 +592,11 @@ pub fn resolve(shell: &Path, hive: &dyn HiveSource, method: &str, target: &str) 
         _ => None,
     };
     if let Some(sig) = content_sig {
+        // Outside the current genome, an atom answers as one never held: the
+        // refusal says nothing about what the store keeps.
+        if !genome().admits_content(&sig) {
+            return cors(Reply::new(404));
+        }
         return match hive.content(&sig) {
             Some(bytes) => cors(Reply::new(200))
                 .with("content-type", "application/octet-stream")
@@ -633,6 +702,9 @@ pub fn serve(
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let live = Arc::new(AtomicUsize::new(0));
+    // One gate for every connection: a visitor fetching a page's atoms asks
+    // the same collection hundreds of times, so it is reused while fresh.
+    let gate = Arc::new(genome::Gate::default());
 
     let accepting = {
         let shutdown = shutdown.clone();
@@ -665,11 +737,12 @@ pub fn serve(
                             live.fetch_add(1, Ordering::SeqCst);
                             let shell = shell.clone();
                             let hive = hive.clone();
+                            let gate = gate.clone();
                             let done = live.clone();
                             let spawned = std::thread::Builder::new()
                                 .name("hypercomb-host-conn".into())
                                 .spawn(move || {
-                                    handle(stream, &shell, hive.as_ref());
+                                    handle(stream, &shell, hive.as_ref(), &gate);
                                     done.fetch_sub(1, Ordering::SeqCst);
                                 });
                             if spawned.is_err() {
@@ -697,7 +770,7 @@ fn shed(mut stream: TcpStream) {
     let _ = http::write_reply(&mut stream, &reply, true, false);
 }
 
-fn handle(stream: TcpStream, shell: &Path, hive: &dyn HiveSource) {
+fn handle(stream: TcpStream, shell: &Path, hive: &dyn HiveSource, gate: &genome::Gate) {
     // A connection that opens and says nothing must not hold a thread forever.
     let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
@@ -722,7 +795,7 @@ fn handle(stream: TcpStream, shell: &Path, hive: &dyn HiveSource) {
                 return;
             }
         };
-        let reply = resolve(shell, hive, &request.method, &request.target);
+        let reply = resolve_with(shell, hive, &|| gate.current(hive), &request.method, &request.target);
         let keep_alive = request.keep_alive;
         let sent = http::write_reply(&mut writer, &reply, request.method != "HEAD", keep_alive);
         if sent.is_err() || !keep_alive {

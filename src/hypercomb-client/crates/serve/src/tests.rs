@@ -56,6 +56,44 @@ impl HiveSource for Stub {
         names.sort();
         Some(names)
     }
+    fn bags(&self) -> Vec<String> {
+        let mut dirs: Vec<String> = self.entries.keys().map(|(dir, _)| dir.clone()).collect();
+        dirs.dedup();
+        dirs
+    }
+}
+
+impl Stub {
+    /// Hold `bytes` at their real signature, as the store does.
+    fn hold(&mut self, bytes: &[u8]) -> String {
+        let sig = hypercomb_protocol::sign(bytes).to_hex();
+        self.content.insert(sig.clone(), bytes.to_vec());
+        sig
+    }
+
+    /// A location's next revision: marker `index` in the bag `path` names.
+    fn revise(&mut self, path: &[&str], index: &str, layer: &str) {
+        self.entries.insert((bag(path), index.to_string()), marker(layer));
+    }
+
+    /// A one-revision home page that reaches `sigs` — the smallest current
+    /// hive that makes them part of the genome.
+    fn rooted(mut self, sigs: &[&str]) -> Self {
+        let listed: Vec<String> = sigs.iter().map(|sig| format!("\"{sig}\"")).collect();
+        let root = self.hold(format!("{{\"name\":\"\",\"attachments\":[{}]}}", listed.join(",")).as_bytes());
+        self.revise(&[], "00000000", &root);
+        self
+    }
+}
+
+/// A location's bag, as the browser addresses it: the home page is the
+/// `root-entries` molecule; every other place is its canonical path key.
+fn bag(path: &[&str]) -> String {
+    if path.is_empty() {
+        hypercomb_protocol::sign_str("root-entries").to_hex()
+    } else {
+        hypercomb_protocol::bag_addr(path).to_hex()
+    }
 }
 
 /// A shell directory shaped like a shim build.
@@ -107,6 +145,44 @@ fn a_door_is_read_by_signature_never_by_a_named_route() {
     assert_eq!(activation.status, 200);
     let door: serde_json::Value = serde_json::from_slice(&body_of(&activation)).unwrap();
     assert_eq!(door["head"], head);
+    // The door is switched on, so the creation it names is served too.
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{head}")).status, 200);
+}
+
+/// A door that is switched OFF still says so, and serves nothing behind it;
+/// an activation filed under another hostname's bag is no door at all.
+#[test]
+fn a_door_serves_its_creation_only_while_switched_on() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default().rooted(&[]);
+    let page = hive.hold(b"{\"name\":\"garden\"}");
+    let creation = hive.hold(format!("{{\"name\":\"garden\",\"children\":[\"{page}\"]}}").as_bytes());
+    let activation = |route: &str, enabled: bool| format!(
+        "{{\"name\":\"host:activation\",\"enabled\":{enabled},\"pubkey\":\"{SIG_A}\",\"lineage\":\"garden\",\"sourceRoute\":\"https://garden.jwize.com/\",\"localRoute\":\"{route}\",\"head\":\"{creation}\",\"source\":\"jwize.com\"}}"
+    );
+
+    let off = hive.hold(activation("off.localhost", false).as_bytes());
+    let off_bag = hypercomb_protocol::sign_str("off.localhost").to_hex();
+    hive.entries.insert((off_bag.clone(), "00000000".to_string()), marker(&off));
+    let forged = hive.hold(activation("elsewhere.localhost", true).as_bytes());
+    let forged_bag = hypercomb_protocol::sign_str("forged.localhost").to_hex();
+    hive.entries.insert((forged_bag.clone(), "00000000".to_string()), marker(&forged));
+
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{off_bag}/00000000")).status, 200);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{off}")).status, 200);
+    for behind in [&creation, &page] {
+        assert_eq!(resolve(&root, &hive, "GET", &format!("/{behind}")).status, 404, "off: {behind}");
+    }
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{forged_bag}/00000000")).status, 404);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{forged}")).status, 404);
+
+    let on = hive.hold(activation("off.localhost", true).as_bytes());
+    hive.entries.insert((off_bag.clone(), "00000001".to_string()), marker(&on));
+    for served in [&on, &creation, &page] {
+        assert_eq!(resolve(&root, &hive, "GET", &format!("/{served}")).status, 200, "on: {served}");
+    }
+    // The switched-off revision is history now.
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{off}")).status, 404);
 }
 
 #[test]
@@ -133,6 +209,7 @@ fn content_is_served_from_the_store_at_both_bases() {
     let (_dir, root) = shell();
     let mut hive = Stub::default();
     hive.content.insert(SIG_B.to_string(), b"atom bytes".to_vec());
+    let hive = hive.rooted(&[SIG_B]);
 
     for path in [format!("/{SIG_B}"), format!("/content/{SIG_B}")] {
         let reply = resolve(&root, &hive, "GET", &path);
@@ -151,18 +228,16 @@ fn content_is_served_from_the_store_at_both_bases() {
 fn markers_and_pool_members_come_out_of_the_directory() {
     let (_dir, root) = shell();
     let mut hive = Stub::default();
-    hive.entries.insert(
-        (SIG_B.to_string(), "00000007".to_string()),
-        marker(SIG_A),
-    );
+    let home = hive.hold(b"{\"name\":\"\"}");
+    hive.revise(&[], "00000007", &home);
     let hosts = pool("community:hosts");
     hive.entries
         .insert((hosts.clone(), "my note".to_string()), b"pool bytes".to_vec());
 
-    // A bag's HEAD marker is the one entry any directory gives up.
-    let head = resolve(&root, &hive, "GET", &format!("/{SIG_B}/00000007"));
+    // A bag's HEAD marker is the one entry a reached location gives up.
+    let head = resolve(&root, &hive, "GET", &format!("/{}/00000007", bag(&[])));
     assert_eq!(head.status, 200);
-    assert!(String::from_utf8_lossy(&body_of(&head)).contains(SIG_A));
+    assert!(String::from_utf8_lossy(&body_of(&head)).contains(&home));
     assert_eq!(
         head.header("cache-control"),
         Some("no-cache, must-revalidate"),
@@ -351,6 +426,8 @@ fn a_real_hive_serves_its_own_bytes() {
     let hive_dir = tempfile::tempdir().expect("a temp dir");
     let host = hypercomb_host::Host::open(hive_dir.path()).expect("a hive");
     let sig = host.put(b"a resource in the store").expect("put");
+    let home = host.put(format!("{{\"name\":\"\",\"attachments\":[\"{sig}\"]}}").as_bytes()).expect("put");
+    host.append(&["root-entries".to_string()], &home).expect("a home revision");
 
     let reply = resolve(&root, &host, "GET", &format!("/{sig}"));
     assert_eq!(reply.status, 200);
@@ -448,23 +525,152 @@ fn a_floor_document_pool_lists_and_serves_only_its_current_version() {
 }
 
 #[test]
-fn an_unlisted_bag_gives_up_its_head_marker_and_nothing_older() {
+fn a_reached_bag_gives_up_its_head_marker_and_nothing_older() {
     let (_dir, root) = shell();
     let mut hive = Stub::default();
-    for (index, layer) in [("00000000", SIG_A), ("00000001", SIG_C), ("00000002", SIG_B)] {
-        hive.entries.insert((SIG_C.to_string(), index.to_string()), marker(layer));
+    let revisions: Vec<String> = ["first", "second", "third"]
+        .iter()
+        .map(|label| hive.hold(format!("{{\"name\":\"\",\"label\":\"{label}\"}}").as_bytes()))
+        .collect();
+    for (index, layer) in ["00000000", "00000001", "00000002"].iter().zip(&revisions) {
+        hive.revise(&[], index, layer);
     }
+    let home = bag(&[]);
 
     for base in ["", "/content"] {
-        let head = resolve(&root, &hive, "GET", &format!("{base}/{SIG_C}/00000002"));
+        let head = resolve(&root, &hive, "GET", &format!("{base}/{home}/00000002"));
         assert_eq!(head.status, 200, "{base}");
-        assert_eq!(body_of(&head), marker(SIG_B), "{base}");
+        assert_eq!(body_of(&head), marker(&revisions[2]), "{base}");
         for old in ["00000000", "00000001"] {
-            let reply = resolve(&root, &hive, "GET", &format!("{base}/{SIG_C}/{old}"));
+            let reply = resolve(&root, &hive, "GET", &format!("{base}/{home}/{old}"));
             assert_eq!(reply.status, 404, "{base} {old} — history never leaves");
             assert!(body_of(&reply).is_empty());
         }
+        // The layer each older marker named is history too.
+        for older in &revisions[..2] {
+            assert_eq!(resolve(&root, &hive, "GET", &format!("{base}/{older}")).status, 404, "{base} {older}");
+        }
+        assert_eq!(resolve(&root, &hive, "GET", &format!("{base}/{}", revisions[2])).status, 200, "{base}");
     }
+}
+
+/// A bag the current tree does not reach gives up NOTHING — not even its
+/// head: a tile that was removed, a root filed away by `save as <word>`.
+#[test]
+fn an_unreached_bag_gives_up_nothing() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let filed = hive.hold(b"{\"name\":\"\",\"label\":\"filed away\"}");
+    hive.revise(&["work"], "00000000", &filed);
+    let mut hive = hive.rooted(&[]);
+    let removed = hive.hold(b"{\"name\":\"gone\"}");
+    hive.revise(&["gone"], "00000003", &removed);
+
+    for (path, layer) in [(["work"], &filed), (["gone"], &removed)] {
+        let dir = bag(&path);
+        for entry in ["00000000", "00000003"] {
+            assert_eq!(resolve(&root, &hive, "GET", &format!("/{dir}/{entry}")).status, 404, "{dir}/{entry}");
+        }
+        assert_eq!(resolve(&root, &hive, "GET", &format!("/{layer}")).status, 404, "{layer}");
+    }
+}
+
+/// A personal pool's head names its current record. Pools are not the
+/// genome, so even that head stays home.
+#[test]
+fn a_personal_pool_gives_up_no_head() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default().rooted(&[]);
+    let interests = pool("registry:interests");
+    hive.entries.insert((interests.clone(), "00000000".to_string()), marker(SIG_A));
+    hive.entries.insert((interests.clone(), "00000001".to_string()), marker(SIG_B));
+
+    for entry in ["00000000", "00000001"] {
+        let reply = resolve(&root, &hive, "GET", &format!("/{interests}/{entry}"));
+        assert_eq!(reply.status, 404, "{entry}");
+        assert!(body_of(&reply).is_empty(), "{entry}");
+    }
+}
+
+/// Under leaf-only history a parent keeps naming the child generation it
+/// last carried. The child's own head is the current state; the carried
+/// generation is history, and so is everything only it reaches.
+#[test]
+fn a_parent_carried_generation_stays_home_and_the_childs_head_is_served() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let old_note = hive.hold(b"the note as it was");
+    let new_note = hive.hold(b"the note as it is");
+    let old_child = hive.hold(format!("{{\"name\":\"about\",\"notes\":[\"{old_note}\"]}}").as_bytes());
+    let new_child = hive.hold(format!("{{\"name\":\"about\",\"notes\":[\"{new_note}\"]}}").as_bytes());
+    let home = hive.hold(format!("{{\"name\":\"\",\"children\":[\"{old_child}\"]}}").as_bytes());
+    hive.revise(&[], "00000000", &home);
+    hive.revise(&["about"], "00000000", &old_child);
+    hive.revise(&["about"], "00000001", &new_child);
+
+    for current in [&home, &new_child, &new_note] {
+        assert_eq!(resolve(&root, &hive, "GET", &format!("/{current}")).status, 200, "{current}");
+    }
+    for history in [&old_child, &old_note] {
+        assert_eq!(resolve(&root, &hive, "GET", &format!("/{history}")).status, 404, "{history}");
+    }
+    let about = bag(&["about"]);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{about}/00000001")).status, 200);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{about}/00000000")).status, 404);
+}
+
+/// A restore point is a current record that names a WHOLE EARLIER HIVE
+/// through its `seal`; a succession names its earlier generation through
+/// `prev`. The records are current; what they point back at never leaves.
+#[test]
+fn a_restore_point_and_a_succession_never_carry_the_past() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let old_page = hive.hold(b"{\"name\":\"draft\"}");
+    let old_home = hive.hold(format!("{{\"name\":\"\",\"children\":[\"{old_page}\"]}}").as_bytes());
+    let snapshot = hive.hold(format!("{{\"seal\":\"{old_home}\",\"label\":\"before\",\"at\":1}}").as_bytes());
+    let old_list = hive.hold(b"{\"succession\":1,\"prev\":null,\"members\":[]}");
+    let list = hive.hold(format!("{{\"succession\":1,\"prev\":\"{old_list}\",\"members\":[]}}").as_bytes());
+    let home = hive.hold(format!("{{\"name\":\"\",\"snapshots\":[\"{snapshot}\"],\"properties\":[\"{list}\"]}}").as_bytes());
+    hive.revise(&[], "00000000", &home);
+
+    for current in [&home, &snapshot, &list] {
+        assert_eq!(resolve(&root, &hive, "GET", &format!("/{current}")).status, 200, "{current}");
+    }
+    for past in [&old_home, &old_page, &old_list] {
+        assert_eq!(resolve(&root, &hive, "GET", &format!("/{past}")).status, 404, "{past}");
+    }
+}
+
+/// A head may name a meta envelope rather than the layer itself: both are
+/// the current state.
+#[test]
+fn a_head_that_names_an_envelope_serves_the_envelope_and_its_layer() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let note = hive.hold(b"current note");
+    let layer = hive.hold(format!("{{\"name\":\"\",\"notes\":[\"{note}\"]}}").as_bytes());
+    let envelope = hive.hold(format!("{{\"meta\":1,\"layer\":\"{layer}\"}}").as_bytes());
+    hive.revise(&[], "00000000", &envelope);
+
+    for current in [&envelope, &layer, &note] {
+        assert_eq!(resolve(&root, &hive, "GET", &format!("/{current}")).status, 200, "{current}");
+    }
+}
+
+/// An older build reads the home page at the empty path's bag, `sign('')`,
+/// which the browser mirrors. A hive that has only that bag is still served.
+#[test]
+fn the_legacy_home_bag_still_roots_the_hive() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let note = hive.hold(b"note");
+    let home = hive.hold(format!("{{\"name\":\"\",\"notes\":[\"{note}\"]}}").as_bytes());
+    let legacy = hypercomb_protocol::bag_addr::<&str>(&[]).to_hex();
+    hive.entries.insert((legacy.clone(), "00000000".to_string()), marker(&home));
+
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{note}")).status, 200);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{legacy}/00000000")).status, 200);
 }
 
 #[test]
@@ -486,20 +692,18 @@ fn a_member_of_an_unlisted_directory_is_never_served() {
 }
 
 #[test]
-fn content_by_signature_is_untouched_by_the_gate() {
+fn content_outside_the_current_hive_answers_as_never_held() {
     let (_dir, root) = shell();
     let mut hive = Stub::default();
-    // The same address held as bytes AND as a directory: the bytes are content
-    // (immutable, verified by the reader); the directory is not listed.
+    // Held, but nothing current reaches it: an earlier revision, a dropped
+    // draft. The answer is the one an absent atom gets.
     hive.content.insert(SIG_C.to_string(), b"atom bytes".to_vec());
-    hive.entries.insert((SIG_C.to_string(), "00000000".to_string()), marker(SIG_A));
-    hive.entries.insert((SIG_C.to_string(), "00000001".to_string()), marker(SIG_B));
+    let hive = hive.rooted(&[]);
 
     for base in ["", "/content"] {
-        let bytes = resolve(&root, &hive, "GET", &format!("{base}/{SIG_C}"));
-        assert_eq!(bytes.status, 200, "{base}");
-        assert_eq!(body_of(&bytes), b"atom bytes");
-        assert_eq!(resolve(&root, &hive, "GET", &format!("{base}/{SIG_C}/")).status, 404, "{base}");
+        let reply = resolve(&root, &hive, "GET", &format!("{base}/{SIG_C}"));
+        assert_eq!(reply.status, 404, "{base}");
+        assert!(body_of(&reply).is_empty(), "{base}");
     }
 }
 
@@ -528,11 +732,13 @@ fn a_real_hive_lists_no_bag_and_serves_only_its_head() {
     let (_dir, root) = shell();
     let hive_dir = tempfile::tempdir().expect("a temp dir");
     let host = hypercomb_host::Host::open(hive_dir.path()).expect("a hive");
-    let first = host.put(b"first revision").expect("put");
-    let second = host.put(b"second revision").expect("put");
-    let bag = hypercomb_protocol::sign_str("garden").to_hex();
+    let first = host.put(b"{\"name\":\"\",\"label\":\"first\"}").expect("put");
+    let second = host.put(b"{\"name\":\"\",\"label\":\"second\"}").expect("put");
+    let bag = bag(&[]);
     host.raw_dir_put(&bag, "00000000", &marker(&first)).expect("marker");
     host.raw_dir_put(&bag, "00000001", &marker(&second)).expect("marker");
+    let garden = hypercomb_protocol::sign_str("garden").to_hex();
+    host.raw_dir_put(&garden, "00000000", &marker(&first)).expect("marker");
 
     assert_eq!(resolve(&root, &host, "GET", &format!("/{bag}/")).status, 404);
     assert_eq!(resolve(&root, &host, "GET", &format!("/{bag}/00000000")).status, 404);
@@ -540,8 +746,11 @@ fn a_real_hive_lists_no_bag_and_serves_only_its_head() {
     assert_eq!(head.status, 200);
     let named: serde_json::Value = serde_json::from_slice(&body_of(&head)).unwrap();
     assert_eq!(named["layer"], second);
-    // Every revision's bytes are content, and content is served by signature.
-    assert_eq!(resolve(&root, &host, "GET", &format!("/{first}")).status, 200);
+    // The current revision is served; the earlier one stays home, and so does
+    // a bag the current tree does not reach.
+    assert_eq!(resolve(&root, &host, "GET", &format!("/{second}")).status, 200);
+    assert_eq!(resolve(&root, &host, "GET", &format!("/{first}")).status, 404);
+    assert_eq!(resolve(&root, &host, "GET", &format!("/{garden}/00000000")).status, 404);
 }
 
 // ── the wire ────────────────────────────────────────────────────────────────
@@ -554,11 +763,35 @@ fn fetch(addr: std::net::SocketAddr, request: &str) -> String {
     out
 }
 
+/// The running host reuses one collection — but never across a write. The
+/// first request after an edit already answers from the edited hive, so a
+/// superseded version is never admitted for even a moment.
+#[test]
+fn a_running_gate_answers_from_the_hive_as_it_is_now() {
+    let hive_dir = tempfile::tempdir().expect("a temp dir");
+    let host = hypercomb_host::Host::open(hive_dir.path()).expect("a hive");
+    let home = vec!["root-entries".to_string()];
+    let first = host.put(b"{\"name\":\"\",\"label\":\"first\"}").expect("put");
+    host.append(&home, &first).expect("revision");
+    let gate = genome::Gate::default();
+
+    assert!(gate.current(&host).admits_content(&first));
+    let reused = gate.current(&host);
+    assert!(Arc::ptr_eq(&reused, &gate.current(&host)), "nothing changed, nothing re-derived");
+
+    let second = host.put(b"{\"name\":\"\",\"label\":\"second\"}").expect("put");
+    host.append(&home, &second).expect("revision");
+    let now = gate.current(&host);
+    assert!(now.admits_content(&second));
+    assert!(!now.admits_content(&first), "the edit took effect on the very next request");
+}
+
 #[test]
 fn it_answers_on_a_socket() {
     let (_dir, root) = shell();
     let mut stub = Stub::default();
     stub.content.insert(SIG_B.to_string(), b"atom bytes".to_vec());
+    let stub = stub.rooted(&[SIG_B]);
 
     // Port 0: the OS picks, so a busy machine never fails this test.
     let serving = serve(root, Arc::new(stub), LOOPBACK, 0).expect("bind");
@@ -624,6 +857,7 @@ fn a_body_larger_than_the_socket_buffer_arrives_whole() {
     let (_dir, root) = shell();
     let mut stub = Stub::default();
     stub.content.insert(SIG_B.to_string(), vec![b'x'; SIZE]);
+    let stub = stub.rooted(&[SIG_B]);
 
     let serving = serve(root, Arc::new(stub), LOOPBACK, 0).expect("bind");
     let response = fetch(

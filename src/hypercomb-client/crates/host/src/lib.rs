@@ -42,6 +42,7 @@
 #![warn(missing_debug_implementations)]
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use hypercomb_protocol::{bag_addr, LayerSig, Marker, PoolRegistry, Sig};
@@ -111,6 +112,10 @@ pub struct Host {
     store: RedbStore,
     registry: Mutex<PoolRegistry>,
     root: PathBuf,
+    /// Bumped by every write through this host. A reader that derives
+    /// something from the whole hive (the desktop host's gate) compares it
+    /// instead of re-deriving on a timer.
+    writes: AtomicU64,
 }
 
 impl Host {
@@ -123,12 +128,24 @@ impl Host {
             store: RedbStore::open(&root)?,
             registry: Mutex::new(PoolRegistry::new()),
             root,
+            writes: AtomicU64::new(0),
         })
     }
 
     /// Where this hive lives.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// How many writes this host has made since it opened. Equal readings
+    /// mean nothing in the hive changed in between.
+    pub fn writes(&self) -> u64 {
+        self.writes.load(Ordering::SeqCst)
+    }
+
+    fn wrote<T>(&self, result: Result<T>) -> Result<T> {
+        self.writes.fetch_add(1, Ordering::SeqCst);
+        result
     }
 
     // -----------------------------------------------------------------
@@ -140,7 +157,7 @@ impl Host {
     /// Idempotent: identical content yields an identical signature, so a
     /// re-put is free and there is never anything to merge.
     pub fn put(&self, bytes: &[u8]) -> Result<String> {
-        Ok(self.store.put(bytes)?.to_hex())
+        self.wrote(Ok(self.store.put(bytes)?.to_hex()))
     }
 
     /// Read content by signature.
@@ -181,7 +198,7 @@ impl Host {
     /// written.
     pub fn append(&self, segments: &[String], layer: &str) -> Result<u32> {
         let layer = LayerSig::from_sig(parse_sig(layer)?);
-        Ok(self.store.append(bag_addr(segments), &Marker::pointer(layer))?)
+        self.wrote(Ok(self.store.append(bag_addr(segments), &Marker::pointer(layer))?))
     }
 
     /// Every revision at a location, oldest first.
@@ -213,7 +230,7 @@ impl Host {
 
     pub fn pool_put(&self, meaning: &str, key: &str, bytes: &[u8]) -> Result<()> {
         let pool = self.registry.lock().expect("registry lock").address(meaning);
-        Ok(self.store.pool_put(pool, key, bytes)?)
+        self.wrote(Ok(self.store.pool_put(pool, key, bytes)?))
     }
 
     pub fn pool_get(&self, meaning: &str, key: &str) -> Result<Option<Vec<u8>>> {
@@ -276,6 +293,22 @@ impl Host {
         Ok(out)
     }
 
+    /// A sig-named directory's head marker — its name and bytes — by one
+    /// lookup, without listing every revision.
+    pub fn raw_head(&self, sig: &str) -> Result<Option<(String, Vec<u8>)>> {
+        let bag = hypercomb_protocol::BagAddr::from_sig(parse_sig(sig)?);
+        Ok(self
+            .store
+            .head(bag)?
+            .map(|(index, marker)| (hypercomb_protocol::marker_filename(index), marker.to_bytes())))
+    }
+
+    /// Every bag address that holds a marker — without enumerating content,
+    /// so a host can find its door bags (`sign(<hostname>)`) cheaply.
+    pub fn raw_bags(&self) -> Result<Vec<String>> {
+        Ok(self.store.bags()?.into_iter().map(|b| b.to_hex()).collect())
+    }
+
     /// Everything inside a sig-named directory — markers and pool members
     /// together, since the address may be both a bag and a pool.
     pub fn raw_dir_entries(&self, sig: &str) -> Result<Vec<RawEntry>> {
@@ -320,6 +353,7 @@ impl Host {
 
     /// Write one entry inside a sig-named directory.
     pub fn raw_dir_put(&self, sig: &str, name: &str, bytes: &[u8]) -> Result<()> {
+        self.writes.fetch_add(1, Ordering::SeqCst);
         let parsed = parse_sig(sig)?;
         match hypercomb_protocol::marker_index(name) {
             Some(index) => {
@@ -369,6 +403,7 @@ impl Host {
     /// Markers and pool members are real deletes. See [`Host::raw_remove`] for
     /// why removing *content* is not.
     pub fn raw_dir_remove(&self, sig: &str, name: &str) -> Result<bool> {
+        self.writes.fetch_add(1, Ordering::SeqCst);
         let parsed = parse_sig(sig)?;
         match hypercomb_protocol::marker_index(name) {
             Some(index) => Ok(self
@@ -402,7 +437,7 @@ impl Host {
     ///
     /// Never automatic. This is a manual or idle-time operation.
     pub fn collect(&self) -> Result<Collected> {
-        Ok(gc(&self.store)?)
+        self.wrote(Ok(gc(&self.store)?))
     }
 
     // -----------------------------------------------------------------
@@ -424,7 +459,7 @@ impl Host {
     /// markers merge with the highest winning, pool members merge by name.
     /// Idempotent — restoring the same folder twice imports nothing.
     pub fn restore(&self, source: impl AsRef<Path>) -> Result<Transfer> {
-        Ok(restore(&self.store, source)?)
+        self.wrote(Ok(restore(&self.store, source)?))
     }
 
     /// Export this hive to a folder in the interchange form. Writes into the

@@ -44,9 +44,34 @@ only when it is a floor pool from `hypercomb-relay/host-listing.floor.json` —
 the same file the relay and the blossom worker list from — and a `document`
 floor pool lists only its head marker and the atom it names. Every other
 directory (a tile's bag, any other pool) answers `404 pool not held`, exactly
-as an absent one, and gives up its head marker and nothing else: no earlier
-marker, no member. Operator-declared `listed` pools are not served by this
+as an absent one. Operator-declared `listed` pools are not served by this
 host yet.
+
+**Only what the current hive reaches** (2026-10-18; jwize: "only the head
+identifier is exposed"). Listing was never the whole gate: the store keeps
+every earlier layer of every tile, a parent keeps naming the child generation
+it last carried, and a restore point names a whole earlier hive. Until then
+`/<sig>` served ANY atom the store held and `/<dir>/<head>` served the head of
+ANY bag or pool, so an ordinary walk from the home page downloaded earlier
+page versions, every restore point, removed tiles, roots filed away by
+`save as`, and a fingerprint of personal pools. Now `crates/serve/src/genome.rs`
+derives the current hive from the layers — from the home page (`root-entries`,
+or the legacy `sign('')` mirror), each location's own head rather than the
+generation its parent carries, the resources those layers reach, referent
+fields (`prev`, a restore point's `seal`) skipped — plus every DOOR: a
+hostname's bag whose head is a `host:activation` for that hostname, and, while
+it is switched on, the creation it names. `/<sig>` and `/<dir>/<head>` answer
+only for that set; everything else answers exactly like an atom or directory
+never held. It is derived from the layers, not from the browser's
+`computed:genome` record — a derived cache is never load-bearing — and it is
+re-derived on the first request after any write to the store, so a
+superseded version is never served even for a moment (12,000 tiles: about
+0.13 s per re-derivation). An atom someone saved while it was current is
+still refused once it is not: keeping old signatures buys a crawler nothing.
+
+What a gate cannot do is recall. Anything served while it was current may be
+kept by whoever took it — and `/<sig>` replies say `immutable, max-age=1 year`,
+so a cache in front (a tunnel's edge) keeps serving it too.
 
 Nothing is exported first, and there is no second copy to keep current. A hive
 edited a second ago is the hive being served — the question "did I remember to

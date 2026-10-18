@@ -120,10 +120,13 @@ it, and so does quitting.
 
 Nothing is exported first. `hypercomb-serve` (`crates/serve`) answers the host
 contract live out of the open store — `/<sig>` is a content read, `/<bagSig>/
-00000007` is a marker, `/<poolSig>/<member>` is a pool member — so the hive
-being served is the hive as it is, not a copy that was current when someone last
-remembered to publish. Full picture:
-[hosting-from-a-machine.md](hosting-from-a-machine.md).
+00000007` is a head marker, `/<floorPoolSig>/<member>` is a listed pool member —
+so the hive being served is the hive as it is, not a copy that was current when
+someone last remembered to publish. Only what the CURRENT hive reaches answers:
+no earlier version, restore point, removed tile or personal pool (see
+"Only what the current hive reaches" in
+[hosting-from-a-machine.md](hosting-from-a-machine.md)). The menu asks before it
+binds, and says what becomes readable.
 
 Three things about it are deliberate and should stay that way:
 
