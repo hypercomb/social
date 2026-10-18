@@ -45,7 +45,7 @@ import {
 } from './stage-succession.js'
 import { isReservedRootKey } from './hive-link.js'
 import {
-  ENTRANCES_MAX, ENTRANCE_POWERS, boundLineage, creationUrl, entranceHost, foldContentLabel, isPoweredEntrance, ownAddressHost,
+  ENTRANCES_MAX, ENTRANCE_POWERS, boundLineage, creationUrl, entranceHost, foldContentLabel, isPoweredEntrance, isPublishNode, ownAddressHost,
   ownAddressRefusal, ownLabelOn, readEntrance, topOpenIn, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
 } from './zone-door.js'
 import type { ModuleAssessmentRecord } from '../assistant/module-review.js'
@@ -140,6 +140,7 @@ export type PublishFailure =
   | 'services'        // core services not ready
   | 'no-branch'       // called at the hive root
   | 'no-host'         // nowhere to put the bytes: no node named, none standing, or none answering
+  | 'not-a-node'      // every host it names is an address no publish can upload to (`reason` names them)
   | 'seal-failed'     // a child is cold or unresolvable
   | 'no-signer'       // no key to sign the index with
   | 'not-available'   // closure not served at the deadline — or a node refused it (`refused`) — pointer NOT advanced
@@ -284,8 +285,16 @@ export async function publishBranch(
   //     so — it never picks a host the participant did not.
   const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
-  const nodes = await nodesFor(segs, hostSync)
-  if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
+  const named = await nodesFor(segs, hostSync)
+  if (named.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
+  // A host no publish can upload to — a LAN address with a port, which is
+  // what Serve This Hive hands out — is refused HERE, by name. Left in, the
+  // upload queue dropped it without a word, the availability wait ran out
+  // its two minutes and said "still uploading" about bytes that were never
+  // sent; and, named first beside a good host, it became the door the index
+  // was written to while the bytes went to the other.
+  const nodes = named.filter(isPublishNode)
+  if (nodes.length === 0) return { ok: false, failure: 'not-a-node', reason: named.join(', ') }
   const answering: string[] = []
   const unreachable: string[] = []
   for (const door of nodes) {

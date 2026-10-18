@@ -2863,5 +2863,6 @@
   "share.held.on-device.one": "Las páginas más profundas de {count} mosaico siguen solo en tu dispositivo — quédate un momento para dejárselas a la sala",
   "publish.optimize.no-host": "No se envió nada: no se ha nombrado ningún host. Di features publish <host> para enviar el conjunto a uno.",
   "hosts.behind": "{host} aún no tiene la versión más reciente",
-  "packages.updates.not-held": "Hay una actualización lista, pero ninguno de tus hosts la tiene todavía"
+  "packages.updates.not-held": "Hay una actualización lista, pero ninguno de tus hosts la tiene todavía",
+  "publish.failure.not-a-node": "{hosts} no acepta subidas. Una publicación va a un dominio sin puerto —el nombre de un túnel lo es— o a un host en este ordenador. No se publicó nada."
 }

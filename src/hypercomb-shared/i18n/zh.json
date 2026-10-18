@@ -2863,5 +2863,6 @@
   "share.held.on-device.one": "{count} 个磁贴的更深页面仍只在你的设备上 — 请稍留片刻，把它们留给房间",
   "publish.optimize.no-host": "未发送任何内容：未指定主机。输入 features publish <host> 将该集合发送到某个主机。",
   "hosts.behind": "{host} 还没有最新版本",
-  "packages.updates.not-held": "更新已就绪，但你的主机都还没有它"
+  "packages.updates.not-held": "更新已就绪，但你的主机都还没有它",
+  "publish.failure.not-a-node": "{hosts} 不接受上传。发布只会发往不带端口的域名（隧道的名称就是一种），或这台电脑上的主机。没有发布任何内容。"
 }

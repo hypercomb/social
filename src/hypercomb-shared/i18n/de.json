@@ -2863,5 +2863,6 @@
   "share.held.on-device.one": "Tiefere Seiten von {count} Kachel sind noch nur auf deinem Gerät — bleib einen Moment, damit sie beim Raum bleiben",
   "publish.optimize.no-host": "Es wurde nichts gesendet: Es ist kein Host genannt. Sagen Sie features publish <host>, um die Auswahl dorthin zu senden.",
   "hosts.behind": "{host} hat die neueste Version noch nicht",
-  "packages.updates.not-held": "Ein Update ist bereit, aber noch keiner Ihrer Hosts hat es"
+  "packages.updates.not-held": "Ein Update ist bereit, aber noch keiner Ihrer Hosts hat es",
+  "publish.failure.not-a-node": "{hosts} nimmt keine Uploads an. Veröffentlicht wird auf eine Domain ohne Port – der Name eines Tunnels ist eine – oder auf einen Host auf diesem Computer. Nichts wurde veröffentlicht."
 }

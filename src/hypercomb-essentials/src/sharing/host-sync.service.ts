@@ -107,7 +107,7 @@
 import { CHILD_SLOTS, EffectBus, SignatureService, registerPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 import { isJoinedHere, ownZone } from './membership.js'
-import { foldContentLabel, legacyContentFace } from './zone-door.js'
+import { foldContentLabel, HOST_DOMAIN_RE, isLoopbackHost, isPublishNode, legacyContentFace } from './zone-door.js'
 import { swarmHosts, type SwarmHostChoice, type SwarmHostResolver, type SwarmHostSource } from './swarm-hosts.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
@@ -205,19 +205,12 @@ const PUBLIC_HOST_KEY = 'hc:public-host'
 // stored history is never rewritten behind the participant's back.
 const PUBLIC_HOST_DOMAIN_KEY = 'hc:public-host:domain'
 const DEFAULT_PUBLIC_HOST_DOMAIN = ''
-/** A bare hostname: labels joined by dots, no scheme, no path, no port. The
- *  target is concatenated into request URLs, so anything else is refused
- *  rather than normalised — a half-understood value is how you publish to
- *  somewhere you did not mean to. */
-const HOST_DOMAIN_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
-/** THIS MACHINE — any `*.localhost` name (RFC 6761), 127.x or ::1, with or
- *  without a port; spoken over plain http (#schemeFor). The one other shape a
- *  host may take: a host the participant runs here (local-content-host.mjs,
- *  hypercomb-serve on this box). HOST_DOMAIN_RE's dotted, port-less shape
- *  refused it as a publish node, and with no node `markPublic` staged
- *  nothing — a page with children never finished publishing, because its
- *  freshly sealed root is the one atom no tile write had already backed up. */
-const LOOPBACK_HOST_RE = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d{1,5})?$/i
+// The node shapes — a bare hostname (HOST_DOMAIN_RE) and THIS MACHINE (any
+// `*.localhost`, 127.x or ::1, port allowed, spoken over plain http) — are
+// one rule in zone-door.ts (`isPublishNode`, `isLoopbackHost`). A loopback
+// host once failed the dotted, port-less shape, and with no node `markPublic`
+// staged nothing: a page with children never finished publishing, because its
+// freshly sealed root is the one atom no tile write had already backed up.
 // Queue-pool sidecar marker: `{sig}.public` = this sig belongs to a
 // published-public closure. THE doctrine gate for the CDN target — written
 // only by markPublic() (fed by the swarm publish walk, which enumerates
@@ -908,7 +901,7 @@ export class HostSyncService extends EventTarget {
     for (const raw of domains) {
       // A node is a write door — the zone root, never a `content.` face.
       const domain = foldContentLabel(String(raw ?? '').trim().toLowerCase())
-      if (!HOST_DOMAIN_RE.test(domain) && !LOOPBACK_HOST_RE.test(domain)) continue
+      if (!isPublishNode(domain)) continue
       if (this.#hostBackoff.delete(domain)) { this.#putsThrew.delete(domain); this.#receiptEpoch++; kick = true }
       if (this.#publishNodes.has(domain)) continue
       this.#publishNodes.add(domain)
@@ -3553,7 +3546,7 @@ export class HostSyncService extends EventTarget {
    *  rule for the probe, the push, the read-back and the audit, so they can
    *  never disagree about which origin is "the host". */
   static #schemeFor(host: string): 'http' | 'https' {
-    return LOOPBACK_HOST_RE.test(host) ? 'http' : 'https'
+    return isLoopbackHost(host) ? 'http' : 'https'
   }
 
   /** Bounded fan-out that keeps the input order. */
@@ -3717,7 +3710,7 @@ export class HostSyncService extends EventTarget {
     if (!domain) return { ok: false, error: 'no host to publish to' }
     // Any *.localhost name is loopback (RFC 6761): a zone's content face on
     // one machine is content.localhost.
-    const scheme = LOOPBACK_HOST_RE.test(domain) ? 'http' : 'https'
+    const scheme = isLoopbackHost(domain) ? 'http' : 'https'
     let sent = 0
     let held = 0
     for (const sig of sigs) {

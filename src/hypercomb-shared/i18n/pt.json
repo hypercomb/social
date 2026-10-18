@@ -2863,5 +2863,6 @@
   "share.held.on-device.one": "As páginas mais profundas de {count} bloco ainda estão só no seu dispositivo — fique um momento para deixá-las com a sala",
   "publish.optimize.no-host": "Nada foi enviado: nenhum host foi indicado. Diga features publish <host> para enviar o conjunto a um.",
   "hosts.behind": "{host} ainda não tem a versão mais recente",
-  "packages.updates.not-held": "Há uma atualização pronta, mas nenhum dos seus hosts a tem ainda"
+  "packages.updates.not-held": "Há uma atualização pronta, mas nenhum dos seus hosts a tem ainda",
+  "publish.failure.not-a-node": "{hosts} não aceita envios. Uma publicação vai para um domínio sem porta — o nome de um túnel é um deles — ou para um host neste computador. Nada foi publicado."
 }

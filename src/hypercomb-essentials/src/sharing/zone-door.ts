@@ -44,6 +44,24 @@ export const bareHost = (raw: unknown): string => {
 
 export const isLoopbackHost = (raw: unknown): boolean => LOOPBACK_RE.test(bareHost(raw))
 
+/** A bare hostname: labels joined by dots, no scheme, no path, no port. The
+ *  target is concatenated into request URLs, so anything else is refused
+ *  rather than normalised — a half-understood value is how you publish to
+ *  somewhere you did not mean to. */
+export const HOST_DOMAIN_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
+
+/** MAY A PUBLISH UPLOAD TO THIS HOST? A domain without a port — a tunnel's
+ *  name is one — or a host on this machine (any `*.localhost`, 127.x or ::1,
+ *  port allowed, spoken over plain http). A LAN address with a port is
+ *  neither: nothing there takes uploads (Serve This Hive is read-only) and an
+ *  https page cannot reach plain http on the network anyway. The ONE rule:
+ *  the publish refuses such a host up front by name, and the upload queue
+ *  (HostSyncService.addPublishNodes) never takes it as a node. */
+export const isPublishNode = (raw: unknown): boolean => {
+  const domain = foldContentLabel(raw)
+  return HOST_DOMAIN_RE.test(domain) || LOOPBACK_RE.test(domain)
+}
+
 /**
  * The ZONE a host names: a leading `content.` label folded away. Only a label
  * in front of a real zone is plumbing — `content.com` is a domain of its own

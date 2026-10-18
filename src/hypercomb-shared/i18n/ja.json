@@ -3104,5 +3104,6 @@
   "recommend.left": "recommend: 「{word}」を {label} に残しました(あなたの署名付き)",
   "recommend.toast": "「{word}」を {label} に残しました",
   "domainLinks.asksWord": "ひとこと",
-  "module.brood": "ブルード"
+  "module.brood": "ブルード",
+  "publish.failure.not-a-node": "{hosts} はアップロードを受け付けません。公開先はポートのないドメイン（トンネルの名前もその一つ）か、このコンピューター上のホストです。何も公開されていません。"
 }

@@ -2863,5 +2863,6 @@
   "share.held.on-device.one": "Le pagine più profonde di {count} tessera sono ancora solo sul tuo dispositivo — resta un momento per lasciarle alla stanza",
   "publish.optimize.no-host": "Non è stato inviato nulla: nessun host è indicato. Scrivi features publish <host> per inviare l'insieme a uno.",
   "hosts.behind": "{host} non ha ancora la versione più recente",
-  "packages.updates.not-held": "Un aggiornamento è pronto, ma nessuno dei tuoi host ce l'ha ancora"
+  "packages.updates.not-held": "Un aggiornamento è pronto, ma nessuno dei tuoi host ce l'ha ancora",
+  "publish.failure.not-a-node": "{hosts} non accetta caricamenti. Una pubblicazione va a un dominio senza porta — il nome di un tunnel lo è — o a un host su questo computer. Non è stato pubblicato nulla."
 }

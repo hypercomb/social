@@ -2863,5 +2863,6 @@
   "share.held.on-device.one": "{count} döşemenin daha derin sayfaları hâlâ yalnızca cihazınızda — onları odaya bırakmak için biraz bekleyin",
   "publish.optimize.no-host": "Hiçbir şey gönderilmedi: hiçbir sunucu belirtilmedi. Kümeyi göndermek için features publish <host> yaz.",
   "hosts.behind": "{host} henüz en yeni sürüme sahip değil",
-  "packages.updates.not-held": "Bir güncelleme hazır, ancak henüz hiçbir konağınızda yok"
+  "packages.updates.not-held": "Bir güncelleme hazır, ancak henüz hiçbir konağınızda yok",
+  "publish.failure.not-a-node": "{hosts} yükleme kabul etmiyor. Yayın, portu olmayan bir alan adına — tünel adı da öyledir — ya da bu bilgisayardaki bir sunucuya gider. Hiçbir şey yayımlanmadı."
 }

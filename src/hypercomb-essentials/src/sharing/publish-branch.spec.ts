@@ -133,6 +133,30 @@ describe('where the bytes go', () => {
     } finally { ioc.get = original }
   })
 
+  // The address Serve This Hive hands out (a LAN address with a port) takes
+  // no uploads. It used to be dropped by the upload queue without a word,
+  // and the publish waited out two minutes to say "still uploading".
+  it('refuses a host no publish can upload to at once, by name, before reading or writing anything', async () => {
+    const ioc = (window as unknown as { ioc: { get: (k: string) => unknown } }).ioc
+    const original = ioc.get
+    const named: string[][] = []
+    ioc.get = (key: string): unknown => {
+      if (key !== '@diamondcoreprocessor.com/HostSyncService') return original(key)
+      return {
+        ...(original(key) as object),
+        publicHostDomain: () => '192.168.1.5:4271',
+        addPublishNodes: (domains: readonly string[]) => { named.push([...domains]) },
+      }
+    }
+    try {
+      indexRead = { ok: false, reason: 'http', status: 404 }
+      const result = await publishBranch(['site'])
+      expect(result).toMatchObject({ ok: false, failure: 'not-a-node', reason: '192.168.1.5:4271' })
+      expect(putCalls).toEqual([])
+      expect(named).toEqual([])
+    } finally { ioc.get = original }
+  })
+
   it('names the nodes it publishes to, and never the standing enable', async () => {
     const ioc = (window as unknown as { ioc: { get: (k: string) => unknown } }).ioc
     const original = ioc.get
