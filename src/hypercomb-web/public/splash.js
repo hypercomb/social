@@ -5,8 +5,10 @@
  * first tiles on screen (EffectBus 'render:cell-count' with count>0), OR a genuinely
  * empty layer (count===0 with settled:true — pixi + data were up, the location just
  * has no tiles), OR the install-needed welcome card (boot:status) whose "Start" button
- * the splash must not cover. Then it finishes the animation down to the honey dot,
- * holds ~1s, and fades to reveal the hive. It never blocks on an event that may not
+ * the splash must not cover. Then it fades out at once to reveal the hive: the
+ * animation covers real loading only, never a hive that is already ready (jwize
+ * 2026-10-18 — finishing the loop down to the dot and holding ~1s kept a ready hive
+ * covered 2.6–3.4s on every load). It never blocks on an event that may not
  * fire: an empty page reveals via settled, and after MAXLOOPS (3) plays with no signal
  * it rests on the dot and offers "click to enter" — the user always has a way in.
  * Resting is never a dead stop: the dot dances a faint waggle — the bee's figure-
@@ -20,7 +22,7 @@
  * the element (as before); worker dies after the canvas was transferred (e.g. a CSP
  * that blocks blob: workers) → swap in a fresh canvas and run the same core inline.
  * All DOM policy — ready signals, hidden-tab rules, click-to-enter, the fade — stays
- * on the main thread; the core only animates and reports 'resting' / 'done'.
+ * on the main thread; the core only animates and reports 'resting'.
  * A/B check: load with ?splash=inline to force the inline path.
  *
  * Keep in sync with hypercomb-dev/public/splash.js. The #hc-splash styles live in
@@ -63,10 +65,10 @@
    * requestAnimationFrame). The same function runs inline when there is no worker.
    * Outward through post():
    *   {t:'resting'} — loop cap hit with no ready signal; pinned on the dot, waiting
-   *   {t:'done'}    — finishing run reached the dot and held ~1s → reveal the hive
    * Inward through handle():
-   *   {t:'size',w,h,dpr} · {t:'exit'} ready → finish + auto-reveal · {t:'rest'}
-   *   finish + wait for a click (the 20s wall-clock backstop).
+   *   {t:'size',w,h,dpr} · {t:'rest'} finish + wait for a click (the 20s
+   *   wall-clock backstop). A ready signal never reaches the core: the main
+   *   thread fades the splash out over whatever frame it is on.
    */
   function GenesisCore(canvas, opts, post) {
     var ctx = canvas.getContext('2d');
@@ -153,8 +155,8 @@
     function byDepth(a, b) { return PZ[b] - PZ[a]; }   // far side first — painter's order
 
     // ---- timeline -------------------------------------------------------------
-    var nowSec = 0, loops = 0, finishing = false, awaitEnter = false;
-    var dotReal = 0, restSent = false, doneSent = false;
+    var nowSec = 0, loops = 0, finishing = false;
+    var restSent = false;
     var waggleT = 0;                                      // real seconds resting on the dot — drives the waggle dance
 
     function timeline(dt, realDt) {
@@ -162,10 +164,9 @@
       if (finishing && nowSec >= TOTAL) {                 // the finishing run has reached the honey dot
         nowSec = TOTAL;                                   // pin on the dot — but it rests DANCING, never dead (see the waggle in render())
         waggleT += realDt;
-        if (awaitEnter) { if (!restSent) { restSent = true; post({ t: 'resting' }); } }   // cap hit with no ready signal → rest here, wait for a click
-        else { dotReal += realDt; if (dotReal >= 1.0 && !doneSent) { doneSent = true; post({ t: 'done' }); } }   // real signal → hold ~1s, then hand off to the hive
+        if (!restSent) { restSent = true; post({ t: 'resting' }); }   // no ready signal → rest here, wait for a click
       } else if (nowSec >= TOTAL) {
-        if (++loops >= MAXLOOPS) { finishing = true; awaitEnter = true; nowSec = TOTAL; }   // played MAXLOOPS times, still no ready signal → rest on the dot
+        if (++loops >= MAXLOOPS) { finishing = true; nowSec = TOTAL; }   // played MAXLOOPS times, still no ready signal → rest on the dot
         else nowSec -= TOTAL;                             // the loop is seamless: dot out, dot in
       }
     }
@@ -283,8 +284,7 @@
     function handle(m) {
       if (!m) return;
       if (m.t === 'size') { W = m.w; H = m.h; canvas.width = Math.round(W * m.dpr); canvas.height = Math.round(H * m.dpr); ctx.setTransform(m.dpr, 0, 0, m.dpr, 0, 0); resize(); }
-      else if (m.t === 'exit') { finishing = true; awaitEnter = false; }
-      else if (m.t === 'rest') { finishing = true; awaitEnter = true; }
+      else if (m.t === 'rest') finishing = true;
     }
     function start() { last = performance.now(); raf = rafFn(frame); }
     function stop() { stopped = true; cancelFn(raf); }
@@ -293,14 +293,13 @@
 
   // ---- main-thread side: where the core runs, and the DOM policy around it ----
   var mode = 'inline', worker = null, core = null;
-  var dismissed = false, readySeen = false, awaitEnter = false, enterHint = null;
+  var dismissed = false, awaitEnter = false, enterHint = null;
 
   function measure() { return { t: 'size', w: cv.clientWidth || window.innerWidth, h: cv.clientHeight || window.innerHeight, dpr: Math.min(2, window.devicePixelRatio || 1) }; }
   function coreSend(m) { if (worker) worker.postMessage(m); else if (core) core.handle(m); }
   function onCoreMsg(m) {
     if (!m || dismissed) return;
     if (m.t === 'resting') { awaitEnter = true; showEnter(); }   // loop cap on the dot → offer a way in
-    else if (m.t === 'done') dismiss();                          // finished + held ~1s → reveal the hive
   }
   function startInline() {
     core = GenesisCore(cv, { reduce: reduce, alive: function () { return splash.isConnected; } }, onCoreMsg);
@@ -346,21 +345,14 @@
     if (core) { core.stop(); core = null; }
   }
 
-  // ---- dismissal: wait for real tiles, finish down to the dot, then fade to the hive ----
-  // 'exit' → core finishes + auto-reveals ('done'). 'rest' → core finishes + waits.
-  // awaitEnter here gates the click/key entry; readySeen means a real ready signal
-  // arrived (regardless of animation state).
-  // HIDDEN-TAB RULE: the finishing run and the rAF-deferred dismiss ride frames,
-  // which are PARKED in a hidden tab (worker rAF included — no compositor, no
-  // frames) — a backgrounded boot would strand the splash over a fully-ready hive
-  // (observed 2026-07-16 on a driver tab). Nobody is watching the animation in a
-  // hidden tab, so reveal immediately instead of waiting on frames.
-  function requestExit() {
-    readySeen = true;
-    if (document.hidden) { dismiss(); return; }
-    awaitEnter = false;                                         // a real ready signal wins over click-to-enter
-    coreSend({ t: 'exit' });
-  }
+  // ---- dismissal: wait for real tiles, then fade to the hive ----
+  // A real ready signal reveals at once, over whatever frame the animation is on:
+  // the hive is never kept waiting on the choreography. awaitEnter gates the
+  // click/key entry, which exists only while no ready signal has come.
+  // HIDDEN-TAB RULE: the fade rides a frame, and frames are PARKED in a hidden tab
+  // (worker rAF included — no compositor) — a backgrounded boot would strand the
+  // splash over a fully-ready hive (observed 2026-07-16 on a driver tab). Nobody is
+  // watching a hidden tab, so dismiss() removes it there without the fade.
   function dismiss() {
     if (dismissed) return; dismissed = true;
     if (document.hidden) {                                      // frames are parked — remove now, no fade (it isn't visible)
@@ -374,18 +366,12 @@
       setTimeout(function () { unplug(); if (splash.parentNode) splash.parentNode.removeChild(splash); }, 520);
     });
   }
-  // Tab hidden after the ready signal landed mid-animation: the finishing run
-  // can no longer advance (frames parked) — reveal so the hive is there on return.
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden && readySeen && !dismissed) dismiss();
-  });
   // WALL-CLOCK BACKSTOP (frame-independent): the 3-play cap only accrues while
   // frames run, so a hidden/throttled boot could outlive it indefinitely.
-  // After 20s real time: ready → reveal; not ready → rest on click-to-enter
-  // (built directly in the DOM — no frame needed) so there is ALWAYS a way in.
+  // After 20s real time with no ready signal: rest on click-to-enter (built
+  // directly in the DOM — no frame needed) so there is ALWAYS a way in.
   setTimeout(function () {
     if (dismissed) return;
-    if (readySeen) { dismiss(); return; }
     awaitEnter = true;
     coreSend({ t: 'rest' });
     showEnter();
@@ -428,19 +414,14 @@
       // A count:0 WITHOUT settled is a not-ready transient (pixi still warming —
       // clearMesh's early "not ready" bails) and is IGNORED, so a populated hive
       // never flashes an empty canvas before its tiles paint.
-      bus.on('render:cell-count', function (pl) { if (pl && (pl.count > 0 || pl.settled)) requestExit(); });
+      bus.on('render:cell-count', function (pl) { if (pl && (pl.count > 0 || pl.settled)) dismiss(); });
       // A location that OPENS AS a view (its layer carries a view:default
       // mark): the hexagons are deliberately never painted, so the
       // cell-count signal above will not fire — the arrival verdict IS the
       // ready signal. An empty view means "opens as hexagons after all";
       // only a real view name reveals. (EffectBus replays the last value,
       // so a verdict emitted before this subscription still lands.)
-      // Published visitor: the pinned page IS the site — reveal the instant
-      // the verdict lands, skipping the finishing run and the ~1s hold. The
-      // fade in dismiss() still smooths the flip; nothing paints in between.
-      var visitorShell = false;
-      try { visitorShell = document.documentElement.getAttribute('data-hypercomb-mode') === 'visitor'; } catch (e) {}
-      bus.on('view:arrival', function (p) { if (p && p.view) { if (visitorShell) dismiss(); else requestExit(); } });
+      bus.on('view:arrival', function (p) { if (p && p.view) dismiss(); });
       bus.on('render:unsupported', function () { dismiss(); });                                 // GPU blocked → tiles never paint
       // install-needed → the welcome card's "Start" button is behind the splash.
       // Reveal it NOW so the user can click Start to load the libraries. Holding
