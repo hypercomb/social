@@ -134,4 +134,49 @@ describe('active genome', () => {
     }
     expect((await collectActiveGenome(source)).stable).toBe(false)
   })
+
+  // ONLY THE GENOME LEAVES (layer-pattern-audit.md rule 6; jwize 2026-10-18:
+  // "only the head identifier is exposed"). A restore point names a whole
+  // earlier hive through its `seal`, and a succession names its earlier
+  // generation through `prev`. Both are referents: the record itself is
+  // current, what it points back at is history.
+  it('counts a restore point and a succession, never the past they point at', async () => {
+    const root = s('a')
+    const snapshot = s('b')
+    const oldRoot = s('c')
+    const oldChild = s('d')
+    const list = s('e')
+    const oldList = s('f')
+    const layers = new Map([
+      [root, { bytes: 100, value: { name: '/', snapshots: [snapshot], properties: [list] } }],
+      [oldRoot, { bytes: 90, value: { name: '/', children: [oldChild] } }],
+      [oldChild, { bytes: 70, value: { name: 'gone' } }],
+    ])
+    const resources = new Map<string, { bytes: number; value?: unknown }>([
+      [snapshot, { bytes: 60, value: { seal: oldRoot, label: 'before', at: 1 } }],
+      [list, { bytes: 50, value: { succession: 1, prev: oldList, members: [] } }],
+      [oldList, { bytes: 40, value: { succession: 1, prev: null, members: [] } }],
+      [oldRoot, { bytes: 90, value: { name: '/', children: [oldChild] } }],
+      [oldChild, { bytes: 70, value: { name: 'gone' } }],
+    ])
+    const source: ActiveGenomeSource = {
+      epoch: () => 1,
+      root: async () => root,
+      lineage: async path => `lineage:${path.join('/')}`,
+      layer: async signature => layers.get(signature) ?? null,
+      head: async lineage => lineage === 'lineage:' ? { marker: '00000002', layer: root, bytes: 76 } : null,
+      resource: async signature => resources.get(signature) ?? null,
+      beeBytes: async () => null,
+      dependencyBytes: async () => null,
+    }
+
+    const { record } = await collectActiveGenome(source)
+    const held = new Set(record?.objects.map(object => object.sig))
+    expect(held.has(snapshot)).toBe(true)
+    expect(held.has(list)).toBe(true)
+    expect(held.has(oldRoot)).toBe(false)
+    expect(held.has(oldChild)).toBe(false)
+    expect(held.has(oldList)).toBe(false)
+    expect(record?.complete).toBe(true)
+  })
 })

@@ -5,7 +5,7 @@
 // self-referential. The runtime service stores the canonical result in the
 // sign('computed') meaning pool.
 
-import { CHILD_SLOTS } from '@hypercomb/core'
+import { CHILD_SLOTS, isReferentField } from '@hypercomb/core'
 
 export const ACTIVE_GENOME_VERSION = 1 as const
 
@@ -168,6 +168,10 @@ export async function collectActiveGenome(
     }
     if (value && typeof value === 'object') {
       for (const [childKey, child] of Object.entries(value as Record<string, unknown>)) {
+        // A referent (`prev`, a restore point's `seal`, an identity) points
+        // AT something — usually the past. The genome is the current state
+        // only, and it is what replication and hosts are allowed to send.
+        if (isReferentField(childKey)) continue
         await expandValue(child, childKey)
       }
       return
@@ -218,7 +222,7 @@ export async function collectActiveGenome(
     addObject('layer', signature, layer.bytes)
 
     for (const [key, value] of Object.entries(layer.value)) {
-      if (key === 'name') continue
+      if (key === 'name' || isReferentField(key)) continue
       if (CHILD_SLOT_SET.has(key) && Array.isArray(value)) {
         for (const childRaw of value) {
           const childSig = sig(childRaw)

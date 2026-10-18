@@ -32,6 +32,13 @@ describe('edge registry', () => {
     expect(isEdgeField('prev')).toBe(false)
   })
 
+  // A restore point's or build's seal names a WHOLE EARLIER TREE. Following
+  // it is time travel, the same as `prev` — never part of the current state.
+  it('treats a restore point `seal` as a referent, never an edge', () => {
+    expect(isReferentField('seal')).toBe(true)
+    expect(isEdgeField('seal')).toBe(false)
+  })
+
   it('never harvests `prev` into a closure', () => {
     expect(edgeSigsOf({ children: [sigA], prev: sigB })).toEqual([sigA])
   })

@@ -88,6 +88,14 @@ export const EDGE_FIELDS: readonly string[] = Object.freeze([
  *     host has bytes for. It is compared against the key a reader asked for and
  *     is never dereferenced, so treating it as an edge is the permanent-404
  *     bug class exactly as `groupSig` was.
+ *   - `seal` — a restore point's (snapshots-slot.ts) or a build revision's
+ *     (builds-slot.ts) sealed EARLIER state: `sealSubtree` at that moment, a
+ *     whole past tree. It is the same kind of pointer as `prev` — read
+ *     deliberately to restore, never carried. Carrying it put every restore
+ *     point's entire earlier hive into the current genome, and from there
+ *     onto hosts (layer-pattern-audit.md rule 6: only the genome leaves;
+ *     history never does — jwize 2026-10-18: "only the head identifier is
+ *     exposed").
  *
  * May grow as new referent fields are minted — adding here is how a new
  * pointer field opts out of every precise walker at once.
@@ -97,6 +105,7 @@ export const REFERENT_FIELDS: readonly string[] = Object.freeze([
   'targetSig',
   'prev',
   'pubkey',
+  'seal',
 ])
 
 const edgeSet: ReadonlySet<string> = new Set(EDGE_FIELDS)
