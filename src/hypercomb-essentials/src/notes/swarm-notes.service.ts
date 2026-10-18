@@ -227,7 +227,7 @@ export class SwarmNotes extends EventTarget {
     if (!history) return true
     try {
       const layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
-      const children = Array.isArray(layer?.children) ? layer!.children as unknown[] : []
+      const children = Array.isArray(layer?.['children']) ? layer!['children'] as unknown[] : []
       for (const sig of children) {
         if (typeof sig !== 'string') continue
         const name = (await history.getLayerBySig(sig))?.['name']
