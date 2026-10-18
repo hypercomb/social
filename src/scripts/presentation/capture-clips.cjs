@@ -22,7 +22,13 @@ const ROOT = __dirname
 const OUT = path.join(ROOT, 'capture-out')
 // the viewport IS the deck letterbox (2.93:1) — the app's own global fit lays
 // the hive into it, so no crop is ever needed, and the command line stays in frame
-const VP = { width: 1440, height: 492 }
+const VP = { width: 960, height: 328 }
+// recorded at twice the pixel density: the deck shows these up to ~1420 px wide,
+// and a 960 px cut upscaled there left names a few pixels tall. Playwright's
+// recorder delivers at most 1440 px wide frames (a larger canvas is padded grey),
+// which is native for the deck's largest frame — so 1440x492, no padding, no upscale.
+const DPR = 2
+const OUT_W = 1440, OUT_H = 492
 
 function arg(name, fallback) {
   const i = process.argv.indexOf('--' + name)
@@ -95,27 +101,35 @@ async function commandInput(page) {
 
 /** Type into the real command line with the real keyboard — the typing IS the shot. */
 async function typeName(page, text, { perKey = 85, settle = 2400 } = {}) {
-  const sel = await commandInput(page)
-  await page.click(sel)
-  await sleep(300)
-  await page.type(sel, text, { delay: perKey })
+  const sel = 'input.command-input'
+  if (await page.locator(sel).first().isVisible().catch(() => false)) { await page.click(sel); await sleep(300) }
+  await page.keyboard.type(text, { delay: perKey })
   await sleep(500)
   await page.keyboard.press('Enter')
   await sleep(settle)
 }
 
-async function clickIntoTile(page, label) {
+async function clickIntoTile(page, label, { hold = 160 } = {}) {
   // press the LOWER tile body (the hover icon block owns the centre) and HOLD:
   // a branch enters on pointerdown, a childless tile enters at the 450ms hold —
   // one gesture walks into either
-  const at = await tileClientPoint(page, label, { fy: 0.42 })
+  const at = await tileClientPoint(page, label, { fy: 0.55 })
   if (!at.ok) { log('clickIntoTile MISS', label, at.reason); return at }
-  await page.mouse.move(at.x, at.y, { steps: 24 })
-  await sleep(450)
-  await page.mouse.down(); await sleep(700); await page.mouse.up()
+  // arrive and press at once: a lingering cursor raises the tile's action
+  // menu and tooltip over the footage
+  await page.mouse.move(at.x, at.y, { steps: 18 })
+  await sleep(90)
+  // a branch enters on pointerdown: a short press keeps the tile's menu off screen
+  await page.mouse.down(); await sleep(hold); await page.mouse.up()
+  await parkCursor(page)
   await sleep(2400)
   log('at', await segmentsOf(page))
   return at
+}
+
+/** The right margin: no tile under the cursor, so no hover overlay. */
+async function parkCursor(page) {
+  await page.mouse.move(VP.width * 0.97, VP.height * 0.55, { steps: 8 })
 }
 
 async function segmentsOf(page) {
@@ -129,6 +143,7 @@ async function rightClickBack(page) {
     await page.mouse.move(VP.width / 2, VP.height / 2, { steps: 10 })
     await sleep(300)
     await page.mouse.click(VP.width / 2, VP.height / 2, { button: 'right' })
+    await parkCursor(page)
     await sleep(2200)
     if (await segmentsOf(page) !== before) return
   }
@@ -138,8 +153,12 @@ async function rightClickBack(page) {
 async function boot(browser, videoDir) {
   const ctx = await browser.newContext({
     viewport: VP,
-    ...(videoDir ? { recordVideo: { dir: videoDir, size: VP } } : {}),
+    deviceScaleFactor: DPR,
+    colorScheme: 'dark',
+    ...(videoDir ? { recordVideo: { dir: videoDir, size: { width: OUT_W, height: OUT_H } } } : {}),
   })
+  // the deck is dark: film the app in its dark theme whatever the OS says
+  await ctx.addInitScript(() => { try { localStorage.setItem('hc:theme', 'dark') } catch {} })
   // the recording has no OS cursor — draw one, so clicks read as clicks
   await ctx.addInitScript(() => {
     addEventListener('DOMContentLoaded', () => {
@@ -159,17 +178,46 @@ async function boot(browser, videoDir) {
   await page.goto(URL_, { waitUntil: 'domcontentloaded' })
   if (!await waitForShell(page)) throw new Error('shell never became ready')
   if (!await waitForRender(page)) throw new Error('renderer never became ready')
-  await sleep(2500)
+  // the activity log lists every tile the setup added — not part of the shot
+  await page.addStyleTag({ content: 'hc-activity-log,hc-upgrade-indicator{display:none!important}' }).catch(() => {})
+  // a fresh hive greets with the example-hives offer; it is answered by the
+  // clip (opening()), and nothing is filmed until it has gone
+  await page.waitForSelector('hc-example-hives-offer button', { timeout: 45000 }).catch(() => log('no welcome offer'))
+  await sleep(900)
   await page.evaluate(() => {
     const bus = window.__hypercombEffectBus
-    // never film the example-hives offer mid-frame
-    bus?.emit?.('examples:dismiss', {})
-    // and disarm the empty-layer beehaviors offer: telling the prompt drone the
+    // disarm the empty-layer beehaviors offer: telling the prompt drone the
     // panel is already open means it never raises one over the footage
     bus?.emit?.('features:viewer-state', { open: true })
   }).catch(() => {})
   await sleep(800)
   return { ctx, page, t0 }
+}
+
+/** Answer the welcome offer: take an example hive by name (real pictures,
+ *  real depth), or "Add a tile", which also opens the command line. */
+async function opening(page, example) {
+  const offer = page.locator('hc-example-hives-offer')
+  if (example) {
+    const card = offer.locator('article, .card, li, div').filter({ hasText: example }).filter({ has: page.locator('button', { hasText: 'Add' }) }).last()
+    await card.locator('button', { hasText: 'Add' }).first().click()
+    const until = Date.now() + 30000
+    while (Date.now() < until) {
+      const n = await page.evaluate(() => (window.__hypercombEffectBus?.lastValue?.get('render:cell-count')?.labels ?? []).length).catch(() => 0)
+      if (n > 0) break
+      await sleep(400)
+    }
+    await page.evaluate(() => window.__hypercombEffectBus?.emit?.('examples:dismiss', {})).catch(() => {})
+    await sleep(2500)
+  } else {
+    await offer.locator('button', { hasText: 'Add a tile' }).first().click()
+    await sleep(1200)
+  }
+  await parkCursor(page)
+}
+
+async function labelsOf(page) {
+  return page.evaluate(() => [...(window.__hypercombEffectBus?.lastValue?.get('render:cell-count')?.labels ?? [])])
 }
 
 /* ── the four choreographies ──────────────────────────────────────────────
@@ -179,6 +227,7 @@ async function boot(browser, videoDir) {
 const CLIPS = {
   // your first tile: type a name, press Enter, a tile exists — then walk in
   async create(page, mark) {
+    await opening(page)
     mark.begin('hive-create')
     await typeName(page, 'journal')
     await sleep(600)
@@ -189,8 +238,10 @@ const CLIPS = {
 
   // creating structure: inside a tile, names become children, one by one
   async children(page, mark) {
+    await opening(page)
     await typeName(page, 'journal', { settle: 2000 })
-    await clickIntoTile(page, 'journal')
+    // a tile with no children yet enters on a held press
+    await clickIntoTile(page, 'journal', { hold: 600 })
     mark.begin('hive-children')
     await typeName(page, 'sketches', { settle: 1700 })
     await typeName(page, 'recordings', { settle: 1700 })
@@ -202,37 +253,32 @@ const CLIPS = {
   // the hive: go in, go deeper, and right-click comes back out —
   // every room entered on film already has something in it
   async navigate(page, mark) {
-    await typeName(page, 'journal', { settle: 1500 })
-    await typeName(page, 'archive', { settle: 1500 })
-    await typeName(page, 'garden', { settle: 1500 })
-    await clickIntoTile(page, 'journal')
-    await typeName(page, 'sketches', { settle: 1300 })
-    await typeName(page, 'recordings', { settle: 1300 })
-    await typeName(page, 'plans', { settle: 1300 })
-    await rightClickBack(page)
-    await clickIntoTile(page, 'garden')
-    await typeName(page, 'roses', { settle: 1300 })
-    await typeName(page, 'herbs', { settle: 1300 })
-    await rightClickBack(page)
-    await sleep(800)
+    // the Postcards example: places with postcards inside — real pictures, real depth
+    await opening(page, 'Postcards')
+    await clickIntoTile(page, 'postcards')
+    await sleep(1200)
+    const places = await labelsOf(page)
+    log('places', JSON.stringify(places))
     mark.begin('hive-navigate')
-    await clickIntoTile(page, 'journal')
-    await rightClickBack(page)
-    await clickIntoTile(page, 'garden')
-    await rightClickBack(page)
+    await sleep(900)
+    await clickIntoTile(page, places[0])
     await sleep(600)
+    await rightClickBack(page)
+    await sleep(500)
+    await clickIntoTile(page, places[Math.min(1, places.length - 1)])
+    await sleep(600)
+    await rightClickBack(page)
+    await sleep(900)
     mark.end()
   },
 
   // one hive, many worlds: wheel out until the world is small, then dive back
   async zoom(page, mark) {
-    await typeName(page, 'journal', { settle: 1400 })
-    await typeName(page, 'archive', { settle: 1400 })
-    await typeName(page, 'garden', { settle: 1400 })
-    await typeName(page, 'postcards', { settle: 1400 })
-    await typeName(page, 'recordings', { settle: 1600 })
-    // park the cursor in open sky so no tile overlay joins the shot
-    await page.mouse.move(VP.width / 2, VP.height * 0.82, { steps: 12 })
+    await opening(page, 'Honey Garden')
+    // the example arrives as one tile: film the garden inside it
+    await clickIntoTile(page, 'honey-garden')
+    await sleep(1500)
+    await parkCursor(page)
     await sleep(700)
     mark.begin('hive-zoom')
     for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, 220); await sleep(300) }
@@ -251,8 +297,8 @@ function cut(webm, seg) {
   const dur = (seg.to - seg.from + 800) / 1000
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error',
     '-ss', from.toFixed(2), '-t', dur.toFixed(2), '-i', webm,
-    '-vf', 'scale=960:328',
-    '-an', '-c:v', 'libx264', '-crf', '24', '-preset', 'slow',
+    '-vf', `scale=${OUT_W}:${OUT_H}:flags=lanczos`,
+    '-an', '-c:v', 'libx264', '-crf', '21', '-preset', 'slow',
     '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out])
   const kb = Math.round(fs.statSync(out).size / 1024)
   log('cut', seg.name + '.mp4', `${dur.toFixed(1)}s ${kb}KB`)
