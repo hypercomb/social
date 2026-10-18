@@ -217,7 +217,11 @@ Two defences, both owed:
   its single egress (`untransformed()` in `blossom-worker/worker.js`) on every
   `text/html` answer, and the shim's `_headers` carries it on `/`,
   `/index.html` and `/*.html`. This holds whatever the switch says and on
-  whichever zone the script is routed next. `hypercomb-web/public/_headers`
+  whichever zone the script is routed next. **Live since 2026-10-18** (worker
+  version `0676a2ca`, shipped with the asset set of the 10-15 deploy
+  untouched): every Worker-served host — the pluginthematrix.com apex and
+  subdomains, realones.online — answers its page with `no-transform` and no
+  beacon, and the non-page answers are byte-identical to before. `hypercomb-web/public/_headers`
   does NOT carry it: its HTML on a Worker-less Pages host (`jwize.com`) is
   served at every SPA route, and a `/*` Cache-Control there would combine with
   the immutable asset rules.
