@@ -174,6 +174,10 @@ export class TileEditorElement extends HTMLElement {
   #insetFrame = 0
   #insetTimer = 0
 
+  /** The tile this editor was on when the shell parked it — what `unpark`
+   *  comes back to. Empty once it has, or when nothing was parked. */
+  #parkedCell = ''
+
   readonly #session: WindowSession = {
     // Put away by the shell (another window, a lane, the installer): the
     // editor does not survive hidden — a hidden editor would keep holding the
@@ -183,18 +187,30 @@ export class TileEditorElement extends HTMLElement {
     // went (audit F4, 2026-10-18). The toast answers in place rather than
     // reopening anything (feedback: a window opens only from its own door).
     park: () => {
-      const kept = this.#dirty() ? (this.#service?.cell ?? '') : ''
+      const cell = this.#service?.cell ?? ''
+      const changed = this.#dirty()
+      this.#parkedCell = cell
       this.#cancel()
-      if (!kept) return
+      if (!changed || !cell) return
       EffectBus.emit('toast:show', {
         type: 'info',
-        message: t('editor.draft-kept', 'Draft kept — reopen {tile} to continue', { tile: kept }),
-        actionLabel: t('editor.draft-kept-open', 'open {tile}', { tile: kept }),
+        message: t('editor.draft-kept', 'Draft kept — reopen {tile} to continue', { tile: cell }),
+        actionLabel: t('editor.draft-kept-open', 'open {tile}', { tile: cell }),
         actionEffect: 'tile:action',
-        actionPayload: { action: 'edit', label: kept },
+        actionPayload: { action: 'edit', label: cell },
       })
     },
-    unpark: () => { /* reopening a tile offers the kept draft back */ },
+    // Brought back by the shell — the window that displaced this one was
+    // closed (window-rule.ts), or the installer returned: the same tile opens
+    // again through its own door, and the restore strip offers the kept draft
+    // back. "Show again, exactly as park() left" is the session's contract;
+    // the toast above is for the time in between, and for a park nothing
+    // brings back (Escape's sweep, a lane eviction).
+    unpark: () => {
+      const cell = this.#parkedCell
+      this.#parkedCell = ''
+      if (cell) EffectBus.emit('tile:action', { action: 'edit', label: cell })
+    },
     dismiss: () => this.dismissInner(),
     close: () => this.#cancel(),
   }

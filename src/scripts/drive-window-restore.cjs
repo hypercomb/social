@@ -261,7 +261,24 @@ async function main() {
       return /draft kept/i.test(message) ? { toast: message, door: toast?.actionEffect } : { fail: `no draft-kept toast: ${JSON.stringify(toast ?? null).slice(0, 120)}` }
     })],
     ['chat close', () => emit(page, 'chat:close', {})],
-    ['editor shut?', () => expectShowing(page, [])],
+    // The close restores the editor (F3) and its unpark reopens the same tile;
+    // the kept draft is offered back by the restore strip.
+    ['editor back?', () => expectShowing(page, ['tile-editor'])],
+    ['draft offered?', () => page.evaluate(() => {
+      const svc = window.ioc.get('@diamondcoreprocessor.com/TileEditorService')
+      return svc.cell === 'alpha' && svc.stashFor(svc.cell, svc.targetSegments) ? { cell: svc.cell, stash: true } : { fail: `cell ${svc.cell}, stash ${!!svc.stashFor(svc.cell, svc.targetSegments)}` }
+    })],
+    ['escape (cancel)', () => page.keyboard.press('Escape')],
+    ['wait 4s', () => page.waitForTimeout(4000)],
+  ])
+  await S('restore: chat → notes → Escape → Escape (notes back) → notes close → chat NOT back', [
+    ['chat open', () => emit(page, 'chat:open', {})],
+    ['notes open', () => emit(page, 'notes:panel', { visible: true })],
+    ['escape', () => page.keyboard.press('Escape')],
+    ['escape again', async () => { await page.waitForTimeout(300); await page.keyboard.press('Escape') }],
+    ['notes back?', () => expectShowing(page, ['notes-strip', 'tags-viewer'])],
+    ['notes close', () => emit(page, 'notes:panel', { visible: false })],
+    ['nothing back?', () => expectShowing(page, [])],
   ])
   await S('editor: edit alpha → chat open → chat close → Escape', [
     ['edit', () => emit(page, 'tile:action', { action: 'edit', label: 'alpha', q: 0, r: 0, index: 0 })],
@@ -360,11 +377,13 @@ async function main() {
       await page.evaluate(() => window.dispatchEvent(new Event('resize')))
     }],
   ])
-  await S('editor: edit alpha → notes open → notes close (editor parked = cancelled?)', [
+  await S('editor: edit alpha → notes open (editor parked) → notes close (editor back) → Escape', [
     ['edit', () => emit(page, 'tile:action', { action: 'edit', label: 'alpha', q: 0, r: 0, index: 0 })],
     ['notes open', () => emit(page, 'notes:panel', { visible: true })],
     ['notes close', () => emit(page, 'notes:panel', { visible: false })],
-    ['tags close', () => emit(page, 'tags:view-close', {})],
+    ['editor back?', () => expectShowing(page, ['tile-editor'])],
+    ['escape (cancel)', () => page.keyboard.press('Escape')],
+    ['wait 4s', () => page.waitForTimeout(4000)],
   ])
 
   // ── reload with chat remembered open ───────────────────────────────

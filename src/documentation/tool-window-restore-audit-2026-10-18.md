@@ -247,8 +247,12 @@ were asked for); a park by the rule keeps it (the window above will be closed
 in its turn); a displaced window that comes back on its own account is owed
 nothing. The companion palette is never what is restored. The tile editor's
 park, when the draft had changes, toasts "Draft kept — reopen {tile} to
-continue" with `tile:action edit` as the door (`editor.draft-kept`, en + ja);
-the editor itself is not reopened. Probe: the six "pair:" scenarios now end
-by closing the restored window and assert it came back mid-way, plus "Escape
-parks → nothing back" and the editor toast case: 42 ok / 0 FAIL. Six
+continue" with `tile:action edit` as the door (`editor.draft-kept`, en + ja),
+and its unpark reopens the same tile through that door with the kept draft
+offered by the restore strip — so a close that restores the editor (F3)
+brings the edit back, and the toast covers the time in between and the parks
+nothing brings back. Probe: the six "pair:" scenarios now end by closing the
+restored window and assert it came back mid-way, plus "Escape parks → nothing
+back", "Escape, put back, then close → nothing back" and the editor case
+(toast, then restored with its draft): 43 ok / 0 FAIL. Six
 `window-rule.spec.ts` cases pin the rule. F6 remains open.
