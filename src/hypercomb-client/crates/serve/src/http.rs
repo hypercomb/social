@@ -65,6 +65,29 @@ pub struct Request {
     pub method: String,
     pub target: String,
     pub keep_alive: bool,
+    /// The hostname the reader asked for (`Host`), lower case, no port — a
+    /// tunnel forwards the public name, and a door is chosen by it.
+    pub host: Option<String>,
+}
+
+/// `Host: Alice.Example.com:443` → `alice.example.com`. Anything that is not
+/// a plain hostname is no host at all.
+pub fn host_name(raw: &str) -> Option<String> {
+    let value = raw.trim().trim_end_matches('.').to_ascii_lowercase();
+    let name = match value.rsplit_once(':') {
+        Some((name, port)) if port.bytes().all(|b| b.is_ascii_digit()) => name.to_string(),
+        _ => value,
+    };
+    let plain = !name.is_empty()
+        && name.len() <= 253
+        && name.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+        });
+    plain.then_some(name)
 }
 
 /// Read one request, or `None` when the peer closed cleanly.
@@ -90,6 +113,7 @@ pub fn read_request(reader: &mut BufReader<&TcpStream>) -> io::Result<Option<Req
     // HTTP/1.0 defaults to close; 1.1 defaults to keep-alive. `Connection` may
     // override either way.
     let mut keep_alive = !version.starts_with("HTTP/1.0");
+    let mut host = None;
     let mut has_body = false;
 
     loop {
@@ -107,7 +131,9 @@ pub fn read_request(reader: &mut BufReader<&TcpStream>) -> io::Result<Option<Req
         }
         let Some((name, value)) = trimmed.split_once(':') else { continue };
         let value = value.trim();
-        if name.eq_ignore_ascii_case("connection") {
+        if name.eq_ignore_ascii_case("host") {
+            host = host_name(value);
+        } else if name.eq_ignore_ascii_case("connection") {
             keep_alive = !value.eq_ignore_ascii_case("close");
         } else if name.eq_ignore_ascii_case("content-length") {
             has_body = value.trim() != "0";
@@ -122,7 +148,7 @@ pub fn read_request(reader: &mut BufReader<&TcpStream>) -> io::Result<Option<Req
         keep_alive = false;
     }
 
-    Ok(Some(Request { method, target, keep_alive }))
+    Ok(Some(Request { method, target, keep_alive, host }))
 }
 
 fn status_text(status: u16) -> &'static str {

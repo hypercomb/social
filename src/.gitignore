@@ -31,6 +31,10 @@ hypercomb-client/app/frontend/
 # not. The README is kept so the bundler's resource glob always matches.
 hypercomb-client/app/host-shell/*
 !hypercomb-client/app/host-shell/README.md
+# The VISITOR shell a door domain opens (hypercomb-web's visitor build), staged
+# beside it by the same script. Same rule: build output, README kept.
+hypercomb-client/app/visitor-shell/*
+!hypercomb-client/app/visitor-shell/README.md
 
 # Baked client frontend — a fresh copy of hypercomb-web/dist with a static
 # import map written into index.html, produced by

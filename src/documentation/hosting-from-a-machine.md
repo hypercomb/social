@@ -69,6 +69,20 @@ superseded version is never served even for a moment (12,000 tiles: about
 0.13 s per re-derivation). An atom someone saved while it was current is
 still refused once it is not: keeping old signatures buys a crawler nothing.
 
+**A domain opens its door** (2026-10-18). The host reads the hostname a
+request names (`Host` — a tunnel forwards the public name). When that
+hostname's bag, `sign(<hostname>)`, holds an ENABLED `host:activation` for
+exactly that hostname, the answer is the VISITOR shell (hypercomb-web's
+visitor build, staged beside the host shell as the `visitor-shell` resource,
+or `hypercomb-serve --visitor <dir>`), its page carrying the door record
+(`#hc-door`: `{layer, pubkey, lineage, title}`) the way the Cloudflare
+worker carries it. Every other hostname — and a bare address — gets the host
+shell as before; with no visitor build staged, so does a door. So a tunnel in
+front of Serve This Hive, pointed at a domain whose door is on, opens that
+page. Proof: `crates/serve` tests `a_door_host_opens_its_page_and_other_hosts_keep_the_shell`
+and `a_running_host_opens_the_door_the_host_header_names` (a real socket,
+`Host: alice.localhost`).
+
 What a gate cannot do is recall. Anything served while it was current may be
 kept by whoever took it — and `/<sig>` replies say `immutable, max-age=1 year`,
 so a cache in front (a tunnel's edge) keeps serving it too.

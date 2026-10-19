@@ -22,7 +22,8 @@
   "bundle": {
     "active": true,
     "resources": [
-      "host-shell/**/*"
+      "host-shell/**/*",
+      "visitor-shell/**/*"
     ],
     "icon": [
       "icons/32x32.png",

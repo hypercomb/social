@@ -786,6 +786,96 @@ fn a_running_gate_answers_from_the_hive_as_it_is_now() {
     assert!(!now.admits_content(&first), "the edit took effect on the very next request");
 }
 
+/// A visitor shell, shaped like the visitor build: its own index.html.
+fn visitor() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = dir.path().to_path_buf();
+    std::fs::write(root.join("index.html"), b"<!doctype html><head><title>visitor</title></head><body></body>").unwrap();
+    std::fs::write(root.join("main-visitor.js"), b"// visitor").unwrap();
+    (dir, root)
+}
+
+/// The door record a page carries, read back out of it.
+fn carried_door(reply: &Reply) -> Option<serde_json::Value> {
+    let page = String::from_utf8(body_of(reply)).ok()?;
+    let start = page.find("<script id=\"hc-door\" type=\"application/json\">")?;
+    let json = &page[start..];
+    let json = &json[json.find('>')? + 1..json.find("</script>")?];
+    serde_json::from_str(&json.replace("<\\/", "</")).ok()
+}
+
+/// YOUR DOMAIN OPENS YOUR PAGE. A hostname whose bag holds an enabled door is
+/// answered with the VISITOR shell, its page carrying the door the way the
+/// Cloudflare worker carries it; every other hostname — and a request with
+/// none — keeps the host shell.
+#[test]
+fn a_door_host_opens_its_page_and_other_hosts_keep_the_shell() {
+    let (_dir, root) = shell();
+    let (_visitor_dir, visitor_root) = visitor();
+    let mut hive = Stub::default().rooted(&[]);
+    let page = hive.hold(b"{\"name\":\"about\"}");
+    let door = |enabled: bool| format!(
+        "{{\"name\":\"host:activation\",\"enabled\":{enabled},\"pubkey\":\"{SIG_A}\",\"lineage\":\"site/about\",\"sourceRoute\":\"https://alice.example.com/\",\"localRoute\":\"alice.example.com\",\"head\":\"{page}\",\"source\":\"alice.example.com\"}}"
+    );
+    let on = hive.hold(door(true).as_bytes());
+    let bag = hypercomb_protocol::sign_str("alice.example.com").to_hex();
+    hive.entries.insert((bag.clone(), "00000000".to_string()), marker(&on));
+
+    for target in ["/", "/index.html", "/a/deep/location"] {
+        let reply = resolve_for(&root, Some(&visitor_root), &hive, Some("alice.example.com"), "GET", target);
+        assert_eq!(reply.status, 200, "{target}");
+        let record = carried_door(&reply).unwrap_or_else(|| panic!("{target} carries the door"));
+        assert_eq!(record["layer"], page.as_str(), "{target}");
+        assert_eq!(record["lineage"], "site/about");
+        assert_eq!(record["title"], "about");
+        assert!(String::from_utf8(body_of(&reply)).unwrap().contains("<title>visitor</title>"));
+    }
+    // The visitor shell's own files, and the page it opens.
+    let script = resolve_for(&root, Some(&visitor_root), &hive, Some("alice.example.com"), "GET", "/main-visitor.js");
+    assert_eq!(body_of(&script), b"// visitor");
+    assert_eq!(resolve_for(&root, Some(&visitor_root), &hive, Some("alice.example.com"), "GET", &format!("/{page}")).status, 200);
+
+    for host in [None, Some("bob.example.com"), Some("localhost")] {
+        let reply = resolve_for(&root, Some(&visitor_root), &hive, host, "GET", "/");
+        assert!(carried_door(&reply).is_none(), "{host:?}");
+        assert!(String::from_utf8(body_of(&reply)).unwrap().contains("./main.js"), "{host:?} gets the host shell");
+    }
+
+    // Switched off: the hostname is no door any more.
+    let off = hive.hold(door(false).as_bytes());
+    hive.entries.insert((bag, "00000001".to_string()), marker(&off));
+    let reply = resolve_for(&root, Some(&visitor_root), &hive, Some("alice.example.com"), "GET", "/");
+    assert!(carried_door(&reply).is_none());
+}
+
+/// No visitor shell staged: a door host is answered like any other.
+#[test]
+fn without_a_visitor_shell_a_door_host_keeps_the_host_shell() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default().rooted(&[]);
+    let page = hive.hold(b"{\"name\":\"about\"}");
+    let on = hive.hold(format!(
+        "{{\"name\":\"host:activation\",\"enabled\":true,\"pubkey\":\"{SIG_A}\",\"lineage\":\"about\",\"sourceRoute\":\"https://alice.example.com/\",\"localRoute\":\"alice.example.com\",\"head\":\"{page}\",\"source\":\"alice.example.com\"}}"
+    ).as_bytes());
+    let bag = hypercomb_protocol::sign_str("alice.example.com").to_hex();
+    hive.entries.insert((bag, "00000000".to_string()), marker(&on));
+
+    let reply = resolve_for(&root, None, &hive, Some("alice.example.com"), "GET", "/");
+    assert!(carried_door(&reply).is_none());
+    assert!(String::from_utf8(body_of(&reply)).unwrap().contains("./main.js"));
+}
+
+#[test]
+fn a_host_header_is_a_plain_lower_case_name_or_nothing() {
+    assert_eq!(host_name("Alice.Example.com:443").as_deref(), Some("alice.example.com"));
+    assert_eq!(host_name("alice.localhost:4270").as_deref(), Some("alice.localhost"));
+    assert_eq!(host_name("example.com.").as_deref(), Some("example.com"));
+    assert_eq!(host_name("192.168.1.5:4271").as_deref(), Some("192.168.1.5"));
+    for bad in ["", "a b", "evil.com/x", "-x.com", "[::1]:80"] {
+        assert_eq!(host_name(bad), None, "{bad:?}");
+    }
+}
+
 #[test]
 fn it_answers_on_a_socket() {
     let (_dir, root) = shell();
@@ -825,6 +915,29 @@ fn it_answers_on_a_socket() {
             || TcpStream::connect(addr).is_err(),
         "the listener should be gone after stop()",
     );
+}
+
+/// Over a real socket: the hostname a request names (`Host`, as a tunnel
+/// forwards it) chooses the door; the address itself opens the host shell.
+#[test]
+fn a_running_host_opens_the_door_the_host_header_names() {
+    let (_dir, root) = shell();
+    let (_visitor_dir, visitor_root) = visitor();
+    let mut hive = Stub::default().rooted(&[]);
+    let page = hive.hold(b"{\"name\":\"about\"}");
+    let on = hive.hold(format!(
+        "{{\"name\":\"host:activation\",\"enabled\":true,\"pubkey\":\"{SIG_A}\",\"lineage\":\"about\",\"sourceRoute\":\"https://alice.localhost/\",\"localRoute\":\"alice.localhost\",\"head\":\"{page}\",\"source\":\"alice.localhost\"}}"
+    ).as_bytes());
+    let bag = hypercomb_protocol::sign_str("alice.localhost").to_hex();
+    hive.entries.insert((bag, "00000000".to_string()), marker(&on));
+
+    let serving = serve_with_doors(root, Some(visitor_root), Arc::new(hive), LOOPBACK, 0).expect("bind");
+    let door = fetch(serving.addr(), "GET / HTTP/1.1\r\nHost: alice.localhost:4270\r\nConnection: close\r\n\r\n");
+    assert!(door.contains("<title>visitor</title>"), "{door}");
+    assert!(door.contains(&format!("\"layer\":\"{page}\"")), "{door}");
+    let plain = fetch(serving.addr(), "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(plain.contains("./main.js") && !plain.contains("hc-door"), "{plain}");
+    serving.stop();
 }
 
 #[test]

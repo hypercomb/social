@@ -1132,6 +1132,23 @@ fn host_shell(app: &tauri::AppHandle) -> Option<PathBuf> {
     None
 }
 
+/// The page a DOOR domain opens: hypercomb-web's visitor build, staged as
+/// the `visitor-shell` resource. Optional — without it a door domain gets the
+/// host shell, as before.
+fn visitor_shell(app: &tauri::AppHandle) -> Option<PathBuf> {
+    if cfg!(debug_assertions) {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../hypercomb-web/dist/hypercomb-web/visitor");
+        if repo.join("index.html").is_file() {
+            return Some(repo);
+        }
+    }
+    app.path()
+        .resolve("visitor-shell", tauri::path::BaseDirectory::Resource)
+        .ok()
+        .filter(|path| path.join("index.html").is_file())
+}
+
 /// Start serving, returning the address to hand out.
 fn start_hosting(app: &tauri::AppHandle) -> std::result::Result<String, String> {
     let Some(shell) = host_shell(app) else {
@@ -1152,7 +1169,7 @@ fn start_hosting(app: &tauri::AppHandle) -> std::result::Result<String, String> 
         // Every interface, not loopback: a host nobody else can reach is not a
         // host. What it is reachable BY is the network's business — a LAN, a
         // tunnel, a forwarded port.
-        match hypercomb_serve::serve(&shell, hive.clone(), hypercomb_serve::ANY, port) {
+        match hypercomb_serve::serve_with_doors(&shell, visitor_shell(app), hive.clone(), hypercomb_serve::ANY, port) {
             Ok(serving) => {
                 let url = serving.lan_url();
                 match app.state::<Hosting>().0.lock() {

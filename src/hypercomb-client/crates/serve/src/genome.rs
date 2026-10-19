@@ -301,6 +301,33 @@ impl Walk<'_> {
     }
 }
 
+/// THE DOOR A HOSTNAME OPENS, as the page carries it (`#hc-door`, the
+/// record the Cloudflare worker injects — hypercomb-web `main.visitor.ts`
+/// `readDoor`): `{layer, pubkey, lineage, title}`, where `layer` is the head
+/// the visitor opens. Only an ENABLED `host:activation` for exactly this
+/// hostname, at the head of its bag `sign(<hostname>)`, is a door.
+pub fn door_for(hive: &dyn HiveSource, host: &str) -> Option<Value> {
+    let (_, bytes) = head_of(hive, &sign_str(host).to_hex())?;
+    let Marker::Pointer { layer, .. } = Marker::parse(&bytes) else { return None };
+    let door: Value = serde_json::from_slice(&hive.content(&layer.to_hex())?).ok()?;
+    let field = |key: &str| door.get(key).and_then(Value::as_str).unwrap_or("").to_string();
+    if field("name") != "host:activation"
+        || field("localRoute") != host
+        || door.get("enabled").and_then(Value::as_bool) != Some(true)
+    {
+        return None;
+    }
+    let head = signature(&field("head"))?;
+    let lineage = field("lineage");
+    let title = lineage.rsplit('/').next().unwrap_or("").to_string();
+    Some(serde_json::json!({
+        "layer": head,
+        "pubkey": field("pubkey"),
+        "lineage": lineage,
+        "title": title,
+    }))
+}
+
 /// Collect what the current hive admits, memoizing what each signature names.
 fn collect_into(hive: &dyn HiveSource, memo: &mut HashMap<String, Facts>) -> Genome {
     let mut walk = Walk {

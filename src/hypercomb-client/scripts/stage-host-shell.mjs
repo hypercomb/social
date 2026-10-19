@@ -79,3 +79,41 @@ It is the shell a visitor's browser boots when this app serves its hive
 )
 
 console.log(`[stage-host-shell] staged ${count(out)} files -> ${out}`)
+
+// ── THE VISITOR SHELL ──────────────────────────────────────────────────────
+// A hostname switched on as a DOOR (`serve at <domain>`, a host:activation in
+// its bag) is answered with hypercomb-web's visitor build, its page carrying
+// the door — the same artifact and the same record the Cloudflare worker
+// serves (crates/serve resolve_for). Optional: with no visitor build the app
+// still serves, and a door domain gets the host shell instead.
+//
+//   npm --prefix hypercomb-web run build:visitor     (from src/)
+const visitorDist = join(here, '../../hypercomb-web/dist/hypercomb-web/visitor')
+const visitorOut = join(here, '../app/visitor-shell')
+const VISITOR_README = `# visitor-shell
+
+Staged by \`scripts/stage-host-shell.mjs\` from hypercomb-web's visitor build
+(\`npm --prefix hypercomb-web run build:visitor\`). Every file here except this
+one is a build artifact and is gitignored.
+
+It is the page a visitor's browser opens at a domain this app serves as a
+DOOR — a hostname whose bag holds an enabled \`host:activation\`. The server
+injects the door record (\`#hc-door\`) the way the Cloudflare worker does.
+`
+if (existsSync(visitorOut)) {
+  for (const name of readdirSync(visitorOut)) {
+    if (name === 'README.md') continue
+    rmSync(join(visitorOut, name), { recursive: true, force: true })
+  }
+} else {
+  mkdirSync(visitorOut, { recursive: true })
+}
+if (existsSync(join(visitorDist, 'index.html'))) {
+  for (const name of readdirSync(visitorDist)) {
+    cpSync(join(visitorDist, name), join(visitorOut, name), { recursive: true })
+  }
+  console.log(`[stage-host-shell] staged ${count(visitorOut)} visitor files -> ${visitorOut}`)
+} else {
+  console.warn(`[stage-host-shell] no visitor build at ${visitorDist} — door domains will get the host shell`)
+}
+writeFileSync(join(visitorOut, 'README.md'), VISITOR_README)

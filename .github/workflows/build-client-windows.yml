@@ -154,6 +154,13 @@ jobs:
         working-directory: src
         run: npm run build:shim
 
+      # The page a DOOR domain opens (`serve at <domain>`): hypercomb-web's
+      # visitor build, staged as visitor-shell beside the host shell. Without
+      # it the app still serves, and a door domain gets the host shell.
+      - name: Build the visitor shell
+        working-directory: src
+        run: npm --prefix hypercomb-web run build:visitor
+
       - name: Stage the host shell into the client
         working-directory: src
         run: node hypercomb-client/scripts/stage-host-shell.mjs

@@ -95,7 +95,8 @@ fn main() -> ExitCode {
         }
     };
 
-    let serving = match hypercomb_serve::serve(&shell, Arc::new(host), bind, port) {
+    let visitor = flag("--visitor").map(PathBuf::from);
+    let serving = match hypercomb_serve::serve_with_doors(&shell, visitor, Arc::new(host), bind, port) {
         Ok(serving) => serving,
         Err(e) => {
             eprintln!("error: binding {bind}:{port}: {e}");
@@ -119,12 +120,15 @@ fn main() -> ExitCode {
 const USAGE: &str = "\
 hypercomb-serve — serve a hive over HTTP
 
-    hypercomb-serve --hive <dir> --shell <dir> [--port <n>] [--bind <ip>] [--local]
+    hypercomb-serve --hive <dir> --shell <dir> [--visitor <dir>] [--port <n>] [--bind <ip>] [--local]
 
     --hive   the directory holding the hive (a redb store), opened read-only in
              practice: this binary has no write path
     --shell  a built hypercomb-shim dist/ — the shell, /pin and the bundled
              packages a first-time visitor boots from
+    --visitor  hypercomb-web's visitor build — what a DOOR domain (a hostname
+             whose bag holds an enabled host:activation) opens; without it
+             every hostname gets the shell
     --port   default 4270
     --bind   default 0.0.0.0 (every interface); --local is 127.0.0.1
 ";

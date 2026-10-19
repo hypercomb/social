@@ -91,7 +91,7 @@ mod genome;
 mod http;
 
 pub use genome::{collect, Genome};
-pub use http::{Body, Reply};
+pub use http::{host_name, Body, Reply};
 
 use std::io::BufReader;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
@@ -448,6 +448,28 @@ fn is_hive_head(hive: &dyn HiveSource, sig: &str, entry: &str) -> bool {
             .is_some_and(|names| head_marker(&names).is_some_and(|head| head == entry))
 }
 
+/// The page a door host serves: the visitor shell's `index.html`, carrying
+/// the door record the way the Cloudflare worker carries it — a JSON script
+/// before `</head>` — so the visitor opens the page with no round trip and
+/// with no listing it could not get here.
+fn door_page(index: &Path, door: &serde_json::Value) -> Option<Reply> {
+    let html = String::from_utf8(std::fs::read(index).ok()?).ok()?;
+    // `</` inside JSON would close the script early; a JSON string may spell
+    // the slash escaped, and it reads back the same.
+    let record = serde_json::to_string(door).ok()?.replace("</", "<\\/");
+    let carried = format!("<script id=\"hc-door\" type=\"application/json\">{record}</script>");
+    let page = match html.find("</head>") {
+        Some(at) => format!("{}{carried}{}", &html[..at], &html[at..]),
+        None => format!("{carried}{html}"),
+    };
+    Some(
+        cors(Reply::new(200))
+            .with("content-type", "text/html; charset=utf-8")
+            .with("cache-control", "no-cache")
+            .body(Body::Bytes(page.into_bytes())),
+    )
+}
+
 /// The answer for a directory that is not listed here — byte-identical to the
 /// answer for one that is not held, so a 404 reveals nothing.
 fn pool_not_held() -> Reply {
@@ -464,17 +486,40 @@ fn pool_not_held() -> Reply {
 /// binding a port. The current genome is collected afresh when a request
 /// needs it; a running host reuses one collection briefly ([`serve`]).
 pub fn resolve(shell: &Path, hive: &dyn HiveSource, method: &str, target: &str) -> Reply {
+    resolve_for(shell, None, hive, None, method, target)
+}
+
+/// Answer one request that named a host. A hostname whose bag holds an
+/// enabled door (`genome::door_for`) is answered from `door_shell` — the
+/// visitor shell — with the door carried in its page; every other host gets
+/// `shell`, as [`resolve`] does.
+pub fn resolve_for(
+    shell: &Path,
+    door_shell: Option<&Path>,
+    hive: &dyn HiveSource,
+    host: Option<&str>,
+    method: &str,
+    target: &str,
+) -> Reply {
     let held = OnceLock::new();
-    resolve_with(shell, hive, &|| held.get_or_init(|| Arc::new(collect(hive))).clone(), method, target)
+    let genome = || held.get_or_init(|| Arc::new(collect(hive))).clone();
+    resolve_with(shell, door_shell, hive, host, &genome, method, target)
 }
 
 fn resolve_with(
-    shell: &Path,
+    host_shell: &Path,
+    door_shell: Option<&Path>,
     hive: &dyn HiveSource,
+    host: Option<&str>,
     genome: &dyn Fn() -> Arc<Genome>,
     method: &str,
     target: &str,
 ) -> Reply {
+    // A DOOR HOST is answered from the visitor shell, its page carrying the
+    // door. Without a visitor shell staged, there is no door to open and the
+    // host shell answers as always.
+    let door = door_shell.zip(host).and_then(|(visitor, name)| genome::door_for(hive, name).map(|door| (visitor, door)));
+    let shell = door.as_ref().map_or(host_shell, |(visitor, _)| *visitor);
     // CORS is not decoration. Without it every cross-origin replication dies as
     // an opaque "Failed to fetch" — no status, no diagnosis — and the host
     // looks exactly like one that publishes nothing. `*` is correct rather than
@@ -569,6 +614,13 @@ fn resolve_with(
 
     // (3) A real file wins before any SPA rewrite. This also supplies staged
     // package bytes and pool members that the live hive does not hold yet.
+    if let Some((visitor, record)) = &door {
+        if segments.is_empty() || (segments.len() == 1 && name == "index.html") {
+            if let Some(page) = door_page(&visitor.join("index.html"), record) {
+                return page;
+            }
+        }
+    }
     if let Some(file) = shell_file(shell, &segments) {
         let mut reply = cors(Reply::new(200))
             .with("content-type", type_for(&name))
@@ -615,6 +667,11 @@ fn resolve_with(
         return cors(Reply::new(404));
     }
 
+    if let Some((visitor, record)) = &door {
+        if let Some(page) = door_page(&visitor.join("index.html"), record) {
+            return page;
+        }
+    }
     let index = shell.join("index.html");
     if index.is_file() {
         return cors(Reply::new(200))
@@ -695,7 +752,21 @@ pub fn serve(
     bind: IpAddr,
     port: u16,
 ) -> std::io::Result<Serving> {
+    serve_with_doors(shell, None, hive, bind, port)
+}
+
+/// [`serve`], with the visitor shell a DOOR HOST is answered from: a
+/// hostname whose bag holds an enabled `host:activation` opens its page there
+/// (see [`resolve_for`]).
+pub fn serve_with_doors(
+    shell: impl Into<PathBuf>,
+    door_shell: Option<PathBuf>,
+    hive: Arc<dyn HiveSource>,
+    bind: IpAddr,
+    port: u16,
+) -> std::io::Result<Serving> {
     let shell = shell.into();
+    let door_shell = door_shell.filter(|dir| dir.join("index.html").is_file());
     let listener = TcpListener::bind(SocketAddr::new(bind, port))?;
     let addr = listener.local_addr()?;
     listener.set_nonblocking(true)?;
@@ -736,13 +807,14 @@ pub fn serve(
                             }
                             live.fetch_add(1, Ordering::SeqCst);
                             let shell = shell.clone();
+                            let door_shell = door_shell.clone();
                             let hive = hive.clone();
                             let gate = gate.clone();
                             let done = live.clone();
                             let spawned = std::thread::Builder::new()
                                 .name("hypercomb-host-conn".into())
                                 .spawn(move || {
-                                    handle(stream, &shell, hive.as_ref(), &gate);
+                                    handle(stream, &shell, door_shell.as_deref(), hive.as_ref(), &gate);
                                     done.fetch_sub(1, Ordering::SeqCst);
                                 });
                             if spawned.is_err() {
@@ -770,7 +842,7 @@ fn shed(mut stream: TcpStream) {
     let _ = http::write_reply(&mut stream, &reply, true, false);
 }
 
-fn handle(stream: TcpStream, shell: &Path, hive: &dyn HiveSource, gate: &genome::Gate) {
+fn handle(stream: TcpStream, shell: &Path, door_shell: Option<&Path>, hive: &dyn HiveSource, gate: &genome::Gate) {
     // A connection that opens and says nothing must not hold a thread forever.
     let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
@@ -795,7 +867,15 @@ fn handle(stream: TcpStream, shell: &Path, hive: &dyn HiveSource, gate: &genome:
                 return;
             }
         };
-        let reply = resolve_with(shell, hive, &|| gate.current(hive), &request.method, &request.target);
+        let reply = resolve_with(
+            shell,
+            door_shell,
+            hive,
+            request.host.as_deref(),
+            &|| gate.current(hive),
+            &request.method,
+            &request.target,
+        );
         let keep_alive = request.keep_alive;
         let sent = http::write_reply(&mut writer, &reply, request.method != "HEAD", keep_alive);
         if sent.is_err() || !keep_alive {
