@@ -25,6 +25,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use hypercomb_host::{Head, Host, HostError};
 use tauri::{Manager, State};
 
+mod tunnel;
+
 /// Commands return the host's error type directly so the renderer sees a
 /// category it can act on, never an internal path or a raw storage message.
 type Result<T> = std::result::Result<T, HostError>;
@@ -1196,6 +1198,142 @@ fn start_hosting(app: &tauri::AppHandle) -> std::result::Result<String, String> 
     ))
 }
 
+/// The port this machine's host answers on — starting it when it is not
+/// running. Putting the hive online needs a host to put online.
+fn hosting_port(app: &tauri::AppHandle) -> std::result::Result<u16, String> {
+    let running = |app: &tauri::AppHandle| {
+        app.state::<Hosting>().0.lock().ok().and_then(|held| held.as_ref().map(|serving| serving.addr().port()))
+    };
+    if let Some(port) = running(app) {
+        return Ok(port);
+    }
+    start_hosting(app)?;
+    running(app).ok_or_else(|| "The host did not start.".to_string())
+}
+
+/// Where the tunnel program and a named tunnel's files live: beside the
+/// app's data, device-local (a tunnel's credentials are a secret).
+fn hosting_dir(app: &tauri::AppHandle) -> std::result::Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("hosting");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// ASK FIRST, in a dialog the page cannot answer for itself. `Ok(false)` is
+/// the person saying no.
+fn ask(app: &tauri::AppHandle, title: &str, message: &str, yes: &str) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    app.dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(yes.to_string(), "Cancel".to_string()))
+        .blocking_show()
+}
+
+const ONLINE_READABLE: &str = "Anyone on the internet will be able to read your hive as it is \
+     now: every tile in it, its notes, pictures and decorations, and every site you have \
+     switched on here. That includes tiles you never published.\n\n\
+     Earlier versions, restore points, removed tiles and your private pools stay on this \
+     computer.";
+
+/// What the page is told about hosting: this machine's address, and the
+/// tunnel, when one runs.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TunnelStatus {
+    serving: Option<String>,
+    tunnel: Option<tunnel::TunnelState>,
+}
+
+#[tauri::command]
+fn tunnel_status(app: tauri::AppHandle) -> TunnelStatus {
+    let serving = app
+        .state::<Hosting>()
+        .0
+        .lock()
+        .ok()
+        .and_then(|held| held.as_ref().map(|serving| serving.lan_url()));
+    TunnelStatus { serving, tunnel: app.state::<tunnel::Tunnels>().state() }
+}
+
+/// TRY IT NOW — a quick tunnel: an address on trycloudflare.com in seconds,
+/// no account. Asks first; downloads cloudflared the first time.
+#[tauri::command]
+async fn tunnel_try(app: tauri::AppHandle) -> std::result::Result<tunnel::TunnelState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let message = format!(
+            "This puts your hive on the internet at a temporary address, through \
+             Cloudflare's free tunnel. The first time, the app downloads Cloudflare's tunnel \
+             program ({}).\n\n{ONLINE_READABLE}\n\nThe address changes every time the tunnel \
+             restarts. Use your own domain to give the hive a lasting home.",
+            tunnel::VERSION
+        );
+        if !ask(&app, "Put This Hive Online?", &message, "Put it online") {
+            return Err("cancelled".to_string());
+        }
+        let port = hosting_port(&app)?;
+        let program = tunnel::ensure_cloudflared(&hosting_dir(&app)?)?;
+        app.state::<tunnel::Tunnels>().quick(&program, port)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// YOUR OWN DOMAIN — sign in to Cloudflare in the browser, create the
+/// tunnel, point the domain at it, run it. Asks first, and asks again before
+/// replacing a record the domain already has.
+#[tauri::command]
+async fn tunnel_domain(app: tauri::AppHandle, domain: String) -> std::result::Result<tunnel::TunnelState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(domain) = tunnel::domain(&domain) else {
+            return Err(format!("\"{domain}\" is not a domain."));
+        };
+        let message = format!(
+            "This puts your hive on the internet at {domain}, through a Cloudflare tunnel \
+             on your own free Cloudflare account. Your browser opens to sign in; pick the \
+             account {domain} is in. The app then creates the tunnel and points {domain} at \
+             it.\n\n{ONLINE_READABLE}"
+        );
+        if !ask(&app, &format!("Put This Hive Online at {domain}?"), &message, "Put it online") {
+            return Err("cancelled".to_string());
+        }
+        let port = hosting_port(&app)?;
+        let dir = hosting_dir(&app)?;
+        let program = tunnel::ensure_cloudflared(&dir)?;
+        let cert = tunnel::login(&program, &dir)?;
+        let named = match tunnel::setup(&program, &dir, &cert, &domain, port, false) {
+            Err(taken) if taken == tunnel::DNS_TAKEN => {
+                let replace = ask(
+                    &app,
+                    &format!("Replace {domain}'s current address?"),
+                    &format!(
+                        "{domain} already points somewhere in its DNS. Replacing that record \
+                         makes {domain} open this hive instead, and whatever it pointed at \
+                         before stops answering there."
+                    ),
+                    "Replace it",
+                );
+                if !replace {
+                    return Err(format!("{domain} was left pointing where it was."));
+                }
+                tunnel::setup(&program, &dir, &cert, &domain, port, true)?
+            }
+            other => other?,
+        };
+        app.state::<tunnel::Tunnels>().named(&program, &named)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Take the hive off the internet. This machine's host keeps serving its
+/// own network until Stop Serving.
+#[tauri::command]
+fn tunnel_stop(app: tauri::AppHandle) -> bool {
+    app.state::<tunnel::Tunnels>().stop()
+}
+
 /// Stop serving. Returns whether anything was running.
 fn stop_hosting(app: &tauri::AppHandle) -> bool {
     let taken = app
@@ -1250,6 +1388,7 @@ fn main() {
             // the app and dies with it — a host that outlived its window would
             // keep publishing a hive nobody is looking at.
             app.manage(Hosting::default());
+            app.manage(tunnel::Tunnels::default());
             #[cfg(feature = "minimal-deep-link")]
             app.manage(PendingOfferingReview::default());
 
@@ -1861,6 +2000,10 @@ fn main() {
             raw_dir_remove,
             raw_remove,
             raw_destroy,
+            tunnel_status,
+            tunnel_try,
+            tunnel_domain,
+            tunnel_stop,
             collect,
             hive_root,
             renderer_log,

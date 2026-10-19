@@ -46,6 +46,7 @@ import {
   type WindowSession,
 } from '@hypercomb/core'
 import { hostZone } from './community-hosts.js'
+import { hostOnlineBlock } from './host-online.js'
 import { trustCode, trustedCodeDomains } from './code-trust.js'
 import { attestPackage, readWitnessed } from './package-attestation.js'
 import { readInstallFollow, type InstallFollow } from './update-scout.service.js'
@@ -891,6 +892,10 @@ export class HostDirectoryElement extends HTMLElement {
     })
     body.append(add)
     body.append(this.#ownHostForm())
+    // HOST YOUR HIVE FROM THIS COMPUTER — the desktop's walkthrough
+    // (host-online.ts); not drawn on the web, where nothing can serve.
+    const online = hostOnlineBlock({ t, make, button, repaint: () => this.#renderBody() })
+    if (online) body.append(online)
   }
 
   /** YOUR OWN HOST — the domain you serve from (`hc:nostrmesh:self-domain`):
@@ -1703,6 +1708,12 @@ ${S} .hd-primary{padding:.38em .8em;font:inherit;font-size:.95em;font-weight:600
 ${S} .hd-primary:disabled{cursor:default;opacity:.55;}
 ${S} .hd-error{margin:.1em 0 .4em;font-size:.72em;line-height:1.35;color:var(--hc-status-alert);}
 ${S} .hd-note{margin:.5em 0 0;font-size:.72em;line-height:1.45;color:var(--hd-ink-quiet);}
+${S} .hd-online{margin-top:1em;padding-top:.75em;border-top:1px solid rgba(var(--acc),0.12);}
+${S} .hd-online-title{margin:0 0 .3em;font-size:inherit;font-weight:600;}
+${S} .hd-online-steps{margin:.4em 0;padding-left:1.2em;display:flex;flex-direction:column;gap:.5em;}
+${S} .hd-online-actions{display:flex;gap:.5em;flex-wrap:wrap;}
+${S} .hd-online-link{color:var(--hc-window-accent);word-break:break-all;}
+${S} .hd-online-said.ok{color:var(--hc-window-accent);}
 ${S} .hd-section > .hd-behind{margin:-.35em 0 .5em 1.55em;}
 ${S} .hd-list{list-style:none;margin:0;padding:0;}
 ${S} .hd-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto auto;column-gap:.4em;align-items:center;padding:.3em .2em;border-bottom:1px solid rgba(var(--acc),0.08);}

@@ -21,6 +21,10 @@ tauri-plugin-deep-link = { version = "2", optional = true }
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
+# Putting the hive online (tunnel.rs): cloudflared is downloaded on first use
+# and checked against a pinned digest before it is ever run.
+sha2.workspace = true
+ureq = "2"
 
 [features]
 # Enabled by `tauri dev`/`tauri build`; keeps the custom protocol available.

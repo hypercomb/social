@@ -1,7 +1,35 @@
 # Becoming a host
 
-Status: **design, for review** (2026-10-07). Nothing here is built yet beyond
-what "Today" describes.
+Status: **design, for review** (2026-10-07). **"This computer" BUILT
+2026-10-18** — see *Host your hive from this computer* below; the rest is
+still design.
+
+> "We have to make everything automated because we want to be able to walk
+> people through how it's done so they can do it themselves easily." —
+> jwize, 2026-10-18
+
+## Host your hive from this computer (built)
+
+In the desktop app, the foot of the hosts window walks it, with no terminal
+and no file to edit (`essentials/sharing/host-online.ts`,
+`hypercomb-client/app/src/tunnel.rs`):
+
+1. **Try it now** — the app starts serving, downloads Cloudflare's tunnel
+   program the first time (`cloudflared`, a pinned release checked against
+   its published sha256 before it ever runs), and the hive answers at a
+   temporary `https://<words>.trycloudflare.com` address in seconds. No
+   account. The address changes whenever the tunnel restarts.
+2. **Use my domain** — type the domain; the browser opens to sign in to the
+   person's free Cloudflare account; the app creates a named tunnel, points
+   the domain at it (asking before it replaces a DNS record the domain
+   already has), and runs it. The tunnel's credentials stay on this device.
+3. **Check it** — the page the person stands on is served there (`serve at
+   <host>`), and the address is fetched the way a visitor would, to say in a
+   sentence whether it opens the page.
+
+Every act that puts the hive online first asks in a NATIVE dialog that says
+what becomes readable — the page cannot answer for the person, because
+adopted content runs in the page. **Take it offline** stops the tunnel.
 
 > "We need a clear path for people to become hosts. Currently it is hard to
 > understand or express what is needed. If people are to adopt it has to be
