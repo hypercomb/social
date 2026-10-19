@@ -114,10 +114,10 @@
     function parity(k) { return ((k & 1) + ((k >> 1) & 1) + ((k >> 2) & 1)) & 1; }
     // THE DIAGONAL VIEW: a basis that looks straight down the cube's diagonal (1,1,1),
     // corner 7 toward the viewer — from there the cube reads as a hexagon. Up is
-    // (-1,-1,2), so the first triangle (corners 3, 5, 6) opens with two dots above
-    // and one below.
+    // (1,1,-2), so the first triangle (corners 3, 5, 6) stands point up: corner 3
+    // on top, 5 and 6 below.
     var s3 = Math.sqrt(3), s6 = Math.sqrt(6), s2 = Math.sqrt(2);
-    var BZ = [-1 / s3, -1 / s3, -1 / s3], BY = [-1 / s6, -1 / s6, 2 / s6], BX = [1 / s2, -1 / s2, 0];
+    var BZ = [-1 / s3, -1 / s3, -1 / s3], BY = [1 / s6, 1 / s6, -2 / s6], BX = [-1 / s2, 1 / s2, 0];
     (function build() {
       var GA = Math.PI * (3 - Math.sqrt(5)), EPS = 0.36, M = N - NG, i, j, k, inv = 1 / Math.sqrt(3);
       for (k = 0; k < NG; k++) {
@@ -198,8 +198,9 @@
 
     // cube space → screen: down the diagonal (BX, BY, BZ), then the turn (yaw about
     // screen-vertical, pitch about screen-horizontal), then perspective
-    var PJX = 0, PJY = 0, PJZ = 0, PJS = 1, cyw = 1, syw = 0, cp = 1, sp = 0;
+    var PJX = 0, PJY = 0, PJZ = 0, PJS = 1, cyw = 1, syw = 0, cp = 1, sp = 0, OFX = 0, OFY = 0, OFZ = 0, SCL = 1;
     function project(x, y, z) {
+      x = (x + OFX) * SCL; y = (y + OFY) * SCL; z = (z + OFZ) * SCL;
       var dx = x * BX[0] + y * BX[1] + z * BX[2], dy = x * BY[0] + y * BY[1] + z * BY[2], dz = x * BZ[0] + y * BZ[1] + z * BZ[2];
       var x1 = dx * cyw + dz * syw, z1 = -dx * syw + dz * cyw;
       var y2 = dy * cp - z1 * sp, z2 = dy * sp + z1 * cp;
@@ -225,6 +226,11 @@
       var yaw = SPIN * (tau < RAMP ? tau * tau / (2 * RAMP) : tau - RAMP / 2) + tilt * 0.6;
       var pitch = PITCH * eTurn + tilt; cyw = Math.cos(yaw); syw = Math.sin(yaw); cp = Math.cos(pitch); sp = Math.sin(pitch);
       var vn = 0;
+      // the honey dot is the first corner (3): the frame starts on it, the line
+      // grows down from it, and the frame settles on the triangle's centre as the
+      // fourth dot opens there — "then a center again"
+      var off = 1 - eM; OFX = -A * off; OFY = -A * off; OFZ = A * off;
+      SCL = lerp(0.7, 1, eM);                             // the flat opening hangs below the first dot: drawn smaller so it clears the title
 
       for (j = 0; j < N; j++) {                            // in arrival order: a parent is placed before its children
         i = RANKED[j];
@@ -232,11 +238,18 @@
           var bx = i & 1 ? A : -A, by = i & 2 ? A : -A, bz = i & 4 ? A : -A, f;
           if (parity(i)) { if (eX < 0.9) { BORN[i] = 0; continue; } f = 1; HEAT[i] = Math.max(heat, 1 - clamp01((eX - 0.9) / 0.1)); }
           else {
-            f = i === 5 || i === 6 ? eL : (i === 3 ? eT : eM);
-            if (f <= 0) { BORN[i] = 0; continue; }       // still inside the dot it parts from
+            if (i === 0 ? eM <= 0 : eL <= 0) { BORN[i] = 0; continue; }   // still inside the dot it parts from
             HEAT[i] = heat;
+            if (i === 3) f = 1;                            // the first dot: it stays where the honey dot was
+            else if (i === 0) f = eM;                      // the fourth: opens in the triangle's middle
+            else {                                         // the second goes DOWN from the first; then it splits in two
+              var mx = 0, my = 0, mz = A;                  // midpoint of corners 5 and 6: straight below the first dot
+              var lx = lerp(A, mx, eL), ly = lerp(A, my, eL), lz = lerp(-A, mz, eL);
+              VX[i] = lerp(lx, bx, eT); VY[i] = lerp(ly, by, eT); VZ[i] = lerp(lz, bz, eT);
+              f = -1;
+            }
           }
-          VX[i] = bx * f; VY[i] = by * f; VZ[i] = bz * f;
+          if (f >= 0) { VX[i] = bx * f; VY[i] = by * f; VZ[i] = bz * f; }
         } else {
           var gp = (T - AT[i]) / GL[i];
           if (gp <= 0) { BORN[i] = 0; continue; }          // not split off yet
