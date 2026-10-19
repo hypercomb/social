@@ -179,6 +179,23 @@ export function kindsForLabel(label: string): readonly string[] {
   return [...set].filter(kind => !isKindHidden(key, kind))
 }
 
+/** Kinds that claim the ENTRY gesture. A tile wearing one has no inside to
+ *  walk into — it OPENS: the overlay says `tile:open { label, kind }` and the
+ *  claimant does the opening (a question opens its answers). Registered by
+ *  the bee that owns the kind; the overlay names no kind itself. */
+const entryKinds = new Set<string>()
+
+export function claimEntry(kind: string): void {
+  if (kind) entryKinds.add(kind)
+}
+
+/** The kind that claims entering `label`, or null when it is walked into. */
+export function entryClaimFor(label: string): string | null {
+  if (entryKinds.size === 0) return null
+  for (const kind of kindsForLabel(label)) if (entryKinds.has(kind)) return kind
+  return null
+}
+
 /** Every tag name applied to a cell, from the in-memory index. Synchronous
  *  and O(1) — the badge renderer and show-cell's tag aggregation read this
  *  per visible cell. Returns [] for an unknown / untagged cell. */

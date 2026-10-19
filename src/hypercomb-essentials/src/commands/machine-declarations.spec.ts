@@ -58,6 +58,9 @@ await import('../references/gather/from.queen.js')
 await import('../references/gather/references.queen.js')
 await import('../sharing/profile.queen.js')
 await import('../sharing/groups.queen.js')
+await import('../questions/start.queen.js')
+await import('../questions/question.queen.js')
+await import('../questions/tally.queen.js')
 
 type Declared = { reach?: string; scope?: string; refuse?: (args: string) => string | undefined }
 const census = (ioc.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
@@ -121,6 +124,13 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   recommend: ['additive', 'hive'],     // one signed pheromone deposit on a creation's head
   hold: ['additive', 'hive'],          // a link tile on the page you stand on;
                                        // never replaces a link already there
+  // Judged on arrival (2026-10-18, Hypercomb Q and A — "we should be able to
+  // say please start a game … and it starts").
+  start: ['additive', 'network'],      // mints the game's tile here (or finds it), walks in, and
+                                       // makes this hive the organizer; in a swarm the tile is shared
+  question: ['additive', 'network'],   // one tile named with the question, marked; shared in a swarm
+  tally: ['additive', 'network'],      // notes only: a ranking on each question and a scoreboard
+                                       // on the page's tile; changes no answer
 }
 
 describe('every machine declaration, as audited', () => {

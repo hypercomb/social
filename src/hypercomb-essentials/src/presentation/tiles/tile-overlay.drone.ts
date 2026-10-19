@@ -8,7 +8,7 @@ import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial, HexDetector } from '../../navigation/hex-detector.js'
 import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
-import { hasDecorationKind, referenceTargetForLabel, tagsForLabel } from '../../commands/decoration-kind-index.js'
+import { entryClaimFor, hasDecorationKind, referenceTargetForLabel, tagsForLabel } from '../../commands/decoration-kind-index.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-action-icons.js'
@@ -617,7 +617,7 @@ export class TileOverlayDrone extends Drone {
     'view:open-for-tile', 'view:active',
     'default-view:indexed',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'clipboard:take-items', 'clipboard:verb', 'swarm:wand', 'editor:switch-request']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:open', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'clipboard:take-items', 'clipboard:verb', 'swarm:wand', 'editor:switch-request']
 
   #dropDragging = false
   #dropGroupOnly = false
@@ -3714,6 +3714,18 @@ export class TileOverlayDrone extends Drone {
         message: i18n?.t('tags.filter.blocked.message', { cell: label })
           ?? `"${label}" has no tagged tiles inside. Clear the filter to browse it.`,
       })
+      return
+    }
+
+    // A TILE THAT OPENS INSTEAD OF ENTERING. A decoration kind may claim the
+    // entry gesture (claimEntry in decoration-kind-index): a question opens
+    // its answers, it has no inside to walk into. Every entry gesture passes
+    // this choke point, so the claim holds for click, press-drag, the tile
+    // list and the fullscreen view alike. The claimant hears `tile:open` and
+    // does the opening; nothing navigates, so no guard is armed.
+    const opening = entryClaimFor(label)
+    if (opening) {
+      this.emitEffect('tile:open', { label, kind: opening })
       return
     }
 
