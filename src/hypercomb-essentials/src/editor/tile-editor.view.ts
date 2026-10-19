@@ -177,8 +177,23 @@ export class TileEditorElement extends HTMLElement {
   readonly #session: WindowSession = {
     // Put away by the shell (another window, a lane, the installer): the
     // editor does not survive hidden — a hidden editor would keep holding the
-    // hive's input gate and paste routing. Its changed draft is kept.
-    park: () => this.#cancel(),
+    // hive's input gate and paste routing. Its changed draft is kept — and
+    // SAID to be, with the tile as the door: the participant opened a window
+    // and watched their edit vanish, and nothing on screen told them where it
+    // went (audit F4, 2026-10-18). The toast answers in place rather than
+    // reopening anything (feedback: a window opens only from its own door).
+    park: () => {
+      const kept = this.#dirty() ? (this.#service?.cell ?? '') : ''
+      this.#cancel()
+      if (!kept) return
+      EffectBus.emit('toast:show', {
+        type: 'info',
+        message: t('editor.draft-kept', 'Draft kept — reopen {tile} to continue', { tile: kept }),
+        actionLabel: t('editor.draft-kept-open', 'open {tile}', { tile: kept }),
+        actionEffect: 'tile:action',
+        actionPayload: { action: 'edit', label: kept },
+      })
+    },
     unpark: () => { /* reopening a tile offers the kept draft back */ },
     dismiss: () => this.dismissInner(),
     close: () => this.#cancel(),

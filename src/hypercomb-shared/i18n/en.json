@@ -69,6 +69,8 @@
   "editor.qa.done": "done",
   "editor.portal-target": "edits the original",
   "editor.restore-hint": "You left changes here unsaved.",
+  "editor.draft-kept": "Draft kept — reopen {tile} to continue",
+  "editor.draft-kept-open": "open {tile}",
   "editor.restore": "restore",
   "editor.leave-question": "Save your changes before opening “{name}”?",
   "editor.leave-stay": "keep editing",

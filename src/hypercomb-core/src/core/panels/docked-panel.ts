@@ -394,8 +394,12 @@ export class DockedPanel implements GroupMember, LaneMember {
   #laneOffset = 0
   /** Drops this window out of the "currently showing" set when it goes. */
   #releaseSession: (() => void) | null = null
-  /** Drops this window out of the one-window rule's set when it goes. */
-  #releaseRule: (() => void) | null = null
+  /** Drops this window out of the one-window rule's set when it goes; told
+   *  whether the going was a close (true) or a park. */
+  #releaseRule: ((closed?: boolean) => void) | null = null
+  /** Set by `parkByShell` for the life of a mount: the window stopped showing
+   *  because the shell put it away, not because the participant closed it. */
+  #parkedByShell = false
   /** Only when `ownsSize` is false: watches the window's self-driven resize so
    *  its group mates track it, exactly as the grip does for owned panels. */
   #sizeWatch: ResizeObserver | null = null
@@ -467,10 +471,38 @@ export class DockedPanel implements GroupMember, LaneMember {
    *  the only thing such a window can do. */
   evictFromLane(): void {
     if (!this.hcSession) { this.onClose?.(); return }
-    try { this.hcSession.park() }
+    try { this.parkByShell() }
     catch (err) {
       console.error('[hc-docked-panel] park failed, closing instead:', err)
       this.onClose?.()
+    }
+  }
+
+  /** PARK, AND SAY SO. Every park is the shell's doing — the rule, the lane,
+   *  Escape's sweep, the installer, a pair leaving with its window — and the
+   *  one thing that is NOT a park is the participant's own close (the ×, the
+   *  window's word, its door). `dispose()` cannot tell the two apart from the
+   *  DOM going away, so the distinction is recorded here, at the only seam
+   *  every park passes through: the session the registries hold is a wrapper
+   *  whose `park` lands here (`init`), and the panel's own parks call it
+   *  directly. The rule reads it on release — a CLOSE restores the window
+   *  this one displaced; a park never does (window-rule.ts). */
+  parkByShell(): void {
+    if (!this.hcSession) return
+    this.#parkedByShell = true
+    this.hcSession.park()
+  }
+
+  /** The session as the registries see it: the window's own, with `park`
+   *  routed through `parkByShell`. Built once per mount so the identity checks
+   *  in `holdWindow` / `holdToolWindow` match on release. */
+  #heldSession(inner: WindowSession): WindowSession {
+    return {
+      park: () => this.parkByShell(),
+      unpark: () => inner.unpark(),
+      ...(inner.dismiss ? { dismiss: () => inner.dismiss!() } : {}),
+      ...(inner.close ? { close: () => inner.close!() } : {}),
+      ...(inner.companion ? { companion: true } : {}),
     }
   }
 
@@ -483,12 +515,16 @@ export class DockedPanel implements GroupMember, LaneMember {
     // Showing, from now until this panel's element goes away.
     // The root thunk is what lets the shell-wide Escape owner ask "is the focus
     // inside this window" — the gate that replaced every panel's own listener.
-    if (this.hcSession) this.#releaseSession = holdWindow(this.id, this.hcSession, () => this.#el)
+    // Both registries get the SAME wrapper (`#heldSession`), so a park from
+    // anywhere is seen as the shell's and a release can say close or park.
+    this.#parkedByShell = false
+    const held = this.hcSession ? this.#heldSession(this.hcSession) : null
+    if (held) this.#releaseSession = holdWindow(this.id, held, () => this.#el)
     // And join the ONE-WINDOW-AT-A-TIME rule, which puts the others away.
     // Separate from the lane on purpose: the lane is about POSITION and a
     // window may sit outside it (the notes desk in fullscreen, every panel on
     // a phone) while still being a window that owns the screen.
-    if (this.hcSession) this.#releaseRule = holdToolWindow(this.id, this.hcSession)
+    if (held) this.#releaseRule = holdToolWindow(this.id, held)
     // Take a place in this edge's lane. Deferred a microtask so the width set
     // below (or by the window's own first render) is what the lane measures.
     if (this.#dockExclusive) this.#scheduleLaneClaim()
@@ -574,7 +610,9 @@ export class DockedPanel implements GroupMember, LaneMember {
     // session lives on in the parked list, which is what brings it back.
     this.#releaseSession?.()
     this.#releaseSession = null
-    this.#releaseRule?.()
+    // A CLOSE is a release that no park led to: the rule restores what this
+    // window displaced on a close, never on a park (see `parkByShell`).
+    this.#releaseRule?.(wasLive && !this.#parkedByShell)
     this.#releaseRule = null
     this.#stopListeners()
     this.#closePopover()
@@ -697,7 +735,7 @@ export class DockedPanel implements GroupMember, LaneMember {
     for (const panel of live) {
       if (panel.id !== this.pairWindow) continue
       if (panel.hcSession) {
-        try { panel.hcSession.park(); return }
+        try { panel.parkByShell(); return }
         catch (err) { console.error('[hc-docked-panel] pair park failed, closing instead:', err) }
       }
       break

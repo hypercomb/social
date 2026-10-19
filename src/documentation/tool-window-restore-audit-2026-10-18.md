@@ -233,5 +233,22 @@ records both halves: after the first press `view:active` is owned by
 `chat-window` and the chat is showing; after the second no owner, nothing
 showing, canvas and header visible, still so 4 s later. Remedy 3's ratchet
 is the probe itself (it asserts the owners after every step); no spec in the
-suite mounts an Angular component, so a unit ratchet is not its shape. F3,
-F4 and F6 remain open.
+suite mounts an Angular component, so a unit ratchet is not its shape.
+
+**F3 and F4 landed (same day).** The docked panel now tells a CLOSE from a
+PARK: the session it registers is a wrapper whose `park` goes through
+`parkByShell` (the rule, the lane, Escape's sweep, the installer and a pair
+all pass there), so `dispose()` releases the one-window rule with
+`closed: true` only when no park led to it. The rule (`window-rule.ts`)
+remembers, per arrival, the one window it parked for it (`displacedBy`), and
+the arrival's close unparks it if it is still away — a stack of one, a step
+per close. A park by Escape or the installer spends the memory (the hexagons
+were asked for); a park by the rule keeps it (the window above will be closed
+in its turn); a displaced window that comes back on its own account is owed
+nothing. The companion palette is never what is restored. The tile editor's
+park, when the draft had changes, toasts "Draft kept — reopen {tile} to
+continue" with `tile:action edit` as the door (`editor.draft-kept`, en + ja);
+the editor itself is not reopened. Probe: the six "pair:" scenarios now end
+by closing the restored window and assert it came back mid-way, plus "Escape
+parks → nothing back" and the editor toast case: 42 ok / 0 FAIL. Six
+`window-rule.spec.ts` cases pin the rule. F6 remains open.

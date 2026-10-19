@@ -87,6 +87,8 @@
   "editor.qa.done": "完了",
   "editor.portal-target": "本体を編集",
   "editor.restore-hint": "保存されていない変更が残っています。",
+  "editor.draft-kept": "下書きを保持しました — {tile} を開き直すと続けられます",
+  "editor.draft-kept-open": "{tile} を開く",
   "editor.restore": "復元",
   "editor.leave-question": "「{name}」を開く前に変更を保存しますか？",
   "editor.leave-stay": "編集を続ける",

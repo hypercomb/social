@@ -175,35 +175,51 @@ async function main() {
   ])
 
   // ── pairings ────────────────────────────────────────────────────────
-  await S('pair: chat → notes (rule parks chat) → notes close', [
+  // The F3 table: the one-window rule parks the window you were in when
+  // another opens, and the newcomer's CLOSE brings it back (a park does not —
+  // see the Escape case below). Each ends by closing the restored window, so
+  // the end-state verdict is the bare hive.
+  await S('pair: chat → notes (rule parks chat) → notes close (chat back)', [
     ['chat open', () => emit(page, 'chat:open', {})],
     ['notes open', () => emit(page, 'notes:panel', { visible: true })],
     ['notes close', () => emit(page, 'notes:panel', { visible: false })],
+    ['chat back?', () => expectShowing(page, ['chat-window'])],
+    ['chat close', () => emit(page, 'chat:close', {})],
   ])
-  await S('pair: notes → chat → chat close', [
+  await S('pair: notes → chat → chat close (notes back)', [
     ['notes open', () => emit(page, 'notes:panel', { visible: true })],
     ['chat open', () => emit(page, 'chat:open', {})],
     ['chat close', () => emit(page, 'chat:close', {})],
+    ['notes back?', () => expectShowing(page, ['notes-strip', 'tags-viewer'])],
+    ['notes close', () => emit(page, 'notes:panel', { visible: false })],
   ])
-  await S('pair: chat → behaviours → behaviours close', [
+  await S('pair: chat → behaviours → behaviours close (chat back)', [
     ['chat open', () => emit(page, 'chat:open', {})],
     ['behaviours open', () => emit(page, 'features:context-open', {})],
     ['behaviours close', () => emit(page, 'features:viewer-close', {})],
+    ['chat back?', () => expectShowing(page, ['chat-window'])],
+    ['chat close', () => emit(page, 'chat:close', {})],
   ])
-  await S('pair: behaviours → chat → chat close', [
+  await S('pair: behaviours → chat → chat close (behaviours back)', [
     ['behaviours open', () => emit(page, 'features:context-open', {})],
     ['chat open', () => emit(page, 'chat:open', {})],
     ['chat close', () => emit(page, 'chat:close', {})],
+    ['behaviours back?', () => expectShowing(page, ['features-viewer'])],
+    ['behaviours close', () => emit(page, 'features:viewer-close', {})],
   ])
-  await S('pair: notes → behaviours → behaviours close', [
+  await S('pair: notes → behaviours → behaviours close (notes back)', [
     ['notes open', () => emit(page, 'notes:panel', { visible: true })],
     ['behaviours open', () => emit(page, 'features:context-open', {})],
     ['behaviours close', () => emit(page, 'features:viewer-close', {})],
+    ['notes back?', () => expectShowing(page, ['notes-strip', 'tags-viewer'])],
+    ['notes close', () => emit(page, 'notes:panel', { visible: false })],
   ])
-  await S('pair: behaviours → notes → notes close', [
+  await S('pair: behaviours → notes → notes close (behaviours back)', [
     ['behaviours open', () => emit(page, 'features:context-open', {})],
     ['notes open', () => emit(page, 'notes:panel', { visible: true })],
     ['notes close', () => emit(page, 'notes:panel', { visible: false })],
+    ['behaviours back?', () => expectShowing(page, ['features-viewer'])],
+    ['behaviours close', () => emit(page, 'features:viewer-close', {})],
   ])
   await S('pair: chat → notes → Escape → Escape (back) → Escape', [
     ['chat open', () => emit(page, 'chat:open', {})],
@@ -225,6 +241,27 @@ async function main() {
     ['tree on', () => emit(page, 'view:toggle', { view: 'tree', mode: 'on' })],
     ['behaviours open', () => emit(page, 'features:context-open', {})],
     ['behaviours close', () => emit(page, 'features:viewer-close', {})],
+  ])
+  // ── F3, the other half: a PARK (Escape's sweep) restores nothing ──────
+  await S('restore: chat → notes → Escape (park) → wait 4s → nothing back', [
+    ['chat open', () => emit(page, 'chat:open', {})],
+    ['notes open', () => emit(page, 'notes:panel', { visible: true })],
+    ['escape', () => page.keyboard.press('Escape')],
+    ['wait 4s', () => page.waitForTimeout(4000)],
+    ['nothing back?', () => expectShowing(page, [])],
+  ])
+  // ── F4: the door that displaces an edit says "draft kept" ──────────
+  await S('editor: edit alpha (changed) → chat open (toast) → chat close → editor stays shut', [
+    ['edit', () => emit(page, 'tile:action', { action: 'edit', label: 'alpha', q: 0, r: 0, index: 0 })],
+    ['change link', () => page.evaluate(() => { window.ioc.get('@diamondcoreprocessor.com/TileEditorService').setLink('https://example.test/kept'); return { dirty: window.ioc.get('@diamondcoreprocessor.com/TileEditorService').dirty } })],
+    ['chat open', () => emit(page, 'chat:open', {})],
+    ['toast?', () => page.evaluate(() => {
+      const toast = window.__hypercombEffectBus.lastValue.get('toast:show')
+      const message = String(toast?.message ?? '')
+      return /draft kept/i.test(message) ? { toast: message, door: toast?.actionEffect } : { fail: `no draft-kept toast: ${JSON.stringify(toast ?? null).slice(0, 120)}` }
+    })],
+    ['chat close', () => emit(page, 'chat:close', {})],
+    ['editor shut?', () => expectShowing(page, [])],
   ])
   await S('editor: edit alpha → chat open → chat close → Escape', [
     ['edit', () => emit(page, 'tile:action', { action: 'edit', label: 'alpha', q: 0, r: 0, index: 0 })],
@@ -365,7 +402,11 @@ async function scenario(page, name, steps) {
     log(`  ${desc.padEnd(16)} ${brief(s)}`)
   }
   const last = rec.steps[rec.steps.length - 1]
-  rec.verdict = verdict(last)
+  // A step may assert something of its own by returning { fail: '…' } — the
+  // restore scenarios ask "is the displaced window back?" mid-way, where the
+  // end-state verdict (the bare hive) cannot see it.
+  const failed = rec.steps.find(s => s.result && typeof s.result.fail === 'string')
+  rec.verdict = failed ? `FAIL: ${failed.label}: ${failed.result.fail}` : verdict(last)
   log(`  ⇒ ${rec.verdict}`)
   report.scenarios.push(rec)
   // Reset to a clean slate between scenarios: close everything, forget parks,
@@ -406,6 +447,13 @@ function verdict(s) {
 }
 
 const brief = (s) => `host=${s.hostVisible}/${s.hostBox?.join('x')} owners=${JSON.stringify(s.owners)} vm=${s.viewMode} cells=${s.cellCount?.count ?? '?'} showing=${JSON.stringify(s.showing)} parked=${JSON.stringify(s.parked)} covers=${JSON.stringify(s.covers)} stage=${s.stage ? `${s.stage.x},${s.stage.y}@${s.stage.s}` : '?'} seg=${JSON.stringify(s.segments)}${s.result ? ' ' + JSON.stringify(s.result) : ''}`
+
+/** A mid-scenario assertion: exactly these windows are showing (sorted). */
+const expectShowing = async (page, want) => {
+  const have = await page.evaluate(() => [...(globalThis.__hypercombWindowSession?.showing.keys() ?? [])])
+  const a = [...have].sort().join(','), b = [...want].sort().join(',')
+  return a === b ? { showing: have } : { fail: `showing [${a}], wanted [${b}]` }
+}
 
 const ready = async (page) => {
   await page.waitForFunction(() => !!window.__hypercombEffectBus, null, { timeout: 90000 })
