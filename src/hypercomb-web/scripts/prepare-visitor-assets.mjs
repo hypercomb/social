@@ -53,25 +53,69 @@ for (const entry of await readdir(source, { withFileTypes: true })) {
 }
 
 await mkdir(outputContent, { recursive: true })
+const { tsImport } = await import('tsx/esm/api')
+
+// THE VISITOR RUNS A MINIFIED DERIVATION (hypercomb-runtime/src/minified-
+// package.ts; jwize 2026-10-18). The signed package stays readable — the
+// source lives in the hive. A published site ships a package derived from it:
+// each module's body minified (whitespace and syntax only, every name kept),
+// its head lines kept byte for byte, every layer re-hashed bottom-up, and the
+// root naming the readable root and a derivation record (tool, options, every
+// readable → minified pair) so anyone can rerun it and get the same bytes.
+// Whatever fails, the readable package ships exactly as before.
+// VISITOR_MINIFY=0 ships the readable package on purpose.
+let shipSig = currentSig
+let ship = current
+let derived = null
+if (process.env.VISITOR_MINIFY !== '0') {
+  try {
+    const esbuild = await import('esbuild')
+    const { deriveMinifiedPackage } = await tsImport('../../hypercomb-runtime/src/minified-package.ts', import.meta.url)
+    const MINIFY = { loader: 'js', format: 'esm', target: 'es2022', minifyWhitespace: true, minifySyntax: true, treeShaking: false, legalComments: 'none', charset: 'utf8' }
+    const readSource = async (sig) => { try { return new Uint8Array(await readFile(join(sourceContent, sig))) } catch { return null } }
+    derived = await deriveMinifiedPackage(currentSig, current, readSource,
+      async (body) => (await esbuild.transform(body, MINIFY)).code,
+      { name: `esbuild@${esbuild.version}`, options: MINIFY })
+    shipSig = derived.root
+    ship = derived.record
+    console.log(`[visitor-assets] minified ${derived.modules.size} modules: ${currentSig.slice(0, 12)}… → ${shipSig.slice(0, 12)}… (derivation ${derived.derivation.sig.slice(0, 12)}…)`)
+  } catch (err) {
+    derived = null
+    console.warn(`[visitor-assets] minified derivation failed — shipping the readable package: ${err?.message ?? err}`)
+  }
+}
+
 const sigs = new Set([
-  ...(current.bees ?? []),
-  ...(current.dependencies ?? []),
-  ...(current.layers ?? []),
+  ...(ship.bees ?? []),
+  ...(ship.dependencies ?? []),
+  ...(ship.layers ?? []),
 ])
 for (const sig of sigs) {
   if (!SIG_RE.test(sig)) throw new Error(`invalid renderer signature: ${sig}`)
-  await cp(join(sourceContent, sig), join(outputContent, sig))
+  const made = derived?.files.get(sig)
+  if (made) await writeFile(join(outputContent, sig), made)
+  else await cp(join(sourceContent, sig), join(outputContent, sig))
 }
+if (derived) await writeFile(join(outputContent, derived.derivation.sig), derived.derivation.bytes)
 
-for (const bagSig of [current.dependenciesBag, current.beesBag]) {
-  if (bagSig == null) continue
-  if (!SIG_RE.test(bagSig)) throw new Error(`invalid renderer sigbag: ${bagSig}`)
-  await cp(join(sourceContent, bagSig), join(outputContent, bagSig), { recursive: true })
+if (derived) {
+  const { orderedEntries, bagEntryName } = await tsImport('../../hypercomb-runtime/src/bags.ts', import.meta.url)
+  for (const bag of derived.bags) {
+    await mkdir(join(outputContent, bag.sig), { recursive: true })
+    const entries = orderedEntries(bag.entries)
+    for (let i = 0; i < entries.length; i++) await writeFile(join(outputContent, bag.sig, bagEntryName(i)), entries[i].content, 'utf8')
+  }
+} else {
+  for (const bagSig of [current.dependenciesBag, current.beesBag]) {
+    if (bagSig == null) continue
+    if (!SIG_RE.test(bagSig)) throw new Error(`invalid renderer sigbag: ${bagSig}`)
+    await cp(join(sourceContent, bagSig), join(outputContent, bagSig), { recursive: true })
+  }
 }
 
 await writeFile(
   join(outputContent, 'manifest.json'),
-  JSON.stringify({ packages: { [currentSig]: current } }, null, 2) + '\n',
+  JSON.stringify({ packages: { [shipSig]: ship } }, null, 2) + '\n',
   'utf8',
 )
 
@@ -85,8 +129,8 @@ await writeFile(
 // plus the two listings a static host answers a directory with.
 const poolDir = join(outputContent, pool)
 await mkdir(poolDir, { recursive: true })
-const label = String(current.label ?? '').trim()
-await writeFile(join(poolDir, '00000000'), label ? `${currentSig}\n${label}` : currentSig, 'utf8')
+const label = String(ship.label ?? '').trim()
+await writeFile(join(poolDir, '00000000'), label ? `${shipSig}\n${label}` : shipSig, 'utf8')
 for (const listing of ['index.html', 'listing.txt']) {
   await writeFile(join(poolDir, listing), '00000000\n', 'utf8')
 }
@@ -97,15 +141,27 @@ for (const listing of ['index.html', 'listing.txt']) {
 // published site paid ~5–10s of file-by-file fetching on EVERY load. A hint:
 // a build that minted no pack still ships, and the visitor installs loose.
 const packsPool = createHash('sha256').update('transfer:packs').digest('hex')
-const packPointer = await readFile(join(sourceContent, packsPool, currentSig), 'utf8').catch(() => '')
-const packSig = packPointer.trim().toLowerCase()
-if (SIG_RE.test(packSig) && await stat(join(sourceContent, packSig)).then(() => true, () => false)) {
+if (derived) {
+  // The derivation's own pack: every file of the shipped package, one request.
+  const { encodeTransferPack, gzipBytes } = await tsImport('../../hypercomb-runtime/src/transfer-pack.ts', import.meta.url)
+  const members = await Promise.all([...sigs].map(async (sig) => [sig, new Uint8Array(await readFile(join(outputContent, sig)))]))
+  const packBytes = await gzipBytes(encodeTransferPack(members))
+  const packSig = createHash('sha256').update(packBytes).digest('hex')
+  await writeFile(join(outputContent, packSig), packBytes)
   await mkdir(join(outputContent, packsPool), { recursive: true })
-  await writeFile(join(outputContent, packsPool, currentSig), packSig, 'utf8')
-  await cp(join(sourceContent, packSig), join(outputContent, packSig))
-  console.log(`[visitor-assets] transfer pack ${packSig.slice(0, 12)}… shipped`)
+  await writeFile(join(outputContent, packsPool, shipSig), packSig, 'utf8')
+  console.log(`[visitor-assets] transfer pack ${packSig.slice(0, 12)}… minted for the minified package (${(packBytes.byteLength / 1024).toFixed(0)} KB)`)
 } else {
-  console.warn(`[visitor-assets] no transfer pack for ${currentSig.slice(0, 12)}… — visitors will install file by file`)
+  const packPointer = await readFile(join(sourceContent, packsPool, currentSig), 'utf8').catch(() => '')
+  const packSig = packPointer.trim().toLowerCase()
+  if (SIG_RE.test(packSig) && await stat(join(sourceContent, packSig)).then(() => true, () => false)) {
+    await mkdir(join(outputContent, packsPool), { recursive: true })
+    await writeFile(join(outputContent, packsPool, currentSig), packSig, 'utf8')
+    await cp(join(sourceContent, packSig), join(outputContent, packSig))
+    console.log(`[visitor-assets] transfer pack ${packSig.slice(0, 12)}… shipped`)
+  } else {
+    console.warn(`[visitor-assets] no transfer pack for ${currentSig.slice(0, 12)}… — visitors will install file by file`)
+  }
 }
 
 // THE INSTALL INDEX (hypercomb-runtime/src/install-index.ts). What a visitor
@@ -116,18 +172,17 @@ if (SIG_RE.test(packSig) && await stat(join(sourceContent, packSig)).then(() => 
 // a transfer pack of just the layers. A derived record: a visitor with none
 // installs the old way.
 {
-  const { tsImport } = await import('tsx/esm/api')
   const { deriveInstallIndex, INSTALL_INDEX_MEANING } = await tsImport('../../hypercomb-runtime/src/install-index.ts', import.meta.url)
   const { encodeTransferPack, gzipBytes } = await tsImport('../../hypercomb-runtime/src/transfer-pack.ts', import.meta.url)
   const read = async (sig) => new Uint8Array(await readFile(join(outputContent, sig)).catch(() => null) ?? []) || null
-  const layerMembers = await Promise.all((current.layers ?? []).map(async (sig) => [sig, await read(sig)]))
+  const layerMembers = await Promise.all((ship.layers ?? []).map(async (sig) => [sig, await read(sig)]))
   const layersPackBytes = await gzipBytes(encodeTransferPack(layerMembers))
   const layersPack = createHash('sha256').update(layersPackBytes).digest('hex')
   await writeFile(join(outputContent, layersPack), layersPackBytes)
-  const index = await deriveInstallIndex(currentSig, { bees: current.bees ?? [], dependencies: current.dependencies ?? [] }, read, layersPack)
+  const index = await deriveInstallIndex(shipSig, { bees: ship.bees ?? [], dependencies: ship.dependencies ?? [] }, read, layersPack)
   const indexPool = createHash('sha256').update(INSTALL_INDEX_MEANING).digest('hex')
   await mkdir(join(outputContent, indexPool), { recursive: true })
-  await writeFile(join(outputContent, indexPool, currentSig), JSON.stringify(index), 'utf8')
+  await writeFile(join(outputContent, indexPool, shipSig), JSON.stringify(index), 'utf8')
   console.log(
     `[visitor-assets] install index: ${Object.keys(index.aliases).length} aliases, ${index.lazy.length} atoms, ` +
     `${Object.keys(index.beeDeps).length} bees with claims, ${index.coreImports.length} core names; ` +
@@ -143,6 +198,6 @@ const addSize = async (path) => {
 await addSize(join(outputContent, 'manifest.json'))
 for (const sig of sigs) await addSize(join(outputContent, sig))
 console.log(
-  `[visitor-assets] ${currentSig.slice(0, 12)}… · ${sigs.size} signed renderer files · ` +
+  `[visitor-assets] ${shipSig.slice(0, 12)}… · ${sigs.size} signed renderer files · ` +
   `${(bytes / 1024 / 1024).toFixed(2)} MiB flat package`,
 )
