@@ -101,9 +101,12 @@ window.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key !== 'Escape
 EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
   if (cmd !== 'global.escape') return
 
-  // Priority 0: command line owns Escape when focused (select mode collapse, etc.)
+  // Priority 0: the SHELL's command line owns Escape when focused (select
+  // mode collapse, etc.). Only that one line: the same command shell is
+  // embedded elsewhere (the notes desk's composer), and an embedded line that
+  // swallowed every Escape left its window impossible to put away by key.
   const focused = document.activeElement
-  if (focused instanceof HTMLInputElement && focused.classList.contains('command-input')) return
+  if (focused instanceof HTMLInputElement && focused.classList.contains('command-input') && focused.closest('hc-command-line')) return
   // A FIELD THAT ANSWERS ESCAPE ITSELF. The keymap hears Escape in the
   // capture phase, before any field can stop it, so a search box that
   // clears on Escape also closed the whole window around it (the chat

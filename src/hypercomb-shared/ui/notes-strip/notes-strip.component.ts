@@ -1756,6 +1756,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     if (!this.visible()) return false
     if (this.pickerOpenForId() !== null) { this.closePicker(); return true }
     if (this.kebabOpenId() !== null) { this.closeKebab(); return true }
+    // The composer's depth cursor walks back out one level per press; only at
+    // the top does Escape go on to the sweep that puts the desk away.
+    if (this.composerEscape()) return true
     return false
   }
 
@@ -3690,18 +3693,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   readonly composerPlaceholder = computed(() => this.cell()
     ? this.#t('notes.composerPlaceholder', 'write a note')
     : this.#t('notes.composerFirstTile', 'name a tile to write on'))
-
-  /** Keys the shell did not consume. Escape is the only one we want: it walks
-   *  the depth cursor back out. Stopping propagation on a press we HANDLED is
-   *  what keeps the shell's own escape cascade (blur, then the global
-   *  show-the-hexagons sweep) from firing on the same press and taking the
-   *  desk away mid-list. */
-  onComposerKeydown(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return
-    if (!this.composerEscape()) return
-    event.preventDefault()
-    event.stopPropagation()
-  }
 
   /** Escape in the composer — one level back out. Answers whether it was
    *  ours to take, so the caller can let the shell have it otherwise. */
