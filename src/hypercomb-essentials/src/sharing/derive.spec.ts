@@ -50,6 +50,9 @@ describe('derive lines', () => {
     expect(parseDeriveArgs(`verify ${RECORD} @example.com`)).toMatchObject({ verb: 'verify', record: RECORD, host: 'example.com' })
     expect(parseDeriveArgs(`attest ${RECORD} reproduced @example.com`)).toMatchObject({ verb: 'attest', record: RECORD, outcome: 'reproduced' })
     expect(parseDeriveArgs(`attest ${RECORD} differs`)).toMatchObject({ verb: 'attest', outcome: 'differs', host: '' })
+    expect(parseDeriveArgs('on colony.hypercomb.com')).toEqual({ verb: 'read', record: '', outcome: '', host: 'colony.hypercomb.com' })
+    expect(parseDeriveArgs(`verify ${RECORD} on example.com`)).toMatchObject({ verb: 'verify', record: RECORD, host: 'example.com' })
+    expect(parseDeriveArgs(`attest ${RECORD} reproduced on example.com`)).toMatchObject({ verb: 'attest', outcome: 'reproduced', host: 'example.com' })
   })
 
   it('reaches a loopback host over http and every other host over https', () => {

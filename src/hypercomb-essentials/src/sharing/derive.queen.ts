@@ -3,18 +3,19 @@
 // `derive` — read a derivation, re-derive it here, or say what you found
 // (documentation/derivations.md).
 //
-//   derive @<host>                       what the host's sites run, what it was
+//   derive on <host>                     what the host's sites run, what it was
 //                                        derived from, and who has verified it
-//   derive <record> @<host>              the same, for one derivation record
-//   derive verify [<record>] @<host>     re-derive it in this hive with this
+//   derive <record> on <host>            the same, for one derivation record
+//   derive verify [<record>] on <host>   re-derive it in this hive with this
 //                                        shell's own esbuild, and sign what came
 //                                        out: `attest:<record>` in your index
-//   derive attest <record> reproduced|differs @<host>
+//   derive attest <record> reproduced|differs on <host>
 //                                        sign what a terminal verification found
 //                                        (verify-minified-package.mjs --host)
 //
-// There is no default host (jwize 2026-10-11): a word with no @<host> reads
-// nothing and signs nothing.
+// The host is said the way `publish on <domain>` says it; `@<host>` is read
+// too. There is no default host (jwize 2026-10-11): a line that names none
+// reads nothing and signs nothing.
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
 import { zoneDoor } from './zone-door.js'
@@ -37,8 +38,10 @@ export const parseDeriveArgs = (args: string): {
   host: string
 } => {
   const parts = args.trim().split(/\s+/).filter(Boolean)
-  const host = zoneDoor(parts.find(part => part.startsWith('@'))?.slice(1) ?? '')
-  const words = parts.filter(part => !part.startsWith('@')).map(part => part.toLowerCase())
+  const on = parts.findIndex(part => part.toLowerCase() === 'on')
+  const named = on >= 0 ? parts[on + 1] : parts.find(part => part.startsWith('@'))?.slice(1)
+  const host = zoneDoor(named ?? '')
+  const words = parts.filter((part, i) => !part.startsWith('@') && (on < 0 || (i !== on && i !== on + 1))).map(part => part.toLowerCase())
   const verb = words[0] === 'verify' ? 'verify' : words[0] === 'attest' ? 'attest' : 'read'
   const record = words.find(word => SIG_RE.test(word)) ?? ''
   const outcome = words.includes('reproduced') ? 'reproduced' : words.includes('differs') ? 'differs' : ''
@@ -49,19 +52,19 @@ export class DeriveQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'derive'
   override description = 'Read a derivation and who verified it, re-derive it here, or sign what you found'
-  override options = ['@<host>', '<record> @<host>', 'verify @<host>', 'verify <record> @<host>', 'attest <record> reproduced @<host>', 'attest <record> differs @<host>']
+  override options = ['on <host>', '<record> on <host>', 'verify on <host>', 'verify <record> on <host>', 'attest <record> reproduced on <host>', 'attest <record> differs on <host>']
   // The arguments are identifiers — record signatures and @hosts — never words:
   // the line arrives exactly as said, and nothing in it runs as another word.
   override rawArgs = true
   override examples = [
-    { input: 'derive @example.com', result: 'What the sites there run was derived from, and who has verified it' },
-    { input: 'derive verify @example.com', result: 'Re-derive it in this hive, and sign what came out' },
-    { input: 'derive attest <record> reproduced @example.com', result: 'Sign what a terminal verification found' },
+    { input: 'derive on example.com', result: 'What the sites there run was derived from, and who has verified it' },
+    { input: 'derive verify on example.com', result: 'Re-derive it in this hive, and sign what came out' },
+    { input: 'derive attest <record> reproduced on example.com', result: 'Sign what a terminal verification found' },
   ]
 
   protected async execute(args: string): Promise<void> {
     const { verb, record: named, outcome, host } = parseDeriveArgs(args)
-    if (!host) { tell('warning', 'Name the host: derive @example.com, derive verify @example.com.'); return }
+    if (!host) { tell('warning', 'Name the host: derive on example.com, derive verify on example.com.'); return }
 
     let record = named
     if (!record) {
@@ -72,7 +75,7 @@ export class DeriveQueenBee extends QueenBee {
     }
 
     if (verb === 'attest') {
-      if (!outcome) { tell('warning', 'Say what you found: derive attest <record> reproduced (or differs) @<host>.'); return }
+      if (!outcome) { tell('warning', 'Say what you found: derive attest <record> reproduced (or differs) on <host>.'); return }
       const signed = await publishAttestation(host, record, outcome)
       if (!signed.ok) { tell('error', `Your attestation was not signed: ${signed.reason}`); return }
       tell('success', `You attested ${short(record)}: ${outcome}.`)
