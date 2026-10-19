@@ -183,6 +183,11 @@ export type MarkerRecord = {
 }
 
 const SIG_RE = /^[0-9a-f]{64}$/i
+/** PRUNE'S DESTROY — the only removals that ask a never-deleting store (the
+ *  desktop app's, the packed store) to delete for real; OPFS ignores the
+ *  flag and deletes as it always has (removeContentSigs, removeLineageBag). */
+const PRUNE_DESTROY = { destroy: true } as FileSystemRemoveOptions
+const PRUNE_DESTROY_BAG = { recursive: true, destroy: true } as FileSystemRemoveOptions
 
 /**
  * Extract the layer sig from a marker file's bytes. Handles both:
@@ -4909,7 +4914,9 @@ export class HistoryService {
         await root.getFileHandle(sig, { create: false })
       } catch { continue }
       try {
-        await root.removeEntry(sig)
+        // `destroy`: the one removal a store that never deletes must honour
+        // (native-filesystem.ts). OPFS ignores it and deletes as always.
+        await root.removeEntry(sig, PRUNE_DESTROY)
         removed++
         this.#preloaderCache.delete(sig)
         this.#parsedLayerCache.delete(sig)
@@ -4965,7 +4972,7 @@ export class HistoryService {
       return false
     }
     try {
-      await root.removeEntry(sig, { recursive: true })
+      await root.removeEntry(sig, PRUNE_DESTROY_BAG)
     } catch { return false }
     this.#layerListCache.delete(sig)
     this.#latestSigByLineage.delete(sig)

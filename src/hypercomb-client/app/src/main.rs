@@ -217,6 +217,12 @@ fn raw_remove(host: State<'_, Host>, sig: String) -> Result<bool> {
     host.raw_remove(&sig)
 }
 
+/// Prune's destroy — the one real delete. See `Host::raw_destroy`.
+#[tauri::command]
+fn raw_destroy(host: State<'_, Host>, sig: String, directory: bool) -> Result<bool> {
+    host.raw_destroy(&sig, directory)
+}
+
 // ---------------------------------------------------------------------------
 // collection
 // ---------------------------------------------------------------------------
@@ -1837,6 +1843,7 @@ fn main() {
             raw_dir_put,
             raw_dir_remove,
             raw_remove,
+            raw_destroy,
             collect,
             hive_root,
             renderer_log,

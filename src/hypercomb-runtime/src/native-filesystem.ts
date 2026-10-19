@@ -650,11 +650,17 @@ export class NativeRootDirectory {
    * Does not throw — callers treat removal as best-effort, and throwing here
    * would break drain paths that expect absence to be fine.
    */
-  async removeEntry(name: string): Promise<void> {
-    if (SIG.test(name)) {
-      await this.bridge.invoke('raw_remove', { sig: name })
+  async removeEntry(name: string, options?: { recursive?: boolean; destroy?: boolean }): Promise<void> {
+    if (!SIG.test(name)) return // a legacy typed folder: nothing to remove
+    // PRUNE'S DESTROY (history.service.ts removeLineageBag / removeContentSigs)
+    // is the one caller that means it: the tile's whole history (`recursive`)
+    // or bytes nothing else references. The browser's OPFS deletes on any
+    // removeEntry; this store deletes only when told to destroy.
+    if (options?.destroy) {
+      await this.bridge.invoke('raw_destroy', { sig: name, directory: options.recursive === true })
+      return
     }
-    // Anything else is a legacy typed folder. Nothing to remove.
+    await this.bridge.invoke('raw_remove', { sig: name })
   }
 
   async isSameEntry(other: unknown): Promise<boolean> {

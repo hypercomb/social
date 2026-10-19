@@ -87,3 +87,34 @@ describe('native filesystem facade: lookups must not list', () => {
     expect(count('raw_dir_entries')).toBe(1)
   })
 })
+
+// PRUNE'S DESTROY (jwize 2026-10-18: "make it really destroy"). This store
+// never deletes on an ordinary removeEntry — removing a tile appends a layer —
+// so prune says `destroy`, and only then does a real delete cross the bridge.
+describe('native filesystem facade: only prune destroys', () => {
+  const recording = () => {
+    const calls: { command: string; payload: unknown }[] = []
+    const bridge: NativeBridge = {
+      invoke: async (command, payload) => { calls.push({ command, payload }); return true },
+    }
+    return { root: new NativeRootDirectory(bridge), calls }
+  }
+  const SIG = 'a'.repeat(64)
+
+  it('an ordinary removeEntry keeps the never-delete rule', async () => {
+    const { root, calls } = recording()
+    await root.removeEntry(SIG)
+    await root.removeEntry(SIG, { recursive: true })
+    expect(calls.map(c => c.command)).toEqual(['raw_remove', 'raw_remove'])
+  })
+
+  it('prune\'s destroy removes a bag\'s history, or bytes', async () => {
+    const { root, calls } = recording()
+    await root.removeEntry(SIG, { recursive: true, destroy: true })
+    await root.removeEntry(SIG, { destroy: true })
+    expect(calls).toEqual([
+      { command: 'raw_destroy', payload: { sig: SIG, directory: true } },
+      { command: 'raw_destroy', payload: { sig: SIG, directory: false } },
+    ])
+  })
+})

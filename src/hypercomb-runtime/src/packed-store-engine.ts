@@ -438,8 +438,9 @@ export class PackedStoreEngine {
     return this.#content.has(sigHex)
   }
 
-  /** Permanently drop content. ONLY the garbage collector may call this —
-   *  removing a tile appends a new layer and deletes nothing. */
+  /** Permanently drop content. ONLY the garbage collector and prune's
+   *  destroy may call this — removing a tile appends a new layer and deletes
+   *  nothing. */
   sweepContent(sigHex: string): boolean {
     if (!this.#content.has(sigHex)) return false
     this.#append(Kind.TombContent, hexToBytes(sigHex), new Uint8Array())

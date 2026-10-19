@@ -74,6 +74,8 @@ interface CommandPayload {
    *  service worker knows `bees`, not sign('bees'). */
   meaning?: string
   key?: string
+  /** `raw_destroy`: a bag's markers (true) or content bytes (false). */
+  directory?: boolean
   /** `pack_collect`: the addresses of every pool the registry declares
    *  wipe-safe, derived on the main thread (packed-bridge.ts) — the worker
    *  has no registry of its own. Their members are skipped whole. */
@@ -406,6 +408,27 @@ class PackedHost {
     return packedRemoved || flatRemoved
   }
 
+  /** PRUNE'S DESTROY: a bag's every marker (`directory`), or content bytes
+   *  — from the pack and from any undrained flat copy, or the fallback would
+   *  resurrect them on the next read. */
+  async destroy(sig: string, directory: boolean): Promise<boolean> {
+    if (directory) {
+      let removed = false
+      for (const entry of await this.dirEntries(sig)) {
+        if (markerIndexOf(entry.name) !== null && await this.dirRemove(sig, entry.name)) removed = true
+      }
+      return removed
+    }
+    const packed = this.#engine.sweepContent(sig)
+    return (await this.#sweepLoose(sig)) || packed
+  }
+
+  /** Drop an undrained flat copy of content at the root — the collector's
+   *  sweep and prune's destroy share this one removal. */
+  async #sweepLoose(sig: string): Promise<boolean> {
+    try { await this.#root.removeEntry(sig); return true } catch { return false }
+  }
+
   /** A pool member by MEANING — the service worker's addressing. Falls back
    *  to the undrained flat pool dir like every other read, so the SW keeps
    *  getting bytes while migration is still in flight. */
@@ -650,9 +673,7 @@ class PackedHost {
         return out
       },
       sizeOfBlob: async sig => (await this.#looseFile(sig))?.size ?? 0,
-      sweepBlob: async sig => {
-        try { await this.#root.removeEntry(sig); return true } catch { return false }
-      },
+      sweepBlob: sig => this.#sweepLoose(sig),
     })
   }
 }
@@ -743,6 +764,9 @@ const handle = async (request: BridgeRequest): Promise<{ result: unknown; transf
       // Removing content is a no-op — the model, not a limitation. Layers
       // are atomic and complete; content is reclaimed only by collection.
       return { result: false, transfer: [] }
+    case 'raw_destroy':
+      // Prune's destroy — the one real delete (native-filesystem.ts).
+      return { result: await host.destroy(p.sig!, p.directory === true), transfer: [] }
     case 'sign_bulk': {
       const buffers = payload as ArrayBuffer[]
       const sigs: string[] = []

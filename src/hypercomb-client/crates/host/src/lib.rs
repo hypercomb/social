@@ -429,6 +429,30 @@ impl Host {
         Ok(false)
     }
 
+    /// PRUNE'S DESTROY — the one door through which this host deletes for
+    /// real (jwize 2026-10-18: "make it really destroy"). Only prune passes
+    /// it (history.service.ts `removeLineageBag` / `removeContentSigs`, which
+    /// already refuse pools, bags holding anything but markers, and bytes
+    /// anything else in the hive references). `directory` removes every
+    /// marker of the bag at `sig` — the tile's whole history; otherwise the
+    /// content bytes at `sig` are swept. Every other removal keeps the rule
+    /// above: removing a tile appends a layer and deletes nothing.
+    ///
+    /// Returns whether anything was there to destroy.
+    pub fn raw_destroy(&self, sig: &str, directory: bool) -> Result<bool> {
+        let parsed = parse_sig(sig)?;
+        self.writes.fetch_add(1, Ordering::SeqCst);
+        if directory {
+            let bag = hypercomb_protocol::BagAddr::from_sig(parsed);
+            let mut removed = false;
+            for (index, _) in self.store.markers(bag)? {
+                removed |= self.store.remove_marker(bag, index)?;
+            }
+            return Ok(removed);
+        }
+        Ok(self.store.sweep(parsed)?)
+    }
+
     // -----------------------------------------------------------------
     // collection
     // -----------------------------------------------------------------
@@ -511,6 +535,32 @@ mod tests {
         // shell should be able to tell them apart.
         assert_eq!(host.get("nonsense"), Err(HostError::BadSignature("nonsense".into())));
         assert_eq!(host.get(&"a".repeat(64)).unwrap(), None);
+    }
+
+    #[test]
+    fn prunes_destroy_removes_a_bags_history_and_swept_bytes_and_nothing_else() {
+        let (_dir, host) = host();
+        let place = vec!["gone".to_string()];
+        let kept = vec!["kept".to_string()];
+        let first = host.put(b"first").unwrap();
+        let second = host.put(b"second").unwrap();
+        host.append(&place, &first).unwrap();
+        host.append(&place, &second).unwrap();
+        host.append(&kept, &first).unwrap();
+        let bag = host.bag_address(&place);
+
+        // The ordinary remove is still the no-op it always was.
+        assert!(!host.raw_remove(&second).unwrap());
+        assert_eq!(host.get(&second).unwrap(), Some(b"second".to_vec()));
+
+        assert!(host.raw_destroy(&bag, true).unwrap());
+        assert!(host.head(&place).unwrap().is_none(), "the tile's whole history is gone");
+        assert!(host.head(&kept).unwrap().is_some(), "another place is untouched");
+
+        assert!(host.raw_destroy(&second, false).unwrap());
+        assert_eq!(host.get(&second).unwrap(), None, "its bytes are gone");
+        assert_eq!(host.get(&first).unwrap(), Some(b"first".to_vec()));
+        assert!(!host.raw_destroy(&second, false).unwrap(), "nothing left to destroy");
     }
 
     #[test]
