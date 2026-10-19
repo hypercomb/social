@@ -2864,5 +2864,12 @@
   "publish.optimize.no-host": "Non è stato inviato nulla: nessun host è indicato. Scrivi features publish <host> per inviare l'insieme a uno.",
   "hosts.behind": "{host} non ha ancora la versione più recente",
   "packages.updates.not-held": "Un aggiornamento è pronto, ma nessuno dei tuoi host ce l'ha ancora",
-  "publish.failure.not-a-node": "{hosts} non accetta caricamenti. Una pubblicazione va a un dominio senza porta — il nome di un tunnel lo è — o a un host su questo computer. Non è stato pubblicato nulla."
+  "publish.failure.not-a-node": "{hosts} non accetta caricamenti. Una pubblicazione va a un dominio senza porta — il nome di un tunnel lo è — o a un host su questo computer. Non è stato pubblicato nulla.",
+  "slash.serve": "Servi la pagina in cui sei su un dominio ospitato da questo computer",
+  "serve.usage": "Servi: indica il dominio — \"serve at alice.example.com\" oppure \"serve off alice.example.com\"",
+  "serve.bad-domain": "\"{domain}\" non è un dominio",
+  "serve.failed": "Impossibile servire {page}: {reason}",
+  "serve.not-serving": "{domain} qui non apre nulla",
+  "serve.off": "{domain} non apre più nessuna pagina",
+  "serve.on": "{domain} ora apre {page}, sigillata com'è adesso — ripetilo dopo le modifiche"
 }

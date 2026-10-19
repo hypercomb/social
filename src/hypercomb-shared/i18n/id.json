@@ -2864,5 +2864,12 @@
   "publish.optimize.no-host": "Tidak ada yang dikirim: belum ada host yang disebutkan. Ketik features publish <host> untuk mengirim set ke sana.",
   "hosts.behind": "{host} belum memiliki versi terbaru",
   "packages.updates.not-held": "Pembaruan sudah siap, tetapi belum ada host Anda yang memilikinya",
-  "publish.failure.not-a-node": "{hosts} tidak menerima unggahan. Publikasi dikirim ke domain tanpa port — nama tunnel termasuk — atau ke host di komputer ini. Tidak ada yang dipublikasikan."
+  "publish.failure.not-a-node": "{hosts} tidak menerima unggahan. Publikasi dikirim ke domain tanpa port — nama tunnel termasuk — atau ke host di komputer ini. Tidak ada yang dipublikasikan.",
+  "slash.serve": "Sajikan halaman tempat Anda berada di domain yang di-host komputer ini",
+  "serve.usage": "Sajikan: sebutkan domainnya — \"serve at alice.example.com\" atau \"serve off alice.example.com\"",
+  "serve.bad-domain": "\"{domain}\" bukan domain",
+  "serve.failed": "Tidak dapat menyajikan {page}: {reason}",
+  "serve.not-serving": "{domain} tidak membuka apa pun di sini",
+  "serve.off": "{domain} tidak lagi membuka halaman",
+  "serve.on": "{domain} sekarang membuka {page}, disegel seperti sekarang — ucapkan lagi setelah ada perubahan"
 }

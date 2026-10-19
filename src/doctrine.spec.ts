@@ -492,6 +492,13 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/history/layer-placement.ts',
       'hypercomb-essentials/src/sharing/publish-branch.ts',
       'hypercomb-essentials/src/sharing/publish-status.drone.ts',
+      // TEMPORARY EXCEPTION, jwize 2026-10-18 (option 1 of three): `serve at
+      // <domain>` is a publication like publish — a visitor walks carried
+      // child sigs, and only a sealed tree carries each child's current
+      // version. Nothing mints or reads the signed head map yet (step 7 of
+      // hypergraph-molecule-lineage.md); when it lands, publish and serve
+      // leave this list together.
+      'hypercomb-essentials/src/sharing/serve.queen.ts',
       'hypercomb-essentials/src/sharing/swarm.drone.ts',
     ], 'sealSubtree caller')
   })

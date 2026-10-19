@@ -2864,5 +2864,12 @@
   "publish.optimize.no-host": "Hiçbir şey gönderilmedi: hiçbir sunucu belirtilmedi. Kümeyi göndermek için features publish <host> yaz.",
   "hosts.behind": "{host} henüz en yeni sürüme sahip değil",
   "packages.updates.not-held": "Bir güncelleme hazır, ancak henüz hiçbir konağınızda yok",
-  "publish.failure.not-a-node": "{hosts} yükleme kabul etmiyor. Yayın, portu olmayan bir alan adına — tünel adı da öyledir — ya da bu bilgisayardaki bir sunucuya gider. Hiçbir şey yayımlanmadı."
+  "publish.failure.not-a-node": "{hosts} yükleme kabul etmiyor. Yayın, portu olmayan bir alan adına — tünel adı da öyledir — ya da bu bilgisayardaki bir sunucuya gider. Hiçbir şey yayımlanmadı.",
+  "slash.serve": "Bulunduğun sayfayı bu bilgisayarın barındırdığı bir alan adında sun",
+  "serve.usage": "Sun: alan adını söyle — \"serve at alice.example.com\" ya da \"serve off alice.example.com\"",
+  "serve.bad-domain": "\"{domain}\" bir alan adı değil",
+  "serve.failed": "{page} sunulamadı: {reason}",
+  "serve.not-serving": "{domain} burada hiçbir şey açmıyor",
+  "serve.off": "{domain} artık bir sayfa açmıyor",
+  "serve.on": "{domain} artık {page} sayfasını açıyor, şu anki haliyle mühürlendi — değişikliklerden sonra yeniden söyle"
 }

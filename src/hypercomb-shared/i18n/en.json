@@ -3659,5 +3659,12 @@
   "recommend.refused": "Recommend: the deposit was refused ({reason})",
   "recommend.left": "Recommend: \"{word}\" left on {label}, signed by you",
   "recommend.toast": "\"{word}\" left on {label}",
-  "domainLinks.asksWord": "a word"
+  "domainLinks.asksWord": "a word",
+  "slash.serve": "Serve the page you are on at a domain this computer hosts",
+  "serve.usage": "Serve: say the domain — \"serve at alice.example.com\", or \"serve off alice.example.com\"",
+  "serve.bad-domain": "\"{domain}\" is not a domain",
+  "serve.failed": "Could not serve {page}: {reason}",
+  "serve.not-serving": "{domain} opens nothing here",
+  "serve.off": "{domain} no longer opens a page",
+  "serve.on": "{domain} now opens {page}, sealed as it is now — say it again after changes"
 }

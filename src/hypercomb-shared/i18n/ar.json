@@ -2864,5 +2864,12 @@
   "publish.optimize.no-host": "لم يُرسل شيء: لم يُسمَّ أي مضيف. قل features publish <host> لإرسال المجموعة إليه.",
   "hosts.behind": "{host} لا يملك أحدث إصدار بعد",
   "packages.updates.not-held": "يتوفر تحديث، لكن لا يملكه أيٌّ من مضيفيك بعد",
-  "publish.failure.not-a-node": "{hosts} لا يقبل الرفع. يذهب النشر إلى نطاق بلا منفذ — واسم النفق واحد منها — أو إلى مضيف على هذا الحاسوب. لم يُنشر شيء."
+  "publish.failure.not-a-node": "{hosts} لا يقبل الرفع. يذهب النشر إلى نطاق بلا منفذ — واسم النفق واحد منها — أو إلى مضيف على هذا الحاسوب. لم يُنشر شيء.",
+  "slash.serve": "قدّم الصفحة التي أنت عليها على نطاق يستضيفه هذا الحاسوب",
+  "serve.usage": "قدّم: اذكر النطاق — \"serve at alice.example.com\" أو \"serve off alice.example.com\"",
+  "serve.bad-domain": "\"{domain}\" ليس نطاقًا",
+  "serve.failed": "تعذّر تقديم {page}: {reason}",
+  "serve.not-serving": "{domain} لا يفتح شيئًا هنا",
+  "serve.off": "{domain} لم يعد يفتح صفحة",
+  "serve.on": "{domain} يفتح الآن {page}، مختومة كما هي الآن — أعد الأمر بعد التغييرات"
 }

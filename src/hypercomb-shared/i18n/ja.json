@@ -3107,5 +3107,12 @@
   "recommend.toast": "「{word}」を {label} に残しました",
   "domainLinks.asksWord": "ひとこと",
   "module.brood": "ブルード",
-  "publish.failure.not-a-node": "{hosts} はアップロードを受け付けません。公開先はポートのないドメイン（トンネルの名前もその一つ）か、このコンピューター上のホストです。何も公開されていません。"
+  "publish.failure.not-a-node": "{hosts} はアップロードを受け付けません。公開先はポートのないドメイン（トンネルの名前もその一つ）か、このコンピューター上のホストです。何も公開されていません。",
+  "slash.serve": "今いるページを、このコンピューターがホストするドメインで公開します",
+  "serve.usage": "公開: ドメインを指定してください —「serve at alice.example.com」または「serve off alice.example.com」",
+  "serve.bad-domain": "「{domain}」はドメインではありません",
+  "serve.failed": "{page} を公開できませんでした: {reason}",
+  "serve.not-serving": "{domain} はここでは何も開きません",
+  "serve.off": "{domain} はもうページを開きません",
+  "serve.on": "{domain} は {page} を開くようになりました（今の状態で封印）— 変更後はもう一度実行してください"
 }

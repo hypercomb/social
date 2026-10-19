@@ -2864,5 +2864,12 @@
   "publish.optimize.no-host": "Nada foi enviado: nenhum host foi indicado. Diga features publish <host> para enviar o conjunto a um.",
   "hosts.behind": "{host} ainda não tem a versão mais recente",
   "packages.updates.not-held": "Há uma atualização pronta, mas nenhum dos seus hosts a tem ainda",
-  "publish.failure.not-a-node": "{hosts} não aceita envios. Uma publicação vai para um domínio sem porta — o nome de um túnel é um deles — ou para um host neste computador. Nada foi publicado."
+  "publish.failure.not-a-node": "{hosts} não aceita envios. Uma publicação vai para um domínio sem porta — o nome de um túnel é um deles — ou para um host neste computador. Nada foi publicado.",
+  "slash.serve": "Servir a página em que você está em um domínio hospedado por este computador",
+  "serve.usage": "Servir: diga o domínio — \"serve at alice.example.com\" ou \"serve off alice.example.com\"",
+  "serve.bad-domain": "\"{domain}\" não é um domínio",
+  "serve.failed": "Não foi possível servir {page}: {reason}",
+  "serve.not-serving": "{domain} não abre nada aqui",
+  "serve.off": "{domain} não abre mais nenhuma página",
+  "serve.on": "{domain} agora abre {page}, selada como está agora — diga de novo depois de mudanças"
 }

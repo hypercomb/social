@@ -2864,5 +2864,12 @@
   "publish.optimize.no-host": "Es wurde nichts gesendet: Es ist kein Host genannt. Sagen Sie features publish <host>, um die Auswahl dorthin zu senden.",
   "hosts.behind": "{host} hat die neueste Version noch nicht",
   "packages.updates.not-held": "Ein Update ist bereit, aber noch keiner Ihrer Hosts hat es",
-  "publish.failure.not-a-node": "{hosts} nimmt keine Uploads an. Veröffentlicht wird auf eine Domain ohne Port – der Name eines Tunnels ist eine – oder auf einen Host auf diesem Computer. Nichts wurde veröffentlicht."
+  "publish.failure.not-a-node": "{hosts} nimmt keine Uploads an. Veröffentlicht wird auf eine Domain ohne Port – der Name eines Tunnels ist eine – oder auf einen Host auf diesem Computer. Nichts wurde veröffentlicht.",
+  "slash.serve": "Die Seite, auf der du bist, unter einer Domain bereitstellen, die dieser Computer hostet",
+  "serve.usage": "Bereitstellen: Nenne die Domain – „serve at alice.example.com“ oder „serve off alice.example.com“",
+  "serve.bad-domain": "„{domain}“ ist keine Domain",
+  "serve.failed": "{page} konnte nicht bereitgestellt werden: {reason}",
+  "serve.not-serving": "{domain} öffnet hier nichts",
+  "serve.off": "{domain} öffnet keine Seite mehr",
+  "serve.on": "{domain} öffnet jetzt {page}, versiegelt im jetzigen Stand – sag es nach Änderungen noch einmal"
 }

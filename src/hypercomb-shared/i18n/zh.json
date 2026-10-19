@@ -2864,5 +2864,12 @@
   "publish.optimize.no-host": "未发送任何内容：未指定主机。输入 features publish <host> 将该集合发送到某个主机。",
   "hosts.behind": "{host} 还没有最新版本",
   "packages.updates.not-held": "更新已就绪，但你的主机都还没有它",
-  "publish.failure.not-a-node": "{hosts} 不接受上传。发布只会发往不带端口的域名（隧道的名称就是一种），或这台电脑上的主机。没有发布任何内容。"
+  "publish.failure.not-a-node": "{hosts} 不接受上传。发布只会发往不带端口的域名（隧道的名称就是一种），或这台电脑上的主机。没有发布任何内容。",
+  "slash.serve": "在这台电脑托管的域名上提供你所在的页面",
+  "serve.usage": "提供：说出域名 —「serve at alice.example.com」或「serve off alice.example.com」",
+  "serve.bad-domain": "\"{domain}\" 不是域名",
+  "serve.failed": "无法提供 {page}：{reason}",
+  "serve.not-serving": "{domain} 在这里不打开任何内容",
+  "serve.off": "{domain} 不再打开任何页面",
+  "serve.on": "{domain} 现在打开 {page}，已按当前状态封存 — 修改后请再说一次"
 }
