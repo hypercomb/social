@@ -28,15 +28,17 @@
  * Keep in sync with hypercomb-dev/public/splash.js. The #hc-splash styles live in
  * <head> (index.html) so they persist after we move out of <app-root>.
  *
- * THE PIECE (jwize 2026-10-18: "slow down the dots … easy to follow"). One rule,
- * followed all the way: a dot parts in two along a new direction.
- *   • the honey dot parts UP AND DOWN into a line;
- *   • the bottom parts sideways into a TRIANGLE;
- *   • the top parts sideways and the corners settle into a SQUARE;
- *   • every corner parts front and back into a CUBE, which begins to turn.
- * The cube's twelve edges are drawn from the first parting: while two corners
- * still share a place their edge has no length, so the line, the triangle and the
- * square appear on their own. Its corners sit on the sphere, and the SPHERE fills
+ * THE PIECE (jwize 2026-10-18: "1 2 3 on 2d space and then 3d space triangle then
+ * 6 pointed primitive then 7 is the first not balanced dot starts the next phase").
+ *   • one dot, two (a LINE), three (a TRIANGLE): the flat world;
+ *   • the FOURTH dot opens in the triangle's middle — the first chance to go 3D:
+ *     a triangle in space (a tetrahedron), the view tilting just enough to show it;
+ *   • each of the four expands in THREE directions until they meet as a CUBE. The
+ *     four were half a cube's corners all along, so the three directions land on
+ *     the other four exactly. Seen down its diagonal the cube IS the six-pointed
+ *     primitive — the hexagon, the comb's cell — and it holds there, balanced;
+ *   • the SEVENTH beat is the first unbalanced dot: it breaks the symmetry, the
+ *     cube turns, and the next phase begins. Its corners sit on the sphere, and the SPHERE fills
  * on the same rule: each new dot splits off its nearest neighbour (farthest-point
  * insertion over a Fibonacci lattice, so every dot lands where the sphere is
  * emptiest) and glides to its place — a few at first, slowly enough to follow,
@@ -75,9 +77,9 @@
     // them to the viewport (see resize()). Times are real seconds.
     var R = 120, FOV = 1600, DOT_R = 8, DEG = Math.PI / 180;
     var A = R / Math.sqrt(3);                         // half the cube's edge: its corners sit ON the sphere
-    var T_LINE = 0.45, T_TRI = 1.15, T_SQ = 1.85, T_CUBE = 2.55;
-    var STEP = 0.7, CUBE_STEP = 0.9;                  // each parting takes this long — slow enough to watch
-    var T_FILL = 3.85, FILL = 3.2;                    // the sphere fills: slow → fast → very fast
+    var T_LINE = 0.45, T_TRI = 1.25, T_MID = 2.05, T_EXP = 3.0, T_TURN = 4.55;
+    var STEP = 0.75, EXP_STEP = 1.05;                 // each parting takes this long — slow enough to watch
+    var T_FILL = 5.1, FILL = 3.2;                     // the seventh beat: the first unbalanced dot, then the fill: slow → fast → very fast
     var T_RETURN = T_FILL + FILL, RETURN = 0.7;       // everything back to the one dot
     var DOT_IN = T_RETURN + RETURN - 0.2;             // the honey dot takes over as the last dots arrive home
     var TOTAL = T_RETURN + RETURN + 0.25;             // ≈ 8s a play; the dot holds a beat at the seam
@@ -107,14 +109,20 @@
     var AT = new Float64Array(N), GL = new Float64Array(N), SZ = new Float64Array(N);
     var PARENT = new Int32Array(N), RANKED = new Int32Array(N);
     var TONE_R = new Float64Array(N), TONE_G = new Float64Array(N), TONE_B = new Float64Array(N);
-    var EDGES = [];                                   // the cube's 12 edges: corners one bit apart
+    var EDGES = [];                                   // the cube's 12 edges: corners one bit apart, listed EVEN → ODD
+    var TETRA = [0, 3, 0, 5, 0, 6, 3, 5, 3, 6, 5, 6]; // the triangle in space: the four even corners, all joined
+    function parity(k) { return ((k & 1) + ((k >> 1) & 1) + ((k >> 2) & 1)) & 1; }
+    // THE DIAGONAL VIEW: a basis that looks straight down the cube's diagonal (1,1,1),
+    // corner 7 toward the viewer — from there the cube reads as a hexagon. Up is
+    // (-1,-1,2), so the first triangle (corners 3, 5, 6) opens with two dots above
+    // and one below.
+    var s3 = Math.sqrt(3), s6 = Math.sqrt(6), s2 = Math.sqrt(2);
+    var BZ = [-1 / s3, -1 / s3, -1 / s3], BY = [-1 / s6, -1 / s6, 2 / s6], BX = [1 / s2, -1 / s2, 0];
     (function build() {
       var GA = Math.PI * (3 - Math.sqrt(5)), EPS = 0.36, M = N - NG, i, j, k, inv = 1 / Math.sqrt(3);
       for (k = 0; k < NG; k++) {
         UX[k] = (k & 1 ? 1 : -1) * inv; UY[k] = (k & 2 ? 1 : -1) * inv; UZ[k] = (k & 4 ? 1 : -1) * inv;
-        if (!(k & 1)) EDGES.push(k, k | 1);
-        if (!(k & 2)) EDGES.push(k, k | 2);
-        if (!(k & 4)) EDGES.push(k, k | 4);
+        if (!parity(k)) for (var bit = 1; bit < 8; bit <<= 1) EDGES.push(k, k ^ bit);   // each even corner: its three directions
       }
       for (i = 0; i < M; i++) {
         var y = 1 - 2 * (i + EPS) / (M - 1 + 2 * EPS);
@@ -138,7 +146,8 @@
       for (k = 0; k < NG; k++) SZ[k] = 5.2;
       for (j = 0; j < M; j++) {
         var idx = RANKED[NG + j], u = Math.pow((j + 0.5) / M, 1 / FILL_POW);
-        AT[idx] = T_FILL + u * FILL * 0.92;           // the last one lands before the return
+        // the seventh beat: the first unbalanced dot arrives ALONE, then the flood
+        AT[idx] = j === 0 ? T_FILL : T_FILL + 0.6 + u * (FILL * 0.92 - 0.6);
         GL[idx] = lerp(0.75, 0.18, u);                // early dots glide slowly enough to follow
         SZ[idx] = lerp(5, 2.6, u) * (0.45 + 0.55 * rnd(idx));
       }
@@ -187,29 +196,47 @@
         : 'rgb(' + TONE_R[i] + ',' + TONE_G[i] + ',' + TONE_B[i] + ')';
     }
 
+    // cube space → screen: down the diagonal (BX, BY, BZ), then the turn (yaw about
+    // screen-vertical, pitch about screen-horizontal), then perspective
+    var PJX = 0, PJY = 0, PJZ = 0, PJS = 1, cyw = 1, syw = 0, cp = 1, sp = 0;
+    function project(x, y, z) {
+      var dx = x * BX[0] + y * BX[1] + z * BX[2], dy = x * BY[0] + y * BY[1] + z * BY[2], dz = x * BZ[0] + y * BZ[1] + z * BZ[2];
+      var x1 = dx * cyw + dz * syw, z1 = -dx * syw + dz * cyw;
+      var y2 = dy * cp - z1 * sp, z2 = dy * sp + z1 * cp;
+      PJS = FOV / (FOV + z2); PJX = cx + x1 * PJS * S; PJY = cy - y2 * PJS * S; PJZ = z2;
+    }
     function render() {
       ctx.clearRect(0, 0, W, H);
       var T = nowSec, i, j, k;
-      // THE PARTINGS. A corner's place follows from its bits: y parts with the line,
-      // x with the triangle (the bottom corners) or the square (the top ones), z with
-      // the cube. Until a parting runs, the corners it divides share one place.
-      var eL = part(T, T_LINE, STEP), eT = part(T, T_TRI, STEP), eS = part(T, T_SQ, STEP), eC = part(T, T_CUBE, CUBE_STEP);
+      // THE BEATS. Even corners (3, 5, 6, then 0) are the flat world and the triangle
+      // in space; each opens from the centre. The odd corners (1, 2, 4, 7) are where
+      // the even ones' three directions meet — they appear as the edges arrive.
+      var eL = part(T, T_LINE, STEP), eT = part(T, T_TRI, STEP), eM = part(T, T_MID, STEP);
+      var eX = part(T, T_EXP, EXP_STEP), eTurn = part(T, T_TURN, 1.1);
       var back = clamp01((T - T_RETURN) / RETURN), keep = 1 - back * back * back;   // the way home starts slow and ends fast
-      var heat = Math.max(1 - eC, back);                   // honey while the shape is young and on the way home, cool blue between
+      var heat = Math.max(1 - eTurn, back);                // honey while the shape is young and on the way home, cool blue once it turns
       var endFade = clamp01((T - DOT_IN) / 0.2);
-      // still while the flat shapes form; once the cube parts it turns, easing in
-      var tau = Math.max(0, T - T_CUBE), RAMP = 1.2;
-      var yaw = SPIN * (tau < RAMP ? tau * tau / (2 * RAMP) : tau - RAMP / 2);
-      var pitch = PITCH * eC, cyw = Math.cos(yaw), syw = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+      // the view: straight down the diagonal, so the cube reads as a hexagon. The
+      // fourth dot tilts it just enough to show depth, then it settles back; after
+      // the hexagon has held, the seventh beat breaks the balance and it turns.
+      var tiltP = clamp01((T - T_MID) / (T_EXP + EXP_STEP - T_MID));
+      var tilt = Math.sin(Math.PI * tiltP) * 15 * DEG;
+      var tau = Math.max(0, T - T_TURN), RAMP = 1.2;
+      var yaw = SPIN * (tau < RAMP ? tau * tau / (2 * RAMP) : tau - RAMP / 2) + tilt * 0.6;
+      var pitch = PITCH * eTurn + tilt; cyw = Math.cos(yaw); syw = Math.sin(yaw); cp = Math.cos(pitch); sp = Math.sin(pitch);
       var vn = 0;
 
       for (j = 0; j < N; j++) {                            // in arrival order: a parent is placed before its children
         i = RANKED[j];
         if (i < NG) {
-          if (eL <= 0) { BORN[i] = 0; continue; }          // still one dot — the honey dot draws it
-          var bx = i & 1 ? 1 : -1, by = i & 2 ? 1 : -1, bz = i & 4 ? 1 : -1;
-          VX[i] = bx * A * (by < 0 ? eT : eS); VY[i] = by * A * eL; VZ[i] = bz * A * eC;
-          HEAT[i] = heat;
+          var bx = i & 1 ? A : -A, by = i & 2 ? A : -A, bz = i & 4 ? A : -A, f;
+          if (parity(i)) { if (eX < 0.9) { BORN[i] = 0; continue; } f = 1; HEAT[i] = Math.max(heat, 1 - clamp01((eX - 0.9) / 0.1)); }
+          else {
+            f = i === 5 || i === 6 ? eL : (i === 3 ? eT : eM);
+            if (f <= 0) { BORN[i] = 0; continue; }       // still inside the dot it parts from
+            HEAT[i] = heat;
+          }
+          VX[i] = bx * f; VY[i] = by * f; VZ[i] = bz * f;
         } else {
           var gp = (T - AT[i]) / GL[i];
           if (gp <= 0) { BORN[i] = 0; continue; }          // not split off yet
@@ -221,33 +248,45 @@
           HEAT[i] = Math.max(back, 1 - g);                 // born honey, cools as it settles
         }
         BORN[i] = 1;
-        var vx = VX[i] * keep, vy = VY[i] * keep, vz = VZ[i] * keep;
-        var x1 = vx * cyw + vz * syw, z1 = -vx * syw + vz * cyw;
-        var y2 = vy * cp - z1 * sp, z2 = vy * sp + z1 * cp;
-        var sc = FOV / (FOV + z2);
-        var px = cx + x1 * sc * S, py = cy - y2 * sc * S;  // y up: the line parts up and down, the triangle opens at the bottom
-        if (i < NG) { QX[i] = px; QY[i] = py; }
         var q = vn++;
-        PX[q] = px; PY[q] = py; PZ[q] = z2;
-        PR[q] = Math.max(0.05, SZ[i] * sc * lerp(1, 0.5, back) * S);
+        project(VX[i] * keep, VY[i] * keep, VZ[i] * keep);
+        if (i < NG) { QX[i] = PJX; QY[i] = PJY; }
+        PX[q] = PJX; PY[q] = PJY; PZ[q] = PJZ;
+        PR[q] = Math.max(0.05, SZ[i] * PJS * lerp(1, 0.5, back) * S);
         PH[q] = HEAT[i]; PC[q] = colour(i, HEAT[i]);
       }
 
-      // THE EDGES: the cube's twelve, drawn from the first parting. While two corners
-      // still share a place their edge has no length, so the line, the triangle and
-      // the square appear on their own as the corners part. They give way to the fill.
-      var edgeA = clamp01(eL * 3) * (1 - clamp01((T - T_FILL) / 1.4)) * (1 - endFade);
+      // THE EDGES. The triangle in space joins the four even corners: while two of
+      // them still share the centre their edge has no length, so the line and the
+      // flat triangle appear on their own. From the fourth beat each even corner
+      // reaches out in its three directions; where three reaches meet, a corner.
+      var edgeA = clamp01(eL * 3) * (1 - clamp01((T - T_FILL - 0.6) / 1.4)) * (1 - endFade);
       if (edgeA > 0.003) {
         ctx.strokeStyle = 'rgb(' + Math.round(lerp(EDGE_C[0], GLOW_C[0], heat)) + ',' + Math.round(lerp(EDGE_C[1], GLOW_C[1], heat)) + ',' + Math.round(lerp(EDGE_C[2], GLOW_C[2], heat)) + ')';
         ctx.lineWidth = Math.max(1, 1.1 * S);
-        ctx.globalAlpha = 0.5 * edgeA;
-        ctx.beginPath();
-        for (k = 0; k < EDGES.length; k += 2) {
-          var a0 = EDGES[k], a1 = EDGES[k + 1];
-          if (Math.abs(QX[a0] - QX[a1]) + Math.abs(QY[a0] - QY[a1]) < 0.5) continue;
-          ctx.moveTo(QX[a0], QY[a0]); ctx.lineTo(QX[a1], QY[a1]);
+        var tetA = edgeA * (1 - clamp01((eX - 0.2) / 0.6));
+        if (tetA > 0.003) {
+          ctx.globalAlpha = 0.5 * tetA;
+          ctx.beginPath();
+          for (k = 0; k < TETRA.length; k += 2) {
+            var t0 = TETRA[k], t1 = TETRA[k + 1];
+            if (!BORN[t0] || !BORN[t1] || Math.abs(QX[t0] - QX[t1]) + Math.abs(QY[t0] - QY[t1]) < 0.5) continue;
+            ctx.moveTo(QX[t0], QY[t0]); ctx.lineTo(QX[t1], QY[t1]);
+          }
+          ctx.stroke();
         }
-        ctx.stroke();
+        if (eX > 0) {
+          ctx.globalAlpha = 0.5 * edgeA;
+          ctx.beginPath();
+          for (k = 0; k < EDGES.length; k += 2) {
+            var a0 = EDGES[k], a1 = EDGES[k + 1];                   // even → odd: the reach grows from the even corner
+            var ox = (a1 & 1 ? A : -A), oy = (a1 & 2 ? A : -A), oz = (a1 & 4 ? A : -A);
+            project((VX[a0] + (ox - VX[a0]) * eX) * keep, (VY[a0] + (oy - VY[a0]) * eX) * keep, (VZ[a0] + (oz - VZ[a0]) * eX) * keep);
+            if (Math.abs(QX[a0] - PJX) + Math.abs(QY[a0] - PJY) < 0.5) continue;
+            ctx.moveTo(QX[a0], QY[a0]); ctx.lineTo(PJX, PJY);
+          }
+          ctx.stroke();
+        }
       }
 
       if (ORDER.length !== vn) ORDER.length = vn;
