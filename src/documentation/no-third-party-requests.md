@@ -205,13 +205,18 @@ on `pluginthematrix.com`, `hypercomb.com`, `inspiredbyhumans.org`,
 loaded. `curl` without browser navigation headers does not see the injection;
 send `Accept: text/html` and `Sec-Fetch-Mode: navigate` to reproduce.
 
-Two defences, both owed:
+Two defences, both in place since 2026-10-18:
 
 - **The account switch** — Cloudflare dashboard → Web Analytics → *Manage
-  site* → automatic setup **Disable**, for every zone in the account. The only
-  fix for the Pages-served documents (`jwize.com`, `hypercomb.com`,
-  `inspiredbyhumans.org`), whose HTML never passes our Worker. The wrangler
-  OAuth login has no analytics scope, so this is a dashboard act.
+  site* → Real User Measurements **Disable**, for every site in the account
+  (seven: pointblanksolutions.ca, cafesociety.buzz, inspiredbyhumans.org,
+  realones.online, hypercomb.com, pluginthematrix.com, jwize.com — all were
+  on "Enable, excluding visitor data in the EU"). The only fix for the
+  Pages-served documents (`jwize.com`, `inspiredbyhumans.org`), whose HTML
+  never passes our Worker. The wrangler OAuth login has no analytics scope, so
+  this is a dashboard act; a new zone added to Web Analytics starts injecting
+  again until its site is set to Disable. Verified after the switch: every
+  hosted domain answers its page with zero beacon tags.
 - **`Cache-Control: no-transform` on every page** — the directive Cloudflare
   documents as the one that leaves a response alone. The host Worker sets it at
   its single egress (`untransformed()` in `blossom-worker/worker.js`) on every
