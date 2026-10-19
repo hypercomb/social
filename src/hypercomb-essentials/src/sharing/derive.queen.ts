@@ -50,6 +50,9 @@ export class DeriveQueenBee extends QueenBee {
   readonly command = 'derive'
   override description = 'Read a derivation and who verified it, re-derive it here, or sign what you found'
   override options = ['@<host>', '<record> @<host>', 'verify @<host>', 'verify <record> @<host>', 'attest <record> reproduced @<host>', 'attest <record> differs @<host>']
+  // The arguments are identifiers — record signatures and @hosts — never words:
+  // the line arrives exactly as said, and nothing in it runs as another word.
+  override rawArgs = true
   override examples = [
     { input: 'derive @example.com', result: 'What the sites there run was derived from, and who has verified it' },
     { input: 'derive verify @example.com', result: 'Re-derive it in this hive, and sign what came out' },
