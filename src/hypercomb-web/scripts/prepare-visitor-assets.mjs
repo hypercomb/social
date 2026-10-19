@@ -98,6 +98,22 @@ for (const sig of sigs) {
 }
 if (derived) await writeFile(join(outputContent, derived.derivation.sig), derived.derivation.bytes)
 
+// THE INPUTS SHIP BESIDE THE DERIVATION (documentation/derivations.md: a
+// reproducible derivation needs its inputs reachable). The readable package's
+// files go out too, by signature, so anyone can re-derive the minified package
+// from the live site itself (`verify-minified-package.mjs --host <door>`). No
+// pool marker, index or pack names them: no visitor fetches them, and the
+// first resolution stays exactly as slim.
+if (derived) {
+  let inputs = 0
+  for (const sig of new Set([...(current.bees ?? []), ...(current.dependencies ?? []), ...(current.layers ?? [])])) {
+    if (!SIG_RE.test(sig) || sigs.has(sig)) continue
+    await cp(join(sourceContent, sig), join(outputContent, sig))
+    inputs++
+  }
+  console.log(`[visitor-assets] ${inputs} readable input files ship beside the derivation (reachable by signature, fetched by no visitor)`)
+}
+
 if (derived) {
   const { orderedEntries, bagEntryName } = await tsImport('../../hypercomb-runtime/src/bags.ts', import.meta.url)
   for (const bag of derived.bags) {
