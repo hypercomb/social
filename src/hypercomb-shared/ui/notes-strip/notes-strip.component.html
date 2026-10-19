@@ -538,6 +538,142 @@
         }
       </ng-template>
 
+      <!-- THE LEDGER: the category tree to the left of the notes. A shared
+           notes ledger grows a hierarchy — the participant's AI names the
+           categories, Jev files each note into the one it fits, or either by
+           hand. A label shows that branch; the notes themselves never move
+           (filing is a mark they wear, kept beside them on the tile). -->
+      <div class="cv2-ledger" [class.has-cats]="catOpen()">
+      @if (catOpen()) {
+        <nav class="cv2-cats thin-scroll" [attr.aria-label]="'notes.cats.aria' | t">
+          <div class="cv2-cats-head">
+            <span class="cv2-cats-title">{{ 'notes.cats.title' | t }}</span>
+            <span class="cv2-cats-tools">
+              <button type="button" class="cv2-cats-tool" (click)="suggestCategories()"
+                      [disabled]="!!catBusy() || notes().length === 0"
+                      [title]="(catAiReady() ? 'notes.cats.suggest' : 'notes.cats.noAi') | t"
+                      [attr.aria-label]="'notes.cats.suggest' | t">
+                <span class="mat-sym" [class.is-spinning]="catBusy() === 'suggest'" aria-hidden="true">auto_awesome</span>
+              </button>
+              <button type="button" class="cv2-cats-tool" (click)="sortNotes()"
+                      [disabled]="!!catBusy() || catRows().length === 0 || catUnsorted() === 0"
+                      [title]="(catJevReady() ? 'notes.cats.sortJev' : 'notes.cats.sortAi') | t"
+                      [attr.aria-label]="'notes.cats.sort' | t">
+                <span class="mat-sym" [class.is-spinning]="catBusy() === 'sort'" aria-hidden="true">sort</span>
+              </button>
+              <button type="button" class="cv2-cats-tool" (click)="startAddCategory('')"
+                      [title]="'notes.cats.add' | t" [attr.aria-label]="'notes.cats.add' | t">
+                <span class="mat-sym" aria-hidden="true">add</span>
+              </button>
+            </span>
+          </div>
+
+          <button type="button" class="cv2-cat cv2-cat-all" [class.is-on]="catBranch() === null" (click)="pickBranch(null)">
+            <span class="mat-sym cv2-cat-glyph" aria-hidden="true">{{ catGlyph(null) }}</span>
+            <span class="cv2-cat-name">{{ 'notes.cats.all' | t }}</span>
+            <span class="cv2-cat-count">{{ notes().length }}</span>
+          </button>
+
+          @for (row of catRows(); track row.key) {
+            <div class="cv2-cat-row" [style.--depth]="row.depth">
+              @if (catRenaming() === row.key) {
+                <input type="text" class="cv2-cat-input" data-escape-local autocomplete="off"
+                       [value]="row.name" (keydown)="onRenameKey($event, row.path)" (blur)="catRenaming.set(null)" />
+              } @else {
+                <button type="button" class="cv2-cat" [class.is-on]="catBranch() === row.key"
+                        [class.is-empty]="row.count === 0"
+                        [attr.aria-expanded]="row.hasChildren ? !isCatCollapsed(row.key) : null"
+                        (click)="pickBranch(row.key)" (dblclick)="startRename(row.key)"
+                        [title]="row.holders > 1 ? ('notes.cats.held' | t: { count: row.holders }) : row.name">
+                  @if (row.hasChildren) {
+                    <span class="mat-sym cv2-cat-fold" aria-hidden="true"
+                          (click)="toggleCatCollapsed(row.key, $event)">{{ isCatCollapsed(row.key) ? 'chevron_right' : 'expand_more' }}</span>
+                  }
+                  <span class="mat-sym cv2-cat-glyph" aria-hidden="true">{{ catGlyph(row.key) }}</span>
+                  <span class="cv2-cat-name">{{ row.name }}</span>
+                  @if (row.holders > 1) {
+                    <span class="cv2-cat-held">×{{ row.holders }}</span>
+                  }
+                  <span class="cv2-cat-count">{{ row.count }}</span>
+                </button>
+                <span class="cv2-cat-acts">
+                  @if (catNoteInHand()) {
+                    @if (catFiledAt() !== row.key) {
+                      <button type="button" class="cv2-cat-act" (click)="fileHere(row.path)"
+                              [title]="'notes.cats.fileHere' | t" [attr.aria-label]="'notes.cats.fileHere' | t">
+                        <span class="mat-sym" aria-hidden="true">sell</span>
+                      </button>
+                    }
+                  }
+                  @if (row.depth < 2) {
+                    <button type="button" class="cv2-cat-act" (click)="startAddCategory(row.key)"
+                            [title]="'notes.cats.addUnder' | t" [attr.aria-label]="'notes.cats.addUnder' | t">
+                      <span class="mat-sym" aria-hidden="true">add</span>
+                    </button>
+                  }
+                  <button type="button" class="cv2-cat-act" (click)="removeCategory(row.path)"
+                          [title]="'notes.cats.remove' | t" [attr.aria-label]="'notes.cats.remove' | t">
+                    <span class="mat-sym" aria-hidden="true">close</span>
+                  </button>
+                </span>
+              }
+            </div>
+            @if (catAddingUnder() === row.key) {
+              <div class="cv2-cat-row" [style.--depth]="row.depth + 1">
+                <input type="text" class="cv2-cat-input" data-escape-local autocomplete="off"
+                       [placeholder]="'notes.cats.namePlaceholder' | t"
+                       (keydown)="onAddCategoryKey($event)" (blur)="catAddingUnder.set(null)" />
+              </div>
+            }
+          }
+          @if (catAddingUnder() === '') {
+            <div class="cv2-cat-row">
+              <input type="text" class="cv2-cat-input" data-escape-local autocomplete="off"
+                     [placeholder]="'notes.cats.namePlaceholder' | t"
+                     (keydown)="onAddCategoryKey($event)" (blur)="catAddingUnder.set(null)" />
+            </div>
+          }
+
+          @if (catRows().length > 0) {
+            <button type="button" class="cv2-cat cv2-cat-unsorted" [class.is-on]="catBranch() === UNSORTED" (click)="pickBranch(UNSORTED)">
+              <span class="mat-sym cv2-cat-glyph" aria-hidden="true">{{ catGlyph(UNSORTED) }}</span>
+              <span class="cv2-cat-name">{{ 'notes.cats.unsorted' | t }}</span>
+              <span class="cv2-cat-count">{{ catUnsorted() }}</span>
+            </button>
+            @if (catNoteInHand() && catFiledAt()) {
+              <button type="button" class="cv2-cats-link" (click)="unfileInHand()">{{ 'notes.cats.unfile' | t }}</button>
+            }
+          } @else if (catAddingUnder() === null) {
+            <p class="cv2-cats-hint">{{ (catAiReady() ? 'notes.cats.emptyAi' : 'notes.cats.empty') | t }}</p>
+          }
+
+          @if (catRoomOnly().length > 0) {
+            <div class="cv2-cats-room">
+              <span class="cv2-cats-room-title">{{ 'notes.cats.inRoom' | t }}</span>
+              @for (r of catRoomOnly(); track r.name) {
+                <div class="cv2-cat-row">
+                  <span class="cv2-cat is-room" [title]="r.children.join(' · ')">
+                    <span class="mat-sym cv2-cat-glyph" aria-hidden="true">label</span>
+                    <span class="cv2-cat-name">{{ r.name }}</span>
+                    <span class="cv2-cat-held">×{{ r.holders }}</span>
+                  </span>
+                  <span class="cv2-cat-acts is-shown">
+                    <button type="button" class="cv2-cat-act" (click)="adoptRoomCategory(r)"
+                            [title]="'notes.cats.take' | t" [attr.aria-label]="'notes.cats.take' | t">
+                      <span class="mat-sym" aria-hidden="true">check</span>
+                    </button>
+                  </span>
+                </div>
+              }
+            </div>
+          }
+
+          @if (catMessage()) {
+            <p class="cv2-cats-msg" role="status">{{ catMessage() }}</p>
+          }
+        </nav>
+      }
+
       <!-- Notes tree body. Roots render through the recursive template,
            filtered by the search above. -->
       <div class="cv2-list thin-scroll notes-strip-body" #notesList
@@ -578,6 +714,7 @@
           </div>
         }
       </div>
+      </div><!-- /cv2-ledger -->
 
       <!-- Editor footer — note count for the active tile. -->
       <footer class="cv2-foot">

@@ -10,6 +10,7 @@ import { jevFrontInput, jevFrontQuestions, jevFrontResult, jevFrontState, type J
 import { jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type JevVerifyInput, type JevVerifyResult } from './jev-verify.js'
 import { jevEvidenceText } from './jev-evidence.js'
 import { jevFileInput, jevFileQuestions, jevFileResult, type JevFileResult } from './jev-file.js'
+import { jevSortInput, jevSortQuestions, jevSortResult, type JevSortResult } from './jev-sort.js'
 
 /** A subset of material ALREADY sent to / received from the worker whose
  * table is being judged. Never fetches hive content, accepts signatures to
@@ -183,6 +184,19 @@ export class JevDecisionService {
     if (!this.readyForHive()) throw new Error('Filing needs Jev switched on and OpenRouter allowed to read the hive')
     const input = jevFileInput(raw)
     const result = await this.#post({ state: input, questions: jevFileQuestions(input) }, body => jevFileResult(body, input), signal)
+    if (!this.readyForHive()) throw new Error('OpenRouter access changed during the decision')
+    return result
+  }
+
+  /** JEV SORTS NOTES (jev-sort.ts): which category of the tile's tree does
+   *  each note belong in? One choice per note, all in one call. Only the
+   *  notes' words and the category names travel; the answer only chooses
+   *  where each note is filed. */
+  async sort(raw: unknown, signal?: AbortSignal): Promise<JevSortResult> {
+    signal?.throwIfAborted()
+    if (!this.readyForHive()) throw new Error('Sorting needs Jev switched on and OpenRouter allowed to read the hive')
+    const input = jevSortInput(raw)
+    const result = await this.#post({ state: input, questions: jevSortQuestions(input) }, body => jevSortResult(body, input), signal, 40_000)
     if (!this.readyForHive()) throw new Error('OpenRouter access changed during the decision')
     return result
   }

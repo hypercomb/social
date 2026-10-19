@@ -91,6 +91,7 @@ type NotesLike = {
   getNotesAtSegments(s: readonly string[]): Promise<{ id: string; text: string }[]>
   deleteAtSegments(parents: readonly string[], cell: string, id: string): Promise<void>
   addAtSegments(parents: readonly string[], cell: string, text: string): Promise<void>
+  arrivalsOf(entries: readonly unknown[]): Promise<Map<string, number>>
 }
 const notes = services['@diamondcoreprocessor.com/NotesService'] as NotesLike
 const noteBytes = (text: string): string => JSON.stringify({ children: [], mark: null, note: text, shape: null })

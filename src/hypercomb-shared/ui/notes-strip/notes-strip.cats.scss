@@ -1,0 +1,240 @@
+// hypercomb-shared/ui/notes-strip/notes-strip.cats.scss
+//
+// THE LEDGER — the category tree to the left of the notes. On the desk it is
+// a narrow column beside the notes column; in a narrower window it sits above
+// the notes, short and scrollable, so the notes keep the room.
+//
+// A label is one quiet row: a fold chevron when it has children, its glyph
+// (a check when it is the branch on show), the name, how many people in the
+// room hold it, and the count of notes under it. Its actions — file the note
+// in hand here, add beneath, remove — appear on hover, as the peer actions do.
+//
+// One of the notes strip's surface stylesheets (see the component's
+// `styleUrls`) — a surface of its own, so no other sheet grows.
+
+@use './notes-strip-shared' as *;
+
+.cv2-ledger {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.cv2-cats {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 8px 10px;
+  max-height: 34%;
+  overflow-y: auto;
+  border-bottom: 1px solid $guide;
+  flex: 0 0 auto;
+}
+
+@media (min-width: $bp-tablet-land) {
+  // The tree takes its width out of the centre column, so the desk gives that
+  // column the larger share while the tree shows; the notes keep a reading
+  // measure instead of a three-word column.
+  :host .notes-strip:has(.cv2-ledger.has-cats) {
+    grid-template-columns: clamp(200px, 17%, 300px) minmax(0, 1.45fr) minmax(0, 1fr);
+  }
+  .cv2-ledger.has-cats { flex-direction: row; }
+  .cv2-cats {
+    flex: 0 0 clamp(190px, 34%, 240px);
+    max-height: none;
+    border-bottom: none;
+    border-right: 1px solid $guide;
+  }
+}
+
+.cv2-cats-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 6px 6px;
+}
+
+.cv2-cats-title {
+  font-size: scaled(10.5px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--md-on-surface-faint);
+}
+
+.cv2-cats-tools { display: inline-flex; gap: 2px; }
+
+.cv2-cats-tool,
+.cv2-cat-act {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--md-on-surface-variant, inherit);
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+
+  .mat-sym { font-size: 16px; }
+  &:hover:not(:disabled) { background: color-mix(in srgb, var(--md-on-surface) 9%, transparent); color: var(--md-on-surface); }
+  &:disabled { opacity: 0.35; cursor: default; }
+}
+
+.is-spinning { animation: cv2-cats-spin 1.1s linear infinite; }
+@keyframes cv2-cats-spin { to { transform: rotate(360deg); } }
+
+.cv2-cat-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-left: calc(var(--depth, 0) * 14px);
+
+  &:hover .cv2-cat-acts,
+  &:focus-within .cv2-cat-acts { opacity: 1; pointer-events: auto; }
+}
+
+.cv2-cat {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--md-on-surface);
+  font: inherit;
+  font-size: scaled(13px);
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 8px 4px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+
+  &:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
+  &.is-on {
+    background: color-mix(in srgb, #{$steel} 16%, transparent);
+    .cv2-cat-glyph { color: $steel; }
+    .cv2-cat-name { font-weight: 600; }
+  }
+  &.is-empty .cv2-cat-name { color: var(--md-on-surface-variant, inherit); }
+  &.is-room { cursor: default; opacity: 0.75; }
+}
+
+.cv2-cat-fold {
+  font-size: 16px;
+  width: 16px;
+  margin-left: -4px;
+  color: var(--md-on-surface-faint);
+}
+
+.cv2-cat-glyph {
+  font-size: 15px;
+  color: var(--md-on-surface-faint);
+  flex: 0 0 auto;
+}
+
+.cv2-cat-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cv2-cat-held {
+  font-size: scaled(10.5px);
+  color: $steel;
+  font-variant-numeric: tabular-nums;
+}
+
+.cv2-cat-count {
+  font-size: scaled(11px);
+  color: var(--md-on-surface-faint);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.4em;
+  text-align: right;
+}
+
+// The row's actions sit over the count while hovered; the name keeps its room.
+.cv2-cat-acts {
+  .cv2-cat-act { width: 21px; height: 21px; .mat-sym { font-size: 14px; } }
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  gap: 1px;
+  padding-left: 6px;
+  border-radius: 2px;
+  background: var(--md-surface-container, var(--md-surface, #1b1f24));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+
+  &.is-shown { opacity: 1; pointer-events: auto; background: none; }
+}
+
+.cv2-cat-input {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  border: 1px solid rgba($steel, 0.45);
+  background: color-mix(in srgb, var(--md-on-surface) 4%, transparent);
+  color: var(--md-on-surface);
+  font: inherit;
+  font-size: scaled(13px);
+  outline: none;
+
+  &:focus { border-color: $steel; }
+}
+
+.cv2-cat-all { margin-bottom: 2px; }
+.cv2-cat-unsorted { margin-top: 4px; }
+
+.cv2-cats-link {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: $steel;
+  font: inherit;
+  font-size: scaled(11.5px);
+  text-align: left;
+  padding: 4px 8px;
+  cursor: pointer;
+
+  &:hover { text-decoration: underline; }
+}
+
+.cv2-cats-hint,
+.cv2-cats-msg {
+  margin: 6px 8px 0;
+  font-size: scaled(11.5px);
+  line-height: 1.45;
+  color: var(--md-on-surface-variant, inherit);
+}
+
+.cv2-cats-msg { color: $steel; }
+
+.cv2-cats-room {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid $guide;
+}
+
+.cv2-cats-room-title {
+  padding: 0 6px 4px;
+  font-size: scaled(10.5px);
+  color: var(--md-on-surface-faint);
+}

@@ -175,6 +175,30 @@ type NotesService = {
   getNotes(cellLabel: string): Promise<Note[]>
 }
 
+/** The category tree beside the notes (essentials notes/note-categories.service.ts),
+ *  reached structurally through IoC like every module service here. */
+type CategoryRow = { key: string; path: readonly number[]; name: string; depth: number; count: number; holders: number; hasChildren: boolean }
+type RoomOnlyCategory = { name: string; holders: number; children: readonly string[] }
+type CategoryOutcome = { ok: true; count: number; by?: 'jev' | 'ai' } | { ok: false; reason: string; detail?: string }
+type NoteCategoriesService = EventTarget & {
+  busy(): 'suggest' | 'sort' | null
+  load(cell: string): Promise<unknown>
+  rows(cell: string, present: ReadonlySet<string>): CategoryRow[]
+  roomOnly(cell: string): RoomOnlyCategory[]
+  branch(cell: string, key: string): ReadonlySet<string>
+  filedAt(cell: string, noteId: string): string
+  add(cell: string, parent: readonly number[], name: string): Promise<readonly number[] | null>
+  remove(cell: string, path: readonly number[]): Promise<void>
+  rename(cell: string, path: readonly number[], name: string): Promise<void>
+  file(cell: string, path: readonly number[], noteId: string): Promise<void>
+  unfile(cell: string, noteId: string): Promise<void>
+  adopt(cell: string, outline: readonly { name: string; children?: readonly { name: string }[] }[]): Promise<void>
+  aiReady(): boolean
+  jevReady(): boolean
+  suggest(cell: string, notes: readonly { id: string; text: string }[]): Promise<CategoryOutcome>
+  sort(cell: string, notes: readonly { id: string; text: string }[]): Promise<CategoryOutcome>
+}
+
 /** A note another participant in the swarm holds on this tile — read from
  *  their layer for it (essentials notes/swarm-notes.service.ts). */
 type PeerNoteRoot = { note: Note; by: string; holders: readonly string[] }
@@ -282,6 +306,7 @@ type InputModeStackLike = {
     './notes-strip.lists.scss',
     './notes-strip.desk.scss',
     './notes-strip.swarm.scss',
+    './notes-strip.cats.scss',
   ],
 })
 export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
@@ -417,11 +442,11 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     pick: (value) => { this.setFace(value as NotesFace) },
   }]
 
-  #t(key: string, fallback: string): string {
+  #t(key: string, fallback: string, params?: Record<string, unknown>): string {
     const i18n = window.ioc?.get<I18nProvider>('@hypercomb.social/I18n')
     // A missing key comes back AS the key — that is the catalog saying it has
     // nothing, and printing `notes.openTile` at a user is worse than English.
-    const value = i18n?.t(key)
+    const value = i18n?.t(key, params as never)
     return value && value !== key ? value : fallback
   }
 
@@ -1912,6 +1937,228 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     if (untracked(() => this.#stickToBottom)) untracked(() => this.#scrollListToBottom())
   })
 
+  // ── The category tree (the ledger's left column) ──────────────
+  // A tile's notes get a hierarchy without a single note moving: the tree is
+  // its own document on the tile (essentials NoteCategories), a note is filed
+  // by being named in it. Picking a label shows that branch in the column
+  // beside it; the picked label wears a check. Names come from the
+  // participant's AI (`auto_awesome`), Jev sorts (`sort`), and both can be
+  // done by hand — `+` names a category, `sell` files the note in hand.
+  readonly #categories = signal<NoteCategoriesService | null>(null)
+  readonly #catVersion = signal(0)
+  /** The branch the notes column shows: null = every note, 'unsorted', or a
+   *  category's dotted path. */
+  readonly catBranch = signal<string | null>(null)
+  /** Naming a new category under this dotted path ('' = top), or null. */
+  readonly catAddingUnder = signal<string | null>(null)
+  readonly catRenaming = signal<string | null>(null)
+  readonly #catCollapsed = signal<ReadonlySet<string>>(new Set())
+  readonly catMessage = signal('')
+
+  /** The tree shows wherever a tile's notes do. */
+  readonly catOpen = computed(() => !!this.cell() && !!this.#categories())
+
+  readonly catBusy = computed(() => { this.#catVersion(); return this.#categories()?.busy() ?? null })
+  readonly catAiReady = computed(() => { this.#catVersion(); return !!this.#categories()?.aiReady() })
+  readonly catJevReady = computed(() => { this.#catVersion(); return !!this.#categories()?.jevReady() })
+
+  readonly #presentIds = computed<ReadonlySet<string>>(() => new Set(this.notes().map(n => n.id)))
+
+  /** The tree as rows, a folded branch's rows left out. */
+  readonly catRows = computed<readonly CategoryRow[]>(() => {
+    this.#catVersion()
+    this.#swarmVersion()
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!svc || !cell) return []
+    const folded = this.#catCollapsed()
+    return svc.rows(cell, this.#presentIds())
+      .filter(r => ![...folded].some(k => r.key.startsWith(k + '.')))
+  })
+
+  readonly catRoomOnly = computed<readonly RoomOnlyCategory[]>(() => {
+    this.#catVersion()
+    this.#swarmVersion()
+    const svc = this.#categories()
+    const cell = this.cell()
+    return svc && cell ? svc.roomOnly(cell) : []
+  })
+
+  /** How many notes on the tile no category holds. */
+  readonly catUnsorted = computed(() => {
+    this.#catVersion()
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!svc || !cell) return 0
+    const filed = svc.branch(cell, 'unsorted')
+    return this.notes().filter(n => !filed.has(n.id)).length
+  })
+
+  /** The note in the pane, when it is one of the tile's notes — the one the
+   *  `sell` button files. */
+  readonly catNoteInHand = computed<string | null>(() => {
+    const id = this.readingRow()?.note.id ?? null
+    return id && this.#presentIds().has(id) ? id : null
+  })
+
+  readonly catFiledAt = computed(() => {
+    this.#catVersion()
+    const svc = this.#categories()
+    const cell = this.cell()
+    const id = this.catNoteInHand()
+    return svc && cell && id ? svc.filedAt(cell, id) : ''
+  })
+
+  #inBranch(notes: readonly Note[]): readonly Note[] {
+    const branch = this.catBranch()
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!branch || !svc || !cell) return notes
+    this.#catVersion()
+    const set = svc.branch(cell, branch)
+    return branch === 'unsorted' ? notes.filter(n => !set.has(n.id)) : notes.filter(n => set.has(n.id))
+  }
+
+  pickBranch(key: string | null): void {
+    this.catBranch.set(this.catBranch() === key ? null : key)
+    this.readingIndex.set(0)
+  }
+
+  /** The branch key for the notes no category holds. */
+  readonly UNSORTED = 'unsorted'
+
+  /** A label's glyph: the check while it is the branch on show, else what it
+   *  is — every note, a category, or the unsorted tray. */
+  catGlyph(key: string | null): string {
+    if (this.catBranch() === key) return 'check_circle'
+    return key === null ? 'account_tree' : key === this.UNSORTED ? 'inbox' : 'label'
+  }
+
+  isCatCollapsed(key: string): boolean { return this.#catCollapsed().has(key) }
+
+  toggleCatCollapsed(key: string, event: Event): void {
+    event.stopPropagation()
+    const next = new Set(this.#catCollapsed())
+    if (!next.delete(key)) next.add(key)
+    this.#catCollapsed.set(next)
+  }
+
+  startAddCategory(parentKey: string): void {
+    this.catRenaming.set(null)
+    this.catAddingUnder.set(parentKey)
+    this.#focusCatInput(false)
+  }
+
+  /** Focus the tree's one open field as soon as it is on screen. It appears
+   *  on the render after the click, so try each frame for a few; typing must
+   *  land in it, never in the command line behind it. */
+  #focusCatInput(select: boolean): void {
+    let tries = 0
+    const attempt = (): void => {
+      const input = this.#host.nativeElement.querySelector('.cv2-cats .cv2-cat-input') as HTMLInputElement | null
+      if (input) { input.focus(); if (select) input.select(); return }
+      if (++tries < 20) requestAnimationFrame(attempt)
+    }
+    requestAnimationFrame(attempt)
+  }
+
+  /** Rename in place: the label becomes a field, focused and selected, so
+   *  typing replaces the name and never reaches the command line. */
+  startRename(key: string): void {
+    this.catAddingUnder.set(null)
+    this.catRenaming.set(key)
+    this.#focusCatInput(true)
+  }
+
+  onAddCategoryKey(event: KeyboardEvent): void {
+    if (event.key === 'Escape') { event.preventDefault(); this.catAddingUnder.set(null); return }
+    if (event.key !== 'Enter' || event.isComposing) return
+    event.preventDefault()
+    const input = event.target as HTMLInputElement
+    const name = input.value.trim()
+    const parentKey = this.catAddingUnder()
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!name || parentKey === null || !svc || !cell) { this.catAddingUnder.set(null); return }
+    // Stay open: naming categories is a run of them, like writing lines.
+    input.value = ''
+    void svc.add(cell, parentKey ? parentKey.split('.').map(Number) : [], name)
+  }
+
+  onRenameKey(event: KeyboardEvent, path: readonly number[]): void {
+    if (event.key === 'Escape') { event.preventDefault(); this.catRenaming.set(null); return }
+    if (event.key !== 'Enter' || event.isComposing) return
+    event.preventDefault()
+    const name = (event.target as HTMLInputElement).value.trim()
+    const svc = this.#categories()
+    const cell = this.cell()
+    this.catRenaming.set(null)
+    if (name && svc && cell) void svc.rename(cell, path, name)
+  }
+
+  removeCategory(path: readonly number[]): void {
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!svc || !cell) return
+    const key = path.join('.')
+    const branch = this.catBranch()
+    if (branch && (branch === key || branch.startsWith(key + '.'))) this.catBranch.set(null)
+    void svc.remove(cell, path)
+  }
+
+  fileHere(path: readonly number[]): void {
+    const svc = this.#categories()
+    const cell = this.cell()
+    const id = this.catNoteInHand()
+    if (svc && cell && id) void svc.file(cell, path, id)
+  }
+
+  unfileInHand(): void {
+    const svc = this.#categories()
+    const cell = this.cell()
+    const id = this.catNoteInHand()
+    if (svc && cell && id) void svc.unfile(cell, id)
+  }
+
+  adoptRoomCategory(r: RoomOnlyCategory): void {
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (svc && cell) void svc.adopt(cell, [{ name: r.name, children: r.children.map(name => ({ name })) }])
+  }
+
+  /** The tile's notes as the helpers read them: each root with the lines
+   *  beneath it, so a list is judged by what it holds, not just its head. */
+  #catNotes(): { id: string; text: string }[] {
+    const flat = (n: Note): string[] => [this.noteDisplayText(n), ...n.children.flatMap(flat)]
+    return this.notes().map(n => ({ id: n.id, text: flat(n).filter(Boolean).join(' — ').slice(0, 600) }))
+  }
+
+  async suggestCategories(): Promise<void> {
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!svc || !cell) return
+    this.catMessage.set('')
+    this.#catSay(await svc.suggest(cell, this.#catNotes()), 'suggest')
+  }
+
+  async sortNotes(): Promise<void> {
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!svc || !cell) return
+    this.catMessage.set('')
+    this.#catSay(await svc.sort(cell, this.#catNotes()), 'sort')
+  }
+
+  #catSay(outcome: CategoryOutcome, act: 'suggest' | 'sort'): void {
+    if (outcome.ok) {
+      const key = act === 'suggest' ? 'notes.cats.suggested' : (outcome.by === 'jev' ? 'notes.cats.sortedJev' : 'notes.cats.sortedAi')
+      this.catMessage.set(this.#t(key, '', { count: outcome.count }))
+      return
+    }
+    const fallback = outcome.detail ? `${outcome.reason}: ${outcome.detail}` : outcome.reason
+    this.catMessage.set(this.#t(`notes.cats.why.${outcome.reason}`, fallback, outcome.detail ? { detail: outcome.detail } : undefined))
+  }
+
   // ── Notes in the swarm ──────────────────────────────────────
   // Notes are one thing and the swarm is a property of them: everyone in the
   // room who shares this tile shows here, each root in the colour of who
@@ -2056,7 +2303,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   readonly visibleNotes = computed<readonly Note[]>(() => {
     const q = this.noteQuery().trim().toLowerCase()
     const wantLists = this.tab() === 'lists'
-    const all = this.notes().filter(n => this.#isListRoot(n) === wantLists)
+    const all = this.#inBranch(this.notes()).filter(n => this.#isListRoot(n) === wantLists)
     if (!q) return all
     const prune = (nodes: readonly Note[]): Note[] => {
       const out: Note[] = []
@@ -2907,6 +3154,25 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
     // Notes in the swarm: hold the service when it lands, repaint when a peer's
     // notes change, and read the swarm for whichever tile is open.
+    window.ioc.whenReady('@diamondcoreprocessor.com/NoteCategories', (svc: NoteCategoriesService) => {
+      const repaint = (): void => this.#catVersion.update(v => v + 1)
+      svc.addEventListener('change', repaint)
+      this.#cleanups.push(() => svc.removeEventListener('change', repaint))
+      this.#categories.set(svc)
+    })
+    // Read the tile's tree when the tile in hand changes; a different tile is
+    // a different tree, so the branch picked on the last one goes.
+    effect(() => {
+      const svc = this.#categories()
+      const cell = this.cell()
+      untracked(() => {
+        this.catBranch.set(null)
+        this.catAddingUnder.set(null)
+        this.catRenaming.set(null)
+        this.catMessage.set('')
+        if (svc && cell) void svc.load(cell)
+      })
+    })
     window.ioc.whenReady('@diamondcoreprocessor.com/SwarmNotes', (svc: SwarmNotesService) => {
       const repaint = (): void => this.#swarmVersion.update(v => v + 1)
       svc.addEventListener('change', repaint)

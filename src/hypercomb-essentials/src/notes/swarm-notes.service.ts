@@ -25,6 +25,7 @@ import { EffectBus, moleculeKey } from '@hypercomb/core'
 import { isJoinedHere } from '../sharing/membership.js'
 import { isCellPublic, setCellPublic } from '../presentation/tiles/tile-public.js'
 import { foldPeerRoots, participantColor, type PeerNoteRoot, type SwarmNote, type SwarmNoteCounts } from './swarm-notes.js'
+import { readCategoryDoc, type CategoryDoc } from './note-categories.js'
 
 export const SWARM_NOTES_KEY = '@diamondcoreprocessor.com/SwarmNotes'
 
@@ -73,6 +74,8 @@ export class SwarmNotes extends EventTarget {
   #pageKey = ''
   #roots = new Map<string, PeerNoteRoot[]>()
   #heldMine = new Map<string, Map<string, string[]>>()
+  /** Each peer's category tree on a tile (their layer's `categories` slot). */
+  #peerCategories = new Map<string, { pubkey: string; doc: CategoryDoc }[]>()
   #firstHolder = new Map<string, string>()
   /** When this desk first saw each root on this page — yours and everyone's.
    *  A note carries no time; arrival order is what makes the room ONE list. */
@@ -239,6 +242,14 @@ export class SwarmNotes extends EventTarget {
 
   /** Peer roots on `cell` (a tile of the page this tab stands on) as of the
    *  last read. Synchronous; `refresh` reads. Empty outside a swarm. */
+  /** Every peer's category tree on `cell`, as last read — ignored people
+   *  and a hidden room hold none. */
+  peerCategoriesFor(cell: string): readonly { pubkey: string; doc: CategoryDoc }[] {
+    if (this.#roomHidden) return []
+    return (this.#peerCategories.get(moleculeKey(cell)) ?? [])
+      .filter(p => !this.#ignoredSession.has(p.pubkey) && !this.#ignoredAlways.has(p.pubkey))
+  }
+
   rootsFor(cell: string): readonly PeerNoteRoot[] {
     this.#syncPage()
     if (!isJoinedHere() || this.#roomHidden) return []
@@ -320,6 +331,7 @@ export class SwarmNotes extends EventTarget {
     const tiles = (swarm.peerTilesAtCurrentSig?.() ?? [])
       .filter(t => typeof t.layerSig === 'string' && SIG.test(t.layerSig) && moleculeKey(t.name) === key)
     const peers: { pubkey: string; notes: SwarmNote[] }[] = []
+    const categoryTrees: { pubkey: string; doc: CategoryDoc }[] = []
     // When each line arrived on its writer's list (the incidence's `at`):
     // the room reads in the order lines were WRITTEN, the same for everyone
     // and across reloads. Earliest claim wins when several hold one note.
@@ -334,6 +346,14 @@ export class SwarmNotes extends EventTarget {
       if (!layer) {
         await this.#ensure(layerSig, 'layer', new Set())
         layer = await history.getLayerBySig(layerSig).catch(() => null)
+      }
+      // Their category tree rides the same layer: one resource, its sig in
+      // the `categories` slot.
+      const treeSig = String(layer?.['categories'] ?? '')
+      if (SIG.test(treeSig)) {
+        await this.#ensure(treeSig, 'resource', new Set())
+        const doc = await this.#readTree(treeSig)
+        if (doc && doc.categories.length) categoryTrees.push({ pubkey: t.peerPubkey, doc })
       }
       const slot = Array.isArray(layer?.['notes']) ? layer!['notes'] as unknown[] : []
       if (slot.length === 0) return
@@ -359,7 +379,22 @@ export class SwarmNotes extends EventTarget {
       if (at !== undefined) this.#firstSeen.set(id, at)
       else if (!this.#firstSeen.has(id)) this.#firstSeen.set(id, now + tick++ / 1000)
     }
+    const treesBefore = JSON.stringify(this.#peerCategories.get(key) ?? [])
+    this.#peerCategories.set(key, categoryTrees.sort((a, b) => a.pubkey.localeCompare(b.pubkey)))
+    const treesMoved = treesBefore !== JSON.stringify(this.#peerCategories.get(key))
     this.#set(cell, key, roots, heldMine)
+    if (treesMoved) this.dispatchEvent(new CustomEvent('change', { detail: { cell } }))
+  }
+
+  async #readTree(sig: string): Promise<CategoryDoc | null> {
+    try {
+      let blob = await get<StoreShape>('@hypercomb.social/Store')?.getResource?.(sig).catch(() => null) ?? null
+      if (!blob) {
+        const bytes = await get<BrokerShape>('@diamondcoreprocessor.com/ContentBrokerDrone')?.fetchBySig?.(sig, 'resource', FETCH_TIMEOUT_MS).catch(() => null)
+        if (bytes) blob = new Blob([bytes as BlobPart])
+      }
+      return blob ? readCategoryDoc(JSON.parse(await blob.text())) : null
+    } catch { return null }
   }
 
   #set(cell: string, key: string, roots: PeerNoteRoot[], heldMine: Map<string, string[]>): void {

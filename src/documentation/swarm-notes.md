@@ -90,15 +90,46 @@ node scripts/drive-swarm-notes.cjs --url http://localhost:4251/ --relay ws://loc
 It proves both directions, colour and author, counts, take, two holders, and
 that leaving removes untaken notes while taken ones stay.
 
-## Next: categories that settle by count
+## Categories: the ledger's tree
 
-A **category** is a heading root in the notes tree, and organizing is nesting
-notes under it, which the desk already does by hand.
+*jwize, 2026-10-18: "AI creates some categories and Jev sorts them to fit the
+structure … a hierarchy of the notes in their categorical order … to the left
+of the notes, a treeview of sorts."*
 
-- **Peers' categories show as optional roots.** They are counted by how many
-  participants hold a category of that name. The name folds to one molecule, so
-  the shared structure settles by numbers.
-- **Each participant organizes in their own tree.** They file notes by hand, or
-  their own AI (their provider, their key) suggests a filing that they apply.
-  Both write the same nests, and neither is a parent that someone else's notes
-  are moved into.
+A tile's notes grow a hierarchy, shown as a tree in a column to the left of
+the notes. Picking a label shows that branch (the label wears a check),
+**Unsorted** shows what no category holds, and **All notes** shows everything.
+
+- **The notes are never touched.** The tree is its own canonical JSON
+  document, `{ categories: [{ name, notes: [noteSig], children }] }`, and the
+  tile's layer points at it from the `categories` slot, beside `notes`. Filing
+  a note puts its signature in a category, so the note keeps its bytes, its
+  place in the list and its identity. That is why categories are not heading
+  notes with notes nested under them, which the earlier plan proposed: a
+  parent note embeds its children, so nesting would rewrite atoms and move
+  every filed note onto the lists tab.
+- **One place per note.** Filing a note again moves it. Removing a category
+  unsorts its notes and loses none of them. Names fold the way tile names do,
+  so `Energy` and `energy` are one category. The tree goes three levels deep
+  at most.
+- **AI suggests and only adds.** `auto_awesome` sends the tile's notes to the
+  participant's own AI: a local model, or a provider they allowed to read the
+  hive (`/providers`). It answers with an outline, which is laid onto the
+  tree. Names already there, and everything already filed, stay as they are.
+- **Jev sorts.** `sort` files each unsorted note with one Jev choice per note,
+  all of them in one call (`assistant/jev-sort.ts`: the rubric, with
+  confidence gated at 0.6). A note Jev is unsure of stays unsorted. Without
+  Jev, the participant's AI does the same job.
+- **By hand, always.** `+` names a category (Enter keeps naming), and a
+  double-click renames one. With a note open in the pane, `sell` on a label
+  files it there.
+- **The room.** A peer's shared tile carries their layer, so their tree
+  arrives with their notes (`SwarmNotes.peerCategoriesFor`). A label shows
+  `×N` when N people hold a category of that name at that place. Categories
+  only others hold are listed under **In the room**, and ✓ takes one into your
+  own tree. The shared structure settles by numbers.
+
+Pieces: `notes/note-categories.ts` (the pure tree, with its spec),
+`notes/note-categories.service.ts` (`NoteCategories`, registered by
+`note-categories.drone.ts`), `assistant/jev-sort.ts`, and in the desk
+`notes-strip.cats.scss`. Proof: `scripts/drive-notes-categories.cjs`.
