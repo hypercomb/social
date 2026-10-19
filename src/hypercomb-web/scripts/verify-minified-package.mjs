@@ -93,38 +93,24 @@ const derivation = JSON.parse(Buffer.from(derivationBytes).toString('utf8'))
 if (derivation.kind !== 'minify') fail(`the record is a "${derivation.kind}" derivation, not "minify"`)
 if (derivation.from !== rootLayer.derivedFrom) fail('the root and its record name different readable roots')
 
-// 2. The readable package, from its root signature alone: walk its layers.
-const layers = [], bees = new Set(), dependencies = new Set(), seen = new Set()
-const visit = async (sig) => {
-  if (seen.has(sig)) return
-  seen.add(sig)
-  const bytes = await readReadable(sig)
-  if (!bytes) fail(`readable layer ${sig.slice(0, 12)}… is not reachable — the derivation's input must ship beside it`)
-  layers.push(sig)
-  const layer = JSON.parse(Buffer.from(bytes).toString('utf8'))
-  for (const field of ['bees', 'criticalBees', 'bootBees', 'dependencies']) {
-    for (const entry of Array.isArray(layer[field]) ? layer[field] : []) {
-      const s = String(entry).replace(/\.js$/i, '').toLowerCase()
-      if (SIG_RE.test(s)) (field === 'dependencies' ? dependencies : bees).add(s)
-    }
-  }
-  for (const cell of Array.isArray(layer.cells) ? layer.cells : []) if (SIG_RE.test(String(cell))) await visit(String(cell))
-}
-await visit(derivation.from)
-const modules = [...bees, ...dependencies]
-// Fetch every module up front, many at once — the derivation then reads them in order.
+// 2. The readable package, from its root signature alone (core's walk), and
+//    every module fetched up front, many at once.
+const { tsImport } = await import('tsx/esm/api')
+const { walkPackage, deriveMinifiedTree } = await tsImport('../../hypercomb-core/src/core/derivation.ts', import.meta.url)
+let walked
+try { walked = await walkPackage(derivation.from, readReadable) } catch (err) { fail(`${err?.message ?? err} — the derivation's input must ship beside it`) }
+const { layers } = walked
+const modules = [...walked.bees, ...walked.dependencies]
 for (let i = 0; i < modules.length; i += 24) {
   const missing = (await Promise.all(modules.slice(i, i + 24).map(async (sig) => (await readReadable(sig)) ? null : sig))).filter(Boolean)
   if (missing.length) fail(`readable module ${missing[0].slice(0, 12)}… is not reachable (${missing.length} in this batch)`)
 }
 
-// 3. Re-derive with the record's own tool and options.
+// 3. Re-derive with the record's own tool and options — core's transform, the
+//    one the build ran and the hive's `derive verify` word runs.
 const esbuild = await import('esbuild')
 if (`esbuild@${esbuild.version}` !== derivation.tool) fail(`the record was made by ${derivation.tool}; this machine has esbuild@${esbuild.version}`)
-const { tsImport } = await import('tsx/esm/api')
-const { deriveMinifiedPackage } = await tsImport('../../hypercomb-runtime/src/minified-package.ts', import.meta.url)
-const again = await deriveMinifiedPackage(derivation.from, { layers, bees: [...bees], dependencies: [...dependencies] },
-  readReadable,
+const again = await deriveMinifiedTree(derivation.from, readReadable,
   async (body) => (await esbuild.transform(body, derivation.options)).code,
   { name: derivation.tool, options: derivation.options })
 if (again.root !== shippedRoot) fail(`re-derived root ${again.root.slice(0, 12)}… is not the served ${shippedRoot.slice(0, 12)}…`)
