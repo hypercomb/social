@@ -11,9 +11,10 @@
     "build:visitor": "npm --prefix .. run prebuild:web && ng build --configuration visitor && node scripts/one-core-index.mjs && node scripts/prepare-visitor-assets.mjs",
     "test:visitor": "node scripts/test-visitor-build.mjs",
     "postbuild": "node ../hypercomb-client/scripts/bake-frontend.mjs --if-available",
-    "runtime": "npm run runtime:core && npm run runtime:pixi",
+    "runtime": "npm run runtime:core && npm run runtime:pixi && npm run runtime:esbuild",
     "runtime:core": "node ./scripts/build-core-vendor.cjs",
-    "runtime:pixi": "tsx ./scripts/build-pixi-vendor.ts"
+    "runtime:pixi": "tsx ./scripts/build-pixi-vendor.ts",
+    "runtime:esbuild": "node ./scripts/copy-esbuild-wasm.mjs"
   },
   "overrides": {
     "undici": "7.24.1"

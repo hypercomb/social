@@ -62,6 +62,7 @@ export const sleepers: readonly Sleeper[] = [
   { command: "pattern", description: "Draw a tile shape a frame can be read through", load: () => import('./sequence/pattern.queen') },
   { command: "sequence", description: "Open Tile arrangements or edit a named drop-target sequence", load: () => import('./sequence/sequence.queen') },
   { command: "arrival", description: "Name what a published branch\\", load: () => import('./sharing/arrival.queen') },
+  { command: "derive", description: "Read a derivation and who verified it, re-derive it here, or sign what you found", load: () => import('./sharing/derive.queen') },
   { wakesOn: ["swarm:leader-moved"], load: () => import('./sharing/follow.drone') },
   { command: "invite", description: "Invite people to your current meeting place. Copies a meeting link to this room and page; with a tile selected, stamps it as a swarm junction instead.", load: () => import('./sharing/invite.queen') },
   { command: "publish", description: "Show what your published hive is serving right now, next to what has changed here since — one row per branch, with publish, re-check and unpublish per row. `publish here` publishes the layer you stand on to its hosts; `publish on <domain>` and `publish off <domain>` switch one domain for it.", load: () => import('./sharing/publish.queen') },

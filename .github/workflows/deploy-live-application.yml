@@ -69,6 +69,7 @@ jobs:
         run: |
           node ./scripts/build-core-vendor.cjs
           node ../node_modules/tsx/dist/cli.mjs ./scripts/build-pixi-vendor.ts
+          node ./scripts/copy-esbuild-wasm.mjs
 
       - name: Build web app
         working-directory: src/hypercomb-web

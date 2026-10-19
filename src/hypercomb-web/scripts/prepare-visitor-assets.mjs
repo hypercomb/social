@@ -46,7 +46,9 @@ await mkdir(output, { recursive: true })
 
 // Copy the compiled shell and local presentation assets. These root folders
 // are authoring/discovery material, not runtime inputs for a published site.
-const omittedRoots = new Set(['content', 'documentation', 'tracks'])
+// esbuild-wasm serves the participant's `derive verify` — a published
+// site's reader never verifies there, so its 13 MB stay out of the door.
+const omittedRoots = new Set(['content', 'documentation', 'tracks', 'esbuild-wasm'])
 for (const entry of await readdir(source, { withFileTypes: true })) {
   if (omittedRoots.has(entry.name)) continue
   await cp(join(source, entry.name), join(output, entry.name), { recursive: entry.isDirectory() })
