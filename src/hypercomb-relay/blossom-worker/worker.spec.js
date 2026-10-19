@@ -1561,6 +1561,25 @@ test('writing an index that names assess:<root> lists its signer as an assessor 
   assert.equal(HIVES.values.get(`assessors:${root}`), undefined)
 })
 
+test('writing an index that names attest:<record> lists its signer in that derivation\'s attestation pool, at its own address', async () => {
+  const record = 'a'.repeat(64)
+  const CONTENT = contentBag()
+  const env = { SITE_BINDINGS: '{}', HIVES: kvMap(), CONTENT }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
+  const body = JSON.stringify(await indexBy(assessorKey, { [`attest:${record}`]: 'f'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
+  assert.equal(response.status, 201)
+  const pool = await sha256Hex(`attest:${record}`)
+  assert(CONTENT.held.has(`${pool}/${assessor}`), 'a member of the record\'s pool, named by the attester\'s key')
+  assert(CONTENT.held.has(`${await sha256Hex('attest:pools')}/${pool}`), 'and the pool is named among the attestation pools')
+  // Asked at its address, the pool lists its attesters; an address that is no pool still answers 404.
+  const listing = await worker.fetch(new Request(`https://content.hypercomb.com/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(await listing.text(), `${assessor}\n`)
+  const stranger = await worker.fetch(new Request(`https://content.hypercomb.com/${await sha256Hex('attest:' + 'b'.repeat(64))}/`), env)
+  assert.equal(stranger.status, 404)
+})
+
 test('a try- door lists every signed assessment of its root, and the host AI verdict', async () => {
   const [root, reviewSig, goodRecord] = ['b'.repeat(64), 'd'.repeat(64), 'c'.repeat(64)]
   const HIVES = kvMap(new Map([

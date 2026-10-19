@@ -1642,7 +1642,9 @@ async function servePoolListing(request, env, sig) {
     names.sort()
     return new Response(request.method === 'HEAD' ? null : (names.length ? names.join('\n') + '\n' : ''), { status: 200, headers })
   }
-  if (!await listedPool(env, sig)) {
+  // A DERIVATION'S ATTESTATION POOL is listed to whoever asks its address —
+  // the attesters' keys; each one's word is read from their own index.
+  if (!await listedPool(env, sig) && !await isAttestPool(env, sig)) {
     return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
       status: 404, headers: { ...headers, 'X-Reason': 'no pool at this address' },
     })
@@ -2092,6 +2094,37 @@ async function noteAssessors(env, pubkey, evt) {
     // only: what they said is read, and re-verified, from their index.
     await addPoolMember(env, `assess:${root}`, pubkey)
   }
+}
+
+// ── derivation attestations (documentation/derivations.md) ───────────────
+//
+// ANYONE MAY ATTEST A DERIVATION, under their own key: they re-derive it (the
+// hive's `derive verify` word, or verify-minified-package.mjs) and name what
+// they found in their OWN signed index as `attest:<record sig>`. The index
+// write keeps one derived list per record — the members of
+// sign('attest:<record>'), each named by the attester's key — and a list of
+// those lists, sign('attest:pools'), so the listing route knows an
+// attestation pool when it is asked its address. Membership only: what each
+// attester said is read back, and re-verified, from their own index by
+// whoever reads the pool. A key that dropped the entry is simply not counted.
+const ATTEST_KEY_RE = /^attest:([0-9a-f]{64})$/
+const ATTEST_POOLS_MEANING = 'attest:pools'
+
+async function noteAttesters(env, pubkey, evt) {
+  let roots = {}
+  try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
+  for (const key of Object.keys(roots)) {
+    const record = ATTEST_KEY_RE.exec(key)?.[1]
+    if (!record) continue
+    await addPoolMember(env, `attest:${record}`, pubkey)
+    await addPoolMember(env, ATTEST_POOLS_MEANING, await poolAddress(`attest:${record}`))
+  }
+}
+
+/** Is `sig` the address of a derivation's attestation pool this host holds? */
+async function isAttestPool(env, sig) {
+  if (!SIG_RE.test(sig) || !env.CONTENT?.head) return false
+  return !!(await env.CONTENT.head(`${await poolAddress(ATTEST_POOLS_MEANING)}/${sig}`))
 }
 
 // ── the community's translations (documentation/community-translations.md)
@@ -3962,6 +3995,7 @@ async function putHive(request, env, pubkey) {
   await holdIndex(env, pubkey, evt)
   await noteTranslators(env, pubkey, evt)
   await noteAssessors(env, pubkey, evt)
+  await noteAttesters(env, pubkey, evt)
   await noteSharedPools(env, pubkey, evt)
   if (!await advancePublishedLocations(env, pubkey, evt)) {
     return text(503, 'signed index is held but a route location is not current; retry this index')
