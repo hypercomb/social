@@ -64,6 +64,7 @@ const { createServer } = require('node:http')
 const { watchFile } = require('node:fs')
 const { OWED_FILE, readOwed, settleOwed, followedPubkey, servedByRelay } = require('./owed-stamps.cjs')
 const { bridgeOriginAllowed, rendererOrigins, rendererOriginAllowed, HIVE_PORTS } = require('./bridge-origin.cjs')
+const { failPendingVia } = require('./bridge-pending.cjs')
 const { hashCode, parseCodeHashes, codeAdmitted } = require('./bridge-codes.cjs')
 
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 2401)
@@ -297,6 +298,9 @@ wss.on('connection', (ws, req) => {
   })
 
   ws.on('close', () => {
+    // Whatever went to this socket and was never answered will not be: tell the askers now.
+    const orphaned = failPendingVia(pending, ws)
+    if (orphaned) console.log(`[bridge] ${orphaned} op${orphaned === 1 ? '' : 's'} the closed socket never answered: the askers were told`)
     if (ws === renderer) {
       renderer = null
       rendererOrigin = ''

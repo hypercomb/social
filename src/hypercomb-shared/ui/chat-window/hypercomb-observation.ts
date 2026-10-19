@@ -140,12 +140,20 @@ export type HypercombFindRead =
     readonly unfinishedCount?: number
     /** More matches than the limit shows, finished branches included. */
     readonly moreMatches?: true
+    /** How the walk went, for whoever checks a find afterwards (the ask's
+     *  result carries it; the model's receipt does not): the tiles opened, and
+     *  why a cut walk stopped. */
+    readonly walked?: number
+    readonly stoppedBy?: 'time' | 'nodes' | 'bytes' | 'depth' | 'pages'
     readonly snapshot: string
   }
   | { readonly ok: false; readonly root: string; readonly code: string }
 
 /** The most unfinished branches one find names — the reader's own bound. */
 const MAX_UNFINISHED = 20
+
+/** Why a walk stops short: the reader's own words (hive-tree-reader.ts WalkStop). */
+const WALK_STOPS: ReadonlySet<string> = new Set(['time', 'nodes', 'bytes', 'depth', 'pages'])
 
 export type HypercombNodeRead =
   | {
@@ -655,6 +663,8 @@ const safeFind = (read: HypercombFindRead, expectedRoot: string, maxMatches: num
     ok: true, root: expectedRoot, query: read.query, matches, truncated: read.truncated === true,
     ...(unfinished.length ? { unfinished: [...unfinished], unfinishedCount } : {}),
     ...(read.moreMatches === true ? { moreMatches: true as const } : {}),
+    ...(Number.isInteger(read.walked) && read.walked! >= 0 && read.walked! <= 100_000_000 ? { walked: read.walked } : {}),
+    ...(WALK_STOPS.has(read.stoppedBy as string) ? { stoppedBy: read.stoppedBy } : {}),
     snapshot: read.snapshot,
   }
 }

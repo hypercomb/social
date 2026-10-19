@@ -66,6 +66,13 @@ type BridgeRequest = {
   /** `submit`: how long (ms) to keep listening for what the hive says after
    *  the line is dispatched. Default 1500, capped at ten minutes. */
   listen?: number
+  /** `submit`: stop listening early. With it, `listen` is only the CEILING:
+   *  the listen ends once the line has finished (or the hive has said
+   *  something) and `quiet` ms pass with nothing more — a find that walks in
+   *  0.3 s answers in about a second, not after the whole window — and the
+   *  line may run for as long as `listen` rather than the default eight
+   *  seconds. Absent, the window is held in full, as it always was. */
+  quiet?: number
   /** Resource sig for `get-resource`. */
   sig?: string
   /** Bag manipulation. */
@@ -2135,11 +2142,30 @@ export class ClaudeBridgeWorker extends Worker {
       if (said) heard.push({ kind: 'toast', text: masked(said), type: typeof p?.type === 'string' ? p.type : undefined })
     })
     live = true
+    const startedAt = Date.now()
     const listenMs = Math.max(0, Math.min(Number.isFinite(req.listen) ? Number(req.listen) : 1500, 600_000))
+    const quietMs = Number.isFinite(req.quiet) && Number(req.quiet) > 0 ? Math.min(Number(req.quiet), 10_000) : 0
     try {
-      const answer = await this.#submitLine(req, text)
+      // A caller that asked to stop early has said how long it will wait, and
+      // the line may take that long: a word that takes thirty seconds (a cold
+      // walk, a slow tidy) used to be answered "did not answer in time" at
+      // eight, and its lines then leaked into the next submit's window.
+      const answer = await this.#submitLine(req, text, quietMs ? Math.max(SUBMIT_DEADLINE_MS, listenMs) : SUBMIT_DEADLINE_MS)
       if (!answer.ok) return answer
-      if (listenMs > 0) await new Promise(resolve => setTimeout(resolve, listenMs))
+      if (quietMs && listenMs > 0) {
+        // Done once the line finished (a Tongue line reports it) or the hive
+        // has spoken, and has then been quiet for `quiet` ms. A legacy-pipeline
+        // line cannot report an end, so silence alone is not an end: until it
+        // has said something it is held for the whole window.
+        const ran = (answer.data as { outcome?: { kind?: string } } | undefined)?.outcome?.kind === 'ran'
+        let seen = heard.length
+        let lastAt = Date.now()
+        while (Date.now() < startedAt + listenMs) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+          if (heard.length !== seen) { seen = heard.length; lastAt = Date.now() }
+          if ((ran || seen > 0) && Date.now() - lastAt >= quietMs) break
+        }
+      } else if (listenMs > 0) await new Promise(resolve => setTimeout(resolve, listenMs))
       return { ...answer, data: { ...(answer.data as Record<string, unknown>), files: stored, heard } }
     } finally {
       unhearActivity()
@@ -2147,7 +2173,7 @@ export class ClaudeBridgeWorker extends Worker {
     }
   }
 
-  async #submitLine(req: BridgeRequest, text: string): Promise<BridgeResponse> {
+  async #submitLine(req: BridgeRequest, text: string, deadlineMs = SUBMIT_DEADLINE_MS): Promise<BridgeResponse> {
 
     let accepted = false
     let settle!: (outcome: RemoteSubmitOutcome) => void
@@ -2164,7 +2190,7 @@ export class ClaudeBridgeWorker extends Worker {
 
     const timer = setTimeout(
       () => settle({ kind: 'unknown', reason: 'the command line did not answer in time' }),
-      SUBMIT_DEADLINE_MS,
+      deadlineMs,
     )
     try {
       const outcome = await answered

@@ -12,7 +12,7 @@
 //   node scripts/bridge/manager.cjs unnote /route "<first words>"   says `unfile on /route: <first words>` (a list change; history keeps it)
 //   node scripts/bridge/manager.cjs thread <manager|convoId> [n]   the last n turns
 //   node scripts/bridge/manager.cjs report <manager> "<text>"      write into the manager's own conversation
-//   node scripts/bridge/manager.cjs ask <manager|convoId> "<request>"   hand work to the hive's own models, wait, print the result
+//   node scripts/bridge/manager.cjs ask <manager|convoId> "<request>"   hand work to the hive's own models, wait, print the result (with `finds`: each find's walk — tiles opened, cut or whole)
 //   node scripts/bridge/manager.cjs convo                    a fresh conversation id, for one job of its own
 //   node scripts/bridge/manager.cjs held                     what waits on the participant in Execution
 //   node scripts/bridge/manager.cjs do "<behaviour sentence>"      one line through the command line
@@ -116,11 +116,23 @@ const unshelled = value => {
   return `/${rest}`
 }
 /** Say a sentence on the hive's command line and print what the hive said. */
-const hear = async (sentence, listen) => {
-  const reply = await send({ op: 'submit', text: sentence, listen }, listen + 30_000)
-  if (!reply.ok) return fail(reply.error)
-  const heard = (reply.data?.heard ?? []).map(entry => entry.text)
-  return print(heard.length ? heard.join('\n') : (reply.data?.summary ?? 'the hive said nothing'))
+/** How long the hive must be quiet before a sentence is taken as finished. */
+const HEAR_QUIET_MS = 700
+/** A tab that drops while a READ is in flight is asked again (a reload takes seconds);
+ *  a write is never repeated for the caller — it might have landed. */
+const hear = async (sentence, listen, { read = false } = {}) => {
+  for (let attempt = 0; ; attempt++) {
+    // `listen` is the CEILING: the worker answers as soon as the line is done
+    // and the hive has gone quiet (an older worker holds the whole window).
+    const reply = await send({ op: 'submit', text: sentence, listen, quiet: HEAR_QUIET_MS }, listen + 30_000)
+    if (!reply.ok && read && attempt < 3 && /dropped before it answered/.test(String(reply.error))) {
+      await new Promise(resolve => setTimeout(resolve, 4_000))
+      continue
+    }
+    if (!reply.ok) return fail(reply.error)
+    const heard = (reply.data?.heard ?? []).map(entry => entry.text)
+    return print(heard.length ? heard.join(String.fromCharCode(10)) : (reply.data?.summary ?? 'the hive said nothing'))
+  }
 }
 const segmentsOf = route => unshelled(route ?? '/').split('/').map(part => part.trim()).filter(Boolean)
 const GROUP = 'managers'
@@ -173,7 +185,7 @@ const main = async () => {
       // the tiles under a route (as routes) and its notes. A withheld tile is
       // never read to a session: the door refuses a line that names one and
       // masks one wherever a word says it.
-      return hear(`read ${first && first.trim() ? '/' + segmentsOf(first).join('/') : '/'}`, 3_000)
+      return hear(`read ${first && first.trim() ? '/' + segmentsOf(first).join('/') : '/'}`, 20_000, { read: true })
     }
     case 'dates': {
       // Markers written since 2026-10-02 carry their create date; older ones
@@ -186,7 +198,7 @@ const main = async () => {
       // SAID: `file on /<route>: <text>` — the note holds the text alone.
       const segments = segmentsOf(first)
       if (!segments.length || !second.trim()) return fail('note needs a tile route and the text')
-      return hear(`file on /${segments.join('/')}: ${second.trim()}`, 2_000)
+      return hear(`file on /${segments.join('/')}: ${second.trim()}`, 15_000)
     }
     case 'unnote': {
       // SAID: `unfile on /<route>: <first words>` — the note is named by how it
@@ -194,7 +206,7 @@ const main = async () => {
       // deletion: history keeps it, undo puts it back. Only on a yes, per the rules.
       const segments = segmentsOf(first)
       if (!segments.length || !second.trim()) return fail('unnote needs a tile route and the first words of the note')
-      return hear(`unfile on /${segments.join('/')}: ${second.trim()}`, 2_000)
+      return hear(`unfile on /${segments.join('/')}: ${second.trim()}`, 15_000)
     }
     case 'thread': {
       if (!first) return fail(`thread needs a manager (${Object.keys(MANAGERS).join(', ')}) or a convoId`)
@@ -222,11 +234,11 @@ const main = async () => {
       const askId = asked.data.askId
       const deadline = Date.now() + Number(process.env.MANAGER_ASK_MS || 900_000)
       while (Date.now() < deadline) {
-        await new Promise(resolve => setTimeout(resolve, 4_000))
+        await new Promise(resolve => setTimeout(resolve, 1_500))
         const reply = await send({ op: 'chat-asked', cell: askId })
         if (!reply.ok) return fail(reply.error)
         if (reply.data?.done) {
-          const { outcome, rounds, reads, tokens, answer, left, error, held } = reply.data
+          const { outcome, rounds, reads, tokens, answer, left, error, held, finds } = reply.data
           // Held for jwize: the change waits in Execution; nothing ran yet.
           if (outcome === 'held') return print({ convoId, outcome, held, note: 'waiting for jwize in Execution — report it; do not try to get around the hold' })
           // A ONE-OFF JOB IS PUT AWAY once answered (jwize, 2026-10-12: the
@@ -234,7 +246,7 @@ const main = async () => {
           // `thread <convoId>` still reads it and the window's archive lists it.
           // A manager's own conversation, and one that stopped mid-leg, stay.
           if (!Object.values(MANAGERS).includes(convoId) && !left) await send({ op: 'submit', text: 'chats tidy', listen: 0 })
-          return print({ convoId, outcome, rounds, reads, ...(reads === 0 ? { warning: 'nothing was read in this turn: check every claim about the hive yourself' } : {}), tokens, ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
+          return print({ convoId, outcome, rounds, reads, ...(reads === 0 ? { warning: 'nothing was read in this turn: check every claim about the hive yourself' } : {}), tokens, ...(finds && finds.length ? { finds } : {}), ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
         }
       }
       return fail(`no result for ${askId} in time; the turn may still be running — manager.cjs thread ${first} shows where it got to`)
@@ -253,12 +265,12 @@ const main = async () => {
       // answers with the matches and how its walk went. A cold first walk
       // after a reload takes ~40 s, so the reply listens that long.
       if (!first) return fail('find needs a word, and optionally a /route')
-      return hear(`find ${first} ${second.trim() || '/'}`, 45_000)
+      return hear(`find ${first} ${second.trim() || '/'}`, 90_000, { read: true })
     }
     case 'tidy': {
       // SAID, NOT BRIDGED: `chats tidy` puts away answered and abandoned job
       // conversations (never a manager's own, never jwize's); `tidy dry` lists.
-      return hear(first === 'dry' ? 'chats tidy dry' : 'chats tidy', 3_000)
+      return hear(first === 'dry' ? 'chats tidy dry' : 'chats tidy', 30_000, { read: first === 'dry' })
     }
     case 'roster': {
       const fromHive = await hiveRoster()

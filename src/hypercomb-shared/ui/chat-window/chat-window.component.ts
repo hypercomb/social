@@ -3174,6 +3174,12 @@ export class ChatWindowComponent implements OnDestroy {
   /** Conversations an outside ask is running in. Their questions are never
    *  handed to the bridge queue — see send(). */
   readonly #outsideConvos = new Set<string>()
+
+  /** HOW EACH FIND IN THE TURN WENT, kept for the ask's result. The answer says
+   *  what it says; whether the walk behind it finished is a fact the asker must
+   *  be able to check afterwards (harness pass, 2026-10-18: "a cut-find receipt
+   *  cannot be checked from the thread"). Cleared when a turn begins. */
+  readonly #turnFinds = new Map<string, readonly { word: string; route: string; matches: number; walked?: number; cut: boolean; stoppedBy?: string; unfinished?: number }[]>()
   #askStarting = false
 
   async #drainAsks(): Promise<void> {
@@ -3242,6 +3248,8 @@ export class ChatWindowComponent implements OnDestroy {
       const last = [...turns].reverse().find(entry => entry.role === 'assistant' && entry.at >= since)
       if (!failure && (receipt?.outcome === 'failed' || this.#turnFailures.has(ask.convoId))) failure = this.#turnFailures.get(ask.convoId) ?? ''
       this.#turnFailures.delete(ask.convoId)
+      const finds = this.#turnFinds.get(ask.convoId)
+      this.#turnFinds.delete(ask.convoId)
       if (answered) return
       answered = true
       EffectBus.emit('chat:asked', {
@@ -3252,6 +3260,8 @@ export class ChatWindowComponent implements OnDestroy {
         rounds: receipt?.rounds ?? 0,
         reads: receipt?.reads ?? 0,
         tokens: receipt?.spent?.tokens ?? 0,
+        // Each find's walk, as it went: tiles opened, and cut or whole.
+        ...(finds ? { finds } : {}),
         answer: last?.text ?? '',
         // Long work stopped at a leg's end: ask again to carry it on.
         ...(last?.left ? { left: true } : {}),
@@ -6732,6 +6742,7 @@ export class ChatWindowComponent implements OnDestroy {
     // Read blocks that ran in this turn, for the receipt: an answer about the
     // hive with none behind it is said, not trusted.
     let turnReads = 0
+    this.#turnFinds.delete(convoId)
     // WHAT THIS TURN READ OF SOMEONE ELSE'S WORDS (execution-queue.ts,
     // `foreign`): a change asked for after it waits for the participant's
     // hand.
@@ -7145,6 +7156,19 @@ export class ChatWindowComponent implements OnDestroy {
           }
           readRounds++
           turnReads++
+          for (const result of receipt.results) {
+            if (result.kind !== 'find' || !result.read.ok) continue
+            const found = result.read
+            const noted = component.#turnFinds.get(convoId) ?? []
+            if (noted.length >= 12) continue
+            component.#turnFinds.set(convoId, [...noted, {
+              word: found.query, route: found.root, matches: found.matches.length,
+              ...(found.walked !== undefined ? { walked: found.walked } : {}),
+              cut: found.truncated,
+              ...(found.stoppedBy ? { stoppedBy: found.stoppedBy } : {}),
+              ...(found.unfinishedCount ? { unfinished: found.unfinishedCount } : {}),
+            }])
+          }
           readChars += content.length
           if (receipt.results.some(result => result.kind === 'code' || (result.kind === 'bytes' && result.read.ok && result.read.of !== 'resource'))) {
             component.#codeThreads.add(convoId)

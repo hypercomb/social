@@ -377,6 +377,23 @@ describe('/find under a route', () => {
     observationsOf(formatHypercombObservationReceipt(await executeHypercombObservationPlan(
       parseHypercombObservationGrammars(['/find betz /'], ['business-card']), reader)))[0]
 
+  // The ask's result tells a manager how each find's walk went, so a cut find
+  // can be checked afterwards (harness pass, 2026-10-18). The model's receipt
+  // names its own fields and carries none of this.
+  it('carries how the walk went on the read, validated, and keeps it out of the receipt', async () => {
+    const run = (read: Record<string, unknown>) => executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/find betz /'], ['business-card']), cutFind(read))
+    const plan = await run({ walked: 6_372, stoppedBy: 'time' })
+    expect((plan.results[0] as { read: Record<string, unknown> }).read).toMatchObject({ walked: 6_372, stoppedBy: 'time' })
+    const receipt = observationsOf(formatHypercombObservationReceipt(plan))[0]
+    expect(receipt).not.toHaveProperty('walked')
+    expect(receipt).not.toHaveProperty('stoppedBy')
+    const junk = await run({ walked: -3, stoppedBy: 'because' })
+    const read = (junk.results[0] as { read: Record<string, unknown> }).read
+    expect(read).not.toHaveProperty('walked')
+    expect(read).not.toHaveProperty('stoppedBy')
+  })
+
   it('names the branches a cut find did not finish, in place of the narrower-route advice', async () => {
     const cut = await receiptOf(cutFind({
       matches: [{ name: 'betz', path: '/people/betz' }],

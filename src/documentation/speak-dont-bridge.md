@@ -41,6 +41,20 @@ shows a participant and returns them as `heard`. That is how a session reads by
 speaking: a word that answers (`opens meetups`, `website list`) answers in the
 reply. `--listen <ms>` keeps listening for slow acts such as a publish.
 
+A caller that also sends `quiet: <ms>` turns `listen` into a ceiling: the reply
+goes once the line has finished (a Tongue line reports its end) or the hive has
+spoken, and has then been quiet that long. A `find` that walks in 0.3 s answers
+in about a second, not after the whole window, and a word may run as long as
+`listen` instead of the default eight seconds (a line that cannot report its
+end and has said nothing is held to the ceiling). The manager verbs (`find`,
+`read`, `note`, `unnote`, `tidy`) all send it.
+
+When the hive tab drops while a line is running (the dev build reloads it), the
+broker answers the waiting caller at once, "the hive tab dropped before it
+answered; ask again", instead of leaving it to its own timer. The read verbs of
+`manager.cjs` ask again by themselves; a write is never repeated for the caller,
+because it might have landed. The broker reads this at its next start.
+
 ## Words added for this
 
 | Word | Does |

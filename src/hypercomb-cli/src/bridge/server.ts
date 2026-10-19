@@ -318,6 +318,17 @@ export function runBridge(): void {
     })
 
     ws.on('close', () => {
+      // Twin of scripts/bridge/bridge-pending.cjs: whatever went to this socket
+      // and was never answered will not be, so the askers are told now.
+      for (const [id, entry] of [...pending]) {
+        if (entry.via !== ws) continue
+        pending.delete(id)
+        try {
+          if (entry.client.readyState === WebSocket.OPEN) {
+            entry.client.send(JSON.stringify({ id, ok: false, error: 'the hive tab dropped before it answered; ask again' }))
+          }
+        } catch { /* the asker went too */ }
+      }
       if (ws === renderer) {
         renderer = null
         rendererOrigin = ''
