@@ -17,6 +17,11 @@
       "title": "camelflage"
     },
     {
+      "host": "colony.hypercomb.com",
+      "label": "colony",
+      "title": "colony"
+    },
+    {
       "host": "dylan.hypercomb.com",
       "label": "dylan",
       "title": "dylan"
@@ -25,6 +30,11 @@
       "host": "favorites.hypercomb.com",
       "label": "favorites",
       "title": "favorites"
+    },
+    {
+      "host": "hyperdex.hypercomb.com",
+      "label": "hyperdex",
+      "title": "hyperdex"
     },
     {
       "host": "jaime-weise.hypercomb.com",
