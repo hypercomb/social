@@ -61,8 +61,14 @@ const TREE_WALK: WalkCeiling = { depth: MAX_DEPTH, nodes: MAX_NODES, bytes: MAX_
  *  finishes. */
 export const FIND_WALK_NODES = 12_000
 const FIND_WALK: WalkCeiling = { depth: MAX_RECORD_DEPTH, nodes: FIND_WALK_NODES, bytes: 1_500_000, ms: 30_000, partial: true, fair: true }
-/** Walks again after a tree changed under one, while the find's time lasts. */
+/** Walks again after a tree changed under one. */
 const STALE_WALK_RETRIES = 3
+/** How long, from the first walk's start, a find may still walk again. NOT the
+ *  walk's own 30 s: a cold first walk uses all of those, and the warm walk after
+ *  it takes a second — the orchestrator's pass of 2026-10-18 ended "stale-read"
+ *  at 31.5 s, one route found, because the retry's clock had run out before the
+ *  retry began. Each walk is still bounded by its own ceiling. */
+const STALE_WALK_WINDOW_MS = 75_000
 /** Unfinished branches one find names; `unfinishedCount` says how many in all. */
 const MAX_UNFINISHED = 20
 /** Children a walk opens at once. */
@@ -309,6 +315,26 @@ class StaleReadError extends Error {}
 class ReadBudgetError extends Error {}
 class IncompleteReadError extends Error {}
 
+/** How long a read waits for the commit queue to drain before it reads anyway.
+ *  `settled()` resolves when EVERYTHING queued before it has run, with no bound
+ *  of its own: one deep queue after a reload (drains, heals, a swarm page), or
+ *  one commit that never returns, and a read that only wanted names hung with
+ *  it — a first model-free `find` went silent for over two minutes twice on
+ *  2026-10-18. A read taken before the queue drained may go stale, and a stale
+ *  walk is walked again; a read that never starts cannot be. */
+const SETTLE_WAIT_MS = 8_000
+const settledWithin = async (committer: LayerCommitter, ms = SETTLE_WAIT_MS): Promise<void> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      committer.settled(),
+      new Promise<void>(resolve => { timer = setTimeout(resolve, ms) }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 const stopped = (): DOMException => new DOMException('The Hypercomb tree read was stopped', 'AbortError')
 
 const boundedInteger = (value: number | undefined, fallback: number, max: number): number => {
@@ -521,7 +547,7 @@ export class HypercombHiveTreeReader {
 
     try {
       if (signal?.aborted) throw stopped()
-      if (!settled) await committer.settled()
+      if (!settled) await settledWithin(committer)
       if (signal?.aborted) throw stopped()
       const epoch = history.treeEpoch()
 
@@ -848,7 +874,7 @@ export class HypercombHiveTreeReader {
     const signal = options.signal
     try {
       if (signal?.aborted) throw stopped()
-      if (!settled) await committer.settled()
+      if (!settled) await settledWithin(committer)
       const epoch = history.treeEpoch()
       const locationSig = await history.sign({ explorerSegments: () => [...segments] })
       const stats: { cold?: boolean } = {}
@@ -1012,7 +1038,7 @@ export class HypercombHiveTreeReader {
     }, epoch !== undefined, FIND_WALK)
     const walkStarted = Date.now()
     let walk = await walkOnce()
-    for (let again = 0; !walk.ok && walk.code === 'stale-read' && again < STALE_WALK_RETRIES && Date.now() - walkStarted < FIND_WALK.ms; again++) {
+    for (let again = 0; !walk.ok && walk.code === 'stale-read' && again < STALE_WALK_RETRIES && Date.now() - walkStarted < STALE_WALK_WINDOW_MS; again++) {
       epoch = await this.#settledEpoch(options.signal)
       walk = await walkOnce()
     }
@@ -1546,7 +1572,7 @@ export class HypercombHiveTreeReader {
     const committer = this.#committer()
     if (!history?.treeEpoch || !committer?.settled) return undefined
     if (signal?.aborted) throw stopped()
-    await committer.settled()
+    await settledWithin(committer)
     if (signal?.aborted) throw stopped()
     return history.treeEpoch()
   }
@@ -1704,7 +1730,7 @@ export class HypercombHiveTreeReader {
     const committer = this.#committer()
     if (!history?.currentLayerRefAt || !committer?.settled) return false
     if (signal?.aborted) throw stopped()
-    await committer.settled()
+    await settledWithin(committer)
     if (signal?.aborted) throw stopped()
 
     this.#pruneSnapshots()

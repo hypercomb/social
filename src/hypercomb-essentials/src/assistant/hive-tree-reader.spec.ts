@@ -672,6 +672,43 @@ describe('a page history cannot pin to one signature', () => {
     expect(found).not.toHaveProperty('walkFailed')
   })
 
+  // The orchestrator's pass of 2026-10-18: a cold first walk used the walk's
+  // whole thirty seconds and went stale at the end; the retry's clock had run
+  // out before it began, so the find answered one route and "stale-read".
+  it('walks again after a cold first walk that used its whole time', async () => {
+    const fx = fixture()
+    const route = deepBetz(fx, 1)
+    const current = fx.history['currentLayerRefAt'] as ReturnType<typeof vi.fn>
+    const original = current.getMockImplementation()! as (location: string, stats?: { cold?: boolean }) => Promise<unknown>
+    let clock = 1_000_000
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    let changes = 1
+    current.mockImplementation(async (location: string, stats?: { cold?: boolean }) => {
+      if (location === sig(102) && changes > 0) { changes--; fx.epoch.value++; clock += 31_000 }
+      return original(location, stats)
+    })
+    try {
+      const found = await fx.reader.find('betz', [])
+      expect(found).toMatchObject({ ok: true, matches: [{ path: pathOf(route) }] })
+      expect(found).not.toHaveProperty('walkFailed')
+    } finally { spy.mockRestore() }
+  })
+
+  // A first model-free find went silent for over two minutes, twice, on
+  // 2026-10-18: `settled()` waits for the whole commit queue and has no bound.
+  it('reads anyway when the commit queue does not drain, instead of hanging', async () => {
+    vi.useFakeTimers()
+    try {
+      const fx = fixture()
+      const route = deepBetz(fx, 1)
+      fx.settled.mockImplementation(() => new Promise<void>(() => { /* a queue that never drains */ }))
+      const answer = fx.reader.find('betz', [])
+      await vi.advanceTimersByTimeAsync(8_100)
+      const found = await answer
+      expect(found).toMatchObject({ ok: true, matches: [{ path: pathOf(route) }] })
+    } finally { vi.useRealTimers() }
+  })
+
   it('still says the tree changed when the walk went stale, unless a hint was read live', async () => {
     // Any record, even one with no matching row, turned a stale walk into an
     // ok "nothing found" whose snapshot held no heads (2026-10-12).
