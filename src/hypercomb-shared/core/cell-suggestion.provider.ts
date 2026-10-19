@@ -52,6 +52,12 @@ export class CellSuggestionProvider extends EventTarget implements SuggestionPro
    *  children it holds. The tile list in the notes panel is this list. */
   public roster(): readonly RosterRow[] { return this.#rows }
 
+  /** The level `roster()` lists, as segments joined by '/'. A reader that
+   *  acts on a name checks this first: right after a move the roster still
+   *  holds the level just left until the fresh read lands. */
+  public rosterPath(): string { return this.#rowsPath }
+  #rowsPath = ''
+
   public constructor() {
     super()
 
@@ -78,12 +84,20 @@ export class CellSuggestionProvider extends EventTarget implements SuggestionPro
   }
 
   #refreshing: Promise<void> | null = null
+  #again = false
 
   #refresh = async (): Promise<void> => {
-    // dedup concurrent refreshes
-    if (this.#refreshing) return
-    this.#refreshing = this.#doRefresh()
-    try { await this.#refreshing } finally { this.#refreshing = null }
+    // Coalesce concurrent refreshes — but never DROP one: a move that lands
+    // while a read is in flight must be read after it, or the list keeps the
+    // level that was just left.
+    if (this.#refreshing) { this.#again = true; return }
+    try {
+      do {
+        this.#again = false
+        this.#refreshing = this.#doRefresh()
+        await this.#refreshing
+      } while (this.#again)
+    } finally { this.#refreshing = null }
   }
 
   #doRefresh = async (): Promise<void> => {
@@ -107,17 +121,19 @@ export class CellSuggestionProvider extends EventTarget implements SuggestionPro
     } catch {
       // nothing resolves at that address (yet) — empty level
     }
-    this.#publish(rows)
+    this.#publish(rows, segments.join('/'))
   }
 
   /** Store the level and announce it, but only when it actually changed —
    *  every `synchronize` re-reads, and a repaint per pulse is a flicker. */
-  #publish = (rows: readonly RosterRow[]): void => {
+  #publish = (rows: readonly RosterRow[], path = ''): void => {
+    const moved = path !== this.#rowsPath
+    this.#rowsPath = path
     const names = rows.map(row => row.name)
     // Autocomplete reads alphabetically; the roster keeps the layer's order,
     // which is the order the canvas and the rail lay the tiles out in.
     const sorted = [...names].sort((a, b) => a.localeCompare(b))
-    if (this.#sameAs(sorted) && this.#sameSigs(rows)) return
+    if (!moved && this.#sameAs(sorted) && this.#sameSigs(rows)) return
     this.#rows = rows
     this.#names = sorted
     this.dispatchEvent(new CustomEvent('change'))

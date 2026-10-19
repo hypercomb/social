@@ -1493,6 +1493,10 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   // not two, and this list used to show it twice. Maintained continuously
   // (boot + lineage change + synchronize), not gated behind a see-all toggle.
   readonly #layerCellLabels = signal<readonly string[]>([])
+  /** The level `#layerCellLabels` was read at ('/'-joined), or null where
+   *  the provider cannot say (an older build) — then the labels are taken
+   *  as current, as they always were. */
+  readonly #layerLabelsPath = signal<string | null>(null)
 
   /** The labels the canvas actually painted on the last pass (`render:cell-count`).
    *  Only consulted while a page filter is on — otherwise the layer's own list
@@ -1533,6 +1537,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // for autocomplete — the fallback while an older provider is registered.
     const roster = provider.roster?.()
     this.#layerCellLabels.set(roster ? roster.map(row => row.name) : [...provider.suggestions()])
+    const at = (provider as { rosterPath?(): string }).rosterPath?.()
+    this.#layerLabelsPath.set(typeof at === 'string' ? at : null)
     // The rail walks the same level for itself; this is the poll that says
     // WHEN — the panel already hears every event that can move the layer.
     this.#syncRail()
@@ -2172,6 +2178,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  essentials build predates the profile) the panel's own chips stand in. */
   readonly railMounted = signal(false)
   #rail: TilesRailLike | null = null
+  /** The element the rail's nodes currently sit in. */
+  #railHostEl: HTMLElement | null = null
 
   /** Ask for the rail, and WAIT for it if essentials has not landed yet.
    *  The web shell loads its bees from OPFS, so the desk can be on screen
@@ -2180,7 +2188,21 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  exactly the list the rail was brought in to replace. The chat window has
    *  waited on this key from the start; this is the same wait. */
   #mountRail(host: HTMLElement): void {
-    if (this.#rail || this.#railPending) return
+    // The desk rebuilds its DOM every time it opens (and on fullscreen and
+    // re-dock), so the host can be a NEW element while the rail still lives
+    // in the old, detached one — the list then opened blank, with the
+    // stand-in chips hidden because a rail IS mounted. Carry the rail's own
+    // nodes across: its rows, find box and listeners move with them.
+    if (this.#rail) {
+      const was = this.#railHostEl
+      if (was && was !== host) {
+        host.replaceChildren(...Array.from(was.childNodes))
+        this.#railHostEl = host
+        this.#syncRail()
+      }
+      return
+    }
+    if (this.#railPending) return
     const key = '@diamondcoreprocessor.com/AgentTilesRailFactory'
     const now = get<TilesRailFactoryLike>(key)
     if (now) { this.#bringRail(now, host); return }
@@ -2238,6 +2260,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     }
     rail.onLevelChanged = segments => this.#followRailLevel(segments)
     rail.mount(host)
+    this.#railHostEl = host
     rail.showLevel?.(this.platePath())
     rail.showCurrent?.(this.cell())
     this.railMounted.set(true)
@@ -2263,9 +2286,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  writes on the tiles of the place it is standing at, so the place has to
    *  move or the rows below name tiles the desk would open the wrong notes
    *  for. `goRaw` pushes, so the browser's (and the phone's) Back walks the
-   *  excursion out the way it walked in, and closing the desk leaves the
-   *  participant where they actually went rather than snapping them back to
-   *  somewhere they have stopped thinking about.
+   *  excursion out the way it walked in. Closing the desk ends the excursion:
+   *  the participant is back where they opened it (`#returnToOrigin`).
    *
    *  The active tile does NOT survive the move — a name resolves per level, so
    *  carrying it across would open a different tile's notes under the name you
@@ -2277,6 +2299,29 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     this.#clearSubject()
     this.#activeCell.set(null)
     get<NavigationLike>('@hypercomb.social/Navigation')?.goRaw?.(next)
+  }
+
+  /** Where the participant stood when the desk opened. */
+  #origin: readonly string[] | null = null
+
+  #here(): string[] {
+    return [...(get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])]
+      .map(s => String(s ?? '').trim()).filter(Boolean)
+  }
+
+  #rememberOrigin(): void {
+    this.#origin = this.#here()
+  }
+
+  /** Back to where the desk was opened. The page's own framing comes back
+   *  with it: the hive keeps every page's zoom and position as it leaves it. */
+  #returnToOrigin(): void {
+    const origin = this.#origin
+    this.#origin = null
+    if (!origin) return
+    const here = this.#here()
+    if (origin.length === here.length && origin.every((s, i) => s === here[i])) return
+    get<NavigationLike>('@hypercomb.social/Navigation')?.goRaw?.(origin)
   }
 
   /** First letter of a tile's name, for the hexagon on its row. Mirrors the
@@ -3100,6 +3145,38 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // on a tile is still the desk. `visible()` is exactly that reading.
     effect(() => this.#claimSurface(this.visible()))
 
+    // THE DESK NEVER STANDS EMPTY-HANDED. Open with no tile in hand (the root,
+    // a page just walked into) and it takes one: the tile selected on the
+    // hive, else the first in the list — so there is always somewhere to
+    // write. Only from a list read at THIS level: right after a move the list
+    // still names the level just left, and those names would resolve here to
+    // other tiles or none.
+    effect(() => {
+      if (!this.visible() || this.cell()) return
+      const list = this.#navigatorCellLabels()
+      if (list.length === 0) return
+      const at = this.#layerLabelsPath()
+      untracked(() => {
+        if (at !== null && at !== this.#here().join('/')) return
+        const selection = get<SelectionService>('@diamondcoreprocessor.com/SelectionService')
+        const chosen = [selection?.active ?? '', ...(selection?.selected ?? [])].find(name => !!name && list.includes(name))
+        this.activateCell(chosen ?? list[0])
+      })
+    })
+
+    // THE DESK IS AN EXCURSION. Opening it remembers where the participant
+    // stood; walking the tile list may take the desk anywhere; closing it
+    // brings them back to where they started (jwize, 2026-10-18). Keyed on
+    // the intent, not on what is on screen, so the installer parking the desk
+    // is not a close.
+    let wasOpen = false
+    effect(() => {
+      const open = this.#open()
+      if (open === wasOpen) return
+      wasOpen = open
+      untracked(() => open ? this.#rememberOrigin() : this.#returnToOrigin())
+    })
+
     // Warm the decoded-set cache for the active cell AND every tile in the
     // layer (the navigator lists them all) so notes(), the navigator counts,
     // and the name-or-text filter classify accurately on first paint.
@@ -3570,7 +3647,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   /** Enter in the composer. */
   commitComposer(raw: string): void {
     const cell = this.cell()
-    if (!cell) return
+    if (!cell) { this.#startFirstTile(raw); return }
     const line = this.#readComposerLine(raw)
     if (!line) return
     // Never skip a level: a depth with no parent above it becomes the
@@ -3589,6 +3666,30 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     this.composerShell()?.clear()
     this.#drainComposer()
   }
+
+  /** A PAGE WITH NOTHING ON IT STILL TAKES A NOTE. The line names the first
+   *  tile — through the same create commit the `create` word runs, so the
+   *  shell's naming rules hold — and the desk is on it the moment it exists. */
+  #startFirstTile(raw: string): void {
+    const name = String(raw ?? '').replace(/^\s*-+\s*/, '').trim()
+    if (!name) return
+    this.composerText.set('')
+    this.composerShell()?.clear()
+    EffectBus.emitTransient('command:create-cells', {
+      name,
+      accept: () => {},
+      complete: (error?: unknown) => { if (error === undefined) this.activateCell(name) },
+    })
+  }
+
+  /** Does the page the desk stands on hold any tile to write on? */
+  readonly pageHasTiles = computed(() => this.#navigatorCellLabels().length > 0)
+
+  /** The composer's prompt: a note on the tile in hand, or — on a page with
+   *  no tile yet — the name of the first one. */
+  readonly composerPlaceholder = computed(() => this.cell()
+    ? this.#t('notes.composerPlaceholder', 'write a note')
+    : this.#t('notes.composerFirstTile', 'name a tile to write on'))
 
   /** Keys the shell did not consume. Escape is the only one we want: it walks
    *  the depth cursor back out. Stopping propagation on a press we HANDLED is

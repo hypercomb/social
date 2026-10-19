@@ -608,7 +608,7 @@
       </footer>
     } @else {
       <!-- No active tile — prompt the user to find one in the tile list. -->
-      <div class="cv2-empty-hint">{{ 'notes.pickTile' | t }}</div>
+      <div class="cv2-empty-hint">{{ (pageHasTiles() ? 'notes.pickTile' : 'notes.startHere') | t }}</div>
     }
 
     </div><!-- /cv2-main -->
@@ -631,7 +631,7 @@
     <aside class="cv2-reading" [attr.aria-label]="'notes.viewer.aria' | t">
       @if (!cell()) {
         <div class="cv2-reading-empty">
-          <span>{{ 'notes.pickTile' | t }}</span>
+          <span>{{ (pageHasTiles() ? 'notes.pickTile' : 'notes.startHere') | t }}</span>
         </div>
       } @else {
         <!-- ── LISTS: its own interface ──────────────────────────
@@ -970,30 +970,28 @@
          the shell keeps Escape for closing its dropdown only when it has one,
          and forwards it to us otherwise.
 
-         It spans the desk's full width, below every column, and only appears
-         with a tile in hand — there is nothing to write a note ON otherwise,
-         and the navigator above is how you pick one. -->
-    @if (cell()) {
-      <div class="cv2-composer">
-        @if (composerDepth() > 0) {
-          <!-- WHERE THE NEXT LINE LANDS, said before it is typed. A depth you
-               cannot see is a depth you will be surprised by. -->
-          <span class="cv2-composer-depth"
-                [title]="'notes.composerDepthHint' | t">
-            <span class="mat-sym" aria-hidden="true">subdirectory_arrow_right</span>
-            <span>{{ composerDepth() }}</span>
-          </span>
-        }
-        <hc-command-shell
-          #composer
-          class="cv2-composer-shell"
-          [embedded]="true"
-          [placeholder]="'notes.composerPlaceholder' | t"
-          (valueChange)="composerText.set($event)"
-          (commit)="commitComposer($event)"
-          (shellKeydown)="onComposerKeydown($event)" />
-      </div>
-    }
+         It spans the desk's full width, below every column, and is ALWAYS
+         there: with a tile in hand it writes on it, and on a page with no
+         tile yet the line names the first one (`#startFirstTile`). -->
+    <div class="cv2-composer">
+      @if (composerDepth() > 0) {
+        <!-- WHERE THE NEXT LINE LANDS, said before it is typed. A depth you
+             cannot see is a depth you will be surprised by. -->
+        <span class="cv2-composer-depth"
+              [title]="'notes.composerDepthHint' | t">
+          <span class="mat-sym" aria-hidden="true">subdirectory_arrow_right</span>
+          <span>{{ composerDepth() }}</span>
+        </span>
+      }
+      <hc-command-shell
+        #composer
+        class="cv2-composer-shell"
+        [embedded]="true"
+        [placeholder]="composerPlaceholder()"
+        (valueChange)="composerText.set($event)"
+        (commit)="commitComposer($event)"
+        (shellKeydown)="onComposerKeydown($event)" />
+    </div>
 
   </div>
 
