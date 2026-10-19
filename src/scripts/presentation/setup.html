@@ -232,9 +232,12 @@
     <span>the responder — a parked session (or a scheduled drain) that watches for questions, answers, and retires them.</span>
   </div>
 </div>
-<p class="flow-note">A question typed in the hive becomes a durable <b>ask record</b> in your
+<p class="flow-note">A question to a named model, from the ask screen, or from <code>/break-apart</code>,
+<code>/expand</code> and <code>/organize</code> becomes a durable <b>ask record</b> in your
 hive's own storage. Close the laptop mid-question — the ask survives and is answered when a
-responder next connects. The broker and your hive's storage stay on your machine; the
+responder next connects. A plain chat question no model took is written only while a session is
+<b>parked</b> (the broker being up is not that); with none parked the chat tells you at once.
+The broker and your hive's storage stay on your machine; the
 question — and whatever hive content Claude reads to answer it — goes to Anthropic through
 your Claude Code session, the same as anything you type into Claude Code.</p>
 
@@ -351,6 +354,10 @@ npm run build:packages</pre></div>
 <p>Schedule this every few minutes (Task Scheduler / cron). Zero pending asks costs nothing;
 pending asks spawn <code>claude&nbsp;-p</code> per model group, answer, and retire:</p>
 <div class="term"><button class="copy-btn">copy</button><pre>npm run bridge:drain</pre></div>
+<p>The drain is not a parked session — it cannot promise when it will be back, so it claims
+nothing. It answers asks that were already queued (a named model, the ask screen,
+<code>/break-apart</code>, <code>/expand</code>, <code>/organize</code>); a plain chat question is
+not queued for it.</p>
 
 <h3>Remote answering session</h3>
 <p>The renderer tab must stay on the broker's machine — only the answering session can be
@@ -368,7 +375,8 @@ the code it copies. Without a code, remote senders are refused outright.</p>
     <tr><td>connection refused :2401</td><td>No broker</td><td><code>npm run bridge</code></td></tr>
     <tr><td>port already bound</td><td>Broker already running</td><td>Use it — never start a second</td></tr>
     <tr><td>asks queue, nothing answers</td><td>No responder</td><td>Park a session (step 5) or schedule the drain</td></tr>
-    <tr><td>chat: "nothing is listening"</td><td>Live truth from the socket</td><td>Same — start a session</td></tr>
+    <tr><td>chat: "nothing is listening yet"</td><td>A question was queued and no session is parked (live truth from <code>bridge:status</code>)</td><td>Park a session (step 5), or withdraw the question</td></tr>
+    <tr><td>chat: "no Claude session is parked"</td><td>No model took a plain question; nothing was queued</td><td>Park a session (step 5) or fix the providers console; just after a reload give the watcher ~10 s</td></tr>
     <tr><td>died after tab reload</td><td>Renderer retries only if it ever connected</td><td>Reload the tab after the broker is up</td></tr>
     <tr><td>connect/timeout flapping</td><td>Two tabs fighting for one slot</td><td>Close one (<code>Get-NetTCPConnection -RemotePort 2401</code>)</td></tr>
   </tbody>

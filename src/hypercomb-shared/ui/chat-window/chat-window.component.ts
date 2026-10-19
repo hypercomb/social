@@ -971,7 +971,18 @@ type TilesRailLike = {
   dispose(): void
 }
 type TilesRailFactoryLike = { create?: () => TilesRailLike }
-type BridgeLike = { connected?: boolean }
+type BridgeLike = { connected?: boolean; listening?: boolean; connectedAt?: number }
+
+/** Is a session parked? `listening` is the newer worker's word; an older
+ *  essentials build can only say `connected`, so a missing one is read as that
+ *  old contract rather than as "nobody is parked" — a newer shell on an older
+ *  installed package must not stop queueing for a session that is there. */
+const parkedOf = (state?: { connected?: boolean; listening?: boolean }): boolean =>
+  typeof state?.listening === 'boolean' ? state.listening : !!state?.connected
+
+/** How long after a socket opens a parked watcher may still be on its way: its
+ *  poll is six seconds apart, plus the two it waits before retrying. */
+const ARRIVAL_GRACE_MS = 9_000
 type NavigationLike = { goRaw?(segments: readonly string[]): void }
 
 /** The optimization pool, over the shared Store — the durable inbox a queued
@@ -1667,12 +1678,23 @@ export class ChatWindowComponent implements OnDestroy {
    *  question that has left but not been picked up. */
   readonly pendingSig = signal('')
 
+  /** The broker is reachable. Transport only — the managers ride it all day
+   *  with no session answering anything, so this is NOT "somebody will take
+   *  the question": that is `sessionListening`. */
   readonly bridgeUp = signal(false)
+  /** A session is PARKED on the bridge, visiting for asks (the worker's
+   *  `listening`). Alone it means nothing without the broker; use
+   *  `sessionListening`. */
+  readonly sessionParked = signal(false)
+  /** A Claude session is there to take a question the models declined. The
+   *  one thing every "queue it for the session" decision asks: a question
+   *  queued without it waits for good (jwize, 2026-10-12 and 10-15). */
+  readonly sessionListening = computed(() => this.bridgeUp() && this.sessionParked())
   /** A local broker socket can remain open while the machine is offline. It
    *  is transport plumbing, not proof that a remote model can answer. */
   readonly networkOnline = signal(typeof navigator === 'undefined' || navigator.onLine)
   readonly linkUp = computed(() => this.networkOnline() && (
-    this.providerReady() || (this.bridgeUp() && !!this.designated())
+    this.providerReady() || (this.sessionListening() && !!this.designated())
   ))
 
   /** WHY THE LINE IS DOWN, when the router has something worth saying — one
@@ -1687,7 +1709,7 @@ export class ChatWindowComponent implements OnDestroy {
    *  The distinction is the whole difference between "Bridge connected" and a
    *  sentence that is true: a direct provider needs no bridge, and saying one
    *  is connected when none is was the line's oldest lie. */
-  readonly directLink = computed(() => this.providerReady() && !this.bridgeUp())
+  readonly directLink = computed(() => this.providerReady() && !this.sessionListening())
 
   /** The availability line's key, for the branch that knows who answers. */
   readonly linkKey = computed(() =>
@@ -4599,10 +4621,13 @@ export class ChatWindowComponent implements OnDestroy {
   readonly canStop = computed(() => this.waiting() && (this.hostStreaming() || !!this.pendingSig()))
 
   /** NOBODY IS LISTENING. The question is a durable record in the optimization
-   *  pool and no Claude session is connected to drain it — so it is not slow,
-   *  it is unattended, and saying "Thinking…" would be a lie. */
+   *  pool (it WAS queued — `pendingSig` — not merely sent: until then a model
+   *  is still being tried, and that is thinking) and no Claude session is
+   *  parked to drain it — so it is not slow, it is unattended, and saying
+   *  "Thinking…" would be a lie. */
   readonly unattended = computed(() =>
-    this.waiting() && !this.hostStreaming() && !this.bridgeUp() && this.bridgeConfigured())
+    this.waiting() && !this.hostStreaming() && !this.sessionListening()
+    && this.bridgeConfigured() && !!this.pendingSig())
 
   /** m:ss once past a minute — a bare "127s" makes people do arithmetic. */
   readonly elapsedLabel = computed(() => {
@@ -5025,10 +5050,11 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ open?: boolean }>(
       'providers:state', payload => this.providersOpen.set(!!payload?.open)))
 
-    this.#cleanups.push(EffectBus.on<{ connected?: boolean }>(
+    this.#cleanups.push(EffectBus.on<{ connected?: boolean; listening?: boolean }>(
       'bridge:status', payload => {
         this.bridgeConfigured.set(isLocalClaudeBridgeConfigured())
         this.bridgeUp.set(!!payload?.connected)
+        this.sessionParked.set(parkedOf(payload))
         // A bridge arriving or leaving changes who can answer at all, so the
         // designation is re-read on the same signal the footer's light is.
         this.#refreshDesignation()
@@ -5308,10 +5334,48 @@ export class ChatWindowComponent implements OnDestroy {
   /** WHO IS ABOUT TO ANSWER. With a session on the bridge it is the model the
    *  composer is set to; without one the shallow host takes it, and that tier
    *  has its own model. Not a guess and not something to be discovered from
-   *  the reply — the same `bridgeUp()` the send path branches on, read one
-   *  moment earlier. */
+   *  the reply — the same `sessionListening()` the send path branches on, read
+   *  one moment earlier. */
   #answeringModel(): string {
-    return this.providerReady() ? this.answering() : this.bridgeUp() ? this.answering() : HOST_TIER_MODEL
+    return this.providerReady() ? this.answering() : this.sessionListening() ? this.answering() : HOST_TIER_MODEL
+  }
+
+  /** The bridge as the worker knows it THIS INSTANT. The signals follow
+   *  `bridge:status`, but a claim that lapsed is announced by a timer a
+   *  background tab may have throttled, and a question must never be queued
+   *  for a session on the strength of a stale signal. Read where a decision
+   *  is made; a worker that is not there changes nothing. */
+  #syncBridge(): void {
+    const worker = ioc()?.get('@diamondcoreprocessor.com/ClaudeBridgeWorker') as BridgeLike | undefined
+    if (!worker) return
+    this.bridgeUp.set(!!worker.connected)
+    this.sessionParked.set(parkedOf(worker))
+  }
+
+  /** JUST AFTER A RELOAD A PARKED SESSION HAS NOT VISITED YET. The claim lives
+   *  in the worker, so a fresh tab starts with none and learns of the session
+   *  at its next visit — seconds away. Refusing a question in that gap would
+   *  say "no session is parked" about one that is. So when a question would
+   *  otherwise be refused and the socket is young, wait (never past
+   *  `ARRIVAL_GRACE_MS` after it opened) for the first visit to be announced.
+   *  A worker that cannot say when its socket opened is not waited for. */
+  async #awaitArrivingSession(): Promise<void> {
+    this.#syncBridge()
+    if (this.sessionListening() || !this.bridgeUp()) return
+    const opened = (ioc()?.get('@diamondcoreprocessor.com/ClaudeBridgeWorker') as BridgeLike | undefined)?.connectedAt
+    const age = typeof opened === 'number' && opened > 0 ? Date.now() - opened : Infinity
+    if (age >= ARRIVAL_GRACE_MS) return
+    await new Promise<void>(resolve => {
+      let settled = false
+      let unsubscribe: (() => void) | undefined
+      const finish = (): void => { if (settled) return; settled = true; clearTimeout(timer); unsubscribe?.(); resolve() }
+      const timer = setTimeout(finish, ARRIVAL_GRACE_MS - age)
+      unsubscribe = EffectBus.on<{ connected?: boolean; listening?: boolean }>('bridge:status', payload => {
+        if (!payload?.connected || payload.listening === true) finish()
+      })
+      if (settled) unsubscribe()
+    })
+    this.#syncBridge()
   }
 
   #raiseBee(convoId: string, question: string, model = this.#answeringModel()): void {
@@ -5451,11 +5515,20 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** Step 4 — prove the loop with a real question. Completes when the
    *  answer lands (`#onReply` sets the first-reply flag). */
-  tryAsk(): void {
+  async tryAsk(): Promise<void> {
+    // The button is live only while something can answer: a parked session,
+    // or a model that is ready. A question nobody is there for lands a
+    // failure the checklist (which hides the transcript) cannot show.
+    this.#syncBridge()
+    if (!this.sessionListening() && !this.providerReady()) return
     const i18n = ioc()?.get('@hypercomb.social/I18n') as { t?: (key: string) => string } | undefined
     const starter = i18n?.t?.('chat.setup.starter') || 'What do you see in this hive?'
     this.tried.set(true)
-    void this.send(starter)
+    await this.send(starter)
+    // A send that ended without queueing or answering (the lease lapsed
+    // between the render and the click) leaves nothing to wait for: keeping
+    // `tried` would swap the button for a line that can never complete.
+    if (!this.waiting() && !this.firstReply()) this.tried.set(false)
   }
 
   /** Copy a checklist command; the button flashes "Copied" briefly. */
@@ -5539,7 +5612,7 @@ export class ChatWindowComponent implements OnDestroy {
     EffectBus.emit('chat:window-state', { open: true })
     if (!this.enabled()) return
     this.#refreshContext()
-    this.bridgeUp.set(!!(ioc()?.get('@diamondcoreprocessor.com/ClaudeBridgeWorker') as BridgeLike | undefined)?.connected)
+    this.#syncBridge()
     this.#refreshDesignation()
 
     if (payload?.convoId) { await this.#refreshList(); await this.#load(payload.convoId) }
@@ -6221,6 +6294,7 @@ export class ChatWindowComponent implements OnDestroy {
     // wait open with no turn and no word; now it lands in the conversation
     // like any other reply, so the row wears the reason instead of a clock.
     let routed: 'answered' | 'declined' | 'aborted'
+    this.#syncBridge()
     try {
       routed = await this.#askProvider(convoId, message)
     } catch (error) {
@@ -6246,15 +6320,18 @@ export class ChatWindowComponent implements OnDestroy {
 
     // The two legacy transports remain honest fallbacks.
     //
-    // With a session on the bridge, the question goes to it: that is the deep
-    // tier, and the only one that can read the hive. With nothing listening,
-    // the host's AI answers immediately instead — that is what `/ask` did
-    // before it folded in here, and folding it in must not cost it.
+    // With a session PARKED on the bridge, the question goes to it: that is
+    // the deep tier, and the only one that can read the hive. With nothing
+    // listening, the host's AI answers immediately instead — that is what
+    // `/ask` did before it folded in here, and folding it in must not cost it.
+    // (A broker that is merely up is not a session: it was read as one, and a
+    // declined question waited for good in a queue nothing drained.)
     //
-    // If the host tier is unreachable and a local bridge is configured, the
-    // question is QUEUED there: its durable record can be picked up when a
-    // session connects. Without that bridge, host failure is reported now.
-    if (!this.bridgeUp()) {
+    // If the host tier is unreachable and the participant named a model only a
+    // bridge serves, the question is QUEUED: its durable record can be picked
+    // up when a session connects. Otherwise the failure is reported now.
+    this.#syncBridge()
+    if (!this.sessionListening()) {
       // THE ENDING IS NOT THIS CALL'S RETURN VALUE. `chat:host-done` paints,
       // stores and counts it (`#onHostDone`), because the run outlives this
       // component and its answer must land whether or not anybody is still
@@ -6278,9 +6355,13 @@ export class ChatWindowComponent implements OnDestroy {
     // ops"). A question no model took goes to the bridge queue only when a
     // session is listening, or the participant named a model only a bridge
     // serves. Otherwise they are told why, now.
-    if (!this.bridgeUp() && !this.modelExplicit()) {
+    if (!this.modelExplicit()) await this.#awaitArrivingSession()
+    else this.#syncBridge()
+    if (!this.sessionListening() && !this.modelExplicit()) {
       const reason = this.#declineReason.get(convoId)
-        ?? 'No model is ready to answer. Check the providers console.'
+        ?? `No model is ready to answer. Check the providers console${this.bridgeUp()
+          ? ' — and no Claude session is parked on the bridge; start one and tell it to listen for hive asks.'
+          : '.'}`
       console.warn('[chat] no model took the question:', reason)
       await this.#landFailure(convoId, reason)
       return
@@ -6311,7 +6392,7 @@ export class ChatWindowComponent implements OnDestroy {
     // instead — with the composer's model, not the host's. The bee was
     // branded for the tier that was going to take it, so it is re-branded
     // for the one that actually did.
-    if (!this.bridgeUp()) this.#raiseBee(convoId, message, this.answering())
+    if (!this.sessionListening()) this.#raiseBee(convoId, message, this.answering())
 
     // WHAT ANSWERED IS WHAT THE THREAD IS HELD IN. The hint and the brand are
     // one string (`answering`), and writing it down here is what lets the
@@ -7857,7 +7938,7 @@ export class ChatWindowComponent implements OnDestroy {
     // the bridge queue (jwize, 2026-09-21: "the agent should have done the
     // task instead of this message"). Words already on screen are never
     // taken back: a failure after them is appended, whoever is listening.
-    const listening = (): boolean => this.bridgeUp()
+    const listening = async (): Promise<boolean> => { await this.#awaitArrivingSession(); return this.sessionListening() }
     const guarded: HostAsk = async function* (question, opts) {
       // HOW LONG THE TURN TOOK (essentials jev-outcomes.ts): to the last
       // word, and to the first visible one. A stopped or failed turn says
@@ -7878,7 +7959,7 @@ export class ChatWindowComponent implements OnDestroy {
         if (opts?.signal?.aborted) throw error
         const detail = error instanceof Error ? error.message : String(error)
         component.#turnFailures.set(convoId, detail)
-        if (!firstAt && listening() && !component.#outsideConvos.has(convoId)) {
+        if (!firstAt && !component.#outsideConvos.has(convoId) && await listening()) {
           console.warn('[chat] no model took the question — the bridge session takes it:', detail)
           return ''
         }

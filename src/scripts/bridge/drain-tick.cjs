@@ -9,6 +9,12 @@
 // a session is open. This covers the other case: nobody is watching, and asks
 // should still get answered.
 //
+// A drain tick is NOT a parked session: it cannot promise when it will be
+// back, so it claims nothing (watch-asks.cjs sends `parked`, this does not).
+// It answers the asks that were already queued — a named model, the ask
+// screen, /break-apart, /expand, /organize — and the chat window does not
+// queue a plain question for it (documentation/claude-bridge-setup.md).
+//
 // COST SHAPE — the point of this file. Model time is only spent when there is
 // real work:
 //

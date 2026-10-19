@@ -32,10 +32,17 @@ at the end.
 3. **The responder** — a Claude Code session (or a scheduled drain) that
    watches for questions and answers them.
 
-A question typed in the hive is written as a durable **ask record** in your
-hive's own storage. The responder polls for those records through the broker,
-answers, and retires them. Close the laptop mid-question? The ask survives —
-it is answered when a responder next connects.
+A question to a named model (`/opus …`), from the ask screen, or from
+`/break-apart`, `/expand` and `/organize` is written as a durable **ask
+record** in your hive's own storage. The responder polls for those records
+through the broker, answers, and retires them. Close the laptop mid-question?
+The ask survives — it is answered when a responder next connects.
+
+A plain chat question that no model took is different: it is written only
+while a session is **parked** (Step 5). The broker being up is not that — the
+managers ride it all day — so with no session parked the chat window shows the
+failure at once ("no Claude session is parked on the bridge") and writes
+nothing, instead of waiting for good.
 
 **Trust model**: the broker binds to loopback only. Registration as a renderer
 is *always* loopback-only, and only from the hive's own page — the origins in
@@ -162,7 +169,14 @@ see asks arrive as JSON lines:
 npm run bridge:watch
 ```
 
-One-shot smoke test instead of parking:
+The watcher's poll is what tells the hive a session is parked: each poll says
+how often it will come back (`parked: <ms>` on the `optimization-list` it
+sends), and the claim lasts three polls — about 18 s at the default 6 s — and
+lapses on its own when the watcher stops. `bridge:status` carries it as
+`{ connected, listening }`; `connected` is the broker, `listening` is a
+session.
+
+One-shot smoke test instead of parking (it claims nothing):
 
 ```bash
 npm run bridge:watch:once
@@ -250,6 +264,13 @@ spawns `claude -p` once per model group, maps the hive's model hint
 (opus/sonnet/haiku/fable) to a real model id, answers, and retires the asks.
 `--dry` reports without answering.
 
+The drain is not a parked session: it comes back every few minutes at the
+scheduler's pleasure, cannot promise an interval, and claims nothing. It
+answers the asks that were already queued (a named model such as `/opus`, the
+ask screen, `/break-apart`, `/expand`, `/organize`). A plain chat question with
+no named model and no parked session is not queued for it; the chat window
+tells you at once.
+
 ### Optional · Remote answering session
 
 The **renderer tab must stay on the broker's machine** — only the answering
@@ -332,7 +353,8 @@ every form.
 | Connection refused on 2401 | No broker | `npm run bridge` |
 | Port 2401 already bound | Broker already running | Use it — never start a second |
 | Asks queue but nothing answers | No responder | Step 5 (park) or the drain schedule |
-| Chat window says nothing is listening | Live truth from `bridge:status` | Same as above — start a session |
+| Chat says "Nothing is listening yet" | A question was queued (a named model) and no session is parked — live truth from `bridge:status` (`listening`) | Step 5 — park a session, or withdraw the question |
+| Chat says "no Claude session is parked on the bridge" | No model took a plain question and nothing was queued (the broker is up; no watcher is visiting) | Step 5 — park a session, or fix the providers console; just after a reload give the watcher ~10 s |
 | Worked, then died after a tab reload | Renderer reconnects only if it had connected once | Reload the tab after the broker is up |
 | Two browsers flapping connect/timeout | Two tabs fighting for one renderer slot | Windows: `Get-NetTCPConnection -RemotePort 2401` to find them; close one |
 | `unauthorized — this bridge serves its own machine…` | A page or a remote sender without a code | `bridge give <name>` in the hive tab; send it as `Authorization: Bearer <code>`, or from a page as `{"type":"code","code":"<code>"}` first |

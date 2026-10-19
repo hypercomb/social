@@ -84,6 +84,13 @@ function bridge(req, timeoutMs = 15_000) {
   })
 }
 
+// A question is queued for a Claude session only while one is PARKED
+// (assistant/bridge-parked.ts): the broker being up proves nothing. This
+// verifier IS the responder — it visits the ask pool and promises to return,
+// as scripts/bridge/watch-asks.cjs does, so the window queues what it types.
+const PARK_MS = 6_000
+const park = () => bridge({ op: 'optimization-list', kind: 'ask', parked: PARK_MS }, 5_000).catch(() => {})
+
 function node(script, args) {
   return new Promise(resolve => {
     execFile(process.execPath, [path.join(__dirname, 'bridge', script), ...args],
@@ -188,6 +195,8 @@ async function boot(page) {
   await page.goto(URL_, { waitUntil: 'domcontentloaded' })
   await page.waitForFunction(() => !!window.__hypercombEffectBus && !!window.ioc?.get('@diamondcoreprocessor.com/ChatThreads'), null, { timeout: 60_000 })
   await page.waitForFunction(() => !!window.ioc?.get('@diamondcoreprocessor.com/ClaudeBridgeWorker')?.connected, null, { timeout: 30_000 })
+  // Every boot is a fresh worker with no claim: park again at once.
+  await park()
 }
 
 async function openConvo(page, convoId) {
@@ -321,6 +330,9 @@ async function main() {
   const context = await chromium.launchPersistentContext(PROFILE, { headless: true, viewport: { width: 1280, height: 820 } })
   const errors = []
   let exitCode = 0
+  // The claim lasts three visits (18 s at PARK_MS): renew it well inside that.
+  const parkedTimer = setInterval(() => { void park() }, 4_000)
+  parkedTimer.unref?.()
   try {
     await prepareContext(context)
     for (const extra of context.pages().slice(1)) await extra.close()
@@ -1153,6 +1165,7 @@ async function main() {
     check('!', 'driver', false, String(err && err.stack || err))
     exitCode = 1
   } finally {
+    clearInterval(parkedTimer)
     await context.close().catch(() => {})
     try { fs.rmSync(PROFILE, { recursive: true, force: true }) } catch { /* reported below */ }
     console.log(`scratch profile ${fs.existsSync(PROFILE) ? 'NOT removed' : 'removed'}: ${PROFILE}`)

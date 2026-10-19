@@ -16,11 +16,18 @@
 //   node scripts/bridge/watch-asks.cjs --once    → one tick, then exit (smoke)
 //   ASK_POLL_MS=6000                             → poll cadence (default 6s)
 //
-// Zero changes to the live broker or renderer: it speaks the same
-// request/response envelope every scripts/bridge client uses. The poll is
-// localhost, read-only (`optimization-list kind:'ask'`), one request per
-// tick — the cheap half of park-and-wake; the expensive half (the model)
-// runs only when a line prints.
+// Zero changes to the live broker: it speaks the same request/response
+// envelope every scripts/bridge client uses. The poll is localhost, read-only
+// (`optimization-list kind:'ask'`), one request per tick — the cheap half of
+// park-and-wake; the expensive half (the model) runs only when a line prints.
+//
+// Each poll also SAYS HOW OFTEN IT WILL COME BACK (`parked: <ms>`). That is
+// how the hive knows a session is parked at all — the broker being up proves
+// nothing, the managers ride it all day — and how its chat window decides
+// whether to queue a question for a session or tell you at once that no model
+// took it (assistant/bridge-parked.ts: the claim lasts three intervals and
+// lapses on its own when the polls stop). `--once` is a smoke test, not a
+// parked session, so it claims nothing.
 //
 // Output contract (line-buffered, one JSON object per line):
 //   { "ask": "<sig>", "prompt": "...", "model": "opus|sonnet|haiku",
@@ -127,7 +134,7 @@ function onFail(reason) {
 async function attempt() {
   let r
   try {
-    r = await send({ op: 'optimization-list', kind: 'ask' })
+    r = await send({ op: 'optimization-list', kind: 'ask', ...(ONCE ? {} : { parked: POLL_MS }) })
   } catch (e) {
     return { fail: /timeout/i.test(String(e?.message)) ? 'bridge-timeout' : 'bridge-unreachable' }
   }

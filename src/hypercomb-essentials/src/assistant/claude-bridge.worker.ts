@@ -9,6 +9,7 @@ import {
 import { deliverTurnSig, readTurns, setConversationGoalReached } from './chat-thread.js'
 import { appendStep, nextSeq as ledgerNextSeq, readSteps, runForAsk } from './chat-steps.js'
 import { MUTATING_OPS, STEP_SILENT_OPS } from './bridge-ops.js'
+import { ParkedLease, monotonicNow } from './bridge-parked.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
@@ -74,6 +75,10 @@ type BridgeRequest = {
    *  unrelated to this filter. Also used by `decoration-add` as the
    *  kind tag on the new decoration record. */
   kind?: string
+  /** `optimization-list` kind:'ask' from a PARKED session: how often (ms) it
+   *  will visit again. Each visit holds the claim for three intervals
+   *  (bridge-parked.ts); a visit that says nothing claims nothing. */
+  parked?: number
   /** `agents-announce`: the frontier bridges this machine can spawn, each an
    *  `llm-provider@1` spec with `shape: 'agent-bridge'`. */
   agents?: unknown[]
@@ -262,11 +267,51 @@ export class ClaudeBridgeWorker extends Worker {
    *  exists to remove. */
   get connected(): boolean { return this.#connected }
 
+  // ── IS ANYONE PARKED? (2026-10-18) ────────────────────────────────
+  // `connected` is the renderer's socket to the broker, and the broker is up
+  // whenever a manager is working — it says nothing about a session being
+  // there to answer. A chat window that read it as "somebody will take this"
+  // queued declined questions into a pool nothing drained. A parked session
+  // (watch-asks.cjs) proves itself by visiting the ask pool and promising to
+  // return; the claim lapses by itself when the visits stop.
+  //
+  // The claim belongs to the SESSION, not to the socket: a socket that drops
+  // and comes back (a throttled background tab, a broker bounce) finds the
+  // session still parked, so the claim is kept across it — `listening` simply
+  // reads false while the socket is down. A tab that RELOADS starts with no
+  // claim at all and learns of the session at its next visit.
+  readonly #parked = new ParkedLease()
+  #parkedTimer: ReturnType<typeof setTimeout> | null = null
+  #connectedAt = 0
+
+  /** Is a session parked on the bridge — one that keeps coming back for asks?
+   *  What a chat surface must ask before it queues a question for a session:
+   *  `connected` alone is the broker, not an answerer. Read at the moment of
+   *  deciding, so a lapsed claim is never believed for want of a timer. */
+  get listening(): boolean { return this.#connected && this.#parked.active(monotonicNow()) }
+
+  /** When this socket opened (`Date.now()`); 0 before one has. A surface
+   *  deciding a question right after a reload uses it to tell "no session"
+   *  from "no session has visited yet": a parked watcher is seconds from its
+   *  next visit. */
+  get connectedAt(): number { return this.#connectedAt }
+
+  /** A session visited the ask pool. The first visit, and the lapse of the
+   *  last one, are announced; the visits in between are not. */
+  #noteVisit(req: BridgeRequest): void {
+    if (req.op !== 'optimization-list' || req.kind !== 'ask') return
+    const was = this.listening
+    if (!this.#parked.visit(req.parked, monotonicNow())) return
+    if (!was) this.#announce()
+    if (this.#parkedTimer) clearTimeout(this.#parkedTimer)
+    this.#parkedTimer = setTimeout(() => { this.#parkedTimer = null; this.#announce() }, this.#parked.remaining(monotonicNow()) + 50)
+  }
+
   /** Announce the socket's state. Emitted on every transition AND once on
    *  connect, so a surface that opens later still learns the state from
    *  EffectBus's last-value replay rather than having to poll. */
   #announce(): void {
-    EffectBus.emit('bridge:status', { connected: this.#connected })
+    EffectBus.emit('bridge:status', { connected: this.#connected, listening: this.listening })
   }
 
   #port(): number {
@@ -328,6 +373,7 @@ export class ClaudeBridgeWorker extends Worker {
 
       ws.onopen = () => {
         this.#connected = true
+        this.#connectedAt = Date.now()
         this.#attempts = 0
         // The renderer brings the bridge codes' HASHES — who besides this
         // machine may send ops. The list belongs to this socket: the broker
@@ -489,6 +535,7 @@ export class ClaudeBridgeWorker extends Worker {
   }
 
   async #dispatch(req: BridgeRequest): Promise<BridgeResponse> {
+    this.#noteVisit(req)
     // The run is resolved BEFORE the op routes, so that the retire's own
     // step — `optimization-remove` of the ask — is addressed while the ask
     // record still exists to be read.
