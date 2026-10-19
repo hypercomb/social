@@ -225,11 +225,13 @@ the memory is this window's, keeps the memory across Escape's park/put-back,
 and lets the pair go when it comes up alone (`#forgetIfAlone`).
 
 Probe: 40 scenarios in the script (the 41 above counted the seed). Before:
-32 ok / 8 FAIL. After: 39 ok / 1 FAIL. The one left is
-`chat: open → peek → Escape → wait 4s`, which now ENDS WITH THE CHAT OPEN —
-the press unfolds the conversation (the intended behaviour, remedy 2) instead
-of parking it, so the probe's "hive visible" verdict no longer fits the
-scenario as written. A separate probe of the same sequence confirms: fold →
-Escape unfolds (`view:active` owned by `chat-window`, chat showing) → Escape
-parks (no owner, nothing showing, canvas and header visible, still so 4 s
-later). F3, F4 and F6 remain open.
+32 ok / 8 FAIL. After: 40 ok / 0 FAIL. One scenario changed shape with the
+remedy: `chat: open → peek → Escape` used to park the chat and now UNFOLDS it
+(the press is the window's own dismiss, one level — remedy 2), so the
+scenario is `peek → Escape (unfold) → Escape (park) → wait 4s`, and the probe
+records both halves: after the first press `view:active` is owned by
+`chat-window` and the chat is showing; after the second no owner, nothing
+showing, canvas and header visible, still so 4 s later. Remedy 3's ratchet
+is the probe itself (it asserts the owners after every step); no spec in the
+suite mounts an Angular component, so a unit ratchet is not its shape. F3,
+F4 and F6 remain open.
