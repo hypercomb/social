@@ -427,6 +427,7 @@
   "markup.uncut": "cuts need this tab shared — the whole screen went instead",
   "annotate.open": "annotate the screen",
   "slash.file": "File a note on the tile it belongs to on this page",
+  "slash.event": "A meeting on the calendar: add one, read the calendar across your community, join, or keep the roll",
   "file.empty": "Say what to file.",
   "file.unavailable": "Notes are not available here.",
   "file.under": "Filed under",

@@ -430,6 +430,7 @@
   "markup.uncut": "kesitler için bu sekmenin paylaşılması gerekir — bunun yerine ekranın tamamı gönderildi",
   "annotate.open": "ekrana not düş",
   "slash.file": "Notu bu sayfada ait olduğu karoya koy",
+  "slash.event": "Takvimde bir toplantı: ekle, topluluğunun takvimini oku, katıl ya da katılımcı listesini sakla",
   "file.empty": "Neyin konacağını söyleyin.",
   "file.unavailable": "Notlar burada kullanılamıyor.",
   "file.under": "Şuraya konuldu:",

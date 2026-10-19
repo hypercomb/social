@@ -48,6 +48,7 @@
   .mh .btn-primary{background:var(--accent);color:var(--bg)}
   .mh .btn-primary:hover{background:var(--a600);color:var(--bg)}
   .mh .btn-primary:active{background:var(--a700)}
+  .mh .btn-primary[disabled]{opacity:.5;cursor:default}
   .mh .btn-secondary{border-color:var(--divider)}
   .mh .btn-secondary:hover{background:color-mix(in srgb,var(--text) 7%,transparent)}
   .mh .btn-secondary:active{background:color-mix(in srgb,var(--text) 14%,transparent)}
@@ -84,6 +85,38 @@
   .mh .num{font-weight:800;font-feature-settings:"tnum"}
   .mh .actions{border-top:1px solid var(--divider);padding:var(--s3) 0 0;display:flex;gap:var(--s2);flex-wrap:wrap}
   .mh .actions .btn-primary{flex:1;justify-content:flex-start}
+
+  /* join: pick a name, you're in */
+  .mh .join{display:none;border-top:1px solid var(--divider);margin-top:var(--s3);padding-top:var(--s3)}
+  .mh .join.open{display:block}
+  .mh .join form{display:flex;gap:var(--s2);flex-wrap:wrap}
+  .mh .join input{flex:1;min-width:0;min-height:44px;padding:var(--s2) var(--s3);border:1px solid var(--divider);border-radius:0;
+    background:var(--bg);color:var(--text);font:400 16px/1.2 var(--font)}
+  .mh .join input::placeholder{color:var(--n700)}
+  .mh .join .btn-primary{flex:none}
+  .mh .join .state{margin-top:var(--s2);font-size:14px;color:var(--n800);min-height:1.4em}
+  .mh .join .state b{color:var(--text)}
+  .mh .join .state a{word-break:break-all}
+  .mh .who{border-top:1px solid var(--divider);margin-top:var(--s3);padding-top:var(--s3)}
+  .mh .who ul{list-style:none;display:flex;flex-wrap:wrap;gap:6px var(--s2);margin-top:6px;font-size:14px}
+  .mh .who li{padding:2px 8px;border:1px solid var(--divider)}
+  .mh .who li.you{border-color:var(--accent);color:var(--a700)}
+  .mh .who .none{font-size:14px;color:var(--n700);margin-top:4px}
+
+  /* calendar: a scroller of meetings and dates, not an organizer */
+  .mh .scroller{display:flex;gap:var(--s2);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--s3) 0 var(--s2);
+    margin-top:var(--s3);border-top:2px solid var(--divider);scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+  .mh .card{flex:0 0 172px;scroll-snap-align:start;text-align:left;cursor:pointer;border:1px solid var(--divider);border-radius:0;
+    background:transparent;color:var(--text);font:inherit;padding:var(--s3);display:grid;gap:4px;transition:background .15s ease}
+  .mh .card:hover{background:color-mix(in srgb,var(--text) 5%,transparent)}
+  .mh .card[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+  .mh .card .day{font-weight:800;font-size:20px;line-height:1.1}
+  .mh .card .place{font-size:13px;color:var(--n800)}
+  .mh .card .count{font-size:12px;color:var(--a700);font-weight:600;margin-top:2px}
+  .mh .card.past{color:var(--n700)}
+  .mh .card.past .count{color:var(--n700)}
+  .mh .card.away .count{color:var(--n700)}
+  .mh .empty{font-size:14px;color:var(--n700);padding:var(--s3) 0}
 
   /* how joining works */
   .mh .three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:2px solid var(--divider);margin-top:var(--s3)}
@@ -160,21 +193,21 @@
 
   <hr class="hr">
 
-  <section class="sec" data-reveal aria-labelledby="next">
+  <section class="sec" data-reveal aria-labelledby="next" data-next>
     <div class="head">
-      <span class="kicker" id="next">Next meeting</span>
+      <span class="kicker" id="next" data-next-kicker>Next meeting</span>
       <span class="live">Live now</span>
     </div>
     <div class="facts">
       <div>
         <div class="mini">When</div>
-        <div class="big">Sat 17 Oct</div>
-        <div class="sub">Every Saturday · time posted here</div>
+        <div class="big" data-when>—</div>
+        <div class="sub" data-when-sub>Every Saturday · time posted here</div>
       </div>
       <div>
         <div class="mini">Where</div>
-        <div class="big">Yaletown</div>
-        <div class="sub">Vancouver · free, all welcome</div>
+        <div class="big" data-where>—</div>
+        <div class="sub" data-where-sub>Free, all welcome</div>
       </div>
     </div>
     <div class="agenda">
@@ -186,10 +219,34 @@
       </ol>
     </div>
     <div class="actions">
-      <a class="btn btn-primary" href="#joining" data-join>Join the meeting<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></a>
-      <button type="button" class="btn btn-secondary" data-calendar>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4"/><path d="M3 10h18"/></svg><span data-calendar-label>Calendar</span></button>
+      <button type="button" class="btn btn-primary" data-join>Join the meeting<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+      <a class="btn btn-secondary" href="#calendar" data-calendar>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4"/><path d="M3 10h18"/></svg>Calendar</a>
     </div>
+
+    <div class="join" data-join-panel>
+      <form data-join-form autocomplete="off">
+        <label class="sr" for="mh-name">Your name</label>
+        <input id="mh-name" name="name" type="text" maxlength="48" placeholder="Pick a name" required data-name>
+        <button type="submit" class="btn btn-primary" data-join-send>I'm coming</button>
+      </form>
+      <p class="state" data-join-state></p>
+    </div>
+
+    <div class="who" data-who>
+      <div class="mini"><span data-who-title>Who's coming</span> <span data-who-count></span></div>
+      <ul data-who-list></ul>
+      <p class="none" data-who-none>Nobody has said yet. Be the first.</p>
+    </div>
+  </section>
+
+  <hr class="hr">
+
+  <section class="sec" id="calendar" data-reveal aria-labelledby="cal">
+    <span class="kicker" id="cal">Calendar</span>
+    <p class="sub">Every meeting on the calendar, from this community and the ones it follows. Tap one to see who is coming.</p>
+    <div class="scroller" data-scroller role="list" aria-label="Meetings"></div>
+    <p class="empty" data-empty hidden>No meetings on the calendar yet.</p>
   </section>
 
   <hr class="hr">
@@ -213,7 +270,7 @@
         <div class="cell grayscale"><img src="resource:{cell-in.webp}" alt="Bee cell"></div>
         <div class="step">3</div>
         <div class="step-title">You're in</div>
-        <p class="step-body">A member lets you in, like being introduced at the door.</p>
+        <p class="step-body">Your name joins the list for everyone to see, and you keep the receipt.</p>
       </div>
     </div>
   </section>
@@ -265,15 +322,18 @@
   if (!root) return;
   root.setAttribute('data-ready', '');
 
-  // THE MEETING — the one place to change when the next one is set.
-  var MEETING = {
-    date: '2026-10-17',            // all-day until a time is set
-    title: 'Hypercomb Meetup',
-    where: 'Yaletown, Vancouver',
-    url: 'https://meetups.hypercomb.com/'
-  };
-
-  var said = root.querySelector('[data-said]');
+  // THE CALENDAR IS A POOL OF MEANING (documentation/calendar-events.md).
+  // Meetings are records in sign('calendar:events') on the door that serves
+  // this page — one derived address every community host answers — and who
+  // is coming to one meeting is sign('rsvp:<meeting>') on the meeting's own
+  // host. The page carries no meeting data: it reads both from its origin,
+  // and from the meetup's door when it stands somewhere else (a hive).
+  var DOOR = 'meetups.hypercomb.com';
+  var PAGE_URL = 'https://' + DOOR + '/';
+  var TITLE = 'Hypercomb Meetup';
+  var visitor = document.documentElement.getAttribute('data-hypercomb-mode') === 'visitor';
+  var $ = function (sel) { return root.querySelector(sel); };
+  var said = $('[data-said]');
   var say = function (text) { if (said) said.textContent = text; };
   var flash = function (el, text) {
     if (!el) return;
@@ -288,37 +348,274 @@
     button.addEventListener('click', function () {
       var label = button.hasAttribute('data-share-label') ? button : null;
       if (navigator.share) {
-        navigator.share({ title: MEETING.title, url: MEETING.url }).catch(function () {});
+        navigator.share({ title: TITLE, url: PAGE_URL }).catch(function () {});
         return;
       }
       var done = function () { say('Link copied'); flash(label, 'Link copied'); };
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(MEETING.url).then(done, function () { say(MEETING.url); });
-      else say(MEETING.url);
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(PAGE_URL).then(done, function () { say(PAGE_URL); });
+      else say(PAGE_URL);
     });
   });
 
-  // Calendar: a real calendar file for the next meeting, made here, sent nowhere.
-  var cal = root.querySelector('[data-calendar]');
-  if (cal) cal.addEventListener('click', function () {
-    var d = MEETING.date.replace(/-/g, '');
-    var next = new Date(MEETING.date + 'T00:00:00Z'); next.setUTCDate(next.getUTCDate() + 1);
-    var end = next.toISOString().slice(0, 10).replace(/-/g, '');
-    var stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
-    var ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Hypercomb//Meetup//EN', 'BEGIN:VEVENT',
-      'UID:meetup-' + d + '@meetups.hypercomb.com', 'DTSTAMP:' + stamp,
-      'DTSTART;VALUE=DATE:' + d, 'DTEND;VALUE=DATE:' + end,
-      'SUMMARY:' + MEETING.title, 'LOCATION:' + MEETING.where.replace(/,/g, '\\,'),
-      'URL:' + MEETING.url, 'DESCRIPTION:Time posted at ' + MEETING.url,
-      'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
-    a.download = 'hypercomb-meetup-' + MEETING.date + '.ics';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
-    var label = root.querySelector('[data-calendar-label]');
-    if (label) label.textContent = 'Added';
-    say('Calendar file saved');
+  // ── reading the pools ───────────────────────────────────────────────
+  var SIG = /^[0-9a-f]{64}$/;
+  function sha256(text) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    });
+  }
+  // Where to read: this origin first; the meetup's own door when this copy of
+  // the page stands elsewhere (standing alone, or in a hive). A visitor door
+  // may read only itself, so there the door IS the origin.
+  function bases() {
+    var out = [];
+    if (/^https?:$/.test(location.protocol)) out.push(location.origin);
+    if (location.host !== DOOR && !visitor) out.push('https://' + DOOR);
+    return out;
+  }
+  function baseFor(host) {
+    if (host === location.host) return location.origin;
+    if (visitor) return null;                       // a visitor writes and reads only here
+    return 'https://' + host;
+  }
+  function listing(base, pool) {
+    return fetch(base + '/' + pool + '/', { cache: 'no-store' }).then(function (res) {
+      if (!res.ok) return [];
+      return res.text().then(function (text) {
+        return text.split('\n').map(function (l) { return l.trim().toLowerCase(); }).filter(function (l) { return SIG.test(l); });
+      });
+    }).catch(function () { return []; });
+  }
+  function readJson(base, sig) {
+    return fetch(base + '/' + sig, { cache: 'force-cache' }).then(function (res) {
+      if (!res.ok) return null;
+      return res.text().then(function (text) { try { return JSON.parse(text); } catch (e) { return null; } });
+    }).catch(function () { return null; });
+  }
+  function isEvent(r) {
+    return !!r && r.kind === 'event' && /^\d{4}-\d{2}-\d{2}$/.test(String(r.date || '')) && r.title && r.where && r.host;
+  }
+  function readEvents() {
+    return sha256('calendar:events').then(function (pool) {
+      var seen = {}, found = [];
+      var one = function (base) {
+        return listing(base, pool).then(function (names) {
+          return Promise.all(names.map(function (sig) {
+            if (seen[sig]) return null;
+            seen[sig] = true;
+            return readJson(base, sig).then(function (r) { if (isEvent(r)) found.push({ sig: sig, record: r, base: base }); });
+          }));
+        });
+      };
+      return bases().reduce(function (p, base) { return p.then(function () { return one(base); }); }, Promise.resolve()).then(function () { return found; });
+    });
+  }
+  // Who is coming: every claim the meeting's host lists, each key's newest standing.
+  function readComing(ev) {
+    var base = baseFor(ev.record.host) || ev.base;
+    return sha256('rsvp:' + ev.sig).then(function (pool) {
+      return listing(base, pool).then(function (names) {
+        return Promise.all(names.map(function (name) { return readJson(base, pool + '/' + name); })).then(function (claims) {
+          var newest = {};
+          claims.forEach(function (c, i) {
+            if (!c || Number(c.kind) !== 30568 || !Array.isArray(c.tags)) return;
+            var tag = function (k) { var t = c.tags.filter(function (t) { return t[0] === k; })[0]; return t ? String(t[1] || '') : ''; };
+            var row = { who: tag('name').trim(), going: tag('going'), at: Number(c.created_at) || 0, signer: String(c.pubkey || ''), member: names[i] };
+            if (!row.who || !row.signer) return;
+            var held = newest[row.signer];
+            if (!held || row.at > held.at) newest[row.signer] = row;
+          });
+          return Object.keys(newest).map(function (k) { return newest[k]; }).sort(function (a, b) { return a.at - b.at; });
+        });
+      });
+    });
+  }
+
+  // ── the calendar, rendered ──────────────────────────────────────────
+  var state = { events: [], selected: null, coming: {}, mine: {} };
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function dayOf(record, long) {
+    var p = record.date.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return d.toLocaleDateString(undefined, long ? { weekday: 'long', day: 'numeric', month: 'long' } : { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+  function order(events) {
+    var t = today();
+    var key = function (e) { return e.record.date + (e.record.time || ''); };
+    var up = events.filter(function (e) { return e.record.date >= t; }).sort(function (a, b) { return key(a) < key(b) ? -1 : 1; });
+    var past = events.filter(function (e) { return e.record.date < t; }).sort(function (a, b) { return key(a) > key(b) ? -1 : 1; });
+    return up.concat(past);
+  }
+  function renderFacts(ev) {
+    var isPast = ev && ev.record.date < today();
+    $('[data-next-kicker]').textContent = !ev ? 'Next meeting' : isPast ? 'Last meeting' : 'Next meeting';
+    $('[data-when]').textContent = ev ? dayOf(ev.record) : '—';
+    $('[data-when-sub]').textContent = ev ? (ev.record.time ? 'at ' + ev.record.time : 'Time posted here') : 'Every Saturday · time posted here';
+    $('[data-where]').textContent = ev ? ev.record.where.split(',')[0] : '—';
+    $('[data-where-sub]').textContent = ev ? (ev.record.where.split(',').slice(1).join(',').trim() || ev.record.title) : 'Free, all welcome';
+    var join = $('[data-join]');
+    join.disabled = !ev || isPast;
+    join.querySelector ? null : null;
+  }
+  function renderWho(ev) {
+    var list = $('[data-who-list]'), none = $('[data-who-none]'), count = $('[data-who-count]');
+    list.textContent = '';
+    var rows = ev ? (state.coming[ev.sig] || []).filter(function (r) { return r.going === 'yes'; }) : [];
+    count.textContent = rows.length ? '(' + rows.length + ')' : '';
+    $('[data-who-title]').textContent = ev && ev.record.date < today() ? 'Who came' : "Who's coming";
+    rows.forEach(function (r) {
+      var li = document.createElement('li');
+      li.textContent = r.who;
+      if (ev && state.mine[ev.sig] === r.member) li.className = 'you';
+      list.appendChild(li);
+    });
+    none.hidden = rows.length > 0;
+    none.textContent = !ev ? 'No meeting to join yet.' : ev.record.date < today() ? 'Nobody said they were coming.' : 'Nobody has said yet. Be the first.';
+    // A meeting hosted by another community: a visitor joins it there.
+    var away = ev && !baseFor(ev.record.host);
+    var panel = $('[data-join-panel]');
+    if (away) {
+      panel.classList.add('open');
+      $('[data-join-form]').hidden = true;
+      var st = $('[data-join-state]');
+      st.textContent = 'This meeting is hosted by ' + ev.record.host + '. ';
+      var a = document.createElement('a'); a.href = 'https://' + ev.record.host + '/'; a.textContent = 'Join it there'; st.appendChild(a); st.appendChild(document.createTextNode('.'));
+    } else {
+      $('[data-join-form]').hidden = false;
+    }
+  }
+  function renderCards() {
+    var strip = $('[data-scroller]'), empty = $('[data-empty]');
+    strip.textContent = '';
+    var t = today();
+    var ordered = order(state.events);
+    empty.hidden = ordered.length > 0;
+    ordered.forEach(function (ev) {
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'card' + (ev.record.date < t ? ' past' : '') + (baseFor(ev.record.host) ? '' : ' away');
+      card.setAttribute('role', 'listitem');
+      card.setAttribute('aria-pressed', state.selected && state.selected.sig === ev.sig ? 'true' : 'false');
+      var rows = (state.coming[ev.sig] || []).filter(function (r) { return r.going === 'yes'; });
+      var count = state.coming[ev.sig] ? (rows.length + (ev.record.date < t ? ' came' : ' coming')) : (baseFor(ev.record.host) ? '…' : 'at ' + ev.record.host);
+      card.innerHTML = '<span class="mini"></span><span class="day"></span><span class="place"></span><span class="count"></span>';
+      card.children[0].textContent = ev.record.title;
+      card.children[1].textContent = dayOf(ev.record) + (ev.record.time ? ' · ' + ev.record.time : '');
+      card.children[2].textContent = ev.record.where;
+      card.children[3].textContent = count;
+      card.addEventListener('click', function () { select(ev); $('[data-next]').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+      strip.appendChild(card);
+    });
+  }
+  function select(ev) {
+    state.selected = ev;
+    renderFacts(ev); renderWho(ev); renderCards();
+    if (ev && !state.coming[ev.sig]) {
+      readComing(ev).then(function (rows) { state.coming[ev.sig] = rows; if (state.selected === ev) renderWho(ev); renderCards(); });
+    }
+  }
+  function load() {
+    return readEvents().then(function (events) {
+      state.events = events;
+      var ordered = order(events);
+      var upcoming = ordered.filter(function (e) { return e.record.date >= today(); });
+      select(upcoming[0] || ordered[0] || null);
+      // Counts for every card, quietly.
+      ordered.forEach(function (ev) {
+        if (state.coming[ev.sig] || !baseFor(ev.record.host)) return;
+        readComing(ev).then(function (rows) { state.coming[ev.sig] = rows; renderCards(); if (state.selected === ev) renderWho(ev); });
+      });
+    });
+  }
+
+  // ── joining: pick a name, you're in ─────────────────────────────────
+  var panel = $('[data-join-panel]'), form = $('[data-join-form]'), stateLine = $('[data-join-state]');
+  $('[data-join]').addEventListener('click', function () {
+    panel.classList.add('open');
+    var input = $('[data-name]');
+    if (!form.hidden) { input.focus(); }
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
+  function receiptLink(ev, member) {
+    return PAGE_URL + '?event=' + ev.sig + '&rsvp=' + member;
+  }
+  function showReceipt(ev, who, member) {
+    stateLine.textContent = '';
+    var b = document.createElement('b'); b.textContent = "You're in, " + who + '.'; stateLine.appendChild(b);
+    stateLine.appendChild(document.createTextNode(' Keep your receipt: '));
+    var a = document.createElement('a'); a.href = receiptLink(ev, member); a.textContent = 'this link'; stateLine.appendChild(a);
+    stateLine.appendChild(document.createTextNode(' shows your name on the list whenever you open it.'));
+  }
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var ev = state.selected;
+    var who = $('[data-name]').value.trim();
+    if (!ev || !who) return;
+    var send = $('[data-join-send]');
+    send.disabled = true;
+    stateLine.textContent = 'Signing your name…';
+    say('Joining');
+    var done = false;
+    var finish = function (handler) { return function (evt) {
+      if (done || !evt.detail || evt.detail.event !== ev.sig) return;
+      done = true; cleanup(); handler(evt.detail);
+    }; };
+    var onDone = finish(function (d) {
+      state.mine[ev.sig] = d.member;
+      showReceipt(ev, who, d.member);
+      say("You're in, " + who);
+      delete state.coming[ev.sig];
+      readComing(ev).then(function (rows) { state.coming[ev.sig] = rows; renderWho(ev); renderCards(); });
+    });
+    var onError = finish(function (d) {
+      stateLine.textContent = "That didn't go through: " + (d.reason || 'the host said no') + '.';
+      send.disabled = false;
+    });
+    var cleanup = function () {
+      clearTimeout(timer);
+      document.removeEventListener('hc:rsvp:done', onDone);
+      document.removeEventListener('hc:rsvp:error', onError);
+      send.disabled = false;
+    };
+    document.addEventListener('hc:rsvp:done', onDone);
+    document.addEventListener('hc:rsvp:error', onError);
+    var timer = setTimeout(function () {
+      if (done) return;
+      done = true; cleanup();
+      stateLine.textContent = "Joining isn't available on this copy of the page. Open " + PAGE_URL + ' to join.';
+    }, 12000);
+    // The hive's RsvpDrone hears this, signs the claim with this device's key,
+    // writes it to the meeting's host, and answers on the document.
+    document.dispatchEvent(new CustomEvent('hc:rsvp', { detail: { event: ev.sig, host: ev.record.host, name: who, going: 'yes' } }));
+  });
+
+  // A receipt link: the claim is read back from the pool it went into. No
+  // storage is asked for anything — the link IS what you kept.
+  function checkReceipt() {
+    var q = new URLSearchParams(location.search);
+    var sig = String(q.get('event') || '').toLowerCase(), member = String(q.get('rsvp') || '').toLowerCase();
+    if (!SIG.test(sig) || !SIG.test(member)) return;
+    var ev = state.events.filter(function (e) { return e.sig === sig; })[0];
+    if (!ev) return;
+    var base = baseFor(ev.record.host) || ev.base;
+    sha256('rsvp:' + sig).then(function (pool) { return readJson(base, pool + '/' + member); }).then(function (claim) {
+      select(ev);
+      panel.classList.add('open');
+      if (!claim) { stateLine.textContent = 'That receipt is not on the list.'; return; }
+      var tag = function (k) { var t = (claim.tags || []).filter(function (t) { return t[0] === k; })[0]; return t ? String(t[1] || '') : ''; };
+      state.mine[sig] = member;
+      stateLine.textContent = '';
+      var b = document.createElement('b');
+      b.textContent = tag('going') === 'yes' ? "You're on the list for " + dayOf(ev.record, true) + ' as ' + tag('name') + '.' : 'You said you were not coming on ' + dayOf(ev.record, true) + '.';
+      stateLine.appendChild(b);
+      renderWho(ev);
+    });
+  }
+
+  renderFacts(null); renderWho(null); renderCards();
+  load().then(checkReceipt, function () {});
 
   // Quiet motion, never where it could hide content.
   var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;

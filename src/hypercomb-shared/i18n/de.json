@@ -430,6 +430,7 @@
   "markup.uncut": "Ausschnitte brauchen diesen Tab geteilt — stattdessen ging der ganze Bildschirm",
   "annotate.open": "Bildschirm annotieren",
   "slash.file": "Eine Notiz bei der Kachel auf dieser Seite ablegen, zu der sie gehört",
+  "slash.event": "Ein Treffen im Kalender: eines anlegen, den Kalender deiner Community lesen, teilnehmen oder die Teilnehmerliste behalten",
   "file.empty": "Sag, was abgelegt werden soll.",
   "file.unavailable": "Notizen sind hier nicht verfügbar.",
   "file.under": "Abgelegt unter",

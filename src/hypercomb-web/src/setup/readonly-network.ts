@@ -5,8 +5,18 @@
 // requests are not part of the visitor configuration. Install this before the
 // normal runtime graph so even an otherwise enabled participant bee cannot
 // cross that boundary.
+//
+// THE ONE WRITE A VISITOR MAY MAKE: a pool member at this origin —
+// `PUT /<pool>/<member>`, both 64-hex. That is how a reader joins a meeting
+// from its page (documentation/calendar-events.md): a few hundred bytes of
+// their own signed claim, which the host takes only into a list its organizer
+// opened and verifies before it keeps. It changes nothing of the hive this
+// door serves; every other mutation stays refused.
 
 const allowedUrl = (value: string | URL): URL => new URL(String(value), location.href)
+const POOL_MEMBER_RE = /^\/[0-9a-f]{64}\/[0-9a-f]{64}$/
+const poolMemberWrite = (method: string, target: URL): boolean =>
+  method === 'PUT' && target.origin === location.origin && POOL_MEMBER_RE.test(target.pathname)
 
 export function installReadonlyNetwork(): void {
   const nativeFetch = globalThis.fetch.bind(globalThis)
@@ -18,7 +28,7 @@ export function installReadonlyNetwork(): void {
     // rather than throwing synchronously out of the fetch() call: callers
     // handle "the network said no" everywhere, and a synchronous throw
     // escapes paths that only ever wrapped the await.
-    if (method !== 'GET' && method !== 'HEAD') {
+    if (method !== 'GET' && method !== 'HEAD' && !poolMemberWrite(method, target)) {
       return Promise.reject(new TypeError(`Failed to fetch: published websites cannot send ${method} requests.`))
     }
     if ((target.protocol === 'http:' || target.protocol === 'https:') && target.origin !== location.origin) {

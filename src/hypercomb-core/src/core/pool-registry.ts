@@ -269,6 +269,17 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // One current JSON document per participant, replaced whole; never sent.
   // The swarm model for static content: an offer is not an adoption.
   'community:offers',
+  // THE CALENDAR (documentation/calendar-events.md): one member per meeting
+  // record, named by the record's own signature, at the SAME address on every
+  // community host — a calendar is the union of this one address across the
+  // hosts a reader carries, and a door picks up what its community lists.
+  // TRUTH POOL: an organizer's act, never derived.
+  'calendar:events',
+  // WHICH MEETINGS' LISTS ARE OPEN on a host: the addresses of the
+  // sign('rsvp:<record>') pools an organizer's index opened, so a host knows a
+  // list when a stranger's claim arrives at it. Host-side only; the lists
+  // themselves are per-meeting pools no census can enumerate.
+  'rsvp:pools',
   // WHAT FORMAT THIS HIVE IS WRITTEN IN — one declaration naming the format
   // its newest writes use, the lowest reader version that sees all of it, and
   // when that last moved (see essentials/sharing/hive-format.ts and the pure

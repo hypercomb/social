@@ -430,6 +430,7 @@
   "markup.uncut": "los recortes necesitan compartir esta pestaña — se envió la pantalla entera",
   "annotate.open": "anotar la pantalla",
   "slash.file": "Archivar una nota en el mosaico de esta página al que pertenece",
+  "slash.event": "Una reunión en el calendario: añade una, lee el calendario de tu comunidad, únete o guarda la lista de asistentes",
   "file.empty": "Di qué quieres archivar.",
   "file.unavailable": "Las notas no están disponibles aquí.",
   "file.under": "Archivado en",

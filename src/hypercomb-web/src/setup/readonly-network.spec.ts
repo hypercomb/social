@@ -17,6 +17,23 @@ describe('visitor network gate', () => {
     expect(nativeFetch).toHaveBeenCalledTimes(1)
   })
 
+  it('admits the one write a reader makes — their own pool member at this origin — and nothing like it elsewhere', async () => {
+    const nativeFetch = vi.fn(async () => new Response('member'))
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: nativeFetch })
+    installReadonlyNetwork()
+
+    const pool = 'a'.repeat(64), member = 'b'.repeat(64)
+    // Joining a meeting from its page: PUT /<pool>/<member>, both signatures.
+    await expect(fetch(`/${pool}/${member}`, { method: 'PUT', body: '{}' })).resolves.toBeInstanceOf(Response)
+    // Not a bare atom, not a listing, not another origin, not another verb.
+    await expect(fetch(`/${pool}`, { method: 'PUT', body: '{}' })).rejects.toBeInstanceOf(TypeError)
+    await expect(fetch(`/${pool}/`, { method: 'PUT', body: '{}' })).rejects.toBeInstanceOf(TypeError)
+    await expect(fetch(`https://outside.example/${pool}/${member}`, { method: 'PUT', body: '{}' })).rejects.toBeInstanceOf(TypeError)
+    await expect(fetch(`/${pool}/${member}`, { method: 'POST', body: '{}' })).rejects.toBeInstanceOf(TypeError)
+    await expect(fetch(`/${pool}/${member}`, { method: 'DELETE' })).rejects.toBeInstanceOf(TypeError)
+    expect(nativeFetch).toHaveBeenCalledTimes(1)
+  })
+
   it('makes a blocked socket fail like an unreachable one, never at construction', async () => {
     Object.defineProperty(globalThis, 'fetch', { configurable: true, value: vi.fn(async () => new Response('ok')) })
     installReadonlyNetwork()

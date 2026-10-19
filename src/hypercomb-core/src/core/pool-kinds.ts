@@ -150,6 +150,9 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['comfy:generations', 'set'],
   ['comfy:workflows', 'set'],
   ['community:hosts', 'set'],
+  // The calendar's meetings and the lists a host has opened (documentation/calendar-events.md).
+  ['calendar:events', 'set'],
+  ['rsvp:pools', 'set'],
   // What a HOST is offering. The one meaning the directory branch serves
   // (`GET /<sign('host:packages')>/`), reached by an address every client
   // derives for itself — so if any pool must be declared replicable, it is

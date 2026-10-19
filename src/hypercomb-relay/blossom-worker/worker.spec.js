@@ -5332,3 +5332,158 @@ test('every page leaves with no-transform — the edge may not rewrite it into a
   assert.match(registry.headers.get('content-type'), /json/)
   assert.equal(registry.headers.get('cache-control'), 'no-store')
 })
+
+// ── the calendar (documentation/calendar-events.md) ──────────────────────────
+
+const EVENTS_POOL = await sha256Hex('calendar:events')
+const eventRecordText = (date, host = 'meetups.hypercomb.com') =>
+  JSON.stringify({ v: 1, kind: 'event', title: 'Hypercomb Meetup', date, where: 'Yaletown, Vancouver', series: 'meetups', host, at: 1 })
+
+/** An operator's zone whose signed index lists calendar:events, holding `held`. */
+async function calendarEnv(held = new Map(), extraRoots = {}) {
+  const index = await signedIndex(extraRoots, 1_800_000_000, undefined, undefined, { listed: ['calendar:events'] })
+  return {
+    SITE_BINDINGS: JSON.stringify(ONE_ZONE),
+    SITE_OPERATORS: JSON.stringify({ 'pluginthematrix.com': pubkey }),
+    HIVES: kvMap(new Map([[pubkey, JSON.stringify(index)]])),
+    CONTENT: contentBag(held),
+  }
+}
+
+/** The organizer's index naming its meetings and opening their lists. */
+async function organizerPuts(env, roots) {
+  const url = `https://content.hypercomb.com/${INDEXES}/${pubkey}`
+  const body = JSON.stringify(await signedIndex(roots, 1_800_000_200, undefined, undefined, { listed: ['calendar:events'] }))
+  return worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT') }, body }), env)
+}
+
+/** A visitor's rsvp: kind 30568, signed by `key`, tagged for its pool and event. */
+async function rsvpClaim(pool, event, key, { name = 'Jaime', going = 'yes' } = {}) {
+  const evt = { pubkey: pubOf(key), created_at: nowSeconds(), kind: 30568, tags: [['pool', pool], ['event', event], ['name', name], ['going', going]], content: '' }
+  evt.id = await sha256Hex(JSON.stringify([0, evt.pubkey, evt.created_at, evt.kind, evt.tags, evt.content]))
+  evt.sig = hex(schnorr.sign(evt.id, key))
+  return JSON.stringify(evt)
+}
+
+/** PUT /<pool>/<member> with NO authorization — the stranger's write. */
+async function putRsvp(env, pool, body, name) {
+  const res = await worker.fetch(new Request(`https://${WRITE_FACE}/${pool}/${name ?? await sha256Hex(body)}`, { method: 'PUT', body }), env)
+  return { status: res.status, text: (await res.text()).trim() }
+}
+
+test('an index naming event:<sig> puts the meeting in the calendar pool, and rsvp:<sig> opens its list at its own address', async () => {
+  const record = eventRecordText('2026-10-24')
+  const sig = await sha256Hex(record)
+  const env = await calendarEnv(new Map([[sig, enc(record)]]))
+  const response = await organizerPuts(env, { [`event:${sig}`]: sig, [`rsvp:${sig}`]: sig })
+  assert.equal(response.status, 200)
+  assert(env.CONTENT.held.has(`${EVENTS_POOL}/${sig}`), 'the meeting is a member of calendar:events, named by its record')
+  const rsvpPool = await sha256Hex(`rsvp:${sig}`)
+  assert(env.CONTENT.held.has(`${await sha256Hex('rsvp:pools')}/${rsvpPool}`), 'and its rsvp pool is named among the rsvp pools')
+
+  // The calendar is listed where its operator lists it; the rsvp pool is listed at its address, empty.
+  const calendar = await worker.fetch(new Request(`https://${WRITE_FACE}/${EVENTS_POOL}/`), env)
+  assert.equal(calendar.status, 200)
+  assert.equal(await calendar.text(), `${sig}\n`)
+  const list = await worker.fetch(new Request(`https://${WRITE_FACE}/${rsvpPool}/`), env)
+  assert.equal(list.status, 200)
+  assert.equal(await list.text(), '')
+  // An rsvp pool nobody opened is no pool at all.
+  const unopened = await worker.fetch(new Request(`https://${WRITE_FACE}/${await sha256Hex('rsvp:' + 'b'.repeat(64))}/`), env)
+  assert.equal(unopened.status, 404)
+})
+
+test('a stranger joins a meeting with their own signed claim, no grant asked; the claim is read back and the list names it', async () => {
+  const record = eventRecordText('2026-10-24')
+  const sig = await sha256Hex(record)
+  const env = await calendarEnv(new Map([[sig, enc(record)]]))
+  assert.equal((await organizerPuts(env, { [`event:${sig}`]: sig, [`rsvp:${sig}`]: sig })).status, 200)
+  const pool = await sha256Hex(`rsvp:${sig}`)
+  const stranger = keyOf(31)
+  const claim = await rsvpClaim(pool, sig, stranger)
+  const name = await sha256Hex(claim)
+  assert.deepEqual(await putRsvp(env, pool, claim), { status: 201, text: `member ${name}` })
+  assert.equal((await putRsvp(env, pool, claim)).status, 200, 'the same claim again is already held')
+  const listing = await worker.fetch(new Request(`https://${WRITE_FACE}/${pool}/`), env)
+  assert.equal(await listing.text(), `${name}\n`)
+  const read = await worker.fetch(new Request(`https://${WRITE_FACE}/${pool}/${name}`), env)
+  assert.equal(read.status, 200)
+  assert.equal(await read.text(), claim)
+  // A second person, and a change of mind, are further members: readers take each key's newest.
+  const other = await rsvpClaim(pool, sig, keyOf(32), { name: 'Pavlos' })
+  assert.equal((await putRsvp(env, pool, other)).status, 201)
+  const changed = await rsvpClaim(pool, sig, stranger, { going: 'no' })
+  assert.equal((await putRsvp(env, pool, changed)).status, 201)
+  assert.equal((await (await worker.fetch(new Request(`https://${WRITE_FACE}/${pool}/`), env)).text()).trim().split('\n').length, 3)
+})
+
+test('an rsvp is refused unless it is a signed claim on this pool\'s event with a name and an answer — and only into a list someone opened', async () => {
+  const record = eventRecordText('2026-10-24')
+  const sig = await sha256Hex(record)
+  const env = await calendarEnv(new Map([[sig, enc(record)]]))
+  assert.equal((await organizerPuts(env, { [`event:${sig}`]: sig, [`rsvp:${sig}`]: sig })).status, 200)
+  const pool = await sha256Hex(`rsvp:${sig}`)
+  const key = keyOf(31)
+
+  assert.equal((await putRsvp(env, pool, await rsvpClaim(pool, 'c'.repeat(64), key))).status, 400, 'another event than the pool is for')
+  assert.equal((await putRsvp(env, pool, await rsvpClaim(await sha256Hex('rsvp:' + 'c'.repeat(64)), sig, key))).status, 400, 'tagged with another pool')
+  assert.equal((await putRsvp(env, pool, await rsvpClaim(pool, sig, key, { name: '' }))).status, 400, 'no name')
+  assert.equal((await putRsvp(env, pool, await rsvpClaim(pool, sig, key, { name: 'x'.repeat(49) }))).status, 400, 'a name too long')
+  assert.equal((await putRsvp(env, pool, await rsvpClaim(pool, sig, key, { going: 'maybe' }))).status, 400, 'an answer that is not yes or no')
+  const good = await rsvpClaim(pool, sig, key)
+  assert.equal((await putRsvp(env, pool, good, 'e'.repeat(64))).status, 400, 'bytes that do not hash to their name')
+  const forged = JSON.stringify({ ...JSON.parse(good), sig: 'f'.repeat(128) })
+  assert.equal((await putRsvp(env, pool, forged)).status, 401, 'a signature that does not verify')
+  assert.equal((await putRsvp(env, pool, 'x'.repeat(2049))).status, 413, 'more than a claim')
+  // A list nobody opened is a room, and a room takes only an admitted key's word.
+  const closed = await sha256Hex('rsvp:' + 'd'.repeat(64))
+  assert.equal((await putRsvp(env, closed, await rsvpClaim(closed, 'd'.repeat(64), key))).status, 401)
+  // The good claim still lands.
+  assert.equal((await putRsvp(env, pool, good)).status, 201)
+})
+
+test('the calendar picks up what the community lists: a peer\'s events join this pool when they hash to their names and are events', async () => {
+  const mine = eventRecordText('2026-10-24')
+  const mineSig = await sha256Hex(mine)
+  const theirs = eventRecordText('2026-10-25', 'peer.example')
+  const theirsSig = await sha256Hex(theirs)
+  const forgedSig = 'a'.repeat(64)
+  const notAnEvent = JSON.stringify({ kind: 'something-else' })
+  const notAnEventSig = await sha256Hex(notAnEvent)
+  const hostRecord = JSON.stringify({ kind: 'visual:host:artifact', meaning: 'host:peer.example', payload: { zone: 'peer.example' } })
+  const env = await calendarEnv(new Map([
+    [mineSig, enc(mine)],
+    [`${await sha256Hex('community:hosts')}/${await sha256Hex(hostRecord)}`, enc(hostRecord)],
+  ]))
+  assert.equal((await organizerPuts(env, { [`event:${mineSig}`]: mineSig })).status, 200)
+
+  const asked = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const { hostname, pathname } = new URL(String(url))
+    asked.push(`${hostname}${pathname}`)
+    if (hostname !== 'peer.example') return new Response('', { status: 404 })
+    if (pathname === `/${EVENTS_POOL}/`) return new Response([theirsSig, forgedSig, notAnEventSig].join('\n') + '\n')
+    if (pathname === `/${theirsSig}`) return new Response(theirs)
+    if (pathname === `/${forgedSig}`) return new Response('not the bytes this name promises')
+    if (pathname === `/${notAnEventSig}`) return new Response(notAnEvent)
+    return new Response('', { status: 404 })
+  }
+  try {
+    const listing = await worker.fetch(new Request(`https://${WRITE_FACE}/${EVENTS_POOL}/`), env)
+    assert.equal(listing.status, 200)
+    assert.deepEqual((await listing.text()).trim().split('\n').sort(), [mineSig, theirsSig].sort())
+    assert(env.CONTENT.held.has(theirsSig), 'the peer\'s record is kept in this heap, by its signature')
+    assert(!env.CONTENT.held.has(forgedSig) && !env.CONTENT.held.has(notAnEventSig), 'bytes that lie about their name, or are not an event, are not picked up')
+    assert(asked.includes(`peer.example/${EVENTS_POOL}/`), 'the peer was asked the same derived address')
+    const read = await worker.fetch(new Request(`https://${WRITE_FACE}/${theirsSig}`), env)
+    assert.equal(read.status, 200)
+    assert.equal(await read.text(), theirs)
+    // Once a minute: a second listing asks nobody again.
+    asked.length = 0
+    await worker.fetch(new Request(`https://${WRITE_FACE}/${EVENTS_POOL}/`), env)
+    assert.equal(asked.length, 0)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})

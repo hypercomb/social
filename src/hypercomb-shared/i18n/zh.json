@@ -430,6 +430,7 @@
   "markup.uncut": "裁剪需要共享此标签页——已改为发送整个屏幕",
   "annotate.open": "在屏幕上标注",
   "slash.file": "把笔记归到本页中它所属的磁贴下",
+  "slash.event": "日历上的聚会：添加一个、查看社区日历、加入，或保留出席名单",
   "file.empty": "请说要归档的内容。",
   "file.unavailable": "此处无法使用笔记。",
   "file.under": "已归到",

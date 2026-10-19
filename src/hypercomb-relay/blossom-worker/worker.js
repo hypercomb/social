@@ -1636,19 +1636,23 @@ async function serveOfferingsPool(request, env, member) {
 
 async function servePoolListing(request, env, sig) {
   const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
+  const listed = await listedPool(env, sig)
   // A ROOM POOL is listed to whoever asks its address — its members only.
-  if (!await listedPool(env, sig) && await isRoomPool(env, sig)) {
+  if (!listed && await isRoomPool(env, sig)) {
     const names = await roomMemberNames(env, sig)
     names.sort()
     return new Response(request.method === 'HEAD' ? null : (names.length ? names.join('\n') + '\n' : ''), { status: 200, headers })
   }
   // A DERIVATION'S ATTESTATION POOL is listed to whoever asks its address —
-  // the attesters' keys; each one's word is read from their own index.
-  if (!await listedPool(env, sig) && !await isAttestPool(env, sig)) {
+  // the attesters' keys; each one's word is read from their own index. So is
+  // an EVENT'S RSVP POOL an organizer opened here, empty or not.
+  if (!listed && !await isAttestPool(env, sig) && !await isRsvpPool(env, sig)) {
     return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
       status: 404, headers: { ...headers, 'X-Reason': 'no pool at this address' },
     })
   }
+  // THE CALENDAR picks up what the community lists before it answers.
+  if (listed && sig === await poolAddress(EVENTS_POOL_MEANING)) await pickUpEvents(env)
   const prefix = `${sig}/`
   const names = []
   if (env.CONTENT?.list) {
@@ -2125,6 +2129,166 @@ async function noteAttesters(env, pubkey, evt) {
 async function isAttestPool(env, sig) {
   if (!SIG_RE.test(sig) || !env.CONTENT?.head) return false
   return !!(await env.CONTENT.head(`${await poolAddress(ATTEST_POOLS_MEANING)}/${sig}`))
+}
+
+// ── the calendar (documentation/calendar-events.md) ─────────────────────────
+//
+// A MEETING IS A RECORD IN A POOL OF MEANING. Its organizer puts the record on
+// the host and names it in their OWN signed index as `event:<record sig>`; the
+// index write keeps the record's signature as a member of
+// sign('calendar:events'), listed to whoever asks that address wherever the
+// operator lists the meaning (`hosts list calendar:events`). Every community
+// host answers the SAME derived address, so a calendar is the union of one
+// address across the hosts a reader carries — nothing named, nothing looked
+// up. A door PICKS UP what its community lists (pickUpEvents), so a read-only
+// visitor, who may read only this origin, still sees everyone's meetings.
+//
+// WHO IS COMING is a pool per event, sign('rsvp:<record sig>'), OPENED by the
+// organizer's index naming `rsvp:<record sig>`; the pool's address is kept
+// among sign('rsvp:pools') so the write and listing routes know it. A member
+// is a visitor's own signed claim (kind RSVP_KIND) hashing to its name — the
+// one write a stranger may make here: a few hundred bytes, into a pool a key
+// this host keeps bytes for opened, under a cap. Readers take each key's
+// newest claim.
+const EVENT_KEY_RE = /^event:([0-9a-f]{64})$/
+const EVENTS_POOL_MEANING = 'calendar:events'
+const EVENT_RECORD_KIND = 'event'
+const EVENT_MAX_BYTES = 4_096
+const RSVP_KEY_RE = /^rsvp:([0-9a-f]{64})$/
+const RSVP_POOLS_MEANING = 'rsvp:pools'
+const RSVP_KIND = 30568
+const RSVP_MAX_BYTES = 2_048
+const RSVP_NAME_MAX = 48
+const RSVP_POOL_CAP = 1_000
+const PICKUP_HOSTS = 16
+const PICKUP_MEMBERS = 200
+const PICKUP_TTL_MS = 60_000
+const PICKUP_FETCH_MS = 3_000
+const PICKUP_PASS_MS = 6_000
+
+async function noteEvents(env, pubkey, evt) {
+  let roots = {}
+  try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
+  for (const [key, value] of Object.entries(roots)) {
+    const sig = String(value ?? '').toLowerCase()
+    if (!SIG_RE.test(sig)) continue
+    if (EVENT_KEY_RE.test(key)) await addPoolMember(env, EVENTS_POOL_MEANING, sig)
+    const opened = RSVP_KEY_RE.exec(key)?.[1]
+    if (opened) await addPoolMember(env, RSVP_POOLS_MEANING, await poolAddress(`rsvp:${opened}`))
+  }
+}
+
+/** Is `sig` the address of an event's RSVP pool an organizer opened here? */
+async function isRsvpPool(env, sig) {
+  if (!SIG_RE.test(sig) || !env.CONTENT?.head) return false
+  return !!(await env.CONTENT.head(`${await poolAddress(RSVP_POOLS_MEANING)}/${sig}`))
+}
+
+/** The zones this host's community:hosts pool names: host artifact records
+ *  (essentials community-hosts.ts), each `{ meaning: 'host:<zone>' }`. */
+async function communityZones(env) {
+  const pool = await poolAddress(COMMUNITY_HOSTS_POOL)
+  const zones = new Set()
+  for (const name of await poolMemberNames(env, COMMUNITY_HOSTS_POOL)) {
+    if (zones.size >= PICKUP_HOSTS) break
+    try {
+      const obj = await env.CONTENT.get(`${pool}/${name}`)
+      if (!obj) continue
+      const meaning = String(JSON.parse(new TextDecoder().decode(await obj.arrayBuffer()))?.meaning ?? '')
+      const zone = meaning.startsWith('host:') ? meaning.slice('host:'.length).trim().toLowerCase() : ''
+      if (zone.includes('.') && zone.split('.').every(label => DNS_LABEL_RE.test(label))) zones.add(zone)
+    } catch { /* a member that will not parse is not a host */ }
+  }
+  return [...zones]
+}
+
+const eventsPickedUp = new WeakMap()
+
+/** PICK UP the events the community lists: ask every host this door carries
+ *  for sign('calendar:events') at its own address, fetch each record this
+ *  heap lacks, believe it only when it hashes to its name and is an event,
+ *  and keep it — the bytes in the heap, the name in this host's pool. At most
+ *  once a minute per isolate, bounded in time; a host that is slow or gone
+ *  costs its timeout and never fails the listing. */
+async function pickUpEvents(env) {
+  if (!env.CONTENT?.put || !env.CONTENT?.list || typeof fetch !== 'function') return
+  const holder = env.CONTENT
+  if (Date.now() - (eventsPickedUp.get(holder) ?? 0) < PICKUP_TTL_MS) return
+  eventsPickedUp.set(holder, Date.now())
+  const zones = await communityZones(env)
+  if (!zones.length) return
+  const pool = await poolAddress(EVENTS_POOL_MEANING)
+  const held = new Set(await poolMemberNames(env, EVENTS_POOL_MEANING))
+  let picked = 0
+  const fetchWithin = async (url) => {
+    const control = new AbortController()
+    const timer = setTimeout(() => control.abort(), PICKUP_FETCH_MS)
+    try { return await fetch(url, { signal: control.signal, headers: { accept: 'text/plain, application/json' } }) }
+    finally { clearTimeout(timer) }
+  }
+  const pickFrom = async (zone) => {
+    try {
+      const listing = await fetchWithin(`https://${zone}/${pool}/`)
+      if (!listing.ok) return
+      const names = (await listing.text()).split('\n').map(line => line.trim().toLowerCase()).filter(line => SIG_RE.test(line))
+      for (const name of names) {
+        if (held.has(name) || picked >= PICKUP_MEMBERS) continue
+        const record = await fetchWithin(`https://${zone}/${name}`)
+        if (!record.ok) continue
+        const bytes = new Uint8Array(await record.arrayBuffer())
+        if (bytes.byteLength > EVENT_MAX_BYTES || await sha256Hex(bytes) !== name) continue
+        let parsed
+        try { parsed = JSON.parse(new TextDecoder().decode(bytes)) } catch { continue }
+        if (parsed?.kind !== EVENT_RECORD_KIND) continue
+        if (!await env.CONTENT.head(name)) {
+          await env.CONTENT.put(name, bytes, {
+            httpMetadata: { contentType: 'application/json; charset=utf-8' },
+            customMetadata: { picked: zone },
+          })
+        }
+        await addPoolMember(env, EVENTS_POOL_MEANING, name)
+        held.add(name)
+        picked++
+      }
+    } catch { /* that host is slow or gone; the rest still answer */ }
+  }
+  await Promise.race([
+    Promise.all(zones.map(pickFrom)),
+    new Promise(resolve => setTimeout(resolve, PICKUP_PASS_MS)),
+  ])
+}
+
+/** PUT /<rsvp pool>/<member> — a stranger's own signed claim that they are
+ *  coming, or not. No NIP-98 and no grant: the claim's signature is the proof,
+ *  the pool was opened by a key this host keeps bytes for, and a claim is a
+ *  few hundred bytes under a cap. The same bytes again are already held. */
+async function putRsvpMember(request, env, pool, member) {
+  if (!env.CONTENT?.put || !env.CONTENT?.list) return text(503, 'this host holds no pools')
+  const body = await request.arrayBuffer()
+  if (body.byteLength > RSVP_MAX_BYTES) return text(413, 'an rsvp is a claim, not content')
+  if (await sha256Hex(body) !== member) return text(400, 'member bytes do not hash to their name')
+  let evt
+  try { evt = JSON.parse(new TextDecoder().decode(body)) } catch { return text(400, 'body is not a JSON nostr event') }
+  if (Number(evt?.kind) !== RSVP_KIND) return text(400, `wrong event kind (expected rsvp ${RSVP_KIND})`)
+  if (String(tagValue(evt, 'pool') || '').toLowerCase() !== pool) return text(400, 'rsvp is not tagged with this pool')
+  const event = String(tagValue(evt, 'event') || '').toLowerCase()
+  if (!SIG_RE.test(event) || await poolAddress(`rsvp:${event}`) !== pool) return text(400, 'rsvp names another event than this pool is for')
+  const name = String(tagValue(evt, 'name') || '').trim()
+  if (!name || name.length > RSVP_NAME_MAX || /[\u0000-\u001f\u007f]/.test(name)) return text(400, `an rsvp carries a name of 1 to ${RSVP_NAME_MAX} characters`)
+  const going = String(tagValue(evt, 'going') || '')
+  if (going !== 'yes' && going !== 'no') return text(400, 'an rsvp says going yes or no')
+  const pubkey = String(evt?.pubkey || '').toLowerCase()
+  if (!SIG_RE.test(pubkey) || !(await verifyEventSig(evt))) return text(401, 'invalid rsvp signature')
+
+  const key = `${pool}/${member}`
+  if (await env.CONTENT.head(key)) return text(200, `member ${member}`)
+  const page = await env.CONTENT.list({ prefix: `${pool}/`, limit: RSVP_POOL_CAP })
+  if ((page.objects ?? []).length >= RSVP_POOL_CAP) return text(507, 'this event\'s list is full')
+  await env.CONTENT.put(key, body, {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+    customMetadata: { owner: pubkey, member: '1', rsvp: '1' },
+  })
+  return text(201, `member ${member}`)
 }
 
 // ── the community's translations (documentation/community-translations.md)
@@ -3996,6 +4160,7 @@ async function putHive(request, env, pubkey) {
   await noteTranslators(env, pubkey, evt)
   await noteAssessors(env, pubkey, evt)
   await noteAttesters(env, pubkey, evt)
+  await noteEvents(env, pubkey, evt)
   await noteSharedPools(env, pubkey, evt)
   if (!await advancePublishedLocations(env, pubkey, evt)) {
     return text(503, 'signed index is held but a route location is not current; retry this index')
@@ -5090,7 +5255,13 @@ const router = {
     // that is not a stored member falls through to that alias unchanged.
     const roomMemberPath = pathname.match(/^\/([0-9a-f]{64})\/([0-9a-f]{64})$/)
     if (roomMemberPath) {
-      if (method === 'PUT') return putRoomMember(request, env, roomMemberPath[1], roomMemberPath[2])
+      // An EVENT'S RSVP POOL takes a stranger's signed claim (putRsvpMember);
+      // every other address is a room, whose members come from admitted keys.
+      if (method === 'PUT') {
+        return await isRsvpPool(env, roomMemberPath[1])
+          ? putRsvpMember(request, env, roomMemberPath[1], roomMemberPath[2])
+          : putRoomMember(request, env, roomMemberPath[1], roomMemberPath[2])
+      }
       if (method === 'GET' || method === 'HEAD') {
         const held = await getRoomMember(request, env, roomMemberPath[1], roomMemberPath[2])
         if (held) return held
