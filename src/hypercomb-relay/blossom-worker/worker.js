@@ -3373,8 +3373,9 @@ function blobHeaders(sig, obj, contentLength) {
     'Accept-Ranges': 'bytes',
     'Cache-Control': IMMUTABLE,
     // The bytes are immutable but their MIME depends on what the REQUEST is
-    // for (module imports get text/javascript) — cache per purpose.
-    'Vary': 'Sec-Fetch-Dest',
+    // for (module imports get text/javascript), and text goes out gzipped to
+    // a client that takes it (gzipBlob) — cache per purpose and encoding.
+    'Vary': 'Sec-Fetch-Dest, Accept-Encoding',
     // Strangers' bytes must never become pages acting under this domain:
     // sandbox neuters scripts/forms/top-nav on anything a browser would
     // render (HTML/SVG/XML), nosniff stops type-guessing around it. Media,
@@ -3448,7 +3449,40 @@ async function serveBlob(request, env, sig, typeOverride) {
       headers: { ...headersFor(object, length), 'Content-Range': `bytes ${offset}-${offset + length - 1}/${size}` },
     })
   }
+  if (takesGzip(request) && object.size >= GZIP_MIN && object.size <= GZIP_MAX) {
+    return gzipBlob(sig, new Uint8Array(await object.arrayBuffer()), headersFor(object, object.size))
+  }
   return new Response(object.body, { status: 200, headers: headersFor(object, object.size) })
+}
+
+// TEXT GOES OUT COMPRESSED (jwize 2026-10-18: the published experience must
+// show soon). The edge compresses only the types it recognises, and content-
+// addressed bytes are mostly stored as octet-stream, so a published page went
+// out raw: the business card's page, 975 KB on the wire, is 272 KB gzipped.
+// A whole read of text-shaped bytes, for a client that takes gzip, is gzipped
+// HERE, whatever the zone's own settings. Binary is left as it is (pictures,
+// fonts and archives are compressed already), and a range read stays exact.
+const GZIP_MIN = 1024
+const GZIP_MAX = 8 * 1024 * 1024
+const takesGzip = (request) => /\bgzip\b/i.test(String(request.headers.get('accept-encoding') || ''))
+/** Text-shaped: the opening KB holds no control byte but tab, newline, form
+ *  feed, carriage return and escape — a picture, font or archive header does. */
+function looksLikeText(bytes) {
+  const n = Math.min(bytes.length, 1024)
+  for (let i = 0; i < n; i++) {
+    const b = bytes[i]
+    if (b === 0x7f || (b < 0x20 && b !== 9 && b !== 10 && b !== 12 && b !== 13 && b !== 27)) return false
+  }
+  return true
+}
+function gzipBlob(sig, bytes, headers) {
+  if (!looksLikeText(bytes)) return new Response(bytes, { status: 200, headers })
+  const encoded = { ...headers, 'Content-Encoding': 'gzip', 'ETag': `W/"${sig}"` }
+  delete encoded['Content-Length']
+  delete encoded['Accept-Ranges']
+  const body = new Response(bytes).body.pipeThrough(new CompressionStream('gzip'))
+  // `manual`: the body is already encoded — the runtime sends it as it is.
+  return new Response(body, { status: 200, headers: encoded, encodeBody: 'manual' })
 }
 
 // /content/<sig> — a signed module import from the visitor engine. The same

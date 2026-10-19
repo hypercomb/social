@@ -1818,6 +1818,51 @@ test('a door runs no worker from the heap — its package cannot start one outsi
   assert.notEqual((await ask('content.hypercomb.com', 'worker')).status, 403)
 })
 
+test('text goes out gzipped to a client that takes it; binary, ranges and other clients get the bytes as stored', async () => {
+  const { gunzipSync } = await import('node:zlib')
+  const sigOf = async (bytes) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+  const page = new TextEncoder().encode('<!doctype html><title>card</title>' + '<p>the card, its scene and its words</p>'.repeat(200))
+  const picture = new Uint8Array(4096).map((_, i) => (i * 37) & 0xff)
+  picture.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])   // a PNG's header: binary from its first bytes
+  const sigs = { page: await sigOf(page), picture: await sigOf(picture) }
+  const held = new Map([[sigs.page, page], [sigs.picture, picture]])
+  const store = {
+    head: async (k) => held.has(k) ? { size: held.get(k).length, httpMetadata: {} } : null,
+    get: async (k, o) => {
+      const bytes = held.get(k)
+      if (!bytes) return null
+      const part = o?.range ? bytes.slice(0, 10) : bytes
+      return { size: bytes.length, httpMetadata: {}, body: new Response(part).body, arrayBuffer: async () => part.buffer.slice(0), ...(o?.range ? { range: { offset: 0, length: 10 } } : {}) }
+    },
+  }
+  const env = { SITE_BINDINGS: '{}', CONTENT: store }
+  const read = (sig, headers = {}) => worker.fetch(new Request(`https://content.hypercomb.com/${sig}`, { headers }), env)
+
+  const gz = await read(sigs.page, { 'accept-encoding': 'gzip, deflate, br' })
+  assert.equal(gz.status, 200)
+  assert.equal(gz.headers.get('content-encoding'), 'gzip')
+  assert.equal(gz.headers.get('content-length'), null)
+  assert.match(gz.headers.get('vary'), /Accept-Encoding/)
+  assert.equal(gz.headers.get('etag'), `W/"${sigs.page}"`)
+  const unzipped = gunzipSync(Buffer.from(await gz.arrayBuffer()))
+  assert.equal(await sigOf(new Uint8Array(unzipped)), sigs.page, 'the gzip carries the very bytes the sig names')
+
+  const raw = await read(sigs.page)
+  assert.equal(raw.headers.get('content-encoding'), null, 'a client that does not take gzip gets the bytes as stored')
+  assert.equal(raw.headers.get('content-length'), String(page.length))
+
+  const png = await read(sigs.picture, { 'accept-encoding': 'gzip' })
+  assert.equal(png.headers.get('content-encoding'), null, 'binary is left as it is')
+  assert.equal((await png.arrayBuffer()).byteLength, picture.length)
+
+  const ranged = await read(sigs.page, { 'accept-encoding': 'gzip', range: 'bytes=0-9' })
+  assert.equal(ranged.status, 206)
+  assert.equal(ranged.headers.get('content-encoding'), null, 'a range read stays exact')
+
+  const revalidated = await read(sigs.page, { 'accept-encoding': 'gzip', 'if-none-match': `W/"${sigs.page}"` })
+  assert.equal(revalidated.status, 304, 'the weak tag of the gzipped answer still revalidates')
+})
+
 test('a door is told only the reads it may make, and its reads still answer', async () => {
   const env = { SITE_BINDINGS: '{}', HIVES: kvMap(new Map([[assessor, JSON.stringify(await indexBy(assessorKey, { 'try-fresh-rooms': head }))]])) }
   const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
