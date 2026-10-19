@@ -121,14 +121,24 @@ learns the dialect by using it and an agent says the same sentences.
   head: a pheromone (`pheromones.md`), shown to readers whose interests
   match the word and to nobody else. The control asks for the word in place.
 
-- `hold <name|address>` — the link becomes a row in your **Hyperdex**
-  (`business-card.md`): a link tile named after the creation, whose link is
-  its address, inside the `/sets/hyperdex` collection — collections are the
-  tiles under `/sets`, so it is listed in the collections entrance like any
-  other. Minted on the first hold; a creation already held is a no-op, and a
-  tile of that name holding a different link is never replaced. The row is
-  an ordinary link tile, so the card page's held-address read and update
-  notice apply to it unchanged.
+- `hold <name|address>` — a link tile named after the creation, whose link
+  is its address, on the page you stand on, like a dropped link. Every hive
+  IS a Hyperdex — its signed index, read from outside — so there is no
+  separate collection to file into. The link is written only at the row
+  (tile properties are shared by name). A creation already held there is a
+  no-op; a tile of that name that links elsewhere, or is no link at all, is
+  never replaced. The row is an ordinary link tile, so the held-address read
+  and update notice apply to it unchanged.
 
-Owed: replacements — a publisher's signed pointer from an old door to a new
-one, offered as an update to whoever holds it.
+## Decided, not built (2026-10-18)
+
+- **The link mark** (`link:<zone>` group plus a `link` decoration, the href
+  computed on read) waits for its first reader: a Hyperdex view that gathers
+  the hive's held links. Until one asks, a link tile's `link` property is
+  the whole story, and a mark nobody reads is an abstraction ahead of need.
+- **Replacements** (a `successors` map in the signed index, offered to
+  holders as an update) wait for the first door that actually moves. They
+  change the signed index, a protocol every host and client shares.
+- **Clusters** stay blank after a publish until a page is read again; an
+  older table's record would show edges a cold read would not.
+- **hold** refuses, rather than overrides, a root tile that pins its link.

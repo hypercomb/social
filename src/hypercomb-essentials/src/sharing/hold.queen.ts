@@ -9,10 +9,10 @@
 //   hold business-card                   one of ours, by name
 //   hold card.pointblanksolutions.ca     by address — read at its live head
 //
-// THE COLLECTION. Collections are the tiles under `/sets`, so the Hyperdex is
-// `/sets/hyperdex`, minted on the first hold and listed in the collections
-// entrance like any other. A held creation is `/sets/hyperdex/<name>`: an
-// ordinary link tile, made the way a dropped link makes one (one link per
+// WHERE YOU STAND. Every hive IS a Hyperdex — its signed index, read from
+// outside (jwize, 2026-10-16) — so there is no separate collection to file
+// into: a held creation is a link tile named after it, placed on the page
+// you are on, like a dropped link. It is an ordinary link tile, made the way a dropped link makes one (one link per
 // tile, the same property writes), so everything that reads a link tile —
 // the link action, the card page's held-address read, the update notice —
 // reads it unchanged. Holding what is already held changes nothing and says
@@ -37,7 +37,7 @@ import {
 } from '../editor/tile-properties.js'
 import { addressOf, readLinkHead, resolveLink } from './link-acts.js'
 
-export const HYPERDEX_SEGMENTS: readonly string[] = ['sets', 'hyperdex']
+type LineageLike = { explorerSegments?: () => readonly string[] }
 
 type CommitterLike = {
   commitChildrenDeltas(segments: readonly string[], changes: { appends?: readonly string[] }): Promise<string>
@@ -51,11 +51,11 @@ type Standing = 'listed' | 'absent' | 'unknown'
 export class HoldQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'hold'
-  override description = 'Hold a linked creation in your Hyperdex: a link tile named after it, inside the /sets/hyperdex collection, minted on first use'
+  override description = 'Hold a linked creation: a link tile named after it, on the page you are on — your hive is your Hyperdex'
   override descriptionKey = 'slash.hold'
   override options = ['<name>', '<address>']
   override examples = [
-    { input: '/hold business-card', result: 'A link tile "business-card" is in /sets/hyperdex, linking to its address' },
+    { input: '/hold business-card', result: 'A link tile "business-card" is on this page, linking to its address' },
   ]
   override rawArgs = true
   override machine: MachineGrammar = {
@@ -91,56 +91,51 @@ export class HoldQueenBee extends QueenBee {
     if (!history || !committer) { this.#say(this.#t('hold.not-ready', 'Hold: the hive is not ready to write')); return }
 
     // MEMBERSHIP decides "held", never a surviving bag: a row taken off the
-    // collection keeps its bag and its link, and is still not in the Hyperdex.
-    const parent = HYPERDEX_SEGMENTS.slice(0, -1)
-    const collection = HYPERDEX_SEGMENTS[HYPERDEX_SEGMENTS.length - 1] ?? ''
-    const collectionStands = await this.#standing(history, parent, collection)
-    // The row is asked of the collection's head even when the collection is
-    // off /sets: its surviving bag comes back listing what it listed, and a
-    // row appended again by its newer head sig would be listed twice.
-    const rowStands = collectionStands === 'unknown' ? 'unknown' : await this.#standing(history, HYPERDEX_SEGMENTS, name)
-    if (collectionStands === 'unknown' || rowStands === 'unknown') {
-      this.#say(this.#t('hold.cold', 'Hold: your Hyperdex is not fully read yet — try again in a moment'))
+    // page keeps its bag and its link, and is listed again from it.
+    const here = (get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []).map(String)
+    const rowStands = await this.#standing(history, here, name)
+    if (rowStands === 'unknown') {
+      this.#say(this.#t('hold.cold', 'Hold: this page is not fully read yet — try again in a moment'))
       return
     }
 
     // The row's OWN properties — the inherited view would answer with the
     // link of whatever root tile shares the name.
-    const existing = await readOwnTilePropertiesAt(HYPERDEX_SEGMENTS, name).catch(() => ({} as Record<string, unknown>))
+    const existing = await readOwnTilePropertiesAt(here, name).catch(() => ({} as Record<string, unknown>))
+    const prior = typeof existing['link'] === 'string' ? addressOf(existing['link'] as string) : ''
     if (rowStands === 'listed') {
-      // One link per tile, and the same link twice is a no-op.
-      const prior = typeof existing['link'] === 'string' ? addressOf(existing['link'] as string) : ''
-      // The same link is only already HELD while the collection is listed;
-      // off /sets, the collection is listed again below.
-      if (prior && prior === addressOf(address)) {
-        if (collectionStands === 'listed') { this.#say(this.#t('hold.already', 'Hold: {name} is already in your Hyperdex', { name })); return }
-      } else if (prior) { this.#say(this.#t('hold.other-link', 'Hold: "{name}" in your Hyperdex already links to {prior} — not replaced', { name, prior })); return }
-    }
-
-    // A root tile of that name that PINS its link locks every appearance to
-    // it, so the row's own link would never show. Refuse rather than make a
-    // row that opens somewhere else.
-    const root = await readOwnTilePropertiesAt([], name).catch(() => ({} as Record<string, unknown>))
-    const rootPins = Array.isArray(root[TILE_PROPERTY_PINS]) ? root[TILE_PROPERTY_PINS] as unknown[] : []
-    const rootLink = typeof root['link'] === 'string' ? addressOf(root['link'] as string) : ''
-    if (rootPins.includes('link') && rootLink !== addressOf(address)) {
-      this.#say(this.#t('hold.pinned', 'Hold: your tile "{name}" locks its link, so a Hyperdex row of that name cannot link to {address}', { name, address }))
+      // One link per tile, and the same link twice is a no-op. A tile of that
+      // name that is no link at all is a creation of its own, never made one.
+      if (prior && prior === addressOf(address)) { this.#say(this.#t('hold.already', 'Hold: {name} is already held here', { name })); return }
+      if (prior) { this.#say(this.#t('hold.other-link', 'Hold: "{name}" here already links to {prior} — not replaced', { name, prior })); return }
+      this.#say(this.#t('hold.not-a-link', 'Hold: "{name}" here is a tile of its own, not a link — not replaced', { name }))
       return
     }
 
-    // The collection, then the row — each listed when it is not.
-    if (collectionStands === 'absent') await this.#list(committer, HYPERDEX_SEGMENTS)
-    if (rowStands === 'absent') await this.#list(committer, [...HYPERDEX_SEGMENTS, name])
-    await persistDroppedTileLink(HYPERDEX_SEGMENTS, name, address, {
+    // Below the root, a root tile of that name that PINS its link locks every
+    // appearance to it, so the row's own link would never show. Refuse rather
+    // than make a row that opens somewhere else.
+    if (here.length > 0) {
+      const root = await readOwnTilePropertiesAt([], name).catch(() => ({} as Record<string, unknown>))
+      const rootPins = Array.isArray(root[TILE_PROPERTY_PINS]) ? root[TILE_PROPERTY_PINS] as unknown[] : []
+      const rootLink = typeof root['link'] === 'string' ? addressOf(root['link'] as string) : ''
+      if (rootPins.includes('link') && rootLink !== addressOf(address)) {
+        this.#say(this.#t('hold.pinned', 'Hold: your tile "{name}" locks its link, so a row of that name cannot link to {address}', { name, address }))
+        return
+      }
+    }
+
+    await this.#list(committer, [...here, name])
+    await persistDroppedTileLink(here, name, address, {
       writeProperties: (p, c, u) => writeTilePropertiesAt(p, c, u, { onlyHere: true }),
       readPropertiesSig: readTilePropsSigAt,
       locationSig: cellLocationSig,
       readIndex: readTilePropsIndex,
       writeIndex: writeTilePropsIndex,
     }, null, existing)
-    const route = `/${HYPERDEX_SEGMENTS.join('/')}/${name}`
-    this.#say(this.#t('hold.held', 'Hold: {name} is in your Hyperdex — {route} links to {address}', { name, route, address }))
-    EffectBus.emit('toast:show', { type: 'success', message: this.#t('hold.toast', '{name} held in your Hyperdex', { name }) })
+    const route = `/${[...here, name].join('/')}`
+    this.#say(this.#t('hold.held', 'Hold: {name} is held — {route} links to {address}', { name, route, address }))
+    EffectBus.emit('toast:show', { type: 'success', message: this.#t('hold.toast', '{name} held', { name }) })
   }
 
   /** Whether `name` is among the children of the page at `parent`. */

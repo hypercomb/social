@@ -1,5 +1,6 @@
-// sharing/hold.queen.spec.ts — a held link is the Hyperdex row's own, and a
-// row taken off the collection is listed again by the next hold.
+// sharing/hold.queen.spec.ts — a held link is a row on the page you stand on
+// (your hive is your Hyperdex), the link is the row's own, and a row taken
+// off the page is listed again by the next hold.
 //
 // The props model and the commit queue are faked at their seams: the property
 // writer records what it was asked, and a small history answers membership
@@ -87,39 +88,54 @@ const logs: string[] = []
 EffectBus.on<{ message: string }>('activity:log', p => { if (p?.message) logs.push(p.message) })
 
 let world: ReturnType<typeof hive>
+let here: string[] = []
 
 beforeEach(async () => {
   props.own.clear()
   props.writes.length = 0
   logs.length = 0
   world = hive()
-  // /sets stands at the root, as the collections entrance expects
-  await world.committer.commitChildrenDeltas([], { appends: [await world.committer.update(['sets'], { name: 'sets' })] })
+  // you stand on /people
+  here = ['people']
+  await world.committer.commitChildrenDeltas([], { appends: [await world.committer.update(['people'], { name: 'people' })] })
   ;(globalThis as unknown as { ioc: unknown }).ioc = {
     register: () => {},
     whenReady: () => {},
     get: (key: string) => key === '@diamondcoreprocessor.com/HistoryService' ? world.history
       : key === '@diamondcoreprocessor.com/LayerCommitter' ? world.committer
+      : key === '@hypercomb.social/Lineage' ? { explorerSegments: () => here }
       : undefined,
   }
 })
 
 describe('hold', () => {
-  it('writes the link only at the row — the root tile of that name is never touched', async () => {
+  it('files the row on the page you stand on, its link only there — the root tile of that name is never touched', async () => {
     props.own.set('business-card', { small: { image: 'x' } })
     await run('business-card')
-    expect(world.names('sets')).toEqual(['hyperdex'])
-    expect(world.names('sets/hyperdex')).toEqual(['business-card'])
+    expect(world.names('people')).toEqual(['business-card'])
     expect(props.writes).toHaveLength(1)
-    expect(props.writes[0]).toMatchObject({ parent: ['sets', 'hyperdex'], cell: 'business-card', options: { onlyHere: true } })
+    expect(props.writes[0]).toMatchObject({ parent: ['people'], cell: 'business-card', options: { onlyHere: true } })
     expect(props.own.get('business-card')).toEqual({ small: { image: 'x' } })
+  })
+
+  it('files at the root when you stand there', async () => {
+    here = []
+    await run('team')
+    expect(world.names('')).toEqual(['people', 'team'])
+    expect(props.own.get('team')?.['link']).toBe('https://team.jwize.com')
+  })
+
+  it('never turns a tile of its own into a link', async () => {
+    here = []
+    await run('people')
+    expect(props.writes).toHaveLength(0)
+    expect(logs.at(-1)).toMatch(/tile of its own/)
   })
 
   it('makes its row even when the root tile of that name already links elsewhere', async () => {
     props.own.set('business-card', { link: 'https://elsewhere.example.org' })
     await run('business-card')
-    expect(world.names('sets/hyperdex')).toEqual(['business-card'])
-    expect(props.own.get('sets/hyperdex/business-card')?.['link']).toBe('https://business-card.jwize.com')
+    expect(props.own.get('people/business-card')?.['link']).toBe('https://business-card.jwize.com')
     expect(props.own.get('business-card')?.['link']).toBe('https://elsewhere.example.org')
   })
 
@@ -127,7 +143,7 @@ describe('hold', () => {
     props.own.set('business-card', { link: 'https://elsewhere.example.org', propertyPins: ['link'] })
     await run('business-card')
     expect(props.writes).toHaveLength(0)
-    expect(world.names('sets/hyperdex')).toEqual([])
+    expect(world.names('people')).toEqual([])
     expect(logs.at(-1)).toMatch(/locks its link/)
   })
 
@@ -137,53 +153,32 @@ describe('hold', () => {
     await run('business-card')
     expect(world.committer.commitChildrenDeltas.mock.calls.length).toBe(appends)
     expect(props.writes).toHaveLength(1)
-    expect(logs.at(-1)).toMatch(/already in your Hyperdex/)
+    expect(logs.at(-1)).toMatch(/already held here/)
+  })
+
+  it('a row that links elsewhere is not replaced', async () => {
+    await run('business-card')
+    props.own.set('people/business-card', { link: 'https://elsewhere.example.org' })
+    await run('business-card')
+    expect(props.writes).toHaveLength(1)
+    expect(logs.at(-1)).toMatch(/not replaced/)
   })
 
   it('lists a removed row again from its surviving head, once', async () => {
     await run('business-card')
     // remove only unlinks: the bag and its link survive
-    await world.committer.commitChildrenDeltas(['sets', 'hyperdex'], { removes: [{ label: 'business-card' }] })
-    expect(world.names('sets/hyperdex')).toEqual([])
+    await world.committer.commitChildrenDeltas(['people'], { removes: [{ label: 'business-card' }] })
+    expect(world.names('people')).toEqual([])
     await run('business-card')
-    expect(world.names('sets/hyperdex')).toEqual(['business-card'])
+    expect(world.names('people')).toEqual(['business-card'])
     await run('business-card')
-    expect(world.names('sets/hyperdex')).toEqual(['business-card'])
+    expect(world.names('people')).toEqual(['business-card'])
   })
 
-  it('lists a removed collection again rather than writing into an unlisted one', async () => {
+  it('appends nothing while a child of the page cannot be read', async () => {
     await run('business-card')
-    await world.committer.commitChildrenDeltas(['sets'], { removes: [{ label: 'hyperdex' }] })
-    await run('team')
-    expect(world.names('sets')).toEqual(['hyperdex'])
-    expect(world.names('sets/hyperdex')).toEqual(['business-card', 'team'])
-  })
-
-  it('re-holding a name after its collection was removed lists it once, from a stale child sig', async () => {
-    await run('business-card')
-    // the row's head moves on; /sets/hyperdex still holds its older sig
-    world.put('sets/hyperdex/business-card', { name: 'business-card', children: [] })
-    await world.committer.commitChildrenDeltas(['sets'], { removes: [{ label: 'hyperdex' }] })
-    await run('business-card')
-    expect(world.names('sets')).toEqual(['hyperdex'])
-    expect(world.names('sets/hyperdex')).toEqual(['business-card'])
-  })
-
-  it('a surviving row that links elsewhere is not replaced when its collection comes back', async () => {
-    await run('business-card')
-    props.own.set('sets/hyperdex/business-card', { link: 'https://elsewhere.example.org' })
-    await world.committer.commitChildrenDeltas(['sets'], { removes: [{ label: 'hyperdex' }] })
-    const writes = props.writes.length
-    await run('business-card')
-    expect(props.writes).toHaveLength(writes)
-    expect(props.own.get('sets/hyperdex/business-card')?.['link']).toBe('https://elsewhere.example.org')
-    expect(logs.at(-1)).toMatch(/not replaced/)
-  })
-
-  it('appends nothing while a child of the collection cannot be read', async () => {
-    await run('business-card')
-    const page = world.heads.get('sets/hyperdex')!
-    world.heads.set('sets/hyperdex', { ...page, children: [...(page.children ?? []), 'cold@0'] })
+    const page = world.heads.get('people')!
+    world.heads.set('people', { ...page, children: [...(page.children ?? []), 'cold@0'] })
     const appends = world.committer.commitChildrenDeltas.mock.calls.length
     await run('team')
     expect(world.committer.commitChildrenDeltas.mock.calls.length).toBe(appends)

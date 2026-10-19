@@ -119,7 +119,7 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   raise: ['additive', 'hive'],         // walks to ours; offers another host's creation shaded
                                        // (a view, withdrawn like any other), then walks to it
   recommend: ['additive', 'hive'],     // one signed pheromone deposit on a creation's head
-  hold: ['additive', 'hive'],          // a link tile in /sets/hyperdex, minted on first use;
+  hold: ['additive', 'hive'],          // a link tile on the page you stand on;
                                        // never replaces a link already there
 }
 
