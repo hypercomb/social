@@ -69,6 +69,8 @@ import { knownRoots, listPublishRecords, writePublishRecord, type PublishRecord 
 import { recordPublishResult } from './publish-results.js'
 import { wornKindsWithin, writePublishLights } from '../commands/publish-lights.js'
 import { readGlobalOnKinds } from './behavior-enablement.js'
+import { derivedArrival, derivedArrivalRecord } from './arrival-derive.js'
+import { arrivalPointer } from './arrival-plan-publish.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
@@ -478,7 +480,28 @@ export async function publishBranch(
     }
   }
 
-  const roots = { ...nextRoots, ...stageRoots }
+  // THE ARRIVAL PLAN, derived where the index names none (arrival-derive.ts):
+  // a branch that opens as a view declaring its arrival is published with
+  // it, so a reader's first view loads that and nothing else. A plan made by
+  // hand stays as it is. Its record travels like the stage atoms: a pointer a
+  // stranger can read must find its atom on the host.
+  const planRoots: Record<string, string> = {}
+  const planKey = arrivalPointer(key)
+  if (!existing[planKey]) {
+    const arrive = await derivedArrival(segs).catch(() => null)
+    if (arrive) {
+      try {
+        const planSig = await store.putResource(new Blob([derivedArrivalRecord(arrive)], { type: 'application/json' }), { emit: false })
+        if (SIG_RE.test(planSig)) {
+          await hostSync.markPublic(planSig, 'resource', true, false)
+          if (!stageAtoms.includes(planSig)) stageAtoms.push(planSig)
+          planRoots[planKey] = planSig
+        }
+      } catch { /* the plan is a courtesy to the reader, never a gate on the publish */ }
+    }
+  }
+
+  const roots = { ...nextRoots, ...stageRoots, ...planRoots }
   const put = await putHiveManifest(indexHost, roots, doors,
     read.ok ? read.manifest.createdAt : 0, read.ok ? read.manifest.signedContent : undefined)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason, sealed }

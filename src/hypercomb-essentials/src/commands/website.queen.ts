@@ -673,6 +673,10 @@ window.ioc.register('@diamondcoreprocessor.com/WebsiteQueenBee', _website)
       labelKey: 'view.website',
       descriptionKey: 'view.website.description',
       queenKey: '@diamondcoreprocessor.com/WebsiteQueenBee',
+      // A published site arrives on its face alone: the arbiter, this queen
+      // and the site view (proven 2026-09-25 on revolucion, 2026-10-18 on the
+      // business card: 546 → 110 scripts, the page up 3× sooner on a phone).
+      arrival: ['@diamondcoreprocessor.com/SiteViewDrone'],
       adoptable: true,
       // A website IS its subtree — each page is a child cell carrying its own
       // page in its `website` slot. Adopting the site must bring the page-tiles,

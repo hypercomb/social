@@ -338,6 +338,19 @@ export type VisualBeeDescriptor = {
   readonly queenKey?: string
 
   /**
+   * WHAT A PUBLISHED ARRIVAL INTO THIS VIEW NEEDS, besides the view arbiter
+   * (ViewBee) and `queenKey` — by IoC key, e.g. the bee that renders it.
+   * Declaring it says those are ALL the arrival needs: publishing a branch
+   * that opens as this view signs them as its arrival plan (sharing/
+   * arrival-derive.ts), so a reader's first view loads them and nothing else
+   * (jwize 2026-10-18: every app must show soon, with no tuning by hand).
+   * Declare only what is proven — a view that opens but needs more (a game
+   * whose game is its own bee) would stay waiting. Absent: the whole package
+   * loads, as before.
+   */
+  readonly arrival?: readonly string[]
+
+  /**
    * LOAD THIS VIEW'S CODE FOR A FACE, OPENING NOTHING. The tile walk
    * (history.service.ts preloadFromRoot) calls it for a tile within reach that
    * wears this view — a non-empty `slot`, or a decoration of its kind (the
