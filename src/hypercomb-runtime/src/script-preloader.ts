@@ -6,7 +6,7 @@
 import { Bee, type BeeResolver, EffectBus, hypercomb, mayRunBee } from '@hypercomb/core'
 import { Store } from './store'
 import { installedPackageSig } from './installed-package.js'
-import { arrivalNames, beeClassesOfDocs, quietFeatureNames, resolveArrival, type BeeClass } from './arrival-plan.js'
+import { arrivalNames, beeClassesOfDocs, guardArrival, quietFeatureNames, resolveArrival, type BeeClass } from './arrival-plan.js'
 import { activeInstallIndex } from './install-index.js'
 import {
   learnedCriticalBeeSigs,
@@ -555,6 +555,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     // Within range of the approach, fetch them ahead of it (#preloadPassive).
     EffectBus.on('loader:preload', () => { this.#preloadPassive() })
     this.#watchRange()
+    // A plan that leaves what the reader needs asleep must not strand them:
+    // hexagons, or no view in time, wakes the rest (arrival-plan.ts).
+    guardArrival(EffectBus, reason => {
+      console.log(`[script-preloader] arrival ${reason === 'hexagons' ? 'opened as hexagons' : 'stalled'}: waking the passive bees`)
+      EffectBus.emit('loader:activate', { reason: `arrival-${reason}` })
+    })
   }
 
   // ── WITHIN RANGE: preload what the approach would wake ─────────────────

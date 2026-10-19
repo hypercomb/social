@@ -97,6 +97,56 @@ export const resolveArrival = (
   return { bees, missing }
 }
 
+// A STALLED ARRIVAL WAKES THE REST (jwize 2026-10-18: "we can create many
+// different apps that need to show soon" — so a plan is derived at publish,
+// with no tuning, and a derived plan can miss a bee its page reads without
+// declaring it). The arrival answers with its verdict (`view:arrival`): a view
+// opening is the plan working. The door opening as hexagons, or no verdict
+// ARRIVAL_GRACE_MS after the planned bees are in, means what the reader needs
+// is asleep — so everything wakes, as if there had been no plan. The worst a
+// wrong plan costs is the old speed plus the grace.
+
+export const ARRIVAL_GRACE_MS = 2500
+
+type BusLike = { on<T>(effect: string, handler: (payload: T) => void): () => void }
+type TimersLike = { set: (run: () => void, ms: number) => unknown; clear: (handle: unknown) => void }
+
+/** Watch one planned arrival; `wake` runs at most once. Returns a stop. */
+export const guardArrival = (
+  bus: BusLike,
+  wake: (reason: 'hexagons' | 'stalled') => void,
+  graceMs = ARRIVAL_GRACE_MS,
+  timers: TimersLike = { set: (run, ms) => setTimeout(run, ms), clear: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) },
+): (() => void) => {
+  let done = false
+  let timer: unknown = null
+  const offs: Array<() => void> = []
+  const stop = (): void => {
+    if (done) return
+    done = true
+    if (timer !== null) timers.clear(timer)
+    for (const off of offs.splice(0)) off()
+  }
+  const finish = (reason: 'hexagons' | 'stalled' | null): void => {
+    if (done) return
+    stop()
+    if (reason) wake(reason)
+  }
+  // The bus replays a last value as it subscribes, so a handler may finish
+  // the watch before its own unsubscribe exists: drop it the moment it does.
+  const listen = <T>(effect: string, handler: (payload: T) => void): void => {
+    const off = bus.on<T>(effect, handler)
+    if (done) off()
+    else offs.push(off)
+  }
+  listen<{ view?: string }>('view:arrival', p => finish(p?.view ? null : 'hexagons'))
+  if (!done) listen('loader:bees-done', () => {
+    if (done || timer !== null) return
+    timer = timers.set(() => finish('stalled'), graceMs)
+  })
+  return stop
+}
+
 /** The plan this visit carries, if its shell found one: the IoC keys the
  *  publisher's arrival needs. The shell starts reading it before the runtime
  *  exists (hypercomb-web main.visitor.ts), so this only waits on a read
