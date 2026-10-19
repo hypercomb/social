@@ -117,8 +117,21 @@ followed community domains) against hotlinking; it is not security.
      the host, a joiner reads it back, and it is still there after the sharer
      leaves.
    - **Template-first ordering** comes with step 3.
-3. **The template.** Publishing a branch into a room pool makes it the
-   host-signed template member.
+3. **The template. BUILT.** There is no separate publish step. A member signed
+   by the HOST's own key is the template, and the host's key is the one it
+   publishes as `_` at `/.well-known/nostr.json`, the signal both the relay
+   and the worker give. The host shares a page in the room as anyone does
+   (step two writes the member).
+   - **On reading the pool,** `RoomPool` fetches each template word from the
+     host, checks it against its signature, and hands it to
+     `SwarmDrone.holdTemplate`. It is held apart from live peers, merged into
+     `peerTilesAtSig` (so render, take and notes work unchanged), never
+     counted as someone present, and never expires. The host's live word wins
+     while they are in the room. Its tiles are pulled from the host so their
+     files are local first.
+   - **Proof.** `scripts/drive-swarm-room-template.cjs`, 7/7: a guest who
+     arrives after the host has left gets the template tile and its notes,
+     and the template does not count as someone present.
 4. **Arrive = join.** A link carries the room words; the shell installs the
    package, replicates the template, joins and opens the notes desk on the room
    tile.

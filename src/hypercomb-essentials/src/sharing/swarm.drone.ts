@@ -1160,6 +1160,9 @@ export class SwarmDrone extends Drone {
    *  of the session; ephemeral announces only where you stand, so what you
    *  leave lapses for the people there. Participant-local like the public
    *  list — never in a layer. `/swarm-mode` flips it. */
+  /** Room templates held from the room pool: page sig → host key → word. */
+  readonly #templatesBySig = new Map<string, Map<string, SwarmLayerPayload>>()
+
   public stickyMode = (): boolean => {
     try { return localStorage.getItem('hc:swarm:sticky') !== '0' } catch { return true }
   }
@@ -2615,8 +2618,9 @@ export class SwarmDrone extends Drone {
    */
   public peerTilesAtSig = (sig: string): readonly ({ name: string; peerPubkey: string; imageSig?: string } & Record<string, unknown>)[] => {
     if (!sig) return []
-    const peerLayers = this.#peerLayersBySig.get(sig)
-    if (!peerLayers || peerLayers.size === 0) return []
+    const held = this.#templatesBySig.get(sig)
+    const peerLayers = this.#peerLayersBySig.get(sig) ?? new Map<string, SwarmLayerPayload>()
+    if (peerLayers.size === 0 && !held?.size) return []
     const out: ({ name: string; peerPubkey: string; imageSig?: string } & Record<string, unknown>)[] = []
 
     // Walk peers in freshest-first order so downstream consumers that
@@ -2637,6 +2641,7 @@ export class SwarmDrone extends Drone {
     })
 
     const sigRe = /^[0-9a-f]{64}$/
+    const live = new Set<string>()
     for (const [pubkey, layer] of sortedPeers) {
       if (this.#myPubkey && pubkey === this.#myPubkey) continue
       // Slot filter — the entry lives exactly as long as the relay holds it
@@ -2675,8 +2680,60 @@ export class SwarmDrone extends Drone {
           ...(imageSig ? { imageSig } : {}),
         })
       }
+      live.add(pubkey)
+    }
+    // THE ROOM'S TEMPLATE (holdTemplate): the host's own word for this page,
+    // read back from the room pool — there whether or not the host is in the
+    // room. The host's LIVE word, when they are here, is the newer one and
+    // wins; the template never counts as someone present.
+    for (const [pubkey, layer] of held ?? []) {
+      if (live.has(pubkey) || (this.#myPubkey && pubkey === this.#myPubkey)) continue
+      for (const v of layer.visuals) {
+        const name = String((v as Record<string, unknown>)['name'] ?? '').trim()
+        if (!name) continue
+        const flat = v as Record<string, unknown>
+        const direct = flat['imageSig']
+        const imageSig = typeof direct === 'string' && sigRe.test(direct) ? direct : undefined
+        out.push({ ...flat, name, peerPubkey: pubkey, template: true, ...(imageSig ? { imageSig } : {}) })
+      }
     }
     return out
+  }
+
+  /** Hold a ROOM TEMPLATE (documentation/swarm-pools.md, step three): the host's
+   *  word for the page at `pageSig`, as the room pool keeps it — the exact
+   *  page-event content, run through the same sanitizer a live word is. It
+   *  shows like a participant's tiles (render, take, notes) but never counts as
+   *  anyone present and never expires: it is the room's own starting tree.
+   *  `host` names where its bytes are served. Returns false on a word that
+   *  does not read. */
+  public holdTemplate = (pageSig: string, pubkey: string, word: string, host?: string): boolean => {
+    if (!/^[0-9a-f]{64}$/.test(pageSig) || !/^[0-9a-f]{64}$/.test(pubkey)) return false
+    let raw: unknown
+    try { raw = JSON.parse(word) } catch { return false }
+    const visualsRaw = (raw as { visuals?: unknown })?.visuals
+    if (!Array.isArray(visualsRaw)) return false
+    const clean: ({ name: string } & Record<string, unknown>)[] = []
+    for (const v of visualsRaw) {
+      if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+      const cleaned = sanitizeVisual(v as Record<string, unknown>)
+      if (cleaned) clean.push(withDeep(cleaned, v as Record<string, unknown>))
+    }
+    // Its bytes are the host's: tell the broker where to read them.
+    const broker = this.#getBroker()
+    if (host && broker?.noteDomainsForSig) noteVisualHosts(clean, [host], broker.noteDomainsForSig)
+    let bag = this.#templatesBySig.get(pageSig)
+    if (!bag) { bag = new Map(); this.#templatesBySig.set(pageSig, bag) }
+    const before = JSON.stringify(bag.get(pubkey) ?? null)
+    bag.set(pubkey, { visuals: clean })
+    const label = typeof (raw as { label?: unknown }).label === 'string'
+      ? (raw as { label: string }).label.trim().slice(0, 64).replace(/[\x00-\x1f]/g, '')
+      : ''
+    if (label && !this.#labelByPubkey.has(pubkey)) this.#labelByPubkey.set(pubkey, label)
+    if (before !== JSON.stringify({ visuals: clean })) {
+      this.emitEffect('swarm:peers-changed', { sig: pageSig, pubkey, reason: 'room-template' })
+    }
+    return true
   }
 
   /** Peer tiles grouped per participant at the live sig — the adoption

@@ -31,7 +31,11 @@ export const ROOM_POOL_KEY = '@diamondcoreprocessor.com/RoomPool'
 const SETTLE_MS = 4_000
 const FETCH_MS = 8_000
 
-type SwarmShape = { takenWord?: (sig: string) => string | null }
+type SwarmShape = {
+  takenWord?: (sig: string) => string | null
+  holdTemplate?: (pageSig: string, pubkey: string, word: string, host?: string) => boolean
+}
+type BrokerShape = { adopt?: (rootSig: string, opts?: { silent?: boolean; quiet?: boolean }) => Promise<unknown> }
 type MeshShape = { swarmHost?: () => string }
 type HostSyncShape = { putOne?: (host: string, sig: string, bytes: Uint8Array) => Promise<{ ok: boolean }> }
 type CredentialShape = { value?: string }
@@ -51,6 +55,10 @@ export class RoomPool extends EventTarget {
   #poolOfMembers = ''
   #written = new Map<string, string>()          // page sig → head of the member written
   #timers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** host → the key it publishes as `_` (NIP-05), '' when it names none. */
+  #hostKeys = new Map<string, string>()
+  #templateKey = ''
+  #heldTemplates = new Set<string>()          // member names already held in the swarm
 
   constructor() {
     super()
@@ -75,8 +83,37 @@ export class RoomPool extends EventTarget {
     return roomPoolAddress(room, secret, host)
   }
 
-  /** What stands in the pool as last read: the newest member per signer per page. */
-  standing(): RoomMember[] { return standingMembers(this.#members.values()) }
+  /** What stands in the pool as last read: the newest member per signer per
+   *  page — the TEMPLATE (members signed by the host's own key) first. */
+  standing(): RoomMember[] {
+    const all = standingMembers(this.#members.values())
+    const key = this.#templateKey
+    return key ? [...all.filter(m => m.signer === key), ...all.filter(m => m.signer !== key)] : all
+  }
+
+  /** The room's template: what the HOST shares in the room, per page. */
+  templates(): RoomMember[] {
+    return this.#templateKey ? this.standing().filter(m => m.signer === this.#templateKey) : []
+  }
+
+  /** The key a host publishes as `_` at /.well-known/nostr.json — the one
+   *  signal both the relay and the worker give for "this key is the host".
+   *  '' when it names none (then the room simply has no template). */
+  async hostKey(host = this.host()): Promise<string> {
+    if (!host) return ''
+    const held = this.#hostKeys.get(host)
+    if (held !== undefined) return held
+    let key = ''
+    try {
+      const res = await fetch(`${this.#base(host)}/.well-known/nostr.json?name=_`, { signal: AbortSignal.timeout(FETCH_MS) })
+      if (res.ok) {
+        const named = String(((await res.json()) as { names?: Record<string, unknown> })?.names?.['_'] ?? '').toLowerCase()
+        if (/^[0-9a-f]{64}$/.test(named)) key = named
+      }
+    } catch { /* unreachable: no template this time, asked again next read */ return '' }
+    this.#hostKeys.set(host, key)
+    return key
+  }
 
   /** Put this tab's word for the page at `pageSig` into the room pool. */
   async share(pageSig: string): Promise<ShareOutcome> {
@@ -138,8 +175,40 @@ export class RoomPool extends EventTarget {
         if (member) { this.#members.set(name, member); changed = true }
       } catch { /* a member that does not arrive is not read */ }
     }))
+    this.#templateKey = await this.hostKey(host)
+    await this.#holdTemplates(host, base)
     if (changed) this.dispatchEvent(new CustomEvent('change'))
     return this.standing()
+  }
+
+  /** THE TEMPLATE ARRIVES FIRST. Each template member's word is read from the
+   *  host, checked against its signature, held in the swarm (shown like a
+   *  participant who never leaves), and its tiles are pulled from the host so
+   *  their files are here before anyone asks. */
+  async #holdTemplates(host: string, base: string): Promise<void> {
+    const swarm = get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')
+    if (!swarm?.holdTemplate) return
+    for (const member of this.templates()) {
+      if (this.#heldTemplates.has(member.name)) continue
+      let word = ''
+      try {
+        const res = await fetch(`${base}/${member.head}`, { signal: AbortSignal.timeout(FETCH_MS) })
+        if (!res.ok) continue
+        const bytes = new Uint8Array(await res.arrayBuffer())
+        if (await sha256(bytes) !== member.head) continue
+        word = new TextDecoder().decode(bytes)
+      } catch { continue }
+      if (!swarm.holdTemplate(member.page, member.signer, word, host)) continue
+      this.#heldTemplates.add(member.name)
+      const broker = get<BrokerShape>('@diamondcoreprocessor.com/ContentBrokerDrone')
+      try {
+        const visuals = (JSON.parse(word) as { visuals?: { layerSig?: unknown }[] }).visuals ?? []
+        for (const v of visuals) {
+          const sig = String(v?.layerSig ?? '')
+          if (/^[0-9a-f]{64}$/.test(sig)) void broker?.adopt?.(sig, { silent: true, quiet: true })?.catch?.(() => {})
+        }
+      } catch { /* a word without tiles has nothing to pull */ }
+    }
   }
 
   #settle(pageSig: string): void {
