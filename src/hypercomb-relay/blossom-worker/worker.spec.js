@@ -1455,6 +1455,48 @@ test('a try- door hands every other path to the participant shell', async () => 
   } finally { globalThis.fetch = original }
 })
 
+// ── the swarm door (documentation/swarm-pools.md, step four) ──────────────
+// swarm.<zone> is the host's one room door: the participant shell, pinned to
+// the package the zone's publisher signed as `install:swarm` — never the live
+// channel. It is served as a sandbox door is, but it is no sandbox: it writes.
+
+test('swarm.<zone> names the package signed as install:swarm, and only that', async () => {
+  const root = 'd'.repeat(64)
+  const env = await sandboxEnv({ 'install:swarm': root, 'install:essentials': head })
+  const pool = await hostPackagesPool()
+  const listing = await worker.fetch(new Request(`https://swarm.hypercomb.com/content/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(await listing.text(), '00000000\n')
+  const member = await worker.fetch(new Request(`https://swarm.hypercomb.com/content/${pool}/00000000`), env)
+  assert.equal(await member.text(), `${root}\nswarm`)
+})
+
+test('a host that signed no install:swarm has no swarm door — the live channel never opens one', async () => {
+  const env = await sandboxEnv({ 'install:essentials': head })
+  const response = await worker.fetch(new Request('https://swarm.hypercomb.com/'), env)
+  assert.equal(response.status, 404)
+})
+
+test('the swarm door hands every other path to the participant shell', async () => {
+  const env = await sandboxEnv({ 'install:swarm': 'd'.repeat(64) })
+  const seen = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (url) => { seen.push(String(url)); return new Response('<!doctype html>shell', { headers: { 'content-type': 'text/html' } }) }
+  try {
+    const response = await worker.fetch(new Request('https://swarm.hypercomb.com/'), env)
+    assert.equal(response.status, 200)
+    assert.deepEqual(seen, ['https://shell.example/'])
+  } finally { globalThis.fetch = original }
+})
+
+test('a write from the swarm door is not refused as a sandbox write', async () => {
+  const env = await sandboxEnv({ 'install:swarm': 'd'.repeat(64) })
+  const bytes = new TextEncoder().encode('a room note')
+  const sig = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+  const response = await worker.fetch(new Request(`https://hypercomb.com/${sig}`, { method: 'PUT', body: bytes, headers: { origin: 'https://swarm.hypercomb.com' } }), env)
+  assert.notEqual(await response.clone().text().then(t => /sandbox/i.test(t)), true)
+})
+
 // THE TRANSFER PACK (hypercomb-runtime transfer-pack.ts): `module commit`
 // stamps `pack:try-<change>` beside the sandbox, and the door answers the
 // transfer:packs member for the root it serves — for that root only.

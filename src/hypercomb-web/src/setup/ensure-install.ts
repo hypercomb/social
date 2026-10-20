@@ -24,7 +24,7 @@ import { INSTALL_INDEX_MEANING, parseInstallIndex, setActiveInstallIndex } from 
 import { decodeTransferPack, gunzipBytes } from '@hypercomb/runtime/transfer-pack'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from '@hypercomb/runtime/bags'
 import { HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from '@hypercomb/runtime/host-pool'
-import { registerPoolMeaning, sandboxDoorOf } from '@hypercomb/core'
+import { packageDoorOf, registerPoolMeaning } from '@hypercomb/core'
 import { installedPackageSig, stampInstalledPackage } from '@hypercomb/runtime/installed-package'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
 import { installCandidates, readInstallChannel, type ChannelRead } from '@hypercomb/runtime/host-packages'
@@ -378,10 +378,11 @@ export const ensureInstall = async (): Promise<void> => {
  * `navigator.serviceWorker.ready` alone is not enough: it never settles when
  * no registration exists at all, which is precisely the first-load case.
  */
-/** This origin, when it is a sandbox door (`try-<change>.<zone>`): the one
- *  host whose packages pool names the package this shell must run. */
+/** This origin, when it is a PACKAGE DOOR — a sandbox (`try-<change>.<zone>`)
+ *  or the host's swarm door (`swarm.<zone>`, pinned to `install:swarm`): the
+ *  one host whose packages pool names the package this shell must run. */
 export const sandboxDoor = (hostname: string = location.hostname, host: string = location.host): string | null =>
-  sandboxDoorOf(hostname) ? host.toLowerCase() : null
+  packageDoorOf(hostname) ? host.toLowerCase() : null
 
 const serviceWorkerSettled = async (timeoutMs = 4000): Promise<void> => {
   try {

@@ -36,3 +36,44 @@ export const sandboxDoorOf = (hostname: string): { label: string; zone: string }
 export const isSandboxDoor = (): boolean => {
   try { return !!sandboxDoorOf(globalThis.location?.hostname ?? '') } catch { return false }
 }
+
+// ── THE SWARM DOOR (documentation/swarm-pools.md, step four) ─────────────
+//
+// `swarm.<zone>` is a host's one door for its rooms: the host serves the
+// participant shell there, pinned to the package it signed as `install:swarm`,
+// so everyone in a room runs the SAME code before they attach — the runtime
+// is fixed by the door, not by whatever each visitor last installed. The room
+// itself comes from the link's words; the door is one per host, never one per
+// room. Unlike a sandbox door it is the participant's own hive on its own
+// origin: it holds keys and signs, because a room is written in by everyone.
+//
+// The worker keeps its own copy of the label (blossom-worker/worker.js
+// SWARM_DOOR_LABEL); the two must say the same thing.
+
+export const SWARM_DOOR_LABEL = 'swarm'
+
+/** The swarm door a hostname is, or null: `swarm.<zone>` (port ignored,
+ *  `*.localhost` zones count, as for a sandbox door). */
+export const swarmDoorOf = (hostname: string): { label: string; zone: string } | null => {
+  const host = String(hostname ?? '').trim().toLowerCase().replace(/:\d{1,5}$/, '')
+  const dot = host.indexOf('.')
+  if (dot < 0) return null
+  const label = host.slice(0, dot)
+  const zone = host.slice(dot + 1)
+  return zone && label === SWARM_DOOR_LABEL ? { label, zone } : null
+}
+
+/** Is THIS page a swarm door? */
+export const isSwarmDoor = (): boolean => {
+  try { return !!swarmDoorOf(globalThis.location?.hostname ?? '') } catch { return false }
+}
+
+/** A PACKAGE DOOR: an origin whose own `host:packages` pool names the one
+ *  package its shell runs — a sandbox door or a swarm door. What the two share
+ *  is only this: install from the door, and update when the door moves. */
+export const packageDoorOf = (hostname: string): { label: string; zone: string; kind: 'sandbox' | 'swarm' } | null => {
+  const sandbox = sandboxDoorOf(hostname)
+  if (sandbox) return { ...sandbox, kind: 'sandbox' }
+  const swarm = swarmDoorOf(hostname)
+  return swarm ? { ...swarm, kind: 'swarm' } : null
+}

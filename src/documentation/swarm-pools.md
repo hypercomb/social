@@ -135,8 +135,28 @@ followed community domains) against hotlinking; it is not security.
 4. **Arrive = join.** A link carries the room words; the shell installs the
    package, replicates the template, joins and opens the notes desk on the room
    tile.
-5. **Doors.** A subdomain maps to a pool address plus a package via `Host`. This
-   is optional, and every door is one level deep.
+5. **Doors. BUILT (before step 4).** One door per host: `swarm.<zone>`.
+   - **What it serves.** The full participant shell, pinned to the package
+     the zone's publisher signed as `install:swarm`. Everyone in a room runs
+     the same code before they attach. The room comes from the link's words,
+     so one door serves every room on that host.
+   - **How a host opens it.** Publish a revision under the name `swarm`
+     (`npm run publish:revision -- swarm`). A host that signed no
+     `install:swarm` answers "nothing here" at the door, because the live
+     channel never opens it.
+   - **Worker.** `SWARM_DOOR_LABEL` is served exactly as a sandbox door is
+     (`serveSandbox`: the shell from `SANDBOX_SHELL_ORIGIN`, and a one-member
+     `host:packages` pool). It is never a site, an own address or a card door.
+   - **Shell.** `packageDoorOf` (core `sandbox-door.ts`, the one door rule) is
+     true for both kinds of door. A cold install takes the door's package, and
+     the update scout follows the door rather than the follow record's channel,
+     so an update means the door now names a different root.
+   - **It is no sandbox.** Its origin is the participant's own hive: it holds
+     keys and signs, because a room is written in by everyone.
+   - **Proof.** Unit tests only: `worker.spec.js` (swarm door), core
+     `swarm-door.spec.ts`, and `update-scout.service.spec.ts` (package door).
+     There is no live check until the worker is deployed and a host has
+     published `install:swarm`.
 6. **Room requirements and take home.** The room tile's traits are checked on
    entry, and "take home" replicates what you took into your root hive by
    signature.

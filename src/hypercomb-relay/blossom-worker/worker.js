@@ -207,6 +207,16 @@ const ADDRESS_SITES = Symbol('address-sites')
 // a site and never an own address, and it writes nothing (the zone root does).
 const HOST_DOOR_LABEL = 'host'
 
+// THE SWARM DOOR (documentation/swarm-pools.md, step four). One per host:
+// swarm.<zone> runs the PARTICIPANT shell pinned to the package the zone's
+// publisher signed as `install:swarm`, so everyone in a room runs the same
+// code before they attach; the room comes from the link's words. It is served
+// exactly as a sandbox door is (serveSandbox: the shell, and a one-member
+// host:packages pool), but it is no sandbox — it writes and signs like any
+// participant shell. Never a site, never an own address, never a card door.
+// The shell's copy of the label: hypercomb-core sandbox-door.ts.
+const SWARM_DOOR_LABEL = 'swarm'
+
 function resolveSite(env, hostname) {
   const host = String(hostname || '').toLowerCase()
   const bindings = siteBindings(env)
@@ -401,7 +411,7 @@ function addressableHost(bindings, host, zone) {
   if (bindingZoneOf(bindings, host) !== zone) return false
   const label = host.slice(0, -(zone.length + 1))
   if (label === HOST_DOOR_LABEL && bindings[zone]?.frontDoor === true) return false
-  return DNS_LABEL_RE.test(label) && label !== 'content' && !SANDBOX_LABEL_RE.test(label)
+  return DNS_LABEL_RE.test(label) && label !== 'content' && label !== SWARM_DOOR_LABEL && !SANDBOX_LABEL_RE.test(label)
 }
 
 /** A zone's own addresses (`host → site`) and root places (`lineage →
@@ -2771,7 +2781,7 @@ function cardDoorHost(env, hostname) {
   const zone = bindingZoneOf(bindings, host)
   if (!zone) return false
   const label = host.slice(0, -(zone.length + 1))
-  if (!DNS_LABEL_RE.test(label) || label === 'content' || SANDBOX_LABEL_RE.test(label)) return false
+  if (!DNS_LABEL_RE.test(label) || label === 'content' || label === SWARM_DOOR_LABEL || SANDBOX_LABEL_RE.test(label)) return false
   return !(label === HOST_DOOR_LABEL && bindings[zone].frontDoor === true)
 }
 
@@ -5463,6 +5473,8 @@ const router = {
       // Every open trial on this zone — from its apex or any door on it.
       // A `try-` name under a zone is a sandbox door, not a website.
       if (implicit && SANDBOX_LABEL_RE.test(site.lineage)) return serveSandbox(request, env, site, siteZone)
+      // swarm.<zone> — the host's room door, pinned to `install:swarm`.
+      if (implicit && site.lineage === SWARM_DOOR_LABEL) return serveSandbox(request, env, site, siteZone)
       // Signed module imports — the visitor engine maps bee/dependency
       // imports to /content/<sig>. Same immutable blob as the flat read,
       // but with a JavaScript MIME: browsers enforce strict MIME checks on

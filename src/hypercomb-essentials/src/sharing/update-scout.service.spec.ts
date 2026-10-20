@@ -135,3 +135,33 @@ describe('UpdateScoutService.check', () => {
     expect(emitted).toEqual([])
   })
 })
+
+describe('UpdateScoutService.check on a package door', () => {
+  const DOOR_ROOT = 'e'.repeat(64)
+
+  it('follows the door, never the follow record — the room runs what its host signed', async () => {
+    const emitted: Record<string, unknown>[] = []
+    const scout = new UpdateScoutService()
+    let manifestAsked = false
+    const sig = await scout.check({
+      door: 'https://swarm.hypercomb.com',
+      doorRoot: async () => DOOR_ROOT,
+      storage: storageOf({ [INSTALL_FOLLOW_KEY]: follow, 'hc:shim:installed-package': INSTALLED }),
+      fetchManifest: async () => { manifestAsked = true; return manifestOf({ 'install:essentials': PUBLISHED }) },
+      emit: p => emitted.push(p),
+    })
+    expect(sig).toBe(DOOR_ROOT)
+    expect(manifestAsked).toBe(false)
+    expect(emitted).toEqual([expect.objectContaining({ packageSig: DOOR_ROOT, source: 'door' })])
+  })
+
+  it('is silent when the door still names what runs, at genesis, and when the door says nothing', async () => {
+    const emitted: unknown[] = []
+    const scout = new UpdateScoutService()
+    const base = { door: 'https://swarm.hypercomb.com', emit: (p: unknown) => emitted.push(p) }
+    expect(await scout.check({ ...base, doorRoot: async () => INSTALLED, storage: storageOf({ 'hc:shim:installed-package': INSTALLED }) })).toBeNull()
+    expect(await scout.check({ ...base, doorRoot: async () => DOOR_ROOT, storage: storageOf({}) })).toBeNull()
+    expect(await scout.check({ ...base, doorRoot: async () => null, storage: storageOf({ 'hc:shim:installed-package': INSTALLED }) })).toBeNull()
+    expect(emitted).toEqual([])
+  })
+})

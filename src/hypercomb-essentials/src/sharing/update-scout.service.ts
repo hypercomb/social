@@ -45,7 +45,7 @@
 //     the shell's bundled check owns that verdict, and clobbering it via
 //     the EffectBus last-value replay would hide a real bundled update)
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, packageDoorOf } from '@hypercomb/core'
 import { checkRemoteHiveFormat } from './hive-format.js'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
 import { installRootOf } from './hive-link.js'
@@ -127,6 +127,20 @@ export function scoutVerdict(
   return published
 }
 
+/** A PACKAGE DOOR's own answer (a sandbox, or the host's swarm door): the
+ *  root its one-member `host:packages` pool names — `<root>` then `<label>`,
+ *  one per line, at `/content/<sign('host:packages')>/00000000` on the door. */
+export async function doorPackageRoot(origin: string, fetcher: typeof fetch = fetch): Promise<string | null> {
+  try {
+    const bytes = new TextEncoder().encode('host:packages')
+    const pool = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('')
+    const res = await fetcher(`${origin.replace(/\/+$/, '')}/content/${pool}/00000000`, { cache: 'no-store' })
+    if (!res.ok) return null
+    const root = (await res.text()).split('\n')[0].trim().toLowerCase()
+    return SIG_RE.test(root) ? root : null
+  } catch { return null }
+}
+
 type ScoutDeps = {
   fetchManifest?: typeof fetchHiveManifestFromAny
   storage?: Pick<Storage, 'getItem'>
@@ -135,6 +149,11 @@ type ScoutDeps = {
   emit?: (payload: Record<string, unknown>) => void
   /** Does this shell run its working tree? Asks IoC for the source catalog. */
   runsSource?: boolean
+  /** This page's door origin when it is a package door; null when it is not.
+   *  Defaults to the page's own location. */
+  door?: string | null
+  /** What the door names (test seam); defaults to reading the door. */
+  doorRoot?: (origin: string) => Promise<string | null>
 }
 
 export class UpdateScoutService {
@@ -142,6 +161,11 @@ export class UpdateScoutService {
   /** One demand-driven check. Returns the announced sig, or null. */
   public readonly check = async (deps: ScoutDeps = {}): Promise<string | null> => {
     const storage = deps.storage ?? localStorage
+    // A PACKAGE DOOR FOLLOWS ITS DOOR, never the follow record's channel: the
+    // swarm door runs what its host signed as `install:swarm` so a whole room
+    // runs one package, and an update is the door naming a different root.
+    const door = 'door' in deps ? deps.door ?? null : pageDoor()
+    if (door) return this.#checkDoor(door, storage, deps)
     const follow = readInstallFollow(storage, 'publisher' in deps ? deps.publisher : INSTALL_PUBLISHER)
     if (!follow) return null
 
@@ -174,6 +198,27 @@ export class UpdateScoutService {
     if (!('emit' in deps)) void takeIfAllowed(sig, follow.hosts)
     return sig
   }
+
+  async #checkDoor(door: string, storage: Pick<Storage, 'getItem'>, deps: ScoutDeps): Promise<string | null> {
+    const root = await (deps.doorRoot ?? doorPackageRoot)(door)
+    if (!root) return null
+    let installed: string | null
+    try {
+      installed = INSTALLED_SIG_KEYS.map(key => storage.getItem(key)).find(sig => !!sig && SIG_RE.test(sig)) ?? null
+    } catch { return null }
+    if (!installed || installed === root) return null
+    const emit = deps.emit ?? (payload => EffectBus.emit('update:available', payload))
+    emit({ available: true, newCount: 0, newBees: [], packageSig: root, previous: null, label: '', source: 'door' })
+    if (!('emit' in deps)) void takeIfAllowed(root, [new URL(door).host])
+    return root
+  }
+}
+
+function pageDoor(): string | null {
+  try {
+    const here = globalThis.location
+    return here && packageDoorOf(here.hostname) ? here.origin : null
+  } catch { return null }
 }
 
 const scout = new UpdateScoutService()
