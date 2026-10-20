@@ -83,6 +83,13 @@
   .mh .agenda ol{list-style:none;display:grid;gap:6px;font-size:15px;margin-top:6px}
   .mh .agenda li{display:grid;grid-template-columns:28px 1fr;gap:var(--s2)}
   .mh .num{font-weight:800;font-feature-settings:"tnum"}
+  .mh .talks{border-top:1px solid var(--divider);padding:var(--s3) 0}
+  .mh .talks ul{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--s2);margin-top:6px}
+  .mh .talks a{display:grid;gap:2px;padding:10px 12px;border:1px solid var(--divider);color:var(--text);text-decoration:none}
+  .mh .talks a:hover{border-color:var(--accent)}
+  .mh .talks b{font-size:15px;font-weight:700}
+  .mh .talks b::after{content:" \2197";color:var(--accent)}
+  .mh .talks span{font-size:13px;color:var(--n700)}
   .mh .actions{border-top:1px solid var(--divider);padding:var(--s3) 0 0;display:flex;gap:var(--s2);flex-wrap:wrap}
   .mh .actions .btn-primary{flex:1;justify-content:flex-start}
 
@@ -217,6 +224,13 @@
         <li><span class="num">02</span>Show and tell: what's new in Hypercomb</li>
         <li><span class="num">03</span>Open floor: your questions</li>
       </ol>
+    </div>
+    <div class="talks">
+      <div class="mini">Talks from the meetings</div>
+      <ul>
+        <li><a href="https://hyperdex.hypercomb.com/" target="_blank" rel="noopener"><b>Hyperdex</b><span>Every hive is an index, read from outside</span></a></li>
+        <li><a href="https://colony.hypercomb.com/" target="_blank" rel="noopener"><b>Colony</b><span>A domain, and the hives that live on it</span></a></li>
+      </ul>
     </div>
     <div class="actions">
       <button type="button" class="btn btn-primary" data-join>Join the meeting<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
