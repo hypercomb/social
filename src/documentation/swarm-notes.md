@@ -132,4 +132,17 @@ the notes. Picking a label shows that branch (the label wears a check),
 Pieces: `notes/note-categories.ts` (the pure tree, with its spec),
 `notes/note-categories.service.ts` (`NoteCategories`, registered by
 `note-categories.drone.ts`), `assistant/jev-sort.ts`, and in the desk
-`notes-strip.cats.scss`. Proof: `scripts/drive-notes-categories.cjs`.
+`notes-strip.cats.scss`. Proof, each against a running dev server:
+
+- `drive-notes-categories.cjs` (15/15): by hand, branches, reload, rename,
+  remove, and what the desk says with no AI set up.
+- `drive-notes-categories-ai.cjs` (11/11): your AI, through the real `local`
+  provider, against a stand-in model server. It names nested categories, a
+  second suggestion adds nothing, and the notes are sorted with the unsure one
+  left unsorted.
+- `drive-notes-categories-jev.cjs` (11/11): Jev, with OpenRouter answered
+  inside the script. It runs one decision for the tile, one choice per note,
+  and the gate holds.
+- `drive-swarm-notes-categories.cjs` (10/10): two browsers. A shared name
+  counts every holder, and a name only one person holds is offered to the
+  other and taken.
