@@ -7467,7 +7467,7 @@ export class ChatWindowComponent implements OnDestroy {
         EffectBus.emit('toast:show', held
           ? { type: 'warning', message: `Draft of ${parsed.section} held: it newly reaches ${held}. Say brood to read it, brood accept to let it run.` }
           : { type: 'success', message: `Draft of ${parsed.section} applied — reload to run it` })
-        return writeRanMessage({ section: parsed.section, beeSig: outcome.beeSig, path: outcome.path, held }, message)
+        return writeRanMessage({ section: parsed.section, beeSig: outcome.beeSig, path: outcome.path, held, created: outcome.created === true }, message)
       }
 
       // A DOCTRINE SECTION WRITTEN (essentials anatomy/doctrine.ts). The rules
