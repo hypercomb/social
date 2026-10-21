@@ -17,7 +17,7 @@
 
 import { splitQuestion } from '@hypercomb/core'
 import { JEV_ANSWER_NOW, JEV_ROW_CHARS, JEV_ROW_LINES, parseTable, ROW_OVER_BUDGET, SENTENCE_JOIN, tableChoiceNote, tableQuestion, QUESTION_WORDS, type Decision, type QuestionWords, type Reach, type Row } from './hypercomb-jev'
-import { parseWriteBlock, WorkRefused, writeHeaderOf, type WorkRequest } from './hypercomb-work-fence'
+import { parseWriteBlock, tileFileLabel, WorkRefused, writeHeaderOf, type WorkRequest } from './hypercomb-work-fence'
 
 /** The live census, as the loop reads it. Both throw on a line the hive refuses. */
 export interface RoundCensus {
@@ -70,7 +70,7 @@ export interface RoundTable {
 export const writeLabelOf = (lines: readonly string[]): string => {
   const parsed = parseWriteBlock(lines)
   if ('error' in parsed) return ''
-  const named = 'doctrine' in parsed ? parsed.doctrine : parsed.section
+  const named = 'doctrine' in parsed ? parsed.doctrine : 'target' in parsed ? tileFileLabel(parsed) : parsed.section
   return named.length > 70 ? named.slice(-70) : named
 }
 

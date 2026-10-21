@@ -119,9 +119,9 @@ import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 // THE SOURCE LIVES IN THE HIVE: a model writes a module section back and the
 // hive runs it here as a draft (documentation/hive-read-fence.md, "Writing a
 // module"; runtime module-drafts.ts).
-import { draftModule } from '@hypercomb/runtime/module-drafts'
+import { applySectionEdits, draftModule } from '@hypercomb/runtime/module-drafts'
 import { installedPackageSig } from '@hypercomb/runtime/installed-package'
-import { doctrineFailedMessage, doctrineRanMessage, parseWriteBlock, readsAskedIn, routesNamedIn, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage } from './hypercomb-work-fence'
+import { doctrineFailedMessage, doctrineRanMessage, fileFailedMessage, fileRanMessage, parseWriteBlock, readsAskedIn, routesNamedIn, tileFileLabel, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage, type TileFileWriteRequest } from './hypercomb-work-fence'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'
@@ -1212,6 +1212,15 @@ const ANATOMY_IOC_KEY = '@hypercomb.social/Anatomy'
 /** The anatomy's doctrine (essentials anatomy/doctrine.ts), as the write door uses it. */
 type AnatomyDoctrineLike = {
   write(heading: string, body: string): Promise<{ ok: true; state: { sections: readonly string[] } } | { ok: false; error: string }>
+}
+/** files/tile-files.drone.ts — a tile's page and text files, as the write door uses them. */
+const TILE_FILES_IOC_KEY = '@diamondcoreprocessor.com/TileFilesDrone'
+type TileFileTarget = { route: readonly string[]; kind: 'page' | 'file'; name?: string }
+type TileFilesLike = {
+  read(target: TileFileTarget): Promise<{ ok: true; text: string | null } | { ok: false; error: string }>
+  write(target: TileFileTarget, text: string): Promise<
+    { ok: true; sig: string; created: boolean; unchanged: boolean } | { ok: false; error: string }
+  >
 }
 /** assistant/llm-hive-access.ts — which keyed providers may read the hive. */
 const LLM_HIVE_ACCESS_IOC_KEY = '@hypercomb.social/LlmHiveAccess'
@@ -6637,6 +6646,10 @@ export class ChatWindowComponent implements OnDestroy {
     // to be a hive artifact here (essentials anatomy/doctrine.ts).
     const anatomyDoctrine = (ioc()?.get(ANATOMY_IOC_KEY) as { doctrine?: AnatomyDoctrineLike } | undefined)?.doctrine
     const canWriteDoctrine = canChange && !!anatomyDoctrine?.write
+    // WRITING FILES needs changes allowed and the tile-files door
+    // (essentials files/tile-files.drone.ts): a tile's page and text files.
+    const tileFiles = ioc()?.get(TILE_FILES_IOC_KEY) as TileFilesLike | undefined
+    const canWriteFiles = canChange && !!tileFiles?.write && !!tileFiles.read
     const namedProvider = namedModel ? router?.providerIdForModel?.(namedModel) : undefined
     const localEndpoint = router?.providerMachineEndpoint?.('local')
     const localReadyAndTrusted = router?.providerIsMachineLocal?.('local') === true
@@ -6773,6 +6786,7 @@ export class ChatWindowComponent implements OnDestroy {
         vocabulary,
         canWrite,
         canWriteDoctrine,
+        canWriteFiles,
       }),
       !(canRead || canChange)
         ? ''
@@ -7413,6 +7427,7 @@ export class ChatWindowComponent implements OnDestroy {
         const parsed = parseWriteBlock(lines)
         if ('error' in parsed) throw new WorkRefused(parsed.error)
         if ('doctrine' in parsed) return runDoctrine(parsed.doctrine, parsed.body, providerId, model)
+        if ('target' in parsed) return runTileFile(parsed, providerId, model, review)
         if (!canWrite || !queue) throw new WorkRefused('writing code is not available here: nothing is installed to draft onto')
         // The participant's ceiling answers a write as it answers a line —
         // asked again after the wait, so a grant taken back meanwhile holds.
@@ -7493,6 +7508,59 @@ export class ChatWindowComponent implements OnDestroy {
         lastRun = 'ran'
         EffectBus.emit('toast:show', { type: 'success', message: `Doctrine section "${heading}" written` })
         return doctrineRanMessage(heading, outcome.state.sections.length, message)
+      }
+
+      // A FILE ON A TILE WRITTEN (essentials files/tile-files.drone.ts): the
+      // tile's website page, or a text file attached to it by name. It waits
+      // in Execution like a code write — the participant's policy or hand
+      // decides — and replaces nothing for good: the old bytes stay in the
+      // tile's history. Edits are made here, against the file as it is when
+      // the participant lets the block run, with the same rule as a module.
+      const runTileFile = async (parsed: TileFileWriteRequest, providerId: string, model: string, review = false): Promise<string> => {
+        if (!canWriteFiles || !tileFiles || !queue) throw new WorkRefused('files cannot be written here')
+        const refusedWrite = hypercombWriteRefusal()
+        if (refusedWrite) throw new WorkRefused(refusedWrite)
+        const label = tileFileLabel(parsed)
+        const grammar = `write ${label}`
+        const target: TileFileTarget = { route: parsed.route, kind: parsed.target, ...(parsed.name ? { name: parsed.name } : {}) }
+        if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
+        const entry = queue.request({
+          convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal,
+          forceReview: review, foreign: conversationForeign(),
+        })
+        if (!review) waitingOn(entry.id)
+        if (await entry.decision === 'skip') {
+          if (signal?.aborted) throw stopped()
+          lastRun = 'skipped'
+          return writeSkippedMessage(label, message)
+        }
+        stillHere()
+        const revoked = hypercombWriteRefusal()
+        if (revoked) {
+          queue.settle(entry.id, 'skipped', revoked)
+          throw new WorkRefused(revoked)
+        }
+        const fail = (reason: string, current?: string): string => {
+          queue.settle(entry.id, 'failed', reason)
+          lastRun = 'failed'
+          return fileFailedMessage(label, reason, current, message)
+        }
+        let text = parsed.body
+        if (parsed.edits) {
+          const now = await tileFiles.read(target)
+          if (!now.ok) return fail(now.error)
+          if (now.text === null) return fail(`${label} does not exist yet, so there is nothing to edit; write its whole text instead`)
+          const made = applySectionEdits(now.text, parsed.edits)
+          if ('error' in made) return fail(made.error.replace('the section as it runs now', 'the file as it is now'), now.text)
+          text = made.body
+        }
+        const outcome = await tileFiles.write(target, text)
+        if (!outcome.ok) return fail(outcome.error)
+        ran.push(grammar)
+        queue.settle(entry.id, 'ran')
+        lastRun = 'ran'
+        EffectBus.emit('toast:show', { type: 'success', message: outcome.unchanged ? `${label} unchanged` : `${label} ${outcome.created ? 'created' : 'updated'}` })
+        return fileRanMessage({ label, sig: outcome.sig, created: outcome.created, unchanged: outcome.unchanged }, message)
       }
 
       // THE PARTICIPANT SPEAKS THE HIVE'S LANGUAGE. A table question offers

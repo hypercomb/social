@@ -39,7 +39,7 @@ describe('a write block in Jev mode', () => {
 
   it('is refused in the block\'s own words when the header is malformed', () => {
     const table = tableFor({ kind: 'write', lines: ['not a header', 'code'] }, true)!
-    expect(() => prepareTable(table, census)).toThrow('block starts with <module signature> <src/path.ts>, or doctrine <heading>,')
+    expect(() => prepareTable(table, census)).toThrow('block starts with <module signature> <src/path.ts>, page /<tile>, file /<tile> <name.ext>, or doctrine <heading>,')
   })
 
   it('prepares as an editing row that runs the block, never a grammar', () => {
