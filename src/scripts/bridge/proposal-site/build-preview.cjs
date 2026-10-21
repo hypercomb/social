@@ -8,7 +8,7 @@ const { renderPage } = require('./engine.cjs')
 
 const name = process.argv[2]
 if (!name) { console.error('usage: build-preview.cjs <proposal>'); process.exit(1) }
-const site = require(`./proposals/${name}.cjs`)()
+const site = require('./load-site.cjs').loadSite(name)
 
 const OUT = path.join(__dirname, '..', '..', '..', '..', '.tmp', `proposal-site-${name}`)
 fs.mkdirSync(OUT, { recursive: true })

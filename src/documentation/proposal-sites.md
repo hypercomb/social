@@ -19,6 +19,22 @@ A grant or crowdfunding proposal is published as its own hive, at
 - **Links are site-relative** (`/`, `/plan`), so the same bytes work under any
   root tile and on any domain.
 
+## The portal
+
+`proposals.hypercomb.com` is the directory: every proposal, with its funder,
+its ask, its deadline and its status, and a page each on what is being built
+and how to take part. It is built from `proposals/*.cjs` (`portal.cjs`,
+through `load-site.cjs`), so a new proposal file is a new row with nothing
+else to edit. Each proposal says what the directory shows in its `meta`:
+`{ kind, status, ask, deadline }`, status one of `draft`, `submitted`,
+`funded`, `declined`. The portal is a peer of the proposals, never their
+container: each is its own hive at its own door, and the portal only points.
+
+```bash
+npm run proposal:preview -- portal
+npm run proposal:stamp -- portal
+```
+
 ## Files
 
 `scripts/bridge/proposal-site/`

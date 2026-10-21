@@ -48,6 +48,10 @@ function rich(s, mode) {
 const HEX = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 20.2 7.25v9.5L12 21.5 3.8 16.75v-9.5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 8.2 15.3 10.1v3.8L12 15.8 8.7 13.9v-3.8Z" fill="currentColor"/></svg>'
 
 const STATUS = {
+  draft: 'Draft',
+  submitted: 'Submitted',
+  funded: 'Funded',
+  declined: 'Declined',
   built: 'Built',
   partial: 'Partly built',
   designed: 'Designed',
@@ -67,7 +71,7 @@ function renderBlock(b, ctx) {
         `<div><dt>${esc(s.n)}</dt><dd>${rich(s.label, mode)}</dd></div>`).join('')}</dl>${b.note ? `<p class="note">${rich(b.note, mode)}</p>` : ''}</section>`
     case 'cards':
       return `<section class="blk">${head}${intro}<div class="cards">${b.items.map(c => {
-        const inner = `${c.kicker ? `<span class="kicker">${esc(c.kicker)}</span>` : ''}<strong>${esc(c.title)}</strong><span>${rich(c.text, mode)}</span>`
+        const inner = `${c.kicker ? `<span class="kicker">${esc(c.kicker)}</span>` : ''}<strong>${esc(c.title)}</strong><span>${rich(c.text, mode)}</span>${c.meta ? `<span class="meta">${c.meta.map(m => `<em>${esc(m)}</em>`).join('')}</span>` : ''}${c.status ? `<span class="pill pill-${esc(c.status)}">${esc(STATUS[c.status] || c.status)}</span>` : ''}`
         return c.href ? anchor(c.href, inner, mode, 'card') : `<div class="card">${inner}</div>`
       }).join('')}</div></section>`
     case 'list':
@@ -146,6 +150,9 @@ a.card:hover{border-color:var(--accent);transform:translateY(-1px)}
 .card strong{font:600 16px/1.3 var(--sans)}
 .card span{font-size:15px;line-height:1.5;color:var(--muted)}
 .card .kicker{font:12px/1 var(--mono);color:var(--accent);letter-spacing:.06em}
+.card .meta{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:4px;font:12px/1.6 var(--mono);color:var(--muted)}
+.card .meta em{font-style:normal}
+.card .pill{align-self:flex-start;margin-top:6px}
 .points,.checks{margin:0;padding:0;list-style:none}
 .points li,.checks li{position:relative;padding:0 0 10px 26px}
 .points li::before{content:"";position:absolute;left:4px;top:.62em;width:8px;height:8px;background:var(--brick);clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
@@ -164,7 +171,8 @@ tfoot th,tfoot td{font-weight:600;border-top:2px solid var(--line);border-bottom
 .m-top h3{flex:1 1 260px}
 .pill{font:12px/1 var(--mono);padding:5px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
 .pill-built{color:var(--second);border-color:currentColor}
-.pill-designed,.pill-partial{color:var(--accent);border-color:currentColor}
+.pill-designed,.pill-partial,.pill-draft,.pill-submitted{color:var(--accent);border-color:currentColor}
+.pill-funded{color:var(--second);border-color:currentColor}
 .milestones p{margin:0 0 8px;font-size:15.5px}
 .deliver{display:flex;gap:10px;align-items:baseline}
 .deliver span,.cmp p span{font:11px/1.6 var(--mono);text-transform:uppercase;letter-spacing:.07em;color:var(--muted);flex:none}

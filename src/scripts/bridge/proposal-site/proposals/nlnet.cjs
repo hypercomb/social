@@ -17,11 +17,14 @@ module.exports = function nlnet() {
     title: 'Hypercomb · NLnet Restack proposal',
     funder: 'NLnet · Restack fund',
     summary: 'Verifiable, consent-based hosting for content-addressed hives: the trust and consent layer that lets independent hosts carry each other\'s signed content.',
+    // What the portal's directory shows for this proposal.
+    meta: { kind: 'Grant', status: 'draft', ask: 'up to €50,000', deadline: '2026-11-03' },
     draft: 'Draft — the amounts and wording are still being settled before submission.',
     docsBase: `${P.repo}/blob/main/src/documentation`,
     brand: { name: 'Hypercomb' },
     footer: [
       'Every page here is a tile in a Hypercomb hive, published as signed content.',
+      '[All proposals](https://proposals.hypercomb.com)',
       `Code ${P.licenseCode} · Docs ${P.licenseDocs}`,
       `[Source](${P.repo})`,
       `[${P.contact}](mailto:${P.contact})`,

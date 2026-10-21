@@ -16,7 +16,7 @@ const BRIDGE = 'ws://localhost:2401'
 const name = process.argv[2]
 const DRY = process.argv.includes('--dry')
 if (!name || name.startsWith('--')) { console.error('usage: stamp.cjs <proposal> [--dry]'); process.exit(1) }
-const site = require(`./proposals/${name}.cjs`)()
+const site = require('./load-site.cjs').loadSite(name)
 
 let counter = 0
 const send = (req) => new Promise((resolve, reject) => {
