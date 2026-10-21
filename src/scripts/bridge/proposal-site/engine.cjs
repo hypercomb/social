@@ -10,7 +10,7 @@
 //                    bytes work at any lineage and on any domain.
 //   mode 'preview' → links are local files (`index.html`, `plan.html`).
 
-const { crackedHexArt } = require('./cracked-hex.cjs')
+const { honeycombArt } = require('./honeycomb.cjs')
 
 const DEFAULT_BRAND = {
   name: 'Hypercomb',
@@ -106,9 +106,9 @@ function renderBlock(b, ctx) {
 function css(brand) {
   const a = brand.accent, s = brand.second
   return `
-:root{color-scheme:light;--plaster:#fdfaf3;--plaster-deep:#f0e7d8;--brick:#b7563f;--brick-2:#a3472f;--brick-3:#c86d52;--mortar:#7d3626;--crack:#2b1d16;--paper:#f7f0e5;--surface:#fffcf7;--soft:#f0e7d9;--ink:#211a13;--muted:#6b6155;--line:#dccfbd;--accent:${a.light};--second:${s.light};--warn:#9a6a12;--warn-bg:#fbf0d9;--serif:Georgia,"Iowan Old Style","Times New Roman",serif;--sans:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;--mono:ui-monospace,"Cascadia Code",Consolas,monospace}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--plaster:#2b2620;--plaster-deep:#231e19;--brick:#9a4331;--brick-2:#7f3524;--brick-3:#b45840;--mortar:#3a180f;--crack:#060504;--paper:#13110e;--surface:#1c1915;--soft:#24201b;--ink:#efe6d8;--muted:#a99d8d;--line:#373029;--accent:${a.dark};--second:${s.dark};--warn:#e3b45c;--warn-bg:#2a2214}}
-:root[data-theme="dark"]{color-scheme:dark;--plaster:#2b2620;--plaster-deep:#231e19;--brick:#9a4331;--brick-2:#7f3524;--brick-3:#b45840;--mortar:#3a180f;--crack:#060504;--paper:#13110e;--surface:#1c1915;--soft:#24201b;--ink:#efe6d8;--muted:#a99d8d;--line:#373029;--accent:${a.dark};--second:${s.dark};--warn:#e3b45c;--warn-bg:#2a2214}
+:root{color-scheme:light;--honey:#d99a32;--steel:#7193a0;--paper:#f7f0e5;--surface:#fffcf7;--soft:#f0e7d9;--ink:#211a13;--muted:#6b6155;--line:#dccfbd;--accent:${a.light};--second:${s.light};--warn:#9a6a12;--warn-bg:#fbf0d9;--serif:Georgia,"Iowan Old Style","Times New Roman",serif;--sans:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;--mono:ui-monospace,"Cascadia Code",Consolas,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--honey:#e0a94a;--steel:#86a6b3;--paper:#13110e;--surface:#1c1915;--soft:#24201b;--ink:#efe6d8;--muted:#a99d8d;--line:#373029;--accent:${a.dark};--second:${s.dark};--warn:#e3b45c;--warn-bg:#2a2214}}
+:root[data-theme="dark"]{color-scheme:dark;--honey:#e0a94a;--steel:#86a6b3;--paper:#13110e;--surface:#1c1915;--soft:#24201b;--ink:#efe6d8;--muted:#a99d8d;--line:#373029;--accent:${a.dark};--second:${s.dark};--warn:#e3b45c;--warn-bg:#2a2214}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);position:relative;color:var(--ink);font:17px/1.62 var(--sans);-webkit-font-smoothing:antialiased}
@@ -134,7 +134,7 @@ main{min-width:0;max-width:760px}
 h1{font:400 clamp(32px,5vw,50px)/1.08 var(--serif);letter-spacing:-.015em;margin:0 0 18px;text-wrap:balance}
 .lede{font-size:20px;line-height:1.55;color:var(--muted);margin:0 0 34px;text-wrap:pretty}
 h2{font:400 26px/1.2 var(--serif);margin:0 0 14px;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
-h2::before{content:"";width:11px;height:12px;flex:none;background:var(--brick);clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%)}
+h2::before{content:"";width:11px;height:12px;flex:none;background:var(--honey);clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%)}
 h3{font:600 17px/1.35 var(--sans);margin:0}
 .blk{margin:0 0 44px}
 .blk p{margin:0 0 14px;text-wrap:pretty}
@@ -142,7 +142,7 @@ h3{font:600 17px/1.35 var(--sans);margin:0}
 .note{font-size:14px;color:var(--muted);margin-top:12px}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;margin:0;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .stats div{background:var(--surface);padding:18px 18px 16px}
-.stats dt{font:400 30px/1.1 var(--serif);color:var(--brick)}
+.stats dt{font:400 30px/1.1 var(--serif);color:var(--accent)}
 .stats dd{margin:6px 0 0;font-size:14px;line-height:1.4;color:var(--muted)}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
 .card{display:flex;flex-direction:column;gap:6px;padding:18px;background:var(--surface);border:1px solid var(--line);border-radius:14px;color:var(--ink);text-decoration:none;transition:border-color .15s,transform .15s}
@@ -155,7 +155,7 @@ a.card:hover{border-color:var(--accent);transform:translateY(-1px)}
 .card .pill{align-self:flex-start;margin-top:6px}
 .points,.checks{margin:0;padding:0;list-style:none}
 .points li,.checks li{position:relative;padding:0 0 10px 26px}
-.points li::before{content:"";position:absolute;left:4px;top:.62em;width:8px;height:8px;background:var(--brick);clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+.points li::before{content:"";position:absolute;left:4px;top:.62em;width:8px;height:8px;background:var(--honey);clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
 .checks li::before{content:"✓";position:absolute;left:2px;top:0;color:var(--second);font-weight:700}
 .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
 table{width:100%;border-collapse:collapse;font-size:15px;line-height:1.45}
@@ -194,7 +194,7 @@ tfoot th,tfoot td{font-weight:600;border-top:2px solid var(--line);border-bottom
 .foot{max-width:1180px;margin:0 auto;padding:22px 24px 40px;border-top:1px solid var(--line);font-size:13.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 22px}
 .foot a{color:var(--muted)}
 @media (max-width:900px){
-  .art{opacity:.32}
+  .art{opacity:.35}
   main{background:color-mix(in srgb,var(--paper) 82%,transparent);border-radius:14px}
   .frame{grid-template-columns:minmax(0,1fr);gap:0;padding:0 16px 48px}
   .toc{display:none}
@@ -248,7 +248,7 @@ function renderPage(site, page, mode) {
 <style>${css(brand)}</style>
 </head>
 <body>
-${crackedHexArt(1 + at * 101)}
+${honeycombArt(1 + at * 101)}
 ${site.draft ? `<div class="draft">${esc(site.draft)}</div>` : ''}
 <header class="top">${anchor('/', `${HEX}<span>${esc(brand.name)}</span>`, mode, 'brand')}<span class="funder">${esc(site.funder)}</span></header>
 <div class="frame">

@@ -262,7 +262,7 @@ module.exports = function nlnet() {
           { type: 'prose', p: [
             'Development uses Claude through Claude Code as a pair programmer. The maintainer sets the design, directs each change, reviews it, and answers for it. The architecture and its rules, the doctrine the test suite enforces, are the maintainer\'s own.',
             'For grant-funded milestones, AI-assisted work will be logged with the model and prompt details NLnet\'s policy asks for, and the paid work is the design, review and verification.',
-            'The text of this site was drafted with Claude Opus 5.5 from the repository\'s own documentation, and the maintainer reviews it before it is published. The answers in the NLnet form itself are written by the applicant.',
+            'This site was made with AI as well. Its text was drafted with Claude from the repository\'s own documentation, and its design — the layout, the colours and the honeycomb drawn on each page — was written as code by Claude under the maintainer\'s direction, who reviews everything before it is published. The answers in the NLnet form itself are written by the applicant.',
           ] },
           { type: 'callout', p: [ 'None of the funded milestones includes the workspace\'s AI features, and the core protocol does not depend on them.' ] },
         ],
