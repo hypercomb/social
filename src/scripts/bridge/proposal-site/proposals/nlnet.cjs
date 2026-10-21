@@ -256,11 +256,15 @@ module.exports = function nlnet() {
         title: 'How generative AI is used',
         lede: 'NLnet asks applicants to disclose any substantive use of generative AI. Here it is in full.',
         blocks: [
+          { type: 'prose', h: 'The design is human', p: [
+            'Hypercomb\'s design is the maintainer\'s, and it is entirely human-guided. Its shape — a hexagonal grid of tiles, presence as permission, every artifact named by the signature of its bytes, no accounts and no central server — was worked out and largely built before frontier AI models were available for coding, in an earlier version of the application that the repository still carries as `hypercomb-legacy`.',
+            'Frontier models came later, as a pair programmer. They write code to the maintainer\'s design and direction; the maintainer reviews, tests and answers for every change. No design decision has been delegated to a model, and the rules the test suite enforces are the maintainer\'s own.',
+          ] },
           { type: 'stats', items: [
             { n: fmt(m.assisted), label: `of ${fmt(m.commits)} commits carry a Co-Authored-By: Claude trailer` },
           ], note: 'Counted from commit trailers when this site was built.' },
           { type: 'prose', p: [
-            'Development uses Claude through Claude Code as a pair programmer. The maintainer sets the design, directs each change, reviews it, and answers for it. The architecture and its rules, the doctrine the test suite enforces, are the maintainer\'s own.',
+            'Day to day, development uses Claude through Claude Code as that pair programmer. The maintainer sets the design, directs each change, reviews it, and answers for it.',
             'For grant-funded milestones, AI-assisted work will be logged with the model and prompt details NLnet\'s policy asks for, and the paid work is the design, review and verification.',
             'This site was made with AI as well. Its text was drafted with Claude from the repository\'s own documentation, and its design — the layout, the colours and the honeycomb drawn on each page — was written as code by Claude under the maintainer\'s direction, who reviews everything before it is published. The answers in the NLnet form itself are written by the applicant.',
           ] },
