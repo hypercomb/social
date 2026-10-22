@@ -27,7 +27,7 @@
 // room and secret already in — one host typed (or hypercomb.com tapped) and
 // START. Never the default relay: there is none.
 
-import { EffectBus, get, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, get, isSwarmDoor, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { resolveInviteSecret, validateInviteBundle, meetingRelayOf, meetingHostOf, isAccessCode, type MeetingInviteBundle, type MeetingPoint } from './meeting-invite.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { readDoorsOf } from './zone-door.js'
@@ -335,6 +335,22 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   // `join` word use (its zone guard lives in runtime-initializer). Only
   // when this tab is not already a member — a toggle would make it leave.
   if (!isJoinedHere()) EffectBus.emit('keymap:invoke', { cmd: 'mesh.togglePublic', binding: null, event: null })
+  // ARRIVE = JOIN, AT THE ROOM'S DOOR (documentation/swarm-pools.md). On the
+  // host's swarm door a room is a shared notes ledger, so arriving says where
+  // to write — and opens nothing by itself: a window opens only from its own
+  // door, so the toast carries it, and stays until it is answered.
+  if (isSwarmDoor()) {
+    EffectBus.emit('toast:show', {
+      type: 'success',
+      title: tr('invite.join.success', 'Joined meeting place'),
+      message: tr('invite.join.door', `You're in "${label}". Everyone's notes are in the notes desk.`, { label }),
+      duration: 0,
+      actionLabel: tr('invite.join.openNotes', 'Open the notes'),
+      actionEffect: 'notes:panel',
+      actionPayload: { visible: true },
+    })
+    return true
+  }
   toast('success', tr('invite.join.success', 'Joined meeting place'), label)
   return true
 }

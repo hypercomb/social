@@ -2551,6 +2551,16 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     get<NavigationLike>('@hypercomb.social/Navigation')?.goRaw?.(next)
   }
 
+  /** The room's tiles on this page — what the swarm shares here, the host's
+   *  template first — when this tab is in a room. Names only. */
+  #roomTiles(): string[] {
+    if (!this.#swarmNotes()?.inSwarm()) return []
+    const swarm = get<{ peerTilesAtCurrentSig?: () => readonly { name: string; template?: boolean }[] }>('@diamondcoreprocessor.com/SwarmDrone')
+    const tiles = swarm?.peerTilesAtCurrentSig?.() ?? []
+    const names = [...tiles.filter(t => t.template), ...tiles.filter(t => !t.template)].map(t => String(t.name ?? '').trim()).filter(Boolean)
+    return [...new Set(names)]
+  }
+
   /** Where the participant stood when the desk opened. */
   #origin: readonly string[] | null = null
 
@@ -3420,13 +3430,19 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // write. Only from a list read at THIS level: right after a move the list
     // still names the level just left, and those names would resolve here to
     // other tiles or none.
+    //
+    // A GUEST WHO HOLDS NOTHING HERE YET (just arrived in a room) takes the
+    // room's own tile instead: the shared tiles on this page, the host's
+    // template first. Writing on it is how their copy of it begins.
     effect(() => {
       if (!this.visible() || this.cell()) return
-      const list = this.#navigatorCellLabels()
+      this.#swarmVersion()
+      const own = this.#navigatorCellLabels()
+      const list = own.length ? own : untracked(() => this.#roomTiles())
       if (list.length === 0) return
       const at = this.#layerLabelsPath()
       untracked(() => {
-        if (at !== null && at !== this.#here().join('/')) return
+        if (own.length && at !== null && at !== this.#here().join('/')) return
         const selection = get<SelectionService>('@diamondcoreprocessor.com/SelectionService')
         const chosen = [selection?.active ?? '', ...(selection?.selected ?? [])].find(name => !!name && list.includes(name))
         this.activateCell(chosen ?? list[0])

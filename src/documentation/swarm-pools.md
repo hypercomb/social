@@ -132,9 +132,29 @@ followed community domains) against hotlinking; it is not security.
    - **Proof.** `scripts/drive-swarm-room-template.cjs`, 7/7: a guest who
      arrives after the host has left gets the template tile and its notes,
      and the template does not count as someone present.
-4. **Arrive = join.** A link carries the room words; the shell installs the
-   package, replicates the template, joins and opens the notes desk on the room
-   tile.
+4. **Arrive = join. BUILT.**
+   - **The link lands on the door.** When the meeting host has opened its swarm
+     door, the meeting link the `invite` word hands out lands on
+     `swarm.<host>` (`sharing/swarm-door-landing.ts`, which asks the door
+     what package it names). So the guest's first load installs the room's
+     pinned package. Without a door, the link lands where it always did.
+   - **Joining asks first.** The link asks before it joins and joins on yes,
+     the same as any meeting link. The template arrives first, because the
+     room pool is read as the zone completes (step 3).
+   - **Arriving opens no window.** A window opens only from its own door. On a
+     swarm door, arriving shows a toast that stays until answered, says where
+     everyone's notes are, and carries the notes desk's door ("Open the
+     notes").
+   - **The desk opens on the room's tile.** A guest who holds no tile here
+     yet takes the room's tile: the shared tiles on the page, the host's
+     template first. Their first line there starts their copy of it and
+     reaches the room.
+   - **Proof.** `scripts/drive-swarm-arrive.cjs`, 9/9. A host on `localhost`
+     and a fresh guest on `swarm.localhost`, which follows the same door rule
+     as `swarm.<host>`: the link asks, the guest joins, nothing pops up, the
+     toast opens the desk on `lecture` with the host's note in it, and the
+     guest's line reaches the host. `swarm-door-landing.spec.ts` covers where
+     a link lands.
 5. **Doors. BUILT (before step 4).** One door per host: `swarm.<zone>`.
    - **What it serves.** The full participant shell, pinned to the package
      the zone's publisher signed as `install:swarm`. Everyone in a room runs

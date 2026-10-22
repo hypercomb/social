@@ -2186,6 +2186,8 @@
   "invite.join.confirm": "Join",
   "invite.join.cancel": "Stay",
   "invite.join.success": "Joined meeting place",
+  "invite.join.door": "You're in \"{label}\". Everyone's notes are in the notes desk.",
+  "invite.join.openNotes": "Open the notes",
   "invite.needs-link": "\"{label}\" opens from its invite link — ask whoever shared it.",
   "website-archive.save-failed.title": "Save failed",
   "website-archive.save-failed.message": "Core services unavailable",

@@ -54,6 +54,7 @@ import {
 } from './meeting-invite.js'
 import { isJoinedHere, readTabZone } from './membership.js'
 import { publishSwarmLink, swarmLinkText } from './swarm-link.js'
+import { landingOrigin } from './swarm-door-landing.js'
 import { writeDecoration } from '../commands/decoration-manifest.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
@@ -275,7 +276,7 @@ export class InviteQueenBee {
     const login = { host, location: room, secret, ...(code ? { code } : {}), ...(page.length ? { page: [...page] } : {}) }
     try {
       const r = await publishSwarmLink(login, ({ host: at, sig, bytes }) => hostSync.putOne!(at, sig, bytes))
-      return r.ok ? swarmLinkText(window.location.origin, r.parts) : ''
+      return r.ok ? swarmLinkText(await landingOrigin(host), r.parts) : ''
     } catch { return '' }
   }
 
@@ -320,7 +321,7 @@ export class InviteQueenBee {
     // the fragment, which no server sees. A host that will not take it (not
     // yours, not a friend's) leaves the plain #meet= link, as before.
     const signed = await this.#signedLink(room, secret, relay, zone?.code, segments)
-    const url = signed || `${window.location.origin}/${fragment}`
+    const url = signed || `${await landingOrigin(meetingPointKey(relay))}/${fragment}`
     const point = relay.replace(/^wss?:\/\//, '')
 
     const delivery = await deliverLink(url, 'Hypercomb meeting')
