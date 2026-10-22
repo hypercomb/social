@@ -130,8 +130,21 @@
   .mh .three > div{padding:var(--s3) var(--s2) 0 0}
   .mh .three > div + div{padding:var(--s3) var(--s2) 0;border-left:1px solid var(--divider)}
   .mh .three > div:last-child{padding-right:0}
-  .mh .cell{width:64px;height:72px;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:var(--n900);margin-bottom:var(--s2)}
-  .mh .cell img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 48%}
+  /* Each step gets a small cluster of cells — a corner of the hive. One cell
+     carries the step's picture with a feathered edge (it fades into the
+     cell's field before the hexagon's edge, so the cutout reads soft, not
+     punched); the others are plain fields in the page's own tints. */
+  .mh .cluster{position:relative;width:100%;max-width:150px;aspect-ratio:150/130;margin-bottom:var(--s3)}
+  .mh .cell{position:absolute;width:44%;aspect-ratio:8/9;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:var(--surface)}
+  .mh .cell.c1{left:0;top:0}
+  .mh .cell.c2{left:50%;top:0}
+  .mh .cell.c3{left:25%;top:43%}
+  .mh .cell.dark{background:var(--n900)}
+  .mh .cell.red{background:var(--accent)}
+  .mh .cell.light{background:color-mix(in srgb,var(--text) 9%,var(--bg))}
+  .mh .cell img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 46%;transform:scale(1.08);
+    -webkit-mask-image:radial-gradient(ellipse 60% 62% at 50% 50%,#000 52%,rgba(0,0,0,.5) 78%,transparent 100%);
+    mask-image:radial-gradient(ellipse 60% 62% at 50% 50%,#000 52%,rgba(0,0,0,.5) 78%,transparent 100%)}
   .mh .step{font-weight:800;font-size:24px;color:var(--accent);line-height:1}
   .mh .step-title{font-weight:800;font-size:15px;margin-top:var(--s2);line-height:1.2}
   .mh .step-body{margin-top:4px;font-size:13px;color:var(--n800)}
@@ -271,19 +284,31 @@
     <span class="kicker" id="how">How joining works</span>
     <div class="three">
       <div>
-        <div class="cell grayscale"><img src="resource:cd554c78bccd0af216c2b11496a276508c34d720a24d56aad5cbf909affbdca5" alt="Hypercomb cell"></div>
+        <div class="cluster" aria-hidden="true">
+          <div class="cell c1 grayscale"><img src="resource:cd554c78bccd0af216c2b11496a276508c34d720a24d56aad5cbf909affbdca5" alt=""></div>
+          <div class="cell c2 light"></div>
+          <div class="cell c3 red"></div>
+        </div>
         <div class="step">1</div>
         <div class="step-title">Open the link</div>
         <p class="step-body">On your phone or computer — no app to install.</p>
       </div>
       <div>
-        <div class="cell grayscale"><img src="resource:28a96fc9b0b24be5a468904b84c626c68e7d3f360bed3d16378d23451d5a07a2" alt="People cell"></div>
+        <div class="cluster" aria-hidden="true">
+          <div class="cell c1 dark"></div>
+          <div class="cell c2 grayscale"><img src="resource:28a96fc9b0b24be5a468904b84c626c68e7d3f360bed3d16378d23451d5a07a2" alt=""></div>
+          <div class="cell c3 light"></div>
+        </div>
         <div class="step">2</div>
         <div class="step-title">Pick a name</div>
         <p class="step-body">Just a name you choose. No email, no password.</p>
       </div>
       <div>
-        <div class="cell grayscale"><img src="resource:63b5fec4df0d61e772cf8408d906e397d9010d2be7deca7cec160a15983ffd5a" alt="Bee cell"></div>
+        <div class="cluster" aria-hidden="true">
+          <div class="cell c1 light"></div>
+          <div class="cell c2 red"></div>
+          <div class="cell c3 grayscale"><img src="resource:63b5fec4df0d61e772cf8408d906e397d9010d2be7deca7cec160a15983ffd5a" alt=""></div>
+        </div>
         <div class="step">3</div>
         <div class="step-title">You're in</div>
         <p class="step-body">Your name joins the list for everyone to see, and you keep the receipt.</p>
