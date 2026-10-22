@@ -46,7 +46,7 @@ up by another host still says where to join it.
 The organizer stands on the tile and says one sentence:
 
 ```
-event 2026-10-26 09:15-11:00 at Yaletown Galleria, 1080 Mainland St, Vancouver on hypercomb.com
+event 2026-10-24 09:15-11:00 at Yaletown Galleria, 1080 Mainland St, Vancouver on hypercomb.com
 ```
 
 The `event` word (`calendar/event.queen.ts`) mints the canonical record, holds
