@@ -1,3 +1,0 @@
-const WebSocket=require('ws');
-const ask=(op,ms)=>new Promise(res=>{const ws=new WebSocket('ws://localhost:2401');const t=setTimeout(()=>{try{ws.close()}catch{};res({ok:false,error:'client-timeout'})},ms);ws.on('open',()=>ws.send(JSON.stringify({...op,id:'p-'+Date.now()+Math.random()})));ws.on('message',m=>{clearTimeout(t);res(JSON.parse(String(m)));ws.close()});ws.on('error',e=>{clearTimeout(t);res({ok:false,error:e.message})})});
-(async()=>{const t0=Date.now();for(let i=0;i<14;i++){const t=Date.now();const r=await ask({op:'summary-list'},20000);console.log('t+'+Math.round((Date.now()-t0)/1000)+'s summary-list =>',(Date.now()-t)+'ms',r.ok?'ok':r.error);if(r.ok)break;await new Promise(r=>setTimeout(r,10000))}})()
