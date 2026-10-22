@@ -34,6 +34,9 @@ describe('event lines', () => {
       verb: 'make', date: '2026-10-24', time: '', where: 'Yaletown', title: 'Hypercomb Meetup', host: 'hypercomb.com',
     })
     expect(parseEventArgs('2026-10-24 9:30 at the café on hypercomb.com').time).toBe('09:30')
+    expect(parseEventArgs('2026-10-26 9:15-11:00 at Yaletown Galleria, 1080 Mainland St, Vancouver on hypercomb.com')).toMatchObject({
+      verb: 'make', date: '2026-10-26', time: '09:15', ends: '11:00', where: 'Yaletown Galleria, 1080 Mainland St, Vancouver',
+    })
   })
 
   it('reads list, join and roll, and refuses a line with no host or no shape', () => {
@@ -59,6 +62,8 @@ describe('the meeting record', () => {
     expect(parseEvent('{"kind":"event","title":"x","date":"soon","where":"y","series":"s","host":"h.example"}')).toBeNull()
     expect(parseEvent('{"kind":"event","title":"x","date":"2026-10-24","where":"","series":"s","host":"h.example"}')).toBeNull()
     expect(parseEvent('{"kind":"event","title":"x","date":"2026-10-24","time":"7pm","where":"y","series":"s","host":"h.example"}')).toBeNull()
+    expect(parseEvent('{"kind":"event","title":"x","date":"2026-10-24","ends":"11:00","where":"y","series":"s","host":"h.example"}')).toBeNull()
+    expect(parseEvent(eventText({ title: 'x', date: '2026-10-24', time: '09:15', ends: '11:00', where: 'y', series: 's', host: 'h.example', at: 1 }))).toMatchObject({ time: '09:15', ends: '11:00' })
     expect(parseEvent('{"kind":"other"}')).toBeNull()
     expect(parseEvent('not json')).toBeNull()
   })

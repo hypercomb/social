@@ -44,6 +44,7 @@ export interface EventLine {
   readonly verb: Verb
   readonly date: string
   readonly time: string
+  readonly ends: string
   readonly where: string
   readonly title: string
   /** A meeting named by signature or by its date. */
@@ -70,7 +71,7 @@ export const parseEventArgs = (args: string): EventLine => {
     const at = rest.split(/\s+/).find(part => part.startsWith('@'))
     if (at) { host = zoneDoor(at.slice(1)); rest = rest.split(/\s+/).filter(part => part !== at).join(' ') }
   }
-  const none: EventLine = { verb: '', date: '', time: '', where: '', title: '', ref: '', who: '', host }
+  const none: EventLine = { verb: '', date: '', time: '', ends: '', where: '', title: '', ref: '', who: '', host }
   const words = rest.split(/\s+/).filter(Boolean)
   const first = (words[0] ?? '').toLowerCase()
   if (first === 'list') return { ...none, verb: 'list' }
@@ -80,10 +81,12 @@ export const parseEventArgs = (args: string): EventLine => {
     const who = asAt > 0 ? words.slice(asAt + 1).join(' ').trim() : ''
     return { ...none, verb: first, ref, who }
   }
-  const made = /^(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2}))?\s+at\s+(.+?)(?:\s*:\s*(.+))?$/is.exec(rest)
+  // `09:15` or `09:15-11:00`: when it starts, and when it ends if the line says.
+  const made = /^(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2})(?:\s*[-–]\s*(\d{1,2}:\d{2}))?)?\s+at\s+(.+?)(?:\s*:\s*(.+))?$/is.exec(rest)
   if (made) {
     const time = made[2] ? made[2].padStart(5, '0') : ''
-    return { ...none, verb: 'make', date: made[1]!, time, where: made[3]!.trim(), title: (made[4] ?? '').trim() }
+    const ends = time && made[3] ? made[3].padStart(5, '0') : ''
+    return { ...none, verb: 'make', date: made[1]!, time, ends, where: made[4]!.trim(), title: (made[5] ?? '').trim() }
   }
   return none
 }
@@ -102,7 +105,7 @@ export class EventQueenBee extends QueenBee {
   readonly command = 'event'
   override description = 'A meeting on the calendar: add one, read the calendar across your community, join, or keep the roll'
   override descriptionKey = 'slash.event'
-  override options = ['<date> [<time>] at <where> [: <title>] on <host>', 'list on <host>', 'join <date|sig> as <name> on <host>', 'roll <date|sig> on <host>']
+  override options = ['<date> [<time>[-<ends>]] at <where> [: <title>] on <host>', 'list on <host>', 'join <date|sig> as <name> on <host>', 'roll <date|sig> on <host>']
   // Dates, signatures, places and names — the line arrives exactly as said.
   override rawArgs = true
   override examples = [
@@ -140,7 +143,7 @@ export class EventQueenBee extends QueenBee {
     const series = segments[segments.length - 1]!.toLowerCase()
     const door = line.host.split('.')[0] === series ? line.host : `${series}.${line.host}`
     const title = line.title || series.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-    const text = eventText({ title, date: line.date, time: line.time || undefined, where: line.where, series, host: door })
+    const text = eventText({ title, date: line.date, time: line.time || undefined, ends: line.ends || undefined, where: line.where, series, host: door })
     const bytes = new TextEncoder().encode(text)
     const sig = await eventSignature(text)
 
@@ -157,7 +160,7 @@ export class EventQueenBee extends QueenBee {
     const opened = await setHiveRoot(line.host, `rsvp:${sig}`, sig)
     if (!opened.ok) { tell('error', `The meeting is listed, but its list did not open: ${opened.reason ?? 'refused'}`); return }
 
-    const when = `${line.date}${line.time ? ` ${line.time}` : ''}`
+    const when = `${line.date}${line.time ? ` ${line.time}${line.ends ? `–${line.ends}` : ''}` : ''}`
     await this.#note(segments, `Meeting ${when} at ${line.where} — on the calendar at ${door} (event ${short(sig)})`)
     say(`event: ${title} ${when} at ${line.where} is on the calendar ${line.host} serves; join at ${door}`)
     tell('success', `${title} ${when} is on the calendar; its list is open at ${door}.`)

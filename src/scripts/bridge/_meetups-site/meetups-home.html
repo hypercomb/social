@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hypercomb Meetup</title>
-<meta name="description" content="A regular get-together for people building and using Hypercomb. No account, no email. Just open the link and come in.">
+<meta name="description" content="A free weekly meetup in Vancouver for people building their community online — web builders, startups and communities co-creating a humanity-first internet with Hypercomb. Beginners welcome. No account, no email.">
 <style>
   /* Modernist, from the Claude Design "Meetups Home" handoff. Scoped under
      .mh: the hive mounts a page inline, so nothing here may touch the shell. */
@@ -158,8 +158,9 @@
   .mh .promise .btn{margin-top:var(--s6);color:var(--bg);border:1px solid var(--bg);padding-inline:14px}
   .mh .promise .btn:hover{background:var(--bg);color:var(--accent)}
 
-  .mh footer{padding:var(--s4) var(--s4) var(--s6);font-size:13px;line-height:1.5;color:var(--n700)}
+  .mh footer{display:flex;gap:var(--s4);align-items:flex-start;padding:var(--s4) var(--s4) var(--s6);font-size:13px;line-height:1.5;color:var(--n700)}
   .mh footer b{display:block;font-weight:800;color:var(--text)}
+  .mh footer .qr{flex:none;display:block;width:88px;height:88px;border:1px solid var(--divider);padding:4px;background:#fff}
 
   .mh .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
@@ -190,8 +191,9 @@
   </nav>
 
   <section class="open">
-    <h1 data-reveal>You are here!</h1>
-    <p class="lede" data-reveal>A regular get-together for people building and using Hypercomb. No account, no email — just open the link and come in.</p>
+    <span class="kicker" data-reveal>Weekly meetup · hosted by Hypercomb</span>
+    <h1 data-reveal>Build your online community.</h1>
+    <p class="lede" data-reveal>A free weekly get-together for anyone with a passion project or a business they want to see thrive online — web builders, startups and communities co-creating a humanity-first internet. Beginners welcome. No account, no email — just open the link and come in.</p>
     <figure class="grayscale" data-reveal>
       <div class="hero"><img src="resource:c83e3cacb01593e4f92801de0bd732fa4d91ea387f91c123b5fbb3d9ebb45161" alt="The Hypercomb workspace — a honeycomb of cells"></div>
       <figcaption>Inside Hypercomb: every cell is a space. This meetup is one of them.</figcaption>
@@ -209,7 +211,7 @@
       <div>
         <div class="mini">When</div>
         <div class="big" data-when>—</div>
-        <div class="sub" data-when-sub>Every Saturday · time posted here</div>
+        <div class="sub" data-when-sub>Weekly · see the calendar</div>
       </div>
       <div>
         <div class="mini">Where</div>
@@ -220,9 +222,9 @@
     <div class="agenda">
       <div class="mini">On the agenda</div>
       <ol>
-        <li><span class="num">01</span>Say hello — how joining works</li>
-        <li><span class="num">02</span>Show and tell: what's new in Hypercomb</li>
-        <li><span class="num">03</span>Open floor: your questions</li>
+        <li><span class="num">01</span>Say hello — coffee, small bites, who is in the room</li>
+        <li><span class="num">02</span>Hypercomb, the fundamentals: a demo of building with your community — bring any AI you choose</li>
+        <li><span class="num">03</span>Your projects and your questions: bring what you are passionate about</li>
       </ol>
     </div>
     <div class="talks">
@@ -308,7 +310,7 @@
       <details><summary><span class="num">06</span><span class="title">Decentralized protocol</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
         <p>Messages travel through nostr, an open network nobody owns. Anyone can help carry them; no single point can switch it off.</p></details>
       <details><summary><span class="num">07</span><span class="title">Open software platform</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
-        <p>The code is public. Anyone can read it, check it, improve it or start their own version.</p></details>
+        <p>The code is public and the platform is free — no cost, no ads. Anyone can read it, check it, improve it or start their own version.</p></details>
       <details><summary><span class="num">08</span><span class="title">Global signature hashing</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
         <p>Everything shared carries a digital signature and fingerprint, so anyone can confirm it is genuine and untouched.</p></details>
       <details><summary><span class="num">09</span><span class="title">One primitive for all data</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
@@ -322,8 +324,11 @@
   </section>
 
   <footer>
-    <b>meetups.hypercomb.com</b>
-    Free and open software. Share this page with anyone you'd like to bring along.
+    <img class="qr" src="resource:cd92ab8f821e71c4d68c5106ba58341f30d37b4caa289c81459c3cfeeb61b3eb" width="88" height="88" alt="QR code that opens meetups.hypercomb.com">
+    <div>
+      <b>meetups.hypercomb.com</b>
+      This page stays at this address. Scan the code to come back, or share it with anyone you'd like to bring along.
+    </div>
   </footer>
 
   <span class="sr" role="status" aria-live="polite" data-said></span>
@@ -466,7 +471,7 @@
     var isPast = ev && ev.record.date < today();
     $('[data-next-kicker]').textContent = !ev ? 'Next meeting' : isPast ? 'Last meeting' : 'Next meeting';
     $('[data-when]').textContent = ev ? dayOf(ev.record) : '—';
-    $('[data-when-sub]').textContent = ev ? (ev.record.time ? 'at ' + ev.record.time : 'Time posted here') : 'Every Saturday · time posted here';
+    $('[data-when-sub]').textContent = ev ? (ev.record.time ? (ev.record.ends ? ev.record.time + ' – ' + ev.record.ends : 'at ' + ev.record.time) : 'Time posted here') : 'Weekly · see the calendar';
     $('[data-where]').textContent = ev ? ev.record.where.split(',')[0] : '—';
     $('[data-where-sub]').textContent = ev ? (ev.record.where.split(',').slice(1).join(',').trim() || ev.record.title) : 'Free, all welcome';
     var join = $('[data-join]');
@@ -516,7 +521,7 @@
       var count = state.coming[ev.sig] ? (rows.length + (ev.record.date < t ? ' came' : ' coming')) : (baseFor(ev.record.host) ? '…' : 'at ' + ev.record.host);
       card.innerHTML = '<span class="mini"></span><span class="day"></span><span class="place"></span><span class="count"></span>';
       card.children[0].textContent = ev.record.title;
-      card.children[1].textContent = dayOf(ev.record) + (ev.record.time ? ' · ' + ev.record.time : '');
+      card.children[1].textContent = dayOf(ev.record) + (ev.record.time ? ' · ' + ev.record.time + (ev.record.ends ? '–' + ev.record.ends : '') : '');
       card.children[2].textContent = ev.record.where;
       card.children[3].textContent = count;
       card.addEventListener('click', function () { select(ev); $('[data-next]').scrollIntoView({ behavior: 'smooth', block: 'start' }); });

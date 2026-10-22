@@ -33,7 +33,7 @@ host answers, with nothing named and nothing looked up.
 
 | What | Where | Member |
 |---|---|---|
-| **A meeting** | `sign('calendar:events')` on the host that lists it, and on every host that picked it up | the meeting record, named by its own signature: `{ v, kind:'event', title, date, time?, where, series, host, at }` |
+| **A meeting** | `sign('calendar:events')` on the host that lists it, and on every host that picked it up | the meeting record, named by its own signature: `{ v, kind:'event', title, date, time?, ends?, where, series, host, at }` |
 | **Who is coming to one meeting** | `sign('rsvp:<meeting sig>')` on the meeting's own host (`record.host`, the door) | one signed claim per person (nostr kind `30568`, tags `pool`, `event`, `name`, `going`), named by the claim's own hash |
 | **Which lists are open** | `sign('rsvp:pools')` on that host | the addresses of the lists an organizer opened — so the write and listing routes know one when asked |
 
@@ -46,7 +46,7 @@ up by another host still says where to join it.
 The organizer stands on the tile and says one sentence:
 
 ```
-event 2026-10-24 19:00 at Yaletown, Vancouver on hypercomb.com
+event 2026-10-26 09:15-11:00 at Yaletown Galleria, 1080 Mainland St, Vancouver on hypercomb.com
 ```
 
 The `event` word (`calendar/event.queen.ts`) mints the canonical record, holds

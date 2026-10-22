@@ -41,6 +41,8 @@ export interface EventRecord {
   readonly date: string
   /** HH:MM where it happens, when a time is set. */
   readonly time?: string
+  /** HH:MM it ends, when the meeting says so. */
+  readonly ends?: string
   readonly where: string
   /** The tile the meeting belongs to — its route name. */
   readonly series: string
@@ -69,11 +71,12 @@ export const eventsPoolAddress = (): Promise<string> => registerPoolMeaning(EVEN
 
 /** The record's bytes, key order fixed so the same meeting is the same signature. */
 export const eventText = (fields: {
-  title: string; date: string; time?: string; where: string; series: string; host: string; at?: number
+  title: string; date: string; time?: string; ends?: string; where: string; series: string; host: string; at?: number
 }): string => JSON.stringify({
   v: 1, kind: EVENT_RECORD_KIND,
   title: fields.title.trim(), date: fields.date,
   ...(fields.time ? { time: fields.time } : {}),
+  ...(fields.time && fields.ends ? { ends: fields.ends } : {}),
   where: fields.where.trim(), series: fields.series.trim().toLowerCase(), host: fields.host.trim().toLowerCase(),
   at: fields.at ?? Date.now(),
 })
@@ -91,8 +94,10 @@ export const parseEvent = (text: string): EventRecord | null => {
   const series = String(raw['series'] ?? '').trim().toLowerCase()
   const host = String(raw['host'] ?? '').trim().toLowerCase()
   const time = raw['time'] === undefined ? undefined : String(raw['time'])
+  const ends = raw['ends'] === undefined ? undefined : String(raw['ends'])
   if (!title || !DATE_RE.test(date) || !where || !series || !host || (time !== undefined && !TIME_RE.test(time))) return null
-  return { v: 1, kind: EVENT_RECORD_KIND, title, date, ...(time ? { time } : {}), where, series, host, at: Number(raw['at']) || 0 }
+  if (ends !== undefined && (!time || !TIME_RE.test(ends))) return null
+  return { v: 1, kind: EVENT_RECORD_KIND, title, date, ...(time ? { time } : {}), ...(ends ? { ends } : {}), where, series, host, at: Number(raw['at']) || 0 }
 }
 
 /** The unsigned claim a key signs: this pool, this meeting, this name, coming or not. */
