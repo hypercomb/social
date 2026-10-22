@@ -26,6 +26,7 @@ import { isJoinedHere } from '../sharing/membership.js'
 import { isCellPublic, setCellPublic } from '../presentation/tiles/tile-public.js'
 import { foldPeerRoots, participantColor, type PeerNoteRoot, type SwarmNote, type SwarmNoteCounts } from './swarm-notes.js'
 import { readCategoryDoc, type CategoryDoc } from './note-categories.js'
+import { nestedSigs } from '../sharing/nested-sigs.js'
 
 export const SWARM_NOTES_KEY = '@diamondcoreprocessor.com/SwarmNotes'
 
@@ -445,11 +446,4 @@ export class SwarmNotes extends EventTarget {
   }
 }
 
-/** Every 64-hex string anywhere in a parsed JSON value. */
-function nestedSigs(value: unknown, out: string[] = []): string[] {
-  if (typeof value === 'string') { const v = value.toLowerCase(); if (SIG.test(v)) out.push(v) }
-  else if (Array.isArray(value)) for (const v of value) nestedSigs(v, out)
-  else if (value && typeof value === 'object') for (const v of Object.values(value)) nestedSigs(v, out)
-  return out
-}
 

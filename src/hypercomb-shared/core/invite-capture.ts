@@ -97,6 +97,26 @@ const captureSwarmLink = (): boolean => {
 }
 captureSwarmLink()
 
+/** TAKE HOME — `#take=<sig>@<host>` (documentation/swarm-pools.md, step six):
+ *  what a participant collected in a room, handed to their own hive. The
+ *  bundle is on the room's host by its signature; the package's worker reads
+ *  it and takes it as a hive link. Stashed and the URL cleaned, like the
+ *  swarm link. MIRRORED: essentials meeting-invite.worker.ts TAKE_LINK_KEY. */
+const TAKE_PREFIX = '#take='
+const PENDING_TAKE_KEY = 'hc:pending-take'
+
+const captureTakeLink = (): boolean => {
+  try {
+    const hash = window.location.hash ?? ''
+    if (!hash.startsWith(TAKE_PREFIX)) return false
+    try { sessionStorage.setItem(PENDING_TAKE_KEY, hash) } catch { /* no storage: nothing can take it */ }
+    const clean = window.location.pathname + (window.location.search ?? '')
+    window.history.replaceState(window.history.state, '', clean)
+    return true
+  } catch { return false } // never block boot on capture
+}
+captureTakeLink()
+
 /** Take a `#meet=` fragment from the address bar. True when there was one. */
 const captureMeetLink = (): boolean => {
   try {
@@ -128,6 +148,7 @@ const onFragment = (): void => {
   // shell's own synthetic popstate (bootstrap-history) must not take it again.
   if (restoredLink) return
   if (captureSwarmLink()) { EffectBus.emitTransient('meet:pending', { at: Date.now() }); return }
+  if (captureTakeLink()) { EffectBus.emitTransient('meet:pending', { at: Date.now() }); return }
   if (!captureMeetLink()) return
   EffectBus.emitTransient('meet:pending', { at: Date.now() })
   if (watching) watchPendingMeet(watching)

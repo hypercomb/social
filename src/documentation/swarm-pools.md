@@ -177,8 +177,39 @@ followed community domains) against hotlinking; it is not security.
      `swarm-door.spec.ts`, and `update-scout.service.spec.ts` (package door).
      There is no live check until the worker is deployed and a host has
      published `install:swarm`.
-6. **Room requirements and take home.** The room tile's traits are checked on
-   entry, and "take home" replicates what you took into your root hive by
-   signature.
+6. **Room requirements and take home. BUILT.** jwize chose both shapes on
+   2026-10-21.
+   - **A requirement is a behaviour.** `room asks notes keep-alive`, said with
+     the room's tile selected, writes the words into that tile's layer as an
+     `asks` slot (`sharing/room-asks.ts`). The words travel with the tile like
+     its notes. `room asks ~ <word>` drops one, and `room asks =` clears them.
+     The word keeps its whole line (`rawArgs`), because the asked words are
+     behaviour words themselves.
+   - **On arrival (`room-asks.drone.ts`).** Once per room, the room's tiles
+     (the host's template first) are read for what they ask. A toast lists the
+     words with one button each: `notes` is the notes desk's door, and any
+     other word is run as if typed. Words this hive lacks are named plainly.
+     Nothing is turned on by itself.
+   - **Take home (`sharing/take-home.ts`, the `room home` word).**
+     - `room home <address>` names your own hive once. It is remembered on
+       this device under `hc:my-hive`, the key the visitor door already reads.
+     - `room home` puts the room tile's closure (its layer, children, notes,
+       their envelopes and its category tree) on the room's host. Every atom
+       is checked against its name (`HostSync.publishAtoms`).
+     - It then puts a hive-link bundle there `{ segments: [tile], rootSig,
+       hosts: [room host] }` and offers "Open my hive" in a sticky toast. The
+       tab opens inside that click, because the upload outlives the word's own
+       keypress.
+     - Your hive opens at `#take=<bundle sig>@<host>`. The shell stashes it
+       (`invite-capture.ts`), the invite worker reads the bundle from that
+       host and checks it against its signature, and it is taken as any hive
+       link: offered at your top level and adopted as you enter it.
+   - **Proof.** `scripts/drive-swarm-room-step-six.cjs`, 11/11. The host's
+     `room asks` lands on the tile. A guest on `swarm.localhost` is offered
+     both behaviours with nothing turned on, and the keep-alive button runs
+     the word. `room home <address>` remembers home, and `room home` puts the
+     tile on the room's host. "Open my hive" opens the home hive at `#take=`,
+     which is offered `lecture`, whose head and note are on the host.
+     `room-step-six.spec.ts` covers the pure parts.
 7. **Categories and organize.** These settle by count, with per-participant AI
    or manual organizing ([swarm-notes.md](swarm-notes.md) → next).

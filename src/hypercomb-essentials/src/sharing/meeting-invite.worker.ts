@@ -50,10 +50,14 @@ import { loadBundleJson, loadInviteBundle, joinMeetingPlace } from './meeting-in
 import { PENDING_DOOR_KEY, hiveDoorOf, validateHiveLinkBundle } from './hive-link.js'
 import { listDecorations } from '../commands/decoration-manifest.js'
 import { openSwarmLink, parseSwarmLink, swarmRelayUrl } from './swarm-link.js'
+import { fetchTakeBundle, parseTake } from './take-home.js'
 
 /** The shell's stash of a #swarm= link — MIRRORED: hypercomb-shared/core/
  *  invite-capture.ts PENDING_SWARM_KEY. */
 const SWARM_LINK_KEY = 'hc:pending-swarm'
+/** The shell's stash of a #take= link — MIRRORED: hypercomb-shared/core/
+ *  invite-capture.ts PENDING_TAKE_KEY. */
+const TAKE_LINK_KEY = 'hc:pending-take'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const ROOM_KEY = '@hypercomb.social/RoomStore'
@@ -110,8 +114,9 @@ export class MeetingInviteWorker extends Worker {
 
     // A `#meet=` meeting link captured at boot — and any the shell stashes
     // later, from a link opened in this tab while it is on the hive.
-    this.onEffect('meet:pending', () => { void this.#takeSwarm(); this.#takeMeet() })
+    this.onEffect('meet:pending', () => { void this.#takeSwarm(); this.#takeMeet(); void this.#takeHome() })
     void this.#takeSwarm()
+    void this.#takeHome()
     this.#takeMeet()
 
     // One-shot: a /<sig> invite link captured at boot. sessionStorage
@@ -176,6 +181,29 @@ export class MeetingInviteWorker extends Worker {
     } finally { this.#swarmTaking = false }
   }
   #swarmTaking = false
+
+  /** TAKE HOME (take-home.ts): what this participant collected in a room,
+   *  sent here from the room's door. The bundle is read from the room's host
+   *  by its signature and checked against it, then taken as any hive link is
+   *  — offered at the top level, adopted as it is entered. A link that cannot
+   *  be read is said so; nothing is taken. */
+  #takeHome = async (): Promise<void> => {
+    let held = ''
+    try { held = sessionStorage.getItem(TAKE_LINK_KEY) ?? '' } catch { held = '' }
+    if (!held) return
+    try { sessionStorage.removeItem(TAKE_LINK_KEY) } catch { /* ignore */ }
+    const link = parseTake(held)
+    const bundle = link ? await fetchTakeBundle(link.sig, link.host) : null
+    if (!bundle) {
+      this.emitEffect('toast:show', {
+        type: 'warning',
+        title: this.#tr('take.title', 'Take home'),
+        message: this.#tr('take.unreadable', 'What you took home could not be read from the room\'s host — try "room home" again from the room.'),
+      })
+      return
+    }
+    this.emitEffect('hive:link', bundle)
+  }
 
   #heldMeet = (): string => {
     try { return sessionStorage.getItem(MEET_KEY) ?? '' } catch { return '' }
