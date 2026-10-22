@@ -41,7 +41,7 @@
 // that reading may hold it too. Only the participant's hand lets held code
 // run, and a commit never folds it.
 
-import { EffectBus, MODULE_DRAFTS_IOC_KEY, SignatureService, flagInBrood, holdInBrood, isSectionPath, mayRunBee, newReaches, reachPhrase, registerPoolMeaning, replaceSection, sectionOf, type CodeReach, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
+import { EffectBus, MODULE_DRAFTS_IOC_KEY, SignatureService, flagInBrood, holdInBrood, isSectionPath, mayRunBee, newReaches, reachPhrase, registerPoolMeaning, replaceSection, sectionIndex, sectionOf, type CodeReach, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
 import { applySelection, installedPackageSig, layersIoFor, unpickRevision, type SelectionOutcome } from './acquire.js'
 import { HOST_PACKAGES_MEANING, formatMember, markerIndices, poolEntryName } from './host-pool.js'
 import { composeDependencies, isOff, namespaceOf, ownerOf, readPicks, sigsOf, walkTree, within, type Picks, type TreeWalk } from './package-tree.js'
@@ -114,6 +114,8 @@ export type ModuleDraftOutcome =
     readonly rootSig: string
     /** The package path the draft is picked at (`games/solomon`). */
     readonly path: string
+    /** The file was new: a bee added to the folder, nothing renamed. */
+    readonly created?: true
     /** The running code is unchanged until the page reloads. */
     readonly reload: true
     /** What the new section reaches that the old one did not. Non-empty: the
@@ -359,7 +361,15 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   if (!held) return fail('the module\'s bytes are not held here')
   const text = decode(held)
   const replaced = sectionOf(text, request.section)
-  if (!replaced) return fail(`the module has no section ${request.section}; list <sig> names its sections`)
+  if (!replaced) {
+    // A SECTION THE MODULE DOES NOT HAVE IS A NEW FILE (jwize, 2026-10-21:
+    // "why can't we add the import once in the folder"). The folder is the
+    // layer, and the layer names its bees, so a new file is a new bee
+    // appended to the layer beside the module that was named — the same
+    // act as a rename, one entry longer.
+    if (request.edits) return fail(`the module has no section ${request.section} to edit; to add it as a new file, write its whole text`)
+    return draftNewBee(request, beeSig, text, node, { deps, store, local, trunk, picks, walk, dependenciesAt })
+  }
   const made = withBody(request, bodyOf(text, replaced))
   if ('error' in made) return fail(made.error)
   request = made
@@ -421,6 +431,75 @@ type DraftContext = {
   readonly picks: Picks
   readonly walk: TreeWalk
   readonly dependenciesAt: (path: string) => Promise<string[] | null>
+}
+
+/**
+ * A NEW FILE IN THE FOLDER. The body is a whole module of its own — it must
+ * import only what the import map carries (`@hypercomb/core`, the namespace
+ * bundles) — headed by its section line so `read <sig> <section>` opens it.
+ * It becomes a new bee appended to the layer that names `besideSig`, with
+ * nothing renamed: the folder gained a file. Everything the new code reaches
+ * is new, so the brood reads all of it before it runs.
+ */
+const draftNewBee = async (request: ModuleDraftRequest, besideSig: string, besideText: string, node: TreeWalk['nodes'][number], context: DraftContext): Promise<ModuleDraftOutcome> => {
+  const fail = (error: string): ModuleDraftOutcome => ({ ok: false, error })
+  const { deps, store, local, trunk, picks, dependenciesAt } = context
+  if (!request.body.trim()) return fail(`the module has no section ${request.section}, and the body is empty, so there is nothing to add`)
+  if (sectionIndex(request.body).length) return fail('a new file carries no section headers of its own; write its text without a `// src/…` line')
+  const text = `// ${request.section}\n${request.body.replace(/\s+$/, '')}\n`
+  const broken = await unparsable(deps, text, '', request.section)
+  if (broken) return fail(broken.replace(`Read ${request.section} again and fix the edit`, 'Fix the file'))
+  const bytes = encode(text)
+  const sig = await sigOf(bytes)
+  if (node.bees.includes(sig)) return fail('a module with exactly this text is already in the folder')
+
+  const layerBytes = await local.read(node.layerSig)
+  let record: LayerRecord
+  try { record = JSON.parse(decode(layerBytes!)) as LayerRecord } catch { return fail(`the layer at ${node.path} could not be read`) }
+  const nextLayerBytes = encode(JSON.stringify(appendBee(record, besideSig, sig, text)))
+  const nextLayerSig = await sigOf(nextLayerBytes)
+
+  const dependencies = await dependenciesAt(node.path)
+  if (!dependencies) return fail(`the pick at ${node.path} could not be read`)
+  const at = deps.now()
+  const rootBytes = encode(JSON.stringify({
+    draft: { of: trunk, path: node.path, section: request.section, from: '', to: sig, beside: besideSig, kind: 'bee', at },
+    dependencies,
+  }))
+  const rootSig = await sigOf(rootBytes)
+
+  const admission: DraftAdmission = { sig, from: '', section: request.section, path: node.path, reaches: newReaches('', text) }
+  const refused = await admitDraft(deps, admission)
+  if (refused) return fail(refused)
+  await store.writeBeeBytes!(sig, bytes)
+  await store.writeLayerBytes!(nextLayerSig, nextLayerBytes.buffer)
+  await store.writeLayerBytes!(rootSig, rootBytes.buffer)
+  const outcome = await deps.apply(trunk, [sig, nextLayerSig, rootSig], {
+    ...picks,
+    [node.path]: { layer: nextLayerSig, root: rootSig, hides: false, at },
+  })
+  if (!outcome.ok) return fail(outcome.error)
+  announce({ ...admission, of: 'bee', at })
+  void besideText
+  return { ok: true, beeSig: sig, of: 'bee', created: true, layerSig: nextLayerSig, rootSig, path: node.path, reload: true, reaches: admission.reaches }
+}
+
+/** The layer with one more bee, listed after `beside` in the spelling the
+ *  list already uses, and a doc entry naming its class when the layer keeps
+ *  docs — so the command line and the listing see the new file as they see
+ *  every other. */
+const appendBee = (record: LayerRecord, beside: string, sig: string, text: string): LayerRecord => {
+  const list = Array.isArray(record.bees) ? record.bees : []
+  const spelt = (entry: unknown): string => typeof entry === 'string' ? entry.replace(/\.js$/, '').toLowerCase() : ''
+  const suffix = list.some(entry => typeof entry === 'string' && entry.endsWith('.js')) ? '.js' : ''
+  const at = list.findIndex(entry => spelt(entry) === beside)
+  const bees = [...list.slice(0, at + 1), `${sig}${suffix}`, ...list.slice(at + 1)]
+  const docs = record.docs && typeof record.docs === 'object' ? { ...record.docs } : undefined
+  if (docs?.bees && typeof docs.bees === 'object') {
+    const className = /\bclass\s+([A-Za-z_$][\w$]*)/.exec(text)?.[1]
+    docs.bees = { ...docs.bees, [sig]: className ? { className } : {} }
+  }
+  return { ...record, bees, ...(docs ? { docs } : {}) }
 }
 
 /**

@@ -94,6 +94,41 @@ describe('draftModule', () => {
     expect(decode(w.bees.get(outcome.beeSig)!)).toBe(BEE.replace('"remembered"', '"edited"'))
   })
 
+  it('a section the module does not have becomes a new file: a new bee appended to the folder, nothing renamed', async () => {
+    const w = await world()
+    const body = 'import { Drone } from "@hypercomb/core";\nexport class MapDrone extends Drone {}\n'
+    const outcome = await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/map.drone.ts', body }, w.deps)
+    if (!outcome.ok) throw new Error(outcome.error)
+    expect(outcome.created).toBe(true)
+    expect(outcome.path).toBe('games/solomon')
+    // The new bee is the body headed by its section line, so `read <sig> <section>` opens it.
+    const text = decode(w.bees.get(outcome.beeSig)!)
+    expect(text).toBe(`// src/games/solomon/map.drone.ts\n${body}`)
+    expect(await sigOf(encode(text))).toBe(outcome.beeSig)
+    // The old bee is untouched and still listed; the new one follows it, in the list's spelling and in the docs.
+    expect(decode(w.bees.get(w.beeSig)!)).toBe(BEE)
+    const layer = JSON.parse(decode(w.heap.get(outcome.layerSig)!)) as { bees: string[]; docs: { bees: Record<string, { className?: string }> } }
+    expect(layer.bees).toEqual([`${w.beeSig}.js`, `${outcome.beeSig}.js`])
+    expect(layer.docs.bees[w.beeSig]).toEqual({ className: 'SolomonDrone' })
+    expect(layer.docs.bees[outcome.beeSig]).toEqual({ className: 'MapDrone' })
+    // The root says it came from nothing, beside the module that was named.
+    const root = JSON.parse(decode(w.heap.get(outcome.rootSig)!)) as { draft: { from: string; to: string; beside: string; section: string } }
+    expect(root.draft).toMatchObject({ from: '', to: outcome.beeSig, beside: w.beeSig, section: 'src/games/solomon/map.drone.ts' })
+    expect(w.applied[0].admitted).toEqual([outcome.beeSig, outcome.layerSig, outcome.rootSig])
+    // The same text again is already there.
+    expect(await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/map.drone.ts', body }, w.deps)).toMatchObject({ ok: false, error: expect.stringContaining('already in the folder') })
+  })
+
+  it('a new file must be whole: no edits, no body, and no section headers of its own', async () => {
+    const w = await world()
+    const at = (o: Awaited<ReturnType<typeof draftModule>>): string => (o.ok ? 'ok' : o.error)
+    expect(at(await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/map.ts', body: 'x', edits: [{ find: 'a', replace: 'b' }] }, w.deps))).toMatch(/write its whole text/)
+    expect(at(await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/map.ts', body: '  \n' }, w.deps))).toMatch(/body is empty/)
+    expect(at(await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/map.ts', body: '// src/games/solomon/other.ts\nvar x = 1;' }, w.deps))).toMatch(/no section headers of its own/)
+    expect(w.applied).toHaveLength(0)
+    expect(w.bees.size).toBe(1)
+  })
+
   it('refuses a draft that does not parse, and writes nothing', async () => {
     const w = await world()
     const seen: string[] = []
@@ -156,7 +191,7 @@ describe('draftModule', () => {
     const at = (r: Awaited<ReturnType<typeof draftModule>>): string => r.ok ? 'ok' : r.error
     expect(at(await draftModule({ beeSig: 'nope', section: 'src/x.ts', body: '' }, w.deps))).toMatch(/64-character signature/)
     expect(at(await draftModule({ beeSig: w.beeSig, section: 'games/x.ts', body: '' }, w.deps))).toMatch(/one source section/)
-    expect(at(await draftModule({ beeSig: w.beeSig, section: 'src/nowhere.ts', body: 'x' }, w.deps))).toMatch(/no section src\/nowhere\.ts/)
+    expect(at(await draftModule({ beeSig: w.beeSig, section: 'src/nowhere.ts', body: 'x', edits: [{ find: 'a', replace: 'b' }] }, w.deps))).toMatch(/no section src\/nowhere\.ts to edit/)
     expect(at(await draftModule({ beeSig: 'c'.repeat(64), section: 'src/x.ts', body: 'x' }, w.deps))).toMatch(/not a module of the installed package/)
     expect(at(await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: 'var rooms = "remembered";' }, w.deps))).toMatch(/byte-identical/)
     expect(at(await draftModule({ beeSig: w.beeSig, section: 'src/x.ts', body: 'x' }, { ...w.deps, trunk: () => null }))).toMatch(/nothing is installed here/)

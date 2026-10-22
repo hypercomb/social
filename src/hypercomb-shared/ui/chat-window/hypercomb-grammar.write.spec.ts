@@ -41,7 +41,9 @@ describe('a write, judged by the grant', () => {
 })
 
 describe('the chat window', () => {
-  const source = readFileSync(join(process.cwd(), 'hypercomb-shared', 'ui', 'chat-window', 'chat-window.component.ts'), 'utf8')
+  // Line endings normalised: a Windows checkout (core.autocrlf) has CRLF, and
+  // the door bodies below are cut at an LF-spelled closing brace.
+  const source = readFileSync(join(process.cwd(), 'hypercomb-shared', 'ui', 'chat-window', 'chat-window.component.ts'), 'utf8').replace(/\r\n/g, '\n')
 
   it('a trusted conversation never releases a row marked for review', () => {
     const release = source.slice(source.indexOf('#releaseTrusted(): void {'), source.indexOf('#releaseTrusted(): void {') + 500)
@@ -52,12 +54,12 @@ describe('the chat window', () => {
     expect(source).toContain('const conversationForeign = (): boolean =>')
     expect(source).toContain("(component.#foreignSigs.get(convoId)?.size ?? 0) > 0")
     expect(source).toContain('const foreign = !own && conversationForeign()')
-    expect(source.split('foreign: conversationForeign()').length - 1).toBe(2)   // write, doctrine
+    expect(source.split('foreign: conversationForeign()').length - 1).toBe(3)   // write, doctrine, tile file
     expect(source).not.toMatch(/foreign:?\s*=?\s*(!own && )?turnForeign\.length > 0/)
   })
 
-  it('asks the grant before a write is queued and again after the wait, for code and doctrine alike', () => {
-    for (const door of ['const runWrite = async', 'const runDoctrine = async']) {
+  it('asks the grant before a write is queued and again after the wait, for code, doctrine and files alike', () => {
+    for (const door of ['const runWrite = async', 'const runDoctrine = async', 'const runTileFile = async']) {
       const at = source.indexOf(door)
       const body = source.slice(at, source.indexOf('\n      }\n', at))
       expect(body.split('hypercombWriteRefusal()').length - 1, door).toBe(2)
