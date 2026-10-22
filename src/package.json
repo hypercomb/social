@@ -27,6 +27,7 @@
     "bridge:drain": "node scripts/bridge/drain-tick.cjs",
     "bridge:check": "node scripts/bridge/bridge-cli.cjs list",
     "bridge:swarm": "node scripts/bridge/swarm-debug.cjs",
+    "comfy": "cd /d C:\\ComfyUI && venv\\Scripts\\python.exe main.py --enable-cors-header \"*\"",
     "deploy:hypercomb.com": "node scripts/presentation/build.cjs && node scripts/presentation/deploy-azure.cjs",
     "docs": "npx -y http-server documentation -p 4290 -c-1",
     "docs:links": "node documentation/check-links.mjs",

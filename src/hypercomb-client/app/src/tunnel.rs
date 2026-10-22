@@ -494,9 +494,9 @@ mod tests {
     /// `Host` (what door routing keys on). Puts a page on the internet for a
     /// minute; run by hand: `cargo test -p hypercomb-client
     /// a_quick_tunnel -- --ignored --nocapture`.
-    #[test]
-    #[ignore]
-    fn a_quick_tunnel_reaches_this_machine_with_its_public_host() {
+    /// A throwaway server that only echoes the Host it was asked for — no
+    /// hive. Returns its port.
+    fn echo_host_server() -> u16 {
         use std::io::Write;
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -522,6 +522,27 @@ Connection: close
 {body}", body.len());
             }
         });
+        port
+    }
+
+    /// Fetch `https://<host>/`, retrying while a fresh name settles.
+    fn fetch_public(host: &str) -> Option<String> {
+        for attempt in 0..30 {
+            match ureq::get(&format!("https://{host}/")).timeout(Duration::from_secs(10)).call() {
+                Ok(response) => return response.into_string().ok(),
+                Err(error) => {
+                    println!("attempt {attempt}: {error}");
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    #[ignore]
+    fn a_quick_tunnel_reaches_this_machine_with_its_public_host() {
+        let port = echo_host_server();
 
         let dir = std::env::temp_dir().join("hypercomb-tunnel-test");
         let program = ensure_cloudflared(&dir).expect("cloudflared");
@@ -530,21 +551,47 @@ Connection: close
         println!("quick tunnel: https://{}", state.host);
         assert!(state.host.ends_with(".trycloudflare.com"), "{}", state.host);
 
-        // A fresh quick hostname can take a few seconds to resolve.
-        let mut answer = None;
-        for attempt in 0..30 {
-            match ureq::get(&format!("https://{}/", state.host)).timeout(Duration::from_secs(10)).call() {
-                Ok(response) => { answer = response.into_string().ok(); break }
-                Err(error) => {
-                    println!("attempt {attempt}: {error}");
-                    std::thread::sleep(Duration::from_secs(2));
-                }
-            }
-        }
+        let answer = fetch_public(&state.host);
         assert!(tunnels.stop(), "the tunnel was running");
         let answer = answer.expect("the public address answered");
         println!("answered: {answer}");
         assert_eq!(answer, format!("echo-host:{}", state.host));
+    }
+
+    /// LIVE: the own-domain path on a real Cloudflare account — create the
+    /// named tunnel, point the name at it, run it, and fetch it from outside.
+    /// Uses the sign-in already on this machine (~/.cloudflared/cert.pem) and
+    /// the app's own hosting folder, so the tunnel it makes is the one the
+    /// "Use my domain" button reuses. The name must be one with no record yet,
+    /// or one this app already pointed. Run by hand:
+    /// `HC_TUNNEL_DOMAIN=tunnel-test.example.org cargo test -p hypercomb-client
+    /// a_named_tunnel -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn a_named_tunnel_reaches_this_machine_at_its_domain() {
+        let domain = domain(&std::env::var("HC_TUNNEL_DOMAIN").expect("HC_TUNNEL_DOMAIN")).expect("a domain");
+        let port = echo_host_server();
+        let dir = PathBuf::from(std::env::var_os(if cfg!(windows) { "APPDATA" } else { "HOME" }).unwrap())
+            .join("io.hypercomb.client")
+            .join("hosting");
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = ensure_cloudflared(&dir).expect("cloudflared");
+        let cert = login(&program, &dir).expect("signed in");
+        let named = setup(&program, &dir, &cert, &domain, port, false).expect("tunnel created and routed");
+        println!("named tunnel {} for {}", named.id, named.domain);
+        // Setting up again reuses the tunnel and its record: the button
+        // pressed twice changes nothing.
+        let again = setup(&program, &dir, &cert, &domain, port, false).expect("set up again");
+        assert_eq!(again.id, named.id);
+
+        let tunnels = Tunnels::default();
+        let state = tunnels.named(&program, &named).expect("the tunnel runs");
+        assert_eq!(state.host, domain);
+        let answer = fetch_public(&domain);
+        assert!(tunnels.stop(), "the tunnel was running");
+        let answer = answer.expect("the domain answered");
+        println!("answered: {answer}");
+        assert_eq!(answer, format!("echo-host:{domain}"));
     }
 
     #[test]
