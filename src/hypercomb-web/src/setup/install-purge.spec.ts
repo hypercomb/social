@@ -19,7 +19,7 @@ import { isInstallArtifactName, purgeInstallCacheDir } from './ensure-install.js
 const SIG = 'a'.repeat(64)
 const OTHER = 'b'.repeat(64)
 
-type Entry = { kind: 'file'; text?: string } | { kind: 'directory'; children: Record<string, Entry> }
+type Entry = { kind: 'file'; text?: string; size?: number } | { kind: 'directory'; children: Record<string, Entry> }
 
 /** A directory fake with just enough surface for the purge and the veto. */
 const dir = (name: string, children: Record<string, Entry>): FileSystemDirectoryHandle => {
@@ -27,15 +27,15 @@ const dir = (name: string, children: Record<string, Entry>): FileSystemDirectory
     name,
     kind: 'directory',
     async *entries() {
-      for (const [n, e] of Object.entries(children)) yield [n, e.kind === 'file' ? file(n) : dir(n, e.children)]
+      for (const [n, e] of Object.entries(children)) yield [n, e.kind === 'file' ? file(n, e.size) : dir(n, e.children)]
     },
-    getFileHandle: async (n: string) => { if (children[n]?.kind !== 'file') throw new Error('nf'); return file(n) },
+    getFileHandle: async (n: string) => { const e = children[n]; if (e?.kind !== 'file') throw new Error('nf'); return file(n, e.size) },
     getDirectoryHandle: async (n: string) => { const e = children[n]; if (e?.kind !== 'directory') throw new Error('nd'); return dir(n, e.children) },
     removeEntry: async (n: string) => { if (!(n in children)) throw new Error('nf'); delete children[n] },
   }
   return self as unknown as FileSystemDirectoryHandle
 }
-const file = (name: string) => ({ name, kind: 'file', getFile: async () => ({ size: 1, arrayBuffer: async () => new ArrayBuffer(1) }) })
+const file = (name: string, size = 1) => ({ name, kind: 'file', getFile: async () => ({ size, arrayBuffer: async () => new ArrayBuffer(size) }) })
 
 describe('isInstallArtifactName', () => {
   it('admits <sig> and <sig>.js and nothing else', () => {
@@ -78,6 +78,35 @@ describe('purgeInstallCacheDir', () => {
       [SIG]: { kind: 'directory', children: { '00000000': { kind: 'file' }, '00000001': { kind: 'file' } } },
     }
     const refused = await purgeInstallCacheDir(dir('__bees__', children))
+    expect(Object.keys(children)).toEqual([])
+    expect(refused).toEqual([])
+  })
+})
+
+describe('purgeInstallCacheDir on a legacy __layers__ domain dir', () => {
+  // Its sig files are CONTENT the Store's relocation copies up to the root.
+  // The install purge can run on an upgrade before that delayed pass, so it
+  // must follow the copy, never precede it.
+  it('removes a sig file only once the root holds a complete copy', async () => {
+    const root = dir('root', {
+      [SIG]: { kind: 'file', size: 5 },        // relocated, complete
+      [OTHER]: { kind: 'file', size: 2 },      // an interrupted copy
+    })
+    const THIRD = 'c'.repeat(64)
+    const children: Record<string, Entry> = {
+      [SIG]: { kind: 'file', size: 5 },
+      [OTHER]: { kind: 'file', size: 5 },
+      [THIRD]: { kind: 'file', size: 5 },      // not relocated yet
+      [`${THIRD}.js`]: { kind: 'file' },       // install cache — never relocated
+    }
+    const refused = await purgeInstallCacheDir(dir('hypercomb.io', children), root)
+    expect(Object.keys(children).sort()).toEqual([OTHER, THIRD].sort())
+    expect(refused.sort()).toEqual([OTHER, THIRD].sort())
+  })
+
+  it('removes an empty sig file — there is nothing in it to keep', async () => {
+    const children: Record<string, Entry> = { [SIG]: { kind: 'file', size: 0 } }
+    const refused = await purgeInstallCacheDir(dir('hypercomb.io', children), dir('root', {}))
     expect(Object.keys(children)).toEqual([])
     expect(refused).toEqual([])
   })

@@ -1149,8 +1149,14 @@ export const isInstallArtifactName = (name: string): boolean => /^[0-9a-f]{64}(?
  * nothing foreign). Anything else stays, and the caller's non-recursive
  * `removeEntry` on the directory then fails, which is the design: a legacy
  * dir disappears only once it is genuinely empty. Returns what was refused.
+ *
+ * `contentRoot` is passed for a legacy `__layers__/<domain>/` dir, whose sig
+ * files are CONTENT the Store's relocation copies up to the flat root. The
+ * purge follows that copy and never precedes it: such a file goes only once
+ * the root holds a complete one (`heldAtRoot`); until then it is refused and
+ * stays where the relocation will find it.
  */
-export const purgeInstallCacheDir = async (dir: FileSystemDirectoryHandle): Promise<string[]> => {
+export const purgeInstallCacheDir = async (dir: FileSystemDirectoryHandle, contentRoot?: FileSystemDirectoryHandle): Promise<string[]> => {
   const entries: Array<[string, FileSystemHandle]> = []
   try {
     for await (const entry of dir.entries()) entries.push(entry)
@@ -1160,6 +1166,7 @@ export const purgeInstallCacheDir = async (dir: FileSystemDirectoryHandle): Prom
     try {
       if (handle.kind === 'file') {
         if (!isInstallArtifactName(name)) { refused.push(name); continue }
+        if (contentRoot && !(await heldAtRoot(contentRoot, name, handle as FileSystemFileHandle))) { refused.push(name); continue }
         await dir.removeEntry(name)
       } else {
         const veto = await bagEvictionVeto(handle as FileSystemDirectoryHandle)
@@ -1168,8 +1175,23 @@ export const purgeInstallCacheDir = async (dir: FileSystemDirectoryHandle): Prom
       }
     } catch { refused.push(name) }
   }
-  if (refused.length) console.warn(`[ensure-install] left ${refused.length} entr${refused.length === 1 ? 'y' : 'ies'} in ${dir.name} — not an install's to remove`)
+  if (refused.length) console.warn(`[ensure-install] left ${refused.length} entr${refused.length === 1 ? 'y' : 'ies'} in ${dir.name} — not an install's to remove${contentRoot ? ', or not yet at the root' : ''}`)
   return refused
+}
+
+/** Is a legacy sig file already COMPLETE at the content root? Equal size is
+ *  the proof, as it is for the relocation's own GC gate — content-addressed,
+ *  so a short or 0-byte root copy (an interrupted write) never passes. A
+ *  `<sig>.js` module is install cache, never relocated, so it needs no copy;
+ *  an empty source file has nothing in it to keep. */
+const heldAtRoot = async (root: FileSystemDirectoryHandle, name: string, handle: FileSystemFileHandle): Promise<boolean> => {
+  if (name.endsWith('.js')) return true
+  try {
+    const here = await handle.getFile()
+    if (here.size === 0) return true
+    const there = await (await root.getFileHandle(name, { create: false })).getFile()
+    return there.size === here.size
+  } catch { return false }
 }
 
 /** Every install-cache atom a manifest accounts for: its bees, its
@@ -1256,10 +1278,12 @@ const purgeStaleOpfsArtifacts = async (store: Store, sigs: readonly string[]): P
     // Legacy `__layers__` may be absent (retired — layer bytes live flat
     // at the OPFS root now); only legacy installs still have stale
     // per-domain manifest subdirs to purge here. Its flat sig files are
-    // left for the Store's content relocation to drain.
-    if (store.layers) {
+    // left for the Store's content relocation to drain, and a subdir's sig
+    // files go only once that relocation has put them at the root — this
+    // purge can run on an upgrade before the relocation's delayed pass.
+    if (store.layers && store.hypercombRoot) {
       for await (const [, handle] of store.layers.entries()) {
-        if (handle.kind === 'directory') await purgeDir(handle as FileSystemDirectoryHandle)
+        if (handle.kind === 'directory') await purgeDir(handle as FileSystemDirectoryHandle, store.hypercombRoot)
       }
     }
   } catch { /* skip */ }
