@@ -73,6 +73,7 @@
 // and IoC-free, and it stays that way — it owns the FACTS (who is showing, who
 // has the focus); this owns the POLICY.
 
+import { holdDisplacements } from './window-rule.js'
 import { focusedWindow, isWindowShowing, showingWindows } from './window-session.js'
 
 /** How the popover half arrives — INVERTED, so this file stays framework-free.
@@ -118,6 +119,10 @@ const putAwayAll = (): (() => boolean) | null => {
   // of the very registry being walked.
   const up = showingWindows()
   if (!up.length) return null
+  // What each of them would bring back on its close, held before the parks
+  // spend it: the put-back below restores the screen EXACTLY, and that
+  // includes what closing the newcomer gives back (window-rule.ts).
+  const owed = holdDisplacements(up.map(({ id }) => id))
   for (const { session } of up) {
     try { session.park() }
     catch (err) { console.error('[tool-windows] park failed:', err) }
@@ -130,6 +135,7 @@ const putAwayAll = (): (() => boolean) | null => {
     let landed = false
     for (const { id, session } of up) {
       if (isWindowShowing(id)) continue
+      owed(id)
       try { session.unpark(); landed = true }
       catch (err) { console.error('[tool-windows] unpark failed:', err) }
     }

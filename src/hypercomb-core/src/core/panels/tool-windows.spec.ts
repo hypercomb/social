@@ -22,7 +22,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { toolWindows } from './tool-windows.js'
-import { holdToolWindow, resetWindowRule } from './window-rule.js'
+import { displacedBy, holdToolWindow, resetWindowRule } from './window-rule.js'
 import { holdWindow, isWindowShowing, resetWindowSession, type WindowSession } from './window-session.js'
 
 /** A window that joins BOTH registries while it shows and drops out of them
@@ -97,6 +97,31 @@ describe('putAwayAll', () => {
     expect(back).toBeTypeOf('function')
     expect(panel.log.park).toBe(2)
     expect(isWindowShowing('tutorials')).toBe(false)
+  })
+
+  it('puts back what the newcomer owes, too — the screen comes back EXACTLY', async () => {
+    // chat, then notes over it: the rule parks the chat and notes owes it.
+    const chat = openWindow('chat-window')
+    await Promise.resolve()
+    const notes = openWindow('notes-strip')
+    await Promise.resolve()
+    expect(chat.log.park).toBe(1)
+    expect(displacedBy('notes-strip')).toBe('chat-window')
+    const putBack = toolWindows.putAwayAll()
+    expect(displacedBy('notes-strip')).toBeNull()
+    expect(putBack?.()).toBe(true)
+    await Promise.resolve()
+    expect(notes.log.unpark).toBe(1)
+    expect(displacedBy('notes-strip')).toBe('chat-window')
+  })
+
+  it('leaves the memory spent when the sweep is never taken back', async () => {
+    openWindow('chat-window')
+    await Promise.resolve()
+    openWindow('notes-strip')
+    await Promise.resolve()
+    toolWindows.putAwayAll()
+    expect(displacedBy('notes-strip')).toBeNull()
   })
 
   it('brings back only what is still away', () => {

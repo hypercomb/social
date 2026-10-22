@@ -61,6 +61,13 @@ const windows = new Map<string, WindowSession>()
 // undo) is no longer owed, and a newcomer that is SWEPT away rather than
 // closed takes its memory with it — the next press, click or open is about
 // something else.
+//
+// ONE EXCEPTION, and it is Escape's own: the press straight after a sweep puts
+// the screen back EXACTLY as it was, and "as it was" includes what the
+// newcomer's close would have brought back. So the sweep holds its windows'
+// memories (`holdDisplacements`) and hands them back only with that put-back
+// (2026-10-21: chat → notes → Escape → Escape → close notes brought nothing
+// back, though the two presses had changed nothing on screen).
 
 /** What each showing window displaced when it arrived: the newest
  *  non-companion window the rule parked for it. Keyed by the arrival's id. */
@@ -98,6 +105,27 @@ function restoreDisplacedBy(closedId: string): void {
   if (!owed || windows.has(owed.id)) return
   try { owed.session.unpark() }
   catch (err) { console.error('[window-rule] restore failed:', err) }
+}
+
+/** Hold what the windows in `ids` displaced, before a sweep spends it, and
+ *  return the hand-back for ONE of them. Escape's put-back calls it for each
+ *  window it actually returns: that window is coming back exactly as it was,
+ *  so it owes again what it owed. Nothing is handed back to a window that
+ *  already owes something new, or whose displaced window is showing again —
+ *  that one came back on its own account and is owed nothing. Never called =
+ *  the memory stays spent, which is what a sweep nobody took back means. */
+export function holdDisplacements(ids: readonly string[]): (id: string) => void {
+  const held = new Map<string, { id: string; session: WindowSession }>()
+  for (const id of ids) {
+    const owed = displaced.get(id)
+    if (owed) held.set(id, owed)
+  }
+  return (id: string) => {
+    const owed = held.get(id)
+    held.delete(id)
+    if (!owed || displaced.has(id) || windows.has(owed.id)) return
+    displaced.set(id, owed)
+  }
 }
 
 /** What `openedId` displaced — for tests and for anything that wants to say

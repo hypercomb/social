@@ -6,7 +6,7 @@
 // as dock-lanes.spec.ts and panel-groups.spec.ts do for theirs.
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { displacedBy, holdToolWindow, resetWindowRule, toolWindowIds, windowsToKeep } from './window-rule.js'
+import { displacedBy, holdDisplacements, holdToolWindow, resetWindowRule, toolWindowIds, windowsToKeep } from './window-rule.js'
 import type { WindowSession } from './window-session.js'
 
 /** A tool window as the rule sees one: something that can be put away, and a
@@ -187,6 +187,35 @@ describe('one window at a time', () => {
       notes.unpark(); await settle()
       notes.close(); await settle()
       expect(chat.unparked).toBe(0)
+    })
+
+    it('an Escape PUT-BACK owes again what the sweep spent', async () => {
+      // Escape, then Escape straight after, changes nothing on screen — so it
+      // must change nothing about what the newcomer's close brings back.
+      const chat = new FakeWindow('chat-window')
+      const notes = new FakeWindow('notes-strip')
+      await opened(['chat-window', chat])
+      await opened(['notes-strip', notes])
+      const owed = holdDisplacements(['notes-strip'])
+      notes.park(); await settle()          // the sweep spends it
+      expect(displacedBy('notes-strip')).toBeNull()
+      owed('notes-strip')                   // the put-back hands it back
+      notes.unpark(); await settle()
+      expect(displacedBy('notes-strip')).toBe('chat-window')
+      notes.close(); await settle()
+      expect(chat.unparked).toBe(1)
+    })
+
+    it('hands nothing back once the displaced window came back on its own', async () => {
+      const chat = new FakeWindow('chat-window')
+      const notes = new FakeWindow('notes-strip')
+      await opened(['chat-window', chat])
+      await opened(['notes-strip', notes])
+      const owed = holdDisplacements(['notes-strip'])
+      notes.park(); await settle()
+      chat.unpark(); await settle()         // reopened by hand in between
+      owed('notes-strip')
+      expect(displacedBy('notes-strip')).toBeNull()
     })
 
     it('replays nothing for a window the participant reopened themselves', async () => {
