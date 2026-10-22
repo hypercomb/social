@@ -158,7 +158,7 @@ fn run(program: &Path, args: &[&str]) -> Result<String, String> {
 fn spawn_until(
     program: &Path,
     args: &[&str],
-    found: fn(&str) -> Option<String>,
+    mut found: impl FnMut(&str) -> Option<String>,
     wait: Duration,
 ) -> Result<(Child, String), String> {
     let mut child = command(program)
@@ -196,6 +196,32 @@ fn spawn_until(
         "The tunnel did not come up.\n\n{}",
         tail.into_iter().rev().cloned().collect::<Vec<_>>().join("\n")
     ))
+}
+
+/// WAIT UNTIL THE NAME EXISTS before handing it out. A lookup that runs
+/// before Cloudflare has published the name fails — and the operating system
+/// remembers the failure (Windows: up to 15 minutes), so the person's own
+/// check, and their first visit, would say "no such site" long after it
+/// works. Cloudflare's DNS is asked directly, over HTTPS, so nothing on this
+/// machine looks the name up until it resolves. True once it does.
+fn wait_resolvable(host: &str, wait: Duration) -> bool {
+    let deadline = std::time::Instant::now() + wait;
+    let url = format!("https://cloudflare-dns.com/dns-query?name={host}&type=A");
+    while std::time::Instant::now() < deadline {
+        let answered = ureq::get(&url)
+            .set("accept", "application/dns-json")
+            .timeout(Duration::from_secs(5))
+            .call()
+            .ok()
+            .and_then(|response| response.into_string().ok())
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .is_some_and(|json| json.get("Answer").and_then(|a| a.as_array()).is_some_and(|a| !a.is_empty()));
+        if answered {
+            return true;
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+    false
 }
 
 fn quick_url(line: &str) -> Option<String> {
@@ -265,13 +291,37 @@ impl Tunnels {
     /// TRY IT NOW — a quick tunnel to this machine's host on `port`.
     pub fn quick(&self, program: &Path, port: u16) -> Result<TunnelState, String> {
         let local = format!("http://127.0.0.1:{port}");
+        // The address is printed BEFORE the tunnel connects. Handing it out
+        // then means a visitor's first lookup fails — and the system caches
+        // that failure. So: note the address, answer once a connection to
+        // Cloudflare is registered.
+        // ITS OWN CONFIG, ALWAYS. Without `--config`, cloudflared reads the
+        // person's own ~/.cloudflared/config.yml — and a catch-all ingress
+        // there (`service: http_status:404`) answers this tunnel's hostname
+        // with 404 before it ever reaches this machine. Found on the first
+        // live run, on a machine that already runs a tunnel.
+        let config = program.with_file_name("quick.yml");
+        std::fs::write(&config, "no-autoupdate: true
+").map_err(|e| e.to_string())?;
+        let config = config.to_string_lossy().to_string();
+        let mut address: Option<String> = None;
         let (child, url) = spawn_until(
             program,
-            &["tunnel", "--no-autoupdate", "--url", &local],
-            quick_url,
-            Duration::from_secs(60),
+            &["tunnel", "--config", &config, "--no-autoupdate", "--url", &local],
+            move |line| {
+                if address.is_none() {
+                    address = quick_url(line);
+                }
+                connected(line).and(address.clone())
+            },
+            Duration::from_secs(90),
         )?;
         let host = url.trim_start_matches("https://").to_string();
+        let mut child = child;
+        if !wait_resolvable(&host, Duration::from_secs(90)) {
+            let _ = child.kill();
+            return Err(format!("{host} was created but never appeared in Cloudflare's DNS. Try again."));
+        }
         Ok(self.hold(child, TunnelState { kind: "quick", host }))
     }
 
@@ -436,6 +486,65 @@ mod tests {
         assert!(said.contains(VERSION), "{said}");
         // A second call finds it and downloads nothing.
         assert_eq!(ensure_cloudflared(&dir).unwrap(), program);
+    }
+
+    /// LIVE: a real quick tunnel to a throwaway server that only echoes the
+    /// Host it was asked for — no hive. Proves the address is read off
+    /// cloudflared and that the public hostname reaches this machine as
+    /// `Host` (what door routing keys on). Puts a page on the internet for a
+    /// minute; run by hand: `cargo test -p hypercomb-client
+    /// a_quick_tunnel -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn a_quick_tunnel_reaches_this_machine_with_its_public_host() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut reader = BufReader::new(&stream);
+                let mut host = String::new();
+                let mut line = String::new();
+                while reader.read_line(&mut line).map(|n| n > 0).unwrap_or(false) {
+                    if line.trim().is_empty() { break; }
+                    if let Some(value) = line.strip_prefix("Host:").or_else(|| line.strip_prefix("host:")) {
+                        host = value.trim().to_string();
+                    }
+                    line.clear();
+                }
+                let body = format!("echo-host:{host}");
+                let mut out = &stream;
+                let _ = write!(out, "HTTP/1.1 200 OK
+Content-Length: {}
+Connection: close
+
+{body}", body.len());
+            }
+        });
+
+        let dir = std::env::temp_dir().join("hypercomb-tunnel-test");
+        let program = ensure_cloudflared(&dir).expect("cloudflared");
+        let tunnels = Tunnels::default();
+        let state = tunnels.quick(&program, port).expect("a quick tunnel");
+        println!("quick tunnel: https://{}", state.host);
+        assert!(state.host.ends_with(".trycloudflare.com"), "{}", state.host);
+
+        // A fresh quick hostname can take a few seconds to resolve.
+        let mut answer = None;
+        for attempt in 0..30 {
+            match ureq::get(&format!("https://{}/", state.host)).timeout(Duration::from_secs(10)).call() {
+                Ok(response) => { answer = response.into_string().ok(); break }
+                Err(error) => {
+                    println!("attempt {attempt}: {error}");
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            }
+        }
+        assert!(tunnels.stop(), "the tunnel was running");
+        let answer = answer.expect("the public address answered");
+        println!("answered: {answer}");
+        assert_eq!(answer, format!("echo-host:{}", state.host));
     }
 
     #[test]
