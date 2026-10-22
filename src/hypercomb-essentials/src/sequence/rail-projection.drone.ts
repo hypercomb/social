@@ -25,10 +25,16 @@
 //     flat-top in landscape) without touching the participant's standing
 //     `hc:hex-orientation` preference, and hands it back on release;
 //   • publishes `lanes:changed {active, lanes}` for the chrome and
-//     `render:grid-changed` for the renderer.
+//     `render:grid-changed` for the renderer;
+//   • PARKS THE VIEWPORT IT LEAVES. Each posture — the free map and the strip
+//     — frames a page differently, so toggling remembers the zoom and
+//     position of the posture being left, per page, and hands it back on the
+//     render after the next toggle. The strip's start-edge fit is only the
+//     landing for a posture this page has not been read in yet.
 //
 // `hc:lanes` is a participant-local on/off switch. No lane count is exposed:
-// turning it on always produces three centered lanes.
+// turning it on produces three centered lanes — fewer only when the page has
+// fewer tiles than that, so one tile reads in one lane and two in two.
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import { buildRailMatrix } from '../presentation/grid/rail-grid.js'
@@ -54,6 +60,17 @@ type AxialLike = {
   readonly projected?: boolean
 }
 type ZoomLike = { zoomToFit?: (snap?: boolean, source?: 'user' | 'auto' | 'auto-persist') => void }
+type ViewportSnapshotLike = {
+  zoom?: { scale: number; cx: number; cy: number; fit?: boolean }
+  pan?: { dx: number; dy: number }
+}
+type ViewportLike = EventTarget & {
+  readonly lastZoom?: ViewportSnapshotLike['zoom']
+  readonly lastPan?: ViewportSnapshotLike['pan']
+  setZoom?: (scale: number, cx: number, cy: number, fit?: boolean, source?: 'user' | 'auto' | 'auto-persist') => void
+  setPan?: (dx: number, dy: number, source?: 'user' | 'auto' | 'auto-persist') => void
+}
+type Posture = 'map' | 'strip'
 
 export const railsPreferenceOff = (): boolean => {
   try { return window.localStorage?.getItem(RAILS_KEY) !== 'on' } catch { return true }
@@ -90,8 +107,15 @@ export class RailProjectionDrone extends Drone {
   #orientationEcho = false
   #reflowTimer: ReturnType<typeof setTimeout> | null = null
   #fitTimer: ReturnType<typeof setTimeout> | null = null
-  /** A projection changed; fit on the render that follows it. */
-  #fitPending = false
+  /** Owed on the render that follows: a toggle hands the posture arrived at
+   *  its parked viewport (else fits); a rotation always fits. */
+  #framePending: Posture | 'fit' | null = null
+  /** The viewport each posture last had on each page, parked at the toggle
+   *  that left it. Participant-local and in memory: a reload lands on the
+   *  page's saved viewport as before. */
+  #parked = new Map<string, ViewportSnapshotLike>()
+  /** Tiles on the current page, from the last `render:cell-count`. */
+  #count: number | null = null
   /** The page the strip was last fitted on arrival at. */
   #fittedLocation: string | null = null
 
@@ -111,15 +135,32 @@ export class RailProjectionDrone extends Drone {
     // render — fitting stale bounds fits the old shape. And every ARRIVAL at
     // a new page fits too: a page's own remembered viewport was framed on a
     // desktop map, and the phone reads a strip from its start edge.
-    this.onEffect<{ settled?: boolean }>('render:cell-count', ({ settled }) => {
-      if (!this.#active) return
+    this.onEffect<{ count?: number; settled?: boolean }>('render:cell-count', ({ count, settled }) => {
+      if (typeof count === 'number' && Number.isFinite(count)) this.#count = count
       const here = this.#locationKey()
+      // Fewer tiles than lanes: the strip narrows to them (and widens back as
+      // tiles arrive). The re-projection asks for another render, and whatever
+      // frame is owed lands on that one. A partial pass is not yet a count.
+      if (this.#active && settled !== false && this.#lanesFor() !== this.#lanes) {
+        this.#apply()
+        return
+      }
+      // A toggle landed: give the posture back the viewport it last had here.
+      // The parked frame is absolute, so even a partial pass can take it.
+      const owed = this.#framePending
+      if (owed) {
+        this.#framePending = null
+        this.#fittedLocation = here
+        if (owed !== 'fit' && this.#restore(owed, here)) return
+        this.#fit()
+        return
+      }
+      if (!this.#active) return
       const arrived = here !== this.#fittedLocation
-      if (!this.#fitPending && !arrived) return
+      if (!arrived) return
       // A partial pass (tiles still streaming in) would fit a shorter strip;
-      // wait for the settled one unless a projection change is what's owed.
-      if (arrived && !this.#fitPending && settled === false) return
-      this.#fitPending = false
+      // wait for the settled one.
+      if (settled === false) return
       this.#fittedLocation = here
       this.#fit()
     })
@@ -190,7 +231,7 @@ export class RailProjectionDrone extends Drone {
    *  rotation does not. */
   #apply(say = false): void {
     if (!this.#wanted()) { this.#release(); return }
-    const lanes = LANES
+    const lanes = this.#lanesFor()
     const horizontal = laneStripHorizontal()
     if (this.#active && this.#lanes === lanes && this.#horizontal === horizontal) {
       if (say) this.#toast(lanes)
@@ -199,6 +240,10 @@ export class RailProjectionDrone extends Drone {
     const axial = this.resolve<AxialLike>('axial')
     if (!axial?.project) return
     const capacity = Math.max(1, axial.capacity ?? 0)
+    // Leaving the free map: park how this page was framed on it, before the
+    // projection moves anything.
+    const entering = !this.#active
+    if (entering) this.#park('map')
     if (!axial.project(buildRailMatrix(lanes, horizontal, capacity))) return
 
     this.#active = true
@@ -208,12 +253,18 @@ export class RailProjectionDrone extends Drone {
     this.#orient(horizontal)
     this.emitEffect('render:grid-changed', { active: true, lanes, horizontal })
     this.#publish()
-    this.#fitPending = true
+    // A rotation or a lane change re-projects the same posture: the strip is
+    // re-fitted across its new shape. Only a toggle resumes a parked reading,
+    // and a re-projection in the same render does not take that away.
+    if (entering) this.#framePending = 'strip'
+    else this.#framePending ??= 'fit'
     if (say) this.#toast(lanes)
   }
 
   #release(): void {
     if (!this.#active) return
+    // Leaving the strip: park where the participant was reading it.
+    this.#park('strip')
     const axial = this.resolve<AxialLike>('axial')
     axial?.project?.(null)
     this.#active = false
@@ -228,7 +279,51 @@ export class RailProjectionDrone extends Drone {
     }
     this.emitEffect('render:grid-changed', { active: false, lanes: LANES, horizontal: null })
     this.#publish()
-    this.#fitPending = true
+    this.#framePending = 'map'
+  }
+
+  /** Never more lanes than tiles: a page of one or two reads in that many.
+   *  An unknown or empty count keeps the three. */
+  #lanesFor(): number {
+    const n = this.#count
+    return n !== null && n > 0 && n < LANES ? n : LANES
+  }
+
+  /** A strip reading is along one long axis and one lane count; the map is
+   *  the same whichever way the phone is held. */
+  #parkKey(posture: Posture, location: string): string {
+    const shape = posture === 'strip' ? `${laneStripHorizontal() ? 'x' : 'y'}${this.#lanesFor()}` : ''
+    return `${posture}${shape}
+${location}`
+  }
+
+  #viewport(): ViewportLike | undefined {
+    return window.ioc.get<ViewportLike>('@diamondcoreprocessor.com/ViewportPersistence')
+  }
+
+  /** Remember the viewport the page has right now, under the posture that
+   *  framed it. Nothing to park until the page has a zoom at all. */
+  #park(posture: Posture): void {
+    const vp = this.#viewport()
+    const zoom = vp?.lastZoom
+    if (!zoom) return
+    const snap: ViewportSnapshotLike = { zoom: { ...zoom } }
+    if (vp?.lastPan) snap.pan = { ...vp.lastPan }
+    this.#parked.set(this.#parkKey(posture, this.#locationKey()), snap)
+  }
+
+  /** Give a posture back the viewport it last had on this page. Persists as
+   *  the strip's own fit does ('auto-persist': automatic, meant to stick) and
+   *  announces a `restore` so the zoom and pan drones apply it. */
+  #restore(posture: Posture, location: string): boolean {
+    const snap = this.#parked.get(this.#parkKey(posture, location))
+    const vp = this.#viewport()
+    if (!snap?.zoom || !vp) return false
+    const { scale, cx, cy, fit } = snap.zoom
+    vp.setZoom?.(scale, cx, cy, fit === true, 'auto-persist')
+    vp.setPan?.(snap.pan?.dx ?? 0, snap.pan?.dy ?? 0, 'auto-persist')
+    vp.dispatchEvent(new CustomEvent('restore', { detail: snap }))
+    return true
   }
 
   /** The strip is only straight one way: point-top rows for a vertical strip,
@@ -249,7 +344,7 @@ export class RailProjectionDrone extends Drone {
   /** The rung, for anything that shows it (the phone bar). Replayed by
    *  EffectBus, so chrome mounted later still reads it. */
   #publish(): void {
-    this.emitEffect('lanes:changed', { active: this.#active, lanes: LANES })
+    this.emitEffect('lanes:changed', { active: this.#active, lanes: this.#active ? this.#lanes : LANES })
   }
 
   /** Fit ACROSS the strip and center it in the viewport — zoomToFit derives

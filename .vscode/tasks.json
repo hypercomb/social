@@ -10,6 +10,16 @@
       "options": { "cwd": "${workspaceFolder}/src" },
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
       "problemMatcher": []
+    },
+    {
+      "label": "Start ComfyUI",
+      "detail": "Start ComfyUI from C:\\ComfyUI (its own venv) on http://127.0.0.1:8188 with the CORS header the hive's /comfy word needs.",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "comfy"],
+      "options": { "cwd": "${workspaceFolder}/src" },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
     }
   ],
   "inputs": [

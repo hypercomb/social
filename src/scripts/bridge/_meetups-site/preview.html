@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hypercomb Meetup</title>
+<meta name="description" content="A free weekly meetup in Vancouver for people building their community online — web builders, startups and communities co-creating a humanity-first internet with Hypercomb. Beginners welcome. No account, no email.">
+<style>
+  /* Modernist, from the Claude Design "Meetups Home" handoff. Scoped under
+     .mh: the hive mounts a page inline, so nothing here may touch the shell. */
+  @font-face{font-family:"Archivo";font-style:normal;font-weight:400 800;font-display:swap;
+    src:url("archivo-latin.woff2") format("woff2");
+    unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+  @font-face{font-family:"Archivo";font-style:normal;font-weight:400 800;font-display:swap;
+    src:url("archivo-latin-ext.woff2") format("woff2");
+    unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C4,U+2113,U+2C60-2C7F,U+A720-A7FF}
+
+  .mh{--bg:#f3f2f2;--surface:#eae9e9;--text:#201e1d;--accent:#ec3013;
+    --divider:color-mix(in srgb,#201e1d 40%,transparent);
+    --n200:#eae7e7;--n700:#605d5d;--n800:#444141;--n900:#2d2b2b;
+    --a600:#dd2b0f;--a700:#ae1800;
+    --font:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s6:24px;--s8:32px;
+    display:block;min-height:100vh;background:var(--n200);color:var(--text);
+    font:400 15px/1.55 var(--font);text-wrap:pretty;-webkit-font-smoothing:antialiased}
+  /* Standing alone, the page owns its edges. Mounted in the hive it sits in a
+     host element, so this never reaches the shell's body. */
+  body:has(> .mh){margin:0}
+  .mh *,.mh *::before,.mh *::after{box-sizing:border-box;margin:0;padding:0}
+  .mh a{color:var(--accent);text-underline-offset:3px}
+  .mh a:hover{color:var(--a600)}
+  .mh :focus{outline:none}
+  .mh :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .mh ::selection{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+  .mh .page{max-width:560px;min-height:100vh;margin:0 auto;background:var(--bg);padding-bottom:96px}
+  @media (min-width:600px){.mh .page{border-left:1px solid var(--divider);border-right:1px solid var(--divider)}}
+  .mh h1,.mh h2,.mh h3{font-family:var(--font);font-weight:800;letter-spacing:-.015em}
+  .mh .hr{height:2px;border:0;background:var(--divider);margin:0 var(--s4)}
+  .mh .kicker{display:block;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--a700)}
+  .mh .mini{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--n700)}
+  .mh .grayscale{filter:grayscale(1) contrast(1.08)}
+
+  /* buttons: square, Modernist */
+  .mh .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;text-decoration:none;
+    font:800 14px/1.2 var(--font);color:var(--text);background:transparent;border:1px solid transparent;border-radius:0;
+    padding:var(--s2) calc(var(--s3) * 1.2);min-height:44px;transition:background .18s ease,color .18s ease}
+  .mh .btn svg{display:block;flex:none}
+  .mh .btn-primary{background:var(--accent);color:var(--bg)}
+  .mh .btn-primary:hover{background:var(--a600);color:var(--bg)}
+  .mh .btn-primary:active{background:var(--a700)}
+  .mh .btn-primary[disabled]{opacity:.5;cursor:default}
+  .mh .btn-secondary{border-color:var(--divider)}
+  .mh .btn-secondary:hover{background:color-mix(in srgb,var(--text) 7%,transparent)}
+  .mh .btn-secondary:active{background:color-mix(in srgb,var(--text) 14%,transparent)}
+  .mh .btn-icon{width:40px;height:40px;min-height:40px;padding:0}
+
+  /* masthead */
+  .mh .nav{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);padding:var(--s3) var(--s4);
+    border-bottom:2px solid var(--divider)}
+  .mh .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
+
+  /* opening */
+  .mh .open{padding:var(--s8) var(--s4) var(--s6)}
+  .mh h1{font-size:40px;line-height:1.04;letter-spacing:-.02em;margin:0 0 var(--s4) -.05em}
+  .mh .lede{font-size:16px;color:var(--n800);max-width:34ch}
+  .mh figure{margin:var(--s6) 0 0;border-top:2px solid var(--divider);padding-top:var(--s3)}
+  .mh .hero{width:100%;aspect-ratio:16/10;overflow:hidden;background:var(--n900)}
+  .mh .hero img{display:block;width:100%;height:100%;object-fit:cover}
+  .mh figcaption{font-size:11px;margin-top:var(--s1);color:var(--n700)}
+
+  .mh .sec{padding:var(--s4) var(--s4) var(--s6)}
+
+  /* next meeting */
+  .mh .head{display:flex;align-items:center;gap:var(--s2);margin-bottom:var(--s3)}
+  .mh .live{display:none;font-size:11px;font-weight:600;letter-spacing:.02em;padding:3px 10px;background:var(--accent);color:var(--bg)}
+  .mh[data-status="live"] .live{display:inline-flex}
+  .mh .facts{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid var(--divider)}
+  .mh .facts > div{padding:var(--s3) var(--s3) var(--s3) 0}
+  .mh .facts > div + div{padding:var(--s3) 0 var(--s3) var(--s3);border-left:1px solid var(--divider)}
+  .mh .big{font-weight:800;font-size:22px;line-height:1.1;margin-top:4px}
+  .mh .sub{font-size:14px;color:var(--n800);margin-top:2px}
+  .mh .agenda{border-top:1px solid var(--divider);padding:var(--s3) 0}
+  .mh .agenda ol{list-style:none;display:grid;gap:6px;font-size:15px;margin-top:6px}
+  .mh .agenda li{display:grid;grid-template-columns:28px 1fr;gap:var(--s2)}
+  .mh .num{font-weight:800;font-feature-settings:"tnum"}
+  .mh .talks{border-top:1px solid var(--divider);padding:var(--s3) 0}
+  .mh .talks ul{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--s2);margin-top:6px}
+  .mh .talks a{display:grid;gap:2px;padding:10px 12px;border:1px solid var(--divider);color:var(--text);text-decoration:none}
+  .mh .talks a:hover{border-color:var(--accent)}
+  .mh .talks b{font-size:15px;font-weight:700}
+  .mh .talks b::after{content:" \2197";color:var(--accent)}
+  .mh .talks span{font-size:13px;color:var(--n700)}
+  .mh .actions{border-top:1px solid var(--divider);padding:var(--s3) 0 0;display:flex;gap:var(--s2);flex-wrap:wrap}
+  .mh .actions .btn-primary{flex:1;justify-content:flex-start}
+
+  /* join: pick a name, you're in */
+  .mh .join{display:none;border-top:1px solid var(--divider);margin-top:var(--s3);padding-top:var(--s3)}
+  .mh .join.open{display:block}
+  .mh .join form{display:flex;gap:var(--s2);flex-wrap:wrap}
+  .mh .join input{flex:1;min-width:0;min-height:44px;padding:var(--s2) var(--s3);border:1px solid var(--divider);border-radius:0;
+    background:var(--bg);color:var(--text);font:400 16px/1.2 var(--font)}
+  .mh .join input::placeholder{color:var(--n700)}
+  .mh .join .btn-primary{flex:none}
+  .mh .join .state{margin-top:var(--s2);font-size:14px;color:var(--n800);min-height:1.4em}
+  .mh .join .state b{color:var(--text)}
+  .mh .join .state a{word-break:break-all}
+  .mh .who{border-top:1px solid var(--divider);margin-top:var(--s3);padding-top:var(--s3)}
+  .mh .who ul{list-style:none;display:flex;flex-wrap:wrap;gap:6px var(--s2);margin-top:6px;font-size:14px}
+  .mh .who li{padding:2px 8px;border:1px solid var(--divider)}
+  .mh .who li.you{border-color:var(--accent);color:var(--a700)}
+  .mh .who .none{font-size:14px;color:var(--n700);margin-top:4px}
+
+  /* calendar: a scroller of meetings and dates, not an organizer */
+  .mh .scroller{display:flex;gap:var(--s2);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--s3) 0 var(--s2);
+    margin-top:var(--s3);border-top:2px solid var(--divider);scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+  .mh .card{flex:0 0 172px;scroll-snap-align:start;text-align:left;cursor:pointer;border:1px solid var(--divider);border-radius:0;
+    background:transparent;color:var(--text);font:inherit;padding:var(--s3);display:grid;gap:4px;transition:background .15s ease}
+  .mh .card:hover{background:color-mix(in srgb,var(--text) 5%,transparent)}
+  .mh .card[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+  .mh .card .day{font-weight:800;font-size:20px;line-height:1.1}
+  .mh .card .place{font-size:13px;color:var(--n800)}
+  .mh .card .count{font-size:12px;color:var(--a700);font-weight:600;margin-top:2px}
+  .mh .card.past{color:var(--n700)}
+  .mh .card.past .count{color:var(--n700)}
+  .mh .card.away .count{color:var(--n700)}
+  .mh .empty{font-size:14px;color:var(--n700);padding:var(--s3) 0}
+
+  /* how joining works */
+  .mh .three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:2px solid var(--divider);margin-top:var(--s3)}
+  .mh .three > div{padding:var(--s3) var(--s2) 0 0}
+  .mh .three > div + div{padding:var(--s3) var(--s2) 0;border-left:1px solid var(--divider)}
+  .mh .three > div:last-child{padding-right:0}
+  /* Each step gets a small cluster of cells — a corner of the hive. One cell
+     carries the step's picture with a feathered edge (it fades into the
+     cell's field before the hexagon's edge, so the cutout reads soft, not
+     punched); the others are plain fields in the page's own tints. */
+  .mh .cluster{position:relative;width:100%;max-width:150px;aspect-ratio:150/130;margin-bottom:var(--s3)}
+  .mh .cell{position:absolute;width:44%;aspect-ratio:8/9;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:var(--surface)}
+  .mh .cell.c1{left:0;top:0}
+  .mh .cell.c2{left:50%;top:0}
+  .mh .cell.c3{left:25%;top:43%}
+  .mh .cell.dark{background:var(--n900)}
+  .mh .cell.red{background:var(--accent)}
+  .mh .cell.light{background:color-mix(in srgb,var(--text) 9%,var(--bg))}
+  .mh .cell img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 46%;transform:scale(1.08);
+    -webkit-mask-image:radial-gradient(ellipse 60% 62% at 50% 50%,#000 52%,rgba(0,0,0,.5) 78%,transparent 100%);
+    mask-image:radial-gradient(ellipse 60% 62% at 50% 50%,#000 52%,rgba(0,0,0,.5) 78%,transparent 100%)}
+  .mh .step{font-weight:800;font-size:24px;color:var(--accent);line-height:1}
+  .mh .step-title{font-weight:800;font-size:15px;margin-top:var(--s2);line-height:1.2}
+  .mh .step-body{margin-top:4px;font-size:13px;color:var(--n800)}
+
+  /* nine promises */
+  .mh h2{font-size:26px;line-height:1.1;margin:var(--s1) 0 var(--s3)}
+  .mh .promises{border-bottom:2px solid var(--divider)}
+  .mh details{border-top:1px solid var(--divider)}
+  .mh summary{list-style:none;display:grid;grid-template-columns:32px minmax(0,1fr) 20px;gap:var(--s3);align-items:start;
+    padding:var(--s3) 0;cursor:pointer;transition:background .15s ease}
+  .mh summary::-webkit-details-marker{display:none}
+  .mh summary:hover{background:color-mix(in srgb,var(--text) 5%,transparent)}
+  .mh summary:active{background:color-mix(in srgb,var(--text) 10%,transparent)}
+  .mh summary .num{font-size:14px;padding-top:3px}
+  .mh summary .title{font-weight:800;font-size:17px;line-height:1.2}
+  .mh summary svg{margin-top:4px;color:var(--n700);transition:transform .18s ease}
+  .mh details[open] summary svg{transform:rotate(180deg)}
+  .mh details p{padding:0 0 var(--s3) calc(32px + var(--s3));margin-top:calc(var(--s2) * -1);
+    font-size:14px;line-height:1.5;color:var(--n800);padding-right:calc(20px + var(--s3))}
+
+  /* the promise */
+  .mh .promise{background:var(--accent);color:var(--bg);padding:var(--s8) var(--s4)}
+  .mh .promise h3{font-size:34px;line-height:1.06;margin-left:-.05em}
+  .mh .promise .btn{margin-top:var(--s6);color:var(--bg);border:1px solid var(--bg);padding-inline:14px}
+  .mh .promise .btn:hover{background:var(--bg);color:var(--accent)}
+
+  .mh footer{display:flex;gap:var(--s4);align-items:flex-start;padding:var(--s4) var(--s4) var(--s6);font-size:13px;line-height:1.5;color:var(--n700)}
+  .mh footer b{display:block;font-weight:800;color:var(--text)}
+  .mh footer .qr{flex:none;display:block;width:88px;height:88px;border:1px solid var(--divider);padding:4px;background:#fff}
+
+  .mh .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  /* quiet motion, only where it can never hide anything */
+  .mh.motion [data-reveal]{opacity:0;transform:translateY(10px);
+    transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);transition-delay:var(--d,0ms)}
+  .mh.motion [data-reveal].in{opacity:1;transform:none}
+  .mh.motion .hero img{transform:scale(1.04);transition:transform 2.4s cubic-bezier(.2,.7,.2,1)}
+  .mh.motion [data-reveal].in .hero img{transform:none}
+  .mh.motion details[open] p{animation:mh-open .25s ease}
+  @keyframes mh-open{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){
+    .mh.motion [data-reveal],.mh.motion .hero img{opacity:1;transform:none;transition:none}
+    .mh.motion details[open] p{animation:none}
+    .mh summary svg{transition:none}
+  }
+</style>
+</head>
+<body>
+<div class="mh" data-status="upcoming">
+<div class="page">
+
+  <nav class="nav" aria-label="Hypercomb Meetup">
+    <span class="brand">Hypercomb Meetup</span>
+    <button type="button" class="btn btn-secondary btn-icon" aria-label="Share this page" data-share>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg>
+    </button>
+  </nav>
+
+  <section class="open">
+    <span class="kicker" data-reveal>Weekly meetup · hosted by Hypercomb</span>
+    <h1 data-reveal>Build your online community.</h1>
+    <p class="lede" data-reveal>A free weekly get-together for anyone with a passion project or a business they want to see thrive online — web builders, startups and communities co-creating a humanity-first internet. Beginners welcome. No account, no email — just open the link and come in.</p>
+    <figure class="grayscale" data-reveal>
+      <div class="hero"><img src="hero.webp" alt="The Hypercomb workspace — a honeycomb of cells"></div>
+      <figcaption>Inside Hypercomb: every cell is a space. This meetup is one of them.</figcaption>
+    </figure>
+  </section>
+
+  <hr class="hr">
+
+  <section class="sec" data-reveal aria-labelledby="next" data-next>
+    <div class="head">
+      <span class="kicker" id="next" data-next-kicker>Next meeting</span>
+      <span class="live">Live now</span>
+    </div>
+    <div class="facts">
+      <div>
+        <div class="mini">When</div>
+        <div class="big" data-when>—</div>
+        <div class="sub" data-when-sub>Weekly · see the calendar</div>
+      </div>
+      <div>
+        <div class="mini">Where</div>
+        <div class="big" data-where>—</div>
+        <div class="sub" data-where-sub>Free, all welcome</div>
+      </div>
+    </div>
+    <div class="agenda">
+      <div class="mini">On the agenda</div>
+      <ol>
+        <li><span class="num">01</span>Say hello — coffee, small bites, who is in the room</li>
+        <li><span class="num">02</span>Hypercomb, the fundamentals: a demo of building with your community — bring any AI you choose</li>
+        <li><span class="num">03</span>Your projects and your questions: bring what you are passionate about</li>
+      </ol>
+    </div>
+    <div class="talks">
+      <div class="mini">Talks from the meetings</div>
+      <ul>
+        <li><a href="https://hyperdex.hypercomb.com/" target="_blank" rel="noopener"><b>Hyperdex</b><span>Every hive is an index, read from outside</span></a></li>
+        <li><a href="https://colony.hypercomb.com/" target="_blank" rel="noopener"><b>Colony</b><span>A domain, and the hives that live on it</span></a></li>
+      </ul>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn btn-primary" data-join>Join the meeting<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+      <a class="btn btn-secondary" href="#calendar" data-calendar>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4"/><path d="M3 10h18"/></svg>Calendar</a>
+    </div>
+
+    <div class="join" data-join-panel>
+      <form data-join-form autocomplete="off">
+        <label class="sr" for="mh-name">Your name</label>
+        <input id="mh-name" name="name" type="text" maxlength="48" placeholder="Pick a name" required data-name>
+        <button type="submit" class="btn btn-primary" data-join-send>I'm coming</button>
+      </form>
+      <p class="state" data-join-state></p>
+    </div>
+
+    <div class="who" data-who>
+      <div class="mini"><span data-who-title>Who's coming</span> <span data-who-count></span></div>
+      <ul data-who-list></ul>
+      <p class="none" data-who-none>Nobody has said yet. Be the first.</p>
+    </div>
+  </section>
+
+  <hr class="hr">
+
+  <section class="sec" id="calendar" data-reveal aria-labelledby="cal">
+    <span class="kicker" id="cal">Calendar</span>
+    <p class="sub">Every meeting on the calendar, from this community and the ones it follows. Tap one to see who is coming.</p>
+    <div class="scroller" data-scroller role="list" aria-label="Meetings"></div>
+    <p class="empty" data-empty hidden>No meetings on the calendar yet.</p>
+  </section>
+
+  <hr class="hr">
+
+  <section class="sec" id="joining" data-reveal aria-labelledby="how">
+    <span class="kicker" id="how">How joining works</span>
+    <div class="three">
+      <div>
+        <div class="cluster" aria-hidden="true">
+          <div class="cell c1 grayscale"><img src="cell-open.webp" alt=""></div>
+          <div class="cell c2 light"></div>
+          <div class="cell c3 red"></div>
+        </div>
+        <div class="step">1</div>
+        <div class="step-title">Open the link</div>
+        <p class="step-body">On your phone or computer — no app to install.</p>
+      </div>
+      <div>
+        <div class="cluster" aria-hidden="true">
+          <div class="cell c1 dark"></div>
+          <div class="cell c2 grayscale"><img src="cell-name.webp" alt=""></div>
+          <div class="cell c3 light"></div>
+        </div>
+        <div class="step">2</div>
+        <div class="step-title">Pick a name</div>
+        <p class="step-body">Just a name you choose. No email, no password.</p>
+      </div>
+      <div>
+        <div class="cluster" aria-hidden="true">
+          <div class="cell c1 light"></div>
+          <div class="cell c2 red"></div>
+          <div class="cell c3 grayscale"><img src="cell-in.webp" alt=""></div>
+        </div>
+        <div class="step">3</div>
+        <div class="step-title">You're in</div>
+        <p class="step-body">Your name joins the list for everyone to see, and you keep the receipt.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="hr">
+
+  <section class="sec" data-reveal aria-labelledby="promises">
+    <span class="kicker">What makes it different</span>
+    <h2 id="promises">Nine promises we make to everyone who joins.</h2>
+    <div class="promises">
+      <details><summary><span class="num">01</span><span class="title">No email or personal information</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>You never give us an email, phone number or name. Your phone or computer creates a private key that stands in for you.</p></details>
+      <details><summary><span class="num">02</span><span class="title">Security by community</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Instead of a company checking your identity, the people already in the group vouch for newcomers — the way a real community does.</p></details>
+      <details><summary><span class="num">03</span><span class="title">Domain agnostic</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>The meetup can be reached from any website address. If one is blocked or expires, people can still find your things, and the group carries on at another.</p></details>
+      <details><summary><span class="num">04</span><span class="title">Platform agnostic</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Works the same on phone, tablet and computer, in any web browser. Nothing to download.</p></details>
+      <details><summary><span class="num">05</span><span class="title">Pure edge computing</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Everything happens on your own device. There is no central server that stores or reads your data.</p></details>
+      <details><summary><span class="num">06</span><span class="title">Decentralized protocol</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Messages travel through nostr, an open network nobody owns. Anyone can help carry them; no single point can switch it off, and nobody can delete your posts or quietly hide them.</p></details>
+      <details><summary><span class="num">07</span><span class="title">Open software platform</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>The code is public and the platform is free — no cost, no ads. Anyone can read it, check it, improve it or start their own version.</p></details>
+      <details><summary><span class="num">08</span><span class="title">Global signature hashing</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Everything shared carries a digital signature and fingerprint, so anyone can confirm it is genuine and untouched.</p></details>
+      <details><summary><span class="num">09</span><span class="title">One primitive for all data</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p>Every piece of information uses the same simple building block, which keeps things reliable and easy to move or back up.</p></details>
+    </div>
+  </section>
+
+  <section class="promise" data-reveal>
+    <h3>Your data stays<br>with you.<br>Always.</h3>
+    <button type="button" class="btn" data-share data-share-label>Share this page</button>
+  </section>
+
+  <footer>
+    <img class="qr" src="qr.png" width="88" height="88" alt="QR code that opens meetups.hypercomb.com">
+    <div>
+      <b>meetups.hypercomb.com</b>
+      This page stays at this address. Scan the code to come back, or share it with anyone you'd like to bring along.
+    </div>
+  </footer>
+
+  <span class="sr" role="status" aria-live="polite" data-said></span>
+</div>
+</div>
+<script>
+(function () {
+  var roots = document.querySelectorAll('.mh:not([data-ready])');
+  var root = roots[roots.length - 1];
+  if (!root) return;
+  root.setAttribute('data-ready', '');
+
+  // THE CALENDAR IS A POOL OF MEANING (documentation/calendar-events.md).
+  // Meetings are records in sign('calendar:events') on the door that serves
+  // this page — one derived address every community host answers — and who
+  // is coming to one meeting is sign('rsvp:<meeting>') on the meeting's own
+  // host. The page carries no meeting data: it reads both from its origin,
+  // and from the meetup's door when it stands somewhere else (a hive).
+  var DOOR = 'meetups.hypercomb.com';
+  var PAGE_URL = 'https://' + DOOR + '/';
+  var TITLE = 'Hypercomb Meetup';
+  var visitor = document.documentElement.getAttribute('data-hypercomb-mode') === 'visitor';
+  var $ = function (sel) { return root.querySelector(sel); };
+  var said = $('[data-said]');
+  var say = function (text) { if (said) said.textContent = text; };
+  var flash = function (el, text) {
+    if (!el) return;
+    var was = el.textContent;
+    el.textContent = text;
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.textContent = was; }, 1800);
+  };
+
+  // Share: the device's share sheet where there is one, else copy the link.
+  root.querySelectorAll('[data-share]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var label = button.hasAttribute('data-share-label') ? button : null;
+      if (navigator.share) {
+        navigator.share({ title: TITLE, url: PAGE_URL }).catch(function () {});
+        return;
+      }
+      var done = function () { say('Link copied'); flash(label, 'Link copied'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(PAGE_URL).then(done, function () { say(PAGE_URL); });
+      else say(PAGE_URL);
+    });
+  });
+
+  // ── reading the pools ───────────────────────────────────────────────
+  var SIG = /^[0-9a-f]{64}$/;
+  function sha256(text) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    });
+  }
+  // Where to read: this origin first; the meetup's own door when this copy of
+  // the page stands elsewhere (standing alone, or in a hive). A visitor door
+  // may read only itself, so there the door IS the origin.
+  function bases() {
+    var out = [];
+    if (/^https?:$/.test(location.protocol)) out.push(location.origin);
+    if (location.host !== DOOR && !visitor) out.push('https://' + DOOR);
+    return out;
+  }
+  function baseFor(host) {
+    if (host === location.host) return location.origin;
+    if (visitor) return null;                       // a visitor writes and reads only here
+    return 'https://' + host;
+  }
+  function listing(base, pool) {
+    return fetch(base + '/' + pool + '/', { cache: 'no-store' }).then(function (res) {
+      if (!res.ok) return [];
+      return res.text().then(function (text) {
+        return text.split('\n').map(function (l) { return l.trim().toLowerCase(); }).filter(function (l) { return SIG.test(l); });
+      });
+    }).catch(function () { return []; });
+  }
+  function readJson(base, sig) {
+    return fetch(base + '/' + sig, { cache: 'force-cache' }).then(function (res) {
+      if (!res.ok) return null;
+      return res.text().then(function (text) { try { return JSON.parse(text); } catch (e) { return null; } });
+    }).catch(function () { return null; });
+  }
+  function isEvent(r) {
+    return !!r && r.kind === 'event' && /^\d{4}-\d{2}-\d{2}$/.test(String(r.date || '')) && r.title && r.where && r.host;
+  }
+  function readEvents() {
+    return sha256('calendar:events').then(function (pool) {
+      var seen = {}, found = [];
+      var one = function (base) {
+        return listing(base, pool).then(function (names) {
+          return Promise.all(names.map(function (sig) {
+            if (seen[sig]) return null;
+            seen[sig] = true;
+            return readJson(base, sig).then(function (r) { if (isEvent(r)) found.push({ sig: sig, record: r, base: base }); });
+          }));
+        });
+      };
+      return bases().reduce(function (p, base) { return p.then(function () { return one(base); }); }, Promise.resolve()).then(function () { return found; });
+    });
+  }
+  // Who is coming: every claim the meeting's host lists, each key's newest standing.
+  function readComing(ev) {
+    var base = baseFor(ev.record.host) || ev.base;
+    return sha256('rsvp:' + ev.sig).then(function (pool) {
+      return listing(base, pool).then(function (names) {
+        return Promise.all(names.map(function (name) { return readJson(base, pool + '/' + name); })).then(function (claims) {
+          var newest = {};
+          claims.forEach(function (c, i) {
+            if (!c || Number(c.kind) !== 30568 || !Array.isArray(c.tags)) return;
+            var tag = function (k) { var t = c.tags.filter(function (t) { return t[0] === k; })[0]; return t ? String(t[1] || '') : ''; };
+            var row = { who: tag('name').trim(), going: tag('going'), at: Number(c.created_at) || 0, signer: String(c.pubkey || ''), member: names[i] };
+            if (!row.who || !row.signer) return;
+            var held = newest[row.signer];
+            if (!held || row.at > held.at) newest[row.signer] = row;
+          });
+          return Object.keys(newest).map(function (k) { return newest[k]; }).sort(function (a, b) { return a.at - b.at; });
+        });
+      });
+    });
+  }
+
+  // ── the calendar, rendered ──────────────────────────────────────────
+  var state = { events: [], selected: null, coming: {}, mine: {} };
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function dayOf(record, long) {
+    var p = record.date.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return d.toLocaleDateString(undefined, long ? { weekday: 'long', day: 'numeric', month: 'long' } : { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+  function order(events) {
+    var t = today();
+    var key = function (e) { return e.record.date + (e.record.time || ''); };
+    var up = events.filter(function (e) { return e.record.date >= t; }).sort(function (a, b) { return key(a) < key(b) ? -1 : 1; });
+    var past = events.filter(function (e) { return e.record.date < t; }).sort(function (a, b) { return key(a) > key(b) ? -1 : 1; });
+    return up.concat(past);
+  }
+  function renderFacts(ev) {
+    var isPast = ev && ev.record.date < today();
+    $('[data-next-kicker]').textContent = !ev ? 'Next meeting' : isPast ? 'Last meeting' : 'Next meeting';
+    $('[data-when]').textContent = ev ? dayOf(ev.record) : '—';
+    $('[data-when-sub]').textContent = ev ? (ev.record.time ? (ev.record.ends ? ev.record.time + ' – ' + ev.record.ends : 'at ' + ev.record.time) : 'Time posted here') : 'Weekly · see the calendar';
+    $('[data-where]').textContent = ev ? ev.record.where.split(',')[0] : '—';
+    $('[data-where-sub]').textContent = ev ? (ev.record.where.split(',').slice(1).join(',').trim() || ev.record.title) : 'Free, all welcome';
+    var join = $('[data-join]');
+    join.disabled = !ev || isPast;
+    join.querySelector ? null : null;
+  }
+  function renderWho(ev) {
+    var list = $('[data-who-list]'), none = $('[data-who-none]'), count = $('[data-who-count]');
+    list.textContent = '';
+    var rows = ev ? (state.coming[ev.sig] || []).filter(function (r) { return r.going === 'yes'; }) : [];
+    count.textContent = rows.length ? '(' + rows.length + ')' : '';
+    $('[data-who-title]').textContent = ev && ev.record.date < today() ? 'Who came' : "Who's coming";
+    rows.forEach(function (r) {
+      var li = document.createElement('li');
+      li.textContent = r.who;
+      if (ev && state.mine[ev.sig] === r.member) li.className = 'you';
+      list.appendChild(li);
+    });
+    none.hidden = rows.length > 0;
+    none.textContent = !ev ? 'No meeting to join yet.' : ev.record.date < today() ? 'Nobody said they were coming.' : 'Nobody has said yet. Be the first.';
+    // A meeting hosted by another community: a visitor joins it there.
+    var away = ev && !baseFor(ev.record.host);
+    var panel = $('[data-join-panel]');
+    if (away) {
+      panel.classList.add('open');
+      $('[data-join-form]').hidden = true;
+      var st = $('[data-join-state]');
+      st.textContent = 'This meeting is hosted by ' + ev.record.host + '. ';
+      var a = document.createElement('a'); a.href = 'https://' + ev.record.host + '/'; a.textContent = 'Join it there'; st.appendChild(a); st.appendChild(document.createTextNode('.'));
+    } else {
+      $('[data-join-form]').hidden = false;
+    }
+  }
+  function renderCards() {
+    var strip = $('[data-scroller]'), empty = $('[data-empty]');
+    strip.textContent = '';
+    var t = today();
+    var ordered = order(state.events);
+    empty.hidden = ordered.length > 0;
+    ordered.forEach(function (ev) {
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'card' + (ev.record.date < t ? ' past' : '') + (baseFor(ev.record.host) ? '' : ' away');
+      card.setAttribute('role', 'listitem');
+      card.setAttribute('aria-pressed', state.selected && state.selected.sig === ev.sig ? 'true' : 'false');
+      var rows = (state.coming[ev.sig] || []).filter(function (r) { return r.going === 'yes'; });
+      var count = state.coming[ev.sig] ? (rows.length + (ev.record.date < t ? ' came' : ' coming')) : (baseFor(ev.record.host) ? '…' : 'at ' + ev.record.host);
+      card.innerHTML = '<span class="mini"></span><span class="day"></span><span class="place"></span><span class="count"></span>';
+      card.children[0].textContent = ev.record.title;
+      card.children[1].textContent = dayOf(ev.record) + (ev.record.time ? ' · ' + ev.record.time + (ev.record.ends ? '–' + ev.record.ends : '') : '');
+      card.children[2].textContent = ev.record.where;
+      card.children[3].textContent = count;
+      card.addEventListener('click', function () { select(ev); $('[data-next]').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+      strip.appendChild(card);
+    });
+  }
+  function select(ev) {
+    state.selected = ev;
+    renderFacts(ev); renderWho(ev); renderCards();
+    if (ev && !state.coming[ev.sig]) {
+      readComing(ev).then(function (rows) { state.coming[ev.sig] = rows; if (state.selected === ev) renderWho(ev); renderCards(); });
+    }
+  }
+  function load() {
+    return readEvents().then(function (events) {
+      state.events = events;
+      var ordered = order(events);
+      var upcoming = ordered.filter(function (e) { return e.record.date >= today(); });
+      select(upcoming[0] || ordered[0] || null);
+      // Counts for every card, quietly.
+      ordered.forEach(function (ev) {
+        if (state.coming[ev.sig] || !baseFor(ev.record.host)) return;
+        readComing(ev).then(function (rows) { state.coming[ev.sig] = rows; renderCards(); if (state.selected === ev) renderWho(ev); });
+      });
+    });
+  }
+
+  // ── joining: pick a name, you're in ─────────────────────────────────
+  var panel = $('[data-join-panel]'), form = $('[data-join-form]'), stateLine = $('[data-join-state]');
+  $('[data-join]').addEventListener('click', function () {
+    panel.classList.add('open');
+    var input = $('[data-name]');
+    if (!form.hidden) { input.focus(); }
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+  function receiptLink(ev, member) {
+    return PAGE_URL + '?event=' + ev.sig + '&rsvp=' + member;
+  }
+  function showReceipt(ev, who, member) {
+    stateLine.textContent = '';
+    var b = document.createElement('b'); b.textContent = "You're in, " + who + '.'; stateLine.appendChild(b);
+    stateLine.appendChild(document.createTextNode(' Keep your receipt: '));
+    var a = document.createElement('a'); a.href = receiptLink(ev, member); a.textContent = 'this link'; stateLine.appendChild(a);
+    stateLine.appendChild(document.createTextNode(' shows your name on the list whenever you open it.'));
+  }
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var ev = state.selected;
+    var who = $('[data-name]').value.trim();
+    if (!ev || !who) return;
+    var send = $('[data-join-send]');
+    send.disabled = true;
+    stateLine.textContent = 'Signing your name…';
+    say('Joining');
+    var done = false;
+    var finish = function (handler) { return function (evt) {
+      if (done || !evt.detail || evt.detail.event !== ev.sig) return;
+      done = true; cleanup(); handler(evt.detail);
+    }; };
+    var onDone = finish(function (d) {
+      state.mine[ev.sig] = d.member;
+      showReceipt(ev, who, d.member);
+      say("You're in, " + who);
+      delete state.coming[ev.sig];
+      readComing(ev).then(function (rows) { state.coming[ev.sig] = rows; renderWho(ev); renderCards(); });
+    });
+    var onError = finish(function (d) {
+      stateLine.textContent = "That didn't go through: " + (d.reason || 'the host said no') + '.';
+      send.disabled = false;
+    });
+    var cleanup = function () {
+      clearTimeout(timer);
+      document.removeEventListener('hc:rsvp:done', onDone);
+      document.removeEventListener('hc:rsvp:error', onError);
+      send.disabled = false;
+    };
+    document.addEventListener('hc:rsvp:done', onDone);
+    document.addEventListener('hc:rsvp:error', onError);
+    var timer = setTimeout(function () {
+      if (done) return;
+      done = true; cleanup();
+      stateLine.textContent = "Joining isn't available on this copy of the page. Open " + PAGE_URL + ' to join.';
+    }, 12000);
+    // The hive's RsvpDrone hears this, signs the claim with this device's key,
+    // writes it to the meeting's host, and answers on the document.
+    document.dispatchEvent(new CustomEvent('hc:rsvp', { detail: { event: ev.sig, host: ev.record.host, name: who, going: 'yes' } }));
+  });
+
+  // A receipt link: the claim is read back from the pool it went into. No
+  // storage is asked for anything — the link IS what you kept.
+  function checkReceipt() {
+    var q = new URLSearchParams(location.search);
+    var sig = String(q.get('event') || '').toLowerCase(), member = String(q.get('rsvp') || '').toLowerCase();
+    if (!SIG.test(sig) || !SIG.test(member)) return;
+    var ev = state.events.filter(function (e) { return e.sig === sig; })[0];
+    if (!ev) return;
+    var base = baseFor(ev.record.host) || ev.base;
+    sha256('rsvp:' + sig).then(function (pool) { return readJson(base, pool + '/' + member); }).then(function (claim) {
+      select(ev);
+      panel.classList.add('open');
+      if (!claim) { stateLine.textContent = 'That receipt is not on the list.'; return; }
+      var tag = function (k) { var t = (claim.tags || []).filter(function (t) { return t[0] === k; })[0]; return t ? String(t[1] || '') : ''; };
+      state.mine[sig] = member;
+      stateLine.textContent = '';
+      var b = document.createElement('b');
+      b.textContent = tag('going') === 'yes' ? "You're on the list for " + dayOf(ev.record, true) + ' as ' + tag('name') + '.' : 'You said you were not coming on ' + dayOf(ev.record, true) + '.';
+      stateLine.appendChild(b);
+      renderWho(ev);
+    });
+  }
+
+  renderFacts(null); renderWho(null); renderCards();
+  load().then(checkReceipt, function () {});
+
+  // Quiet motion, never where it could hide content.
+  var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (still || !('IntersectionObserver' in window) || !window.innerHeight) return;
+  var marks = root.querySelectorAll('[data-reveal]');
+  var shown = 0;
+  var show = function (el) { if (!el.classList.contains('in')) { el.classList.add('in'); shown++; } };
+  root.classList.add('motion');
+  var seen = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { if (e.isIntersecting) { show(e.target); seen.unobserve(e.target); } });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.06 });
+  for (var i = 0; i < marks.length; i++) {
+    marks[i].style.setProperty('--d', (i < 3 ? i * 110 : 0) + 'ms');
+    if (marks[i].getBoundingClientRect().top < window.innerHeight) {
+      (function (el) { requestAnimationFrame(function () { show(el); }); })(marks[i]);
+    } else seen.observe(marks[i]);
+  }
+  setTimeout(function () { if (shown === 0) { seen.disconnect(); root.classList.remove('motion'); } }, 2500);
+})();
+</script>
+</body>
+</html>

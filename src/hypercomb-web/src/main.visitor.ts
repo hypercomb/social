@@ -218,6 +218,7 @@ if (arrivalTrial) startArrivalTrial(EffectBus, arrivalTrial)
 //     location is genuinely settled-empty — the splash contract.
 const siteLoader = document.querySelector('.site-loading')
 if (siteLoader) document.body.appendChild(siteLoader)
+let siteOwnsLoader = false
 const removeSiteLoader = (): void => {
   const el = document.querySelector('.site-loading')
   if (!el) return
@@ -236,9 +237,32 @@ const removeSiteLoader = (): void => {
   let offCells: (() => void) | undefined
   const onVerdict = (view: string): void => {
     if (view) {
+      siteOwnsLoader = true
       const tick = (): void => {
-        if (document.body.classList.contains('hc-view-covered')) removeSiteLoader()
-        else requestAnimationFrame(tick)
+        const host = document.getElementById('hc-site-view-host')
+        if (!document.body.classList.contains('hc-view-covered') || !host) {
+          requestAnimationFrame(tick)
+          return
+        }
+
+        // The covered class is applied as soon as the view mode changes. It
+        // only hides the hive canvas; the page host and its scripts may still
+        // be mounting. In particular, the business card builds its 3D stage
+        // asynchronously and marks `scene-live` when its first animation frame
+        // is ready. Keep the blank cover over the old edit view until that
+        // signal arrives, so neither the old view nor an unfinished card frame
+        // can flash between the two.
+        const waitsForScene = host.classList.contains('card-open') || !!host.querySelector('#stageHost')
+        if (waitsForScene && !host.classList.contains('scene-live')) {
+          requestAnimationFrame(tick)
+          return
+        }
+
+        // Let the host and its styles paint before fading the cover away.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          siteOwnsLoader = false
+          removeSiteLoader()
+        }))
       }
       tick()
       return
@@ -261,7 +285,7 @@ const removeSiteLoader = (): void => {
   })
   // Failsafe: a boot that never reaches a verdict (engine error, unreachable
   // index) must not strand the visitor behind an eternal cover.
-  setTimeout(removeSiteLoader, 25_000)
+  setTimeout(() => { if (!siteOwnsLoader) removeSiteLoader() }, 25_000)
 }
 
 await import('./main')

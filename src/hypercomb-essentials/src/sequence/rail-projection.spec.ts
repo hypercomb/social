@@ -13,6 +13,23 @@ import { LANE_VIEWPORT_EFFECT, setLaneCount } from './lane-viewport-mode.js'
 
 type Matrix = ReadonlyMap<number, { q: number; r: number }>
 const CAPACITY = 12
+const VIEWPORT_KEY = '@diamondcoreprocessor.com/ViewportPersistence'
+
+type Zoom = { scale: number; cx: number; cy: number; fit?: boolean }
+type Pan = { dx: number; dy: number }
+/** The viewport mirror the zoom and pan drones report into, as the rail sees it. */
+const viewportStub = (zoom: Zoom, pan: Pan) => {
+  const vp = Object.assign(new EventTarget(), {
+    lastZoom: zoom as Zoom | undefined,
+    lastPan: pan as Pan | undefined,
+    setZoom: vi.fn(),
+    setPan: vi.fn(),
+    restored: [] as unknown[],
+  })
+  vp.addEventListener('restore', (e) => vp.restored.push((e as CustomEvent).detail))
+  services.set(VIEWPORT_KEY, vp)
+  return vp
+}
 
 const services = new Map<string, unknown>()
 ;(globalThis as unknown as { ioc: unknown }).ioc = {
@@ -85,6 +102,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  services.delete(VIEWPORT_KEY)
   drone.markDisposed()
   vi.restoreAllMocks()
   for (const [type, fn] of listeners) window.removeEventListener(type, fn)
@@ -208,6 +226,113 @@ describe('rail projection — the phone posture', () => {
     expect(project).toHaveBeenCalledTimes(1)
     expect(drone.active).toBe(true)
     expect(last('lanes:changed')).toEqual({ active: true, lanes: 3 })
+  })
+
+  it('toggling hands each posture back the zoom and position it last had on the page', async () => {
+    const vp = viewportStub({ scale: 2, cx: 10, cy: 20 }, { dx: 5, dy: 6 })
+    await beat()
+    // First time in the strip here: nothing parked for it, so it fits.
+    EffectBus.emit('render:cell-count', { settled: true })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(zoomToFit).toHaveBeenCalledTimes(1)
+    expect(vp.restored).toEqual([])
+
+    // The participant reads down the strip, then asks for the map back.
+    vp.lastZoom = { scale: 1, cx: 0, cy: 0, fit: true }
+    vp.lastPan = { dx: 0, dy: 300 }
+    EffectBus.emit('lanes:toggle', {})
+    expect(drone.active).toBe(false)
+    EffectBus.emit('render:cell-count', { settled: false })
+    await vi.advanceTimersByTimeAsync(100)
+    // The map comes back exactly as it was left — no fit.
+    expect(zoomToFit).toHaveBeenCalledTimes(1)
+    expect(vp.setZoom).toHaveBeenLastCalledWith(2, 10, 20, false, 'auto-persist')
+    expect(vp.setPan).toHaveBeenLastCalledWith(5, 6, 'auto-persist')
+    expect(vp.restored).toEqual([{ zoom: { scale: 2, cx: 10, cy: 20 }, pan: { dx: 5, dy: 6 } }])
+
+    // Roam the map, then back to the strip: it resumes where the reading stopped.
+    vp.lastZoom = { scale: 3, cx: 1, cy: 1 }
+    vp.lastPan = { dx: -4, dy: 0 }
+    EffectBus.emit('lanes:toggle', {})
+    expect(drone.active).toBe(true)
+    EffectBus.emit('render:cell-count', { settled: true })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(zoomToFit).toHaveBeenCalledTimes(1)
+    expect(vp.setZoom).toHaveBeenLastCalledWith(1, 0, 0, true, 'auto-persist')
+    expect(vp.setPan).toHaveBeenLastCalledWith(0, 300, 'auto-persist')
+    expect(vp.restored).toHaveLength(2)
+
+    // And the map again, as the roaming left it.
+    EffectBus.emit('lanes:toggle', {})
+    EffectBus.emit('render:cell-count', { settled: true })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(zoomToFit).toHaveBeenCalledTimes(1)
+    expect(vp.setZoom).toHaveBeenLastCalledWith(3, 1, 1, false, 'auto-persist')
+    expect(vp.setPan).toHaveBeenLastCalledWith(-4, 0, 'auto-persist')
+  })
+
+  it('a parked strip is for one long axis: a rotation fits the strip afresh', async () => {
+    const vp = viewportStub({ scale: 2, cx: 10, cy: 20 }, { dx: 5, dy: 6 })
+    await beat()
+    EffectBus.emit('render:cell-count', { settled: true })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(zoomToFit).toHaveBeenCalledTimes(1)
+
+    vp.lastZoom = { scale: 1, cx: 0, cy: 0 }
+    EffectBus.emit('lanes:toggle', {})
+    EffectBus.emit('render:cell-count', { settled: true })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(zoomToFit).toHaveBeenCalledTimes(1)
+
+    // Back into the strip, but held the other way: that axis has no parked
+    // reading, so it fits.
+    landscape()
+    EffectBus.emit('lanes:toggle', {})
+    EffectBus.emit('render:cell-count', { settled: true })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(zoomToFit).toHaveBeenCalledTimes(2)
+
+    // Turning the phone re-fits, even where a reading was parked.
+    portrait()
+    await rotate()
+    EffectBus.emit('render:cell-count', { settled: true })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(zoomToFit).toHaveBeenCalledTimes(3)
+    expect(vp.restored).toHaveLength(1)
+  })
+
+  it('never more lanes than tiles: two tiles read in two lanes, and the third brings the third lane', async () => {
+    EffectBus.emit('render:cell-count', { count: 2, settled: true })
+    await beat()
+    expect(project).toHaveBeenCalledTimes(1)
+    for (let slot = 0; slot < CAPACITY; slot++) expect(matrixAt(0).get(slot)).toEqual(railCoord(slot, 2, false))
+    expect(last('lanes:changed')).toEqual({ active: true, lanes: 2 })
+    expect(last('render:grid-changed')).toEqual({ active: true, lanes: 2, horizontal: false })
+
+    // The render after the projection fits, as ever.
+    EffectBus.emit('render:cell-count', { count: 2, settled: true })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(zoomToFit).toHaveBeenCalledTimes(1)
+    expect(project).toHaveBeenCalledTimes(1)
+
+    // A third tile streaming in is not yet a count; settled, it widens the strip.
+    EffectBus.emit('render:cell-count', { count: 3, settled: false })
+    expect(project).toHaveBeenCalledTimes(1)
+    EffectBus.emit('render:cell-count', { count: 3, settled: true })
+    expect(project).toHaveBeenCalledTimes(2)
+    expect(matrixAt(1).get(0)).toEqual(railCoord(0, 3, false))
+    expect(last('lanes:changed')).toEqual({ active: true, lanes: 3 })
+    // ...and the render that follows the wider strip fits it.
+    EffectBus.emit('render:cell-count', { count: 3, settled: true })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(zoomToFit).toHaveBeenCalledTimes(2)
+
+    // One tile: one lane. Many: three, never more.
+    EffectBus.emit('render:cell-count', { count: 1, settled: true })
+    expect(matrixAt(2).get(0)).toEqual(railCoord(0, 1, false))
+    EffectBus.emit('render:cell-count', { count: 40, settled: true })
+    expect(matrixAt(3).get(1)).toEqual(railCoord(1, 3, false))
+    expect(project).toHaveBeenCalledTimes(4)
   })
 
   it('owns the orientation only while active — the standing preference comes back on release', async () => {
