@@ -170,7 +170,7 @@ Registered by `TileActionsDrone` when `render:host-ready` fires:
 | `edit` | Font `2` | x:-2, y:5 | Blue `0xc8d8ff` | Always | Emits `tile:action` (editor listens) |
 | `remove` | SVG (trash can) | x:7.9375, y:5 | Red `0xffc8c8` | Always | Emits `cell:removed` |
 | `search` | SVG (magnifier) | x:19.25, y:5 | Green `0xc8ffc8` | `noImage` only | Prefills search with label |
-| `toggle-text` | Font `J` | x:8.625, y:5 | Yellow `0xfff0c8` | Always | Emits `tile:toggle-text` |
+| `toggle-text` | retired 2026-05-20 | — | — | — | Now the `/image-only` word and the rail's image-only button (`presentation/tiles/image-only.queen.ts`); `tile:toggle-text` carries `{ imageOnly }` |
 | `toggle-visibility` | SVG (eye) | x:19.25, y:5 | Cyan `0xc8e8ff` | Has image only | Toggles hidden state in localStorage |
 
 ### Public-Own Profile

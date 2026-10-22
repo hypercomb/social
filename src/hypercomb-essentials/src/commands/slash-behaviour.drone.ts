@@ -850,7 +850,16 @@ class TextOnlyProvider implements SlashBehaviourProvider {
       examples: [{ input: '/text-only', result: 'Tiles render labels only; repeat to restore images' }] }
   ]
 
+  // Tracked from the bus, not from this word alone: the rail button and the
+  // image-only queen (which turns text only off when image only comes on) set
+  // the same mode, and a count kept here alone drifted from the picture.
   #active = false
+
+  constructor() {
+    EffectBus.on<{ textOnly?: boolean } | undefined>('render:set-text-only', p => {
+      if (p?.textOnly != null) this.#active = p.textOnly
+    })
+  }
 
   execute(): void {
     this.#active = !this.#active

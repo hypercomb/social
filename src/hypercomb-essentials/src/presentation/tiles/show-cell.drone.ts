@@ -7319,10 +7319,15 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // toggle tile label text visibility via shader uniform
-    this.onEffect('tile:toggle-text', () => {
-      this.#labelsVisible = !this.#labelsVisible
-      this.shader?.setLabelMix(this.#labelsVisible ? 1.0 : 0.0)
+    // Image only — every name off, via the shader's label mix. The payload
+    // states the mode (`{ imageOnly }`, image-only.queen.ts) so a replay to a
+    // late subscriber lands on the same side as everyone else; a bare emit
+    // still flips, as the retired overlay icon did.
+    this.onEffect<{ imageOnly?: boolean } | undefined>('tile:toggle-text', (p) => {
+      const visible = p?.imageOnly == null ? !this.#labelsVisible : !p.imageOnly
+      if (visible === this.#labelsVisible) return
+      this.#labelsVisible = visible
+      this.shader?.setLabelMix(visible ? 1.0 : 0.0)
     })
 
     // show hidden items grayed out when eye toggle is active

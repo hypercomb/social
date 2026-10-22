@@ -143,6 +143,12 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // mesh-header — it now lives beside the solo/swarm icon and only shows in
   // swarm mode (see MeshHeaderComponent).
   { id: 'text-only',    label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
+  // Image only is text only's pair — names off instead of pictures off. It
+  // SAYS THE WORD (`/image-only`, presentation/tiles/image-only.queen.ts):
+  // with nothing selected every name on the page goes quiet, with a selection
+  // the selected tiles' own name switch flips and is saved. The queen owns
+  // both scopes; this entry is only a door into it.
+  { id: 'image-only',   label: 'controls.image-only',   action: 'toggleImageOnly',    visibleWhen: 'always' },
   // 'notes' moved to the command-line header (the post-it toggle at the right
   // of the input) — notes ride along with every page, so their switch lives in
   // the top chrome now, not here.
@@ -199,6 +205,7 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   // the fit flyout now. Edit mode re-enables them for trackpad-less setups.
   'back': true, 'fit': true, 'lanes': true, 'zoom-out': false, 'zoom-in': false, 'pin': true, 'fullscreen': true,
   'text-only': false,
+  'image-only': false,
   'pools': true,
   'chat': false,
   'sequences': false,
@@ -564,6 +571,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // so the launcher lights while the default view is up.
   #hasSelection = signal(false)
   #textOnly = signal(false)
+  #imageOnly = signal(false)
   #layoutPinned = signal(false)
   #tags = signal<{ name: string; count: number }[]>([])
   #activeTagFilters = signal<Set<string>>(new Set())
@@ -833,6 +841,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleFullscreen: () => this.toggleFullscreen(),
     toggleShowHidden: () => this.toggleShowHidden(),
     toggleTextOnly: () => this.toggleTextOnly(),
+    toggleImageOnly: () => this.toggleImageOnly(),
     openPools: () => this.openPools(),
     toggleChat: () => EffectBus.emit('chat:toggle', {}),
     openSequences: () => EffectBus.emit('sequence:view-open', {}),
@@ -866,6 +875,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'fit': return this.fitLocked()
       case 'lanes': return this.lanesActive()
       case 'text-only': return this.#textOnly()
+      case 'image-only': return this.#imageOnly()
       case 'bees': return this.#beesVisible()
       case 'voice': return this.voiceActive()
       default: return false
@@ -902,6 +912,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'pin':          return 'push_pin'
       case 'fullscreen':   return 'fullscreen'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
+      case 'image-only':   return 'image'
       // Not a map pin: Portals is a way OUT of this page into another root,
       // the same act as the installer beside it.
       case 'pools':        return 'nearby'
@@ -1272,6 +1283,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly moveMode = this.#moveMode.asReadonly()
   readonly hasSelection = this.#hasSelection.asReadonly()
   readonly textOnly = this.#textOnly.asReadonly()
+  readonly imageOnly = this.#imageOnly.asReadonly()
   readonly layoutPinned = this.#layoutPinned.asReadonly()
   readonly tags = this.#tags.asReadonly()
 
@@ -1479,6 +1491,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #voiceActiveUnsub: (() => void) | null = null
   #showHiddenUnsub: (() => void) | null = null
   #textOnlyUnsub: (() => void) | null = null
+  #imageOnlyUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
   #hostsOpenUnsub: (() => void) | null = null
@@ -1811,6 +1824,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.#textOnlyUnsub = EffectBus.on<{ textOnly: boolean }>('render:set-text-only', ({ textOnly }) => {
       this.#textOnly.set(textOnly)
+    })
+
+    // Image only lights from the stated mode; a bare (legacy) emit says nothing.
+    this.#imageOnlyUnsub = EffectBus.on<{ imageOnly?: boolean } | undefined>('tile:toggle-text', (p) => {
+      if (p?.imageOnly != null) this.#imageOnly.set(p.imageOnly)
     })
 
     // emit initial show-hidden state so drones pick it up
@@ -2224,6 +2242,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#voiceActiveUnsub?.()
     this.#showHiddenUnsub?.()
     this.#textOnlyUnsub?.()
+    this.#imageOnlyUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardOpenUnsub?.()
     this.#hostsOpenUnsub?.()
@@ -3001,6 +3020,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const next = !this.#textOnly()
     this.#textOnly.set(next)
     EffectBus.emit('render:set-text-only', { textOnly: next })
+  }
+
+  /** Says `/image-only`: the queen decides the scope (page or selection) and
+   *  states the result on `tile:toggle-text`, which lights this icon. Transient
+   *  so a late subscriber to `controls:action` never replays the click. */
+  readonly toggleImageOnly = (): void => {
+    EffectBus.emitTransient('controls:action', { action: 'image-only' })
   }
 
   readonly toggleLayout = (): void => {

@@ -52,6 +52,7 @@ const { StoryQueenBee } = await import('../games/story.queen.js')
 ioc.register('@diamondcoreprocessor.com/StoryQueenBee', new StoryQueenBee())
 await import('../history/undo.queen.js')
 await import('../presentation/tiles/hide.queen.js')
+await import('../presentation/tiles/image-only.queen.js')
 await import('../presentation/tiles/organism.queen.js')
 await import('../references/gather/feed.queen.js')
 await import('../references/gather/from.queen.js')
@@ -85,6 +86,11 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   undo: ['editing', 'hive'],           // a cursor; the hive refuses writes while rewound
   redo: ['editing', 'hive'],
   hide: ['editing', 'network'],        // a flag, published as a signed mesh event
+  // Judged on arrival (2026-10-22, image only — "what happened to image only as
+  // a left sidebar option?").
+  'image-only': ['editing', 'tile'],   // bare with nothing selected is a lens here; with a
+                                       // selection it writes those tiles' own name switch, a
+                                       // layer commit each, so the tile is the ceiling
   organism: ['editing', 'local'],      // a projection, never a commit
   // Corrected by the audit.
   module: ['additive', 'local'],       // was editing/network: list only; drop is the participant's

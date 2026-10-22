@@ -172,7 +172,12 @@ export class TileNameDrone extends Drone {
     this.onEffect('render:set-text-only', () => this.#refreshAll())
     // A live edit (the tile editor's preview) changed whether a name shows.
     this.onEffect('render:name-visibility', () => this.#refreshAll())
-    this.onEffect('tile:toggle-text', () => { this.#visible = !this.#visible; if (this.#root) this.#root.hidden = !this.#visible })
+    // Image only states its mode (`{ imageOnly }`, image-only.queen.ts); a
+    // bare emit still flips.
+    this.onEffect<{ imageOnly?: boolean } | undefined>('tile:toggle-text', (p) => {
+      this.#visible = p?.imageOnly == null ? !this.#visible : !p.imageOnly
+      if (this.#root) this.#root.hidden = !this.#visible
+    })
     this.onEffect<HoverPayload>('tile:hover', (p) => { this.#hovered = p?.label ?? null; this.#refreshAll() })
     // Depths belong to a page: arriving somewhere else drops them, so a count
     // from the last page never lands on a same-named tile of this one.
