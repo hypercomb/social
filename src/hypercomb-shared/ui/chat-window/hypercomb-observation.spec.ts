@@ -394,6 +394,18 @@ describe('/find under a route', () => {
     expect(read).not.toHaveProperty('stoppedBy')
   })
 
+  // 2026-10-22: correct whole finds were flagged "could not confirm" 3 times in
+  // 9 because the model added statements the reads do not hold. Eight runs
+  // clean once a whole find's receipt said to give the routes and stop.
+  it('tells the model a whole find is the routes and nothing more, and a cut one something else', async () => {
+    const whole = await receiptOf(cutFind({ truncated: false, matches: [{ name: 'betz', path: '/people/betz' }] }))
+    expect(String(whole['answerNote'])).toMatch(/give the routes and stop/)
+    expect(whole).not.toHaveProperty('truncatedNote')
+    const cut = await receiptOf(cutFind({ truncated: true }))
+    expect(cut).not.toHaveProperty('answerNote')
+    expect(cut).toHaveProperty('truncatedNote')
+  })
+
   it('names the branches a cut find did not finish, in place of the narrower-route advice', async () => {
     const cut = await receiptOf(cutFind({
       matches: [{ name: 'betz', path: '/people/betz' }],

@@ -872,6 +872,13 @@ const cutNoteOf = (found: Extract<HypercombFindRead, { ok: true }>): Record<stri
   }
 }
 
+/** What a WHOLE find lets the model say. The walk finished, so the routes are
+ *  the answer; the extras the cheap models add ("both live under the root",
+ *  "want me to open either?") are statements the reads do not hold, and Jev,
+ *  who judges every statement, then says it could not confirm a correct answer
+ *  (live 2026-10-22: 3 of 9 correct finds flagged, supported .44 to .75). */
+const WHOLE_FIND_NOTE = 'the walk finished, so this is every match under the route: give the routes and stop; do not describe where they sit, do not guess what they are, do not add offers or questions'
+
 /** JSON keeps hostile labels data-shaped. Snapshot handles stay host-private. */
 export const formatHypercombObservationReceipt = (
   receipt: HypercombObservationReceipt,
@@ -902,7 +909,7 @@ export const formatHypercombObservationReceipt = (
       return found.ok
         ? {
           grammar, root: found.root, query: found.query, matches: found.matches, truncated: found.truncated,
-          ...(found.truncated ? cutNoteOf(found) : {}),
+          ...(found.truncated ? cutNoteOf(found) : { answerNote: WHOLE_FIND_NOTE }),
           ...scope,
         }
         : { grammar, root: read.root, error: found.code, ...scope }
