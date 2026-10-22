@@ -213,6 +213,12 @@ service = "hypercomb-meet-open"
 # service = "hypercomb-meet"
 
 [vars]
+# WHO SPEAKS FOR A ZONE (worker.js siteOperators): the operator's signed index
+# may list pools for every door here (`hosts list <meaning> @hypercomb.com`)
+# and may carry the zone's binding artifact (`binding:<zone>`), which replaces
+# SITE_BINDINGS for that zone only when every link verifies. jwize for
+# hypercomb.com, set 2026-10-22 so `calendar:events` is listed at its address.
+SITE_OPERATORS = '{"hypercomb.com":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a"}'
 # The front door every frontDoor apex serves: the shim host card, a static
 # Pages deployment (npm --prefix hypercomb-shim run host:deploy -- --project hypercomb-host).
 HOST_DOOR_ORIGIN = "https://hypercomb-host.pages.dev"
