@@ -12,11 +12,17 @@ answers to the questions just like the notes; then the host can tally the
 results" · "the name of the game is important so we can say `start hypercomb
 q and a`".*
 
-**Status: built, pass one, proven two-browser 16/16**
-(`hypercomb-essentials/src/questions/`, proof `scripts/drive-questions-game.cjs
---url http://localhost:4253/ --relay ws://localhost:7777`). Played through the
-swarm and the notes desk as they are; the game adds three words, one mark,
-one door and one settle.
+**Status: built, pass two.** Proven two-browser 21/21
+(`scripts/drive-questions-game.cjs --url http://localhost:4253/ --relay
+ws://localhost:7777`: the words, the door, answers, takes, the tally, a
+category materializing from the namer, a thinned category retracting, the
+tree tally from the ledger) and the host's copy 15/15
+(`scripts/drive-questions-host-copy.cjs --url http://localhost:4253/`: a
+third browser arriving after host and guest left reads the game, its
+category, its question, the answer and the tally from the room's host).
+Module `hypercomb-essentials/src/questions/`. Played through the swarm and
+the notes desk as they are; the game adds three words, one mark, one door,
+one settle and one ledger.
 
 ## The game in sentences
 
@@ -69,38 +75,84 @@ arcade game.
 
 ## The settle — layers materialize and retract
 
-The organizer runs one pass a few seconds after the room changes (a peer
-tile appears, a tile is added), coalesced, and only while standing on the
-page it organizes:
+The organizer runs one pass over the game's **whole tree** a few seconds
+after the room changes (a peer tile appears, a tile is added), coalesced:
 
-1. **Take** every peer tile on the page not already held — the room's
-   questions become the organizer's to file. A placeholder with no bytes
-   yet waits for the next pass.
-2. **Place** each question: Jev (when switched on and allowed to read the
-   hive) files it into one of the page's categories — any non-question
-   tile, including ones the host laid out beforehand; else the
-   participant's own AI does. Questions no category fits are shown to the
-   AI for new names (two to four words, each fitting at least two
-   questions), then filed among those.
-3. **Plan** (`settlePlan`, pure, spec-covered): a label with at least
+1. **Take** every peer tile on the page the organizer stands on, when that
+   page is in the game — the room's questions become the organizer's to
+   file. Peers' tiles are only ever read for the page in front of you, so
+   this is the one step bound to where the organizer stands. A placeholder
+   with no bytes yet waits for the next pass.
+2. **Walk** the tree from the game's tile: its page, then every category (a
+   non-question tile with tiles inside) beneath it, three levels deep.
+3. **Place** each page's questions: Jev (when switched on and allowed to
+   read the hive) files each into one of the page's categories — any
+   non-question tile, including ones the host laid out beforehand; else the
+   participant's own AI does. Questions no category fits go to **the
+   namer** (`Questions.suggestNames`, the participant's AI; two-to-four-word
+   names, each fitting at least two questions), then are filed among those.
+   The namer is a method on the service on purpose: a harness, or a
+   participant's own module, can stand another namer in.
+4. **Plan** (`settlePlan`, pure, spec-covered): a label with at least
    `MIN_TO_MATERIALIZE` (2) questions **materializes** as a new tile and
    they move inside; an existing tile under the label receives even one;
-   a category left with fewer than two questions **retracts** — they come
-   back up, and the tile goes if nothing else was inside it.
-4. **Apply** with `MoveDrone.commitMoveInto`, the primitive drag-into,
+   a category **the settle itself minted** that is left with fewer than two
+   questions **retracts** — they come back up, and the tile goes if nothing
+   else was inside it. A tile the host laid out is their structure: it
+   keeps even one question and never retracts. (Minted categories are
+   remembered for the game being played; after a reload nothing retracts
+   that this hive did not materialize since.)
+5. **Apply** with `MoveDrone.commitMoveInto`, the primitive drag-into,
    `/into` and organize already use: one marker per group, undoable, name
    collisions skipped.
 
 Without Jev or an AI that may read the hive, nothing moves and the
-organizer is told once. Categories inside categories (the tree) settle the
-same way when the organizer stands inside one.
+organizer is told once. `Questions.lastSettle` holds the last pass, page by
+page — what each page held, what the plan said, how many moved — for
+anyone checking the game's state.
+
+## The ledger — what this hive has seen
+
+The swarm is read for the page you stand on: peers' answers to a question
+reach this hive only while it stands where that question is. So the
+organizer's hive keeps a **ledger** of the answers it has seen — per
+question, each answer's words, who gave it, and everyone ever seen holding
+it. It is fed by every swarm-notes read while standing on a page, and by
+the reads the service asks for a moment after the page renders or the room
+changes (the same moment taken questions get their mark back). Holders
+accumulate: a take is not undone by leaving. In memory only, for the game
+being played — never a pool, never persisted.
+
+`tally` standing anywhere in the game walks the whole tree: each question
+gets its `Tally ·` note from what this hive holds plus what the ledger saw,
+and the game's tile gets one `Scoreboard ·`. The page in front of you is
+read live first. Standing outside the game, `tally` counts the page you
+stand on and writes the scoreboard on its tile.
+
+## The host's copy
+
+"There has to be a host that allows the answers to show for everybody." A
+swarm is live — tiles go when their holders leave — and the room's host is
+what stays: the host's shares are the room's **template** on its host
+(RoomPool, [swarm-pools.md](swarm-pools.md) step three), one signed member
+per page the host stood on, pulled by whoever arrives and never expiring.
+So when the HOST plays the organizer — takes the room's questions, takes
+the answers, tallies — a participant who arrives after everyone left still
+gets the game tile at the root, the categories inside it, the questions
+inside those, and each question's answers and tally. Nothing new was
+built for this; the proof `scripts/drive-questions-host-copy.cjs` runs a
+scratch relay that names the host browser as its `_` key and a third
+browser that joins after host and guest have gone. An organizer who is not
+the host key leaves no copy behind — their shares expire with them, as any
+participant's do; a game meant to outlast its players is the host's to run.
 
 ## Pieces
 
 | Piece | Role |
 |---|---|
 | `questions/questions.ts` | pure: the names and marks, `settlePlan`, `parseCategoryNames`, `parsePlacedIndexes`, `rankAnswers`, `scoreboard`, `tallyText`, `boardText` |
-| `questions/questions.service.ts` | `Questions` (`@diamondcoreprocessor.com/Questions`): start, ask, open, settle, tally |
+| `questions/questions.service.ts` | `Questions` (`@diamondcoreprocessor.com/Questions`): start, ask, open, settle (the tree), tally (the tree + the ledger), `seen`, `suggestNames` (the namer seam) |
+| `scripts/drive-questions-game.cjs` · `drive-questions-host-copy.cjs` | the two-browser proof, and the host's-copy proof with a scratch relay |
 | `questions/questions.drone.ts` | the bee: registers the service, claims entry for question tiles, offers the game to `start` |
 | `questions/start.queen.ts` · `question.queen.ts` · `tally.queen.ts` | the three words |
 | `commands/decoration-kind-index.ts` | `claimEntry(kind)` / `entryClaimFor(label)` — kinds that open instead of entering |
@@ -117,15 +169,11 @@ answers.
 
 ## Not yet
 
-- The organizer settles only the page it stands on; walking into a category
-  settles inside it. A pass over the whole tree is owed.
 - A peer's question is recognised as one once taken. Before that it is a
   peer tile like any other — clicking it takes it, as in any swarm.
-- New category names need an AI that may read the hive (Jev only files into
-  categories that exist). The proof stands Jev in on the organizer's page and
-  has the host lay the categories out beforehand; the materialize step is
-  spec-covered, not yet seen live with a model.
-- A pass over the whole tree for `tally`, and a tally that reads what the
-  room's host holds after everyone left.
-- Retract (a category thinning below two questions) is spec-covered, not
-  yet seen live.
+- New category names from a real model: the proof stands the namer and Jev
+  in (no model may read the hive on the dev machine); the materialize and
+  retract steps are proven live with them.
+- The ledger counts what this hive has seen. An answer given on a page the
+  organizer never stood on while it was there is not counted — the tally
+  says what the host saw, never more.

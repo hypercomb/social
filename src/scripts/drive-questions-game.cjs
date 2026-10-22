@@ -206,9 +206,9 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
 
   // ── TALLY ──────────────────────────────────────────────────────────────
   await word(a, '/tally')
-  const tallied = await H.waitFor(async () => ({ q: await notesAt(a, [GAME, 'storage', slug(Q1)]), page: await notesAt(a, [GAME, 'storage']) }),
+  const tallied = await H.waitFor(async () => ({ q: await notesAt(a, [GAME, 'storage', slug(Q1)]), page: await notesAt(a, [GAME]) }),
     v => v.q.some(t => t.startsWith('Tally ·') && /1 take · Ben/.test(t)) && v.page.some(t => t.startsWith('Scoreboard ·') && /Ben — 1 take/.test(t)), 30000, 750)
-  H.check('`tally` ranks the answers on the question and scores the page', tallied.ok, JSON.stringify(tallied.value))
+  H.check('`tally` ranks the answers on the question and scores the game tile', tallied.ok, JSON.stringify(tallied.value))
 
   // ── A QUESTION AT THE ROOT SETTLES INTO ITS CATEGORY ───────────────────
   const Q3 = 'who is dana?'
@@ -219,6 +219,60 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
   const settled = await H.waitFor(async () => { await settleNow(a); return { root: await childrenAt(a, [GAME]), people: await childrenAt(a, [GAME, 'people']) } },
     v => has(v.people, Q3) && !has(v.root, Q3), 90000, 3000)
   H.check('a question asked at the root settles into its category layer', settled.ok, JSON.stringify(settled.value))
+
+  // ── LIVE NAMING: a category nobody laid out materializes, named by the namer
+  // (the participant's AI; stood in for here — no model may read this hive).
+  const namer = await H.evalSafe(() => a.page.evaluate(() => {
+    const q = window.ioc.get('@diamondcoreprocessor.com/Questions')
+    q.suggestNames = async (questions) => questions.some(x => /copper|iron/i.test(x)) ? ['Materials'] : []
+    const jev = window.ioc.get('@hypercomb.social/JevDecision')
+    jev.readyForHive = () => true
+    jev.sort = async ({ notes, categories }) => ({ placed: notes.map(n =>
+      /copper|iron/i.test(n) ? categories.findIndex(k => /materials/i.test(k))
+      : /dana/i.test(n) ? categories.findIndex(k => /people/i.test(k))
+      : /bag|pool/i.test(n) ? categories.findIndex(k => /storage/i.test(k))
+      : -1) })
+    return typeof q.suggestNames === 'function'
+  }))
+  H.check('the namer is a seam a participant can stand another namer in', namer === true)
+  const Q4 = 'what is copper?'
+  const Q5 = 'what is iron?'
+  await word(b, `/question ${Q4}`); await H.sleep(2000)
+  await word(b, `/question ${Q5}`)
+  await H.waitFor(() => childrenAt(b, [GAME]), v => has(v, Q4) && has(v, Q5), 30000, 500)
+  const named = await H.waitFor(async () => { await settleNow(a); return { root: await childrenAt(a, [GAME]), materials: await childrenAt(a, [GAME, 'Materials']) } },
+    v => has(v.root, 'Materials') && has(v.materials, Q4) && has(v.materials, Q5) && !has(v.root, Q4) && !has(v.root, Q5), 90000, 3000)
+  H.check('a category nobody laid out materializes at two questions, named by the namer', named.ok, JSON.stringify(named.value))
+
+  // ── RETRACT: someone files one of its two questions elsewhere by hand; the
+  // thin category comes back up and its tile goes.
+  await H.evalSafe(() => a.page.evaluate(async ({ game, q }) => {
+    const move = window.ioc.get('@diamondcoreprocessor.com/MoveDrone')
+    return (await move.commitMoveInto([q], [game, 'Materials'], [game, 'people'])).length
+  }, { game: GAME, q: slug(Q5) }))
+  const retracted = await H.waitFor(async () => { await settleNow(a); return { root: await childrenAt(a, [GAME]), people: await childrenAt(a, [GAME, 'people']) } },
+    v => has(v.root, Q4) && !has(v.root, 'Materials') && has(v.people, Q5), 90000, 3000)
+  H.check('a category left with one question retracts — it comes up and the tile goes', retracted.ok, JSON.stringify(retracted.value))
+  if (!retracted.ok) console.log('DEBUG lastSettle', JSON.stringify(await H.evalSafe(() => a.page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/Questions').lastSettle.map(p => ({ page: p.page, tiles: p.tiles.map(t => [t.name, t.question ? 'Q' : t.inside.join('|'), t.children]), plan: p.plan, moved: p.moved }))))))
+
+  // ── THE TREE TALLY: standing at the game's root, every question of the tree
+  // is tallied from what this hive holds and what its ledger saw.
+  const ANSWER2 = 'a pool is a folder of meaning'
+  await goTo(b, [GAME, 'storage']); await H.sleep(1500)
+  await write(b, slug(Q2), ANSWER2)
+  await goTo(a, [GAME, 'storage']); await H.sleep(1500)
+  const seenAt = (c, cell) => H.evalSafe(() => c.page.evaluate((cell) =>
+    [...window.ioc.get('@diamondcoreprocessor.com/Questions').seen(cell).values()].map(v => ({ text: v.text, holders: v.holders.size })), cell))
+  const ledger = await H.waitFor(() => seenAt(a, slug(Q2)), v => (v ?? []).some(x => x.text === ANSWER2), 60000, 1500)
+  H.check("the organizer's ledger sees an answer while standing where the question is", ledger.ok, JSON.stringify(ledger.value))
+  await goTo(a, [GAME]); await H.sleep(1500)
+  await word(a, '/tally')
+  const tree = await H.waitFor(async () => ({
+    pool: await notesAt(a, [GAME, 'storage', slug(Q2)]),
+    board: await notesAt(a, [GAME]),
+  }), v => v.pool.some(t => t.startsWith('Tally ·') && t.includes(ANSWER2) && /0 takes · Ben/.test(t))
+      && v.board.some(t => t.startsWith('Scoreboard ·') && /Ben — 1 take, 1 best, 2 answers/.test(t)), 45000, 1000)
+  H.check("tally at the game's root ranks every question in the tree and scores the game tile", tree.ok, JSON.stringify(tree.value))
 
   console.log('\n========== hypercomb q and a ==========')
   for (const x of H.results) console.log(`  ${x.ok ? '✓' : '✗'} ${x.name}${x.detail ? '  — ' + x.detail : ''}`)

@@ -54,22 +54,30 @@ describe('settlePlan — categories materialize and retract by count', () => {
     expect(plan).toEqual({ create: [], move: [], retract: [] })
   })
 
-  it('a category left with too few questions retracts, and goes when nothing else is inside', () => {
-    const plan = settlePlan([cat('Storage', ['what is a pool?']), cat('Mixed', ['one?'], 1)], [])
+  const minted = new Set(['storage', 'mixed'])
+
+  it('a minted category left with too few questions retracts, and goes when nothing else is inside', () => {
+    const plan = settlePlan([cat('Storage', ['what is a pool?']), cat('Mixed', ['one?'], 1)], [], minted)
     expect(plan.retract).toEqual([
       { category: 'Storage', members: ['what is a pool?'], remove: true },
       { category: 'Mixed', members: ['one?'], remove: false },
     ])
   })
 
+  it('a category the host laid out never retracts — it keeps even one question', () => {
+    const plan = settlePlan([cat('People', ['who is dana?'])], [])
+    expect(plan.retract).toEqual([])
+    expect(settlePlan([cat('People', ['who is dana?'])], [], minted).retract).toEqual([])
+  })
+
   it('a category about to gain a question does not retract', () => {
-    const plan = settlePlan([cat('Storage', ['what is a pool?']), q('what is a bag?')], [{ question: 'what is a bag?', category: 'Storage' }])
+    const plan = settlePlan([cat('Storage', ['what is a pool?']), q('what is a bag?')], [{ question: 'what is a bag?', category: 'Storage' }], minted)
     expect(plan.retract).toEqual([])
     expect(plan.move).toEqual([{ category: 'Storage', members: ['what is a bag?'] }])
   })
 
   it('a plain tile holding no questions is never retracted', () => {
-    const plan = settlePlan([{ name: 'notes', question: false, children: 3, inside: [] }], [])
+    const plan = settlePlan([{ name: 'notes', question: false, children: 3, inside: [] }], [], new Set(['notes']))
     expect(plan.retract).toEqual([])
   })
 })

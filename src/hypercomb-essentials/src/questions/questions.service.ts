@@ -6,8 +6,8 @@
 //
 //   START   `start hypercomb q and a` mints the game's tile on the page you
 //           stand on (or finds it), walks you in, and makes you the
-//           ORGANIZER of the game's tree: as questions arrive on the page you
-//           stand on, your hive takes them and settles them into categories.
+//           ORGANIZER of the game's tree: as questions arrive, your hive
+//           takes them and settles them into categories.
 //   ASK     `question <text>` makes a tile named with the question (the
 //           hive's spelling), titled with the question as asked, and marked.
 //           In a swarm a tile made here is shared, so the room sees it.
@@ -16,15 +16,15 @@
 //           answers show through the swarm notes, colour per participant,
 //           Take collects one — so the count of who holds an answer is its
 //           score. No new wire, no new store.
-//   SETTLE  the organizer's pass over the page they stand on: take the
-//           room's questions, have Jev (or the participant's own AI) file
-//           each into a category — new names suggested by the AI when none
-//           fits — then let the pure settlePlan say what materializes and
-//           what retracts, and apply it with the one move primitive
-//           drag-into uses.
-//   TALLY   `tally` writes, on each question, its answers ranked by takes,
-//           and a scoreboard on the page's own tile — notes, so the room
-//           reads them and the host's copy stays with the room on its host.
+//   SETTLE  the organizer's pass over the game's WHOLE TREE: take the room's
+//           questions on the page they stand on, then on every page of the
+//           tree have Jev (or the participant's own AI) file each question
+//           into a category — new names from the namer when none fits —
+//           and let the pure settlePlan say what materializes and what
+//           retracts, applied with the one move primitive drag-into uses.
+//   TALLY   `tally` writes, on each question of the tree, its answers ranked
+//           by takes, and one scoreboard on the game's tile — notes, so the
+//           room reads them and the host's copy stays with the room.
 //
 // WHAT A TAKE CARRIES. Taking a peer's tile folds its admitted projection —
 // name, titles, picture, properties — never its decoration records. So a
@@ -32,6 +32,15 @@
 // questions by their TITLE inside the game (a sentence ending in a question
 // mark) and gives each one the mark again in the hive that took it. The game
 // itself is read by NAME: a tile called `hypercomb q and a` is the game.
+//
+// THE LEDGER. The swarm is read for the page you stand on: peers' answers
+// to a question reach this hive only while it stands where that question
+// is. So the organizer's hive keeps a LEDGER of the answers it has seen —
+// per question, each answer's words, who gave it, and everyone ever seen
+// holding it — fed by every swarm-notes read while standing on a page and
+// by the reads this service asks for as the room changes. The tally over the
+// tree counts what this hive holds plus what the ledger saw; it never counts
+// what nobody here has seen. In memory only, for the game being played.
 //
 // A dependency: the drone (questions.drone.ts) registers it.
 
@@ -44,18 +53,23 @@ import { removeTilesAt } from '../commands/remove-tiles.js'
 import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
 import { isJoinedHere } from '../sharing/membership.js'
 import {
-  BOARD_MARK, GAME_NAME, QUESTION_KIND, TALLY_MARK,
+  BOARD_MARK, GAME_NAME, MIN_TO_MATERIALIZE, QUESTION_KIND, TALLY_MARK,
   boardText, inGame, isQuestionTitle, isTallyNote, parseCategoryNames, parsePlacedIndexes, scoreboard, settlePlan, tallyText,
   type Answer, type PageTile, type Placement, type QuestionAnswers, type SettlePlan,
 } from './questions.js'
 
 /** New questions settle a moment after they arrive, as one pass. */
 const SETTLE_MS = 4_000
-/** A page's taken questions are given their mark a moment after it renders. */
-const MARK_MS = 1_200
+/** A page's taken questions are marked and its answers read a moment after
+ *  it renders or the room changes. */
+const SYNC_MS = 1_200
 /** A create that never says it completed stops waiting here. */
 const CREATE_MS = 8_000
 const SORT_BATCH = 24
+/** How deep the game's tree is walked: the game, categories, categories
+ *  inside those. */
+const TREE_DEPTH = 3
+const TREE_PAGES = 64
 
 const SUGGEST_SYSTEM = 'People in a room asked these questions. Name categories that group them. Answer with category names only, one per line, two to four words each, no numbering, no explanation. Prefer few broad categories; every category must fit at least two of the questions. Reuse an existing category name when it fits.'
 const SORT_SYSTEM = 'You file questions into categories. Answer with one JSON array of integers, one per question in the order given: the index of the category that clearly fits, or -1 when none does. No other text.'
@@ -86,47 +100,63 @@ type JevShape = {
 type SignerShape = { getPublicKeyHex?: () => Promise<string | null> }
 type DecorationsShape = { setTitle?: (segments: readonly string[], text: string, locale?: string) => Promise<unknown> }
 
+/** One answer as the ledger remembers it. */
+export interface SeenAnswer { readonly text: string; readonly by: string; readonly holders: ReadonlySet<string> }
+
 const get = <T>(key: string): T | undefined =>
   (window as { ioc?: { get?: <V>(k: string) => V | undefined } }).ioc?.get?.<T>(key)
 
 export type StartOutcome = { outcome: 'started' | 'resumed'; where: string }
 export type AskOutcome = 'asked' | 'empty' | 'exists' | 'failed'
-export type TallyOutcome = { questions: number; answers: number; leader: string; takes: number }
-export type SettleOutcome = { moved: number; categories: number; sorter: 'jev' | 'ai' | 'none' }
+export type TallyOutcome = { pages: number; questions: number; answers: number; leader: string; takes: number }
+export type SettleOutcome = { pages: number; moved: number; categories: number; sorter: 'jev' | 'ai' | 'none' }
 
 export class Questions extends EventTarget {
   /** The game this hive organizes, while it does — the game tile's path. */
   #organizing: readonly string[] | null = null
   #timer: ReturnType<typeof setTimeout> | null = null
-  #markTimer: ReturnType<typeof setTimeout> | null = null
+  #syncTimer: ReturnType<typeof setTimeout> | null = null
   #settling: Promise<SettleOutcome> | null = null
-  #marking = false
+  #syncing = false
   #again = false
   #saidNoAi = false
-  /** Who brought each answer to the room (note id → pubkey), remembered from
-   *  the swarm notes as they were read — so an answer the host TAKES still
-   *  counts for the participant who gave it. */
-  #broughtBy = new Map<string, string>()
+  /** The ledger: question (folded name) → answer id → what was seen. */
+  #seen = new Map<string, Map<string, { text: string; by: string; holders: Set<string> }>>()
+  /** Categories this settle minted (page key → folded names). Only these
+   *  retract when they thin; a tile the host laid out is theirs to keep. */
+  #minted = new Map<string, Set<string>>()
+  #me = ''
 
   constructor() {
     super()
-    EffectBus.on('swarm:peers-changed', () => this.#schedule())
+    EffectBus.on('swarm:peers-changed', () => { this.#schedule(); this.#scheduleSync() })
     EffectBus.on('swarm:roster-changed', () => this.#schedule())
     EffectBus.on<{ segments?: readonly string[] }>('cell:added', () => this.#schedule())
     // Everyone in the game, organizer or not: a question taken from the room
-    // gets its mark back once the page shows it, so clicking it opens.
-    EffectBus.on('render:cell-count', () => this.#scheduleMark())
+    // gets its mark back once the page shows it (so clicking it opens), and
+    // the answers on the page are read into the ledger.
+    EffectBus.on('render:cell-count', () => this.#scheduleSync())
+    EffectBus.on('notes:changed', () => this.#scheduleSync())
     window.ioc.whenReady<SwarmNotesShape & EventTarget>('@diamondcoreprocessor.com/SwarmNotes', (swarmNotes) => {
       swarmNotes.addEventListener('change', (e) => {
         const cell = String((e as CustomEvent<{ cell?: string }>).detail?.cell ?? '')
-        if (!cell) return
-        try { for (const r of swarmNotes.rootsFor(cell)) if (!this.#broughtBy.has(r.note.id)) this.#broughtBy.set(r.note.id, r.by) } catch { /* not in a room */ }
+        if (cell) this.#record(swarmNotes, cell)
       })
     })
   }
 
   /** The game this hive is organizing, or null. */
   organizing(): readonly string[] | null { return this.#organizing }
+
+  /** The last settle pass, page by page — what the page held, what the plan
+   *  said, how many moved — for anyone checking the game's state. */
+  lastSettle: { page: readonly string[]; tiles: readonly PageTile[]; plan: SettlePlan; moved: number }[] = []
+
+  /** What the ledger has seen on a question (by its name), for the tally and
+   *  for anyone checking the game's state. */
+  seen(cell: string): ReadonlyMap<string, SeenAnswer> {
+    return this.#seen.get(moleculeKey(cell)) ?? new Map()
+  }
 
   // ── start ──────────────────────────────────────────────────────────────
 
@@ -206,9 +236,8 @@ export class Questions extends EventTarget {
 
   // ── settle ─────────────────────────────────────────────────────────────
 
-  /** One organizer pass over the page you stand on, inside the game you
-   *  organize. Coalesced: a pass asked for while one runs runs once more
-   *  after it. */
+  /** One organizer pass over the game's tree. Coalesced: a pass asked for
+   *  while one runs runs once more after it. */
   settle(): Promise<SettleOutcome> {
     if (this.#settling) { this.#again = true; return this.#settling }
     const run = this.#settle().finally(() => {
@@ -220,29 +249,55 @@ export class Questions extends EventTarget {
   }
 
   async #settle(): Promise<SettleOutcome> {
-    const none: SettleOutcome = { moved: 0, categories: 0, sorter: 'none' }
+    const none: SettleOutcome = { pages: 0, moved: 0, categories: 0, sorter: 'none' }
     const root = this.#organizing
     if (!root) return none
-    // The organizer works where they stand, anywhere in the game's tree —
-    // the game's page or a category inside it. Peers' tiles are read for the
-    // page in front of them, and taking one lands it there; standing inside
-    // a category settles that category, which is how the tree deepens.
-    const page = this.#segments()
-    if (page.length < root.length || root.some((s, i) => page[i] !== s)) return none
+    // Peers' tiles are read for the page in front of the organizer, and
+    // taking one lands it there — so the room is taken where they stand,
+    // when that is in the game; the tree is then settled page by page.
+    const here = this.#segments()
+    if (here.length >= root.length && root.every((s, i) => here[i] === s)) await this.#takeRoomTiles(here)
 
-    await this.#takeRoomTiles(page)
-    const tiles = await this.#pageTiles(page)
-    if (!tiles) return none
-    const questions = tiles.filter(t => t.question)
-    if (questions.length === 0) return none
-    const categories = tiles.filter(t => !t.question)
-
-    const { placements, sorter } = await this.#place(questions.map(q => this.#titleOf([...page, q.name])), categories.map(c => c.name))
-    const byTitle = new Map(questions.map(q => [this.#titleOf([...page, q.name]), q.name]))
-    const plan = settlePlan(tiles, placements.map(p => ({ question: byTitle.get(p.question) ?? p.question, category: p.category })))
-    const moved = await this.#apply(page, plan)
+    const pages = await this.#tree(root)
+    let moved = 0, categories = 0
+    let sorter: SettleOutcome['sorter'] = 'none'
+    const passes: Questions['lastSettle'] = []
+    for (const page of pages) {
+      const tiles = await this.#pageTiles(page)
+      if (!tiles) continue
+      const questions = tiles.filter(t => t.question)
+      const others = tiles.filter(t => !t.question)
+      const titles = new Map(questions.map(q => [this.#titleOf([...page, q.name]), q.name]))
+      // Questions on the page are placed; a page with none may still hold a
+      // minted category that thinned, so the plan is made either way.
+      const placed = questions.length ? await this.#place([...titles.keys()], others.map(c => c.name)) : { placements: [], sorter: 'none' as const }
+      if (placed.sorter !== 'none') sorter = placed.sorter
+      const plan = settlePlan(tiles, placed.placements.map(p => ({ question: titles.get(p.question) ?? p.question, category: p.category })), this.#minted.get(page.join('/')) ?? new Set())
+      const landed = await this.#apply(page, plan)
+      passes.push({ page, tiles, plan, moved: landed })
+      moved += landed
+      categories += plan.create.length + plan.move.length
+    }
+    this.lastSettle = passes
     if (moved > 0) this.dispatchEvent(new CustomEvent('change'))
-    return { moved, categories: plan.create.length + plan.move.length, sorter }
+    return { pages: pages.length, moved, categories, sorter }
+  }
+
+  /** The game's tree from `root`: the game's page, then every category
+   *  (a non-question tile with tiles inside) beneath it, to TREE_DEPTH. */
+  async #tree(root: readonly string[]): Promise<string[][]> {
+    const pages: string[][] = [[...root]]
+    for (let i = 0; i < pages.length && pages.length < TREE_PAGES; i++) {
+      const page = pages[i]
+      if (page.length - root.length >= TREE_DEPTH - 1) continue
+      const rows = await this.#children(page)
+      if (!rows) continue
+      await this.#markQuestions(page, rows.map(r => r.name))
+      for (const r of rows) {
+        if (r.childCount > 0 && !hasDecorationKindAt([...page, r.name], QUESTION_KIND)) pages.push([...page, r.name])
+      }
+    }
+    return pages
   }
 
   /** Take every peer tile on the page not already held: the questions the
@@ -268,7 +323,7 @@ export class Questions extends EventTarget {
 
   /** Which category each question belongs in — Jev when switched on, else
    *  the participant's own AI. Questions no category fits are offered to the
-   *  AI for new names, then filed among those. Without either, none move. */
+   *  namer for new names, then filed among those. With neither, none move. */
   async #place(questions: readonly string[], categories: readonly string[]): Promise<{ placements: Placement[]; sorter: 'jev' | 'ai' | 'none' }> {
     const jev = get<JevShape>('@hypercomb.social/JevDecision')
     const useJev = !!jev?.readyForHive?.() && !!jev.sort
@@ -305,8 +360,8 @@ export class Questions extends EventTarget {
       })
       open = left
     }
-    if (open.length >= 2 && provider) {
-      const names = await this.#suggest(provider, open, categories)
+    if (open.length >= MIN_TO_MATERIALIZE) {
+      const names = await this.suggestNames(open, categories)
       if (names.length) {
         const picks = await sort(open, names)
         open.forEach((q, i) => {
@@ -318,7 +373,12 @@ export class Questions extends EventTarget {
     return { placements, sorter: useJev ? 'jev' : 'ai' }
   }
 
-  async #suggest(provider: string, questions: readonly string[], existing: readonly string[]): Promise<string[]> {
+  /** THE NAMER. New category names for questions no category fits, from the
+   *  participant's own AI; none without one. A method, not a closure, so a
+   *  harness (or a participant's module) can stand another namer in. */
+  async suggestNames(questions: readonly string[], existing: readonly string[]): Promise<string[]> {
+    const provider = this.#aiProvider()
+    if (!provider) return []
     const content = (existing.length ? `Existing categories:\n${existing.map(c => '- ' + c).join('\n')}\n\n` : '')
       + `Questions:\n${questions.map(q => '- ' + q).join('\n')}`
     try {
@@ -349,7 +409,13 @@ export class Questions extends EventTarget {
     if (!move?.commitMoveInto) return 0
     let moved = 0
     if (plan.create.length) {
-      for (const step of plan.create) EffectBus.emit('cell:added', { cell: step.category, segments: [...page] })
+      const key = page.join('/')
+      const minted = this.#minted.get(key) ?? new Set<string>()
+      for (const step of plan.create) {
+        EffectBus.emit('cell:added', { cell: step.category, segments: [...page] })
+        minted.add(moleculeKey(step.category))
+      }
+      this.#minted.set(key, minted)
       await new hypercomb().act()
       await this.#settled()
     }
@@ -368,53 +434,127 @@ export class Questions extends EventTarget {
 
   // ── tally ──────────────────────────────────────────────────────────────
 
-  /** Tally the page you stand on: each question gets a note ranking its
-   *  answers by takes; the page's own tile gets the scoreboard. */
+  /** Tally the game: standing in it, every question of the whole tree gets
+   *  a note ranking its answers by takes and the game's tile gets one
+   *  scoreboard; standing elsewhere, the page you stand on and its tile. */
   async tally(): Promise<TallyOutcome | null> {
     const here = this.#segments()
-    const tiles = await this.#pageTiles(here)
-    const questions = (tiles ?? []).filter(t => t.question)
-    if (!questions.length) return null
+    const game = moleculeKey(GAME_NAME)
+    const depth = here.findIndex(s => moleculeKey(s) === game)
+    const root = depth >= 0 ? here.slice(0, depth + 1) : here
+    const pages = depth >= 0 ? await this.#tree(root) : [here]
     const notes = get<NotesShape>('@diamondcoreprocessor.com/NotesService')
     if (!notes) return null
     const swarmNotes = get<SwarmNotesShape>('@diamondcoreprocessor.com/SwarmNotes')
-    const me = (await get<SignerShape>('@diamondcoreprocessor.com/NostrSigner')?.getPublicKeyHex?.()) ?? ''
+    const me = await this.#whoAmI()
     const labelOf = (pubkey: string): string =>
       (pubkey && swarmNotes?.labelOf(pubkey)) || get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')?.labelFor?.(pubkey) || (pubkey ? pubkey.slice(0, 8) : 'you')
 
-    const gathered: QuestionAnswers[] = []
-    for (const q of questions) {
-      try { await swarmNotes?.refresh(q.name) } catch { /* the room's answers that did not arrive are not counted */ }
-      const own = await notes.getNotesAtSegments([...here, q.name])
-      const mine = swarmNotes?.holdersOfMine(q.name) ?? new Map<string, readonly string[]>()
-      // An answer's takes are the participants holding it other than the one
-      // who gave it. A note of mine was given by me unless the room showed it
-      // first as someone else's — then I took it, and it stays theirs.
-      const answers: Answer[] = own
-        .filter(n => !isTallyNote(n.text))
-        .map(n => {
-          const by = this.#broughtBy.get(n.id) ?? me
-          const holders = new Set([me, ...(mine.get(n.id) ?? [])])
-          return { id: n.id, text: n.text, by, takes: [...holders].filter(h => h !== by).length }
-        })
-      for (const r of swarmNotes?.rootsFor(q.name) ?? []) {
-        if (isTallyNote(r.note.text) || answers.some(a => a.id === r.note.id)) continue
-        answers.push({ id: r.note.id, text: r.note.text, by: r.by, takes: r.holders.filter(h => h !== r.by).length })
+    // The page in front of us is read live first, so the ledger is current
+    // there; every other page is counted from what this hive holds and what
+    // the ledger saw while standing there.
+    const gathered: { page: readonly string[]; q: QuestionAnswers }[] = []
+    for (const page of pages) {
+      const tiles = await this.#pageTiles(page)
+      const questions = (tiles ?? []).filter(t => t.question)
+      const standing = page.join('/') === here.join('/')
+      for (const q of questions) {
+        if (standing && swarmNotes) {
+          try { await swarmNotes.refresh(q.name); this.#record(swarmNotes, q.name) } catch { /* what did not arrive is not counted */ }
+        }
+        const ledger = this.seen(q.name)
+        const own = await notes.getNotesAtSegments([...page, q.name])
+        // An answer's takes are the participants holding it other than the
+        // one who gave it. A note of mine was given by me unless the room
+        // showed it first as someone else's — then I took it, and it stays
+        // theirs; the ledger remembers who else was ever seen holding it.
+        const answers: Answer[] = own
+          .filter(n => !isTallyNote(n.text))
+          .map(n => {
+            const seen = ledger.get(n.id)
+            const by = seen?.by ?? me
+            const holders = new Set([me, ...(seen?.holders ?? [])])
+            return { id: n.id, text: n.text, by, takes: [...holders].filter(h => h !== by).length }
+          })
+        for (const [id, seen] of ledger) {
+          if (answers.some(a => a.id === id) || isTallyNote(seen.text)) continue
+          answers.push({ id, text: seen.text, by: seen.by, takes: [...seen.holders].filter(h => h !== seen.by).length })
+        }
+        gathered.push({ page, q: { question: q.name, answers } })
       }
-      gathered.push({ question: q.name, answers })
     }
+    if (!gathered.length) return null
 
     let answered = 0
-    for (const q of gathered) {
+    for (const { page, q } of gathered) {
       if (!q.answers.length) continue
       answered += q.answers.length
-      await notes.addAtSegments(here, q.question, tallyText(q, labelOf))
+      await notes.addAtSegments(page, q.question, tallyText(q, labelOf))
     }
-    const board = scoreboard(gathered)
-    if (here.length && board.length) await notes.addAtSegments(here.slice(0, -1), here[here.length - 1], boardText(board, labelOf))
+    const board = scoreboard(gathered.map(g => g.q))
+    if (root.length && board.length) await notes.addAtSegments(root.slice(0, -1), root[root.length - 1], boardText(board, labelOf))
     this.dispatchEvent(new CustomEvent('change'))
     const top = board[0]
-    return { questions: gathered.length, answers: answered, leader: top ? labelOf(top.by) : '', takes: top?.takes ?? 0 }
+    return { pages: pages.length, questions: gathered.length, answers: answered, leader: top ? labelOf(top.by) : '', takes: top?.takes ?? 0 }
+  }
+
+  // ── the ledger ─────────────────────────────────────────────────────────
+
+  /** Record what the swarm notes show on `cell` right now: peers' roots
+   *  (who gave each, everyone holding it) and who else holds mine. Holders
+   *  accumulate — a take is not undone by leaving the room. */
+  #record(swarmNotes: SwarmNotesShape, cell: string): void {
+    const key = moleculeKey(cell)
+    if (!key) return
+    let book = this.#seen.get(key)
+    try {
+      for (const r of swarmNotes.rootsFor(cell)) {
+        if (!book) { book = new Map(); this.#seen.set(key, book) }
+        const entry = book.get(r.note.id) ?? { text: r.note.text, by: r.by, holders: new Set<string>() }
+        for (const h of r.holders) entry.holders.add(h)
+        book.set(r.note.id, entry)
+      }
+      for (const [id, holders] of swarmNotes.holdersOfMine(cell)) {
+        if (!book) { book = new Map(); this.#seen.set(key, book) }
+        const entry = book.get(id) ?? { text: '', by: this.#me, holders: new Set<string>() }
+        for (const h of holders) entry.holders.add(h)
+        book.set(id, entry)
+      }
+    } catch { /* not in a room, or the cell is not on this page */ }
+  }
+
+  /** A moment after the page renders or the room changes, inside the game:
+   *  give taken questions their mark back and read the answers on this page
+   *  into the ledger. */
+  #scheduleSync(): void {
+    if (!inGame(this.#segments())) return
+    if (this.#syncTimer) clearTimeout(this.#syncTimer)
+    this.#syncTimer = setTimeout(() => {
+      this.#syncTimer = null
+      if (this.#syncing) return
+      this.#syncing = true
+      void (async () => {
+        const page = this.#segments()
+        if (!inGame(page)) return
+        const rows = await this.#children(page)
+        if (!rows) return
+        await this.#markQuestions(page, rows.map(r => r.name))
+        const swarmNotes = get<SwarmNotesShape>('@diamondcoreprocessor.com/SwarmNotes')
+        if (!swarmNotes || !isJoinedHere()) return
+        await this.#whoAmI()
+        for (const r of rows) {
+          if (!hasDecorationKindAt([...page, r.name], QUESTION_KIND)) continue
+          try { await swarmNotes.refresh(r.name); this.#record(swarmNotes, r.name) } catch { /* next time */ }
+        }
+      })().finally(() => { this.#syncing = false })
+    }, SYNC_MS)
+  }
+
+  async #whoAmI(): Promise<string> {
+    if (!this.#me) {
+      try { this.#me = (await get<SignerShape>('@diamondcoreprocessor.com/NostrSigner')?.getPublicKeyHex?.()) ?? '' } catch { /* unsigned */ }
+    }
+    return this.#me
   }
 
   // ── reading the page ───────────────────────────────────────────────────
@@ -481,22 +621,6 @@ export class Questions extends EventTarget {
     if (!this.#organizing) return
     if (this.#timer) clearTimeout(this.#timer)
     this.#timer = setTimeout(() => { this.#timer = null; void this.settle() }, ms)
-  }
-
-  #scheduleMark(): void {
-    const here = this.#segments()
-    if (!inGame(here)) return
-    if (this.#markTimer) clearTimeout(this.#markTimer)
-    this.#markTimer = setTimeout(() => {
-      this.#markTimer = null
-      if (this.#marking) return
-      this.#marking = true
-      void (async () => {
-        const page = this.#segments()
-        const rows = await this.#children(page)
-        if (rows) await this.#markQuestions(page, rows.map(r => r.name))
-      })().finally(() => { this.#marking = false })
-    }, MARK_MS)
   }
 
   async #settled(): Promise<void> {

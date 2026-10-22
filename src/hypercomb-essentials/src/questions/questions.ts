@@ -86,9 +86,11 @@ export interface SettlePlan {
 /** The settle for one page. Pure: the page's own tiles and the placements
  *  in, the moves out. A placement names a tile that is not on the page, or
  *  names a question as a category, or names the question itself, is ignored.
- *  A category is any non-question tile holding questions; a tile holding
- *  anything else is never retracted. */
-export function settlePlan(tiles: readonly PageTile[], placements: readonly Placement[]): SettlePlan {
+ *  A category is any non-question tile holding questions. Only a category
+ *  the settle itself MINTED (`minted`, folded names) retracts when it thins:
+ *  a tile the host laid out is their structure — it receives even one
+ *  question and keeps it. A tile holding anything else is never retracted. */
+export function settlePlan(tiles: readonly PageTile[], placements: readonly Placement[], minted: ReadonlySet<string> = new Set()): SettlePlan {
   const byKey = new Map<string, PageTile>()
   for (const t of tiles) byKey.set(moleculeKey(t.name), t)
 
@@ -116,7 +118,7 @@ export function settlePlan(tiles: readonly PageTile[], placements: readonly Plac
 
   const retract: SettleStep[] = []
   for (const t of tiles) {
-    if (t.question || t.inside.length === 0) continue
+    if (t.question || t.inside.length === 0 || !minted.has(moleculeKey(t.name))) continue
     const gaining = groups.get(moleculeKey(t.name))?.members.length ?? 0
     if (t.inside.length + gaining >= MIN_TO_MATERIALIZE) continue
     retract.push({ category: t.name, members: [...t.inside], remove: t.children === t.inside.length })
