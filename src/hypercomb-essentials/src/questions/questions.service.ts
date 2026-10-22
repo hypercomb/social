@@ -65,6 +65,8 @@ const SETTLE_MS = 4_000
 const SYNC_MS = 1_200
 /** A create that never says it completed stops waiting here. */
 const CREATE_MS = 8_000
+/** A click on a peer's question opens it only if the take lands this soon. */
+const WAND_MS = 15_000
 const SORT_BATCH = 24
 /** How deep the game's tree is walked: the game, categories, categories
  *  inside those. */
@@ -125,6 +127,9 @@ export class Questions extends EventTarget {
   /** Categories this settle minted (page key → folded names). Only these
    *  retract when they thin; a tile the host laid out is theirs to keep. */
   #minted = new Map<string, Set<string>>()
+  /** Peer tiles the participant clicked in the game (folded name → when),
+   *  waiting for the take to land so the question can open. */
+  #wanded = new Map<string, number>()
   #me = ''
 
   constructor() {
@@ -137,6 +142,16 @@ export class Questions extends EventTarget {
     // the answers on the page are read into the ledger.
     EffectBus.on('render:cell-count', () => this.#scheduleSync())
     EffectBus.on('notes:changed', () => this.#scheduleSync())
+    // ONE CLICK ON SOMEONE ELSE'S QUESTION. In a swarm a click on a peer's
+    // tile is the wand — it takes the tile. Inside the game the participant
+    // clicked a question to answer it, so once the take lands and the tile
+    // reads as a question, its answers open; a take the organizer asked for
+    // itself (`tile:action`, not the wand) opens nothing.
+    EffectBus.on<{ label?: string }>('swarm:wand', (p) => {
+      const label = String(p?.label ?? '').trim()
+      if (label && inGame(this.#segments())) this.#wanded.set(moleculeKey(label), Date.now())
+    })
+    EffectBus.on<{ parentSegments?: readonly string[]; name?: string }>('swarm:visit-folded', (p) => { void this.#openIfWanted(p) })
     window.ioc.whenReady<SwarmNotesShape & EventTarget>('@diamondcoreprocessor.com/SwarmNotes', (swarmNotes) => {
       swarmNotes.addEventListener('change', (e) => {
         const cell = String((e as CustomEvent<{ cell?: string }>).detail?.cell ?? '')
@@ -232,6 +247,22 @@ export class Questions extends EventTarget {
     if (!cell) return
     EffectBus.emit('notes:panel', { visible: true })
     EffectBus.emit('note:capture', { cellLabel: cell })
+  }
+
+  /** A taken tile just landed: if the participant clicked it in the game a
+   *  moment ago and it reads as a question, open its answers. */
+  async #openIfWanted(p: { parentSegments?: readonly string[]; name?: string } | undefined): Promise<void> {
+    const name = String(p?.name ?? '').trim()
+    const key = moleculeKey(name)
+    const at = this.#wanded.get(key)
+    if (!at) return
+    this.#wanded.delete(key)
+    if (Date.now() - at > WAND_MS) return
+    const page = (p?.parentSegments ?? this.#segments()).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (!inGame(page)) return
+    await this.#settled()
+    await this.#markQuestions(page, [name])
+    if (hasDecorationKindAt([...page, name], QUESTION_KIND)) this.open(name)
   }
 
   // ── settle ─────────────────────────────────────────────────────────────

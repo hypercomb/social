@@ -30,7 +30,7 @@ one settle and one ledger.
 |---|---|
 | `start hypercomb q and a` | The game's tile appears on the page you stand on (or is found there), you walk in, and your hive becomes the **organizer** of that page. |
 | `question <your question>` | A tile named with the question appears here, marked as a question. In a swarm it is shared the moment it exists. |
-| *click a question* | It **opens** instead of being walked into: the notes desk on that tile, composer ready. Your answer is a note. Everyone's answers show there, coloured by who gave them, with **Take**. |
+| *click a question* | It **opens** instead of being walked into: the notes desk on that tile, composer ready. Your answer is a note. Everyone's answers show there, coloured by who gave them, with **Take**. Someone else's question is a peer tile, so the click is the swarm's wand — it takes the tile — and because it is a question in the game, it opens the moment the take lands. One click either way. |
 | *take an answer* | The swarm notes take — the same signature onto your tile. How many participants hold an answer is its score. |
 | `tally` | On the page you stand on: each question gets a note ranking its answers by takes, and the page's own tile gets the scoreboard — who gave the most-taken answers. |
 
@@ -169,8 +169,6 @@ answers.
 
 ## Not yet
 
-- A peer's question is recognised as one once taken. Before that it is a
-  peer tile like any other — clicking it takes it, as in any swarm.
 - New category names from a real model: the proof stands the namer and Jev
   in (no model may read the hive on the dev machine); the materialize and
   retract steps are proven live with them.

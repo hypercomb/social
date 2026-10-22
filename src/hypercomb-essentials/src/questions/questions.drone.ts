@@ -17,7 +17,7 @@ export class QuestionsDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'Hypercomb Q and A — questions are tiles that settle into category layers as they arrive, answers are everyone\'s notes on them, taking an answer is its score, and the host tallies'
 
-  protected override listens = ['tile:open', 'swarm:peers-changed', 'swarm:roster-changed', 'cell:added', 'render:cell-count', 'notes:changed']
+  protected override listens = ['tile:open', 'swarm:peers-changed', 'swarm:roster-changed', 'cell:added', 'render:cell-count', 'notes:changed', 'swarm:wand', 'swarm:visit-folded']
   protected override emits = ['notes:panel', 'note:capture', 'cell:added', 'tile:action', 'activity:log']
 
   readonly service = new Questions()

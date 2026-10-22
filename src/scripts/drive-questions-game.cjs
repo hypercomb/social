@@ -255,6 +255,24 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
   H.check('a category left with one question retracts — it comes up and the tile goes', retracted.ok, JSON.stringify(retracted.value))
   if (!retracted.ok) console.log('DEBUG lastSettle', JSON.stringify(await H.evalSafe(() => a.page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/Questions').lastSettle.map(p => ({ page: p.page, tiles: p.tiles.map(t => [t.name, t.question ? 'Q' : t.inside.join('|'), t.children]), plan: p.plan, moved: p.moved }))))))
 
+  // ── ONE CLICK ON SOMEONE ELSE'S QUESTION: the wand takes it, and because it
+  // is a question in the game, its answers open.
+  const Q6 = 'what is a layer?'
+  await goTo(a, [GAME]); await H.sleep(1000)
+  await word(a, `/question ${Q6}`)
+  await H.waitFor(() => childrenAt(a, [GAME]), v => has(v, Q6), 30000, 500)
+  await goTo(b, [GAME]); await H.sleep(1000)
+  await H.waitFor(() => peerTiles(b), v => has(v, Q6), 45000, 750)
+  await H.waitFor(() => H.evalSafe(() => b.page.evaluate((label) => {
+    const adopt = window.ioc.get('@diamondcoreprocessor.com/SwarmAdoptDrone')
+    if (!adopt?.wandEligible?.(label)) return false
+    window.__hypercombEffectBus.emitTransient('swarm:wand', { label })
+    return true
+  }, slug(Q6))), ok => ok === true, 30000, 1000)
+  const oneClick = await H.waitFor(async () => ({ held: await childrenAt(b, [GAME]), desk: await deskState(b), segs: await segments(b) }),
+    v => has(v.held, Q6) && v.desk.open && v.desk.cell === slug(Q6) && JSON.stringify(v.segs) === JSON.stringify([GAME]), 30000, 500)
+  H.check("one click on a peer's question takes it and opens its answers", oneClick.ok, JSON.stringify({ held: oneClick.value?.held, cell: oneClick.value?.desk?.cell, open: oneClick.value?.desk?.open }))
+
   // ── THE TREE TALLY: standing at the game's root, every question of the tree
   // is tallied from what this hive holds and what its ledger saw.
   const ANSWER2 = 'a pool is a folder of meaning'
