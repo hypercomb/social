@@ -78,7 +78,7 @@ async function main() {
   report.seeded = seeded
   log('seeded', brief(seeded))
 
-  const S = (name, steps) => scenario(page, name, steps)
+  const S = (name, steps, options) => scenario(page, name, steps, options)
 
   // ── chat ────────────────────────────────────────────────────────────
   await S('chat: toggle open → toggle close', [
@@ -271,14 +271,36 @@ async function main() {
     ['escape (cancel)', () => page.keyboard.press('Escape')],
     ['wait 4s', () => page.waitForTimeout(4000)],
   ])
-  await S('restore: chat → notes → Escape → Escape (notes back) → notes close → chat NOT back', [
+  // Escape, then Escape straight after, changes NOTHING — including what the
+  // newcomer's close brings back (2026-10-21).
+  await S('restore: chat → notes → Escape → Escape (notes back) → notes close → chat back', [
     ['chat open', () => emit(page, 'chat:open', {})],
     ['notes open', () => emit(page, 'notes:panel', { visible: true })],
     ['escape', () => page.keyboard.press('Escape')],
     ['escape again', async () => { await page.waitForTimeout(300); await page.keyboard.press('Escape') }],
     ['notes back?', () => expectShowing(page, ['notes-strip', 'tags-viewer'])],
     ['notes close', () => emit(page, 'notes:panel', { visible: false })],
-    ['nothing back?', () => expectShowing(page, [])],
+    ['chat back?', () => expectShowing(page, ['chat-window'])],
+    ['chat close', () => emit(page, 'chat:close', {})],
+  ])
+  // F6: following a place in an answer shows the place — the chat folds, the
+  // hive is live at the destination, and closing leaves you there.
+  await S('chat: open → follow a place link → folded on the place → close stays', [
+    ['open', () => emit(page, 'chat:open', {})],
+    ['follow alpha', () => followPlace(page, 'alpha')],
+    ['folded on alpha?', () => page.evaluate(() => {
+      const owners = window.ioc.get('@diamondcoreprocessor.com/ModeRegistry').ownersOf('view:active')
+      const seg = window.ioc.get('@hypercomb.social/Lineage').explorerSegments()
+      const folded = !!document.querySelector('.chat-panel.peeking')
+      return folded && owners.length === 0 && seg.join('/') === 'alpha'
+        ? { folded, seg } : { fail: `folded ${folded}, owners ${JSON.stringify(owners)}, seg ${JSON.stringify(seg)}` }
+    })],
+    ['close', () => emit(page, 'chat:close', {})],
+    ['still on alpha?', () => page.evaluate(() => {
+      const seg = window.ioc.get('@hypercomb.social/Lineage').explorerSegments()
+      return seg.join('/') === 'alpha' ? { seg } : { fail: `seg ${JSON.stringify(seg)}` }
+    })],
+    ['back to root', () => page.evaluate(() => window.ioc.get('@hypercomb.social/Navigation').goRaw([]))],
   ])
   await S('editor: edit alpha → chat open → chat close → Escape', [
     ['edit', () => emit(page, 'tile:action', { action: 'edit', label: 'alpha', q: 0, r: 0, index: 0 })],
@@ -397,7 +419,7 @@ async function main() {
       await page.waitForTimeout(2500)
     }],
     ['chat close', () => emit(page, 'chat:close', {})],
-  ])
+  ], { reloads: true })
 
   report.errors = errors
   fs.writeFileSync(OUT, JSON.stringify(report, null, 2))
@@ -407,19 +429,56 @@ async function main() {
 
 let current = 'boot'
 
-async function scenario(page, name, steps) {
+/** THE DEV SERVER RELOADS UNDER A RUN. Every `ng serve` watches the whole
+ *  shared tree, so another session's save live-reloads this page mid-scenario:
+ *  the bus and ioc vanish (a throw) or come back fresh (a silent reset that
+ *  reads as a failing verdict). Each scenario plants a marker on the page; a
+ *  scenario whose marker is gone, or that threw because the runtime went away,
+ *  is RUN AGAIN once the page is back — never scored. A scenario that reloads
+ *  the page on purpose says so (`{ reloads: true }`) and is never retried. */
+const RELOADED = /Execution context was destroyed|reading 'get'|reading 'lastValue'|reading 'emit'|has been closed/i
+const RETRIES = 4
+
+async function recover(page) {
+  await ready(page)
+  await page.waitForFunction(() => !!window.ioc?.get?.('@diamondcoreprocessor.com/ModeRegistry'), null, { timeout: 90000 })
+  await page.waitForTimeout(2500)
+}
+
+async function scenario(page, name, steps, options = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      if (await scenarioOnce(page, name, steps, options)) return
+      log(`  ↻ the page reloaded under it — running it again`)
+    } catch (e) {
+      if (options.reloads || !RELOADED.test(String(e?.message ?? e))) throw e
+      log(`  ↻ the runtime went away under it — running it again`)
+    }
+    if (attempt + 1 >= RETRIES) throw new Error(`"${name}": the page kept reloading under it`)
+    await recover(page)
+  }
+}
+
+/** One attempt. False = the page reloaded under it, and nothing was scored. */
+async function scenarioOnce(page, name, steps, options) {
   current = name
   const rec = { name, steps: [] }
+  const token = `${Date.now()}-${Math.random()}`
+  await page.evaluate(t => { window.__dwrScenario = t }, token)
+  const stillHere = async () => options.reloads
+    || await page.evaluate(t => window.__dwrScenario === t, token).catch(() => false)
   log(`\n── ${name}`)
   for (const [desc, run] of steps) {
     let result
     try { result = await run() } catch (e) { result = { error: String(e.message).slice(0, 160) } }
     await page.waitForTimeout(700)
+    if (!(await stillHere())) return false
     const s = await snap(page, desc)
     if (result && typeof result === 'object') s.result = result
     rec.steps.push(s)
     log(`  ${desc.padEnd(16)} ${brief(s)}`)
   }
+  if (!(await stillHere())) return false
   const last = rec.steps[rec.steps.length - 1]
   // A step may assert something of its own by returning { fail: '…' } — the
   // restore scenarios ask "is the displaced window back?" mid-way, where the
@@ -428,8 +487,16 @@ async function scenario(page, name, steps) {
   rec.verdict = failed ? `FAIL: ${failed.label}: ${failed.result.fail}` : verdict(last)
   log(`  ⇒ ${rec.verdict}`)
   report.scenarios.push(rec)
-  // Reset to a clean slate between scenarios: close everything, forget parks,
-  // release any stranded view claim so one scenario cannot poison the next.
+  // Scored. A reload during the reset below only costs the reset — the next
+  // scenario waits for the page and starts from a fresh one anyway.
+  try { await resetBetween(page) }
+  catch (e) { if (!RELOADED.test(String(e?.message ?? e))) throw e; await recover(page) }
+  return true
+}
+
+/** Reset to a clean slate between scenarios: close everything, forget parks,
+ *  release any stranded view claim so one scenario cannot poison the next. */
+async function resetBetween(page) {
   await emit(page, 'chat:close', {})
   await emit(page, 'notes:panel', { visible: false })
   await emit(page, 'features:viewer-close', {})
@@ -468,6 +535,29 @@ function verdict(s) {
 const brief = (s) => `host=${s.hostVisible}/${s.hostBox?.join('x')} owners=${JSON.stringify(s.owners)} vm=${s.viewMode} cells=${s.cellCount?.count ?? '?'} showing=${JSON.stringify(s.showing)} parked=${JSON.stringify(s.parked)} covers=${JSON.stringify(s.covers)} stage=${s.stage ? `${s.stage.x},${s.stage.y}@${s.stage.s}` : '?'} seg=${JSON.stringify(s.segments)}${s.result ? ' ' + JSON.stringify(s.result) : ''}`
 
 /** A mid-scenario assertion: exactly these windows are showing (sorted). */
+/** Click a place link the way an answer draws one — a `data-hive-path` button
+ *  inside the thread, routed by the chat's own click handler. A fresh profile
+ *  shows the setup view with no thread, so then the component is asked
+ *  directly (dev mode exposes it through `ng.getComponent`). */
+const followPlace = (page, path) => page.evaluate((path) => {
+  const thread = document.querySelector('.chat-thread')
+  if (thread) {
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = 'chat-path'
+    chip.dataset.hivePath = path
+    thread.appendChild(chip)
+    chip.click()
+    chip.remove()
+    return { via: 'chip' }
+  }
+  const host = document.querySelector('hc-chat-window')
+  const cmp = host && globalThis.ng?.getComponent?.(host)
+  if (!cmp?.goPath) return { fail: 'no thread and no component to ask' }
+  cmp.goPath(path)
+  return { via: 'component' }
+}, path)
+
 const expectShowing = async (page, want) => {
   const have = await page.evaluate(() => [...(globalThis.__hypercombWindowSession?.showing.keys() ?? [])])
   const a = [...have].sort().join(','), b = [...want].sort().join(',')

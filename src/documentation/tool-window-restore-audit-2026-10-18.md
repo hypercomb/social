@@ -256,3 +256,33 @@ restored window and assert it came back mid-way, plus "Escape parks → nothing
 back", "Escape, put back, then close → nothing back" and the editor case
 (toast, then restored with its draft): 43 ok / 0 FAIL. Six
 `window-rule.spec.ts` cases pin the rule. F6 remains open.
+
+## Landed (2026-10-21) — the double Escape, and F6
+
+**Escape, Escape changes nothing — including what a close brings back.**
+The sweep spent the newcomer's memory, so chat → notes → Escape → Escape
+(notes back, exactly as it was) → close notes brought nothing back, although
+the two presses had changed nothing on screen. Escape's sweep now holds what
+each of its windows owed (`holdDisplacements` in `window-rule.ts`, called by
+`putAwayAll` in `tool-windows.ts`) and hands it back, per window, only with
+the put-back that returns that window. A sweep nobody takes back keeps the
+memory spent, and nothing is handed to a window whose displaced window came
+back on its own. Four specs pin it (window-rule and tool-windows).
+
+**F6 — following a place shows the place.** The only thing that moves the
+hive under a covering chat is the chat itself: a place link in an answer
+(`goPath`). The hive moved behind a window that still covered it, so the
+destination was not on screen and closing the chat later dropped the
+participant somewhere they had stopped thinking about. Now the chat FOLDS
+on that click — the same fold its own button makes: the place is on screen
+and live, the conversation is one press (or Escape) away, and closing leaves
+you where you went. The agent's work grammar has no navigation verb, so
+nothing else moves the hive while chat covers it.
+
+Probe: 44 scenarios — the double-Escape case now expects chat back, and
+"follow a place link → folded on the place → close stays" is new. The
+harness also survives the shared tree now: every `ng serve` reloads the page
+when any session saves a file, so each scenario plants a marker and is RUN
+AGAIN (never scored) when a reload takes it; a scenario that reloads on
+purpose says `{ reloads: true }`. 44 ok / 0 FAIL on 4253, one reload
+absorbed. Nothing from the audit remains open.

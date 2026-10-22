@@ -8495,12 +8495,21 @@ export class ChatWindowComponent implements OnDestroy {
   }
 
   /** Go where the answer said. Raw segments: an answer names a place with the
-   *  characters it is spelled with, not a normalized guess at them. */
+   *  characters it is spelled with, not a normalized guess at them.
+   *
+   *  GOING THERE IS SEEING IT. The hive moved behind a window that still
+   *  covered it, so the place you asked for was not on screen and closing the
+   *  chat later dropped you somewhere you had stopped thinking about (the
+   *  window-restore audit's F6). The window folds instead — the same fold its
+   *  own button makes: the place is on screen, the conversation is one press
+   *  (or Escape) away, and closing leaves you where you went. */
   goPath(path: string): void {
     const segments = hivePathSegments(path)
     if (!segments.length) return
     const navigation = ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined
-    navigation?.goRaw?.(segments)
+    if (!navigation?.goRaw) return
+    navigation.goRaw(segments)
+    if (this.visible() && !this.peeking()) this.togglePeek()
   }
 
   /** Outside the hive: the OS browser on native, a new tab on the web. Never
