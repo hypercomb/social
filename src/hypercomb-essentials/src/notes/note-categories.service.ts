@@ -25,8 +25,9 @@ import { callModel, configuredProviders } from '../assistant/llm-dispatch.js'
 import { llmHiveAccess } from '../assistant/llm-hive-access.js'
 import {
   EMPTY_DOC, addCategory, categoryAt, categoryDocJson, categoryKey, countUnder, fileNote, filedNotes, flattenCategories,
-  mergeOutline, parseOutline, readCategoryDoc, removeCategory, renameCategory, roomCategories, unfileNote,
-  type CategoryDoc, type CategoryPath, type NoteCategory,
+  mergeOutline, parseOutline, readCategoryDoc, removeCategory, renameCategory, roomCategories, settleThreshold,
+  settledOutline, unfileNote,
+  type CategoryDoc, type CategoryPath, type NoteCategory, type OutlineNode,
 } from './note-categories.js'
 
 export const NOTE_CATEGORIES_KEY = '@diamondcoreprocessor.com/NoteCategories'
@@ -68,11 +69,14 @@ export type CategoryRow = {
   /** People in the room holding a category of this name here (you included). */
   readonly holders: number
   readonly hasChildren: boolean
+  /** Enough of the room holds it that it is the room's agreed structure. */
+  readonly settled: boolean
 }
 /** A category someone in the room holds and you do not — offered, never forced. */
-export type RoomOnlyCategory = { readonly name: string; readonly holders: number; readonly children: readonly string[] }
+export type RoomOnlyCategory = { readonly name: string; readonly holders: number; readonly children: readonly string[]; readonly settled: boolean }
 
 type PeerTreesShape = { peerCategoriesFor?(cell: string): readonly { pubkey: string; doc: CategoryDoc }[] }
+type PresenceShape = { participantsInZone?: () => readonly unknown[] }
 
 /** A note as the desk hands it in: its id (the note's signature) and words. */
 export type CategoryNote = { readonly id: string; readonly text: string }
@@ -137,14 +141,17 @@ export class NoteCategories extends EventTarget {
   rows(cell: string, present: ReadonlySet<string>): CategoryRow[] {
     const doc = this.doc(cell)
     const peers = this.#peers(cell)
+    const needed = settleThreshold(this.#people())
     const out: CategoryRow[] = []
     const walk = (level: readonly NoteCategory[], at: number[], names: string[]): void => {
       const room = new Map(roomCategories(doc, peers, names).map(r => [r.key, r.holders]))
       level.forEach((c, i) => {
         const path = [...at, i]
+        const holders = room.get(categoryKey(c.name)) ?? 1
         out.push({
           key: path.join('.'), path, name: c.name, depth: at.length,
-          count: countUnder(c, present), holders: room.get(categoryKey(c.name)) ?? 1, hasChildren: c.children.length > 0,
+          count: countUnder(c, present), holders, hasChildren: c.children.length > 0,
+          settled: peers.length > 0 && holders >= needed,
         })
         walk(c.children, path, [...names, categoryKey(c.name)])
       })
@@ -157,10 +164,35 @@ export class NoteCategories extends EventTarget {
   roomOnly(cell: string): RoomOnlyCategory[] {
     const peers = this.#peers(cell)
     if (!peers.length) return []
+    const needed = settleThreshold(this.#people())
     return roomCategories(this.doc(cell), peers).filter(r => !r.mine).map(r => {
       const held = peers.map(p => p.doc.categories.find(c => categoryKey(c.name) === r.key)).find(Boolean)
-      return { name: r.name, holders: r.holders, children: (held?.children ?? []).map(c => c.name) }
-    })
+      return { name: r.name, holders: r.holders, children: (held?.children ?? []).map(c => c.name), settled: r.holders >= needed }
+    }).sort((a, b) => Number(b.settled) - Number(a.settled))
+  }
+
+  /** THE ROOM'S SETTLED STRUCTURE (step seven): every category, at every
+   *  level, enough of the room holds — nested as the room holds it. */
+  settled(cell: string): OutlineNode[] {
+    const peers = this.#peers(cell)
+    return peers.length ? settledOutline(this.doc(cell), peers, this.#people()) : []
+  }
+
+  /** How many settled categories this tree does not hold yet. */
+  missingSettled(cell: string): number {
+    const doc = this.doc(cell)
+    return flattenCategories(mergeOutline(doc, this.settled(cell))).length - flattenCategories(doc).length
+  }
+
+  /** Take the room's settled structure into this tree. Only adds. */
+  takeSettled(cell: string): Promise<void> {
+    const outline = this.settled(cell)
+    return outline.length ? this.#edit(cell, doc => mergeOutline(doc, outline)) : Promise.resolve()
+  }
+
+  /** People in the room now, you included. */
+  #people(): number {
+    try { return (get<PresenceShape>('@diamondcoreprocessor.com/SwarmDrone')?.participantsInZone?.() ?? []).length + 1 } catch { return 1 }
   }
 
   /** The note ids filed in the branch at `key` and everything under it, or

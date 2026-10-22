@@ -233,6 +233,30 @@
   border-top: 1px solid $guide;
 }
 
+// SETTLED: enough of the room holds it that it is the room's agreed
+// structure — the steel glyph says so, everywhere a category is listed.
+.cv2-cat-glyph.is-settled { color: $steel; }
+.cv2-cat.is-room.is-settled { opacity: 1; }
+
+.cv2-cats-take {
+  appearance: none;
+  border: 1px solid rgba($steel, 0.45);
+  background: color-mix(in srgb, #{$steel} 10%, transparent);
+  color: var(--md-on-surface);
+  font: inherit;
+  font-size: scaled(12px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 6px 6px;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+
+  .mat-sym { font-size: 15px; color: $steel; }
+  &:hover { background: color-mix(in srgb, #{$steel} 18%, transparent); }
+}
+
 .cv2-cats-room-title {
   padding: 0 6px 4px;
   font-size: scaled(10.5px);

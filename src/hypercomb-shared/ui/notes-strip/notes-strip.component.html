@@ -584,12 +584,12 @@
                         [class.is-empty]="row.count === 0"
                         [attr.aria-expanded]="row.hasChildren ? !isCatCollapsed(row.key) : null"
                         (click)="pickBranch(row.key)" (dblclick)="startRename(row.key)"
-                        [title]="row.holders > 1 ? ('notes.cats.held' | t: { count: row.holders }) : row.name">
+                        [title]="row.settled ? ('notes.cats.settledHint' | t: { count: row.holders }) : row.holders > 1 ? ('notes.cats.held' | t: { count: row.holders }) : row.name">
                   @if (row.hasChildren) {
                     <span class="mat-sym cv2-cat-fold" aria-hidden="true"
                           (click)="toggleCatCollapsed(row.key, $event)">{{ isCatCollapsed(row.key) ? 'chevron_right' : 'expand_more' }}</span>
                   }
-                  <span class="mat-sym cv2-cat-glyph" aria-hidden="true">{{ catGlyph(row.key) }}</span>
+                  <span class="mat-sym cv2-cat-glyph" [class.is-settled]="row.settled" aria-hidden="true">{{ catGlyph(row.key, !!row.settled) }}</span>
                   <span class="cv2-cat-name">{{ row.name }}</span>
                   @if (row.holders > 1) {
                     <span class="cv2-cat-held">×{{ row.holders }}</span>
@@ -650,10 +650,16 @@
           @if (catRoomOnly().length > 0) {
             <div class="cv2-cats-room">
               <span class="cv2-cats-room-title">{{ 'notes.cats.inRoom' | t }}</span>
+              @if (catMissingSettled() > 0) {
+                <button type="button" class="cv2-cats-take" (click)="takeRoomStructure()">
+                  <span class="mat-sym" aria-hidden="true">verified</span>
+                  <span>{{ 'notes.cats.takeSettled' | t: { count: catMissingSettled() } }}</span>
+                </button>
+              }
               @for (r of catRoomOnly(); track r.name) {
                 <div class="cv2-cat-row">
-                  <span class="cv2-cat is-room" [title]="r.children.join(' · ')">
-                    <span class="mat-sym cv2-cat-glyph" aria-hidden="true">label</span>
+                  <span class="cv2-cat is-room" [class.is-settled]="r.settled" [title]="r.children.join(' · ')">
+                    <span class="mat-sym cv2-cat-glyph" [class.is-settled]="r.settled" aria-hidden="true">{{ catGlyph('', !!r.settled) }}</span>
                     <span class="cv2-cat-name">{{ r.name }}</span>
                     <span class="cv2-cat-held">×{{ r.holders }}</span>
                   </span>

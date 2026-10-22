@@ -137,3 +137,35 @@ describe('Jev sorts notes into categories', () => {
     expect(() => jevSortInput({ notes: ['x'], categories: [] })).toThrow()
   })
 })
+
+describe('categories settle by count', () => {
+  const tree = (...names: (string | [string, string[]])[]) => mergeOutline(EMPTY_DOC, names.map(n => typeof n === 'string'
+    ? { name: n, children: [] }
+    : { name: n[0], children: n[1].map(c => ({ name: c, children: [] })) }))
+
+  it('needs two holders, and half the room', async () => {
+    const { settleThreshold } = await import('./note-categories.js')
+    expect(settleThreshold(1)).toBe(2)
+    expect(settleThreshold(3)).toBe(2)
+    expect(settleThreshold(4)).toBe(2)
+    expect(settleThreshold(5)).toBe(3)
+    expect(settleThreshold(10)).toBe(5)
+  })
+
+  it('a category enough people hold settles, nested as the room holds it', async () => {
+    const { settledOutline } = await import('./note-categories.js')
+    const mine = tree(['Energy', ['ATP']], 'Cells')
+    const peers = [
+      { pubkey: 'p1', doc: tree(['energy', ['ATP', 'Krebs']]) },
+      { pubkey: 'p2', doc: tree(['Energy', ['Krebs']], 'Genetics') },
+      { pubkey: 'p3', doc: tree('Genetics') },
+    ]
+    // 4 people: two holders settle.
+    expect(settledOutline(mine, peers, 4)).toEqual([
+      { name: 'Energy', children: [{ name: 'ATP', children: [] }, { name: 'Krebs', children: [] }] },
+      { name: 'Genetics', children: [] },
+    ])
+    // 8 people: four holders needed — only Energy (three) does not make it.
+    expect(settledOutline(mine, peers, 8)).toEqual([])
+  })
+})

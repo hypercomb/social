@@ -146,3 +146,50 @@ Pieces: `notes/note-categories.ts` (the pure tree, with its spec),
 - `drive-swarm-notes-categories.cjs` (10/10): two browsers. A shared name
   counts every holder, and a name only one person holds is offered to the
   other and taken.
+
+## How it is used
+
+A lecture, a meeting or a class in which everyone takes notes into one shared
+ledger.
+
+**The host, before the session**
+
+1. **Open a door, once per host.** Publish a revision under the name `swarm`
+   (`npm run publish:revision -- swarm`). From then on `swarm.<host>` runs
+   exactly that package for everyone who enters, so the whole room runs the
+   same code.
+2. **Make the room's tile.** Make the tile (`lecture`, say) on the page you
+   will share, and write the agenda on it in the notes desk. Shared in the
+   room, it becomes the template: anyone who arrives gets it, even after you
+   leave.
+3. **Say what the room asks.** Select the tile and type `room asks notes
+   keep-alive`. Arrivals are offered those behaviours.
+4. **Optionally, seed a structure.** Name a few categories with `+`, or press
+   ✨ to let your AI suggest some.
+5. **Hand out the link.** Use `invite`. When your host has a swarm door, the
+   link lands there.
+
+**A participant, in the room**
+
+1. **Arrive.** Open the link. It asks before joining, then a toast says what
+   the room asks, with a button for each behaviour, and points to the notes.
+   Nothing opens or turns on by itself.
+2. **Write.** Write in the notes desk, which opens on the room's tile. Each
+   line goes to the room in the order it was written, in your colour and
+   under your name. Other people's lines arrive the same way.
+3. **Collect.** ✓ takes a line (one note, two holders, never a copy) and ✕
+   dismisses it. Clicking a name ignores that person for the session or for
+   good.
+4. **Organize, your own way.** By hand: name categories with `+` and file the
+   note you are reading with the tag button. With your AI: ✨ suggests
+   categories. With Jev: `sort` files every unsorted note it is sure of. The
+   tree sits to the left of the notes, and a label shows its branch.
+5. **Let the structure settle.** A category held by others counts them (×N).
+   Once enough of the room holds it, it is settled (the `verified` mark).
+   "Take the room's structure" brings in every settled category you lack.
+6. **Take it home.** The first time, type `room home <your hive's address>`.
+   Then type `room home` and press "Open my hive": the room's tile, with
+   everything you collected and organized on it, is offered in your own hive.
+
+**When people leave**, their untaken lines leave with them. What you took and
+organized stays yours, here and, once taken home, in your own hive.

@@ -177,8 +177,8 @@ type NotesService = {
 
 /** The category tree beside the notes (essentials notes/note-categories.service.ts),
  *  reached structurally through IoC like every module service here. */
-type CategoryRow = { key: string; path: readonly number[]; name: string; depth: number; count: number; holders: number; hasChildren: boolean }
-type RoomOnlyCategory = { name: string; holders: number; children: readonly string[] }
+type CategoryRow = { key: string; path: readonly number[]; name: string; depth: number; count: number; holders: number; hasChildren: boolean; settled?: boolean }
+type RoomOnlyCategory = { name: string; holders: number; children: readonly string[]; settled?: boolean }
 type CategoryOutcome = { ok: true; count: number; by?: 'jev' | 'ai' } | { ok: false; reason: string; detail?: string }
 type NoteCategoriesService = EventTarget & {
   busy(): 'suggest' | 'sort' | null
@@ -195,6 +195,8 @@ type NoteCategoriesService = EventTarget & {
   adopt(cell: string, outline: readonly { name: string; children?: readonly { name: string }[] }[]): Promise<void>
   aiReady(): boolean
   jevReady(): boolean
+  missingSettled?(cell: string): number
+  takeSettled?(cell: string): Promise<void>
   suggest(cell: string, notes: readonly { id: string; text: string }[]): Promise<CategoryOutcome>
   sort(cell: string, notes: readonly { id: string; text: string }[]): Promise<CategoryOutcome>
 }
@@ -2029,9 +2031,28 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   /** A label's glyph: the check while it is the branch on show, else what it
    *  is — every note, a category, or the unsorted tray. */
-  catGlyph(key: string | null): string {
+  catGlyph(key: string | null, settled = false): string {
     if (this.catBranch() === key) return 'check_circle'
-    return key === null ? 'account_tree' : key === this.UNSORTED ? 'inbox' : 'label'
+    if (key === null) return 'account_tree'
+    if (key === this.UNSORTED) return 'inbox'
+    return settled ? 'verified' : 'label'
+  }
+
+  /** How many of the room's settled categories this tree does not hold. */
+  readonly catMissingSettled = computed(() => {
+    this.#catVersion()
+    this.#swarmVersion()
+    const svc = this.#categories()
+    const cell = this.cell()
+    return svc && cell ? svc.missingSettled?.(cell) ?? 0 : 0
+  })
+
+  /** Take the room's settled structure — every category enough of the room
+   *  holds, nested as it holds them. Only adds. */
+  takeRoomStructure(): void {
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (svc && cell) void svc.takeSettled?.(cell)
   }
 
   isCatCollapsed(key: string): boolean { return this.#catCollapsed().has(key) }

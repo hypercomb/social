@@ -211,5 +211,17 @@ followed community domains) against hotlinking; it is not security.
      tile on the room's host. "Open my hive" opens the home hive at `#take=`,
      which is offered `lecture`, whose head and note are on the host.
      `room-step-six.spec.ts` covers the pure parts.
-7. **Categories and organize.** These settle by count, with per-participant AI
-   or manual organizing ([swarm-notes.md](swarm-notes.md) → next).
+7. **Categories and organize. BUILT.** Each participant organizes their own
+   tree by hand, with their own AI, or with Jev
+   ([swarm-notes.md](swarm-notes.md), "Categories").
+   - **Settling by count** (`note-categories.ts` `settledOutline`). A category
+     settles when at least 2 people, and at least half of everyone present,
+     hold one of its name at that place, at every level of the tree.
+   - **On the desk.** A settled category wears `verified`. Settled ones you
+     lack come first under "In the room". "Take the room's structure" takes
+     every settled category you lack, nested as the room holds them, and only
+     adds. The count never moves anything into anyone's tree.
+   - **Proof.** `scripts/drive-swarm-categories-settle.cjs`, 10/10, with three
+     browsers. Energy (Ana, Ben) and Genetics (Ana, Cy) settle. Ben is offered
+     the structure with one missing and Genetics first, and one tap gives him
+     Genetics with nothing else moved.

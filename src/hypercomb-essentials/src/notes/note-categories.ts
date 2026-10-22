@@ -315,3 +315,34 @@ export function roomCategories(
     .map(r => ({ key: r.key, name: r.name, holders: r.holders.size, mine: r.mine }))
     .sort((a, b) => b.holders - a.holders || a.name.localeCompare(b.name))
 }
+
+// ── settling by count (documentation/swarm-pools.md, step seven) ──────────
+//
+// "calcified by numbers" (jwize, 2026-10-13). A category is SETTLED in a room
+// when enough of the people there hold one of its name at that place: at
+// least SETTLE_MIN_HOLDERS of them, and at least SETTLE_SHARE of everyone
+// present. A settled category is the room's agreed structure — shown as such,
+// and offered whole to anyone who does not hold it yet. Nothing is moved into
+// anyone's tree by the count; taking the room's structure is still a tap.
+
+export const SETTLE_MIN_HOLDERS = 2
+export const SETTLE_SHARE = 0.5
+
+/** How many holders settle a category among `people` present (you included). */
+export function settleThreshold(people: number): number {
+  return Math.max(SETTLE_MIN_HOLDERS, Math.ceil(Math.max(1, people) * SETTLE_SHARE))
+}
+
+/** The room's settled structure: every category, at every level, held by
+ *  enough people — nested as the room holds it. Pure. */
+export function settledOutline(
+  mine: CategoryDoc,
+  peers: readonly { pubkey: string; doc: CategoryDoc }[],
+  people: number,
+  path: readonly string[] = [],
+): OutlineNode[] {
+  const needed = settleThreshold(people)
+  return roomCategories(mine, peers, path)
+    .filter(r => r.holders >= needed)
+    .map(r => ({ name: r.name, children: settledOutline(mine, peers, people, [...path, r.key]) }))
+}
