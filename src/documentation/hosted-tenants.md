@@ -167,6 +167,42 @@ mark on what a head move left behind**:
 `HEAD_ONLY = "1"` and deploy again. Withdrawal starts with the next head
 move; history from before the flag is not walked back.
 
+### 4b. Public history — a flag on the latest head
+
+jwize 2026-10-22: both should be available — head only, or the hive's history
+open like a public repository — and **the hive says which with a flag on its
+latest head**.
+
+- **Head only is the default.** A head without the flag withdraws what its
+  move left behind, exactly as above.
+- **The latest head is the only authority.** The worker already reads the new
+  head when the index moves (the reach walk), so it reads the flag there. No
+  separate mark, no host setting for the author's half: the flag travels with
+  the content, and changing it is just another head.
+- **Flag on:** that head move withdraws nothing, and lifts the `withdrawn`
+  mark from what this publisher alone put here — the bytes never left, so the
+  whole history answers again.
+- **Flag off again:** that head move withdraws what it no longer reaches, as
+  any head move does. What was served while the history was public may
+  already be copied or cached elsewhere; turning it off cannot take that back,
+  and the app says so when someone turns it on.
+- **The host consents too.** Old versions cost storage, so a host (or a plan)
+  may decline to keep public history; such a host serves head only whatever
+  the flag says. The owner's signed read is unchanged either way.
+- **The update suggestion is the client's, not the host's.** A withdrawn
+  signature answers as a plain miss so nobody can probe which old signatures
+  were real. A client that misses while resolving something it holds already
+  knows its address: it reads the current head and shows the update notice
+  (`using-a-creation.md`, "Holding a published item").
+- **Two traps to close with it:** a client mid-walk when the head moves gets
+  misses — keep the previous head readable briefly; and a miss is laid as a
+  dormant egg (`eggs.ts`) that never re-asks that host, so a revert onto
+  withdrawn bytes must hatch the eggs for what the newly taken head reaches.
+- **The desktop host (Rust `HiveSource`)** gets the same rule: serve what the
+  current head reaches, list nothing, honour the flag. It must ship before
+  anyone tunnels a desktop host — its `public, max-age=31536000, immutable` answers
+  would keep any leaked old atom in the edge cache for a year.
+
 ### 5. Swarms
 
 The meeting point is already a Durable Object. A plan sets how many rooms a
@@ -244,6 +280,8 @@ jwize 2026-10-22: "go with your recommendations, start with head-only reads."
 - **Edge caching:** nothing to choose — the worker's content answers are not
   edge-cached (see Head only).
 - **Lapse terms:** 14 days' grace, then 30 days of reads after writes stop.
+- **Head only or public history:** both, chosen by a flag on the hive's latest
+  head; head only by default; the host may decline to keep history (4b).
 
 Still open, needed before sign-up (step 3):
 
