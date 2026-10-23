@@ -16,8 +16,15 @@
 //               ask for — or post — its notice.
 //   notice      a nostr event, kind ROOM_NOTICE_KIND, addressable (one per
 //               signer per room: d = the address), tagged x = the address,
-//               content { label, segments }. Never the secret. It is fresh
-//               for NOTICE_FRESH_SEC; after that a session is not "starting".
+//               content { label, segments, startedAt }. Never the secret. It
+//               is fresh for NOTICE_FRESH_SEC from startedAt; after that a
+//               session is not "starting".
+//   re-posted   the meeting point keeps events in memory only, so a restart
+//               of it would lose the notice for anyone who opens their hive
+//               later. While the host stays in the room its hive posts the
+//               notice again every NOTICE_REPOST_MS — same startedAt, same
+//               expiration — and a listener knows a re-post by its start
+//               (noticeKey), so nobody is told twice.
 
 import { SignatureService } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
@@ -27,6 +34,8 @@ export const ROOM_NOTICE_KIND = 30569
 export const REMEMBERED_ROOMS_KEY = 'hc:rooms'
 /** How long a start notice stays news — and how long the relay keeps it. */
 export const NOTICE_FRESH_SEC = 3 * 60 * 60
+/** While the host stays in the room, the notice is posted again this often. */
+export const NOTICE_REPOST_MS = 5 * 60 * 1000
 /** A device remembers this many rooms; the oldest falls off. */
 export const REMEMBERED_ROOMS_MAX = 12
 
@@ -107,8 +116,14 @@ export interface RoomNotice {
   readonly signer: string
   readonly label: string
   readonly segments: readonly string[]
+  /** When it was posted (created_at). */
   readonly at: number
+  /** When the session started: the first post's time, kept by every re-post. */
+  readonly started: number
 }
+
+/** One session's notice, however often it is posted. */
+export const noticeKey = (n: Pick<RoomNotice, 'signer' | 'started'>): string => `${n.signer}:${n.started}`
 
 type NoticeEvent = { id?: unknown; kind?: unknown; pubkey?: unknown; created_at?: unknown; tags?: unknown; content?: unknown; sig?: unknown }
 
@@ -130,10 +145,15 @@ export function readNotice(
   const evt = raw as NoticeEvent
   if (Number(evt.kind) !== ROOM_NOTICE_KIND || tagOf(evt, 'x') !== address) return null
   const at = Number(evt.created_at) || 0
-  if (at > nowSec + 300 || nowSec - at > NOTICE_FRESH_SEC) return null
-  try { if (!verify(evt)) return null } catch { return null }
+  if (at > nowSec + 300) return null
   let content: Record<string, unknown> = {}
   try { const c = JSON.parse(String(evt.content ?? '{}')); if (c && typeof c === 'object' && !Array.isArray(c)) content = c } catch { /* a bare notice */ }
+  // A notice from before re-posting carries no start: its post is its start.
+  // A start is never later than the post that carries it.
+  const said = Number(content['startedAt'])
+  const started = Number.isInteger(said) && said > 0 ? Math.min(said, at) : at
+  if (nowSec - started > NOTICE_FRESH_SEC) return null
+  try { if (!verify(evt)) return null } catch { return null }
   const segments = Array.isArray(content['segments']) ? content['segments'].map(str).filter(Boolean) : []
   return {
     id: String(evt.id ?? ''),
@@ -141,13 +161,15 @@ export function readNotice(
     label: str(content['label']).slice(0, LABEL_MAX),
     segments,
     at,
+    started,
   }
 }
 
-/** The notice's content and tags, as `room start` posts it. */
-export function noticeTemplate(address: string, label: string, segments: readonly string[], nowSec = Math.floor(Date.now() / 1000)) {
+/** The notice's content and tags, as `room start` posts it — and as every
+ *  re-post does: the same start, so the same expiration. */
+export function noticeTemplate(address: string, label: string, segments: readonly string[], startedSec = Math.floor(Date.now() / 1000)) {
   return {
-    content: { label: String(label ?? '').trim().slice(0, LABEL_MAX), segments: [...segments] },
-    tags: [['d', address], ['expiration', String(nowSec + NOTICE_FRESH_SEC)]],
+    content: { label: String(label ?? '').trim().slice(0, LABEL_MAX), segments: [...segments], startedAt: startedSec },
+    tags: [['d', address], ['expiration', String(startedSec + NOTICE_FRESH_SEC)]],
   }
 }

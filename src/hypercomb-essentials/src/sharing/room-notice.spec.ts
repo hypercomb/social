@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NOTICE_FRESH_SEC, REMEMBERED_ROOMS_MAX, ROOM_NOTICE_KIND, noticeAddress, noticeTemplate, parseRememberedRooms, readNotice, withRoom, type RememberedRoom } from './room-notice.js'
+import { NOTICE_FRESH_SEC, REMEMBERED_ROOMS_MAX, ROOM_NOTICE_KIND, noticeAddress, noticeKey, noticeTemplate, parseRememberedRooms, readNotice, withRoom, type RememberedRoom } from './room-notice.js'
 
 const room = (n: number, at = n): RememberedRoom => ({ room: `room${n}`, secret: 's', relay: 'wss://hypercomb.com/meet', segments: ['a'], label: `Room ${n}`, at })
 const ADDR = 'a'.repeat(64)
@@ -35,7 +35,7 @@ describe('the notice', () => {
   })
 
   it('reads a fresh signed notice at its address', () => {
-    expect(readNotice(notice(), ADDR, NOW, () => true)).toEqual({ id: 'e1', signer: 'b'.repeat(64), label: 'Lecture', segments: ['swarm-room'], at: NOW - 60 })
+    expect(readNotice(notice(), ADDR, NOW, () => true)).toEqual({ id: 'e1', signer: 'b'.repeat(64), label: 'Lecture', segments: ['swarm-room'], at: NOW - 60, started: NOW - 60 })
   })
 
   it('refuses another address, another kind, a stale one, a bad signature', () => {
@@ -48,6 +48,29 @@ describe('the notice', () => {
   it('is addressable by its room and expires when it stops being news', () => {
     const t = noticeTemplate(ADDR, 'Lecture', ['swarm-room'], NOW)
     expect(t.tags).toEqual([['d', ADDR], ['expiration', String(NOW + NOTICE_FRESH_SEC)]])
-    expect(t.content).toEqual({ label: 'Lecture', segments: ['swarm-room'] })
+    expect(t.content).toEqual({ label: 'Lecture', segments: ['swarm-room'], startedAt: NOW })
+  })
+})
+
+describe('a re-posted notice', () => {
+  const START = NOW - 2 * 60 * 60
+  const posted = (at: number, id: string) => notice({ id, created_at: at, content: JSON.stringify(noticeTemplate(ADDR, 'Lecture', [], START).content) })
+
+  it('keeps its start, so it is the same session and the same expiration', () => {
+    const first = readNotice(posted(START, 'e1'), ADDR, NOW, () => true)!
+    const again = readNotice(posted(NOW - 30, 'e2'), ADDR, NOW, () => true)!
+    expect([first.started, again.started]).toEqual([START, START])
+    expect(noticeKey(again)).toBe(noticeKey(first))
+    expect(noticeTemplate(ADDR, 'Lecture', [], START).tags[1]).toEqual(['expiration', String(START + NOTICE_FRESH_SEC)])
+  })
+
+  it('stops being news by its start, however recently it was posted', () => {
+    const late = NOW + 90 * 60
+    expect(readNotice(posted(late - 10, 'e3'), ADDR, late, () => true)).toBeNull()
+  })
+
+  it('never starts after the post that carries it', () => {
+    const odd = notice({ content: JSON.stringify({ label: 'x', startedAt: NOW + 1000 }) })
+    expect(readNotice(odd, ADDR, NOW, () => true)?.started).toBe(NOW - 60)
   })
 })

@@ -203,19 +203,44 @@ is not told again.
   secret, so it is a credential. It stays in this device's localStorage
   (`hc:rooms`) and never goes into a pool, a resource or an event. For each
   remembered room, `room-notice.drone.ts` keeps one small socket to the
-  room's meeting point and asks for one filter.
+  room's meeting point and asks for one filter. A meeting point closes a
+  socket it hears nothing from for two minutes, so every 45 seconds each
+  socket renews its listen. That is still under two minutes in a hidden tab,
+  whose timers wake only on whole minutes. The renewal reuses the same
+  subscription. Once the stored notices have arrived it is live only
+  (`limit: 0`), so nothing stored is sent again. A listen the meeting point
+  refuses (full, rate-limited) closes and dials again later.
 - *What is sent.* The notice is a nostr event of kind 30569, addressable (one
   per signer per room). It is posted at `sign('room:notice:' + the room's
   pool address)`. That address holds the secret, so only someone who was
   given the room can ask for its notice, or post one. Its content is
-  `{ label, segments }`, never the secret. It expires after three hours.
+  `{ label, segments, startedAt }`, never the secret. It expires three hours
+  after the start.
+- *Kept alive while the session runs.* A meeting point keeps events in memory
+  only, so a restart would lose the notice for anyone who opens their hive
+  later. While the host stays in the room, their hive posts the notice again
+  every five minutes. It is the same signed event every time (signed once at
+  `room start`), so it is the same id, and no listener takes a re-post for a
+  new start. That includes hives on the version before re-posting, which knew
+  a notice by its id. A re-post goes out on the host's own mesh socket to the
+  meeting point (`NostrMeshDrone.sendSigned`), so it opens no extra
+  connection. A reload of the host's tab resumes it: the signed event, never
+  the secret, is kept in that tab's sessionStorage. The re-posts stop when
+  the host leaves the room or three hours have passed.
 - *Pieces.* `sharing/room-notice.ts` (pure: the list, the address, reading a
   notice), `room-notice.drone.ts` (listens, toasts, joins through
-  `joinMeetingPlace`), `room start` in `room.queen.ts`. The remembering
-  happens in `meeting-invite.join.ts`, through that file's one raw write.
+  `joinMeetingPlace`; signs, posts and re-posts the host's notice),
+  `room start` in `room.queen.ts`. The remembering happens in
+  `meeting-invite.join.ts`, through that file's one raw write.
 - *Proof.* `node scripts/drive-swarm-session-start.cjs --url
   http://localhost:4251/ --relay ws://localhost:7791` passes 11/11 with two
-  browsers.
+  browsers, and on live hypercomb.io and swarm.hypercomb.com.
+  `node scripts/drive-swarm-session-repost.cjs --url http://localhost:4251/`
+  passes 19/19. It runs its own relay and restarts it to wipe its memory. The
+  checks cover: re-posts with one id and no second toast, listen renewals, a
+  host reload resuming the same session, the notice coming back after the
+  restart for a guest who opens their hive then, and the posts stopping when
+  the host leaves.
 
 **When people leave**, their untaken lines leave with them. What you took and
 organized stays yours, here and, once taken home, in your own hive.

@@ -1337,13 +1337,7 @@ export class NostrMeshDrone extends Drone {
       return false
     }
     if (signed.pubkey && signed.pubkey !== this.#selfPubkey) this.#learnSelf(String(signed.pubkey))
-    if (onTaken && signed.id) {
-      if (this.#takenWaiters.size >= TAKEN_WAITERS_MAX) {
-        const oldest = this.#takenWaiters.keys().next().value
-        if (oldest !== undefined) this.#takenWaiters.delete(oldest)
-      }
-      this.#takenWaiters.set(String(signed.id), onTaken)
-    }
+    if (onTaken && signed.id) this.#awaitTaken(String(signed.id), onTaken)
     if (this.#draining.size) {
       for (const relay of askedOn) {
         const ws = this.#draining.get(relay)
@@ -1356,6 +1350,26 @@ export class NostrMeshDrone extends Drone {
     this.note('publish:sent', undefined, s, undefined, k)
 
     return delivered
+  }
+
+  // note: send an event that is ALREADY signed, exactly as it is — the same id
+  // every time, for a re-post that must never read as a new event (the session
+  // start notice, room-notice.drone.ts). Same delivery as publish: the relays
+  // this tab dials, queued while none is open, `onTaken` once a relay took it
+  // (OK accepted or duplicate). No local fanout: it is not news here.
+  public sendSigned = (evt: NostrEvent, onTaken?: () => void): boolean => {
+    if (!evt?.id || !evt.sig || !evt.pubkey) return false
+    this.ensureStartedNow()
+    if (onTaken) this.#awaitTaken(String(evt.id), onTaken)
+    return this.sendEventToAll(evt)
+  }
+
+  #awaitTaken = (id: string, onTaken: () => void): void => {
+    if (this.#takenWaiters.size >= TAKEN_WAITERS_MAX) {
+      const oldest = this.#takenWaiters.keys().next().value
+      if (oldest !== undefined) this.#takenWaiters.delete(oldest)
+    }
+    this.#takenWaiters.set(id, onTaken)
   }
 
   // -----------------------------
