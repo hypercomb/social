@@ -110,6 +110,10 @@ export class TouchMoveInput {
 
     const rect = this.#canvas.getBoundingClientRect()
     if (!this.#isInsideRect(e.clientX, e.clientY, rect)) return
+    // The canvas fills the screen even while another view covers it, so the
+    // rect alone let a hold-and-scroll on a page pick up the hidden tile
+    // underneath. Only a press that landed on the hive moves a tile.
+    if (e.target !== this.#canvas) return
 
     const axial = this.#clientToAxial(e.clientX, e.clientY)
     if (!axial) return

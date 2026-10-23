@@ -37,6 +37,18 @@
 // pointer lock. See `#pendingView`. Everywhere else, and anywhere off a tile,
 // the ring is unchanged.
 //
+// ── A finger summons only over the hexagons ───────────────────────────
+//
+// The listeners are on the window, so a hold on ANY surface used to mature —
+// a tile page, the phone's list, a website, a game. The press was then read
+// against the canvas underneath, which those surfaces hide but never move:
+// a hidden tile under the finger opened ITS screen over the one being read,
+// and empty hive under it painted the ring. Either way the hexagons came up
+// in the middle of another view. A touch summon now starts only when the
+// finger landed on the hive canvas itself — the same test every other touch
+// gesture on the hive makes. Middle mouse and the keyboard are deliberate
+// and keep working everywhere.
+//
 // ── Why it takes the input stack AND the gate ─────────────────────────
 //
 // InputModeStack suspends whatever mode is on top (the migrated systems);
@@ -174,6 +186,8 @@ export class QuickMenuInput {
    * and it moves, let go and it opens.
    */
   #pendingView: { label: string; pointerId: number; x: number; y: number } | null = null
+  /** The hive's canvas — the only surface a touch hold summons over. */
+  #canvas: HTMLCanvasElement | null = null
 
   /**
    * Where the DRAWN pointer is, in screen coordinates. The real cursor is
@@ -206,6 +220,10 @@ export class QuickMenuInput {
     window.addEventListener(POINTER_GESTURE_END, this.#onGestureEnd as EventListener)
     window.addEventListener('keydown', this.#onKeyDown, { capture: true })
     window.addEventListener('keyup', this.#onKeyUp, { capture: true })
+
+    EffectBus.on<{ canvas?: HTMLCanvasElement }>('render:host-ready', payload => {
+      this.#canvas = payload?.canvas ?? null
+    })
 
     // The keyboard trigger. KeymapService owns the keydown — it already knows
     // about focus suppression and user overrides — and hands us the raw event
@@ -346,6 +364,12 @@ export class QuickMenuInput {
       this.#pendingView = null
 
       this.#clearTimers()
+      this.#pointerId = null
+      this.#touchDown = null
+      // Another view is under the finger, not the hexagons — the hold is that
+      // view's to read. See "A finger summons only over the hexagons" above.
+      if (e.target !== this.#canvas) return
+
       this.#pointerId = e.pointerId
       this.#touchDown = { x: e.clientX, y: e.clientY }
       this.#holdTimer = setTimeout(() => {
