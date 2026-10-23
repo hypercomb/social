@@ -849,7 +849,6 @@
   "swarm.join.publish-failed": "{cell} は提供されていません: {reason}",
   "swarm.leave.already": "群れに入っていません",
   "slash.format": "アクティブタイルのビジュアル書式をコピー",
-  "slash.layout": "レイアウトテンプレートの保存・適用・一覧・削除",
   "slash.into": "選択したタイルを別のタイルの中へ移動 — このページからは消えます; /into <cell>",
   "slash.go": "タイルへ移動:このページの名前、パス、.. で上へ、/ でルートへ; /go <tile>",
   "slash.start": "ゲームを名前で始める — `start hypercomb q and a`。誰かがすでに進めている場所で言うと、その人に参加します",

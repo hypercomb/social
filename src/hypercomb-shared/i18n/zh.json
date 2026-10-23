@@ -692,7 +692,6 @@
   "swarm.join.publish-failed": "{cell} 未提供：{reason}",
   "swarm.leave.already": "你不在任何蜂群中",
   "slash.format": "复制活动磁贴的可视格式",
-  "slash.layout": "保存、应用、列出或删除布局模板",
   "slash.into": "将所选磁贴移入另一个磁贴 — 它们会离开此页面；/into <cell>",
   "slash.go": "前往一个格子:本页上的名称、路径、.. 返回上级、/ 回到根; /go <tile>",
   "slash.find": "查找名称包含某个词的格子:此处及以下,/ 为整个蜂巢,/<route> 为某路径之下; /find <word> /",

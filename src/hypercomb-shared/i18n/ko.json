@@ -692,7 +692,6 @@
   "swarm.join.publish-failed": "{cell}은(는) 제공되지 않습니다: {reason}",
   "swarm.leave.already": "무리에 들어가 있지 않습니다",
   "slash.format": "활성 타일의 시각적 서식 복사",
-  "slash.layout": "레이아웃 템플릿 저장, 적용, 목록 또는 제거",
   "slash.into": "선택한 타일을 다른 타일 안으로 이동 — 이 페이지에서는 사라집니다; /into <cell>",
   "slash.go": "타일로 이동: 이 페이지의 이름, 경로, 위로는 .., 루트는 /; /go <tile>",
   "slash.find": "이름에 단어가 들어 있는 타일 찾기: 여기와 그 아래, 하이브 전체는 /, 경로 아래는 /<route>; /find <word> /",

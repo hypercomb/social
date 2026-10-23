@@ -692,7 +692,6 @@
   "swarm.join.publish-failed": "{cell} n'est pas proposé : {reason}",
   "swarm.leave.already": "tu n’es dans aucun essaim",
   "slash.format": "Copier le format visuel de la tuile active",
-  "slash.layout": "Enregistrer, appliquer, lister ou supprimer des modèles de disposition",
   "slash.into": "Déplacer les tuiles sélectionnées dans une autre tuile — elles quittent cette page ; /into <cell>",
   "slash.go": "Aller à une tuile : un nom sur cette page, un chemin, .. pour remonter, / pour la racine ; /go <tile>",
   "slash.find": "Trouver les tuiles dont le nom contient un mot : ici et en dessous, / pour toute la ruche, /<route> sous un chemin ; /find <word> /",

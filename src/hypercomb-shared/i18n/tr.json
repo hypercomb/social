@@ -692,7 +692,6 @@
   "swarm.join.publish-failed": "{cell} sunulmuyor: {reason}",
   "swarm.leave.already": "bir kümede değilsin",
   "slash.format": "Etkin döşemenin görsel biçimini kopyala",
-  "slash.layout": "Düzen şablonlarını kaydet, uygula, listele veya kaldır",
   "slash.into": "Seçili döşemeleri başka bir döşemenin içine taşı — bu sayfadan ayrılırlar; /into <cell>",
   "slash.go": "Bir döşemeye git: bu sayfadaki bir ad, bir yol, yukarı için .., kök için /; /go <tile>",
   "slash.find": "Adında bir kelime geçen döşemeleri bul: burada ve altında, tüm kovan için /, bir yolun altında /<route>; /find <word> /",

@@ -692,7 +692,6 @@
   "swarm.join.publish-failed": "{cell} non è offerto: {reason}",
   "swarm.leave.already": "non sei in uno sciame",
   "slash.format": "Copia la formattazione visiva dalla tessera attiva",
-  "slash.layout": "Salva, applica, elenca o rimuovi modelli di layout",
   "slash.into": "Sposta le tessere selezionate dentro un'altra tessera — lasciano questa pagina; /into <cell>",
   "slash.go": "Vai a una tessera: un nome in questa pagina, un percorso, .. per salire, / per la radice; /go <tile>",
   "slash.find": "Trova le tessere il cui nome contiene una parola: qui e sotto, / per tutto l'alveare, /<route> sotto un percorso; /find <word> /",

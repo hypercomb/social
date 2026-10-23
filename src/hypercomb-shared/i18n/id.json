@@ -692,7 +692,6 @@
   "swarm.join.publish-failed": "{cell} tidak ditawarkan: {reason}",
   "swarm.leave.already": "kamu tidak sedang di kawanan",
   "slash.format": "Salin format visual dari ubin aktif",
-  "slash.layout": "Simpan, terapkan, daftarkan, atau hapus template tata letak",
   "slash.into": "Pindahkan ubin terpilih ke dalam ubin lain — ubin meninggalkan halaman ini; /into <cell>",
   "slash.go": "Pergi ke ubin: nama di halaman ini, sebuah jalur, .. untuk naik, / untuk akar; /go <tile>",
   "slash.find": "Cari ubin yang namanya memuat sebuah kata: di sini dan di bawahnya, / untuk seluruh sarang, /<route> di bawah sebuah jalur; /find <word> /",
