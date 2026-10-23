@@ -139,6 +139,19 @@
   .mh .doors b{font-weight:800;font-size:15px}
   .mh code{font:600 12px/1.4 ui-monospace,Consolas,monospace;background:var(--surface);padding:2px 6px}
 
+  /* MEMBERS — a normal list of people in a scroller */
+  .mh .people{list-style:none;display:grid;border-top:2px solid var(--divider);margin-top:var(--s3)}
+  .mh .people li{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:var(--s3);align-items:center;padding:var(--s2) var(--s1);border-bottom:1px solid var(--divider)}
+  .mh .people .ring{display:block;width:42px;aspect-ratio:8/9;padding:2px;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:transparent}
+  .mh .people li.here .ring{background:var(--accent)}
+  .mh .people .hex{display:grid;place-items:center;width:100%;height:100%;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);overflow:hidden;
+    background:color-mix(in srgb,var(--text) 9%,var(--bg));font-weight:800;font-size:15px;color:var(--n700)}
+  .mh .people .hex img{display:block;width:100%;height:100%;object-fit:cover}
+  .mh .people b{display:block;font-weight:800;font-size:15px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mh .people .ab{display:block;font-size:12px;color:var(--n700);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mh .people .pm{font-size:12px;color:var(--n800);text-align:right;white-space:nowrap}
+  .mh .people .pm .now{color:var(--a700);font-weight:600}
+
   /* ABOUT panel */
   .mh .hero{width:100%;aspect-ratio:16/9;overflow:hidden;background:var(--n900);margin:var(--s3) 0}
   .mh .hero img{display:block;width:100%;height:100%;object-fit:cover}
@@ -231,6 +244,15 @@
         <img class="qr" src="resource:{qr.png}" width="64" height="64" alt="QR code that opens this calendar">
         <div><b>meetups.hypercomb.com</b>This calendar's permanent address — scan it to open your meetings anywhere.</div>
       </div>
+    </section>
+
+    <!-- MEMBERS -->
+    <section class="panel" data-panel="members" aria-label="Members">
+      <span class="kicker">Members</span>
+      <h2>The people of this community.</h2>
+      <p class="sub">Everyone who has joined a meeting, from the lists the meetings keep. A hosted member carries their own picture and line, from their own host.</p>
+      <ul class="people" data-people></ul>
+      <p class="none" data-people-none>Nobody has joined a meeting yet.</p>
     </section>
 
     <!-- 3 · COMMUNITY -->
@@ -658,7 +680,54 @@
     });
     none.hidden = (state.doors || []).length > 0;
   }
-  function render() { renderMeeting(); renderRows(); renderDoors(); }
+  // THE MEMBERS: one row per key across every meeting's list — the newest
+  // claim names them, a verified profile dresses them, the count says how
+  // many meetings they joined, and a check-in today marks them here now.
+  function membersOf() {
+    var by = {};
+    state.events.forEach(function (ev) {
+      (state.coming[ev.sig] || []).forEach(function (r) {
+        if (!isComing(r)) return;
+        var m = by[r.signer] || (by[r.signer] = { who: r.who, picture: '', about: '', meetings: 0, at: 0, here: false });
+        m.meetings++;
+        if (r.at >= m.at) { m.at = r.at; m.who = r.who; }
+        if (r.picture) m.picture = r.picture;
+        if (r.about) m.about = r.about;
+        if (r.going === 'here' && ev.record.date === today()) m.here = true;
+      });
+    });
+    return Object.keys(by).map(function (k) { return by[k]; })
+      .sort(function (a, b) { return (b.here - a.here) || (b.meetings - a.meetings) || (b.at - a.at); });
+  }
+  function renderPeople() {
+    var list = $('[data-people]'), none = $('[data-people-none]');
+    list.textContent = '';
+    var rows = membersOf();
+    rows.forEach(function (m) {
+      var li = document.createElement('li');
+      if (m.here) li.classList.add('here');
+      var ring = document.createElement('span'); ring.className = 'ring';
+      var hex = document.createElement('span'); hex.className = 'hex';
+      if (m.picture) {
+        var img = document.createElement('img');
+        img.alt = ''; img.loading = 'lazy'; img.src = m.picture;
+        img.onerror = function () { img.remove(); hex.textContent = initial(m.who); };
+        hex.appendChild(img);
+      } else hex.textContent = initial(m.who);
+      ring.appendChild(hex); li.appendChild(ring);
+      var mid = document.createElement('span');
+      var nm = document.createElement('b'); nm.textContent = m.who; mid.appendChild(nm);
+      if (m.about) { var ab = document.createElement('span'); ab.className = 'ab'; ab.textContent = m.about; mid.appendChild(ab); }
+      li.appendChild(mid);
+      var pm = document.createElement('span'); pm.className = 'pm';
+      pm.textContent = m.meetings + (m.meetings === 1 ? ' meeting' : ' meetings');
+      if (m.here) { var now = document.createElement('span'); now.className = 'now'; now.textContent = ' · here now'; pm.appendChild(now); }
+      li.appendChild(pm);
+      list.appendChild(li);
+    });
+    none.hidden = rows.length > 0;
+  }
+  function render() { renderMeeting(); renderRows(); renderPeople(); renderDoors(); }
   function select(ev) {
     state.selected = ev;
     render();
