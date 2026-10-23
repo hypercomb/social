@@ -1,7 +1,12 @@
 # Hosted tenants — the paid on-ramp
 
 **Status:** DESIGN, 2026-10-22. Nothing here is built unless a row says so.
-Step 1 (head-only reads) BUILT the same day, behind `HEAD_ONLY`.
+Step 1 (head-only reads) BUILT the same day, behind `HEAD_ONLY`. Step 2
+(the tenant record and plans) BUILT the same day: `GET/POST /plans`,
+`DELETE /plans/<sig>`, `PUT /tenants/<pubkey>` (operator), `GET /tenant`
+(own); standing derived from `until` with `TENANT_GRACE_DAYS` (14) and
+`TENANT_READ_DAYS` (30); a lapsed tenant's writes are refused, reads go on.
+The pages people follow: `documentation/hosting-pages.md`.
 
 jwize, 2026-10-18: *"create a mesh on cloudflare that is shared but securely
 have a multi tenant architecture… Then charge for hosting to get people

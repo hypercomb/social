@@ -18,6 +18,10 @@
 //   PUT /upload       Blossom BUD-02 — kind 24242, t=upload
 //   HEAD /upload      Blossom BUD-06 preflight — X-SHA-256/X-Content-Length
 //   POST /reach       operator: mark one index's reach before HEAD_ONLY goes on
+//   GET  /plans       the plans this host offers; POST (operator) adds one,
+//                     DELETE /plans/<sig> (operator) withdraws it from offer
+//   PUT  /tenants/<pubkey>  operator: a key's plan and paid-through date
+//   GET  /tenant      a key's own tenant record, standing and plan — NIP-98
 //   POST /claim       claim a domain — NIP-98 (documentation/domain-claim.md)
 //   GET /claim/<name> a claim's public reading: {domain, status, nameservers}
 //
@@ -1167,7 +1171,7 @@ async function declaredListing(env, read) {
 /** The host's own private ledgers. Each member names a key or a domain and
  *  holds what only its own endpoint may hand out, so no declaration lists
  *  them — not even an operator's signed `listed`. */
-const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters']
+const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters', 'host:tenants']
 
 /** Is this pool listed here? The floor answers without an index read — the
  *  addresses every follower asks stay on the hot path; anything else is
@@ -3801,6 +3805,18 @@ async function hostPeople(env) {
 async function standing(env, pubkey, p, now) {
   const held = await readGrant(env, pubkey)
   const grant = held && typeof held === 'object' ? held : null
+  // A TENANT stands on its plan (documentation/hosted-tenants.md): the plan's
+  // bytes at least, per window as the host's own people do, while the plan
+  // is paid for or in its grace. Lapsed, it stands where anyone else does.
+  const tenant = await tenantOf(env, pubkey, now)
+  if (tenant && tenantWrites(tenant.standing)) {
+    const open = !!grant && Number(grant.expiresAt || 0) > now
+    return {
+      quotaBytes: Math.max(Number(grant?.quotaBytes || 0), tenant.plan.bytes),
+      usedBytes: open ? Number(grant.usedBytes || 0) : 0,
+      expiresAt: open ? Number(grant.expiresAt) : now + p.ttlDays * 86_400,
+    }
+  }
   if (!(await hostPeople(env)).has(pubkey)) {
     return grant && { ...grant, quotaBytes: Math.min(Number(grant.quotaBytes || 0), p.defaultQuota) }
   }
@@ -3819,6 +3835,13 @@ async function standing(env, pubkey, p, now) {
 async function admit(env, pubkey, size) {
   const p = policy(env)
   const now = Math.floor(Date.now() / 1000)
+  // A lapsed tenant writes nothing more here (reads go on for a while — the
+  // visitors are not theirs to strand), unless the host keeps it for its own
+  // reasons: an operator, a bound publisher, a friend.
+  const tenant = await tenantOf(env, pubkey, now)
+  if (tenant && !tenantWrites(tenant.standing) && !(await hostPeople(env)).has(pubkey)) {
+    return { ok: false, kind: 'lapsed', reason: 'your hosting plan has lapsed — what you published stays readable for a while; renew to publish again' }
+  }
   let grant = await standing(env, pubkey, p, now)
   const expired = !!grant && Number(grant.expiresAt || 0) <= now
   if (!grant || expired) {
@@ -3841,6 +3864,171 @@ async function admit(env, pubkey, size) {
 async function consume(env, pubkey, grant, size) {
   grant.usedBytes = Number(grant.usedBytes || 0) + size
   await writeLedger(env, HOST_GRANTS_MEANING, pubkey, grant)
+}
+
+// ── plans and tenants (documentation/hosted-tenants.md) ──────────────────────
+//
+// jwize 2026-10-18: "charge for hosting to get people initiated and move
+// them along to host their own servers after." A PLAN is a resource — its
+// bytes at their signature on the heap, listed as the member of
+// sign('host:plans') named by that signature while the host offers it. Its
+// terms never change: new terms are a new plan, and a tenant on the old one
+// keeps it until they move. A TENANT is the member of sign('host:tenants')
+// named by its key — private, like a grant: what the key is on, paid through
+// when, and its sites. No name, no email, no card: billing identity lives
+// with the payment provider, which only ever names the key.
+//
+// STANDING is derived from the paid-through date, never stored:
+//   active   paid through a date still ahead
+//   grace    TENANT_GRACE_DAYS (14) past it — full service, a notice
+//   lapsed   TENANT_READ_DAYS (30) past the grace — writes stop, reads go on
+//   dark     past that — the sites close (the door, step 3 of the design)
+//
+// Written by the operator now (PUT /tenants/<pubkey>); the payment
+// provider's webhook will write the same row (sign-up, step 3).
+const HOST_PLANS_MEANING = 'host:plans'
+const HOST_TENANTS_MEANING = 'host:tenants'
+const PLAN_MAX_BYTES = 4_096
+
+/** A plan's terms, or null when the bytes are not a plan. Every allowance
+ *  is a count or a size — never a rate, never a record of anyone. */
+function readPlan(raw) {
+  let plan
+  try { plan = typeof raw === 'string' ? JSON.parse(raw) : raw } catch { return null }
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) return null
+  const name = String(plan.name || '').trim()
+  const whole = (n) => Number.isInteger(n) && n >= 0
+  if (!name || name.length > 64) return null
+  if (!whole(plan.bytes) || !whole(plan.sites) || !whole(plan.rooms) || !whole(plan.people)) return null
+  const out = { name, bytes: plan.bytes, sites: plan.sites, rooms: plan.rooms, people: plan.people }
+  if (plan.price != null) {
+    const price = plan.price
+    if (!price || typeof price !== 'object' || !whole(price.amount) || !/^[a-z]{3}$/.test(String(price.currency || ''))
+      || !['month', 'year'].includes(price.period)) return null
+    out.price = { amount: price.amount, currency: price.currency, period: price.period }
+  }
+  return out
+}
+
+function tenantPolicy(env) {
+  return {
+    graceDays: allowance(env.TENANT_GRACE_DAYS, 14),
+    readDays: allowance(env.TENANT_READ_DAYS, 30),
+  }
+}
+
+function tenantStanding(record, env, now) {
+  const until = Number(record?.until || 0)
+  const { graceDays, readDays } = tenantPolicy(env)
+  if (now <= until) return 'active'
+  if (now <= until + graceDays * 86_400) return 'grace'
+  if (now <= until + (graceDays + readDays) * 86_400) return 'lapsed'
+  return 'dark'
+}
+const tenantWrites = (standing) => standing === 'active' || standing === 'grace'
+
+/** The plan held at a signature on the heap, or null. */
+async function heldPlan(env, sig) {
+  if (!SIG_RE.test(String(sig || ''))) return null
+  const bytes = await heldCreationBytes(env, sig, PLAN_MAX_BYTES)
+  return bytes ? readPlan(new TextDecoder().decode(bytes)) : null
+}
+
+/** A key's tenant record with its plan and standing, or null when the key
+ *  is no tenant (or its plan's bytes are gone — a record without terms). */
+async function tenantOf(env, pubkey, now) {
+  const record = await readLedger(env, HOST_TENANTS_MEANING, pubkey)
+  if (!record || typeof record !== 'object') return null
+  const plan = await heldPlan(env, record.plan)
+  if (!plan) return null
+  return { record, plan, standing: tenantStanding(record, env, now) }
+}
+
+const isOperator = (env, pubkey) => siteOperators(env).some(([, operator]) => operator === pubkey)
+
+// GET /plans — what this host offers, newest terms last: every member of the
+// plans pool whose bytes are a plan. Open: a price is for anyone to read.
+async function getPlans(request, env) {
+  const members = await poolMembers(env, HOST_PLANS_MEANING)
+  const plans = []
+  for (const { name } of members) {
+    const plan = await heldPlan(env, name)
+    if (plan) plans.push({ sig: name, ...plan })
+  }
+  plans.sort((a, b) => a.price?.amount - b.price?.amount || a.name.localeCompare(b.name))
+  return json(200, { plans }, { 'Cache-Control': 'no-store' })
+}
+
+// POST /plans — the operator offers a plan: its bytes land at their signature
+// and the pool lists it. The same terms twice are the same plan.
+async function postPlan(request, env) {
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST')
+  if (!auth.ok) return text(401, auth.reason)
+  if (!isOperator(env, auth.pubkey)) return text(403, 'only this host\'s operators offer plans')
+  let raw
+  try { raw = await request.text() } catch { return text(400, 'no plan') }
+  if (raw.length > PLAN_MAX_BYTES) return text(413, 'a plan is a few terms, not a document')
+  const plan = readPlan(raw)
+  if (!plan) return text(400, 'a plan is {name, bytes, sites, rooms, people, price?: {amount, currency, period}}')
+  const bytes = new TextEncoder().encode(JSON.stringify(plan))
+  const sig = await sha256Hex(bytes)
+  const held = await env.CONTENT.head(sig)
+  if (!held) {
+    await env.CONTENT.put(sig, bytes, { httpMetadata: { contentType: 'application/json; charset=utf-8' }, customMetadata: { owner: auth.pubkey } })
+  }
+  const member = `${await poolAddress(HOST_PLANS_MEANING)}/${sig}`
+  const listed = await env.CONTENT.head(member)
+  if (!listed) await env.CONTENT.put(member, bytes, { httpMetadata: { contentType: 'application/json; charset=utf-8' } })
+  return json(listed ? 200 : 201, { sig, ...plan }, { 'Cache-Control': 'no-store' })
+}
+
+// DELETE /plans/<sig> — withdrawn from offer. The bytes stay: a tenant on it
+// keeps its terms, and the record keeps pointing at something.
+async function deletePlan(request, env, sig) {
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'DELETE')
+  if (!auth.ok) return text(401, auth.reason)
+  if (!isOperator(env, auth.pubkey)) return text(403, 'only this host\'s operators withdraw plans')
+  await env.CONTENT.delete(`${await poolAddress(HOST_PLANS_MEANING)}/${sig}`)
+  return json(200, { sig, offered: false }, { 'Cache-Control': 'no-store' })
+}
+
+// PUT /tenants/<pubkey> — the operator (and later the payment webhook) puts
+// a key on a plan, paid through `until`. Body: {plan, until, sites?,
+// customer?}. The plan must be bytes this heap holds — offered or withdrawn.
+async function putTenant(request, env, pubkey) {
+  const auth = await verifyNip98(request, parseAuthEvent(request))
+  if (!auth.ok) return text(401, auth.reason)
+  if (!isOperator(env, auth.pubkey)) return text(403, 'only this host\'s operators set tenants')
+  let body
+  try { body = await request.json() } catch { return text(400, 'body is not JSON') }
+  const plan = String(body?.plan || '').toLowerCase()
+  if (!await heldPlan(env, plan)) return text(400, 'plan is not a plan this host holds')
+  const until = Number(body?.until)
+  if (!Number.isInteger(until) || until <= 0) return text(400, 'until is the paid-through time, in seconds')
+  const sites = [...new Set((Array.isArray(body?.sites) ? body.sites : []).map((s) => String(s || '').trim().toLowerCase()).filter(validHostName))]
+  const now = Math.floor(Date.now() / 1000)
+  const previous = await readLedger(env, HOST_TENANTS_MEANING, pubkey)
+  const record = { pubkey, plan, until, sites, since: Number(previous?.since) || now }
+  if (body?.customer != null) record.customer = String(body.customer).slice(0, 128)
+  else if (previous?.customer) record.customer = previous.customer
+  await writeLedger(env, HOST_TENANTS_MEANING, pubkey, record)
+  return json(previous ? 200 : 201, { ...record, standing: tenantStanding(record, env, now) }, { 'Cache-Control': 'no-store' })
+}
+
+// GET /tenant — a key reads its own row: the record, its standing and the
+// plan's terms. Never anyone else's.
+async function getTenant(request, env) {
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'GET')
+  if (!auth.ok) return text(401, auth.reason)
+  const now = Math.floor(Date.now() / 1000)
+  const tenant = await tenantOf(env, auth.pubkey, now)
+  if (!tenant) return json(200, { standing: 'none' }, { 'Cache-Control': 'no-store' })
+  const { graceDays, readDays } = tenantPolicy(env)
+  return json(200, {
+    ...tenant.record, standing: tenant.standing, plan: { sig: tenant.record.plan, ...tenant.plan },
+    graceUntil: tenant.record.until + graceDays * 86_400,
+    readUntil: tenant.record.until + (graceDays + readDays) * 86_400,
+  }, { 'Cache-Control': 'no-store' })
 }
 
 // ── read side (BUD-01) ───────────────────────────────────────────────────────
@@ -5907,6 +6095,26 @@ const router = {
 
     if (writeFace && pathname === '/grant') {
       if (method === 'GET') return getGrant(request, env)
+      return text(405, 'method not allowed')
+    }
+
+    if (writeFace && pathname === '/plans') {
+      if (method === 'GET') return getPlans(request, env)
+      if (method === 'POST') return postPlan(request, env)
+      return text(405, 'method not allowed')
+    }
+    const planPath = pathname.match(/^\/plans\/([0-9a-f]{64})$/)
+    if (writeFace && planPath) {
+      if (method === 'DELETE') return deletePlan(request, env, planPath[1])
+      return text(405, 'method not allowed')
+    }
+    const tenantPath = pathname.match(/^\/tenants\/([0-9a-f]{64})$/)
+    if (writeFace && tenantPath) {
+      if (method === 'PUT') return putTenant(request, env, tenantPath[1])
+      return text(405, 'method not allowed')
+    }
+    if (writeFace && pathname === '/tenant') {
+      if (method === 'GET') return getTenant(request, env)
       return text(405, 'method not allowed')
     }
 

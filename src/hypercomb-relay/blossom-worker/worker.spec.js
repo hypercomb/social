@@ -5873,3 +5873,124 @@ test('a meeting the network lists opens its list on this door, and the list aggr
     globalThis.fetch = realFetch
   }
 })
+
+// ── plans and tenants: the paid on-ramp ──────────────────────────────────────
+//
+// documentation/hosted-tenants.md. A plan is a resource the host offers; a
+// tenant is a key on a plan, paid through a date. Standing is derived from
+// that date: active, grace (writes go on), lapsed (writes stop, reads go on).
+
+const tenantSk = Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 3 : 0)
+const tenantKey = hex(schnorr.getPublicKey(tenantSk))
+const STARTER = { name: 'Starter', bytes: 40, sites: 1, rooms: 1, people: 10, price: { amount: 900, currency: 'usd', period: 'month' } }
+
+async function hostWithPlans() {
+  const content = textHeap()
+  content.get = async (k) => content.objects.has(k) ? {
+    size: content.objects.get(k).length,
+    body: content.objects.get(k),
+    text: async () => content.objects.get(k),
+    arrayBuffer: async () => new TextEncoder().encode(content.objects.get(k)).buffer,
+  } : null
+  content.delete = async (k) => { content.objects.delete(k) }
+  content.list = async ({ prefix }) => ({ objects: [...content.objects.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key, etag: '' })), truncated: false })
+  const env = { SITE_BINDINGS: '{}', SITE_OPERATORS: JSON.stringify({ 'hypercomb.com': pubkey }), AUTO_GRANT: '0', CONTENT: content, GRANTS: kvMap() }
+  const call = async (path, method, body, key = sk) => {
+    const url = `https://content.hypercomb.com${path}`
+    return worker.fetch(new Request(url, { method, headers: { authorization: await nip98(url, method, key), 'content-type': 'application/json' }, body }), env)
+  }
+  const upload = async (text) => {
+    const url = `https://content.hypercomb.com/${await sha256Hex(text)}`
+    return worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', tenantSk) }, body: text }), env)
+  }
+  return { env, content, call, upload }
+}
+
+test('plans: the operator offers a plan, anyone reads the offer, only the operator changes it', async () => {
+  const { call, env } = await hostWithPlans()
+  assert.equal((await call('/plans', 'POST', JSON.stringify(STARTER), tenantSk)).status, 403)
+  assert.equal((await call('/plans', 'POST', JSON.stringify({ name: 'Nope', bytes: -1 }))).status, 400)
+  const offered = await call('/plans', 'POST', JSON.stringify(STARTER))
+  assert.equal(offered.status, 201)
+  const { sig } = await offered.json()
+  assert.match(sig, /^[0-9a-f]{64}$/)
+  assert.equal((await call('/plans', 'POST', JSON.stringify(STARTER))).status, 200, 'the same terms are the same plan')
+  const listed = await (await worker.fetch(new Request('https://content.hypercomb.com/plans'), env)).json()
+  assert.deepEqual(listed.plans, [{ sig, ...STARTER }])
+  // The plan's bytes answer at their signature, like any resource.
+  const bytes = await worker.fetch(new Request(`https://content.hypercomb.com/${sig}`), env)
+  assert.equal(bytes.status, 200)
+  assert.deepEqual(JSON.parse(await bytes.text()), STARTER)
+  assert.equal((await call(`/plans/${sig}`, 'DELETE', null, tenantSk)).status, 403)
+  assert.equal((await call(`/plans/${sig}`, 'DELETE')).status, 200)
+  assert.deepEqual((await (await worker.fetch(new Request('https://content.hypercomb.com/plans'), env)).json()).plans, [])
+  assert.equal((await worker.fetch(new Request(`https://content.hypercomb.com/${sig}`), env)).status, 200, 'withdrawn from offer, the terms stay')
+})
+
+test('tenants: a key on a plan writes up to the plan bytes, on a host that keeps nothing for strangers', async () => {
+  const { call, upload } = await hostWithPlans()
+  const { sig } = await (await call('/plans', 'POST', JSON.stringify(STARTER))).json()
+  const now = Math.floor(Date.now() / 1000)
+  assert.equal((await upload('before any plan')).status, 403, 'a stranger is refused')
+  assert.equal((await call(`/tenants/${tenantKey}`, 'PUT', JSON.stringify({ plan: 'f'.repeat(64), until: now + 86_400 }))).status, 400)
+  assert.equal((await call(`/tenants/${tenantKey}`, 'PUT', JSON.stringify({ plan: sig, until: now + 86_400 }), tenantSk)).status, 403)
+  const set = await call(`/tenants/${tenantKey}`, 'PUT', JSON.stringify({ plan: sig, until: now + 86_400, sites: ['maria.hypercomb.com'], customer: 'cus_123' }))
+  assert.equal(set.status, 201)
+  assert.equal((await set.json()).standing, 'active')
+  const own = await (await call('/tenant', 'GET', null, tenantSk)).json()
+  assert.equal(own.standing, 'active')
+  assert.equal(own.plan.name, 'Starter')
+  assert.deepEqual(own.sites, ['maria.hypercomb.com'])
+  assert.equal(own.customer, 'cus_123')
+  assert.equal((await (await call('/tenant', 'GET')).json()).standing, 'none', 'another key reads only its own standing')
+  assert.equal((await upload('twenty bytes of hive')).status, 201)
+  assert.equal((await upload('twenty more of them.')).status, 201)
+  const over = await upload('one byte over')
+  assert.equal(over.status, 403, 'the plan bytes are the allowance')
+  assert.match(await over.text(), /quota used up/)
+  const grant = await (await call('/grant', 'GET', null, tenantSk)).json()
+  assert.equal(grant.quotaBytes, 40)
+  assert.equal(grant.usedBytes, 40)
+})
+
+test('tenants: standing follows the paid-through date — grace keeps writing, lapsed stops it, reads go on', async () => {
+  const { call, env, upload } = await hostWithPlans()
+  const { sig } = await (await call('/plans', 'POST', JSON.stringify(STARTER))).json()
+  const now = Math.floor(Date.now() / 1000)
+  const day = 86_400
+  const standing = async () => (await (await call('/tenant', 'GET', null, tenantSk)).json()).standing
+
+  await call(`/tenants/${tenantKey}`, 'PUT', JSON.stringify({ plan: sig, until: now - 3 * day }))
+  assert.equal(await standing(), 'grace')
+  const page = 'a tenant page'
+  assert.equal((await upload(page)).status, 201, 'in grace, full service')
+
+  await call(`/tenants/${tenantKey}`, 'PUT', JSON.stringify({ plan: sig, until: now - 20 * day }))
+  assert.equal(await standing(), 'lapsed')
+  const refused = await upload('another page')
+  assert.equal(refused.status, 403)
+  assert.match(await refused.text(), /lapsed/)
+  assert.equal((await worker.fetch(new Request(`https://content.hypercomb.com/${await sha256Hex(page)}`), env)).status, 200, 'what was published still reads')
+
+  await call(`/tenants/${tenantKey}`, 'PUT', JSON.stringify({ plan: sig, until: now - 50 * day }))
+  assert.equal(await standing(), 'dark')
+
+  // Renewed: active again, and the row keeps its first day.
+  const renewed = await (await call(`/tenants/${tenantKey}`, 'PUT', JSON.stringify({ plan: sig, until: now + 30 * day }))).json()
+  assert.equal(renewed.standing, 'active')
+  assert.equal(typeof renewed.since, 'number')
+  const own = await (await call('/tenant', 'GET', null, tenantSk)).json()
+  assert.equal(own.graceUntil, now + 30 * day + 14 * day)
+  assert.equal(own.readUntil, now + 30 * day + 44 * day)
+})
+
+test('tenants: the record is private — the pool is not listed and the member is not an open read', async () => {
+  const { call, env, content } = await hostWithPlans()
+  const { sig } = await (await call('/plans', 'POST', JSON.stringify(STARTER))).json()
+  await call(`/tenants/${tenantKey}`, 'PUT', JSON.stringify({ plan: sig, until: 2_000_000_000 }))
+  const pool = await sha256Hex('host:tenants')
+  assert.equal(content.objects.has(`${pool}/${tenantKey}`), true)
+  assert.notEqual((await worker.fetch(new Request(`https://content.hypercomb.com/${pool}/`), env)).status, 200)
+  const member = await worker.fetch(new Request(`https://content.hypercomb.com/${pool}/${tenantKey}`), env)
+  assert.notEqual(await member.text(), content.objects.get(`${pool}/${tenantKey}`))
+})
