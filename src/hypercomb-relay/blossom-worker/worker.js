@@ -5441,6 +5441,24 @@ const router = {
       }
     }
 
+    // A PACKAGE DOOR'S ONE PACKAGE, AT ITS FLAT ADDRESS TOO. A shell probes a
+    // host's `host:packages` pool flat first (`/<pool>/`) and takes a "no
+    // pool at this address" there as the host's last word — so a door that
+    // answered only under /content/ installed nothing. Both spellings are the
+    // door's one-member pool (answerPackage).
+    const doorPackages = pathname.match(/^\/([0-9a-f]{64})\/([0-9]{8})?$/)
+    const doorLabel = requestUrl.hostname.split('.')[0]
+    if (doorPackages && (method === 'GET' || method === 'HEAD')
+      && (doorLabel === SWARM_DOOR_LABEL || SANDBOX_LABEL_RE.test(doorLabel))
+      && doorPackages[1] === await poolAddress(HOST_PACKAGES_MEANING)) {
+      const routed = await route()
+      if (routed.site && routed.implicit && (routed.site.lineage === SWARM_DOOR_LABEL || SANDBOX_LABEL_RE.test(routed.site.lineage))) {
+        const asContent = new URL(request.url)
+        asContent.pathname = '/content' + pathname
+        return serveSandbox(new Request(asContent, request), routed.env, routed.site, routed.zone)
+      }
+    }
+
     // The only exposed location bag is this DNS door's own hashed name. Its
     // newest numbered marker is the head, but the publisher's signed index
     // must still authorize that exact route and agree with the marker.

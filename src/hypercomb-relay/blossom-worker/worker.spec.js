@@ -1512,6 +1512,17 @@ test('a door asks for its shell bundles under /shell/, and /shell/<file> is the 
   } finally { globalThis.fetch = original }
 })
 
+test('the door answers its one package at the flat pool address too — where a shell asks first', async () => {
+  const root = 'd'.repeat(64)
+  const env = await sandboxEnv({ 'install:swarm': root })
+  const pool = await hostPackagesPool()
+  const listing = await worker.fetch(new Request(`https://swarm.hypercomb.com/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(await listing.text(), '00000000\n')
+  const member = await worker.fetch(new Request(`https://swarm.hypercomb.com/${pool}/00000000`), env)
+  assert.equal(await member.text(), `${root}\nswarm`)
+})
+
 test('a write from the swarm door is not refused as a sandbox write', async () => {
   const env = await sandboxEnv({ 'install:swarm': 'd'.repeat(64) })
   const bytes = new TextEncoder().encode('a room note')
