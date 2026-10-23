@@ -1648,6 +1648,8 @@ async function serveOfferingsPool(request, env, member) {
 async function servePoolListing(request, env, sig) {
   const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
   const listed = await listedPool(env, sig)
+  // A MEETING'S LIST gathers what the network's other doors hold first.
+  if (!listed && await isRsvpPool(env, sig)) await pickUpClaims(env, sig)
   // A ROOM POOL is listed to whoever asks its address — its members only.
   if (!listed && await isRoomPool(env, sig)) {
     const names = await roomMemberNames(env, sig)
@@ -2177,15 +2179,83 @@ const PICKUP_TTL_MS = 60_000
 const PICKUP_FETCH_MS = 3_000
 const PICKUP_PASS_MS = 6_000
 
+// THE HOST NETWORK FOR MEETINGS (jwize 2026-10-22: "we create a host network
+// for meetings"). A door follows other doors by its own people's signed word —
+// `follow:<zone>` in their index, naming the canonical host artifact of that
+// zone — and the follows ARE this host's community:hosts pool, which every
+// reader can list at its address. Who follows whom is the network: a meeting
+// any followed door lists is picked up here (its list opened here too, so a
+// reader joins on the door they arrived at), and every door aggregates the
+// claims the others hold, so each keeps the whole list. Doors this worker
+// serves share one store already; only hosts elsewhere are asked.
+const FOLLOW_KEY_RE = /^follow:([a-z0-9.-]+)$/
+const HOST_ARTIFACT_KIND = 'visual:host:artifact'
+// Hosts a hosted attendee came from (their profile verified there): their own
+// events show on the calendar — the business-card list of meetings. Members
+// are named by the hostname, as i18n:locales are.
+const RSVP_HOSTS_MEANING = 'rsvp:hosts'
+const PICKUP_PER_HOST = 20
+const RSVP_GATHER_TTL_MS = 30_000
+
+/** A host's canonical artifact record — byte for byte what the hive mints
+ *  (essentials community-hosts.ts hostArtifactRecord), so one zone is one
+ *  signature on every machine. */
+const hostArtifactText = (zone) => JSON.stringify({ kind: HOST_ARTIFACT_KIND, meaning: `host:${zone}`, payload: { zone } })
+
+/** Is this key one of the host's own people (operators, bound publishers,
+ *  friends) — the keys whose word puts meetings and follows on its doors? */
+async function isHostPerson(env, pubkey) {
+  return (await hostPeople(env)).has(String(pubkey || '').toLowerCase())
+}
+
 async function noteEvents(env, pubkey, evt) {
   let roots = {}
   try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
+  const keys = Object.keys(roots)
+  if (!keys.some(key => EVENT_KEY_RE.test(key) || RSVP_KEY_RE.test(key))) return
+  // Meetings and their lists are the host's own people's to put here.
+  if (!(await isHostPerson(env, pubkey))) return
   for (const [key, value] of Object.entries(roots)) {
     const sig = String(value ?? '').toLowerCase()
     if (!SIG_RE.test(sig)) continue
     if (EVENT_KEY_RE.test(key)) await addPoolMember(env, EVENTS_POOL_MEANING, sig)
     const opened = RSVP_KEY_RE.exec(key)?.[1]
     if (opened) await addPoolMember(env, RSVP_POOLS_MEANING, await poolAddress(`rsvp:${opened}`))
+  }
+}
+
+/** A host person's follows become members of community:hosts — each the
+ *  canonical artifact of the zone it names, kept only when the key's value is
+ *  that artifact's signature. A follow the same key no longer names is
+ *  withdrawn; members anyone else put there stay. */
+async function noteFollows(env, pubkey, evt) {
+  let roots = {}
+  try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
+  const named = Object.entries(roots).filter(([key]) => FOLLOW_KEY_RE.test(key))
+  const pool = await poolAddress(COMMUNITY_HOSTS_POOL)
+  const page = env.CONTENT?.list ? await env.CONTENT.list({ prefix: `${pool}/`, limit: 1000, include: ['customMetadata'] }) : { objects: [] }
+  const mine = (page.objects ?? []).filter(obj => obj.customMetadata?.follow === pubkey)
+  if (!named.length && !mine.length) return
+  if (!(await isHostPerson(env, pubkey))) return
+  const wanted = new Map()
+  for (const [key, value] of named) {
+    const zone = publicHostName(FOLLOW_KEY_RE.exec(key)?.[1])
+    if (!zone) continue
+    const text = hostArtifactText(zone)
+    const sig = await sha256Hex(new TextEncoder().encode(text))
+    if (String(value || '').toLowerCase() === sig) wanted.set(sig, text)
+  }
+  for (const obj of mine) {
+    const name = String(obj.key).slice(pool.length + 1)
+    if (!wanted.has(name)) await env.CONTENT.delete(obj.key)
+  }
+  for (const [sig, text] of wanted) {
+    const key = `${pool}/${sig}`
+    if (await env.CONTENT.head(key)) continue
+    await env.CONTENT.put(key, new TextEncoder().encode(text), {
+      httpMetadata: { contentType: 'application/json; charset=utf-8' },
+      customMetadata: { follow: pubkey },
+    })
   }
 }
 
@@ -2206,44 +2276,66 @@ async function communityZones(env) {
       const obj = await env.CONTENT.get(`${pool}/${name}`)
       if (!obj) continue
       const meaning = String(JSON.parse(new TextDecoder().decode(await obj.arrayBuffer()))?.meaning ?? '')
-      const zone = meaning.startsWith('host:') ? meaning.slice('host:'.length).trim().toLowerCase() : ''
-      if (zone.includes('.') && zone.split('.').every(label => DNS_LABEL_RE.test(label))) zones.add(zone)
+      const zone = publicHostName(meaning.startsWith('host:') ? meaning.slice('host:'.length).trim() : '')
+      if (zone) zones.add(zone)
     } catch { /* a member that will not parse is not a host */ }
   }
   return [...zones]
 }
 
+/** The hosts hosted attendees came from, at most PICKUP_HOSTS. */
+async function participantHosts(env) {
+  const out = []
+  for (const name of await poolMemberNames(env, RSVP_HOSTS_MEANING)) {
+    const host = publicHostName(name)
+    if (host && !out.includes(host)) out.push(host)
+    if (out.length >= PICKUP_HOSTS) break
+  }
+  return out
+}
+
+/** GET within the pick-up bound; a slow host costs its timeout, never more. */
+async function fetchWithin(url) {
+  const control = new AbortController()
+  const timer = setTimeout(() => control.abort(), PICKUP_FETCH_MS)
+  try { return await fetch(url, { signal: control.signal, headers: { accept: 'text/plain, application/json' } }) }
+  finally { clearTimeout(timer) }
+}
+
+const listingOf = async (res) => (await res.text()).split('\n').map(line => line.trim().toLowerCase()).filter(line => SIG_RE.test(line))
+
 const eventsPickedUp = new WeakMap()
 
-/** PICK UP the events the community lists: ask every host this door carries
- *  for sign('calendar:events') at its own address, fetch each record this
- *  heap lacks, believe it only when it hashes to its name and is an event,
- *  and keep it — the bytes in the heap, the name in this host's pool. At most
- *  once a minute per isolate, bounded in time; a host that is slow or gone
- *  costs its timeout and never fails the listing. */
+/** PICK UP the network's meetings: ask every followed host, and every host a
+ *  hosted attendee came from, for sign('calendar:events') at its own address;
+ *  fetch each record this heap lacks, believe it only when it hashes to its
+ *  name and is an event, and keep it — the bytes in the heap, the name in this
+ *  host's pool. A meeting from a FOLLOWED host also opens its list here, so a
+ *  reader joins on this door; a participant's own events are shown, and joined
+ *  at their door. At most once a minute per isolate, bounded in time; hosts
+ *  this worker serves already share this store and are not asked. */
 async function pickUpEvents(env) {
   if (!env.CONTENT?.put || !env.CONTENT?.list || typeof fetch !== 'function') return
   const holder = env.CONTENT
   if (Date.now() - (eventsPickedUp.get(holder) ?? 0) < PICKUP_TTL_MS) return
   eventsPickedUp.set(holder, Date.now())
-  const zones = await communityZones(env)
-  if (!zones.length) return
+  const followed = (await communityZones(env)).filter(zone => !servedHere(env, zone))
+  const participants = (await participantHosts(env)).filter(host => !servedHere(env, host) && !followed.includes(host))
+  if (!followed.length && !participants.length) return
   const pool = await poolAddress(EVENTS_POOL_MEANING)
   const held = new Set(await poolMemberNames(env, EVENTS_POOL_MEANING))
   let picked = 0
-  const fetchWithin = async (url) => {
-    const control = new AbortController()
-    const timer = setTimeout(() => control.abort(), PICKUP_FETCH_MS)
-    try { return await fetch(url, { signal: control.signal, headers: { accept: 'text/plain, application/json' } }) }
-    finally { clearTimeout(timer) }
-  }
-  const pickFrom = async (zone) => {
+  const pickFrom = async (zone, opens) => {
     try {
       const listing = await fetchWithin(`https://${zone}/${pool}/`)
       if (!listing.ok) return
-      const names = (await listing.text()).split('\n').map(line => line.trim().toLowerCase()).filter(line => SIG_RE.test(line))
-      for (const name of names) {
-        if (held.has(name) || picked >= PICKUP_MEMBERS) continue
+      let fromHere = 0
+      for (const name of await listingOf(listing)) {
+        if (picked >= PICKUP_MEMBERS || fromHere >= PICKUP_PER_HOST) break
+        if (held.has(name)) {
+          if (opens) await addPoolMember(env, RSVP_POOLS_MEANING, await poolAddress(`rsvp:${name}`))
+          continue
+        }
         const record = await fetchWithin(`https://${zone}/${name}`)
         if (!record.ok) continue
         const bytes = new Uint8Array(await record.arrayBuffer())
@@ -2258,13 +2350,72 @@ async function pickUpEvents(env) {
           })
         }
         await addPoolMember(env, EVENTS_POOL_MEANING, name)
+        if (opens) await addPoolMember(env, RSVP_POOLS_MEANING, await poolAddress(`rsvp:${name}`))
         held.add(name)
         picked++
+        fromHere++
       }
     } catch { /* that host is slow or gone; the rest still answer */ }
   }
   await Promise.race([
-    Promise.all(zones.map(pickFrom)),
+    Promise.all([...followed.map(zone => pickFrom(zone, true)), ...participants.map(host => pickFrom(host, false))]),
+    new Promise(resolve => setTimeout(resolve, PICKUP_PASS_MS)),
+  ])
+}
+
+/** The meeting an RSVP pool is for: the calendar member whose list address it
+ *  is. A pool is a hash, so this is asked of the calendar, never derived. */
+async function meetingOfPool(env, pool) {
+  for (const name of await poolMemberNames(env, EVENTS_POOL_MEANING)) {
+    if (await poolAddress(`rsvp:${name}`) === pool) return { sig: name, record: await heapRecord(env, name) }
+  }
+  return null
+}
+
+const claimsPickedUp = new Map()
+
+/** AGGREGATE A MEETING'S LIST across the network: ask the meeting's own door
+ *  and every followed host for the same list address, and keep every claim
+ *  this door lacks that passes the same checks a direct write does. Claims
+ *  are self-signed, so a door may hold any of them; the newest per key stands
+ *  for every reader. Once per RSVP_GATHER_TTL_MS per list per isolate, bounded. */
+async function pickUpClaims(env, pool) {
+  if (!env.CONTENT?.put || !env.CONTENT?.list || typeof fetch !== 'function') return
+  if (Date.now() - (claimsPickedUp.get(pool) ?? 0) < RSVP_GATHER_TTL_MS) return
+  claimsPickedUp.set(pool, Date.now())
+  const meeting = await meetingOfPool(env, pool)
+  const leader = publicHostName(String(meeting?.record?.host || ''))
+  const sources = [...new Set([...(leader ? [leader] : []), ...(await communityZones(env))])]
+    .filter(host => !servedHere(env, host))
+  if (!sources.length) return
+  const held = new Set((await roomMemberNames(env, pool)))
+  let picked = 0
+  const pickFrom = async (host) => {
+    try {
+      const listing = await fetchWithin(`https://${host}/${pool}/`)
+      if (!listing.ok) return
+      for (const name of await listingOf(listing)) {
+        if (held.has(name) || picked >= PICKUP_MEMBERS) continue
+        const res = await fetchWithin(`https://${host}/${pool}/${name}`)
+        if (!res.ok) continue
+        const body = new Uint8Array(await res.arrayBuffer())
+        const claim = await checkRsvpClaim(body, pool, name)
+        if (!claim.ok) continue
+        const key = `${pool}/${name}`
+        if (!(await env.CONTENT.head(key))) {
+          await env.CONTENT.put(key, body, {
+            httpMetadata: { contentType: 'application/json; charset=utf-8' },
+            customMetadata: { owner: claim.pubkey, member: '1', rsvp: '1', picked: host },
+          })
+        }
+        held.add(name)
+        picked++
+        if (claim.profile) await pickUpProfile(env, claim.theirHost, claim.profile, claim.pubkey).catch(() => {})
+      }
+    } catch { /* that host is slow or gone; the rest still answer */ }
+  }
+  await Promise.race([
+    Promise.all(sources.map(pickFrom)),
     new Promise(resolve => setTimeout(resolve, PICKUP_PASS_MS)),
   ])
 }
@@ -2282,24 +2433,9 @@ async function pickUpEvents(env) {
 async function putRsvpMember(request, env, pool, member, ctx) {
   if (!env.CONTENT?.put || !env.CONTENT?.list) return text(503, 'this host holds no pools')
   const body = await request.arrayBuffer()
-  if (body.byteLength > RSVP_MAX_BYTES) return text(413, 'an rsvp is a claim, not content')
-  if (await sha256Hex(body) !== member) return text(400, 'member bytes do not hash to their name')
-  let evt
-  try { evt = JSON.parse(new TextDecoder().decode(body)) } catch { return text(400, 'body is not a JSON nostr event') }
-  if (Number(evt?.kind) !== RSVP_KIND) return text(400, `wrong event kind (expected rsvp ${RSVP_KIND})`)
-  if (String(tagValue(evt, 'pool') || '').toLowerCase() !== pool) return text(400, 'rsvp is not tagged with this pool')
-  const event = String(tagValue(evt, 'event') || '').toLowerCase()
-  if (!SIG_RE.test(event) || await poolAddress(`rsvp:${event}`) !== pool) return text(400, 'rsvp names another event than this pool is for')
-  const name = String(tagValue(evt, 'name') || '').trim()
-  if (!name || name.length > RSVP_NAME_MAX || /[\u0000-\u001f\u007f]/.test(name)) return text(400, `an rsvp carries a name of 1 to ${RSVP_NAME_MAX} characters`)
-  const going = String(tagValue(evt, 'going') || '')
-  if (going !== 'yes' && going !== 'no' && going !== 'here') return text(400, 'an rsvp says going yes, no or here')
-  const theirHost = String(tagValue(evt, 'host') || '').toLowerCase()
-  const profile = String(tagValue(evt, 'profile') || '').toLowerCase()
-  if (theirHost && !publicHostName(theirHost)) return text(400, 'an rsvp names its host as a public hostname')
-  if (profile && (!SIG_RE.test(profile) || !theirHost)) return text(400, 'an rsvp names its profile by signature, with the host that holds it')
-  const pubkey = String(evt?.pubkey || '').toLowerCase()
-  if (!SIG_RE.test(pubkey) || !(await verifyEventSig(evt))) return text(401, 'invalid rsvp signature')
+  const claim = await checkRsvpClaim(new Uint8Array(body), pool, member)
+  if (!claim.ok) return text(claim.status, claim.reason)
+  const { pubkey, theirHost, profile } = claim
   // Their profile and picture follow the claim — after it, and never in its way.
   const pickUp = () => (profile ? pickUpProfile(env, theirHost, profile, pubkey) : Promise.resolve())
 
@@ -2314,6 +2450,33 @@ async function putRsvpMember(request, env, pool, member, ctx) {
   if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(pickUp().catch(() => {}))
   else await pickUp().catch(() => {})
   return text(201, `member ${member}`)
+}
+
+/** A claim's bytes as the claim they are, or why not: they hash to their
+ *  name, are an RSVP of THIS pool's meeting with a name and an answer, name
+ *  their host and profile (when they do) properly, and verify. One check for
+ *  a direct write and for a claim picked up from another door. */
+async function checkRsvpClaim(bytes, pool, member) {
+  const fail = (status, reason) => ({ ok: false, status, reason })
+  if (bytes.byteLength > RSVP_MAX_BYTES) return fail(413, 'an rsvp is a claim, not content')
+  if (await sha256Hex(bytes) !== member) return fail(400, 'member bytes do not hash to their name')
+  let evt
+  try { evt = JSON.parse(new TextDecoder().decode(bytes)) } catch { return fail(400, 'body is not a JSON nostr event') }
+  if (Number(evt?.kind) !== RSVP_KIND) return fail(400, `wrong event kind (expected rsvp ${RSVP_KIND})`)
+  if (String(tagValue(evt, 'pool') || '').toLowerCase() !== pool) return fail(400, 'rsvp is not tagged with this pool')
+  const event = String(tagValue(evt, 'event') || '').toLowerCase()
+  if (!SIG_RE.test(event) || await poolAddress(`rsvp:${event}`) !== pool) return fail(400, 'rsvp names another event than this pool is for')
+  const name = String(tagValue(evt, 'name') || '').trim()
+  if (!name || name.length > RSVP_NAME_MAX || /[\u0000-\u001f\u007f]/.test(name)) return fail(400, `an rsvp carries a name of 1 to ${RSVP_NAME_MAX} characters`)
+  const going = String(tagValue(evt, 'going') || '')
+  if (going !== 'yes' && going !== 'no' && going !== 'here') return fail(400, 'an rsvp says going yes, no or here')
+  const theirHost = String(tagValue(evt, 'host') || '').toLowerCase()
+  const profile = String(tagValue(evt, 'profile') || '').toLowerCase()
+  if (theirHost && !publicHostName(theirHost)) return fail(400, 'an rsvp names its host as a public hostname')
+  if (profile && (!SIG_RE.test(profile) || !theirHost)) return fail(400, 'an rsvp names its profile by signature, with the host that holds it')
+  const pubkey = String(evt?.pubkey || '').toLowerCase()
+  if (!SIG_RE.test(pubkey) || !(await verifyEventSig(evt))) return fail(401, 'invalid rsvp signature')
+  return { ok: true, pubkey, theirHost, profile }
 }
 
 const PROFILE_MAX_BYTES = 8_192
@@ -2378,6 +2541,8 @@ async function pickUpProfile(env, host, sig, pubkey) {
       customMetadata: { picked: host },
     })
   }
+  // A verified profile is a hosted participant: their host's events show here.
+  await addPoolMember(env, RSVP_HOSTS_MEANING, host)
   let picture
   try { picture = new URL(String(content?.picture || '')) } catch { return }
   const pictureSig = /^\/([0-9a-f]{64})$/.exec(picture.pathname)?.[1]
@@ -4465,6 +4630,7 @@ async function putHive(request, env, pubkey, ctx) {
   await noteAssessors(env, pubkey, evt)
   await noteAttesters(env, pubkey, evt)
   await noteEvents(env, pubkey, evt)
+  await noteFollows(env, pubkey, evt)
   await noteSharedPools(env, pubkey, evt)
   if (!await advancePublishedLocations(env, pubkey, evt)) {
     return text(503, 'signed index is held but a route location is not current; retry this index')

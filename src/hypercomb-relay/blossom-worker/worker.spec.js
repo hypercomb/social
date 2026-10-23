@@ -5412,7 +5412,7 @@ test('every page leaves with no-transform — the edge may not rewrite it into a
 // ── the calendar (documentation/calendar-events.md) ──────────────────────────
 
 const EVENTS_POOL = await sha256Hex('calendar:events')
-const eventRecordText = (date, host = 'meetups.hypercomb.com') =>
+const eventRecordText = (date, host = 'meetups.pluginthematrix.com') =>
   JSON.stringify({ v: 1, kind: 'event', title: 'Hypercomb Meetup', date, where: 'Yaletown, Vancouver', series: 'meetups', host, at: 1 })
 
 /** An operator's zone whose signed index lists calendar:events, holding `held`. */
@@ -5777,4 +5777,99 @@ test('an rsvp naming a host or a profile is refused unless both are what they sa
   assert.equal((await putRsvp(env, pool, await signedBy(key, 30568, [...base, ['profile', 'a'.repeat(64)]]))).status, 400, 'a profile with no host to hold it')
   assert.equal((await putRsvp(env, pool, await signedBy(key, 30568, [...base, ['host', 'peer.example'], ['profile', 'nope']]))).status, 400, 'a profile not named by signature')
   assert.equal((await putRsvp(env, pool, await signedBy(key, 30568, [['pool', pool], ['event', sig], ['name', 'Cy'], ['going', 'here']]))).status, 201, 'a check-in')
+})
+
+// ── the host network for meetings (documentation/calendar-events.md) ─────────
+// jwize, 2026-10-22: "we create a host network for meetings" — doors follow
+// each other by their people's signed word; a meeting the network lists opens
+// its list on every door; every door aggregates the claims the others hold.
+const hostArtifact = (zone) => JSON.stringify({ kind: 'visual:host:artifact', meaning: `host:${zone}`, payload: { zone } })
+const COMMUNITY = await sha256Hex('community:hosts')
+
+async function indexPutBy(env, key, roots, createdAt) {
+  const who = pubOf(key)
+  const url = `https://content.hypercomb.com/${INDEXES}/${who}`
+  // The operator's own index keeps listing the calendar, as the live one does.
+  const body = JSON.stringify(key === sk
+    ? await signedIndex(roots, createdAt ?? 1_800_000_300, undefined, undefined, { listed: ['calendar:events'] })
+    : await indexBy(key, roots, createdAt))
+  return worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', key) }, body }), env)
+}
+
+test('a host\'s own people make its doors follow another host; a stranger cannot, and a follow withdrawn is gone', async () => {
+  const env = await calendarEnv()
+  const artifact = await sha256Hex(hostArtifact('peer.example'))
+  assert.equal((await indexPutBy(env, sk, { 'follow:peer.example': artifact }, 1_800_000_300)).status, 200)
+  assert(env.CONTENT.held.has(`${COMMUNITY}/${artifact}`), 'the follow is a member of community:hosts')
+  const listing = await worker.fetch(new Request(`https://${WRITE_FACE}/${COMMUNITY}/`), env)
+  assert.equal(await listing.text(), `${artifact}\n`, 'listed at its address for every reader')
+
+  const strangerKey = keyOf(51)
+  const theirs = await sha256Hex(hostArtifact('stranger.example'))
+  assert.equal((await indexPutBy(env, strangerKey, { 'follow:stranger.example': theirs })).status, 201)
+  assert(!env.CONTENT.held.has(`${COMMUNITY}/${theirs}`), 'a stranger\'s word does not make this door follow anyone')
+  const wrong = await sha256Hex(hostArtifact('other.example'))
+  assert.equal((await indexPutBy(env, sk, { 'follow:peer.example': artifact, 'follow:third.example': wrong }, 1_800_000_400)).status, 200)
+  assert(!env.CONTENT.held.has(`${COMMUNITY}/${wrong}`), 'a follow whose value is not that zone\'s artifact is ignored')
+
+  assert.equal((await indexPutBy(env, sk, {}, 1_800_000_500)).status, 200)
+  assert(!env.CONTENT.held.has(`${COMMUNITY}/${artifact}`), 'unfollowed: the member is gone')
+})
+
+test('only a host\'s own people put meetings and lists on its doors', async () => {
+  const record = eventRecordText('2026-10-24')
+  const sig = await sha256Hex(record)
+  const env = await calendarEnv(new Map([[sig, enc(record)]]))
+  assert.equal((await indexPutBy(env, keyOf(52), { [`event:${sig}`]: sig, [`rsvp:${sig}`]: sig })).status, 201)
+  assert(!env.CONTENT.held.has(`${EVENTS_POOL}/${sig}`), 'a stranger\'s meeting is not on this calendar')
+  assert(!env.CONTENT.held.has(`${await sha256Hex('rsvp:pools')}/${await sha256Hex(`rsvp:${sig}`)}`), 'nor is its list open here')
+})
+
+test('a meeting the network lists opens its list on this door, and the list aggregates the claims every door holds', async () => {
+  const theirMeeting = eventRecordText('2026-10-31', 'meetups.peer.example')
+  const meetingSig = await sha256Hex(theirMeeting)
+  const pool = await sha256Hex(`rsvp:${meetingSig}`)
+  const atPeer = await rsvpClaim(pool, meetingSig, keyOf(61), { name: 'Peer Person' })
+  const atPeerName = await sha256Hex(atPeer)
+  const forged = JSON.stringify({ ...JSON.parse(await rsvpClaim(pool, meetingSig, keyOf(62), { name: 'Forger' })), sig: 'f'.repeat(128) })
+  const forgedName = await sha256Hex(forged)
+  const participantEvent = eventRecordText('2026-11-07', 'ada.example')
+  const participantSig = await sha256Hex(participantEvent)
+
+  const env = await calendarEnv(new Map([[`${await sha256Hex('rsvp:hosts')}/ada.example`, new Uint8Array(0)]]))
+  assert.equal((await indexPutBy(env, sk, { 'follow:peer.example': await sha256Hex(hostArtifact('peer.example')) }, 1_800_000_600)).status, 200)
+
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const { hostname, pathname } = new URL(String(url))
+    if (hostname === 'peer.example' || hostname === 'meetups.peer.example') {
+      if (pathname === `/${EVENTS_POOL}/`) return new Response(`${meetingSig}\n`)
+      if (pathname === `/${meetingSig}`) return new Response(theirMeeting)
+      if (pathname === `/${pool}/`) return new Response(`${atPeerName}\n${forgedName}\n`)
+      if (pathname === `/${pool}/${atPeerName}`) return new Response(atPeer)
+      if (pathname === `/${pool}/${forgedName}`) return new Response(forged)
+    }
+    if (hostname === 'ada.example') {
+      if (pathname === `/${EVENTS_POOL}/`) return new Response(`${participantSig}\n`)
+      if (pathname === `/${participantSig}`) return new Response(participantEvent)
+    }
+    return new Response('', { status: 404 })
+  }
+  try {
+    const calendar = await worker.fetch(new Request(`https://${WRITE_FACE}/${EVENTS_POOL}/`), env)
+    assert.deepEqual((await calendar.text()).trim().split('\n').sort(), [meetingSig, participantSig].sort(), 'the network\'s meeting and a participant\'s own event')
+    const rsvpPools = await sha256Hex('rsvp:pools')
+    assert(env.CONTENT.held.has(`${rsvpPools}/${pool}`), 'the network meeting\'s list is open on this door')
+    assert(!env.CONTENT.held.has(`${rsvpPools}/${await sha256Hex(`rsvp:${participantSig}`)}`), 'a participant\'s own event is joined at their door')
+
+    // A reader joins on this door; the list then holds theirs and the peer door's, never the forgery.
+    const local = await rsvpClaim(pool, meetingSig, keyOf(63), { name: 'Local Reader' })
+    const door = 'https://revolucion.pluginthematrix.com'
+    assert.equal((await worker.fetch(new Request(`${door}/${pool}/${await sha256Hex(local)}`, { method: 'PUT', body: local }), env)).status, 201)
+    const list = await worker.fetch(new Request(`${door}/${pool}/`), env)
+    assert.deepEqual((await list.text()).trim().split('\n').sort(), [atPeerName, await sha256Hex(local)].sort())
+    assert(!env.CONTENT.held.has(`${pool}/${forgedName}`), 'a claim that does not verify is not picked up')
+  } finally {
+    globalThis.fetch = realFetch
+  }
 })

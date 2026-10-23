@@ -14,6 +14,14 @@
 //                                   (hypercomb-relay/host-listing.js)
 //   hosts unlist <meaning> [@<host>]  withdraw it; the bytes stay, the listing goes
 //   hosts listed [@<host>]          what your index on the host declares
+//   hosts follow <door> [@<host>]   THE HOST NETWORK FOR MEETINGS: the doors of
+//                                   the host you speak for follow that door —
+//                                   its meetings show on your calendar, their
+//                                   lists open on your doors, and every door
+//                                   keeps the whole list (calendar-events.md).
+//                                   Signed into your index as follow:<door>.
+//   hosts unfollow <door> [@<host>] stop following it
+//   hosts following [@<host>]       which doors your host follows
 //   hosts welcome <zone> <title> [| <tagline>] [@<host>]
 //                                   what a front door calls itself: a signed
 //                                   card in the pool sign('welcome:<zone>')
@@ -23,12 +31,13 @@
 // With no @<host>, the words speak to your public content host.
 
 import { EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { fetchHiveIndex, listedOf, setHostListing } from './hive-pointer.js'
+import { clearHiveRoot, fetchHiveIndex, listedOf, setHiveRoot, setHostListing } from './hive-pointer.js'
+import { addCommunityHost, hostArtifactSig, hostZone } from './community-hosts.js'
 import { publishWelcome, welcomeZone } from './host-welcome.js'
 
 const SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 const SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
-const WORDS = ['list', 'unlist', 'listed', 'welcome']
+const WORDS = ['list', 'unlist', 'listed', 'welcome', 'follow', 'unfollow', 'following']
 
 type SyncLike = { publicHostDomain?: () => string }
 type SignerLike = { getPublicKeyHex?: () => Promise<string | null> }
@@ -47,7 +56,7 @@ export class HostsQueenBee {
   // A card's title keeps its case ("Plugin the Matrix"); every sub-word and zone
   // below is folded where it is read.
   readonly rawArgs = true
-  readonly options = ['list <meaning> [@<host>]', 'unlist <meaning> [@<host>]', 'listed [@<host>]', 'welcome <zone> <title> [| <tagline>] [@<host>]']
+  readonly options = ['list <meaning> [@<host>]', 'unlist <meaning> [@<host>]', 'listed [@<host>]', 'follow <door> [@<host>]', 'unfollow <door> [@<host>]', 'following [@<host>]', 'welcome <zone> <title> [| <tagline>] [@<host>]']
 
   slashComplete(args: string): readonly string[] {
     const q = args.toLowerCase().trim()
@@ -71,6 +80,36 @@ export class HostsQueenBee {
       const done = await publishWelcome(host, zone, title, tagline)
       if (!done.ok) { toast(t('hosts.welcomefailed', 'The card for {zone} was not published: {reason}', { zone, reason: done.reason }), 'warning'); return }
       toast(t('hosts.welcomed', '{zone} now goes by "{title}".', { zone, title }), 'success')
+      return
+    }
+
+    if (word === 'follow' || word === 'unfollow') {
+      const zone = hostZone(parts.slice(1).find(p => !p.startsWith('@')) ?? '')
+      if (!zone) { toast(t('hosts.followsay', 'Say hosts {word} <door>, such as hosts follow meetups.example.com.', { word }), 'warning'); return }
+      const key = `follow:${zone}`
+      const on = word === 'follow'
+      const done = on ? await setHiveRoot(host, key, await hostArtifactSig(zone)) : await clearHiveRoot(host, key)
+      if (!done.ok) {
+        toast(t('hosts.followfailed', '{host} did not take it: {reason}', { host, reason: String(done.reason ?? 'refused') }), 'warning')
+        return
+      }
+      // Your hive carries the door too, so `event list` reads its calendar.
+      if (on) await addCommunityHost(zone).catch(() => '')
+      toast(on
+        ? t('hosts.followed', '{host} follows {zone}: its meetings show on your calendar, and every door keeps their whole list.', { host, zone })
+        : t('hosts.unfollowed', '{host} no longer follows {zone}.', { host, zone }), 'success')
+      EffectBus.emit('hosts:followed', { host, zone, on })
+      return
+    }
+
+    if (word === 'following') {
+      const pubkey = String(await get<SignerLike>(SIGNER_KEY)?.getPublicKeyHex?.().catch(() => null) ?? '').toLowerCase()
+      if (!pubkey) { toast(t('hosts.nosigner', 'A signing key is required.'), 'warning'); return }
+      const read = await fetchHiveIndex(host, pubkey)
+      const zones = read.ok ? Object.keys(read.manifest.roots ?? {}).filter(k => k.startsWith('follow:')).map(k => k.slice('follow:'.length)) : []
+      toast(zones.length
+        ? t('hosts.following', '{host} follows: {zones}', { host, zones: zones.join(', ') })
+        : t('hosts.followingnone', '{host} follows no other door yet.', { host }))
       return
     }
 

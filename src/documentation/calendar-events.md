@@ -93,6 +93,50 @@ signature, nothing more: a host that is slow or gone costs its timeout and
 never fails the listing. Adding a community to the door's `community:hosts` is
 what makes its meetings appear.
 
+## The host network for meetings
+
+*jwize, 2026-10-22: "we need to be able to set up multi hosting so that when we
+have a meeting it could be meetups dot and then a whole bunch of people sharing
+them together … so that when people go to the meetups they all retain the data
+for that meeting … the meeting is shared in the pools and the leader aggregates
+the data." · "that way we open our meetings calendar just like the business card
+list feature." · "we create a host network for meetings."*
+
+A meeting is carried by every door in a network of hosts, and every door keeps
+the whole list.
+
+- **Following is a signed word.** `hosts follow meetups.example.com @hypercomb.com`
+  writes `follow:<door>` into your index on your host, naming that door's
+  canonical host artifact (the same bytes the hive's `community:hosts` mints).
+  When the key is one of the host's own people (an operator, a bound publisher,
+  a friend), the worker makes it a member of the host's `community:hosts` pool
+  (`noteFollows`); a follow the key no longer names is withdrawn. A stranger's
+  word makes no door follow anyone. `hosts following` says the list; `hosts
+  unfollow` withdraws one. The hive also carries the door, so `event list`
+  reads its calendar.
+- **A network meeting opens its list on every door.** When a door picks up a
+  meeting from a host it follows, it opens that meeting's list locally too, so a
+  reader joins on the door they arrived at. The page reads and writes its own
+  door whenever the list is open there.
+- **Every door aggregates.** Listing a meeting's list first gathers the claims
+  the meeting's own door and every followed host hold at the same address
+  (`pickUpClaims`), each passing the same checks a direct write does
+  (`checkRsvpClaim`). Claims are self-signed, so any door may hold any of them;
+  the organizer's door ends up with every door's claims, and so does every
+  other door. `event roll` at the organizer keeps the result in the hive.
+- **Participants' own events show too**, like the business-card list. A hosted
+  attendee whose profile verified makes their host a member of `rsvp:hosts`;
+  the calendar picks up that host's meetings as well (at most 20 per host),
+  shown with "join at their door" — their lists open only on doors that follow
+  them.
+- **Only a host's own people put meetings on its doors.** An index's `event:`
+  and `rsvp:` keys count only from the host's people; anyone else's are
+  ignored, so the calendar cannot be filled by strangers.
+
+Doors this worker serves share one store, so they already share every pool;
+only hosts elsewhere are asked, each within a bounded pass (16 hosts, 3 s per
+request, 6 s per pass, once a minute for the calendar and every 30 s per list).
+
 ## How someone joins
 
 **From the page.** "Join the meeting" asks for a name and dispatches `hc:rsvp`

@@ -487,9 +487,16 @@
     });
   }
   // Who is coming: every claim the meeting's host lists, each key's newest standing.
+  // A meeting the host network carries has its list open on THIS door too,
+  // holding every door's claims: read and join here when it is, else at the
+  // meeting's own door.
   function readComing(ev) {
-    var base = baseFor(ev.record.host) || ev.base;
+    var own = /^https?:$/.test(location.protocol) ? location.origin : null;
     return sha256('rsvp:' + ev.sig).then(function (pool) {
+      var here = own ? fetch(own + '/' + pool + '/', { cache: 'no-store' }).then(function (r) { return r.ok ? own : null; }, function () { return null; }) : Promise.resolve(null);
+      return here.then(function (local) {
+      state.local[ev.sig] = !!local;
+      var base = local || baseFor(ev.record.host) || ev.base;
       return listing(base, pool).then(function (names) {
         return Promise.all(names.map(function (name) { return readJson(base, pool + '/' + name); })).then(function (claims) {
           var newest = {};
@@ -510,8 +517,10 @@
           }));
         });
       });
+      });
     });
   }
+  var joinable = function (ev) { return !!ev && (!!baseFor(ev.record.host) || !!state.local[ev.sig]); };
   // A hosted attendee's profile, as this door picked it up from their host:
   // believed only when its bytes hash to the name their claim gave, it is a
   // profile (kind 0), and the key that signed it signed the claim.
@@ -539,7 +548,7 @@
   var isComing = function (r) { return r.going === 'yes' || r.going === 'here'; };
 
   // ── the calendar, rendered ──────────────────────────────────────────
-  var state = { events: [], selected: null, coming: {}, mine: {} };
+  var state = { events: [], selected: null, coming: {}, mine: {}, local: {} };
   function today() {
     var d = new Date();
     return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
@@ -595,7 +604,7 @@
     none.hidden = rows.length > 0;
     none.textContent = !ev ? 'No meeting to join yet.' : ev.record.date < today() ? 'Nobody said they were coming.' : 'Nobody has said yet. Be the first.';
     // A meeting hosted by another community: a visitor joins it there.
-    var away = ev && !baseFor(ev.record.host);
+    var away = ev && !joinable(ev) && state.coming[ev.sig] !== undefined;
     var panel = $('[data-join-panel]');
     if (away) {
       panel.classList.add('open');
@@ -616,11 +625,12 @@
     ordered.forEach(function (ev) {
       var card = document.createElement('button');
       card.type = 'button';
-      card.className = 'card' + (ev.record.date < t ? ' past' : '') + (baseFor(ev.record.host) ? '' : ' away');
+      card.className = 'card' + (ev.record.date < t ? ' past' : '') + (joinable(ev) ? '' : ' away');
       card.setAttribute('role', 'listitem');
       card.setAttribute('aria-pressed', state.selected && state.selected.sig === ev.sig ? 'true' : 'false');
       var rows = (state.coming[ev.sig] || []).filter(isComing);
-      var count = state.coming[ev.sig] ? (rows.length + (ev.record.date < t ? ' came' : ' coming')) : (baseFor(ev.record.host) ? '…' : 'at ' + ev.record.host);
+      var count = state.coming[ev.sig] && joinable(ev) ? (rows.length + (ev.record.date < t ? ' came' : ' coming'))
+        : state.coming[ev.sig] ? 'at ' + ev.record.host : '…';
       card.innerHTML = '<span class="mini"></span><span class="day"></span><span class="place"></span><span class="count"></span>';
       card.children[0].textContent = ev.record.title;
       card.children[1].textContent = dayOf(ev.record) + (ev.record.time ? ' · ' + ev.record.time + (ev.record.ends ? '–' + ev.record.ends : '') : '');
@@ -645,7 +655,7 @@
       select(upcoming[0] || ordered[0] || null);
       // Counts for every card, quietly.
       ordered.forEach(function (ev) {
-        if (state.coming[ev.sig] || !baseFor(ev.record.host)) return;
+        if (state.coming[ev.sig]) return;
         readComing(ev).then(function (rows) { state.coming[ev.sig] = rows; renderCards(); if (state.selected === ev) renderWho(ev); });
       });
     });
@@ -710,7 +720,8 @@
     }, 12000);
     // The hive's RsvpDrone hears this, signs the claim with this device's key,
     // writes it to the meeting's host, and answers on the document.
-    document.dispatchEvent(new CustomEvent('hc:rsvp', { detail: { event: ev.sig, host: ev.record.host, name: who, going: going } }));
+    var target = state.local[ev.sig] ? location.host : ev.record.host;
+    document.dispatchEvent(new CustomEvent('hc:rsvp', { detail: { event: ev.sig, host: target, name: who, going: going } }));
   });
 
   // A receipt link: the claim is read back from the pool it went into. No
