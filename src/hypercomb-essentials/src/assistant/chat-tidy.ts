@@ -18,17 +18,15 @@
 //     an ask waits fifteen minutes at most, so an hour is never a live one).
 // The participant's own chats and every tile's chat are never touched.
 
-import { listConversations, readTurns, setConversationArchived } from './chat-thread.js'
+import { isJobConversation, listConversations, readTurns, setConversationArchived } from './chat-thread.js'
 
-/** The id a one-off job conversation is minted with (`manager.cjs convo`).
- *  NOT `chat:tile:/::` alone: that is also the id the chat window gives a
- *  conversation the participant starts on the root tile (newTileConvoId), and
- *  a tidy keyed on it put away jwize's own chats with the jobs (2026-10-15).
- *  `job-` is a seed the window never mints. */
-export const JOB_PREFIX = 'chat:tile:/::job-'
-
-/** Is this a one-off job a session handed the hive — never a person's chat? */
-export const isJobConversation = (convoId: string): boolean => convoId.startsWith(JOB_PREFIX)
+// The id a one-off job conversation is minted with (`manager.cjs convo`) lives
+// beside the thread it names (chat-thread.ts), because every list walk skips
+// jobs there: they never reach the participant's rail or chat list, and only
+// this tidy asks for them. NOT `chat:tile:/::` alone: that is also the id the
+// window gives a chat the participant starts on the root tile, and a tidy keyed
+// on it put away jwize's own chats with the jobs (2026-10-15).
+export { JOB_PREFIX, isJobConversation } from './chat-thread.js'
 
 export interface TidyOptions {
   readonly olderThanMs?: number
@@ -53,7 +51,7 @@ export const tidyJobConversations = async (options: TidyOptions = {}): Promise<T
   const jobs: { convoId: string; title: string; replied: boolean }[] = []
   const passed: Record<string, number> = {}
   const pass = (why: string): void => { passed[why] = (passed[why] ?? 0) + 1 }
-  for (const convo of await listConversations()) {
+  for (const convo of await listConversations({ jobs: true })) {
     if (convo.archived) continue
     if (!isJobConversation(convo.convoId)) { pass(/^chat:tile:[^:]*$/.test(convo.convoId) ? 'tile chat' : 'your own chat'); continue }
     if (convo.asking) { pass('waiting on you'); continue }

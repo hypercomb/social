@@ -358,6 +358,27 @@ describe('chat-thread — turns are contentSig manifests; legacy stays readable'
     expect(byId.get('chat:filed')?.turnCount).toBe(1)
   })
 
+  // 2026-10-22: twenty manager jobs stood in jwize's rail at once, each one
+  // "open". A job is read by its id — the asker collects its answer — but no
+  // list a participant sees holds it; only the tidy asks for it.
+  it('a manager’s job is readable by its id and in no list but the tidy’s', async () => {
+    await mod.appendTurn('chat:tile:/::1700000000000-mine', 'user', 'my own root chat')
+    await new Promise(r => setTimeout(r, 5))
+    await mod.appendTurn('chat:tile:/::job-1700000000001-abcdef', 'user', 'find betz /')
+    await mod.appendTurn('chat:tile:/::job-1700000000001-abcdef', 'assistant', 'two tiles')
+
+    const { conversations, latestTurns } = await mod.listConversationsWithLatest()
+    expect(conversations.map(c => c.convoId)).toEqual(['chat:tile:/::1700000000000-mine'])
+    // The newest LIVE thread a window resumes into is the participant's, never a job.
+    expect(latestTurns.map(t => t.text)).toEqual(['my own root chat'])
+    expect((await mod.listRailConversations()).map(c => c.convoId)).toEqual(['chat:tile:/::1700000000000-mine'])
+    expect(await mod.readConversationSummary('chat:tile:/::job-1700000000001-abcdef')).toBeNull()
+
+    expect((await mod.listConversations({ jobs: true })).map(c => c.convoId).sort())
+      .toEqual(['chat:tile:/::1700000000000-mine', 'chat:tile:/::job-1700000000001-abcdef'])
+    expect((await mod.readTurns('chat:tile:/::job-1700000000001-abcdef')).map(t => t.text)).toEqual(['find betz /', 'two tiles'])
+  })
+
   it('an archived thread is never what a window resumes into', async () => {
     await mod.appendTurn('chat:older', 'user', 'the older thread')
     await new Promise(r => setTimeout(r, 5))

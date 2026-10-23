@@ -410,6 +410,24 @@ const HUMAN_PREFIXES = ['chat:', 'convo-'] as const
 export const isHumanConversation = (convoId: string): boolean =>
   HUMAN_PREFIXES.some(prefix => convoId.startsWith(prefix))
 
+/** A ONE-OFF JOB a session handed the hive (`manager.cjs ask`). It is a thread
+ *  like any other when read by its id — the asker collects its answer from it,
+ *  and `manager.cjs thread` reads it back — but it is a manager's work, never a
+ *  row in the participant's lists: twenty of them stood in jwize's rail at once,
+ *  each one "open", until a tidy ten minutes later moved them to the filed
+ *  section (2026-10-22: "we are getting glitchies again, not acceptable").
+ *  NOT `chat:tile:/::` alone: that is also the id the window gives a chat the
+ *  participant starts on the root tile. `job-` is a seed the window never mints. */
+export const JOB_PREFIX = 'chat:tile:/::job-'
+
+/** Is this a one-off job a session handed the hive — never a person's chat? */
+export const isJobConversation = (convoId: string): boolean => convoId.startsWith(JOB_PREFIX)
+
+/** What a list walk takes in. `jobs` only for the tidy that puts them away. */
+export interface ListOptions {
+  readonly jobs?: boolean
+}
+
 /** A fresh conversation id. The `chat:` prefix is what marks it as a person's. */
 export const newConvoId = (): string =>
   `chat:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -852,7 +870,7 @@ export interface ConversationList {
  * — which this walk necessarily read — ride out in the result instead of being
  * discarded for the window to immediately re-read.
  */
-export const listConversationsWithLatest = async (): Promise<ConversationList> => {
+export const listConversationsWithLatest = async (options: ListOptions = {}): Promise<ConversationList> => {
   const store = get<StoreLike>('@hypercomb.social/Store')
   const pool = await store?.getPool?.(THREADS_POOL)
   if (!pool || !store) return { conversations: [], latestTurns: [] }
@@ -870,6 +888,8 @@ export const listConversationsWithLatest = async (): Promise<ConversationList> =
         const raw = read.turns
         const convoId = raw[0]?.convoId
         if (!convoId) continue
+        // A manager's job is never one of the participant's conversations.
+        if (!options.jobs && isJobConversation(convoId)) continue
         const lastAt = raw[raw.length - 1]?.at ?? 0
         out.push({
           convoId,
@@ -900,8 +920,8 @@ export const listConversationsWithLatest = async (): Promise<ConversationList> =
 }
 
 /** The list alone — for callers that only want the roster. */
-export const listConversations = async (): Promise<ConversationSummary[]> =>
-  (await listConversationsWithLatest()).conversations
+export const listConversations = async (options: ListOptions = {}): Promise<ConversationSummary[]> =>
+  (await listConversationsWithLatest(options)).conversations
 
 // ── what a tile's conversation looks like from outside ───
 //
@@ -1043,7 +1063,7 @@ export const listRailConversations = async (): Promise<TileConversation[]> => {
  *  costs all of them — and it is paid on every single reply. */
 export const readConversationSummary = async (convoId: string): Promise<TileConversation | null> => {
   const id = String(convoId ?? '').trim()
-  if (!id) return null
+  if (!id || isJobConversation(id)) return null
   const store = get<StoreLike>('@hypercomb.social/Store')
   const pool = await store?.getPool?.(THREADS_POOL)
   if (!pool || !store) return null
