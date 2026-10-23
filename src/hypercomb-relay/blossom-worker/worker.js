@@ -17,6 +17,7 @@
 //   PUT /<sig>        hypercomb host-sync shape — NIP-98 (kind 27235)
 //   PUT /upload       Blossom BUD-02 — kind 24242, t=upload
 //   HEAD /upload      Blossom BUD-06 preflight — X-SHA-256/X-Content-Length
+//   POST /reach       operator: mark one index's reach before HEAD_ONLY goes on
 //   POST /claim       claim a domain — NIP-98 (documentation/domain-claim.md)
 //   GET /claim/<name> a claim's public reading: {domain, status, nameservers}
 //
@@ -3644,9 +3645,13 @@ async function serveBlob(request, env, sig, typeOverride) {
     return h
   }
 
+  // HEAD ONLY: a withdrawn object answers as a miss, so nothing tells it
+  // apart from bytes never held — except to its owner's signed read.
+  const hidden = async (object) => headOnly(env) && withdrawn(object.customMetadata) && !await ownerReads(request, object.customMetadata)
+
   if (request.method === 'HEAD') {
     const head = await env.CONTENT.head(sig)
-    if (!head) return text(404, 'sig not held')
+    if (!head || await hidden(head)) return text(404, 'sig not held')
     return new Response(null, { status: 200, headers: headersFor(head, head.size) })
   }
 
@@ -3658,10 +3663,14 @@ async function serveBlob(request, env, sig, typeOverride) {
     object = await env.CONTENT.get(sig, ranged ? { range: request.headers } : undefined)
   } catch {
     const head = await env.CONTENT.head(sig)
-    if (!head) return text(404, 'sig not held')
+    if (!head || await hidden(head)) return text(404, 'sig not held')
     return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${head.size}`, ...CORS } })
   }
   if (!object) return text(404, 'sig not held')
+  if (await hidden(object)) {
+    try { await object.body?.cancel?.() } catch { /* released */ }
+    return text(404, 'sig not held')
+  }
 
   if (ranged && object.range) {
     const size = object.size
@@ -3764,9 +3773,14 @@ async function storeBlob(env, pubkey, sig, body, contentType) {
     // forgetSigs). Rare — identical bytes from two keys — and one rewrite.
     const claim = existing.customMetadata ?? {}
     const type = existing.httpMetadata?.contentType || 'application/octet-stream'
-    if (claim.owner && claim.owner !== pubkey && claim.shared !== '1') {
+    const theirs = claim.owner && claim.owner !== pubkey
+    // Uploaded again — by its owner (a revert) or by another key — withdrawn
+    // bytes are servable again (head only, below).
+    if ((theirs && claim.shared !== '1') || withdrawn(claim)) {
+      const kept = { owner: claim.owner }
+      if (theirs || claim.shared === '1') kept.shared = '1'
       const obj = await env.CONTENT.get(sig)
-      if (obj) await env.CONTENT.put(sig, obj.body, { httpMetadata: { contentType: type }, customMetadata: { owner: claim.owner, shared: '1' } })
+      if (obj) await env.CONTENT.put(sig, obj.body, { httpMetadata: { contentType: type }, customMetadata: kept })
     }
     return { outcome: 'exists', size: existing.size, type }
   }
@@ -3799,18 +3813,7 @@ async function forgetSigs(request, env) {
     .filter((s) => SIG_RE.test(s))
   if (sigs.length === 0) return text(400, 'no sigs named')
   if (sigs.length > FORGET_MAX) return text(413, `at most ${FORGET_MAX} sigs per call`)
-  const index = await verifiedIndex(env, auth.pubkey)
-  const heads = new Set(Object.values(index?.roots ?? {}).map((s) => String(s).toLowerCase()))
-  for (const offer of Object.values(index?.offerings ?? {})) {
-    heads.add(offer.head)
-    const metaBytes = await heldCreationBytes(env, offer.head, 65_536)
-    if (metaBytes) {
-      try {
-        const meta = JSON.parse(new TextDecoder().decode(metaBytes))
-        if (SIG_RE.test(String(meta?.layer || ''))) heads.add(meta.layer)
-      } catch { /* A malformed head cannot name a protected layer. */ }
-    }
-  }
+  const heads = await publisherHeads(env, await verifiedIndex(env, auth.pubkey))
   const removed = []
   const kept = {}
   for (const sig of sigs) {
@@ -3825,6 +3828,186 @@ async function forgetSigs(request, env) {
     removed.push(sig)
   }
   return json(200, { removed, kept }, { 'Cache-Control': 'no-store' })
+}
+
+/** Every head a publisher's index keeps open: each root, each offering's head
+ *  and the layer that head names. Nothing these reach is ever forgotten or
+ *  withdrawn. */
+async function publisherHeads(env, index) {
+  const heads = new Set(Object.values(index?.roots ?? {}).map((s) => String(s).toLowerCase()).filter((s) => SIG_RE.test(s)))
+  for (const offer of Object.values(index?.offerings ?? {})) {
+    if (!SIG_RE.test(String(offer?.head || ''))) continue
+    heads.add(offer.head)
+    const metaBytes = await heldCreationBytes(env, offer.head, 65_536)
+    if (metaBytes) {
+      try {
+        const meta = JSON.parse(new TextDecoder().decode(metaBytes))
+        if (SIG_RE.test(String(meta?.layer || ''))) heads.add(meta.layer)
+      } catch { /* A malformed head cannot name a protected layer. */ }
+    }
+  }
+  return heads
+}
+
+// ── head only (documentation/hosted-tenants.md, "Head only") ─────────────────
+//
+// jwize 2026-10-18: "Only the head identifier is exposed; we should be careful
+// where the old signature can be systematically cached by an attacker." An old
+// version a publisher edited away stayed readable at its signature forever, to
+// anyone who saved the address — and anyone can save every address by walking
+// old layers.
+//
+// So when a publisher's index moves, what its OLD heads reached and its new
+// heads no longer reach is WITHDRAWN: the object is marked, its bytes stay
+// (the publisher's own history, and the way out, need them), and a read of it
+// answers exactly as a miss does. Only what that publisher alone put here is
+// ever withdrawn — never bytes another key uploaded too (`shared`), never
+// bytes stored before claims existed. Reached again — a revert, a re-upload,
+// another publisher's head — and it is servable again. The publisher's own
+// signed read (NIP-98 GET) still gets it.
+//
+// The heap is shared by everything (packages, pools, swarm tiles), so this is
+// a DENY mark on what a head move left behind, never an allowlist of reached
+// signatures: nothing that was never in a head is touched.
+//
+// A walk that runs out of budget withdraws nothing (complete or absent). Off
+// unless HEAD_ONLY is "1"; before turning it on, the operator walks every held
+// index once (POST /reach) so bytes one key uploaded and another key's pages
+// use are marked shared first.
+const REACH_READS_MAX = 2000
+const REACH_MEMBER_MAX = 65_536
+const REACH_BATCH = 48
+const headOnly = (env) => String(env?.HEAD_ONLY || '') === '1'
+const withdrawn = (claim) => claim?.withdrawn === '1'
+
+/** What the heads reach: every 64-hex string in a JSON member is a reference
+ *  (the rule every byte walker here uses). A large member is reached, not
+ *  read. sig → its claim ({} when it has none). `complete` is false when the
+ *  read budget ran out before the walk did. */
+async function reachOf(env, heads) {
+  const reached = new Map()
+  const seen = new Set(heads)
+  let frontier = [...heads]
+  let reads = 0
+  const decoder = new TextDecoder()
+  while (frontier.length) {
+    if (reads + frontier.length > REACH_READS_MAX) return { reached, complete: false }
+    reads += frontier.length
+    const next = []
+    for (let at = 0; at < frontier.length; at += REACH_BATCH) {
+      const read = await Promise.all(frontier.slice(at, at + REACH_BATCH).map(async (sig) => {
+        const object = await env.CONTENT.get(sig)
+        if (!object) return null
+        const claim = object.customMetadata ?? {}
+        if (object.size > REACH_MEMBER_MAX) {
+          try { await object.body?.cancel?.() } catch { /* released */ }
+          return [sig, claim, null]
+        }
+        return [sig, claim, new Uint8Array(await object.arrayBuffer())]
+      }))
+      for (const entry of read) {
+        if (!entry) continue
+        const [sig, claim, bytes] = entry
+        reached.set(sig, claim)
+        if (!bytes) continue
+        const text = decoder.decode(bytes)
+        if (!/^\s*[[{]/.test(text)) continue
+        for (const match of text.matchAll(/\b[0-9a-f]{64}\b/g)) {
+          if (!seen.has(match[0])) { seen.add(match[0]); next.push(match[0]) }
+        }
+      }
+    }
+    frontier = next
+  }
+  return { reached, complete: true }
+}
+
+/** Rewrite an object's claim. R2 keeps metadata only with the bytes, so the
+ *  bytes go back with it — the same rewrite storeBlob makes to mark shared. */
+async function reclaim(env, sig, claim) {
+  const object = await env.CONTENT.get(sig)
+  if (!object) return
+  await env.CONTENT.put(sig, object.body, {
+    httpMetadata: { contentType: object.httpMetadata?.contentType || 'application/octet-stream' },
+    customMetadata: claim,
+  })
+}
+
+/** What `pubkey`'s heads reach is servable, and marked shared where another
+ *  key put it here — so that key's head moving can never withdraw it. */
+async function keepReached(env, pubkey, reached) {
+  for (const [sig, claim] of reached) {
+    const theirs = claim.owner && claim.owner !== pubkey
+    if (!withdrawn(claim) && !(theirs && claim.shared !== '1')) continue
+    const kept = { owner: claim.owner }
+    if (theirs || claim.shared === '1') kept.shared = '1'
+    await reclaim(env, sig, kept)
+  }
+}
+
+/** An index moved from `before` to `after`: withdraw what only the old heads
+ *  reached and only this key put here. Returns how many were withdrawn, or
+ *  null when either walk ran out of budget (nothing is withdrawn then). */
+async function withdrawSuperseded(env, pubkey, before, after) {
+  const was = await publisherHeads(env, before)
+  const now = await publisherHeads(env, after)
+  const [old, current] = await Promise.all([reachOf(env, was), reachOf(env, now)])
+  if (!old.complete || !current.complete) return null
+  await keepReached(env, pubkey, current.reached)
+  let count = 0
+  for (const [sig, claim] of old.reached) {
+    if (current.reached.has(sig) || claim.owner !== pubkey || claim.shared === '1' || withdrawn(claim)) continue
+    await reclaim(env, sig, { owner: claim.owner, withdrawn: '1' })
+    count++
+  }
+  return count
+}
+
+/** The parsed content of a signed index event, as verifiedIndex reads it. */
+function indexContent(evt) {
+  try {
+    const content = JSON.parse(String(evt?.content ?? ''))
+    return { roots: content?.roots ?? {}, offerings: content?.offerings ?? {} }
+  } catch { return { roots: {}, offerings: {} } }
+}
+
+/** A withdrawn object is still its owner's: their signed read gets it. */
+async function ownerReads(request, claim) {
+  if (!claim?.owner || !request.headers.has('authorization')) return false
+  const auth = await verifyNip98(request, parseAuthEvent(request), request.method)
+  return auth.ok && auth.pubkey === claim.owner
+}
+
+// POST /reach — the operator's walk before HEAD_ONLY goes on: one held index
+// per call, its heads' reach marked servable and shared where another key put
+// the bytes. Body {after?: <pubkey>}; answers {walked, complete, next}. Call
+// again with `after: next` until next is null.
+async function reachWalk(request, env) {
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST')
+  if (!auth.ok) return text(401, auth.reason)
+  if (!siteOperators(env).some(([, operator]) => operator === auth.pubkey)) return text(403, 'only this host\'s operators walk its indexes')
+  let body = {}
+  try { body = await request.json() } catch { /* the first call */ }
+  const after = String(body?.after || '').toLowerCase()
+  // Every held index: the pool's members, and those only the KV drain source
+  // still holds (an index moves into the pool the first time it is read).
+  const held = new Set((await poolMembers(env, HIVE_INDEXES_MEANING)).map((m) => m.name))
+  if (env.HIVES?.list) {
+    let cursor
+    do {
+      const page = await env.HIVES.list({ cursor })
+      for (const key of page.keys ?? []) held.add(key.name)
+      cursor = page.list_complete ? undefined : page.cursor
+    } while (cursor)
+  }
+  const keys = [...held].filter((n) => SIG_RE.test(n)).sort()
+  const pubkey = keys.find((key) => key > after) ?? null
+  if (!pubkey) return json(200, { walked: null, complete: true, next: null }, { 'Cache-Control': 'no-store' })
+  const { reached, complete } = await reachOf(env, await publisherHeads(env, await verifiedIndex(env, pubkey)))
+  await keepReached(env, pubkey, reached)
+  // The cursor is the key just walked; null once none follows it.
+  const next = keys.some((key) => key > pubkey) ? pubkey : null
+  return json(200, { walked: pubkey, reached: reached.size, complete, next }, { 'Cache-Control': 'no-store' })
 }
 
 // PUT /<sig> — hypercomb host-sync shape (NIP-98). The URL names the
@@ -4068,6 +4251,10 @@ async function walkLandingMembers(env, head) {
 
 async function serveContentPack(request, env, host, head) {
   const key = `${await poolAddress(CONTENT_PACKS_MEANING)}/${head}`
+  // A pack is its head's closure: once that head is withdrawn, so is the pack.
+  if (headOnly(env) && withdrawn((await env.CONTENT?.head?.(head))?.customMetadata)) {
+    return new Response(null, { status: 404, headers: CORS })
+  }
   const held = await env.CONTENT?.get?.(key)
   if (held) {
     const bytes = new Uint8Array(await held.arrayBuffer())
@@ -4154,7 +4341,7 @@ async function validOfferingLocations(evt) {
 // INDEX. Both must be the path pubkey: a valid guest can't plant an index
 // under someone else's key, and a leaked index event can't be replanted by
 // a stranger (the NIP-98 envelope binds this URL + freshness).
-async function putHive(request, env, pubkey) {
+async function putHive(request, env, pubkey, ctx) {
   const auth = await verifyNip98(request, parseAuthEvent(request))
   if (!auth.ok) return text(401, auth.reason)
   if (auth.pubkey !== pubkey) return text(403, 'auth pubkey does not match the hive being written')
@@ -4190,6 +4377,12 @@ async function putHive(request, env, pubkey) {
   await noteSharedPools(env, pubkey, evt)
   if (!await advancePublishedLocations(env, pubkey, evt)) {
     return text(503, 'signed index is held but a route location is not current; retry this index')
+  }
+  if (stored && headOnly(env)) {
+    // After the answer: the publish is done; the walk only tidies what it left.
+    const tidy = withdrawSuperseded(env, pubkey, indexContent(stored), indexContent(evt)).catch(() => null)
+    if (ctx?.waitUntil) ctx.waitUntil(tidy)
+    else await tidy
   }
   // NOTE: the message rides the X-Reason header (ByteString) — ASCII only.
   return text(stored ? 200 : 201, `hive index updated for ${pubkey.slice(0, 12)}...`)
@@ -5207,7 +5400,7 @@ const router = {
     const drainIndex = pathname.match(/^\/hive\/([0-9a-f]{64})$/)
     if (drainIndex) {
       if (method === 'GET' || method === 'HEAD') return getHive(request, env, drainIndex[1])
-      if (method === 'PUT') return putHive(request, env, drainIndex[1])
+      if (method === 'PUT') return putHive(request, env, drainIndex[1], ctx)
       return text(405, 'method not allowed')
     }
     if (method === 'GET' || method === 'HEAD') {
@@ -5232,7 +5425,7 @@ const router = {
     }
     if (indexMatch && indexMatch[1] === await poolAddress(HIVE_INDEXES_MEANING)) {
       if (method === 'GET' || method === 'HEAD') return getHive(request, env, indexMatch[2])
-      if (method === 'PUT') return putHive(request, env, indexMatch[2])
+      if (method === 'PUT') return putHive(request, env, indexMatch[2], ctx)
       return text(405, 'method not allowed')
     }
 
@@ -5429,6 +5622,11 @@ const router = {
 
     if (writeFace && pathname === '/forget') {
       if (method === 'POST') return forgetSigs(request, env)
+      return text(405, 'method not allowed')
+    }
+
+    if (writeFace && pathname === '/reach') {
+      if (method === 'POST') return reachWalk(request, env)
       return text(405, 'method not allowed')
     }
 

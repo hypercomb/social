@@ -1,6 +1,7 @@
 # Hosted tenants — the paid on-ramp
 
 **Status:** DESIGN, 2026-10-22. Nothing here is built unless a row says so.
+Step 1 (head-only reads) BUILT the same day, behind `HEAD_ONLY`.
 
 jwize, 2026-10-18: *"create a mesh on cloudflare that is shared but securely
 have a multi tenant architecture… Then charge for hosting to get people
@@ -125,24 +126,41 @@ attacker who walks old layers can harvest them systematically. Rung 2 must
 close this before it takes money, because a paying tenant's edited-out
 content is the thing they are paying to keep private.
 
-The rule, the same as `hypercomb-serve`'s genome gate on the desktop:
-**a site serves only what its current head reaches.** A signature not
-reached from any tenant's current head answers 404, even though its bytes may
-still be in R2 (other tenants may share them, and the way out needs them).
+**BUILT 2026-10-22, off until `HEAD_ONLY = "1"`** (`worker.js`, "head only").
 
-- The reach set is a derived record keyed by the head signature
-  (`optimize-phase.md` rules: derive-on-miss, never truth). A new head = a
-  new set; nothing to invalidate.
-- Shared bytes: a signature reached by any active tenant's head is servable;
-  the pool stays deduplicated.
-- Edge cache: content answers today carry `immutable, max-age=31536000`.
-  Under head-only, a reached signature can stay immutable (its bytes never
-  change), but the edge must not serve it after it falls out of the reach set.
-  Use a shorter `s-maxage` on the edge with the long `max-age` for browsers,
-  or purge by URL when a head moves. Choosing between them is a decision
-  below.
-- History stays the tenant's: their own signed read (NIP-98) may fetch any
-  signature their key wrote, so undo and time travel keep working for them.
+The heap is shared by everything — packages, pools, room members, swarm
+tiles — so the gate is not an allowlist of reached signatures (that would
+refuse every byte that was never in a published head). It is a **withdrawn
+mark on what a head move left behind**:
+
+- When a publisher's signed index moves, the worker walks what the old heads
+  reached and what the new heads reach (every 64-hex in a JSON member is a
+  reference; large members are reached, not read). What only the old heads
+  reached, and only this publisher put here, is marked `withdrawn` on the
+  object. Its bytes stay — the publisher's history and the way out need them.
+- A withdrawn object answers exactly as a miss (`404 sig not held`), so
+  nothing tells it apart from bytes never held. A landing pack built for a
+  withdrawn head goes with it.
+- **Never withdrawn:** bytes another key also uploaded (`shared`), bytes
+  stored before claims existed, anything a current head still reaches.
+- **Served again** when reached again (a revert), or uploaded again by anyone.
+- **The owner's signed read** (NIP-98 GET) still gets it, so undo and time
+  travel keep working for them.
+- **Complete or absent:** a walk that runs out of its read budget (2000
+  members) withdraws nothing.
+- **Bytes one key uploaded and another key's page uses:** each walk marks
+  what the publisher's heads reach as shared when another key put it here.
+  Before turning the flag on, the operator walks every held index once —
+  `POST /reach` (operator NIP-98, one index per call, `{after}` cursor) — so
+  no page loses bytes it borrowed.
+- **Edge cache:** the worker never puts content into the edge cache (only the
+  hive index, for seconds), and Cloudflare does not cache a Worker's own
+  answers, so a withdrawn signature stops answering at once. A browser that
+  already fetched it keeps its own copy — it already had the bytes.
+
+**To turn it on:** deploy, run `POST /reach` until `next` is null, then set
+`HEAD_ONLY = "1"` and deploy again. Withdrawal starts with the next head
+move; history from before the flag is not walked back.
 
 ### 5. Swarms
 
@@ -211,16 +229,20 @@ name. Before rung 3 is offered as the way out:
 5. **Swarm allowances** on the meeting point.
 6. **Move to my own server.**
 
-## Decisions this needs from jwize
+## Decisions
+
+jwize 2026-10-22: "go with your recommendations, start with head-only reads."
+
+- **Payment provider:** Stripe (Checkout + webhooks + customer portal).
+- **Own domain:** the claim (nameservers) for a new domain, a custom hostname
+  (one CNAME) for a domain already in use.
+- **Edge caching:** nothing to choose — the worker's content answers are not
+  edge-cached (see Head only).
+- **Lapse terms:** 14 days' grace, then 30 days of reads after writes stop.
+
+Still open, needed before sign-up (step 3):
 
 1. **Which zone(s) tenants get names under** — `hypercomb.com` was called a
    test host on 2026-10-11 ("may be retired"); paid tenants need a zone
    that will not be.
 2. **Plans and prices** — how many tiers, and what each allows.
-3. **Payment provider** — Stripe recommended.
-4. **Edge caching under head-only** — short edge `s-maxage`, or purge on head
-   move.
-5. **Default own-domain path** — claim (nameservers) for new domains and
-   custom hostname for domains in use, as recommended above, or one only.
-6. **Lapse terms** — the 14-day grace and 30-day read window above are
-   placeholders.

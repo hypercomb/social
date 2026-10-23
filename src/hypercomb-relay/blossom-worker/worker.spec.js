@@ -5580,3 +5580,122 @@ test('a site door takes a reader\'s claim into an opened list, and still refuses
   const upload = await worker.fetch(new Request(`${door}/upload`, { method: 'PUT', body: claim }), env)
   assert.equal(upload.status, 405, 'nor an upload')
 })
+
+// ── head only: what a head move leaves behind is withdrawn ───────────────────
+//
+// documentation/hosted-tenants.md "Head only". A publisher's new index no
+// longer reaching an old layer, or the picture only that layer used, withdraws
+// it: a read answers as a miss, to everyone but the owner's signed read. Bytes
+// another key also put here, and anything still reached, stay served.
+
+const other = hex(schnorr.getPublicKey(Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 2 : 0)))
+const [layerA, layerB, pictureA, pictureB, kept, theirs] = ['1', '2', '3', '4', '5', '6'].map((c) => c.repeat(64))
+
+async function headMoveFixture(flag) {
+  const { env } = await fixture(await signedIndex({ revolucion: layerA }, 1_800_000_000))
+  if (flag) env.HEAD_ONLY = '1'
+  const put = (sig, value, owner = pubkey) => env.CONTENT.put(sig, new TextEncoder().encode(value), { customMetadata: { owner } })
+  // A is the old page: its own picture, a picture B keeps, and bytes another key put here.
+  await put(layerA, JSON.stringify({ name: 'page', picture: pictureA, also: kept, from: theirs }))
+  await put(layerB, JSON.stringify({ name: 'page', picture: pictureB, also: kept }))
+  await put(pictureA, 'old picture')
+  await put(pictureB, 'new picture')
+  await put(kept, 'kept picture')
+  await put(theirs, 'their picture', other)
+  const indexUrl = `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`
+  const publish = async (roots, at) => worker.fetch(new Request(indexUrl, { method: 'PUT',
+    headers: { authorization: await nip98(indexUrl, 'PUT') }, body: JSON.stringify(await signedIndex(roots, at)) }), env)
+  const read = async (sig, signed = false) => {
+    const url = `https://content.pluginthematrix.com/${sig}`
+    return (await worker.fetch(new Request(url, signed ? { headers: { authorization: await nip98(url, 'GET') } } : {}), env)).status
+  }
+  return { env, publish, read }
+}
+
+test('head only: a new head withdraws what only the old head reached, and only the publisher\'s own bytes', async () => {
+  const { publish, read } = await headMoveFixture(true)
+  assert.equal(await read(layerA), 200)
+  assert.equal((await publish({ revolucion: layerB }, 1_800_000_100)).status, 200)
+  assert.equal(await read(layerA), 404, 'the old layer answers as a miss')
+  assert.equal(await read(pictureA), 404, 'the picture only it used, too')
+  assert.equal(await read(layerB), 200)
+  assert.equal(await read(pictureB), 200)
+  assert.equal(await read(kept), 200, 'still reached by the new head')
+  assert.equal(await read(theirs), 200, 'another key\'s bytes are never withdrawn')
+  assert.equal(await read(layerA, true), 200, 'the owner\'s signed read still gets it')
+})
+
+test('head only: going back to an old head serves it again', async () => {
+  const { publish, read } = await headMoveFixture(true)
+  await publish({ revolucion: layerB }, 1_800_000_100)
+  assert.equal(await read(pictureA), 404)
+  await publish({ revolucion: layerA }, 1_800_000_200)
+  assert.equal(await read(layerA), 200)
+  assert.equal(await read(pictureA), 200)
+  assert.equal(await read(pictureB), 404, 'and what only the newer head reached is withdrawn in turn')
+})
+
+test('head only: re-uploading withdrawn bytes serves them again', async () => {
+  const { env, publish, read } = await headMoveFixture(true)
+  await publish({ revolucion: layerB }, 1_800_000_100)
+  assert.equal(await read(pictureA), 404)
+  // The fixture's names are made up; a real upload is checked against its hash.
+  const bytes = new TextEncoder().encode('old picture')
+  const sig = await sha256Hex('old picture')
+  await env.CONTENT.put(sig, bytes, { customMetadata: { owner: pubkey, withdrawn: '1' } })
+  const putUrl = `https://content.pluginthematrix.com/${sig}`
+  const put = await worker.fetch(new Request(putUrl, { method: 'PUT', headers: { authorization: await nip98(putUrl, 'PUT') }, body: bytes }), env)
+  assert.equal(put.status < 300, true, `re-upload answered ${put.status}`)
+  assert.equal(await read(sig), 200)
+})
+
+test('head only is off unless HEAD_ONLY is "1": a head move withdraws nothing', async () => {
+  const { publish, read } = await headMoveFixture(false)
+  await publish({ revolucion: layerB }, 1_800_000_100)
+  assert.equal(await read(layerA), 200)
+  assert.equal(await read(pictureA), 200)
+})
+
+test('head only: bytes this key put here that another key\'s page uses are marked shared, and never withdrawn', async () => {
+  const { env, publish, read } = await headMoveFixture(true)
+  env.SITE_OPERATORS = JSON.stringify({ 'pluginthematrix.com': pubkey })
+  // The other key's page uses pictureA, which this key uploaded.
+  const otherSk = Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 2 : 0)
+  const layerC = '7'.repeat(64)
+  await env.CONTENT.put(layerC, new TextEncoder().encode(JSON.stringify({ picture: pictureA })), { customMetadata: { owner: other } })
+  const event = { pubkey: other, created_at: 1_800_000_000, kind: 30564, tags: [], content: JSON.stringify({ roots: { theirs: layerC } }) }
+  const serial = JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content])
+  event.id = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serial))))
+  event.sig = hex(schnorr.sign(event.id, otherSk))
+  await env.CONTENT.put(`${INDEXES}/${other}`, new TextEncoder().encode(JSON.stringify(event)))
+  // This key's index is still only in the KV drain source; the walk finds it there.
+  env.HIVES.list = async () => ({ keys: [{ name: pubkey }], list_complete: true })
+
+  const walkUrl = 'https://content.pluginthematrix.com/reach'
+  const walk = async (body, key) => worker.fetch(new Request(walkUrl, { method: 'POST',
+    headers: { authorization: await nip98(walkUrl, 'POST', key), 'content-type': 'application/json' }, body: JSON.stringify(body) }), env)
+  assert.equal((await walk({}, otherSk)).status, 403, 'only an operator walks')
+  const walked = []
+  for (let after = '', i = 0; i < 4; i++) {
+    const out = await (await walk({ after })).json()
+    if (out.walked) walked.push(out.walked)
+    if (!out.next) break
+    after = out.next
+  }
+  assert.deepEqual(walked.sort(), [other, pubkey].sort(), 'every held index, one per call')
+  assert.equal((await env.CONTENT.head(pictureA)).customMetadata.shared, '1')
+
+  await publish({ revolucion: layerB }, 1_800_000_100)
+  assert.equal(await read(pictureA), 200, 'shared bytes stay served when this key moves on')
+  assert.equal(await read(layerA), 404, 'what only this key used is still withdrawn')
+})
+
+test('head only: a landing pack for a withdrawn head is withdrawn with it', async () => {
+  const { env, publish } = await headMoveFixture(true)
+  const packs = await sha256Hex('content:packs')
+  await env.CONTENT.put(`${packs}/${layerA}`, new TextEncoder().encode('pack'))
+  const url = `https://revolucion.pluginthematrix.com/${packs}/${layerA}`
+  assert.equal((await worker.fetch(new Request(url), env)).status, 200)
+  await publish({ revolucion: layerB }, 1_800_000_100)
+  assert.equal((await worker.fetch(new Request(url), env)).status, 404)
+})
