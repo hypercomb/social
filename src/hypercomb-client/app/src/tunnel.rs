@@ -128,6 +128,7 @@ pub fn ensure_cloudflared(dir: &Path) -> Result<PathBuf, String> {
 
 /// A command for `cloudflared` that never flashes a console window.
 fn command(program: &Path) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut command = Command::new(program);
     #[cfg(windows)]
     {
