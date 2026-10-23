@@ -274,6 +274,9 @@ describe('the pair a window brings', () => {
   const flush = () => new Promise(resolve => setTimeout(resolve, 0))
   const session = (parked: { count: number }) =>
     ({ park: () => { parked.count++ }, unpark: () => {} })
+  // Pairing is off by default; these desks have it switched on in the gear.
+  const pairOn = (...ids: string[]) => { for (const id of ids) localStorage.setItem(`hc:panel-pair:${id}`, '1') }
+  beforeEach(() => pairOn('desk-brought', 'desk-by-hand', 'desk-back', 'desk-alone'))
 
   it('is parked when the window that brought it is disposed', async () => {
     const parked = { count: 0 }
@@ -361,9 +364,9 @@ describe('the pair a window brings', () => {
     expect(parked.count).toBe(1)
   })
 
-  it('respects a pairing switched off in the gear', async () => {
-    // Pairing off: the window brings nothing, so there is nothing to take.
-    localStorage.setItem('hc:panel-pair:desk-off', '0')
+  it('brings nothing by default — the pair keeps its own door', async () => {
+    // Pairing off (the default): the window brings nothing, so there is nothing to take.
+    localStorage.removeItem('hc:panel-pair:desk-off')
     const parked = { count: 0 }
     unsubscribe.push(EffectBus.on('spec:pair-open-off', () => {
       attach(makePanel(), { id: 'palette-off', hcSession: session(parked) })

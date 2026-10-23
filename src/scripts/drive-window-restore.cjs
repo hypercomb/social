@@ -190,7 +190,7 @@ async function main() {
     ['notes open', () => emit(page, 'notes:panel', { visible: true })],
     ['chat open', () => emit(page, 'chat:open', {})],
     ['chat close', () => emit(page, 'chat:close', {})],
-    ['notes back?', () => expectShowing(page, ['notes-strip', 'tags-viewer'])],
+    ['notes back?', () => expectShowing(page, ['notes-strip'])],
     ['notes close', () => emit(page, 'notes:panel', { visible: false })],
   ])
   await S('pair: chat → behaviours → behaviours close (chat back)', [
@@ -211,7 +211,7 @@ async function main() {
     ['notes open', () => emit(page, 'notes:panel', { visible: true })],
     ['behaviours open', () => emit(page, 'features:context-open', {})],
     ['behaviours close', () => emit(page, 'features:viewer-close', {})],
-    ['notes back?', () => expectShowing(page, ['notes-strip', 'tags-viewer'])],
+    ['notes back?', () => expectShowing(page, ['notes-strip'])],
     ['notes close', () => emit(page, 'notes:panel', { visible: false })],
   ])
   await S('pair: behaviours → notes → notes close (behaviours back)', [
@@ -278,7 +278,7 @@ async function main() {
     ['notes open', () => emit(page, 'notes:panel', { visible: true })],
     ['escape', () => page.keyboard.press('Escape')],
     ['escape again', async () => { await page.waitForTimeout(300); await page.keyboard.press('Escape') }],
-    ['notes back?', () => expectShowing(page, ['notes-strip', 'tags-viewer'])],
+    ['notes back?', () => expectShowing(page, ['notes-strip'])],
     ['notes close', () => emit(page, 'notes:panel', { visible: false })],
     ['chat back?', () => expectShowing(page, ['chat-window'])],
     ['chat close', () => emit(page, 'chat:close', {})],

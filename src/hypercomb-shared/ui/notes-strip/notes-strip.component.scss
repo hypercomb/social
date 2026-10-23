@@ -47,20 +47,12 @@
   // no width cap to release, no drag offset to cancel and no second layout to
   // fall back to.
   //
-  // TOP: THE TOP OF THE SCREEN — the same rule the chat window follows
-  // (`inset: 0`, yielding only to the control bar). The desk used to start at
-  // the shared toolwindow anchor so its header lined up with every other
-  // window's, which was right while the header bar held the command line. It
-  // does not any more: the desk stands the command line down, so the band it
-  // stopped below is an EMPTY 42px stripe of backdrop across the top of a
-  // surface that is meant to be the whole screen.
-  //
-  // The desk paints at z-index 60001 and the header bar at 60000, so covering
-  // it is one number — and nothing is lost, because there is nothing in it.
-  // (The pheromone panel it pairs with still anchors under the header, which
-  // is right: that panel is a toolwindow among toolwindows, not part of the
-  // takeover.)
-  top: 0;
+  // TOP: UNDER THE HEADER BAR (jwize 2026-10-23: "reintegrate the header").
+  // The desk keeps the hive's header — the command line, the crumbs, the
+  // room — above it (`view:keeps-shell`), so it starts at the shared
+  // toolwindow anchor like every other window, and the pheromone panel beside
+  // it lines up on the same edge.
+  top: var(--hc-header-anchor, 0px);
 
   // BESIDE THE BAR, NEVER OVER IT — the same rule the chat window follows.
   // This used to end at `bottom: 0` and cover the control bar outright

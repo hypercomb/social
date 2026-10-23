@@ -126,24 +126,18 @@ type NotesFace = typeof NOTES_FACES[number]
 /** This window's name in the two owner-counted view modes below. */
 const SURFACE_OWNER = 'notes-strip'
 
-/** THE DESK TAKES THE SURFACE, AND LEAVES THE BAR ITS EDGE.
+/** THE DESK TAKES THE SURFACE, AND LEAVES THE SHELL ITS EDGES.
  *
- *  `view:active` means "a view is covering the canvas, put the chrome away".
- *  The desk is a view covering the canvas by any honest reading — it fills the
- *  screen and nothing behind it can be reached — and saying so is what stands
- *  the COMMAND LINE down while notes are open, the same handover the chat
- *  window makes. (A command line over the desk is a second place to type with
- *  none of the note grammar; the desk's own line at the bottom is the one that
- *  writes notes.)
+ *  `view:active` means "a view is covering the canvas" — the desk is one: it
+ *  fills the screen and nothing behind it can be reached.
  *
- *  `view:keeps-controls` is the other half. On its own, `view:active` also
- *  hides the CONTROL BAR — right for a full takeover, wrong for this one: the
- *  desk stops at the bar's reservation (see the component SCSS's
- *  `--hc-controls-*` box), so the bar has a place to be, and hiding it would
- *  cost the participant every control on it — on a phone, the whole of the
- *  navigation. Any view that leaves the bar its edge can hold the mode, and
- *  the bar stays while ANY owner does. Claimed and released in lockstep. */
-const KEEPS_CONTROLS = 'view:keeps-controls'
+ *  `view:keeps-shell` is the other half: the desk keeps the hive's HEADER (the
+ *  command line, the crumbs, the room — jwize 2026-10-23: "reintegrate the
+ *  header") and the CONTROL BAR, and lays itself out between them (the SCSS's
+ *  `--hc-header-anchor` top and `--hc-controls-*` box). Hiding either would
+ *  cost the participant where they are and how they move. The shell stays
+ *  while ANY owner keeps it. Claimed and released in lockstep. */
+const KEEPS_CONTROLS = 'view:keeps-shell'
 
 const MODE_REGISTRY_IOC_KEY = '@diamondcoreprocessor.com/ModeRegistry'
 
@@ -1795,16 +1789,11 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  claim down. */
   #claimSurface(active: boolean): void {
     this.#surfaceWanted = active
-    // AND SAY WHERE THE DESK'S TOP EDGE IS, for exactly as long as it holds
-    // the surface. The desk covers the header bar (`top: 0` — the bar has
-    // nothing in it while a view is up); the pheromone panel it pairs with is
-    // a normal toolwindow anchored UNDER that bar, so without this the two
-    // halves meet at a 42px step with a stripe of hive above the panel.
-    // Unset again on release, so the panel is back on the shared anchor the
-    // moment it is on its own.
-    const root = document.documentElement.style
-    if (active) root.setProperty('--hc-desk-top', '0px')
-    else root.removeProperty('--hc-desk-top')
+    // The desk keeps the header bar now (KEEPS_CONTROLS is `view:keeps-shell`),
+    // so it starts on the shared toolwindow anchor and the pheromone panel
+    // lines up beside it with no override. A value an older build left behind
+    // is cleared.
+    document.documentElement.style.removeProperty('--hc-desk-top')
     const modes = get<ModeRegistryLike>(MODE_REGISTRY_IOC_KEY)
     if (!modes) {
       // The registry is an essentials bee and the desk can boot open before it

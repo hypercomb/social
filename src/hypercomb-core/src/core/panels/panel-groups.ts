@@ -328,8 +328,10 @@ export const writeTextScale = (window: string, scale: number | null): void => {
 // A window can bring ANOTHER up alongside it, because some gestures need two
 // windows on screen: a pheromone is dragged from the pheromone panel onto a row
 // of the notes window, so opening notes with no pheromones in reach is opening
-// half of a tool. The pairing is ON by default for the windows that declare one
-// and is a plain participant-local switch in the window's settings gear.
+// half of a tool. The pairing is a plain participant-local switch in the
+// window's settings gear, OFF by default (jwize 2026-10-23: "let's not open
+// tags by default in notes but it should be available") — the pair keeps its
+// own door, and a participant who wants the two together switches it on once.
 //
 // It fires only when the window OPENS, and only into a FREE place in the lane.
 // Close the paired window and it stays closed — a default is an opening move,
@@ -337,16 +339,16 @@ export const writeTextScale = (window: string, scale: number | null): void => {
 
 export const pairKey = (window: string): string => `hc:panel-pair:${window}`
 
-/** Does this window bring its pair up? Default ON — the declared pairings exist
- *  because the two windows are halves of one gesture. */
+/** Does this window bring its pair up? Only when the participant switched it
+ *  on in the gear — opening one window never opens another by itself. */
 export const readPairing = (window: string): boolean => {
-  try { return localStorage.getItem(pairKey(window)) !== '0' } catch { return true }
+  try { return localStorage.getItem(pairKey(window)) === '1' } catch { return false }
 }
 
 export const writePairing = (window: string, on: boolean): void => {
   try {
-    if (on) localStorage.removeItem(pairKey(window))
-    else localStorage.setItem(pairKey(window), '0')
+    if (on) localStorage.setItem(pairKey(window), '1')
+    else localStorage.removeItem(pairKey(window))
   } catch { /* ignore */ }
 }
 
