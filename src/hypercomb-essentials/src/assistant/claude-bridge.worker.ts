@@ -175,6 +175,8 @@ const HEALTH_PROBE_DEADLINE_MS = 1_000
  *  sentence can still surface there as a client-side timeout. That belongs to
  *  the caller to raise; it is not a reason to go back to lying. */
 const SUBMIT_DEADLINE_MS = 8_000
+/** How long a sentence waits for the one before it before it speaks anyway. */
+const SUBMIT_TURN_MS = 25_000
 
 /** A hive route said in a line of text: `/people/betz`. */
 const ROUTE_IN_TEXT = /\/[^\s,;:()"'“”]+/g
@@ -2085,7 +2087,36 @@ export class ClaudeBridgeWorker extends Worker {
   // a re-created command line would RE-EXECUTE the previous bridge line with
   // no caller and no receipt. EffectBus dispatches synchronously, so
   // `accepted` is already true here if a command line was listening at all.
+  // ONE COMMAND LINE, ONE SENTENCE AT A TIME. What a sentence says comes back
+  // on the activity log, which is one shared stream: three managers reading at
+  // once each heard the others' answers (7 of 12 reads, the games manager, and
+  // 9 of 28, housekeeping, 2026-10-22). A sentence that asks to stop early
+  // (`quiet`) is bounded, so it takes its turn; a sentence that waits out a
+  // long window (no `quiet`: a publish) is not queued behind or in front of
+  // anything. And a turn is never waited for past SUBMIT_TURN_MS: a cold find
+  // must not starve a read whose caller gives up in half a minute.
+  #sentences: Promise<unknown> = Promise.resolve()
+
   async #submit(req: BridgeRequest): Promise<BridgeResponse> {
+    if (!(Number.isFinite(req.quiet) && Number(req.quiet) > 0)) return this.#submitNow(req)
+    const before = this.#sentences
+    const mine = (async (): Promise<BridgeResponse> => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          before.catch(() => undefined),
+          new Promise<void>(resolve => { timer = setTimeout(resolve, SUBMIT_TURN_MS) }),
+        ])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
+      return this.#submitNow(req)
+    })()
+    this.#sentences = mine.catch(() => undefined)
+    return mine
+  }
+
+  async #submitNow(req: BridgeRequest): Promise<BridgeResponse> {
     const text = req.text
     if (typeof text !== 'string') return { id: req.id, ok: false, error: 'no text provided' }
 

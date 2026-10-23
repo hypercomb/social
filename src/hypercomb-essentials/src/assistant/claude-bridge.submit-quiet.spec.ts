@@ -106,6 +106,19 @@ describe('listening stops when the sentence is done', () => {
     expect(ms).toBeGreaterThanOrEqual(450)
   })
 
+  // The activity log is one shared stream. Three managers reading at once each
+  // heard the others' answers (2026-10-22), so a sentence takes its turn.
+  it('gives each sentence only its own answer when several are said at once', async () => {
+    line = request => setTimeout(() => {
+      EffectBus.emit('activity:log', { message: `answer to ${request.text}` })
+      request.complete?.(ran)
+    }, 80)
+    const [a, b, c] = await Promise.all(['read /a', 'read /b', 'read /c'].map(text => submit({ text, listen: 5_000, quiet: 150 })))
+    expect(a.reply.data?.['heard']).toEqual([{ kind: 'activity', text: 'answer to read /a' }])
+    expect(b.reply.data?.['heard']).toEqual([{ kind: 'activity', text: 'answer to read /b' }])
+    expect(c.reply.data?.['heard']).toEqual([{ kind: 'activity', text: 'answer to read /c' }])
+  })
+
   it('keeps listening while the hive keeps speaking', async () => {
     line = request => {
       request.complete?.(ran)

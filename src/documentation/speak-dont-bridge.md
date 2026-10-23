@@ -47,7 +47,10 @@ spoken, and has then been quiet that long. A `find` that walks in 0.3 s answers
 in about a second, not after the whole window, and a word may run as long as
 `listen` instead of the default eight seconds (a line that cannot report its
 end and has said nothing is held to the ceiling). The manager verbs (`find`,
-`read`, `note`, `unnote`, `tidy`) all send it.
+`read`, `note`, `unnote`, `tidy`) all send it. Sentences that send `quiet` take
+their turn, one at a time, because what a sentence says comes back on one shared
+activity stream and three managers reading at once each heard the others' answers;
+a turn is never waited for longer than 25 s, so a cold find cannot starve a read.
 
 When the hive tab drops while a line is running (the dev build reloads it), the
 broker answers the waiting caller at once, "the hive tab dropped before it

@@ -245,7 +245,7 @@ const main = async () => {
           // job conversations piled up past reading). Archived, never deleted:
           // `thread <convoId>` still reads it and the window's archive lists it.
           // A manager's own conversation, and one that stopped mid-leg, stay.
-          if (!Object.values(MANAGERS).includes(convoId) && !left) await send({ op: 'submit', text: 'chats tidy', listen: 0 })
+          if (!Object.values(MANAGERS).includes(convoId) && !left) await send({ op: 'submit', text: 'chats tidy', listen: 8_000, quiet: HEAR_QUIET_MS })
           return print({ convoId, outcome, rounds, reads, ...(reads === 0 ? { warning: 'nothing was read in this turn: check every claim about the hive yourself' } : {}), tokens, ...(finds && finds.length ? { finds } : {}), ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
         }
       }
