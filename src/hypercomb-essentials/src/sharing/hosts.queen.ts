@@ -86,6 +86,14 @@ export class HostsQueenBee {
     if (word === 'follow' || word === 'unfollow') {
       const zone = hostZone(parts.slice(1).find(p => !p.startsWith('@')) ?? '')
       if (!zone) { toast(t('hosts.followsay', 'Say hosts {word} <door>, such as hosts follow meetups.example.com.', { word }), 'warning'); return }
+      // The worker follows only a public dotted hostname (publicHostName): a
+      // port, a loopback name or a bare address would sign a follow no door
+      // ever honours, so it is refused here instead of toasting success
+      // (audit 2026-10-23).
+      if (zone.includes(':') || !zone.includes('.') || /^\d+(\.\d+){3}$/.test(zone)) {
+        toast(t('hosts.followpublic', '{zone} is not a public hostname — a door is followed by its dotted domain name, without a port.', { zone }), 'warning')
+        return
+      }
       const key = `follow:${zone}`
       const on = word === 'follow'
       const done = on ? await setHiveRoot(host, key, await hostArtifactSig(zone)) : await clearHiveRoot(host, key)

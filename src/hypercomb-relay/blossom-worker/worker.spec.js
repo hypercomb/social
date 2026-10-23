@@ -5812,8 +5812,16 @@ test('a host\'s own people make its doors follow another host; a stranger cannot
   assert.equal((await indexPutBy(env, sk, { 'follow:peer.example': artifact, 'follow:third.example': wrong }, 1_800_000_400)).status, 200)
   assert(!env.CONTENT.held.has(`${COMMUNITY}/${wrong}`), 'a follow whose value is not that zone\'s artifact is ignored')
 
+  // A second host person follows the same zone: one member, both counted —
+  // the first one's unfollow never severs the zone for everyone (audit
+  // 2026-10-23); only the last one out removes it.
+  const bobKey = keyOf(53)
+  env.HOST_FRIENDS = pubOf(bobKey)
+  assert.equal((await indexPutBy(env, bobKey, { 'follow:peer.example': artifact }, 1_800_000_450)).status, 201)
   assert.equal((await indexPutBy(env, sk, {}, 1_800_000_500)).status, 200)
-  assert(!env.CONTENT.held.has(`${COMMUNITY}/${artifact}`), 'unfollowed: the member is gone')
+  assert(env.CONTENT.held.has(`${COMMUNITY}/${artifact}`), 'Alice unfollowed, Bob still follows: the member stays')
+  assert.equal((await indexPutBy(env, bobKey, {}, 1_800_000_550)).status, 200)
+  assert(!env.CONTENT.held.has(`${COMMUNITY}/${artifact}`), 'the last one out removes the member')
 })
 
 test('only a host\'s own people put meetings and lists on its doors', async () => {
@@ -5833,34 +5841,34 @@ test('a meeting the network lists opens its list on this door, and the list aggr
   const atPeerName = await sha256Hex(atPeer)
   const forged = JSON.stringify({ ...JSON.parse(await rsvpClaim(pool, meetingSig, keyOf(62), { name: 'Forger' })), sig: 'f'.repeat(128) })
   const forgedName = await sha256Hex(forged)
-  const participantEvent = eventRecordText('2026-11-07', 'ada.example')
-  const participantSig = await sha256Hex(participantEvent)
+  // A record the followed door merely PICKED UP from elsewhere: shown here,
+  // never opened — a stranger's host cannot open writable pools transitively
+  // (audit 2026-10-23).
+  const foreignEvent = eventRecordText('2026-11-07', 'elsewhere.example')
+  const foreignSig = await sha256Hex(foreignEvent)
 
-  const env = await calendarEnv(new Map([[`${await sha256Hex('rsvp:hosts')}/ada.example`, new Uint8Array(0)]]))
+  const env = await calendarEnv()
   assert.equal((await indexPutBy(env, sk, { 'follow:peer.example': await sha256Hex(hostArtifact('peer.example')) }, 1_800_000_600)).status, 200)
 
   const realFetch = globalThis.fetch
   globalThis.fetch = async (url) => {
     const { hostname, pathname } = new URL(String(url))
     if (hostname === 'peer.example' || hostname === 'meetups.peer.example') {
-      if (pathname === `/${EVENTS_POOL}/`) return new Response(`${meetingSig}\n`)
+      if (pathname === `/${EVENTS_POOL}/`) return new Response(`${meetingSig}\n${foreignSig}\n`)
       if (pathname === `/${meetingSig}`) return new Response(theirMeeting)
+      if (pathname === `/${foreignSig}`) return new Response(foreignEvent)
       if (pathname === `/${pool}/`) return new Response(`${atPeerName}\n${forgedName}\n`)
       if (pathname === `/${pool}/${atPeerName}`) return new Response(atPeer)
       if (pathname === `/${pool}/${forgedName}`) return new Response(forged)
-    }
-    if (hostname === 'ada.example') {
-      if (pathname === `/${EVENTS_POOL}/`) return new Response(`${participantSig}\n`)
-      if (pathname === `/${participantSig}`) return new Response(participantEvent)
     }
     return new Response('', { status: 404 })
   }
   try {
     const calendar = await worker.fetch(new Request(`https://${WRITE_FACE}/${EVENTS_POOL}/`), env)
-    assert.deepEqual((await calendar.text()).trim().split('\n').sort(), [meetingSig, participantSig].sort(), 'the network\'s meeting and a participant\'s own event')
+    assert.deepEqual((await calendar.text()).trim().split('\n').sort(), [foreignSig, meetingSig].sort(), 'the followed door\'s meetings, its own and what it carries')
     const rsvpPools = await sha256Hex('rsvp:pools')
-    assert(env.CONTENT.held.has(`${rsvpPools}/${pool}`), 'the network meeting\'s list is open on this door')
-    assert(!env.CONTENT.held.has(`${rsvpPools}/${await sha256Hex(`rsvp:${participantSig}`)}`), 'a participant\'s own event is joined at their door')
+    assert(env.CONTENT.held.has(`${rsvpPools}/${pool}`), 'the followed zone\'s own meeting opens its list on this door')
+    assert(!env.CONTENT.held.has(`${rsvpPools}/${await sha256Hex(`rsvp:${foreignSig}`)}`), 'a carried record from elsewhere is shown, never opened')
 
     // A reader joins on this door; the list then holds theirs and the peer door's, never the forgery.
     const local = await rsvpClaim(pool, meetingSig, keyOf(63), { name: 'Local Reader' })

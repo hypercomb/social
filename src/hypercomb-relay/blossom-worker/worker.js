@@ -2194,11 +2194,11 @@ const PICKUP_PASS_MS = 6_000
 // serves share one store already; only hosts elsewhere are asked.
 const FOLLOW_KEY_RE = /^follow:([a-z0-9.-]+)$/
 const HOST_ARTIFACT_KIND = 'visual:host:artifact'
-// Hosts a hosted attendee came from (their profile verified there): their own
-// events show on the calendar — the business-card list of meetings. Members
-// are named by the hostname, as i18n:locales are.
-const RSVP_HOSTS_MEANING = 'rsvp:hosts'
 const PICKUP_PER_HOST = 20
+// A listing answer is read to this bound; anything longer is not a pool.
+const LISTING_MAX_BYTES = 256 * 1024
+// How many followers one zone's member records (a host's own people are few).
+const FOLLOWERS_MAX = 16
 const RSVP_GATHER_TTL_MS = 30_000
 
 /** A host's canonical artifact record — byte for byte what the hive mints
@@ -2230,15 +2230,27 @@ async function noteEvents(env, pubkey, evt) {
 
 /** A host person's follows become members of community:hosts — each the
  *  canonical artifact of the zone it names, kept only when the key's value is
- *  that artifact's signature. A follow the same key no longer names is
- *  withdrawn; members anyone else put there stay. */
+ *  that artifact's signature. One zone is ONE member, and the member records
+ *  EVERY follower (customMetadata.follow, comma-joined): a second person's
+ *  follow joins the list, a withdrawal leaves it, and only the last one out
+ *  removes the member — one unfollow never severs the zone for everyone
+ *  (audit 2026-10-23). Members nobody's follow put there stay untouched. */
+const followersOf = (obj) => String(obj?.customMetadata?.follow ?? '').split(',').map(k => k.trim()).filter(k => SIG_RE.test(k))
+
 async function noteFollows(env, pubkey, evt) {
   let roots = {}
   try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
   const named = Object.entries(roots).filter(([key]) => FOLLOW_KEY_RE.test(key))
   const pool = await poolAddress(COMMUNITY_HOSTS_POOL)
-  const page = env.CONTENT?.list ? await env.CONTENT.list({ prefix: `${pool}/`, limit: 1000, include: ['customMetadata'] }) : { objects: [] }
-  const mine = (page.objects ?? []).filter(obj => obj.customMetadata?.follow === pubkey)
+  const mine = []
+  if (env.CONTENT?.list) {
+    let cursor
+    do {
+      const page = await env.CONTENT.list({ prefix: `${pool}/`, cursor, limit: 1000, include: ['customMetadata'] })
+      for (const obj of page.objects ?? []) if (followersOf(obj).includes(pubkey)) mine.push(obj)
+      cursor = page.truncated ? page.cursor : undefined
+    } while (cursor)
+  }
   if (!named.length && !mine.length) return
   if (!(await isHostPerson(env, pubkey))) return
   const wanted = new Map()
@@ -2249,17 +2261,26 @@ async function noteFollows(env, pubkey, evt) {
     const sig = await sha256Hex(new TextEncoder().encode(text))
     if (String(value || '').toLowerCase() === sig) wanted.set(sig, text)
   }
+  const rewrite = async (key, text, followers) => {
+    if (!followers.length) { await env.CONTENT.delete(key); return }
+    await env.CONTENT.put(key, new TextEncoder().encode(text), {
+      httpMetadata: { contentType: 'application/json; charset=utf-8' },
+      customMetadata: { follow: followers.slice(0, FOLLOWERS_MAX).join(',') },
+    })
+  }
   for (const obj of mine) {
     const name = String(obj.key).slice(pool.length + 1)
-    if (!wanted.has(name)) await env.CONTENT.delete(obj.key)
+    if (wanted.has(name)) continue
+    const bytes = await env.CONTENT.get(obj.key)
+    const text = bytes ? new TextDecoder().decode(await bytes.arrayBuffer()) : ''
+    await rewrite(obj.key, text, followersOf(obj).filter(k => k !== pubkey))
   }
   for (const [sig, text] of wanted) {
     const key = `${pool}/${sig}`
-    if (await env.CONTENT.head(key)) continue
-    await env.CONTENT.put(key, new TextEncoder().encode(text), {
-      httpMetadata: { contentType: 'application/json; charset=utf-8' },
-      customMetadata: { follow: pubkey },
-    })
+    const held = await env.CONTENT.head(key)
+    const followers = held ? followersOf(held) : []
+    if (followers.includes(pubkey)) continue
+    await rewrite(key, text, [...followers, pubkey])
   }
 }
 
@@ -2287,17 +2308,6 @@ async function communityZones(env) {
   return [...zones]
 }
 
-/** The hosts hosted attendees came from, at most PICKUP_HOSTS. */
-async function participantHosts(env) {
-  const out = []
-  for (const name of await poolMemberNames(env, RSVP_HOSTS_MEANING)) {
-    const host = publicHostName(name)
-    if (host && !out.includes(host)) out.push(host)
-    if (out.length >= PICKUP_HOSTS) break
-  }
-  return out
-}
-
 /** GET within the pick-up bound; a slow host costs its timeout, never more. */
 async function fetchWithin(url) {
   const control = new AbortController()
@@ -2306,44 +2316,85 @@ async function fetchWithin(url) {
   finally { clearTimeout(timer) }
 }
 
-const listingOf = async (res) => (await res.text()).split('\n').map(line => line.trim().toLowerCase()).filter(line => SIG_RE.test(line))
+/** A response's bytes, read to `max` and no further: the stream is cancelled
+ *  past the bound and the answer is null — a hostile peer can cost this
+ *  worker its timeout and its cap, never its memory (audit 2026-10-23). */
+async function readCapped(res, max) {
+  const said = Number(res.headers.get('content-length') || 0)
+  if (said > max) { try { await res.body?.cancel() } catch { /* closed */ } return null }
+  if (!res.body?.getReader) {
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    return bytes.byteLength <= max ? bytes : null
+  }
+  const reader = res.body.getReader()
+  const parts = []
+  let got = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      got += value.byteLength
+      if (got > max) { try { await reader.cancel() } catch { /* closed */ } return null }
+      parts.push(value)
+    }
+  } catch { return null }
+  const out = new Uint8Array(got)
+  let at = 0
+  for (const part of parts) { out.set(part, at); at += part.byteLength }
+  return out
+}
+
+const listingOf = async (res) => {
+  const bytes = await readCapped(res, LISTING_MAX_BYTES)
+  if (!bytes) return []
+  return new TextDecoder().decode(bytes).split('\n').map(line => line.trim().toLowerCase()).filter(line => SIG_RE.test(line))
+}
 
 const eventsPickedUp = new WeakMap()
 
-/** PICK UP the network's meetings: ask every followed host, and every host a
- *  hosted attendee came from, for sign('calendar:events') at its own address;
- *  fetch each record this heap lacks, believe it only when it hashes to its
- *  name and is an event, and keep it — the bytes in the heap, the name in this
- *  host's pool. A meeting from a FOLLOWED host also opens its list here, so a
- *  reader joins on this door; a participant's own events are shown, and joined
- *  at their door. At most once a minute per isolate, bounded in time; hosts
- *  this worker serves already share this store and are not asked. */
+/** PICK UP the network's meetings from the hosts this door FOLLOWS — trust is
+ *  an allowance, so only a followed host feeds this calendar; fetch each
+ *  record this heap lacks, believe it only when it hashes to its name and is
+ *  an event, and keep it — the bytes in the heap, the name in this host's
+ *  pool. A meeting's list opens here ONLY when its record names a door of the
+ *  followed zone itself: what a followed door merely picked up from elsewhere
+ *  is shown, never opened, so no stranger opens writable pools transitively
+ *  (audit 2026-10-23). At most once a minute per isolate, bounded in time and
+ *  in attempts; hosts this worker serves share this store and are not asked. */
+const withinZoneName = (host, zone) => host === zone || host.endsWith('.' + zone)
+
 async function pickUpEvents(env) {
   if (!env.CONTENT?.put || !env.CONTENT?.list || typeof fetch !== 'function') return
   const holder = env.CONTENT
   if (Date.now() - (eventsPickedUp.get(holder) ?? 0) < PICKUP_TTL_MS) return
   eventsPickedUp.set(holder, Date.now())
   const followed = (await communityZones(env)).filter(zone => !servedHere(env, zone))
-  const participants = (await participantHosts(env)).filter(host => !servedHere(env, host) && !followed.includes(host))
-  if (!followed.length && !participants.length) return
+  if (!followed.length) return
   const pool = await poolAddress(EVENTS_POOL_MEANING)
   const held = new Set(await poolMemberNames(env, EVENTS_POOL_MEANING))
   let picked = 0
-  const pickFrom = async (zone, opens) => {
+  const opensHere = async (zone, record) => {
+    const host = publicHostName(String(record?.host || ''))
+    return !!host && withinZoneName(host, zone)
+  }
+  const pickFrom = async (zone) => {
     try {
       const listing = await fetchWithin(`https://${zone}/${pool}/`)
       if (!listing.ok) return
       let fromHere = 0
+      let attempts = 0
       for (const name of await listingOf(listing)) {
-        if (picked >= PICKUP_MEMBERS || fromHere >= PICKUP_PER_HOST) break
+        if (picked >= PICKUP_MEMBERS || fromHere >= PICKUP_PER_HOST || ++attempts > PICKUP_PER_HOST * 3) break
         if (held.has(name)) {
-          if (opens) await addPoolMember(env, RSVP_POOLS_MEANING, await poolAddress(`rsvp:${name}`))
+          if (await opensHere(zone, await heapRecord(env, name))) {
+            await addPoolMember(env, RSVP_POOLS_MEANING, await poolAddress(`rsvp:${name}`))
+          }
           continue
         }
         const record = await fetchWithin(`https://${zone}/${name}`)
         if (!record.ok) continue
-        const bytes = new Uint8Array(await record.arrayBuffer())
-        if (bytes.byteLength > EVENT_MAX_BYTES || await sha256Hex(bytes) !== name) continue
+        const bytes = await readCapped(record, EVENT_MAX_BYTES)
+        if (!bytes || await sha256Hex(bytes) !== name) continue
         let parsed
         try { parsed = JSON.parse(new TextDecoder().decode(bytes)) } catch { continue }
         if (parsed?.kind !== EVENT_RECORD_KIND) continue
@@ -2354,7 +2405,7 @@ async function pickUpEvents(env) {
           })
         }
         await addPoolMember(env, EVENTS_POOL_MEANING, name)
-        if (opens) await addPoolMember(env, RSVP_POOLS_MEANING, await poolAddress(`rsvp:${name}`))
+        if (await opensHere(zone, parsed)) await addPoolMember(env, RSVP_POOLS_MEANING, await poolAddress(`rsvp:${name}`))
         held.add(name)
         picked++
         fromHere++
@@ -2362,7 +2413,7 @@ async function pickUpEvents(env) {
     } catch { /* that host is slow or gone; the rest still answer */ }
   }
   await Promise.race([
-    Promise.all([...followed.map(zone => pickFrom(zone, true)), ...participants.map(host => pickFrom(host, false))]),
+    Promise.all(followed.map(pickFrom)),
     new Promise(resolve => setTimeout(resolve, PICKUP_PASS_MS)),
   ])
 }
@@ -2388,9 +2439,14 @@ async function pickUpClaims(env, pool) {
   if (Date.now() - (claimsPickedUp.get(pool) ?? 0) < RSVP_GATHER_TTL_MS) return
   claimsPickedUp.set(pool, Date.now())
   const meeting = await meetingOfPool(env, pool)
+  const followed = (await communityZones(env)).filter(zone => !servedHere(env, zone))
+  // The meeting's own door is asked only when a followed zone vouches for it:
+  // the record's host is not a source by its own word (audit 2026-10-23).
   const leader = publicHostName(String(meeting?.record?.host || ''))
-  const sources = [...new Set([...(leader ? [leader] : []), ...(await communityZones(env))])]
-    .filter(host => !servedHere(env, host))
+  const sources = [...new Set([
+    ...(leader && !servedHere(env, leader) && followed.some(zone => withinZoneName(leader, zone)) ? [leader] : []),
+    ...followed,
+  ])]
   if (!sources.length) return
   const held = new Set((await roomMemberNames(env, pool)))
   let picked = 0
@@ -2398,11 +2454,14 @@ async function pickUpClaims(env, pool) {
     try {
       const listing = await fetchWithin(`https://${host}/${pool}/`)
       if (!listing.ok) return
+      let attempts = 0
       for (const name of await listingOf(listing)) {
-        if (held.has(name) || picked >= PICKUP_MEMBERS) continue
+        // The gathered list honours the same cap a direct write does.
+        if (held.has(name) || picked >= PICKUP_MEMBERS || held.size >= RSVP_POOL_CAP || ++attempts > PICKUP_MEMBERS * 2) continue
         const res = await fetchWithin(`https://${host}/${pool}/${name}`)
         if (!res.ok) continue
-        const body = new Uint8Array(await res.arrayBuffer())
+        const body = await readCapped(res, RSVP_MAX_BYTES)
+        if (!body) continue
         const claim = await checkRsvpClaim(body, pool, name)
         if (!claim.ok) continue
         const key = `${pool}/${name}`
@@ -2515,8 +2574,7 @@ async function fetchBounded(url, max, ms = PICKUP_FETCH_MS) {
   try {
     const res = await fetch(url, { signal: control.signal })
     if (!res.ok || /text\/html/i.test(res.headers.get('content-type') || '')) return null
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    return bytes.byteLength <= max ? bytes : null
+    return await readCapped(res, max)
   } catch { return null } finally { clearTimeout(timer) }
 }
 
@@ -2545,8 +2603,6 @@ async function pickUpProfile(env, host, sig, pubkey) {
       customMetadata: { picked: host },
     })
   }
-  // A verified profile is a hosted participant: their host's events show here.
-  await addPoolMember(env, RSVP_HOSTS_MEANING, host)
   let picture
   try { picture = new URL(String(content?.picture || '')) } catch { return }
   const pictureSig = /^\/([0-9a-f]{64})$/.exec(picture.pathname)?.[1]

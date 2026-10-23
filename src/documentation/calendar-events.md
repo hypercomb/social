@@ -124,11 +124,12 @@ the whole list.
   (`checkRsvpClaim`). Claims are self-signed, so any door may hold any of them;
   the organizer's door ends up with every door's claims, and so does every
   other door. `event roll` at the organizer keeps the result in the hive.
-- **Participants' own events show too**, like the business-card list. A hosted
-  attendee whose profile verified makes their host a member of `rsvp:hosts`;
-  the calendar picks up that host's meetings as well (at most 20 per host),
-  shown with "join at their door" — their lists open only on doors that follow
-  them.
+- **Only followed hosts feed the calendar** (audit 2026-10-23). An earlier
+  draft also picked up hosted attendees' own hosts; a stranger could use it to
+  fill the calendar, so it is gone. A followed door's meeting opens its list
+  here only when its record names a door of that zone; what that door merely
+  carries from elsewhere is shown, never opened. Each follow records every
+  follower, so one person's unfollow never severs a zone others follow.
 - **Only a host's own people put meetings on its doors.** An index's `event:`
   and `rsvp:` keys count only from the host's people; anyone else's are
   ignored, so the calendar cannot be filled by strangers.

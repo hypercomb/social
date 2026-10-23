@@ -396,8 +396,11 @@
         return listing(base, pool).then(function (names) {
           return Promise.all(names.map(function (sig) {
             if (seen[sig]) return null;
-            seen[sig] = true;
-            return readJson(base, sig).then(function (r) { if (isEvent(r)) found.push({ sig: sig, record: r, base: base }); });
+            return readJson(base, sig).then(function (r) {
+              if (seen[sig] || !isEvent(r)) return;
+              seen[sig] = true;
+              found.push({ sig: sig, record: r, base: base });
+            });
           }));
         });
       };
@@ -632,14 +635,22 @@
       rw.textContent = dayOf(ev.record) + (ev.record.time ? ' · ' + ev.record.time + (ev.record.ends ? '–' + ev.record.ends : '') : '') + ' · ' + ev.record.where.split(',')[0];
       row.appendChild(b); row.appendChild(rc); row.appendChild(rw);
       // A tap opens the meeting; a LONG HOLD pins it as this device's opener.
-      var hold = null, held = false;
-      row.addEventListener('pointerdown', function () {
+      // A finger is never perfectly still: the hold survives 12px of drift and
+      // dies on a real move, a lift, or the browser taking the pointer back.
+      var hold = null, held = false, downAt = null;
+      var callOff = function () { clearTimeout(hold); downAt = null; };
+      row.addEventListener('pointerdown', function (e) {
         held = false;
+        downAt = { x: e.clientX, y: e.clientY };
+        clearTimeout(hold);
         hold = setTimeout(function () { held = true; togglePin(ev); }, 550);
       });
-      var callOff = function () { clearTimeout(hold); };
-      row.addEventListener('pointermove', callOff);
+      row.addEventListener('pointermove', function (e) {
+        if (!downAt) return;
+        if (Math.abs(e.clientX - downAt.x) > 12 || Math.abs(e.clientY - downAt.y) > 12) callOff();
+      });
       row.addEventListener('pointerup', callOff);
+      row.addEventListener('pointercancel', callOff);
       row.addEventListener('pointerleave', callOff);
       row.addEventListener('contextmenu', function (e) { e.preventDefault(); });
       row.addEventListener('click', function () { if (held) { held = false; return; } select(ev); show('meeting'); });
@@ -729,6 +740,14 @@
   }
   function render() { renderMeeting(); renderRows(); renderPeople(); renderDoors(); }
   function select(ev) {
+    // Another meeting: the join line and panel belong to the one that owned
+    // them, so they reset rather than stand under the new selection.
+    if ((state.selected && state.selected.sig) !== (ev && ev.sig)) {
+      var st = $('[data-join-state]');
+      if (st) st.textContent = '';
+      var jp = $('[data-join-panel]');
+      if (jp) jp.classList.remove('open');
+    }
     state.selected = ev;
     render();
     if (ev && !state.coming[ev.sig]) {
@@ -826,8 +845,13 @@
     if (!SIG.test(sig) || !SIG.test(member)) return;
     var ev = state.events.filter(function (e) { return e.sig === sig; })[0];
     if (!ev) return;
-    var base = state.local[sig] && /^https?:$/.test(location.protocol) ? location.origin : (baseFor(ev.record.host) || ev.base);
-    sha256('rsvp:' + sig).then(function (pool) { return readJson(base, pool + '/' + member); }).then(function (claim) {
+    // readComing settles state.local[sig] first, so the claim is read from the
+    // door that actually holds the list — this one when it is open here.
+    readComing(ev).then(function (rows) {
+      state.coming[ev.sig] = rows;
+      var base = state.local[sig] && /^https?:$/.test(location.protocol) ? location.origin : (baseFor(ev.record.host) || ev.base);
+      return sha256('rsvp:' + sig).then(function (pool) { return readJson(base, pool + '/' + member); });
+    }).then(function (claim) {
       select(ev);
       show('meeting');
       panel.classList.add('open');

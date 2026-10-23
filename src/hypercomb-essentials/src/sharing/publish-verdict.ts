@@ -71,10 +71,16 @@ export function publishVerdict(input: VerdictInput): PublishRowState {
   if (!live) return sealable ? 'unpublished' : 'unknown'
   // Authentic but superseded: an edge is serving an index older than ours.
   if (indexStale) return 'stale-edge'
+  // A head WE published recently and the index already names: a 404 right
+  // after the act is the edge still catching up, not the head being gone —
+  // the ledger outranks a momentary absence (audit 2026-10-23). Past the
+  // window, a 404 is the host's word again.
+  const justPublished = record && now - record.at < RECENT_PUBLISH_MS
+  if (served === 'absent' && justPublished && record.sealed === live) return 'pending'
   // The host ASSERTED absence. Only a 404 reaches here.
   if (served === 'absent') return 'gone'
   // We published a head the index still does not name, recently.
-  if (record && record.sealed !== live && now - record.at < RECENT_PUBLISH_MS) return 'pending'
+  if (record && record.sealed !== live && justPublished) return 'pending'
   // No local path to seal — we can see the world's side only.
   if (!sealable) return 'unknown'
   // Could not see our own side (a cold child). Say so; never call it drift.

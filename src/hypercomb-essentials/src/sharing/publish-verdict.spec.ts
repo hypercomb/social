@@ -56,6 +56,17 @@ describe('publish verdict ladder', () => {
     expect(verdict({ served: 'unknown', here: B })).not.toBe('gone')
   })
 
+  it('a 404 right after OUR publish of the head the index names is the edge catching up, not gone', () => {
+    // jwize 2026-10-23: "Publish changes" stayed after the publish succeeded —
+    // a momentary 404 outranked the ledger. Inside the window it is pending;
+    // past it, the host's word stands again.
+    const justNow = { sealed: A, at: NOW - 30_000 }
+    expect(verdict({ served: 'absent', record: justNow })).toBe('pending')
+    expect(verdict({ served: 'absent', record: { sealed: A, at: NOW - RECENT_PUBLISH_MS - 1 } })).toBe('gone')
+    // A ledger head the index does NOT name earns no shelter from a 404.
+    expect(verdict({ served: 'absent', record: { sealed: B, at: NOW - 30_000 } })).toBe('gone')
+  })
+
   // ── the index cannot be believed ───────────────────────────────────────
 
   it('an unreadable index makes every row unknown, not broken', () => {

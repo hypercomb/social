@@ -1242,6 +1242,14 @@ export class PublishStatusDrone extends Drone {
       result.status === 'confirmed'
         ? 'Published — its host is serving it.'
         : 'Published — its host has not served it back yet. This row re-checks on its own.')
+    // THE ACT IS THE TRUTH THE ROW PAINTS NOW (audit 2026-10-23): the index
+    // write just landed, so the row says so at once — the republish button
+    // goes with it — instead of waiting out a sweep that read its snapshots
+    // before the publish and would re-paint 'drift' until the next pass.
+    row.live = result.sealed
+    row.here = result.sealed
+    row.state = result.status === 'confirmed' ? 'live' : 'pending'
+    this.#emit()
     void this.#refresh()
   }
 
