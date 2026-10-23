@@ -191,5 +191,31 @@ ledger.
    Then type `room home` and press "Open my hive": the room's tile, with
    everything you collected and organized on it, is offered in your own hive.
 
+**Starting a session.** When the session begins, the host (in the room) types
+`room start`. Everyone who has ever joined that room by its link is told:
+"The session in <room> is starting", with a Join button. They are told even
+if they left, or are elsewhere in their own hive. Join asks the way the link
+did. The host is not told of their own start, and anyone already in the room
+is not told again.
+
+- *Who hears it.* Every join remembers the room on that device: room, secret
+  and meeting point, newest first, at most twelve rooms. The list holds the
+  secret, so it is a credential. It stays in this device's localStorage
+  (`hc:rooms`) and never goes into a pool, a resource or an event. For each
+  remembered room, `room-notice.drone.ts` keeps one small socket to the
+  room's meeting point and asks for one filter.
+- *What is sent.* The notice is a nostr event of kind 30569, addressable (one
+  per signer per room). It is posted at `sign('room:notice:' + the room's
+  pool address)`. That address holds the secret, so only someone who was
+  given the room can ask for its notice, or post one. Its content is
+  `{ label, segments }`, never the secret. It expires after three hours.
+- *Pieces.* `sharing/room-notice.ts` (pure: the list, the address, reading a
+  notice), `room-notice.drone.ts` (listens, toasts, joins through
+  `joinMeetingPlace`), `room start` in `room.queen.ts`. The remembering
+  happens in `meeting-invite.join.ts`, through that file's one raw write.
+- *Proof.* `node scripts/drive-swarm-session-start.cjs --url
+  http://localhost:4251/ --relay ws://localhost:7791` passes 11/11 with two
+  browsers.
+
 **When people leave**, their untaken lines leave with them. What you took and
 organized stays yours, here and, once taken home, in your own hive.

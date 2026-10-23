@@ -11,14 +11,21 @@
 //                              tile here) to your own hive
 //   room home <address>        your own hive is at <address> — remembered on
 //                              this device, asked for once
+//   room start                 the session starts: everyone who has been in
+//                              this room is told, with a Join button
 //
 // What a room asks rides the room tile's layer (`asks`, room-asks.ts); on
 // arrival each asked word is offered to be turned on (room-asks.drone.ts).
 // Taking home hands the tile to your own hive by signature (take-home.ts).
+// A start notice is posted at the room's notice address on its meeting point
+// (room-notice.ts); room-notice.drone.ts hears it on every device that
+// remembers the room.
 
 import { EffectBus, QueenBee, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { ROOM_ASKS_SLOT, applyAsks, currentRoomAsks, readAsks } from './room-asks.js'
 import { readHome, takeBundle, takeClosure, takeLinkText, writeHome } from './take-home.js'
+import { ROOM_NOTICE_KIND, noticeAddress, noticeTemplate } from './room-notice.js'
+import { isJoinedHere, ownZone } from './membership.js'
 
 /** The toast's button opens the home hive INSIDE its own click — the upload
  *  before it takes too long for the word's own keypress to still count. */
@@ -35,6 +42,10 @@ type StoreShape = { getResourceLocal?(sig: string): Promise<Blob | null> }
 type HostSyncShape = {
   putOne?(host: string, sig: string, bytes: Uint8Array): Promise<{ ok: true } | { ok: false; reason: string }>
   publishAtoms?(host: string, sigs: readonly string[], bytesOf: (sig: string) => Promise<Uint8Array | null>): Promise<{ ok: true; sent: number; held: number } | { ok: false; error: string }>
+}
+type MeshShape = {
+  meetingRelay?: () => string
+  publish?: (kind: number, sig: string, payload: unknown, extraTags?: string[][], onTaken?: () => void) => Promise<boolean>
 }
 type SwarmShape = { peerTilesAtCurrentSig?: () => readonly { name: string; layerSig?: unknown; template?: boolean }[] }
 
@@ -55,12 +66,13 @@ export class RoomQueenBee extends QueenBee {
   readonly command = 'room'
   override description = 'What this room asks of whoever joins, and taking home what you collected'
   override descriptionKey = 'slash.room'
-  override options = ['asks <behaviours>', 'asks ~ <behaviour>', 'home', 'home <address>']
+  override options = ['asks <behaviours>', 'asks ~ <behaviour>', 'home', 'home <address>', 'start']
   override examples = [
     { input: 'room', result: 'Says what this room asks and where take home sends' },
     { input: 'room asks notes keep-alive', result: 'The selected room tile asks joiners for notes and keep-alive' },
     { input: 'room home', result: 'Takes the room tile you collected home to your own hive' },
     { input: 'room home hypercomb.io', result: 'Your own hive is at hypercomb.io' },
+    { input: 'room start', result: 'Tells everyone who has been in this room that the session is starting' },
   ]
 
   // What a room asks ARE behaviour words (`keep-alive`), and the command line
@@ -74,7 +86,8 @@ export class RoomQueenBee extends QueenBee {
     if (!verb) return this.#show()
     if (verb === 'asks') return this.#asks(tail)
     if (verb === 'home') return tail ? this.#setHome(tail) : this.#takeHome()
-    this.#say(this.#t('room.usage', 'room — say "room", "room asks <behaviours>", or "room home"'), 'warning')
+    if (verb === 'start') return this.#start()
+    this.#say(this.#t('room.usage', 'room — say "room", "room asks <behaviours>", "room home", or "room start"'), 'warning')
   }
 
   // ── what the room asks ──────────────────────────────────────
@@ -174,6 +187,31 @@ export class RoomQueenBee extends QueenBee {
       actionEffect: TAKE_HOME_OPEN_EFFECT,
       actionPayload: { url },
     })
+  }
+
+  // ── the session starts ──────────────────────────────────────
+
+  async #start(): Promise<void> {
+    const zone = ownZone()
+    const mesh = get<MeshShape>('@diamondcoreprocessor.com/NostrMeshDrone')
+    const relay = String(mesh?.meetingRelay?.() ?? '').trim()
+    if (!zone || !relay || !isJoinedHere() || !mesh?.publish) {
+      this.#say(this.#t('room.start.not-joined', 'room start: join your room first — the notice goes to its meeting point'), 'warning')
+      return
+    }
+    const address = await noticeAddress(zone.room, zone.secret, relay)
+    if (!address) return
+    const here = this.#here()
+    const label = here.length ? `${zone.room} — /${here.join('/')}` : zone.room
+    const { content, tags } = noticeTemplate(address, label, here)
+    const taken = await new Promise<boolean>(resolve => {
+      const timer = setTimeout(() => resolve(false), 15_000)
+      void mesh.publish!(ROOM_NOTICE_KIND, address, content, tags, () => { clearTimeout(timer); resolve(true) })
+        .then(sent => { if (!sent) { clearTimeout(timer); resolve(false) } })
+    })
+    this.#say(taken
+      ? this.#t('room.start.sent', `The session in "${zone.room}" has started — everyone who has been here is told`, { room: zone.room })
+      : this.#t('room.start.unsent', 'The meeting point did not take the notice — try again in a moment'), taken ? 'success' : 'warning')
   }
 
   // ── where things are ────────────────────────────────────────

@@ -32,6 +32,7 @@ import { resolveInviteSecret, validateInviteBundle, meetingRelayOf, meetingHostO
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { readDoorsOf } from './zone-door.js'
 import { isJoinedHere, readTabZone, writeTabZone } from './membership.js'
+import { REMEMBERED_ROOMS_KEY, readRememberedRooms, withRoom } from './room-notice.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const ROOM_KEY = '@hypercomb.social/RoomStore'
@@ -98,6 +99,12 @@ async function keeperOf(segments: readonly string[], meetingHost = ''): Promise<
     if (!choice?.pending || Date.now() >= deadline) return choice?.hosts?.[0] ?? ''
     await new Promise(resolve => setTimeout(resolve, KEEPER_POLL_MS))
   }
+}
+
+/** THE ONE RAW WRITE in this file: the command line's stance, and the rooms
+ *  this device remembers (a credential — its home is this device). */
+function writeRaw(key: string, value: string): void {
+  try { localStorage.setItem(key, value) } catch { /* this session only */ }
 }
 
 function toast(type: string, title: string, message: string): void {
@@ -322,7 +329,7 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   // A guest who typed a slash word before tapping the link is still in
   // command stance — and there every name they type next is read as a
   // command and silently dropped. Joining a room is joining to make tiles.
-  try { localStorage.setItem(STANCE_KEY, 'tiles') } catch { /* the effect below still lands */ }
+  writeRaw(STANCE_KEY, 'tiles')
   EffectBus.emit('command-line:stance', { stance: 'tiles' })
   // NO HOST: nothing to join yet. The selector opens on the host field,
   // with the room and secret just set; its START is the join.
@@ -331,6 +338,14 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
     toast('tip', tr('invite.join.title', 'Meeting place'), tr('invite.meet.needs-host', 'This link names no host — name the host the room meets at (or tap hypercomb.com), then start.'))
     return false
   }
+  // THE ROOM IS REMEMBERED on this device, so its host's `room start` reaches
+  // this participant later, joined or not (room-notice.ts). It holds the
+  // secret: device-local, like any credential.
+  writeRaw(REMEMBERED_ROOMS_KEY, JSON.stringify(withRoom(readRememberedRooms(), {
+    room: bundle.room, secret: bundle.secret, relay,
+    ...(point.host ? { host: point.host } : {}), ...(code ? { code } : {}),
+    segments: bundle.segments, label: stored.alias?.trim() || bundle.room, at: Date.now(),
+  })))
   // THE ONE DOOR in: the same toggle the control, the shortcut and the
   // `join` word use (its zone guard lives in runtime-initializer). Only
   // when this tab is not already a member — a toggle would make it leave.
