@@ -4,8 +4,14 @@
 //
 // Played on the notes the swarm already shares, with the swarm's own acts:
 //
-//   START    `start did you know` mints the game's tile on the page you stand
-//            on (or finds it) and opens the notes desk on it.
+//   TOGGLE   `did-you-know on | off | everywhere` (or the word alone, which
+//            flips it) declares where the game may be played: a mark on this
+//            layer that holds for everything beneath it, or on the root layer
+//            for everywhere (scope.ts). The mark holds no ideas; those stay
+//            on the layer where they were shared.
+//   START    `start did you know` switches the game on here, mints the game's
+//            tile on the page you stand on (or finds it) and opens the notes
+//            desk on it.
 //   SHARE    `did-you-know <idea>` writes your idea as a note on that tile —
 //            making the tile on your page first when it is not there, so the
 //            room hears it. The desk shows everyone's ideas as plain words:
@@ -34,8 +40,10 @@
 
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
+import { readGlobalOffKinds } from '../sharing/behavior-enablement.js'
 import { isJoinedHere } from '../sharing/membership.js'
-import { GAME_NAME, IDEA_MAX, bringers, cleanIdea, isGame, isRevealNote, revealText, type Idea } from './didyouknow.js'
+import { ENABLED_KIND, GAME_NAME, IDEA_MAX, bringers, cleanIdea, isGame, isRevealNote, revealText, type Idea, type Toggle } from './didyouknow.js'
+import { declarationsAt, declaredAt, disableAt, enableAt } from './scope.js'
 
 /** The room's ideas are read a moment after the room or the page changes. */
 const SYNC_MS = 1_200
@@ -63,10 +71,24 @@ type SignerShape = { getPublicKeyHex?: () => Promise<string | null> }
 const get = <T>(key: string): T | undefined =>
   (window as { ioc?: { get?: <V>(k: string) => V | undefined } }).ioc?.get?.<T>(key)
 
-export type StartOutcome = { outcome: 'started' | 'resumed'; where: string }
-export type ShareOutcome = 'shared' | 'empty' | 'long' | 'exists' | 'failed'
-export type RevealOutcome = { ideas: number; people: number } | 'none' | 'already'
-export type CollectOutcome = { taken: number; waiting: number } | 'none'
+/** Why the game cannot be played on this layer: it is not switched on here
+ *  (`off`), or the participant switched the behaviour off for good in the
+ *  Beehaviors roster (`switched-off`). */
+export type Unavailable = 'off' | 'switched-off'
+export type StartOutcome = { outcome: 'started' | 'resumed'; where: string; refused?: 'switched-off' }
+export type ShareOutcome = 'shared' | 'empty' | 'long' | 'exists' | 'failed' | Unavailable
+export type RevealOutcome = { ideas: number; people: number } | 'none' | 'already' | Unavailable
+export type CollectOutcome = { taken: number; waiting: number } | 'none' | Unavailable
+/** What a toggle did. `at` is the layer that declares the game on (or lost
+ *  its declaration). `covered` / `inherited` say an ancestor holds the
+ *  declaration, so nothing was written or removed here. */
+export type ToggleOutcome =
+  | { state: 'on'; at: string[]; changed: boolean }
+  | { state: 'covered'; at: string[] }
+  | { state: 'off'; at: string[] }
+  | { state: 'inherited'; at: string[] }
+  | { state: 'none' }
+  | { state: 'switched-off' }
 
 export class DidYouKnow extends EventTarget {
   /** The ledger: note id → its words and the first participant seen holding
@@ -96,14 +118,67 @@ export class DidYouKnow extends EventTarget {
 
   // ── start ──────────────────────────────────────────────────────────────
 
-  /** Start the game on the page you stand on: the game's tile is made here
-   *  unless it already is, and the notes desk opens on it. */
+  /** Start the game on the page you stand on: the game is switched on here
+   *  (unless a layer above already holds it on), its tile is made unless it
+   *  already is, and the notes desk opens on it. */
   async start(): Promise<StartOutcome> {
     const here = this.#segments()
+    if (this.#switchedOff()) return { outcome: 'resumed', where: here.join('/'), refused: 'switched-off' }
+    await this.toggle('on')
     const held = await this.#tileHere(here)
     const name = held ?? await this.#mint(here)
     if (name) this.open(name)
     return { outcome: held ? 'resumed' : 'started', where: [...here, name ?? GAME_NAME].join('/') }
+  }
+
+  // ── the toggle ─────────────────────────────────────────────────────────
+
+  /** Switch the game on or off for the layer you stand on and everything
+   *  beneath it, or on for the whole hive (`everywhere`, the root layer).
+   *  Declared, never stamped: one mark, read by walking up from wherever a
+   *  word is said. Ideas already shared are never touched. */
+  async toggle(action: Toggle): Promise<ToggleOutcome> {
+    if (this.#switchedOff()) return { state: 'switched-off' }
+    const here = this.#segments()
+    if (action === 'everywhere') {
+      const had = (await declarationsAt([])).length > 0
+      await enableAt([])
+      await this.#settled()
+      return { state: 'on', at: [], changed: !had }
+    }
+    const exact = (await declarationsAt(here)).length > 0
+    if (action === 'flip') action = exact ? 'off' : 'on'
+    if (action === 'on') {
+      const near = await declaredAt(here)
+      if (near && near.length !== here.length) return { state: 'covered', at: near }
+      await enableAt(here)
+      await this.#settled()
+      return { state: 'on', at: here, changed: !exact }
+    }
+    if (exact) {
+      await disableAt(here)
+      await this.#settled()
+      return { state: 'off', at: here }
+    }
+    const near = await declaredAt(here)
+    return near ? { state: 'inherited', at: near } : { state: 'none' }
+  }
+
+  /** Can the game be played on `segments`? Yes where a layer at or above it
+   *  declares it on, and wherever the room is already playing on the page you
+   *  stand on: a participant who arrives into a room never has to switch
+   *  anything on first. Not when the participant switched the behaviour off
+   *  for good in the Beehaviors roster. */
+  async availability(segments: readonly string[]): Promise<'ok' | Unavailable> {
+    if (this.#switchedOff()) return 'switched-off'
+    if (await declaredAt(segments)) return 'ok'
+    return this.#peerTile() ? 'ok' : 'off'
+  }
+
+  /** The roster's own switch, honoured as the one switch it is: only an
+   *  explicit off counts. A hive that simply never lit the kind still plays. */
+  #switchedOff(): boolean {
+    try { return readGlobalOffKinds().has(ENABLED_KIND) } catch { return false }
   }
 
   // ── share ──────────────────────────────────────────────────────────────
@@ -117,6 +192,8 @@ export class DidYouKnow extends EventTarget {
     const notes = get<NotesShape>('@diamondcoreprocessor.com/NotesService')
     if (!notes) return 'failed'
     const here = this.#segments()
+    const unavailable = await this.availability(here)
+    if (unavailable !== 'ok') return unavailable
     const name = (await this.#tileHere(here)) ?? (await this.#mint(here))
     if (!name) return 'failed'
     const own = await notes.getNotesAtSegments([...here, name])
@@ -143,6 +220,8 @@ export class DidYouKnow extends EventTarget {
    *  The desk shows names again wherever that note is among the tile's notes. */
   async reveal(): Promise<RevealOutcome> {
     const here = this.#segments()
+    const unavailable = await this.availability(here)
+    if (unavailable !== 'ok') return unavailable
     const name = await this.#tileHere(here) ?? this.#peerTile()
     const notes = get<NotesShape>('@diamondcoreprocessor.com/NotesService')
     if (!name || !notes) return 'none'
@@ -201,6 +280,8 @@ export class DidYouKnow extends EventTarget {
     const swarmNotes = get<SwarmNotesShape>('@diamondcoreprocessor.com/SwarmNotes')
     if (!swarmNotes || !isJoinedHere()) return 'none'
     const here = this.#segments()
+    const unavailable = await this.availability(here)
+    if (unavailable !== 'ok') return unavailable
     if (!(await this.#tileHere(here)) && !this.#peerTile()) return 'none'
     // The ideas land on a tile of yours: make it before taking.
     const mine = await this.#tileHere(here) ?? await this.#mint(here)

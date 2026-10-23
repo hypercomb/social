@@ -204,6 +204,20 @@ const CAPABILITIES: Readonly<Record<string, {
     cascades: true,
     addable: false,
   },
+  // DID YOU KNOW — a toggle a layer declares: the meeting exercise is on for
+  // this layer and everything beneath it (or for the whole hive when the root
+  // layer declares it). The record holds no ideas; those live on the tile of
+  // the layer where they were shared (didyouknow/scope.ts).
+  'visual:didyouknow:enabled': {
+    view: 'didyouknow',
+    icon: 'psychology',
+    slashCommand: '/did-you-know on',
+    labelKey: 'features.cap.didyouknow',
+    descriptionKey: 'features.cap.didyouknow.desc',
+    fallbackLabel: 'Did You Know',
+    cascades: true,
+    addable: true,
+  },
   // PUBLISH GROUPS — lit per layer, it puts that layer's groups on a strip at
   // the top of the hive (sharing/publish-groups.drone.ts). The groups are
   // `publish:group` records and the members wear `group` marks; this deposit

@@ -2,8 +2,8 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  GAME_NAME, IDEA_MAX, REVEAL_LINE_MAX, REVEAL_MARK,
-  bringers, cleanIdea, concealsAuthors, isGame, isRevealNote, isRevealed, revealText,
+  ENABLED_KIND, GAME_NAME, IDEA_MAX, REVEAL_LINE_MAX, REVEAL_MARK,
+  bringers, cleanIdea, concealsAuthors, isGame, isRevealNote, isRevealed, parseToggle, revealText, routeOf,
   type Idea,
 } from './didyouknow.js'
 
@@ -14,6 +14,37 @@ describe('the game is a tile read by name', () => {
     expect(isGame('did-you-know')).toBe(true)
     expect(isGame('did you know more')).toBe(false)
     expect(isGame('')).toBe(false)
+  })
+})
+
+describe('the toggle — the word alone, or on / off / everywhere, else an idea', () => {
+  it('the word alone flips the game for this layer and beneath', () => {
+    expect(parseToggle('')).toBe('flip')
+    expect(parseToggle('   ')).toBe('flip')
+    expect(parseToggle(undefined)).toBe('flip')
+  })
+
+  it('reads the three toggle words, however they are cased or spaced', () => {
+    expect(parseToggle('on')).toBe('on')
+    expect(parseToggle(' OFF ')).toBe('off')
+    expect(parseToggle('Everywhere')).toBe('everywhere')
+  })
+
+  it('anything longer than a toggle word is an idea, even one that starts with one', () => {
+    expect(parseToggle('on Mars a day is longer than its year')).toBeNull()
+    expect(parseToggle('off the coast of Peru the sea glows')).toBeNull()
+    expect(parseToggle('everywhere you look there is a Fibonacci spiral')).toBeNull()
+    expect(parseToggle('octopuses have three hearts')).toBeNull()
+  })
+
+  it('names a layer as a route, the root as /', () => {
+    expect(routeOf([])).toBe('/')
+    expect(routeOf(['lecture', 'biology'])).toBe('/lecture/biology')
+    expect(routeOf([' lecture ', ''])).toBe('/lecture')
+  })
+
+  it('the mark is a visual kind a layer wears, like the other container behaviours', () => {
+    expect(ENABLED_KIND).toBe('visual:didyouknow:enabled')
   })
 })
 

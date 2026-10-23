@@ -11,6 +11,12 @@
 //   - `collect` takes the room's ideas onto the participant's own tile
 //   - `reveal` writes one note naming who brought each idea; the desks then
 //     show names again; `collect` after the reveal leaves the reveal behind
+//   - the game is a TOGGLE a layer declares: `start` at the root switches it on
+//     everywhere; a participant joins a room without switching anything on;
+//     ideas belong to the layer they were shared on; `off` at a layer that
+//     inherits the mark changes nothing; off at the root closes the layers
+//     beneath; `on` on a branch opens that branch and what is beneath it, not
+//     its sibling; `everywhere` opens the sibling; the word alone flips
 //
 //   node scripts/drive-didyouknow.cjs --url http://localhost:4253/ --relay ws://localhost:7777
 
@@ -82,10 +88,12 @@ const openDesk = (c, cell) => H.evalSafe(() => c.page.evaluate((cell) => {
   return !!cmp
 }, cell))
 
-const service = (c, call) => H.evalSafe(() => c.page.evaluate(async (call) => {
+const service = (c, call, ...args) => H.evalSafe(() => c.page.evaluate(async ({ call, args }) => {
   const s = window.ioc.get('@diamondcoreprocessor.com/DidYouKnow')
-  return s ? await s[call]() : null
-}, call))
+  return s ? await s[call](...args) : null
+}, { call, args }))
+
+const goTo = (c, segs) => H.evalSafe(() => c.page.evaluate((segs) => { window.ioc.get('@hypercomb.social/Navigation').goRaw(segs); return true }, segs))
 
 const slug = (s) => String(s).trim().toLowerCase().replace(/[._\s]+/g, '-').replace(/[^\p{L}\p{N}\-]/gu, '').replace(/-{2,}/g, '-').replace(/^-|-$/g, '')
 const has = (list, name) => (list ?? []).some(n => slug(n) === slug(name))
@@ -161,6 +169,77 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
   const benHolds = await H.waitFor(() => notesAt(b, [tile]), v => v.includes(IDEA_BEN) && v.includes(IDEA_CY), 60000, 1000)
   H.check('`collect` after the reveal takes the ideas and leaves the reveal where it is',
     benHolds.ok && !(benHolds.value ?? []).some(t => t.startsWith('Revealed ·')), JSON.stringify(benHolds.value))
+
+  // ── THE TOGGLE: where the game is on ───────────────────────────────────
+  // Ben joined the room and played without switching anything on: the room
+  // being there was enough, and his hive declares nothing.
+  const benDeclares = await service(b, 'toggle', 'off')
+  H.check('a participant plays a room without switching anything on', benDeclares?.state === 'none', JSON.stringify(benDeclares))
+
+  // `start` at the root switched the game on everywhere. A layer with no room
+  // and no mark of its own plays; its ideas belong to it, not to the root.
+  await H.addTile(a.page, 'lecture'); await H.sleep(1500)
+  await goTo(a, ['lecture']); await H.sleep(2000)
+  const everywhere = await service(a, 'availability', ['lecture'])
+  H.check('`start` at the root switched the game on everywhere', everywhere === 'ok', JSON.stringify(everywhere))
+  const IDEA_LAYER = 'light bends around heavy things'
+  const sharedHere = await service(a, 'share', IDEA_LAYER)
+  const layerNotes = await H.waitFor(() => notesAt(a, ['lecture', tile]), v => v.includes(IDEA_LAYER), 30000, 750)
+  const rootNotes = await notesAt(a, [tile])
+  H.check("an idea shared on a layer is that layer's data — the root's tile does not hold it",
+    sharedHere === 'shared' && layerNotes.ok && !rootNotes.includes(IDEA_LAYER), JSON.stringify({ sharedHere, layer: layerNotes.value, root: rootNotes }))
+
+  const inherited = await service(a, 'toggle', 'off')
+  H.check('`off` on a layer that only inherits the mark changes nothing and says where it is held',
+    inherited?.state === 'inherited' && inherited.at.length === 0, JSON.stringify(inherited))
+
+  // Off at the root closes every layer that held no mark of its own.
+  await goTo(a, []); await H.sleep(1500)
+  const closed = await service(a, 'toggle', 'off')
+  await goTo(a, ['lecture']); await H.sleep(2000)
+  const afterClose = await service(a, 'availability', ['lecture'])
+  const refused = await service(a, 'share', 'this should not be written')
+  const stillOne = await notesAt(a, ['lecture', tile])
+  H.check('off at the root closes the layers beneath: the word is refused and writes nothing',
+    closed?.state === 'off' && afterClose === 'off' && refused === 'off' && !stillOne.includes('this should not be written'),
+    JSON.stringify({ closed, afterClose, refused, stillOne }))
+
+  // A branch: on at /lecture opens /lecture and what is beneath it.
+  await word(a, '/did-you-know on')
+  const branchOn = await H.waitFor(() => service(a, 'availability', ['lecture']), v => v === 'ok', 30000, 750)
+  H.check('`did-you-know on` on a layer opens that layer', branchOn.ok, JSON.stringify(branchOn.value))
+  const onTwice = await service(a, 'toggle', 'on')
+  H.check('saying it again finds it already there', onTwice?.state === 'on' && onTwice.changed === false, JSON.stringify(onTwice))
+  await H.addTile(a.page, 'biology'); await H.sleep(1500)
+  await goTo(a, ['lecture', 'biology']); await H.sleep(2000)
+  const beneath = await service(a, 'availability', ['lecture', 'biology'])
+  const IDEA_DEEP = 'cells keep their own time'
+  const deepShared = await service(a, 'share', IDEA_DEEP)
+  const deepNotes = await H.waitFor(() => notesAt(a, ['lecture', 'biology', tile]), v => v.includes(IDEA_DEEP), 30000, 750)
+  H.check('the mark holds for everything beneath it — a deeper layer plays, with its own ideas',
+    beneath === 'ok' && deepShared === 'shared' && deepNotes.ok, JSON.stringify({ beneath, deepShared, deep: deepNotes.value }))
+
+  // The word alone flips the layer it is said on (no layer above holds a mark
+  // yet, so turning it back on writes one here).
+  await goTo(a, ['lecture']); await H.sleep(1500)
+  const flippedOff = await service(a, 'toggle', 'flip')
+  const flippedOn = await service(a, 'toggle', 'flip')
+  H.check('the word alone flips the game on a layer', flippedOff?.state === 'off' && flippedOn?.state === 'on' && flippedOn.changed === true, JSON.stringify({ flippedOff, flippedOn }))
+
+  // A sibling branch is not covered; `everywhere` covers it.
+  await goTo(a, []); await H.sleep(1500)
+  await H.addTile(a.page, 'other'); await H.sleep(1500)
+  await goTo(a, ['other']); await H.sleep(2000)
+  const sibling = await service(a, 'availability', ['other'])
+  H.check('a sibling branch is not covered by the mark on /lecture', sibling === 'off', JSON.stringify(sibling))
+  const wide = await service(a, 'toggle', 'everywhere')
+  const siblingNow = await service(a, 'availability', ['other'])
+  H.check('`everywhere` switches the game on for the whole hive', wide?.state === 'on' && wide.at.length === 0 && siblingNow === 'ok', JSON.stringify({ wide, siblingNow }))
+
+  // With the whole hive on, saying `on` on a layer below only says it is covered.
+  await goTo(a, ['lecture', 'biology']); await H.sleep(1500)
+  const covered = await service(a, 'toggle', 'on')
+  H.check('`on` below a layer that already holds the mark says the nearest one covers it and writes nothing', covered?.state === 'covered' && covered.at.join('/') === 'lecture', JSON.stringify(covered))
 
   console.log('\n========== did you know ==========')
   for (const x of H.results) console.log(`  ${x.ok ? '✓' : '✗'} ${x.name}${x.detail ? '  — ' + x.detail : ''}`)

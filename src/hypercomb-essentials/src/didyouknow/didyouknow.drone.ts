@@ -10,6 +10,7 @@
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { DYK_KEY, GAME_NAME, concealsAuthors } from './didyouknow.js'
 import { DidYouKnow, type StartOutcome } from './didyouknow.service.js'
+import { unavailableSentence } from './unavailable.js'
 
 type StartShape = {
   register(name: string, start: () => Promise<StartOutcome>, say?: (outcome: StartOutcome, game: string) => string): void
@@ -33,6 +34,7 @@ export class DidYouKnowDrone extends Drone {
       start.register(GAME_NAME, () => this.service.start(), (result, game) => {
         const t = (window as { ioc?: { get?: <V>(k: string) => V | undefined } }).ioc?.get?.<I18nProvider>(I18N_IOC_KEY)
         const params = { game, where: result.where }
+        if (result.refused) return unavailableSentence(result.refused)
         return result.outcome === 'started'
           ? (t?.t('didyouknow.started', params) ?? `${game} started at /${result.where} — share with "did-you-know <something the others might not know>"; names stay hidden until you say "reveal"`)
           : (t?.t('didyouknow.resumed', params) ?? `${game} is on at /${result.where} — share with "did-you-know <idea>", collect with "collect", reveal with "reveal"`)

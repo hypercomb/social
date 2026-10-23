@@ -8,6 +8,10 @@ participants can pull the items in to their collection of ideas so each can
 have a resource to go back to later to help them learn." · "similar to the
 q and a".*
 
+*jwize, the same day, after the first build: "did you know is a toggle so the
+game is accessible everywhere or to a specific branch. The game is tile layer
+specific for data."*
+
 **Status: built, proven.** `scripts/drive-didyouknow.cjs` runs three browsers
 in one room through the words and the real notes desk. Module
 `hypercomb-essentials/src/didyouknow/`. Like [Hypercomb Q and A](hypercomb-q-and-a.md),
@@ -18,8 +22,9 @@ store and no wire.
 
 | Say | What happens |
 |---|---|
-| `start did you know` | The game's tile, `did you know`, appears on the page you stand on (or is found there) and the notes desk opens on it. Ask the room to stand on the same page. |
-| `did-you-know <idea>` | Your idea is written as a note on that tile and shared with the room. If your page has no such tile yet, it is made first, so the room hears you. The desk opens, so you can read the others. |
+| `did-you-know on` · `off` · `everywhere` | The toggle: where the game may be played. `on` and `off` act on the layer you stand on and everything beneath it; `everywhere` acts on the whole hive. The word alone flips the layer. See [The toggle](#the-toggle). |
+| `start did you know` | Switches the game on here (unless a layer above already has), makes the game's tile on the page you stand on (or finds it) and opens the notes desk on it. Ask the room to stand on the same page. |
+| `did-you-know <idea>` | Your idea is written as a note on that layer's game tile and shared with the room. If your page has no such tile yet, it is made first, so the room hears you. The desk opens, so you can read the others. |
 | *read* | The desk shows everyone's ideas as plain words. **No name and no colour** is painted on any idea while the game runs, for the host and for every participant. |
 | `collect` | Every idea you do not hold yet is taken onto your own `did you know` tile: the swarm's take, the same signature (shared, never copied). It is your list to go back to. Saying it again brings any that were still arriving. |
 | `reveal` | The host writes one note on the tile listing every idea with its name. Every desk that finds it shows names again. |
@@ -28,9 +33,50 @@ store and no wire.
 it asks each game for its own next-step sentence, so a game tells the
 participant its own words.
 
+## The toggle
+
+*Accessible everywhere, or to a specific branch.* Did You Know is a behaviour a
+**layer declares**, the same shape as the contact and dropbox behaviours: the
+application-scope primitive of *what, where, scope*
+(`visual:didyouknow:enabled`, a payload-free decoration on a layer).
+
+- **One mark, read upward.** A word asks "is the game on here?" by walking up
+  from the layer it was said on: this layer, then each ancestor, the root
+  included. The nearest declaration answers. Nothing is stamped on
+  descendants, so a layer made tomorrow inherits at once.
+- **Everywhere is the root.** A mark on the root layer holds for every layer.
+  `did-you-know everywhere` writes it from wherever you stand; `did-you-know
+  on` at the root does the same.
+- **A branch is a layer.** `did-you-know on` inside `/lecture` opens
+  `/lecture` and everything beneath it, and nothing beside it.
+- **`off` takes off the mark on this layer.** If the mark is held by a layer
+  above, `off` changes nothing and says where it is held, so one layer never
+  quietly switches off a branch it does not own.
+- **The mark holds no ideas.** It says where the game may be played, nothing
+  more. Switching it off never deletes a shared idea.
+- **A word said where the game is off answers.** A typed word is a gesture;
+  swallowing it reads as a broken game, so the refusal names the way in.
+- **A room that is already playing here is enough.** A participant who arrives
+  into a room never has to switch anything on: while a peer holds the game's
+  tile on the page you stand on, the words work. The host's `start` switches
+  the game on; the participants just join.
+- **The roster's own switch is honoured.** The kind appears in the Beehaviors
+  panel (a capability row that cascades, and that the panel can add or remove
+  on a layer). Switching it off there closes the game everywhere, the one
+  switch with the one meaning. A hive that simply never lit it still plays.
+
+### Where the data lives
+
+The data is **tile-layer specific**. An idea is a note on the `did you know`
+tile of the layer where it was shared, so every layer keeps its own set and
+moving to another layer shows that layer's ideas. Turning the game on
+*everywhere* does not pool anything: an idea shared on `/lecture/biology` is
+on that layer's tile, not on the root's. `collect` takes the room's ideas onto
+your own tile on the same layer.
+
 ## Why the tile is the game, and ideas are notes
 
-- **The game is a tile named `did you know`.** `sign('did you know')` is the
+- **The game is a tile named `did you know`** on each layer that plays it. `sign('did you know')` is the
   molecule, so one game is one word on every participant's hive. It folds the
   way every tile name folds: `Did You Know` and `did-you-know` are one tile.
 - **An idea is a note on it**, not a tile. Notes already swarm: a peer's notes
@@ -98,8 +144,11 @@ This is an exercise among people in one room, and it is honest about that.
 
 | Piece | Role |
 |---|---|
-| `didyouknow/didyouknow.ts` | pure: the game's name, `concealsAuthors`, `isRevealNote`, `revealText`, `cleanIdea` |
-| `didyouknow/didyouknow.service.ts` | `DidYouKnow` (`@diamondcoreprocessor.com/DidYouKnow`): start, share, reveal, collect, the ledger |
+| `didyouknow/didyouknow.ts` | pure: the game's name, the toggle's mark and words (`parseToggle`), `concealsAuthors`, `isRevealNote`, `revealText`, `cleanIdea` |
+| `didyouknow/scope.ts` | the toggle's record: `declaredAt` (walks up, root included), `enableAt`, `disableAt` |
+| `didyouknow/didyouknow.service.ts` | `DidYouKnow` (`@diamondcoreprocessor.com/DidYouKnow`): toggle, availability, start, share, reveal, collect, the ledger |
+| `didyouknow/unavailable.ts` | the one sentence a refused word says |
+| `presentation/tiles/show-features.drone.ts` | the Beehaviors capability row for `visual:didyouknow:enabled` |
 | `didyouknow/didyouknow.drone.ts` | the bee: registers the service, offers the game to `start`, teaches the notes service the concealment rule |
 | `didyouknow/did-you-know.queen.ts` · `reveal.queen.ts` · `collect.queen.ts` | the three words |
 | `notes/swarm-notes.service.ts` | `concealAuthorsWhen(rule)` and `authorsHidden(cell, own)` |
@@ -107,11 +156,13 @@ This is an exercise among people in one room, and it is honest about that.
 | `questions/start.queen.ts` | `register(name, start, say?)` — a game tells its own next words |
 | `scripts/drive-didyouknow.cjs` | the three-browser proof |
 
-All three words are pinned in `commands/machine-declarations.spec.ts` as
-additive / network, and carry a `machine` grammar, so a participant's AI can
-play too. `did-you-know` keeps everything after it verbatim (`rawArgs`), so an
-idea's words are never read as other words; `reveal` and `collect` take no
-arguments.
+The three words are pinned in `commands/machine-declarations.spec.ts` and carry
+a `machine` grammar, so a participant's AI can play too: `reveal` and
+`collect` as additive / network, `did-you-know` as editing / network because
+`off` takes a mark off a layer (undoable). `did-you-know` keeps everything
+after it verbatim (`rawArgs`), so an idea's words are never read as other
+words. Only the exact words `on`, `off` and `everywhere` toggle: an idea that
+merely starts with one (`on Mars a day is longer than its year`) is an idea.
 
 ## Proof
 
@@ -126,12 +177,25 @@ the game's tile, `collect` before the reveal, `reveal` naming each bringer,
 a second `reveal` writing nothing, names returning on a participant's desk,
 and `collect` after the reveal leaving the reveal behind.
 
+Then the toggle: a participant plays a room without switching anything on;
+`start` at the root opened every layer; an idea belongs to the layer it was
+shared on; `off` on a layer that only inherits the mark changes nothing; `off`
+at the root closes the layers beneath and the word is refused, writing
+nothing; `on` on a branch opens that layer and what is beneath it but not a
+sibling; `everywhere` opens the sibling; the word alone flips.
+
 ## Not yet
 
 - A projector view for the host: today the host reads the desk like everyone.
   A larger, text-only reading surface for a screen in the room is a view over
   the same notes.
 - An enforced host: the reveal is the host's by convention.
+- A per-layer opt-out under an `everywhere` mark (the hidden-pool shape the
+  other behaviours use). Today a layer is closed by taking the mark off where
+  it is held.
+- The toggle is not carried by a take: a mark is a decoration, and a take
+  carries no decoration records. A participant who wants the game on their own
+  layers declares it in their own hive; a room that is playing needs nothing.
 - Studying the collection: collected ideas are notes on a tile, so the tutor
   view (the `tutor-build` skill) can turn them into recall cards; that is a
   separate step.

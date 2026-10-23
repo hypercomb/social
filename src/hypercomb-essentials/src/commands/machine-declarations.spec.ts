@@ -145,8 +145,9 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
                                        // the game's host; writes nothing
   // Judged on arrival (2026-10-22, Did You Know — a meeting exercise: share
   // what the others might not know with no names, reveal at the end, collect).
-  'did-you-know': ['additive', 'network'], // one note on the game's tile, shared with the room; the
-                                           // desk hides who brought it until the reveal
+  'did-you-know': ['editing', 'network'],  // an idea is one note on the game's tile, shared with the room
+                                           // (the desk hides who brought it until the reveal); `off` takes
+                                           // the game's mark off a layer, which is why the word is editing
   reveal: ['additive', 'network'],         // one note on the tile naming who brought each idea; it is a
                                            // note, so hiding it conceals the names again
   collect: ['additive', 'network'],        // takes the room's ideas onto the participant's own tile

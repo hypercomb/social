@@ -8,6 +8,7 @@
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider, type MachineGrammar } from '@hypercomb/core'
 import { DYK_KEY } from './didyouknow.js'
 import type { DidYouKnow } from './didyouknow.service.js'
+import { unavailableSentence } from './unavailable.js'
 
 const get = <T>(key: string): T | undefined =>
   (window as { ioc?: { get?: <V>(k: string) => V | undefined } }).ioc?.get?.<T>(key)
@@ -32,7 +33,8 @@ export class RevealQueenBee extends QueenBee {
     const game = get<DidYouKnow>(DYK_KEY)
     if (!game) return
     const result = await game.reveal()
-    if (result === 'none') this.#say(this.#t('didyouknow.reveal.none', 'nothing to reveal here — no ideas have been shared on this page yet'))
+    if (result === 'off' || result === 'switched-off') this.#say(unavailableSentence(result))
+    else if (result === 'none') this.#say(this.#t('didyouknow.reveal.none', 'nothing to reveal here — no ideas have been shared on this page yet'))
     else if (result === 'already') this.#say(this.#t('didyouknow.reveal.already', 'already revealed — the names are in the note on the tile'))
     else this.#say(this.#t('didyouknow.revealed', `revealed ${result.ideas} ideas from ${result.people} people — the names are on the tile for everyone`, { ideas: result.ideas, people: result.people }))
   }

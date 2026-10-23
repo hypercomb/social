@@ -22,6 +22,13 @@ import { moleculeKey } from '@hypercomb/core'
 export const GAME_NAME = 'did you know'
 export const DYK_KEY = '@diamondcoreprocessor.com/DidYouKnow'
 
+/** THE TOGGLE. A mark a layer wears to switch the game on for itself and
+ *  everything beneath it — one declaration, read by walking up the ancestors
+ *  (the root included, so a mark at the root is "everywhere"), never stamped
+ *  onto descendants. It is the same shape as the contact and dropbox
+ *  behaviours: a container declares, its subtree inherits. */
+export const ENABLED_KIND = 'visual:didyouknow:enabled'
+
 /** The reveal note begins with this. Its presence on the game tile — anyone's,
  *  the room's — is what un-conceals the names, and it never counts as an idea. */
 export const REVEAL_MARK = 'Revealed ·'
@@ -56,6 +63,23 @@ export function concealsAuthors(cell: unknown, texts: readonly unknown[]): boole
 /** An idea as typed: whitespace gathered into single spaces. */
 export function cleanIdea(text: unknown): string {
   return String(text ?? '').replace(/\s+/g, ' ').trim()
+}
+
+/** What the word `did-you-know` was asked to do. The toggle words stand alone;
+ *  anything longer than one of them is an idea. */
+export type Toggle = 'flip' | 'on' | 'off' | 'everywhere'
+
+/** `did-you-know` alone flips the game on or off for this layer and beneath;
+ *  `on`, `off` and `everywhere` say which. Anything else is null — an idea. */
+export function parseToggle(args: unknown): Toggle | null {
+  const word = cleanIdea(args).toLowerCase()
+  if (word === '') return 'flip'
+  return word === 'on' || word === 'off' || word === 'everywhere' ? word : null
+}
+
+/** A layer as the sentences name it: `/` is the hive's root. */
+export function routeOf(segments: readonly string[]): string {
+  return '/' + segments.map(s => String(s ?? '').trim()).filter(Boolean).join('/')
 }
 
 /** One idea as the host's hive knows it: the note's signature, its words, and
