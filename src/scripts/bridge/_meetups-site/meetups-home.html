@@ -38,12 +38,6 @@
 
   /* the app frame: header / view / tab bar; the rail takes the bar's place wide */
   .mh .app{position:relative;display:grid;grid-template-rows:auto 1fr var(--bar);height:100%;max-width:760px;margin:0 auto;background:var(--bg);overflow:hidden}
-  @media (min-width:700px){
-    .mh .app{grid-template-rows:auto 1fr;grid-template-columns:var(--rail) 1fr}
-    .mh header.top{grid-column:2}
-    .mh .view{grid-column:2}
-    .mh nav.tabs{grid-row:1 / 3;grid-column:1;flex-direction:column;justify-content:flex-start;gap:var(--s2);padding-top:var(--s4);border-top:0;border-right:2px solid var(--divider)}
-    .mh .app{border-left:1px solid var(--divider);border-right:1px solid var(--divider)}
   }
   .mh header.top{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);padding:var(--s3) var(--s4);border-bottom:2px solid var(--divider)}
   .mh .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
@@ -192,6 +186,20 @@
   .mh .scrim.on{opacity:1;pointer-events:auto}
 
   .mh .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  /* A DESKTOP SCROLLS (jwize 2026-10-23): past 700px the one-screen frame
+     opens out — every section in a row, no tab bar, no sheet; the header
+     stays put while the page scrolls under it. */
+  @media (min-width:700px){
+    .mh{height:auto;overflow:visible}
+    body:has(> .mh){height:auto;overflow:auto}
+    .mh .app{display:block;height:auto;border-left:1px solid var(--divider);border-right:1px solid var(--divider)}
+    .mh header.top{position:sticky;top:0;background:var(--bg);z-index:40}
+    .mh .view{overflow:visible}
+    .mh .panel{position:static;display:block;overflow:visible;border-top:2px solid var(--divider);scroll-margin-top:72px}
+    .mh .panel[data-panel="meeting"]{border-top:0}
+    .mh nav.tabs,.mh .sheet,.mh .scrim{display:none}
+
 </style>
 </head>
 <body>
@@ -536,14 +544,23 @@
 
   // The tabs: five icons, one view on screen. The view is state, so a tap,
   // a row, or a receipt link all land the same way — reactively, no scroll.
+  var wide = function () { return window.matchMedia && window.matchMedia('(min-width:700px)').matches; };
+  function loadDoors() {
+    if (state.doors !== null) return;
+    state.doors = [];
+    readDoors().then(function (zones) { state.doors = zones; renderDoors(); });
+  }
   function show(name) {
-    $$('.panel').forEach(function (p) { p.classList.toggle('on', p.getAttribute('data-panel') === name); });
-    $$('[data-tab]').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === name)); });
-    if (name === 'community' && state.doors === null) {
-      state.doors = [];
-      readDoors().then(function (zones) { state.doors = zones; renderDoors(); });
+    $('.panel').forEach(function (p) { p.classList.toggle('on', p.getAttribute('data-panel') === name); });
+    $('[data-tab]').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === name)); });
+    if (name === 'community') loadDoors();
+    // On a desktop every section is on the page: showing one scrolls to it.
+    if (wide()) {
+      var p = root.querySelector('.panel[data-panel="' + name + '"]');
+      if (p && p.scrollIntoView) p.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }
+  if (wide()) loadDoors();
   $('[data-tabs]').addEventListener('click', function (e) {
     var b = e.target.closest('[data-tab]');
     if (b) { show(b.getAttribute('data-tab')); closeSheet(); }
