@@ -16,7 +16,7 @@ import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import { visitRecordAt } from '../../sharing/visit-genome.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
 import { isJoinedHere } from '../../sharing/membership.js'
-import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel, defaultViewWithinSegments, HEXAGONS_SURFACE } from '../../commands/decoration-kind-index.js'
+import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel, defaultViewWithinSegments, presenceClaimed, HEXAGONS_SURFACE } from '../../commands/decoration-kind-index.js'
 import { defaultViewWithinAt } from '../../commands/view-default.js'
 import { slotAt, type AxialLike } from '../../sequence/pattern.js'
 import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
@@ -4504,6 +4504,17 @@ export class ShowCellDrone extends Drone {
         }
       }
     } catch { /* registry not up yet — tiles render this pass; the next synchronize re-filters */ }
+
+    // NAMES A BEE DRAWS ITSELF (claimPresence). A peer's tile carries no
+    // decoration kinds, so the takeover filter above cannot leave it out; its
+    // NAME travels with it, and a bee may claim a name's presence — Q and A's
+    // `<hive> q and a` child is the door in the chrome, own and the room's.
+    for (const name of [...union]) {
+      if (!presenceClaimed(name, passSegments)) continue
+      union.delete(name)
+      ephemeralCellSet.delete(name)
+      peerCellSet.delete(name)
+    }
 
     this.#currentHiddenSet = hiddenSet
     if (!this.#showHiddenItems) {

@@ -115,6 +115,9 @@ const leave = async (c) => { await word(c, '/leave'); await H.sleep(2000); try {
   }
   await fakeJev(host)
   await word(host, `/start ${GAME}`)
+  // Starting leads the game where you stand; `questions` walks into this layer's Q and A.
+  await H.sleep(1500)
+  await word(host, '/questions')
   const started = await H.waitFor(async () => ({ segs: await segments(host), root: await childrenAt(host, []) }),
     v => JSON.stringify(v.segs) === JSON.stringify([GAME]) && has(v.root, GAME), 30000, 500)
   H.check('the host starts the game', started.ok, JSON.stringify(started.value))

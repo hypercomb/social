@@ -196,6 +196,26 @@ export function entryClaimFor(label: string): string | null {
   return null
 }
 
+/** Names whose PRESENCE a bee draws itself, so the hexagon grid leaves them
+ *  out — own tiles and the room's alike. A decoration kind cannot do this
+ *  for a peer's tile (its marks stay with its layer; only the visual
+ *  travels), but a NAME is the tile's grammar and travels with it: Q and A's
+ *  `<hive> q and a` child is drawn as the door in the chrome, never as a
+ *  hexagon. Registered by the bee that draws the name; the grid names none. */
+const presenceClaims: ((name: string, segments: readonly string[]) => boolean)[] = []
+
+export function claimPresence(claims: (name: string, segments: readonly string[]) => boolean): void {
+  presenceClaims.push(claims)
+}
+
+/** Does a bee draw `name` itself on the page at `segments`? */
+export function presenceClaimed(name: string, segments: readonly string[]): boolean {
+  for (const claims of presenceClaims) {
+    try { if (claims(name, segments)) return true } catch { /* a claim that throws claims nothing */ }
+  }
+  return false
+}
+
 /** Every tag name applied to a cell, from the in-memory index. Synchronous
  *  and O(1) — the badge renderer and show-cell's tag aggregation read this
  *  per visible cell. Returns [] for an unknown / untagged cell. */

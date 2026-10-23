@@ -18,10 +18,12 @@
 
 import { moleculeKey } from '@hypercomb/core'
 
-/** The game's name is the word that starts it: `start hypercomb q and a`.
- *  It is also the game's place: a tile of that name IS the game, and every
- *  page beneath it is in the game — `sign('hypercomb q and a')` is the
- *  molecule, so one game is one word on every participant's hive. */
+/** A game's name is the word that starts it: `start <hive> q and a`, named
+ *  for the hive being shared as the swarm (`hypercomb` → `start hypercomb q
+ *  and a`). It is also the game's place: every layer holds its own Q and A
+ *  as a child of that name, and every page beneath that child is in the
+ *  game — `sign('hypercomb q and a')` is the molecule, so one game is one
+ *  word on every participant's hive. This is the example name. */
 export const GAME_NAME = 'hypercomb q and a'
 /** The mark a question tile wears in the hive that holds it. A take carries
  *  a tile's admitted projection (name, title, picture), not its marks, so a
@@ -29,10 +31,33 @@ export const GAME_NAME = 'hypercomb q and a'
 export const QUESTION_KIND = 'visual:question'
 export const QUESTIONS_KEY = '@diamondcoreprocessor.com/Questions'
 
-/** Is this page in the game — its own tile, or one above it, the game? */
+/** The words every game's name ends with: `<hive> q and a`. */
+export const GAME_SUFFIX = 'q and a'
+
+/** The game's name for a hive: `hypercomb` → `hypercomb q and a`. */
+export function gameNameFor(hive: string): string {
+  const clean = String(hive ?? '').replace(/\s+/g, ' ').trim()
+  return clean ? `${clean} ${GAME_SUFFIX}` : ''
+}
+
+/** The hive a game's name names, or null when the name is not a game's.
+ *  Spaces, hyphens and underscores fold alike (`hypercomb-q-and-a` is the
+ *  same game), and a bare `q and a` is no game — it names no hive. */
+export function hiveOfGame(name: string): string | null {
+  const folded = String(name ?? '').toLowerCase().replace(/[-_\s]+/g, ' ').trim()
+  const m = /^(.+) q and a$/.exec(folded)
+  return m ? m[1].trim() : null
+}
+
+/** Where the game begins on a path: the index of the first segment that is a
+ *  game's name, or -1. Everything below it is one layer's Q and A. */
+export function gameDepth(segments: readonly string[]): number {
+  return segments.findIndex(s => hiveOfGame(String(s ?? '')) !== null)
+}
+
+/** Is this page in the game — inside a layer's Q and A? */
 export function inGame(segments: readonly string[]): boolean {
-  const game = moleculeKey(GAME_NAME)
-  return segments.some(s => moleculeKey(String(s ?? '')) === game)
+  return gameDepth(segments) >= 0
 }
 
 /** A question is a sentence that asks: the title ends with a question mark

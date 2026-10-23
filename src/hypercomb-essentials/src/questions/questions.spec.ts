@@ -2,14 +2,25 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  GAME_NAME, MIN_TO_MATERIALIZE, boardText, inGame, isQuestionTitle, isTallyNote, parseCategoryNames, parsePlacedIndexes, rankAnswers, scoreboard, settlePlan, tallyText,
+  GAME_NAME, MIN_TO_MATERIALIZE, boardText, gameDepth, gameNameFor, hiveOfGame, inGame, isQuestionTitle, isTallyNote, parseCategoryNames, parsePlacedIndexes, rankAnswers, scoreboard, settlePlan, tallyText,
   type PageTile,
 } from './questions.js'
 
 describe('the game is read by name, a question by its title', () => {
-  it('a page is in the game when its own tile or one above it is the game', () => {
+  it('a game is named for its hive, and the name says which hive', () => {
+    expect(gameNameFor('hypercomb')).toBe('hypercomb q and a')
+    expect(gameNameFor('  lecture  hall ')).toBe('lecture hall q and a')
+    expect(gameNameFor('')).toBe('')
+    expect(hiveOfGame('hypercomb q and a')).toBe('hypercomb')
+    expect(hiveOfGame('Hypercomb-Q-And-A')).toBe('hypercomb')
+    expect(hiveOfGame('q and a')).toBeNull()
+    expect(hiveOfGame('storage')).toBeNull()
+  })
+
+  it('a page is in the game when it is inside a layer\'s Q and A', () => {
     expect(inGame([GAME_NAME])).toBe(true)
     expect(inGame(['lecture', 'Hypercomb Q And A', 'storage'])).toBe(true)
+    expect(gameDepth(['cells', 'hypercomb q and a', 'storage'])).toBe(1)
     expect(inGame(['lecture'])).toBe(false)
     expect(inGame([])).toBe(false)
   })

@@ -12,39 +12,89 @@ answers to the questions just like the notes; then the host can tally the
 results" · "the name of the game is important so we can say `start hypercomb
 q and a`".*
 
-**Status: built, pass two.** Proven two-browser 21/21
-(`scripts/drive-questions-game.cjs --url http://localhost:4253/ --relay
-ws://localhost:7777`: the words, the door, answers, takes, the tally, a
-category materializing from the namer, a thinned category retracting, the
-tree tally from the ledger) and the host's copy 15/15
-(`scripts/drive-questions-host-copy.cjs --url http://localhost:4253/`: a
-third browser arriving after host and guest left reads the game, its
-category, its question, the answer and the tally from the room's host).
-Module `hypercomb-essentials/src/questions/`. Played through the swarm and
-the notes desk as they are; the game adds three words, one mark, one door,
-one settle and one ledger.
+*jwize, 2026-10-22: "should we have the hive that we are sharing as the
+swarm so it is `start <subdomain> q and a` … let's not make it a tile, make
+it a graphic somewhere it looks nice on the interface, an option you can join
+from anywhere in the swarm … always page specific, layer context specific" ·
+"it is a tile in the sense it is just another child but we have a different
+view" · "this demands the host has set up some default content" ·
+"participants are pinned to the host and the host can move them through the
+hive while they participate in the game — it is like follow the leader while
+teaching".*
+
+**Status: built, pass three — follow the leader.** Proofs, all against a dev
+server on 4253:
+
+| Proof | What it shows | Result |
+|---|---|---|
+| `scripts/drive-questions-follow.cjs --relay ws://localhost:7777` | the host leads, a participant joins and is moved through the hive, asks on a layer, the room opens that layer's questions together, answer, take, tally, back, leave | 17/17 |
+| `scripts/drive-questions-game.cjs --relay ws://localhost:7777` | the words, the door, answers, takes, the tally, categories materializing and retracting, the tree tally from the ledger, one-click questions | 22/22 |
+| `scripts/drive-questions-host-copy.cjs` | a late arrival reads the game, its category, question, answer and tally from the room's host after everyone left | 15/15 |
+
+Module `hypercomb-essentials/src/questions/`. Played through the swarm, its
+follow-the-leader and the notes desk as they are; the game adds four words,
+one name, one mark, one door, one settle and one ledger.
 
 ## The game in sentences
 
 | Say | What happens |
 |---|---|
-| `start hypercomb q and a` | The game's tile appears on the page you stand on (or is found there), you walk in, and your hive becomes the **organizer** of that page. |
-| `question <your question>` | A tile named with the question appears here, marked as a question. In a swarm it is shared the moment it exists. |
-| *click a question* | It **opens** instead of being walked into: the notes desk on that tile, composer ready. Your answer is a note. Everyone's answers show there, coloured by who gave them, with **Take**. Someone else's question is a peer tile, so the click is the swarm's wand — it takes the tile — and because it is a question in the game, it opens the moment the take lands. One click either way. |
+| `start hypercomb q and a` | Named for the hive you share as the swarm (`start <hive> q and a`). The first to say it **leads**: the game's child, `hypercomb q and a`, appears on the page you stand on — that layer's Q and A and the room's sign that the game is on — and you stay where you are, to teach. |
+| `start hypercomb q and a`, where someone leads it | You **join**: you follow the host. Wherever they walk in the hive, you are moved with them. |
+| `question <your question>` | Asked on a layer, it goes into **that layer's** Q and A — the question is about the page in front of you. Asked inside a Q and A, it is a tile there. |
+| `questions` | The room looks at this layer's questions: the host walks into the layer's Q and A, and their followers come along. A participant may walk in on their own. |
+| *click a question* | It **opens** its answers instead of being walked into: the notes desk on that tile, composer ready. Your answer is a note. Everyone's answers show there in each giver's colour, with **Take**. Someone else's question opens with the same one click (the wand takes it, then it opens). |
 | *take an answer* | The swarm notes take — the same signature onto your tile. How many participants hold an answer is its score. |
-| `tally` | On the page you stand on: each question gets a note ranking its answers by takes, and the page's own tile gets the scoreboard — who gave the most-taken answers. |
+| `tally` | Inside a layer's Q and A, its whole tree: each question gets a note ranking its answers by takes, and the Q and A's tile gets the scoreboard. On a layer while in the game, that layer's Q and A. |
+| `questions back` | Back out to the layer the questions belong to; followers come back with the host. |
+| `questions leave` | Leave the game: stop following its host. |
 
 `start` is the natural-language door: in the common tongue "please start
-hypercomb q and a" lights `start`, and the rest is the game's name. A name
-nothing answers to makes the word say which games this build can start,
-never guess. The `game` word is a different thing — it makes a cell an
-arcade game.
+hypercomb q and a" lights `start`, and the rest is the game's name. A game
+registers with `start` either a whole name or the words its name ends with
+(`q and a`), and is handed the rest (`hypercomb`). A name nothing answers to
+makes the word say which games this build can start, never guess. The `game`
+word is a different thing — it makes a cell an arcade game.
+
+## Follow the leader
+
+The host teaches; the room is pinned to them. Joining is the swarm's own
+follow (`SwarmDrone.follow(host)`): the host's presence names the page they
+stand on, and `FollowDrone` moves each follower there — onto the host's
+pages, the content the host set up. The game supposes that content: the
+questions are about the layers the host walks the room through.
+
+Every layer has its own Q and A, so the questions in front of the room are
+always the page's questions. The host decides when the room looks at them
+(`questions`) and when it moves on (`questions back`, or simply walking on).
+
+## The door — a child drawn in the chrome
+
+The game's child is a tile like any other, `<hive> q and a`, but it is never
+drawn as a hexagon. Its NAME claims its presence (`claimPresence` in
+`decoration-kind-index.ts`, consulted by the grid's union filter): a peer's
+tile carries no decoration kinds, but its name travels with it, so the
+host's child disappears from every follower's grid too. In its place, the
+door in the chrome (`questions-door.ts`, mounted by the drone as a shell
+surface) shows the page in front of you:
+
+| Who | The door says | Buttons |
+|---|---|---|
+| the room, before joining | *Ana leads · 3 here* | Join |
+| the host | *you lead · 3 here* | Questions · Ask · Tally |
+| a participant | *following Ana · 3 here* | Questions · Ask · Leave |
+| inside a layer's Q and A | *this layer's questions · 3* | Back · Ask (· Tally) |
+
+*n here* is the larger of what this hive's own Q and A holds on the layer and
+what each participant's lists — never a sum, because the host takes the
+room's questions into their own. Every button is one of the words above.
 
 ## Pools of meaning, not a new store
 
-- **The game is a tile named `hypercomb q and a`.** Every page beneath it is
-  in the game; `sign('hypercomb q and a')` is the molecule, so one game is
-  one word on every participant's hive. Nothing else marks the game.
+- **The game is a name, `<hive> q and a`.** Each layer's Q and A is a child
+  of that name, and every page beneath it is in the game;
+  `sign('hypercomb q and a')` is the molecule, so one game is one word on
+  every participant's hive. Nothing else marks the game.
 - **A question is a tile.** Its name is the question in the hive's spelling
   (`what-is-a-bag`, as the create commit names every tile); its **title** is
   the question as asked, question mark and all. Its molecule is `sign(name)`,
@@ -152,10 +202,12 @@ participant's do; a game meant to outlast its players is the host's to run.
 |---|---|
 | `questions/questions.ts` | pure: the names and marks, `settlePlan`, `parseCategoryNames`, `parsePlacedIndexes`, `rankAnswers`, `scoreboard`, `tallyText`, `boardText` |
 | `questions/questions.service.ts` | `Questions` (`@diamondcoreprocessor.com/Questions`): start, ask, open, settle (the tree), tally (the tree + the ledger), `seen`, `suggestNames` (the namer seam) |
-| `scripts/drive-questions-game.cjs` · `drive-questions-host-copy.cjs` | the two-browser proof, and the host's-copy proof with a scratch relay |
+| `scripts/drive-questions-follow.cjs` · `drive-questions-game.cjs` · `drive-questions-host-copy.cjs` | follow the leader, the full game, and the host's copy with a scratch relay |
 | `questions/questions.drone.ts` | the bee: registers the service, claims entry for question tiles, offers the game to `start` |
-| `questions/start.queen.ts` · `question.queen.ts` · `tally.queen.ts` | the three words |
+| `questions/start.queen.ts` · `question.queen.ts` · `questions.queen.ts` · `tally.queen.ts` | the four words; `start` takes a whole name or the words a name ends with |
+| `questions/questions-door.ts` | the door: the element the drone mounts in the chrome |
 | `commands/decoration-kind-index.ts` | `claimEntry(kind)` / `entryClaimFor(label)` — kinds that open instead of entering |
+| `commands/decoration-kind-index.ts` · `presentation/tiles/show-cell.drone.ts` | `claimPresence` / `presenceClaimed` — names a bee draws itself, left out of the grid for own and peer tiles alike |
 | `presentation/tiles/tile-overlay.drone.ts` | the one entry choke point says `tile:open { label, kind }` for a claimed tile |
 
 ## Scoring

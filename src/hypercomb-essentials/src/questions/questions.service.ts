@@ -53,8 +53,8 @@ import { removeTilesAt } from '../commands/remove-tiles.js'
 import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
 import { isJoinedHere } from '../sharing/membership.js'
 import {
-  BOARD_MARK, GAME_NAME, MIN_TO_MATERIALIZE, QUESTION_KIND, TALLY_MARK,
-  boardText, inGame, isQuestionTitle, isTallyNote, parseCategoryNames, parsePlacedIndexes, scoreboard, settlePlan, tallyText,
+  BOARD_MARK, MIN_TO_MATERIALIZE, QUESTION_KIND, TALLY_MARK,
+  boardText, gameDepth, gameNameFor, hiveOfGame, inGame, isQuestionTitle, isTallyNote, parseCategoryNames, parsePlacedIndexes, scoreboard, settlePlan, tallyText,
   type Answer, type PageTile, type Placement, type QuestionAnswers, type SettlePlan,
 } from './questions.js'
 
@@ -83,6 +83,10 @@ type MoveShape = { commitMoveInto?: (labels: readonly string[], source: readonly
 type SwarmShape = {
   peerTilesAtCurrentSig?: () => readonly { name: string; peerPubkey: string }[]
   labelFor?: (pubkey: string) => string
+  follow?: (pubkey: string | null) => Promise<void>
+  following?: () => string
+  segmentsFor?: (pubkey: string) => readonly string[]
+  setOpenForSubscribers?: (on: boolean) => void
 }
 type AdoptShape = { wandEligible?: (label: string) => boolean }
 type NotesShape = {
@@ -101,6 +105,10 @@ type JevShape = {
 }
 type SignerShape = { getPublicKeyHex?: () => Promise<string | null> }
 type DecorationsShape = { setTitle?: (segments: readonly string[], text: string, locale?: string) => Promise<unknown> }
+type BrokerShape = { fetchBySig?: (sig: string, type: 'layer' | 'resource', timeoutMs: number) => Promise<Uint8Array | ArrayBuffer | null> }
+
+const SIG = /^[0-9a-f]{64}$/
+const FETCH_MS = 8_000
 
 /** One answer as the ledger remembers it. */
 export interface SeenAnswer { readonly text: string; readonly by: string; readonly holders: ReadonlySet<string> }
@@ -108,14 +116,38 @@ export interface SeenAnswer { readonly text: string; readonly by: string; readon
 const get = <T>(key: string): T | undefined =>
   (window as { ioc?: { get?: <V>(k: string) => V | undefined } }).ioc?.get?.<T>(key)
 
-export type StartOutcome = { outcome: 'started' | 'resumed'; where: string }
+export type StartOutcome = { outcome: 'started' | 'resumed' | 'joined'; where: string; host?: string }
 export type AskOutcome = 'asked' | 'empty' | 'exists' | 'failed'
 export type TallyOutcome = { pages: number; questions: number; answers: number; leader: string; takes: number }
 export type SettleOutcome = { pages: number; moved: number; categories: number; sorter: 'jev' | 'ai' | 'none' }
 
+/** A game in the room: its name and who leads it (a pubkey). */
+export interface GameOffer { readonly name: string; readonly host: string }
+
+/** What the door in the chrome shows on the page you stand on. */
+export interface DoorState {
+  /** The game's name, or '' when the room has none. */
+  readonly name: string
+  readonly host: string
+  readonly hostLabel: string
+  /** host = you lead · player = you follow the host · offered = you may join. */
+  readonly role: 'host' | 'player' | 'offered' | 'none'
+  /** You stand inside a layer's Q and A. */
+  readonly inside: boolean
+  /** How many questions (and categories) this layer's Q and A holds that this
+   *  hive has seen — its own and the room's. */
+  readonly count: number
+}
+
 export class Questions extends EventTarget {
-  /** The game this hive organizes, while it does — the game tile's path. */
-  #organizing: readonly string[] | null = null
+  /** The game this hive is in — leading it, or following its host. */
+  #game: GameOffer | null = null
+  /** Games seen in the room (folded name → offer), from tiles named like one. */
+  #offered = new Map<string, GameOffer>()
+  /** How many questions this layer's Q and A holds, as last counted. */
+  #count = 0
+  #counted = ''
+  #layers = new Map<string, { name: string; children: string[] } | null>()
   #timer: ReturnType<typeof setTimeout> | null = null
   #syncTimer: ReturnType<typeof setTimeout> | null = null
   #settling: Promise<SettleOutcome> | null = null
@@ -160,8 +192,37 @@ export class Questions extends EventTarget {
     })
   }
 
-  /** The game this hive is organizing, or null. */
-  organizing(): readonly string[] | null { return this.#organizing }
+  /** The game this hive is in, or null. */
+  game(): GameOffer | null { return this.#game }
+
+  /** Does this hive lead the game it is in? */
+  hosting(): boolean { return !!this.#game && !!this.#me && this.#game.host === this.#me }
+
+  /** The games there are to start or join: the one this hive is in, and the
+   *  ones seen in the room. */
+  offered(): GameOffer[] {
+    const out = new Map(this.#offered)
+    if (this.#game) out.set(moleculeKey(this.#game.name), this.#game)
+    return [...out.values()]
+  }
+
+  /** Is `name` a game this hive knows — so its tile is the door, never a
+   *  hexagon? Asked by the grid for every name it would draw. */
+  claims(name: string): boolean {
+    if (hiveOfGame(name) === null) return false
+    const key = moleculeKey(String(name).replace(/[-_\s]+/g, ' ').trim())
+    return this.offered().some(g => moleculeKey(g.name.replace(/[-_\s]+/g, ' ').trim()) === key)
+  }
+
+  /** What the door shows where you stand. */
+  door(): DoorState {
+    const here = this.#segments()
+    const inside = gameDepth(here) >= 0
+    const game = this.#game ?? [...this.#offered.values()][0] ?? null
+    if (!game) return { name: '', host: '', hostLabel: '', role: 'none', inside, count: 0 }
+    const role = this.#game ? (this.hosting() ? 'host' : 'player') : 'offered'
+    return { name: game.name, host: game.host, hostLabel: this.#labelOf(game.host), role, inside, count: this.#count }
+  }
 
   /** The last settle pass, page by page — what the page held, what the plan
    *  said, how many moved — for anyone checking the game's state. */
@@ -175,66 +236,134 @@ export class Questions extends EventTarget {
 
   // ── start ──────────────────────────────────────────────────────────────
 
-  /** Start the game on the page you stand on: the game tile is minted here
-   *  unless it already is, or you already stand inside the game. You become
-   *  the organizer of the game's tree and walk in. */
-  async start(): Promise<StartOutcome> {
+  /** `start <hive> q and a`. Where someone else in the room already leads a
+   *  game of that name, you JOIN it: you follow its host through the hive
+   *  (follow the leader while teaching). Otherwise you LEAD it: the game's
+   *  child is minted on the page you stand on — that layer's Q and A, and
+   *  the room's sign that the game is on — and you stay where you are, to
+   *  walk the room through the hive. */
+  async startGame(hive: string): Promise<StartOutcome> {
+    const name = gameNameFor(hive)
     const here = this.#segments()
-    const game = moleculeKey(GAME_NAME)
-    const depth = here.findIndex(s => moleculeKey(s) === game)
-    if (depth >= 0) {
-      this.#organizing = here.slice(0, depth + 1)
-      this.#schedule(0)
-      return { outcome: 'resumed', where: here.join('/') }
-    }
-    const at = [...here, GAME_NAME]
-    const tiles = await this.#children(here)
-    const held = tiles?.find(t => moleculeKey(t.name) === game)
+    if (!name) return { outcome: 'resumed', where: here.join('/') }
+    const me = await this.#whoAmI()
+    const key = moleculeKey(name)
+    const offer = this.#offered.get(key)
+    if (offer && offer.host && offer.host !== me) return this.join(offer)
+
+    this.#game = { name, host: me }
+    const swarm = get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')
+    try { swarm?.setOpenForSubscribers?.(true) } catch { /* the room still sees the game tile */ }
+    const at = gameDepth(here) >= 0 ? here.slice(0, gameDepth(here)) : here
+    const tiles = await this.#children(at)
+    const held = tiles?.find(t => moleculeKey(t.name) === key)
     if (!held) {
-      EffectBus.emit('cell:added', { cell: GAME_NAME, segments: [...here] })
+      EffectBus.emit('cell:added', { cell: name, segments: [...at] })
       await new hypercomb().act()
       await this.#settled()
-    } else {
-      at[at.length - 1] = held.name
     }
-    this.#organizing = at
-    get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw?.(at)
+    this.#changed()
     this.#schedule()
-    return { outcome: held ? 'resumed' : 'started', where: at.join('/') }
+    return { outcome: held ? 'resumed' : 'started', where: at.join('/'), host: me }
+  }
+
+  /** Join a game: follow its host, and go where they are now. */
+  async join(offer: GameOffer): Promise<StartOutcome> {
+    this.#game = { name: offer.name, host: offer.host }
+    const swarm = get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')
+    try { await swarm?.follow?.(offer.host) } catch { /* following failed: the door still works */ }
+    const there = swarm?.segmentsFor?.(offer.host) ?? []
+    if (there.length) get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw?.(there)
+    this.#changed()
+    return { outcome: 'joined', where: [...there].join('/'), host: offer.host }
+  }
+
+  /** Leave the game: stop following its host (a host simply stops leading). */
+  async leaveGame(): Promise<void> {
+    const game = this.#game
+    if (!game) return
+    const swarm = get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')
+    if (!this.hosting() && swarm?.following?.() === game.host) {
+      try { await swarm.follow?.(null) } catch { /* not following after all */ }
+    }
+    this.#game = null
+    this.#changed()
+  }
+
+  /** The room looks at this layer's questions: walk into its Q and A. The
+   *  host's followers come with them. A host's Q and A is minted if this
+   *  layer has none yet; a participant walks into the host's. */
+  async openQuestions(): Promise<'opened' | 'inside' | 'no-game'> {
+    const game = this.#game
+    if (!game) return 'no-game'
+    const here = this.#segments()
+    if (gameDepth(here) >= 0) return 'inside'
+    if (this.hosting()) await this.#ensureLayerGame(here, game.name)
+    get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw?.([...here, game.name])
+    this.#changed()
+    return 'opened'
+  }
+
+  /** Back out of the Q and A to the layer it belongs to. */
+  back(): boolean {
+    const here = this.#segments()
+    const depth = gameDepth(here)
+    if (depth < 0) return false
+    get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw?.(here.slice(0, depth))
+    return true
+  }
+
+  /** Make sure the layer at `segments` holds its Q and A child. */
+  async #ensureLayerGame(segments: readonly string[], name: string): Promise<void> {
+    const rows = await this.#children(segments)
+    if (rows?.some(r => moleculeKey(r.name) === moleculeKey(name))) return
+    EffectBus.emit('cell:added', { cell: name, segments: [...segments] })
+    await new hypercomb().act()
+    await this.#settled()
   }
 
   // ── ask ────────────────────────────────────────────────────────────────
 
-  /** Ask here: a tile named with the question, through the same create
-   *  commit the `create` word runs (so reserved words and bad names are
-   *  refused there), titled with the question as asked, and marked. */
+  /** Ask. Inside a layer's Q and A, the question is a tile here. In the game
+   *  but standing on a layer, it goes into THAT layer's Q and A — the
+   *  question is about the page in front of you. Outside any game, it is a
+   *  tile here. The tile is named the hive's way (normalizeCell: lower,
+   *  hyphens, no punctuation), titled with the question as asked, and
+   *  marked. */
   async ask(text: string): Promise<AskOutcome> {
     const question = String(text ?? '').replace(/\s+/g, ' ').trim()
-    // The create commit names the tile the way every tile is named
-    // (normalizeCell: lower, hyphens, no punctuation); the question's own
-    // words, question mark and all, are its title.
     const name = normalizeCell(question)
     if (!question || !name) return 'empty'
     const here = this.#segments()
-    const tiles = await this.#children(here)
+    const game = this.#game
+    const page = gameDepth(here) < 0 && game ? [...here, game.name] : here
+    if (page !== here) await this.#ensureLayerGame(here, game!.name)
+    const tiles = await this.#children(page)
     if (tiles?.some(t => moleculeKey(t.name) === moleculeKey(name))) return 'exists'
-    const created = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), CREATE_MS)
-      EffectBus.emitTransient('command:create-cells', {
-        name: question,
-        accept: () => {},
-        complete: (error?: unknown) => { clearTimeout(timer); resolve(error === undefined) },
+    if (page === here) {
+      // Here: the create commit the `create` word runs.
+      const created = await new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), CREATE_MS)
+        EffectBus.emitTransient('command:create-cells', {
+          name: question,
+          accept: () => {},
+          complete: (error?: unknown) => { clearTimeout(timer); resolve(error === undefined) },
+        })
       })
-    })
-    if (!created) return 'failed'
+      if (!created) return 'failed'
+    } else {
+      EffectBus.emit('cell:added', { cell: name, segments: [...page] })
+      await new hypercomb().act()
+    }
     await this.#settled()
-    const at = [...here, name]
+    const at = [...page, name]
     await replaceDecoration({ kind: QUESTION_KIND, appliesTo: at, segments: at, payload: { version: 1, question }, mark: 'persistent' })
     if (name !== question) {
       try { await get<DecorationsShape>('@diamondcoreprocessor.com/DecorationService')?.setTitle?.(at, question) } catch { /* a plainer tile, never a failed ask */ }
     }
-    this.dispatchEvent(new CustomEvent('change'))
+    this.#changed()
     this.#schedule()
+    this.#scheduleSync()
     return 'asked'
   }
 
@@ -281,13 +410,16 @@ export class Questions extends EventTarget {
 
   async #settle(): Promise<SettleOutcome> {
     const none: SettleOutcome = { pages: 0, moved: 0, categories: 0, sorter: 'none' }
-    const root = this.#organizing
-    if (!root) return none
-    // Peers' tiles are read for the page in front of the organizer, and
-    // taking one lands it there — so the room is taken where they stand,
-    // when that is in the game; the tree is then settled page by page.
+    // The HOST settles the Q and A of the layer the room is looking at:
+    // standing inside it, the room's questions are taken (peers' tiles are
+    // read for the page in front of you, and taking one lands it there),
+    // and that Q and A's tree is settled page by page.
+    if (!this.hosting()) return none
     const here = this.#segments()
-    if (here.length >= root.length && root.every((s, i) => here[i] === s)) await this.#takeRoomTiles(here)
+    const depth = gameDepth(here)
+    if (depth < 0) return none
+    const root = here.slice(0, depth + 1)
+    await this.#takeRoomTiles(here)
 
     const pages = await this.#tree(root)
     let moved = 0, categories = 0
@@ -469,11 +601,12 @@ export class Questions extends EventTarget {
    *  a note ranking its answers by takes and the game's tile gets one
    *  scoreboard; standing elsewhere, the page you stand on and its tile. */
   async tally(): Promise<TallyOutcome | null> {
+    // Inside a layer's Q and A: its whole tree, scoreboard on its tile. On a
+    // layer while in the game: that layer's Q and A. Elsewhere: this page.
     const here = this.#segments()
-    const game = moleculeKey(GAME_NAME)
-    const depth = here.findIndex(s => moleculeKey(s) === game)
-    const root = depth >= 0 ? here.slice(0, depth + 1) : here
-    const pages = depth >= 0 ? await this.#tree(root) : [here]
+    const depth = gameDepth(here)
+    const root = depth >= 0 ? here.slice(0, depth + 1) : this.#game ? [...here, this.#game.name] : here
+    const pages = depth >= 0 || this.#game ? await this.#tree(root) : [here]
     const notes = get<NotesShape>('@diamondcoreprocessor.com/NotesService')
     if (!notes) return null
     const swarmNotes = get<SwarmNotesShape>('@diamondcoreprocessor.com/SwarmNotes')
@@ -557,29 +690,111 @@ export class Questions extends EventTarget {
   /** A moment after the page renders or the room changes, inside the game:
    *  give taken questions their mark back and read the answers on this page
    *  into the ledger. */
+  /** A moment after the page renders or the room changes: learn the games
+   *  the room offers (tiles named like one), count this layer's questions
+   *  for the door, and — inside a layer's Q and A — give taken questions
+   *  their mark back and read the answers on this page into the ledger. */
   #scheduleSync(): void {
-    if (!inGame(this.#segments())) return
     if (this.#syncTimer) clearTimeout(this.#syncTimer)
     this.#syncTimer = setTimeout(() => {
       this.#syncTimer = null
-      if (this.#syncing) return
+      if (this.#syncing) { this.#scheduleSync(); return }
       this.#syncing = true
-      void (async () => {
-        const page = this.#segments()
-        if (!inGame(page)) return
-        const rows = await this.#children(page)
-        if (!rows) return
-        await this.#markQuestions(page, rows.map(r => r.name))
-        const swarmNotes = get<SwarmNotesShape>('@diamondcoreprocessor.com/SwarmNotes')
-        if (!swarmNotes || !isJoinedHere()) return
-        await this.#whoAmI()
-        for (const r of rows) {
-          if (!hasDecorationKindAt([...page, r.name], QUESTION_KIND)) continue
-          try { await swarmNotes.refresh(r.name); this.#record(swarmNotes, r.name) } catch { /* next time */ }
-        }
-      })().finally(() => { this.#syncing = false })
+      void this.#sync().finally(() => { this.#syncing = false })
     }, SYNC_MS)
   }
+
+  async #sync(): Promise<void> {
+    const page = this.#segments()
+    const me = await this.#whoAmI()
+    const rows = await this.#children(page) ?? []
+    const swarm = get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')
+    const peers = isJoinedHere() ? (swarm?.peerTilesAtCurrentSig?.() ?? []) : []
+
+    // THE ROOM'S GAMES. A tile named `<hive> q and a` on any page is a game
+    // somebody leads: a peer's names its host; this hive's own, when it is
+    // not in a game, is one it led before (say `start` to lead it again).
+    const before = this.offered().map(g => g.name).sort().join('\n')
+    for (const t of peers) {
+      if (hiveOfGame(t.name) === null || !t.peerPubkey) continue
+      const key = moleculeKey(t.name)
+      if (!this.#offered.has(key)) this.#offered.set(key, { name: t.name, host: t.peerPubkey })
+    }
+    if (!this.#game) {
+      for (const r of rows) {
+        const key = moleculeKey(r.name)
+        if (hiveOfGame(r.name) !== null && !this.#offered.has(key)) this.#offered.set(key, { name: r.name, host: me })
+      }
+    }
+    if (this.offered().map(g => g.name).sort().join('\n') !== before) {
+      // A game just became known: its tiles are the door now, never a
+      // hexagon — one processor pass redraws the grid without them.
+      void new hypercomb().act()
+    }
+
+    // THE COUNT for the door: inside, the tiles on this page; on a layer,
+    // the questions in its Q and A — this hive's own child and the room's.
+    const game = this.#game ?? this.offered()[0] ?? null
+    const depth = gameDepth(page)
+    let count = 0
+    if (depth >= 0) {
+      count = new Set([...rows.map(r => moleculeKey(r.name)), ...peers.map(t => moleculeKey(t.name))]).size
+    } else if (game) {
+      // The larger of what this hive's own Q and A holds here and what each
+      // participant's lists. Never a sum: the host takes the room's questions
+      // into their own, so a sum would count a taken question twice — and a
+      // peer's child layers need not be fetchable yet, only their count is.
+      const key = moleculeKey(game.name)
+      const own = rows.find(r => moleculeKey(r.name) === key)
+      count = own ? (await this.#children([...page, own.name]) ?? []).length : 0
+      for (const t of peers) {
+        if (moleculeKey(t.name) !== key) continue
+        const layer = await this.#layer(String((t as { layerSig?: unknown }).layerSig ?? ''))
+        count = Math.max(count, layer?.children.length ?? 0)
+      }
+    }
+    const counted = `${page.join('/')}\n${count}`
+    if (counted !== this.#counted) { this.#counted = counted; this.#count = count; this.#changed() }
+
+    if (depth < 0) return
+    await this.#markQuestions(page, rows.map(r => r.name))
+    const swarmNotes = get<SwarmNotesShape>('@diamondcoreprocessor.com/SwarmNotes')
+    if (!swarmNotes || !isJoinedHere()) return
+    for (const r of rows) {
+      if (!hasDecorationKindAt([...page, r.name], QUESTION_KIND)) continue
+      try { await swarmNotes.refresh(r.name); this.#record(swarmNotes, r.name) } catch { /* next time */ }
+    }
+  }
+
+  /** A layer by its signature — this hive's own, else the room's through the
+   *  content broker (mesh-first from the peer while they are here). Its name
+   *  and its children's signatures, remembered by signature. */
+  async #layer(sig: string): Promise<{ name: string; children: string[] } | null> {
+    if (!SIG.test(sig)) return null
+    if (this.#layers.has(sig)) return this.#layers.get(sig) ?? null
+    let parsed: { name?: unknown; children?: unknown } | null = null
+    try {
+      const history = get<{ getLayerBySig?: (s: string) => Promise<{ name?: unknown; children?: unknown } | null> }>('@diamondcoreprocessor.com/HistoryService')
+      parsed = (await history?.getLayerBySig?.(sig)) ?? null
+      if (!parsed) {
+        const bytes = await get<BrokerShape>('@diamondcoreprocessor.com/ContentBrokerDrone')?.fetchBySig?.(sig, 'layer', FETCH_MS)
+        if (bytes) parsed = JSON.parse(new TextDecoder().decode(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes))
+      }
+    } catch { parsed = null }
+    const layer = parsed
+      ? { name: String(parsed.name ?? ''), children: Array.isArray(parsed.children) ? parsed.children.map(String).filter(s => SIG.test(s)) : [] }
+      : null
+    if (layer) this.#layers.set(sig, layer)
+    return layer
+  }
+
+  #labelOf(pubkey: string): string {
+    if (!pubkey) return ''
+    if (pubkey === this.#me) return this.#t('questions.door.you', 'you')
+    return get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')?.labelFor?.(pubkey) || pubkey.slice(0, 8)
+  }
+
+  #changed(): void { this.dispatchEvent(new CustomEvent('change')) }
 
   async #whoAmI(): Promise<string> {
     if (!this.#me) {
@@ -649,7 +864,7 @@ export class Questions extends EventTarget {
   }
 
   #schedule(ms = SETTLE_MS): void {
-    if (!this.#organizing) return
+    if (!this.hosting()) return
     if (this.#timer) clearTimeout(this.#timer)
     this.#timer = setTimeout(() => { this.#timer = null; void this.settle() }, ms)
   }

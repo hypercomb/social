@@ -146,6 +146,9 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
   // ── START ──────────────────────────────────────────────────────────────
   await fakeJev(a)
   await word(a, `/start ${GAME}`)
+  // Starting leads the game where you stand; `questions` walks into this layer's Q and A.
+  await H.sleep(1500)
+  await word(a, '/questions')
   const started = await H.waitFor(async () => ({ segs: await segments(a), root: await childrenAt(a, []) }),
     v => JSON.stringify(v.segs) === JSON.stringify([GAME]) && has(v.root, GAME), 30000, 500)
   H.check('`start hypercomb q and a` mints the game tile and walks the host in', started.ok, JSON.stringify(started.value))
