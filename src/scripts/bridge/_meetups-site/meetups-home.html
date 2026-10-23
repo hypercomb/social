@@ -726,33 +726,16 @@
   }
 
   // ── THE PULL-UP SHEET (the business card gesture) ───────────────────
-  // Pull up from the bottom and your meetings rise as a list. With exactly
-  // one meeting and no registration yet, the sheet IS the registration:
-  // pulling up asks your name.
+  // Pull up from the bottom and your meetings rise as a list. The list
+  // carries NO registration (jwize 2026-10-23): the sheet is always
+  // the meetings, and joining lives on the Meeting view a row opens.
   var sheet = $('[data-sheet]'), grab = $('[data-grab]'), sheetBody = $('[data-sheet-body]'), scrim = $('[data-scrim]');
-  function sheetMode() {
-    var one = state.events.length === 1 ? state.events[0] : null;
-    return one && !state.mine[one.sig] && one.record.date >= today() && joinable(one) ? 'register' : 'list';
-  }
   function renderSheet() {
-    grab.textContent = sheetMode() === 'register' ? 'Register' : 'Meetings';
     if (!sheet.classList.contains('open')) return;
     sheetBody.textContent = '';
-    if (sheetMode() === 'register') {
-      var ev = state.events[0];
-      var head = document.createElement('p');
-      head.innerHTML = '<b>' + ev.record.title + '</b> — ' + dayOf(ev.record, true) + (ev.record.time ? ', ' + ev.record.time : '') + ' · ' + ev.record.where;
-      head.className = 'sub';
-      sheetBody.appendChild(head);
-      var go = document.createElement('button');
-      go.type = 'button'; go.className = 'btn btn-primary'; go.style.marginTop = '12px'; go.textContent = 'Register — pick a name';
-      go.addEventListener('click', function () { select(ev); show('meeting'); closeSheet(); openJoin(); });
-      sheetBody.appendChild(go);
-    } else {
-      var ul = document.createElement('ul'); ul.className = 'rows';
-      sheetBody.appendChild(ul);
-      meetingRows(ul, true);
-    }
+    var ul = document.createElement('ul'); ul.className = 'rows';
+    sheetBody.appendChild(ul);
+    meetingRows(ul, true);
   }
   function openSheet() { renderSheetOpen(); }
   function renderSheetOpen() { sheet.classList.add('open'); scrim.classList.add('on'); renderSheet(); }
