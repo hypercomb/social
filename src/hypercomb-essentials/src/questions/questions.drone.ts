@@ -7,7 +7,7 @@
 // and offers the game to the `start` word under its name. Registration is
 // the bee's act.
 
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { claimEntry } from '../commands/decoration-kind-index.js'
 import { GAME_NAME, QUESTION_KIND, QUESTIONS_KEY } from './questions.js'
 import { Questions } from './questions.service.js'
@@ -29,7 +29,13 @@ export class QuestionsDrone extends Drone {
       if (p?.kind === QUESTION_KIND && p.label) this.service.open(p.label)
     })
     window.ioc.whenReady<StartQueenBee>('@diamondcoreprocessor.com/StartQueenBee', (start) => {
-      start.register(GAME_NAME, () => this.service.start())
+      start.register(GAME_NAME, () => this.service.start(), (result, game) => {
+        const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+        const params = { game, where: result.where || '/' }
+        return result.outcome === 'started'
+          ? (i18n?.t('questions.started', params) ?? `${game} started at /${params.where} — ask with "question <your question>"; questions settle into categories as they arrive`)
+          : (i18n?.t('questions.resumed', params) ?? `${game} is on at /${params.where} — questions keep settling as they arrive`)
+      })
     })
   }
 }

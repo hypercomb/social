@@ -88,6 +88,8 @@ export class SwarmNotes extends EventTarget {
   #ignoredSession = new Set<string>()
   #ignoredAlways = new Set<string>()
   #roomHidden = false
+  /** Rules a game registered to hide authors on a tile (concealAuthorsWhen). */
+  #concealers: ((cell: string, texts: readonly string[]) => boolean)[] = []
   /** Lines waved off with `dismiss`, for this session only. */
   #dismissed = new Set<string>()
   #again = new Set<string>()
@@ -283,6 +285,25 @@ export class SwarmNotes extends EventTarget {
       yours: own,
       open,
     }
+  }
+
+  /** A game may ask the desk to show the words and not who brought them on
+   *  one tile (Did You Know, until its reveal). `rule` gets the tile and the
+   *  text of every note on it — yours and the room's — and answers whether
+   *  authors are hidden there. A presentation rule among people in one room:
+   *  the notes still travel as each participant's own. */
+  concealAuthorsWhen(rule: (cell: string, texts: readonly string[]) => boolean): void {
+    if (this.#concealers.includes(rule)) return
+    this.#concealers.push(rule)
+    this.dispatchEvent(new CustomEvent('change', { detail: { cell: '' } }))
+  }
+
+  /** Are authors hidden on `cell` right now? `own` is the text of the notes
+   *  you hold there. The desk asks before it paints a name or a colour. */
+  authorsHidden(cell: string, own: readonly string[]): boolean {
+    if (this.#concealers.length === 0) return false
+    const texts = [...own, ...this.rootsFor(cell).map(r => r.note.text)]
+    return this.#concealers.some((rule) => { try { return rule(cell, texts) } catch { return false } })
   }
 
   /** Who a pubkey is, for a row's author label. */

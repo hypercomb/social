@@ -62,6 +62,9 @@ await import('../sharing/groups.queen.js')
 await import('../questions/start.queen.js')
 await import('../questions/question.queen.js')
 await import('../questions/tally.queen.js')
+await import('../didyouknow/did-you-know.queen.js')
+await import('../didyouknow/reveal.queen.js')
+await import('../didyouknow/collect.queen.js')
 
 type Declared = { reach?: string; scope?: string; refuse?: (args: string) => string | undefined }
 const census = (ioc.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
@@ -137,6 +140,14 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   question: ['additive', 'network'],   // one tile named with the question, marked; shared in a swarm
   tally: ['additive', 'network'],      // notes only: a ranking on each question and a scoreboard
                                        // on the page's tile; changes no answer
+  // Judged on arrival (2026-10-22, Did You Know — a meeting exercise: share
+  // what the others might not know with no names, reveal at the end, collect).
+  'did-you-know': ['additive', 'network'], // one note on the game's tile, shared with the room; the
+                                           // desk hides who brought it until the reveal
+  reveal: ['additive', 'network'],         // one note on the tile naming who brought each idea; it is a
+                                           // note, so hiding it conceals the names again
+  collect: ['additive', 'network'],        // takes the room's ideas onto the participant's own tile
+                                           // (same signature, shared never copied); removes nothing
 }
 
 describe('every machine declaration, as audited', () => {

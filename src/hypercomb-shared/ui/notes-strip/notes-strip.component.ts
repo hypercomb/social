@@ -220,6 +220,7 @@ type SwarmNotesService = EventTarget & {
   inSwarm(): boolean
   labelOf(pubkey: string): string
   colorOf(pubkey: string): string
+  authorsHidden?(cell: string, own: readonly string[]): boolean
   refresh(cell: string): Promise<void>
   take(cell: string, ids: readonly string[]): Promise<string[]>
 }
@@ -2218,13 +2219,26 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     return counts.people > 1 || counts.open > 0 || hiding ? counts : null
   })
 
+  /** A game (Did You Know) may hide who brought each note on this tile: the
+   *  words show, the name and the colour do not, until the game says so.
+   *  Asked of the swarm notes service with the text of the notes you hold. */
+  readonly authorsHidden = computed(() => {
+    this.#swarmVersion()
+    const svc = this.#swarmNotes()
+    const cell = this.cell()
+    if (!svc?.authorsHidden || !cell) return false
+    return svc.authorsHidden(cell, (this.#notesByCell().get(cell) ?? []).map(n => n.text))
+  })
+
   isPeer(id: string): boolean { return this.#peerById().has(id) }
   isPeerRoot(id: string): boolean { return this.#peerById().get(id)?.note.id === id }
   peerColor(id: string): string | null {
+    if (this.authorsHidden()) return null
     const r = this.#peerById().get(id)
     return r ? this.#swarmNotes()?.colorOf(r.by) ?? null : null
   }
   peerLabel(id: string): string {
+    if (this.authorsHidden()) return ''
     const r = this.#peerById().get(id)
     return r ? this.#swarmNotes()?.labelOf(r.by) ?? '' : ''
   }

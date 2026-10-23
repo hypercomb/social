@@ -14,7 +14,10 @@
 import { QueenBee, EffectBus, I18N_IOC_KEY, moleculeKey, type I18nProvider, type MachineGrammar } from '@hypercomb/core'
 import type { StartOutcome } from './questions.service.js'
 
-type Startable = { readonly name: string; readonly start: () => Promise<StartOutcome> }
+/** `say` is the sentence a game tells the participant once it has begun (it
+ *  knows its own next word); a game that gives none gets a plain one. */
+type Say = (outcome: StartOutcome, game: string) => string
+type Startable = { readonly name: string; readonly start: () => Promise<StartOutcome>; readonly say?: Say }
 
 const get = <T>(key: string): T | undefined =>
   (window as { ioc?: { get?: <V>(k: string) => V | undefined } }).ioc?.get?.<T>(key)
@@ -40,9 +43,9 @@ export class StartQueenBee extends QueenBee {
   readonly #games = new Map<string, Startable>()
 
   /** A game offers itself under its full name. */
-  register(name: string, start: () => Promise<StartOutcome>): void {
+  register(name: string, start: () => Promise<StartOutcome>, say?: Say): void {
     const clean = String(name ?? '').trim()
-    if (clean) this.#games.set(moleculeKey(clean), { name: clean, start })
+    if (clean) this.#games.set(moleculeKey(clean), { name: clean, start, say })
   }
 
   names(): string[] { return [...this.#games.values()].map(g => g.name) }
@@ -64,9 +67,8 @@ export class StartQueenBee extends QueenBee {
     }
     const result = await game.start()
     const where = result.where || '/'
-    this.#say(result.outcome === 'started'
-      ? this.#t('questions.started', `${game.name} started at /${where} — ask with "question <your question>"; questions settle into categories as they arrive`, { game: game.name, where })
-      : this.#t('questions.resumed', `${game.name} is on at /${where} — questions keep settling as they arrive`, { game: game.name, where }))
+    this.#say(game.say?.(result, game.name)
+      ?? this.#t('start.on', `${game.name} is on at /${where}`, { game: game.name, where }))
   }
 
   #t(key: string, fallback: string, params?: Record<string, string | number>): string {

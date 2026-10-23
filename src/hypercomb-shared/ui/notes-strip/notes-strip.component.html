@@ -452,7 +452,7 @@
                 @if (heldCount(note.id) > 0) {
                   <span class="cv2-peer-held" [title]="'notes.swarm.held' | t: { count: heldCount(note.id) }">×{{ heldCount(note.id) }}</span>
                 }
-                @if (isPeerRoot(note.id)) {
+                @if (isPeerRoot(note.id) && !authorsHidden()) {
                   <button type="button" class="cv2-peer-by" (click)="ignorePeer(note.id, $event)"
                           [title]="'notes.swarm.ignore' | t: { name: peerLabel(note.id) }">{{ peerLabel(note.id) }}</button>
                 }
