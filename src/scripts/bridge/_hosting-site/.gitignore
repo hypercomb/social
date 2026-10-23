@@ -1,0 +1,5 @@
+# generate.cjs builds into the OS temp dir by default; an --out pointed here
+# (built pages, previews) stays out of git.
+out/
+pages/
+*.preview.html

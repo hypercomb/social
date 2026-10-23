@@ -1,0 +1,771 @@
+/* chrome.css -- the shared chrome of hosting.hypercomb.com.
+
+   Minted once, linked by signature from every page, never copied:
+     <link rel="stylesheet" href="resource:<sig>/chrome.css">
+   generate.cjs fills <sig> with the sha256 of these bytes; nobody types it.
+   One byte changed here means every /hosting page is built and said again
+   in the same pass, the closed hosted page included; generate.cjs reads
+   each tile back and stops until it wears the page built on these bytes.
+
+   WHERE IT RUNS. Inside a hive and on a door this sheet is hoisted UNSCOPED
+   into the live <head>, so:
+   - every rule starts at .hp-root, .hp or an .hp-* class; the one other
+     selector is html:has(> body.hp-root), which only a page read on its own
+     matches (a hive's body never wears the class);
+   - it defines no --md-* token. Colour and faces come from the shell: the
+     hive's styles, the door's visitor build, the shim's theme.css. A retune
+     of the house reaches the pages with no new bytes here. A preview links
+     the compiled house tokens itself;
+   - it is a leaf: no url(), no @import, no @font-face, no resource: refs
+     (the publish closure is one level deep);
+   - colour is --md-* only; faces are --md-font-display / -body / -ui (on a
+     door these resolve to the system faces at the end of each stack, in a
+     hive with the house fonts to those fonts); sizes are rem on one ladder;
+     radius is the house 2px / 3px, with the literal as the fallback because
+     the shim's theme.css carries no --hc-radius-*;
+   - a notched phone's safe areas are kept clear (the door's viewport is
+     viewport-fit=cover and the site host is pinned edge to edge).
+
+   THE PAGE (structure, not a component; generate.cjs writes it)
+     <body class="hp-root">                the ground and the width container;
+                                           a hive copies this class onto its
+                                           site host, so it measures the page,
+                                           not the window
+       <main class="hp" lang="en">
+         <header class="hp-head">
+           <h1 class="hp-title">Title.</h1>
+           <p class="hp-promise">The promise.</p>
+         </header>
+         <section class="hp-part">         one per part, the same parts in the
+           <h2 class="hp-label">Who this is for</h2>    same order on every path
+           <ul class="hp-lines" role="list"><li>One line.</li></ul>
+         </section>                        bodies: .hp-lines, .hp-steps (with a
+                                           CALLOUT before or after it),
+                                           p.hp-cost, div.hp-body (> p, p.hp-next)
+         <p class="hp-next">...</p>        the main page's last line
+         <p class="hp-up"><a href="/hosting"><span aria-hidden="true">&uarr;</span> Host your hive</a></p>
+                                           a path page's last line: the way up
+       </main>
+     Inline: <strong> a control the reader presses; <samp> what the app says;
+     <var> the part of it that changes.
+
+   THREE COMPONENTS, AND ONLY THREE (one markup function each in generate.cjs)
+
+   STEP -- a number, three lines, a check when it is done. The number is a CSS
+   counter on the list, drawn in the house's pointy-top cell; ticking the box
+   fills the cell with a drawn check, tints the rail and boxes the line.
+   No script, nothing stored.
+     <ol class="hp-steps" role="list">
+       <li class="hp-step">
+         <p class="hp-step__do">What you do.</p>
+         <p class="hp-step__happens">What happens.</p>
+         <label class="hp-step__done"><input class="hp-check" type="checkbox"> <span>Done when ...</span></label>
+       </li>
+     </ol>
+     An optional step opens its do line with <span class="hp-step__tag">Optional</span>.
+     A step whose "happens" shows the plans makes it a <div class="hp-step__happens">
+     holding the <p> and the plan list, so the step keeps three lines.
+
+   CALLOUT -- the one sentence that must not be missed.
+     <div class="hp-callout" role="note"><p>One sentence.</p></div>
+
+   PLAN CARD -- name, what it allows, price. When it leads somewhere the whole
+   card is the link and an arrow is drawn; the same markup without the <a> is
+   a card that leads nowhere, and the arrow goes with it.
+     <ol class="hp-plans" role="list">
+       <li class="hp-plan">
+         <h2 class="hp-plan__name"><a href="/hosting/try-it">Name</a></h2>
+         <p class="hp-plan__what">What it allows.</p>
+         <p class="hp-plan__price"><span class="hp-plan__amount">Free</span> &middot; about 2 minutes</p>
+       </li>
+     </ol>
+     A price is never typed. A page with a live price links the shared reader,
+     <script src="resource:<sig>/plans.js"></script>, which reads this host's
+     GET /plans (same origin) into:
+       data-hp-plans="from" -- the lowest price; inside a card only when the
+         card leads somewhere, so nothing anyone cannot buy shows a figure
+       data-hp-plans="list" on an .hp-plans list holding ONE card in a
+         <template> -- that card, cloned once per plan; the page wrote it, so
+         a card drawn by the reader and a card written on the page are one
+         shape (sentence, then price line)
+     Until the host answers with a plan list, the words in the slot stay. */
+
+
+/* -- the ground: the body on its own, the site host in a hive or on a door */
+
+.hp-root {
+  margin: 0;
+  background-color: var(--md-surface);
+  color-scheme: var(--md-color-scheme, light);
+  container: hp / inline-size;
+}
+
+html:has(> body.hp-root) {
+  background-color: var(--md-surface);
+  color-scheme: var(--md-color-scheme, light);
+}
+
+
+/* -- the page: one rhythm, one type scale, one edge --------------------- */
+
+.hp {
+  /* rhythm: a 0.25rem ladder */
+  --hp-space-1: 0.25rem;
+  --hp-space-2: 0.5rem;
+  --hp-space-3: 0.75rem;
+  --hp-space-4: 1rem;
+  --hp-space-5: 1.5rem;
+  --hp-space-6: 2rem;
+  --hp-space-7: 3rem;
+  --hp-space-8: 4rem;
+
+  /* type: five sizes; body steps up once on a wide page, lead and title
+     follow the page's width where they can */
+  --hp-text-label: 0.875rem;
+  --hp-text-ui: 0.9375rem;
+  --hp-text-body: 1rem;
+  --hp-text-lead: 1.1875rem;
+  --hp-text-title: 2rem;
+
+  /* one edge, 1px: --md-outline for objects, --md-outline-variant between */
+  --hp-edge: 1px solid var(--md-outline);
+  --hp-divider: 1px solid var(--md-outline-variant);
+
+  --hp-gutter: var(--hp-space-4);
+  --hp-measure: 46rem;
+  --hp-label-col: 8.5rem;
+  --hp-mark: 2rem;
+  --hp-mark-h: calc(var(--hp-mark) * 1.1547);
+  --hp-motion: var(--md-dur-short, 150ms) var(--md-easing-standard, cubic-bezier(0.2, 0, 0.2, 1));
+
+  color-scheme: var(--md-color-scheme, light);
+  box-sizing: border-box;
+  display: block;
+  inline-size: 100%;
+  max-inline-size: calc(var(--hp-measure) + 2 * var(--hp-gutter));
+  margin: 0 auto;
+  /* the gutter, or the notch / rounded corner where that is wider */
+  padding-top: 0;
+  padding-right: max(var(--hp-gutter), env(safe-area-inset-right, 0px));
+  padding-bottom: calc(var(--hp-space-8) + env(safe-area-inset-bottom, 0px));
+  padding-left: max(var(--hp-gutter), env(safe-area-inset-left, 0px));
+  color: var(--md-on-surface);
+  font-family: var(--md-font-body);
+  font-size: var(--hp-text-body);
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-align: start;
+  text-transform: none;
+  overflow-wrap: break-word;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+@supports (width: 1cqi) {
+  .hp {
+    --hp-text-lead: clamp(1.125rem, 1.0625rem + 0.4cqi, 1.25rem);
+    --hp-text-title: clamp(1.75rem, 1.25rem + 2.4cqi, 2.75rem);
+  }
+}
+
+.hp *,
+.hp *::before,
+.hp *::after {
+  box-sizing: inherit;
+}
+
+.hp :where(h1, h2, h3, h4, p, ul, ol, li) {
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.hp :where(ul, ol) {
+  list-style: none;
+}
+
+.hp a {
+  color: var(--md-on-surface-strong);
+  text-decoration-line: underline;
+  text-decoration-color: var(--md-primary);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2rem;
+  border-radius: var(--hc-radius-control, 2px);
+  transition: color var(--hp-motion);
+}
+
+.hp a:hover {
+  color: var(--md-primary);
+}
+
+.hp a:focus-visible,
+.hp .hp-check:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
+.hp strong {
+  font-weight: 600;
+  color: var(--md-on-surface-strong);
+}
+
+.hp samp {
+  font-family: var(--md-font-ui);
+  font-size: inherit;
+  font-weight: 500;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.hp var {
+  font-family: inherit;
+  font-style: italic;
+}
+
+
+/* -- head: the title and the promise; the safe area above the title ----- */
+
+.hp-head {
+  padding-block-start: calc(var(--hp-space-6) + env(safe-area-inset-top, 0px));
+}
+
+.hp-title {
+  font-family: var(--md-font-display);
+  font-size: var(--hp-text-title);
+  font-weight: 400;
+  line-height: 1.12;
+  letter-spacing: -0.02rem;
+  color: var(--md-on-surface-strong);
+  text-wrap: balance;
+}
+
+.hp-promise {
+  max-inline-size: 36rem;
+  margin-block-start: var(--hp-space-3);
+  font-size: var(--hp-text-lead);
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+
+/* -- parts: one label, one body, the same parts on every path ----------- */
+
+.hp-part {
+  display: grid;
+  row-gap: var(--hp-space-2);
+  margin-block-start: var(--hp-space-5);
+}
+
+.hp-label {
+  font-family: var(--md-font-ui);
+  font-size: var(--hp-text-label);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--md-on-surface-var);
+}
+
+.hp-part > :not(.hp-label) {
+  min-inline-size: 0;
+}
+
+.hp-body {
+  display: grid;
+  row-gap: var(--hp-space-3);
+}
+
+.hp-body > p {
+  max-inline-size: 36rem;
+}
+
+.hp-lines {
+  display: grid;
+  row-gap: var(--hp-space-1);
+  max-inline-size: 36rem;
+}
+
+.hp .hp-lines > li {
+  position: relative;
+  padding-inline-start: var(--hp-space-4);
+}
+
+.hp-lines > li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: calc(var(--hp-text-body) * 0.75 - 0.5px);
+  inline-size: var(--hp-space-2);
+  border-block-start: 1px solid var(--md-on-surface-faint);
+}
+
+.hp-cost {
+  font-weight: 600;
+  color: var(--md-on-surface-strong);
+}
+
+.hp-next {
+  color: var(--md-on-surface-strong);
+}
+
+.hp > .hp-next {
+  margin-block-start: var(--hp-space-5);
+}
+
+/* the way up: a path page's last line, a full 44px target */
+.hp-up {
+  margin-block-start: var(--hp-space-6);
+  font-family: var(--md-font-ui);
+  font-size: var(--hp-text-label);
+  font-weight: 500;
+  line-height: 1;
+}
+
+.hp .hp-up a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--hp-space-2);
+  min-block-size: 2.75rem;
+  color: var(--md-on-surface-var);
+  text-decoration: none;
+}
+
+.hp .hp-up a:hover {
+  color: var(--md-on-surface-strong);
+}
+
+
+/* -- STEP ----------------------------------------------------------------- */
+
+.hp-steps {
+  display: grid;
+  counter-reset: hp-step;
+}
+
+.hp .hp-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--hp-mark) minmax(0, 1fr);
+  column-gap: var(--hp-space-4);
+  padding-block-end: var(--hp-space-5);
+  counter-increment: hp-step;
+}
+
+.hp .hp-step:last-child {
+  padding-block-end: 0;
+}
+
+/* the number, in the house's pointy-top cell */
+.hp-step::before {
+  content: counter(hp-step);
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  align-self: start;
+  display: grid;
+  place-items: center;
+  inline-size: var(--hp-mark);
+  block-size: var(--hp-mark-h);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  background-color: var(--md-surface-c-high);
+  color: var(--md-on-surface-strong);
+  font-family: var(--md-font-ui);
+  font-size: var(--hp-text-ui);
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--hp-motion), color var(--hp-motion);
+}
+
+/* the rail down to the next step */
+.hp-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: calc(var(--hp-mark) / 2 - 0.5px);
+  top: calc(var(--hp-mark-h) + var(--hp-space-2));
+  bottom: var(--hp-space-2);
+  border-inline-start: var(--hp-divider);
+  transition: border-color var(--hp-motion);
+}
+
+.hp-step > * {
+  grid-column: 2;
+  min-inline-size: 0;
+}
+
+.hp-step__do {
+  padding-block-start: calc((var(--hp-mark-h) - var(--hp-text-body) * 1.45) / 2);
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--md-on-surface-strong);
+}
+
+.hp-step__tag {
+  margin-inline-end: var(--hp-space-2);
+  font-family: var(--md-font-ui);
+  font-size: var(--hp-text-label);
+  font-weight: 600;
+  color: var(--md-on-surface-var);
+}
+
+.hp-step__happens {
+  margin-block-start: var(--hp-space-1);
+  line-height: 1.55;
+  color: var(--md-on-surface-var);
+}
+
+/* a "happens" that shows the plans: the sentence, then the list */
+.hp-step__happens > :is(p, ol) + :is(p, ol) {
+  margin-block-start: var(--hp-space-3);
+}
+
+/* how you know: a quiet line at rest, a box only once it is ticked */
+.hp-step__done {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--hp-space-3);
+  min-block-size: 2.75rem;
+  margin-block-start: var(--hp-space-2);
+  margin-inline-start: calc(-1 * (var(--hp-space-2) + 1px));
+  padding: var(--hp-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--hc-radius-control, 2px);
+  font-family: var(--md-font-ui);
+  font-size: var(--hp-text-ui);
+  line-height: 1.45;
+  color: var(--md-on-surface);
+  cursor: pointer;
+  transition: background-color var(--hp-motion), border-color var(--hp-motion), color var(--hp-motion);
+}
+
+.hp-step__done:hover {
+  border-color: var(--md-outline-variant);
+}
+
+.hp-step__done strong {
+  color: inherit;
+}
+
+.hp .hp-check {
+  flex: none;
+  inline-size: 1.125rem;
+  block-size: 1.125rem;
+  margin: 0.125rem 0 0;
+  accent-color: var(--md-primary);
+  cursor: pointer;
+}
+
+.hp-step:has(.hp-check:checked)::before {
+  background-color: var(--md-primary);
+  color: transparent;
+}
+
+/* the check, drawn over the cell (it is symmetric, so it reads the same in
+   either direction) */
+.hp-step:has(.hp-check:checked) .hp-step__do::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: calc(var(--hp-mark) / 2 - 0.1875rem);
+  top: calc(var(--hp-mark-h) / 2 - 0.465rem);
+  inline-size: 0.375rem;
+  block-size: 0.75rem;
+  border: solid var(--md-on-primary);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.hp-step:has(.hp-check:checked)::after {
+  border-inline-start-color: var(--md-outline);
+}
+
+.hp-step:has(.hp-check:checked) .hp-step__done {
+  border-color: var(--md-primary);
+  background-color: var(--md-primary-container);
+  color: var(--md-on-primary-c);
+}
+
+
+/* -- CALLOUT -------------------------------------------------------------- */
+
+.hp .hp-callout {
+  max-inline-size: 36rem;
+  padding: var(--hp-space-4);
+  border: var(--hp-edge);
+  border-radius: var(--hc-radius-card, 3px);
+  background-color: var(--md-secondary-c);
+  color: var(--md-on-secondary-c);
+  font-size: var(--hp-text-body);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.hp .hp-callout > * + * {
+  margin-block-start: var(--hp-space-2);
+}
+
+.hp > .hp-callout {
+  max-inline-size: none;
+  margin-block-start: var(--hp-space-5);
+}
+
+/* a callout beside the steps it belongs to: read before the first, or after
+   the last */
+.hp-part > .hp-callout + .hp-steps,
+.hp-part > .hp-steps + .hp-callout {
+  margin-block-start: var(--hp-space-3);
+}
+
+.hp .hp-callout a,
+.hp .hp-callout a:hover {
+  color: inherit;
+  text-decoration-color: currentColor;
+}
+
+.hp .hp-callout a:hover {
+  text-decoration-thickness: 2px;
+}
+
+
+/* -- PLAN CARD ------------------------------------------------------------ */
+
+.hp-plans {
+  display: grid;
+  gap: var(--hp-space-3);
+  margin-block-start: var(--hp-space-5);
+}
+
+/* a plan list whose plans have not arrived (only its template inside) */
+.hp-plans:not(:has(> li)) {
+  display: none;
+}
+
+.hp-part .hp-plans {
+  margin-block-start: var(--hp-space-3);
+}
+
+.hp .hp-plan {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--hp-space-4);
+  row-gap: var(--hp-space-1);
+  padding: var(--hp-space-4);
+  border: var(--hp-edge);
+  border-radius: var(--hc-radius-card, 3px);
+  background-color: var(--md-surface-c-low);
+  transition: background-color var(--hp-motion), border-color var(--hp-motion);
+}
+
+.hp-plan > * {
+  grid-column: 1;
+  min-inline-size: 0;
+}
+
+.hp .hp-plan__name {
+  font-family: var(--md-font-display);
+  font-size: var(--hp-text-lead);
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--md-on-surface-strong);
+  overflow-wrap: anywhere;
+}
+
+.hp .hp-plan__name a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* the whole card is the link */
+.hp .hp-plan__name a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--hc-radius-card, 3px);
+}
+
+.hp-plan__what {
+  color: var(--md-on-surface-var);
+}
+
+/* the price is the decision: full width, under one divider, on every card */
+.hp-plan__price {
+  grid-column: 1 / -1;
+  margin-block-start: var(--hp-space-2);
+  padding-block-start: var(--hp-space-2);
+  border-block-start: var(--hp-divider);
+  font-family: var(--md-font-ui);
+  font-size: var(--hp-text-ui);
+  font-weight: 500;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  color: var(--md-on-surface-var);
+  overflow-wrap: anywhere;
+}
+
+.hp-plan__amount {
+  font-weight: 600;
+  color: var(--md-on-surface-strong);
+}
+
+/* an arrow only when the card leads somewhere */
+.hp-plan:has(.hp-plan__name a)::after {
+  content: "\2192";
+  content: "\2192" / "";
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-family: var(--md-font-ui);
+  font-size: var(--hp-text-lead);
+  line-height: 1;
+  color: var(--md-on-surface-var);
+  transition: color var(--hp-motion);
+}
+
+.hp .hp-plan:has(.hp-plan__name a):hover {
+  border-color: var(--md-primary);
+  background-color: var(--md-surface-c);
+}
+
+.hp-plan:has(.hp-plan__name a):hover::after {
+  color: var(--md-primary);
+}
+
+@supports selector(:has(*)) {
+  .hp .hp-plan__name a:focus-visible {
+    outline: none;
+  }
+
+  .hp .hp-plan:has(.hp-plan__name a:focus-visible) {
+    outline: 2px solid var(--md-primary);
+    outline-offset: 2px;
+  }
+}
+
+
+/* -- wider than a phone, measured on the page's own box: labels take a
+      column, so the one shape shows at a glance */
+
+@container hp (min-width: 40rem) {
+  .hp {
+    --hp-gutter: var(--hp-space-5);
+    --hp-text-body: 1.0625rem;
+  }
+
+  .hp-head {
+    padding-block-start: calc(var(--hp-space-8) + env(safe-area-inset-top, 0px));
+  }
+
+  .hp-part {
+    grid-template-columns: var(--hp-label-col) minmax(0, 1fr);
+    column-gap: var(--hp-space-5);
+    margin-block-start: var(--hp-space-6);
+    padding-block-start: var(--hp-space-5);
+    border-block-start: var(--hp-divider);
+  }
+
+  .hp-part > .hp-label {
+    padding-block-start: calc((var(--hp-text-body) * 1.5 - var(--hp-text-label) * 1.35) / 2);
+  }
+
+  .hp-part:has(> .hp-steps) > .hp-label {
+    padding-block-start: calc((var(--hp-mark-h) - var(--hp-text-label) * 1.35) / 2);
+  }
+
+  /* a part that opens with its callout: the label sits on the callout's
+     first line */
+  .hp-part:has(> .hp-label + .hp-callout) > .hp-label {
+    padding-block-start: calc(var(--hp-space-4) + 1px + (var(--hp-text-body) * 1.5 - var(--hp-text-label) * 1.35) / 2);
+  }
+
+  .hp-part > :not(.hp-label) {
+    grid-column: 2;
+  }
+}
+
+
+/* -- tints, where the browser can mix one; the plain outline elsewhere (a
+      var() inside an unsupported color-mix() voids the declaration) */
+
+@supports (color: color-mix(in srgb, red 50%, transparent)) {
+  .hp-step:has(.hp-check:checked)::after {
+    border-inline-start-color: color-mix(in srgb, var(--md-primary) 45%, transparent);
+  }
+
+  .hp .hp-callout {
+    border-color: color-mix(in srgb, var(--md-secondary) 32%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hp {
+    --hp-motion: 0s linear;
+  }
+}
+
+@media (forced-colors: active) {
+  .hp-step::before {
+    forced-color-adjust: none;
+    background-color: CanvasText;
+    color: Canvas;
+  }
+
+  .hp-step:has(.hp-check:checked)::before {
+    background-color: Highlight;
+    color: Highlight;
+  }
+
+  .hp-step:has(.hp-check:checked) .hp-step__do::before {
+    forced-color-adjust: none;
+    border-color: HighlightText;
+  }
+
+  .hp-step:has(.hp-check:checked) .hp-step__done {
+    border-color: Highlight;
+  }
+
+  .hp .hp-callout {
+    border-color: CanvasText;
+  }
+}
+
+/* paper: dark ink on the page's own sheet, every step and card whole, the
+   boxes left to tick by hand; only this page's tokens change */
+@media print {
+  .hp {
+    color-scheme: light;
+    --md-surface: Canvas;
+    --md-surface-c-low: Canvas;
+    --md-surface-c: Canvas;
+    --md-surface-c-high: Canvas;
+    --md-on-surface: CanvasText;
+    --md-on-surface-strong: CanvasText;
+    --md-on-surface-var: CanvasText;
+    --md-on-surface-faint: GrayText;
+    --md-primary: CanvasText;
+    --md-on-primary: Canvas;
+    --md-primary-container: Canvas;
+    --md-on-primary-c: CanvasText;
+    --md-secondary: CanvasText;
+    --md-secondary-c: Canvas;
+    --md-on-secondary-c: CanvasText;
+    --md-outline: GrayText;
+    --md-outline-variant: GrayText;
+    padding-bottom: 0;
+  }
+
+  .hp-up {
+    display: none;
+  }
+
+  .hp-step,
+  .hp-plan,
+  .hp-callout {
+    break-inside: avoid;
+  }
+
+  .hp-label {
+    break-after: avoid;
+  }
+}

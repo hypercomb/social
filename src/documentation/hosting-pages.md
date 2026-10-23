@@ -13,6 +13,28 @@ kept through the hive like any creation (`documentation/website-artifact-
 paradigm.md`), never as files in the shell. This document is the brief: what
 each page says, in what order, and the standard every page meets.
 
+**BUILT 2026-10-23 in jwize's hive (not yet published).** The five tiles
+wear their pages and `/hosting` opens as a website. **The copy lives in the
+hive, not here:** each tile's notes are its page, one part per note, and the
+page texts below are the first draft they grew from. The notes were
+corrected against the standard before the pages were built: second person
+throughout, every *Done when* line quoting what the app really says, and the
+hosted page closed (*Not open yet*) until sign-up exists, so it promises no
+button that is not built. To change a page, change its note, then run:
+
+```bash
+node scripts/bridge/_hosting-site/generate.cjs --dry
+node scripts/bridge/_hosting-site/generate.cjs
+```
+
+The generator (`scripts/bridge/_hosting-site/generate.cjs`) reads the notes,
+renders each page through the three components, and says every changed page
+back into the hive with the hive's own words (`go`, `website page`, `opens
+as website`, `builds`). It never types copy or a signature, and a second run
+with nothing changed says nothing. The one look is `chrome.css` beside it,
+shared by signature from every page; `plans.js` is the plan card's live
+price, linked only by a page that carries a price.
+
 ## The shape
 
 ```
@@ -64,6 +86,12 @@ standard.
 they are done the thing the promise named is true. Each path is walked by
 someone who has not done it before; where they stopped is a defect in the
 page, not in them.
+
+**One truth.** Every *Done when* line quotes what the app really shows, and
+every control a step names exists in the app today. A step for a button
+that is not built yet is not written; the page says *Not open yet* instead.
+(Learned 2026-10-23: the first draft promised a *Signed in* message the app
+never shows, and buttons sign-up has not built.)
 
 ## The main page — Host your hive
 
@@ -190,22 +218,34 @@ old one keeps working until you turn it off). One callout: *Every signature
 stays the same wherever it is served, so every link anyone holds keeps
 working.*
 
-## What this needs built first
+## What is still owed
 
-- The **plan cards** read the host's offered plans (`GET /plans`, BUILT
-  2026-10-22) — the prices on the pages are never typed by hand.
-- **Host with Hypercomb** and **Continue to payment** in the hosts window —
-  sign-up (hosted-tenants.md, step 3). Until then the hosted page is written
-  but its door is not opened.
-- The three shared components as hive artifacts, so every page has the same
-  step, callout and plan card.
+- **The plan card's live price at a door.** `plans.js` asks its own host's
+  `GET /plans`, but the worker answers `/plans` only on a zone's write face,
+  so on `hosting.hypercomb.com` it falls through to the visitor shell and the
+  card keeps its words. The worker must answer `GET /plans` at site doors (as
+  it does `/publications.json`). No page carries a price today — the hosted
+  card returns with sign-up — so this blocks nothing yet.
+- **Sign-up** (`hosted-tenants.md`, step 3): then the hosted page's notes get
+  their steps and card, and the generator draws the plan list.
+- **The door's title.** Without an exact `SITE_BINDINGS` entry the door reads
+  *hosting*; it should read *Host your hive*.
+- **A download address for the desktop app.** *Try it* and *Your own domain*
+  need the app; no public page says where to get it.
+- **The three components as hive artifacts on tiles.** Today they are one
+  shared stylesheet and one markup function each in the generator, shared by
+  signature but belonging to no tile. Filing a shared artifact on a tile has
+  no word yet.
 
 ## Order of work
 
-1. Make the tiles in the hive (`/hosting` and its five children) with each
-   page's text above as its notes — through the hive's own words.
-2. Make the three components once; have every page use them.
-3. Open the door: publish `/hosting` to `hosting.hypercomb.com`.
-4. Walk each path with someone who has not done it; fix the page where they
-   stopped.
-5. When sign-up lands, open the hosted page's door.
+1. ~~Make the tiles in the hive with each page's text as its notes.~~ Done
+   2026-10-22, corrected 2026-10-23.
+2. ~~Make the three components once; have every page use them.~~ Done
+   2026-10-23 (`chrome.css`, `generate.cjs`).
+3. Open the door: `publish /hosting on hypercomb.com`, said in jwize's hive
+   (it asks him first). Success is `hosting` in his signed index, then the
+   address opening the main page.
+4. Walk each path with someone who has not done it; fix the note where they
+   stopped and run the generator.
+5. When sign-up lands, give the hosted page its steps and card.
