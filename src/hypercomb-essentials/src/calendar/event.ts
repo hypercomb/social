@@ -9,7 +9,8 @@
 //   pool     sign('calendar:events') on every community host: one member per
 //            meeting, named by the record's own signature. A calendar is the
 //            union of that ONE derived address across the hosts you carry.
-//   record   { v, kind:'event', title, date, time?, where, series, host, at }
+//   record   { v, kind:'event', title, type?, date, time?, ends?, where, series, host, at }
+//            — `type` is what kind of meeting it is (Beginners, Networking …),
 //            — `series` is the tile the meeting belongs to (its route name),
 //            `host` the door where its list lives, which is where to join.
 //   list     sign('rsvp:<record sig>') on the record's host: one member per
@@ -29,6 +30,7 @@ export const RSVP_KIND = 30568
 export const RSVP_NAME_MAX = 48
 export const RSVP_MAX_BYTES = 2048
 export const EVENT_MAX_BYTES = 4096
+export const EVENT_TYPE_MAX = 40
 
 const SIG_RE = /^[a-f0-9]{64}$/
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -40,6 +42,8 @@ export interface EventRecord {
   readonly v: 1
   readonly kind: typeof EVENT_RECORD_KIND
   readonly title: string
+  /** What kind of meeting it is — Beginners, Networking, Workshop … */
+  readonly type?: string
   /** The meeting's own day, YYYY-MM-DD. */
   readonly date: string
   /** HH:MM where it happens, when a time is set. */
@@ -77,10 +81,12 @@ export const eventsPoolAddress = (): Promise<string> => registerPoolMeaning(EVEN
 
 /** The record's bytes, key order fixed so the same meeting is the same signature. */
 export const eventText = (fields: {
-  title: string; date: string; time?: string; ends?: string; where: string; series: string; host: string; at?: number
+  title: string; type?: string; date: string; time?: string; ends?: string; where: string; series: string; host: string; at?: number
 }): string => JSON.stringify({
   v: 1, kind: EVENT_RECORD_KIND,
-  title: fields.title.trim(), date: fields.date,
+  title: fields.title.trim(),
+  ...(fields.type?.trim() ? { type: fields.type.trim().slice(0, EVENT_TYPE_MAX) } : {}),
+  date: fields.date,
   ...(fields.time ? { time: fields.time } : {}),
   ...(fields.time && fields.ends ? { ends: fields.ends } : {}),
   where: fields.where.trim(), series: fields.series.trim().toLowerCase(), host: fields.host.trim().toLowerCase(),
@@ -99,11 +105,12 @@ export const parseEvent = (text: string): EventRecord | null => {
   const where = String(raw['where'] ?? '').trim()
   const series = String(raw['series'] ?? '').trim().toLowerCase()
   const host = String(raw['host'] ?? '').trim().toLowerCase()
+  const type = typeof raw['type'] === 'string' ? raw['type'].trim().slice(0, EVENT_TYPE_MAX) : ''
   const time = raw['time'] === undefined ? undefined : String(raw['time'])
   const ends = raw['ends'] === undefined ? undefined : String(raw['ends'])
   if (!title || !DATE_RE.test(date) || !where || !series || !host || (time !== undefined && !TIME_RE.test(time))) return null
   if (ends !== undefined && (!time || !TIME_RE.test(ends))) return null
-  return { v: 1, kind: EVENT_RECORD_KIND, title, date, ...(time ? { time } : {}), ...(ends ? { ends } : {}), where, series, host, at: Number(raw['at']) || 0 }
+  return { v: 1, kind: EVENT_RECORD_KIND, title, ...(type ? { type } : {}), date, ...(time ? { time } : {}), ...(ends ? { ends } : {}), where, series, host, at: Number(raw['at']) || 0 }
 }
 
 /** The unsigned claim a key signs: this pool, this meeting, this name — coming,

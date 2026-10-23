@@ -39,6 +39,16 @@ describe('event lines', () => {
     })
   })
 
+  it('reads what kind of meeting it is after a pipe, after the title or the place', () => {
+    expect(parseEventArgs('2026-10-31 09:15-11:00 at Yaletown Galleria : Hypercomb Meetup | Beginners on hypercomb.com'))
+      .toMatchObject({ where: 'Yaletown Galleria', title: 'Hypercomb Meetup', type: 'Beginners' })
+    expect(parseEventArgs('2026-10-31 at Yaletown Galleria | Networking on hypercomb.com'))
+      .toMatchObject({ where: 'Yaletown Galleria', title: '', type: 'Networking' })
+    const record = parseEvent(eventText({ title: 'Hypercomb Meetup', type: ' Beginners ', date: '2026-10-31', where: 'Y', series: 's', host: 'h.example', at: 1 }))
+    expect(record?.type).toBe('Beginners')
+    expect(parseEvent(eventText({ title: 'x', date: '2026-10-31', where: 'y', series: 's', host: 'h.example', at: 1 }))?.type).toBeUndefined()
+  })
+
   it('reads a check-in like a join', () => {
     expect(parseEventArgs('here 2026-10-24 as Ada on hypercomb.com')).toMatchObject({ verb: 'here', ref: '2026-10-24', who: 'Ada', host: 'hypercomb.com' })
   })

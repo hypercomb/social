@@ -3,7 +3,7 @@
 // `event` — a meeting on the calendar, and who is coming
 // (documentation/calendar-events.md).
 //
-//   event <date> [<time>] at <where> [: <title>] on <host>
+//   event <date> [<time>] at <where> [: <title>] [| <type>] on <host>
 //        Put a meeting of the tile you stand on (its series) on the calendar
 //        the host serves. The record goes to the host as an atom; your signed
 //        index names it `event:<sig>` — the host lists it under
@@ -51,6 +51,8 @@ export interface EventLine {
   readonly ends: string
   readonly where: string
   readonly title: string
+  /** What kind of meeting: Beginners, Networking … */
+  readonly type: string
   /** A meeting named by signature or by its date. */
   readonly ref: string
   readonly who: string
@@ -75,7 +77,7 @@ export const parseEventArgs = (args: string): EventLine => {
     const at = rest.split(/\s+/).find(part => part.startsWith('@'))
     if (at) { host = zoneDoor(at.slice(1)); rest = rest.split(/\s+/).filter(part => part !== at).join(' ') }
   }
-  const none: EventLine = { verb: '', date: '', time: '', ends: '', where: '', title: '', ref: '', who: '', host }
+  const none: EventLine = { verb: '', date: '', time: '', ends: '', where: '', title: '', type: '', ref: '', who: '', host }
   const words = rest.split(/\s+/).filter(Boolean)
   const first = (words[0] ?? '').toLowerCase()
   if (first === 'list') return { ...none, verb: 'list' }
@@ -90,7 +92,17 @@ export const parseEventArgs = (args: string): EventLine => {
   if (made) {
     const time = made[2] ? made[2].padStart(5, '0') : ''
     const ends = time && made[3] ? made[3].padStart(5, '0') : ''
-    return { ...none, verb: 'make', date: made[1]!, time, ends, where: made[4]!.trim(), title: (made[5] ?? '').trim() }
+    // `| <type>` closes the line, after the title or, with none, after the place.
+    let where = made[4]!.trim()
+    let title = (made[5] ?? '').trim()
+    let type = ''
+    const split = (text: string): [string, string] => {
+      const at = text.indexOf('|')
+      return at < 0 ? [text, ''] : [text.slice(0, at).trim(), text.slice(at + 1).trim()]
+    }
+    if (title) [title, type] = split(title)
+    else [where, type] = split(where)
+    return { ...none, verb: 'make', date: made[1]!, time, ends, where, title, type }
   }
   return none
 }
@@ -109,7 +121,7 @@ export class EventQueenBee extends QueenBee {
   readonly command = 'event'
   override description = 'A meeting on the calendar: add one, read the calendar across your community, join, or keep the roll'
   override descriptionKey = 'slash.event'
-  override options = ['<date> [<time>[-<ends>]] at <where> [: <title>] on <host>', 'list on <host>', 'join <date|sig> as <name> on <host>', 'here <date|sig> as <name> on <host>', 'roll <date|sig> on <host>']
+  override options = ['<date> [<time>[-<ends>]] at <where> [: <title>] [| <type>] on <host>', 'list on <host>', 'join <date|sig> as <name> on <host>', 'here <date|sig> as <name> on <host>', 'roll <date|sig> on <host>']
   // Dates, signatures, places and names — the line arrives exactly as said.
   override rawArgs = true
   override examples = [
@@ -148,7 +160,7 @@ export class EventQueenBee extends QueenBee {
     const series = segments[segments.length - 1]!.toLowerCase()
     const door = line.host.split('.')[0] === series ? line.host : `${series}.${line.host}`
     const title = line.title || series.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-    const text = eventText({ title, date: line.date, time: line.time || undefined, ends: line.ends || undefined, where: line.where, series, host: door })
+    const text = eventText({ title, type: line.type || undefined, date: line.date, time: line.time || undefined, ends: line.ends || undefined, where: line.where, series, host: door })
     const bytes = new TextEncoder().encode(text)
     const sig = await eventSignature(text)
 
@@ -181,7 +193,7 @@ export class EventQueenBee extends QueenBee {
     if (!events.length) { tell('info', `${host} and the hosts you carry list no meetings yet.`); return }
     for (const { sig, record, hosts } of events) {
       const n = coming(await readRsvps(record.host, sig)).length
-      say(`event: ${record.date}${record.time ? ` ${record.time}` : ''} ${record.title} at ${record.where} — ${n} coming — join at ${record.host}${hosts.length > 1 ? ` (listed by ${hosts.length} hosts)` : ''} ${short(sig)}`)
+      say(`event: ${record.date}${record.time ? ` ${record.time}` : ''} ${record.title}${record.type ? ` (${record.type})` : ''} at ${record.where} — ${n} coming — join at ${record.host}${hosts.length > 1 ? ` (listed by ${hosts.length} hosts)` : ''} ${short(sig)}`)
     }
     tell('info', `${events.length} meeting${events.length === 1 ? '' : 's'} on the calendar.`)
   }
