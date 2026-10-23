@@ -13,6 +13,9 @@
 //                              this device, asked for once
 //   room start                 the session starts: everyone who has been in
 //                              this room is told, with a Join button
+//   room list                  the rooms this device remembers (it hears their
+//                              start notices)
+//   room forget <room>         stop remembering a room on this device
 //
 // What a room asks rides the room tile's layer (`asks`, room-asks.ts); on
 // arrival each asked word is offered to be turned on (room-asks.drone.ts).
@@ -25,6 +28,8 @@ import { EffectBus, QueenBee, I18N_IOC_KEY, type I18nProvider } from '@hypercomb
 import { ROOM_ASKS_SLOT, applyAsks, currentRoomAsks, readAsks } from './room-asks.js'
 import { readHome, takeBundle, takeClosure, takeLinkText, writeHome } from './take-home.js'
 import { isJoinedHere, ownZone } from './membership.js'
+import { readRememberedRooms, withoutRoom } from './room-notice.js'
+import { saveRememberedRooms } from './meeting-invite.join.js'
 
 /** The toast's button opens the home hive INSIDE its own click — the upload
  *  before it takes too long for the word's own keypress to still count. */
@@ -63,13 +68,15 @@ export class RoomQueenBee extends QueenBee {
   readonly command = 'room'
   override description = 'What this room asks of whoever joins, and taking home what you collected'
   override descriptionKey = 'slash.room'
-  override options = ['asks <behaviours>', 'asks ~ <behaviour>', 'home', 'home <address>', 'start']
+  override options = ['asks <behaviours>', 'asks ~ <behaviour>', 'home', 'home <address>', 'start', 'list', 'forget <room>']
   override examples = [
     { input: 'room', result: 'Says what this room asks and where take home sends' },
     { input: 'room asks notes keep-alive', result: 'The selected room tile asks joiners for notes and keep-alive' },
     { input: 'room home', result: 'Takes the room tile you collected home to your own hive' },
     { input: 'room home hypercomb.io', result: 'Your own hive is at hypercomb.io' },
     { input: 'room start', result: 'Tells everyone who has been in this room that the session is starting' },
+    { input: 'room list', result: 'Shows the rooms this device remembers' },
+    { input: 'room forget lecture', result: 'This device stops remembering the room "lecture"' },
   ]
 
   // What a room asks ARE behaviour words (`keep-alive`), and the command line
@@ -84,7 +91,9 @@ export class RoomQueenBee extends QueenBee {
     if (verb === 'asks') return this.#asks(tail)
     if (verb === 'home') return tail ? this.#setHome(tail) : this.#takeHome()
     if (verb === 'start') return this.#start()
-    this.#say(this.#t('room.usage', 'room — say "room", "room asks <behaviours>", "room home", or "room start"'), 'warning')
+    if (verb === 'list') return this.#list()
+    if (verb === 'forget') return this.#forget(tail)
+    this.#say(this.#t('room.usage', 'room — say "room", "room asks <behaviours>", "room home", "room start", "room list" or "room forget <room>"'), 'warning')
   }
 
   // ── what the room asks ──────────────────────────────────────
@@ -202,6 +211,42 @@ export class RoomQueenBee extends QueenBee {
     this.#say(taken
       ? this.#t('room.start.sent', `The session in "${zone.room}" has started — everyone who has been here is told`, { room: zone.room })
       : this.#t('room.start.unsent', 'The meeting point did not take the notice — try again in a moment'), taken ? 'success' : 'warning')
+  }
+
+  // ── the rooms this device remembers ─────────────────────────
+
+  #list(): void {
+    const rooms = readRememberedRooms()
+    if (!rooms.length) {
+      this.#say(this.#t('room.list.none', 'This device remembers no rooms yet — joining one remembers it'), 'warning')
+      return
+    }
+    const hostOf = (relay: string): string => { try { return new URL(relay).host } catch { return relay } }
+    const names = rooms.map(r => r.label === r.room ? r.room : `${r.room} (${r.label})`)
+    for (const r of rooms) EffectBus.emit('activity:log', { message: `${r.room} — ${hostOf(r.relay)}`, icon: '⌂' })
+    EffectBus.emit('toast:show', {
+      type: 'info',
+      title: this.#t('room.list.title', 'Rooms this device remembers'),
+      message: names.join(', '),
+      duration: 10_000,
+    })
+  }
+
+  #forget(name: string): void {
+    const room = name.trim()
+    if (!room) { this.#say(this.#t('room.forget.usage', 'room forget: name the room — "room list" shows them'), 'warning'); return }
+    const held = readRememberedRooms()
+    const { rooms, removed } = withoutRoom(held, room)
+    if (!removed) { this.#say(this.#t('room.forget.missing', `This device does not remember "${room}"`, { room }), 'warning'); return }
+    // The room this tab is in would be remembered again the moment it is
+    // rejoined (a reload): leaving comes first.
+    const zone = isJoinedHere() ? ownZone() : null
+    if (zone && held.some(r => !rooms.includes(r) && r.room === zone.room && r.secret === zone.secret)) {
+      this.#say(this.#t('room.forget.here', `You are in "${room}" — leave it first, then forget it`, { room }), 'warning')
+      return
+    }
+    saveRememberedRooms(rooms)
+    this.#say(this.#t('room.forget.done', `This device no longer remembers "${room}" — its sessions will not be announced here`, { room }), 'success')
   }
 
   // ── where things are ────────────────────────────────────────

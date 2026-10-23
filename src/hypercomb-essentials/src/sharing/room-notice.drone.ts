@@ -24,17 +24,28 @@
 // own socket to the meeting point (sendSigned), a socket of its own only when
 // the mesh meets elsewhere. A reload resumes it: the signed event (never the
 // secret) is kept in this tab's sessionStorage.
+//
+// MEMBERSHIP: whenever this tab is in a room — joined by a link, by `join`,
+// by the selector, or moved into it while joined — the room is remembered
+// (saveRememberedRooms, the list's one write; a room already remembered moves
+// to the front) and that room's "a session is starting" toast comes down.
+// When it leaves, or moves to another room, the last room's "you're in the
+// room" toast comes down. The room this tab is in needs no listening socket:
+// its notices would not be shown here anyway.
 
 import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { isJoinedHere, ownZone, readTabZone } from './membership.js'
-import { joinMeetingPlace } from './meeting-invite.join.js'
+import { isJoinedHere, ownZone, readTabZone, tabMeetingHost } from './membership.js'
+import { joinMeetingPlace, saveRememberedRooms } from './meeting-invite.join.js'
 import { MEETING_INVITE_KIND, MEETING_INVITE_VERSION } from './meeting-invite.js'
-import { NOTICE_FRESH_SEC, NOTICE_REPOST_MS, REMEMBERED_ROOMS_KEY, ROOM_NOTICE_KIND, noticeAddress, noticeKey, noticeTemplate, readNotice, readRememberedRooms, type RememberedRoom } from './room-notice.js'
+import { NOTICE_FRESH_SEC, NOTICE_REPOST_MS, REMEMBERED_ROOMS_KEY, ROOMS_CHANGED_EFFECT, ROOM_NOTICE_KIND, arrivalToastKey, noticeAddress, noticeKey, noticeTemplate, noticeToastKey, readNotice, readRememberedRooms, withRoom, type RememberedRoom } from './room-notice.js'
 
 export const ROOM_NOTICE_JOIN_EFFECT = 'room-notice:join'
 
 const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
+const LINEAGE_KEY = '@hypercomb.social/Lineage'
+const ROOM_STORE_KEY = '@hypercomb.social/RoomStore'
+const SECRET_STORE_KEY = '@hypercomb.social/SecretStore'
 const ACCESS_PROTOCOL_PREFIX = 'hc-access.'
 const ACCESS_CODE_RE = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,256}$/
 /** How long the drone waits after boot before it dials anything. */
@@ -100,7 +111,7 @@ export class RoomNoticeDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'Tells you when a room you have been in starts a session, with a Join button'
 
-  protected override listens = ['mesh:public-changed', ROOM_NOTICE_JOIN_EFFECT]
+  protected override listens = ['mesh:public-changed', ROOM_NOTICE_JOIN_EFFECT, ROOMS_CHANGED_EFFECT]
   protected override emits = ['toast:show']
 
   /** Address → its socket. */
@@ -116,13 +127,36 @@ export class RoomNoticeDrone extends Drone {
   #newest = new Map<string, number>()
   /** Resuming waits for boot: before it the mesh may not exist yet. */
   #booted = false
+  /** The room this tab was last in (its name), for its arrival toast. */
+  #joinedRoom = ''
+  #membershipQueued = false
 
   constructor() {
     super()
     try { for (const id of JSON.parse(sessionStorage.getItem(SEEN_KEY) ?? '[]') as string[]) this.#remember(id) } catch { /* none yet */ }
-    setTimeout(() => { this.#booted = true; void this.#sync(); void this.#resume() }, BOOT_DELAY_MS)
+    setTimeout(() => { this.#booted = true; void this.#sync(); void this.#resume(); void this.#membershipChanged() }, BOOT_DELAY_MS)
     // A join adds a room; another tab's join reaches this one by `storage`.
-    EffectBus.on('mesh:public-changed', () => { void this.#sync(); if (this.#booted) void this.#resume() })
+    EffectBus.on('mesh:public-changed', () => {
+      void this.#sync()
+      // Resuming waits for boot (it needs the mesh); membership does not —
+      // a join and a leave inside the first seconds still count.
+      if (this.#booted) void this.#resume()
+      this.#membershipSoon()
+    })
+    // A room changed while joined (use-live-relay, the selector, a link) says
+    // so on these; their last values replay at construction, which is harmless.
+    for (const effect of ['mesh:zone', 'mesh:room', 'mesh:secret']) {
+      EffectBus.on(effect, () => { this.#membershipSoon() })
+    }
+    // `use-live-relay` and the selector move a joined tab by setting the
+    // stores — their own change events, which no effect repeats.
+    const ioc = (window as { ioc?: { whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc
+    for (const key of [ROOM_STORE_KEY, SECRET_STORE_KEY]) {
+      ioc?.whenReady?.(key, (store) => {
+        (store as EventTarget | undefined)?.addEventListener?.('change', () => { this.#membershipSoon() })
+      })
+    }
+    EffectBus.on(ROOMS_CHANGED_EFFECT, () => { void this.#sync() })
     window.addEventListener('storage', (e) => { if (e.key === REMEMBERED_ROOMS_KEY) void this.#sync() })
     EffectBus.on<{ address?: unknown }>(ROOM_NOTICE_JOIN_EFFECT, (p) => { void this.#join(String(p?.address ?? '')) })
   }
@@ -250,19 +284,71 @@ export class RoomNoticeDrone extends Drone {
     return get<MeshShape>(MESH_KEY)?.nowSec?.() ?? Math.floor(Date.now() / 1000)
   }
 
+  // ── membership ──────────────────────────────────────────────
+
+  /** Once, after everything said in the same turn: a link's join writes the
+   *  zone, the stores and its arrival toast in one go. */
+  #membershipSoon(): void {
+    if (this.#membershipQueued) return
+    this.#membershipQueued = true
+    setTimeout(() => { this.#membershipQueued = false; void this.#membershipChanged(); void this.#sync() }, 0)
+  }
+
+  /** In a room: remember it (a room already remembered moves to the front,
+   *  keeping the link's fuller entry) and take its notice toast down. Left or
+   *  moved: take the last room's "you're in the room" toast down. */
+  async #membershipChanged(): Promise<void> {
+    const zone = isJoinedHere() ? ownZone() : null
+    if (this.#joinedRoom && this.#joinedRoom !== (zone?.room ?? '')) {
+      EffectBus.emit('toast:dismiss', { key: arrivalToastKey(this.#joinedRoom) })
+    }
+    this.#joinedRoom = zone?.room ?? ''
+    const relay = String(get<MeshShape>(MESH_KEY)?.meetingRelay?.() ?? '').trim()
+    if (!zone || !relay) return
+    const address = await noticeAddress(zone.room, zone.secret, relay).catch(() => '')
+    if (address) EffectBus.emit('toast:dismiss', { key: noticeToastKey(address) })
+    const rooms = readRememberedRooms()
+    const held = rooms.find(r => r.room === zone.room && r.secret === zone.secret && bareRelay(r.relay) === bareRelay(relay))
+    if (held) {
+      if (rooms[0] !== held) saveRememberedRooms(withRoom(rooms, { ...held, at: Date.now() }))
+      return
+    }
+    const tab = readTabZone()
+    const host = tabMeetingHost()
+    const code = tab?.code && bareRelay(tab.relay ?? '') === bareRelay(relay) ? tab.code : ''
+    const segments = [...(get<{ explorerSegments?: () => readonly string[] }>(LINEAGE_KEY)?.explorerSegments?.() ?? [])]
+      .map(s => String(s ?? '').trim()).filter(Boolean)
+    saveRememberedRooms(withRoom(rooms, {
+      room: zone.room, secret: zone.secret, relay,
+      ...(host ? { host } : {}), ...(code ? { code } : {}),
+      segments, label: zone.room, at: Date.now(),
+    }))
+  }
+
   // ── the listener's side ─────────────────────────────────────
 
   async #sync(): Promise<void> {
     if (!this.#me) {
       try { this.#me = String(await get<SignerShape>(SIGNER_KEY)?.getPublicKeyHex?.() ?? '').toLowerCase() } catch { /* unsigned */ }
     }
+    // The room this tab is in is not listened for: its notices are not shown.
+    const zone = isJoinedHere() ? ownZone() : null
+    const meeting = String(get<MeshShape>(MESH_KEY)?.meetingRelay?.() ?? '').trim()
+    const here = zone && meeting ? await noticeAddress(zone.room, zone.secret, meeting).catch(() => '') : ''
     const want = new Map<string, RememberedRoom>()
     for (const room of readRememberedRooms()) {
       const address = await noticeAddress(room.room, room.secret, room.relay).catch(() => '')
-      if (address) want.set(address, room)
+      if (address && address !== here) want.set(address, room)
     }
     for (const [address, l] of this.#listens) {
-      if (!want.has(address)) { l.closed = true; if (l.timer) clearTimeout(l.timer); if (l.renew) clearInterval(l.renew); try { l.ws?.close() } catch { /* gone */ }; this.#listens.delete(address) }
+      if (want.has(address)) continue
+      l.closed = true
+      if (l.timer) clearTimeout(l.timer)
+      if (l.renew) clearInterval(l.renew)
+      try { l.ws?.close() } catch { /* gone */ }
+      this.#listens.delete(address)
+      // Forgotten, or this tab is in it now: its notice has nothing to say.
+      EffectBus.emit('toast:dismiss', { key: noticeToastKey(address) })
     }
     for (const [address, room] of want) {
       const held = this.#listens.get(address)
@@ -349,6 +435,8 @@ export class RoomNoticeDrone extends Drone {
       actionEffect: ROOM_NOTICE_JOIN_EFFECT,
       // The address names the room; the secret never rides the bus.
       actionPayload: { address: l.address },
+      // Taken down when this tab joins the room by any path.
+      key: noticeToastKey(l.address),
     })
   }
 

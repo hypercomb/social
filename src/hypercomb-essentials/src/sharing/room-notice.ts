@@ -6,11 +6,13 @@
 // right now. This is its pure half: the rooms this device remembers, the
 // notice's address, and how a notice is read. No store, no network.
 //
-//   remembered  the rooms this device joined, newest first. Each holds the
-//               room's SECRET, so the list is a credential: it lives in this
-//               device's localStorage only, never a pool, a resource, an
-//               event or an export (feedback: secrets never in pools). The
-//               one write is the join's (meeting-invite.join.ts).
+//   remembered  the rooms this device joined — by a link, by `join`, by the
+//               selector — newest first. Each holds the room's SECRET, so the
+//               list is a credential: it lives in this device's localStorage
+//               only, never a pool, a resource, an event or an export
+//               (feedback: secrets never in pools). The one write is
+//               saveRememberedRooms (meeting-invite.join.ts); `room list` and
+//               `room forget <room>` show and prune it.
 //   address     sign('room:notice:' + the room's pool address). The pool
 //               address holds the secret, so only someone given the room can
 //               ask for — or post — its notice.
@@ -34,6 +36,15 @@ export const ROOM_NOTICE_KIND = 30569
 export const REMEMBERED_ROOMS_KEY = 'hc:rooms'
 /** How long a start notice stays news — and how long the relay keeps it. */
 export const NOTICE_FRESH_SEC = 3 * 60 * 60
+/** Said (no payload) whenever the remembered list is written, so this tab's
+ *  listeners follow at once — another tab hears the `storage` event. */
+export const ROOMS_CHANGED_EFFECT = 'room-notice:rooms-changed'
+/** The key of a room's "you're in the room" toast, taken down when you leave
+ *  it or move to another room. The room's name only — never its secret. */
+export const arrivalToastKey = (room: string): string => `room-arrival:${room}`
+/** The key of a room's "a session is starting" toast, taken down when you join it. */
+export const noticeToastKey = (address: string): string => `room-notice:${address}`
+
 /** While the host stays in the room, the notice is posted again this often. */
 export const NOTICE_REPOST_MS = 5 * 60 * 1000
 /** A device remembers this many rooms; the oldest falls off. */
@@ -102,6 +113,15 @@ export function withRoom(list: readonly RememberedRoom[], entry: RememberedRoom)
   const clean = cleanRoom(entry)
   if (!clean) return [...list]
   return [clean, ...list.filter(r => !sameRoom(r, clean))].slice(0, REMEMBERED_ROOMS_MAX)
+}
+
+/** The list without the rooms named `name` (by room or by label, case
+ *  ignored), and how many went. */
+export function withoutRoom(list: readonly RememberedRoom[], name: string): { rooms: RememberedRoom[]; removed: number } {
+  const want = String(name ?? '').trim().toLowerCase()
+  if (!want) return { rooms: [...list], removed: 0 }
+  const rooms = list.filter(r => r.room.toLowerCase() !== want && r.label.toLowerCase() !== want)
+  return { rooms, removed: list.length - rooms.length }
 }
 
 /** The notice address of a room at its meeting point, or '' (no host). */

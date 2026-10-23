@@ -33,6 +33,25 @@ module path. Importing the `@hypercomb/shared/ui` index is not equivalent: every
 re-exported component registers at module scope, so evaluating that index pulls
 the complete surface list back into the initial bundle.
 
+## Binding to a module service
+
+On the web shell the essentials bees load from OPFS AFTER the surfaces are
+built (only the boot lane loads before). So a surface that reads a module
+service once, in a field initializer, the constructor or `ngOnInit`, finds
+nothing there, and on hypercomb.io it stays empty for the whole session. The
+dev shell imports every module before bootstrap, which hides this.
+`fromRuntime(get(KEY))` is that mistake too, because it listens only if the
+target is already there. On 2026-10-23 the toasts, the command palette, the
+shortcut sheet and the presence banner's follow toggles were all dead on the
+live site this way.
+
+Bind through `window.ioc.whenReady(KEY, attach)` instead. It answers at once
+when the service is already registered (the dev shell) and later when its bee
+arrives (the web shell). Guard `attach` with a destroyed flag and remove the
+listener in `ngOnDestroy`. `toast.component.ts` is the reference. A lookup
+made at call time, in a handler or a method, needs nothing. Prove a surface
+change on the web shell (`web-4260`), not only on the dev shell.
+
 ## The two surface shapes
 
 ```typescript

@@ -3,20 +3,23 @@
 // Subscribes to CommandPaletteDrone state and renders the palette UI.
 // Forwards input changes and keyboard navigation back to the drone
 // via EffectBus effects. No business logic lives here.
+//
+// BOUND WHEN THE DRONE ARRIVES (as toast.component.ts): on the web shell the
+// drone loads with the bees, after this surface is built, so a lookup made
+// once at construction found nothing and the palette never opened on
+// hypercomb.io (found 2026-10-23).
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import {
   Component,
   computed,
   effect,
+  signal,
   ElementRef,
   ViewChild,
-  type AfterViewChecked,
-  type OnInit,
   type OnDestroy,
 } from '@angular/core'
 import { EffectBus, formatChord, type KeyBinding } from '@hypercomb/core'
-import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 
@@ -26,6 +29,8 @@ import type { CommandPaletteState, PaletteItem } from
 // Owner token for the InputGate lock held while the palette is open. Owner-
 // scoped so it composes with locks held by the editor / other overlays.
 const COMMAND_PALETTE_LOCK_OWNER = 'command-palette'
+const COMMAND_PALETTE_DRONE_KEY = '@diamondcoreprocessor.com/CommandPaletteDrone'
+const CLOSED: CommandPaletteState = { open: false, query: '', activeIndex: 0, groups: [], totalCount: 0 } as CommandPaletteState
 
 /** Structural type for the InputGate — the shared tile-input lock. Resolved
  *  at runtime via window.ioc (shared must never import from modules). */
@@ -41,18 +46,15 @@ type InputGateLike = {
   templateUrl: './command-palette.component.html',
   styleUrls: ['./command-palette.component.scss'],
 })
-export class CommandPaletteComponent implements OnInit, AfterViewChecked, OnDestroy {
+export class CommandPaletteComponent implements OnDestroy {
 
   @ViewChild('paletteInput') paletteInput!: ElementRef<HTMLInputElement>
 
   #drone: any
-  #unsub: (() => void) | null = null
-  #needsFocus = false
+  #release: (() => void) | undefined
+  #destroyed = false
 
-  private readonly state$ = fromRuntime(
-    get('@diamondcoreprocessor.com/CommandPaletteDrone') as EventTarget,
-    () => (this.#drone?.state ?? { open: false, query: '', activeIndex: 0, groups: [], totalCount: 0 }) as CommandPaletteState,
-  )
+  private readonly state$ = signal<CommandPaletteState>(CLOSED)
 
   readonly open = computed(() => this.state$().open)
   readonly groups = computed(() => this.state$().groups)
@@ -72,6 +74,27 @@ export class CommandPaletteComponent implements OnInit, AfterViewChecked, OnDest
       if (this.open()) gate.lock(COMMAND_PALETTE_LOCK_OWNER)
       else gate.unlock(COMMAND_PALETTE_LOCK_OWNER)
     })
+    // The input takes the keyboard as the palette opens — once it has
+    // rendered (as the shortcut sheet's filter does; the old after-view-
+    // checked hook never focused it, on either shell).
+    effect(() => {
+      if (!this.open()) return
+      const focus = (): void => { if (!this.#destroyed) this.paletteInput?.nativeElement?.focus() }
+      setTimeout(focus, 0)
+      requestAnimationFrame(focus)
+    })
+    window.ioc.whenReady<EventTarget>(COMMAND_PALETTE_DRONE_KEY, drone => this.#attach(drone))
+  }
+
+  #attach(drone: EventTarget): void {
+    if (this.#destroyed || !drone?.addEventListener || this.#drone) return
+    this.#drone = drone
+    const read = (): void => this.state$.set((this.#drone?.state ?? CLOSED) as CommandPaletteState)
+    // A microtask, as fromRuntime does: never inside a change-detection pass.
+    const onChange = (): void => queueMicrotask(read)
+    drone.addEventListener('change', onChange)
+    this.#release = () => drone.removeEventListener('change', onChange)
+    read()
   }
 
   readonly close = (): void => {
@@ -145,25 +168,10 @@ export class CommandPaletteComponent implements OnInit, AfterViewChecked, OnDest
     return parts
   }
 
-  ngOnInit(): void {
-    this.#drone = get('@diamondcoreprocessor.com/CommandPaletteDrone')
-
-    // watch for open state to focus input
-    this.#unsub = EffectBus.on('command-palette:state', () => {
-      if (this.open()) this.#needsFocus = true
-    })
-  }
-
-  ngAfterViewChecked(): void {
-    if (this.#needsFocus && this.paletteInput?.nativeElement) {
-      this.paletteInput.nativeElement.focus()
-      this.#needsFocus = false
-    }
-  }
-
   ngOnDestroy(): void {
+    this.#destroyed = true
+    this.#release?.()
     this.#drone = undefined
-    this.#unsub?.()
     // Release on teardown — the visibility effect won't run a final unlock
     // once destroyed, so a palette torn down while open would leave the hexes
     // locked.

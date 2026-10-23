@@ -193,6 +193,7 @@ const pubkeysOf = (list: unknown): string[] => {
 export class PresenceBannerComponent implements OnInit, OnDestroy {
 
   #unsubs: (() => void)[] = []
+  #destroyed = false
 
   /** The strip's own element — the containment test for the
    *  dismiss-on-outside-pointer handler. */
@@ -551,12 +552,19 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     const onFolded = (): void => this.folded.set(stripFolded.value)
     stripFolded.addEventListener('change', onFolded)
     this.#unsubs.push(() => stripFolded.removeEventListener('change', onFolded))
-    const swarm = this.#swarm()
-    if (swarm) {
+    // Seeded when the swarm exists: at once on the dev shell, and on the web
+    // shell when its bee arrives — after this strip mounted. Until then the
+    // follow and subscribe toggles showed off while you were following, and a
+    // click on one did the opposite of what it showed (found 2026-10-23).
+    const seed = (swarm: SwarmConsumerApi | undefined): void => {
+      if (!swarm || this.#destroyed) return
       try { this.#myLabel.set(swarm.myLabel() ?? '') } catch { /* default empty */ }
       try { this.#subscribedTo.set(swarm.subscribedTo() ?? '') } catch { /* default empty */ }
       try { this.#following.set(swarm.following() ?? '') } catch { /* default empty */ }
     }
+    const ioc = (window as { ioc?: { whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc
+    if (ioc?.whenReady) ioc.whenReady(SWARM_KEY, v => seed(v as SwarmConsumerApi))
+    else seed(this.#swarm())
 
     this.#unsubs.push(
       EffectBus.on<PresencePayload>('swarm:presence-changed', (payload) => {
@@ -905,6 +913,7 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.#destroyed = true
     for (const u of this.#unsubs) u()
     this.#unsubs.length = 0
     if (this.#downTimer) clearTimeout(this.#downTimer)

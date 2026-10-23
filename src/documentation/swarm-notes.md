@@ -192,14 +192,16 @@ ledger.
    everything you collected and organized on it, is offered in your own hive.
 
 **Starting a session.** When the session begins, the host (in the room) types
-`room start`. Everyone who has ever joined that room by its link is told:
+`room start`. Everyone who has ever joined that room is told:
 "The session in <room> is starting", with a Join button. They are told even
 if they left, or are elsewhere in their own hive. Join asks the way the link
 did. The host is not told of their own start, and anyone already in the room
 is not told again.
 
-- *Who hears it.* Every join remembers the room on that device: room, secret
-  and meeting point, newest first, at most twelve rooms. The list holds the
+- *Who hears it.* Every join remembers the room on that device (by a link,
+  by `join`, by the selector): room, secret and meeting point, newest first,
+  at most twelve rooms. `room list` shows them; `room forget <room>` stops
+  remembering one, and stops listening for it. The list holds the
   secret, so it is a credential. It stays in this device's localStorage
   (`hc:rooms`) and never goes into a pool, a resource or an event. For each
   remembered room, `room-notice.drone.ts` keeps one small socket to the
@@ -216,6 +218,10 @@ is not told again.
   given the room can ask for its notice, or post one. Its content is
   `{ label, segments, startedAt }`, never the secret. It expires three hours
   after the start.
+- *Toasts follow membership.* The "a session is starting" toast comes down
+  when you join that room by any path. On a swarm door, the "you're in the
+  room" toast comes down when you leave. Both are keyed toasts
+  (`toast:show { key }`, `toast:dismiss { key }`).
 - *Kept alive while the session runs.* A meeting point keeps events in memory
   only, so a restart would lose the notice for anyone who opens their hive
   later. While the host stays in the room, their hive posts the notice again

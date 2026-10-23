@@ -1703,6 +1703,34 @@ describe('doctrine ratchets', () => {
     assertRatchet(actual.sort(), [], 'origin-wide swarm flag read in essentials')
   })
 
+  it('a shell surface binds a late module service when it arrives — never once at construction', () => {
+    // On the web shell the essentials bees load from OPFS AFTER the shell
+    // surfaces are built; only the boot lane loads first. `fromRuntime(get(KEY))`
+    // listens only if KEY is registered at that moment, so for any other key
+    // it never listens on hypercomb.io — the toasts, the command palette and
+    // the shortcut sheet were all dead live that way (2026-10-23,
+    // documentation/shell-surfaces.md "Binding to a module service"). Bind
+    // through window.ioc.whenReady instead. The boot-lane keys are read from
+    // the source, never listed here. Empty allowlist, and it stays empty.
+    const bootKeys = new Set<string>()
+    for (const file of walk(join(ROOT, 'hypercomb-essentials/src'))) {
+      const text = readFileSync(file, 'utf8')
+      if (!/\.boot\.drone\.ts$/.test(file) && !/readonly lane = 'boot'/.test(text)) continue
+      for (const m of text.matchAll(/register\(\s*'(@diamondcoreprocessor\.com\/[A-Za-z]+)'/g)) bootKeys.add(m[1])
+    }
+    const actual: string[] = []
+    for (const dir of ['hypercomb-shared', 'hypercomb-web/src']) {
+      for (const file of walk(join(ROOT, dir))) {
+        const code = stripComments(readFileSync(file, 'utf8'))
+        for (const m of code.matchAll(/fromRuntime\(\s*get(?:<[^>]*>)?\(\s*'(@diamondcoreprocessor\.com\/[A-Za-z]+)'/g)) {
+          if (!bootKeys.has(m[1])) actual.push(`${relative(ROOT, file).replace(/\\/g, '/')}: ${m[1]}`)
+        }
+      }
+    }
+    expect(bootKeys.has('@diamondcoreprocessor.com/InputGate'), 'the boot-lane scan found nothing — its pattern drifted').toBe(true)
+    assertRatchet(actual.sort(), [], 'module service bound once at construction')
+  })
+
   it('a mesh address is a computed signature — never a word written into the source', () => {
     // THE SIGNATURES ARE THE ONLY THING THAT CAN BE QUERIED (relay.js address
     // gate, nostr-mesh #addressable): a relay refuses a read or a write at

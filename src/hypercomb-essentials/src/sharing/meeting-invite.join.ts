@@ -32,7 +32,7 @@ import { resolveInviteSecret, validateInviteBundle, meetingRelayOf, meetingHostO
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { readDoorsOf } from './zone-door.js'
 import { isJoinedHere, readTabZone, writeTabZone } from './membership.js'
-import { REMEMBERED_ROOMS_KEY, readRememberedRooms, withRoom } from './room-notice.js'
+import { REMEMBERED_ROOMS_KEY, ROOMS_CHANGED_EFFECT, arrivalToastKey, readRememberedRooms, withRoom, type RememberedRoom } from './room-notice.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const ROOM_KEY = '@hypercomb.social/RoomStore'
@@ -105,6 +105,15 @@ async function keeperOf(segments: readonly string[], meetingHost = ''): Promise<
  *  this device remembers (a credential — its home is this device). */
 function writeRaw(key: string, value: string): void {
   try { localStorage.setItem(key, value) } catch { /* this session only */ }
+}
+
+/** The rooms this device remembers, as a whole — the only place that list is
+ *  written (the join below, any other join and `room forget` come here). It
+ *  holds secrets, so it never leaves this device. Says so on the bus (no
+ *  payload) so this tab's listeners follow at once. */
+export function saveRememberedRooms(rooms: readonly RememberedRoom[]): void {
+  writeRaw(REMEMBERED_ROOMS_KEY, JSON.stringify(rooms))
+  EffectBus.emit(ROOMS_CHANGED_EFFECT, {})
 }
 
 function toast(type: string, title: string, message: string): void {
@@ -341,11 +350,11 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   // THE ROOM IS REMEMBERED on this device, so its host's `room start` reaches
   // this participant later, joined or not (room-notice.ts). It holds the
   // secret: device-local, like any credential.
-  writeRaw(REMEMBERED_ROOMS_KEY, JSON.stringify(withRoom(readRememberedRooms(), {
+  saveRememberedRooms(withRoom(readRememberedRooms(), {
     room: bundle.room, secret: bundle.secret, relay,
     ...(point.host ? { host: point.host } : {}), ...(code ? { code } : {}),
     segments: bundle.segments, label: stored.alias?.trim() || bundle.room, at: Date.now(),
-  })))
+  }))
   // THE ONE DOOR in: the same toggle the control, the shortcut and the
   // `join` word use (its zone guard lives in runtime-initializer). Only
   // when this tab is not already a member — a toggle would make it leave.
@@ -363,6 +372,9 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
       actionLabel: tr('invite.join.openNotes', 'Open the notes'),
       actionEffect: 'notes:panel',
       actionPayload: { visible: true },
+      // Taken down when this tab leaves the room or moves to another
+      // (room-notice.drone.ts).
+      key: arrivalToastKey(bundle.room),
     })
     return true
   }

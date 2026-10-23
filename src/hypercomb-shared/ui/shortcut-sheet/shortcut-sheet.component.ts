@@ -3,6 +3,11 @@
 // Subscribes to ShortcutSheetDrone state and renders three auto-generated
 // sections (slash commands, command-line operations, keyboard shortcuts) with
 // a shared filter input. No business logic — the drone owns the data.
+//
+// BOUND WHEN THE DRONE ARRIVES (as toast.component.ts): on the web shell the
+// drone loads with the bees, after this surface is built, so a lookup made
+// once at construction found nothing and /help showed nothing on
+// hypercomb.io (found 2026-10-23).
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import {
@@ -16,7 +21,6 @@ import {
   type OnDestroy,
 } from '@angular/core'
 import { EffectBus, formatChord, type KeyBinding } from '@hypercomb/core'
-import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 
@@ -26,6 +30,9 @@ import type {
   ShortcutSheetState,
   SlashCommandEntry,
 } from '@hypercomb/essentials/commands/shortcut-sheet.drone'
+
+const SHORTCUT_SHEET_DRONE_KEY = '@diamondcoreprocessor.com/ShortcutSheetDrone'
+const CLOSED = { open: false, slashCommands: [], commandLineOps: [], shortcutGroups: [] } as unknown as ShortcutSheetState
 
 @Component({
   selector: 'hc-shortcut-sheet',
@@ -37,18 +44,11 @@ import type {
 export class ShortcutSheetComponent implements OnInit, OnDestroy {
 
   #drone: any
+  #release: (() => void) | undefined
+  #destroyed = false
   #unsub: (() => void) | null = null
 
-  private readonly state$ = fromRuntime(
-    get('@diamondcoreprocessor.com/ShortcutSheetDrone') as EventTarget,
-    () =>
-      (this.#drone?.state ?? {
-        open: false,
-        slashCommands: [],
-        commandLineOps: [],
-        shortcutGroups: [],
-      }) as ShortcutSheetState,
-  )
+  private readonly state$ = signal<ShortcutSheetState>(CLOSED)
 
   readonly open = computed(() => this.state$().open)
   readonly query = signal('')
@@ -119,17 +119,29 @@ export class ShortcutSheetComponent implements OnInit, OnDestroy {
         queueMicrotask(() => this.filterInput()?.nativeElement.focus())
       }
     })
+    window.ioc.whenReady<EventTarget>(SHORTCUT_SHEET_DRONE_KEY, drone => this.#attach(drone))
+  }
+
+  #attach(drone: EventTarget): void {
+    if (this.#destroyed || !drone?.addEventListener || this.#drone) return
+    this.#drone = drone
+    const read = (): void => this.state$.set((this.#drone?.state ?? CLOSED) as ShortcutSheetState)
+    // A microtask, as fromRuntime does: never inside a change-detection pass.
+    const onChange = (): void => queueMicrotask(read)
+    drone.addEventListener('change', onChange)
+    this.#release = () => drone.removeEventListener('change', onChange)
+    read()
   }
 
   ngOnInit(): void {
-    this.#drone = get('@diamondcoreprocessor.com/ShortcutSheetDrone')
-
     this.#unsub = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
       if (payload?.cmd === 'global.escape' && this.open()) this.close()
     })
   }
 
   ngOnDestroy(): void {
+    this.#destroyed = true
+    this.#release?.()
     this.#drone = undefined
     this.#unsub?.()
   }

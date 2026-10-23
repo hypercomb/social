@@ -8,6 +8,12 @@
 //   EffectBus.emit('toast:show', { type: 'success', title: 'Done', message: 'Layout saved' })
 //   EffectBus.emit('toast:dismiss', { id: 42 })
 //   EffectBus.emit('toast:clear', undefined)
+//
+// A toast that stands for something that can end (a room you are in, a
+// session that is starting) carries a `key`: showing it again replaces the
+// one on screen, and `toast:dismiss { key }` takes it down when the thing ends.
+//   EffectBus.emit('toast:show', { type: 'info', message: '…', key: 'room-arrival' })
+//   EffectBus.emit('toast:dismiss', { key: 'room-arrival' })
 
 import { EffectBus } from '@hypercomb/core'
 
@@ -36,6 +42,7 @@ export interface ToastRequest {
   actionEffect?: string        // legacy single-action effect to emit
   actionPayload?: unknown      // legacy single-action payload
   actions?: ToastAction[]      // multi-action variant (Material combo)
+  key?: string                 // one on screen per key; dismissable by key
 }
 
 export interface Toast {
@@ -50,6 +57,7 @@ export interface Toast {
   actions: readonly ToastAction[]
   fading: boolean
   createdAt: number
+  key: string | null
 }
 
 const DEFAULT_DURATIONS: Record<ToastType, number> = {
@@ -76,14 +84,17 @@ export class ToastDrone extends EventTarget {
       this.#show(request)
     })
 
-    EffectBus.on<{ id: number }>('toast:dismiss', payload => {
+    EffectBus.on<{ id?: number; key?: string }>('toast:dismiss', payload => {
       if (payload?.id != null) this.dismiss(payload.id)
+      if (payload?.key) this.#dismissKey(payload.key)
     })
 
     EffectBus.on('toast:clear', () => this.#clearAll())
   }
 
   #show(request: ToastRequest): void {
+    const key = typeof request.key === 'string' && request.key ? request.key : null
+    if (key) this.#dismissKey(key)
     const id = this.#nextId++
     const duration = request.duration ?? DEFAULT_DURATIONS[request.type] ?? 5_000
 
@@ -101,6 +112,7 @@ export class ToastDrone extends EventTarget {
         : [],
       fading: false,
       createdAt: Date.now(),
+      key,
     }
 
     // prepend — newest on top
@@ -131,6 +143,10 @@ export class ToastDrone extends EventTarget {
       this.#toasts = this.#toasts.filter(t => t.id !== id)
       this.#emit()
     }, 280)
+  }
+
+  #dismissKey(key: string): void {
+    for (const t of this.#toasts) if (t.key === key) this.dismiss(t.id)
   }
 
   executeAction(id: number): void {

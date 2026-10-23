@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NOTICE_FRESH_SEC, REMEMBERED_ROOMS_MAX, ROOM_NOTICE_KIND, noticeAddress, noticeKey, noticeTemplate, parseRememberedRooms, readNotice, withRoom, type RememberedRoom } from './room-notice.js'
+import { NOTICE_FRESH_SEC, REMEMBERED_ROOMS_MAX, ROOM_NOTICE_KIND, noticeAddress, noticeKey, noticeTemplate, parseRememberedRooms, readNotice, withRoom, withoutRoom, type RememberedRoom } from './room-notice.js'
 
 const room = (n: number, at = n): RememberedRoom => ({ room: `room${n}`, secret: 's', relay: 'wss://hypercomb.com/meet', segments: ['a'], label: `Room ${n}`, at })
 const ADDR = 'a'.repeat(64)
@@ -22,6 +22,14 @@ describe('remembered rooms', () => {
     expect(list).toHaveLength(REMEMBERED_ROOMS_MAX)
     expect(parseRememberedRooms(JSON.stringify([...list, { room: 'x', secret: 's', relay: 'http://no' }, 7]))).toHaveLength(REMEMBERED_ROOMS_MAX)
     expect(parseRememberedRooms('not json')).toEqual([])
+  })
+
+  it('forgets a room by its name or its label, case ignored, and says how many went', () => {
+    const list = withRoom(withRoom([], room(1)), room(2))
+    expect(withoutRoom(list, 'ROOM1')).toEqual({ rooms: [list[0]], removed: 1 })
+    expect(withoutRoom(list, 'Room 2').removed).toBe(1)
+    expect(withoutRoom(list, 'nope')).toEqual({ rooms: list, removed: 0 })
+    expect(withoutRoom(list, '  ').removed).toBe(0)
   })
 })
 
