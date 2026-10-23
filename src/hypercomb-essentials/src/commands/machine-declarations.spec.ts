@@ -141,8 +141,8 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   question: ['additive', 'network'],   // one tile named with the question, marked; shared in a swarm
   tally: ['additive', 'network'],      // notes only: a ranking on each question and a scoreboard
                                        // on the page's tile; changes no answer
-  questions: ['additive', 'local'],  // walks into this layer's Q and A, back out, or stops following
-                                       // the game's host; writes nothing
+  questions: ['additive', 'network'], // walks into this layer's Q and A (a host mints and shares the
+                                       // layer's child when it has none), back out, or stops following
   // Judged on arrival (2026-10-22, Did You Know — a meeting exercise: share
   // what the others might not know with no names, reveal at the end, collect).
   'did-you-know': ['editing', 'network'],  // an idea is one note on the game's tile, shared with the room

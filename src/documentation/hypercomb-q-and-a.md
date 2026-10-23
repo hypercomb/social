@@ -33,7 +33,7 @@ server on 4253:
 
 Module `hypercomb-essentials/src/questions/`. Played through the swarm, its
 follow-the-leader and the notes desk as they are; the game adds four words,
-one name, one mark, one door, one settle and one ledger.
+one name, two marks, one door, one settle and one ledger.
 
 ## The game in sentences
 
@@ -68,6 +68,31 @@ Every layer has its own Q and A, so the questions in front of the room are
 always the page's questions. The host decides when the room looks at them
 (`questions`) and when it moves on (`questions back`, or simply walking on).
 
+## Who leads — the host's mark
+
+A participant who asks on a layer mints that layer's `<hive> q and a` child
+too: their question has to live where the host can take it from. So holding
+a child of the game's name says nothing about who leads. Every child the
+**host** mints wears the host's mark, the decoration `visual:questions:game`.
+A peer's marks stay with its layer, so the room reads the mark through the
+host's layer (its decorations slot, fetched by signature). Only a marked tile
+is an offer to join; a tile whose name merely ends in `q and a` is no game,
+and nothing hides it.
+
+- An offer is read only on a page outside every Q and A, and it goes when its
+  host leaves the room. A tab in no swarm holds no peer offers.
+- `start` joins only a host who is here now. Said by the host again, it
+  resumes. Leading follows nobody: whoever you followed before, you stop.
+- This hive's own marked child is a game it led before; the door offers it
+  back as **Lead**. A live host's offer always wins over that leftover.
+- When the host you follow leaves, the door says so and offers **Lead** to
+  carry the game on, or **Leave**.
+- Reading acts (marking taken questions, the ledger, one-click answers,
+  asking here) hold inside the Q and A of any game this hive knows. Leading
+  acts (settle, tally, `questions`, `questions back`) hold only in your own.
+- A question whose hive name is a reserved pool word is refused, as at every
+  naming gesture.
+
 ## The door — a child drawn in the chrome
 
 The game's child is a tile like any other, `<hive> q and a`, but it is never
@@ -83,6 +108,7 @@ surface) shows the page in front of you:
 | the room, before joining | *Ana leads · 3 here* | Join |
 | the host | *you lead · 3 here* | Questions · Ask · Tally |
 | a participant | *following Ana · 3 here* | Questions · Ask · Leave |
+| a participant whose host left | *Ana has left · Lead to carry it on, or Leave* | Lead · Leave |
 | inside a layer's Q and A | *this layer's questions · 3* | Back · Ask (· Tally) |
 
 *n here* is the larger of what this hive's own Q and A holds on the layer and

@@ -862,6 +862,8 @@
   "questions.asked": "\"{question}\" を質問しました — 部屋が答えられます",
   "questions.ask.exists": "\"{question}\" はすでにここで質問されています",
   "questions.ask.failed": "\"{question}\" をここでタイルにできませんでした",
+  "questions.ask.reserved": "\"{question}\" は巣が自分のために取ってある言葉です — 別の言い方で質問してください",
+  "questions.door.host-left": "{host} は退出しました · 進行して続けるか、離れてください",
   "questions.tally.none": "このページに集計する質問がありません",
   "questions.tally.done": "{questions} 問、{answers} 答えを集計 — {leader} が {takes} 取得で首位",
   "questions.tally.quiet": "{questions} 問を集計 — まだ取られた答えはありません",

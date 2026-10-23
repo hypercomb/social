@@ -21,7 +21,7 @@
 
 import { EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import { childNamesOf } from '../../history/layer-placement.js'
-import { isClaimedByTakeoverAt } from '../../commands/decoration-kind-index.js'
+import { isClaimedByTakeoverAt, presenceClaimed } from '../../commands/decoration-kind-index.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
 import { MOBILE_MODE_IOC_KEY } from '../../preferences/mobile-pheromones.js'
 
@@ -207,7 +207,9 @@ class CollectionEmptyPromptDrone {
       const layer = await history.currentLayerAt(sig)
       if (!layer) return false
       const names = await childNamesOf(history, layer as Parameters<typeof childNamesOf>[1])
-      return names.some(name => isClaimedByTakeoverAt([...segments, name]))
+      // A child a bee draws itself (claimPresence) is present, only not as a
+      // hexagon — the layer is not empty.
+      return names.some(name => isClaimedByTakeoverAt([...segments, name]) || presenceClaimed(name, segments))
     } catch {
       // No layer here (a genuinely empty location) — nothing claims anything.
       return false

@@ -28,7 +28,7 @@ export class QuestionsDrone extends Drone {
   constructor() {
     super()
     claimEntry(QUESTION_KIND)
-    claimPresence((name) => this.service.claims(name))
+    claimPresence((name, segments) => this.service.claims(name, segments))
     EffectBus.on<{ label?: string; kind?: string }>('tile:open', (p) => {
       if (p?.kind === QUESTION_KIND && p.label) this.service.open(p.label)
     })

@@ -29,6 +29,14 @@ export const GAME_NAME = 'hypercomb q and a'
  *  a tile's admitted projection (name, title, picture), not its marks, so a
  *  taken question is read by its TITLE and given the mark again. */
 export const QUESTION_KIND = 'visual:question'
+/** THE HOST'S MARK, worn by every `<hive> q and a` child the HOST mints. A
+ *  participant who asks on a layer mints that layer's child too (their
+ *  question has to live somewhere the host can take it from), so holding a
+ *  child of the game's name says nothing about who leads; wearing this mark
+ *  does. The mark stays on the host's layer, and a peer reads it through
+ *  that layer. A tile whose name merely ends in `q and a` wears none, so
+ *  it is no game. */
+export const GAME_KIND = 'visual:questions:game'
 export const QUESTIONS_KEY = '@diamondcoreprocessor.com/Questions'
 
 /** The words every game's name ends with: `<hive> q and a`. */

@@ -44,7 +44,7 @@
 //
 // A dependency: the drone (questions.drone.ts) registers it.
 
-import { EffectBus, hypercomb, moleculeKey, normalizeCell } from '@hypercomb/core'
+import { EffectBus, hypercomb, isReservedPoolWord, moleculeKey, normalizeCell } from '@hypercomb/core'
 import { callModel, configuredProviders } from '../assistant/llm-dispatch.js'
 import { llmHiveAccess } from '../assistant/llm-hive-access.js'
 import { ensureDecorationsIndexed, hasDecorationKindAt, titlesForSegments } from '../commands/decoration-kind-index.js'
@@ -52,8 +52,9 @@ import { replaceDecoration } from '../commands/decoration-manifest.js'
 import { removeTilesAt } from '../commands/remove-tiles.js'
 import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
 import { isJoinedHere } from '../sharing/membership.js'
+import { isCellPublic, setCellPublic } from '../presentation/tiles/tile-public.js'
 import {
-  BOARD_MARK, MIN_TO_MATERIALIZE, QUESTION_KIND, TALLY_MARK,
+  BOARD_MARK, GAME_KIND, MIN_TO_MATERIALIZE, QUESTION_KIND, TALLY_MARK,
   boardText, gameDepth, gameNameFor, hiveOfGame, inGame, isQuestionTitle, isTallyNote, parseCategoryNames, parsePlacedIndexes, scoreboard, settlePlan, tallyText,
   type Answer, type PageTile, type Placement, type QuestionAnswers, type SettlePlan,
 } from './questions.js'
@@ -110,6 +111,9 @@ type BrokerShape = { fetchBySig?: (sig: string, type: 'layer' | 'resource', time
 const SIG = /^[0-9a-f]{64}$/
 const FETCH_MS = 8_000
 
+/** A name folded the way molecules fold it, hyphens and spaces alike. */
+const fold = (name: string): string => moleculeKey(String(name ?? '').replace(/[-_\s]+/g, ' ').trim())
+
 /** One answer as the ledger remembers it. */
 export interface SeenAnswer { readonly text: string; readonly by: string; readonly holders: ReadonlySet<string> }
 
@@ -117,7 +121,7 @@ const get = <T>(key: string): T | undefined =>
   (window as { ioc?: { get?: <V>(k: string) => V | undefined } }).ioc?.get?.<T>(key)
 
 export type StartOutcome = { outcome: 'started' | 'resumed' | 'joined'; where: string; host?: string }
-export type AskOutcome = 'asked' | 'empty' | 'exists' | 'failed'
+export type AskOutcome = 'asked' | 'empty' | 'exists' | 'failed' | 'reserved'
 export type TallyOutcome = { pages: number; questions: number; answers: number; leader: string; takes: number }
 export type SettleOutcome = { pages: number; moved: number; categories: number; sorter: 'jev' | 'ai' | 'none' }
 
@@ -132,7 +136,11 @@ export interface DoorState {
   readonly hostLabel: string
   /** host = you lead · player = you follow the host · offered = you may join. */
   readonly role: 'host' | 'player' | 'offered' | 'none'
-  /** You stand inside a layer's Q and A. */
+  /** The game is this hive's own to lead (it led it before, or leads it). */
+  readonly mine: boolean
+  /** The host is in the room now (always true for your own game). */
+  readonly hostPresent: boolean
+  /** You stand inside a layer's Q and A of this game. */
   readonly inside: boolean
   /** How many questions (and categories) this layer's Q and A holds that this
    *  hive has seen — its own and the room's. */
@@ -142,12 +150,18 @@ export interface DoorState {
 export class Questions extends EventTarget {
   /** The game this hive is in — leading it, or following its host. */
   #game: GameOffer | null = null
-  /** Games seen in the room (folded name → offer), from tiles named like one. */
+  /** Games seen in the room (folded name → offer): a peer's tile of a game's
+   *  name that wears the host's mark, or this hive's own marked child (a
+   *  game it led before). Pruned when the host leaves the room. */
   #offered = new Map<string, GameOffer>()
+  /** The names the grid leaves out (folded), rebuilt when the games change. */
+  #claimed = new Set<string>()
   /** How many questions this layer's Q and A holds, as last counted. */
   #count = 0
   #counted = ''
-  #layers = new Map<string, { name: string; children: string[] } | null>()
+  #layers = new Map<string, { name: string; children: string[]; decorations: string[] } | null>()
+  /** Does a peer's layer (by signature) wear the host's mark? */
+  #marked = new Map<string, boolean>
   #timer: ReturnType<typeof setTimeout> | null = null
   #syncTimer: ReturnType<typeof setTimeout> | null = null
   #settling: Promise<SettleOutcome> | null = null
@@ -181,7 +195,7 @@ export class Questions extends EventTarget {
     // itself (`tile:action`, not the wand) opens nothing.
     EffectBus.on<{ label?: string }>('swarm:wand', (p) => {
       const label = String(p?.label ?? '').trim()
-      if (label && inGame(this.#segments())) this.#wanded.set(moleculeKey(label), Date.now())
+      if (label && this.#inKnownGame(this.#segments())) this.#wanded.set(moleculeKey(label), Date.now())
     })
     EffectBus.on<{ parentSegments?: readonly string[]; name?: string }>('swarm:visit-folded', (p) => { void this.#openIfWanted(p) })
     window.ioc.whenReady<SwarmNotesShape & EventTarget>('@diamondcoreprocessor.com/SwarmNotes', (swarmNotes) => {
@@ -202,26 +216,68 @@ export class Questions extends EventTarget {
    *  ones seen in the room. */
   offered(): GameOffer[] {
     const out = new Map(this.#offered)
-    if (this.#game) out.set(moleculeKey(this.#game.name), this.#game)
+    if (this.#game) out.set(fold(this.#game.name), this.#game)
     return [...out.values()]
   }
 
   /** Is `name` a game this hive knows — so its tile is the door, never a
-   *  hexagon? Asked by the grid for every name it would draw. */
-  claims(name: string): boolean {
-    if (hiveOfGame(name) === null) return false
-    const key = moleculeKey(String(name).replace(/[-_\s]+/g, ' ').trim())
-    return this.offered().some(g => moleculeKey(g.name.replace(/[-_\s]+/g, ' ').trim()) === key)
+   *  hexagon? Asked by the grid for every name it would draw, on the page at
+   *  `segments`. Names inside a Q and A are never claimed: there they are
+   *  questions and categories, whatever they are called. */
+  claims(name: string, segments: readonly string[] = []): boolean {
+    if (this.#claimed.size === 0 || gameDepth(segments) >= 0) return false
+    return this.#claimed.has(fold(name))
   }
 
   /** What the door shows where you stand. */
   door(): DoorState {
     const here = this.#segments()
-    const inside = gameDepth(here) >= 0
-    const game = this.#game ?? [...this.#offered.values()][0] ?? null
-    if (!game) return { name: '', host: '', hostLabel: '', role: 'none', inside, count: 0 }
+    const game = this.#game ?? this.#liveOffers()[0] ?? null
+    if (!game) return { name: '', host: '', hostLabel: '', role: 'none', mine: false, hostPresent: false, inside: false, count: 0 }
+    const depth = gameDepth(here)
+    const inside = depth >= 0 && fold(here[depth]) === fold(game.name)
     const role = this.#game ? (this.hosting() ? 'host' : 'player') : 'offered'
-    return { name: game.name, host: game.host, hostLabel: this.#labelOf(game.host), role, inside, count: this.#count }
+    const mine = !!this.#me && game.host === this.#me
+    return { name: game.name, host: game.host, hostLabel: this.#labelOf(game.host), role, mine, hostPresent: this.#present(game.host), inside, count: this.#count }
+  }
+
+  /** Offers whose host is in the room now (or is this hive). */
+  #liveOffers(): GameOffer[] {
+    return [...this.#offered.values()].filter(g => this.#present(g.host))
+  }
+
+  /** Is `pubkey` in the room now? This hive always is. */
+  #present(pubkey: string): boolean {
+    if (!pubkey) return false
+    if (pubkey === this.#me) return true
+    try {
+      const swarm = get<{ participantsInZone?: () => readonly string[] }>('@diamondcoreprocessor.com/SwarmDrone')
+      return (swarm?.participantsInZone?.() ?? []).includes(pubkey)
+    } catch { return false }
+  }
+
+  /** Is this page inside a layer's Q and A of the game this hive is in? */
+  #inOurGame(page: readonly string[]): boolean {
+    const depth = gameDepth(page)
+    return depth >= 0 && !!this.#game && fold(page[depth]) === fold(this.#game.name)
+  }
+
+  /** Is this page inside a layer's Q and A of ANY game this hive knows —
+   *  the one it is in, or one the room offers? Reading acts (marking taken
+   *  questions, the ledger, one-click answers, asking here) hold there;
+   *  leading acts (settle, tally, opening, back) hold only in our own. A
+   *  tile that merely ends in `q and a` is no known game. */
+  #inKnownGame(page: readonly string[]): boolean {
+    const depth = gameDepth(page)
+    return depth >= 0 && this.#claimed.has(fold(page[depth]))
+  }
+
+  /** Rebuild the names the grid leaves out; tell the grid when they change. */
+  #reclaim(): void {
+    const next = new Set(this.offered().map(g => fold(g.name)))
+    const same = next.size === this.#claimed.size && [...next].every(k => this.#claimed.has(k))
+    this.#claimed = next
+    if (!same) EffectBus.emit('presence:claims-changed', { names: [...next] })
   }
 
   /** The last settle pass, page by page — what the page held, what the plan
@@ -247,21 +303,33 @@ export class Questions extends EventTarget {
     const here = this.#segments()
     if (!name) return { outcome: 'resumed', where: here.join('/') }
     const me = await this.#whoAmI()
-    const key = moleculeKey(name)
-    const offer = this.#offered.get(key)
-    if (offer && offer.host && offer.host !== me) return this.join(offer)
-
-    this.#game = { name, host: me }
-    const swarm = get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')
-    try { swarm?.setOpenForSubscribers?.(true) } catch { /* the room still sees the game tile */ }
+    const key = fold(name)
     const at = gameDepth(here) >= 0 ? here.slice(0, gameDepth(here)) : here
-    const tiles = await this.#children(at)
-    const held = tiles?.find(t => moleculeKey(t.name) === key)
-    if (!held) {
-      EffectBus.emit('cell:added', { cell: name, segments: [...at] })
-      await new hypercomb().act()
-      await this.#settled()
+    const swarm = get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')
+
+    // Already in this game: leading it resumes; following its host, while
+    // the host is here, stays joined.
+    if (this.#game && fold(this.#game.name) === key) {
+      if (this.hosting()) {
+        await this.#ensureLayerGame(at, this.#game.name, true)
+        this.#schedule(0)
+        return { outcome: 'resumed', where: at.join('/'), host: me }
+      }
+      if (this.#present(this.#game.host)) return { outcome: 'joined', where: here.join('/'), host: this.#game.host }
     }
+
+    // Someone in the room leads it: join them.
+    const offer = this.#offered.get(key)
+    if (offer && offer.host !== me && this.#present(offer.host)) return this.join(offer)
+
+    // Lead it. Whoever this hive followed before, it follows nobody now.
+    if (swarm?.following?.()) { try { await swarm.follow?.(null) } catch { /* not following after all */ } }
+    const rows = await this.#children(at)
+    const held = rows?.find(t => fold(t.name) === key)
+    this.#game = { name: held?.name ?? name, host: me }
+    // Claimed before it is minted, so the incremental add never paints it.
+    this.#reclaim()
+    await this.#ensureLayerGame(at, this.#game.name, true)
     this.#changed()
     this.#schedule()
     return { outcome: held ? 'resumed' : 'started', where: at.join('/'), host: me }
@@ -274,6 +342,7 @@ export class Questions extends EventTarget {
     try { await swarm?.follow?.(offer.host) } catch { /* following failed: the door still works */ }
     const there = swarm?.segmentsFor?.(offer.host) ?? []
     if (there.length) get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw?.(there)
+    this.#reclaim()
     this.#changed()
     return { outcome: 'joined', where: [...there].join('/'), host: offer.host }
   }
@@ -283,10 +352,11 @@ export class Questions extends EventTarget {
     const game = this.#game
     if (!game) return
     const swarm = get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')
-    if (!this.hosting() && swarm?.following?.() === game.host) {
+    if (game.host && swarm?.following?.() === game.host) {
       try { await swarm.follow?.(null) } catch { /* not following after all */ }
     }
     this.#game = null
+    this.#reclaim()
     this.#changed()
   }
 
@@ -297,8 +367,8 @@ export class Questions extends EventTarget {
     const game = this.#game
     if (!game) return 'no-game'
     const here = this.#segments()
-    if (gameDepth(here) >= 0) return 'inside'
-    if (this.hosting()) await this.#ensureLayerGame(here, game.name)
+    if (this.#inOurGame(here)) return 'inside'
+    if (this.hosting()) await this.#ensureLayerGame(here, game.name, true)
     get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw?.([...here, game.name])
     this.#changed()
     return 'opened'
@@ -307,19 +377,38 @@ export class Questions extends EventTarget {
   /** Back out of the Q and A to the layer it belongs to. */
   back(): boolean {
     const here = this.#segments()
-    const depth = gameDepth(here)
-    if (depth < 0) return false
-    get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw?.(here.slice(0, depth))
+    if (!this.#inOurGame(here)) return false
+    get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw?.(here.slice(0, gameDepth(here)))
     return true
   }
 
-  /** Make sure the layer at `segments` holds its Q and A child. */
-  async #ensureLayerGame(segments: readonly string[], name: string): Promise<void> {
+  /** Make sure the layer at `segments` holds its Q and A child, shared with
+   *  the room while this tab is in a swarm (a child minted earlier, or
+   *  outside the swarm, is shared now too). The HOST's child wears the
+   *  host's mark — that, not the name, is what tells the room who leads. */
+  async #ensureLayerGame(segments: readonly string[], name: string, host: boolean): Promise<void> {
     const rows = await this.#children(segments)
-    if (rows?.some(r => moleculeKey(r.name) === moleculeKey(name))) return
-    EffectBus.emit('cell:added', { cell: name, segments: [...segments] })
-    await new hypercomb().act()
-    await this.#settled()
+    const held = rows?.find(r => fold(r.name) === fold(name))
+    const cell = held?.name ?? name
+    if (!held) {
+      EffectBus.emit('cell:added', { cell, segments: [...segments] })
+      await new hypercomb().act()
+      await this.#settled()
+    }
+    const at = [...segments, cell]
+    if (host && !hasDecorationKindAt(at, GAME_KIND)) {
+      await ensureDecorationsIndexed([cell], segments)
+      if (!hasDecorationKindAt(at, GAME_KIND)) {
+        await replaceDecoration({ kind: GAME_KIND, appliesTo: at, segments: at, payload: { version: 1 }, mark: 'persistent' })
+      }
+    }
+    if (isJoinedHere()) {
+      const location = '/' + segments.join('/')
+      if (!isCellPublic(location, cell)) {
+        setCellPublic(location, cell, true)
+        EffectBus.emit('tile:public-changed', { cell, location, public: true })
+      }
+    }
   }
 
   // ── ask ────────────────────────────────────────────────────────────────
@@ -334,10 +423,13 @@ export class Questions extends EventTarget {
     const question = String(text ?? '').replace(/\s+/g, ' ').trim()
     const name = normalizeCell(question)
     if (!question || !name) return 'empty'
+    // The naming gesture's gate (src/CLAUDE.md): a reserved pool word is
+    // never a tile's name, however it was asked.
+    if (isReservedPoolWord(name)) return 'reserved'
     const here = this.#segments()
     const game = this.#game
-    const page = gameDepth(here) < 0 && game ? [...here, game.name] : here
-    if (page !== here) await this.#ensureLayerGame(here, game!.name)
+    const page = game && !this.#inKnownGame(here) ? [...here, game.name] : here
+    if (page !== here) await this.#ensureLayerGame(here, game!.name, this.hosting())
     const tiles = await this.#children(page)
     if (tiles?.some(t => moleculeKey(t.name) === moleculeKey(name))) return 'exists'
     if (page === here) {
@@ -388,7 +480,7 @@ export class Questions extends EventTarget {
     this.#wanded.delete(key)
     if (Date.now() - at > WAND_MS) return
     const page = (p?.parentSegments ?? this.#segments()).map(s => String(s ?? '').trim()).filter(Boolean)
-    if (!inGame(page)) return
+    if (!this.#inKnownGame(page)) return
     await this.#settled()
     await this.#markQuestions(page, [name])
     if (hasDecorationKindAt([...page, name], QUESTION_KIND)) this.open(name)
@@ -416,9 +508,8 @@ export class Questions extends EventTarget {
     // and that Q and A's tree is settled page by page.
     if (!this.hosting()) return none
     const here = this.#segments()
-    const depth = gameDepth(here)
-    if (depth < 0) return none
-    const root = here.slice(0, depth + 1)
+    if (!this.#inOurGame(here)) return none
+    const root = here.slice(0, gameDepth(here) + 1)
     await this.#takeRoomTiles(here)
 
     const pages = await this.#tree(root)
@@ -604,9 +695,9 @@ export class Questions extends EventTarget {
     // Inside a layer's Q and A: its whole tree, scoreboard on its tile. On a
     // layer while in the game: that layer's Q and A. Elsewhere: this page.
     const here = this.#segments()
-    const depth = gameDepth(here)
-    const root = depth >= 0 ? here.slice(0, depth + 1) : this.#game ? [...here, this.#game.name] : here
-    const pages = depth >= 0 || this.#game ? await this.#tree(root) : [here]
+    const ours = this.#inOurGame(here)
+    const root = ours ? here.slice(0, gameDepth(here) + 1) : this.#game ? [...here, this.#game.name] : here
+    const pages = ours || this.#game ? await this.#tree(root) : [here]
     const notes = get<NotesShape>('@diamondcoreprocessor.com/NotesService')
     if (!notes) return null
     const swarmNotes = get<SwarmNotesShape>('@diamondcoreprocessor.com/SwarmNotes')
@@ -711,44 +802,59 @@ export class Questions extends EventTarget {
     const swarm = get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')
     const peers = isJoinedHere() ? (swarm?.peerTilesAtCurrentSig?.() ?? []) : []
 
-    // THE ROOM'S GAMES. A tile named `<hive> q and a` on any page is a game
-    // somebody leads: a peer's names its host; this hive's own, when it is
-    // not in a game, is one it led before (say `start` to lead it again).
-    const before = this.offered().map(g => g.name).sort().join('\n')
-    for (const t of peers) {
-      if (hiveOfGame(t.name) === null || !t.peerPubkey) continue
-      const key = moleculeKey(t.name)
-      if (!this.#offered.has(key)) this.#offered.set(key, { name: t.name, host: t.peerPubkey })
-    }
-    if (!this.#game) {
-      for (const r of rows) {
-        const key = moleculeKey(r.name)
-        if (hiveOfGame(r.name) !== null && !this.#offered.has(key)) this.#offered.set(key, { name: r.name, host: me })
+    // THE ROOM'S GAMES — read on a page outside every Q and A (inside one,
+    // names are questions and categories). A peer's tile of a game's name is
+    // a game only when its layer wears the HOST'S MARK: a participant who
+    // asked holds a child of that name too, and must never be taken for the
+    // host. This hive's own marked child, when it is in no game, is one it
+    // led before (`start` leads it again). A live host's offer replaces a
+    // leftover one of this hive's own; an offer goes when its host leaves
+    // the room, and every peer offer goes when this tab is in no swarm.
+    const depth = gameDepth(page)
+    if (depth < 0) {
+      if (isJoinedHere()) {
+        for (const t of peers) {
+          if (hiveOfGame(t.name) === null || !t.peerPubkey || t.peerPubkey === me) continue
+          const key = fold(t.name)
+          const held = this.#offered.get(key)
+          if (held && held.host !== me && this.#present(held.host)) continue
+          if (!(await this.#peerMarked(String((t as { layerSig?: unknown }).layerSig ?? '')))) continue
+          this.#offered.set(key, { name: t.name, host: t.peerPubkey })
+        }
+      }
+      if (!this.#game) {
+        const named = rows.filter(r => hiveOfGame(r.name) !== null)
+        if (named.length) await ensureDecorationsIndexed(named.map(r => r.name), page)
+        for (const r of named) {
+          const key = fold(r.name)
+          const held = this.#offered.get(key)
+          if (held && held.host !== me && this.#present(held.host)) continue
+          if (hasDecorationKindAt([...page, r.name], GAME_KIND)) this.#offered.set(key, { name: r.name, host: me })
+        }
       }
     }
-    if (this.offered().map(g => g.name).sort().join('\n') !== before) {
-      // A game just became known: its tiles are the door now, never a
-      // hexagon — one processor pass redraws the grid without them.
-      void new hypercomb().act()
+    for (const [key, offer] of this.#offered) {
+      if (offer.host !== me && (!isJoinedHere() || !this.#present(offer.host))) this.#offered.delete(key)
     }
+    this.#reclaim()
 
     // THE COUNT for the door: inside, the tiles on this page; on a layer,
     // the questions in its Q and A — this hive's own child and the room's.
-    const game = this.#game ?? this.offered()[0] ?? null
-    const depth = gameDepth(page)
+    const game = this.#game ?? this.#liveOffers()[0] ?? null
+    const ours = game ? depth >= 0 && fold(page[depth]) === fold(game.name) : false
     let count = 0
-    if (depth >= 0) {
-      count = new Set([...rows.map(r => moleculeKey(r.name)), ...peers.map(t => moleculeKey(t.name))]).size
-    } else if (game) {
+    if (ours) {
+      count = new Set([...rows.map(r => fold(r.name)), ...peers.map(t => fold(t.name))]).size
+    } else if (game && depth < 0) {
       // The larger of what this hive's own Q and A holds here and what each
       // participant's lists. Never a sum: the host takes the room's questions
       // into their own, so a sum would count a taken question twice — and a
       // peer's child layers need not be fetchable yet, only their count is.
-      const key = moleculeKey(game.name)
-      const own = rows.find(r => moleculeKey(r.name) === key)
+      const key = fold(game.name)
+      const own = rows.find(r => fold(r.name) === key)
       count = own ? (await this.#children([...page, own.name]) ?? []).length : 0
       for (const t of peers) {
-        if (moleculeKey(t.name) !== key) continue
+        if (fold(t.name) !== key) continue
         const layer = await this.#layer(String((t as { layerSig?: unknown }).layerSig ?? ''))
         count = Math.max(count, layer?.children.length ?? 0)
       }
@@ -756,7 +862,7 @@ export class Questions extends EventTarget {
     const counted = `${page.join('/')}\n${count}`
     if (counted !== this.#counted) { this.#counted = counted; this.#count = count; this.#changed() }
 
-    if (depth < 0) return
+    if (!this.#inKnownGame(page)) return
     await this.#markQuestions(page, rows.map(r => r.name))
     const swarmNotes = get<SwarmNotesShape>('@diamondcoreprocessor.com/SwarmNotes')
     if (!swarmNotes || !isJoinedHere()) return
@@ -769,23 +875,60 @@ export class Questions extends EventTarget {
   /** A layer by its signature — this hive's own, else the room's through the
    *  content broker (mesh-first from the peer while they are here). Its name
    *  and its children's signatures, remembered by signature. */
-  async #layer(sig: string): Promise<{ name: string; children: string[] } | null> {
+  async #layer(sig: string): Promise<{ name: string; children: string[]; decorations: string[] } | null> {
     if (!SIG.test(sig)) return null
     if (this.#layers.has(sig)) return this.#layers.get(sig) ?? null
-    let parsed: { name?: unknown; children?: unknown } | null = null
+    let parsed: { name?: unknown; children?: unknown; decorations?: unknown } | null = null
     try {
-      const history = get<{ getLayerBySig?: (s: string) => Promise<{ name?: unknown; children?: unknown } | null> }>('@diamondcoreprocessor.com/HistoryService')
+      const history = get<{ getLayerBySig?: (s: string) => Promise<{ name?: unknown; children?: unknown; decorations?: unknown } | null> }>('@diamondcoreprocessor.com/HistoryService')
       parsed = (await history?.getLayerBySig?.(sig)) ?? null
       if (!parsed) {
         const bytes = await get<BrokerShape>('@diamondcoreprocessor.com/ContentBrokerDrone')?.fetchBySig?.(sig, 'layer', FETCH_MS)
         if (bytes) parsed = JSON.parse(new TextDecoder().decode(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes))
       }
     } catch { parsed = null }
+    const sigs = (v: unknown): string[] => Array.isArray(v) ? v.map(String).filter(s => SIG.test(s)) : []
     const layer = parsed
-      ? { name: String(parsed.name ?? ''), children: Array.isArray(parsed.children) ? parsed.children.map(String).filter(s => SIG.test(s)) : [] }
+      ? { name: String(parsed.name ?? ''), children: sigs(parsed.children), decorations: sigs(parsed.decorations) }
       : null
     if (layer) this.#layers.set(sig, layer)
     return layer
+  }
+
+  /** Does a peer's layer wear the HOST'S MARK? Its decoration entries are
+   *  read by signature — a record, or an envelope naming one — from this
+   *  hive's store, else through the content broker. Remembered by layer
+   *  signature: marking the child makes a new layer, so a stale answer
+   *  never outlives the layer it was about. */
+  async #peerMarked(layerSig: string): Promise<boolean> {
+    if (!SIG.test(layerSig)) return false
+    const known = this.#marked.get(layerSig)
+    if (known !== undefined) return known
+    const layer = await this.#layer(layerSig)
+    if (!layer) return false
+    let marked = false
+    const read = async (sig: string): Promise<unknown> => {
+      try {
+        const store = get<{ getResource?: (s: string) => Promise<Blob | null | undefined> }>('@hypercomb.social/Store')
+        const blob = await store?.getResource?.(sig)
+        if (blob) return JSON.parse(await blob.text())
+        const bytes = await get<BrokerShape>('@diamondcoreprocessor.com/ContentBrokerDrone')?.fetchBySig?.(sig, 'resource', FETCH_MS)
+        return bytes ? JSON.parse(new TextDecoder().decode(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes)) : null
+      } catch { return null }
+    }
+    const kindOf = (v: unknown): string => String((v as { kind?: unknown } | null)?.kind ?? '')
+    for (const sig of layer.decorations) {
+      const record = await read(sig)
+      if (kindOf(record) === GAME_KIND) { marked = true; break }
+      if (record && typeof record === 'object' && !kindOf(record)) {
+        for (const inner of Object.values(record as Record<string, unknown>)) {
+          if (typeof inner === 'string' && SIG.test(inner) && kindOf(await read(inner)) === GAME_KIND) { marked = true; break }
+        }
+        if (marked) break
+      }
+    }
+    this.#marked.set(layerSig, marked)
+    return marked
   }
 
   #labelOf(pubkey: string): string {
@@ -836,7 +979,9 @@ export class Questions extends EventTarget {
    *  all read one thing. Outside the game nothing is inferred. */
   async #markQuestions(page: readonly string[], names: readonly string[]): Promise<void> {
     await ensureDecorationsIndexed(names, page)
-    if (!inGame(page)) return
+    // Only inside a game this hive knows — never under some other tile
+    // whose name happens to end in `q and a`.
+    if (!this.#inKnownGame(page)) return
     for (const name of names) {
       const at = [...page, name]
       if (hasDecorationKindAt(at, QUESTION_KIND)) continue

@@ -5,8 +5,8 @@
 // leaves the name out, claimPresence); it is drawn HERE, once, in the chrome,
 // on every page of the swarm, saying what the page in front of you holds:
 //
-//   offered  "<host> leads · 3 here"            Join
-//   leading  "you lead · 3 questions here"      Questions · Ask · Tally
+//   offered  "<host> leads · 3 here"            Join (Lead, for your own)
+//   leading  "you lead · 3 here"                Questions · Ask · Tally
 //   playing  "following <host> · 3 here"        Questions · Ask · Leave
 //   inside   "this layer's questions · 3"       Back · Ask (· Tally)
 //
@@ -23,15 +23,22 @@ import { QUESTIONS_KEY, hiveOfGame } from './questions.js'
 import type { DoorState, Questions } from './questions.service.js'
 
 export const QUESTIONS_DOOR_SURFACE = 'hc-questions-door'
-/** Above the hive (59989) and the phone list (59990), below the controls bar
- *  (60000) and every tool window (100002). */
+/** Above the hive (59989), the phone list (59990) and the presence strip
+ *  (59990), below the controls bar (60000) and every tool window (100002). */
 const DOOR_Z = 59994
 const STYLE_ID = 'hc-questions-door-css'
 
+// Placed BELOW the presence strip (presence-banner.component.scss: it sits
+// just under the header and is 1.85rem tall), on the same header anchors, so
+// the two never overlap in a swarm — where both always show.
 const CSS = `
-hc-questions-door { position: fixed; z-index: ${DOOR_Z}; top: calc(env(safe-area-inset-top, 0px) + 64px); left: 50%;
-  transform: translateX(-50%); max-width: calc(100vw - 32px); display: none; pointer-events: auto;
+hc-questions-door { position: fixed; z-index: ${DOOR_Z};
+  top: max(calc(2.5rem * var(--hc-header-zoom, 1) + 2.75rem), calc(var(--hc-header-anchor, 2.5rem) + 2.4rem));
+  left: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); display: none; pointer-events: auto;
   font: 500 0.875rem/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+@media (pointer: coarse) {
+  hc-questions-door { top: max(calc(3.5rem * var(--hc-header-zoom, 1) + 2.75rem), calc(var(--hc-header-anchor, 3.5rem) + 3.4rem)); }
+}
 hc-questions-door[data-open] { display: block; }
 hc-questions-door .qa { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
   padding: 0.5rem 0.625rem 0.5rem 0.5rem; border-radius: 4px;
@@ -92,6 +99,7 @@ export class QuestionsDoorElement extends HTMLElement {
     service?.addEventListener('change', render)
     this.#cleanups.push(() => service?.removeEventListener('change', render))
     this.#cleanups.push(EffectBus.on('render:cell-count', render))
+    this.#cleanups.push(EffectBus.on('locale:changed', () => { this.#last = ''; this.#render() }))
     this.#render()
   }
 
@@ -107,12 +115,21 @@ export class QuestionsDoorElement extends HTMLElement {
     const door = this.#service()?.door()
     if (!door || !door.name || door.role === 'none') {
       this.removeAttribute('data-open')
+      this.#asking = false
       this.#last = ''
       return
     }
-    const key = JSON.stringify(door) + (this.#asking ? '\nasking' : '')
+    // Asking belongs to a game you are in; an offer has no Ask.
+    if (door.role === 'offered') this.#asking = false
+    const lang = document.documentElement.lang || ''
+    const key = JSON.stringify(door) + `\n${lang}` + (this.#asking ? '\nasking' : '')
     if (key === this.#last) return
     this.#last = key
+
+    // Keep what the participant is typing across the rebuild.
+    const typing = this.querySelector('input') as HTMLInputElement | null
+    const draft = typing ? { value: typing.value, start: typing.selectionStart, end: typing.selectionEnd, focused: document.activeElement === typing } : null
+
     this.setAttribute('data-open', '')
     this.setAttribute('data-role', door.role)
     this.toggleAttribute('data-inside', door.inside)
@@ -130,7 +147,14 @@ export class QuestionsDoorElement extends HTMLElement {
     }
     const form = this.querySelector('form')
     form?.addEventListener('submit', (e) => { e.preventDefault(); e.stopPropagation(); void this.#ask(form) })
-    if (this.#asking) (form?.querySelector('input') as HTMLInputElement | null)?.focus()
+    const input = form?.querySelector('input') as HTMLInputElement | null
+    if (input && draft && this.#asking) {
+      input.value = draft.value
+      if (draft.focused) {
+        input.focus()
+        try { input.setSelectionRange(draft.start ?? draft.value.length, draft.end ?? draft.value.length) } catch { /* not a text field */ }
+      }
+    }
   }
 
   #sub(door: DoorState): string {
@@ -138,6 +162,7 @@ export class QuestionsDoorElement extends HTMLElement {
     if (door.inside) return t('questions.door.inside', "this layer's questions · {count}", { count: door.count })
     if (door.role === 'offered') return `${t('questions.door.leads', '{host} leads', { host: door.hostLabel })} · ${here}`
     if (door.role === 'host') return `${t('questions.door.you-lead', 'you lead')} · ${here}`
+    if (!door.hostPresent) return t('questions.door.host-left', '{host} has left · Lead to carry it on, or Leave', { host: door.hostLabel })
     return `${t('questions.door.following', 'following {host}', { host: door.hostLabel })} · ${here}`
   }
 
@@ -145,10 +170,14 @@ export class QuestionsDoorElement extends HTMLElement {
     const button = (act: string, label: string, primary = false): string =>
       `<button type="button" data-act="${act}"${primary ? ' class="qa-primary"' : ''}>${escape(label)}</button>`
     if (door.role === 'offered') {
-      const lead = door.host && door.hostLabel === t('questions.door.you', 'you')
-      return button('join', lead ? t('questions.door.lead', 'Lead') : t('questions.door.join', 'Join'), true)
+      return button('join', door.mine ? t('questions.door.lead', 'Lead') : t('questions.door.join', 'Join'), true)
     }
     const out: string[] = []
+    if (door.role === 'player' && !door.hostPresent) {
+      out.push(button('join', t('questions.door.lead', 'Lead'), true))
+      out.push(button('leave', t('questions.door.leave', 'Leave')))
+      return out.join('')
+    }
     out.push(door.inside ? button('back', t('questions.door.back', 'Back')) : button('open', t('questions.door.questions', 'Questions'), true))
     out.push(button('ask', t('questions.door.ask', 'Ask'), door.inside))
     if (door.role === 'host') out.push(button('tally', t('questions.door.tally', 'Tally')))
@@ -162,25 +191,35 @@ export class QuestionsDoorElement extends HTMLElement {
     if (act === 'join') {
       const hive = hiveOfGame(door.name) ?? ''
       const result = await service.startGame(hive)
+      const params = { game: door.name, host: door.hostLabel, where: result.where || '/' }
       say(result.outcome === 'joined'
-        ? t('questions.joined', 'you joined {game} — you follow {host} through the hive', { game: door.name, host: door.hostLabel })
-        : t('questions.started', '{game} started at /{where}', { game: door.name, where: result.where || '/' }))
+        ? t('questions.joined', 'you joined {game} — you follow {host} through the hive', params)
+        : result.outcome === 'resumed'
+          ? t('questions.resumed', '{game} is on at /{where} — you lead it again', params)
+          : t('questions.started', '{game} started at /{where}', params))
     } else if (act === 'open') {
       await service.openQuestions()
     } else if (act === 'back') {
       service.back()
     } else if (act === 'leave') {
+      this.#asking = false
       await service.leaveGame()
       say(t('questions.left', 'you left {game}', { game: door.name }))
     } else if (act === 'tally') {
       const result = await service.tally()
-      say(result
-        ? t('questions.tally.done', 'tallied {questions} questions, {answers} answers — {leader} leads with {takes} takes', { questions: result.questions, answers: result.answers, leader: result.leader, takes: result.takes })
-        : t('questions.tally.none', 'no questions on this page to tally'))
+      if (!result) say(t('questions.tally.none', 'no questions on this page to tally'))
+      else {
+        const params = { questions: result.questions, answers: result.answers, leader: result.leader, takes: result.takes }
+        say(result.takes > 0
+          ? t('questions.tally.done', 'tallied {questions} questions, {answers} answers — {leader} leads with {takes} takes', params)
+          : t('questions.tally.quiet', 'tallied {questions} questions — no answer has been taken yet', params))
+      }
     } else if (act === 'ask') {
       this.#asking = !this.#asking
       this.#last = ''
       this.#render()
+      // Focus moves to the field only on the press that opens it.
+      if (this.#asking) (this.querySelector('form input') as HTMLInputElement | null)?.focus()
     }
   }
 
@@ -196,5 +235,6 @@ export class QuestionsDoorElement extends HTMLElement {
       this.#render()
     } else if (outcome === 'exists') say(t('questions.ask.exists', '"{question}" is already asked here', { question: text }))
     else if (outcome === 'failed') say(t('questions.ask.failed', '"{question}" could not be made a tile here', { question: text }))
+    else if (outcome === 'reserved') say(t('questions.ask.reserved', '"{question}" names a word the hive keeps for itself — ask it another way', { question: text }))
   }
 }

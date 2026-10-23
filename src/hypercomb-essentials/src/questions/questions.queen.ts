@@ -32,7 +32,9 @@ export class QuestionsQueenBee extends QueenBee {
     example: 'questions',
     bare: true,
     reach: 'additive',
-    scope: 'local',
+    // network: a host walking into a layer's questions mints and shares that
+    // layer's Q and A child when it has none yet.
+    scope: 'network',
   }
 
   override slashComplete(args: string): readonly string[] {

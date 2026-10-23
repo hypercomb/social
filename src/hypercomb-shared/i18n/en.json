@@ -1017,6 +1017,8 @@
   "questions.asked": "asked \"{question}\" — the room can answer it now",
   "questions.ask.exists": "\"{question}\" is already asked here",
   "questions.ask.failed": "\"{question}\" could not be made a tile here",
+  "questions.ask.reserved": "\"{question}\" names a word the hive keeps for itself — ask it another way",
+  "questions.door.host-left": "{host} has left · Lead to carry it on, or Leave",
   "questions.tally.none": "no questions on this page to tally",
   "questions.tally.done": "tallied {questions} questions, {answers} answers — {leader} leads with {takes} takes",
   "questions.tally.quiet": "tallied {questions} questions — no answer has been taken yet",

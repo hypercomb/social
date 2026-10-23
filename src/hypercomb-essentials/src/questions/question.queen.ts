@@ -38,6 +38,7 @@ export class QuestionQueenBee extends QueenBee {
     if (outcome === 'asked') this.#say(this.#t('questions.asked', `asked "${text}" — the room can answer it now`, { question: text }))
     else if (outcome === 'exists') this.#say(this.#t('questions.ask.exists', `"${text}" is already asked here`, { question: text }))
     else if (outcome === 'failed') this.#say(this.#t('questions.ask.failed', `"${text}" could not be made a tile here`, { question: text }))
+    else if (outcome === 'reserved') this.#say(this.#t('questions.ask.reserved', `"${text}" names a word the hive keeps for itself — ask it another way`, { question: text }))
   }
 
   #t(key: string, fallback: string, params?: Record<string, string | number>): string {
