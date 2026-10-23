@@ -119,6 +119,7 @@
   /* MEETINGS list — collapsed rows: name · type · who's coming */
   .mh .rows{list-style:none;display:grid;border-top:2px solid var(--divider)}
   .mh .rows .ghead{border-bottom:0}
+  .mh .rows button.pinned b::before{content:"";display:inline-block;width:8px;height:8px;background:var(--accent);margin-right:7px;vertical-align:1px}
   .mh .rows button{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px var(--s3);align-items:center;text-align:left;cursor:pointer;
     width:100%;border:0;border-bottom:1px solid var(--divider);background:transparent;color:var(--text);font:inherit;padding:var(--s3) var(--s1)}
   .mh .rows button:hover{background:color-mix(in srgb,var(--text) 5%,transparent)}
@@ -207,7 +208,7 @@
   <div class="view" data-view>
 
     <!-- 1 · MEETING -->
-    <section class="panel on" data-panel="meeting" aria-label="Meeting">
+    <section class="panel" data-panel="meeting" aria-label="Meeting">
       <span class="kicker" data-next-kicker>Next meeting</span>
       <h1><span data-title>—</span><span class="typechip" data-type hidden></span></h1>
       <div class="facts">
@@ -243,7 +244,7 @@
     </section>
 
     <!-- 2 · MEETINGS (the collapsed list) -->
-    <section class="panel" data-panel="list" aria-label="Meetings">
+    <section class="panel on" data-panel="list" aria-label="Meetings">
       <span class="kicker">Meetings</span>
       <p class="sub">Your index for meetings — this community's and the ones it follows, grouped as you grouped them.</p>
       <label class="sr" for="mh-q">Search meetings</label>
@@ -330,8 +331,8 @@
   </div>
 
   <nav class="tabs" data-tabs aria-label="Views">
-    <button type="button" data-tab="meeting" aria-selected="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8 5v10l-8 5-8-5V7z"/></svg>Meeting<span class="dot"></span></button>
-    <button type="button" data-tab="list" aria-selected="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4"/><path d="M3 10h18"/></svg>Meetings<span class="dot"></span></button>
+    <button type="button" data-tab="meeting" aria-selected="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8 5v10l-8 5-8-5V7z"/></svg>Meeting<span class="dot"></span></button>
+    <button type="button" data-tab="list" aria-selected="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4"/><path d="M3 10h18"/></svg>Meetings<span class="dot"></span></button>
     <button type="button" data-tab="community" aria-selected="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Community<span class="dot"></span></button>
     <button type="button" data-tab="hosting" aria-selected="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect width="20" height="8" x="2" y="2"/><rect width="20" height="8" x="2" y="14"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>Hosting<span class="dot"></span></button>
     <button type="button" data-tab="about" aria-selected="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>About<span class="dot"></span></button>
@@ -493,6 +494,19 @@
       });
     }).catch(function () { return null; });
   }
+  // THE PIN (jwize 2026-10-23: the list is the default view unless pinned;
+  // long hold pins). A per-device convenience in localStorage — in a hive it
+  // stays; on a published door the visitor shell keeps only allowed fields,
+  // and 'mh.pin' is one of them (index.visitor.html KEPT).
+  var PIN_KEY = 'mh.pin';
+  function readPin() { try { var v = localStorage.getItem(PIN_KEY); return v && SIG.test(v) ? v : null; } catch (e) { return null; } }
+  function writePin(sig) { try { sig ? localStorage.setItem(PIN_KEY, sig) : localStorage.removeItem(PIN_KEY); } catch (e) {} }
+  function togglePin(ev) {
+    var was = readPin() === ev.sig;
+    writePin(was ? null : ev.sig);
+    say(was ? 'Unpinned — the list opens first' : 'Pinned — ' + ev.record.title + ' opens first');
+    render();
+  }
   var initial = function (name) { return (Array.from(String(name).trim())[0] || '?').toUpperCase(); };
   var isComing = function (r) { return r.going === 'yes' || r.going === 'here'; };
   var joinable = function (ev) { return !!ev && (!!baseFor(ev.record.host) || !!state.local[ev.sig]); };
@@ -627,7 +641,7 @@
       var li = document.createElement('li');
       var row = document.createElement('button');
       row.type = 'button';
-      row.className = (ev.record.date < t ? 'past' : '') + (state.selected && state.selected.sig === ev.sig ? ' sel' : '');
+      row.className = (ev.record.date < t ? 'past' : '') + (state.selected && state.selected.sig === ev.sig ? ' sel' : '') + (readPin() === ev.sig ? ' pinned' : '');
       var b = document.createElement('b');
       b.textContent = ev.record.title;
       if (ev.record.type) { var chip = document.createElement('span'); chip.className = 'typechip'; chip.textContent = ev.record.type; b.appendChild(chip); }
@@ -635,7 +649,18 @@
       var rw = document.createElement('span'); rw.className = 'rw';
       rw.textContent = dayOf(ev.record) + (ev.record.time ? ' · ' + ev.record.time + (ev.record.ends ? '–' + ev.record.ends : '') : '') + ' · ' + ev.record.where.split(',')[0];
       row.appendChild(b); row.appendChild(rc); row.appendChild(rw);
-      row.addEventListener('click', function () { select(ev); show('meeting'); if (fromSheet) closeSheet(); });
+      // A tap opens the meeting; a LONG HOLD pins it as this device's opener.
+      var hold = null, held = false;
+      row.addEventListener('pointerdown', function () {
+        held = false;
+        hold = setTimeout(function () { held = true; togglePin(ev); }, 550);
+      });
+      var callOff = function () { clearTimeout(hold); };
+      row.addEventListener('pointermove', callOff);
+      row.addEventListener('pointerup', callOff);
+      row.addEventListener('pointerleave', callOff);
+      row.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      row.addEventListener('click', function () { if (held) { held = false; return; } select(ev); show('meeting'); if (fromSheet) closeSheet(); });
       li.appendChild(row);
       into.appendChild(li);
     });
@@ -686,7 +711,13 @@
       state.events = events;
       var ordered = order(events);
       var upcoming = ordered.filter(function (e) { return e.record.date >= today(); });
-      select(upcoming[0] || ordered[0] || null);
+      // The list is the default view — unless this device pinned a meeting,
+      // which then opens first (the selected meeting is readied either way).
+      var pinned = null;
+      var pin = readPin();
+      if (pin) ordered.forEach(function (e) { if (e.sig === pin) pinned = e; });
+      select(pinned || upcoming[0] || ordered[0] || null);
+      if (pinned) show('meeting');
       ordered.forEach(function (ev) {
         if (state.coming[ev.sig]) return;
         readComing(ev).then(function (rows) { state.coming[ev.sig] = rows; render(); });

@@ -31,7 +31,7 @@
          on doors too"). The page asks `localStorage.keeps(key)`. -->
     <script>
       (function () {
-        var KEPT = { 'bc.howto': /^(true|false)$/ };
+        var KEPT = { 'bc.howto': /^(true|false)$/, 'mh.pin': /^[0-9a-f]{64}$/ };
         var real = null, verbose = null, seed = [];
         try { real = window.localStorage; verbose = real.getItem('hc:verbose'); } catch (error) {}
         if (verbose) seed.push(['hc:verbose', verbose]);
