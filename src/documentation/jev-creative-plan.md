@@ -133,6 +133,21 @@ only when Jev is unsure.
    Measure it: the outcomes pool plus the token line already separate worker
    and Jev usage; add per-turn wall time to `jev:outcome` so §3 can compare.
 
+**CODE CORROBORATES WHAT CODE CAN CHECK (2026-10-22).** The judge is a cheap
+model asked for a number, and on the plainest answer there is it is noisy: the
+same two routes, read whole, scored .57 to 1.0 across a morning, and four in
+five correct `find betz /` answers ended "Jev could not confirm". So in
+`jev-verify.ts` (`corroborate`, called by the service's `verify()`), an answer
+that is a bare list of routes — at most sixteen words besides the routes, any
+count in it the number of routes — every one of which the reads Jev was shown
+returned as a whole route, from reads with no cut in them, needs `supported` to
+clear `JEV_CORROBORATED_FLOOR` (.5) rather than the .8 gate. The judge keeps
+its veto below the floor, `complete` keeps its gate, and anything with more to
+say (prose, a wrong count, a route no read returned, a cut read) is the
+judge's alone. The note on the answer says so: `· every route is one the reads
+returned`. Ten live runs afterwards: nine clean, none flagged (the four before:
+half).
+
 **Acceptance:** harness scenario where the fake worker's answer contradicts
 the evidence → the unverified line appears; a supported answer → no line.
 Step-down is proven only by jwize on real models.

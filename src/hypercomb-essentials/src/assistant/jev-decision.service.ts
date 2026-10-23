@@ -7,7 +7,7 @@ import { openRouterRouting, providerBlock } from './providers/openrouter-routing
 import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevReadingQuestions, jevReadingResult, jevReadingState, jevResult, jevState, type JevInput, type JevReadingInput, type JevReadingResult, type JevResult, type JevPassInput, type JevPassResult, jevPassQuestions, jevPassResult, jevPassState } from './jev-decision.js'
 import type { JevDirectInput } from './jev-direct.js'
 import { jevFrontInput, jevFrontQuestions, jevFrontResult, jevFrontState, type JevFrontResult } from './jev-front.js'
-import { jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type JevVerifyInput, type JevVerifyResult } from './jev-verify.js'
+import { corroborate, jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type JevVerifyInput, type JevVerifyResult } from './jev-verify.js'
 import { jevEvidenceText } from './jev-evidence.js'
 import { jevFileInput, jevFileQuestions, jevFileResult, type JevFileResult } from './jev-file.js'
 import { jevSortInput, jevSortQuestions, jevSortResult, type JevSortResult } from './jev-sort.js'
@@ -167,7 +167,9 @@ export class JevDecisionService {
     const state = JSON.stringify(rendered).length > budget ? input : rendered
     const result = await this.#post({ state, questions: jevVerifyQuestions() }, jevVerifyResult, signal)
     if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
-    return { ...result, evidence: state.evidence }
+    // CODE LOOKS TOO (jev-verify.ts): the routes the answer names against the
+    // text Jev was shown, not the judge's number alone.
+    return { ...corroborate(result, input, state.evidence), evidence: state.evidence }
   }
 
   /** For a word the participant says directly (no worker): Jev switched on,

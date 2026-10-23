@@ -43,6 +43,52 @@ export const JEV_VERIFY_QUESTIONS = {
 /** Conservative starting values, tuned from the outcomes pool. */
 export const JEV_VERIFY_GATES = { supported: 0.8, complete: 0.8 } as const
 
+// ── CODE CORROBORATES WHAT CODE CAN CHECK ────────────────────────────────
+//
+// The judge is a cheap model asked for a number, and on the plainest answer
+// there is it is noisy: the same two routes, read whole, from the same
+// evidence, scored .57 to 1.0 across a morning (2026-10-22), and four in five
+// correct finds ended "Jev could not confirm". "Code decides what the
+// participant is told", so where code can check the claims itself it does: an
+// answer that is a bare list of routes, every one of which the reads
+// returned, from reads that were not cut, needs the judge's `supported` to
+// clear only a floor, not the gate. The judge keeps its veto below the floor
+// and `complete` is untouched. Anything with more to say than a list — prose,
+// a count that is wrong, a route no read returned, a cut read — is the
+// judge's alone.
+
+/** The most `supported` may fall short of the gate when code vouches for the routes. */
+export const JEV_CORROBORATED_FLOOR = 0.5
+/** A bare list says little besides its routes. */
+const BARE_LIST_WORDS = 16
+const ROUTE_TOKEN = /(?<![\w./-])\/[\w.'-]+(?:\/[\w.'-]+)*/g
+const CUT_READ = /truncated: yes|part of it|cut to fit|not finish|unfinished|did not reach/i
+
+/** Is the answer a bare list of routes, each one a route the reads returned
+ *  and none of the reads cut? Pure. */
+export const routesCorroborated = (answer: string, evidence: readonly string[]): boolean => {
+  const routes = [...new Set((answer.match(ROUTE_TOKEN) ?? []).map(route => route.replace(/[.'-]+$/, '')))]
+  if (!routes.length) return false
+  const read = evidence.join('\n')
+  if (CUT_READ.test(read)) return false
+  // A route is "returned" only as a whole route: '/people/betz' is not '/people/betzy'.
+  const returned = (route: string): boolean =>
+    new RegExp(`(?<![\\w./-])${route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.'-])`, 'i').test(read)
+  if (!routes.every(returned)) return false
+  const prose = answer.replace(ROUTE_TOKEN, ' ').replace(/[`*_>#\-[\]()|:;,.!?"“”]/g, ' ').split(/\s+/).filter(Boolean)
+  if (prose.length > BARE_LIST_WORDS) return false
+  // A number in the prose is a count; it must be the number of routes listed.
+  return prose.filter(word => /^\d+$/.test(word)).every(word => Number(word) === routes.length)
+}
+
+/** The verdict after code has looked: `supported` may clear the floor instead
+ *  of the gate when the routes are corroborated; `complete` always clears its gate. */
+export const corroborate = (result: JevVerifyResult, input: JevVerifyInput, shown: readonly string[] = input.evidence): JevVerifyResult => {
+  if (result.verified || result.complete < JEV_VERIFY_GATES.complete || result.supported < JEV_CORROBORATED_FLOOR) return result
+  if (!routesCorroborated(input.answer, shown)) return result
+  return { ...result, verified: true, reason: `${result.reason} · every route is one the reads returned` }
+}
+
 // ── shape ──────────────────────────────────────────────────────────────────
 
 const text = (value: unknown, max: number): string => {
