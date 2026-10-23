@@ -25,10 +25,9 @@
     --a600:#dd2b0f;--a700:#ae1800;
     --font:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
     --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s6:24px;
-    --rail:64px;--bar:60px;
-    display:block;height:100dvh;overflow:hidden;background:var(--n200);color:var(--text);
+    display:block;background:var(--n200);color:var(--text);
     font:400 15px/1.5 var(--font);text-wrap:pretty;-webkit-font-smoothing:antialiased}
-  body:has(> .mh){margin:0;height:100dvh;overflow:hidden}
+  body:has(> .mh){margin:0}
   .mh *,.mh *::before,.mh *::after{box-sizing:border-box;margin:0;padding:0}
   .mh a{color:var(--accent);text-underline-offset:3px}
   .mh a:hover{color:var(--a600)}
@@ -36,10 +35,11 @@
   .mh :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .mh ::selection{background:color-mix(in srgb,var(--accent) 30%,transparent)}
 
-  /* the app frame: header / view / tab bar; the rail takes the bar's place wide */
-  .mh .app{position:relative;display:grid;grid-template-rows:auto 1fr var(--bar);height:100%;max-width:760px;margin:0 auto;background:var(--bg);overflow:hidden}
-  }
-  .mh header.top{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);padding:var(--s3) var(--s4);border-bottom:2px solid var(--divider)}
+  /* one scrolling page, every screen: the sections in a row under a sticky
+     header (jwize 2026-10-23 — the tabbed view is gone) */
+  .mh .app{display:block;max-width:760px;min-height:100dvh;margin:0 auto;background:var(--bg)}
+  @media (min-width:762px){.mh .app{border-left:1px solid var(--divider);border-right:1px solid var(--divider)}}
+  .mh header.top{position:sticky;top:0;z-index:40;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:var(--s3);padding:var(--s3) var(--s4);border-bottom:2px solid var(--divider)}
   .mh .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
   .mh .brand em{font-style:normal;color:var(--accent)}
 
@@ -61,20 +61,9 @@
   .mh .btn-secondary:hover{background:color-mix(in srgb,var(--text) 7%,transparent)}
   .mh .btn-icon{width:40px;height:40px;min-height:40px;padding:0}
 
-  /* the views: one visible, each scrolls inside itself */
-  .mh .view{position:relative;overflow:hidden}
-  .mh .panel{position:absolute;inset:0;overflow-y:auto;padding:var(--s4);display:none;scrollbar-width:thin}
-  .mh .panel.on{display:block}
-
-  /* the tab bar: five icons */
-  .mh nav.tabs{display:flex;align-items:stretch;justify-content:space-around;border-top:2px solid var(--divider);background:var(--bg);z-index:30}
-  .mh nav.tabs button{flex:1;display:grid;justify-items:center;align-content:center;gap:3px;cursor:pointer;border:0;background:transparent;
-    color:var(--n700);font:600 10px/1 var(--font);letter-spacing:.04em;text-transform:uppercase;min-height:var(--bar)}
-  @media (min-width:700px){.mh nav.tabs button{flex:0 0 auto;width:var(--rail);min-height:56px}}
-  .mh nav.tabs button svg{display:block}
-  .mh nav.tabs button[aria-selected="true"]{color:var(--accent)}
-  .mh nav.tabs button[aria-selected="true"] .dot{width:14px;height:2px;background:var(--accent)}
-  .mh nav.tabs .dot{width:14px;height:2px;background:transparent}
+  /* the sections, in a row */
+  .mh .panel{display:block;padding:var(--s4);border-top:2px solid var(--divider);scroll-margin-top:72px}
+  .mh .panel[data-panel="meeting"]{border-top:0}
 
   /* MEETING view */
   .mh .typechip[hidden]{display:none}
@@ -173,32 +162,9 @@
   .mh .qrline b{display:block;font-weight:800;color:var(--text)}
   .mh .qrline .qr{flex:none;display:block;width:84px;height:84px;border:1px solid var(--divider);padding:4px;background:#fff}
 
-  /* THE PULL-UP SHEET — the meetings list, the business card way */
-  .mh .sheet{position:absolute;left:0;right:0;bottom:0;top:auto;z-index:20;background:var(--bg);border-top:2px solid var(--divider);
-    box-shadow:0 -8px 24px color-mix(in srgb,var(--text) 18%,transparent);
-    height:min(72%,480px);transform:translateY(calc(100% - 34px));transition:transform .22s cubic-bezier(.2,.7,.2,1);touch-action:none;display:grid;grid-template-rows:auto 1fr}
-  .mh .sheet.open{transform:translateY(0)}
-  .mh .sheet.drag{transition:none}
-  .mh .grab{display:grid;justify-items:center;gap:4px;padding:6px 0 8px;cursor:grab;border:0;background:transparent;width:100%;font:600 11px/1 var(--font);letter-spacing:.08em;text-transform:uppercase;color:var(--n700)}
-  .mh .grab::before{content:"";width:44px;height:4px;background:var(--divider)}
-  .mh .sheet .body{overflow-y:auto;padding:0 var(--s4) var(--s4);scrollbar-width:thin}
-  .mh .scrim{position:absolute;inset:0;z-index:15;background:color-mix(in srgb,var(--text) 30%,transparent);opacity:0;pointer-events:none;transition:opacity .22s ease}
-  .mh .scrim.on{opacity:1;pointer-events:auto}
 
   .mh .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
-  /* A DESKTOP SCROLLS (jwize 2026-10-23): past 700px the one-screen frame
-     opens out — every section in a row, no tab bar, no sheet; the header
-     stays put while the page scrolls under it. */
-  @media (min-width:700px){
-    .mh{height:auto;overflow:visible}
-    body:has(> .mh){height:auto;overflow:auto}
-    .mh .app{display:block;height:auto;border-left:1px solid var(--divider);border-right:1px solid var(--divider)}
-    .mh header.top{position:sticky;top:0;background:var(--bg);z-index:40}
-    .mh .view{overflow:visible}
-    .mh .panel{position:static;display:block;overflow:visible;border-top:2px solid var(--divider);scroll-margin-top:72px}
-    .mh .panel[data-panel="meeting"]{border-top:0}
-    .mh nav.tabs,.mh .sheet,.mh .scrim{display:none}
 
 </style>
 </head>
@@ -252,7 +218,7 @@
     </section>
 
     <!-- 2 · MEETINGS (the collapsed list) -->
-    <section class="panel on" data-panel="list" aria-label="Meetings">
+    <section class="panel" data-panel="list" aria-label="Meetings">
       <span class="kicker">Meetings</span>
       <p class="sub">Your index for meetings — this community's and the ones it follows, grouped as you grouped them.</p>
       <label class="sr" for="mh-q">Search meetings</label>
@@ -330,21 +296,8 @@
       </div>
     </section>
 
-    <!-- the scrim + pull-up sheet live over the view -->
-    <div class="scrim" data-scrim></div>
-    <aside class="sheet" data-sheet aria-label="Your meetings">
-      <button type="button" class="grab" data-grab>Meetings</button>
-      <div class="body" data-sheet-body></div>
-    </aside>
   </div>
 
-  <nav class="tabs" data-tabs aria-label="Views">
-    <button type="button" data-tab="meeting" aria-selected="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8 5v10l-8 5-8-5V7z"/></svg>Meeting<span class="dot"></span></button>
-    <button type="button" data-tab="list" aria-selected="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4"/><path d="M3 10h18"/></svg>Meetings<span class="dot"></span></button>
-    <button type="button" data-tab="community" aria-selected="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Community<span class="dot"></span></button>
-    <button type="button" data-tab="hosting" aria-selected="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect width="20" height="8" x="2" y="2"/><rect width="20" height="8" x="2" y="14"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>Hosting<span class="dot"></span></button>
-    <button type="button" data-tab="about" aria-selected="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>About<span class="dot"></span></button>
-  </nav>
 
   <span class="sr" role="status" aria-live="polite" data-said></span>
 </div>
@@ -544,27 +497,17 @@
 
   // The tabs: five icons, one view on screen. The view is state, so a tap,
   // a row, or a receipt link all land the same way — reactively, no scroll.
-  var wide = function () { return window.matchMedia && window.matchMedia('(min-width:700px)').matches; };
   function loadDoors() {
     if (state.doors !== null) return;
     state.doors = [];
     readDoors().then(function (zones) { state.doors = zones; renderDoors(); });
   }
+  // Every section is on the page: showing one scrolls to it.
   function show(name) {
-    $('.panel').forEach(function (p) { p.classList.toggle('on', p.getAttribute('data-panel') === name); });
-    $('[data-tab]').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === name)); });
-    if (name === 'community') loadDoors();
-    // On a desktop every section is on the page: showing one scrolls to it.
-    if (wide()) {
-      var p = root.querySelector('.panel[data-panel="' + name + '"]');
-      if (p && p.scrollIntoView) p.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    var p = root.querySelector('.panel[data-panel="' + name + '"]');
+    if (p && p.scrollIntoView) p.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
-  if (wide()) loadDoors();
-  $('[data-tabs]').addEventListener('click', function (e) {
-    var b = e.target.closest('[data-tab]');
-    if (b) { show(b.getAttribute('data-tab')); closeSheet(); }
-  });
+  loadDoors();
 
   function renderMeeting() {
     var ev = state.selected;
@@ -677,7 +620,7 @@
       row.addEventListener('pointerup', callOff);
       row.addEventListener('pointerleave', callOff);
       row.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-      row.addEventListener('click', function () { if (held) { held = false; return; } select(ev); show('meeting'); if (fromSheet) closeSheet(); });
+      row.addEventListener('click', function () { if (held) { held = false; return; } select(ev); show('meeting'); });
       li.appendChild(row);
       into.appendChild(li);
     });
@@ -715,7 +658,7 @@
     });
     none.hidden = (state.doors || []).length > 0;
   }
-  function render() { renderMeeting(); renderRows(); renderDoors(); renderSheet(); }
+  function render() { renderMeeting(); renderRows(); renderDoors(); }
   function select(ev) {
     state.selected = ev;
     render();
@@ -742,51 +685,6 @@
     });
   }
 
-  // ── THE PULL-UP SHEET (the business card gesture) ───────────────────
-  // Pull up from the bottom and your meetings rise as a list. The list
-  // carries NO registration (jwize 2026-10-23): the sheet is always
-  // the meetings, and joining lives on the Meeting view a row opens.
-  var sheet = $('[data-sheet]'), grab = $('[data-grab]'), sheetBody = $('[data-sheet-body]'), scrim = $('[data-scrim]');
-  function renderSheet() {
-    if (!sheet.classList.contains('open')) return;
-    sheetBody.textContent = '';
-    var ul = document.createElement('ul'); ul.className = 'rows';
-    sheetBody.appendChild(ul);
-    meetingRows(ul, true);
-  }
-  function openSheet() { renderSheetOpen(); }
-  function renderSheetOpen() { sheet.classList.add('open'); scrim.classList.add('on'); renderSheet(); }
-  function closeSheet() { sheet.classList.remove('open'); scrim.classList.remove('on'); }
-  scrim.addEventListener('click', closeSheet);
-  grab.addEventListener('click', function () { sheet.classList.contains('open') ? closeSheet() : openSheet(); });
-  // The drag: follow the pointer, settle open or closed by where it let go.
-  var drag = null;
-  sheet.addEventListener('pointerdown', function (e) {
-    if (sheet.classList.contains('open') && !e.target.closest('[data-grab]')) return;
-    drag = { y: e.clientY, open: sheet.classList.contains('open'), moved: 0 };
-    sheet.classList.add('drag');
-    sheet.setPointerCapture(e.pointerId);
-  });
-  sheet.addEventListener('pointermove', function (e) {
-    if (!drag) return;
-    var dy = e.clientY - drag.y;
-    drag.moved = dy;
-    var h = sheet.getBoundingClientRect().height - 34;
-    var base = drag.open ? 0 : h;
-    var y = Math.max(0, Math.min(h, base + dy));
-    if (!drag.open && !sheet.classList.contains('open') && dy < -8) renderSheetOpen();
-    sheet.style.transform = 'translateY(' + y + 'px)';
-  });
-  function endDrag() {
-    if (!drag) return;
-    sheet.classList.remove('drag');
-    sheet.style.transform = '';
-    var opening = drag.open ? drag.moved < 60 : drag.moved < -40;
-    drag = null;
-    if (opening) renderSheetOpen(); else closeSheet();
-  }
-  sheet.addEventListener('pointerup', endDrag);
-  sheet.addEventListener('pointercancel', endDrag);
 
   // ── joining: pick a name, you're in ─────────────────────────────────
   var panel = $('[data-join-panel]'), form = $('[data-join-form]'), stateLine = $('[data-join-state]');
