@@ -5710,3 +5710,71 @@ test('head only: a landing pack for a withdrawn head is withdrawn with it', asyn
   await publish({ revolucion: layerB }, 1_800_000_100)
   assert.equal((await worker.fetch(new Request(url), env)).status, 404)
 })
+
+// jwize, 2026-10-22: "they should be able to send their visuals to the tile
+// with some data if they are hosted and share their presence." A hosted
+// attendee's claim names their host and their profile; the door picks the
+// profile and its picture up from that host. A check-in says `going: here`.
+async function signedBy(key, kind, tags, content = '') {
+  const evt = { pubkey: pubOf(key), created_at: nowSeconds(), kind, tags, content }
+  evt.id = await sha256Hex(JSON.stringify([0, evt.pubkey, evt.created_at, evt.kind, evt.tags, evt.content]))
+  evt.sig = hex(schnorr.sign(evt.id, key))
+  return JSON.stringify(evt)
+}
+
+test('a hosted attendee\'s claim brings their profile and picture to the door, from their own host', async () => {
+  const record = eventRecordText('2026-10-24', 'revolucion.pluginthematrix.com')
+  const sig = await sha256Hex(record)
+  const env = await calendarEnv(new Map([[sig, enc(record)]]))
+  assert.equal((await organizerPuts(env, { [`event:${sig}`]: sig, [`rsvp:${sig}`]: sig })).status, 200)
+  const pool = await sha256Hex(`rsvp:${sig}`)
+  const ada = keyOf(41)
+  const picture = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2, 3, 4])
+  const pictureSig = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', picture)))
+  const profile = await signedBy(ada, 0, [], JSON.stringify({ name: 'Ada', about: 'builds hives', picture: `https://peer.example/${pictureSig}` }))
+  const profileSig = await sha256Hex(profile)
+  const stranger = await signedBy(keyOf(42), 0, [], JSON.stringify({ name: 'Not Ada' }))
+  const strangerSig = await sha256Hex(stranger)
+
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const { hostname, pathname } = new URL(String(url))
+    if (hostname !== 'peer.example') return new Response('', { status: 404 })
+    if (pathname === `/${profileSig}`) return new Response(profile)
+    if (pathname === `/${strangerSig}`) return new Response(stranger)
+    if (pathname === `/${pictureSig}`) return new Response(picture)
+    return new Response('', { status: 404 })
+  }
+  try {
+    const claim = await signedBy(ada, 30568, [['pool', pool], ['event', sig], ['name', 'Ada'], ['going', 'here'], ['host', 'peer.example'], ['profile', profileSig]])
+    const res = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${pool}/${await sha256Hex(claim)}`, { method: 'PUT', body: claim }), env)
+    assert.equal(res.status, 201, await res.clone().text())
+    assert(env.CONTENT.held.has(profileSig), 'the profile is kept by its signature')
+    assert(env.CONTENT.held.has(pictureSig), 'and so is its picture')
+    const shown = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${pictureSig}`), env)
+    assert.equal(shown.status, 200)
+    assert.deepEqual(new Uint8Array(await shown.arrayBuffer()), picture, 'served from this door, byte for byte')
+
+    // A claim naming a profile another key signed: the claim stands, the profile is not kept.
+    const borrowed = await signedBy(keyOf(43), 30568, [['pool', pool], ['event', sig], ['name', 'Bo'], ['going', 'yes'], ['host', 'peer.example'], ['profile', strangerSig]])
+    assert.equal((await putRsvp(env, pool, borrowed)).status, 201)
+    assert(!env.CONTENT.held.has(strangerSig), 'a profile is believed only from the key that signed the claim')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('an rsvp naming a host or a profile is refused unless both are what they say', async () => {
+  const record = eventRecordText('2026-10-24')
+  const sig = await sha256Hex(record)
+  const env = await calendarEnv(new Map([[sig, enc(record)]]))
+  assert.equal((await organizerPuts(env, { [`event:${sig}`]: sig, [`rsvp:${sig}`]: sig })).status, 200)
+  const pool = await sha256Hex(`rsvp:${sig}`)
+  const key = keyOf(44)
+  const base = [['pool', pool], ['event', sig], ['name', 'Cy'], ['going', 'yes']]
+  assert.equal((await putRsvp(env, pool, await signedBy(key, 30568, [...base, ['host', 'localhost']]))).status, 400, 'a host that is not a public hostname')
+  assert.equal((await putRsvp(env, pool, await signedBy(key, 30568, [...base, ['host', '10.0.0.1']]))).status, 400, 'nor a bare address')
+  assert.equal((await putRsvp(env, pool, await signedBy(key, 30568, [...base, ['profile', 'a'.repeat(64)]]))).status, 400, 'a profile with no host to hold it')
+  assert.equal((await putRsvp(env, pool, await signedBy(key, 30568, [...base, ['host', 'peer.example'], ['profile', 'nope']]))).status, 400, 'a profile not named by signature')
+  assert.equal((await putRsvp(env, pool, await signedBy(key, 30568, [['pool', pool], ['event', sig], ['name', 'Cy'], ['going', 'here']]))).status, 201, 'a check-in')
+})

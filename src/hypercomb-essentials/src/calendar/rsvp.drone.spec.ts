@@ -5,10 +5,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
 
+// Which hosts hold a profile for this hive's key, and which were asked.
+let profiles: Record<string, string> = {}
+const askedForProfile: string[] = []
 vi.mock('../sharing/hive-pointer.js', () => ({
   fetchHiveIndex: async () => ({ ok: false, reason: 'http', status: 404 }),
   setHiveRoot: async () => ({ ok: true }),
   nip98Header: async () => null,
+  ownHiveRoot: async (host: string, key: string) => { askedForProfile.push(host); return key === 'nostr:profile' ? profiles[host] ?? null : null },
 }))
 
 const registry = new Map<string, unknown>()
@@ -29,6 +33,9 @@ let puts: Array<{ url: string; body: Uint8Array }>
 let answer: { status: number; reason?: string }
 
 beforeEach(() => {
+  profiles = {}
+  askedForProfile.length = 0
+  delete document.documentElement.dataset['hypercombMode']
   puts = []
   answer = { status: 201 }
   registry.set('@diamondcoreprocessor.com/NostrSigner', {
@@ -38,6 +45,27 @@ beforeEach(() => {
     puts.push({ url: String(url), body: new Uint8Array(init?.body as ArrayBuffer) })
     return new Response(answer.reason ?? '', { status: answer.status, headers: answer.reason ? { 'x-reason': answer.reason } : {} })
   }) as unknown as typeof fetch
+})
+
+describe('a hosted attendee, and a check-in', () => {
+  it('names the profile this hive\'s key has on a host, so the door can show who they are', async () => {
+    profiles['hypercomb.com'] = 'c'.repeat(64)
+    const outcome = await drone.join({ event: EVENT, host: 'meetups.hypercomb.com', name: 'Ada', going: 'here' })
+    expect(outcome).toMatchObject({ ok: true, going: 'here', profile: 'c'.repeat(64) })
+    const pool = await rsvpPoolAddress(EVENT)
+    const member = await SignatureService.sign(puts[0]!.body.slice().buffer as ArrayBuffer)
+    expect(await readRsvp(pool, member, puts[0]!.body, () => true)).toMatchObject({ going: 'here', host: 'hypercomb.com', profile: 'c'.repeat(64) })
+    expect(askedForProfile).toEqual(['meetups.hypercomb.com', 'hypercomb.com'])
+  })
+
+  it('joins by name alone on a visitor door — a key that lives for the page has no profile to name', async () => {
+    document.documentElement.dataset['hypercombMode'] = 'visitor'
+    profiles['hypercomb.com'] = 'c'.repeat(64)
+    const outcome = await drone.join({ event: EVENT, host: 'meetups.hypercomb.com', name: 'Visitor' })
+    expect(outcome).toMatchObject({ ok: true, going: 'yes' })
+    expect(outcome.ok && outcome.profile).toBeFalsy()
+    expect(askedForProfile).toEqual([])
+  })
 })
 
 describe('joining from the page', () => {

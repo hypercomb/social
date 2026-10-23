@@ -108,9 +108,36 @@ same through the same bee, from your own hive to the meeting's own host.
 **On the host** (`putRsvpMember`) this is the one write a stranger may make: no
 NIP-98, no grant consumed. The claim's signature is the proof; the pool was
 opened by a key the host keeps bytes for; a claim is a few hundred bytes
-(≤ 2 KB), the name ≤ 48 characters, `going` is `yes` or `no`, the `event` tag
-must derive to this pool, and the pool holds at most 1000 claims. The same
-bytes again are already held (200). Everything else is refused by name.
+(≤ 2 KB), the name ≤ 48 characters, `going` is `yes`, `no` or `here`, the
+`event` tag must derive to this pool, and the pool holds at most 1000 claims.
+The same bytes again are already held (200). Everything else is refused by name.
+
+**On a site door.** Every site under a zone refuses every write, so a
+published page can never write into a hive ("published Core hosts are
+read-only"). A page writes only to its own origin, so that rule refused every
+join from meetups.hypercomb.com until 2026-10-22 (the tests had written through
+the zone root). Inside that rule one write now passes: a `PUT /<pool>/<member>`
+whose pool is a list an organizer opened goes to `putRsvpMember`. An unopened
+list, an atom, an upload: still refused.
+
+**Here now.** A check-in is a claim with `going: here`. On the meeting's own
+day the page's button says "I'm here", and the wall rings everyone who checked
+in. From a hive: `event here 2026-10-24 as Ada on hypercomb.com`. A check-in
+counts as coming, and in the roll as checked in.
+
+**A hosted attendee shows who they are.** A participant whose key has a profile
+on a host (the `profile` word: name, about, picture — a kind-0 event their own
+index names as `nostr:profile`) joins with it: the claim carries `['host', …]`
+and `['profile', <sig>]`. The meeting's door then picks the profile up from that
+host (`pickUpProfile`) — kept only when it hashes to its name, is kind 0, is
+signed by the key that signed the claim, and verifies — and its picture, when
+it is one by signature (`https://<host>/<sig>`, a raster image ≤ 256 KB whose
+bytes hash to the sig). Both land in the door's heap, so a visitor sees them
+from the page's own origin. The page re-checks the profile's hash and key before
+it shows it. A visitor's key lives for the page and has no profile, so a visitor
+joins by name, and the wall shows their initial. This is "send your visual to
+the tile, if you are hosted": the bytes come from your own host, by signature,
+and nothing is uploaded to anyone else's.
 
 **On the visitor** `readonly-network.ts` admits exactly this shape — `PUT
 /<64-hex>/<64-hex>` at the page's own origin — and nothing else: not a bare

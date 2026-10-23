@@ -12,10 +12,16 @@
 // host is the page's own origin — a visitor reads and writes there alone
 // (hypercomb-web setup/readonly-network.ts admits exactly this write). In a
 // hive it is the door the meeting names, and that host's CORS takes it.
+//
+// A HOSTED attendee — a hive whose key has a profile on a host — joins with
+// it: the claim names that host and the profile (name, about, picture) their
+// own index names there, and the meeting's door picks both up. A visitor's
+// key lives for the page and has no profile, so a visitor joins by name.
 
 import { Drone } from '@hypercomb/core'
 import { RSVP_NAME_MAX, rsvpPoolAddress, rsvpTemplate, type Going } from './event.js'
 import { hostBase } from '../sharing/derivation-attestation.js'
+import { ownHiveRoot } from '../sharing/hive-pointer.js'
 
 export const RSVP_ASK = 'hc:rsvp'
 export const RSVP_DONE = 'hc:rsvp:done'
@@ -30,13 +36,31 @@ export interface RsvpAsk {
   readonly host?: string
   readonly name: string
   readonly going?: Going
+  /** Where to look for your own profile first; the meeting's host and your
+   *  public host follow. */
+  readonly from?: string
 }
 
 export type RsvpOutcome =
-  | { ok: true; event: string; pool: string; member: string; name: string; going: Going; host: string }
+  | { ok: true; event: string; pool: string; member: string; name: string; going: Going; host: string; profile?: string }
   | { ok: false; event: string; reason: string }
 
 type SignerShape = { signEvent: (evt: Record<string, unknown>) => Promise<Record<string, unknown>> }
+type HostSyncShape = { publicHostDomain?: () => string }
+
+const bareHost = (raw: unknown): string =>
+  String(raw ?? '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '').toLowerCase()
+
+/** The profile this hive's key has on a host, and that host — or nothing.
+ *  Never on a visitor door: its key lives for the page and has none. */
+const ownProfile = async (hosts: readonly string[]): Promise<{ host: string; profile: string } | null> => {
+  if (typeof document !== 'undefined' && document.documentElement?.dataset?.['hypercombMode'] === 'visitor') return null
+  for (const host of [...new Set(hosts.map(bareHost).filter(h => h.includes('.')))]) {
+    const sig = await ownHiveRoot(host, 'nostr:profile').catch(() => null)
+    if (sig && SIG_RE.test(sig)) return { host, profile: sig }
+  }
+  return null
+}
 
 const get = <T>(key: string): T | undefined =>
   (globalThis as { ioc?: { get?: <V>(k: string) => V | undefined } }).ioc?.get?.<T>(key)
@@ -72,12 +96,17 @@ export class RsvpDrone extends Drone {
     const name = String(ask?.name ?? '').trim()
     if (!name) return { ok: false, event, reason: 'say who is coming' }
     if (name.length > RSVP_NAME_MAX) return { ok: false, event, reason: `a name is at most ${RSVP_NAME_MAX} characters` }
-    const going: Going = ask?.going === 'no' ? 'no' : 'yes'
+    const going: Going = ask?.going === 'no' ? 'no' : ask?.going === 'here' ? 'here' : 'yes'
     const signer = get<SignerShape>(this.deps.signer)
     if (!signer?.signEvent) return { ok: false, event, reason: 'no signer here' }
     const pool = await rsvpPoolAddress(event)
+    const zoneOf = (host: string): string => host.split('.').slice(-2).join('.')
+    const hosted = await ownProfile([
+      ask?.from ?? '', ask?.host ?? '', zoneOf(bareHost(ask?.host)),
+      get<HostSyncShape>('@diamondcoreprocessor.com/HostSyncService')?.publicHostDomain?.() ?? '',
+    ])
     let signed: Record<string, unknown>
-    try { signed = await signer.signEvent(rsvpTemplate(pool, event, name, going)) } catch (error) {
+    try { signed = await signer.signEvent(rsvpTemplate(pool, event, name, going, undefined, hosted ?? {})) } catch (error) {
       return { ok: false, event, reason: `the claim was not signed: ${(error as Error)?.message ?? error}` }
     }
     const bytes = new TextEncoder().encode(JSON.stringify(signed))
@@ -96,7 +125,7 @@ export class RsvpDrone extends Drone {
       const why = (res.headers.get('x-reason') || (await res.text().catch(() => '')) || `HTTP ${res.status}`).trim()
       return { ok: false, event, reason: why }
     }
-    return { ok: true, event, pool, member, name, going, host }
+    return { ok: true, event, pool, member, name, going, host, ...(hosted ? { profile: hosted.profile } : {}) }
   }
 }
 

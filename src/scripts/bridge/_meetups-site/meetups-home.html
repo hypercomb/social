@@ -105,9 +105,26 @@
   .mh .join .state b{color:var(--text)}
   .mh .join .state a{word-break:break-all}
   .mh .who{border-top:1px solid var(--divider);margin-top:var(--s3);padding-top:var(--s3)}
-  .mh .who ul{list-style:none;display:flex;flex-wrap:wrap;gap:6px var(--s2);margin-top:6px;font-size:14px}
-  .mh .who li{padding:2px 8px;border:1px solid var(--divider)}
-  .mh .who li.you{border-color:var(--accent);color:var(--a700)}
+  /* Who is coming, as a wall of cells: a hosted attendee's picture, else
+     their initial; a red ring is someone checked in, here now. */
+  .mh .wall{list-style:none;display:flex;flex-wrap:wrap;gap:12px 10px;margin-top:10px}
+  .mh .wall li{width:64px;display:grid;justify-items:center;gap:4px;text-align:center}
+  .mh .wall .ring{display:block;width:56px;aspect-ratio:8/9;padding:3px;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:transparent}
+  .mh .wall li.here .ring{background:var(--accent)}
+  .mh .wall .hex{display:grid;place-items:center;width:100%;height:100%;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);overflow:hidden;
+    background:color-mix(in srgb,var(--text) 9%,var(--bg));font-weight:800;font-size:18px;color:var(--n700)}
+  .mh .wall .hex img{display:block;width:100%;height:100%;object-fit:cover}
+  .mh .wall .nm{font-size:12px;line-height:1.2;max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--n800)}
+  .mh .wall li.you .nm{color:var(--a700);font-weight:600}
+  .mh .who .hint{font-size:12px;color:var(--n700);margin-top:var(--s2)}
+
+  /* the hosting offer */
+  .mh .offer{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid var(--divider);margin:var(--s3) 0}
+  .mh .offer > div{display:grid;align-content:start;gap:4px;padding:var(--s3) var(--s3) var(--s3) 0;border-bottom:1px solid var(--divider)}
+  .mh .offer > div:nth-child(even){padding-left:var(--s3);border-left:1px solid var(--divider)}
+  .mh .offer b{font-weight:800;font-size:16px;line-height:1.2}
+  .mh .offer span{font-size:14px;color:var(--n800)}
+  @media (max-width:420px){.mh .offer{grid-template-columns:1fr}.mh .offer > div:nth-child(even){padding-left:0;border-left:0}}
   .mh .who .none{font-size:14px;color:var(--n700);margin-top:4px}
 
   /* calendar: a scroller of meetings and dates, not an organizer */
@@ -248,7 +265,7 @@
       </ul>
     </div>
     <div class="actions">
-      <button type="button" class="btn btn-primary" data-join>Join the meeting<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+      <button type="button" class="btn btn-primary" data-join><span data-join-label>Join the meeting</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
       <a class="btn btn-secondary" href="#calendar" data-calendar>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4"/><path d="M3 10h18"/></svg>Calendar</a>
     </div>
@@ -264,8 +281,9 @@
 
     <div class="who" data-who>
       <div class="mini"><span data-who-title>Who's coming</span> <span data-who-count></span></div>
-      <ul data-who-list></ul>
+      <ul class="wall" data-who-list></ul>
       <p class="none" data-who-none>Nobody has said yet. Be the first.</p>
+      <p class="hint">Hosted on Hypercomb? Join from your own hive and your picture and a line about you show here.</p>
     </div>
   </section>
 
@@ -314,6 +332,20 @@
         <p class="step-body">Your name joins the list for everyone to see, and you keep the receipt.</p>
       </div>
     </div>
+  </section>
+
+  <hr class="hr">
+
+  <section class="sec" data-reveal aria-labelledby="hosting">
+    <span class="kicker">Bring your community online</span>
+    <h2 id="hosting">We help you set up your own host.</h2>
+    <div class="offer">
+      <div><b>Setup is free</b><span>Do it yourself — we walk you through it at the meetup.</span></div>
+      <div><b>Hosting</b><span>A monthly plan that keeps your community's site and data online.</span></div>
+      <div><b>Setup services and private lessons</b><span>We set it up with you, one to one.</span></div>
+      <div><b>Memberships</b><span>Meeting benefits across our other meeting types.</span></div>
+    </div>
+    <p class="sub">Ask us at the next meeting. Once you are hosted, join from your own hive and your picture shows on the list.</p>
   </section>
 
   <hr class="hr">
@@ -464,16 +496,47 @@
           claims.forEach(function (c, i) {
             if (!c || Number(c.kind) !== 30568 || !Array.isArray(c.tags)) return;
             var tag = function (k) { var t = c.tags.filter(function (t) { return t[0] === k; })[0]; return t ? String(t[1] || '') : ''; };
-            var row = { who: tag('name').trim(), going: tag('going'), at: Number(c.created_at) || 0, signer: String(c.pubkey || ''), member: names[i] };
+            var profile = tag('profile').toLowerCase();
+            var row = { who: tag('name').trim(), going: tag('going'), at: Number(c.created_at) || 0, signer: String(c.pubkey || '').toLowerCase(), member: names[i],
+              profile: SIG.test(profile) && tag('host') ? profile : '' };
             if (!row.who || !row.signer) return;
             var held = newest[row.signer];
             if (!held || row.at > held.at) newest[row.signer] = row;
           });
-          return Object.keys(newest).map(function (k) { return newest[k]; }).sort(function (a, b) { return a.at - b.at; });
+          var rows = Object.keys(newest).map(function (k) { return newest[k]; }).sort(function (a, b) { return a.at - b.at; });
+          return Promise.all(rows.map(function (r) {
+            if (!r.profile) return r;
+            return readProfile(base, r.profile, r.signer).then(function (p) { if (p) { r.picture = p.picture; r.about = p.about; } return r; });
+          }));
         });
       });
     });
   }
+  // A hosted attendee's profile, as this door picked it up from their host:
+  // believed only when its bytes hash to the name their claim gave, it is a
+  // profile (kind 0), and the key that signed it signed the claim.
+  function readProfile(base, sig, signer) {
+    return fetch(base + '/' + sig, { cache: 'force-cache' }).then(function (res) {
+      if (!res.ok) return null;
+      return res.text().then(function (text) {
+        return sha256(text).then(function (h) {
+          if (h !== sig) return null;
+          var p; try { p = JSON.parse(text); } catch (e) { return null; }
+          if (!p || Number(p.kind) !== 0 || String(p.pubkey || '').toLowerCase() !== signer) return null;
+          var c; try { c = JSON.parse(String(p.content || '')); } catch (e) { return null; }
+          var picture = '';
+          try {
+            var u = new URL(String(c.picture || ''));
+            var m = /^\/([0-9a-f]{64})$/.exec(u.pathname);
+            if (u.protocol === 'https:' && m) picture = base + '/' + m[1];
+          } catch (e) {}
+          return { about: String(c.about || '').slice(0, 140), picture: picture };
+        });
+      });
+    }).catch(function () { return null; });
+  }
+  var initial = function (name) { return (Array.from(String(name).trim())[0] || '?').toUpperCase(); };
+  var isComing = function (r) { return r.going === 'yes' || r.going === 'here'; };
 
   // ── the calendar, rendered ──────────────────────────────────────────
   var state = { events: [], selected: null, coming: {}, mine: {} };
@@ -499,20 +562,34 @@
     $('[data-when-sub]').textContent = ev ? (ev.record.time ? (ev.record.ends ? ev.record.time + ' – ' + ev.record.ends : 'at ' + ev.record.time) : 'Time posted here') : 'Weekly · see the calendar';
     $('[data-where]').textContent = ev ? ev.record.where.split(',')[0] : '—';
     $('[data-where-sub]').textContent = ev ? (ev.record.where.split(',').slice(1).join(',').trim() || ev.record.title) : 'Free, all welcome';
-    var join = $('[data-join]');
-    join.disabled = !ev || isPast;
-    join.querySelector ? null : null;
+    // On the meeting's own day, joining is checking in: you are here.
+    var onTheDay = !!ev && ev.record.date === today();
+    $('[data-join]').disabled = !ev || isPast;
+    $('[data-join-label]').textContent = onTheDay ? "I'm here" : 'Join the meeting';
+    $('[data-join-send]').textContent = onTheDay ? 'Check in' : "I'm coming";
   }
   function renderWho(ev) {
     var list = $('[data-who-list]'), none = $('[data-who-none]'), count = $('[data-who-count]');
     list.textContent = '';
-    var rows = ev ? (state.coming[ev.sig] || []).filter(function (r) { return r.going === 'yes'; }) : [];
-    count.textContent = rows.length ? '(' + rows.length + ')' : '';
+    var rows = ev ? (state.coming[ev.sig] || []).filter(isComing) : [];
+    var here = rows.filter(function (r) { return r.going === 'here'; }).length;
+    count.textContent = rows.length ? '(' + rows.length + (here ? ' · ' + here + ' here now' : '') + ')' : '';
     $('[data-who-title]').textContent = ev && ev.record.date < today() ? 'Who came' : "Who's coming";
     rows.forEach(function (r) {
       var li = document.createElement('li');
-      li.textContent = r.who;
-      if (ev && state.mine[ev.sig] === r.member) li.className = 'you';
+      if (r.going === 'here') li.classList.add('here');
+      if (ev && state.mine[ev.sig] === r.member) li.classList.add('you');
+      var ring = document.createElement('span'); ring.className = 'ring';
+      var hex = document.createElement('span'); hex.className = 'hex';
+      if (r.picture) {
+        var img = document.createElement('img');
+        img.alt = ''; img.loading = 'lazy'; img.src = r.picture;
+        img.onerror = function () { img.remove(); hex.textContent = initial(r.who); };
+        hex.appendChild(img);
+      } else hex.textContent = initial(r.who);
+      ring.appendChild(hex); li.appendChild(ring);
+      var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = r.who; li.appendChild(nm);
+      li.title = r.who + (r.about ? ' — ' + r.about : '') + (r.going === 'here' ? ' · here now' : '');
       list.appendChild(li);
     });
     none.hidden = rows.length > 0;
@@ -542,7 +619,7 @@
       card.className = 'card' + (ev.record.date < t ? ' past' : '') + (baseFor(ev.record.host) ? '' : ' away');
       card.setAttribute('role', 'listitem');
       card.setAttribute('aria-pressed', state.selected && state.selected.sig === ev.sig ? 'true' : 'false');
-      var rows = (state.coming[ev.sig] || []).filter(function (r) { return r.going === 'yes'; });
+      var rows = (state.coming[ev.sig] || []).filter(isComing);
       var count = state.coming[ev.sig] ? (rows.length + (ev.record.date < t ? ' came' : ' coming')) : (baseFor(ev.record.host) ? '…' : 'at ' + ev.record.host);
       card.innerHTML = '<span class="mini"></span><span class="day"></span><span class="place"></span><span class="count"></span>';
       card.children[0].textContent = ev.record.title;
@@ -585,9 +662,9 @@
   function receiptLink(ev, member) {
     return PAGE_URL + '?event=' + ev.sig + '&rsvp=' + member;
   }
-  function showReceipt(ev, who, member) {
+  function showReceipt(ev, who, member, going) {
     stateLine.textContent = '';
-    var b = document.createElement('b'); b.textContent = "You're in, " + who + '.'; stateLine.appendChild(b);
+    var b = document.createElement('b'); b.textContent = (going === 'here' ? "You're checked in, " : "You're in, ") + who + '.'; stateLine.appendChild(b);
     stateLine.appendChild(document.createTextNode(' Keep your receipt: '));
     var a = document.createElement('a'); a.href = receiptLink(ev, member); a.textContent = 'this link'; stateLine.appendChild(a);
     stateLine.appendChild(document.createTextNode(' shows your name on the list whenever you open it.'));
@@ -606,9 +683,10 @@
       if (done || !evt.detail || evt.detail.event !== ev.sig) return;
       done = true; cleanup(); handler(evt.detail);
     }; };
+    var going = ev.record.date === today() ? 'here' : 'yes';
     var onDone = finish(function (d) {
       state.mine[ev.sig] = d.member;
-      showReceipt(ev, who, d.member);
+      showReceipt(ev, who, d.member, d.going || going);
       say("You're in, " + who);
       delete state.coming[ev.sig];
       readComing(ev).then(function (rows) { state.coming[ev.sig] = rows; renderWho(ev); renderCards(); });
@@ -632,7 +710,7 @@
     }, 12000);
     // The hive's RsvpDrone hears this, signs the claim with this device's key,
     // writes it to the meeting's host, and answers on the document.
-    document.dispatchEvent(new CustomEvent('hc:rsvp', { detail: { event: ev.sig, host: ev.record.host, name: who, going: 'yes' } }));
+    document.dispatchEvent(new CustomEvent('hc:rsvp', { detail: { event: ev.sig, host: ev.record.host, name: who, going: going } }));
   });
 
   // A receipt link: the claim is read back from the pool it went into. No
@@ -652,7 +730,9 @@
       state.mine[sig] = member;
       stateLine.textContent = '';
       var b = document.createElement('b');
-      b.textContent = tag('going') === 'yes' ? "You're on the list for " + dayOf(ev.record, true) + ' as ' + tag('name') + '.' : 'You said you were not coming on ' + dayOf(ev.record, true) + '.';
+      b.textContent = tag('going') === 'here' ? 'You checked in on ' + dayOf(ev.record, true) + ' as ' + tag('name') + '.'
+        : tag('going') === 'yes' ? "You're on the list for " + dayOf(ev.record, true) + ' as ' + tag('name') + '.'
+        : 'You said you were not coming on ' + dayOf(ev.record, true) + '.';
       stateLine.appendChild(b);
       renderWho(ev);
     });

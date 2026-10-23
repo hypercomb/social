@@ -2270,10 +2270,16 @@ async function pickUpEvents(env) {
 }
 
 /** PUT /<rsvp pool>/<member> — a stranger's own signed claim that they are
- *  coming, or not. No NIP-98 and no grant: the claim's signature is the proof,
- *  the pool was opened by a key this host keeps bytes for, and a claim is a
- *  few hundred bytes under a cap. The same bytes again are already held. */
-async function putRsvpMember(request, env, pool, member) {
+ *  coming, not coming, or here now (a check-in at the meeting). No NIP-98 and
+ *  no grant: the claim's signature is the proof, the pool was opened by a key
+ *  this host keeps bytes for, and a claim is a few hundred bytes under a cap.
+ *  The same bytes again are already held.
+ *
+ *  A HOSTED attendee's claim may also name their host and the profile their
+ *  own index names there (['host', …], ['profile', <sig>]). The door then
+ *  picks that profile up — and its picture — from their host, so readers of
+ *  this door see who they are without leaving it (pickUpProfile). */
+async function putRsvpMember(request, env, pool, member, ctx) {
   if (!env.CONTENT?.put || !env.CONTENT?.list) return text(503, 'this host holds no pools')
   const body = await request.arrayBuffer()
   if (body.byteLength > RSVP_MAX_BYTES) return text(413, 'an rsvp is a claim, not content')
@@ -2287,9 +2293,15 @@ async function putRsvpMember(request, env, pool, member) {
   const name = String(tagValue(evt, 'name') || '').trim()
   if (!name || name.length > RSVP_NAME_MAX || /[\u0000-\u001f\u007f]/.test(name)) return text(400, `an rsvp carries a name of 1 to ${RSVP_NAME_MAX} characters`)
   const going = String(tagValue(evt, 'going') || '')
-  if (going !== 'yes' && going !== 'no') return text(400, 'an rsvp says going yes or no')
+  if (going !== 'yes' && going !== 'no' && going !== 'here') return text(400, 'an rsvp says going yes, no or here')
+  const theirHost = String(tagValue(evt, 'host') || '').toLowerCase()
+  const profile = String(tagValue(evt, 'profile') || '').toLowerCase()
+  if (theirHost && !publicHostName(theirHost)) return text(400, 'an rsvp names its host as a public hostname')
+  if (profile && (!SIG_RE.test(profile) || !theirHost)) return text(400, 'an rsvp names its profile by signature, with the host that holds it')
   const pubkey = String(evt?.pubkey || '').toLowerCase()
   if (!SIG_RE.test(pubkey) || !(await verifyEventSig(evt))) return text(401, 'invalid rsvp signature')
+  // Their profile and picture follow the claim — after it, and never in its way.
+  const pickUp = () => (profile ? pickUpProfile(env, theirHost, profile, pubkey) : Promise.resolve())
 
   const key = `${pool}/${member}`
   if (await env.CONTENT.head(key)) return text(200, `member ${member}`)
@@ -2299,7 +2311,86 @@ async function putRsvpMember(request, env, pool, member) {
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
     customMetadata: { owner: pubkey, member: '1', rsvp: '1' },
   })
+  if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(pickUp().catch(() => {}))
+  else await pickUp().catch(() => {})
   return text(201, `member ${member}`)
+}
+
+const PROFILE_MAX_BYTES = 8_192
+const PICTURE_MAX_BYTES = 262_144
+const PICTURE_TYPES = { png: 'image/png', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif' }
+
+/** A public hostname a profile may be fetched from: dotted DNS labels, no
+ *  port, never loopback or a bare address. */
+function publicHostName(host) {
+  const bare = String(host || '').toLowerCase()
+  if (!bare.includes('.') || bare.length > 253 || /^\d+(\.\d+){3}$/.test(bare)) return null
+  return bare.split('.').every(label => DNS_LABEL_RE.test(label)) ? bare : null
+}
+
+/** What a picture's first bytes say it is — the raster kinds a profile shows. */
+function pictureKind(bytes) {
+  const b = bytes
+  if (b.length < 12) return null
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'png'
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'jpeg'
+  const ascii = (at, t) => [...t].every((c, i) => b[at + i] === c.charCodeAt(0))
+  if (ascii(0, 'GIF87a') || ascii(0, 'GIF89a')) return 'gif'
+  if (ascii(0, 'RIFF') && ascii(8, 'WEBP')) return 'webp'
+  if (ascii(4, 'ftypavif') || ascii(4, 'ftypavis')) return 'avif'
+  return null
+}
+
+/** Fetch bytes from a public host within a time and size bound, or null. */
+async function fetchBounded(url, max, ms = PICKUP_FETCH_MS) {
+  const control = new AbortController()
+  const timer = setTimeout(() => control.abort(), ms)
+  try {
+    const res = await fetch(url, { signal: control.signal })
+    if (!res.ok || /text\/html/i.test(res.headers.get('content-type') || '')) return null
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    return bytes.byteLength <= max ? bytes : null
+  } catch { return null } finally { clearTimeout(timer) }
+}
+
+/** PICK UP AN ATTENDEE'S PROFILE from their own host: the kind-0 event their
+ *  index names, believed only when it hashes to its name, IS a profile, is
+ *  signed by the key that signed the claim, and verifies; then its picture,
+ *  when it is one by signature — an https address ending in /<sig> whose bytes
+ *  hash to that sig and are a raster image. Both are kept in this door's heap,
+ *  so a reader here sees them from this origin. Nothing that fails a check is
+ *  kept; a host that is slow or gone costs only its timeout. */
+async function pickUpProfile(env, host, sig, pubkey) {
+  let bytes = null
+  const held = await env.CONTENT.get(sig)
+  if (held) bytes = new Uint8Array(await held.arrayBuffer())
+  else bytes = await fetchBounded(`https://${host}/${sig}`, PROFILE_MAX_BYTES)
+  if (!bytes || await sha256Hex(bytes) !== sig) return
+  let evt
+  try { evt = JSON.parse(new TextDecoder().decode(bytes)) } catch { return }
+  if (Number(evt?.kind) !== 0 || String(evt?.pubkey || '').toLowerCase() !== pubkey) return
+  if (!(await verifyEventSig(evt))) return
+  let content
+  try { content = JSON.parse(String(evt.content || '')) } catch { return }
+  if (!held) {
+    await env.CONTENT.put(sig, bytes, {
+      httpMetadata: { contentType: 'application/json; charset=utf-8' },
+      customMetadata: { picked: host },
+    })
+  }
+  let picture
+  try { picture = new URL(String(content?.picture || '')) } catch { return }
+  const pictureSig = /^\/([0-9a-f]{64})$/.exec(picture.pathname)?.[1]
+  if (picture.protocol !== 'https:' || !pictureSig || !publicHostName(picture.hostname)) return
+  if (await env.CONTENT.head(pictureSig)) return
+  const image = await fetchBounded(picture.href, PICTURE_MAX_BYTES)
+  if (!image || await sha256Hex(image) !== pictureSig) return
+  const kind = pictureKind(image)
+  if (!kind) return
+  await env.CONTENT.put(pictureSig, image, {
+    httpMetadata: { contentType: PICTURE_TYPES[kind] },
+    customMetadata: { picked: picture.hostname },
+  })
 }
 
 // ── the community's translations (documentation/community-translations.md)
@@ -5365,7 +5456,7 @@ const router = {
         // join can reach no other face; putRsvpMember checks the claim as it
         // does at the zone root. Every other write stays refused.
         const claim = method === 'PUT' && /^\/([0-9a-f]{64})\/([0-9a-f]{64})$/.exec(requestUrl.pathname)
-        if (claim && await isRsvpPool(env, claim[1])) return putRsvpMember(request, env, claim[1], claim[2])
+        if (claim && await isRsvpPool(env, claim[1])) return putRsvpMember(request, env, claim[1], claim[2], ctx)
         return text(405, 'published Core hosts are read-only')
       }
       if (routed.hostDoor) return text(405, 'the host door is read-only — write at the zone root')
@@ -5503,7 +5594,7 @@ const router = {
       // every other address is a room, whose members come from admitted keys.
       if (method === 'PUT') {
         return await isRsvpPool(env, roomMemberPath[1])
-          ? putRsvpMember(request, env, roomMemberPath[1], roomMemberPath[2])
+          ? putRsvpMember(request, env, roomMemberPath[1], roomMemberPath[2], ctx)
           : putRoomMember(request, env, roomMemberPath[1], roomMemberPath[2])
       }
       if (method === 'GET' || method === 'HEAD') {

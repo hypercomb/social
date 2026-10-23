@@ -12,8 +12,12 @@
 //   event list on <host>
 //        The calendar: every meeting the host lists, in union with the hosts
 //        you carry, and how many are coming to each.
-//   event join <date|sig> [as <name>] on <host>
+//   event join <date|sig> as <name> on <host>
 //        Say you are coming — from your own hive, to the meeting's own host.
+//        When your key has a profile on a host, the claim carries it, and the
+//        meeting's door shows your picture and your about line.
+//   event here <date|sig> as <name> on <host>
+//        Check in at the meeting: you are here now.
 //   event roll <date|sig> on <host>
 //        Read who is coming and KEEP it in the hive: the roll as a record the
 //        tile you stand on wears (a calendar:roll decoration) and a note.
@@ -39,7 +43,7 @@ const short = (sig: string): string => `${sig.slice(0, 12)}…`
 export const ROLL_KIND = 'calendar:roll'
 export const ROLL_RECORD_KIND = 'rsvp-roll'
 
-type Verb = 'make' | 'list' | 'join' | 'roll' | ''
+type Verb = 'make' | 'list' | 'join' | 'here' | 'roll' | ''
 export interface EventLine {
   readonly verb: Verb
   readonly date: string
@@ -75,7 +79,7 @@ export const parseEventArgs = (args: string): EventLine => {
   const words = rest.split(/\s+/).filter(Boolean)
   const first = (words[0] ?? '').toLowerCase()
   if (first === 'list') return { ...none, verb: 'list' }
-  if (first === 'join' || first === 'roll') {
+  if (first === 'join' || first === 'here' || first === 'roll') {
     const ref = (words[1] ?? '').toLowerCase()
     const asAt = words.findIndex((word, i) => i > 1 && word.toLowerCase() === 'as')
     const who = asAt > 0 ? words.slice(asAt + 1).join(' ').trim() : ''
@@ -98,14 +102,14 @@ type HostSyncLike = {
   publishAtoms?: (host: string, sigs: readonly string[], bytesOf: (sig: string) => Promise<Uint8Array | null>) =>
     Promise<{ ok: true } | { ok: false; error: string }>
 }
-type JoinerLike = { join: (ask: { event: string; host?: string; name: string; going?: 'yes' | 'no' }) => Promise<RsvpOutcome> }
+type JoinerLike = { join: (ask: { event: string; host?: string; name: string; going?: 'yes' | 'no' | 'here'; from?: string }) => Promise<RsvpOutcome> }
 
 export class EventQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'event'
   override description = 'A meeting on the calendar: add one, read the calendar across your community, join, or keep the roll'
   override descriptionKey = 'slash.event'
-  override options = ['<date> [<time>[-<ends>]] at <where> [: <title>] on <host>', 'list on <host>', 'join <date|sig> as <name> on <host>', 'roll <date|sig> on <host>']
+  override options = ['<date> [<time>[-<ends>]] at <where> [: <title>] on <host>', 'list on <host>', 'join <date|sig> as <name> on <host>', 'here <date|sig> as <name> on <host>', 'roll <date|sig> on <host>']
   // Dates, signatures, places and names — the line arrives exactly as said.
   override rawArgs = true
   override examples = [
@@ -120,7 +124,8 @@ export class EventQueenBee extends QueenBee {
     if (!line.host) { tell('warning', 'Name the host: event 2026-10-24 at Yaletown on example.com, event list on example.com.'); return }
     if (line.verb === 'make') return this.#make(line)
     if (line.verb === 'list') return this.#list(line.host)
-    if (line.verb === 'join') return this.#join(line)
+    if (line.verb === 'join') return this.#join(line, 'yes')
+    if (line.verb === 'here') return this.#join(line, 'here')
     if (line.verb === 'roll') return this.#roll(line)
     tell('warning', 'Say event <date> [<time>] at <where> on <host>, event list on <host>, event join <date> as <name> on <host>, or event roll <date> on <host>.')
   }
@@ -193,17 +198,23 @@ export class EventQueenBee extends QueenBee {
     return null
   }
 
-  async #join(line: EventLine): Promise<void> {
-    if (!line.ref) { tell('warning', 'Say which meeting: event join 2026-10-24 as <name> on <host>.'); return }
-    if (!line.who) { tell('warning', 'Say who is coming: event join <date> as <name> on <host>.'); return }
+  async #join(line: EventLine, going: 'yes' | 'here'): Promise<void> {
+    const verb = going === 'here' ? 'here' : 'join'
+    if (!line.ref) { tell('warning', `Say which meeting: event ${verb} 2026-10-24 as <name> on <host>.`); return }
+    if (!line.who) { tell('warning', `Say who you are: event ${verb} <date> as <name> on <host>.`); return }
     const found = await this.#resolve(line.ref, line.host)
     if (!found) { tell('warning', `No meeting ${line.ref} on the calendar ${line.host} serves.`); return }
     const joiner = get<JoinerLike>('@diamondcoreprocessor.com/RsvpDrone')
     if (!joiner?.join) { tell('error', 'Joining is not available here.'); return }
-    const outcome = await joiner.join({ event: found.sig, host: found.record.host, name: line.who, going: 'yes' })
+    const outcome = await joiner.join({ event: found.sig, host: found.record.host, name: line.who, going, from: line.host })
     if (!outcome.ok) { tell('error', `${found.record.host} did not take it: ${outcome.reason}`); return }
-    say(`event: ${line.who} is coming to ${found.record.title} ${found.record.date} — receipt ${short(outcome.member)} at ${found.record.host}`)
-    tell('success', `You are on the list for ${found.record.title} ${found.record.date}.`)
+    const shown = outcome.profile ? ' with your profile' : ''
+    say(going === 'here'
+      ? `event: ${line.who} is here at ${found.record.title} ${found.record.date}${shown} — receipt ${short(outcome.member)}`
+      : `event: ${line.who} is coming to ${found.record.title} ${found.record.date}${shown} — receipt ${short(outcome.member)} at ${found.record.host}`)
+    tell('success', going === 'here'
+      ? `You are checked in at ${found.record.title} ${found.record.date}.`
+      : `You are on the list for ${found.record.title} ${found.record.date}.`)
   }
 
   async #roll(line: EventLine): Promise<void> {
@@ -214,11 +225,13 @@ export class EventQueenBee extends QueenBee {
     if (!found) { tell('warning', `No meeting ${line.ref} on the calendar ${line.host} serves.`); return }
     const { sig, record } = found
     const standing = await readRsvps(record.host, sig)
-    const yes = standing.filter(claim => claim.going === 'yes')
+    const yes = standing.filter(claim => claim.going === 'yes' || claim.going === 'here')
+    const here = standing.filter(claim => claim.going === 'here')
     const no = standing.filter(claim => claim.going === 'no')
     const roll = {
       v: 1, kind: ROLL_RECORD_KIND, event: sig, host: record.host, date: record.date, at: Date.now(),
-      coming: yes.map(claim => ({ who: claim.who, signer: claim.signer, member: claim.name, at: claim.at })),
+      coming: yes.map(claim => ({ who: claim.who, signer: claim.signer, member: claim.name, at: claim.at, ...(claim.profile ? { profile: claim.profile, host: claim.host } : {}) })),
+      here: here.map(claim => claim.signer),
       declined: no.map(claim => ({ who: claim.who, signer: claim.signer, member: claim.name, at: claim.at })),
     }
     const store = get<StoreLike>('@hypercomb.social/Store')
@@ -238,7 +251,7 @@ export class EventQueenBee extends QueenBee {
     })
     const names = yes.map(claim => claim.who)
     const shown = names.slice(0, 40).join(', ') + (names.length > 40 ? ` and ${names.length - 40} more` : '')
-    await this.#note(segments, `Roll ${record.date} ${record.title}: ${yes.length} coming${names.length ? ` — ${shown}` : ''}${no.length ? ` (${no.length} not coming)` : ''}`)
+    await this.#note(segments, `Roll ${record.date} ${record.title}: ${yes.length} coming${here.length ? `, ${here.length} checked in` : ''}${names.length ? ` — ${shown}` : ''}${no.length ? ` (${no.length} not coming)` : ''}`)
     say(`event: roll for ${record.title} ${record.date} kept — ${yes.length} coming, record ${short(rollSig)}`)
     tell('success', `${yes.length} coming to ${record.title} ${record.date}; the roll is kept here.`)
   }

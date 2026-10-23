@@ -14,7 +14,10 @@
 //            `host` the door where its list lives, which is where to join.
 //   list     sign('rsvp:<record sig>') on the record's host: one member per
 //            signed claim (kind RSVP_KIND, tags pool/event/name/going), named
-//            by the claim's own hash. Each key's newest claim stands.
+//            by the claim's own hash. Each key's newest claim stands. A
+//            check-in is a claim with going 'here'. A HOSTED attendee's claim
+//            may also name their host and their profile there (host/profile
+//            tags); the door picks that profile and its picture up.
 
 import { SignatureService, registerPoolMeaning } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
@@ -51,7 +54,7 @@ export interface EventRecord {
   readonly at: number
 }
 
-export type Going = 'yes' | 'no'
+export type Going = 'yes' | 'no' | 'here'
 
 /** A claim as read: who says they are coming to which meeting, when. */
 export interface Rsvp {
@@ -63,6 +66,9 @@ export interface Rsvp {
   readonly who: string
   readonly going: Going
   readonly at: number
+  /** A hosted attendee's host, and the profile their index names there. */
+  readonly host?: string
+  readonly profile?: string
 }
 
 export const rsvpPoolMeaning = (eventSig: string): string => `rsvp:${eventSig.toLowerCase()}`
@@ -100,12 +106,19 @@ export const parseEvent = (text: string): EventRecord | null => {
   return { v: 1, kind: EVENT_RECORD_KIND, title, date, ...(time ? { time } : {}), ...(ends ? { ends } : {}), where, series, host, at: Number(raw['at']) || 0 }
 }
 
-/** The unsigned claim a key signs: this pool, this meeting, this name, coming or not. */
-export function rsvpTemplate(pool: string, event: string, who: string, going: Going, at = Math.floor(Date.now() / 1000)) {
+/** The unsigned claim a key signs: this pool, this meeting, this name — coming,
+ *  not coming, or here now — and, for a hosted attendee, where their profile is. */
+export function rsvpTemplate(
+  pool: string, event: string, who: string, going: Going, at = Math.floor(Date.now() / 1000),
+  hosted: { host?: string; profile?: string } = {},
+) {
+  const where = hosted.host && hosted.profile && SIG_RE.test(hosted.profile.toLowerCase())
+    ? [['host', hosted.host.toLowerCase()], ['profile', hosted.profile.toLowerCase()]]
+    : []
   return {
     kind: RSVP_KIND,
     created_at: at,
-    tags: [['pool', pool], ['event', event.toLowerCase()], ['name', who.trim()], ['going', going]],
+    tags: [['pool', pool], ['event', event.toLowerCase()], ['name', who.trim()], ['going', going], ...where],
     content: '',
   }
 }
@@ -135,9 +148,14 @@ export async function readRsvp(
   const event = tag(evt, 'event').toLowerCase()
   const who = tag(evt, 'name').trim()
   const going = tag(evt, 'going')
-  if (!SIG_RE.test(event) || !who || who.length > RSVP_NAME_MAX || (going !== 'yes' && going !== 'no')) return null
+  if (!SIG_RE.test(event) || !who || who.length > RSVP_NAME_MAX || (going !== 'yes' && going !== 'no' && going !== 'here')) return null
+  const host = tag(evt, 'host').toLowerCase()
+  const profile = tag(evt, 'profile').toLowerCase()
   try { if (!verify(evt)) return null } catch { return null }
-  return { name, signer: String(evt.pubkey ?? '').toLowerCase(), event, who, going, at: Number(evt.created_at) || 0 }
+  return {
+    name, signer: String(evt.pubkey ?? '').toLowerCase(), event, who, going, at: Number(evt.created_at) || 0,
+    ...(host && SIG_RE.test(profile) ? { host, profile } : {}),
+  }
 }
 
 /** The names in a host's pool listing — newline text, one 64-hex per line.
@@ -157,8 +175,11 @@ export function standingRsvps(claims: Iterable<Rsvp>): Rsvp[] {
   return [...newest.values()].sort((a, b) => a.at - b.at || (a.name < b.name ? -1 : 1))
 }
 
-/** Who is coming, in the order they said so. */
-export const coming = (standing: readonly Rsvp[]): Rsvp[] => standing.filter(claim => claim.going === 'yes')
+/** Who is coming, in the order they said so — a check-in counts: they came. */
+export const coming = (standing: readonly Rsvp[]): Rsvp[] => standing.filter(claim => claim.going === 'yes' || claim.going === 'here')
+
+/** Who has checked in. */
+export const hereNow = (standing: readonly Rsvp[]): Rsvp[] => standing.filter(claim => claim.going === 'here')
 
 /** Today as a meeting's date is spelled, in this device's own day. */
 export const localDate = (now = new Date()): string =>

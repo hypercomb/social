@@ -15,7 +15,7 @@ vi.mock('../sharing/hive-pointer.js', () => ({
 ;(window as unknown as { ioc: unknown }).ioc = { register: () => void 0, get: () => undefined }
 
 const {
-  EVENTS_POOL, RSVP_KIND, coming, eventSignature, eventText, listingNames, orderEvents, parseEvent, readRsvp,
+  EVENTS_POOL, RSVP_KIND, coming, eventSignature, eventText, hereNow, listingNames, orderEvents, parseEvent, readRsvp,
   rsvpPoolMeaning, rsvpTemplate, standingRsvps,
 } = await import('./event.js')
 const { readEvents } = await import('./event-read.js')
@@ -37,6 +37,10 @@ describe('event lines', () => {
     expect(parseEventArgs('2026-10-26 9:15-11:00 at Yaletown Galleria, 1080 Mainland St, Vancouver on hypercomb.com')).toMatchObject({
       verb: 'make', date: '2026-10-26', time: '09:15', ends: '11:00', where: 'Yaletown Galleria, 1080 Mainland St, Vancouver',
     })
+  })
+
+  it('reads a check-in like a join', () => {
+    expect(parseEventArgs('here 2026-10-24 as Ada on hypercomb.com')).toMatchObject({ verb: 'here', ref: '2026-10-24', who: 'Ada', host: 'hypercomb.com' })
   })
 
   it('reads list, join and roll, and refuses a line with no host or no shape', () => {
@@ -91,6 +95,23 @@ describe('who is coming', () => {
     const nameless = claimBytes(pool, event, '   ', 'yes', '1'.repeat(64), 10)
     expect(await readRsvp(pool, await SignatureService.sign(nameless.slice().buffer as ArrayBuffer), nameless, () => true)).toBeNull()
     expect(rsvpTemplate(pool, event, 'x', 'no').kind).toBe(RSVP_KIND)
+  })
+
+  it('reads a check-in and a hosted attendee\'s profile, and ignores a profile with no host', async () => {
+    const hosted = new TextEncoder().encode(JSON.stringify({ ...rsvpTemplate(pool, event, 'Ada', 'here', 10, { host: 'HyperComb.com', profile: 'C'.repeat(64) }), pubkey: '1'.repeat(64), id: 'x', sig: 'y' }))
+    const name = await SignatureService.sign(hosted.slice().buffer as ArrayBuffer)
+    expect(await readRsvp(pool, name, hosted, () => true)).toMatchObject({ going: 'here', host: 'hypercomb.com', profile: 'c'.repeat(64) })
+    const loose = new TextEncoder().encode(JSON.stringify({ ...rsvpTemplate(pool, event, 'Bo', 'yes', 10), pubkey: '2'.repeat(64), id: 'x', sig: 'y', tags: [['pool', pool], ['event', event], ['name', 'Bo'], ['going', 'yes'], ['profile', 'c'.repeat(64)]] }))
+    const looseName = await SignatureService.sign(loose.slice().buffer as ArrayBuffer)
+    const read = await readRsvp(pool, looseName, loose, () => true)
+    expect(read?.profile).toBeUndefined()
+  })
+
+  it('counts a check-in as coming, and as here', () => {
+    const claim = (signer: string, going: 'yes' | 'no' | 'here', at: number) => ({ name: signer.slice(0, 1).repeat(64), signer, event, who: signer.slice(0, 2), going, at })
+    const standing = standingRsvps([claim('aa'.repeat(32), 'yes', 1), claim('aa'.repeat(32), 'here', 2), claim('bb'.repeat(32), 'yes', 3), claim('cc'.repeat(32), 'no', 4)])
+    expect(coming(standing).map(c => c.who)).toEqual(['aa', 'bb'])
+    expect(hereNow(standing).map(c => c.who)).toEqual(['aa'])
   })
 
   it('lets each key\'s newest claim stand, in the order they arrived, and counts who is coming', () => {
