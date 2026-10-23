@@ -5529,3 +5529,31 @@ test('the calendar picks up what the community lists: a peer\'s events join this
     globalThis.fetch = realFetch
   }
 })
+
+// A published page writes only to its own origin, and a site door under a zone
+// is read-only — so a reader joining from meetups.<zone> was refused before the
+// claim was ever looked at (jwize, 2026-10-22: "right now the register doesn't
+// work"). The site door takes exactly this one write and nothing else.
+test('a site door takes a reader\'s claim into an opened list, and still refuses every other write', async () => {
+  const record = eventRecordText('2026-10-24', 'revolucion.pluginthematrix.com')
+  const sig = await sha256Hex(record)
+  const env = await calendarEnv(new Map([[sig, enc(record)]]))
+  assert.equal((await organizerPuts(env, { [`event:${sig}`]: sig, [`rsvp:${sig}`]: sig })).status, 200)
+  const pool = await sha256Hex(`rsvp:${sig}`)
+  const claim = await rsvpClaim(pool, sig, keyOf(31))
+  const name = await sha256Hex(claim)
+  const door = 'https://revolucion.pluginthematrix.com'
+
+  const joined = await worker.fetch(new Request(`${door}/${pool}/${name}`, { method: 'PUT', body: claim }), env)
+  assert.equal(joined.status, 201, await joined.clone().text())
+  const listed = await worker.fetch(new Request(`${door}/${pool}/`), env)
+  assert.equal(await listed.text(), `${name}\n`)
+
+  const closed = await sha256Hex('rsvp:' + 'd'.repeat(64))
+  const elsewhere = await worker.fetch(new Request(`${door}/${closed}/${name}`, { method: 'PUT', body: claim }), env)
+  assert.equal(elsewhere.status, 405, 'a list nobody opened is not a write a site door takes')
+  const atom = await worker.fetch(new Request(`${door}/${name}`, { method: 'PUT', body: claim }), env)
+  assert.equal(atom.status, 405, 'nor is an atom')
+  const upload = await worker.fetch(new Request(`${door}/upload`, { method: 'PUT', body: claim }), env)
+  assert.equal(upload.status, 405, 'nor an upload')
+})

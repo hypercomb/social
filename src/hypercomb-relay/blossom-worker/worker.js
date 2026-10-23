@@ -5150,6 +5150,13 @@ const router = {
     if (method !== 'GET' && method !== 'HEAD') {
       const routed = await route()
       if (routed.site && !isZoneRoot(routed.env, requestUrl.hostname)) {
+        // THE ONE WRITE A SITE DOOR TAKES (documentation/calendar-events.md):
+        // a reader's own signed claim into a meeting's list that its organizer
+        // opened here. A published page writes only to its own origin, so its
+        // join can reach no other face; putRsvpMember checks the claim as it
+        // does at the zone root. Every other write stays refused.
+        const claim = method === 'PUT' && /^\/([0-9a-f]{64})\/([0-9a-f]{64})$/.exec(requestUrl.pathname)
+        if (claim && await isRsvpPool(env, claim[1])) return putRsvpMember(request, env, claim[1], claim[2])
         return text(405, 'published Core hosts are read-only')
       }
       if (routed.hostDoor) return text(405, 'the host door is read-only — write at the zone root')
