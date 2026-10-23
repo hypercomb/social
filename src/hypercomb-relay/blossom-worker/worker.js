@@ -2547,12 +2547,24 @@ const PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=(), payment=()
  *  posts no form, takes no device and keeps no cookie. Scripts are left alone
  *  on purpose: the shell injects an import map and loads its bees as blob:
  *  modules, and a script-src would stop the boot. */
+// A DOOR'S SHELL FILES LIVE UNDER /shell/. The participant shell's hashed
+// bundles share their names' shape (`main-*.js`, `chunk-*.js`, …) with the
+// visitor engine's, and `run_worker_first` hands those root paths straight to
+// the asset store — which holds the visitor's, not the shell's — so a door's
+// page loaded and its scripts 404'd. The door's page is rewritten to ask for
+// its own bundles under /shell/ (a path the worker runs first), and /shell/<f>
+// is the shell origin's /<f>. Lazy chunks follow by themselves: the bundles
+// import each other relative to their own URL. Sites pay nothing for this.
+const SHELL_PREFIX = '/shell/'
+const SHELL_BUNDLE_RE = /\b(src|href)="\/?((?:main|chunk|polyfills|styles|worker)-[A-Za-z0-9]+\.(?:js|css))"/g
+
 async function serveSandboxShell(request, env, zone) {
   const origin = String(env.SANDBOX_SHELL_ORIGIN || '').replace(/\/+$/, '')
   const loopback = /^http:\/\/((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(origin)
   const url = new URL(request.url)
+  const upstreamPath = url.pathname.startsWith(SHELL_PREFIX) ? '/' + url.pathname.slice(SHELL_PREFIX.length) : url.pathname
   const upstream = origin.startsWith('https://') || loopback
-    ? await fetch(origin + url.pathname + url.search, {
+    ? await fetch(origin + upstreamPath + url.search, {
       method: request.method,
       headers: { accept: request.headers.get('accept') || '*/*' },
     })
@@ -2570,6 +2582,10 @@ async function serveSandboxShell(request, env, zone) {
   headers.set('Cross-Origin-Opener-Policy', 'same-origin')
   headers.set('X-Content-Type-Options', 'nosniff')
   headers.delete('set-cookie')
+  if (request.method !== 'HEAD' && /text\/html/i.test(headers.get('content-type') || '')) {
+    const page = (await upstream.text()).replace(SHELL_BUNDLE_RE, (_, attr, file) => `${attr}="${SHELL_PREFIX}${file}"`)
+    return new Response(page, { status: upstream.status, headers })
+  }
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
 }
 

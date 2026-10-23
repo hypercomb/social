@@ -1489,6 +1489,29 @@ test('the swarm door hands every other path to the participant shell', async () 
   } finally { globalThis.fetch = original }
 })
 
+test('a door asks for its shell bundles under /shell/, and /shell/<file> is the shell origin\'s file', async () => {
+  const env = await sandboxEnv({ 'install:swarm': 'd'.repeat(64) })
+  const seen = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    seen.push(String(url))
+    return String(url).endsWith('/')
+      ? new Response('<script src="polyfills-AB12.js" type="module"></script><link rel="modulepreload" href="chunk-ZZ9.js"><script src="main-TQO2BYYC.js" type="module"></script><link rel="stylesheet" href="styles-Q1.css"><script src="env.js"></script>', { headers: { 'content-type': 'text/html' } })
+      : new Response('js', { headers: { 'content-type': 'text/javascript' } })
+  }
+  try {
+    const page = await (await worker.fetch(new Request('https://swarm.hypercomb.com/'), env)).text()
+    assert.match(page, /src="\/shell\/polyfills-AB12\.js"/)
+    assert.match(page, /href="\/shell\/chunk-ZZ9\.js"/)
+    assert.match(page, /src="\/shell\/main-TQO2BYYC\.js"/)
+    assert.match(page, /href="\/shell\/styles-Q1\.css"/)
+    assert.match(page, /src="env\.js"/)
+    const script = await worker.fetch(new Request('https://swarm.hypercomb.com/shell/main-TQO2BYYC.js'), env)
+    assert.equal(script.status, 200)
+    assert.deepEqual(seen, ['https://shell.example/', 'https://shell.example/main-TQO2BYYC.js'])
+  } finally { globalThis.fetch = original }
+})
+
 test('a write from the swarm door is not refused as a sandbox write', async () => {
   const env = await sandboxEnv({ 'install:swarm': 'd'.repeat(64) })
   const bytes = new TextEncoder().encode('a room note')
