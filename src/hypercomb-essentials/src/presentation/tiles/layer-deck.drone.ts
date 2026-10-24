@@ -42,7 +42,7 @@
 
 import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
-  APP_COLS, APP_LANDSCAPE_COLS, APP_LANDSCAPE_ROWS, APP_ROWS, DIM, STEEL, TIGHT_GAP,
+  DIM, STEEL, TIGHT_GAP,
   appDeckPage, buildAppDeck, installAppDeckCss, type AppChip, type AppDeckGroup,
 } from './app-deck.js'
 import type { VisualBeeDescriptor, VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
@@ -222,8 +222,8 @@ export class LayerDeckDrone extends Drone {
     this.close()
   }
 
-  /** A rotation changes the row count (one row across in landscape, two in
-   *  portrait) — rebuild on the same page. Coalesced to a frame. */
+  /** A rotation changes the sheet's ceiling (taller in landscape, shorter in
+   *  portrait) — rebuild with the same row open. Coalesced to a frame. */
   #onResize = (): void => {
     if (this.#resizeQueued) return
     this.#resizeQueued = true
@@ -300,8 +300,6 @@ export class LayerDeckDrone extends Drone {
       onActivate: chip => { chip.run?.() },
       t: (key, fallback) => this.#t(key, fallback),
       page,
-      cols: landscape ? APP_LANDSCAPE_COLS : APP_COLS,
-      rows: landscape ? APP_LANDSCAPE_ROWS : APP_ROWS,
     }))
     el.appendChild(sheet)
   }

@@ -24,9 +24,9 @@
 // It opens full-screen with the tile's picture, its name, its notes, and its
 // actions. HOW those actions are drawn depends on the device: a pointer gets
 // the RAIL (bare glyph, caption under it, wrapping down the column), a phone
-// gets the DECK — app-icon plates, four across, two rows (one row of six
-// beside the picture in landscape), and the rest a page away. Same chips,
-// same `run()`, one grammar; the plates themselves are built by `app-deck.ts`,
+// gets the DECK — expansion rows, one per group, each opening to a sideways
+// strip of its items (one open at a time). Same chips,
+// same `run()`, one grammar; the rows themselves are built by `app-deck.ts`,
 // which the layer's Views sheet shares, so a hand that learned one screen
 // already knows the other. See `#buildDeck`.
 //
@@ -96,7 +96,7 @@ import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig, readTileProper
 import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { nextTile, rememberCloseUpEntry, VIEW_ENTER_PREFIX } from './viewer-walk.js'
 import {
-  APP_COLS, APP_LANDSCAPE_COLS, APP_LANDSCAPE_ROWS, APP_ROWS, DIM, STEEL, TIGHT_GAP,
+  DIM, STEEL, TIGHT_GAP,
   appDeckPage, buildAppDeck, installAppDeckCss, type AppChip,
 } from './app-deck.js'
 import { tileArtSig } from './tile-art.js'
@@ -343,11 +343,11 @@ export class TileViewDrone extends Drone {
   #suspendedAt = 0
   /** Live orientation watch, bound only while the view is up. */
   #resizeObserver: ResizeObserver | null = null
-  /** The deck page the card was on when it was last torn down — a suspend, a
+  /** The deck row the card had open when it was last torn down — a suspend, a
    *  step, a rotation — so the re-mount lands on it. Reset on close. */
   #deckPage = 0
   /** Which shape the mounted deck was built for; a rotation past it rebuilds
-   *  (one row of six across in landscape, two rows of four in portrait). */
+   *  (the deck sits beside the picture in landscape, under it in portrait). */
   #deckLandscape: boolean | null = null
 
   protected override heartbeat = async (): Promise<void> => {
@@ -1663,8 +1663,6 @@ export class TileViewDrone extends Drone {
       onActivate: chip => this.#activate(chip, label),
       t: (key, fallback) => this.#t(key, fallback),
       page: this.#deckPage,
-      cols: landscape ? APP_LANDSCAPE_COLS : APP_COLS,
-      rows: landscape ? APP_LANDSCAPE_ROWS : APP_ROWS,
     })
   }
 

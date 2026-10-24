@@ -82,7 +82,7 @@ document.body.appendChild(el)
 const sheet = () => el.querySelector('[data-role="sheet"]') as HTMLElement | null
 const plates = () => Array.from(el.querySelectorAll('[data-hc-tv-app]')) as HTMLElement[]
 const plate = (action: string) => plates().find(p => p.dataset['action'] === action) as HTMLElement | undefined
-const titles = () => Array.from(el.querySelectorAll('[data-hc-tv-dot]')).map(d => d.getAttribute('aria-label'))
+const titles = () => Array.from(el.querySelectorAll('[data-hc-tv-group]')).map(d => d.getAttribute('aria-label'))
 const isOpen = () => el.style.display !== 'none' && !!sheet()
 const open = () => { EffectBus.emit('layer:deck-open', {}) }
 
