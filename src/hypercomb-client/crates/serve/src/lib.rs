@@ -43,6 +43,24 @@
 //!   2026-10-18: "only the head identifier is exposed", and an old signature
 //!   a crawler saved earlier buys it nothing.
 //!
+//! Two bounded widenings (jwize 2026-10-24, "go with a-d"; details in
+//! `genome.rs`):
+//!
+//! - **Public history is the hive's choice, and the operator's.** A location
+//!   whose current head wears a `publish:history` mark with `public: true`
+//!   also gives up its earlier markers and what they reach. A host started
+//!   with [`HostOptions::head_only`] (`hypercomb-serve --head-only`) never
+//!   reads the mark.
+//! - **A grace window.** When the genome moves, what the previous one
+//!   admitted stays admitted for ten minutes ([`GRACE`]), so a reader
+//!   mid-walk finishes; then it answers as never held.
+//!
+//! Content admitted only by either widening is answered `private,
+//! max-age=600`, never `immutable`: a shared cache must not keep serving it
+//! after the hive takes it back. Current content keeps `public, immutable` —
+//! the name IS the hash, and a reader that already holds the bytes loses
+//! nothing by keeping them.
+//!
 //! The staged shell is the published build — every byte of it is public on
 //! any static host serving the same `dist/` — so a real file there still wins
 //! inside a non-floor directory (a staged transfer pack, say). It is never
@@ -90,7 +108,7 @@
 mod genome;
 mod http;
 
-pub use genome::{collect, Genome};
+pub use genome::{collect, collect_with, Admission, Genome, GRACE};
 pub use http::{host_name, Body, Reply};
 
 use std::io::BufReader;
@@ -265,7 +283,7 @@ fn type_for(name: &str) -> &'static str {
 /// runtime with no way back.
 fn cache_for(path: &str, name: &str) -> &'static str {
     if is_sig(name) {
-        return "public, max-age=31536000, immutable";
+        return CACHE_CURRENT;
     }
     if path == "/pin" || matches!(name, "hypercomb.worker.js" | "main.js" | "env.js") {
         return "no-cache, no-store, must-revalidate";
@@ -502,16 +520,25 @@ pub fn resolve_for(
     target: &str,
 ) -> Reply {
     let held = OnceLock::new();
-    let genome = || held.get_or_init(|| Arc::new(collect(hive))).clone();
+    let genome = || held.get_or_init(|| genome::Admits::only(Arc::new(collect(hive)))).clone();
     resolve_with(shell, door_shell, hive, host, &genome, method, target)
 }
+
+/// How a current-head atom may be cached: forever, the name IS the hash.
+const CACHE_CURRENT: &str = "public, max-age=31536000, immutable";
+
+/// How an atom admitted only by public history or the grace window may be
+/// cached: by this reader, briefly. The hive can take it back — turn public
+/// history off, or let the grace window close — and a shared cache holding it
+/// `immutable` would keep giving it out.
+const CACHE_PROVISIONAL: &str = "private, max-age=600";
 
 fn resolve_with(
     host_shell: &Path,
     door_shell: Option<&Path>,
     hive: &dyn HiveSource,
     host: Option<&str>,
-    genome: &dyn Fn() -> Arc<Genome>,
+    genome: &dyn Fn() -> genome::Admits,
     method: &str,
     target: &str,
 ) -> Reply {
@@ -600,7 +627,12 @@ fn resolve_with(
                 }
                 true
             }
-            None => is_hive_head(hive, dir, entry) && genome().admits_head(dir, entry),
+            // The head of a reached location; any marker of a location whose
+            // history is public; or what the last genome admitted, in grace.
+            None => {
+                let admits = genome();
+                admits.admits_entry(dir, entry, is_hive_head(hive, dir, entry))
+            }
         };
         if admitted {
             if let Some(bytes) = hive.entry(dir, entry) {
@@ -646,13 +678,17 @@ fn resolve_with(
     if let Some(sig) = content_sig {
         // Outside the current genome, an atom answers as one never held: the
         // refusal says nothing about what the store keeps.
-        if !genome().admits_content(&sig) {
+        let Some(admission) = genome().content(&sig) else {
             return cors(Reply::new(404));
-        }
+        };
+        let cache = match admission {
+            Admission::Current => CACHE_CURRENT,
+            Admission::History | Admission::Grace => CACHE_PROVISIONAL,
+        };
         return match hive.content(&sig) {
             Some(bytes) => cors(Reply::new(200))
                 .with("content-type", "application/octet-stream")
-                .with("cache-control", "public, max-age=31536000, immutable")
+                .with("cache-control", cache)
                 .with("etag", format!("\"{sig}\""))
                 .body(Body::Bytes(bytes)),
             None => cors(Reply::new(404)),
@@ -755,15 +791,37 @@ pub fn serve(
     serve_with_doors(shell, None, hive, bind, port)
 }
 
+/// What the operator decides about a running host, over and above what the
+/// hive decides.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HostOptions {
+    /// Serve every location head only, whatever its `publish:history` mark
+    /// says — the operator declining to host anyone's history. The default
+    /// (`false`) honours the mark.
+    pub head_only: bool,
+}
+
 /// [`serve`], with the visitor shell a DOOR HOST is answered from: a
 /// hostname whose bag holds an enabled `host:activation` opens its page there
-/// (see [`resolve_for`]).
+/// (see [`resolve_for`]). Honours each location's `publish:history` mark.
 pub fn serve_with_doors(
     shell: impl Into<PathBuf>,
     door_shell: Option<PathBuf>,
     hive: Arc<dyn HiveSource>,
     bind: IpAddr,
     port: u16,
+) -> std::io::Result<Serving> {
+    serve_with_options(shell, door_shell, hive, bind, port, HostOptions::default())
+}
+
+/// [`serve_with_doors`], with the operator's [`HostOptions`].
+pub fn serve_with_options(
+    shell: impl Into<PathBuf>,
+    door_shell: Option<PathBuf>,
+    hive: Arc<dyn HiveSource>,
+    bind: IpAddr,
+    port: u16,
+    options: HostOptions,
 ) -> std::io::Result<Serving> {
     let shell = shell.into();
     let door_shell = door_shell.filter(|dir| dir.join("index.html").is_file());
@@ -775,7 +833,7 @@ pub fn serve_with_doors(
     let live = Arc::new(AtomicUsize::new(0));
     // One gate for every connection: a visitor fetching a page's atoms asks
     // the same collection hundreds of times, so it is reused while fresh.
-    let gate = Arc::new(genome::Gate::default());
+    let gate = Arc::new(genome::Gate::new(options.head_only));
 
     let accepting = {
         let shutdown = shutdown.clone();

@@ -218,7 +218,7 @@ fn content_is_served_from_the_store_at_both_bases() {
         assert_eq!(
             reply.header("cache-control"),
             Some("public, max-age=31536000, immutable"),
-            "a signature path is immutable — the name IS the hash",
+            "current content is immutable — the name IS the hash (history and grace are not)",
         );
         assert_eq!(reply.header("etag"), Some(format!("\"{SIG_B}\"").as_str()));
     }
@@ -764,8 +764,9 @@ fn fetch(addr: std::net::SocketAddr, request: &str) -> String {
 }
 
 /// The running host reuses one collection — but never across a write. The
-/// first request after an edit already answers from the edited hive, so a
-/// superseded version is never admitted for even a moment.
+/// first request after an edit already answers from the edited hive; what
+/// the superseded genome admitted stays admitted only for the grace window
+/// (so a reader mid-walk finishes), and is refused the moment it closes.
 #[test]
 fn a_running_gate_answers_from_the_hive_as_it_is_now() {
     let hive_dir = tempfile::tempdir().expect("a temp dir");
@@ -774,16 +775,252 @@ fn a_running_gate_answers_from_the_hive_as_it_is_now() {
     let first = host.put(b"{\"name\":\"\",\"label\":\"first\"}").expect("put");
     host.append(&home, &first).expect("revision");
     let gate = genome::Gate::default();
+    let start = std::time::Instant::now();
 
-    assert!(gate.current(&host).admits_content(&first));
-    let reused = gate.current(&host);
-    assert!(Arc::ptr_eq(&reused, &gate.current(&host)), "nothing changed, nothing re-derived");
+    assert!(gate.current_at(&host, start).admits_content(&first));
+    let reused = gate.current_at(&host, start);
+    assert!(
+        Arc::ptr_eq(reused.genome(), gate.current_at(&host, start).genome()),
+        "nothing changed, nothing re-derived",
+    );
 
     let second = host.put(b"{\"name\":\"\",\"label\":\"second\"}").expect("put");
     host.append(&home, &second).expect("revision");
-    let now = gate.current(&host);
-    assert!(now.admits_content(&second));
-    assert!(!now.admits_content(&first), "the edit took effect on the very next request");
+    let edited = start + Duration::from_secs(5);
+    let now = gate.current_at(&host, edited);
+    assert!(!Arc::ptr_eq(reused.genome(), now.genome()), "the edit took effect on the very next request");
+    assert_eq!(now.content(&second), Some(Admission::Current));
+    assert!(!now.genome().admits_content(&first), "the new genome does not reach the old head");
+    assert_eq!(now.content(&first), Some(Admission::Grace), "a reader mid-walk finishes");
+    let bag = bag(&[]);
+    let old_head = host
+        .raw_dir_entries(&bag)
+        .expect("the home bag")
+        .into_iter()
+        .map(|entry| entry.name)
+        .min()
+        .expect("the home bag holds its first marker");
+    assert!(now.admits_entry(&bag, &old_head, false), "the superseded head marker, in grace");
+
+    let nearly = edited + GRACE - Duration::from_secs(1);
+    assert_eq!(gate.current_at(&host, nearly).content(&first), Some(Admission::Grace));
+    let closed = gate.current_at(&host, edited + GRACE);
+    assert_eq!(closed.content(&first), None, "the grace window closed: refused like anything never held");
+    assert!(!closed.admits_entry(&bag, &old_head, false));
+    assert_eq!(closed.content(&second), Some(Admission::Current));
+}
+
+/// Over the wire: a superseded atom in grace is answered, but never as
+/// immutable — and after the window, as never held.
+#[test]
+fn a_superseded_atom_in_grace_is_never_cached_as_immutable() {
+    let (_dir, root) = shell();
+    let hive_dir = tempfile::tempdir().expect("a temp dir");
+    let host = hypercomb_host::Host::open(hive_dir.path()).expect("a hive");
+    let home = vec!["root-entries".to_string()];
+    let first = host.put(b"{\"name\":\"\",\"label\":\"first\"}").expect("put");
+    host.append(&home, &first).expect("revision");
+    let gate = genome::Gate::default();
+    let start = std::time::Instant::now();
+    let ask = |at: std::time::Instant, target: &str| {
+        resolve_with(&root, None, &host, None, &|| gate.current_at(&host, at), "GET", target)
+    };
+
+    let current = ask(start, &format!("/{first}"));
+    assert_eq!(current.status, 200);
+    assert_eq!(current.header("cache-control"), Some("public, max-age=31536000, immutable"));
+
+    let second = host.put(b"{\"name\":\"\",\"label\":\"second\"}").expect("put");
+    host.append(&home, &second).expect("revision");
+    let graced = ask(start + Duration::from_secs(1), &format!("/{first}"));
+    assert_eq!(graced.status, 200);
+    assert_eq!(graced.header("cache-control"), Some("private, max-age=600"));
+    assert_eq!(
+        ask(start + Duration::from_secs(1), &format!("/{second}")).header("cache-control"),
+        Some("public, max-age=31536000, immutable"),
+    );
+    assert_eq!(ask(start + GRACE + Duration::from_secs(2), &format!("/{first}")).status, 404);
+}
+
+// ── public history, by the hive's mark and the operator's leave ─────────────
+
+/// A `publish:history` record, as `writePublicHistory` writes it.
+fn history_mark(hive: &mut Stub, public: bool) -> String {
+    hive.hold(
+        format!("{{\"kind\":\"publish:history\",\"appliesTo\":[],\"payload\":{{\"public\":{public}}},\"mark\":\"persistent\"}}")
+            .as_bytes(),
+    )
+}
+
+/// Three revisions of the home page, each reaching a note of its own; the
+/// head wears `decorations` (the earlier ones wear nothing).
+fn three_revisions(hive: &mut Stub, decorations: &[&str]) -> (Vec<String>, Vec<String>) {
+    let notes: Vec<String> = ["n0", "n1", "n2"].iter().map(|n| hive.hold(n.as_bytes())).collect();
+    let worn: Vec<String> = decorations.iter().map(|sig| format!("\"{sig}\"")).collect();
+    let layers: Vec<String> = notes
+        .iter()
+        .enumerate()
+        .map(|(at, note)| {
+            let decorations = if at == 2 { worn.join(",") } else { String::new() };
+            hive.hold(format!("{{\"name\":\"\",\"notes\":[\"{note}\"],\"decorations\":[{decorations}]}}").as_bytes())
+        })
+        .collect();
+    for (index, layer) in ["00000000", "00000001", "00000002"].iter().zip(&layers) {
+        hive.revise(&[], index, layer);
+    }
+    (layers, notes)
+}
+
+#[test]
+fn a_location_whose_head_wears_the_public_mark_gives_up_its_history() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let mark = history_mark(&mut hive, true);
+    let (layers, notes) = three_revisions(&mut hive, &[&mark]);
+    let home = bag(&[]);
+
+    for base in ["", "/content"] {
+        for index in ["00000000", "00000001", "00000002"] {
+            let marker = resolve(&root, &hive, "GET", &format!("{base}/{home}/{index}"));
+            assert_eq!(marker.status, 200, "{base} {index}");
+            assert_eq!(marker.header("cache-control"), Some("no-cache, must-revalidate"));
+        }
+        for old in layers[..2].iter().chain(&notes[..2]) {
+            let reply = resolve(&root, &hive, "GET", &format!("{base}/{old}"));
+            assert_eq!(reply.status, 200, "{base} {old}");
+            assert_eq!(reply.header("cache-control"), Some("private, max-age=600"), "history is never immutable");
+        }
+        for current in [&layers[2], &notes[2], &mark] {
+            let reply = resolve(&root, &hive, "GET", &format!("{base}/{current}"));
+            assert_eq!(reply.status, 200, "{base} {current}");
+            assert_eq!(reply.header("cache-control"), Some("public, max-age=31536000, immutable"));
+        }
+    }
+}
+
+/// Fail closed: no mark, a mark that says `public: false`, a record that
+/// cannot be read, a mark of another kind, or a mark only an EARLIER version
+/// wore — head only, every one.
+#[test]
+fn anything_short_of_a_readable_public_mark_on_the_head_is_head_only() {
+    let (_dir, root) = shell();
+    type Decorate = Box<dyn Fn(&mut Stub) -> Vec<String>>;
+    let cases: Vec<(&str, Decorate)> = vec![
+        ("no mark", Box::new(|_| Vec::new())),
+        ("public: false", Box::new(|hive| vec![history_mark(hive, false)])),
+        ("unreadable", Box::new(|_| vec![SIG_C.to_string()])),
+        (
+            "another kind",
+            Box::new(|hive| vec![hive.hold(b"{\"kind\":\"publish:lights\",\"payload\":{\"public\":true}}")]),
+        ),
+    ];
+    for (case, decorate) in cases {
+        let mut hive = Stub::default();
+        let worn = decorate(&mut hive);
+        let worn: Vec<&str> = worn.iter().map(String::as_str).collect();
+        let (layers, notes) = three_revisions(&mut hive, &worn);
+        let home = bag(&[]);
+        assert_eq!(resolve(&root, &hive, "GET", &format!("/{home}/00000002")).status, 200, "{case}");
+        for old in ["00000000", "00000001"] {
+            assert_eq!(resolve(&root, &hive, "GET", &format!("/{home}/{old}")).status, 404, "{case} {old}");
+        }
+        for old in layers[..2].iter().chain(&notes[..2]) {
+            assert_eq!(resolve(&root, &hive, "GET", &format!("/{old}")).status, 404, "{case} {old}");
+        }
+    }
+
+    // The mark on an earlier version only: the head says nothing, so nothing.
+    let mut hive = Stub::default();
+    let mark = history_mark(&mut hive, true);
+    let marked = hive.hold(format!("{{\"name\":\"\",\"decorations\":[\"{mark}\"]}}").as_bytes());
+    let plain = hive.hold(b"{\"name\":\"\",\"label\":\"now\"}");
+    hive.revise(&[], "00000000", &marked);
+    hive.revise(&[], "00000001", &plain);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{}/00000000", bag(&[]))).status, 404);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{marked}")).status, 404);
+}
+
+/// A head that names an envelope: the mark is read off the layer inside it.
+#[test]
+fn the_mark_is_read_through_an_envelope() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let mark = history_mark(&mut hive, true);
+    let old = hive.hold(b"{\"name\":\"\",\"label\":\"old\"}");
+    let layer = hive.hold(format!("{{\"name\":\"\",\"decorations\":[\"{mark}\"]}}").as_bytes());
+    let envelope = hive.hold(format!("{{\"meta\":1,\"layer\":\"{layer}\"}}").as_bytes());
+    hive.revise(&[], "00000000", &old);
+    hive.revise(&[], "00000001", &envelope);
+
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{}/00000000", bag(&[]))).status, 200);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{old}")).status, 200);
+}
+
+/// Only the marked location opens: a sibling page without the mark keeps
+/// its history home.
+#[test]
+fn public_history_is_per_location() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let mark = history_mark(&mut hive, true);
+    let open_old = hive.hold(b"{\"name\":\"open\",\"label\":\"old\"}");
+    let open_now = hive.hold(format!("{{\"name\":\"open\",\"decorations\":[\"{mark}\"]}}").as_bytes());
+    let shut_old = hive.hold(b"{\"name\":\"shut\",\"label\":\"old\"}");
+    let shut_now = hive.hold(b"{\"name\":\"shut\",\"label\":\"now\"}");
+    let home = hive.hold(format!("{{\"name\":\"\",\"children\":[\"{open_now}\",\"{shut_now}\"]}}").as_bytes());
+    hive.revise(&[], "00000000", &home);
+    hive.revise(&["open"], "00000000", &open_old);
+    hive.revise(&["open"], "00000001", &open_now);
+    hive.revise(&["shut"], "00000000", &shut_old);
+    hive.revise(&["shut"], "00000001", &shut_now);
+
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{}/00000000", bag(&["open"]))).status, 200);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{open_old}")).status, 200);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{}/00000000", bag(&["shut"]))).status, 404);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{shut_old}")).status, 404);
+}
+
+/// The operator's leave: a host started head only never reads the mark.
+#[test]
+fn a_head_only_host_declines_public_history() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let mark = history_mark(&mut hive, true);
+    let (layers, _) = three_revisions(&mut hive, &[&mark]);
+    let home = bag(&[]);
+    let gate = genome::Gate::new(true);
+    let ask = |target: &str| resolve_with(&root, None, &hive, None, &|| gate.current(&hive), "GET", target);
+
+    assert_eq!(ask(&format!("/{home}/00000002")).status, 200);
+    assert_eq!(ask(&format!("/{home}/00000000")).status, 404);
+    assert_eq!(ask(&format!("/{}", layers[0])).status, 404);
+    assert_eq!(ask(&format!("/{}", layers[2])).status, 200);
+    assert!(!collect_with(&hive, true).admits_content(&layers[0]));
+    assert!(collect_with(&hive, false).admits_content(&layers[0]));
+}
+
+/// A door's creation is a published location: when its head wears the mark,
+/// the history of the lineage it was published from is public too.
+#[test]
+fn a_door_whose_creation_wears_the_mark_opens_its_lineage_history() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default().rooted(&[]);
+    let mark = history_mark(&mut hive, true);
+    let old = hive.hold(b"{\"name\":\"garden\",\"label\":\"old\"}");
+    let creation = hive.hold(format!("{{\"name\":\"garden\",\"decorations\":[\"{mark}\"]}}").as_bytes());
+    hive.revise(&["site", "garden"], "00000000", &old);
+    hive.revise(&["site", "garden"], "00000001", &creation);
+    let door = hive.hold(format!(
+        "{{\"name\":\"host:activation\",\"enabled\":true,\"pubkey\":\"{SIG_A}\",\"lineage\":\"site/garden\",\"sourceRoute\":\"https://garden.localhost/\",\"localRoute\":\"garden.localhost\",\"head\":\"{creation}\",\"source\":\"jwize.com\"}}"
+    ).as_bytes());
+    hive.entries.insert((hypercomb_protocol::sign_str("garden.localhost").to_hex(), "00000000".to_string()), marker(&door));
+
+    let lineage = bag(&["site", "garden"]);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{lineage}/00000000")).status, 200);
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/{old}")).status, 200);
+    let gate = genome::Gate::new(true);
+    let declined = resolve_with(&root, None, &hive, None, &|| gate.current(&hive), "GET", &format!("/{old}"));
+    assert_eq!(declined.status, 404);
 }
 
 /// A visitor shell, shaped like the visitor build: its own index.html.

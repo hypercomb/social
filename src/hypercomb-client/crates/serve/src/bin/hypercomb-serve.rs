@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! hypercomb-serve --hive /var/lib/hypercomb/hive --shell /srv/hypercomb/shell
-//!                 [--port 4270] [--bind 0.0.0.0] [--local]
+//!                 [--port 4270] [--bind 0.0.0.0] [--local] [--head-only]
 //! ```
 //!
 //! This is the server deployment of the same host the desktop app runs from its
@@ -96,7 +96,10 @@ fn main() -> ExitCode {
     };
 
     let visitor = flag("--visitor").map(PathBuf::from);
-    let serving = match hypercomb_serve::serve_with_doors(&shell, visitor, Arc::new(host), bind, port) {
+    // The operator's consent: a hive may mark a location's history public,
+    // and a host may still decline to serve anyone's history.
+    let options = hypercomb_serve::HostOptions { head_only: argv.iter().any(|a| a == "--head-only") };
+    let serving = match hypercomb_serve::serve_with_options(&shell, visitor, Arc::new(host), bind, port, options) {
         Ok(serving) => serving,
         Err(e) => {
             eprintln!("error: binding {bind}:{port}: {e}");
@@ -107,6 +110,10 @@ fn main() -> ExitCode {
     println!("hive    {}", hive_dir.display());
     println!("shell   {}", shell.display());
     println!("serving {}", serving.addr());
+    println!(
+        "history {}",
+        if options.head_only { "head only (--head-only)" } else { "public where the hive marks it (publish history on)" },
+    );
     println!("open    {}", serving.lan_url());
     println!("verify  node hypercomb-shim/host/check-host.mjs {}", serving.lan_url());
 
@@ -120,7 +127,7 @@ fn main() -> ExitCode {
 const USAGE: &str = "\
 hypercomb-serve — serve a hive over HTTP
 
-    hypercomb-serve --hive <dir> --shell <dir> [--visitor <dir>] [--port <n>] [--bind <ip>] [--local]
+    hypercomb-serve --hive <dir> --shell <dir> [--visitor <dir>] [--port <n>] [--bind <ip>] [--local] [--head-only]
 
     --hive   the directory holding the hive (a redb store), opened read-only in
              practice: this binary has no write path
@@ -131,4 +138,7 @@ hypercomb-serve — serve a hive over HTTP
              every hostname gets the shell
     --port   default 4270
     --bind   default 0.0.0.0 (every interface); --local is 127.0.0.1
+    --head-only  serve every location's head only, even where the hive has
+             turned public history on (`publish history on`); by default a
+             location whose head carries that mark also serves its history
 ";

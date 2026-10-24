@@ -1234,7 +1234,8 @@ fn ask(app: &tauri::AppHandle, title: &str, message: &str, yes: &str) -> bool {
 const ONLINE_READABLE: &str = "Anyone on the internet will be able to read your hive as it is \
      now: every tile in it, its notes, pictures and decorations, and every site you have \
      switched on here. That includes tiles you never published.\n\n\
-     Earlier versions, restore points, removed tiles and your private pools stay on this \
+     Earlier versions stay on this computer unless the hive turns public history on with \
+     `publish history on`. Restore points, removed tiles and your private pools stay on this \
      computer.";
 
 /// What the page is told about hosting: this machine's address, and the
@@ -1665,8 +1666,10 @@ fn main() {
                                      your hive as it is now: every tile in it, its notes, \
                                      pictures and decorations, and every site you have switched \
                                      on here. That includes tiles you never published.\n\n\
-                                     Earlier versions, restore points, removed tiles and your \
-                                     private pools stay on this computer.\n\n\
+                                     Earlier versions stay on this computer unless the hive \
+                                     turns public history on with `publish history on`. \
+                                     Restore points, removed tiles and your private pools stay \
+                                     on this computer.\n\n\
                                      It starts on your local network. A tunnel or forwarded port \
                                      in front of it puts it on the internet.",
                                 )
@@ -1693,8 +1696,10 @@ fn main() {
                                         .message(format!(
                                             "This hive is being served at\n\n    {url}\n\n\
                                              Anyone who can reach that address can read your hive as \
-                                             it is now. Earlier versions, restore points, removed \
-                                             tiles and your private pools are not served. Every byte \
+                                             it is now. Earlier versions are not served unless the \
+                                             hive turns public history on with `publish history \
+                                             on`; restore points, removed tiles and your private \
+                                             pools never are. Every byte \
                                              a reader takes is checked against its own signature, so \
                                              a host can cost them a 404 but never a wrong answer.\n\n\
                                              It speaks plain HTTP and holds no certificate. To put \
