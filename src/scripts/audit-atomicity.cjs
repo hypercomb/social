@@ -278,7 +278,7 @@ async function main() {
       failed = true
       console.log(`\nLIVE DRIFT — roots with content but NO build revision (pages stamped without minting):`)
       for (const r of live.unrecorded) console.log(`  ${r}`)
-      console.log(`  → run the producer with its build-record call, or /builds record at the root.`)
+      console.log(`  → run the producer with its build-record call, or /builds <name> at the root.`)
     }
     if (live.changed.length) {
       console.log(`\nchanged since last build revision (informational — user edits are legitimate):`)

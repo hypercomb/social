@@ -180,9 +180,14 @@ mark or a reference instead.
   bridge op behind which `mintBuildRecord` does seal → compare → mint
   → `commitSlotAppend`.
 - **Participants**: `/builds` lists the current cell's revisions,
-  `/builds record <name>` seals by hand (same mint), `/builds restore
-  <name>` brings one back — after auto-recording the current state
-  first (free when unchanged), same safety as `/restore`.
+  `/builds <name>` seals by hand (same mint), `/builds revert <name>`
+  brings one back — after auto-recording the current state first (free
+  when unchanged), same safety as `/restore`. No sub-word is a behaviour
+  word of its own: `record` and `restore` are words (meeting recording,
+  whole-hive snapshots), so a hive whose reader does not take a word's
+  forms ran them too — `builds record x` recorded nothing (2026-10-23),
+  and `builds restore x` would also have restored the whole hive's
+  snapshot named `x`. Both old forms are still heard by `builds`.
 - **Whole hive**: `/snapshot` + `/restore` are the `segments: []` case
   of the same primitive and predate it; `build-record` deliberately
   refuses empty segments and points at `/snapshot`.
@@ -218,7 +223,7 @@ granularity ever matters, that is a separate decision.
   `BuildRecord`, `readBuildsAt`, `mintBuildRecord`, passive slot
   registration.
 - `hypercomb-essentials/.../history/seal-restore.ts` — `applySealAt`,
-  the one restore walk shared by `/restore` and `/builds restore`.
+  the one restore walk shared by `/restore` and `/builds revert`.
 - `hypercomb-essentials/.../commands/builds.queen.ts` — `/builds`
   list · record · restore.
 - `hypercomb-essentials/.../assistant/claude-bridge.worker.ts` —

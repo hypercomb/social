@@ -155,7 +155,7 @@ async function contentSealOf(rawSeal: string): Promise<string> {
  * one marker, undoable like anything else.
  *
  * The single implementation behind the bridge `build-record` op and the
- * `/builds record` gesture, so producers and participants mint the exact
+ * `builds <name>` gesture, so producers and participants mint the exact
  * same record.
  *
  * `dryRun` seals and compares but NEVER writes — the atomicity audit's

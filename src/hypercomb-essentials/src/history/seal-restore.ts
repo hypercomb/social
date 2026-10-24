@@ -2,7 +2,7 @@
 //
 // The one restore walk: bring every location under `rootSegments` to the
 // sealed tree's content. Shared by /restore (whole hive, snapshots) and
-// /builds restore (a build root's subtree) so the two gestures cannot
+// /builds revert (a build root's subtree) so the two gestures cannot
 // drift — same addressing, same append-only promotion, same monotonic-
 // index carry-forward.
 //
@@ -14,7 +14,7 @@
 //
 // `carrySlots` names index slots on the RESTORE ROOT that are carried
 // FORWARD from the live head instead of reverted to what the seal held
-// (`snapshots` for /restore, `builds` for /builds restore). The list is
+// (`snapshots` for /restore, `builds` for /builds revert). The list is
 // the participant's map of history; history must not eat the map.
 
 import { get } from '@hypercomb/core'

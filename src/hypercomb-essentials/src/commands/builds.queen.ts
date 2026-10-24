@@ -2,9 +2,19 @@
 //
 // `/builds` — build revisions for the cell you are standing on.
 //
-//   /builds                      → list this subtree's build revisions
-//   /builds record before-redesign → seal this subtree under that name
-//   /builds restore build-3      → that build's tree becomes live again
+//   builds                       → list this subtree's build revisions
+//   builds before-redesign       → seal this subtree under that name
+//   builds revert build-3        → that build's tree becomes live again
+//
+// NO SUB-WORD IS A BEHAVIOUR WORD OF ITS OWN. The command line runs every
+// behaviour word on a line, and `record` (meeting recording) and `restore`
+// (whole-hive snapshots) are both words: said to a hive whose reader does not
+// take a word's forms, `builds record x` ran `record x` too and the builds
+// word heard no name (2026-10-23, the hosting pages' pass), and `builds
+// restore x` would run `restore x` — the WHOLE hive's snapshot of that name.
+// So a name alone records, and a build is restored with `revert`, which no
+// behaviour claims. `record` and `restore` are still heard here when they
+// arrive, so a line said the old way on a current hive still works.
 //
 // A build revision is a SCOPED SNAPSHOT (builds-slot.ts): producers mint
 // one automatically at the end of a multi-file pass (bridge op
@@ -47,18 +57,20 @@ export class BuildsQueenBee extends QueenBee {
   override description =
     'Build revisions for this subtree — record the state after a build pass, list them, restore one'
   override descriptionKey = 'slash.builds'
-  override options = ['record <name>', 'restore <name>', 'list']
+  // `<name>` first: the reader takes the word after `builds` as its argument
+  // whatever it is, so a current hive reads `builds record x` as one word too.
+  override options = ['<name>', 'revert <name>', 'list']
   override examples = [
     { input: '/builds', result: 'Lists this subtree’s build revisions' },
-    { input: '/builds record before-redesign', result: 'Seals this subtree under that name' },
-    { input: '/builds restore build-3', result: 'That build’s tree becomes live again' },
+    { input: '/builds before-redesign', result: 'Seals this subtree under that name' },
+    { input: '/builds revert build-3', result: 'That build’s tree becomes live again' },
   ]
 
   public override slashComplete(args: string): readonly string[] {
     const q = String(args ?? '').trim().toLowerCase()
-    const base = ['record', 'restore', 'list']
-    const withLabels = q.startsWith('restore')
-      ? this.#labels.map(l => `restore ${l}`)
+    const base = ['revert', 'list']
+    const withLabels = q.startsWith('revert')
+      ? this.#labels.map(l => `revert ${l}`)
       : base
     return withLabels.filter(o => !q || o.toLowerCase().startsWith(q))
   }
@@ -74,9 +86,10 @@ export class BuildsQueenBee extends QueenBee {
       case '':
       case 'list':
         return this.#list()
-      case 'record':
+      case 'record':                     // the old form, still heard
         return this.#record(remainder)
-      case 'restore':
+      case 'revert':
+      case 'restore':                    // the old form, still heard
         return this.#restore(remainder)
       default:
         // `/builds <name>` with no verb reads most naturally as a record.
@@ -98,7 +111,7 @@ export class BuildsQueenBee extends QueenBee {
     if (records.length === 0) {
       this.#toast('info', this.#t(i18n, 'builds.title', 'Builds'),
         this.#t(i18n, 'builds.none',
-          'No build revisions here yet — run /builds record <name>, or let a build pass mint one.'))
+          'No build revisions here yet — run /builds <name>, or let a build pass mint one.'))
       return
     }
     for (const r of records) {
@@ -146,13 +159,13 @@ export class BuildsQueenBee extends QueenBee {
     if (records.length === 0) {
       this.#toast('info', this.#t(i18n, 'builds.title', 'Builds'),
         this.#t(i18n, 'builds.none',
-          'No build revisions here yet — run /builds record <name>, or let a build pass mint one.'))
+          'No build revisions here yet — run /builds <name>, or let a build pass mint one.'))
       return
     }
     if (!name) {
       for (const r of records) this.#activity(`${r.label} — ${r.seal.slice(0, 8)}`, '◆')
       this.#toast('info', this.#t(i18n, 'builds.title', 'Builds'),
-        this.#t(i18n, 'builds.pick', 'Run /builds restore <name> — {count} revisions are in the activity log.',
+        this.#t(i18n, 'builds.pick', 'Run /builds revert <name> — {count} revisions are in the activity log.',
           { count: records.length }))
       return
     }
@@ -206,8 +219,13 @@ export class BuildsQueenBee extends QueenBee {
     if (here.length > 0) EffectBus.emit('fs:changed', { segments: [...here] })
   }
 
-  #t = (i18n: I18nProvider | undefined, key: string, fallback: string, params?: Record<string, unknown>): string =>
-    i18n?.t(key, params as never) ?? fallback
+  // A key the catalogs lack comes back as itself: the English is said then,
+  // never the key (a builds toast read `builds.none` until 2026-10-23).
+  #t = (i18n: I18nProvider | undefined, key: string, fallback: string, params?: Record<string, unknown>): string => {
+    const said = i18n?.t(key, params as never)
+    if (said && said !== key) return said
+    return fallback.replace(/\{(\w+)\}/g, (all, name: string) => params && name in params ? String(params[name]) : all)
+  }
 
   #activity = (message: string, icon: string): void => {
     EffectBus.emit('activity:log', { message, icon })
