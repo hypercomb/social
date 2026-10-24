@@ -170,7 +170,12 @@ describe('TS-4: a node that refused the upload ends the publish at once, by name
     const raced = await Promise.race([pending, new Promise(r => setTimeout(() => r('still waiting'), 4_000))])
     expect(raced).toBe('still waiting')
     expect(answered).toBeGreaterThan(0)
-  })
+    // Let it end: publishes run one at a time (publish-lane.ts), so one left
+    // waiting would hold every publish after it. The node now refuses, and the
+    // waiting publish stops on its next upload.
+    vi.stubGlobal('fetch', node(() => new Response('participants-closed', { status: 403 })))
+    await expect(pending).resolves.toMatchObject({ ok: false })
+  }, 30_000)
 
   it('the share-sheet gesture toasts "<node> refused the upload (<reason>) — nothing was published"', async () => {
     vi.stubGlobal('fetch', node(() => new Response('participants-closed', { status: 403 })))

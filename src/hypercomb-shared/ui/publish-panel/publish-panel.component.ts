@@ -1104,6 +1104,9 @@ export class PublishPanelComponent implements OnDestroy {
    *  label — it says the one thing the label cannot. */
   whyKey(row: PublishRow): string {
     if (row.busyPhase === 'confirming') return 'publish.why.confirming'
+    // Behind another publish from this hive (publish-lane.ts): say so, or a
+    // press that waits its turn reads as a press that did nothing.
+    if (row.busyPhase === 'queued') return 'publish.why.queued'
     if (row.busyPhase) return ''
     if (row.segments.length === 0) return 'publish.why.other-device'
     switch (row.state) {

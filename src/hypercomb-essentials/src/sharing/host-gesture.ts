@@ -87,6 +87,10 @@ export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> =
 
     let nextNote = 0
     const onProgress = (p: PublishProgress): void => {
+      if (p.phase === 'queued') {
+        activity(t(i18n, 'host.queued', 'waiting for another publish to finish…'), '○')
+        return
+      }
       if (p.phase === 'staging') {
         activity(t(i18n, 'host.uploading', 'uploading branch to its hosts…'), '●')
         nextNote = Date.now() + PROGRESS_NOTE_MS

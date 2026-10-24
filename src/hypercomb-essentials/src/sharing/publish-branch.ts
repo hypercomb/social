@@ -71,6 +71,7 @@ import { wornKindsWithin, writePublishLights } from '../commands/publish-lights.
 import { readGlobalOnKinds } from './behavior-enablement.js'
 import { derivedArrival, derivedArrivalRecord } from './arrival-derive.js'
 import { arrivalPointer } from './arrival-plan-publish.js'
+import { inPublishLane } from './publish-lane.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
@@ -129,6 +130,9 @@ interface HostSyncLike {
 interface SignerLike { getPublicKeyHex?: () => Promise<string | null> }
 
 export type PublishPhase =
+  /** Waiting its turn in the publish lane (publish-lane.ts) behind another
+   *  publish from this hive — nothing has been sealed yet. */
+  | 'queued'
   | 'sealing' | 'staging' | 'waiting' | 'indexing' | 'linking' | 'confirming'
 
 export interface PublishProgress {
@@ -249,7 +253,7 @@ async function resolveIndexDoor(
 }
 
 /** Publish one branch and record the act. Never throws. */
-export async function publishBranch(
+async function publishBranchNow(
   segments: readonly string[],
   options: PublishOptions = {},
 ): Promise<PublishResult> {
@@ -628,7 +632,7 @@ export async function confirmPublished(
  *  fallback, so an old link keeps resolving. Removing the index entry stops
  *  the branch being ADVERTISED and stops it tracking future changes; it does
  *  not un-share what was shared. */
-export async function unpublishBranch(
+async function unpublishBranchNow(
   segments: readonly string[],
 ): Promise<{ ok: true; removed: boolean } | { ok: false; failure: PublishFailure; reason?: string }> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
@@ -729,7 +733,7 @@ async function withdrawFromStages(
  *  already hosted, so turning a domain on or off is as fast as the index
  *  write. An empty set is a withdrawal (unpublishBranch). A branch not in the
  *  index yet has nothing to open — the caller publishes it instead. */
-export async function setBranchDoors(
+async function setBranchDoorsNow(
   segments: readonly string[],
   zones: readonly string[],
 ): Promise<{ ok: true; removed?: boolean } | { ok: false; failure: PublishFailure; reason?: string }> {
@@ -739,7 +743,7 @@ export async function setBranchDoors(
   if (segs.length === 0) return { ok: false, failure: 'no-branch' }
   const wanted = [...new Set(zones.map(z => normalizeHost(z)).filter(Boolean))]
   if (wanted.length === 0) {
-    const out = await unpublishBranch(segs)
+    const out = await unpublishBranchNow(segs)
     return out.ok ? { ok: true, removed: out.removed } : out
   }
 
@@ -802,7 +806,7 @@ export type OwnAddressFailure = PublishFailure | 'not-a-label' | 'reserved' | 'n
  *  not a DNS label, or is reserved (`content`, `try-*`), is refused before
  *  anything is signed. A branch the index does not name has nothing to
  *  address yet — the caller publishes it first. */
-export async function setBranchAddress(
+async function setBranchAddressNow(
   segments: readonly string[],
   zone: string,
   label: string | null,
@@ -936,7 +940,7 @@ async function verifiedIndexDoor(
  *  Refuses, before anything is signed, an index it cannot read (the wipe
  *  guard) — and an index no door holds: Off and Forget then have nothing they
  *  could truthfully report as done. */
-export async function setEntrance(
+async function setEntranceNow(
   host: string,
   intent: ZoneEntranceIntent,
   options: SetEntranceOptions = {},
@@ -1113,7 +1117,7 @@ interface SigningSigner extends SignerLike {
   signEvent?: (evt: { kind: number; created_at: number; tags: string[][]; content: string }) => Promise<Record<string, unknown>>
 }
 
-export async function secureDeleteBranch(segments: readonly string[]): Promise<SecureDeleteResult> {
+async function secureDeleteBranchNow(segments: readonly string[]): Promise<SecureDeleteResult> {
   const signer = get<SigningSigner>(NOSTR_SIGNER_KEY)
   const hostSync = get<HostSyncLike & ClosureWalker>(HOST_SYNC_KEY)
   if (!signer?.getPublicKeyHex || !signer.signEvent || !hostSync?.closureSigs) return { ok: false, failure: 'services' }
@@ -1182,4 +1186,43 @@ export async function secureDeleteBranch(segments: readonly string[]): Promise<S
     kept: hosts.reduce((n, h) => n + h.kept, 0),
     hosts,
   }
+}
+
+// ── THE LANE (publish-lane.ts) ─────────────────────────────────────────────
+//
+// Every act above that publishes or re-signs the index, as the rest of the
+// hive calls it: queued behind any other one from this hive, so no two ever
+// run side by side — a panel press, picked apps, a strip group and a word
+// alike. The bodies (`…Now`) stay unqueued for each other.
+
+/** Publish one branch and record the act — in its turn. Never throws. A
+ *  publish that has to wait says so first (`queued`). */
+export function publishBranch(...args: Parameters<typeof publishBranchNow>): ReturnType<typeof publishBranchNow> {
+  const onProgress = args[1]?.onProgress
+  return inPublishLane(() => publishBranchNow(...args), () => onProgress?.({ phase: 'queued' }))
+}
+
+/** Withdraw a branch from the index — in its turn. */
+export function unpublishBranch(...args: Parameters<typeof unpublishBranchNow>): ReturnType<typeof unpublishBranchNow> {
+  return inPublishLane(() => unpublishBranchNow(...args))
+}
+
+/** Open a published branch on exactly these domains — in its turn. */
+export function setBranchDoors(...args: Parameters<typeof setBranchDoorsNow>): ReturnType<typeof setBranchDoorsNow> {
+  return inPublishLane(() => setBranchDoorsNow(...args))
+}
+
+/** Give a published branch its own address on a domain — in its turn. */
+export function setBranchAddress(...args: Parameters<typeof setBranchAddressNow>): ReturnType<typeof setBranchAddressNow> {
+  return inPublishLane(() => setBranchAddressNow(...args))
+}
+
+/** Change an address's entrance — in its turn. */
+export function setEntrance(...args: Parameters<typeof setEntranceNow>): ReturnType<typeof setEntranceNow> {
+  return inPublishLane(() => setEntranceNow(...args))
+}
+
+/** Withdraw a branch and forget its bytes from its hosts — in its turn. */
+export function secureDeleteBranch(...args: Parameters<typeof secureDeleteBranchNow>): ReturnType<typeof secureDeleteBranchNow> {
+  return inPublishLane(() => secureDeleteBranchNow(...args))
 }
