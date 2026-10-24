@@ -103,9 +103,12 @@ function contentBag(held = new Map()) {
   // Custom metadata rides beside the bytes, as R2 keeps it (a room member's
   // `member: '1'` is what makes an address a room pool).
   const meta = new Map()
+  // As R2 does: every write is a new version, stamped with its upload time.
+  const written = new Map()
   return {
     held,
-    head: async key => held.has(key) ? { size: held.get(key).byteLength, customMetadata: meta.get(key) } : null,
+    written,
+    head: async key => held.has(key) ? { size: held.get(key).byteLength, customMetadata: meta.get(key), ...written.get(key) } : null,
     get: async key => held.has(key) ? {
       size: held.get(key).byteLength,
       body: held.get(key),
@@ -120,6 +123,7 @@ function contentBag(held = new Map()) {
         throw new Error('put: the bytes do not match their sha256')
       }
       held.set(key, bytes)
+      written.set(key, { version: crypto.randomUUID(), uploaded: new Date() })
       if (options?.customMetadata) meta.set(key, options.customMetadata)
       else meta.delete(key)
       return { key }
@@ -1938,9 +1942,14 @@ test('text goes out gzipped to a client that takes it; binary, ranges and other 
   assert.equal(gz.headers.get('content-encoding'), 'gzip')
   assert.equal(gz.headers.get('content-length'), null)
   assert.match(gz.headers.get('vary'), /Accept-Encoding/)
-  assert.equal(gz.headers.get('etag'), `W/"${sigs.page}"`)
-  const unzipped = gunzipSync(Buffer.from(await gz.arrayBuffer()))
-  assert.equal(await sigOf(new Uint8Array(unzipped)), sigs.page, 'the gzip carries the very bytes the sig names')
+  assert.equal(gz.headers.get('etag'), `W/"${sigs.page}.gz"`, 'the runtime-encoded answer wears its own weak tag')
+  // The runtime encodes: the header asks for gzip and the body is handed over
+  // as stored. A body gzipped by hand lost its encodeBody flag when re-wrapped
+  // and left gzipped twice — bytes that no longer hashed to their signature.
+  const handed = new Uint8Array(await gz.arrayBuffer())
+  assert.notEqual(handed[0], 0x1f, 'never gzipped by hand')
+  assert.equal(await sigOf(handed), sigs.page, 'the runtime is handed the very bytes the sig names')
+  assert.equal(typeof gunzipSync, 'function')
 
   const raw = await read(sigs.page)
   assert.equal(raw.headers.get('content-encoding'), null, 'a client that does not take gzip gets the bytes as stored')
@@ -1954,8 +1963,25 @@ test('text goes out gzipped to a client that takes it; binary, ranges and other 
   assert.equal(ranged.status, 206)
   assert.equal(ranged.headers.get('content-encoding'), null, 'a range read stays exact')
 
-  const revalidated = await read(sigs.page, { 'accept-encoding': 'gzip', 'if-none-match': `W/"${sigs.page}"` })
+  const revalidated = await read(sigs.page, { 'accept-encoding': 'gzip', 'if-none-match': `W/"${sigs.page}.gz"` })
   assert.equal(revalidated.status, 304, 'the weak tag of the gzipped answer still revalidates')
+  assert.equal(revalidated.headers.get('etag'), `W/"${sigs.page}.gz"`)
+  assert.equal((await read(sigs.page, { 'if-none-match': `"${sigs.page}"` })).status, 304, 'and so does the strong tag of the stored bytes')
+  // A copy cached in the hand-gzipped era (bare W/"<sig>") may not hash to its
+  // sig: it is never confirmed, it gets the bytes again.
+  const stale = await read(sigs.page, { 'accept-encoding': 'gzip', 'if-none-match': `W/"${sigs.page}"` })
+  assert.equal(stale.status, 200, 'the old weak tag is answered with the bytes, never a 304')
+
+  // A MODULE IMPORT IS ENCODED ONCE. The module path re-types the answer by
+  // re-wrapping it (asScript); it must still hand the runtime the stored bytes
+  // with one gzip header, never a body that is gzip already.
+  const asModule = await read(sigs.page, { 'accept-encoding': 'gzip', 'sec-fetch-dest': 'script' })
+  assert.equal(asModule.status, 200)
+  assert.match(asModule.headers.get('content-type'), /^text\/javascript/)
+  assert.equal(asModule.headers.get('content-encoding'), 'gzip')
+  const moduleBytes = new Uint8Array(await asModule.arrayBuffer())
+  assert.notEqual(moduleBytes[0], 0x1f, 'the module body is not gzipped by hand')
+  assert.equal(await sigOf(moduleBytes), sigs.page)
 })
 
 test('a door is told only the reads it may make, and its reads still answer', async () => {
@@ -4124,7 +4150,7 @@ test('a farm reply that declares its length streams into the bucket, which refus
   })
 })
 
-test('misses of one signature at once share one farm read, one deadline covers every host, and a miss is kept a minute', async () => {
+test('misses of one signature at once each read the farm — no request joins another\'s read — one deadline covers each walk, and a miss is kept a minute', async () => {
   const sig = await sha256('asked by two at once')
   const { env } = await fixture(undefined, FARMED)
   const signals = []
@@ -4143,8 +4169,12 @@ test('misses of one signature at once share one farm read, one deadline covers e
     await new Promise((resolve) => setTimeout(resolve, 20))
     release()
     assert.deepEqual((await both).map((r) => r.status), [404, 404])
-    assert.deepEqual(asked, [`https://relay.pluginthematrix.io/${sig}`, `https://second.example/${sig}`], 'one read for both')
-    assert.ok(signals[0] instanceof AbortSignal && signals.every((s) => s === signals[0]), 'one deadline for the whole walk')
+    // A read in flight dies with the request that started it, so each request
+    // walks the farm itself.
+    assert.deepEqual(asked, [`https://relay.pluginthematrix.io/${sig}`, `https://relay.pluginthematrix.io/${sig}`,
+      `https://second.example/${sig}`, `https://second.example/${sig}`], 'a read each')
+    assert.ok(signals[0] instanceof AbortSignal && signals[0] !== signals[1], 'a deadline each')
+    assert.ok(signals[0] === signals[2] && signals[1] === signals[3], 'one deadline for each whole walk')
     // Every host missed: the next read asks nobody.
     asked.length = 0
     assert.equal((await worker.fetch(new Request(`${APEX}/${sig}`), env)).status, 404)
@@ -4861,6 +4891,268 @@ test('an origin host that installs a channel answers its packages pool from the 
     // The flat listing stays the origin's: the walk settles on /content/.
     assert.equal(await (await at(`/${pool}/`)).text(), `origin /${pool}/`)
   })
+})
+
+// A cold isolate used to re-walk the whole package (~72 serial storage round
+// trips, 12–15 s measured live) before answering the pool. A walk once earned
+// is kept as a member of the host's private pool, under the forget generation
+// it began in, and trusted for VERDICT_TRUST_MS.
+test('a package found whole is kept: a cold isolate answers from the verdict, and /forget retires it before it deletes', async () => {
+  const pool = await sha256Hex('host:packages')
+  const verdicts = await sha256Hex('host:whole-packages')
+  const pkg = await packageFixture('kept')
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }, 1_800_000_000))
+  for (const [sig, text] of Object.entries(pkg.files)) await env.CONTENT.put(sig, utf8(text), { customMetadata: { owner: pubkey } })
+  const member = (store, ctx) => worker.fetch(new Request(`https://hypercomb.com/content/${pool}/00000000`), { ...env, CONTENT: store }, ctx)
+  await withUpstream(originPage, async () => {
+    assert.equal(await (await member(env.CONTENT)).text(), `${pkg.root}\nessentials`, 'whole: the pool names the root')
+    assert(env.CONTENT.held.has(`${verdicts}/${pkg.root}`), 'the verdict is kept')
+
+    // A cold isolate (a fresh store object, the same bytes): no layer is read again.
+    const cold = { ...env.CONTENT }
+    const reads = []
+    cold.get = async (key) => { reads.push(key); return env.CONTENT.get(key) }
+    assert.equal(await (await member(cold)).text(), `${pkg.root}\nessentials`)
+    assert.deepEqual(reads.filter((key) => key === pkg.root || key === pkg.child), [], 'answered from the verdict, no walk')
+
+    // The verdict is the host's own: no listing names it.
+    const listed = await worker.fetch(new Request(`https://hypercomb.com/${verdicts}/`), env)
+    assert(!(await listed.text()).includes(pkg.root), 'never listed')
+
+    // /forget moves the generation BEFORE it deletes: even a verdict the sweep
+    // missed counts for nothing, and a cold read walks again.
+    const deleteOrder = []
+    const del = env.CONTENT.delete
+    const put = env.CONTENT.put
+    const forgotten = await sha256Hex('host:forgotten')
+    env.CONTENT.put = async (key, body, options) => { if (key.startsWith(`${forgotten}/`)) deleteOrder.push('generation'); return put(key, body, options) }
+    env.CONTENT.delete = async (key) => { if (key === pkg.dependency) deleteOrder.push('delete'); return del(key) }
+    const url = 'https://hypercomb.com/forget'
+    const forgot = await worker.fetch(new Request(url, { method: 'POST',
+      headers: { authorization: await nip98(url, 'POST'), 'content-type': 'application/json' },
+      body: JSON.stringify({ sigs: [pkg.dependency] }) }), env)
+    env.CONTENT.put = put
+    env.CONTENT.delete = del
+    assert.deepEqual((await forgot.json()).removed, [pkg.dependency])
+    assert.deepEqual(deleteOrder, ['generation', 'delete', 'generation'], 'the generation moves before and after the deletes')
+    assert.equal(await (await member({ ...env.CONTENT })).text(), `origin /content/${pool}/00000000`, 'the walk finds the package broken')
+    assert.equal(await (await member(env.CONTENT)).text(), `origin /content/${pool}/00000000`, 'and this isolate forgot its memo too')
+  })
+})
+
+test('a verdict counts only in its own generation and its trust window — a walk that straddled a forget is never believed', async () => {
+  const pool = await sha256Hex('host:packages')
+  const verdicts = await sha256Hex('host:whole-packages')
+  const pkg = await packageFixture('aged')
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }, 1_800_000_000))
+  for (const [sig, text] of Object.entries(pkg.files)) await env.CONTENT.put(sig, utf8(text))
+  const key = `${verdicts}/${pkg.root}`
+  const member = (store, ctx) => worker.fetch(new Request(`https://hypercomb.com/content/${pool}/00000000`), { ...env, CONTENT: store }, ctx)
+  const walked = (store) => {
+    const reads = []
+    const get = store.get
+    store.get = async (k) => { reads.push(k); return get(k) }
+    return reads
+  }
+  await withUpstream(originPage, async () => {
+    // A verdict written under another generation (a walk that began before a
+    // forget moved it) is ignored: the cold read walks.
+    await env.CONTENT.put(key, new Uint8Array(0), { customMetadata: { generation: 'an-older-generation' } })
+    const straddled = { ...env.CONTENT }
+    const straddledReads = walked(straddled)
+    assert.equal(await (await member(straddled)).text(), `${pkg.root}\nessentials`)
+    assert(straddledReads.includes(pkg.root), 'walked, not believed')
+    assert.equal(env.CONTENT.head && (await env.CONTENT.head(key)).customMetadata.generation, 'none', 're-earned under the current generation')
+
+    // Past its trust window, with a request that can wait past its answer: the
+    // verdict still answers, and the walk runs behind it.
+    env.CONTENT.written.set(key, { ...env.CONTENT.written.get(key), uploaded: new Date(Date.now() - 7 * 3600_000) })
+    const aged = { ...env.CONTENT }
+    const agedReads = walked(aged)
+    // Hold the walk's child layer open: the answer must not wait for it.
+    let releaseWalk
+    const walkHeld = new Promise((resolve) => { releaseWalk = resolve })
+    const agedGet = aged.get
+    aged.get = async (k) => { if (k === pkg.child) await walkHeld; return agedGet(k) }
+    const waited = []
+    assert.equal(await (await member(aged, { waitUntil: (work) => waited.push(work) })).text(), `${pkg.root}\nessentials`,
+      'answered while the re-walk was still held open')
+    assert.equal(waited.length, 1, 'the re-walk was handed to waitUntil')
+    releaseWalk()
+    await Promise.all(waited)
+    assert(agedReads.includes(pkg.child), 'and it walked behind the answer')
+    assert(Date.now() - (await env.CONTENT.head(key)).uploaded.getTime() < 60_000, 'the verdict is fresh again')
+
+    // Past its trust window with nothing to wait on: the walk runs now.
+    env.CONTENT.written.set(key, { ...env.CONTENT.written.get(key), uploaded: new Date(Date.now() - 7 * 3600_000) })
+    const inline = { ...env.CONTENT }
+    const inlineReads = walked(inline)
+    assert.equal(await (await member(inline)).text(), `${pkg.root}\nessentials`)
+    assert(inlineReads.includes(pkg.root), 'walked before answering')
+  })
+})
+
+test('a walk that began between a forget\'s two generation moves is never believed, though it headed a leaf before its delete', async () => {
+  const pool = await sha256Hex('host:packages')
+  const forgotten = await sha256Hex('host:forgotten')
+  const pkg = await packageFixture('straddle')
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }, 1_800_000_000))
+  for (const [sig, text] of Object.entries(pkg.files)) await env.CONTENT.put(sig, utf8(text), { customMetadata: { owner: pubkey } })
+  const member = (store, ctx) => worker.fetch(new Request(`https://hypercomb.com/content/${pool}/00000000`), { ...env, CONTENT: store }, ctx)
+  await withUpstream(originPage, async () => {
+    assert.equal(await (await member(env.CONTENT)).text(), `${pkg.root}\nessentials`)
+    // The forget's delete of the dependency is held until a cold read, begun
+    // after the first move, has headed it; that read's verdict lands after
+    // the forget has answered (and swept).
+    let releaseDelete, firstMove
+    const deleteHeld = new Promise((resolve) => { releaseDelete = resolve })
+    const moved = new Promise((resolve) => { firstMove = resolve })
+    const { put, delete: del } = env.CONTENT
+    env.CONTENT.put = async (key, body, options) => { const out = await put(key, body, options); if (key.startsWith(`${forgotten}/`)) firstMove(); return out }
+    env.CONTENT.delete = async (key) => { if (key === pkg.dependency) await deleteHeld; return del(key) }
+    const url = 'https://hypercomb.com/forget'
+    const forgetting = worker.fetch(new Request(url, { method: 'POST',
+      headers: { authorization: await nip98(url, 'POST'), 'content-type': 'application/json' },
+      body: JSON.stringify({ sigs: [pkg.dependency] }) }), env)
+    await moved
+    const straddling = { ...env.CONTENT, put, delete: del }
+    straddling.head = async (key) => {
+      const object = await env.CONTENT.head(key)
+      if (key === pkg.dependency) { releaseDelete(); await forgetting }
+      return object
+    }
+    const reading = member(straddling)
+    assert.deepEqual((await (await forgetting).json()).removed, [pkg.dependency])
+    await reading
+    env.CONTENT.put = put
+    env.CONTENT.delete = del
+    assert.equal(await (await member({ ...env.CONTENT })).text(), `origin /content/${pool}/00000000`,
+      'its verdict carries a retired generation: a later cold read walks and finds the package broken')
+  })
+})
+
+test('a verdict past its trust whose re-walk finds the package broken is withdrawn, and past twice its trust the reader waits for the walk', async () => {
+  const pool = await sha256Hex('host:packages')
+  const verdicts = await sha256Hex('host:whole-packages')
+  const pkg = await packageFixture('broken')
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }, 1_800_000_000))
+  for (const [sig, text] of Object.entries(pkg.files)) await env.CONTENT.put(sig, utf8(text))
+  const key = `${verdicts}/${pkg.root}`
+  const member = (store, ctx) => worker.fetch(new Request(`https://hypercomb.com/content/${pool}/00000000`), { ...env, CONTENT: store }, ctx)
+  const age = (hours) => env.CONTENT.written.set(key, { ...env.CONTENT.written.get(key), uploaded: new Date(Date.now() - hours * 3600_000) })
+  await withUpstream(originPage, async () => {
+    assert.equal(await (await member({ ...env.CONTENT })).text(), `${pkg.root}\nessentials`)
+
+    // Past twice its trust, even a request that could wait walks first.
+    age(13)
+    const waited = []
+    const reads = []
+    const late = { ...env.CONTENT }
+    late.get = async (k) => { reads.push(k); return env.CONTENT.get(k) }
+    assert.equal(await (await member(late, { waitUntil: (work) => waited.push(work) })).text(), `${pkg.root}\nessentials`)
+    assert.equal(waited.length, 0, 'nothing deferred')
+    assert(reads.includes(pkg.child), 'walked before answering')
+
+    // A dependency deleted around the worker (no forget, no generation move),
+    // and the verdict past its trust: answered this once, withdrawn behind it.
+    env.CONTENT.held.delete(pkg.dependency)
+    age(7)
+    const behind = []
+    assert.equal(await (await member({ ...env.CONTENT }, { waitUntil: (work) => behind.push(work) })).text(), `${pkg.root}\nessentials`)
+    assert.equal(behind.length, 1)
+    await Promise.all(behind)
+    assert(!env.CONTENT.held.has(key), 'the re-walk withdrew the verdict')
+    assert.equal(await (await member({ ...env.CONTENT })).text(), `origin /content/${pool}/00000000`, 'and the next read walks')
+  })
+})
+
+test('forget checks each claim again right before its delete, and deletes nothing when its generation cannot move', async () => {
+  const [mine, later] = ['6', '7'].map((c) => c.repeat(64))
+  const objects = new Map([[mine, { owner: pubkey }], [later, { owner: pubkey }]])
+  const { env } = await fixture(await signedIndex({ revolucion: 'c'.repeat(64) }))
+  env.CONTENT = heap(objects)
+  // Another publisher uploads `mine`'s bytes while the first pass heads `later`.
+  const head = env.CONTENT.head
+  env.CONTENT.head = async (k) => {
+    if (k === later && !objects.get(mine).shared) objects.set(mine, { owner: pubkey, shared: '1' })
+    return head(k)
+  }
+  const url = 'https://content.pluginthematrix.com/forget'
+  const forget = async () => worker.fetch(new Request(url, {
+    method: 'POST', headers: { authorization: await nip98(url, 'POST'), 'content-type': 'application/json' },
+    body: JSON.stringify({ sigs: [mine, later] }),
+  }), env)
+  const out = await (await forget()).json()
+  assert.deepEqual(out.removed, [later])
+  assert.deepEqual(out.kept, { [mine]: 'shared' })
+  assert(objects.has(mine), 'the bytes another publisher was told are held stay held')
+
+  const forgotten = await sha256Hex('host:forgotten')
+  objects.set(later, { owner: pubkey })
+  objects.set(mine, { owner: pubkey })
+  const put = env.CONTENT.put
+  env.CONTENT.put = async (k, b, o) => { if (k.startsWith(`${forgotten}/`)) throw new Error('storage down'); return put(k, b, o) }
+  const refused = await forget()
+  assert.equal(refused.status, 503)
+  assert(objects.has(mine) && objects.has(later), 'nothing deleted')
+})
+
+test('a door page reads its publisher\'s index from storage once, and its edge fill waits for nobody', async () => {
+  // An edge whose fill is held open: the page answers anyway, the fill is the
+  // request's own waitUntil, and the card check and the gate share one read.
+  let release
+  const filling = new Promise((resolve) => { release = resolve })
+  const held = new Map()
+  const edge = {
+    match: async (request) => (held.has(request.url) ? new Response(held.get(request.url)) : undefined),
+    put: async (request, response) => { await filling; held.set(request.url, await response.text()) },
+    delete: async () => true,
+  }
+  const before = globalThis.caches
+  globalThis.caches = { default: edge }
+  try {
+    const { env } = await fixture()
+    const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+    env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
+    const reads = []
+    const get = env.CONTENT.get
+    env.CONTENT.get = async (key) => { if (key.startsWith(INDEXES)) reads.push(key); return get(key) }
+    const waited = []
+    const res = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env, { waitUntil: (work) => waited.push(work) })
+    assert.equal(res.status, 200)
+    assert.match(await res.text(), /id="hc-index"/, 'the page carries the index the gate verified')
+    assert.equal(reads.length, 1, 'one storage read of the index per page')
+    assert.equal(held.size, 0, 'answered while the fill was still held')
+    assert(waited.length >= 1, 'the fill went to this request\'s waitUntil')
+    release()
+    await Promise.all(waited)
+    assert.equal(held.size, 1, 'and it landed after the answer')
+  } finally {
+    if (before === undefined) delete globalThis.caches
+    else globalThis.caches = before
+  }
+})
+
+test('a door reads its bundled install pointer once per deploy, keeping only an answer', async () => {
+  const { env } = await fixture()
+  const pool = await sha256Hex('host:packages')
+  const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+  const listings = []
+  let shipped = false
+  env.ASSETS.fetch = async (request) => {
+    const path = new URL(request.url).pathname
+    if (path === `/content/${pool}/`) {
+      listings.push(path)
+      return shipped ? new Response('00000000\n', { headers: { 'content-type': 'text/plain' } }) : new Response('not found', { status: 404 })
+    }
+    if (path === `/content/${pool}/00000000`) return new Response(`${'e'.repeat(64)}\nessentials`, { headers: { 'content-type': 'text/plain' } })
+    return new Response(shell, { headers: { 'content-type': 'text/html' } })
+  }
+  // A miss is not kept: the next page asks again.
+  assert.doesNotMatch(await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text(), /id="hc-install"/)
+  shipped = true
+  for (let i = 0; i < 2; i++) assert.match(await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text(), /id="hc-install"/)
+  assert.equal(listings.length, 2, 'asked on the miss, then once for the answer it keeps')
 })
 
 test('anyone pulling the signed root through the farm before its files cannot move the pool (the flip, reproduced)', async () => {

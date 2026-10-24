@@ -563,9 +563,9 @@ function nothingHere(hostname, zone) {
  *  null when the key holds nothing this host will trust. A store that could
  *  not be READ is not the same as an index that is absent: the key goes into
  *  `failed`, so a caller that must not guess (zonePlaces) can tell. */
-async function verifiedIndex(env, pubkey, failed) {
+async function verifiedIndex(env, pubkey, failed, rawOf = (key) => heldIndexRaw(env, key)) {
   let raw
-  try { raw = await heldIndexRaw(env, pubkey) } catch {
+  try { raw = await rawOf(pubkey) } catch {
     failed?.add(pubkey)
     return null
   }
@@ -584,17 +584,27 @@ async function verifiedIndex(env, pubkey, failed) {
 }
 
 /** One request's index reads, memoized by pubkey. The ledger asks the same
- *  key for every site it reports; a page passes one reader to its gate and its
- *  package. A reader never outlives the request that made it, so an index is
- *  never answered stale. `failed` holds the keys whose store read threw. */
-function indexReader(env) {
+ *  key for every site it reports; a page passes one reader to its card check,
+ *  its gate and its package, and `read.raw` hands the page the very bytes the
+ *  gate verified — one storage read of an index per page. A reader never
+ *  outlives the request that made it, so an index is never answered stale, and
+ *  nothing it holds in flight is ever joined by another request. `failed`
+ *  holds the keys whose store read threw. `defer` is the request's waitUntil,
+ *  when the caller has one (heldIndexRaw). */
+function indexReader(env, defer) {
   const reads = new Map()
+  const raws = new Map()
   const failed = new Set()
+  const raw = (pubkey) => {
+    if (!raws.has(pubkey)) raws.set(pubkey, heldIndexRaw(env, pubkey, defer))
+    return raws.get(pubkey)
+  }
   const read = (pubkey) => {
-    if (!reads.has(pubkey)) reads.set(pubkey, verifiedIndex(env, pubkey, failed))
+    if (!reads.has(pubkey)) reads.set(pubkey, verifiedIndex(env, pubkey, failed, raw))
     return reads.get(pubkey)
   }
   read.failed = failed
+  read.raw = raw
   return read
 }
 
@@ -1171,7 +1181,7 @@ async function declaredListing(env, read) {
 /** The host's own private ledgers. Each member names a key or a domain and
  *  holds what only its own endpoint may hand out, so no declaration lists
  *  them — not even an operator's signed `listed`. */
-const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters', 'host:tenants']
+const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters', 'host:tenants', 'host:whole-packages', 'host:forgotten']
 
 /** Is this pool listed here? The floor answers without an index read — the
  *  addresses every follower asks stay on the hot path; anything else is
@@ -1822,11 +1832,11 @@ function servesOrigin(env, hostname) {
 const ORIGIN_ATOM_RE = /^\/content\/([0-9a-f]{64})$/
 const ORIGIN_POOL_RE = /^\/content\/([0-9a-f]{64})\/(?:[0-9]{8})?$/
 
-async function originHostRead(request, env, url) {
+async function originHostRead(request, env, url, defer) {
   const atom = url.pathname.match(ORIGIN_ATOM_RE)
   if (atom) return originAtom(request, env, atom[1])
   const pool = url.pathname.match(ORIGIN_POOL_RE)
-  if (pool && pool[1] === await poolAddress(HOST_PACKAGES_MEANING)) return installedPackage(request, env, url)
+  if (pool && pool[1] === await poolAddress(HOST_PACKAGES_MEANING)) return installedPackage(request, env, url, defer)
   return null
 }
 
@@ -1840,14 +1850,14 @@ async function originAtom(request, env, sig) {
 
 /** The package pool an origin host installs from, when its heap holds the
  *  root the publisher signed — else null, and the origin's own pool answers. */
-async function installedPackage(request, env, url) {
+async function installedPackage(request, env, url, defer) {
   const binding = siteBindings(env)[url.hostname.toLowerCase()]
   const publisher = binding?.publishers?.find((p) => p.primary) || binding?.publishers?.[0]
   if (!binding?.installs || !publisher) return null
   try {
     const index = await verifiedIndex(env, publisher.pubkey)
     const root = String(index?.roots?.[`install:${binding.installs}`] || '').toLowerCase()
-    if (!SIG_RE.test(root) || !(await heapHoldsPackage(env, root))) return null
+    if (!SIG_RE.test(root) || !(await heapHoldsPackage(env, root, defer))) return null
     return await answerPackage(request, url, { root }, binding.installs)
   } catch { return null }
 }
@@ -1862,10 +1872,27 @@ async function installedPackage(request, env, url) {
 // (farmMayCopy).
 
 const PACKAGE_CLOSURE_MAX = 8_192
+// Layer reads in flight at once, in a sliding window: a slow read holds back
+// only itself (lockstep batches each waited for their slowest).
 const PACKAGE_WALK_WIDTH = 6
-// A package found whole is not walked again for this long. Files leave the
-// heap only by an owner's /forget, so the answer is re-earned on this clock
-// rather than trusted for the isolate's life.
+// Leaf heads in flight at once, started as the walk finds them. The runtime
+// queues storage calls past its own connection cap, so this keeps the queue
+// full without waiting on a batch.
+const PACKAGE_HEAD_WIDTH = 24
+// A package found whole is a KEPT VERDICT: a member of this private pool named
+// by its root (no listing hands it out, no room write may fill it). It counts
+// only under the forget generation its walk began in, and only for
+// VERDICT_TRUST_MS — after that it is re-earned, behind the answer when the
+// request can wait past it. Neither /forget (which moves the generation BEFORE
+// it deletes) nor a delete made around the worker (another deployment on this
+// bucket, the dashboard) can leave one standing for longer.
+const HOST_WHOLE_MEANING = 'host:whole-packages'
+// One object, rewritten by every /forget before its first delete; its R2
+// version IS the generation a verdict carries.
+const HOST_FORGOTTEN_MEANING = 'host:forgotten'
+const VERDICT_TRUST_MS = 6 * 60 * 60 * 1000
+// The walking isolate's own memo of a whole package — how long it answers
+// without asking storage again.
 const PACKAGE_WHOLE_MS = 300_000
 const PACKAGE_MEMO_HELD = 16
 // Memos per bucket (siteOpen keys its answer on env.CONTENT the same way).
@@ -1907,31 +1934,74 @@ function packageLayerRefs(bytes) {
 
 /** Walk `root`'s package, reading each LAYER through `layerBytes` (leaves
  *  are never read): `{ layers, leaves, missing }`, or null when what was read
- *  is not a package, or is too large to be one. */
-async function walkPackage(root, layerBytes) {
+ *  is not a package, or is too large to be one. `onLeaf` hears each leaf the
+ *  moment it is found, once. */
+async function walkPackage(root, layerBytes, onLeaf) {
   const layers = new Set([root])
   const leaves = new Set()
   const missing = []
   const queue = [root]
-  while (queue.length) {
-    if (layers.size + leaves.size > PACKAGE_CLOSURE_MAX) return null
-    const batch = queue.splice(0, PACKAGE_WALK_WIDTH)
-    const read = await Promise.all(batch.map(async (sig) => [sig, await layerBytes(sig)]))
-    for (const [sig, bytes] of read) {
-      if (!bytes) { missing.push(sig); continue }
-      const refs = packageLayerRefs(bytes)
-      if (!refs) return null
-      for (const child of refs.layers) {
-        if (leaves.has(child)) return null
-        if (!layers.has(child)) { layers.add(child); queue.push(child) }
-      }
-      for (const leaf of refs.leaves) {
-        if (layers.has(leaf)) return null
-        leaves.add(leaf)
-      }
+  let broken = false
+  const visit = async (sig) => {
+    const bytes = await layerBytes(sig)
+    if (broken) return
+    if (!bytes) { missing.push(sig); return }
+    const refs = packageLayerRefs(bytes)
+    if (!refs) { broken = true; return }
+    for (const child of refs.layers) {
+      if (leaves.has(child)) { broken = true; return }
+      if (!layers.has(child)) { layers.add(child); queue.push(child) }
     }
+    for (const leaf of refs.leaves) {
+      if (layers.has(leaf)) { broken = true; return }
+      if (!leaves.has(leaf)) { leaves.add(leaf); onLeaf?.(leaf) }
+    }
+    if (layers.size + leaves.size > PACKAGE_CLOSURE_MAX) broken = true
+  }
+  const reading = new Set()
+  while (!broken && (queue.length || reading.size)) {
+    while (!broken && queue.length && reading.size < PACKAGE_WALK_WIDTH) {
+      const read = visit(queue.shift()).finally(() => reading.delete(read))
+      reading.add(read)
+    }
+    if (reading.size) await Promise.race(reading)
+  }
+  if (broken) {
+    await Promise.allSettled(reading)
+    return null
   }
   return { layers, leaves, missing }
+}
+
+/** Heads a stream of signatures through a sliding window. `add` as they are
+ *  found; `done()` answers whether every one was held — false at the first
+ *  that is not (or whose head failed), without waiting on the rest. `stop()`
+ *  ends the stream once the answer is known some other way: nothing queued is
+ *  headed, and the few heads in flight just finish. */
+function headWindow(env, width) {
+  const queue = []
+  let active = 0
+  let absent = false
+  let closed = false
+  let answer
+  const answered = new Promise((resolve) => { answer = resolve })
+  const pump = () => {
+    while (!absent && active < width && queue.length) {
+      const sig = queue.shift()
+      active++
+      Promise.resolve()
+        .then(() => env.CONTENT.head(sig))
+        .then((object) => { if (!object) absent = true }, () => { absent = true })
+        .finally(() => { active--; pump() })
+    }
+    if (absent) answer(false)
+    else if (closed && !active && !queue.length) answer(true)
+  }
+  return {
+    add: (sig) => { queue.push(sig); pump() },
+    done: () => { closed = true; pump(); return answered },
+    stop: () => { absent = true; queue.length = 0; answer(false) },
+  }
 }
 
 /** A layer's bytes from the heap, or null. */
@@ -1942,20 +2012,91 @@ async function heapLayer(env, sig) {
 
 /** Does the heap hold `root`'s package WHOLE — every layer, bee and
  *  dependency? Only a whole package may be named by a derived pool. */
-async function heapHoldsPackage(env, root) {
+async function heapHoldsPackage(env, root, defer) {
   const memo = packageMemo(env).whole
   const seen = memo.get(root)
   if (seen !== undefined && Date.now() - seen < PACKAGE_WHOLE_MS) return true
-  if (!(await env.CONTENT?.head?.(root))) return false
-  const walk = await walkPackage(root, (sig) => heapLayer(env, sig))
-  if (!walk || walk.missing.length) return false
-  const leaves = [...walk.leaves]
-  for (let at = 0; at < leaves.length; at += 16) {
-    const held = await Promise.all(leaves.slice(at, at + 16).map((sig) => env.CONTENT.head(sig)))
-    if (held.some((object) => !object)) return false
+  // A WALK ONCE EARNED IS KEPT. Every cold isolate used to re-walk the whole
+  // package — 66 layers, then ~960 leaf heads, about 72 serial storage round
+  // trips — before an origin host would answer a participant's pool read: 12 to
+  // 15 s on 7 of 16 reads measured 2026-10-23, 26.8 s of a 63–67 s first
+  // install. The verdict is a derivation of the root (its closure is held),
+  // kept under the forget generation its walk began in (HOST_WHOLE_MEANING).
+  // Absent, or of another generation ⇒ the walk, exactly as before.
+  const [verdict, stamp] = await Promise.all([wholeVerdictKey(root), forgottenKey()])
+  const [held, earned, forgotten] = await Promise.all([
+    env.CONTENT?.head?.(root), env.CONTENT?.head?.(verdict), env.CONTENT?.head?.(stamp),
+  ])
+  if (!held) return false
+  const generation = forgetGenerationOf(forgotten)
+  if (earned && earned.customMetadata?.generation === generation) {
+    const age = Date.now() - (earned.uploaded?.getTime?.() ?? 0)
+    if (age < VERDICT_TRUST_MS) {
+      remember(memo, root, Date.now())
+      return true
+    }
+    // Past its trust: still the answer, re-earned behind it — the walk never
+    // sits in front of a reader when the request can wait past it. One re-walk
+    // per isolate per PACKAGE_WHOLE_MS, not one per request. Past twice its
+    // trust (a deferred walk cut off at waitUntil's limit never refreshes it)
+    // the reader waits for the walk: a stale verdict is believed 12 h at most.
+    if (defer && age < 2 * VERDICT_TRUST_MS) {
+      remember(memo, root, Date.now())
+      defer(earnWholeVerdict(env, root, verdict, generation, true).catch(() => false))
+      return true
+    }
+  }
+  return earnWholeVerdict(env, root, verdict, generation, !!earned)
+}
+
+/** Walk `root` and keep (or withdraw) its verdict under `generation`. Leaves
+ *  are headed as the walk finds them, and the heads stop the moment the
+ *  answer is known otherwise. */
+async function earnWholeVerdict(env, root, verdict, generation, had) {
+  const heads = headWindow(env, PACKAGE_HEAD_WIDTH)
+  let whole = false
+  try {
+    const walk = await walkPackage(root, (sig) => heapLayer(env, sig), heads.add)
+    whole = !!walk && !walk.missing.length && await heads.done()
+  } finally {
+    if (!whole) heads.stop()
+  }
+  const memo = packageMemo(env).whole
+  if (!whole) {
+    memo.delete(root)
+    if (had) try { await env.CONTENT?.delete?.(verdict) } catch { /* the generation or the clock retires it */ }
+    return false
   }
   remember(memo, root, Date.now())
+  try {
+    await env.CONTENT?.put?.(verdict, new Uint8Array(0), { customMetadata: { generation } })
+  } catch { /* unkept is only slower */ }
   return true
+}
+
+const wholeVerdictKey = async (root) => `${await poolAddress(HOST_WHOLE_MEANING)}/${root}`
+const forgottenKey = async () => `${await poolAddress(HOST_FORGOTTEN_MEANING)}/00000000`
+/** The generation a stamp names: its R2 version, unique to every write. */
+const forgetGenerationOf = (stamp) => (stamp ? String(stamp.version ?? stamp.etag ?? 'unversioned') : 'none')
+
+/** Move the forget generation: every verdict kept until now stops counting,
+ *  and a walk already in flight keeps the old one. */
+async function moveForgetGeneration(env) {
+  await env.CONTENT.put(await forgottenKey(), new TextEncoder().encode(crypto.randomUUID()))
+}
+
+/** Sweep the verdicts the generation already retired — tidiness, never
+ *  correctness: a verdict of an old generation counts for nothing. */
+async function clearWholeVerdicts(env) {
+  packageMemo(env).whole.clear()
+  if (!env.CONTENT?.list || !env.CONTENT?.delete) return
+  const prefix = `${await poolAddress(HOST_WHOLE_MEANING)}/`
+  let cursor
+  do {
+    const page = await env.CONTENT.list({ prefix, cursor, limit: 1000 })
+    await Promise.all((page?.objects ?? []).map((object) => env.CONTENT.delete(object.key)))
+    cursor = page?.truncated ? page.cursor : undefined
+  } while (cursor)
 }
 
 // ── the sandbox door ─────────────────────────────────────────────────────
@@ -2049,6 +2190,20 @@ async function installPointer(request, env, site, promoted) {
   const pool = await poolAddress(HOST_PACKAGES_MEANING)
   if (promoted) return { pool, marker: '00000000', text: `${promoted.root}\n${site.lineage}` }
   if (!env.ASSETS?.fetch) return null
+  // The deployed engine's own pointer is a constant of this worker version —
+  // the asset store cannot change under a running isolate — so once read it
+  // is kept per asset binding, not read as two serial fetches on every page.
+  // Only the ANSWER is kept: a read in flight belongs to the request that
+  // started it, and a request that ended takes its reads with it.
+  const known = bundledPointers.get(env.ASSETS)
+  if (known) return known
+  const pointer = await bundledPointer(request, env, pool)
+  if (pointer) bundledPointers.set(env.ASSETS, pointer)
+  return pointer
+}
+const bundledPointers = new WeakMap()
+
+async function bundledPointer(request, env, pool) {
   try {
     const url = new URL(request.url)
     url.search = ''
@@ -3398,7 +3553,8 @@ const FARM_BUFFER_MAX = 1_048_576
 // A signature every farm host missed is not asked again for a minute.
 const FARM_MISS_MS = 60_000
 const FARM_MISSES_HELD = 4_096
-const farmReads = new Map()   // `<farm>\n<sig>` → the one read in flight
+// Only a settled miss is kept across requests: a read in flight belongs to the
+// request that started it, and dies with it, so it is never joined by another.
 const farmMisses = new Map()  // `<farm>\n<sig>` → when every host missed it
 
 /** The binding whose farm `hostname` reads through: its own, else its zone's. */
@@ -3550,16 +3706,14 @@ async function readThroughFarm(env, hostname, sig) {
   // refused, and asked again it is weighed again (a publish may have just
   // made it part of one).
   if (!(await farmMayCopy(env, farmBindingOf(env, hostname), farm, sig).catch(() => false))) return false
-  if (!farmReads.has(key)) {
-    farmReads.set(key, readFromFarm(env, farm, sig).then((held) => {
-      if (!held) {
-        if (farmMisses.size >= FARM_MISSES_HELD) farmMisses.delete(farmMisses.keys().next().value)
-        farmMisses.set(key, Date.now())
-      }
-      return held
-    }).finally(() => farmReads.delete(key)))
+  // Two requests for one signature each read it: the write is
+  // content-addressed and conditional, so the second lands as already held.
+  const held = await readFromFarm(env, farm, sig)
+  if (!held) {
+    if (farmMisses.size >= FARM_MISSES_HELD) farmMisses.delete(farmMisses.keys().next().value)
+    farmMisses.set(key, Date.now())
   }
-  return farmReads.get(key)
+  return held
 }
 
 async function readFromFarm(env, farm, sig) {
@@ -4132,11 +4286,17 @@ function suffixType(pathname) {
 
 async function serveBlob(request, env, sig, typeOverride) {
   // If-None-Match short-circuit, no R2 op. Content-addressing makes this
-  // unconditionally correct: an ETag match means the client's cached bytes
-  // hash to the sig — they ARE the content, whatever this bucket holds.
-  const inm = String(request.headers.get('if-none-match') || '')
-  if (inm.replace(/^W\//, '').replace(/"/g, '').toLowerCase() === sig) {
-    return new Response(null, { status: 304, headers: { 'ETag': `"${sig}"`, 'Cache-Control': IMMUTABLE, ...CORS } })
+  // correct for the tags this host vouches for: the strong `"<sig>"` (the
+  // stored bytes) and `W/"<sig>.gz"` (the same bytes, encoded once by the
+  // runtime). A bare `W/"<sig>"` is the tag of the hand-gzipped era, when a
+  // module or /content/ read could leave gzipped twice — a copy cached then
+  // may not hash to its sig, so it gets the bytes again, never a 304. That
+  // heals only a copy the browser revalidates: one it still holds as fresh
+  // (immutable, a year) is never asked about, and only the client can drop it.
+  const unmodified = String(request.headers.get('if-none-match') || '').split(',').map((tag) => tag.trim())
+    .find((tag) => tag === `"${sig}"` || tag === sig || tag === `W/"${sig}.gz"`)
+  if (unmodified) {
+    return new Response(null, { status: 304, headers: { 'ETag': unmodified === sig ? `"${sig}"` : unmodified, 'Cache-Control': IMMUTABLE, ...CORS } })
   }
 
   const headersFor = (obj, len) => {
@@ -4209,12 +4369,20 @@ function looksLikeText(bytes) {
 }
 function gzipBlob(sig, bytes, headers) {
   if (!looksLikeText(bytes)) return new Response(bytes, { status: 200, headers })
-  const encoded = { ...headers, 'Content-Encoding': 'gzip', 'ETag': `W/"${sig}"` }
+  // Its own weak tag: a revalidation that names it is answered 304, while the
+  // hand-gzipped era's bare W/"<sig>" is not (serveBlob).
+  const encoded = { ...headers, 'Content-Encoding': 'gzip', 'ETag': `W/"${sig}.gz"` }
   delete encoded['Content-Length']
   delete encoded['Accept-Ranges']
-  const body = new Response(bytes).body.pipeThrough(new CompressionStream('gzip'))
-  // `manual`: the body is already encoded — the runtime sends it as it is.
-  return new Response(body, { status: 200, headers: encoded, encodeBody: 'manual' })
+  // THE RUNTIME ENCODES: the body leaves here as the stored bytes, and the
+  // header asks for gzip (encodeBody 'automatic', the default). A body gzipped
+  // by hand had to carry `encodeBody: 'manual'`, and that flag does not survive
+  // a Response re-wrapped with copied headers — asScript, the module path, does
+  // exactly that — so the runtime gzipped the gzip, and the bytes a reader got
+  // no longer hashed to their signature (found live 2026-10-22 on every R2-held
+  // text atom of 1 KB or more read at /content/<sig> or as a module). A header
+  // survives any re-wrap: one encode, always.
+  return new Response(bytes, { status: 200, headers: encoded })
 }
 
 // /content/<sig> — a signed module import from the visitor engine. The same
@@ -4316,6 +4484,7 @@ async function forgetSigs(request, env) {
   const heads = await publisherHeads(env, await verifiedIndex(env, auth.pubkey))
   const removed = []
   const kept = {}
+  const deletable = []
   for (const sig of sigs) {
     if (heads.has(sig)) { kept[sig] = 'still-open'; continue }
     const head = await env.CONTENT.head(sig)
@@ -4324,8 +4493,35 @@ async function forgetSigs(request, env) {
     if (!claim.owner) { kept[sig] = 'unclaimed'; continue }
     if (claim.owner !== auth.pubkey) { kept[sig] = 'not-yours'; continue }
     if (claim.shared === '1') { kept[sig] = 'shared'; continue }
-    await env.CONTENT.delete(sig)
-    removed.push(sig)
+    deletable.push(sig)
+  }
+  if (deletable.length) {
+    // The forget generation moves BEFORE anything is deleted: every package
+    // verdict kept until now stops counting, a walk already in flight keeps
+    // the old generation, and a forget that fails here has deleted nothing.
+    // It moves AGAIN after the deletes, even when one throws: a walk that
+    // began between the moves may have headed a leaf before its delete, and
+    // its verdict must count for nothing. Only a walk that starts after the
+    // last delete can earn a current one.
+    try { await moveForgetGeneration(env) } catch {
+      return text(503, 'the forget generation could not move; nothing was deleted')
+    }
+    try {
+      for (const sig of deletable) {
+        // The claim is checked again right before its delete: another
+        // publisher may have uploaded the same bytes since the first pass.
+        const claim = (await env.CONTENT.head(sig))?.customMetadata
+        if (!claim) { kept[sig] = 'not-held'; continue }
+        if (claim.owner !== auth.pubkey) { kept[sig] = 'not-yours'; continue }
+        if (claim.shared === '1') { kept[sig] = 'shared'; continue }
+        await env.CONTENT.delete(sig)
+        removed.push(sig)
+      }
+    } finally {
+      packageMemo(env).whole.clear()
+      try { await moveForgetGeneration(env) } catch { /* the trust window bounds it */ }
+    }
+    try { await clearWholeVerdicts(env) } catch { /* retired already; the sweep is tidiness */ }
   }
   return json(200, { removed, kept }, { 'Cache-Control': 'no-store' })
 }
@@ -4628,7 +4824,13 @@ const indexCacheKey = async (pubkey) =>
   new Request(`https://hive-indexes.invalid/${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`)
 const edgeCache = () => globalThis.caches?.default ?? null
 
-async function heldIndexRaw(env, pubkey) {
+/** A publisher's index bytes: the edge copy, else the pool. `defer`, when the
+ *  caller holds its request's waitUntil, takes the edge fill off the answer —
+ *  on a sporadic door the fill is mostly a miss and a put, and the visitor's
+ *  page waited on both. Without it the fill is awaited, as it always was. The
+ *  fill is this request's own work, handed to this request's own waitUntil:
+ *  nothing here is ever left for another request to finish. */
+async function heldIndexRaw(env, pubkey, defer) {
   const edge = edgeCache()
   if (edge) {
     try {
@@ -4638,11 +4840,11 @@ async function heldIndexRaw(env, pubkey) {
   }
   const raw = await readHeldIndex(env, pubkey)
   if (edge && raw) {
-    try {
-      await edge.put(await indexCacheKey(pubkey), new Response(raw, {
-        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${INDEX_EDGE_SECONDS}` },
-      }))
-    } catch { /* uncached is only slower */ }
+    const fill = (async () => edge.put(await indexCacheKey(pubkey), new Response(raw, {
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${INDEX_EDGE_SECONDS}` },
+    })))().catch(() => { /* uncached is only slower */ })
+    if (defer) defer(fill)
+    else await fill
   }
   return raw
 }
@@ -5762,6 +5964,13 @@ export default {
 // alone — so every page leaves with it, whatever the account's analytics
 // switch says and whichever zone this script is routed on next. Only pages:
 // the edge rewrites nothing else, and a WebSocket answer must pass untouched.
+//
+// The price is paid in bytes: `no-transform` also stops the edge compressing a
+// page, and a page the worker marks gzip under it still reaches the reader raw
+// (hypercomb.com's own pass-through pages, measured 2026-10-24) — so a door is
+// its full 72 KB on every visit. Compressing doors again means lifting
+// no-transform on zones whose Web Analytics is confirmed off: an owner's call
+// (documentation/performance-plan.md), not this function's.
 function untransformed(response) {
   if (!/^\s*text\/html\b/i.test(response?.headers?.get?.('content-type') || '')) return response
   const cache = response.headers.get('cache-control') || ''
@@ -5825,10 +6034,16 @@ const router = {
     // page reuses its reader.
     let cardDoor
     let cardRead
+    // ONE READER PER PAGE. The card check, the gate and the page's carried
+    // index ask the same key; sharing this request's reader makes that one
+    // storage read, and its edge fill is this request's waitUntil, off the
+    // answer. Nothing it holds in flight is ever shared with another request.
+    let pageRead
+    const pageReader = (scoped) => (pageRead ??= indexReader(scoped, ctx?.waitUntil ? (work) => ctx.waitUntil(work) : undefined))
     const cardDoorAt = async (reuse = false) => {
       if (cardDoor === undefined) {
         const routed = await route()
-        cardRead = indexReader(routed.env)
+        cardRead = pageReader(routed.env)
         cardDoor = await heldCardDoor(routed, deployed, requestUrl.hostname.toLowerCase(), cardRead, reuse)
       }
       return cardDoor
@@ -5879,7 +6094,7 @@ const router = {
     // package the heap holds (originHostRead), read from the var as deployed.
     if ((method === 'GET' || method === 'HEAD') && servesOrigin(env, requestUrl.hostname)
       && !ORIGIN_OWNED_BY_WORKER.test(pathname)) {
-      return (await originHostRead(request, deployed, requestUrl)) ?? fetch(request)
+      return (await originHostRead(request, deployed, requestUrl, ctx?.waitUntil ? (work) => ctx.waitUntil(work) : undefined)) ?? fetch(request)
     }
 
     // A DOOR RUNS NO WORKER FROM THE HEAP. A worker takes its policy from its
@@ -6253,7 +6468,7 @@ const router = {
       // A door — named or wildcard — is a website only while an approved
       // publisher's signed index carries its lineage (the open mark, above).
       // Until then, and again after a withdrawal, an honest 404 page.
-      const read = indexReader(env)
+      const read = pageReader(env)
       const opened = await siteOpen(env, site, read, requestUrl.hostname, pathname.startsWith('/content/'))
       if (!opened.open) return nothingHere(requestUrl.hostname, implicit ? siteZone : null)
       // A promoted trial: the site runs its publisher's package, not the
@@ -6276,7 +6491,7 @@ const router = {
       const [located, pointer, signedIndex] = frontDoor ? [null, null, null] : await Promise.all([
         newestLocation(env, await poolAddress(requestUrl.hostname.toLowerCase())),
         installPointer(request, env, site, opened.promoted),
-        publisher ? heldIndexRaw(env, publisher.pubkey).catch(() => null) : null,
+        publisher ? read.raw(publisher.pubkey).catch(() => null) : null,
       ])
       const door = located?.record ?? null
       const install = door ? pointer : null

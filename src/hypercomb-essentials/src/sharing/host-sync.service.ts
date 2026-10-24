@@ -3532,7 +3532,8 @@ export class HostSyncService extends EventTarget {
     if (!res.ok) return false
     const type = (res.headers.get('content-type') ?? '').toLowerCase()
     if (!type.includes('text/html')) return true
-    const etag = (res.headers.get('etag') ?? '').replace(/^W\//i, '').replace(/"/g, '').trim().toLowerCase()
+    // A gzipped answer's weak tag carries `.gz` (the host's encoding mark).
+    const etag = (res.headers.get('etag') ?? '').replace(/^W\//i, '').replace(/"/g, '').trim().toLowerCase().replace(/\.gz$/, '')
     if (etag === sig) return true
     try {
       const body = await HostSyncService.#fetchWithin(url, { cache: 'no-store' })

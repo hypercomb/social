@@ -21,6 +21,7 @@
 // says how many files it was shown and whether the change's proof marker was
 // among them, so a harness can prove the host's AI read the changed code.
 import http from 'node:http'
+import zlib from 'node:zlib'
 import worker from '../hypercomb-relay/blossom-worker/worker.js'
 
 const port = Number(process.argv[2] || 4291)
@@ -126,8 +127,15 @@ http.createServer(async (req, res) => {
     const response = await worker.fetch(new Request(url, { method: req.method, headers: req.headers, body }), { ...env }, { waitUntil: () => {} })
     const headers = {}
     response.headers.forEach((value, key) => { headers[key] = value })
+    let out = req.method === 'HEAD' ? undefined : Buffer.from(await response.arrayBuffer())
+    // workerd encodes a body whose header asks for gzip (encodeBody
+    // 'automatic'); Node's Response never does, so this host does it here.
+    if (out && /^gzip$/i.test(String(headers['content-encoding'] || '').trim())) {
+      out = zlib.gzipSync(out)
+      delete headers['content-length']
+    }
     res.writeHead(response.status, headers)
-    res.end(req.method === 'HEAD' ? undefined : Buffer.from(await response.arrayBuffer()))
+    res.end(out)
   } catch (error) {
     res.writeHead(500, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' })
     res.end(String(error?.stack ?? error))
