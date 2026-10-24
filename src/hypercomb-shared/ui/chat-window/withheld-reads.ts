@@ -39,6 +39,24 @@ export const withoutWithheld = (receipt: HypercombObservationReceipt, covers: Co
       const nodes = result.read.nodes.filter(node => !covers(segmentsOfPath(node.path)))
       return nodes.length === result.read.nodes.length ? result : { ...result, read: { ...result.read, nodes, truncated: true } }
     }
+    // A TILE READ LISTS ITS CHILDREN BY NAME AND SIGNATURE (2026-10-24). That a
+    // withheld tile exists stays visible where its parent lists it — the name
+    // is not its contents (core ai-withheld.store.ts) — but its signature is a
+    // key: a read by signature names no route, so the read guard cannot refuse
+    // it, and the withheld tile's contents would come back. The name stays;
+    // the key goes. A read by signature has no route, so its children are
+    // judged as the root's.
+    if (result.kind === 'node' && result.read.ok) {
+      const root = String(result.read.root ?? '')
+      const at = root.startsWith('/') ? segmentsOfPath(root) : []
+      let changed = false
+      const children = result.read.children.map(child => {
+        if (!child.sig || !covers([...at, child.name])) return child
+        changed = true
+        return { name: child.name, sig: '' }
+      })
+      return changed ? { ...result, read: { ...result.read, children } } : result
+    }
     if (result.kind === 'find' && result.read.ok) {
       const matches = result.read.matches.filter(match => !covers(segmentsOfPath(match.path)))
       // A find's unfinished branches name tiles too (2026-10-12). Left in, a

@@ -48,6 +48,29 @@ describe('withheld tiles at the read step', () => {
     expect(withoutWithheld(receipt, () => false).results[0]).toBe(receipt.results[0])
   })
 
+  // 2026-10-24: a tile read lists children with their signatures, and a read
+  // by signature passes the route guard — so a withheld child's signature was
+  // a way in to its contents. Its name stays; its signature goes.
+  it('keeps a withheld child named in a tile read but never gives its signature', () => {
+    const sig = (n: number): string => n.toString(16).padStart(64, '0')
+    const node = (root: string) => ({
+      snapshots: [],
+      results: [{ grammar: `/read ${root}`, kind: 'node', read: {
+        ok: true, root, name: 'hive', layerSig: sig(1),
+        children: [{ name: 'people', sig: sig(2) }, { name: 'susan', sig: sig(3) }],
+      } }],
+    } as unknown as HypercombObservationReceipt)
+    const children = (receipt: HypercombObservationReceipt) =>
+      (receipt.results[0] as unknown as { read: { children: { name: string; sig: string }[] } }).read.children
+    expect(children(withoutWithheld(node('/'), covers))).toEqual([{ name: 'people', sig: sig(2) }, { name: 'susan', sig: '' }])
+    // Read by signature: no route, so its children are judged as the root's.
+    expect(children(withoutWithheld(node(sig(1)), covers))).toEqual([{ name: 'people', sig: sig(2) }, { name: 'susan', sig: '' }])
+    // Under another tile, a child that merely shares the name is not withheld.
+    expect(children(withoutWithheld(node('/people'), covers))[1]).toEqual({ name: 'susan', sig: sig(3) })
+    const receipt = node('/')
+    expect(withoutWithheld(receipt, () => false).results[0]).toBe(receipt.results[0])
+  })
+
   // 2026-10-12: a find names the branches its walk did not finish. A large
   // withheld branch went out by name, with a note to search under it — a
   // read this step then refuses.
