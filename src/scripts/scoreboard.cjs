@@ -114,8 +114,8 @@ function config(argv, env) {
     flags[key] = value
   }
   const quick = !!flags.quick || env.SCOREBOARD_QUICK === '1'
-  const list = positional.length ? positional
-    : env.SCOREBOARD_DOORS ? env.SCOREBOARD_DOORS.split(',').map(s => s.trim()).filter(Boolean) : DOORS
+  const list = (positional.length ? positional : env.SCOREBOARD_DOORS ? [env.SCOREBOARD_DOORS] : DOORS)
+    .flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean)
   return {
     quick,
     doors: list.map(doorUrl),
