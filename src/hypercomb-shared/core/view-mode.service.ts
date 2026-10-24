@@ -51,6 +51,11 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // has been removed and strand the participant on a blank canvas.
   'website', 'home', 'slides', 'tree', 'lightbox', 'tutor', 'workflow',
   'postit', 'document',
+  // The scroller is the slides surface again (slides-view.drone.ts renders
+  // slides, lightbox AND scroller on one opaque full-viewport host) — missed
+  // when it registered (2026-09-01), so its canvas was never suppressed and a
+  // door opening on it was never covered.
+  'scroller',
   // The three document views retired 2026-10-16 — tombstones, like `home`.
   'living-brief', 'evidence-atlas', 'knowledge-studio',
   // `revolucion-welcome` is retired (renamed to `square-tile-view`

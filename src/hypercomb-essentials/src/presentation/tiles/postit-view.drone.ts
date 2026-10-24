@@ -85,6 +85,9 @@ export class PostitViewDrone extends Drone {
   #stickies: HTMLElement | null = null
   #noteByKey = new Map<string, HTMLButtonElement>()
   #post: HTMLElement | null = null
+  /** What the mounted post shows — its place, its content and its seal. A
+   *  reconcile that would show the same leaves the post alone (#mountPost). */
+  #shows: string | null = null
   /** Stops the scrollbar-width tracker that keeps the × clear of the post's
    *  own scrollbar (scroll-gutter.ts). */
   #gutterOff: (() => void) | null = null
@@ -655,8 +658,30 @@ export class PostitViewDrone extends Drone {
     const label = segments.at(-1) ?? ''
     const title = payload?.title
       || (label ? titleForLabel(label, navigator.language) || label : 'Post-it')
+    // What the post will show, read before anything comes down — so the swap
+    // below is one synchronous step: the page, the text, or (no authored
+    // content) the tile's own image.
+    const store = window.ioc?.get<StoreShape>('@hypercomb.social/Store')
+    const blob = payload?.htmlSig ? await store?.getResource(payload.htmlSig) : null
+    const page = blob ? await blob.text() : null
+    const imageSig = payload?.htmlSig || payload?.text ? null : await this.#tileImageSig(segments)
+    if (gen !== this.#gen || this.#vm()?.mode !== POSTIT_VIEW) return
 
-    this.#teardownPost()
+    // A PASS THAT CHANGES NOTHING LEAVES THE POST ALONE. Reconcile runs on
+    // every navigate, synchronize, decoration and enablement event, and a
+    // rebuild here re-ran the page's scripts and flapped `view:active`
+    // 1 → 0 → 1 — which navigation/view-back.ts reads as the view closing: it
+    // drops its history entry (history.back()), the pop comes back as a
+    // `navigate`, and the navigate rebuilt the post again. On arkanoid that
+    // loop ran ~15 times a second from the first background pulse on
+    // (2026-10-24), restarting the page each turn.
+    const shows = [segments.join('\u0000'), payload?.htmlSig ?? '', page === null ? '' : 'arrived', payload?.text ?? '',
+      imageSig ?? '', title, this.#sealedOpen() ? 'sealed' : 'open'].join('\u0001')
+    if (this.#post?.isConnected && this.#shows === shows) return
+
+    // From here to the append is one synchronous step, so the post swaps in
+    // place and keeps its `view:active` claim: a rebuild is not a close.
+    this.#removePost()
     const host = document.createElement('section')
     host.className = 'hc-postit-view'
     host.innerHTML = `<style>${POST_CSS}</style>`
@@ -668,18 +693,15 @@ export class PostitViewDrone extends Drone {
     close.textContent = '×'
     close.onclick = () => this.#vm()?.setMode('hexagons')
 
-    const store = window.ioc?.get<StoreShape>('@hypercomb.social/Store')
     if (payload?.htmlSig) {
-      const blob = await store?.getResource(payload.htmlSig)
-      if (gen !== this.#gen || this.#vm()?.mode !== POSTIT_VIEW) { host.remove(); return }
       const paper = document.createElement('article')
       paper.className = 'postit-page'
       // Shadow root: the page is a standalone artifact — its CSS stays its
       // own, the shell's never reaches in, and `resource:` refs resolve
       // through the same document interception the site view relies on.
       const shadow = paper.attachShadow({ mode: 'open' })
-      shadow.innerHTML = blob
-        ? rewritePageRefs(await blob.text(), RESOURCE_URL_PREFIX)
+      shadow.innerHTML = page !== null
+        ? rewritePageRefs(page, RESOURCE_URL_PREFIX)
         : '<p style="padding:2rem;font-family:system-ui">This post-it\'s page has not arrived yet.</p>'
       // The viewer is content-agnostic — a page may carry behaviour (Pixi,
       // three.js, plain JS). innerHTML never executes <script>, so re-create
@@ -702,9 +724,6 @@ export class PostitViewDrone extends Drone {
       note.append(heading, body)
       host.append(note)
     } else {
-      // No authored content — the tile's own image IS the asset to show.
-      const imageSig = await this.#tileImageSig(segments)
-      if (gen !== this.#gen || this.#vm()?.mode !== POSTIT_VIEW) { host.remove(); return }
       const frame = document.createElement('article')
       frame.className = 'postit-image'
       if (imageSig) {
@@ -728,6 +747,7 @@ export class PostitViewDrone extends Drone {
     // and let the × step aside by that much (scroll-gutter.ts).
     this.#gutterOff = trackScrollGutter(host)
     this.#post = host
+    this.#shows = shows
     this.#applyCover()
     this.#setActive(true)
   }
@@ -757,11 +777,17 @@ export class PostitViewDrone extends Drone {
     } catch { return null }
   }
 
-  #teardownPost(): void {
+  /** Take the post off the glass; its `view:active` claim is the caller's. */
+  #removePost(): void {
     this.#gutterOff?.()
     this.#gutterOff = null
     this.#post?.remove()
     this.#post = null
+    this.#shows = null
+  }
+
+  #teardownPost(): void {
+    this.#removePost()
     this.#setActive(false)
   }
 

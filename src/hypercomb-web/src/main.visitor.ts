@@ -1,6 +1,7 @@
 import { installMemoryFilesystem } from './setup/memory-filesystem'
 import { installReadonlyNetwork } from './setup/readonly-network'
 import { readArrivalTrial, startArrivalTrial } from './setup/arrival-trial'
+import { holdCoverUntilArrival } from './setup/arrival-cover'
 import { fetchContentPack } from './setup/content-pack'
 import type { EarlyInstall } from './setup/ensure-install'
 
@@ -204,89 +205,17 @@ const arrivalTrial = readArrivalTrial()
 const { EffectBus } = await import('@hypercomb/core')
 if (arrivalTrial) startArrivalTrial(EffectBus, arrivalTrial)
 
-// ── the loading cover owns the screen until the SITE is on it ──────────────
+// ── the loading cover owns the screen until the ARRIVAL is on it ───────────
 // `.site-loading` starts inside <app-root>, which Angular REPLACES at
 // bootstrap (~1.4s) — a beat before the published view mounts (~3s). That gap
 // showed the hive's own visuals (background rings, the empty prompt) between
 // the cover and the page. Re-parent the loader to <body> so it survives
-// bootstrap, and take it down only when the deployed experience is up:
-//   • pinned view (view:arrival names a view) → when the body is COVERED by
-//     the takeover surface (body.hc-view-covered — the same signal that
-//     neutralises the canvas), so the ground under the fade is the themed
-//     body, never hexagons;
-//   • hexagons site (empty verdict) → when real tiles land (count>0), or the
-//     location is genuinely settled-empty — the splash contract.
+// bootstrap; setup/arrival-cover.ts takes it down once whatever the arrival
+// opens on — hexagons, a site page, a post-it, a game, a deck — has painted,
+// and its failsafe always lifts it.
 const siteLoader = document.querySelector('.site-loading')
 if (siteLoader) document.body.appendChild(siteLoader)
-let siteOwnsLoader = false
-const removeSiteLoader = (): void => {
-  const el = document.querySelector('.site-loading')
-  if (!el) return
-  ;(el as HTMLElement).style.transition = 'opacity .3s ease'
-  ;(el as HTMLElement).style.opacity = '0'
-  setTimeout(() => el.remove(), 340)
-}
-{
-  // EffectBus REPLAYS the last value SYNCHRONOUSLY inside .on(), so a
-  // `const off = EffectBus.on(..., () => off())` pattern dies in the TDZ
-  // when the replay fires the handler before the const exists — the exact
-  // silent death that left the cover up until the failsafe. Guard with a
-  // flag; unsubscribe on the next tick, when the binding is real.
-  let arrivalSeen = false
-  let offArrival: (() => void) | undefined
-  let offCells: (() => void) | undefined
-  const onVerdict = (view: string): void => {
-    if (view) {
-      siteOwnsLoader = true
-      const tick = (): void => {
-        const host = document.getElementById('hc-site-view-host')
-        if (!document.body.classList.contains('hc-view-covered') || !host) {
-          requestAnimationFrame(tick)
-          return
-        }
-
-        // The covered class is applied as soon as the view mode changes. It
-        // only hides the hive canvas; the page host and its scripts may still
-        // be mounting. In particular, the business card builds its 3D stage
-        // asynchronously and marks `scene-live` when its first animation frame
-        // is ready. Keep the blank cover over the old edit view until that
-        // signal arrives, so neither the old view nor an unfinished card frame
-        // can flash between the two.
-        const waitsForScene = host.classList.contains('card-open') || !!host.querySelector('#stageHost')
-        if (waitsForScene && !host.classList.contains('scene-live')) {
-          requestAnimationFrame(tick)
-          return
-        }
-
-        // Let the host and its styles paint before fading the cover away.
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          siteOwnsLoader = false
-          removeSiteLoader()
-        }))
-      }
-      tick()
-      return
-    }
-    let cellsSeen = false
-    offCells = EffectBus.on<{ count?: number; settled?: boolean }>('render:cell-count', pl => {
-      if (cellsSeen) return
-      if ((pl?.count ?? 0) > 0 || pl?.settled) {
-        cellsSeen = true
-        removeSiteLoader()
-        setTimeout(() => offCells?.(), 0)
-      }
-    })
-  }
-  offArrival = EffectBus.on<{ view?: string }>('view:arrival', p => {
-    if (arrivalSeen) return
-    arrivalSeen = true
-    setTimeout(() => offArrival?.(), 0)
-    onVerdict(String(p?.view ?? ''))
-  })
-  // Failsafe: a boot that never reaches a verdict (engine error, unreachable
-  // index) must not strand the visitor behind an eternal cover.
-  setTimeout(() => { if (!siteOwnsLoader) removeSiteLoader() }, 25_000)
-}
+const removeSiteLoader = holdCoverUntilArrival(EffectBus)
 
 await import('./main')
 
