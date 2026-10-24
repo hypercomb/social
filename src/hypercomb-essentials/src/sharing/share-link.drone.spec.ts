@@ -101,10 +101,10 @@ describe('share-link — which backend a tap reaches', () => {
     expect(seams.hostCurrentBranch).not.toHaveBeenCalled()
   })
 
-  it('percent-encodes every segment and the bracketed selection', async () => {
+  it('spells every space as a hyphen (never %20) and still encodes the rest', async () => {
     services['@hypercomb.social/Lineage'] = { explorerSegments: () => ['my docs', 'guide/1'] }
     await tap('a b')
-    expect(seams.deliverLink).toHaveBeenCalledWith(`${window.location.origin}/my%20docs/guide%2F1/[a%20b]`, 'a b')
+    expect(seams.deliverLink).toHaveBeenCalledWith(`${window.location.origin}/my-docs/guide%2F1/[a-b]`, 'a b')
     services['@hypercomb.social/Lineage'] = { explorerSegments: () => ['docs', 'guide'] }
   })
 

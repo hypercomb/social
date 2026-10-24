@@ -24,3 +24,14 @@ export function isValidCell(s: string): boolean {
     && !/-{2,}/.test(s)
     && s === s.toLocaleLowerCase()
 }
+
+/**
+ * The ADDRESS-BAR spelling of a word — one URL path segment, ready to write.
+ * Every run of whitespace becomes ONE hyphen before encoding, so no address
+ * ever carries `%20`. Nothing moves: `lineageKey` folds a space and a hyphen
+ * alike, so `Big Ideas` and `Big-Ideas` name the same place. Case and other
+ * characters are kept; the raw name stays the explorer's (Navigation keeps it).
+ */
+export function addressSegment(s: string): string {
+  return encodeURIComponent(String(s ?? '').trim().replace(/\s+/g, '-'))
+}

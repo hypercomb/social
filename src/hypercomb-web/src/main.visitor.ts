@@ -338,7 +338,7 @@ window.addEventListener('hypercomb:runtime-ready', () => {
       // The subdomain IS the creation's name — a leading /<rootName> in the
       // URL is redundant. Accept it (old links) but normalize it away.
       route.shift()
-      history.replaceState(history.state, '', '/' + route.map(encodeURIComponent).join('/') + location.search + location.hash)
+      history.replaceState(history.state, '', '/' + route.map(s => encodeURIComponent(s.replace(/\s+/g, '-'))).join('/') + location.search + location.hash)
     }
     // THE BASE GOES IN FIRST. The engine walks into the creation before it
     // reports `preview:mode`, and any URL written in that window carried the

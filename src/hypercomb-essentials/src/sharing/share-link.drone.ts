@@ -21,7 +21,7 @@
 // installed on open would be the drive-by-install every gate exists to
 // prevent.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, addressSegment } from '@hypercomb/core'
 import { MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 import { deliverLink } from './deliver-link.js'
 import { hostCurrentBranch } from './host-gesture.js'
@@ -115,7 +115,7 @@ export class ShareLinkDrone extends Drone {
     // reads `behaviors.<zone>/behaviors/[tile]`.
     const navigation = this.#ioc()?.get<{ urlSegments?: (s: readonly string[]) => readonly string[] }>(NAVIGATION_KEY)
     const parent = navigation?.urlSegments?.(full) ?? full
-    const path = [...parent.map(encodeURIComponent), `[${encodeURIComponent(label)}]`].join('/')
+    const path = [...parent.map(addressSegment), `[${addressSegment(label)}]`].join('/')
     return `${window.location.origin}/${path}`
   }
 

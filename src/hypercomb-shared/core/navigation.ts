@@ -1,6 +1,6 @@
 // hypercomb-shared/core/navigation.ts
 
-import { hypercomb } from '@hypercomb/core'
+import { addressSegment, hypercomb } from '@hypercomb/core'
 import { CompletionUtility } from '../core/completion-utility'
 
 // global get/register/list available via ioc.web.ts
@@ -126,7 +126,14 @@ export class Navigation extends hypercomb {
   // raw decoded segments (good for explorer folder names); bracket segment stripped
   public segmentsRaw = (): string[] => {
     const { pathSegments } = this.parsePath()
-    return pathSegments.map(this.safeDecode).map(s => (s ?? '').trim()).filter(Boolean)
+    const spelled = pathSegments.map(this.safeDecode).map(s => (s ?? '').trim()).filter(Boolean)
+    // The address is the hyphen spelling; the names are what was written.
+    const kept = (window.history.state as { hcRaw?: unknown } | null)?.hcRaw
+    if (Array.isArray(kept) && kept.length === spelled.length
+      && kept.every((n, i) => this.safeDecode(addressSegment(String(n))).toLowerCase() === spelled[i].toLowerCase())) {
+      return kept.map(String)
+    }
+    return spelled.map(s => this.#rawByAddress.get(s) ?? s)
   }
 
   // ----------------------------------
@@ -240,7 +247,7 @@ export class Navigation extends hypercomb {
 
   public go = (segments: readonly string[]): void => {
     const clean = segments.map(this.cleanSegment).filter(Boolean)
-    const path = '/' + this.#stripUrlBase(clean).join('/')
+    const path = this.#pathOf(clean)
     const hash = window.location.hash ?? ''
 
     window.history.pushState({}, '', path + hash)
@@ -249,7 +256,7 @@ export class Navigation extends hypercomb {
 
   public replace = (segments: readonly string[]): void => {
     const clean = segments.map(this.cleanSegment).filter(Boolean)
-    const path = '/' + this.#stripUrlBase(clean).join('/')
+    const path = this.#pathOf(clean)
     const hash = window.location.hash ?? ''
 
     window.history.replaceState({}, '', path + hash)
@@ -257,25 +264,67 @@ export class Navigation extends hypercomb {
   }
 
   // ----------------------------------
-  // mutations (raw, url-encoded)
+  // mutations (raw names, hyphen-spelled address)
+  //
+  // The address never carries %20: each word is written in its address
+  // spelling (whitespace → hyphen, core addressSegment). The raw names ride
+  // in history.state (`hcRaw`) and in #rawByAddress, so segmentsRaw() hands
+  // the explorer back exactly what it wrote — the explorer path stays
+  // lossless while the bar reads `/big-ideas`, never `/big%20ideas`.
   // ----------------------------------
 
   public goRaw = (segments: readonly string[]): void => {
     const clean = segments.map(s => (s ?? '').trim()).filter(Boolean)
-    const path = '/' + this.#stripUrlBase(clean).map(encodeURIComponent).join('/')
+    const path = this.#pathOf(clean)
     const hash = window.location.hash ?? ''
 
-    window.history.pushState({}, '', path + hash)
+    window.history.pushState({ hcRaw: clean }, '', path + hash)
     this.dispatch()
   }
 
   public replaceRaw = (segments: readonly string[]): void => {
     const clean = segments.map(s => (s ?? '').trim()).filter(Boolean)
-    const path = '/' + this.#stripUrlBase(clean).map(encodeURIComponent).join('/')
+    const path = this.#pathOf(clean)
     const hash = window.location.hash ?? ''
 
-    window.history.replaceState({}, '', path + hash)
+    window.history.replaceState({ hcRaw: clean }, '', path + hash)
     this.dispatch()
+  }
+
+  /** The written path for `clean`: base stripped, every word address-spelled.
+   *  Remembers each raw name under its spelling so a later read (another
+   *  history entry, view-back's own entries) still finds the real name. */
+  #pathOf = (clean: readonly string[]): string => {
+    for (const raw of clean) this.#remember(raw)
+    return '/' + this.#stripUrlBase(clean).map(addressSegment).join('/')
+  }
+
+  #rawByAddress = new Map<string, string>()
+
+  #remember = (raw: string): void => {
+    const spelled = this.safeDecode(addressSegment(raw))
+    if (spelled !== raw) this.#rawByAddress.set(spelled, raw)
+  }
+
+  // THE VERY FIRST CHANCE. An address that arrives carrying spaces (an old
+  // shared link, a typed URL) is respelled before anything reads it — the
+  // raw names it carried are kept, so nothing about where it leads changes.
+  #respellArrival = (): void => {
+    try {
+      const parts = window.location.pathname.split('/').filter(Boolean)
+      const raw = parts.map(p => this.safeDecode(p).trim())
+      const spelled = parts.map((p, i) => this.bracketRe.test(raw[i]) ? p : addressSegment(raw[i]))
+      if (spelled.join('/') === parts.join('/')) return
+      for (const name of raw) this.#remember(name)
+      const state = (window.history.state ?? {}) as Record<string, unknown>
+      window.history.replaceState({ ...state, hcRaw: raw.filter(n => !this.bracketRe.test(n)) }, '',
+        '/' + spelled.join('/') + window.location.search + window.location.hash)
+    } catch { /* no location to respell */ }
+  }
+
+  public constructor() {
+    super()
+    this.#respellArrival()
   }
 
   public back = (): void => { window.history.back() }

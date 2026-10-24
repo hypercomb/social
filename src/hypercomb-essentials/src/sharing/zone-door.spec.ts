@@ -98,7 +98,7 @@ describe('where a creation lives', () => {
 
   it('by default at the zone root path', () => {
     expect(zone.rootPathUrl('cafesociety.buzz', ['honey-garden', 'rituals'])).toBe('https://cafesociety.buzz/honey-garden/rituals')
-    expect(zone.rootPathUrl('content.cafesociety.buzz', ['honey garden'])).toBe('https://cafesociety.buzz/honey%20garden')
+    expect(zone.rootPathUrl('content.cafesociety.buzz', ['honey garden'])).toBe('https://cafesociety.buzz/honey-garden')
     expect(zone.rootPathUrl('cafesociety.buzz', [])).toBe('https://cafesociety.buzz')
     expect(zone.rootPathUrl('localhost:4291', ['a'])).toBe('http://localhost:4291/a')
   })

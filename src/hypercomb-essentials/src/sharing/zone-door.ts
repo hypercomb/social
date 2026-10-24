@@ -29,6 +29,7 @@
 // door at its top place's subdomain where the host opens one (creationUrl).
 // Root paths are off on the hosts.
 
+import { addressSegment } from '@hypercomb/core'
 import { lineageKey } from '../history/lineage-key.js'
 
 const LOOPBACK_RE = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d{1,5})?$/i
@@ -113,7 +114,7 @@ export const originOf = (raw: unknown): string => {
 export const rootPathUrl = (zone: unknown, segments: readonly string[]): string => {
   const origin = originOf(foldContentLabel(zone))
   if (!origin) return ''
-  const path = (segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean).map(encodeURIComponent).join('/')
+  const path = (segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean).map(addressSegment).join('/')
   return path ? `${origin}/${path}` : origin
 }
 
@@ -452,7 +453,7 @@ export const subdomainUrl = (zone: unknown, segments: readonly string[]): string
   if (parts.length === 0) return ''
   const origin = originOf(ownAddressHost(foldDnsLabel(parts[0]), zone))
   if (!origin) return ''
-  const rest = parts.slice(1).map(encodeURIComponent).join('/')
+  const rest = parts.slice(1).map(addressSegment).join('/')
   return rest ? `${origin}/${rest}` : origin
 }
 

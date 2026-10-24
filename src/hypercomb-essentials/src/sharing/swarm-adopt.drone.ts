@@ -990,8 +990,9 @@ export class SwarmAdoptDrone extends Drone {
   }
 
   /** One picked page tile. Held → additive (its missing PAGE children fold,
-   *  one level, nothing removed); foreign → the one-level fold. True when
-   *  the tile is held here afterwards. */
+   *  one level, nothing removed); foreign → fold the tile, then add its direct
+   *  children from the publisher's page. Deeper descendants remain lazy until
+   *  the participant enters those children. True when the tile is held here. */
   #adoptPageTile = async (
     label: string,
     pubkey?: string,
@@ -1024,6 +1025,18 @@ export class SwarmAdoptDrone extends Drone {
       return false
     }
     const ok = await this.#foldPageTile(at, label, entry)
+    if (ok) {
+      // Taking a parent also brings its direct children into the hive. The
+      // additive path resolves the publisher's child-page cache (priming it
+      // when needed), preserves any local-only children, and leaves deeper
+      // descendants lazy until the participant opens those child tiles.
+      const layerSig = String(entry['layerSig'] ?? '').trim().toLowerCase()
+      const broker = this.#ioc()?.get?.(BROKER_KEY) as BrokerLike | undefined
+      const domain = SIG_RE.test(layerSig)
+        ? String(broker?.getKnownDomains?.(layerSig)?.[0] ?? '').trim() || undefined
+        : undefined
+      await this.#additiveAdoptHeld({ layerSig, at, domain, label })
+    }
     if (ok && !opts?.silent) {
       this.#rowOutcome(label, undefined, true, `"${label}" is yours now`)
       this.#openBehaviours(label)
