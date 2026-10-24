@@ -29,6 +29,8 @@ import { hoistPageStylesheets, stylesheetsSettled } from './cell-page-stylesheet
 import { HEXAGONS_SURFACE, sameSiteSegments, siteFlipTarget, siteFloorFor, type SiteSpawn } from './site-return.js'
 import { closeSiteContextMenu, isOnSiteContextMenu, openSiteContextMenu, type SiteMenuItem } from './site-context-menu.js'
 import { browserKeepsMenu, isLongPressMenu } from '../../navigation/browser-menu.js'
+import type { BackGesture } from '../../navigation/back-gesture.service.js'
+import { myHiveOrigin, visitorDoorHref } from '../../sharing/visitor-door.view.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -152,20 +154,25 @@ export class SiteViewDrone extends Drone {
   #viewModeBound = false
   #arrivalBound = false
   #globalContextMenuBound = false
+  /** Unregisters this view's way out from the back gesture. */
+  #backOff: (() => void) | null = null
   /**
    * Lineage of the cell where the current website session started —
    * captured the moment ViewMode flipped from hexagons → website (or
    * on boot if VM was already 'website'). Acts as the navigation
-   * floor: right-click (and anchor `..`) inside the site can walk
-   * up freely until segments shrink down to this length, then the
-   * next "go up" exits the site instead of crossing into the parent
-   * hexagon hierarchy. Null while not in a website session.
+   * floor: the menu's Up one level (and anchor `..`) inside the site
+   * can walk up freely until segments shrink down to this length, and
+   * never crosses into the parent hexagon hierarchy. Null while not in
+   * a website session.
    */
   #siteEntrySegments: readonly string[] | null = null
   /** The published creation's root on a visitor door (`preview:mode`), the
    *  floor of any site session that opens inside it — a cold deep link
    *  arrives on a page, not at the root. */
   #publishedRoot: readonly string[] | null = null
+  /** The published creation as `preview:mode` names it — who published it,
+   *  where, and its route — so the menu can offer the visitor door. */
+  #publishedCreation: { pubkey?: string; hosts?: readonly string[]; segments?: readonly string[] } | null = null
   #publishedRootBound = false
 
   /**
@@ -271,21 +278,35 @@ export class SiteViewDrone extends Drone {
       }
     }
     if (!this.#globalContextMenuBound) {
-      // Right-click anywhere on the site (or on a cell that has no per-cell
-      // page yet) → the website's menu. Gated on ViewMode='website' so the
-      // hexagon canvas keeps its own right-click (come back out). Document
-      // BUBBLE: everything closer to the press answers first — a page's own
-      // right-click, a surface open over the site — and the back gesture
-      // (window bubble) still answers after, standing down on the claim.
+      // Right-click anywhere on a PUBLISHED site (or on a cell that has no
+      // per-cell page yet) → the website's menu. Gated on ViewMode='website'
+      // so the hexagon canvas keeps its own right-click (come back out).
+      // Document BUBBLE: everything closer to the press answers first — a
+      // page's own right-click, a surface open over the site — and the back
+      // gesture (window bubble) still answers after, standing down on the
+      // claim.
       document.addEventListener('contextmenu', this.#onGlobalContextMenu)
       this.#globalContextMenuBound = true
+    }
+    if (!this.#backOff) {
+      // On the home domain the right button comes back out of the site the
+      // way the exit button does — the back gesture's ladder, so an ARRIVAL
+      // FACE navigates back and a site the reader opened returns to its
+      // spawn. Not on a published door: there the menu answers instead.
+      // Live only while website mode is up — an entry whose `active()` holds
+      // answers every right-click on the ladder's third rung.
+      const websiteUp = (): boolean => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+        ?.get<{ mode: string }>('@hypercomb.social/ViewMode')?.mode === 'website'
+      this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
+        ?.register({ owner: 'site-view', back: () => this.#exitToHive(), active: () => websiteUp() && !isPublishedVisitorShell() }) ?? null
     }
     if (!this.#publishedRootBound) {
       // Last-value replay covers the boot order: the visit engine mounts the
       // creation (and says where) before this view's first capture.
-      this.onEffect<{ active?: boolean; segments?: readonly string[] }>('preview:mode', (preview) => {
+      this.onEffect<{ active?: boolean; segments?: readonly string[]; pubkey?: string; hosts?: readonly string[] }>('preview:mode', (preview) => {
         const root = preview?.active ? [...(preview.segments ?? [])].map(s => String(s ?? '').trim()).filter(Boolean) : []
         this.#publishedRoot = root.length ? root : null
+        this.#publishedCreation = preview?.active ? preview : null
         if (this.#siteEntrySegments && this.#publishedRoot) {
           this.#siteEntrySegments = siteFloorFor(this.#siteEntrySegments, this.#publishedRoot)
         }
@@ -335,6 +356,8 @@ export class SiteViewDrone extends Drone {
     if (this.#globalContextMenuBound) {
       document.removeEventListener('contextmenu', this.#onGlobalContextMenu)
     }
+    this.#backOff?.()
+    this.#backOff = null
     closeSiteContextMenu()
     this.#removeExitOverlay()
     this.#teardown()
@@ -421,12 +444,18 @@ export class SiteViewDrone extends Drone {
       ?.goRaw?.(segments)
   }
 
-  /** Document-level contextmenu handler, website mode only. A SITE READS
-   *  LIKE A WEBSITE: the right button opens a menu and changes nothing on the
-   *  page (site-context-menu.ts). It used to walk up a page, and at the
-   *  site's floor drop the reader into the hexagons — on a published site, a
-   *  trap door. The way to the hexagons and up a page are rows in the menu
-   *  now. Bubble phase, so a page that answers its own right-click keeps it;
+  /** Document-level contextmenu handler, website mode only. WHO IS READING
+   *  decides what the right button means (jwize 2026-10-24):
+   *   • on the HOME DOMAIN — the reader's own hive, hypercomb.io or
+   *     localhost alike — it goes BACK, through the back gesture like on
+   *     every other surface, and no menu opens. This handler stands down;
+   *     the view's registered way out answers.
+   *   • on a PUBLISHED door a SITE READS LIKE A WEBSITE: the right button
+   *     opens a menu and changes nothing on the page (site-context-menu.ts).
+   *     It used to walk up a page, and at the site's floor drop the reader
+   *     into the hexagons — a trap door. The way to the hexagons and up a
+   *     page are rows in the menu.
+   *  Bubble phase, so a page that answers its own right-click keeps it;
    *  it still runs before the back gesture (window bubble), and its
    *  preventDefault is what keeps that gesture from ALSO walking the
    *  lineage. Two presses stay the browser's:
@@ -447,6 +476,8 @@ export class SiteViewDrone extends Drone {
       if (linkAt(e)?.outside === null) e.preventDefault()
       return
     }
+    // The home domain: the back gesture answers, never the menu.
+    if (!isPublishedVisitorShell()) return
     const first = e.composedPath()[0]
     const target = first instanceof Element ? first : e.target instanceof Element ? e.target : null
     if (browserKeepsMenu(target)) return
@@ -474,6 +505,10 @@ export class SiteViewDrone extends Drone {
    *     opened from, which may be another view. No key is named for it — the
    *     H key IS the plain exit, so naming it here would promise one place
    *     and land in another.
+   *   • Open in my hive — the visitor door (sharing/visitor-door.view.ts):
+   *     the reader's OWN hive opens in a tab of its own, offering this
+   *     creation from the page they stand on. Only where `preview:mode`
+   *     names a published creation; the site is never left.
    *   • Copy page link, and Copy link address over an outside link. An
    *     in-site link is a route resolved against the site, so its href is no
    *     address — it gets no row. */
@@ -494,6 +529,8 @@ export class SiteViewDrone extends Drone {
       items.push({ icon: 'arrow_upward', label: this.#t('site-menu.up', 'Up one level'), act })
     }
     items.push({ icon: 'hexagon', label: this.#t('site-menu.hexagons', 'Hexagon view'), door: true, act: () => this.#exitToHive(true) })
+    const home = visitorDoorHref(this.#publishedCreation, myHiveOrigin(), segments)
+    if (home) items.push({ icon: 'open_in_new', label: this.#t('site-menu.open-home', 'Open in my hive'), act: () => { window.open(home, '_blank', 'noopener') } })
     items.push({ icon: 'link', label: this.#t('site-menu.copy-page', 'Copy page link'), done: copied, failed, rule: true, act: () => copyText(window.location.href) })
     const link = linkAt(e)?.outside
     if (link) items.push({ icon: 'content_copy', label: this.#t('site-menu.copy-link', 'Copy link address'), done: copied, failed, act: () => copyText(link) })

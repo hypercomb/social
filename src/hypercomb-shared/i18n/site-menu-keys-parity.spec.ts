@@ -4,17 +4,18 @@ import { join } from 'node:path'
 
 // THE WEBSITE'S RIGHT-CLICK SPEAKS EVERY LANGUAGE.
 //
-// On a website the right button opens a menu (hypercomb-essentials/src/
-// presentation/tiles/site-context-menu.ts) — Up one level, Hexagon view, the
-// page's link — and on a published site it is the one place a visitor learns
-// the hexagons are there at all. A key missing from a catalog falls through to
-// the English, which is no way to meet someone reading in their own language.
-// Narrow on purpose, like the create parity spec.
+// On a published website the right button opens a menu (hypercomb-essentials/
+// src/presentation/tiles/site-context-menu.ts) — Up one level, Hexagon view,
+// Open in my hive, the page's link — and it is the one place a visitor learns
+// the hexagons are there at all, and that the creation can live in a hive of
+// their own. A key missing from a catalog falls through to the English, which
+// is no way to meet someone reading in their own language. Narrow on purpose,
+// like the create parity spec.
 
 const DIR = __dirname
 const KEYS = [
-  'site-menu.label', 'site-menu.up', 'site-menu.hexagons', 'site-menu.copy-page', 'site-menu.copy-link',
-  'site-menu.copied', 'site-menu.copy-failed',
+  'site-menu.label', 'site-menu.up', 'site-menu.hexagons', 'site-menu.open-home', 'site-menu.copy-page',
+  'site-menu.copy-link', 'site-menu.copied', 'site-menu.copy-failed',
 ]
 
 const catalogs = readdirSync(DIR).filter(f => f.endsWith('.json'))

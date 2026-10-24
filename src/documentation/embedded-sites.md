@@ -57,14 +57,25 @@ is guessed. Every exit path — the exit button, Escape, `/website off`, a
 toggle click — names the hexagons, and the renderer turns that into the
 spawn.
 
-**The right button is not an exit on a website** (2026-10-22). A site reads
-like a website, so a right-click opens the website's menu and changes nothing
-on the page (`site-context-menu.ts`): Up one level (the nearest page above,
+**On the home domain the right button goes back** (2026-10-24). In the
+reader's own hive — hypercomb.io, their own domain, localhost — a right-click
+on a site opens no menu: the back gesture answers it, and the site's
+registered way out is the exit button's, so it lands on the spawn (an arrival
+face navigates back instead). See `back-gesture.md`.
+
+**The right button is not an exit on a published website** (2026-10-22). On a
+published door a site reads like a website, so a right-click opens the
+website's menu and changes nothing on the page (`site-context-menu.ts`): Up
+one level (the nearest page above,
 passing over empty cells, never above the floor — `..` climbs the same way),
 **Hexagon view** (this page's hexagons — the exit's peel,
 never the spawn, because the spawn may be another view; so it names no key,
-since H is the plain exit), Copy page link, and Copy link address over an
-outside link. The handler listens on the document in the bubble phase, so a
+since H is the plain exit), **Open in my hive** (the visitor door,
+`sharing/visitor-door.view.ts` `visitorDoorHref` — the reader's own hive
+opens in a new tab and offers this creation from the page they stand on; a
+row only where `preview:mode` names a published creation), Copy page link,
+and Copy link address over an outside link. The handler listens on the
+document in the bubble phase, so a
 page that answers its own right-click (a game, a map) keeps it, as under a
 browser's own menu. The menu is raw DOM in a shadow root (a page's unscoped
 stylesheets can't reach it), sized from the reader's default font size (a

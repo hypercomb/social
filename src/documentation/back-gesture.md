@@ -32,14 +32,34 @@ A right-click is resolved top-down; the first rung that answers wins.
    to the page it was opened from rather than to the structural parent. At the
    hive root it is a no-op.
 
-A **website** is the one surface where the right button is NOT the way out
-(jwize, 2026-10-22: "they operate like they usually do on their side — website
-(context menu), hexagons (hypercomb view)"). A site reads like a website, so a
-right-click opens the website's own menu and changes nothing on the page:
+On the **home domain** — the reader's own hive, whether it is served from
+hypercomb.io, a domain of their own, or localhost — a website is a surface
+like any other, and the right button **goes back** (jwize, 2026-10-24: "it is
+critical that back click inside hypercomb.io the navigation is used and not
+the context"). No menu opens. The site registers its way out under the owner
+`site-view`, the same call its exit button makes, live only while website mode
+is up (an entry whose `active()` holds answers EVERY right-click on rung 3, so
+a liveness that forgets the mode swallows the hexagons' own back). Rung 2
+answers: an
+ARRIVAL FACE navigates back, and a site the reader opened returns to the page
+and view that spawned it. Reading a site adds no history, so back leaves the
+site; it does not step between the site's pages.
+
+A **published** website is the one surface where the right button is NOT the
+way out (jwize, 2026-10-22: "they operate like they usually do on their side —
+website (context menu), hexagons (hypercomb view)"). On a published door — the
+read-only visitor shell, `data-hypercomb-mode="visitor"` — a site reads like a
+website, so a right-click opens the website's own menu and changes nothing on
+the page. That menu is where a visitor from outside first learns Hypercomb is
+behind the page:
 **Up one level** (the page above, never above the site's floor — reading a
 site adds no history, so it is not "Back"), **Hexagon view** (this page's
-hexagons), **Copy page link**, and **Copy link address** over an outside link
-(`presentation/tiles/site-context-menu.ts`). It used to walk up a page and,
+hexagons), **Open in my hive** (the visitor door — the reader's own hive
+opens in a tab of its own, offering this creation from the page they stand
+on), **Copy page link**, and **Copy link address** over an outside link
+(`presentation/tiles/site-context-menu.ts`). Rows that teach hosting your own
+node and following a host wait until `/hosting` is published — a row that
+points nowhere teaches nothing. It used to walk up a page and,
 at the site's root, drop the reader into the hexagons — on a published site a
 trap door nobody could see. Leaving by the exit button still lands on the page
 that spawned the site, in the view that spawned it
@@ -107,5 +127,7 @@ Escape makes: one way out, two ways to ask for it.
 
 `node scripts/drive-back-gesture.cjs --url http://localhost:4251` drives real
 right-clicks (never synthetic events — the point is that the browser menu no
-longer wins) over shell chrome, a mounted post-it, and website mode at the site
-root. `back-gesture.spec.ts` pins the ladder and the carve-outs.
+longer wins) over shell chrome, a mounted post-it, and website mode on the home
+domain (goes back) and on a published door (the menu). `back-gesture.spec.ts`
+pins the ladder and the carve-outs; `site-view.context-menu.spec.ts` pins the
+home/published split.

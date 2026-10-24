@@ -3,13 +3,15 @@
 //
 //   node scripts/drive-back-gesture.cjs [--url http://localhost:4250] [--out <dir>]
 //
-// Left click goes in, right click comes back out. Three surfaces where the
+// Left click goes in, right click comes back out. Surfaces where the
 // browser's own context menu used to answer instead:
 //
 //   1. ordinary shell chrome sitting over the canvas (the fallback: the
 //      lineage comes back one step)
 //   2. a takeover view — a post-it mounted full-viewport
-//   3. website mode at the site root, which used to be a documented no-op
+//   3. website mode on the home domain — the right button goes back, no menu
+//   4. website mode on a published door — the one place the website's own
+//      menu answers instead, with Open in my hive (the visitor door)
 //
 // Real right-clicks through the mouse, never a synthetic event: the whole
 // point is that the browser menu no longer wins.
@@ -148,28 +150,65 @@ async function main() {
       await shot('04-post-closed')
     }
 
-    // ── 3. website mode at the site root ────────────────────────────────
-    // A site reads like a website: the right button opens the website menu
-    // and changes nothing — it used to drop the reader into the hexagons
-    // here. The menu's Hexagon view row is the way to them now.
+    // ── 3. website mode on the home domain ──────────────────────────────
+    // In the reader's own hive the right button goes BACK on a site, like
+    // everywhere else: no menu, and the site comes down.
+    const siteRows = () => page.evaluate(() => Array.from(document.getElementById('hc-site-menu')?.shadowRoot
+      ?.querySelectorAll('[role="menuitem"]') ?? []).map(r => r.textContent))
+    await page.evaluate(() => window.ioc?.get?.('@hypercomb.social/ViewMode')?.setMode?.('website'))
+    await page.waitForTimeout(2000)
+    const home = await where(page)
+    check('website mode is up on the home domain', home.mode === 'website', JSON.stringify(home))
+    await page.mouse.click(720, 500, { button: 'right' })
+    await page.waitForTimeout(2000)
+    const backed = await where(page)
+    const homeRows = await siteRows()
+    check('right-click on a site at home goes back and opens no menu',
+      backed.mode !== 'website' && homeRows.length === 0, JSON.stringify({ backed, homeRows }))
+    await shot('05-site-back-at-home')
+
+    // ── 4. website mode on a published door ─────────────────────────────
+    // The visitor shell's mark (index.visitor.html) makes this a published
+    // door: a site reads like a website, so the right button opens the
+    // website menu and changes nothing — it used to drop the reader into the
+    // hexagons here. The menu's Hexagon view row is the way to them now, and
+    // its Open in my hive row is the visitor door. The creation the visit
+    // engine would announce on a real door is announced by hand
+    // (`preview:mode`), and `window.open` records where the row points
+    // instead of opening a second tab.
+    const pubkey = 'a'.repeat(64)
+    await page.evaluate((pk) => {
+      document.documentElement.dataset.hypercombMode = 'visitor'
+      globalThis.__hypercombEffectBus?.emit?.('preview:mode', { active: true, label: 'probe', segments: ['probe'], pubkey: pk, hosts: ['host.example'] })
+      window.__opened = []
+      window.open = (...args) => { window.__opened.push(args); return null }
+    }, pubkey)
     await page.evaluate(() => window.ioc?.get?.('@hypercomb.social/ViewMode')?.setMode?.('website'))
     await page.waitForTimeout(2000)
     const site = await where(page)
-    check('website mode is up', site.mode === 'website', JSON.stringify(site))
+    check('website mode is up on a published door', site.mode === 'website', JSON.stringify(site))
     await page.mouse.click(720, 500, { button: 'right' })
     await page.waitForTimeout(800)
     const stayed = await where(page)
-    const rows = await page.evaluate(() => Array.from(document.getElementById('hc-site-menu')?.shadowRoot
-      ?.querySelectorAll('[role="menuitem"]') ?? []).map(r => r.textContent))
-    check('right-click on a site opens the website menu and stays on the site',
+    const rows = await siteRows()
+    check('right-click on a published site opens the website menu and stays on the site',
       stayed.mode === 'website' && rows.length > 0, JSON.stringify({ stayed, rows }))
-    await shot('05-site-menu')
+    await shot('06-site-menu')
     await page.evaluate(() => Array.from(document.getElementById('hc-site-menu')?.shadowRoot
-      ?.querySelectorAll('[role="menuitem"]') ?? []).find(r => r.textContent?.includes('hexagon'))?.click())
+      ?.querySelectorAll('[role="menuitem"]') ?? []).find(r => r.textContent?.includes('Open in my hive'))?.click())
+    await page.waitForTimeout(500)
+    const doorOpens = await page.evaluate(() => window.__opened)
+    const door = `https://hypercomb.io/?hive=${pubkey}&on=host.example&of=probe`
+    check('Open in my hive opens the visitor door in a tab of its own',
+      doorOpens.length === 1 && doorOpens[0][0] === door && doorOpens[0][1] === '_blank', JSON.stringify(doorOpens))
+    await page.mouse.click(720, 500, { button: 'right' })
+    await page.waitForTimeout(800)
+    await page.evaluate(() => Array.from(document.getElementById('hc-site-menu')?.shadowRoot
+      ?.querySelectorAll('[role="menuitem"]') ?? []).find(r => r.textContent?.includes('Hexagon view'))?.click())
     await page.waitForTimeout(2500)
     const outOfSite = await where(page)
     check('the menu\'s Hexagon view row shows the hexagons', outOfSite.mode === 'hexagons', JSON.stringify(outOfSite))
-    await shot('06-hexagon-view')
+    await shot('07-hexagon-view')
 
   } finally {
     const failed = results.filter(r => !r.ok)

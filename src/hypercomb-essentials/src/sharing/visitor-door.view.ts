@@ -93,6 +93,23 @@ export const routeWithin = (mount: readonly string[], here: readonly string[]): 
   return at.filter(Boolean)
 }
 
+/** THE DOOR'S ADDRESS for a published creation, with the reader standing at
+ *  `here` — or '' when the payload names no creation (nothing to offer
+ *  anybody). The one definition: the floating door and the website menu's
+ *  "Open in my hive" row both point here. */
+export const visitorDoorHref = (
+  preview: { pubkey?: string; hosts?: readonly string[]; segments?: readonly string[] } | null | undefined,
+  origin: string,
+  here: readonly string[],
+): string => {
+  if (!preview?.pubkey || !preview.hosts?.length || !preview.segments?.length) return ''
+  return hiveDoorUrl(
+    origin,
+    { pubkey: preview.pubkey, hosts: [...preview.hosts], segments: [...preview.segments] },
+    routeWithin(preview.segments, here),
+  )
+}
+
 export class VisitorDoorElement extends HTMLElement {
 
   #cleanup: (() => void)[] = []
@@ -125,13 +142,7 @@ export class VisitorDoorElement extends HTMLElement {
   /** The address the door points at, or '' when this page is not showing a
    *  published creation (nothing to offer anybody). */
   href(): string {
-    const preview = this.#preview
-    if (!preview?.pubkey || !preview.hosts?.length || !preview.segments?.length) return ''
-    return hiveDoorUrl(
-      this.origin(),
-      { pubkey: preview.pubkey, hosts: [...preview.hosts], segments: [...preview.segments] },
-      routeWithin(preview.segments, this.here()),
-    )
+    return visitorDoorHref(this.#preview, this.origin(), this.here())
   }
 
   #render(): void {

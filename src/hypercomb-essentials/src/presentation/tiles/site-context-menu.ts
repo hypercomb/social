@@ -1,11 +1,13 @@
 // presentation/tiles/site-context-menu.ts
 //
-// THE WEBSITE'S RIGHT-CLICK. A site reads like a website, so the right button
-// does what it does on any website: it opens a menu and changes nothing on the
-// page. The menu says how to reach the hexagon view (and goes there), and holds
-// the few things a reader of a page wants — up a level, the page's link, a
-// link's address. The hexagons keep the hive's own right-click (come back
-// out); only the website view opens this.
+// THE WEBSITE'S RIGHT-CLICK, on a PUBLISHED door. A site reads like a website,
+// so the right button does what it does on any website: it opens a menu and
+// changes nothing on the page. The menu is where a visitor learns Hypercomb is
+// behind the page: it says how to reach the hexagon view (and goes there), how
+// to open the creation in their own hive, and holds the few things a reader of
+// a page wants — up a level, the page's link, a link's address. The hexagons
+// keep the hive's own right-click (come back out), and so does a site in the
+// reader's own hive; only the website view on a published door opens this.
 //
 // Raw DOM in an open shadow root on <body>: a page's linked stylesheets are
 // hoisted unscoped and style `*`, `a` and `nav`, so the menu keeps its own
@@ -58,6 +60,7 @@ const GLYPHS: Readonly<Record<string, string>> = {
   hexagon: 'M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z',
   link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
   content_copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
+  open_in_new: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6',
 }
 
 const CSS = `
