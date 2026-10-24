@@ -36,6 +36,12 @@ export class ArrivalQueenBee extends QueenBee {
     { input: 'arrival revolucion none @example.com', result: 'revolucion loads its whole package again' },
   ]
 
+  // A bee is named by its class, and a class has capitals: read as plain
+  // language the line is lowered first, and the plan it signed named
+  // `siteviewdrone`, which no class answers (meetups 8897c004, jaime-weise
+  // f74b18b2 — every bee of the package loaded). The whole line is this word's.
+  override rawArgs = true
+
   protected async execute(args: string): Promise<void> {
     const parts = args.trim().split(/\s+/).filter(Boolean)
     // @<host> may stand anywhere; it is never a bee.

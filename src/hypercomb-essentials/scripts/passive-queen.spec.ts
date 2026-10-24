@@ -84,6 +84,21 @@ describe('passive queen', () => {
     const offered = asleep.filter(row => declaresMachine(readFileSync(row.file, 'utf8'))).map(row => row.word)
     expect(offered).toEqual([])
   })
+
+  it('no queen in the generated sleeping table takes her arguments verbatim', () => {
+    // Her stand-in cannot say so, so her first line is read as plain language,
+    // lowered, before she wakes. The guard notices a table not regenerated
+    // after a queen gained `rawArgs` (arrival, 2026-10-24).
+    const src = join(dirname(fileURLToPath(import.meta.url)), '..', 'src')
+    const table = readFileSync(join(src, 'sleeping-effects.ts'), 'utf8')
+    const asleep = [...table.matchAll(/command: "([^"]+)"[^\n]*import\('\.\/([^']+)'\)/g)].map(match => ({ word: match[1]!, file: join(src, `${match[2]!}.ts`) }))
+    expect(asleep.length).toBeGreaterThan(20)
+    const verbatim = asleep.filter(row => {
+      const verdict = passiveQueen(row.file, readFileSync(row.file, 'utf8'), new Map())
+      return !verdict.passive && verdict.why === 'takes her arguments verbatim'
+    }).map(row => row.word)
+    expect(verbatim).toEqual([])
+  })
 })
 
 const viewDrone = (renders = "readonly renders: readonly string[] = ['slides', 'lightbox']"): string => `

@@ -2,6 +2,7 @@
 // what those bees declare they read; nothing else.
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import { arrivalNames, beeClassesOfDocs, classOfKey, guardArrival, resolveArrival, type BeeClass } from './arrival-plan'
 
 const sig = (c: string): string => c.repeat(64)
@@ -68,6 +69,71 @@ describe('arrival plan', () => {
     expect(await arrivalNames()).toBeNull()
     ;(globalThis as { __hcArrival?: unknown }).__hcArrival = new Promise(() => {})
     expect(await arrivalNames(20)).toBeNull()
+  })
+})
+
+describe('a plan the command line lowered', () => {
+  // The two live plans, byte for byte as their doors serve them at /content/<sig>
+  // (2026-10-24, package f7392825): the `arrival` word was read as plain
+  // language, and plain language is read in lower case.
+  const MEETUPS = '{"arrive":["@diamondcoreprocessor.com/viewbee","@diamondcoreprocessor.com/websitequeenbee","@diamondcoreprocessor.com/siteviewdrone","@diamondcoreprocessor.com/rsvpdrone"]}'
+  const JAIME_WEISE = '{"arrive":["@diamondcoreprocessor.com/viewbee","@diamondcoreprocessor.com/websitequeenbee","@diamondcoreprocessor.com/siteviewdrone","@diamondcoreprocessor.com/cardreader"]}'
+  const planOf = (record: string): string[] => (JSON.parse(record) as { arrive: string[] }).arrive
+
+  // Those classes as the package's layer docs carry them, with their declared reads.
+  const live = new Map(beeClassesOfDocs({
+    bees: {
+      [sig('1')]: { className: 'ViewBee', deps: {} },
+      [sig('2')]: { className: 'WebsiteQueenBee', deps: {} },
+      [sig('3')]: { className: 'SiteViewDrone', deps: { lineage: '@hypercomb.social/Lineage', store: '@hypercomb.social/Store' } },
+      [sig('4')]: { className: 'RsvpDrone', deps: { signer: '@diamondcoreprocessor.com/NostrSigner' } },
+      [sig('5')]: { className: 'CardQueenBee', deps: {} },
+    },
+  }))
+  const carried = new Set([sig('1'), sig('2'), sig('3'), sig('4'), sig('5')])
+
+  it('are the records the doors name', () => {
+    const hash = (text: string): string => createHash('sha256').update(text).digest('hex')
+    expect(hash(MEETUPS).slice(0, 8)).toBe('8897c004')
+    expect(hash(JAIME_WEISE).slice(0, 8)).toBe('f74b18b2')
+  })
+
+  it('resolve as the plans said with the right case resolve', () => {
+    const cased = ['ViewBee', 'WebsiteQueenBee', 'SiteViewDrone', 'RsvpDrone']
+    expect(cased.map(name => name.toLowerCase())).toEqual(planOf(MEETUPS).map(classOfKey))
+    const meetups = resolveArrival(planOf(MEETUPS), live, carried)
+    expect(meetups).toEqual(resolveArrival(cased, live, carried))
+    expect([...meetups.bees].sort()).toEqual([sig('1'), sig('2'), sig('3'), sig('4')])
+    expect(meetups.missing).toEqual([])
+    // CardReader is a service the card queen's module registers, not a class:
+    // no class folds to it, so it stays a gap — the fold finds a spelling,
+    // never a substitute.
+    const jaimeWeise = resolveArrival(planOf(JAIME_WEISE), live, carried)
+    expect([...jaimeWeise.bees].sort()).toEqual([sig('1'), sig('2'), sig('3')])
+    expect(jaimeWeise.missing).toEqual(['cardreader'])
+  })
+
+  it('never guesses: a fold two classes share answers neither', () => {
+    const twins = new Map(beeClassesOfDocs({ bees: { [sig('a')]: { className: 'ViewBee' }, [sig('b')]: { className: 'Viewbee' } } }))
+    const both = new Set([sig('a'), sig('b')])
+    const { bees, missing } = resolveArrival(['@diamondcoreprocessor.com/viewbee'], twins, both)
+    expect([...bees]).toEqual([])
+    expect(missing).toEqual(['viewbee'])
+    // Spelled as one of them, it is that one.
+    expect([...resolveArrival(['Viewbee'], twins, both).bees]).toEqual([sig('b')])
+    expect([...resolveArrival(['ViewBee'], twins, both).bees]).toEqual([sig('a')])
+  })
+
+  it('folds a NAMED face only: a declared read is the package\'s own spelling', () => {
+    const reads = new Map(beeClassesOfDocs({
+      bees: {
+        [sig('a')]: { className: 'SiteViewDrone', deps: { links: '@diamondcoreprocessor.com/linkservice' } },
+        [sig('b')]: { className: 'LinkService' },
+      },
+    }))
+    const { bees, missing } = resolveArrival(['siteviewdrone'], reads, new Set([sig('a'), sig('b')]))
+    expect([...bees]).toEqual([sig('a')])
+    expect(missing).toEqual([])
   })
 })
 

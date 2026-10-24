@@ -91,6 +91,14 @@ describe('arrival takes its host from its words', () => {
     await new ArrivalQueenBee().invoke('@friend.example revolucion none')
     expect(sent.withdraw).toHaveBeenCalledWith('friend.example', 'revolucion')
   })
+
+  it('keeps its line verbatim, so a bee keeps the capitals of its class', async () => {
+    // Read as plain language the line is lowered before any word sees it, and
+    // the plans signed that way named `siteviewdrone` (meetups 8897c004).
+    expect(new ArrivalQueenBee().rawArgs).toBe(true)
+    await new ArrivalQueenBee().invoke('Meetups ViewBee WebsiteQueenBee SiteViewDrone RsvpDrone @hypercomb.com')
+    expect(sent.arrival).toHaveBeenCalledWith('hypercomb.com', 'meetups', ['ViewBee', 'WebsiteQueenBee', 'SiteViewDrone', 'RsvpDrone'])
+  })
 })
 
 describe('features publish takes its host from its words', () => {
