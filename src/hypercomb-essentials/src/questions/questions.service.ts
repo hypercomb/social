@@ -389,7 +389,9 @@ export class Questions extends EventTarget {
   async #ensureLayerGame(segments: readonly string[], name: string, host: boolean): Promise<void> {
     const rows = await this.#children(segments)
     const held = rows?.find(r => fold(r.name) === fold(name))
-    const cell = held?.name ?? name
+    // A child minted now is named the hive's way (hyphens, never a space);
+    // one held already keeps the name it has — fold finds either.
+    const cell = held?.name ?? (normalizeCell(name) || name)
     if (!held) {
       EffectBus.emit('cell:added', { cell, segments: [...segments] })
       await new hypercomb().act()
@@ -662,11 +664,16 @@ export class Questions extends EventTarget {
     const move = get<MoveShape>('@diamondcoreprocessor.com/MoveDrone')
     if (!move?.commitMoveInto) return 0
     let moved = 0
+    // A category this plan creates is named the hive's way (hyphens, never a
+    // space); one it moves into or retracts already exists and keeps its name.
+    const creates = new Set(plan.create)
+    const named = (step: SettlePlan['create'][number]): string =>
+      creates.has(step) ? (normalizeCell(step.category) || step.category) : step.category
     if (plan.create.length) {
       const key = page.join('/')
       const minted = this.#minted.get(key) ?? new Set<string>()
       for (const step of plan.create) {
-        EffectBus.emit('cell:added', { cell: step.category, segments: [...page] })
+        EffectBus.emit('cell:added', { cell: named(step), segments: [...page] })
         minted.add(moleculeKey(step.category))
       }
       this.#minted.set(key, minted)
@@ -674,7 +681,7 @@ export class Questions extends EventTarget {
       await this.#settled()
     }
     for (const step of [...plan.create, ...plan.move]) {
-      const landed = await move.commitMoveInto(step.members, page, [...page, step.category])
+      const landed = await move.commitMoveInto(step.members, page, [...page, named(step)])
       moved += landed.length
     }
     for (const step of plan.retract) {

@@ -37,6 +37,7 @@ import {
   CANONICAL_REFERENCE_SERVICE_KEY,
   EffectBus,
   hypercomb,
+  normalizeCell,
   type CanonicalReferenceService,
 } from '@hypercomb/core'
 import {
@@ -394,10 +395,12 @@ class CollectionsSource implements AggregateSource {
     if (!source) {
       const here = currentSegments()
       // Standing in the index itself: its parent is the only tile-bearing page.
-      const target = [...(here[0] === SETS ? [] : here), cell]
+      // The minted tile is named the hive's way (hyphens, never a space).
+      const minted = normalizeCell(cell) || cell
+      const target = [...(here[0] === SETS ? [] : here), minted]
       const c = committer()
       if (!c?.importTree) return
-      await c.importTree([{ segments: target, layer: { name: cell } }])
+      await c.importTree([{ segments: target, layer: { name: minted } }])
       source = target
     }
     const references = ioc()?.get(CANONICAL_REFERENCE_SERVICE_KEY) as CanonicalReferenceService | undefined

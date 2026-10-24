@@ -38,7 +38,7 @@
 //
 // A dependency: the drone (didyouknow.drone.ts) registers it.
 
-import { EffectBus, hypercomb } from '@hypercomb/core'
+import { EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
 import { readGlobalOffKinds } from '../sharing/behavior-enablement.js'
 import { isJoinedHere } from '../sharing/membership.js'
@@ -357,7 +357,8 @@ export class DidYouKnow extends EventTarget {
   /** Make the game's tile on this page through the same add the `create`
    *  word runs; a tile made in the swarm is shared. Returns its name. */
   async #mint(page: readonly string[]): Promise<string | null> {
-    EffectBus.emit('cell:added', { cell: GAME_NAME, segments: [...page] })
+    // Named the hive's way — `did-you-know`; isGame folds, so either spelling is the game.
+    EffectBus.emit('cell:added', { cell: normalizeCell(GAME_NAME), segments: [...page] })
     await new hypercomb().act()
     await this.#settled()
     return this.#tileHere(page)
