@@ -5680,6 +5680,15 @@ test('a room member is refused unless it is the caller\'s own claim on this pool
   const packages = await sha256Hex('host:packages')
   assert.equal((await putMember(open(), packages, await roomMember(packages, head))).status, 403, 'never into a pool the host lists')
 
+  // Nor into a pool only the host writes, while it is still empty and
+  // unlisted: a member there would list as a room, and be read as a plan.
+  const plans = await sha256Hex('host:plans')
+  const plantedEnv = open()
+  const planted = await putMember(plantedEnv, plans, await roomMember(plans, head))
+  assert.equal(planted.status, 403, 'never into the plans pool')
+  assert.match(planted.text, /belongs to the host/)
+  assert.equal((await worker.fetch(new Request(`https://${WRITE_FACE}/${plans}/`), plantedEnv)).status, 404, 'and the address is still no pool')
+
   const env = open()
   const bag = await sha256Hex('a door bag')
   env.CONTENT.held.set(`${bag}/00000001`, enc('a marker'))

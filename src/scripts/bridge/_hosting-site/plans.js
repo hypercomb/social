@@ -6,10 +6,15 @@
    A page without such a slot does not link it and asks nothing (generate.cjs
    links it only where it wrote a slot).
 
-   Prices are the host's, never typed: one GET /plans on this page's own
-   origin, answered as {plans: [{name, bytes, sites, rooms, people,
-   price?: {amount, currency, period}}]}, amount a whole number of the
-   currency's minor units (900 usd = $9).
+   Prices are the host's, never typed, and read the way every client reads a
+   host: by signature. The plans a host offers are the pool sign('host:plans')
+   on its own origin -- GET /<sha256('host:plans')>/ lists the members, one
+   plan signature per line, and each plan's bytes answer at /<sig>:
+   {name, bytes, sites, rooms, people, price?: {amount, currency, period}},
+   amount a whole number of the currency's minor units (900 usd = $9). A plan
+   is believed only when its bytes hash to its name. The pool answers on every
+   door of the host once its operator lists it (`hosts list host:plans`); no
+   named route is asked, so no site's own /plans page is ever taken.
 
    Slots (see chrome.css):
      data-hp-plans="from" -- the lowest price ("From $9 a month"; no "From"
@@ -24,15 +29,28 @@
        page's own, so a card drawn here and a card written on the page are
        one shape.
 
-   Anything short of a well-formed plan list (no script, no network, a door
-   that answers with its own page, a hive on localhost, a redirect, a slow
-   host) leaves the words already written in the slot. Operator data is only
+   Anything short of the whole plan list (no script, no network, no
+   crypto.subtle, a host that does not list the pool, any plan that cannot be
+   read, more listed than can be read, a redirect, a slow host) leaves the
+   words already written in the slot -- never a partial list, whose "From"
+   would be higher than the host's. A plan that IS read but is not what its
+   name says, or not exactly a plan's terms, is dropped and the rest stand.
+   Operator data is only
    ever written with textContent. */
 (function () {
   'use strict';
   if (typeof fetch !== 'function' || !/^https?:$/.test(location.protocol)) return;
+  var subtle = typeof crypto === 'object' && crypto && crypto.subtle;
+  if (!subtle || typeof TextEncoder !== 'function') return;
 
   var MAX_PLANS = 12;
+  /* how many listed plans are read before the cheapest MAX_PLANS are kept */
+  var MAX_READ = 32;
+  var MAX_PLAN_BYTES = 4096;
+  /* a plan is exactly these terms -- the worker's readPlan, mirrored */
+  var PLAN_KEYS = ['name', 'bytes', 'sites', 'rooms', 'people', 'price'];
+  var PRICE_KEYS = ['amount', 'currency', 'period'];
+  var SIG = /^[0-9a-f]{64}$/;
   var MAX_NAME = 64;
   var WAIT_MS = 6000;
   var PERIOD = { month: 'a month', year: 'a year' };
@@ -126,19 +144,50 @@
     return storage ? storage + ' of storage.' : '';
   }
 
-  function readPlans(body) {
-    var raw = body && Array.isArray(body.plans) ? body.plans : [];
+  function only(object, keys) {
+    for (var key in object) if (own.call(object, key) && keys.indexOf(key) < 0) return false;
+    return true;
+  }
+
+  /* Bytes that hash to their name are only unchanged, not the operator's:
+     anything that is not exactly a plan's terms (a signed event set out in
+     the pool, say) is not a plan. */
+  function isPlan(plan) {
+    if (!plan || typeof plan !== 'object' || Array.isArray(plan) || !only(plan, PLAN_KEYS)) return false;
+    if (!whole(plan.bytes) || !whole(plan.sites) || !whole(plan.rooms) || !whole(plan.people)) return false;
+    var price = plan.price;
+    return price === undefined || (!!price && typeof price === 'object' && !Array.isArray(price) && only(price, PRICE_KEYS));
+  }
+
+  function readPlans(raw) {
     var plans = [];
-    for (var i = 0; i < raw.length && plans.length < MAX_PLANS; i++) {
+    for (var i = 0; i < raw.length; i++) {
       var plan = raw[i];
-      if (!plan || typeof plan !== 'object') continue;
+      if (!isPlan(plan)) continue;
       var name = typeof plan.name === 'string' ? plan.name.trim() : '';
       if (!name || name.length > MAX_NAME) continue;
       var price = readPrice(plan.price);
       if (!price) continue;
       plans.push({ name: name, price: price, allows: allows(plan) });
     }
-    return plans;
+    /* the host's order: free first, then the lowest price, then the name */
+    plans.sort(function (a, b) {
+      var x = a.price.free ? -1 : a.price.amount;
+      var y = b.price.free ? -1 : b.price.amount;
+      return x - y || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    });
+    return plans.slice(0, MAX_PLANS);
+  }
+
+  function hex(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var out = '';
+    for (var i = 0; i < bytes.length; i++) out += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+    return out;
+  }
+
+  function sign(text) {
+    return subtle.digest('SHA-256', new TextEncoder().encode(text)).then(hex);
   }
 
   function fromText(plans) {
@@ -189,18 +238,46 @@
 
   var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
   var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, WAIT_MS) : 0;
-  fetch('/plans', {
-    method: 'GET',
-    cache: 'no-store',
-    credentials: 'omit',
-    redirect: 'error',
-    headers: { Accept: 'application/json' },
-    signal: ctrl ? ctrl.signal : undefined
+  function ask(path) {
+    return fetch(path, {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error',
+      signal: ctrl ? ctrl.signal : undefined
+    }).then(function (res) { return res.ok ? res : null; });
+  }
+
+  /* One plan, believed only when its bytes are what its name says. A plan
+     that cannot be READ fails the whole list (throws): a partial list would
+     show a higher "From" than the host offers. A plan that is read and is
+     not what its name says is dropped (null). */
+  function plan(sig) {
+    return ask('/' + sig).then(function (res) {
+      if (!res) throw new Error('unread');
+      return res.arrayBuffer();
+    }).then(function (buffer) {
+      if (buffer.byteLength > MAX_PLAN_BYTES) return null;
+      return subtle.digest('SHA-256', buffer).then(function (digest) {
+        if (hex(digest) !== sig) return null;
+        try { return JSON.parse(new TextDecoder().decode(buffer)); } catch (e) { return null; }
+      });
+    });
+  }
+
+  sign('host:plans').then(function (pool) {
+    return ask('/' + pool + '/');
   }).then(function (res) {
-    var type = (res.headers.get('content-type') || '').toLowerCase();
-    return res.ok && type.indexOf('application/json') === 0 ? res.json() : null;
-  }).then(function (body) {
-    var plans = readPlans(body);
+    return res ? res.text() : '';
+  }).then(function (listing) {
+    var names = listing.split('\n').map(function (line) { return line.trim(); })
+      .filter(function (line) { return SIG.test(line); });
+    /* more than can be read is a listing this card cannot order: say nothing */
+    if (names.length > MAX_READ) throw new Error('too many');
+    return Promise.all(names.map(plan));
+  }).then(function (held) {
+    if (ctrl && ctrl.signal.aborted) return;
+    var plans = readPlans(held.filter(Boolean));
     if (plans.length) render(plans);
   }).catch(function () {
     /* the written words stand */

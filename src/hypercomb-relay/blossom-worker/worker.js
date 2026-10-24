@@ -4116,6 +4116,13 @@ async function consume(env, pubkey, grant, size) {
 // provider's webhook will write the same row (sign-up, step 3).
 const HOST_PLANS_MEANING = 'host:plans'
 const HOST_TENANTS_MEANING = 'host:tenants'
+/** The pools only the host itself writes, listed or not. An EMPTY, unlisted
+ *  pool reads as a room pool to the room-member write, and the room branch of
+ *  servePoolListing then lists it to anyone — so with AUTO_GRANT on, a
+ *  stranger's signed room member set out a "plan" the operator never offered,
+ *  and its bytes hash to their name (found by review, 2026-10-24, before any
+ *  page read the pool). A room member is never written into one of these. */
+const HOST_WRITTEN_POOL_MEANINGS = [HOST_PLANS_MEANING]
 const PLAN_MAX_BYTES = 4_096
 
 /** A plan's terms, or null when the bytes are not a plan. Every allowance
@@ -5170,7 +5177,7 @@ async function putRoomMember(request, env, pool, member) {
   if (!auth.ok) return text(401, auth.reason)
   if (!env.CONTENT?.put || !env.CONTENT?.list) return text(503, 'this host holds no pools')
   const reserved = await listedPool(env, pool)
-    || (await Promise.all(PRIVATE_POOL_MEANINGS.map(poolAddress))).includes(pool)
+    || (await Promise.all([...PRIVATE_POOL_MEANINGS, ...HOST_WRITTEN_POOL_MEANINGS].map(poolAddress))).includes(pool)
   if (reserved) return text(403, 'this pool belongs to the host')
   const first = ((await env.CONTENT.list({ prefix: `${pool}/`, limit: 1, include: ['customMetadata'] })).objects ?? [])[0]
   if (first && first.customMetadata?.member !== '1') return text(403, 'this address is not a room pool')

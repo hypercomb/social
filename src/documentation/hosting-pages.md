@@ -220,16 +220,33 @@ working.*
 
 ## What is still owed
 
-- **The plan card's live price at a door.** `plans.js` asks its own host's
-  `GET /plans`, but the worker answers `/plans` only on a zone's write face,
-  so on `hosting.hypercomb.com` it falls through to the visitor shell and the
-  card keeps its words. The worker must answer `GET /plans` at site doors (as
-  it does `/publications.json`). No page carries a price today — the hosted
-  card returns with sign-up — so this blocks nothing yet.
+- **The plan card's live price at a door — one word from jwize.** `plans.js`
+  reads the host's plans the way every client reads a host, by signature:
+  it lists the pool `sign('host:plans')` at its own door and believes each
+  plan only when its bytes hash to its name. No named route is asked (a
+  `/plans` route at a door would take any site's own `plans` page). The pool
+  answers on every door once its operator lists it — `hosts list host:plans`
+  in jwize's hive — and within a minute of that (the worker keeps a host's
+  listing for 60 s). Proven 2026-10-24 against the real worker and the
+  deployed bindings: unlisted, the card keeps its words; listed, *From $9 a
+  month* and one card per plan; a plan whose bytes do not hash to its name is
+  dropped. No page carries a price yet — the hosted card returns with sign-up;
+  list the pool before any page links `plans.js`, or every visit logs the
+  unlisted address's 404. Bytes that hash to their name are only unchanged,
+  not the operator's, so two guards stand behind the hash: the worker never
+  writes a swarm room member into `sign('host:plans')` (with `AUTO_GRANT` on,
+  a stranger's member there listed as a room and read as a "plan" — found by
+  review, never live), and `plans.js` believes only exactly a plan's terms.
 - **Sign-up** (`hosted-tenants.md`, step 3): then the hosted page's notes get
   their steps and card, and the generator draws the plan list.
-- **The door's title.** Without an exact `SITE_BINDINGS` entry the door reads
-  *hosting*; it should read *Host your hive*.
+- **The door's title — deploy the worker BEFORE publishing `/hosting`.**
+  `hosting.hypercomb.com` has an exact `SITE_BINDINGS` entry (title *Host
+  your hive*, lineage `hosting`), so the door record, the tab and the share
+  card read it; without it they read *hosting*. The door's bag keeps the
+  title of the marker that seeded it, so a publish before the deploy keeps
+  *hosting* until the next index write. Every other implicit door is still titled by its
+  label (*meetups*); a title the publisher signs is the general fix, and
+  hosted tenants will need it.
 - **A download address for the desktop app.** *Try it* and *Your own domain*
   need the app; no public page says where to get it.
 - **The three components as hive artifacts on tiles.** Today they are one
@@ -243,9 +260,10 @@ working.*
    2026-10-22, corrected 2026-10-23.
 2. ~~Make the three components once; have every page use them.~~ Done
    2026-10-23 (`chrome.css`, `generate.cjs`).
-3. Open the door: `publish /hosting on hypercomb.com`, said in jwize's hive
-   (it asks him first). Success is `hosting` in his signed index, then the
-   address opening the main page.
+3. Open the door, in this order: deploy the worker (it carries the title and
+   the plans-pool guard), then `publish /hosting on hypercomb.com` in jwize's
+   hive (it asks him first). Success is `hosting` in his signed index, then
+   the address opening the main page titled *Host your hive*.
 4. Walk each path with someone who has not done it; fix the note where they
    stopped and run the generator.
 5. When sign-up lands, give the hosted page its steps and card.
