@@ -47,6 +47,14 @@ describe('arrival plan', () => {
     expect(missing).toEqual(['ArcadeDrone'])
   })
 
+  it('finds a face named in any case — a plan said as a sentence arrives folded to lower case', () => {
+    // The card's live plan, as its line was folded: `arrival jaime-weise ViewBee … CardReader`.
+    const { bees, missing } = resolveArrival(['@diamondcoreprocessor.com/siteviewdrone', 'SHOWCELLDRONE'], index(), all)
+    expect([...bees].sort()).toEqual([sig('a'), sig('b'), sig('c')])
+    expect(missing).toEqual([])
+    expect(resolveArrival(['arcadedrone'], index(), all).missing).toEqual(['arcadedrone'])
+  })
+
   it('never reaches outside the package inventory', () => {
     const { bees } = resolveArrival(['ShowCellDrone'], index(), new Set([sig('c')]))
     expect([...bees]).toEqual([sig('c')])

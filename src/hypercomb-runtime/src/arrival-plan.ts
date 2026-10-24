@@ -78,17 +78,21 @@ export const resolveArrival = (
   const bees = new Set<string>()
   const missing: string[] = []
   const seen = new Set<string>()
+  // A plan said as a sentence arrives folded to lower case (the reader folds
+  // a bare line: `@….com/viewbee`), and no two classes differ by case alone —
+  // so a name finds its class in any case. Signed plans stay as they were.
+  const folded = new Map([...classes].map(([name, cls]) => [name.toLowerCase(), cls]))
   const queue = names.map(classOfKey).filter(Boolean)
-  const named = new Set(queue)
+  const named = new Set(queue.map(cls => cls.toLowerCase()))
   while (queue.length) {
     const cls = queue.shift()!
-    if (seen.has(cls)) continue
-    seen.add(cls)
-    const hit = classes.get(cls)
+    if (seen.has(cls.toLowerCase())) continue
+    seen.add(cls.toLowerCase())
+    const hit = classes.get(cls) ?? folded.get(cls.toLowerCase())
     if (!hit || !packageBees.has(hit.sig)) {
       // A declared need the package answers some other way (a shell
       // service, a dependency's class) is not a gap; a NAMED face is.
-      if (named.has(cls)) missing.push(cls)
+      if (named.has(cls.toLowerCase())) missing.push(cls)
       continue
     }
     bees.add(hit.sig)
