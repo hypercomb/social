@@ -69,7 +69,13 @@ ws.on('message', raw => {
   if (m.id !== id) return
   clearTimeout(timer)
   ws.close()
-  if (!m.ok) { console.error('refused before it ran:', m.error); process.exit(1) }
+  if (!m.ok) {
+    // A tab that dropped mid-sentence (a dev reload, a navigation) may have
+    // run part of it: never call that "refused before it ran".
+    const dropped = /dropped|never answered|closed/i.test(String(m.error))
+    console.error(dropped ? 'the hive tab reloaded or left before it answered — the sentence may have partly run:' : 'refused before it ran:', m.error)
+    process.exit(1)
+  }
   const d = m.data || {}
   console.log(`said: ${sentence}`)
   console.log(`  ${d.summary || JSON.stringify(d.outcome)}`)

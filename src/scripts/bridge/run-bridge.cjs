@@ -103,6 +103,38 @@ const wss = new WebSocketServer({
     done(false, 403)
   },
 })
+// ONE broker per machine. Every session may "start the bridge"; a second
+// broker on the same port leaves the first serving and goes, quietly — it
+// used to die on an unhandled EADDRINUSE (ws re-emits the server's error).
+// Quiet only when what holds the port answers as a broker (/healthz);
+// anything else on it is a real failure, said as one.
+let listenFailed = false
+const onListenError = err => {
+  if (!err || err.code !== 'EADDRINUSE') throw err
+  if (listenFailed) return
+  listenFailed = true
+  const probe = require('node:http').get({ host: '127.0.0.1', port: BRIDGE_PORT, path: '/healthz', timeout: 2000 }, res => {
+    let body = ''
+    res.on('data', chunk => { body += chunk })
+    res.on('end', () => {
+      if (/"ok"\s*:\s*true/.test(body)) {
+        console.log(`[bridge] a broker already answers on port ${BRIDGE_PORT} — leaving it running`)
+        process.exit(0)
+      }
+      console.error(`[bridge] port ${BRIDGE_PORT} is held by something that is not a broker (${err.message})`)
+      process.exit(1)
+    })
+  })
+  probe.on('timeout', () => probe.destroy(new Error('no answer')))
+  probe.on('error', e => { console.error(`[bridge] port ${BRIDGE_PORT} is in use and does not answer as a broker (${e.message})`); process.exit(1) })
+}
+server.on('error', onListenError)
+wss.on('error', onListenError)
+// Its log may be piped into something that stops reading (`| head -40`): a
+// closed pipe must not take the broker, and every hive tab on it, down.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on('error', err => { if (!err || err.code !== 'EPIPE') throw err })
+}
 server.listen(BRIDGE_PORT, BRIDGE_HOST)
 
 let renderer = null
