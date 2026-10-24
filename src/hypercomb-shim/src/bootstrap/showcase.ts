@@ -302,6 +302,9 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   const words = el('div', 'hero-words')
   const title = el('h1')
   title.textContent = options.title
+  // As large as its longest word allows: a domain has no space to wrap at, so
+  // pluginthematrix.com is drawn smaller rather than broken mid-word.
+  title.style.setProperty('--chars', String(Math.max(6, ...options.title.split(/\s+/).map(word => word.length))))
   const tagline = el('p', 'hero-tagline')
   tagline.textContent = options.tagline
   const searchBox = el('label', 'search')
@@ -802,9 +805,12 @@ export const SHOWCASE_STYLE = `
 
 /* the hero: the name, the sentence, the search — and a comb of real hives */
 .hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(1.5rem, 5vw, 4rem); margin: 0 0 clamp(2.5rem, 7vh, 4.5rem); }
+.hero-words { container-type: inline-size; width: 100%; min-width: 0; }
 .hero h1 {
+  --title-size: clamp(3.1rem, 8.5vw, 6.4rem);
   margin: 0; padding-bottom: .06em; overflow-wrap: anywhere;
-  font: 500 clamp(3.1rem, 8.5vw, 6.4rem)/.95 'Source Serif 4', Georgia, serif; letter-spacing: -.055em;
+  font: 500 var(--title-size)/.95 'Source Serif 4', Georgia, serif; letter-spacing: -.055em;
+  font-size: min(var(--title-size), calc(100cqi / (var(--chars, 9) * .5)));
   background: linear-gradient(105deg, var(--md-on-surface-strong) 38%, #b0600c 78%, var(--gold-2));
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
@@ -975,7 +981,7 @@ export const SHOWCASE_STYLE = `
 @media (max-width: 720px) {
   .hero { gap: 1.2rem; margin-bottom: 2rem; }
   .mosaic { --w: 4.6rem; --g: .25rem; }
-  .hero h1 { font-size: clamp(2.7rem, 13vw, 3.6rem); }
+  .hero h1 { --title-size: clamp(2.7rem, 13vw, 3.6rem); }
   .hero-tagline { font-size: .98rem; }
   .search { margin-top: 1.3rem; }
   .band { margin: 0 0 .55rem; border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px); overflow: hidden;
