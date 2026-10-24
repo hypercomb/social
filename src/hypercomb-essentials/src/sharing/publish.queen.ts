@@ -19,6 +19,12 @@
 //                           https://<label>.<domain> instead of <name>.<domain>
 //                           (`@` is the domain itself: its front page). The
 //                           tile must already be published on that domain.
+//   publish history         say whether this branch publishes its history or
+//                           its head only (the default) — changes nothing
+//   publish history on      publish its history too: a `publish:history`
+//                           mark on the branch root, then a republish so the
+//                           host sees the new head
+//   publish history off     back to head only — the mark cleared, republished
 //
 // Every form but the bare word also takes a ROUTE first — `publish
 // /revolucion/lounge on hypercomb.com` — so a sentence can NAME the tile
@@ -26,11 +32,16 @@
 // is, and the tile is read once, never off a tab that may move meanwhile
 // (host-gesture.ts). `publish /route` alone is `publish here` for that tile.
 //
+// `history` is a SUB-WORD here, never a behaviour of its own: the word is
+// rawArgs, so `history` (a live word in commands/history.queen.ts) never runs
+// from this line.
+//
 // `on`/`off`/`as` are the panel's per-domain switch and its own-address field
 // said in words — the same marks and the same signed index, no second
 // mechanism.
 
-import { EffectBus, lineageKey } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, get, lineageKey, type I18nProvider } from '@hypercomb/core'
+import { clearPublicHistory, publicHistoryAt, writePublicHistory } from '../commands/publish-history.js'
 import { hostCurrentBranch } from './host-gesture.js'
 import { hostZone, hostsOfBranch, setBranchHosts } from './community-hosts.js'
 import { setBranchAddress, setBranchDoors, unpublishBranch } from './publish-branch.js'
@@ -42,6 +53,18 @@ type LineageLike = { explorerSegments?: () => readonly string[] }
 const say = (message: string, type: 'info' | 'warning' | 'success' = 'info'): void => {
   EffectBus.emit('activity:log', { message, icon: '⇪' })
   if (type !== 'info') EffectBus.emit('toast:show', { type, message })
+}
+
+const t = (key: string, fallback: string, params: Record<string, string> = {}): string => {
+  const value = get<I18nProvider>(I18N_IOC_KEY)?.t?.(key, params)
+  return value && value !== key ? value : fallback.replace(/\{(\w+)\}/g, (_, name: string) => params[name] ?? '')
+}
+
+/** An answer said in place — the activity line AND a toast, so a status
+ *  question is answered where it was asked. */
+const answer = (message: string, type: 'tip' | 'success' | 'warning'): void => {
+  EffectBus.emit('activity:log', { message, icon: '⇪' })
+  EffectBus.emit('toast:show', { type, message })
 }
 
 /** A route said first — `/a/b …` — as segments, with the rest of the line. */
@@ -59,7 +82,7 @@ export class PublishQueenBee {
    *  Tongue read `publish /revolucion/lounge …` as `revolucion/lounge …`. */
   readonly rawArgs = true
   readonly description =
-    'Show what your published hive is serving right now, next to what has changed here since — one row per branch, with publish, re-check and unpublish per row. `publish here` publishes the layer you stand on to its hosts; `publish on <domain>` and `publish off <domain>` switch one domain for it; `publish as <label> on <domain>` gives it its own address there. Say a route first (`publish /a/b on <domain>`) to name the tile instead of standing on it.'
+    'Show what your published hive is serving right now, next to what has changed here since — one row per branch, with publish, re-check and unpublish per row. `publish here` publishes the layer you stand on to its hosts; `publish on <domain>` and `publish off <domain>` switch one domain for it; `publish as <label> on <domain>` gives it its own address there; `publish history` says whether it publishes its history or its head only, and `publish history on` / `publish history off` switch that. Say a route first (`publish /a/b on <domain>`) to name the tile instead of standing on it.'
   readonly descriptionKey = 'slash.publish'
 
   async invoke(args: string): Promise<void> {
@@ -74,8 +97,17 @@ export class PublishQueenBee {
     if (door) { await this.#door(route, door[1] === 'on', door[2] ?? ''); return }
     const own = lower.match(/^as(?:\s+(\S+))?(?:\s+on(?:\s+(\S+))?)?$/)
     if (own) { await this.#address(route, own[1] ?? '', own[2] ?? ''); return }
+    if (lower === 'history' || lower.startsWith('history ')) {
+      const turn = lower.match(/^history(?:\s+(on|off))?$/)
+      if (!turn) {
+        answer(t('publish-history.usage', 'Say: publish history, publish history on, or publish history off.'), 'warning')
+        return
+      }
+      await this.#history(route, turn[1] === 'on' ? true : turn[1] === 'off' ? false : null)
+      return
+    }
     if (route) {
-      say(`Say what to do with /${route.join('/')}: on <domain>, off <domain>, or as <label> on <domain>.`, 'warning')
+      say(`Say what to do with /${route.join('/')}: on <domain>, off <domain>, as <label> on <domain>, or history on|off.`, 'warning')
       return
     }
     EffectBus.emit('publish:view-toggle', {})
@@ -120,6 +152,38 @@ export class PublishQueenBee {
     const result = next.length === 0 ? await unpublishBranch(segments) : await setBranchDoors(segments, next)
     if (!result.ok) fail(`"${name}" could not be taken off ${zone} (${result.failure}).`)
     say(next.length === 0 ? `"${name}" is withdrawn — ${zone} was its last door` : `"${name}" is off ${zone}`, 'success')
+  }
+
+  /** PUBLIC HISTORY — `turn` null asks (never changes anything); true / false
+   *  writes / clears the `publish:history` mark on the branch root and, when
+   *  the branch is published, republishes it the way `publish here` does so
+   *  the host sees the new head. An unpublished branch keeps the mark for the
+   *  next time it is published. */
+  async #history(route: readonly string[] | null, turn: boolean | null): Promise<void> {
+    const segments = this.#segments(route)
+    const name = segments[segments.length - 1]
+    const isPublic = (await publicHistoryAt(segments)) === true
+    const status = (): string => isPublic
+      ? t('publish-history.status-public', '"{name}" publishes its history — its earlier versions are public, not only its head.', { name })
+      : t('publish-history.status-head', '"{name}" publishes its head only — no record of its earlier versions.', { name })
+
+    if (turn === null || turn === isPublic) { answer(status(), 'tip'); return }
+
+    if (turn) await writePublicHistory(segments)
+    else await clearPublicHistory(segments)
+
+    const said = turn
+      ? t('publish-history.on', 'History is now public for "{name}". Whatever is served while history is public may be copied or cached elsewhere — turning it off cannot take that back.', { name })
+      : t('publish-history.off', '"{name}" now publishes its head only.', { name })
+    const published = (await latestByLineageKey()).has(lineageKey(segments))
+    if (!published) {
+      answer(`${said} ${t('publish-history.not-published', 'It is not published yet — this takes effect the next time you publish it.')}`, 'success')
+      return
+    }
+    answer(said, 'success')
+    // The mark changed the head: publish it, as `publish here` does, so the
+    // host serves (or stops serving) the record from the new root.
+    await hostCurrentBranch(segments)
   }
 
   /** OWN ADDRESS — `<label>.<zone>` for a tile already published on that
