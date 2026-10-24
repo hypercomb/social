@@ -244,10 +244,15 @@ export class ActiveGenomeService {
       epoch: () => history.treeEpoch(),
       root: async () => {
         const lineage = await background(() => history.sign({ explorerSegments: () => [] }))
-        // A cold/brand-new root still gets a partial, retrying census keyed
-        // by its lineage address. This keeps `/genome` informative without
-        // materializing 00000000 merely to measure it.
-        return (await background(() => history.headLayer(lineage)))?.layerSig ?? lineage
+        // A ROOT WITH NO HEAD HAS NOTHING TO MEASURE YET. Its lineage address
+        // names the home BAG (sign('root-entries'), a directory of markers),
+        // never content — handed to the layer reader it went to
+        // getLayerBySig, whose local miss heals from the host, and a published
+        // door (whose root never has a head) asked its own host for the bag as
+        // a layer: /<sig> and /@resource/<sig>, 404 both. No head is no record:
+        // the census stays queued, retries on the next pass, and /genome says
+        // it is initializing. Read-only still — 00000000 is never materialized.
+        return (await background(() => history.headLayer(lineage)))?.layerSig ?? null
       },
       lineage: path => background(() => history.sign({ explorerSegments: () => [...path] })),
       layer: async signature => {

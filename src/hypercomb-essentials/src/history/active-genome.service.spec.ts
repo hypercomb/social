@@ -180,11 +180,11 @@ describe('passive active-genome queue', () => {
     expect(localStorage.getItem('hc:active-genome:pending')).toBe(trigger)
     await service.refresh()
 
+    // No head is no record yet — never a census keyed by the bag's address
+    // (/genome then says it is initializing, the update still queued).
     expect(service.dirty).toBe(true)
-    expect(service.record).toMatchObject({
-      complete: false,
-      totals: { knownBytes: 0, activeBytes: null },
-    })
+    expect(service.record).toBeNull()
+    expect(store.docs.has('active-genome')).toBe(false)
     expect(JSON.parse(new TextDecoder().decode(store.docs.get('active-genome-queue')!))).toEqual({
       queued: trigger,
     })
@@ -200,5 +200,28 @@ describe('passive active-genome queue', () => {
       queued: null,
       completed: 'f'.repeat(64),
     })
+  })
+
+  // A ROOT'S ADDRESS IS A BAG, NEVER CONTENT. A headless root (a published
+  // door's always is: a visitor never commits) used to hand its lineage
+  // address to the layer reader, whose local miss heals from the host — every
+  // door asked its own host for /<sign('root-entries')> and /@resource/<…>,
+  // two 404s, whenever the census ran before the reader walked in.
+  it('never reads a headless root\'s lineage address as a layer', async () => {
+    const store = new MemoryComputedStore()
+    const poolBytes = vi.spyOn(store, 'getLayerPoolBytes')
+    const headless = history(null)
+    const layerBySig = vi.spyOn(headless, 'getLayerBySig')
+    registrations.set('@hypercomb.social/Store', store)
+    registrations.set('@diamondcoreprocessor.com/HistoryService', headless)
+    const service = new ActiveGenomeService()
+
+    service.invalidate(trigger)
+    await service.optimize()
+
+    expect(layerBySig).not.toHaveBeenCalledWith(lineage)
+    expect(poolBytes).not.toHaveBeenCalledWith(lineage)
+    expect(service.record?.seal).not.toBe(lineage)
+    expect(service.dirty).toBe(true)
   })
 })

@@ -12,6 +12,23 @@ export type ResolvedImports = Record<string, string>
 export const sessionBound = (imports: ResolvedImports): boolean =>
   Object.values(imports).some(url => url.startsWith('blob:'))
 
+/** Did the browser take a map appended after the module graph started? Asked
+ *  of the browser itself: `import.meta.resolve` answers through the maps it
+ *  actually holds. true — every alias resolves to the URL the map names;
+ *  false — one does not (a browser that ignores a late map refuses the bare
+ *  specifier); null — this browser cannot be asked. */
+export const lateMapLive = (
+  imports: ResolvedImports,
+  resolve: ((specifier: string) => string) | undefined,
+  base: string,
+): boolean | null => {
+  if (typeof resolve !== 'function') return null
+  for (const [alias, url] of Object.entries(imports)) {
+    try { if (resolve(alias) !== new URL(url, base).href) return false } catch { return false }
+  }
+  return true
+}
+
 /** Does this origin answer `/<sig>` as a JavaScript module? Asked of the
  *  browser itself (modulepreload: fetched and type-checked, never run). */
 const probeRootModule = (sig: string): Promise<boolean> => new Promise(resolve => {

@@ -104,7 +104,7 @@ import { Store } from '@hypercomb/runtime/store'
 import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
 import { ensureInstall, installFromHosts, opfsWritable, storageBlockedStatus, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
-import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap, sessionBound } from './setup/resolve-import-map'
+import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, lateMapLive, resolveImportMap, sessionBound } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
 import {
@@ -241,6 +241,21 @@ const attachImportMap = async (): Promise<void> => {
   // gets resolved this session; the next boot picks the cache up early.
   const aliasMap = (globalThis as any).__hypercombAliasMap as Map<string, string> | undefined
   if (!aliasMap?.size) return
+
+  // A PUBLISHED WEBSITE HAS NO EARLY MAP. index.visitor.html replays none (its
+  // storage ends with the page), so the late map above IS the visitor's map on
+  // every visit, and a reload could only land back here — the guard below
+  // announced a reload that reloadUnlessVisitor then skipped, on every visit.
+  // The one question worth asking is whether this browser took the late map:
+  // taken, there is nothing to say; refused, every bee and dependency import
+  // is about to fail, and that is said once, as the fault it is.
+  if ((window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) {
+    // A browser without import.meta.resolve cannot be asked — null, and quiet.
+    const resolve = typeof import.meta.resolve === 'function' ? (specifier: string) => import.meta.resolve(specifier) : undefined
+    const live = lateMapLive(lateImports, resolve, document.baseURI)
+    if (live === false) console.warn('[main] this browser ignored the import map added at boot — the published site cannot load its modules here')
+    return
+  }
 
   // The map this session needs was NOT live at module-load time. On a browser
   // that ignored the late append, every dep and bee import is about to fail.
