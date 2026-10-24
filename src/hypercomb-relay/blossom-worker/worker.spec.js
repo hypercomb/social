@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { schnorr } from '@noble/curves/secp256k1'
 import worker from './worker.js'
+import { decodeTransferPack, encodeTransferPack, gunzipBytes, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.ts'
 
 const sha256Hex = async (text) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))))
 const hex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
@@ -1513,43 +1514,6 @@ test('a door asks for its shell bundles under /shell/, and /shell/<file> is the 
     const script = await worker.fetch(new Request('https://swarm.hypercomb.com/shell/main-TQO2BYYC.js'), env)
     assert.equal(script.status, 200)
     assert.deepEqual(seen, ['https://shell.example/', 'https://shell.example/main-TQO2BYYC.js'])
-  } finally { globalThis.fetch = original }
-})
-
-test('a door runs the core its shell came with — the import map and the core preloads go under /shell/ too', async () => {
-  // The asset store's /hypercomb-core.runtime.js and /core/* are the visitor
-  // build's, as old as the last worker deploy; a newer shell against them died
-  // ("does not provide an export named 'addressSegment'", 2026-10-24).
-  const env = await sandboxEnv({ 'install:swarm': 'd'.repeat(64) })
-  const seen = []
-  const original = globalThis.fetch
-  const page = [
-    `<script>var CORE = { '@hypercomb/core': '/hypercomb-core.runtime.js' };</script>`,
-    '<link rel="modulepreload" href="chunk-ZZ9.js"><link rel="modulepreload" href="/hypercomb-core.runtime.js"><link rel="modulepreload" href="/core/dist/index.js">',
-    '<script src="main-TQO2BYYC.js" type="module"></script><script src="env.js"></script>',
-  ].join('')
-  globalThis.fetch = async (url) => {
-    seen.push(String(url))
-    return String(url).endsWith('/')
-      ? new Response(page, { headers: { 'content-type': 'text/html' } })
-      : new Response('export {}', { headers: { 'content-type': 'text/javascript' } })
-  }
-  try {
-    const html = await (await worker.fetch(new Request('https://swarm.hypercomb.com/'), env)).text()
-    assert.match(html, /'@hypercomb\/core': '\/shell\/hypercomb-core\.runtime\.js'/)
-    assert.match(html, /href="\/shell\/hypercomb-core\.runtime\.js"/)
-    assert.match(html, /href="\/shell\/core\/dist\/index\.js"/)
-    assert.match(html, /href="\/shell\/chunk-ZZ9\.js"/)
-    assert.match(html, /src="env\.js"/, 'files that are not the shell\'s bundles or its core stay as they were')
-    assert.doesNotMatch(html, /["']\/hypercomb-core\.runtime\.js["']|["']\/core\/dist\//, 'no core reference is left on the asset path')
-    // The runtime's own `./core/dist/index.js` lands here, and is the shell origin's.
-    const core = await worker.fetch(new Request('https://swarm.hypercomb.com/shell/core/dist/index.js'), env)
-    assert.equal(core.status, 200)
-    // The core changes under its name: revalidated every load, never held for hours.
-    assert.equal(core.headers.get('cache-control'), 'no-cache')
-    const bundle = await worker.fetch(new Request('https://swarm.hypercomb.com/shell/main-TQO2BYYC.js'), env)
-    assert.notEqual(bundle.headers.get('cache-control'), 'no-cache', 'a hashed bundle keeps its cache rules')
-    assert.deepEqual(seen, ['https://shell.example/', 'https://shell.example/core/dist/index.js', 'https://shell.example/main-TQO2BYYC.js'])
   } finally { globalThis.fetch = original }
 })
 
@@ -5940,7 +5904,16 @@ test('a site door takes a reader\'s claim into an opened list, and still refuses
 const other = hex(schnorr.getPublicKey(Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 2 : 0)))
 const [layerA, layerB, pictureA, pictureB, kept, theirs] = ['1', '2', '3', '4', '5', '6'].map((c) => c.repeat(64))
 
+// A withdrawal is served for its grace window (ten minutes) before it hides:
+// a test moves this clock past it. Every fixture starts it at now.
+const GRACE = 10 * 60_000
+let clockShift = 0
+const realNow = Date.now
+Date.now = () => realNow() + clockShift
+const pass = (ms = GRACE + 1000) => { clockShift += ms }
+
 async function headMoveFixture(flag) {
+  clockShift = 0
   const { env } = await fixture(await signedIndex({ revolucion: layerA }, 1_800_000_000))
   if (flag) env.HEAD_ONLY = '1'
   const put = (sig, value, owner = pubkey) => env.CONTENT.put(sig, new TextEncoder().encode(value), { customMetadata: { owner } })
@@ -5965,6 +5938,7 @@ test('head only: a new head withdraws what only the old head reached, and only t
   const { publish, read } = await headMoveFixture(true)
   assert.equal(await read(layerA), 200)
   assert.equal((await publish({ revolucion: layerB }, 1_800_000_100)).status, 200)
+  pass()
   assert.equal(await read(layerA), 404, 'the old layer answers as a miss')
   assert.equal(await read(pictureA), 404, 'the picture only it used, too')
   assert.equal(await read(layerB), 200)
@@ -5977,16 +5951,19 @@ test('head only: a new head withdraws what only the old head reached, and only t
 test('head only: going back to an old head serves it again', async () => {
   const { publish, read } = await headMoveFixture(true)
   await publish({ revolucion: layerB }, 1_800_000_100)
+  pass()
   assert.equal(await read(pictureA), 404)
   await publish({ revolucion: layerA }, 1_800_000_200)
   assert.equal(await read(layerA), 200)
   assert.equal(await read(pictureA), 200)
+  pass()
   assert.equal(await read(pictureB), 404, 'and what only the newer head reached is withdrawn in turn')
 })
 
 test('head only: re-uploading withdrawn bytes serves them again', async () => {
   const { env, publish, read } = await headMoveFixture(true)
   await publish({ revolucion: layerB }, 1_800_000_100)
+  pass()
   assert.equal(await read(pictureA), 404)
   // The fixture's names are made up; a real upload is checked against its hash.
   const bytes = new TextEncoder().encode('old picture')
@@ -6035,6 +6012,7 @@ test('head only: bytes this key put here that another key\'s page uses are marke
   assert.equal((await env.CONTENT.head(pictureA)).customMetadata.shared, '1')
 
   await publish({ revolucion: layerB }, 1_800_000_100)
+  pass()
   assert.equal(await read(pictureA), 200, 'shared bytes stay served when this key moves on')
   assert.equal(await read(layerA), 404, 'what only this key used is still withdrawn')
 })
@@ -6046,7 +6024,154 @@ test('head only: a landing pack for a withdrawn head is withdrawn with it', asyn
   const url = `https://revolucion.pluginthematrix.com/${packs}/${layerA}`
   assert.equal((await worker.fetch(new Request(url), env)).status, 200)
   await publish({ revolucion: layerB }, 1_800_000_100)
+  pass()
   assert.equal((await worker.fetch(new Request(url), env)).status, 404)
+})
+
+// ── head only, sharpened (hosted-tenants.md §4, §4b) ─────────────────────────
+//
+// The reach rule is the Rust host's (no `prev`, no `seal`); a current head
+// that is not held withdraws nothing; a branch whose head carries the
+// `publish:history` mark keeps its old versions served; a withdrawal is served
+// for ten minutes first; and no other door — the upload preflight, a landing
+// pack, a route bag — tells a withdrawn object apart from a miss.
+
+/** Bytes held under their real signature, as this key's. */
+async function holdReal(env, value, owner = pubkey) {
+  const sig = await sha256Hex(value)
+  await env.CONTENT.put(sig, utf8(value), { customMetadata: { owner } })
+  return sig
+}
+/** A layer whose root carries the public-history mark (publish-history.ts). */
+async function publicLayer(env, fields = {}) {
+  const mark = await holdReal(env, JSON.stringify({ kind: 'publish:history', appliesTo: ['revolucion'], payload: { public: true }, mark: 'persistent' }))
+  return holdReal(env, JSON.stringify({ name: 'page', picture: pictureB, decorations: [mark], ...fields }))
+}
+
+test('head only: a stage list\'s prev is history, not reach — the old head is withdrawn', async () => {
+  const { env, publish, read } = await headMoveFixture(true)
+  const memberA = await holdReal(env, 'member one')
+  const memberB = await holdReal(env, 'member two')
+  const stageA = await holdReal(env, JSON.stringify({ succession: 1, signer: pubkey, prev: null, members: [memberA], at: 1 }))
+  const stageB = await holdReal(env, JSON.stringify({ succession: 1, signer: pubkey, prev: stageA, members: [memberB], at: 2 }))
+  await publish({ revolucion: stageA }, 1_800_000_050)
+  await publish({ revolucion: stageB }, 1_800_000_100)
+  pass()
+  assert.equal(await read(stageA), 404, 'reached only through prev: withdrawn')
+  assert.equal(await read(memberA), 404)
+  assert.equal(await read(stageB), 200)
+  assert.equal(await read(memberB), 200)
+})
+
+test('head only: a move to a head this host does not hold withdraws nothing', async () => {
+  const { publish, read } = await headMoveFixture(true)
+  assert.equal((await publish({ revolucion: '9'.repeat(64) }, 1_800_000_100)).status, 200)
+  pass()
+  assert.equal(await read(layerA), 200, 'what the new head reaches cannot be known, so nothing is left behind')
+  assert.equal(await read(pictureA), 200)
+})
+
+test('head only: a branch whose head carries the public-history mark keeps its old versions served', async () => {
+  const { env, publish, read } = await headMoveFixture(true)
+  const marked = await publicLayer(env)
+  await publish({ revolucion: marked }, 1_800_000_100)
+  pass()
+  assert.equal(await read(layerA), 200, 'the old version of this branch is served')
+  assert.equal(await read(pictureA), 200)
+  const res = await worker.fetch(new Request(`https://content.pluginthematrix.com/${layerA}`), env)
+  assert.equal(res.headers.get('cache-control'), 'private, max-age=60', 'never cached as immutable')
+  assert.equal((await env.CONTENT.head(layerA)).customMetadata.root, 'revolucion', 'the withdrawal names its branch')
+
+  // Clearing the mark is a move too: the history hides again.
+  await publish({ revolucion: layerB }, 1_800_000_200)
+  pass()
+  assert.equal(await read(layerA), 404)
+})
+
+test('head only: the mark read through an envelope ({meta:1, layer}) counts the same', async () => {
+  const { env, publish, read } = await headMoveFixture(true)
+  const envelope = await holdReal(env, JSON.stringify({ meta: 1, layer: await publicLayer(env) }))
+  await publish({ revolucion: envelope }, 1_800_000_100)
+  pass()
+  assert.equal(await read(layerA), 200)
+})
+
+test('head only: the mark on another branch never opens this branch\'s history', async () => {
+  const { env, publish, read } = await headMoveFixture(true)
+  const marked = await publicLayer(env, { name: 'other page' })
+  await publish({ revolucion: layerA, notes: marked }, 1_800_000_050)
+  await publish({ revolucion: layerB, notes: marked }, 1_800_000_100)
+  pass()
+  assert.equal(await read(layerA), 404, 'revolucion carries no mark')
+  assert.equal(await read(pictureA), 404)
+})
+
+test('head only: a host that sets PUBLIC_HISTORY "0" ignores the mark', async () => {
+  const { env, publish, read } = await headMoveFixture(true)
+  env.PUBLIC_HISTORY = '0'
+  await publish({ revolucion: await publicLayer(env) }, 1_800_000_100)
+  pass()
+  assert.equal(await read(layerA), 404)
+})
+
+test('head only: a withdrawal is served for its grace window, then hides', async () => {
+  const { env, publish, read } = await headMoveFixture(true)
+  await publish({ revolucion: layerB }, 1_800_000_100)
+  assert.equal(await read(layerA), 200, 'a visitor mid-walk finishes')
+  const res = await worker.fetch(new Request(`https://content.pluginthematrix.com/${pictureA}`), env)
+  assert.equal(res.headers.get('cache-control'), 'private, max-age=60', 'a grace read is never cached as immutable')
+  const current = await worker.fetch(new Request(`https://content.pluginthematrix.com/${pictureB}`), env)
+  assert.equal(current.headers.get('cache-control'), 'public, max-age=31536000, immutable', 'the head\'s content is as it was')
+  pass(GRACE - 60_000)
+  assert.equal(await read(layerA), 200, 'still inside ten minutes')
+  pass(120_000)
+  assert.equal(await read(layerA), 404, 'and gone after them')
+})
+
+test('head only: the upload preflight answers a withdrawn object as it answers a miss', async () => {
+  const { env, publish } = await headMoveFixture(true)
+  const preflightOf = async (sig) => {
+    const at = Math.floor(Date.now() / 1000)
+    const event = { pubkey, created_at: at, kind: 24242, tags: [['t', 'upload'], ['x', sig], ['expiration', String(at + 60)]], content: '' }
+    event.id = await sha256Hex(JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]))
+    event.sig = hex(schnorr.sign(event.id, sk))
+    const res = await worker.fetch(new Request('https://content.pluginthematrix.com/upload', { method: 'HEAD',
+      headers: { authorization: 'Nostr ' + btoa(JSON.stringify(event)), 'x-sha-256': sig, 'x-content-length': '11' } }), env)
+    return [res.status, res.headers.get('x-reason')]
+  }
+  const held = await preflightOf(layerA)
+  assert.match(String(held[1]), /already held/)
+  await publish({ revolucion: layerB }, 1_800_000_100)
+  pass()
+  assert.deepEqual(await preflightOf(layerA), await preflightOf('9'.repeat(64)), 'no oracle')
+})
+
+test('head only: a kept landing pack leaves out the members a move withdrew', async () => {
+  const { env, publish } = await headMoveFixture(true)
+  const packs = await sha256Hex('content:packs')
+  const bytesOf = (sig) => env.CONTENT.held.get(sig)
+  // Built while A was current, kept under B's name (a pack names its head).
+  await env.CONTENT.put(`${packs}/${layerB}`, await gzipBytes(encodeTransferPack([[layerB, bytesOf(layerB)], [layerA, bytesOf(layerA)], [pictureA, bytesOf(pictureA)]])))
+  await publish({ revolucion: layerB }, 1_800_000_100)
+  pass()
+  const res = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${packs}/${layerB}`), env)
+  assert.equal(res.status, 200)
+  const members = decodeTransferPack(await gunzipBytes(new Uint8Array(await res.arrayBuffer()))).map(([sig]) => sig)
+  assert.deepEqual(members, [layerB], 'only what is still served')
+})
+
+test('head only: a route bag lists and serves its newest marker alone', async () => {
+  const { env, publish } = await headMoveFixture(true)
+  const door = 'https://revolucion.pluginthematrix.com'
+  const bag = `${door}/${await sha256Hex('revolucion.pluginthematrix.com')}/`
+  assert.equal((await worker.fetch(new Request(bag), env)).status, 200)
+  await publish({ revolucion: layerB }, 1_800_000_100)
+  const names = (await (await worker.fetch(new Request(bag), env)).text()).trim().split('\n')
+  assert.deepEqual(names, ['00000001'])
+  assert.equal((await worker.fetch(new Request(bag + '00000000'), env)).status, 404, 'an old marker is not served')
+  assert.equal((await worker.fetch(new Request(bag + '00000001'), env)).status, 200)
+  delete env.HEAD_ONLY
+  assert.deepEqual((await (await worker.fetch(new Request(bag), env)).text()).trim().split('\n'), ['00000000', '00000001'])
 })
 
 // jwize, 2026-10-22: "they should be able to send their visuals to the tile

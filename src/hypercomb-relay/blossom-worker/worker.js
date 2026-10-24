@@ -44,7 +44,7 @@
 import { schnorr } from '@noble/curves/secp256k1'
 import { HOST_LISTING_FLOOR, listedMeanings } from '../host-listing.js'
 import { nostrJson } from '../nip05-names.js'
-import { encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.ts'
+import { decodeTransferPack, encodeTransferPack, gunzipBytes, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.ts'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 // A hostname LABEL, per DNS. A lineage is only a name the wildcard can bring to
@@ -1181,7 +1181,7 @@ async function declaredListing(env, read) {
 /** The host's own private ledgers. Each member names a key or a domain and
  *  holds what only its own endpoint may hand out, so no declaration lists
  *  them — not even an operator's signed `listed`. */
-const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters', 'host:tenants', 'host:whole-packages', 'host:forgotten']
+const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters', 'host:tenants', 'host:whole-packages', 'host:forgotten', 'history:public']
 
 /** Is this pool listed here? The floor answers without an index read — the
  *  addresses every follower asks stay on the hot path; anything else is
@@ -1436,7 +1436,9 @@ async function serveRouteLocation(request, env, site, member) {
   if (!approved || !await publishedRoot(env, approved, site.lineage, read, host)) {
     return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store', ...CORS } })
   }
-  const names = await routeMarkers(env, host)
+  // Head only: the bag lists and serves its newest marker — every marker
+  // only where this branch keeps its history public.
+  const names = await servedMarkers(env, await routeMarkers(env, host), approved.pubkey, site.lineage)
   if (!names?.length) return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store', ...CORS } })
   if (member) {
     if (!names.includes(member)) return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store', ...CORS } })
@@ -1485,6 +1487,8 @@ async function serveCreationLocation(request, env, host, location, member) {
   const headers = { 'Cache-Control': 'no-store', ...CORS }
   const current = await activeCreation(env, host, location, read)
   if (!current) return new Response(null, { status: 404, headers })
+  // Head only: the creation's newest marker alone.
+  current.markers = await servedMarkers(env, current.markers)
   if (member) {
     if (!current.markers.includes(member)) return new Response(null, { status: 404, headers })
     const object = await env.CONTENT.get(`${current.bag}/${member}`)
@@ -2932,7 +2936,8 @@ async function serveSandboxPools(request, env, site, pool, member) {
   if (pool === await poolAddress(host)) {
     if (member && !ROUTE_MARKER_RE.test(member)) return none()
     await advanceLocation(env, pool, sandboxMeta(site, found))
-    const names = await locationMarkers(env, pool)
+    // Head only: the door's newest marker alone.
+    const names = await servedMarkers(env, await locationMarkers(env, pool))
     if (!names?.length) return none()
     if (!member) return listing(names)
     const held = names.includes(member) ? await locationRecord(env, pool, member) : null
@@ -3029,21 +3034,6 @@ const PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=(), payment=()
 // import each other relative to their own URL. Sites pay nothing for this.
 const SHELL_PREFIX = '/shell/'
 const SHELL_BUNDLE_RE = /\b(src|href)="\/?((?:main|chunk|polyfills|styles|worker)-[A-Za-z0-9]+\.(?:js|css))"/g
-// …AND THE CORE THAT SHELL RUNS. `/hypercomb-core.runtime.js` and `/core/*`
-// are asset paths too — the visitor build's copy, as old as this worker's last
-// deploy — while the bundles above come from the shell origin. A shell that
-// had moved on to a newer core loaded it against the older one and the door
-// died ("does not provide an export named 'addressSegment'", 2026-10-24). So
-// the page's import-map entry and its core preloads go under /shell/ as well;
-// the runtime imports `./core/dist/index.js`, which then follows by itself,
-// and the shell asks its import map which core to inspect (core-surface.ts).
-const SHELL_CORE_RE = /(["'])\/(hypercomb-core\.runtime\.js|core\/dist\/[\w./-]+\.js)\1/g
-// A hashed bundle never changes under its name; the core files do. Left to the
-// cache rules every /shell/ file came back fresh for four hours, so a visitor
-// returning after a core-changing deploy paired the new shell with yesterday's
-// core all the same. Anything under /shell/ that is not a hashed bundle is
-// revalidated on every load (its ETag keeps that a 304).
-const SHELL_HASHED_RE = /^\/(?:main|chunk|polyfills|styles|worker)-[A-Za-z0-9]+\.(?:js|css)$/
 
 async function serveSandboxShell(request, env, zone) {
   const origin = String(env.SANDBOX_SHELL_ORIGIN || '').replace(/\/+$/, '')
@@ -3069,11 +3059,8 @@ async function serveSandboxShell(request, env, zone) {
   headers.set('Cross-Origin-Opener-Policy', 'same-origin')
   headers.set('X-Content-Type-Options', 'nosniff')
   headers.delete('set-cookie')
-  if (url.pathname.startsWith(SHELL_PREFIX) && !SHELL_HASHED_RE.test(upstreamPath)) headers.set('Cache-Control', 'no-cache')
   if (request.method !== 'HEAD' && /text\/html/i.test(headers.get('content-type') || '')) {
-    const page = (await upstream.text())
-      .replace(SHELL_BUNDLE_RE, (_, attr, file) => `${attr}="${SHELL_PREFIX}${file}"`)
-      .replace(SHELL_CORE_RE, (_, quote, path) => `${quote}${SHELL_PREFIX}${path}${quote}`)
+    const page = (await upstream.text()).replace(SHELL_BUNDLE_RE, (_, attr, file) => `${attr}="${SHELL_PREFIX}${file}"`)
     return new Response(page, { status: upstream.status, headers })
   }
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
@@ -4324,15 +4311,18 @@ async function serveBlob(request, env, sig, typeOverride) {
     return new Response(null, { status: 304, headers: { 'ETag': unmodified === sig ? `"${sig}"` : unmodified, 'Cache-Control': IMMUTABLE, ...CORS } })
   }
 
+  // HEAD ONLY: a withdrawn object answers as a miss, so nothing tells it
+  // apart from bytes never held — unless it is kept (readStanding: its grace
+  // window, its branch's public history, its owner's signed read), and a kept
+  // read is never cached as immutable: it may stop being served.
+  let standing = 'open'
+  const hidden = async (object) => (standing = await readStanding(request, env, object.customMetadata)) === 'hidden'
   const headersFor = (obj, len) => {
     const h = blobHeaders(sig, obj, len)
     if (typeOverride) h['Content-Type'] = typeOverride
+    if (standing === 'kept') h['Cache-Control'] = KEPT_CACHE
     return h
   }
-
-  // HEAD ONLY: a withdrawn object answers as a miss, so nothing tells it
-  // apart from bytes never held — except to its owner's signed read.
-  const hidden = async (object) => headOnly(env) && withdrawn(object.customMetadata) && !await ownerReads(request, object.customMetadata)
 
   if (request.method === 'HEAD') {
     const head = await env.CONTENT.head(sig)
@@ -4553,17 +4543,24 @@ async function forgetSigs(request, env) {
 
 /** Every head a publisher's index keeps open: each root, each offering's head
  *  and the layer that head names. Nothing these reach is ever forgotten or
- *  withdrawn. */
+ *  withdrawn. sig → the key that opens it: the root's lineage key, or
+ *  `offer:<location>` (MANY_ROOTS when two keys name the same sig) — head
+ *  only attributes what a head move withdraws to the branch that reached it. */
 async function publisherHeads(env, index) {
-  const heads = new Set(Object.values(index?.roots ?? {}).map((s) => String(s).toLowerCase()).filter((s) => SIG_RE.test(s)))
-  for (const offer of Object.values(index?.offerings ?? {})) {
+  const heads = new Map()
+  const name = (sig, key) => heads.set(sig, heads.has(sig) && heads.get(sig) !== key ? MANY_ROOTS : key)
+  for (const [key, raw] of Object.entries(index?.roots ?? {})) {
+    const sig = String(raw).toLowerCase()
+    if (SIG_RE.test(sig)) name(sig, key)
+  }
+  for (const [location, offer] of Object.entries(index?.offerings ?? {})) {
     if (!SIG_RE.test(String(offer?.head || ''))) continue
-    heads.add(offer.head)
+    name(offer.head, `offer:${location}`)
     const metaBytes = await heldCreationBytes(env, offer.head, 65_536)
     if (metaBytes) {
       try {
         const meta = JSON.parse(new TextDecoder().decode(metaBytes))
-        if (SIG_RE.test(String(meta?.layer || ''))) heads.add(meta.layer)
+        if (SIG_RE.test(String(meta?.layer || ''))) name(meta.layer, `offer:${location}`)
       } catch { /* A malformed head cannot name a protected layer. */ }
     }
   }
@@ -4591,34 +4588,95 @@ async function publisherHeads(env, index) {
 // a DENY mark on what a head move left behind, never an allowlist of reached
 // signatures: nothing that was never in a head is touched.
 //
-// A walk that runs out of budget withdraws nothing (complete or absent). Off
-// unless HEAD_ONLY is "1"; before turning it on, the operator walks every held
-// index once (POST /reach) so bytes one key uploaded and another key's pages
-// use are marked shared first.
+// A walk that runs out of budget withdraws nothing (complete or absent), and
+// so does a move whose CURRENT heads are not all held: what they reach cannot
+// be known, so nothing may be called left behind (fail closed). Off unless
+// HEAD_ONLY is "1"; before turning it on, the operator walks every held index
+// once (POST /reach) so bytes one key uploaded and another key's pages use are
+// marked shared first.
+//
+// THE REACH RULE is the Rust host's (hypercomb-client crates/serve genome.rs
+// `harvest`): a JSON member's string values that are a whole signature, in
+// every field but the REFERENT fields — `prev` (a succession's previous stage
+// list), a restore point's `seal`, identities. Those point at the past and are
+// never part of the present, so the current head never keeps an old one served.
+//
+// PUBLIC HISTORY (hosted-tenants.md, "Public history"): a branch whose current
+// head carries a `publish:history` decoration with payload {public: true}
+// keeps its earlier versions served. Each withdrawal names the branch whose old
+// head reached it (`root`) and when (`at`); a move writes the set of this
+// key's branches that are public now (the private `history:public` pool), and
+// a withdrawn object is served while its branch is in that set — unless the
+// host declines (PUBLIC_HISTORY "0"). Bytes two branches reached carry no
+// `root`, and stay withdrawn unless the owner reads them.
+//
+// GRACE: a withdrawn object stays readable for GRACE_MS after `at`, so an
+// install or a visitor mid-walk finishes on the version it started. Those
+// reads — and the public-history ones — carry a short private cache, never
+// the year-long immutable one.
 const REACH_READS_MAX = 2000
 const REACH_MEMBER_MAX = 65_536
 const REACH_BATCH = 48
+const GRACE_MS = 10 * 60_000
+const KEPT_CACHE = 'private, max-age=60'
+/** The REFERENT fields — genome.rs REFERENT_FIELDS, core edge-registry.ts. */
+const REFERENT_FIELDS = new Set(['groupSig', 'targetSig', 'prev', 'pubkey', 'seal'])
+/** A sig two keys of one index name: attributed to no single branch. */
+const MANY_ROOTS = '\u0000many'
+const ROOT_ATTRIBUTION_MAX = 256
+const HISTORY_PUBLIC_MEANING = 'history:public'
+const PUBLISH_HISTORY_KIND = 'publish:history'
+const DECORATIONS_READ_MAX = 64
 const headOnly = (env) => String(env?.HEAD_ONLY || '') === '1'
 const withdrawn = (claim) => claim?.withdrawn === '1'
+/** The host's consent to honour a branch's public-history mark (default yes). */
+const hostKeepsHistory = (env) => String(env?.PUBLIC_HISTORY ?? '').trim() !== '0'
+function inGrace(claim, now = Date.now()) {
+  const at = Number(claim?.at)
+  return Number.isFinite(at) && at > 0 && now - at < GRACE_MS
+}
+/** A root key that names a layer head — a branch. `install:`, `plan:`,
+ *  `binding:`, `pool:`, `stage:`, `follow:`, `event:` and every other
+ *  `word:` key name something else, and never carry the mark. */
+const branchRoot = (key) => !!key && !/^[a-z0-9-]+:/i.test(key)
 
-/** What the heads reach: every 64-hex string in a JSON member is a reference
- *  (the rule every byte walker here uses). A large member is reached, not
- *  read. sig → its claim ({} when it has none). `complete` is false when the
- *  read budget ran out before the walk did. */
+/** The sigs a JSON value reaches: whole-signature strings, referents skipped. */
+function harvestSigs(value, out) {
+  if (typeof value === 'string') {
+    const sig = value.trim().toLowerCase()
+    if (SIG_RE.test(sig)) out.push(sig)
+  } else if (Array.isArray(value)) {
+    for (const item of value) harvestSigs(item, out)
+  } else if (value && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) if (!REFERENT_FIELDS.has(key)) harvestSigs(item, out)
+  }
+  return out
+}
+
+/** What the heads reach. A large member is reached, not read. Returns
+ *  reached (sig → its claim, {} when it has none), origin (sig → the one
+ *  head key that reached it, MANY_ROOTS when several did), missing (how many
+ *  of the heads themselves are not held) and complete (false when the read
+ *  budget ran out before the walk did). `heads` is a Map sig → key or any
+ *  iterable of sigs. */
 async function reachOf(env, heads) {
+  const labelled = heads instanceof Map ? heads : new Map([...heads].map((sig) => [sig, '']))
   const reached = new Map()
-  const seen = new Set(heads)
-  let frontier = [...heads]
+  const edges = new Map()
+  const seen = new Set(labelled.keys())
+  let frontier = [...labelled.keys()]
   let reads = 0
+  let missing = 0
+  let complete = true
   const decoder = new TextDecoder()
   while (frontier.length) {
-    if (reads + frontier.length > REACH_READS_MAX) return { reached, complete: false }
+    if (reads + frontier.length > REACH_READS_MAX) { complete = false; break }
     reads += frontier.length
     const next = []
     for (let at = 0; at < frontier.length; at += REACH_BATCH) {
       const read = await Promise.all(frontier.slice(at, at + REACH_BATCH).map(async (sig) => {
         const object = await env.CONTENT.get(sig)
-        if (!object) return null
+        if (!object) return [sig, null, null]
         const claim = object.customMetadata ?? {}
         if (object.size > REACH_MEMBER_MAX) {
           try { await object.body?.cancel?.() } catch { /* released */ }
@@ -4626,21 +4684,34 @@ async function reachOf(env, heads) {
         }
         return [sig, claim, new Uint8Array(await object.arrayBuffer())]
       }))
-      for (const entry of read) {
-        if (!entry) continue
-        const [sig, claim, bytes] = entry
+      for (const [sig, claim, bytes] of read) {
+        if (!claim) { if (labelled.has(sig)) missing++; continue }
         reached.set(sig, claim)
         if (!bytes) continue
         const text = decoder.decode(bytes)
         if (!/^\s*[[{]/.test(text)) continue
-        for (const match of text.matchAll(/\b[0-9a-f]{64}\b/g)) {
-          if (!seen.has(match[0])) { seen.add(match[0]); next.push(match[0]) }
-        }
+        let value
+        try { value = JSON.parse(text) } catch { continue }
+        const refs = [...new Set(harvestSigs(value, []))]
+        edges.set(sig, refs)
+        for (const ref of refs) if (!seen.has(ref)) { seen.add(ref); next.push(ref) }
       }
     }
     frontier = next
   }
-  return { reached, complete: true }
+  // Which head reached what: each sig's label moves none → one key → many at
+  // most, so the propagation is bounded by twice the edges.
+  const origin = new Map()
+  const work = [...labelled]
+  while (work.length) {
+    const [sig, key] = work.pop()
+    const was = origin.get(sig)
+    if (was === key || was === MANY_ROOTS) continue
+    const now = was === undefined ? key : MANY_ROOTS
+    origin.set(sig, now)
+    for (const ref of edges.get(sig) ?? []) work.push([ref, now])
+  }
+  return { reached, origin, missing, complete }
 }
 
 /** Rewrite an object's claim. R2 keeps metadata only with the bytes, so the
@@ -4667,21 +4738,112 @@ async function keepReached(env, pubkey, reached) {
 }
 
 /** An index moved from `before` to `after`: withdraw what only the old heads
- *  reached and only this key put here. Returns how many were withdrawn, or
- *  null when either walk ran out of budget (nothing is withdrawn then). */
+ *  reached and only this key put here, each named by the branch that reached
+ *  it and stamped with the time. Returns how many were withdrawn, or null when
+ *  a walk ran out of budget or a current head is not held (nothing is
+ *  withdrawn then; what the current heads do reach is still kept). */
 async function withdrawSuperseded(env, pubkey, before, after) {
   const was = await publisherHeads(env, before)
   const now = await publisherHeads(env, after)
   const [old, current] = await Promise.all([reachOf(env, was), reachOf(env, now)])
-  if (!old.complete || !current.complete) return null
   await keepReached(env, pubkey, current.reached)
+  if (!old.complete || !current.complete || current.missing > 0) return null
+  const at = String(Date.now())
   let count = 0
   for (const [sig, claim] of old.reached) {
     if (current.reached.has(sig) || claim.owner !== pubkey || claim.shared === '1' || withdrawn(claim)) continue
-    await reclaim(env, sig, { owner: claim.owner, withdrawn: '1' })
+    const root = old.origin.get(sig)
+    const mark = { owner: claim.owner, withdrawn: '1', at }
+    if (typeof root === 'string' && root !== MANY_ROOTS && branchRoot(root) && root.length <= ROOT_ATTRIBUTION_MAX) mark.root = root
+    await reclaim(env, sig, mark)
     count++
   }
   return count
+}
+
+/** A JSON value held at `sig` that hashes to it, or null. */
+async function heldJson(env, sig, maxBytes) {
+  if (!SIG_RE.test(String(sig || ''))) return null
+  const bytes = await heldCreationBytes(env, sig, maxBytes)
+  if (!bytes) return null
+  try { return JSON.parse(new TextDecoder().decode(bytes)) } catch { return null }
+}
+
+/** Does this branch head say its history is public? The head is the layer
+ *  or an envelope whose payload is the layer ({meta:1, layer}); its
+ *  `decorations` slot names records, and one {kind:'publish:history',
+ *  payload:{public:true}} says yes. Anything absent or unreadable: no. */
+async function headKeepsHistory(env, head) {
+  let layer = await heldJson(env, head, 1_048_576)
+  if (layer && layer.meta === 1 && SIG_RE.test(String(layer.layer || ''))) layer = await heldJson(env, layer.layer, 1_048_576)
+  const decorations = Array.isArray(layer?.decorations) ? layer.decorations : []
+  for (const sig of decorations.slice(0, DECORATIONS_READ_MAX)) {
+    let record = await heldJson(env, String(sig || '').toLowerCase(), 65_536)
+    if (record && record.meta === 1 && SIG_RE.test(String(record.resource || ''))) record = await heldJson(env, record.resource, 65_536)
+    if (record?.kind === PUBLISH_HISTORY_KIND && record?.payload?.public === true) return true
+  }
+  return false
+}
+
+/** The branches of an index whose current head is public, as the record a
+ *  move writes: {roots: {lineageKey: head}, at}. */
+async function publicBranches(env, index) {
+  const roots = {}
+  for (const [key, raw] of Object.entries(index?.roots ?? {})) {
+    const head = String(raw || '').toLowerCase()
+    if (!branchRoot(key) || !SIG_RE.test(head)) continue
+    try { if (await headKeepsHistory(env, head)) roots[key] = head } catch { /* no */ }
+  }
+  return { roots, at: Date.now() }
+}
+
+const publicRootsHeld = new Map()
+const PUBLIC_ROOTS_TTL_MS = 30_000
+/** The lineage keys `pubkey` keeps public, as its last move recorded them. */
+async function publicRoots(env, pubkey) {
+  const held = publicRootsHeld.get(pubkey)
+  if (held && held.content === env.CONTENT && Date.now() - held.at < PUBLIC_ROOTS_TTL_MS) return held.roots
+  let roots = new Set()
+  try {
+    const object = await env.CONTENT.get(`${await poolAddress(HISTORY_PUBLIC_MEANING)}/${pubkey}`)
+    const row = object ? JSON.parse(new TextDecoder().decode(await object.arrayBuffer())) : null
+    roots = new Set(Object.keys(row?.roots ?? {}))
+  } catch { /* unreadable: none public */ }
+  publicRootsHeld.set(pubkey, { roots, at: Date.now(), content: env.CONTENT })
+  return roots
+}
+
+/** A head move: record which branches are public now (before anything is
+ *  withdrawn, so a withdrawal never outruns its branch's mark), then
+ *  withdraw what the move left behind. */
+async function headMoved(env, pubkey, before, after) {
+  let state = { roots: {}, at: Date.now() }
+  try { state = await publicBranches(env, after) } catch { /* fail closed: none public */ }
+  try { await writeLedger(env, HISTORY_PUBLIC_MEANING, pubkey, state) } catch { /* written next move */ }
+  publicRootsHeld.delete(pubkey)
+  return before ? withdrawSuperseded(env, pubkey, before, after) : null
+}
+
+/** HOW THIS REQUEST MAY READ AN OBJECT — the one predicate every read path
+ *  asks: 'open' (not withdrawn, or head only is off), 'kept' (withdrawn but
+ *  served — in its grace window, its branch's history is public here, or its
+ *  owner's signed read), or 'hidden' (answers as a miss). */
+async function readStanding(request, env, claim) {
+  if (!headOnly(env) || !withdrawn(claim)) return 'open'
+  if (inGrace(claim)) return 'kept'
+  if (claim.root && claim.owner && hostKeepsHistory(env) && (await publicRoots(env, claim.owner)).has(claim.root)) return 'kept'
+  if (request && await ownerReads(request, claim)) return 'kept'
+  return 'hidden'
+}
+const hiddenTo = async (request, env, claim) => (await readStanding(request, env, claim)) === 'hidden'
+
+/** Head only keeps a sigbag's history back too: only its newest marker is
+ *  listed or served — all of them where `lineage` (when given) is a branch
+ *  whose history `publisher` keeps public here. */
+async function servedMarkers(env, names, publisher, lineage) {
+  if (!headOnly(env) || !names?.length) return names
+  if (publisher && lineage && hostKeepsHistory(env) && (await publicRoots(env, publisher)).has(lineage)) return names
+  return names.slice(-1)
 }
 
 /** The parsed content of a signed index event, as verifiedIndex reads it. */
@@ -4724,8 +4886,15 @@ async function reachWalk(request, env) {
   const keys = [...held].filter((n) => SIG_RE.test(n)).sort()
   const pubkey = keys.find((key) => key > after) ?? null
   if (!pubkey) return json(200, { walked: null, complete: true, next: null }, { 'Cache-Control': 'no-store' })
-  const { reached, complete } = await reachOf(env, await publisherHeads(env, await verifiedIndex(env, pubkey)))
+  const index = await verifiedIndex(env, pubkey)
+  const { reached, complete } = await reachOf(env, await publisherHeads(env, index))
   await keepReached(env, pubkey, reached)
+  // Which of its branches keep their history public — so turning head only
+  // on never hides a branch that said its history is open.
+  try {
+    await writeLedger(env, HISTORY_PUBLIC_MEANING, pubkey, await publicBranches(env, index))
+    publicRootsHeld.delete(pubkey)
+  } catch { /* written on its next move */ }
   // The cursor is the key just walked; null once none follows it.
   const next = keys.some((key) => key > pubkey) ? pubkey : null
   return json(200, { walked: pubkey, reached: reached.size, complete, next }, { 'Cache-Control': 'no-store' })
@@ -4787,7 +4956,11 @@ async function headUpload(request, env) {
   const auth = await verifyBud02(parseAuthEvent(request), declared)
   if (!auth.ok) return text(401, auth.reason)
 
-  if (await env.CONTENT.head(declared)) return text(200, 'already held — upload will be a no-op')
+  // A withdrawn object is not "already held" to anyone it is hidden from — the
+  // preflight is no oracle for what head only withdrew; the upload proceeds
+  // and lifts the mark (storeBlob).
+  const held = await env.CONTENT.head(declared)
+  if (held && !await hiddenTo(request, env, held.customMetadata)) return text(200, 'already held — upload will be a no-op')
   const adm = await admit(env, auth.pubkey, size)
   if (!adm.ok) return text(adm.kind === 'exhausted' ? 413 : 403, adm.reason)
   return text(200, 'upload will be accepted')
@@ -4937,7 +5110,7 @@ const contentPackHeaders = (length) => ({
 })
 
 /** The head's landing members, sig → bytes, walked out of the heap. */
-async function walkLandingMembers(env, head) {
+async function walkLandingMembers(env, head, request = null) {
   const members = new Map()
   const seen = new Set([head])
   let frontier = [head]
@@ -4953,7 +5126,8 @@ async function walkLandingMembers(env, head) {
         try {
           const object = await env.CONTENT.get(sig)
           if (!object) return null
-          if (object.size > CONTENT_PACK_MEMBER_MAX) { try { await object.body?.cancel?.() } catch { /* released */ } return null }
+          // Head only: a member hidden from this request is neither packed nor followed.
+          if (object.size > CONTENT_PACK_MEMBER_MAX || await hiddenTo(request, env, object.customMetadata)) { try { await object.body?.cancel?.() } catch { /* released */ } return null }
           return [sig, new Uint8Array(await object.arrayBuffer())]
         } catch { return null }
       }))
@@ -4979,19 +5153,22 @@ async function walkLandingMembers(env, head) {
 async function serveContentPack(request, env, host, head) {
   const key = `${await poolAddress(CONTENT_PACKS_MEANING)}/${head}`
   // A pack is its head's closure: once that head is withdrawn, so is the pack.
-  if (headOnly(env) && withdrawn((await env.CONTENT?.head?.(head))?.customMetadata)) {
-    return new Response(null, { status: 404, headers: CORS })
-  }
+  const standing = await readStanding(request, env, (await env.CONTENT?.head?.(head))?.customMetadata)
+  if (standing === 'hidden') return new Response(null, { status: 404, headers: CORS })
   const held = await env.CONTENT?.get?.(key)
   if (held) {
-    const bytes = new Uint8Array(await held.arrayBuffer())
-    return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers: contentPackHeaders(bytes.byteLength) })
+    const pack = await packWithoutHidden(request, env, new Uint8Array(await held.arrayBuffer()))
+    const headers = contentPackHeaders(pack.bytes.byteLength)
+    // A pack served only while its head or a member is kept may stop being served.
+    if (standing === 'kept' || pack.kept) headers['Cache-Control'] = KEPT_CACHE
+    return new Response(request.method === 'HEAD' ? null : pack.bytes, { status: 200, headers })
   }
   // Built only for the head this door names.
   const door = (await newestLocation(env, await poolAddress(host)))?.record
   if (!door || String(door.layer || '').toLowerCase() !== head || !env.CONTENT?.get) {
     return new Response(null, { status: 404, headers: CORS })
   }
+  // Walked as a stranger reads: the pack is kept for every reader.
   const members = await walkLandingMembers(env, head)
   if (!members.has(head)) return new Response(null, { status: 404, headers: CORS })
   const bytes = await gzipBytes(encodeTransferPack([...members]))
@@ -4999,6 +5176,29 @@ async function serveContentPack(request, env, host, head) {
     await env.CONTENT.put(key, bytes, { httpMetadata: { contentType: 'application/octet-stream' } })
   } catch { /* built again next time */ }
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers: contentPackHeaders(bytes.byteLength) })
+}
+
+/** A pack kept from before a head move may hold members the move withdrew:
+ *  under head only, those are left out of the answer (the kept record stays
+ *  as it was — the visitor fetches loose whatever a pack lacks). Bytes that do
+ *  not decode as a pack name no member, and go out as they are. */
+async function packWithoutHidden(request, env, bytes) {
+  if (!headOnly(env)) return { bytes, kept: false }
+  let members = null
+  try { members = decodeTransferPack(await gunzipBytes(bytes, CONTENT_PACK_MAX * 4)) } catch { members = null }
+  if (!members) return { bytes, kept: false }
+  const served = []
+  let kept = false
+  for (let at = 0; at < members.length; at += CONTENT_PACK_BATCH) {
+    const batch = members.slice(at, at + CONTENT_PACK_BATCH)
+    const standings = await Promise.all(batch.map(async ([sig]) => SIG_RE.test(sig)
+      ? readStanding(request, env, (await env.CONTENT.head(sig))?.customMetadata) : 'open'))
+    batch.forEach((member, i) => {
+      if (standings[i] === 'kept') kept = true
+      if (standings[i] !== 'hidden') served.push(member)
+    })
+  }
+  return { bytes: served.length === members.length ? bytes : await gzipBytes(encodeTransferPack(served)), kept }
 }
 
 /** The members of a pool of meaning: the R2 objects under sign(meaning)/, by
@@ -5106,9 +5306,10 @@ async function putHive(request, env, pubkey, ctx) {
   if (!await advancePublishedLocations(env, pubkey, evt)) {
     return text(503, 'signed index is held but a route location is not current; retry this index')
   }
-  if (stored && headOnly(env)) {
-    // After the answer: the publish is done; the walk only tidies what it left.
-    const tidy = withdrawSuperseded(env, pubkey, indexContent(stored), indexContent(evt)).catch(() => null)
+  if (headOnly(env)) {
+    // After the answer: the publish is done; the walk only tidies what it left
+    // (and records which branches keep their history public now).
+    const tidy = headMoved(env, pubkey, stored ? indexContent(stored) : null, indexContent(evt)).catch(() => null)
     if (ctx?.waitUntil) ctx.waitUntil(tidy)
     else await tidy
   }
@@ -5814,7 +6015,7 @@ async function aiConsume(env, meter) {
 // Resolve context sigs from the R2 heap into capped text blocks. Non-text or
 // missing sigs are skipped silently — context is best-effort, the question
 // always goes through.
-async function aiContext(env, sigs) {
+async function aiContext(request, env, sigs) {
   const parts = []
   let total = 0
   for (const sig of sigs.slice(0, AI_CTX_SIGS_MAX)) {
@@ -5822,6 +6023,8 @@ async function aiContext(env, sigs) {
     let obj = null
     try { obj = await env.CONTENT.get(sig, { range: { offset: 0, length: AI_CTX_EACH_MAX } }) } catch { obj = null }
     if (!obj) continue
+    // Head only: what this request may not read is never fed to the model.
+    if (await hiddenTo(request, env, obj.customMetadata)) { try { await obj.body?.cancel?.() } catch { /* released */ } continue }
     let text = ''
     try { text = new TextDecoder('utf-8', { fatal: true }).decode(await obj.arrayBuffer()) } catch { continue }
     if (!text.trim()) continue
@@ -5849,7 +6052,7 @@ async function aiAsk(request, env) {
   const wantStream = body?.stream !== false
 
   const p = aiPolicy(env)
-  const context = await aiContext(env, sigs)
+  const context = await aiContext(request, env, sigs)
   const estimate = Math.ceil((question.length + context.length) / 4) + p.maxTokens
   const adm = await aiAdmit(env, auth.pubkey, estimate)
   if (!adm.ok) return text(429, adm.reason)

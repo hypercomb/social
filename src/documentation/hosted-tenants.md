@@ -131,7 +131,8 @@ attacker who walks old layers can harvest them systematically. Rung 2 must
 close this before it takes money, because a paying tenant's edited-out
 content is the thing they are paying to keep private.
 
-**BUILT 2026-10-22, off until `HEAD_ONLY = "1"`** (`worker.js`, "head only").
+**BUILT 2026-10-22, sharpened 2026-10-24, off until `HEAD_ONLY = "1"`**
+(`worker.js`, "head only").
 
 The heap is shared by everything — packages, pools, room members, swarm
 tiles — so the gate is not an allowlist of reached signatures (that would
@@ -139,29 +140,53 @@ refuse every byte that was never in a published head). It is a **withdrawn
 mark on what a head move left behind**:
 
 - When a publisher's signed index moves, the worker walks what the old heads
-  reached and what the new heads reach (every 64-hex in a JSON member is a
-  reference; large members are reached, not read). What only the old heads
-  reached, and only this publisher put here, is marked `withdrawn` on the
-  object. Its bytes stay — the publisher's history and the way out need them.
+  reached and what the new heads reach. What only the old heads reached, and
+  only this publisher put here, is marked `withdrawn` on the object, with
+  `at` (when) and `root` (the branch whose old head reached it; none when two
+  branches did). Its bytes stay — the publisher's history and the way out
+  need them.
+- **The reach rule is the desktop host's** (`genome.rs` `harvest`): a JSON
+  member's string values that are a whole signature, in every field except
+  the referent fields `prev`, `seal`, `groupSig`, `targetSig` and `pubkey`.
+  Those point at the past. So a stage list's `prev` never keeps the old stage
+  list served: it is withdrawn like any old head. Large members are reached,
+  not read.
 - A withdrawn object answers exactly as a miss (`404 sig not held`), so
-  nothing tells it apart from bytes never held. A landing pack built for a
-  withdrawn head goes with it.
+  nothing tells it apart from bytes never held. Every door asks the same one
+  question (`readStanding`): the flat read and module read, the upload
+  preflight (`HEAD /upload` no longer says "already held" for it, so a real
+  upload goes ahead and lifts the mark), the landing pack (a withdrawn head's
+  pack is a miss; a kept pack is answered without the members a move
+  withdrew), and the AI context (a hidden signature is never fed to the
+  model).
+- **Sigbags keep their history back too.** A route bag, a creation bag and a
+  sandbox door's bag list and serve only their newest marker — every marker
+  only for a route whose branch has public history (4b).
+- **Grace:** a withdrawn object stays readable for ten minutes after `at`, so
+  an install or a visitor mid-walk finishes on the version it started. Bytes
+  withdrawn before 2026-10-24 carry no `at`, so they get no grace.
 - **Never withdrawn:** bytes another key also uploaded (`shared`), bytes
   stored before claims existed, anything a current head still reaches.
 - **Served again** when reached again (a revert), or uploaded again by anyone.
 - **The owner's signed read** (NIP-98 GET) still gets it, so undo and time
   travel keep working for them.
-- **Complete or absent:** a walk that runs out of its read budget (2000
-  members) withdraws nothing.
+- **Fail closed:** a walk that runs out of its read budget (2000 members, 64
+  KB a member) withdraws nothing, and so does a move to a head this host does
+  not hold — what that head reaches cannot be known. What the current heads
+  do reach is still marked servable again.
 - **Bytes one key uploaded and another key's page uses:** each walk marks
   what the publisher's heads reach as shared when another key put it here.
   Before turning the flag on, the operator walks every held index once —
   `POST /reach` (operator NIP-98, one index per call, `{after}` cursor) — so
-  no page loses bytes it borrowed.
-- **Edge cache:** the worker never puts content into the edge cache (only the
-  hive index, for seconds), and Cloudflare does not cache a Worker's own
-  answers, so a withdrawn signature stops answering at once. A browser that
-  already fetched it keeps its own copy — it already had the bytes.
+  no page loses bytes it borrowed. The same walk records which of that key's
+  branches have public history (4b).
+- **Caching:** content served only because of grace, public history or the
+  owner's read goes out `private, max-age=60`, never the year-long immutable
+  header, because it may stop being served. Current content is unchanged. The
+  worker never puts content into the edge cache (only the hive index, for
+  seconds), and Cloudflare does not cache a Worker's own answers, so a
+  withdrawn signature stops answering at once. A browser that already fetched
+  it keeps its own copy — it already had the bytes.
 
 **To turn it on:** deploy, run `POST /reach` until `next` is null, then set
 `HEAD_ONLY = "1"` and deploy again. Withdrawal starts with the next head
@@ -173,31 +198,45 @@ jwize 2026-10-22: both should be available — head only, or the hive's history
 open like a public repository — and **the hive says which with a flag on its
 latest head**.
 
-- **Head only is the default.** A head without the flag withdraws what its
-  move left behind, exactly as above.
-- **The latest head is the only authority.** The worker already reads the new
-  head when the index moves (the reach walk), so it reads the flag there. No
-  separate mark, no host setting for the author's half: the flag travels with
-  the content, and changing it is just another head.
-- **Flag on:** that head move withdraws nothing, and lifts the `withdrawn`
-  mark from what this publisher alone put here — the bytes never left, so the
-  whole history answers again.
-- **Flag off again:** that head move withdraws what it no longer reaches, as
-  any head move does. What was served while the history was public may
-  already be copied or cached elsewhere; turning it off cannot take that back,
-  and the app says so when someone turns it on.
-- **The host consents too.** Old versions cost storage, so a host (or a plan)
-  may decline to keep public history; such a host serves head only whatever
-  the flag says. The owner's signed read is unchanged either way.
+**BUILT 2026-10-24** (`worker.js`, "head only"; the client's writer is
+essentials `publish-history.ts`).
+
+- **Head only is the default.** A branch without the flag is head only,
+  exactly as above.
+- **The flag:** the branch's head layer (or an envelope `{meta:1, layer}`
+  whose payload is the layer) has a `decorations` slot of record signatures;
+  one record `{kind: 'publish:history', payload: {public: true}}` means the
+  branch's history is public. Absent, unreadable or not held: head only.
+- **Per branch.** Only roots that name a branch are read — keys with a
+  `word:` prefix (`install:`, `plan:`, `binding:`, `pool:`, `stage:`,
+  `follow:`, `event:` and the rest) never carry the flag. The flag on one
+  branch never opens another branch's history.
+- **The latest head is the only authority.** When the index moves, the worker
+  reads the flag off each branch's current head and writes the set of public
+  branches to its private `history:public` pool (one member per publisher
+  key). A withdrawn object whose `root` is in that set is served; changing
+  the flag is just another head. Nothing is rewritten on the objects
+  themselves, so turning the flag on brings the history back at once.
+- **Flag off again:** the next move writes the set without that branch, and
+  its history hides again (after the grace window for what that move itself
+  withdrew). What was served while the history was public may already be
+  copied or cached elsewhere; turning it off cannot take that back, and the
+  app says so when someone turns it on.
+- **Bytes two branches reached** carry no `root`, so public history on one of
+  them does not serve them; only the owner's read does.
+- **The host consents too.** Old versions cost storage, so a host may decline
+  to keep public history: `PUBLIC_HISTORY = "0"` serves head only whatever
+  the flag says. Unset, the flag is honoured. The owner's signed read is
+  unchanged either way.
 - **The update suggestion is the client's, not the host's.** A withdrawn
   signature answers as a plain miss so nobody can probe which old signatures
   were real. A client that misses while resolving something it holds already
   knows its address: it reads the current head and shows the update notice
   (`using-a-creation.md`, "Holding a published item").
-- **Two traps to close with it:** a client mid-walk when the head moves gets
-  misses — keep the previous head readable briefly; and a miss is laid as a
-  dormant egg (`eggs.ts`) that never re-asks that host, so a revert onto
-  withdrawn bytes must hatch the eggs for what the newly taken head reaches.
+- **One trap still open:** a miss is laid as a dormant egg (`eggs.ts`) that
+  never re-asks that host, so a revert onto withdrawn bytes must hatch the
+  eggs for what the newly taken head reaches. (The other trap, a client
+  mid-walk when the head moves, is closed by the grace window.)
 - **The desktop host (Rust `HiveSource`)** gets the same rule: serve what the
   current head reaches, list nothing, honour the flag. It must ship before
   anyone tunnels a desktop host — its `public, max-age=31536000, immutable` answers
