@@ -3029,6 +3029,21 @@ const PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=(), payment=()
 // import each other relative to their own URL. Sites pay nothing for this.
 const SHELL_PREFIX = '/shell/'
 const SHELL_BUNDLE_RE = /\b(src|href)="\/?((?:main|chunk|polyfills|styles|worker)-[A-Za-z0-9]+\.(?:js|css))"/g
+// …AND THE CORE THAT SHELL RUNS. `/hypercomb-core.runtime.js` and `/core/*`
+// are asset paths too — the visitor build's copy, as old as this worker's last
+// deploy — while the bundles above come from the shell origin. A shell that
+// had moved on to a newer core loaded it against the older one and the door
+// died ("does not provide an export named 'addressSegment'", 2026-10-24). So
+// the page's import-map entry and its core preloads go under /shell/ as well;
+// the runtime imports `./core/dist/index.js`, which then follows by itself,
+// and the shell asks its import map which core to inspect (core-surface.ts).
+const SHELL_CORE_RE = /(["'])\/(hypercomb-core\.runtime\.js|core\/dist\/[\w./-]+\.js)\1/g
+// A hashed bundle never changes under its name; the core files do. Left to the
+// cache rules every /shell/ file came back fresh for four hours, so a visitor
+// returning after a core-changing deploy paired the new shell with yesterday's
+// core all the same. Anything under /shell/ that is not a hashed bundle is
+// revalidated on every load (its ETag keeps that a 304).
+const SHELL_HASHED_RE = /^\/(?:main|chunk|polyfills|styles|worker)-[A-Za-z0-9]+\.(?:js|css)$/
 
 async function serveSandboxShell(request, env, zone) {
   const origin = String(env.SANDBOX_SHELL_ORIGIN || '').replace(/\/+$/, '')
@@ -3054,8 +3069,11 @@ async function serveSandboxShell(request, env, zone) {
   headers.set('Cross-Origin-Opener-Policy', 'same-origin')
   headers.set('X-Content-Type-Options', 'nosniff')
   headers.delete('set-cookie')
+  if (url.pathname.startsWith(SHELL_PREFIX) && !SHELL_HASHED_RE.test(upstreamPath)) headers.set('Cache-Control', 'no-cache')
   if (request.method !== 'HEAD' && /text\/html/i.test(headers.get('content-type') || '')) {
-    const page = (await upstream.text()).replace(SHELL_BUNDLE_RE, (_, attr, file) => `${attr}="${SHELL_PREFIX}${file}"`)
+    const page = (await upstream.text())
+      .replace(SHELL_BUNDLE_RE, (_, attr, file) => `${attr}="${SHELL_PREFIX}${file}"`)
+      .replace(SHELL_CORE_RE, (_, quote, path) => `${quote}${SHELL_PREFIX}${path}${quote}`)
     return new Response(page, { status: upstream.status, headers })
   }
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })

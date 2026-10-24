@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { coreCompatibility, coreImportsOf, describeCoreMismatch, requiredCoreExports } from './core-surface'
+import { CORE_RUNTIME_URL, coreCompatibility, coreImportsOf, coreRuntimeUrl, describeCoreMismatch, requiredCoreExports } from './core-surface'
 
 const bytes = (s: string): Uint8Array => new TextEncoder().encode(s)
 
@@ -58,5 +58,20 @@ describe('coreCompatibility — directional: a richer shell passes, a short one 
   it('describes a mismatch briefly, capping the list', () => {
     expect(describeCoreMismatch(['a', 'b'])).toBe('needs a newer shell — its core does not export a, b')
     expect(describeCoreMismatch(['a', 'b', 'c', 'd', 'e', 'f'])).toBe('needs a newer shell — its core does not export a, b, c, d and 2 more')
+  })
+})
+
+describe('coreRuntimeUrl — the core the page runs, as its import map says', () => {
+  const fixed = new URL(CORE_RUNTIME_URL, location.origin).href
+
+  it("takes the import map's answer — a door maps core under /shell/", () => {
+    expect(coreRuntimeUrl(() => 'https://swarm.hypercomb.com/shell/hypercomb-core.runtime.js'))
+      .toBe('https://swarm.hypercomb.com/shell/hypercomb-core.runtime.js')
+  })
+
+  it('falls back to the fixed URL without import.meta.resolve, on a throw, or off the web', () => {
+    expect(coreRuntimeUrl(null)).toBe(fixed)
+    expect(coreRuntimeUrl(() => { throw new Error('no map') })).toBe(fixed)
+    expect(coreRuntimeUrl(() => 'file:///C:/src/hypercomb-core/dist/index.js')).toBe(fixed)
   })
 })

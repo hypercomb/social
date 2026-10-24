@@ -37,11 +37,29 @@
 
 import { SignatureService } from '@hypercomb/core'
 
-/** Where every shell's import map points `@hypercomb/core`. The same URL is
- *  imported here, so the module inspected IS the one the bees will get. */
+/** Where every shell's page maps `@hypercomb/core`. */
 export const CORE_RUNTIME_URL = '/hypercomb-core.runtime.js'
 
 const CORE_SPECIFIER = '@hypercomb/core'
+
+/** THE CORE THIS PAGE RUNS — the import map's own answer for
+ *  `@hypercomb/core`, so the module inspected IS the one the bees get. A door
+ *  (swarm.<host>, try-<x>.<host>) maps it under /shell/, to its shell's own
+ *  core; asking the fixed URL there loaded the door's older copy as a SECOND
+ *  core and judged the package against it (2026-10-24). Without
+ *  import.meta.resolve (an old browser) it is the fixed URL, as before. */
+type MetaResolve = (specifier: string) => string
+const meta = import.meta as { resolve?: MetaResolve }
+/** import.meta.resolve, called on import.meta — or null where there is none. */
+const metaResolve: MetaResolve | null = typeof meta.resolve === 'function' ? (specifier) => meta.resolve!(specifier) : null
+
+export const coreRuntimeUrl = (resolve: MetaResolve | null = metaResolve): string => {
+  try {
+    const mapped = resolve?.(CORE_SPECIFIER)
+    if (mapped && /^https?:/.test(mapped)) return mapped
+  } catch { /* no map answer — the fixed URL */ }
+  return new URL(CORE_RUNTIME_URL, location.origin).href
+}
 
 /** `import { a, b as c } from "@hypercomb/core"` and the `export { … } from`
  *  form. Captures the brace body; the specifier may use either quote. */
@@ -107,7 +125,7 @@ export const exportSurfaceSignature = async (names: readonly string[]): Promise<
  */
 export const liveCoreExports = async (): Promise<Set<string> | null> => {
   try {
-    const url = new URL(CORE_RUNTIME_URL, location.origin).href
+    const url = coreRuntimeUrl()
     const mod = await import(/* @vite-ignore */ url) as Record<string, unknown>
     return new Set(Object.keys(mod))
   } catch {
