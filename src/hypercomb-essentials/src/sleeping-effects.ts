@@ -30,7 +30,6 @@ export const sleepers: readonly Sleeper[] = [
   { command: "history", description: "Toggle the history panel", load: () => import('./commands/history.queen') },
   { command: "hive", description: "Give a lineage path or signature a named handle that other slash commands autocomplete against.", load: () => import('./commands/hive.queen') },
   { command: "interest", description: "Say which pheromones you watch for or never want, and see what\\", load: () => import('./commands/interest.queen') },
-  { command: "into", description: "Move the selected tiles inside another tile — they leave this page", load: () => import('./commands/into.queen') },
   { command: "lanes", description: "Toggle three centered lanes for this viewport", load: () => import('./commands/lanes.queen') },
   { command: "requires", description: "Manage the pheromones a reference demands of what it shows", load: () => import('./commands/requires.queen') },
   { command: "restore", description: "Go back to a named snapshot — its tiles and behaviours become the live hive again", load: () => import('./commands/restore.queen') },

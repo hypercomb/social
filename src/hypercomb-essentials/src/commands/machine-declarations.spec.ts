@@ -40,6 +40,7 @@ await import('../assistant/module.queen.js')
 await import('../clipboard/clipboard.queen.js')
 await import('./create.queen.js')
 await import('./go.queen.js')
+await import('./into.queen.js')
 await import('../sharing/raise.queen.js')
 await import('../sharing/recommend.queen.js')
 await import('../sharing/hold.queen.js')
@@ -152,6 +153,11 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
                                            // can wave it off for themselves, only its author removes it
   collect: ['additive', 'network'],        // takes the room's ideas onto the participant's own tile
                                            // (same signature, shared never copied); removes nothing
+  // Judged on arrival (2026-10-24, organize without guidance — a model made the
+  // group tiles and could not put anything in them).
+  into: ['editing', 'hive'],               // the named tiles move inside a tile anywhere; the
+                                           // destination gains them before this page loses them,
+                                           // so nothing is deleted; a withheld tile stays put
 }
 
 describe('every machine declaration, as audited', () => {
@@ -208,6 +214,30 @@ describe('what the corrections refuse', () => {
     expect(refuse('@tracker.example')).toBe("/profile shows the participant's own host; a machine does not name another")
     expect(refuse('name jwize')).toBe("/profile name publishes under the participant's key; only the participant says it")
     expect(refuse('about I make hives')).toContain('only the participant says it')
+  })
+
+  it('/into names its tiles, and never moves a withheld one or into one', () => {
+    const refuse = declared.get('into')!.refuse!
+    expect(refuse('archive')).toContain('a machine cannot see what is picked')
+    expect(refuse('= drafts')).toBe('/into needs a destination before the =')
+    expect(refuse('archive =')).toBe('/into needs at least one tile name after the =')
+    expect(refuse('archive = [drafts, a/b]')).toBe('/into moves tiles of this page; name them, not a route')
+    expect(refuse('archive = [drafts, notes]')).toBeUndefined()
+    // /susan is withheld (core ai-withheld.store.ts): it may not leave, and nothing goes in.
+    // A store, as the real one is: `covers` reads its own private document, so
+    // a door that lifts the method off the store throws (found live, 2026-10-24).
+    class Withheld { readonly #routes = ['susan']; covers(segments: readonly string[]): boolean { return this.#routes.includes(segments[0]?.toLowerCase() ?? '') } }
+    ioc.register('@hypercomb.social/AiWithheld', new Withheld())
+    ioc.register('@hypercomb.social/Lineage', { explorerSegments: () => [] })
+    expect(refuse('people = [Susan, notes]')).toBe('/into: "Susan" is withheld from outside models and stays where it is; move the others without it')
+    expect(refuse('susan = notes')).toBe('/into: /susan is withheld from outside models; put the tiles somewhere else')
+    expect(refuse('/susan/family = notes')).toContain('is withheld from outside models')
+    expect(refuse('people = [notes, drafts]')).toBeUndefined()
+    // Standing in /people, a child that merely shares the name is not withheld.
+    ioc.register('@hypercomb.social/Lineage', { explorerSegments: () => ['people'] })
+    expect(refuse('archive = susan')).toBeUndefined()
+    ioc.register('@hypercomb.social/AiWithheld', undefined)
+    ioc.register('@hypercomb.social/Lineage', undefined)
   })
 
   it('/copy is refused over a tile the participant cut and has not placed', () => {
