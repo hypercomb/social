@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Meetup · Sat Oct 24</title>
+<meta name="description" content="The agenda for the Hypercomb meetup on Saturday, October 24, 2026 — 9:15 to 11:00 at Yaletown Galleria, 1080 Mainland St, Vancouver.">
+<style>
+  /* One dated agenda. Same look as the meetups page, but self-contained:
+     system fonts, inline styles, no requests, no script. Scoped under .mp so
+     a hive mounting the page inline never touches its shell. */
+  :root,.mp{
+    --mp-outer:#eae7e7;--mp-bg:#f3f2f2;--mp-surface:#eae9e9;--mp-text:#201e1d;
+    --mp-accent:#ec3013;--mp-strong:#ae1800;--mp-muted:#605d5d;--mp-soft:#444141;
+    --mp-divider:rgba(32,30,29,.4);--mp-hover:rgba(32,30,29,.05);
+    --mp-font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mp-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){
+    :root,.mp{
+      --mp-outer:#121110;--mp-bg:#1b1a19;--mp-surface:#2c2a29;--mp-text:#f1efee;
+      --mp-accent:#ff5a3d;--mp-strong:#ff8a72;--mp-muted:#a8a4a3;--mp-soft:#cfcbca;
+      --mp-divider:rgba(241,239,238,.28);--mp-hover:rgba(241,239,238,.06)}}
+  body:has(> .mp){margin:0;background:var(--mp-outer)}
+  .mp{display:block;min-height:100vh;min-height:100dvh;background:var(--mp-outer);color:var(--mp-text);
+    font:400 16px/1.55 var(--mp-font);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;text-size-adjust:100%;text-wrap:pretty}
+  .mp *,.mp *::before,.mp *::after{box-sizing:border-box;margin:0;padding:0}
+  .mp a{color:var(--mp-accent);text-underline-offset:3px}
+  .mp :focus-visible{outline:2px solid var(--mp-accent);outline-offset:2px}
+  .mp ::selection{background:rgba(236,48,19,.3)}
+
+  .mp .app{max-width:760px;min-height:100vh;min-height:100dvh;margin:0 auto;background:var(--mp-bg)}
+  @media (min-width:762px){.mp .app{border-left:1px solid var(--mp-divider);border-right:1px solid var(--mp-divider)}}
+  .mp header.top{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
+    background:var(--mp-bg);border-bottom:2px solid var(--mp-divider)}
+  .mp .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
+  .mp .brand em{font-style:normal;color:var(--mp-accent)}
+  .mp .panel{display:block;padding:20px max(16px,env(safe-area-inset-right)) 20px max(16px,env(safe-area-inset-left));border-top:2px solid var(--mp-divider)}
+  .mp .panel.lead{border-top:0}
+
+  .mp h1{font-size:clamp(28px,7.5vw,40px);line-height:1.05;letter-spacing:-.02em;font-weight:800;margin-top:4px}
+  .mp h1 .nw{white-space:nowrap}
+  .mp h2{font-size:20px;line-height:1.15;font-weight:800}
+  .mp .kicker{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-strong);font-weight:600}
+  .mp .mini{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-muted)}
+  .mp .sub{font-size:14px;color:var(--mp-soft);margin-top:8px}
+  .mp code{font:600 .86em/1.4 var(--mp-mono);background:var(--mp-surface);color:var(--mp-text);padding:1px 5px;
+    overflow-wrap:anywhere;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+
+  /* when and where */
+  .mp .facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border-top:2px solid var(--mp-divider);margin-top:16px}
+  .mp .facts > div{padding:8px 12px 8px 0}
+  .mp .facts > div + div{padding:8px 0 8px 12px;border-left:1px solid var(--mp-divider)}
+  .mp .big{font-weight:800;font-size:19px;line-height:1.15;margin-top:2px}
+  .mp .facts .sub{margin-top:2px;font-size:13px}
+  .mp .bring{border-top:1px solid var(--mp-divider);padding-top:12px;font-size:15px;color:var(--mp-soft)}
+  .mp .bring b{color:var(--mp-text);font-weight:800}
+
+  /* the run of show: time · block · minutes, a one-line note under each */
+  .mp .show{list-style:none;border-top:2px solid var(--mp-divider);margin-top:12px}
+  .mp .show li{display:grid;grid-template-columns:3.3em minmax(0,1fr) auto;gap:0 12px;align-items:baseline;
+    padding:12px 4px;border-bottom:1px solid var(--mp-divider)}
+  .mp .show time{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+  .mp .show b{display:block;font-weight:800;font-size:16px;line-height:1.25}
+  .mp .show .note{display:block;font-size:14px;line-height:1.45;color:var(--mp-soft);margin-top:3px}
+  .mp .show .min{font-size:13px;font-weight:600;color:var(--mp-strong);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .mp .show li.end{border-bottom:0}
+  .mp .show li.end b{color:var(--mp-strong)}
+
+  /* footer links */
+  .mp .links{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:8px}
+  .mp .links a{display:grid;gap:2px;min-height:44px;padding:12px 14px;border:1px solid var(--mp-divider);color:var(--mp-text);text-decoration:none}
+  .mp .links a:hover{border-color:var(--mp-accent);background:var(--mp-hover)}
+  .mp .links b{font-size:15px;font-weight:700;line-height:1.3}
+  .mp .links b::after{content:" \2192";color:var(--mp-accent)}
+  .mp .links span{font-size:13px;color:var(--mp-muted)}
+</style>
+</head>
+<body>
+<div class="mp">
+<div class="app">
+
+  <header class="top">
+    <span class="brand">Hypercomb <em>Meetup</em></span>
+    <span class="mini">Agenda</span>
+  </header>
+
+  <main>
+    <section class="panel lead" aria-label="The meeting">
+      <span class="kicker">Meetup agenda</span>
+      <h1>Saturday, <span class="nw">October 24, 2026</span></h1>
+      <p class="sub">A morning with the people of this community. Free, all welcome.</p>
+      <div class="facts">
+        <div>
+          <div class="mini">When</div>
+          <div class="big"><time datetime="2026-10-24T09:15">9:15</time>–<time datetime="2026-10-24T11:00">11:00</time></div>
+          <div class="sub">Saturday morning</div>
+        </div>
+        <div>
+          <div class="mini">Where</div>
+          <div class="big">Yaletown Galleria</div>
+          <div class="sub">1080 Mainland St, Vancouver</div>
+        </div>
+      </div>
+      <p class="bring"><b>Bring</b> a phone with a browser.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="show-title">
+      <span class="kicker">Run of show</span>
+      <h2 id="show-title">The morning, block by block.</h2>
+      <ol class="show">
+        <li>
+          <time datetime="2026-10-24T09:15">9:15</time>
+          <div><b>Network and get seated</b><span class="note">Say hello and find a seat.</span></div>
+          <span class="min">15 min</span>
+        </li>
+        <li>
+          <time datetime="2026-10-24T09:30">9:30</time>
+          <div><b>Introductions</b><span class="note">Your first name, one community you belong to, and one thing you would put on a page of your own. About 30 seconds each.</span></div>
+          <span class="min">10 min</span>
+        </li>
+        <li>
+          <time datetime="2026-10-24T09:40">9:40</time>
+          <div><b>What is Hypercomb</b><span class="note">People first. An open protocol nobody owns. Every thing has a fingerprint, so peers can check it and everyone can serve it. Host your own domain and content.</span></div>
+          <span class="min">5 min</span>
+        </li>
+        <li>
+          <time datetime="2026-10-24T09:45">9:45</time>
+          <div><b>Join the room</b><span class="note">Scan the code, open the link, say yes to join.</span></div>
+          <span class="min">5 min</span>
+        </li>
+        <li>
+          <time datetime="2026-10-24T09:50">9:50</time>
+          <div><b>The tutorial</b><span class="note">The host says <code>start tutorial</code>. Tap Join on the panel at the top, and the explanation plays itself — everyone moving page to page together.</span></div>
+          <span class="min">15 min</span>
+        </li>
+        <li>
+          <time datetime="2026-10-24T10:05">10:05</time>
+          <div><b>Q and A</b><span class="note">Ask, answer, and take the answers you like. The host's <code>tally</code> scores them.</span></div>
+          <span class="min">25 min</span>
+        </li>
+        <li>
+          <time datetime="2026-10-24T10:30">10:30</time>
+          <div><b>Did You Know</b><span class="note">Share what the others might not know, with no names. Names are revealed at the end.</span></div>
+          <span class="min">15 min</span>
+        </li>
+        <li>
+          <time datetime="2026-10-24T10:45">10:45</time>
+          <div><b>Networking</b><span class="note">Stay and talk.</span></div>
+          <span class="min">15 min</span>
+        </li>
+        <li class="end">
+          <time datetime="2026-10-24T11:00">11:00</time>
+          <div><b>Done</b><span class="note">Thank you for coming.</span></div>
+          <span class="min"></span>
+        </li>
+      </ol>
+    </section>
+  </main>
+
+  <footer class="panel">
+    <div class="mini">More</div>
+    <ul class="links">
+      <li><a href="https://questions.hypercomb.com"><b>How the tutorial and Q and A work</b><span>questions.hypercomb.com</span></a></li>
+      <li><a href="https://meetups.hypercomb.com"><b>Meetings and RSVP</b><span>meetups.hypercomb.com</span></a></li>
+    </ul>
+  </footer>
+
+</div>
+</div>
+</body>
+</html>

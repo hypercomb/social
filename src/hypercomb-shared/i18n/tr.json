@@ -434,6 +434,7 @@
   "slash.event": "Takvimde bir toplantı: ekle, topluluğunun takvimini oku, katıl ya da katılımcı listesini sakla",
   "slash.did-you-know": "Diğerlerinin bilmeyebileceği bir şeyi paylaş — ev sahibi açıklayana kadar isimsiz. Tek başına bu katmanda ve altında oyunu açıp kapatır; `everywhere` her yerde açar",
   "slash.reveal": "Did You Know'da her fikri kimin getirdiğini açıkla — döşemedeki tek bir not her fikri adıyla listeler",
+  "slash.walk": "Bu sayfayı ve altındaki her sayfayı kendi kendine, tur tur dolaşır — seni takip eden de seninle gelir",
   "slash.collect": "Odadaki Did You Know fikirlerini kendi döşemene topla — dönüp bakıp öğrenebileceğin bir liste",
   "file.empty": "Neyin konacağını söyleyin.",
   "file.unavailable": "Notlar burada kullanılamıyor.",

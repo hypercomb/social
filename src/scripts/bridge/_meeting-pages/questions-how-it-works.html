@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Q and A · How it works</title>
+<meta name="description" content="How the Hypercomb meetup's tutorial plays itself and how the Q and A game works — for guests and for the host, with every word on one page.">
+<style>
+  /* How the tutorial and the Q and A work. Same look as the meetups page, but
+     self-contained: system fonts, inline styles, no requests, no script.
+     Scoped under .mp so a hive mounting the page inline never touches its
+     shell. */
+  :root,.mp{
+    --mp-outer:#eae7e7;--mp-bg:#f3f2f2;--mp-surface:#eae9e9;--mp-text:#201e1d;
+    --mp-accent:#ec3013;--mp-strong:#ae1800;--mp-muted:#605d5d;--mp-soft:#444141;
+    --mp-divider:rgba(32,30,29,.4);--mp-hover:rgba(32,30,29,.05);
+    --mp-font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mp-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){
+    :root,.mp{
+      --mp-outer:#121110;--mp-bg:#1b1a19;--mp-surface:#2c2a29;--mp-text:#f1efee;
+      --mp-accent:#ff5a3d;--mp-strong:#ff8a72;--mp-muted:#a8a4a3;--mp-soft:#cfcbca;
+      --mp-divider:rgba(241,239,238,.28);--mp-hover:rgba(241,239,238,.06)}}
+  body:has(> .mp){margin:0;background:var(--mp-outer)}
+  .mp{display:block;min-height:100vh;min-height:100dvh;background:var(--mp-outer);color:var(--mp-text);
+    font:400 16px/1.55 var(--mp-font);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;text-size-adjust:100%;text-wrap:pretty}
+  .mp *,.mp *::before,.mp *::after{box-sizing:border-box;margin:0;padding:0}
+  .mp a{color:var(--mp-accent);text-underline-offset:3px}
+  .mp :focus-visible{outline:2px solid var(--mp-accent);outline-offset:2px}
+  .mp ::selection{background:rgba(236,48,19,.3)}
+
+  .mp .app{max-width:760px;min-height:100vh;min-height:100dvh;margin:0 auto;background:var(--mp-bg)}
+  @media (min-width:762px){.mp .app{border-left:1px solid var(--mp-divider);border-right:1px solid var(--mp-divider)}}
+  .mp header.top{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
+    background:var(--mp-bg);border-bottom:2px solid var(--mp-divider)}
+  .mp .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
+  .mp .brand em{font-style:normal;color:var(--mp-accent)}
+  .mp .panel{display:block;padding:20px max(16px,env(safe-area-inset-right)) 20px max(16px,env(safe-area-inset-left));border-top:2px solid var(--mp-divider)}
+  .mp .panel.lead{border-top:0}
+
+  .mp h1{font-size:clamp(28px,7.5vw,40px);line-height:1.05;letter-spacing:-.02em;font-weight:800;margin-top:4px}
+  .mp h2{font-size:20px;line-height:1.15;font-weight:800}
+  .mp .kicker{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-strong);font-weight:600}
+  .mp .mini{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-muted)}
+  .mp .sub{font-size:14px;color:var(--mp-soft);margin-top:8px}
+  .mp .panel p{margin-top:10px;font-size:15px;color:var(--mp-soft)}
+  .mp .panel p.sub{font-size:14px}
+  .mp code{font:600 .86em/1.4 var(--mp-mono);background:var(--mp-surface);color:var(--mp-text);padding:1px 5px;
+    overflow-wrap:anywhere;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+
+  /* the four tutorial pages */
+  .mp .pages{list-style:none;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border-top:2px solid var(--mp-divider);margin-top:12px}
+  .mp .pages li{display:grid;gap:2px;padding:10px 12px 10px 0;border-bottom:1px solid var(--mp-divider)}
+  .mp .pages li:nth-child(even){padding-left:12px;border-left:1px solid var(--mp-divider)}
+  .mp .pages b{font-weight:800;font-size:16px;line-height:1.2}
+  @media (min-width:560px){
+    .mp .pages{grid-template-columns:repeat(4,minmax(0,1fr))}
+    .mp .pages li + li{padding-left:12px;border-left:1px solid var(--mp-divider)}}
+
+  /* numbered steps */
+  .mp .steps{list-style:none;border-top:2px solid var(--mp-divider);margin-top:12px}
+  .mp .steps li{display:grid;grid-template-columns:2em minmax(0,1fr);gap:0 10px;padding:12px 4px;border-bottom:1px solid var(--mp-divider);
+    font-size:15px;line-height:1.5;color:var(--mp-soft)}
+  .mp .steps .num{font-weight:800;font-size:13px;color:var(--mp-text);font-variant-numeric:tabular-nums;padding-top:2px}
+  .mp .steps b{color:var(--mp-text);font-weight:800}
+
+  /* the game panel, as it reads at the top of the screen */
+  .mp .bar{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;vertical-align:1px;
+    font-size:13px;font-weight:600;line-height:1.2;color:var(--mp-text);border:1px solid var(--mp-divider);padding:2px 2px 2px 8px}
+  .mp .bar span{background:var(--mp-accent);color:var(--mp-bg);font-weight:800;padding:2px 8px}
+
+  .mp .aside{border-top:1px solid var(--mp-divider);margin-top:14px;padding-top:12px}
+
+  /* every word, in two columns */
+  .mp .group{margin-top:16px}
+  .mp .words{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);border-top:2px solid var(--mp-divider);margin-top:6px}
+  .mp .words dt,.mp .words dd{padding:9px 0;border-bottom:1px solid var(--mp-divider)}
+  .mp .words dt{padding-right:12px;font-size:15px;line-height:1.5}
+  .mp .words dd{padding-left:12px;border-left:1px solid var(--mp-divider);font-size:14px;line-height:1.45;color:var(--mp-soft)}
+
+  /* footer links */
+  .mp .links{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:8px}
+  .mp .links a{display:grid;gap:2px;min-height:44px;padding:12px 14px;border:1px solid var(--mp-divider);color:var(--mp-text);text-decoration:none}
+  .mp .links a:hover{border-color:var(--mp-accent);background:var(--mp-hover)}
+  .mp .links b{font-size:15px;font-weight:700;line-height:1.3}
+  .mp .links b::after{content:" \2192";color:var(--mp-accent)}
+  .mp .links span{font-size:13px;color:var(--mp-muted)}
+</style>
+</head>
+<body>
+<div class="mp">
+<div class="app">
+
+  <header class="top">
+    <span class="brand">Hypercomb <em>Meetup</em></span>
+    <span class="mini">Q and A</span>
+  </header>
+
+  <main>
+    <section class="panel lead" aria-label="Q and A">
+      <span class="kicker">The tutorial and the Q and A</span>
+      <h1>How it works</h1>
+      <p class="sub">The tutorial plays itself. Then the whole room asks, answers and takes answers together.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="minute">
+      <h2 id="minute">In one minute</h2>
+      <p>The host says <code>start tutorial</code>. A Q and A begins where they stand. Everyone taps Join and follows the host.</p>
+      <p>The explanation plays itself, a page every 45 seconds:</p>
+      <ol class="pages">
+        <li><span class="mini">Page 1</span><b>Following</b></li>
+        <li><span class="mini">Page 2</span><b>The basics</b></li>
+        <li><span class="mini">Page 3</span><b>The idea</b></li>
+        <li><span class="mini">Page 4</span><b>Playing</b></li>
+      </ol>
+      <p>When it ends, the whole room is walked into the questions together, and the game is on.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="guest">
+      <h2 id="guest">If you are a guest</h2>
+      <ol class="steps">
+        <li><span class="num">01</span><span><b>Join the room.</b> Open the link or scan the code, and say yes to join.</span></li>
+        <li><span class="num">02</span><span><b>Follow the host.</b> Tap Join on the game panel at the top of the screen — it reads <span class="bar">… leads · <span>Join</span></span>. You now follow the host and go where they go.</span></li>
+        <li><span class="num">03</span><span><b>Ask.</b> Tap Ask and type your question. Or say <code>question</code> and your question.</span></li>
+        <li><span class="num">04</span><span><b>Answer.</b> Tap a question and write your answer in the notes that open.</span></li>
+        <li><span class="num">05</span><span><b>Take.</b> Tick the answers you like. The most-taken answers win.</span></li>
+        <li><span class="num">06</span><span><b>Leave.</b> Tap Leave, or say <code>questions leave</code>.</span></li>
+      </ol>
+    </section>
+
+    <section class="panel" aria-labelledby="host">
+      <h2 id="host">If you are the host</h2>
+      <ol class="steps">
+        <li><span class="num">01</span><span><b>Share the room.</b> Share the room's link — the <code>invite</code> word makes it.</span></li>
+        <li><span class="num">02</span><span><b>Start.</b> Say <code>start tutorial</code>.</span></li>
+        <li><span class="num">03</span><span><b>Give it a moment.</b> Let people tap Join. The first page waits a little longer.</span></li>
+        <li><span class="num">04</span><span><b>Play along.</b> You can ask or answer on any page while it plays.</span></li>
+        <li><span class="num">05</span><span><b>The questions.</b> When it ends, the room is in the questions.</span></li>
+        <li><span class="num">06</span><span><b>Score.</b> Say <code>tally</code> to score.</span></li>
+        <li><span class="num">07</span><span><b>Back.</b> <code>questions back</code> returns to the page.</span></li>
+      </ol>
+      <p class="aside">No tutorial today? <code>start hypercomb q and a</code> plays the game without it.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="walk">
+      <h2 id="walk">Walk</h2>
+      <p><code>walk</code> walks the page you stand on and every page beneath it, a stop every 45 seconds, round and round. Whoever follows you comes along.</p>
+      <p><code>walk every 30</code> sets the pace. <code>walk stop</code> stops.</p>
+      <p class="aside">To follow someone outside a game, open the people list — the small caret at the end of the row of initials at the top — and tap → beside their name. Tap it again to let go.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="words">
+      <h2 id="words">Every word</h2>
+      <div class="group">
+        <div class="mini">Tutorial and Q and A</div>
+        <dl class="words">
+          <dt><code>start tutorial</code></dt><dd>Tutorial plays, then the questions begin.</dd>
+          <dt><code>start hypercomb q and a</code></dt><dd>The game alone, without the tutorial.</dd>
+          <dt><code>question &lt;your question&gt;</code></dt><dd>Ask the room your question.</dd>
+          <dt><code>questions</code></dt><dd>Walk the room into this page's questions.</dd>
+          <dt><code>questions back</code></dt><dd>Return from the questions to the page.</dd>
+          <dt><code>questions leave</code></dt><dd>Leave the game and stop following.</dd>
+          <dt><code>tally</code></dt><dd>Score the answers; most-taken answers win.</dd>
+        </dl>
+      </div>
+      <div class="group">
+        <div class="mini">Walk</div>
+        <dl class="words">
+          <dt><code>walk</code></dt><dd>Tour this page and every page beneath.</dd>
+          <dt><code>walk every &lt;seconds&gt;</code></dt><dd>Set the seconds between stops.</dd>
+          <dt><code>walk stop</code></dt><dd>Stop the walk where you are.</dd>
+        </dl>
+      </div>
+      <div class="group">
+        <div class="mini">Did You Know</div>
+        <dl class="words">
+          <dt><code>start did you know</code></dt><dd>Begin Did You Know on this page.</dd>
+          <dt><code>did-you-know &lt;your idea&gt;</code></dt><dd>Share an idea, with no name shown.</dd>
+          <dt><code>reveal</code></dt><dd>Show who brought each idea.</dd>
+          <dt><code>collect</code></dt><dd>Keep the room's ideas on your tile.</dd>
+        </dl>
+      </div>
+    </section>
+  </main>
+
+  <footer class="panel">
+    <div class="mini">More</div>
+    <ul class="links">
+      <li><a href="https://agenda.hypercomb.com"><b>Today's agenda</b><span>agenda.hypercomb.com</span></a></li>
+      <li><a href="https://meetups.hypercomb.com"><b>Meetings and RSVP</b><span>meetups.hypercomb.com</span></a></li>
+    </ul>
+  </footer>
+
+</div>
+</div>
+</body>
+</html>

@@ -434,6 +434,7 @@
   "slash.event": "Une réunion au calendrier : en ajouter une, lire le calendrier de votre communauté, participer ou garder la liste des présents",
   "slash.did-you-know": "Partagez quelque chose que les autres ne savent peut-être pas, sans nom jusqu'à ce que l'hôte révèle qui. Seul, le mot active ou désactive le jeu pour cette couche et en dessous ; « everywhere » l'active partout",
   "slash.reveal": "Révélez qui a apporté chaque idée dans Did You Know — une note sur la tuile liste chaque idée avec son nom",
+  "slash.walk": "Parcourt seule cette page et chaque page en dessous, tour après tour — qui vous suit vient avec vous",
   "slash.collect": "Collectez les idées de la salle sur votre propre tuile — une liste pour y revenir et apprendre",
   "file.empty": "Dites ce qu’il faut classer.",
   "file.unavailable": "Les notes ne sont pas disponibles ici.",

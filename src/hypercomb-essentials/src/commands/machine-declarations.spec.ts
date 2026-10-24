@@ -67,6 +67,7 @@ await import('../questions/questions.queen.js')
 await import('../didyouknow/did-you-know.queen.js')
 await import('../didyouknow/reveal.queen.js')
 await import('../didyouknow/collect.queen.js')
+await import('../navigation/walk.queen.js')
 
 type Declared = { reach?: string; scope?: string; refuse?: (args: string) => string | undefined }
 const census = (ioc.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
@@ -158,6 +159,10 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   into: ['editing', 'hive'],               // the named tiles move inside a tile anywhere; the
                                            // destination gains them before this page loses them,
                                            // so nothing is deleted; a withheld tile stays put
+  // Judged on arrival (2026-10-24, the follow tutorial — "an active tutorial
+  // for the follow session … then we just leave it on").
+  walk: ['additive', 'local'],             // moves where you stand, page by page, on a timer; writes
+                                           // nothing (followers move by the follow mechanism)
 }
 
 describe('every machine declaration, as audited', () => {
