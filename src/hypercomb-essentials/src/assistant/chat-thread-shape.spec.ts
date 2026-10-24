@@ -379,6 +379,67 @@ describe('chat-thread — turns are contentSig manifests; legacy stays readable'
     expect((await mod.readTurns('chat:tile:/::job-1700000000001-abcdef')).map(t => t.text)).toEqual(['find betz /', 'two tiles'])
   })
 
+  // documentation/conversation-continuity.md: work a conversation still owes
+  // is a record in its own bucket, never a thought in the window's memory.
+  describe('what a conversation still owes', () => {
+    it('is written by merging, so each writer keeps what the others wrote', async () => {
+      await mod.appendTurn('chat:owes', 'user', 'update the tiles')
+      await mod.writeOwed('chat:owes', { state: 'continue', why: 'handover', left: 'the other tiles', spent: { rounds: 4, tokens: 900, legs: 1 } })
+      await mod.writeOwed('chat:owes', { why: 'failed', failures: 1, tried: [{ model: 'm1', at: 1, error: '429' }] })
+      const owed = await mod.readOwed('chat:owes')
+      expect(owed).toMatchObject({
+        state: 'continue', why: 'failed', left: 'the other tiles', failures: 1,
+        spent: { rounds: 4, tokens: 900, legs: 1 }, tried: [{ model: 'm1', error: '429' }],
+      })
+    })
+
+    it('travels with the list walk and the rail, and is gone once answered', async () => {
+      await mod.appendTurn('chat:waits', 'user', 'may I remove these?')
+      await mod.writeOwed('chat:waits', { state: 'waiting', why: 'question', left: 'your yes' })
+      const listed = (await mod.listConversationsWithLatest()).conversations.find(c => c.convoId === 'chat:waits')
+      expect(listed?.owed).toMatchObject({ state: 'waiting', why: 'question' })
+      expect((await mod.listRailConversations()).find(c => c.convoId === 'chat:waits')?.owed?.state).toBe('waiting')
+      expect((await mod.readConversationSummary('chat:waits'))?.owed?.state).toBe('waiting')
+
+      await mod.writeOwed('chat:waits', null)
+      expect(await mod.readOwed('chat:waits')).toBeUndefined()
+      expect((await mod.listConversationsWithLatest()).conversations.find(c => c.convoId === 'chat:waits')?.owed).toBeUndefined()
+    })
+
+    it('ends when the conversation is put away', async () => {
+      await mod.appendTurn('chat:filed-owed', 'user', 'keep going')
+      await mod.writeOwed('chat:filed-owed', { state: 'continue', why: 'handover', left: 'more' })
+      await mod.setConversationArchived('chat:filed-owed', true)
+      expect(await mod.readOwed('chat:filed-owed')).toBeUndefined()
+    })
+
+    it('refuses a late write into a conversation that was put away', async () => {
+      await mod.appendTurn('chat:late', 'user', 'keep going')
+      await mod.setConversationArchived('chat:late', true)
+      expect(await mod.writeOwed('chat:late', { state: 'continue', why: 'handover', left: 'more' })).toBeUndefined()
+      expect(await mod.readOwed('chat:late')).toBeUndefined()
+    })
+
+    it('never mints a conversation to hold a record', async () => {
+      expect(await mod.writeOwed('chat:never-spoke', { state: 'continue', why: 'handover', left: 'x' })).toBeUndefined()
+      expect((await mod.listConversationsWithLatest()).conversations.some(c => c.convoId === 'chat:never-spoke')).toBe(false)
+    })
+
+    it('never stands in the way of deleting the conversation', async () => {
+      await mod.appendTurn('chat:gone', 'user', 'hello')
+      await mod.writeOwed('chat:gone', { state: 'paused', why: 'budget', left: 'the rest' })
+      await mod.setConversationHarness('chat:gone', 'a'.repeat(64))
+      expect(await mod.deleteConversation('chat:gone')).toBe(true)
+    })
+
+    it('reads a record field by field, and refuses one that is not one', () => {
+      expect(mod.owedOf({ state: 'sleeping' })).toBeUndefined()
+      expect(mod.owedOf(null)).toBeUndefined()
+      expect(mod.owedOf({ state: 'continue', left: 'x'.repeat(9_000), promises: -2, tried: [null, { model: 'm', at: 'soon' }] }))
+        .toMatchObject({ left: 'x'.repeat(4_000), promises: 0, tried: [{ model: 'm', at: 0, error: '' }] })
+    })
+  })
+
   it('an archived thread is never what a window resumes into', async () => {
     await mod.appendTurn('chat:older', 'user', 'the older thread')
     await new Promise(r => setTimeout(r, 5))

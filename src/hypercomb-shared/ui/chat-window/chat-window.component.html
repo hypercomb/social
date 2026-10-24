@@ -639,18 +639,32 @@
         <div class="chat-msg ai" data-streaming aria-live="polite">
           <div class="chat-msg-text" [innerHTML]="streamHtml()"></div>
         </div>
+        <!-- STILL WORKING (jwize, 2026-10-24: "if there is something happening
+             we need a visual cue"). Text that stops streaming is not a turn
+             that stopped: between rounds the hive reads and the model writes,
+             and this says so, with the clock, until the turn ends. -->
+        @if (waiting()) {
+          <div class="chat-msg ai chat-wait" role="status" aria-live="polite">
+            <span class="chat-msg-text chat-think">{{ turnActivity() || ('chat.thinking' | t) }}</span>
+            <span class="chat-wait-clock">{{ elapsedLabel() }}</span>
+          </div>
+        }
       } @else if (waiting()) {
         <!-- THE WAIT, TOLD HONESTLY. How long it has been, whether anything is
              actually listening, and a way out of it. -->
         <div class="chat-msg ai chat-wait" role="status" aria-live="polite">
           <span class="chat-msg-text" [class.chat-think]="!unattended()">{{
-            (unattended() ? 'chat.unattended' : 'chat.thinking') | t
+            unattended() ? ('chat.unattended' | t) : (turnActivity() || ('chat.thinking' | t))
           }}</span>
           <span class="chat-wait-clock">{{ elapsedLabel() }}</span>
         </div>
         @if (unattended()) {
           <p class="chat-wait-hint">{{ 'chat.unattended.hint.wait' | t }}</p>
         }
+      } @else if (owedLine()) {
+        <!-- WHAT IT STILL OWES, from the conversation's record: carrying on,
+             waiting on you, stopped so it does not loop, or paused. -->
+        <p class="chat-wait-hint" role="status" [attr.data-owed]="owedLine()!.kind">{{ owedLine()!.text }}</p>
       }
     </div>
 

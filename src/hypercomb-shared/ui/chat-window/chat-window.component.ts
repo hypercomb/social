@@ -129,7 +129,8 @@ import { highlightBlocks } from './chat-highlight'
 import { resolveEntryImageUrl } from '../clipboard-thumbs'
 import { hivePathSegments, renderChatMarkdown, type ChatMarkdownOptions } from './chat-markdown'
 import { hiveSentenceHtml, hiveSentenceParts, sentenceAccent, type SentencePart, type SentenceReader } from '../hive-sentence/hive-sentence'
-import { liveHostConvos, liveHostRun, startHostRun, stopHostRun, type HostAsk } from './host-stream'
+import { isHostRunLive, liveHostConvos, liveHostRun, startHostRun, stopHostRun, type HostAsk } from './host-stream'
+import { owedAfter, owedCue, type LegEnd, type OwedLike, type OwedPatchLike } from './owed-step'
 import {
   callableBehaviours,
   hypercombActionProviderId,
@@ -781,6 +782,8 @@ const routeWhyKey = (state: RouteOrganizerState | undefined): string | null => {
 
 type ConversationSummary = {
   readonly convoId: string
+  /** What it still owes, when anything (essentials chat-thread.ts writeOwed). */
+  readonly owed?: { readonly state: 'continue' | 'waiting' | 'paused' }
   readonly title: string
   readonly turnCount: number
   readonly lastAt: number
@@ -815,12 +818,17 @@ type ListGroup = 'waiting' | 'open' | 'done'
 type ChatThreadsLike = {
   appendTurn(convoId: string, role: TurnRole, text: string, meta?: TurnMetaLike): Promise<boolean>
   readTurns(convoId: string): Promise<ChatTurn[]>
+  /** WHAT A CONVERSATION STILL OWES (documentation/conversation-continuity.md):
+   *  a record in its own bucket, merged on write, `null` when the work is
+   *  answered. Absent on an older essentials build: then nothing carries on. */
+  readOwed?(convoId: string): Promise<OwedLike | undefined>
+  writeOwed?(convoId: string, patch: OwedPatchLike | null): Promise<OwedLike | undefined>
   listConversations(): Promise<ConversationSummary[]>
   /** Each conversation's organized standing, and who it waits on — the rail's
    *  own reading, so the flat list and the rail group alike. Absent on an older
    *  essentials build: then the list is one group. */
   readConversationStandings?(convoIds: readonly string[]): Promise<ReadonlyMap<string, ConversationStandingLike>>
-  conversationGroup?(chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number }, standing?: ConversationStandingLike): ListGroup
+  conversationGroup?(chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number; readonly owed?: { readonly state: 'continue' | 'waiting' | 'paused' } }, standing?: ConversationStandingLike): ListGroup
   /** One pass for the list AND the newest thread's turns — the resume path's
    *  read, so opening never re-reads the bucket the list walk just read. */
   listConversationsWithLatest?(): Promise<{ conversations: ConversationSummary[]; latestTurns: ChatTurn[] }>
@@ -1316,9 +1324,64 @@ const MAX_OBSERVATION_CONTEXT_CHARS = 24_000
  *  tree changed when nothing had. The newest are enough: each carries the
  *  tree epoch, and any head that moves bumps it. */
 const LEG_SNAPSHOTS_KEPT = 64
-/** How old a stored handover may be and still resume by itself when the
- *  conversation is reopened. Older, the participant says continue. */
+/** The harness record's `handover.resumeSeconds` — still part of the shipped
+ *  record's shape, which this fallback must equal. Nothing reads it now: work
+ *  a conversation owes carries on from its record, with no hour limit
+ *  (documentation/conversation-continuity.md). */
 const RESUME_LEFT_MS = 60 * 60 * 1000
+
+/** A CONVERSATION IS HELD WHILE IT RUNS — an exclusive Web Lock per
+ *  conversation, for the whole life of a run (typed, continued or a manager's),
+ *  so no other tab carries on the same work at the same time. Nothing waits on
+ *  it: a run takes it if it is free and runs either way; a continuation asks
+ *  first (`conversationBusyElsewhere`). Where the Locks API is missing, both are
+ *  no-ops and the work runs as it always did. */
+type ConversationLocks = {
+  request(name: string, options: { mode: 'exclusive'; ifAvailable: true }, held: (lock: unknown) => Promise<void> | void): Promise<unknown>
+  query?(): Promise<{ held?: readonly { name?: string }[] }>
+}
+const conversationLocks = (): ConversationLocks | undefined =>
+  (globalThis as { navigator?: { locks?: ConversationLocks } }).navigator?.locks
+const conversationLockName = (convoId: string): string => `hypercomb:convo:${convoId}`
+
+const holdConversation = (convoId: string): (() => void) => {
+  const locks = conversationLocks()
+  if (!locks?.request) return () => { /* nothing held */ }
+  let release: () => void = () => { /* set below */ }
+  const held = new Promise<void>(resolve => { release = resolve })
+  try {
+    void Promise.resolve(locks.request(conversationLockName(convoId), { mode: 'exclusive', ifAvailable: true },
+      lock => lock ? held : undefined)).catch(() => { /* a refused lock costs nothing */ })
+  } catch { /* a throwing API costs nothing either */ }
+  return () => release()
+}
+
+/** Take the conversation's lock now, or say it is held: resolves to its
+ *  release, or null when another run (this tab or another) holds it. Where
+ *  the Locks API is missing it resolves to a no-op release. */
+const holdConversationNow = (convoId: string): Promise<(() => void) | null> => {
+  const locks = conversationLocks()
+  if (!locks?.request) return Promise.resolve(() => { /* nothing held */ })
+  return new Promise(resolve => {
+    let release: () => void = () => { /* set below */ }
+    const held = new Promise<void>(done => { release = done })
+    try {
+      void Promise.resolve(locks.request(conversationLockName(convoId), { mode: 'exclusive', ifAvailable: true }, lock => {
+        if (!lock) { resolve(null); return undefined }
+        resolve(() => release())
+        return held
+      })).catch(() => resolve(() => { /* a refused lock costs nothing */ }))
+    } catch { resolve(() => { /* a throwing API costs nothing */ }) }
+  })
+}
+
+/** Is this conversation running anywhere — this tab or another? */
+const conversationBusyElsewhere = async (convoId: string): Promise<boolean> => {
+  try {
+    const held = (await conversationLocks()?.query?.())?.held ?? []
+    return held.some(lock => lock.name === conversationLockName(convoId))
+  } catch { return false }
+}
 
 // THE HARNESS (documentation/agent-harness.md). The loop's policy is a
 // `harness@1` record essentials keeps in the `harness` pool; the window
@@ -1681,6 +1744,18 @@ export class ChatWindowComponent implements OnDestroy {
   /** The host tier is mid-stream: interrupting it means aborting a live fetch.
    *  A bridge ask, by contrast, is a durable record — see `pendingSig`. */
   readonly hostStreaming = signal(false)
+
+  /** WHAT THE TURN IS DOING NOW (jwize, 2026-10-24: "if there is something
+   *  happening we need a visual cue"). Text that stopped streaming read as a
+   *  turn that stopped, while the model read the hive or wrote its next round
+   *  for half a minute with nothing on screen to say so. Fed by the turn's own
+   *  progress (agent:progress, agent:route for this conversation's bee) and
+   *  shown under the reply, with the clock, for as long as the turn runs. */
+  readonly turnActivity = signal('')
+
+  /** What the conversation on screen still owes, as one line under it —
+   *  carrying on, waiting on you, stopped, paused (owed-step.ts owedCue). */
+  readonly owedLine = signal<{ readonly kind: 'continue' | 'waiting' | 'paused'; readonly text: string } | null>(null)
 
   /** The QUEUED bridge ask's record signature. Withdrawing an ask is removing
    *  that record from the optimization pool, so this is the whole handle on a
@@ -2420,6 +2495,7 @@ export class ChatWindowComponent implements OnDestroy {
       // Only ever false for a question still out — see ConversationSummary.
       replied: convo.replied !== false,
       asking: !!convo.asking,
+      owed: convo.owed as { readonly state: 'continue' | 'waiting' | 'paused' } | undefined,
     }))
 
     const known = new Set(rows.map(row => row.convoId))
@@ -2444,6 +2520,7 @@ export class ChatWindowComponent implements OnDestroy {
         // it is named by what it says, which is all there is of it.
         replied: true,
         asking: false,
+        owed: undefined,
       })
     }
     return rows.sort((a, b) => b.lastAt - a.lastAt)
@@ -2465,7 +2542,7 @@ export class ChatWindowComponent implements OnDestroy {
     const standings = this.listStandings()
     const rows = this.liveRoster()
     const groupOf = (row: (typeof rows)[number]): ListGroup =>
-      threads?.conversationGroup?.({ asking: row.asking, replied: row.replied, turns: row.turnCount }, standings.get(row.convoId)) ?? 'open'
+      threads?.conversationGroup?.({ asking: row.asking, replied: row.replied, turns: row.turnCount, owed: row.owed }, standings.get(row.convoId)) ?? 'open'
     return (['waiting', 'open', 'done'] as const)
       .map(key => ({ key, rows: rows.filter(row => groupOf(row) === key) }))
       .filter(group => group.rows.length > 0)
@@ -4637,7 +4714,9 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** Something can be called back: a live stream can be aborted, a queued ask
    *  can be taken out of the pool. */
-  readonly canStop = computed(() => this.waiting() && (this.hostStreaming() || !!this.pendingSig()))
+  readonly canStop = computed(() => (this.waiting() && (this.hostStreaming() || !!this.pendingSig()))
+    // A carry-on waiting out a backoff can be stopped too: Stop clears the record.
+    || (!this.waiting() && this.owedLine()?.kind === 'continue'))
 
   /** NOBODY IS LISTENING. The question is a durable record in the optimization
    *  pool (it WAS queued — `pendingSig` — not merely sent: until then a model
@@ -5055,6 +5134,23 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ convoId?: string; text?: string; outcome?: string }>(
       'chat:host-done', payload => this.#onHostDone(payload)))
 
+    // THE CUE (jwize, 2026-10-24: "if there is something happening we need a
+    // visual cue"): what this conversation's turn is doing, from its own bee,
+    // and what it still owes, from its record.
+    this.#cleanups.push(EffectBus.on<{ id?: string; activity?: string }>('agent:progress', payload => {
+      const activity = typeof payload?.activity === 'string' ? payload.activity.trim() : ''
+      if (activity && payload?.id === this.#beeId(this.activeId()) && this.waiting()) this.turnActivity.set(activity)
+    }))
+    this.#cleanups.push(EffectBus.on<{ convoId?: string; round?: number; model?: string }>('agent:route', payload => {
+      if (!payload?.convoId || payload.convoId !== this.activeId() || !this.waiting()) return
+      const model = String(payload.model ?? '').replace(/^~/, '').split('/').pop() || 'the model'
+      const round = Number(payload.round) || 1
+      this.turnActivity.set(this.#said('chat.working.round', `Round ${round} — ${model} is working`, { round, model }))
+    }))
+    this.#cleanups.push(EffectBus.on<{ convoId?: string }>('chat:owed', payload => {
+      if (payload?.convoId && payload.convoId === this.activeId()) void this.#refreshOwedLine()
+    }))
+
     // WHO ANSWERS CAN CHANGE WHILE YOU ARE LOOKING AT IT — a key arrives, a
     // bridge announces itself, a provider reports its headroom nearly spent,
     // a tier gets pinned. One effect carries all of it (model-policy.ts) and
@@ -5151,6 +5247,10 @@ export class ChatWindowComponent implements OnDestroy {
     // stickies would never come back.
     this.#claimSurface(false)
     for (const cleanup of this.#cleanups) cleanup()
+    // A backoff's timer belongs to this window; the record it waits on does
+    // not, and the next window (or a refresh) picks it up from the record.
+    for (const timer of this.#carryTimers.values()) clearTimeout(timer)
+    this.#carryTimers.clear()
     window.removeEventListener('synchronize', this.#onSync)
     window.removeEventListener('storage', this.#onStorage)
     window.removeEventListener('online', this.#onNetworkChange)
@@ -5426,7 +5526,27 @@ export class ChatWindowComponent implements OnDestroy {
       // retired is noise in its log.
       EffectBus.emit('agent:end', { id: this.#beeId(convoId), ok: true })
     }
-    if (convoId === this.activeId()) this.#syncWait(convoId)
+    if (convoId === this.activeId()) {
+      this.#syncWait(convoId)
+      this.turnActivity.set('')
+      void this.#refreshOwedLine()
+    }
+  }
+
+  /** The owed line for the conversation on screen, from its record. */
+  async #refreshOwedLine(): Promise<void> {
+    const convoId = this.activeId()
+    const owed = convoId ? await this.#threads()?.readOwed?.(convoId) : undefined
+    if (convoId !== this.activeId()) return
+    const cue = owedCue(owed, Date.now())
+    this.owedLine.set(cue ? { kind: cue.kind, text: this.#said(cue.key, cue.fallback, cue.params) } : null)
+  }
+
+  /** A catalog line, or its English when the catalog does not have it yet. */
+  #said(key: string, fallback: string, params?: Readonly<Record<string, string | number>>): string {
+    const i18n = ioc()?.get('@hypercomb.social/I18n') as { t?: (key: string, params?: Record<string, string | number>) => string } | undefined
+    const said = i18n?.t?.(key, params ? { ...params } : undefined)
+    return said && said !== key ? said : fallback
   }
 
   /** Paint the wait state of one conversation — called on every arrival at a
@@ -5480,8 +5600,9 @@ export class ChatWindowComponent implements OnDestroy {
    * `mode:'stop'` marker AgentRegistry leaves for a responder already mid-flight.
    */
   async stop(): Promise<void> {
-    // Stop means stop: no next leg starts from what this one left.
-    this.#left.delete(this.activeId())
+    // Stop means stop: no next leg starts from what this one left — now or
+    // after a refresh, in this tab or another.
+    this.#forgetOwed(this.activeId())
     if (this.hostStreaming()) {
       // The run keeps whatever had already arrived and stores it — stopping is
       // not discarding. Its `chat:host-done` ends the wait.
@@ -5679,7 +5800,9 @@ export class ChatWindowComponent implements OnDestroy {
         this.#clearRoute()
         this.#scheduleRouteRefresh(recent.convoId)
         this.#scrollDown(true)
-        this.#resumeLeft(recent.convoId, latestTurns)
+        // What it still owes carries on from its record — after a refresh too.
+        void this.#refreshOwedLine()
+        void this.#carryOn(recent.convoId)
       } else if (!this.activeId()) {
         this.newChat(false)
       }
@@ -5915,7 +6038,10 @@ export class ChatWindowComponent implements OnDestroy {
     // Switching threads re-pins: you are arriving at a conversation, and its
     // newest turn is where arriving means.
     this.#scrollDown(true)
-    this.#resumeLeft(convoId, turns)
+    // Opening a conversation that still owes work carries it on, and says so.
+    this.turnActivity.set('')
+    void this.#refreshOwedLine()
+    void this.#carryOn(convoId)
   }
 
   // ── a conversation per tile ─────────────────────────────────────────────
@@ -6265,7 +6391,6 @@ export class ChatWindowComponent implements OnDestroy {
     if (!message) return
 
     const threads = this.#threads()
-    const queen = this.#queen()
     if (!threads) {
       EffectBus.emit('toast:show', {
         type: 'warning',
@@ -6276,10 +6401,10 @@ export class ChatWindowComponent implements OnDestroy {
 
     let convoId = this.activeId()
     if (!convoId) { convoId = threads.newConvoId(); this.activeId.set(convoId) }
-    // A typed word starts a fresh request with a fresh budget; a leg
-    // continuing itself keeps the running total.
-    this.#left.delete(convoId)
-    if (!opts.auto) { this.#task.delete(convoId); this.legMeter.set(null) }
+    // A typed word starts a fresh request with a fresh budget, and whatever the
+    // conversation still owed is the participant's to redirect: it goes. A leg
+    // continuing itself keeps the running total and the record.
+    if (!opts.auto) { this.#task.delete(convoId); this.legMeter.set(null); this.#forgetOwed(convoId) }
 
     if (element && text === undefined) { element.value = ''; this.autosize(element) }
     // SENT IS NOT HELD. The thinking became a turn; leaving a copy in the
@@ -6312,17 +6437,36 @@ export class ChatWindowComponent implements OnDestroy {
     // route that throws before a model is even reached used to leave the
     // wait open with no turn and no word; now it lands in the conversation
     // like any other reply, so the row wears the reason instead of a clock.
+    if (opts.auto) this.#owedBy.delete(convoId)
+    const owedEpoch = this.#owedEpoch.get(convoId) ?? 0
+    const routed = await this.#route(convoId, message, threads, !!opts.auto)
+    // AN AUTOMATIC LEG ALWAYS SAYS WHAT IT OWES (conversation-continuity.md).
+    // One that ended on an exit that records nothing — a hand-off with no
+    // stronger model, a question, "stopped the work", refusals, a declined
+    // route, the host or the bridge tier — would leave the last "carry on" in
+    // place, and the same continue word would go out again and again. It waits
+    // on the participant instead, keeping what was owed.
+    if (opts.auto && !this.#owedBy.has(convoId) && (this.#owedEpoch.get(convoId) ?? 0) === owedEpoch) {
+      try { await this.#threads()?.writeOwed?.(convoId, { state: 'waiting', why: 'held', next: 0 }) } catch { /* the record stays as it was */ }
+    }
+    if (routed === 'answered') void this.#carryOn(convoId)
+  }
+
+  /** Where a stored question goes: the providers, then the host tier, then the
+   *  bridge — what `send()` did inline before it learned to settle an
+   *  automatic leg (see above). */
+  async #route(convoId: string, message: string, threads: ChatThreadsLike, auto: boolean): Promise<'answered' | 'declined' | 'aborted' | 'ended'> {
+    const queen = this.#queen()
     let routed: 'answered' | 'declined' | 'aborted'
     this.#syncBridge()
     try {
-      routed = await this.#askProvider(convoId, message)
+      routed = await this.#askProvider(convoId, message, auto)
     } catch (error) {
       console.warn('[chat] the question could not be routed:', error)
       await this.#landFailure(convoId, `The model could not answer: ${error instanceof Error ? error.message : String(error)}`)
-      return
+      return 'ended'
     }
-    if (routed === 'answered') { void this.#continueIfLeft(convoId) }
-    if (routed === 'answered' || routed === 'aborted') return
+    if (routed === 'answered' || routed === 'aborted') return routed
 
     // A MANAGER'S ASK IS ANSWERED BY THE HIVE'S OWN MODELS OR NOT AT ALL
     // (2026-10-15). Handed to the bridge queue, it waited for a Claude session
@@ -6334,7 +6478,7 @@ export class ChatWindowComponent implements OnDestroy {
       const reason = this.#turnFailures.get(convoId) ?? this.#declineReason.get(convoId) ?? 'no model took the question'
       this.#turnFailures.set(convoId, reason)
       await this.#landFailure(convoId, `The model could not answer: ${reason}. Check the providers console, then ask again.`)
-      return
+      return 'ended'
     }
 
     // The two legacy transports remain honest fallbacks.
@@ -6361,12 +6505,12 @@ export class ChatWindowComponent implements OnDestroy {
       } catch (error) {
         console.warn('[chat] the host could not be asked:', error)
         await this.#landFailure(convoId, `The model could not answer: ${error instanceof Error ? error.message : String(error)}`)
-        return
+        return 'ended'
       }
-      if (outcome === 'answered') return
+      if (outcome === 'answered') return 'answered'
       // STOPPED BY THE PARTICIPANT. Handing a question they just called back
       // to the durable bridge queue would be the opposite of what Stop means.
-      if (outcome === 'aborted') return
+      if (outcome === 'aborted') return 'aborted'
     }
 
     // THE BROKER IS FOR COMPLEX WORK, NOT A WAITING ROOM (Jaime, 2026-09-13:
@@ -6383,14 +6527,14 @@ export class ChatWindowComponent implements OnDestroy {
           : '.'}`
       console.warn('[chat] no model took the question:', reason)
       await this.#landFailure(convoId, reason)
-      return
+      return 'ended'
     }
 
     // A participant-host failure is retryable, but without a configured local
     // bridge there is nobody who could ever drain the durable bridge queue.
     if (!this.bridgeConfigured() || !queen?.submitChat) {
       await this.#landFailure(convoId, 'Your AI host is unavailable. Check its setup and try again.')
-      return
+      return 'ended'
     }
 
     const bridgeModel = this.answering()
@@ -6433,6 +6577,7 @@ export class ChatWindowComponent implements OnDestroy {
       if (convoId === this.activeId()) this.pendingSig.set(queued)
     }
     if (!this.#bumpList(convoId)) void this.#refreshList()
+    return 'ended'
   }
 
   /** Direct provider route (local Ollama or a configured API key). A model
@@ -6477,14 +6622,15 @@ export class ChatWindowComponent implements OnDestroy {
   //
   // A request is not capped at a round count; it runs in LEGS, one per
   // stretch of context, and the legs chain until the model answers with
-  // nothing left or the request's budget is spent. `#left` is the handover
-  // between two legs in this window; the same line is stored on the turn
-  // (`left` in its meta), so a reopened conversation resumes from disk.
-  // `#task` is what one request has spent so far — rounds and tokens from
-  // the providers' own usage reports — and is reset by the participant's
+  // nothing left or the request's budget is spent. What a leg leaves owed is
+  // a RECORD in the conversation's own bucket (essentials `writeOwed`;
+  // documentation/conversation-continuity.md), never a thought in this window:
+  // a refresh, another window and the rail all read the same record, and
+  // `#carryOn` is the one thing that sends a continue word. `#task` is what
+  // one request has spent so far — rounds and tokens from the providers' own
+  // usage reports — seeded from the record, and reset by the participant's
   // next typed message.
 
-  readonly #left = new Map<string, string>()
   readonly #task = new Map<string, { rounds: number; tokens: number; legs: number }>()
   /** THE METER — what the request being shown has spent so far, beside the
    *  availability line while it runs. Null when nothing long is under way. */
@@ -6507,28 +6653,133 @@ export class ChatWindowComponent implements OnDestroy {
     return next.rounds >= budget.rounds || next.tokens >= budget.tokens
   }
 
-  /** The next leg, if the last one left work behind. Only for the
-   *  conversation being shown: another one resumes when it is opened. */
-  async #continueIfLeft(convoId: string): Promise<void> {
-    const left = this.#left.get(convoId)
-    if (!left || convoId !== this.activeId() || this.#outstanding.has(convoId)) return
-    this.#left.delete(convoId)
-    const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
-    this.#task.set(convoId, { ...task, legs: task.legs + 1 })
-    await this.send(handoverStepNow(this.#harnessMark(convoId)).continueWord(left), { auto: true })
+  /** Records waiting out a backoff, one timer per conversation. */
+  readonly #carryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Conversations a #carryOn is deciding about right now — one at a time. */
+  readonly #carrying = new Set<string>()
+  /** Conversations whose running leg has said what it owes (see send()). */
+  readonly #owedBy = new Set<string>()
+  /** Moves on whenever the participant ends the work (Stop, a typed redirect):
+   *  a leg that began before it may no longer write the record. */
+  readonly #owedEpoch = new Map<string, number>()
+  /** An essentials build with no record keeps the handover here, as the window
+   *  did before the record existed — on screen, in this window only. */
+  readonly #fallbackLeft = new Map<string, string>()
+
+  /** CARRY THE WORK ON — the one thing that sends a continue word, and only
+   *  from the conversation's record. Phase 1 (conversation-continuity.md §B)
+   *  carries on the conversation on screen: when its leg ends, when it is
+   *  opened, after a refresh, and when a backoff runs out — with no hour
+   *  limit and the request's budget accumulating across legs and refreshes.
+   *  One decision at a time per conversation, and never while it runs in this
+   *  tab or another: the conversation's lock is taken BEFORE the word goes out
+   *  and held for the whole leg. */
+  async #carryOn(convoId: string): Promise<void> {
+    if (!convoId || this.#carrying.has(convoId)) return
+    this.#carrying.add(convoId)
+    try { await this.#carryOnOnce(convoId) } finally { this.#carrying.delete(convoId) }
   }
 
-  /** A conversation opened on a stored handover picks the work back up,
-   *  while the handover is recent enough to be the same sitting. */
-  #resumeLeft(convoId: string, turns: readonly { readonly role: string; readonly at: number; readonly left?: string; readonly spent?: { readonly rounds: number; readonly tokens: number } }[]): void {
-    const last = turns[turns.length - 1]
-    if (!last || last.role !== 'assistant' || !last.left) return
-    if (Date.now() - last.at > activeHarness().handover.resumeSeconds * 1000 || this.#outstanding.has(convoId)) return
-    // The running total rides on the handover, so a reload does not hand
-    // the request a fresh purse.
-    if (last.spent && !this.#task.has(convoId)) this.#task.set(convoId, { ...last.spent, legs: 0 })
-    this.#left.set(convoId, last.left)
-    void this.#continueIfLeft(convoId)
+  async #carryOnOnce(convoId: string): Promise<void> {
+    const timer = this.#carryTimers.get(convoId)
+    if (timer) { clearTimeout(timer); this.#carryTimers.delete(convoId) }
+    const free = (): boolean => convoId === this.activeId() && !this.#outstanding.has(convoId)
+      && !this.#outsideConvos.has(convoId) && !isHostRunLive(convoId)
+    if (!free()) return
+    const threads = this.#threads()
+    const mark = this.#harnessMark(convoId)
+    if (!threads?.readOwed || !threads.writeOwed) {
+      // An essentials build with no record: the old on-screen chaining.
+      const left = this.#fallbackLeft.get(convoId)
+      if (!left) return
+      this.#fallbackLeft.delete(convoId)
+      const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
+      this.#task.set(convoId, { ...task, legs: task.legs + 1 })
+      await this.send(handoverStepNow(mark).continueWord(left), { auto: true })
+      return
+    }
+    let owed = await threads.readOwed(convoId)
+    if (!owed) owed = await this.#migrateLeft(convoId)
+    if (!owed || owed.state !== 'continue' || owed.asker) return
+    // A LEG WENT OUT AFTER THIS RECORD AND NEVER WROTE IT AGAIN — cut off by a
+    // refresh, or ended on an exit that records nothing. Replaying the record
+    // would run that leg's changes a second time; it waits on the participant.
+    const lastAsked = this.turns().reduce((at, turn) => turn.role === 'user' ? Math.max(at, turn.at) : at, 0)
+    if (owed.at && lastAsked > owed.at) {
+      await threads.writeOwed(convoId, { state: 'waiting', why: 'interrupted', next: 0 }).catch(() => undefined)
+      return
+    }
+    const wait = owed.next - Date.now()
+    if (wait > 0) {
+      this.#carryTimers.set(convoId, setTimeout(() => { this.#carryTimers.delete(convoId); void this.#carryOn(convoId) }, wait + 50))
+      return
+    }
+    const budget = workBudget(undefined, activeHarness(mark).budget)
+    if (owed.spent.rounds >= budget.rounds || owed.spent.tokens >= budget.tokens) {
+      await threads.writeOwed(convoId, { state: 'paused', why: 'budget', next: 0 }).catch(() => undefined)
+      return
+    }
+    const release = await holdConversationNow(convoId)
+    if (!release) return
+    try {
+      if (!free()) return
+      this.#task.set(convoId, { rounds: owed.spent.rounds, tokens: owed.spent.tokens, legs: owed.spent.legs + 1 })
+      await this.send(handoverStepNow(mark).continueWord(owed.left), { auto: true })
+    } finally { release() }
+  }
+
+  /** A conversation that handed over before the record existed keeps its
+   *  `left` on its last turn; within the old resume window it becomes a record. */
+  async #migrateLeft(convoId: string): Promise<OwedLike | undefined> {
+    const last = this.turns()[this.turns().length - 1] as { role: string; at: number; left?: string; spent?: { rounds: number; tokens: number } } | undefined
+    if (!last || last.role !== 'assistant' || !last.left || Date.now() - last.at > RESUME_LEFT_MS) return undefined
+    try {
+      return await this.#threads()?.writeOwed?.(convoId, {
+        state: 'continue', why: 'handover', left: last.left, next: 0,
+        spent: { rounds: last.spent?.rounds ?? 0, tokens: last.spent?.tokens ?? 0, legs: 0 },
+      })
+    } catch { return undefined }
+  }
+
+  /** The work is answered, stopped or redirected: its record goes, any wait
+   *  on a backoff with it, and a leg still running may no longer write it. */
+  #forgetOwed(convoId: string): void {
+    if (!convoId) return
+    this.#owedEpoch.set(convoId, (this.#owedEpoch.get(convoId) ?? 0) + 1)
+    this.#fallbackLeft.delete(convoId)
+    const timer = this.#carryTimers.get(convoId)
+    if (timer) { clearTimeout(timer); this.#carryTimers.delete(convoId) }
+    void this.#threads()?.writeOwed?.(convoId, null)?.catch(() => undefined)
+  }
+
+  /** What a leg's end leaves owed, written to the record (owed-step.ts), and
+   *  the line the conversation says about it. A manager's ask is the
+   *  manager's to carry on: nothing is recorded, and it hears `left`. A leg
+   *  the participant has since stopped or redirected writes nothing, and a
+   *  record that cannot be written never turns a finished answer into a
+   *  failure — the line is still said. */
+  async #owe(convoId: string, end: LegEnd, epoch: number, signal?: AbortSignal): Promise<string | undefined> {
+    this.#owedBy.add(convoId)
+    if (this.#outsideConvos.has(convoId)) {
+      return end.kind === 'left' && !end.budgetSpent ? `\n\n*Continuing: ${end.left}*` : undefined
+    }
+    if (signal?.aborted || (this.#owedEpoch.get(convoId) ?? 0) !== epoch) return undefined
+    const threads = this.#threads()
+    if (!threads?.writeOwed) {
+      if (end.kind === 'left' && !end.budgetSpent) {
+        this.#fallbackLeft.set(convoId, end.left)
+        return `\n\n*Continuing: ${end.left}*`
+      }
+      return undefined
+    }
+    let before: OwedLike | undefined
+    try { before = await threads.readOwed?.(convoId) } catch { before = undefined }
+    const { patch, say } = owedAfter(before, end, Date.now())
+    if (signal?.aborted || (this.#owedEpoch.get(convoId) ?? 0) !== epoch) return undefined
+    try { await threads.writeOwed(convoId, patch) } catch (error) {
+      console.warn('[chat] what this leg owes could not be recorded:', error)
+    }
+    return say
   }
 
   /** The model's own hand on the conversation's context: list, add, drop.
@@ -6574,7 +6825,7 @@ export class ChatWindowComponent implements OnDestroy {
     return store?.activeSigFor?.(mark ?? '') ?? ''
   }
 
-  async #askProvider(convoId: string, message: string): Promise<'answered' | 'declined' | 'aborted'> {
+  async #askProvider(convoId: string, message: string, auto = false): Promise<'answered' | 'declined' | 'aborted'> {
     const router = ioc()?.get(LLM_ROUTER_IOC_KEY) as LlmRouterLike | undefined
     const harnessMark = this.#harnessMark(convoId)
     this.#trial.delete(convoId)
@@ -6863,6 +7114,10 @@ export class ChatWindowComponent implements OnDestroy {
     const settledAttempts: TurnAttemptLike[] = []
 
     const component = this
+    // What the record may still be written as at this leg's end: Stop, a typed
+    // redirect or a put-away moves the epoch on, and a late write from this
+    // leg must not bring back the work they ended.
+    const owedEpoch = component.#owedEpoch.get(convoId) ?? 0
     const ask: HostAsk = async function* (_question, opts) {
       const signal = opts?.signal
       const stopped = (): DOMException => new DOMException('The model request was aborted', 'AbortError')
@@ -7622,7 +7877,10 @@ export class ChatWindowComponent implements OnDestroy {
       //  - how heavy is it? Sure, its weight replaces the word list's, and
       //    the mediator picks the participant's own model for that weight.
       // Unsure on any, that part stays as it was.
-      if (jevMode && !spoken && jev?.front) {
+      // A continue word is the work carrying itself on, never a new request
+      // for Jev to weigh: the front door could answer it directly, run one
+      // step and drop the rest (conversation-continuity.md, finding 77).
+      if (jevMode && !spoken && !auto && jev?.front) {
         const door = await frontDoor()
         if (door.answer !== undefined) {
           turnPath = 'direct'
@@ -7708,6 +7966,10 @@ export class ChatWindowComponent implements OnDestroy {
           convoId, settledAttempts.filter(attempt => attempt.round === rounds),
           estimateTokens(system) + tokensOf(messages) + estimateTokens(roundText), budget,
         )
+        // THE BUDGET IS THE CEILING ON EVERY ROUND, not only on one that asked
+        // for work: answer-only legs that handed over again and again never
+        // reached the check and ran without end (finding 70).
+        if (spent) budgetSpent = true
 
         const work = round.work
         stage(AGENT_ROUND, { round: rounds, request: work.request?.kind ?? 'none', handoff: !!work.handoff, spent: spentOf() })
@@ -7844,8 +8106,16 @@ export class ChatWindowComponent implements OnDestroy {
             ...(work.request ? { requestLines: work.request.lines } : {}),
             prose: work.prose, lastRound, proseFallback: harnessNow.handover.proseFallback,
           })
+          // WHAT THIS LEG LEAVES OWED goes to the conversation's own record
+          // (owed-step.ts), never to this window's memory: the handover, a
+          // promise the reply made and did not keep, a wait on the participant,
+          // the spent budget, or nothing at all. `#carryOn` acts on it — now,
+          // after a refresh, or when the conversation is opened again.
+          const task = component.#task.get(convoId)
+          const legSpent = { rounds: task?.rounds ?? rounds, tokens: task?.tokens ?? 0, legs: task?.legs ?? 0 }
+          const worked = readRounds > 0 || ran.length > 0
           if (left) {
-            const task = component.#task.get(convoId)
+            // Shown on the turn; the record, not this, is what carries it on.
             component.#turnMeta.set(convoId, {
               ...(component.#turnMeta.get(convoId) ?? {}),
               left,
@@ -7853,11 +8123,12 @@ export class ChatWindowComponent implements OnDestroy {
             })
             stage(AGENT_HANDOVER, { round: rounds, left, budgetSpent, spent: spentOf() })
             wrote = true
-            if (budgetSpent) yield handoverStep.pausedNote(component.#task.get(convoId) ?? { rounds, tokens: 0 })
-            else {
-              component.#left.set(convoId, left)
-              yield `\n\n*Continuing: ${left}*`
-            }
+            const said = await component.#owe(convoId, { kind: 'left', left, budgetSpent, worked, spent: legSpent }, owedEpoch, signal)
+            if (budgetSpent) yield handoverStep.pausedNote(task ?? { rounds, tokens: 0 })
+            else if (said) yield said
+          } else {
+            const said = await component.#owe(convoId, { kind: 'answered', prose: work.prose, worked, spent: legSpent }, owedEpoch, signal)
+            if (said) { wrote = true; yield said }
           }
           if (snapshotIds.length && treeReader && !await treeReader.validateSnapshots(snapshotIds, signal)) {
             wrote = true
@@ -8041,6 +8312,9 @@ export class ChatWindowComponent implements OnDestroy {
       // The turn holds the page awake: a hidden tab is slowed and may be
       // frozen, and long work must not depend on being watched.
       const letSleep = holdAwake()
+      // And it holds the conversation, so no other tab carries on the same
+      // work while this one is doing it (conversation-continuity.md §B).
+      const releaseConversation = holdConversation(convoId)
       try {
         for await (const chunk of ask(question, opts)) {
           if (!firstAt && chunk) firstAt = Date.now()
@@ -8057,8 +8331,18 @@ export class ChatWindowComponent implements OnDestroy {
         }
         console.warn('[chat] the model could not answer:', error)
         yield `\n\nThe model could not answer: ${detail}`
+        // A MODEL THAT FALLS OFF does not end the work: the record owes it,
+        // backs off, and the conversation tries again — and says so
+        // (conversation-continuity.md §D; finding 29).
+        const task = component.#task.get(convoId)
+        const said = await component.#owe(convoId, {
+          kind: 'failed', model: component.designated()?.model || component.answering() || 'the model', error: detail, request: question,
+          spent: { rounds: task?.rounds ?? 0, tokens: task?.tokens ?? 0, legs: task?.legs ?? 0 },
+        }, owedEpoch, opts?.signal).catch(() => undefined)
+        if (said) yield said
       } finally {
         letSleep()
+        releaseConversation()
         // THE RECEIPT, whatever happened: answered, failed, or stopped — by
         // the `receipt` step the harness names, else the shipped one.
         const at = Date.now()

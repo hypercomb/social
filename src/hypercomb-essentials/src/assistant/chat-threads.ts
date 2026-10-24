@@ -15,6 +15,7 @@ import {
   recoverStreamCheckpoints, readTurns, deliverTurn, listConversations,
   listConversationsWithLatest, deleteConversation, setConversationArchived,
   setConversationGoalReached, setConversationHarness, newConvoId, isHumanConversation,
+  readOwed, writeOwed, type ConversationOwed,
 } from './chat-thread.js'
 import {
   assimilateRouteSelection, flowOpenSteps, organizeRoute, readRoute, readRouteFlow,
@@ -61,13 +62,17 @@ export const readConversationStandings = async (convoIds: readonly string[]): Pr
   return out
 }
 
-/** WHO IT WAITS ON: you, when its newest reply asked a question; nobody, when
+/** WHO IT WAITS ON: you, when its newest reply asked a question, or when what
+ *  it still owes waits on you or on its spent budget (the record, never the
+ *  prose: a reply that only SAYS it is waiting is not waiting); nobody, when
  *  every organized step is settled and nothing newer came in; otherwise open. */
 export const conversationGroup = (
-  chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number },
+  chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number; readonly owed?: Pick<ConversationOwed, 'state'> },
   standing: ConversationStanding | undefined,
 ): ConversationGroup => {
   if (chat.asking) return 'waiting'
+  if (chat.owed?.state === 'waiting' || chat.owed?.state === 'paused') return 'waiting'
+  if (chat.owed?.state === 'continue') return 'open'
   if (chat.replied && standing && standing.total > 0 && standing.open === 0 && standing.upTo >= chat.turns) return 'done'
   return 'open'
 }
@@ -97,6 +102,9 @@ export class ChatThreads {
   readonly setConversationHarness = setConversationHarness
   readonly newConvoId = newConvoId
   readonly isHumanConversation = isHumanConversation
+  /** What a conversation still owes (documentation/conversation-continuity.md). */
+  readonly readOwed = readOwed
+  readonly writeOwed = writeOwed
 
   /** The conversation's ROUTE — its runs laid along its turns, read from the
    *  records (chat-route.ts). A METHOD, not a field like its siblings: this
@@ -142,7 +150,7 @@ export class ChatThreads {
   }
 
   conversationGroup(
-    chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number },
+    chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number; readonly owed?: Pick<ConversationOwed, 'state'> },
     standing?: ConversationStanding,
   ): ConversationGroup {
     return conversationGroup(chat, standing)

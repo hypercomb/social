@@ -307,6 +307,170 @@ let goalNamePromise: Promise<string> | null = null
 const goalName = (): Promise<string> =>
   (goalNamePromise ??= sha256(new TextEncoder().encode(GOAL_MARKER).buffer as ArrayBuffer))
 
+/** THE ONE WRITER OF A BUCKET'S MARKERS — archive, harness, goal and owed. A
+ *  marker is a mutable fact about the thread under a constant name: writing
+ *  replaces it whole, `null` takes it away. One write site and one remove site
+ *  for every marker, so the frozen storage-write counts for this file only go
+ *  down (src/doctrine.storage-writes.json). */
+const writeMarker = async (bucket: FileSystemDirectoryHandle, marker: string, body: object | null): Promise<void> => {
+  if (body === null) {
+    try { await bucket.removeEntry(marker) } catch { /* already absent */ }
+    return
+  }
+  const handle = await bucket.getFileHandle(marker, { create: true })
+  const writable = await handle.createWritable()
+  try { await writable.write(new Blob([JSON.stringify(body)])) } finally { await writable.close() }
+}
+
+// ── WHAT A CONVERSATION STILL OWES (documentation/conversation-continuity.md) ──
+//
+// jwize, 2026-10-24: "sometimes the conversations just say they are going to
+// wait or do something but they are finished already … they should all be
+// robust and survive refreshes." Work a conversation still owes is a record in
+// its own bucket, never a thought in the window's memory: the next leg, a
+// promise made and not kept, a model that fell off, a pause on the budget, a
+// wait on the participant. The list walk reads it with the other markers, so a
+// refresh, another window and the rail all see the same thing. Answered work
+// takes the record away.
+
+const OWED_MARKER = 'chat-owed'
+let owedNamePromise: Promise<string> | null = null
+const owedName = (): Promise<string> =>
+  (owedNamePromise ??= sha256(new TextEncoder().encode(OWED_MARKER).buffer as ArrayBuffer))
+
+/** `continue` — the work carries on by itself; `waiting` — on the participant;
+ *  `paused` — the request's budget is spent, and only the participant resumes it. */
+export type OwedState = 'continue' | 'waiting' | 'paused'
+
+export interface ConversationOwed {
+  readonly state: OwedState
+  /** Why, in one word: handover, promised, failed (continue); question, held,
+   *  stalled, gave-up (waiting); budget (paused). */
+  readonly why: string
+  /** What is owed now, in the model's or the hive's words. */
+  readonly left: string
+  /** What was owed at the leg before — the same twice running is a loop. */
+  readonly lastLeft: string
+  /** Promises in a row with nothing done between them. */
+  readonly promises: number
+  /** Legs in a row that asked the hive for nothing. */
+  readonly idleLegs: number
+  /** Failures in a row; backs off, then gives up. */
+  readonly failures: number
+  /** What the request has spent so far, across legs and refreshes. */
+  readonly spent: { readonly rounds: number; readonly tokens: number; readonly legs: number }
+  /** Models that fell off this work, newest last. */
+  readonly tried: readonly { readonly model: string; readonly at: number; readonly error: string }[]
+  /** A manager's ask owns this work: the manager carries it on, never the window. */
+  readonly asker?: string
+  /** Not before this time (backoff after a failure). */
+  readonly next: number
+  readonly at: number
+}
+
+/** A write to the record: the fields this writer owns. */
+export type OwedPatch = Partial<Omit<ConversationOwed, 'at'>>
+
+const OWED_LEFT_MAX = 4_000
+const OWED_TRIED_MAX = 12
+const OWED_STATES = new Set<OwedState>(['continue', 'waiting', 'paused'])
+
+const count = (value: unknown): number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0
+
+/** A record read from disk, checked field by field; undefined when it is not one. Pure. */
+export const owedOf = (raw: unknown): ConversationOwed | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined
+  const value = raw as Record<string, unknown>
+  const state = value['state'] as OwedState
+  if (!OWED_STATES.has(state)) return undefined
+  const text = (field: unknown, max = OWED_LEFT_MAX): string => typeof field === 'string' ? field.slice(0, max) : ''
+  const spent = (value['spent'] && typeof value['spent'] === 'object' ? value['spent'] : {}) as Record<string, unknown>
+  const tried = Array.isArray(value['tried']) ? value['tried'] : []
+  return {
+    state,
+    why: text(value['why'], 40),
+    left: text(value['left']),
+    lastLeft: text(value['lastLeft']),
+    promises: count(value['promises']),
+    idleLegs: count(value['idleLegs']),
+    failures: count(value['failures']),
+    spent: { rounds: count(spent['rounds']), tokens: count(spent['tokens']), legs: count(spent['legs']) },
+    tried: tried.slice(-OWED_TRIED_MAX).flatMap(entry => {
+      const one = entry as Record<string, unknown> | null
+      return one && typeof one === 'object'
+        ? [{ model: text(one['model'], 200), at: count(one['at']), error: text(one['error'], 500) }]
+        : []
+    }),
+    ...(typeof value['asker'] === 'string' && value['asker'] ? { asker: String(value['asker']).slice(0, 200) } : {}),
+    next: count(value['next']),
+    at: count(value['at']),
+  }
+}
+
+/** The record a patch makes of what stood before. Pure. */
+export const mergeOwed = (before: ConversationOwed | undefined, patch: OwedPatch, at: number): ConversationOwed => {
+  const base: ConversationOwed = before ?? {
+    state: 'continue', why: '', left: '', lastLeft: '', promises: 0, idleLegs: 0, failures: 0,
+    spent: { rounds: 0, tokens: 0, legs: 0 }, tried: [], next: 0, at,
+  }
+  const merged = { ...base, ...patch, at } as ConversationOwed
+  return owedOf(merged) ?? base
+}
+
+/** The record as it stands; undefined when nothing is owed. */
+export const readOwed = async (convoId: string): Promise<ConversationOwed | undefined> => {
+  const id = String(convoId ?? '').trim()
+  if (!id) return undefined
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(THREADS_POOL)
+  if (!pool) return undefined
+  try {
+    const bucket = await pool.getDirectoryHandle(await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer), { create: false })
+    const file = await (await bucket.getFileHandle(await owedName(), { create: false })).getFile()
+    return owedOf(JSON.parse(await file.text()))
+  } catch { return undefined }
+}
+
+/** One write at a time per conversation: several writers fire inside one leg,
+ *  and each merges into what the last one left. */
+const owedWrites = new Map<string, Promise<unknown>>()
+
+/** Merge a patch into the record (`null` = the work is answered, take it away).
+ *  Says so on `chat:owed` and `chat:threads-changed`. Resolves to the record
+ *  as written, or undefined when there is none now. */
+export const writeOwed = (convoId: string, patch: OwedPatch | null): Promise<ConversationOwed | undefined> => {
+  const id = String(convoId ?? '').trim()
+  if (!id) return Promise.resolve(undefined)
+  const before = owedWrites.get(id) ?? Promise.resolve()
+  const run = before.catch(() => undefined).then(async (): Promise<ConversationOwed | undefined> => {
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    const pool = await store?.getPool?.(THREADS_POOL)
+    if (!pool) return undefined
+    const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
+    const was = await readOwed(id)
+    if (patch === null && !was) return undefined
+    // NEVER MINT A CONVERSATION: work is only owed by one that has turns. A leg
+    // still running when its conversation was deleted must not bring the
+    // bucket back with a record in it.
+    let bucket: FileSystemDirectoryHandle
+    try { bucket = await pool.getDirectoryHandle(name, { create: false }) } catch { return undefined }
+    // PUT AWAY IS PUT AWAY: a leg that ends after its conversation was archived
+    // writes nothing that would carry it on.
+    if (patch !== null) {
+      try { await bucket.getFileHandle(await archiveName(), { create: false }); return undefined } catch { /* not archived */ }
+    }
+    const record = patch === null ? undefined : mergeOwed(was, patch, Date.now())
+    await writeMarker(bucket, await owedName(), record ? { kind: OWED_MARKER, convoId: id, ...record } : null)
+    EffectBus.emit('chat:owed', { convoId: id, ...(record ? { state: record.state, why: record.why, next: record.next } : { state: 'done' }) })
+    EffectBus.emit('chat:threads-changed', { convoId: id })
+    return record
+  })
+  owedWrites.set(id, run)
+  void run.finally(() => { if (owedWrites.get(id) === run) owedWrites.delete(id) }).catch(() => undefined)
+  return run
+}
+
 /** The STEP LEDGER's directory name inside a bucket — the agent's recorded
  *  attempts, written beside the turns by `chat-steps.ts`. Named HERE, with
  *  the archive and goal markers, because this file owns the bucket's shape:
@@ -362,6 +526,8 @@ type RawTurn = {
 type BucketRead = {
   readonly turns: RawTurn[]
   readonly archived: boolean
+  /** What the conversation still owes, when anything. */
+  readonly owed?: ConversationOwed
   readonly goal?: ChatGoalReached
   /** The harness record this conversation runs under, by signature. */
   readonly harness?: string
@@ -392,6 +558,8 @@ export interface ConversationSummary {
   readonly replied: boolean
   /** The newest turn is a reply holding a question nobody has answered yet. */
   readonly asking?: boolean
+  /** What the conversation still owes, when anything (see writeOwed). */
+  readonly owed?: ConversationOwed
 }
 
 /** Conversations that belong to a PERSON, and so appear in the chat window.
@@ -668,6 +836,7 @@ const readBucketRaw = async (
   let archived = false
   let goal: ChatGoalReached | undefined
   let harness: string | undefined
+  let owed: ConversationOwed | undefined
   let decided = !humanOnly
   const entries = (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
   for await (const [entryName, handle] of entries) {
@@ -684,6 +853,7 @@ const readBucketRaw = async (
         if (SIG64.test(named)) harness = named
         continue
       }
+      if (turn?.kind === OWED_MARKER) { owed = owedOf(turn); continue }
       if (turn?.kind === GOAL_MARKER) {
         const details = typeof turn.text === 'string' ? turn.text : ''
         goal = { details, at: Number(turn.at) || 0 }
@@ -703,7 +873,7 @@ const readBucketRaw = async (
       out.push({ ...turn, sig: entryName })
     } catch { /* one unreadable turn must not hide the thread */ }
   }
-  return { turns: out.sort((a, b) => a.at - b.at), archived, goal, ...(harness ? { harness } : {}) }
+  return { turns: out.sort((a, b) => a.at - b.at), archived, goal, ...(harness ? { harness } : {}), ...(owed ? { owed } : {}) }
 }
 
 /**
@@ -903,6 +1073,7 @@ export const listConversationsWithLatest = async (options: ListOptions = {}): Pr
           ...(!read.archived && askingIn(raw) ? { asking: true } : {}),
           ...(read.goal ? { goal: read.goal } : {}),
           ...(read.harness ? { harness: read.harness } : {}),
+          ...(read.owed && !read.archived ? { owed: read.owed } : {}),
         })
         // AN ARCHIVED THREAD IS NEVER "where you were". `latestTurns` is what
         // a window opening onto resume will show, and resuming into a
@@ -981,6 +1152,8 @@ export interface TileConversation {
   readonly unread: boolean
   /** PUT AWAY — hidden from the lists until they are asked to show it. */
   readonly archived: boolean
+  /** What it still owes, when anything — the rail's "waiting on you" reads it. */
+  readonly owed?: ConversationOwed
 }
 
 const seenMap = (): Record<string, number> => {
@@ -1020,6 +1193,7 @@ export const listTileConversations = async (): Promise<TileConversation[]> => {
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
+      ...(convo.owed ? { owed: convo.owed } : {}),
     })
   }
   return out.sort((a, b) => b.lastAt - a.lastAt)
@@ -1052,6 +1226,7 @@ export const listRailConversations = async (): Promise<TileConversation[]> => {
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
+      ...(convo.owed ? { owed: convo.owed } : {}),
     })
   }
   return out.sort((a, b) => b.lastAt - a.lastAt)
@@ -1084,6 +1259,7 @@ export const readConversationSummary = async (convoId: string): Promise<TileConv
       lastAt,
       unread: lastAt > (seenMap()[id] ?? 0),
       archived: !!read?.archived,
+      ...(read?.owed && !read.archived ? { owed: read.owed } : {}),
     }
   } catch { /* no bucket yet — an empty conversation, not an error */ }
   return null
@@ -1112,6 +1288,7 @@ export const listGlobalConversations = async (): Promise<TileConversation[]> => 
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
+      ...(convo.owed ? { owed: convo.owed } : {}),
     })
   }
   return out.sort((a, b) => b.lastAt - a.lastAt)
@@ -1174,19 +1351,18 @@ export const setConversationArchived = async (
     const bucket = await pool.getDirectoryHandle(name, { create: archived })
     const marker = await archiveName()
     if (!archived) {
-      try { await bucket.removeEntry(marker) } catch { /* already not archived */ }
+      await writeMarker(bucket, marker, null)
       // Announced from HERE, not from the surface that pressed the button:
       // several surfaces list the same thread (the rail's fold, the window's
       // flat list), and only this function knows the write landed.
       EffectBus.emit('chat:threads-changed', { convoId: id, archived: false })
       return true
     }
-    const bytes = new TextEncoder().encode(
-      JSON.stringify({ kind: ARCHIVE_MARKER, convoId: id, at: Date.now() }),
-    ).buffer as ArrayBuffer
-    const handle = await bucket.getFileHandle(marker, { create: true })
-    const writable = await handle.createWritable()
-    try { await writable.write(new Blob([bytes as BlobPart])) } finally { await writable.close() }
+    await writeMarker(bucket, marker, { kind: ARCHIVE_MARKER, convoId: id, at: Date.now() })
+    // PUT AWAY IS PUT AWAY: nothing carries a filed conversation on by itself.
+    // Through the record's own queue, so a write already in flight lands first
+    // and is then taken away — and writeOwed refuses any later one.
+    await writeOwed(id, null)
     EffectBus.emit('chat:threads-changed', { convoId: id, archived: true })
     return true
   } catch { return false }
@@ -1211,16 +1387,11 @@ export const setConversationHarness = async (
     const bucket = await pool.getDirectoryHandle(name, { create: !!wanted })
     const marker = await harnessName()
     if (!wanted) {
-      try { await bucket.removeEntry(marker) } catch { /* already the device's */ }
+      await writeMarker(bucket, marker, null)
       EffectBus.emit('chat:threads-changed', { convoId: id, harness: '' })
       return true
     }
-    const bytes = new TextEncoder().encode(
-      JSON.stringify({ kind: HARNESS_MARKER, convoId: id, harness: wanted, at: Date.now() }),
-    ).buffer as ArrayBuffer
-    const handle = await bucket.getFileHandle(marker, { create: true })
-    const writable = await handle.createWritable()
-    try { await writable.write(new Blob([bytes as BlobPart])) } finally { await writable.close() }
+    await writeMarker(bucket, marker, { kind: HARNESS_MARKER, convoId: id, harness: wanted, at: Date.now() })
     EffectBus.emit('chat:threads-changed', { convoId: id, harness: wanted })
     return true
   } catch { return false }
@@ -1241,11 +1412,7 @@ export const setConversationGoalReached = async (
     const bucket = await pool.getDirectoryHandle(name, { create: true })
     const marker = await goalName()
     const at = Date.now()
-    const handle = await bucket.getFileHandle(marker, { create: true })
-    const writable = await handle.createWritable()
-    try {
-      await writable.write(new Blob([JSON.stringify({ kind: GOAL_MARKER, convoId: id, text, at })]))
-    } finally { await writable.close() }
+    await writeMarker(bucket, marker, { kind: GOAL_MARKER, convoId: id, text, at })
     EffectBus.emit('chat:goal-reached', { convoId: id, details: text, at })
     EffectBus.emit('chat:threads-changed', { convoId: id })
     return true
@@ -1308,6 +1475,7 @@ export const deleteConversation = async (convoId: string): Promise<boolean> => {
         // holds one would fail this proof and the conversation would refuse to
         // delete. A retired feature must not strand a thread.
         const isOurs = (parsed?.kind === ARCHIVE_MARKER || parsed?.kind === GOAL_MARKER
+          || parsed?.kind === HARNESS_MARKER || parsed?.kind === OWED_MARKER
           || parsed?.kind === 'chat-name' || parsed?.kind === 'chat-turn')
           && (parsed?.convoId === undefined || parsed.convoId === id)
         if (!isOurs) {

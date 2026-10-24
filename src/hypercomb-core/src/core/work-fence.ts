@@ -401,6 +401,82 @@ const unwrittenIn = (lines: readonly string[]): string | undefined => {
   return bare >= BARE_COMMANDS_MIN ? 'hypercomb-do' : undefined
 }
 
+// ── A TURN THAT ENDS ON A PROMISE (documentation/conversation-continuity.md) ──
+//
+// jwize, 2026-10-24: "sometimes the conversations just say they are going to
+// wait or do something but they are finished already." The check above reads a
+// SHORT reply's LAST line for four openers and sends it back once; a longer
+// answer that closes "Next, I'll update the other tiles." ended the work with
+// nothing to carry it on. This reads how ANY reply ends — the last paragraph's
+// closing lines — so the turn's end can record the promise as work still owed,
+// and tells "I'll wait for your go-ahead" (waiting on the participant) from
+// "I'll wait for the walk to finish" (nothing will).
+
+const PROMISE_OPENER = new RegExp(
+  '^[\\s*_>•-]*(?:(?:ok(?:ay)?|alright|all right|so|great|good|first|now|next|then|finally)[,:]?\\s+)*'
+  + '(?:\\*{1,2}next:?\\*{1,2}:?\\s*)?'
+  + '(?:i(?:\'|’)ll|i will|let me|i(?:\'|’)m going to|i am going to|i(?:\'|’)m about to|i am about to|'
+  + 'we(?:\'|’)ll|we will|i still need to|i(?:\'|’)ll now|next,?\\s+i(?:\'|’)ll|now i(?:\'|’)ll)\\s+(.+)$',
+  'i',
+)
+const AFTER_OPENER = /^[\s*_>•-]*(?:once|after|when|as soon as)\b[^.!?]*?,\s*(?:i(?:'|’)ll|i will|we(?:'|’)ll)\s+(.+)$/i
+/** Sign-offs, negations and closers that read like promises and owe nothing. */
+const NOT_A_PROMISE = /^(?:you know\b|be here\b|be (?:happy|glad)\b|gladly\b|leave\b|stop here\b|keep (?:an eye|that in mind|it in mind)\b|remember\b|note that\b|not\b|never\b|be waiting\b|see\b|answer\b|summari[sz]e\b|explain\b|do (?:whichever|whatever) you\b)/i
+/** "Let me know …" ends the reading: it asks the participant, and whatever the
+ *  lines above it say is not owed while it stands. */
+const ASKS_YOU = /^(?:me )?know\b/i
+/** A wait on the participant, not a promise of work. Errs toward waiting: a
+ *  wrong wait costs the participant one word; a wrong promise sends "Continue"
+ *  on their behalf, which a model may take for the go-ahead it asked for
+ *  (phase-1 review, 2026-10-24). */
+const WAITS_ON_YOU = new RegExp(
+  '\\b(?:a?wait(?:ing)?|hold(?:ing)? off|pause|stop)\\b[^.!?]*\\b(?:you|your)\\b'
+  + '|\\b(?:once|when|after|as soon as|until|unless|before|so|so that)\\s+(?:you|confirmed|approved)\\b'
+  + '|\\bif you\\s+(?:confirm|approve|agree|say|want|would like|\'d like|’d like)\\b'
+  + '|\\b(?:need|require)\\s+(?:you|your)\\b'
+  + '|\\byour\\s+(?:ok|okay|go-ahead|approval|confirmation|permission|answer|input|decision|choice|reply|pick)\\b'
+  + '|\\b(?:confirmation|approval|go-ahead)\\b'
+  + '|\\b(?:after|on|with)\\s+your\\b',
+  'i',
+)
+/** Closing lines read, bottom up, of the last paragraph. */
+const ENDING_LINES = 3
+
+export type TurnEnding =
+  | { readonly kind: 'promise'; readonly step: string }
+  | { readonly kind: 'waiting'; readonly step: string }
+
+/** How a reply ends: a promise of work, a wait on the participant, or neither
+ *  (undefined). Reads the last paragraph's closing lines, outside any fence. Pure. */
+export const turnEnding = (prose: string): TurnEnding | undefined => {
+  const lines = String(prose ?? '').replace(/\s+$/, '').split('\n')
+  const kept: string[] = []
+  let fence: string | null = null
+  for (const line of lines) {
+    const mark = FENCE_RE.exec(line)
+    if (mark) {
+      if (!fence) fence = mark[1]
+      else if (closes(line, fence)) fence = null
+      kept.push('')
+      continue
+    }
+    kept.push(fence ? '' : line)
+  }
+  const blank = kept.map(line => line.trim()).lastIndexOf('', kept.length - 1)
+  const paragraph = kept.slice(blank + 1).map(line => line.trim()).filter(Boolean)
+  for (const line of paragraph.slice(-ENDING_LINES).reverse()) {
+    const said = PROMISE_OPENER.exec(line) ?? AFTER_OPENER.exec(line)
+    if (!said) continue
+    const step = said[1].trim()
+    if (ASKS_YOU.test(step)) return undefined
+    // A line that introduces what follows ("Let me summarize:") promises nothing.
+    if (NOT_A_PROMISE.test(step) || /:\s*$/.test(step)) continue
+    if (WAITS_ON_YOU.test(line)) return { kind: 'waiting', step }
+    return { kind: 'promise', step }
+  }
+  return undefined
+}
+
 /** Split a finished round into what the model said and what it asked for. */
 export const splitWork = (text: string): SplitWork => {
   const lines = String(text ?? '').split('\n')
