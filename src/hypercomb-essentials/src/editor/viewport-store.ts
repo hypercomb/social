@@ -296,15 +296,26 @@ export const writeViewportAt = async (
     // tab) can remove this same sig between our getFileHandle and close,
     // throwing NotFoundError. One retry re-derives a fresh handle — a
     // second collision is left to the next debounced commit.
+    let pool = dir
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const fh = await dir.getFileHandle(sig, { create: true })
+        const fh = await pool.getFileHandle(sig, { create: true })
         const writable = await fh.createWritable()
         try { await writable.write(body) }
         finally { await writable.close() }
         return next
       } catch (err) {
         if (attempt === 1 || !(err instanceof DOMException) || err.name !== 'NotFoundError') throw err
+        // The cached POOL handle may be what is stale: the directory was
+        // removed after it was cached, and every later commit failed against
+        // it for the life of the tab (1153 times in one break log). Forget it
+        // and resolve the pool again — created — before the retry.
+        _dir = null
+        const fresh = await viewportPool()
+        // A failed re-resolve is not remembered: the next commit tries again
+        // rather than finding a cached null and dropping every later frame.
+        if (!fresh) { _dir = null; throw err }
+        pool = fresh
       }
     }
     return next
