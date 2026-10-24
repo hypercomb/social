@@ -4,7 +4,9 @@
 //   node scripts/bridge/_hosting-site/generate.cjs --dry                 reads only; prints every page and every sentence it would say; writes nothing
 //   node scripts/bridge/_hosting-site/generate.cjs --build-only          writes the page files to <out>/pages, says nothing to the hive
 //   node scripts/bridge/_hosting-site/generate.cjs                       writes the page files, then says every page that changed into the hive
-//   ... --out <dir>                                                      where the page files go (default <os temp>/hosting-site); pages land in <dir>/pages
+//   ... --out <dir>                                                      where the page files go (default <os temp>/<site>-site); pages land in <dir>/pages
+//   ... --root <route>                                                   the creation to build (default /hosting). A root with no children is ONE page:
+//                                                                        it needs no plan card (e.g. --root /didyouknow, scripts/bridge/_didyouknow-site)
 //   ... --notes <file.json>                                              renders an amendment before it is filed ({"/hosting": ["note", ...], ...}); --dry or --build-only only
 //
 // Run from the monorepo root (src/), where scripts/bridge/say.cjs lives. The
@@ -83,13 +85,17 @@ const path = require('path')
 const crypto = require('crypto')
 const { spawnSync } = require('child_process')
 
-const ROOT_ROUTE = '/hosting'
+const ARGV = process.argv.slice(2)
+const ROOT_AT = ARGV.indexOf('--root')
+const ROOT_ROUTE = ROOT_AT >= 0 && /^\/[a-z0-9][a-z0-9-]*$/.test(ARGV[ROOT_AT + 1] ?? '') ? ARGV[ROOT_AT + 1] : '/hosting'
+/** The creation's own name: names the output folder and the build revision. */
+const SITE = ROOT_ROUTE.slice(1)
 const HERE = __dirname
 const SHARED = { chrome: path.join(HERE, 'chrome.css'), plans: path.join(HERE, 'plans.js') }
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
 
-const args = process.argv.slice(2)
+const args = ARGV
 const flag = (name) => args.includes(name)
 const option = (name, fallback) => {
   const at = args.indexOf(name)
@@ -98,11 +104,11 @@ const option = (name, fallback) => {
 const DRY = flag('--dry')
 const BUILD_ONLY = flag('--build-only')
 const NOTES_FILE = option('--notes', '')
-const OUT = path.resolve(option('--out', path.join(os.tmpdir(), 'hosting-site')))
+const OUT = path.resolve(option('--out', path.join(os.tmpdir(), `${SITE}-site`)))
 const PAGES = path.join(OUT, 'pages')
 const SAY = [path.join(HERE, '..', 'say.cjs'), path.resolve('scripts', 'bridge', 'say.cjs')].find((p) => fs.existsSync(p))
 
-const USAGE = 'usage: generate.cjs [--dry | --build-only] [--out <dir>] [--notes <file.json>]'
+const USAGE = 'usage: generate.cjs [--dry | --build-only] [--root </route>] [--out <dir>] [--notes <file.json>]'
 
 class Refusal extends Error {}
 const refuse = (route, why) => { throw new Refusal(`${route}: ${why}`) }
@@ -413,7 +419,7 @@ const planCards = (html) => `  <ol class="hp-plans" role="list">\n${html.join('\
 // -- a page ----------------------------------------------------------------
 
 function render(route, notes, pass) {
-  if (!notes || !notes.length) refuse(route, 'no notes: every tile under /hosting needs a page, or a website default on /hosting strands it')
+  if (!notes || !notes.length) refuse(route, `no notes: every tile under ${ROOT_ROUTE} needs a page, or a website default on ${ROOT_ROUTE} strands it`)
   const isRoot = route === ROOT_ROUTE
   const items = notes.map((note, i) => classify(note, i, { isRoot, last: i === notes.length - 1, pass }))
   const links = []
@@ -549,7 +555,7 @@ function render(route, notes, pass) {
         time: ctx.text(p.card.time),
       })))
     }
-    if (!own.length && !listed) refuse(route, 'carries no plan card')
+    if (!own.length && !listed && pass.pages.size > 1) refuse(route, 'carries no plan card')
   }
 
   const rootPage = pass.pages.get(ROOT_ROUTE)
@@ -626,11 +632,12 @@ const filesOf = (page) => [path.join(PAGES, page.file), SHARED.chrome, ...(page.
 // -- the run ---------------------------------------------------------------
 
 async function main() {
-  const known = new Set(['--dry', '--build-only', '--notes', '--out'])
+  const known = new Set(['--dry', '--build-only', '--notes', '--out', '--root'])
   for (let i = 0; i < args.length; i++) {
     if (!known.has(args[i])) { console.error(USAGE); return 2 }
-    if (args[i] === '--notes' || args[i] === '--out') i++
+    if (args[i] === '--notes' || args[i] === '--out' || args[i] === '--root') i++
   }
+  if (ROOT_AT >= 0 && ROOT_ROUTE !== ARGV[ROOT_AT + 1]) { console.error(`${USAGE}\n--root names one top-level tile, like /didyouknow`); return 2 }
   if (DRY && BUILD_ONLY) { console.error(`${USAGE}\n--dry writes nothing; --build-only writes the page files: pick one`); return 2 }
   if (NOTES_FILE && !DRY && !BUILD_ONLY) {
     throw new Refusal(`--notes: a page said into the hive is made from the hive's own notes; file the amendment first (file on /<route>: ...), or add --dry / --build-only to read it`)
@@ -668,7 +675,7 @@ async function main() {
     }
     const root = await wears(ROOT_ROUTE)
     if (root.view !== 'website') { changes++; walk(ROOT_ROUTE); console.log(`would say   opens as website    (it opens as ${root.view || 'hexagons'} now)`) }
-    if (changes) { walk(ROOT_ROUTE); console.log(`would say   builds hosting-pages-${passSig.slice(0, 12)}`) }
+    if (changes) { walk(ROOT_ROUTE); console.log(`would say   builds ${SITE}-pages-${passSig.slice(0, 12)}`) }
     if (changes) console.log(`would say   go ${routeOf(stood)}    (where the hive stands now)`)
     console.log(`\ndry: ${changes ? `${changes} change(s) would be said` : 'every tile already wears this build'}; nothing was written`)
     return 0
@@ -711,11 +718,11 @@ async function main() {
     if (changed) {
       moved = true
       await goTo(ROOT_ROUTE)
-      const heard = say(`builds hosting-pages-${passSig.slice(0, 12)}`)
+      const heard = say(`builds ${SITE}-pages-${passSig.slice(0, 12)}`)
       if (!/builds\.(saved|unchanged)|Recorded "|Nothing changed since/.test(heard)) {
         throw new Refusal(`${ROOT_ROUTE}: the builds word did not record the pass (heard: ${heard.split('\n').pop()})`)
       }
-      console.log(`wrote  ${ROOT_ROUTE} build revision hosting-pages-${passSig.slice(0, 12)}`)
+      console.log(`wrote  ${ROOT_ROUTE} build revision ${SITE}-pages-${passSig.slice(0, 12)}`)
     }
     console.log(`\n${changed ? `${changed} change(s) said` : 'nothing to say: every tile already wears this build'}`)
   } finally {
