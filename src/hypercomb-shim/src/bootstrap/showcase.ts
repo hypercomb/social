@@ -23,35 +23,83 @@ const SIG = /^[a-f0-9]{64}$/
 const HOSTNAME = /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/
 const LOOPBACK = /^(?:[a-z0-9-]+\.)*localhost(?::\d{1,5})?$/
 
+/** One publisher of a site: its key, the name the ledger gives it, the head it signed. */
+export type LedgerPublisher = { readonly pubkey: string; readonly label: string; readonly head: string }
+
 /** One published site in the ledger, as far as a showcase needs it. */
 export type LedgerSite = {
   readonly title: string
   readonly lineage: string
   /** Every address the site answers at: its own host, then its bindings. */
   readonly hosts: readonly string[]
-  readonly pubkey: string
-  /** The verified head; '' for a domain whose root has published nothing. */
-  readonly head: string
+  /** Every publisher holding a verified head, the primary first; none for a
+   *  domain whose root has published nothing. */
+  readonly publishers: readonly LedgerPublisher[]
 }
 
-export type ShowcaseTile = {
+/** Somebody who owns a publish: their key, and the name the ledger gives them. */
+export type Owner = { readonly pubkey: string; readonly label: string }
+
+/** ONE PUBLISH: one owner's signed head, open at one address on one domain. */
+export type Publish = {
+  readonly zone: string
   readonly kind: 'hive' | 'creation'
-  /** One tile per key in a band: a publisher's lineage, or a creation's name. */
-  readonly key: string
+  /** The name it goes by, folded — every publish of one name is one tile. */
+  readonly name: string
   readonly title: string
-  /** Where it lives, said under its name. */
+  readonly head: string
+  readonly owner: Owner
   readonly address: string
   readonly href: string
-  /** The signature its picture is read from, and the seed of its cover. */
-  readonly head: string
   /** The door its picture is asked from; a creation wears its cover. */
+  readonly route?: string
+  /** Where it was read: the ledger's verified heads lead, a domain's pool follows. */
+  readonly source: 'ledger' | 'pool'
+}
+
+export type Place = { readonly zone: string; readonly address: string; readonly href: string
+  readonly source: 'ledger' | 'pool' }
+
+/** One version of a name: a head, everyone who publishes exactly it, and every
+ *  place it opens. */
+export type Version = {
+  readonly head: string
+  readonly title: string
+  readonly owners: readonly Owner[]
+  /** This domain's place first. */
+  readonly places: readonly Place[]
   readonly route?: string
 }
 
-export type ShowcaseBand = { readonly zone: string; readonly tiles: readonly ShowcaseTile[] }
+/** A NAME, AS THE PAGE SHOWS IT: one tile, every version behind it. */
+export type Aggregate = {
+  /** `<kind>:<folded name>` — one per page. */
+  readonly key: string
+  readonly kind: 'hive' | 'creation'
+  readonly title: string
+  /** This domain's version first, then the rest by how widely they open. */
+  readonly versions: readonly Version[]
+  /** How many people own it, across every version. */
+  readonly owners: number
+  /** Every domain it opens on. */
+  readonly zones: readonly string[]
+  /** The one band it is drawn in: this domain when it opens here, else the
+   *  first band that has it. */
+  readonly home: string
+}
 
+export type Band = {
+  readonly zone: string
+  /** The tiles drawn in this band. */
+  readonly tiles: readonly Aggregate[]
+  /** Every name open on this domain, drawn here or in a band above. */
+  readonly open: readonly Aggregate[]
+}
+
+/** Text from outside, as plain words: no bidi or format characters that could
+ *  make one owner's name read as another's. */
 const text = (value: unknown, max: number): string =>
-  typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, max) : ''
+  typeof value === 'string' ? value.replace(/\p{Cf}/gu, '').trim().replace(/\s+/g, ' ').slice(0, max) : ''
 
 export const matchesDomain = (host: string, domain: string): boolean =>
   host === domain || host.endsWith(`.${domain}`)
@@ -88,75 +136,178 @@ export const parseLedger = (raw: unknown): LedgerSite[] => {
     if (!hosts.length) continue
     const publishers = (Array.isArray(site['publishers']) ? site['publishers'] as unknown[] : [])
       .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
-      .filter(row => typeof row['head'] === 'string' && SIG.test(row['head']))
-    const publisher = publishers.find(row => row['primary'] === true) ?? publishers[0]
+      .filter(row => typeof row['head'] === 'string' && SIG.test(row['head'])
+        && typeof row['pubkey'] === 'string' && SIG.test(row['pubkey']))
+      .sort((a, b) => Number(b['primary'] === true) - Number(a['primary'] === true))
     const lineage = text(site['lineage'], 200)
-    const pubkey = publisher?.['pubkey']
     out.push({
       title: text(site['title'], 60) || lineage || hosts[0]!,
       lineage,
       hosts: [...new Set(hosts)],
-      pubkey: typeof pubkey === 'string' && SIG.test(pubkey) ? pubkey : '',
-      head: typeof publisher?.['head'] === 'string' ? publisher['head'] : '',
+      publishers: publishers.map(row => ({ pubkey: row['pubkey'] as string, label: text(row['label'], 40),
+        head: row['head'] as string })),
     })
   }
   return out
 }
 
-const byTitle = (a: ShowcaseTile, b: ShowcaseTile): number =>
-  (a.kind === b.kind ? 0 : a.kind === 'hive' ? -1 : 1) || a.title.localeCompare(b.title)
+/** A name folded the way a molecule address folds: case and accents never
+ *  make two names of one. */
+export const foldName = (value: string): string =>
+  value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().trim()
 
-/** One band per root domain, this door's own first: every published hive open
- *  on that domain, at the address it answers there. A hive two domains both
- *  open is shown under each — each domain is its own place. */
-export const ledgerBands = (sites: readonly LedgerSite[], self: string): ShowcaseBand[] => {
-  const zones = rootZones([self, ...sites.flatMap(site => site.hosts)])
-  const bands = zones.map(zone => {
-    const tiles = new Map<string, ShowcaseTile>()
+/** A tile's name is the last word of its lineage: games/arkanoid is arkanoid. */
+const nameOf = (lineage: string, title: string): string =>
+  foldName(lineage.split('/').filter(Boolean).pop() || title)
+
+/** The domains a page draws, this door's own first, the rest by name. */
+export const bandZones = (sites: readonly LedgerSite[], self: string, sources: readonly string[] = []): string[] =>
+  rootZones([self, ...sites.flatMap(site => site.hosts), ...sources])
+    .sort((a, b) => (a === self ? -1 : b === self ? 1 : a.localeCompare(b)))
+
+/** Every publish the ledger names, at the address it answers on each domain. */
+export const ledgerPublishes = (sites: readonly LedgerSite[], zones: readonly string[]): Publish[] => {
+  const out: Publish[] = []
+  for (const zone of zones) {
     for (const site of sites) {
-      if (!site.head) continue
       const host = site.hosts.find(row => row !== zone && matchesDomain(row, zone))
         ?? site.hosts.find(row => row === zone)
-      const key = `${site.pubkey}:${site.lineage}`
-      if (!host || tiles.has(key)) continue
-      const origin = `${doorOrigin(host)}/`
-      tiles.set(key, { kind: 'hive', key, title: site.title, address: host, href: origin, head: site.head, route: origin })
+      if (!host) continue
+      const href = `${doorOrigin(host)}/`
+      for (const publisher of site.publishers) {
+        out.push({ zone, kind: 'hive', name: nameOf(site.lineage, site.title), title: site.title,
+          head: publisher.head, owner: { pubkey: publisher.pubkey, label: publisher.label },
+          address: host, href, route: href, source: 'ledger' })
+      }
     }
-    return { zone, tiles: [...tiles.values()].sort(byTitle) }
-  })
-  return orderBands(bands, self)
+  }
+  return out
 }
 
-/** This door's own band first, the rest by name. */
-export const orderBands = (bands: readonly ShowcaseBand[], self: string): ShowcaseBand[] =>
-  [...bands].sort((a, b) => (a.zone === self ? -1 : b.zone === self ? 1 : a.zone.localeCompare(b.zone)))
-
-/** A band with what its domain's public pools offer: hives the ledger did not
- *  already name, then its shared creations. */
-export const withShared = (band: ShowcaseBand, offers: readonly HostOffering[],
-  creations: readonly HostCreation[]): ShowcaseBand => {
-  const tiles = new Map(band.tiles.map(tile => [tile.key, tile]))
+/** What a domain's public pools share, as publishes on that domain — and only
+ *  at addresses under that domain: a pool speaks for its own domain, never for
+ *  a place on someone else's. */
+export const sharedPublishes = (zone: string, offers: readonly HostOffering[],
+  creations: readonly HostCreation[]): Publish[] => {
+  const out: Publish[] = []
   for (const offer of offers) {
-    const key = `${offer.pubkey}:${offer.lineage}`
-    if (tiles.has(key) || !SIG.test(offer.head)) continue
+    if (!SIG.test(offer.head)) continue
     let route: URL
     try { route = new URL('/', offer.route) } catch { continue }
-    tiles.set(key, { kind: 'hive', key, title: offer.title, address: route.host, href: route.href,
-      head: offer.head, route: route.href })
+    if (!matchesDomain(route.host, zone)) continue
+    const title = text(offer.title, 60) || offer.lineage
+    out.push({ zone, kind: 'hive', name: nameOf(offer.lineage, title), title, head: offer.head,
+      owner: { pubkey: offer.pubkey, label: '' }, address: route.host, href: route.href, route: route.href, source: 'pool' })
   }
-  // A creation is not a place: its tile opens the signed creation itself,
-  // never the domain's root, which in this door's own band is this page.
+  // A creation is not a place: it opens the signed creation itself, never the
+  // domain's root, which in this door's own band is this page.
   for (const creation of creations) {
-    const key = `creation:${creation.pubkey}:${creation.meaning}:${creation.key}`
-    if (tiles.has(key) || !SIG.test(creation.head) || !HOSTNAME.test(creation.host)) continue
-    tiles.set(key, { kind: 'creation', key, title: creation.title, address: creation.host,
-      href: `${doorOrigin(creation.host)}/${creation.head}`, head: creation.head })
+    if (!SIG.test(creation.head) || !HOSTNAME.test(creation.host) || !matchesDomain(creation.host, zone)) continue
+    out.push({ zone, kind: 'creation', name: foldName(`${creation.meaning}:${creation.key}`),
+      title: text(creation.title, 60) || creation.key, head: creation.head, owner: { pubkey: creation.pubkey, label: '' },
+      address: creation.host, href: `${doorOrigin(creation.host)}/${creation.head}`, source: 'pool' })
   }
-  return { zone: band.zone, tiles: [...tiles.values()].sort(byTitle) }
+  return out
 }
 
-export const tileMatches = (tile: ShowcaseTile, zone: string, terms: readonly string[]): boolean =>
-  terms.every(term => [tile.title, tile.address, zone].some(value => value.toLowerCase().includes(term)))
+const byTitle = (a: Aggregate, b: Aggregate): number =>
+  (a.kind === b.kind ? 0 : a.kind === 'hive' ? -1 : 1) || a.title.localeCompare(b.title)
+
+/**
+ * EVERY PUBLISH OF ONE NAME IS ONE TILE (jwize 2026-10-24: "an aggregate so we
+ * don't duplicate tiles on the home pages … your own version pinned to the
+ * top … no need to include stuff that is already identical but the count can
+ * be incremented for how many people own that publish location").
+ *
+ * Exactly identical publishes — one head — are one version, however many
+ * domains open it and however many people own it; a different head is a
+ * version of its own. This domain's version is pinned first, and the tile is
+ * drawn once: in this domain's band when it opens here, else in the first
+ * band that has it.
+ *
+ * TRUST ORDER. A head is public: anyone can name one in their own index. So
+ * what the ledger verified leads — its places before any pool's, its versions
+ * before a pool-only one, its domains before a pool's when choosing the band —
+ * and a pool that claims a head only adds its own place and its own owner.
+ */
+export const aggregate = (publishes: readonly Publish[], zones: readonly string[], self: string): Band[] => {
+  type Gathering = { head: string; title: string; owners: Map<string, Owner>; places: Map<string, Place>
+    route?: string; ledger: boolean }
+  const groups = new Map<string, Publish[]>()
+  for (const publish of publishes) {
+    const key = `${publish.kind}:${publish.name}`
+    const group = groups.get(key)
+    if (group) group.push(publish)
+    else groups.set(key, [publish])
+  }
+  const here = (places: readonly Place[]): boolean => places.some(place => place.zone === self)
+  const aggregates: Aggregate[] = []
+  for (const [key, group] of groups) {
+    const byHead = new Map<string, Gathering>()
+    // The ledger's publishes first, so a pool never names a version's title or picture door.
+    for (const publish of [...group].sort((a, b) => Number(b.source === 'ledger') - Number(a.source === 'ledger'))) {
+      let version = byHead.get(publish.head)
+      if (!version) byHead.set(publish.head, version = { head: publish.head, title: publish.title,
+        owners: new Map(), places: new Map(), route: publish.route, ledger: false })
+      version.ledger ||= publish.source === 'ledger'
+      const known = version.owners.get(publish.owner.pubkey)
+      if (!known || (!known.label && publish.owner.label)) version.owners.set(publish.owner.pubkey, publish.owner)
+      const place = version.places.get(publish.address)
+      if (!place || (place.source === 'pool' && publish.source === 'ledger')) {
+        version.places.set(publish.address, { zone: publish.zone, address: publish.address, href: publish.href,
+          source: publish.source })
+      }
+      version.route ??= publish.route
+    }
+    const ledgerFirst = (a: { source: string }, b: { source: string }): number =>
+      Number(b.source === 'ledger') - Number(a.source === 'ledger')
+    const gathered = [...byHead.values()]
+    const versions: Version[] = gathered.map(version => ({
+      head: version.head,
+      title: version.title,
+      owners: [...version.owners.values()],
+      places: [...version.places.values()].sort((a, b) =>
+        Number(b.zone === self) - Number(a.zone === self) || ledgerFirst(a, b) || a.address.localeCompare(b.address)),
+      ...(version.route ? { route: version.route } : {}),
+    })).sort((a, b) => Number(here(b.places)) - Number(here(a.places))
+      || Number(byHead.get(b.head)!.ledger) - Number(byHead.get(a.head)!.ledger)
+      || b.places.length - a.places.length || a.head.localeCompare(b.head))
+    const opens = [...new Set(group.map(publish => publish.zone))]
+    const verified = new Set(group.filter(publish => publish.source === 'ledger').map(publish => publish.zone))
+    aggregates.push({
+      key,
+      kind: group[0]!.kind,
+      title: versions[0]!.title,
+      versions,
+      owners: new Set(versions.flatMap(version => version.owners.map(owner => owner.pubkey))).size,
+      zones: opens,
+      home: opens.includes(self) ? self
+        : zones.find(zone => verified.has(zone)) ?? zones.find(zone => opens.includes(zone)) ?? opens[0]!,
+    })
+  }
+  return zones.map(zone => ({
+    zone,
+    tiles: aggregates.filter(entry => entry.home === zone).sort(byTitle),
+    open: aggregates.filter(entry => entry.zones.includes(zone)).sort(byTitle),
+  }))
+}
+
+/** A search finds a tile by any name, address, domain or owner behind it. */
+export const aggregateMatches = (entry: Aggregate, terms: readonly string[]): boolean => {
+  if (!terms.length) return true
+  const words = [entry.title, ...entry.zones, ...entry.versions.flatMap(version => [version.title,
+    ...version.places.map(place => place.address), ...version.owners.map(owner => owner.label)])]
+    .join(' ').toLowerCase()
+  return terms.every(term => words.includes(term))
+}
+
+/** Who owns a version, in a few words: names where the ledger gives them, and
+ *  otherwise enough of the key that a ground-out look-alike cannot pass. */
+export const ownersLabel = (owners: readonly Owner[]): string => {
+  const names = owners.map(owner => owner.label || `${owner.pubkey.slice(0, 16)}…`)
+  if (names.length <= 2) return names.join(' and ')
+  return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`
+}
 
 /** The colours a hive with no picture wears — warm, deep and never flat. */
 const COVERS: readonly (readonly [string, string])[] = [
@@ -205,7 +356,10 @@ export const readLedger = async (): Promise<LedgerSite[]> => {
 const svg = (body: string): string =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`
 
-const ICONS: Record<LinkIcon | 'search' | 'arrow' | 'chevron' | 'hive' | 'sparkle' | 'heart' | 'share' | 'globe' | 'link', string> = {
+const ICONS: Record<LinkIcon | 'search' | 'arrow' | 'chevron' | 'hive' | 'sparkle' | 'heart' | 'share' | 'globe' | 'link'
+  | 'people' | 'close', string> = {
+  people: svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3.3 2.8-5.2 5.5-5.2s4.9 1.9 5.5 5.2"/><circle cx="16.8" cy="9.5" r="2.6"/><path d="M15.6 14.1c2.6.2 4.4 1.9 4.9 4.9"/>'),
+  close: svg('<path d="m6 6 12 12M18 6 6 18"/>'),
   search: svg('<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>'),
   arrow: svg('<path d="M7 17 17 7M9 7h8v8"/>'),
   chevron: svg('<path d="m6 9 6 6 6-6"/>'),
@@ -326,7 +480,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   nothing.textContent = 'Nothing matches your search.'
 
   // ── what is known ──
-  let ledgerBandsNow: ShowcaseBand[] = orderBands([{ zone: options.self, tiles: [] }], options.self)
+  let sites: readonly LedgerSite[] = []
   let ledgerRead = false
   const shared = new Map<string, { offers: readonly HostOffering[]; creations: readonly HostCreation[] }>()
   const asked = new Set<string>()
@@ -362,13 +516,22 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     waiting.push(head)
     drainPictures()
   }
-  const wear = (art: HTMLElement, tile: ShowcaseTile): void => {
-    let set = wearers.get(tile.head)
-    if (!set) wearers.set(tile.head, set = new Set())
+  const wear = (art: HTMLElement, head: string, route?: string): void => {
+    let set = wearers.get(head)
+    if (!set) wearers.set(head, set = new Set())
     set.add(art)
-    const url = pictures.get(tile.head)
+    const url = pictures.get(head)
     if (url) wearPicture(art, url, 'hex-picture')
-    else askPicture(tile.head, tile.route)
+    else askPicture(head, route)
+  }
+  /** A small hexagon wearing one version's picture. */
+  const miniOf = (head: string, route?: string): HTMLElement => {
+    const mini = el('span', 'mini')
+    const art = el('span', 'hex-art cover')
+    dressCover(art, head)
+    wear(art, head, route)
+    mini.append(art)
+    return mini
   }
 
   // ── the hero's comb: the mark in the middle, hives around it. A slot that
@@ -387,29 +550,32 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     mosaic.append(cell)
     slots.push({ art, head: '', pictured: false })
   }
-  const fillMosaic = (tiles: readonly ShowcaseTile[]): void => {
+  /** The lead heads the comb may wear; a picture of any other version waits for its sheet. */
+  let mosaicHeads = new Set<string>()
+  const fillMosaic = (heads: readonly string[]): void => {
     // A hive no longer published leaves the comb with the rest of the page.
-    const live = new Set(tiles.map(tile => tile.head))
+    const live = new Set(heads)
+    mosaicHeads = live
     for (const slot of slots) {
       if (!slot.head || live.has(slot.head)) continue
       slot.art.replaceChildren()
       slot.art.classList.remove('has-picture')
       Object.assign(slot, { head: '', pictured: false })
     }
-    // A hive open on several domains is one hive: it takes one slot.
     const shown = new Set(slots.map(slot => slot.head))
-    const fresh = tiles.filter(tile => !shown.has(tile.head) && !!shown.add(tile.head))
+    const fresh = heads.filter(head => !shown.has(head) && !!shown.add(head))
     for (const slot of slots) {
       if (slot.head) continue
-      const tile = fresh.shift()
-      if (!tile) break
-      slot.head = tile.head
-      dressCover(slot.art, tile.head)
-      const url = pictures.get(tile.head)
+      const head = fresh.shift()
+      if (!head) break
+      slot.head = head
+      dressCover(slot.art, head)
+      const url = pictures.get(head)
       if (url) { wearPicture(slot.art, url, 'hex-picture'); slot.pictured = true }
     }
   }
   function placeInMosaic(head: string, url: string): void {
+    if (!mosaicHeads.has(head)) return
     const held = slots.find(slot => slot.head === head)
     const slot = held ?? slots.find(row => !row.pictured)
     if (!slot || slot.pictured) return
@@ -423,32 +589,153 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     slot.pictured = true
   }
 
-  // ── tiles and bands, each drawn once and kept, so a picture never flickers ──
-  const tileViews = new Map<string, HTMLAnchorElement>()
-  const tileView = (zone: string, tile: ShowcaseTile): HTMLAnchorElement => {
-    const id = `${zone}|${tile.key}|${tile.head}`
-    const found = tileViews.get(id)
-    if (found) return found
-    const link = el('a', `hex hex-${tile.kind}`)
-    link.href = tile.href
-    link.title = `${tile.title} · ${tile.address}`
-    const art = el('span', 'hex-art cover')
-    dressCover(art, tile.head)
-    wear(art, tile)
-    const label = el('span', 'hex-label')
-    if (tile.kind === 'creation') {
-      const kind = el('span', 'hex-kind')
-      kind.append(iconOf('sparkle'))
-      label.append(kind)
+  // ── a tile's versions: this domain's first, every other version after it,
+  //    identical copies counted rather than listed ──
+  const backdrop = el('div', 'versions-backdrop')
+  backdrop.hidden = true
+  const sheet = el('div', 'versions')
+  sheet.setAttribute('role', 'dialog')
+  sheet.setAttribute('aria-modal', 'true')
+  sheet.setAttribute('aria-labelledby', 'versions-title')
+  backdrop.append(sheet)
+  // In the hero, not the bands: a band re-orders its own children.
+  hero.append(backdrop)
+  let opener: HTMLElement | null = null
+  const stops = (): HTMLElement[] => [...sheet.querySelectorAll<HTMLElement>('a[href], button')]
+  const activeHere = (): Element | null => (sheet.getRootNode() as ShadowRoot | Document).activeElement
+  // While the sheet is open, Escape and Tab belong to it wherever focus has
+  // wandered: the listeners sit on the document, not on the sheet.
+  const onKey = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeVersions(); return }
+    if (event.key !== 'Tab') return
+    const all = stops()
+    const first = all[0]
+    const last = all[all.length - 1]
+    const active = activeHere()
+    const inside = !!active && sheet.contains(active)
+    if (!inside || (event.shiftKey && active === first) || (!event.shiftKey && active === last)) {
+      event.preventDefault()
+      ;(event.shiftKey ? last : first)?.focus()
     }
-    const name = el('span', 'hex-name')
-    name.textContent = tile.title
-    const address = el('span', 'hex-address')
-    address.textContent = tile.address
-    label.append(name, address)
-    link.append(art, label)
-    tileViews.set(id, link)
-    return link
+  }
+  const onFocus = (event: FocusEvent): void => {
+    const target = event.composedPath()[0]
+    if (target instanceof Node && !sheet.contains(target)) stops()[0]?.focus()
+  }
+  const closeVersions = (): void => {
+    document.removeEventListener('keydown', onKey, true)
+    document.removeEventListener('focusin', onFocus, true)
+    backdrop.hidden = true
+    sheet.replaceChildren()
+    // The tile is kept, so it is still on the page to take focus back.
+    if (opener?.isConnected) opener.focus()
+    opener = null
+  }
+  backdrop.addEventListener('click', event => { if (event.target === backdrop) closeVersions() })
+  const openVersions = (entry: Aggregate, from: HTMLElement): void => {
+    opener = from
+    const lead = entry.versions[0]!
+    const head = el('header', 'versions-head')
+    const titles = el('span', 'versions-titles')
+    const heading = el('h3')
+    heading.id = 'versions-title'
+    heading.textContent = entry.title
+    const meta = el('span', 'band-meta')
+    const domains = new Set(entry.versions.flatMap(version => version.places.map(place => place.zone))).size
+    for (const [icon, words] of [
+      ['people', count(entry.owners, 'owner', 'owners')],
+      ['hive', count(entry.versions.length, 'version', 'versions')],
+      ['globe', count(domains, 'domain', 'domains')],
+    ] as const) {
+      const row = el('span')
+      row.append(iconOf(icon), document.createTextNode(words))
+      meta.append(row)
+    }
+    titles.append(heading, meta)
+    const close = el('button', 'versions-close')
+    close.type = 'button'
+    close.setAttribute('aria-label', 'Close')
+    close.append(iconOf('close'))
+    close.addEventListener('click', closeVersions)
+    head.append(miniOf(lead.head, lead.route), titles, close)
+    const list = el('ol', 'version-list')
+    for (const [index, version] of entry.versions.entries()) {
+      const onThisDomain = version.places.some(place => place.zone === options.self)
+      const row = el('li', index === 0 && onThisDomain ? 'version pinned' : 'version')
+      const about = el('span', 'version-words')
+      const tag = el('span', 'version-tag')
+      tag.textContent = onThisDomain ? 'On this domain' : entry.versions.length > 1 ? 'Another version' : 'Published'
+      const who = el('b', 'version-who')
+      who.textContent = ownersLabel(version.owners)
+      const what = el('span', 'version-what')
+      const zones = new Set(version.places.map(place => place.zone)).size
+      what.textContent = `${version.head.slice(0, 12)}… · ${count(zones, 'domain', 'domains')}`
+        + (version.owners.length > 1 ? ` · ${count(version.owners.length, 'owner', 'owners')}` : '')
+      about.append(tag, who, what)
+      const place = version.places[0]!
+      const visit = el('a', 'version-visit')
+      visit.href = place.href
+      const words = el('span', 'version-visit-label')
+      words.textContent = entry.kind === 'creation' ? 'Inspect' : `Visit ${place.address}`
+      visit.append(words, iconOf('arrow'))
+      row.append(miniOf(version.head, version.route), about, visit)
+      list.append(row)
+    }
+    sheet.replaceChildren(head, list)
+    if (backdrop.hidden) {
+      document.addEventListener('keydown', onKey, true)
+      document.addEventListener('focusin', onFocus, true)
+    }
+    backdrop.hidden = false
+    ;(list.querySelector('a') as HTMLElement | null)?.focus()
+  }
+
+  // ── tiles and bands: ONE button per name, kept and updated in place — a pool
+  //    arriving never swaps a button out from under focus or an open sheet ──
+  type TileView = { tile: HTMLButtonElement; art: HTMLElement; name: HTMLElement; address: HTMLElement
+    owners: HTMLElement; head: string; entry: Aggregate }
+  const tileViews = new Map<string, TileView>()
+  const tileView = (entry: Aggregate): HTMLButtonElement => {
+    const lead = entry.versions[0]!
+    let view = tileViews.get(entry.key)
+    if (!view) {
+      const tile = el('button', `hex hex-${entry.kind}`)
+      tile.type = 'button'
+      tile.setAttribute('aria-haspopup', 'dialog')
+      const art = el('span', 'hex-art cover')
+      const label = el('span', 'hex-label')
+      if (entry.kind === 'creation') {
+        const kind = el('span', 'hex-kind')
+        kind.append(iconOf('sparkle'))
+        label.append(kind)
+      }
+      const name = el('span', 'hex-name')
+      const address = el('span', 'hex-address')
+      label.append(name, address)
+      // How many people own this name — said on the tile only when it is more than one.
+      const owners = el('span', 'hex-owners')
+      tile.append(art, label, owners)
+      const made: TileView = { tile, art, name, address, owners, head: '', entry }
+      tile.addEventListener('click', () => openVersions(made.entry, tile))
+      tileViews.set(entry.key, view = made)
+    }
+    view.entry = entry
+    if (view.head !== lead.head) {
+      // A new lead version: its own cover and picture, and the old head forgets this box.
+      wearers.get(view.head)?.delete(view.art)
+      view.art.replaceChildren()
+      view.art.classList.remove('has-picture')
+      dressCover(view.art, lead.head)
+      wear(view.art, lead.head, lead.route)
+      view.head = lead.head
+    }
+    view.tile.title = `${entry.title} · ${lead.places[0]!.address}`
+    view.name.textContent = entry.title
+    view.address.textContent = lead.places[0]!.address
+    view.owners.hidden = entry.owners < 2
+    view.owners.setAttribute('aria-label', count(entry.owners, 'owner', 'owners'))
+    view.owners.replaceChildren(iconOf('people'), document.createTextNode(String(entry.owners)))
+    return view.tile
   }
 
   // THE COMB: as many hexes as fit, then one fewer, shifted half a hex — rows
@@ -490,7 +777,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   }) : null
 
   type BandView = { section: HTMLElement; badge: HTMLElement; meta: HTMLElement; comb: HTMLElement
-    empty: HTMLElement; toggle: HTMLButtonElement; badgeHeads: string | null }
+    empty: HTMLElement; also: HTMLElement; toggle: HTMLButtonElement; badgeHeads: string | null }
   const bandViews = new Map<string, BandView>()
   const bandView = (zone: string): BandView => {
     const found = bandViews.get(zone)
@@ -539,21 +826,24 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     const comb = el('div', 'comb')
     combs?.observe(comb)
     const empty = el('p', 'band-empty')
-    body.append(comb, empty)
+    const also = el('p', 'band-also')
+    body.append(comb, empty, also)
     section.append(head, body)
     // No join of heads is ever null, so the first paint always draws the badge.
-    const view = { section, badge, meta, comb, empty, toggle, badgeHeads: null }
+    const view = { section, badge, meta, comb, empty, also, toggle, badgeHeads: null }
     bandViews.set(zone, view)
     return view
   }
 
-  const bands = (): ShowcaseBand[] => {
-    const known = new Set(ledgerBandsNow.map(band => band.zone))
-    const added = rootZones([...known, ...options.sources]).filter(zone => !known.has(zone))
-    return [...ledgerBandsNow, ...added.map(zone => ({ zone, tiles: [] }))].map(band => {
-      const pools = shared.get(band.zone)
-      return pools ? withShared(band, pools.offers, pools.creations) : band
-    })
+  /** Every publish known now — the ledger's, then each domain's pools — one tile per name. */
+  const bands = (): Band[] => {
+    const zones = bandZones(sites, options.self, options.sources)
+    const publishes = ledgerPublishes(sites, zones)
+    // Only the pools of domains the page still draws: a refresh can drop one.
+    for (const [zone, pools] of shared) {
+      if (zones.includes(zone)) publishes.push(...sharedPublishes(zone, pools.offers, pools.creations))
+    }
+    return aggregate(publishes, zones, options.self)
   }
 
   // A domain's pools are asked once, three domains at a time.
@@ -578,27 +868,19 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     drainShared()
   }
 
-  const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
-
   function paint(): void {
     const terms = searchTerms(search.value)
     if (terms.join(' ') !== lastTerms) { lastTerms = terms.join(' '); collapsed.clear() }
     const all = bands()
     const sections: HTMLElement[] = []
-    const hives = new Set<string>()
-    let creations = 0
-    let domains = 0
     let matched = 0
     for (const band of all) {
       askShared(band.zone)
       const view = bandView(band.zone)
       const own = band.zone === options.self
-      const shown = band.tiles.filter(tile => tileMatches(tile, band.zone, terms))
-      const hiveCount = band.tiles.filter(tile => tile.kind === 'hive').length
-      const creationCount = band.tiles.length - hiveCount
-      for (const tile of band.tiles) if (tile.kind === 'hive') hives.add(tile.key)
-      creations += creationCount
-      if (band.tiles.length) domains++
+      const shown = band.tiles.filter(entry => aggregateMatches(entry, terms))
+      const hiveCount = band.open.filter(entry => entry.kind === 'hive').length
+      const creationCount = band.open.length - hiveCount
       matched += shown.length
       view.meta.replaceChildren()
       if (hiveCount) {
@@ -611,33 +893,40 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
         row.append(iconOf('sparkle'), document.createTextNode(count(creationCount, 'shared creation', 'shared creations')))
         view.meta.append(row)
       }
-      if (!band.tiles.length) {
+      if (!band.open.length) {
         const row = el('span')
         row.textContent = own && !ledgerRead ? 'Reading…' : 'Nothing shared yet'
         view.meta.append(row)
       }
-      // The badge: the first three hives, overlapping like cards in a fan.
-      const firsts = band.tiles.slice(0, 3)
-      const heads = firsts.map(tile => tile.head).join()
+      // The badge: the first three hives here — or, when every one is drawn in
+      // a band above, the first three it opens — overlapping like a fan of cards.
+      const firsts = (band.tiles.length ? band.tiles : band.open).slice(0, 3)
+      const heads = firsts.map(entry => entry.versions[0]!.head).join()
       if (heads !== view.badgeHeads) {
         view.badgeHeads = heads
-        view.badge.replaceChildren(...(firsts.length ? firsts : [null]).map(tile => {
-          const mini = el('span', 'mini')
-          const art = el('span', 'hex-art cover')
-          if (tile) { dressCover(art, tile.head); wear(art, tile) }
-          else art.append(iconOf('globe'))
-          mini.append(art)
-          return mini
-        }))
-        const lead = coverOf(firsts[0]?.head ?? band.zone)
+        view.badge.replaceChildren(...(firsts.length
+          ? firsts.map(entry => miniOf(entry.versions[0]!.head, entry.versions[0]!.route))
+          : [(() => { const mini = el('span', 'mini'); const art = el('span', 'hex-art cover');
+            art.append(iconOf('globe')); mini.append(art); return mini })()]))
+        const lead = coverOf(firsts[0]?.versions[0]?.head ?? band.zone)
         view.section.style.setProperty('--band-c1', lead.from)
         view.section.style.setProperty('--band-c2', lead.to)
       }
-      arrange(view.comb, shown.map(tile => tileView(band.zone, tile)))
+      arrange(view.comb, shown.map(entry => tileView(entry)))
+      // A name drawn in a band above is not drawn again: the band says so —
+      // in "hives" when that is all it holds, in "tiles" when creations are among them.
+      const above = band.open.length - band.tiles.length
+      const noun = (n: number): string => (creationCount ? (n === 1 ? 'tile' : 'tiles') : (n === 1 ? 'hive' : 'hives'))
       view.empty.hidden = shown.length > 0
       view.empty.textContent = terms.length ? 'Nothing here matches your search.'
-        : own && !ledgerRead ? 'Reading what lives here…' : `Nothing is shared on ${band.zone} yet.`
-      view.section.hidden = terms.length ? shown.length === 0 : !own && band.tiles.length === 0
+        : own && !ledgerRead ? 'Reading what lives here…'
+          : band.open.length === 1 ? `Its one ${noun(1)} is shown above.`
+            : band.open.length ? `All ${band.open.length} of its ${noun(2)} are shown above.`
+              : `Nothing is shared on ${band.zone} yet.`
+      view.also.hidden = !!terms.length || !shown.length || above <= 0
+      view.also.textContent = above === 1 ? `1 more of its ${noun(2)} is shown above.`
+        : `${above} more of its ${noun(2)} are shown above.`
+      view.section.hidden = terms.length ? shown.length === 0 : !own && band.open.length === 0
       const isOpen = terms.length ? shown.length > 0 && !collapsed.has(band.zone) : open === band.zone
       view.section.classList.toggle('open', isOpen)
       view.toggle.setAttribute('aria-expanded', String(isOpen))
@@ -651,10 +940,14 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     if (current.length !== order.length || current.some((node, index) => node !== order[index])) {
       bandsHost.replaceChildren(...order)
     }
+    const names = all.flatMap(band => band.tiles)
+    const hives = names.filter(entry => entry.kind === 'hive')
+    const creations = names.length - hives.length
+    const domains = all.filter(band => band.open.length).length
     stats.replaceChildren()
-    if (hives.size) {
+    if (hives.length) {
       const row = el('span')
-      row.append(iconOf('hive'), document.createTextNode(count(hives.size, 'hive', 'hives')))
+      row.append(iconOf('hive'), document.createTextNode(count(hives.length, 'hive', 'hives')))
       stats.append(row)
     }
     if (domains) {
@@ -667,7 +960,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
       row.append(iconOf('sparkle'), document.createTextNode(count(creations, 'shared creation', 'shared creations')))
       stats.append(row)
     }
-    fillMosaic(all.flatMap(band => band.tiles.filter(tile => tile.kind === 'hive')))
+    fillMosaic(hives.map(entry => entry.versions[0]!.head))
   }
 
   search.addEventListener('input', () => paint())
@@ -676,13 +969,15 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   let reads = 0
   const takeLedger = (ledger: Promise<readonly LedgerSite[]>): void => {
     const read = ++reads
-    void ledger.then(sites => {
+    void ledger.then(found => {
       if (read !== reads) return
-      ledgerBandsNow = ledgerBands(sites, options.self)
+      sites = found
       ledgerRead = true
-      // Every hive's picture is asked for at once — the comb at the top wants
-      // the ones that wear one, and the bands want them all.
-      for (const band of ledgerBandsNow) for (const tile of band.tiles) askPicture(tile.head, tile.route)
+      // Every version's picture is asked for at once — the comb at the top
+      // wants the ones that wear one, the tiles and their lists want them all.
+      for (const band of bands()) for (const entry of band.tiles) {
+        for (const version of entry.versions) askPicture(version.head, version.route)
+      }
       paint()
     })
   }
@@ -696,6 +991,8 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   }
   return { hero, bands: bandsHost, refresh }
 }
+
+const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 
 /** What a member does with a hive: start it, fill it, share it here. */
 export const memberSection = (zone: string, appHref: string): HTMLElement => {
@@ -887,6 +1184,8 @@ export const SHOWCASE_STYLE = `
 .band-visit.inside, .band-chevron, .band-toggle { display: none; }
 .band-body { padding-top: 1.4rem; }
 .band-empty { margin: 0; padding: 1.3rem 1.2rem; border: 1px dashed var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px); color: var(--md-on-surface-var); }
+.band-also { margin: .9rem 0 0; color: var(--md-on-surface-faint); font-size: .82rem; }
+.band-also[hidden] { display: none; }
 
 /* the honeycomb: rows of pointy-top hexagons, every other one shifted half a hex */
 .comb { --s: 10.4rem; --g: .6rem; display: grid; justify-content: start; min-width: 0; }
@@ -894,8 +1193,13 @@ export const SHOWCASE_STYLE = `
 .comb-row + .comb-row { margin-top: calc(var(--g) * .866 - var(--s) * .2887); }
 .comb-row.shift { padding-left: calc((var(--s) + var(--g)) / 2); }
 .hex { position: relative; display: block; flex: none; width: var(--s); height: calc(var(--s) * 1.1547); clip-path: var(--hex);
+  margin: 0; padding: 0; border: 0; border-radius: 0; font: inherit; color: inherit;
   background: linear-gradient(160deg, color-mix(in srgb, var(--gold-1) 75%, transparent), color-mix(in srgb, var(--gold-3) 55%, transparent));
   text-decoration: none; transition: background .25s; }
+.hex-owners { position: absolute; top: 11%; left: 50%; z-index: 3; display: inline-flex; align-items: center; gap: .25rem;
+  transform: translateX(-50%); padding: .15rem .45rem; border-radius: var(--hc-radius-pill, 999px);
+  background: rgb(14 8 2 / .62); color: #fff; font: 700 .7rem/1 var(--md-font-ui, Inter, system-ui, sans-serif); pointer-events: none; }
+.hex-owners svg { width: .85rem; height: .85rem; color: var(--gold-1); }
 .hex > .hex-art { inset: 2.5px; }
 .hex > .hex-art::after { content: ''; position: absolute; inset: 0; z-index: 2; transition: opacity .3s;
   background: linear-gradient(180deg, transparent 36%, rgb(14 8 2 / .55) 70%, rgb(14 8 2 / .82)); }
@@ -905,11 +1209,56 @@ export const SHOWCASE_STYLE = `
 .hex-address { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .8;
   font: 500 .58rem/1.3 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .03em; }
 .hex-kind svg { width: .95rem; height: .95rem; color: var(--gold-1); }
-.hex:hover { background: linear-gradient(160deg, var(--gold-1), var(--gold-2) 50%, var(--gold-3)); }
-.hex:hover .hex-picture, .hex:hover .hex-motif { transform: scale(1.07); }
-.hex:hover > .hex-art::after { opacity: .8; }
-.hex:focus-visible { outline: none; background: var(--md-primary); }
-.hex:focus-visible > .hex-art { inset: 4px; }
+/* only a real tile answers the pointer; the sample tile in the membership panel is a picture */
+button.hex { cursor: pointer; }
+button.hex:hover, button.hex:hover:not(:disabled) { background: linear-gradient(160deg, var(--gold-1), var(--gold-2) 50%, var(--gold-3)); }
+button.hex:hover .hex-picture, button.hex:hover .hex-motif { transform: scale(1.07); }
+button.hex:hover > .hex-art::after { opacity: .8; }
+button.hex:focus-visible { outline: none; background: var(--md-primary); }
+button.hex:focus-visible > .hex-art { inset: 4px; }
+.hex-owners[hidden] { display: none; }
+
+/* a tile's versions: this domain's pinned first, identical copies counted */
+.versions-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 1rem;
+  background: rgb(20 12 4 / .45); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+.versions-backdrop[hidden] { display: none; }
+.versions { box-sizing: border-box; width: min(36rem, 100%); max-height: min(82vh, 46rem); overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--md-primary) 30%, var(--md-outline-variant)); border-radius: var(--hc-radius-floating, 4px);
+  background: var(--md-surface-c-lowest); color: var(--md-on-surface); box-shadow: 0 2rem 4rem -1.5rem rgb(40 20 0 / .6);
+  text-align: left; animation: sc-rise .22s cubic-bezier(.2, 0, 0, 1); }
+@keyframes sc-rise { from { opacity: 0; transform: translateY(.6rem); } }
+.versions-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: .9rem; padding: .95rem 1rem .95rem 1.1rem;
+  border-bottom: 1px solid var(--md-outline-variant);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--md-primary) 10%, var(--md-surface-c-lowest)), var(--md-surface-c-lowest) 70%); }
+.versions-head .mini { width: 2.8rem; height: calc(2.8rem * 1.1547); flex: none; }
+.versions-titles { display: grid; gap: .3rem; min-width: 0; }
+.versions-head h3 { margin: 0; overflow-wrap: anywhere; color: var(--md-on-surface-strong);
+  font: 500 1.55rem/1.1 'Source Serif 4', Georgia, serif; letter-spacing: -.03em; }
+.versions-head .band-meta span { display: inline-flex; align-items: center; gap: .4rem; }
+.versions-head .band-meta svg { width: .9rem; height: .9rem; color: var(--md-primary); }
+.versions-close { flex: none; display: grid; place-items: center; width: 2.3rem; height: 2.3rem; margin-left: auto; padding: 0;
+  border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-on-surface-var); }
+.versions-close svg { width: 1.1rem; height: 1.1rem; }
+.versions-close:hover:not(:disabled) { background: var(--md-surface-c-high); color: var(--md-on-surface-strong); }
+.version-list { list-style: none; margin: 0; padding: .4rem .5rem .6rem; }
+.version-list .version { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .2rem .9rem;
+  padding: .8rem .65rem; border-top: 1px solid var(--md-outline-variant); }
+.version-list .version:first-child { border-top: 0; }
+.version-list .version.pinned { border-radius: var(--hc-radius-card, 3px); background: color-mix(in srgb, var(--md-primary) 9%, transparent); }
+.version .mini { width: 2.4rem; height: calc(2.4rem * 1.1547); margin: 0; }
+.version-words { display: grid; gap: .12rem; min-width: 0; }
+.version-tag { font: 600 .62rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--md-on-surface-faint); }
+.version.pinned .version-tag { color: var(--md-primary); }
+.version-who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--md-on-surface-strong); font: 600 .95rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.version-what { overflow-wrap: anywhere; color: var(--md-on-surface-var); font: 500 .72rem/1.35 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.version-visit { display: inline-flex; align-items: center; gap: .4rem; max-width: 15rem; padding: .5rem .75rem;
+  border: 1px solid color-mix(in srgb, var(--md-primary) 42%, transparent); border-radius: var(--hc-radius-control, 2px);
+  color: var(--md-primary); font: 600 .8rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); text-decoration: none;
+  transition: background .2s, color .2s; }
+.version-visit-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.version-visit svg { flex: none; width: .9rem; height: .9rem; }
+.version-visit:hover { background: var(--md-primary); color: var(--md-on-primary); }
+.version-visit:focus-visible, .versions-close:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 
 /* membership: what a member does, on the colours of the mark */
 .member { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(1.5rem, 4vw, 3.5rem);
@@ -1008,11 +1357,19 @@ export const SHOWCASE_STYLE = `
   .hex-name { font-size: .74rem; }
   .hex-address { display: none; }
   .hex-label { top: 60%; }
+  .hex-owners { top: 9%; padding: .1rem .35rem; font-size: .6rem; }
+  .hex-owners svg { width: .7rem; height: .7rem; }
+  /* the versions open as a sheet from the bottom edge */
+  .versions-backdrop { place-items: end stretch; padding: 0; }
+  .versions { width: 100%; max-height: 86vh; max-height: 86dvh; padding-bottom: env(safe-area-inset-bottom);
+    border-radius: var(--hc-radius-floating, 4px) var(--hc-radius-floating, 4px) 0 0; }
+  .version-list .version { grid-template-columns: auto minmax(0, 1fr); }
+  .version-visit { grid-column: 1 / -1; justify-content: center; max-width: none; }
   .member { padding: 1.4rem 1.15rem 1.6rem; }
   .steps { grid-template-columns: minmax(0, 1fr); }
   .member-cta { width: 100%; justify-content: center; box-sizing: border-box; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hex-picture, .hex-motif, .explore-tile, .member-cta, .band-chevron { transition: none !important; animation: none !important; opacity: 1; }
+  .hex-picture, .hex-motif, .explore-tile, .member-cta, .band-chevron, .versions { transition: none !important; animation: none !important; opacity: 1; }
 }
 `
