@@ -37,7 +37,7 @@ import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/co
 import { isJoinedHere, ownZone, readTabZone, tabMeetingHost } from './membership.js'
 import { joinMeetingPlace, saveRememberedRooms } from './meeting-invite.join.js'
 import { MEETING_INVITE_KIND, MEETING_INVITE_VERSION } from './meeting-invite.js'
-import { NOTICE_FRESH_SEC, NOTICE_REPOST_MS, REMEMBERED_ROOMS_KEY, ROOMS_CHANGED_EFFECT, ROOM_NOTICE_KIND, arrivalToastKey, noticeAddress, noticeKey, noticeTemplate, noticeToastKey, readNotice, readRememberedRooms, withRoom, type RememberedRoom } from './room-notice.js'
+import { NOTICE_FRESH_SEC, NOTICE_REPOST_MS, REMEMBERED_ROOMS_KEY, ROOMS_CHANGED_EFFECT, ROOM_NOTICE_KIND, arrivalToastKey, noticeAddress, noticeKey, noticeTemplate, noticeToastKey, readNotice, readRememberedRooms, sameRoom, withRoom, type RememberedRoom } from './room-notice.js'
 
 export const ROOM_NOTICE_JOIN_EFFECT = 'room-notice:join'
 
@@ -62,6 +62,10 @@ const TAKEN_MS = 15_000
 const SEEN_KEY = 'hc:room-notice-seen'
 /** The session this tab is announcing, so a reload resumes it. */
 const ANNOUNCING_KEY = 'hc:room-notice-announcing'
+/** When this tab left each room it was in (address → seconds): a session that
+ *  started before then is one it was in, never news to it. */
+const LEFT_KEY = 'hc:room-notice-left'
+const LEFT_MAX = 24
 
 type NoticeEvent = { id?: string; pubkey?: string; sig?: string; kind: number; created_at: number; tags: string[][]; content: string }
 type SignerShape = {
@@ -130,10 +134,18 @@ export class RoomNoticeDrone extends Drone {
   /** The room this tab was last in (its name), for its arrival toast. */
   #joinedRoom = ''
   #membershipQueued = false
+  /** Where this tab is (room, secret, point, code, host) as last remembered:
+   *  the list is written only when that changes — not on every event, so a
+   *  room forgotten in another tab is not written back by this one. */
+  #zoneKey = ''
+  /** The notice address of the room this tab is in ('' when none). */
+  #here = ''
+  #left = new Map<string, number>()
 
   constructor() {
     super()
     try { for (const id of JSON.parse(sessionStorage.getItem(SEEN_KEY) ?? '[]') as string[]) this.#remember(id) } catch { /* none yet */ }
+    try { for (const [a, at] of JSON.parse(sessionStorage.getItem(LEFT_KEY) ?? '[]') as [string, number][]) this.#left.set(a, at) } catch { /* none yet */ }
     setTimeout(() => { this.#booted = true; void this.#sync(); void this.#resume(); void this.#membershipChanged() }, BOOT_DELAY_MS)
     // A join adds a room; another tab's join reaches this one by `storage`.
     EffectBus.on('mesh:public-changed', () => {
@@ -304,18 +316,23 @@ export class RoomNoticeDrone extends Drone {
     }
     this.#joinedRoom = zone?.room ?? ''
     const relay = String(get<MeshShape>(MESH_KEY)?.meetingRelay?.() ?? '').trim()
-    if (!zone || !relay) return
+    if (!zone || !relay) { this.#zoneKey = ''; return }
     const address = await noticeAddress(zone.room, zone.secret, relay).catch(() => '')
     if (address) EffectBus.emit('toast:dismiss', { key: noticeToastKey(address) })
-    const rooms = readRememberedRooms()
-    const held = rooms.find(r => r.room === zone.room && r.secret === zone.secret && bareRelay(r.relay) === bareRelay(relay))
-    if (held) {
-      if (rooms[0] !== held) saveRememberedRooms(withRoom(rooms, { ...held, at: Date.now() }))
-      return
-    }
     const tab = readTabZone()
     const host = tabMeetingHost()
     const code = tab?.code && bareRelay(tab.relay ?? '') === bareRelay(relay) ? tab.code : ''
+    const zoneKey = [zone.room, zone.secret, bareRelay(relay), code, host].join('\n')
+    if (zoneKey === this.#zoneKey) return
+    this.#zoneKey = zoneKey
+    const rooms = readRememberedRooms()
+    const held = rooms.find(r => sameRoom(r, { room: zone.room, secret: zone.secret, relay }))
+    if (held) {
+      // Moves to the front, keeping the link's label and page; the point's
+      // code and host as this tab now meets there (a rotated code).
+      saveRememberedRooms(withRoom(rooms, { ...held, ...(code ? { code } : {}), ...(host ? { host } : {}), at: Date.now() }))
+      return
+    }
     const segments = [...(get<{ explorerSegments?: () => readonly string[] }>(LINEAGE_KEY)?.explorerSegments?.() ?? [])]
       .map(s => String(s ?? '').trim()).filter(Boolean)
     saveRememberedRooms(withRoom(rooms, {
@@ -335,6 +352,10 @@ export class RoomNoticeDrone extends Drone {
     const zone = isJoinedHere() ? ownZone() : null
     const meeting = String(get<MeshShape>(MESH_KEY)?.meetingRelay?.() ?? '').trim()
     const here = zone && meeting ? await noticeAddress(zone.room, zone.secret, meeting).catch(() => '') : ''
+    // Left a room (or moved): a session that started before now was this
+    // tab's, so it is never announced to it once it listens again.
+    if (this.#here && this.#here !== here) this.#leftAt(this.#here)
+    this.#here = here
     const want = new Map<string, RememberedRoom>()
     for (const room of readRememberedRooms()) {
       const address = await noticeAddress(room.room, room.secret, room.relay).catch(() => '')
@@ -421,7 +442,14 @@ export class RoomNoticeDrone extends Drone {
     // Your own start, or a room this tab is already in: nothing to say.
     if (notice.signer && notice.signer === this.#me) return
     const zone = ownZone()
-    if (zone && isJoinedHere() && zone.room === l.room.room && zone.secret === l.room.secret) return
+    if (l.address === this.#here || (zone && isJoinedHere() && sameRoom({ ...zone, relay: l.room.relay }, l.room))) return
+    // A session this tab was in before it left: seen, never announced.
+    const left = this.#left.get(l.address)
+    if (left !== undefined && notice.started <= left) {
+      this.#remember(key)
+      if (notice.id) this.#remember(notice.id)
+      return
+    }
     this.#remember(key)
     if (notice.id) this.#remember(notice.id)
     try { sessionStorage.setItem(SEEN_KEY, JSON.stringify([...this.#seen].slice(-100))) } catch { /* this tab only */ }
@@ -438,6 +466,13 @@ export class RoomNoticeDrone extends Drone {
       // Taken down when this tab joins the room by any path.
       key: noticeToastKey(l.address),
     })
+  }
+
+  #leftAt(address: string): void {
+    this.#left.delete(address)
+    this.#left.set(address, this.#nowSec())
+    const keep = [...this.#left.entries()].slice(-LEFT_MAX)
+    try { sessionStorage.setItem(LEFT_KEY, JSON.stringify(keep)) } catch { /* this tab only */ }
   }
 
   /** A seen entry: an event id, or `address:signer:started` — which also

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NOTICE_FRESH_SEC, REMEMBERED_ROOMS_MAX, ROOM_NOTICE_KIND, noticeAddress, noticeKey, noticeTemplate, parseRememberedRooms, readNotice, withRoom, withoutRoom, type RememberedRoom } from './room-notice.js'
+import { NOTICE_FRESH_SEC, REMEMBERED_ROOMS_MAX, ROOM_NOTICE_KIND, noticeAddress, noticeKey, noticeTemplate, parseRememberedRooms, readNotice, sameRoom, withRoom, withoutRoom, type RememberedRoom } from './room-notice.js'
 
 const room = (n: number, at = n): RememberedRoom => ({ room: `room${n}`, secret: 's', relay: 'wss://hypercomb.com/meet', segments: ['a'], label: `Room ${n}`, at })
 const ADDR = 'a'.repeat(64)
@@ -22,6 +22,14 @@ describe('remembered rooms', () => {
     expect(list).toHaveLength(REMEMBERED_ROOMS_MAX)
     expect(parseRememberedRooms(JSON.stringify([...list, { room: 'x', secret: 's', relay: 'http://no' }, 7]))).toHaveLength(REMEMBERED_ROOMS_MAX)
     expect(parseRememberedRooms('not json')).toEqual([])
+  })
+
+  it('knows one room however it was typed — case, and the point by its host', () => {
+    const a = { room: 'Lecture', secret: 'Rose', relay: 'wss://hypercomb.com/meet' }
+    expect(sameRoom(a, { room: 'lecture', secret: 'rose', relay: 'wss://hypercomb.com/' })).toBe(true)
+    expect(sameRoom(a, { room: 'lecture', secret: 'tulip', relay: 'wss://hypercomb.com/' })).toBe(false)
+    const list = withRoom([], { ...room(1), ...a })
+    expect(withRoom(list, { ...room(2), room: 'LECTURE', secret: 'rose', relay: 'wss://hypercomb.com/' })).toHaveLength(1)
   })
 
   it('forgets a room by its name or its label, case ignored, and says how many went', () => {

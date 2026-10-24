@@ -93,7 +93,7 @@ export class RoomQueenBee extends QueenBee {
     if (verb === 'start') return this.#start()
     if (verb === 'list') return this.#list()
     if (verb === 'forget') return this.#forget(tail)
-    this.#say(this.#t('room.usage', 'room — say "room", "room asks <behaviours>", "room home", "room start", "room list" or "room forget <room>"'), 'warning')
+    this.#say(this.#t('room.usage.full', 'room — say "room", "room asks <behaviours>", "room home", "room start", "room list" or "room forget <room>"'), 'warning')
   }
 
   // ── what the room asks ──────────────────────────────────────

@@ -95,6 +95,18 @@ const clickSheetJoin = (c) => H.evalSafe(() => c.page.evaluate(() => {
   const notHere = await H.waitFor(() => listening(guest), v => !(v ?? []).includes(ROOM), 15000, 500)
   H.check('…and does not listen for the room it is in', notHere.ok, JSON.stringify(notHere.value))
 
+  // A SESSION THE GUEST WAS IN is never announced to it after it leaves.
+  await word(host, 'room start')
+  await H.sleep(3000)
+  await word(guest, '/leave')
+  await H.waitFor(() => joined(guest), v => v === false, 30000, 500)
+  const listensAgain = await H.waitFor(() => listening(guest), v => (v ?? []).includes(ROOM), 15000, 500)
+  await H.sleep(6000)
+  const quiet = await shown(guest, NOTICE)
+  H.check('leaving does not announce the session it was in', listensAgain.ok && quiet === 0, `listening=${listensAgain.ok} notices=${quiet}`)
+  await word(guest, '/join')
+  H.check('…and the guest rejoins', (await H.waitFor(() => joined(guest), v => v, 30000, 500)).ok)
+
   // NOT THE ROOM YOU ARE IN.
   await word(guest, `room forget ${ROOM}`)
   const refused = await H.waitFor(() => toastText(guest), v => /leave it first/.test(v ?? ''), 10000, 500)

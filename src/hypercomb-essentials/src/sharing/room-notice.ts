@@ -28,7 +28,7 @@
 //               expiration — and a listener knows a re-post by its start
 //               (noticeKey), so nobody is told twice.
 
-import { SignatureService } from '@hypercomb/core'
+import { SignatureService, roomPreimage } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { roomPoolAddress } from './room-pool.js'
 
@@ -87,8 +87,13 @@ const cleanRoom = (raw: unknown): RememberedRoom | null => {
   }
 }
 
-const sameRoom = (a: RememberedRoom, b: RememberedRoom): boolean =>
-  a.room === b.room && a.secret === b.secret && a.relay === b.relay
+/** One room, however it was typed: the room's own identity (core
+ *  roomPreimage — case folded, keyed on the meeting point's host), else the
+ *  text as it was carried. */
+export const sameRoom = (a: Pick<RememberedRoom, 'room' | 'secret' | 'relay'>, b: Pick<RememberedRoom, 'room' | 'secret' | 'relay'>): boolean => {
+  const ida = roomPreimage(a.room, a.secret, a.relay)
+  return ida ? ida === roomPreimage(b.room, b.secret, b.relay) : a.room === b.room && a.secret === b.secret && a.relay === b.relay
+}
 
 /** The remembered list out of its stored text; anything malformed is dropped. */
 export function parseRememberedRooms(text: string | null | undefined): RememberedRoom[] {
