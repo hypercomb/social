@@ -30,8 +30,20 @@
 // the tile, and under it every domain you carry is ONE switch — on = this
 // branch is published there, off = it is not. The switch is signed: it writes
 // the branch's doors into the hive index, and the host serves a page only on
-// the domains listed there. No list of branches, no filter — thousands of
-// domains times thousands of places is not a window; the hive is the list.
+// the domains listed there.
+//
+// WHAT EACH DOMAIN HOSTS (jwize 2026-10-24, superseding 09-22's "no list of
+// branches"): "each of these should be expandable to see the applications
+// hosted on each domain there shouldn't be any duplicate values". A domain
+// opens — one at a time, the shell's accordion — on what is published there,
+// each by its path and its address there, never the domain twice; a name
+// walks to its tile, where the details are (still never in a list row).
+// "Each should be … selectable to publish changes only on selected … reset on
+// refresh so you can have them available to create a group and then publish
+// to it as well": the selection lives in memory only, and from it the
+// changed apps publish one after another (`publish:run-many`) or, when they
+// share a page, become a publish group there (`publish-groups:create`).
+// The answers are pure, in publish-apps.ts.
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, computed, inject, signal, type OnDestroy } from '@angular/core'
@@ -43,6 +55,7 @@ import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directiv
 import { signalSession } from '../window-session'
 import { accordion } from '../accordion'
 import { isTransientMode } from '../../core/view-mode.service'
+import { appsOn, groupPage, hasChanges, othersOn, pruneSelection, selectedRows, shownAt } from './publish-apps'
 
 // Mirrors of the essentials read-model shapes (shared cannot import
 // essentials). Kept field-for-field identical to PublishRenderPayload in
@@ -184,6 +197,8 @@ interface PublishRenderPayload {
   entrancePreview?: { host: string; page: string; url: string } | null
   /** Pages previewed this session; Turn on is offered for these only. */
   previewed?: string[]
+  /** The selected-apps run while it runs; null otherwise. */
+  batch?: { done: number; total: number; failed: number } | null
 }
 
 const SIG_SHOWN = 12
@@ -200,7 +215,7 @@ type NavigationLike = { go?: (segments: readonly string[]) => void }
   standalone: true,
   imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './publish-panel.component.html',
-  styleUrls: ['./publish-panel.component.scss', './publish-panel.groups.scss'],
+  styleUrls: ['./publish-panel.component.scss', './publish-panel.groups.scss', './publish-panel.apps.scss'],
 })
 export class PublishPanelComponent implements OnDestroy {
 
@@ -215,7 +230,20 @@ export class PublishPanelComponent implements OnDestroy {
   readonly session = signalSession(
     this.visible,
     (open) => { EffectBus.emitTransient('publish:shown', { open }) },
-    { close: () => this.close() },
+    {
+      // One level per press: a selection clears, then an open domain closes,
+      // then the window does.
+      dismiss: () => {
+        const open = this.domainsOpen.open()
+        if (open !== null) {
+          this.#keepFocusOn(open)
+          return this.domainsOpen.dismiss()
+        }
+        if (this.picked().size > 0) { this.clearPicks(); return true }
+        return false
+      },
+      close: () => this.close(),
+    },
   )
 
   /** The STANDING default zone — what a branch that never chose rides. */
@@ -284,12 +312,158 @@ export class PublishPanelComponent implements OnDestroy {
    *  the strip — and from inside a view, where the strip is not drawn. */
   readonly #groups = signal<{ segments: string[]; groups: PublishGroupRow[] }>({ segments: [], groups: [] })
   /** Only the groups of the page this panel is describing — an announcement
-   *  for a layer we have already left never shows here. */
+   *  for a layer we have already left never shows here. The hive root is a
+   *  page too: a group made there from the domains' apps shows, and
+   *  publishes, from here. */
   readonly groupsHere = computed<PublishGroupRow[]>(() => {
-    const row = this.current()
+    const here = this.current()?.segments ?? (this.currentKey() ? null : [])
     const { segments, groups } = this.#groups()
-    return row && row.segments.join('/') === segments.join('/') ? groups : []
+    return here && here.join('/') === segments.join('/') ? groups : []
   })
+
+  // ── WHAT EACH DOMAIN HOSTS ──────────────────────────────────────────
+
+  /** The one domain open on its apps — one at a time, like every list of
+   *  headers in the shell (ui/accordion.ts). */
+  readonly domainsOpen = accordion()
+
+  /** The apps picked to act on — in memory only: a reload clears it. Keys are
+   *  rows' lineage keys, so a pick survives the drone rebuilding its rows. */
+  readonly picked = signal<ReadonlySet<string>>(new Set())
+
+  /** The selected-apps run while it runs (`publish:run-many`). */
+  readonly batch = signal<{ done: number; total: number; failed: number } | null>(null)
+
+  /** What one domain hosts: each published app once, by path. */
+  appsOn(zone: string): PublishRow[] {
+    return appsOn(this.rows(), zone)
+  }
+
+  /** What another device published there — counted and named, never picked. */
+  othersOn(zone: string): PublishRow[] {
+    return othersOn(this.rows(), zone)
+  }
+
+  /** Everything a domain hosts, from here or not. */
+  hostedOn(zone: string): number {
+    return this.appsOn(zone).length + this.othersOn(zone).length
+  }
+
+  /** An app's name in a domain's list — its path, so two tiles with one name
+   *  under different pages never read as the same thing twice. */
+  appName(row: PublishRow): string {
+    return row.path.replace(/^\/+/, '') || row.key
+  }
+
+  /** Where an app is read on a domain, as a word when the address would only
+   *  repeat something already on screen: the domain itself (an app at its
+   *  front page), or the tile you stand on (its address is the line above).
+   *  '' = no address there yet. */
+  appAt(row: PublishRow, zone: string): { at: string } | { word: string } | null {
+    if (row.key === this.currentKey()) return { word: 'publish.apps.this-tile' }
+    const at = shownAt(row, zone)
+    if (!at) return null
+    return at === zone ? { word: 'publish.apps.front-page' } : { at }
+  }
+
+  /** The address as the drone gave it — its own scheme (a host on this
+   *  machine is http), never one the panel makes up. */
+  appUrl(row: PublishRow, zone: string): string {
+    return String(row.urls?.[zone] ?? '')
+  }
+
+  appChanged(row: PublishRow): boolean {
+    return hasChanges(row)
+  }
+
+  /** The line under a domain's name. At the hive root it says how many apps
+   *  it hosts — its address would only be the domain again. On a tile it is
+   *  where that tile is read there, unless that is the domain itself. */
+  domainLine(zone: string): { kind: 'count'; count: number } | { kind: 'at'; at: string } | { kind: 'none' } | null {
+    const row = this.current()
+    if (!row) return { kind: 'count', count: this.hostedOn(zone) }
+    const at = this.address(row, zone)
+    if (at === zone) return null
+    return at ? { kind: 'at', at } : { kind: 'none' }
+  }
+
+  toggleDomain(zone: string): void {
+    this.domainsOpen.toggle(zone)
+  }
+
+  isPicked(row: PublishRow): boolean {
+    return this.picked().has(row.key)
+  }
+
+  togglePick(row: PublishRow): void {
+    if (row.segments.length === 0) return
+    const next = new Set(this.picked())
+    if (next.has(row.key)) next.delete(row.key)
+    else next.add(row.key)
+    this.picked.set(next)
+  }
+
+  clearPicks(): void {
+    this.picked.set(new Set())
+  }
+
+  /** Clear, from its own button — which goes with the bar, so focus moves to
+   *  something that stays. */
+  clearPicksFromBar(): void {
+    this.clearPicks()
+    queueMicrotask(() => document.querySelector<HTMLElement>('hc-publish-panel .pcur-hosts-manage')?.focus())
+  }
+
+  /** A list about to close holds focus: hand it to its domain's chevron
+   *  first, or the next key goes to the hive behind the panel. */
+  #keepFocusOn(zone: string): void {
+    const active = document.activeElement
+    if (!(active instanceof HTMLElement) || !active.closest('hc-publish-panel .papps-host')) return
+    const chevron = [...document.querySelectorAll<HTMLElement>('hc-publish-panel .pdoor-expand')]
+      .find(el => el.dataset['zone'] === zone)
+    chevron?.focus()
+  }
+
+  /** The picked apps as they stand now. */
+  readonly pickedRows = computed<PublishRow[]>(() => selectedRows(this.rows(), this.picked()))
+  /** The picked apps that have changes to publish — not one already being
+   *  published by its own press. */
+  readonly pickedChanged = computed<PublishRow[]>(() => this.pickedRows().filter(row => hasChanges(row) && !row.busyPhase))
+  /** A sweep re-reads every row, and until it reaches a picked one nothing is
+   *  known about it — the bar must not say it has no changes. */
+  readonly pickedChecking = computed<boolean>(() =>
+    this.refreshing() || this.pickedRows().some(row => row.state === 'comparing'))
+  /** A group of this page is publishing — its runs and the picked ones would
+   *  both re-sign the index, so one waits for the other. */
+  readonly groupPublishing = computed<boolean>(() => this.groupsHere().some(g => !!g.publishing))
+  /** The page a group of the picked apps would sit on, or null when they do
+   *  not share one (a group holds one page's tiles). */
+  readonly pickedPage = computed(() => groupPage(this.pickedRows()))
+
+  /** Publish the picked apps' changes — the drone runs them one after another. */
+  publishPicked(): void {
+    const keys = this.pickedChanged().map(row => row.key)
+    if (this.batch() || this.groupPublishing() || keys.length === 0) return
+    EffectBus.emit('publish:run-many', { keys })
+  }
+
+  /** Make a publish group of the picked apps, on the page they share; it then
+   *  publishes from the Groups section like any group. */
+  groupPicked(): void {
+    const page = this.pickedPage()
+    if (!page || this.batch()) return
+    EffectBus.emit('publish-groups:create', { segments: page.segments, members: page.members })
+    // The picks are the group now; a second press would make a second group.
+    this.clearPicks()
+    // A group shows on its own page — where the strip is drawn and Groups
+    // lists it. Picks from another page walk there, so it can be published.
+    const here = this.current()?.segments ?? []
+    if (here.join('/') !== page.segments.join('/')) {
+      const nav = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+        ?.get<NavigationLike>('@hypercomb.social/Navigation')
+      nav?.go?.([...page.segments])
+    }
+  }
 
   /** OVER A VIEW IT IS A POPUP (jwize 2026-10-10) — `p` reaches this panel
    *  from inside a view, and there it floats on the page: it reserves no edge
@@ -694,6 +868,9 @@ export class PublishPanelComponent implements OnDestroy {
       this.collisions.set(Array.isArray(p.collisions)
         ? p.collisions.map(collision => ({ ...collision, paths: [...collision.paths] }))
         : [])
+      this.batch.set(p.batch ? { done: Number(p.batch.done) || 0, total: Number(p.batch.total) || 0, failed: Number(p.batch.failed) || 0 } : null)
+      // A pick whose app is gone (forgotten, withdrawn) drops out.
+      this.picked.set(pruneSelection(this.rows(), this.picked()))
       // No sibling is closed here — the lane decides what fits on an edge and
       // parks whatever it displaces.
       this.visible.set(!!p.open)
@@ -806,7 +983,8 @@ export class PublishPanelComponent implements OnDestroy {
 
   /** Publish one group — its drone runs every member and reports. */
   publishGroup(group: PublishGroupRow): void {
-    if (group.publishing || group.count === 0) return
+    // While the picked apps publish, a group waits: both re-sign the index.
+    if (group.publishing || group.count === 0 || this.batch()) return
     EffectBus.emit('publish-groups:publish', { segments: [...this.#groups().segments], meaning: group.meaning })
   }
 

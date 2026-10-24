@@ -95,24 +95,48 @@
         @for (zone of domains(); track zone) {
           <li
             class="pdoor"
-            role="switch"
-            tabindex="0"
-            [attr.aria-checked]="doorOn(current(), zone)"
-            [attr.aria-disabled]="!canSwitch(current())"
             [class.lit]="doorOn(current(), zone)"
             [class.off]="!doorOn(current(), zone)"
             [class.busy]="!!current()?.busyPhase"
-            [attr.title]="(doorOn(current(), zone) ? 'publish.switch.on' : 'publish.switch.off') | t"
-            (click)="flipDoor(current(), zone)"
-            (keydown.enter)="flipDoor(current(), zone)"
-            (keydown.space)="flipDoor(current(), zone); $event.preventDefault()"
           >
+            <!-- WHAT THIS DOMAIN HOSTS — opens one domain at a time. Beside
+                 the switch, never inside it: a control inside a disabled
+                 switch is disabled too. -->
+            <button
+              class="pdoor-expand"
+              type="button"
+              [attr.data-zone]="zone"
+              [attr.aria-expanded]="domainsOpen.isOpen(zone)"
+              [attr.aria-label]="'publish.domain.show' | t: { zone: zone }"
+              [attr.data-tip]="'publish.domain.show' | t: { zone: zone }"
+              (click)="toggleDomain(zone); $event.stopPropagation()"
+              (keydown.enter)="$event.stopPropagation()"
+              (keydown.space)="$event.stopPropagation()"
+            ><span class="mat-sym" aria-hidden="true">{{ domainsOpen.isOpen(zone) ? 'expand_more' : 'chevron_right' }}</span></button>
+            <!-- THE SWITCH, on a tile. At the hive root there is nothing to
+                 switch: the row is no control, and a press only opens the
+                 domain, as the chevron does. -->
+            <div
+              class="pdoor-switch"
+              [attr.role]="current() ? 'switch' : null"
+              [attr.tabindex]="current() ? 0 : null"
+              [attr.aria-checked]="current() ? doorOn(current(), zone) : null"
+              [attr.aria-disabled]="current() ? !canSwitch(current()) : null"
+              [attr.title]="current() ? ((doorOn(current(), zone) ? 'publish.switch.on' : 'publish.switch.off') | t) : null"
+              (click)="current() ? flipDoor(current(), zone) : toggleDomain(zone)"
+              (keydown.enter)="current() && flipDoor(current(), zone)"
+              (keydown.space)="current() && flipDoor(current(), zone); current() && $event.preventDefault()"
+            >
             <div class="pdoor-meta">
               <span class="pdoor-zone">{{ zone }}</span>
-              @if (address(current(), zone); as shown) {
-                <span class="pdoor-address">{{ shown }}</span>
-              } @else {
-                <span class="pdoor-address pdoor-noaddress">{{ 'publish.own.needed' | t }}</span>
+              <!-- Never the domain twice: at the root it says what the domain
+                   hosts; on a tile, where the tile is read there. -->
+              @if (domainLine(zone); as line) {
+                @switch (line.kind) {
+                  @case ('count') { <span class="pdoor-address">{{ 'publish.domain.count' | t: { count: $any(line).count } }}</span> }
+                  @case ('at') { <span class="pdoor-address">{{ $any(line).at }}</span> }
+                  @default { <span class="pdoor-address pdoor-noaddress">{{ 'publish.own.needed' | t }}</span> }
+                }
               }
             </div>
             @if (doorOn(current(), zone) && addressUrl(current(), zone)) {
@@ -143,9 +167,12 @@
                 (keydown.space)="$event.stopPropagation()"
               ><span class="mat-sym">alt_route</span></button>
             }
-            <span class="pdoor-bulb" [class.on]="doorOn(current(), zone)" aria-hidden="true">
-              <span class="mat-sym">lightbulb</span>
-            </span>
+            @if (current()) {
+              <span class="pdoor-bulb" [class.on]="doorOn(current(), zone)" aria-hidden="true">
+                <span class="mat-sym">lightbulb</span>
+              </span>
+            }
+            </div>
           </li>
           @if (current(); as row) {
             @if (isOwnOpen(row, zone)) {
@@ -259,16 +286,100 @@
               </li>
             }
           }
+          @if (domainsOpen.isOpen(zone)) {
+            <li class="papps-host">
+              @if (appsOn(zone); as apps) {
+                @if (apps.length === 0 && othersOn(zone).length === 0) {
+                  <p class="papps-none">{{ 'publish.apps.none' | t }}</p>
+                } @else {
+                  <ul class="papps" [attr.aria-label]="'publish.domain.show' | t: { zone: zone }">
+                    @for (app of apps; track app.key) {
+                      <li class="papp" [class.picked]="isPicked(app)" [class.busy]="!!app.busyPhase">
+                        <button
+                          class="papp-pick"
+                          type="button"
+                          role="checkbox"
+                          [attr.aria-checked]="isPicked(app)"
+                          [attr.aria-label]="'publish.apps.pick' | t: { name: appName(app) }"
+                          (click)="togglePick(app)"
+                        ><span class="papp-box" aria-hidden="true"><span class="mat-sym">check</span></span></button>
+                        <div class="papp-meta">
+                          <button class="papp-name" type="button" [title]="'publish.apps.visit' | t" (click)="visit(app)">{{ appName(app) }}</button>
+                          @if (appAt(app, zone); as shown) {
+                            @if ($any(shown).word) {
+                              <a class="papp-at" [href]="appUrl(app, zone)" target="_blank" rel="noopener">{{ $any(shown).word | t }} ↗</a>
+                            } @else {
+                              <a class="papp-at" [href]="appUrl(app, zone)" target="_blank" rel="noopener">{{ $any(shown).at }} ↗</a>
+                            }
+                          } @else {
+                            <span class="papp-at papp-noaddress">{{ 'publish.own.needed' | t }}</span>
+                          }
+                        </div>
+                        @if (appChanged(app)) {
+                          <span class="papp-changed">{{ 'publish.apps.changed' | t }}</span>
+                        }
+                      </li>
+                    }
+                    <!-- Published from ANOTHER device: real, so counted and
+                         named, but this hive has no path to act on — no pick,
+                         and no address, which would only be the domain. -->
+                    @for (other of othersOn(zone); track other.key) {
+                      <li class="papp papp-other">
+                        <span class="papp-pick papp-pick-none" aria-hidden="true"></span>
+                        <div class="papp-meta">
+                          <span class="papp-name papp-name-quiet">{{ other.key }}</span>
+                          <span class="papp-at">{{ 'publish.apps.other-device' | t }}</span>
+                        </div>
+                      </li>
+                    }
+                  </ul>
+                }
+              }
+            </li>
+          }
         }
       </ul>
+
+      <!-- THE PICKED APPS — in memory only; a reload clears them. Their
+           changes publish one after another, or they become a group on the
+           page they share, which then publishes from Groups below. -->
+      @if (pickedRows().length > 0 || batch()) {
+        <div class="psel" role="group" [attr.aria-label]="'publish.selection.count' | t: { count: pickedRows().length }">
+          <span class="psel-count">{{ 'publish.selection.count' | t: { count: pickedRows().length } }}</span>
+          <div class="psel-acts">
+            <button
+              class="pcur-action"
+              type="button"
+              [disabled]="!!batch() || groupPublishing() || pickedChanged().length === 0"
+              (click)="publishPicked()"
+            >
+              @if (batch(); as b) {
+                {{ 'publish.selection.publishing' | t: { done: b.done, total: b.total } }}
+              } @else if (pickedChecking() && pickedChanged().length === 0) {
+                {{ 'publish.selection.checking' | t }}
+              } @else {
+                {{ 'publish.selection.publish' | t: { count: pickedChanged().length } }}
+              }
+            </button>
+            <button
+              class="pcur-action"
+              type="button"
+              [disabled]="!pickedPage() || !!batch()"
+              [attr.data-tip]="pickedPage() ? null : ('publish.selection.group-one-page' | t)"
+              (click)="groupPicked()"
+            >{{ 'publish.selection.group' | t }}</button>
+            <button class="psel-clear" type="button" (click)="clearPicksFromBar()">{{ 'publish.selection.clear' | t }}</button>
+          </div>
+          @if (!batch() && !pickedChecking() && pickedRows().length > 0 && pickedChanged().length === 0) {
+            <p class="psel-note">{{ 'publish.selection.none-changed' | t }}</p>
+          }
+        </div>
+      }
+
       <button class="pcur-hosts-manage" type="button" (click)="openHosts()">
         {{ 'publish.action.manage-hosts' | t }}
       </button>
 
-    @if (current(); as row) {
-
-      <!-- THE DETAILS, folded — one section open at a time, all closed on
-           arrival (ui/accordion.ts). -->
       <!-- PUBLISH GROUPS on this layer (publish-groups.md) — each publishes
            every tile in it, from here as from the strip at the top of the
            hive, and from inside a view, where the strip is not drawn. -->
@@ -289,7 +400,7 @@
                   <button
                     class="pgroup-act"
                     type="button"
-                    [disabled]="!!g.publishing || g.count === 0"
+                    [disabled]="!!g.publishing || g.count === 0 || !!batch()"
                     (click)="publishGroup(g)"
                   >
                     @if (g.publishing; as p) {
@@ -304,6 +415,10 @@
           }
         </section>
       }
+    @if (current(); as row) {
+
+      <!-- THE DETAILS, folded — one section open at a time, all closed on
+           arrival (ui/accordion.ts). -->
       @if (row.segments.length > 0 && viewsFor(row).length > 0) {
         <section class="psec">
           <button

@@ -115,9 +115,11 @@ export class PublishGroupsDrone extends Drone {
   protected override listens = [
     'decorations:changed', 'history:cursor-changed', 'selection:changed', 'view:active',
     'render:cell-count', ENABLEMENT_CHANGED, ICON_PICK_RESULT, ICON_PICKER_OPEN, 'publish-groups:publish',
+    'publish-groups:create',
   ]
   protected override emits = [
     'group:preview', 'toast:show', 'publish:refresh', 'publish-groups:render', ICON_PICK_REQUEST,
+    'features:enable',
   ]
 
   #bound = false
@@ -174,6 +176,15 @@ export class PublishGroupsDrone extends Drone {
       const segments = Array.isArray(p?.segments) ? p.segments.map(s => String(s ?? '').trim()).filter(Boolean) : null
       const meaning = typeof p?.meaning === 'string' ? p.meaning : ''
       if (segments && meaning) void this.publishGroup(segments, meaning)
+    })
+    // A GROUP FROM THE PUBLISH PANEL'S SELECTION (jwize 2026-10-24: "so you
+    // can have them available to create a group and then publish to it") —
+    // what `groups new` does with the tiles selected on the page.
+    this.onEffect<{ segments?: unknown; members?: unknown; name?: unknown }>('publish-groups:create', (p) => {
+      const segments = Array.isArray(p?.segments) ? p.segments.map(s => String(s ?? '').trim()).filter(Boolean) : null
+      const members = Array.isArray(p?.members) ? p.members.map(m => String(m ?? '').trim()).filter(Boolean) : []
+      const name = typeof p?.name === 'string' ? p.name : undefined
+      if (segments && members.length) void this.createFromPanel(segments, members, name)
     })
     this.onEffect<IconPickResult>(ICON_PICK_RESULT, (result) => {
       const pick = this.#iconPick
@@ -385,6 +396,44 @@ export class PublishGroupsDrone extends Drone {
       for (const label of opts.members ?? []) await wearEnrollment([...segments, label], { sig, meaning })
       return made
     })
+  }
+
+  /** A group made from the Publish panel's selection — the same act as
+   *  `groups new` with those tiles selected on their page. Only tiles that ARE
+   *  children of the page join (a group holds one page's tiles); the strip is
+   *  lit there, because a group on a page means the strip belongs there and an
+   *  unlit layer announces no groups at all. Says what it made. */
+  async createFromPanel(segments: readonly string[], members: readonly string[], name?: string): Promise<PublishGroupAppearance | null> {
+    try {
+      const reading = await this.#read(segments, true)
+      // Switched off for this hive, a group is made and never seen: say so,
+      // the way the `groups` word does, and make nothing.
+      if (reading.dormant) {
+        this.#toast('error', this.#t('groups.asleep', 'Publish groups is switched off for this hive — light it in the Beehaviors pool'))
+        return null
+      }
+      const joining = [...new Set(members)].filter(label => reading.children.includes(label))
+      if (joining.length === 0) {
+        this.#toast('error', this.#t('publish-groups.not-on-page', 'None of those are tiles on that page — nothing was grouped'))
+        return null
+      }
+      if (!reading.on) {
+        EffectBus.emit('features:enable', {
+          cell: segments[segments.length - 1] ?? '/',
+          segments: [...segments],
+          kind: PUBLISH_GROUPS_KIND,
+          silent: true,
+        })
+      }
+      const made = await this.createGroup(segments, { name, members: joining })
+      this.#schedule()
+      this.#toast('success', this.#t('publish-groups.made-from', `Made ${made.name} with ${joining.length}`, { name: made.name, count: joining.length }))
+      return made
+    } catch (error) {
+      console.warn('[publish-groups] could not make a group from the panel:', error)
+      this.#toast('error', this.#t('publish-groups.not-made', 'The group could not be made'))
+      return null
+    }
   }
 
   joinGroup(segments: readonly string[], meaning: string, labels: readonly string[]): Promise<void> {

@@ -95,6 +95,7 @@ import {
   APEX_LABEL, creationUrl, topOpenIn, entranceAddresses, entranceHost, foldDnsLabel, isPoweredEntrance, ownAddressRefusal, ownLabelOn,
   zoneDoor, type ZoneEntrance,
 } from './zone-door.js'
+import { batchOrder } from './publish-batch.js'
 
 /** English fallbacks for every way publishing can stop. Each one names what
  *  happened AND what it means for the participant's existing links — the
@@ -325,6 +326,9 @@ export interface PublishRenderPayload {
   entrancePreview: { host: string; page: string; url: string } | null
   /** Pages previewed in this session — Turn on is offered for these only. */
   previewed: string[]
+  /** PUBLISHING THE SELECTED (`publish:run-many`): how far the run is, while
+   *  it runs; null otherwise. Optional: an older drone sends none. */
+  batch?: { done: number; total: number; failed: number } | null
 }
 
 export class PublishStatusDrone extends Drone {
@@ -337,7 +341,7 @@ export class PublishStatusDrone extends Drone {
 
   protected override listens: string[] = [
     'publish:view-toggle', 'publish:shown', 'publish:close', 'publish:refresh', 'sync:state',
-    'publish:run', 'publish:unpublish', 'publish:inspect', 'publish:copy-link',
+    'publish:run', 'publish:run-many', 'publish:unpublish', 'publish:inspect', 'publish:copy-link',
     'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
     'hosts:render', 'publish:arrival', 'publish:participant', 'publish:participant-publish',
@@ -349,6 +353,11 @@ export class PublishStatusDrone extends Drone {
   #open = false
   #refreshing = false
   #rows: PublishRow[] = []
+  /** The selected-apps run, while it runs (`publish:run-many`). */
+  #batch: { done: number; total: number; failed: number } | null = null
+  /** Branches being published right now, by key — a sweep rebuilds rows with
+   *  no busyPhase, so the rows cannot say it; this can. */
+  #inFlight = new Set<string>()
 
   /** THE COMMUNITY — the hosts this participant carries, re-read from the
    *  `community:hosts` pool on every refresh. The panel's pick-list, and
@@ -486,6 +495,10 @@ export class PublishStatusDrone extends Drone {
     })
 
     this.onEffect<{ key?: string }>('publish:run', (p) => { void this.#run(String(p?.key ?? '')) })
+    // THE SELECTED APPS — the panel names them, they run one after another.
+    this.onEffect<{ keys?: unknown }>('publish:run-many', (p) => {
+      void this.#runMany(Array.isArray(p?.keys) ? p.keys.map(k => String(k ?? '')).filter(Boolean) : [])
+    })
     this.onEffect<{ key?: string; zone?: string; on?: boolean }>('publish:door', (p) => {
       void this.#door(String(p?.key ?? ''), String(p?.zone ?? ''), p?.on === true)
     })
@@ -1192,31 +1205,52 @@ export class PublishStatusDrone extends Drone {
 
   // ── the actions ───────────────────────────────────────────────────────
 
-  async #run(key: string): Promise<void> {
+  /** Publish one branch. `batched` is the selected-apps run calling: it says
+   *  one summary itself and refreshes once at the end, so a run inside it says
+   *  only what went wrong. Answers whether it published (null = nothing run). */
+  async #run(key: string, batched = false, planned?: PublishRowState): Promise<boolean | null> {
+    // One publish at a time while the selected run is going: both re-sign the
+    // same index, and the row being run may be one the batch is about to run.
+    if (this.#batch && !batched) {
+      this.#toast('tip', 'publish.batch.busy', 'The picked apps are still publishing — try again when they are done.')
+      return null
+    }
+    // The same branch twice at once seals two heads and races its own index
+    // write; the one already running wins.
+    if (this.#inFlight.has(key)) return null
     const row = this.#rows.find(r => r.key === key)
-    if (!row) return
+    if (!row) return null
     if (row.segments.length === 0) {
       // Published from another device: the key cannot be inverted into a path,
       // so there is nothing here to seal. Say that rather than failing oddly.
       this.#toast('tip', 'publish.other-device',
         'This entry was published from another device — this hive has no branch at that path to publish.')
-      return
+      return null
     }
     // `markPublic` short-circuits on sigs it marked this session, so a plain
     // retry after a failure would do nothing at all. Anything that is not a
     // clean forward publish re-verifies and re-stages.
-    const forceReDrain = row.state === 'pending' || row.state === 'gone' || row.state === 'stale-edge'
+    // A batched row may have been rebuilt by a sweep and read 'comparing' by
+    // the time its turn comes; the state it was picked in still decides.
+    const state = row.state === 'comparing' && planned ? planned : row.state
+    const forceReDrain = state === 'pending' || state === 'gone' || state === 'stale-edge'
 
     row.busyPhase = 'staging'
+    this.#inFlight.add(key)
     this.#emit()
-    const result = await publishBranch(row.segments, {
-      forceReDrain,
-      onProgress: (p: PublishProgress) => {
-        row.busyPhase = p.phase
-        this.#emit()
-      },
-    })
-    row.busyPhase = null
+    let result: Awaited<ReturnType<typeof publishBranch>>
+    try {
+      result = await publishBranch(row.segments, {
+        forceReDrain,
+        onProgress: (p: PublishProgress) => {
+          row.busyPhase = p.phase
+          this.#emit()
+        },
+      })
+    } finally {
+      row.busyPhase = null
+      this.#inFlight.delete(key)
+    }
 
     if (!result.ok) {
       // Every node REFUSED what it lacks (TS-4): nothing retries it, so the
@@ -1233,10 +1267,10 @@ export class PublishStatusDrone extends Drone {
           PUBLISH_FAILURE_TEXT[result.failure].replace('{hosts}', hosts), { hosts })
       }
       this.#emit()
-      void this.#refresh()
-      return
+      if (!batched) void this.#refresh()
+      return false
     }
-    this.#toast(
+    if (!batched) this.#toast(
       result.status === 'confirmed' ? 'success' : 'info',
       result.status === 'confirmed' ? 'publish.done' : 'publish.done-unconfirmed',
       result.status === 'confirmed'
@@ -1250,7 +1284,55 @@ export class PublishStatusDrone extends Drone {
     row.here = result.sealed
     row.state = result.status === 'confirmed' ? 'live' : 'pending'
     this.#emit()
+    if (!batched) void this.#refresh()
+    return true
+  }
+
+  /** PUBLISH THE SELECTED — each named branch through the same run as its own
+   *  Publish changes, ONE AFTER ANOTHER (publish-batch.ts: every run re-signs
+   *  the host's whole index), deepest first. The panel shows how far it is;
+   *  one line says how it went; one sweep follows. */
+  async #runMany(keys: readonly string[]): Promise<void> {
+    if (this.#batch || this.#inFlight.size > 0) {
+      this.#toast('tip', 'publish.batch.busy', 'The picked apps are still publishing — try again when they are done.')
+      return
+    }
+    // The plan carries each row's state as it was picked: a sweep mid-run
+    // rebuilds rows as 'comparing', and a row the host lost still needs its
+    // re-drain when its turn comes.
+    const plan = batchOrder(this.#rows, keys).map(row => ({ key: row.key, state: row.state }))
+    if (plan.length === 0) return
+    const total = plan.length
+    let published = 0
+    let failed = 0
+    this.#batch = { done: 0, total, failed: 0 }
+    this.#emit()
+    for (const { key, state } of plan) {
+      // Each run looks its row up afresh, and one that throws is one that did
+      // not publish — the rest still run, and the count stays true.
+      let ok: boolean | null = null
+      try { ok = await this.#run(key, true, state) }
+      catch (error) { console.warn('[publish] a picked app did not publish:', key, error) }
+      if (ok) published++
+      else failed++
+      this.#batch = { done: published + failed, total, failed }
+      this.#emit()
+    }
+    this.#batch = null
+    if (failed === 0) this.#toast('success', 'publish.batch.done', `Published ${published}.`, { count: published })
+    else this.#toast('error', 'publish.batch.partial', `Published ${published} of ${total} — ${failed} did not publish.`,
+      { done: published, total, failed })
+    this.#emit()
     void this.#refresh()
+  }
+
+  /** While the picked apps publish, nothing else writes this hive's index
+   *  from here: a withdrawal the batch has not reached would be published
+   *  again, open on every domain. Says so, and answers true when it refused. */
+  #waitForBatch(): boolean {
+    if (!this.#batch) return false
+    this.#toast('tip', 'publish.batch.busy', 'The picked apps are still publishing — try again when they are done.')
+    return true
   }
 
   /** ONE DOMAIN'S SWITCH for one branch. The branch's host marks follow the
@@ -1259,6 +1341,7 @@ export class PublishStatusDrone extends Drone {
    *  publish it (seal, upload, index — the doors ride along from the marks);
    *  anything else → one signed doors rewrite, no seal, no upload. */
   async #door(key: string, rawZone: string, on: boolean): Promise<void> {
+    if (this.#waitForBatch()) return
     const row = this.#rows.find(r => r.key === key)
     const zone = hostZone(rawZone)
     if (!row || row.segments.length === 0 || !zone || row.busyPhase) return
@@ -1293,6 +1376,7 @@ export class PublishStatusDrone extends Drone {
    *  `<label>.<zone>` (or, with no label, returning it to the root path on
    *  that zone). The label is checked before anything is signed. */
   async #ownAddress(key: string, rawZone: string, label: string | null): Promise<void> {
+    if (this.#waitForBatch()) return
     const row = this.#rows.find(r => r.key === key)
     const zone = hostZone(rawZone)
     if (!row || row.segments.length === 0 || !zone || row.busyPhase) return
@@ -1388,6 +1472,7 @@ export class PublishStatusDrone extends Drone {
     key: string, rawHost: string,
     p: { on?: boolean; page?: string; forget?: boolean },
   ): Promise<void> {
+    if (this.#waitForBatch()) return
     const row = this.#rows.find(r => r.key === key)
     const host = entranceHost(rawHost)
     const view = row?.entrances[host]
@@ -1486,6 +1571,7 @@ export class PublishStatusDrone extends Drone {
    *  stop holding what only this place used (publish-branch.ts). The panel
    *  confirms before emitting; the gates live in the routine, not here. */
   async #forget(key: string): Promise<void> {
+    if (this.#waitForBatch()) return
     const row = this.#rows.find(r => r.key === key)
     if (!row || row.segments.length === 0 || row.busyPhase) return
     row.busyPhase = 'forgetting'
@@ -1511,6 +1597,7 @@ export class PublishStatusDrone extends Drone {
   }
 
   async #unpublish(key: string): Promise<void> {
+    if (this.#waitForBatch()) return
     const row = this.#rows.find(r => r.key === key)
     if (!row || row.segments.length === 0) return
     const result = await unpublishBranch(row.segments)
@@ -1583,7 +1670,7 @@ export class PublishStatusDrone extends Drone {
   /** Toasts carry RESOLVED text — the bus payload is display copy, and the
    *  shell must not have to know which fields are keys (the publishing gesture
    *  resolves the same way). */
-  #toast(type: string, messageKey: string, fallback: string, params?: Record<string, string>): void {
+  #toast(type: string, messageKey: string, fallback: string, params?: Record<string, string | number>): void {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     EffectBus.emit('toast:show', {
       type,
@@ -1596,6 +1683,7 @@ export class PublishStatusDrone extends Drone {
     this.#payload = {
       ...this.#payload, open: this.#open, rows: this.#rows,
       entrancePreview: this.#preview, previewed: [...this.#previewed],
+      batch: this.#batch ? { ...this.#batch } : null,
     }
     this.emitEffect<PublishRenderPayload>('publish:render', this.#payload)
   }

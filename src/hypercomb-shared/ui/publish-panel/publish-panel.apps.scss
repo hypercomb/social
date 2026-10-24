@@ -1,0 +1,237 @@
+// hypercomb-shared/ui/publish-panel/publish-panel.apps.scss
+//
+// WHAT EACH DOMAIN HOSTS — the chevron on a domain row, the list it opens
+// (each app by its path and its address there, a pick box, a changes mark)
+// and the bar the picks bring up. Its own sheet in `styleUrls`, like the
+// groups sheet, so the main sheet never grows toward the per-sheet
+// anyComponentStyle budget. Sizes follow the domain rows above (rem).
+
+@use '../toolwindow' as tw;
+
+$amber: #d99a4e;
+
+// THE SWITCH sits beside the chevron inside the row, and carries what the
+// row used to: the click, the focus ring, and the dim while it cannot flip.
+.pdoor-switch {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding-block: 0.4rem;
+  cursor: pointer;
+  border-radius: tw.$radius-card;
+
+  &:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px rgba(var(--acc), 0.55); }
+}
+
+// Dimmed once: a row that is publishing is already dimmed as a whole (.busy).
+.pdoor:not(.busy) .pdoor-switch[aria-disabled='true'] { opacity: 0.55; cursor: progress; }
+.pdoor.busy .pdoor-switch { cursor: progress; }
+
+.pdoor-expand {
+  flex: 0 0 auto;
+  width: 1.6rem;
+  height: 1.6rem;
+  margin-inline-start: -0.35rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: tw.$radius-control;
+  background: none;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+
+  .mat-sym { font-size: 1.15rem; }
+  &:hover { color: var(--hc-window-ink-loud); background: rgba(var(--acc), 0.1); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
+  &[aria-expanded='true'] { color: var(--hc-window-ink-loud); }
+}
+
+.papps-host {
+  list-style: none;
+  padding: 0 0 0.35rem 1.6rem;
+}
+
+.papps-none {
+  margin: 0.2rem 0 0.2rem 0.72rem;
+  font-size: 0.72rem;
+  color: var(--hc-window-ink-quiet);
+}
+
+.papps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.papp {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: tw.$radius-card;
+
+  &:hover { background: rgba(var(--acc), 0.05); }
+  &.picked { background: rgba(var(--acc), 0.1); }
+  &.busy { opacity: 0.6; }
+}
+
+// The pick: a hit area that grows to the phone's touch size (below), with
+// the box drawn small inside it — an empty square until picked, then a tick.
+.papp-pick {
+  flex: 0 0 auto;
+  width: 1.6rem;
+  min-height: 1.6rem;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: tw.$radius-control;
+  background: none;
+  cursor: pointer;
+
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
+  &:hover .papp-box { border-color: rgba(var(--acc), 0.8); }
+  &[aria-checked='true'] .papp-box {
+    border-color: rgba(var(--acc), 0.9);
+    background: rgba(var(--acc), 0.85);
+    // The tick is cut out of the fill in the panel's own ground.
+    color: rgb(var(--hc-panel-pane));
+  }
+}
+
+.papp-box {
+  width: 1.05rem;
+  height: 1.05rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(var(--acc), 0.45);
+  border-radius: tw.$radius-control;
+  color: transparent;
+
+  .mat-sym { font-size: 0.85rem; line-height: 1; }
+}
+
+.papp-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.papp-name {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 560;
+  line-height: 1.3;
+  color: var(--hc-window-ink-loud);
+  text-align: start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover { text-decoration: underline dotted; }
+}
+
+.papp-at {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.66rem;
+  line-height: 1.45;
+  color: var(--hc-window-ink-quiet);
+  text-decoration: none;
+
+  &:is(a):hover { color: var(--hc-window-ink-loud); }
+}
+
+.papp-changed {
+  flex: 0 0 auto;
+  font-size: 0.64rem;
+  color: tw.ink($amber);
+  white-space: nowrap;
+}
+
+// Another device's app: named, never picked — the pick's place kept empty so
+// the names stay in one column.
+.papp-pick-none { cursor: default; }
+.papp-name-quiet { color: var(--hc-window-ink-quiet); font-weight: 500; cursor: default; }
+.papp-name-quiet:hover { text-decoration: none; }
+
+// THE PICKS' BAR — under the domains, above Manage hosts.
+.psel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  margin: 0.45rem 0.72rem 0.1rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(var(--acc), 0.25);
+  border-radius: tw.$radius-card;
+  background: rgba(var(--acc), 0.05);
+  font-size: 0.74rem;
+}
+
+.psel-count {
+  color: var(--hc-window-ink-loud);
+  font-weight: 560;
+}
+
+.psel-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-inline-start: auto;
+
+  .pcur-action {
+    font-size: 0.72rem;
+    &:disabled { opacity: 0.45; cursor: default; }
+    &:disabled:hover { background: none; color: var(--hc-window-ink-loud); }
+  }
+}
+
+.psel-clear {
+  padding: 0 0.15rem;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--hc-window-ink-quiet);
+  text-decoration: underline dotted;
+  cursor: pointer;
+
+  &:hover { color: var(--hc-window-ink-loud); }
+}
+
+.psel-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--hc-window-ink-quiet);
+}
+
+// A PHONE: the chevron and the pick are thumb-sized (2.75rem, the shell's
+// touch size), and the chevron stands clear of the switch beside it — a miss
+// must not publish or withdraw.
+@media (max-width: 599px), (max-height: 449px) {
+  .publish-panel .pdoor-expand,
+  .publish-panel .papp-pick {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+  .publish-panel .pdoor-expand { margin-inline-start: -0.5rem; margin-inline-end: 0.25rem; }
+  .publish-panel .papp { min-height: 2.75rem; }
+  .publish-panel .papps-host { padding-inline-start: 1rem; }
+}
