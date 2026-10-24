@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, existsSync } from 'fs'
-import { join, relative } from 'path'
+import { dirname, join, relative, resolve } from 'path'
 import { spawnSync } from 'child_process'
 import { createRequire } from 'module'
 import { BARE_WORD_POOL_MEANINGS, RETIRED_POOL_MEANINGS, SCOPED_POOL_MEANINGS } from '@hypercomb/core'
@@ -124,8 +124,9 @@ const countsMatching = (pattern: RegExp): Record<string, number> => {
 
 /** The per-SITE ratchet: a file may never gain an occurrence, and a file that
  *  sheds one must have its allowance lowered so the ratchet clicks. Returns the
- *  problems (empty when clean), so several rules report in one failure. */
-const countRatchet = (actual: Record<string, number>, allowed: Record<string, number>, rule: string, fix: string): { problems: string[]; msg: string } => {
+ *  problems (empty when clean), so several rules report in one failure.
+ *  `home` names where the allowance lives, so DEBT PAID says what to edit. */
+const countRatchet = (actual: Record<string, number>, allowed: Record<string, number>, rule: string, fix: string, home = 'doctrine.storage-writes.json'): { problems: string[]; msg: string } => {
   const drift = Object.entries(actual)
     .filter(([file, n]) => n > (allowed[file] ?? 0))
     .map(([file, n]) => `${file}: ${n} (allowed ${allowed[file] ?? 0})`)
@@ -134,7 +135,7 @@ const countRatchet = (actual: Record<string, number>, allowed: Record<string, nu
     .map(([file, n]) => `${file}: ${actual[file] ?? 0} (allowed ${n}) — lower it${actual[file] ? '' : ', or remove the entry'}`)
   const msg =
     (drift.length ? `\nNEW DRIFT (${rule}) — ${fix}; never raise an allowance:\n  ${drift.join('\n  ')}\n` : '') +
-    (paid.length ? `\nDEBT PAID (${rule}) — update doctrine.storage-writes.json so the ratchet clicks:\n  ${paid.join('\n  ')}\n` : '')
+    (paid.length ? `\nDEBT PAID (${rule}) — update ${home} so the ratchet clicks:\n  ${paid.join('\n  ')}\n` : '')
   return { problems: drift.concat(paid), msg }
 }
 
@@ -1870,6 +1871,251 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/sharing/profile.queen.ts',
       'hypercomb-essentials/src/sharing/publish-status.drone.ts',
     ], 'the compiled public content host used outside a read')
+  })
+
+  // ─── PERFORMANCE RATCHETS (documentation/performance-plan.md, Step 0) ──
+  //
+  // The scoreboard's static half: three costs that need no browser to see,
+  // frozen on 2026-10-23 so the waves can only lower them. P5 forbids field
+  // telemetry, so a number that is not held locally is not held at all — and
+  // a cost that may grow between measurements is not a cost anyone owns. Same
+  // rule as every ratchet above: a new site is drift (fix the code), a site
+  // that leaves is debt paid (lower the allowance so the ratchet clicks).
+
+  it('no new always-on ticker — the frame loop\'s consumers may only shrink', () => {
+    // An idle hive paints 120 frames a second, under covering views and on
+    // published doors alike, because every `ticker.add` is a callback the
+    // frame loop runs on EVERY frame until someone removes it. Wave 4 stops
+    // the ticker under covers, and true render-on-demand needs an animating
+    // refcount across exactly these consumers — so the set must not grow
+    // while that work is owed. A new animation rides a consumer that already
+    // exists; it does not hang another callback on the loop.
+    //
+    // Counted per FILE (tile-overlay holds two). Spelled to see a HELD ticker
+    // as well as `app.ticker.add` — trait-silhouette keeps the ticker in a
+    // field and calls `ticker.add(step)` — and through `?.` or a non-null
+    // `!.`. Scanned over every package, not only essentials, so a shell
+    // cannot grow one either; the retired Angular app's scheduler is the one
+    // entry outside essentials.
+    const { problems, msg } = countRatchet(
+      countsMatching(/\bticker\s*[?!]?\.\s*add\s*\(|\bTicker\s*\.\s*shared\s*[?!]?\.\s*add\s*\(/g),
+      {
+        'hypercomb-essentials/src/meeting/meeting-video.drone.ts': 1,
+        'hypercomb-essentials/src/presentation/avatars/agent-bee.drone.ts': 1,
+        'hypercomb-essentials/src/presentation/avatars/avatar-swarm.drone.ts': 1,
+        'hypercomb-essentials/src/presentation/screensaver/screensaver.drone.ts': 1,
+        'hypercomb-essentials/src/presentation/tiles/pixi-host.worker.ts': 1,        // scene-text resolution refresh
+        'hypercomb-essentials/src/presentation/tiles/spotlight.drone.ts': 1,
+        'hypercomb-essentials/src/presentation/tiles/tile-name.drone.ts': 1,
+        'hypercomb-essentials/src/presentation/tiles/tile-overlay.drone.ts': 2,
+        'hypercomb-essentials/src/presentation/tiles/tile-selection.drone.ts': 1,
+        'hypercomb-essentials/src/presentation/tiles/trait-silhouette.drone.ts': 1,
+        'hypercomb-legacy/src/app/core/controller/render-scheduler.ts': 1,          // the retired app
+      },
+      'always-on ticker.add',
+      'animate through a consumer that already exists instead of hanging a new callback on the frame loop',
+      'the allowance in this test',
+    )
+    expect(problems, msg).toEqual([])
+  })
+
+  it('executable blob URLs may only shrink — and the unhashed fetch-to-blob paths only drain', () => {
+    // P1: every executed byte is verified against its signature. A blob: URL
+    // carries no integrity — whatever runs from it is whatever the Blob was
+    // made of — so the hash check must happen BEFORE the Blob exists, and
+    // every place that makes one is a place the check can be skipped. Two
+    // tiers, both per file:
+    //
+    //   1. EVERY executable blob: a Blob literal typed as JavaScript, or a
+    //      blob URL handed straight to import() or a Worker. Today's sites
+    //      read verified bytes (Store.getBee, Store.getDependencyBytes,
+    //      the shim's resolveVerified) except the three below. A new one is a
+    //      new path to audit, so it is drift; the sanctioned way to run a
+    //      module is a URL the import map gives an integrity entry.
+    //   2. The FETCH-FED subset: a mint whose last eight lines — the mint
+    //      itself included, so `new Blob([await (await fetch(u)).text()], …)`
+    //      counts — call fetch() and name no hash check (digest / sha256 /
+    //      sign / verif — never `unverified` — / integrity). These run a
+    //      host's bytes unverified — the visitor fallbacks in
+    //      resolve-import-map.ts (the install-index door that
+    //      cannot serve modules at the root, and the XCOPY read-only visitor,
+    //      which also takes OPFS text unhashed) and the shim's copy of the
+    //      second. Wave 2 hashes them first; then they leave and this tier
+    //      stays empty.
+    //
+    // KNOWN LIMITS: a Blob typed through a constant (`{ type: JS_MIME }`), or
+    // built far from its fetch, is not seen. This is a tripwire for the
+    // spelling the tree actually uses, not a proof.
+    const EXECUTABLE_BLOB = /new\s+Blob\s*\(\s*\[[^\]]{0,200}\]\s*,\s*\{\s*type\s*:\s*['"`](?:text|application)\/(?:x-)?(?:java|ecma)script|\bimport\s*\(\s*URL\.createObjectURL\s*\(|\bnew\s+(?:Shared)?Worker\s*\(\s*URL\.createObjectURL\s*\(/g
+    const FETCHED = /\bfetch\s*\(/
+    const HASHED = /digest\s*\(|sha256|\bsign\s*\(|(?<!un)verif|integrity/i
+    const fetchFed: Record<string, number> = {}
+    for (const dir of SCAN_DIRS) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const code = stripComments(readFileSync(file, 'utf8'))
+        for (const m of code.matchAll(EXECUTABLE_BLOB)) {
+          const tail = code.slice(0, (m.index ?? 0) + m[0].length).split('\n').slice(-8).join('\n')
+          if (!FETCHED.test(tail) || HASHED.test(tail)) continue
+          const where = relative(ROOT, file).replace(/\\/g, '/')
+          fetchFed[where] = (fetchFed[where] ?? 0) + 1
+        }
+      }
+    }
+    const results = [
+      countRatchet(countsMatching(EXECUTABLE_BLOB), {
+        'hypercomb-runtime/src/dependency-loader.ts': 1,     // Store.getDependencyBytes — hashed
+        'hypercomb-runtime/src/store.ts': 1,                 // getBee's verified buffer — hashed
+        'hypercomb-shim/src/bootstrap-loader.ts': 1,         // resolveVerified — hashed
+        'hypercomb-shim/src/import-map.ts': 2,               // one hashed, one fetch-fed
+        'hypercomb-web/src/setup/resolve-import-map.ts': 3,  // one hashed, two fetch-fed
+      }, 'executable blob URL',
+      'run the module from a URL with an import-map integrity entry, or hash the bytes before the Blob exists',
+      'the allowance in this test'),
+      countRatchet(fetchFed, {
+        'hypercomb-shim/src/import-map.ts': 1,
+        'hypercomb-web/src/setup/resolve-import-map.ts': 2,
+      }, 'unhashed fetch-to-blob execution',
+      'hash the fetched bytes against their signature before making the Blob',
+      'the allowance in this test'),
+    ]
+    expect(results.flatMap(r => r.problems), results.map(r => r.msg).join('')).toEqual([])
+  })
+
+  it('the eager boot-lane closure may only shrink — a boot bee pulls in nothing new', () => {
+    // The boot lane (atomic-modules-plan.md, step 6) is what a visit
+    // evaluates before ANY other bee loads: the bees that declare
+    // `readonly lane = 'boot'` and everything they import statically. The
+    // audit measured it built at 823 KB / 64 modules; every one of them is a
+    // parse and an evaluation on the critical path of every boot, participant
+    // and visitor alike.
+    //
+    // Computed from SOURCE, so it needs no build: the build's own lane
+    // declaration (build-module.ts LANE_RE — never a file suffix), then every
+    // static relative import, transitively, inside essentials (which imports
+    // itself only relatively). `import type` and a named import of types only
+    // are erased and not counted; a dynamic `import()` is lazy and not counted
+    // — that is the way OUT of the lane.
+    //
+    //   a new file  -> NEW DRIFT. Import it lazily from the bee that needs
+    //                  it, after boot, or keep it out of the boot graph.
+    //   a gone file -> DEBT PAID. Remove it so the ratchet clicks tight.
+    //
+    // Bytes are a BUILD number and are not frozen here; the module set is the
+    // source-side proxy that moves with them. The externals are frozen too,
+    // so a vendor (pixi) cannot enter the lane through a boot import.
+    const ESSENTIALS = join(ROOT, 'hypercomb-essentials/src')
+    const BOOT_LANE = /readonly\s+lane\s*(?::[^=]+)?=\s*['"]boot['"]/
+    // The clause may hold only names, braces, commas and `*` — and never the
+    // word `import` or `export` — so a match can never run from one statement
+    // into the next one's `from`. Without that last rule a local
+    // `export type { A }` swallowed the value import after it and erased it.
+    const STATIC = /\b(import|export)\s+(type\s+)?((?:(?!\b(?:import|export)\b)[\w$*{},\s])*?)\s*from\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]/g
+    const erased = (keyword: string, typeOnly: string | undefined, clause: string): boolean => {
+      if (typeOnly) return true
+      const named = /^\{([^}]*)\}$/.exec(clause.trim())
+      return keyword === 'import' && !!named
+        && named[1].split(',').map(s => s.trim()).filter(Boolean).every(s => /^type\s/.test(s))
+    }
+    const toFile = (from: string, spec: string): string | null => {
+      const base = resolve(dirname(from), spec.replace(/\.js$/, ''))
+      for (const candidate of [`${base}.ts`, join(base, 'index.ts')]) if (existsSync(candidate)) return candidate
+      return null
+    }
+
+    const roots = walk(ESSENTIALS).filter(file => BOOT_LANE.test(stripComments(readFileSync(file, 'utf8'))))
+    expect(roots.length, 'no boot-lane bee found — the lane declaration moved, fix this walk').toBeGreaterThan(0)
+    const closure = new Set<string>()
+    const externals = new Set<string>()
+    const unresolved: string[] = []
+    const visit = (file: string): void => {
+      if (closure.has(file)) return
+      closure.add(file)
+      for (const m of stripComments(readFileSync(file, 'utf8')).matchAll(STATIC)) {
+        const spec = m[4] ?? m[5]
+        if (m[4] && erased(m[1], m[2], m[3])) continue
+        if (!spec.startsWith('.')) { externals.add(spec); continue }
+        const next = toFile(file, spec)
+        if (next) visit(next)
+        else unresolved.push(`${relative(ROOT, file).replace(/\\/g, '/')} -> ${spec}`)
+      }
+    }
+    roots.forEach(visit)
+    // A walk that cannot follow an import under-reports, which reads as debt
+    // paid. Fail on it instead.
+    expect(unresolved, 'boot-lane import the walk could not resolve').toEqual([])
+
+    assertRatchet([...externals].sort(), [
+      '@hypercomb/core',
+      'nostr-tools/nip19',
+      'nostr-tools/pure',
+    ], 'external module in the eager boot lane')
+    assertRatchet([...closure].map(file => relative(ROOT, file).replace(/\\/g, '/')).sort(), [
+      'hypercomb-essentials/src/commands/commands.boot.drone.ts',
+      'hypercomb-essentials/src/commands/decoration-kind-index.ts',
+      'hypercomb-essentials/src/commands/decoration-manifest.ts',
+      'hypercomb-essentials/src/commands/decoration.service.ts',
+      'hypercomb-essentials/src/commands/publish-lights.ts',
+      'hypercomb-essentials/src/commands/visual-bee-registry.ts',
+      'hypercomb-essentials/src/commands/website-binding.ts',
+      'hypercomb-essentials/src/commands/website-slot.ts',
+      'hypercomb-essentials/src/history/builds-slot.ts',
+      'hypercomb-essentials/src/history/canonical-layer.ts',
+      'hypercomb-essentials/src/history/child-sig-guard.ts',
+      'hypercomb-essentials/src/history/head-index.ts',
+      'hypercomb-essentials/src/history/history-cursor.service.ts',
+      'hypercomb-essentials/src/history/history.boot.drone.ts',
+      'hypercomb-essentials/src/history/history.service.ts',
+      'hypercomb-essentials/src/history/layer-diff.ts',
+      'hypercomb-essentials/src/history/layer-placement.ts',
+      'hypercomb-essentials/src/history/layer-slot-registry.ts',
+      'hypercomb-essentials/src/history/lineage-key.ts',
+      'hypercomb-essentials/src/history/marker-meta.ts',
+      'hypercomb-essentials/src/history/preload-policy.ts',
+      'hypercomb-essentials/src/history/seal-preference.ts',
+      'hypercomb-essentials/src/history/snapshots-slot.ts',
+      'hypercomb-essentials/src/navigation/back-gesture.service.ts',
+      'hypercomb-essentials/src/navigation/browser-menu.ts',
+      'hypercomb-essentials/src/navigation/hex-detector.ts',
+      'hypercomb-essentials/src/navigation/input-gate.service.ts',
+      'hypercomb-essentials/src/navigation/input-mode-stack.service.ts',
+      'hypercomb-essentials/src/navigation/mode-registry.service.ts',
+      'hypercomb-essentials/src/navigation/navigation.boot.drone.ts',
+      'hypercomb-essentials/src/navigation/view-back.ts',
+      'hypercomb-essentials/src/pheromones/enrollment-acts.ts',
+      'hypercomb-essentials/src/pheromones/enrollment.ts',
+      'hypercomb-essentials/src/preferences/mobile-pheromones.ts',
+      'hypercomb-essentials/src/presentation/grid/hex-geometry.ts',
+      'hypercomb-essentials/src/presentation/tiles/local-resource-reference.ts',
+      'hypercomb-essentials/src/presentation/tiles/session-hide.store.ts',
+      'hypercomb-essentials/src/presentation/tiles/tile-public.ts',
+      'hypercomb-essentials/src/sharing/adopt-descendants.ts',
+      'hypercomb-essentials/src/sharing/behavior-enablement.ts',
+      'hypercomb-essentials/src/sharing/code-trust.ts',
+      'hypercomb-essentials/src/sharing/community-hosts.ts',
+      'hypercomb-essentials/src/sharing/content-broker.boot.drone.ts',
+      'hypercomb-essentials/src/sharing/decoration-closure.ts',
+      'hypercomb-essentials/src/sharing/feature-hidden.ts',
+      'hypercomb-essentials/src/sharing/first-available-host.ts',
+      'hypercomb-essentials/src/sharing/hive-format.ts',
+      'hypercomb-essentials/src/sharing/hive-link.ts',
+      'hypercomb-essentials/src/sharing/hive-pointer.ts',
+      'hypercomb-essentials/src/sharing/hive-visit.boot.drone.ts',
+      'hypercomb-essentials/src/sharing/host-sync.service.ts',
+      'hypercomb-essentials/src/sharing/membership.ts',
+      'hypercomb-essentials/src/sharing/names.service.ts',
+      'hypercomb-essentials/src/sharing/nostr-signer.ts',
+      'hypercomb-essentials/src/sharing/passive-replication-queue.ts',
+      'hypercomb-essentials/src/sharing/retired-push-pool.ts',
+      'hypercomb-essentials/src/sharing/sharing.boot.drone.ts',
+      'hypercomb-essentials/src/sharing/signature-replication.service.ts',
+      'hypercomb-essentials/src/sharing/swarm-hosts.ts',
+      'hypercomb-essentials/src/sharing/text-theme-offering.ts',
+      'hypercomb-essentials/src/sharing/visitor-door.view.ts',
+      'hypercomb-essentials/src/sharing/visual-hosts.ts',
+      'hypercomb-essentials/src/sharing/zone-door.ts',
+    ], 'module in the eager boot-lane closure')
   })
 
 })
