@@ -29,14 +29,26 @@
  * <head> (index.html) so they persist after we move out of <app-root>.
  *
  * THE PIECE (jwize 2026-10-18: "1 2 3 on 2d space and then 3d space triangle then
- * 6 pointed primitive then 7 is the first not balanced dot starts the next phase").
- *   • one dot, two (a LINE), three (a TRIANGLE): the flat world;
- *   • the FOURTH dot opens in the triangle's middle — the first chance to go 3D:
- *     a triangle in space (a tetrahedron), the view tilting just enough to show it;
- *   • each of the four expands in THREE directions until they meet as a CUBE. The
- *     four were half a cube's corners all along, so the three directions land on
- *     the other four exactly. Seen down its diagonal the cube IS the six-pointed
- *     primitive — the hexagon, the comb's cell — and it holds there, balanced;
+ * 6 pointed primitive then 7 is the first not balanced dot starts the next phase";
+ * 2026-10-24: "start with one and then evenly separate dot up and down so later on
+ * a positional move should be unnecessary … the transition from a four point
+ * pyramid to a 5 point bipyramid").
+ *   • one dot; it parts EVENLY, up and down (a LINE) — only as far as the triangle
+ *     is tall, so the top is already its apex and the bottom already its base
+ *     (jwize: "you don't go past and back"); the bottom then parts left and right
+ *     and nothing else (a TRIANGLE): the flat world. From the triangle on, every
+ *     stage is balanced about the one centre, so the piece never moves — only the
+ *     view tilts, just enough to show the depth;
+ *   • the FOURTH dot opens in the triangle's middle and goes back — the first
+ *     chance to go 3D: a four-point PYRAMID (a tetrahedron), the triangle easing
+ *     forward to balance it;
+ *   • the FIFTH opens there too and comes forward — a five-point BIPYRAMID, the
+ *     triangle easing back to the middle, between its two apexes;
+ *   • each of the four even corners expands in THREE directions until they meet
+ *     as a CUBE. The pyramid was half a cube's corners all along and the
+ *     bipyramid's apexes are two more, so the directions land on the last three
+ *     exactly. Seen down its diagonal the cube IS the six-pointed primitive — the
+ *     hexagon, the comb's cell — and it holds there, balanced;
  *   • the SEVENTH beat is the first unbalanced dot: it breaks the symmetry, the
  *     cube turns, and the next phase begins. Its corners sit on the sphere, and the SPHERE fills
  * on the same rule: each new dot splits off its nearest neighbour (farthest-point
@@ -77,12 +89,13 @@
     // them to the viewport (see resize()). Times are real seconds.
     var R = 120, FOV = 1600, DOT_R = 8, DEG = Math.PI / 180;
     var A = R / Math.sqrt(3);                         // half the cube's edge: its corners sit ON the sphere
-    var T_LINE = 0.45, T_TRI = 1.25, T_MID = 2.05, T_EXP = 3.0, T_TURN = 4.55;
+    var HOME = R / 4;                                 // the honey dot: halfway between the triangle's apex (R) and its base (-R/2)
+    var T_LINE = 0.45, T_TRI = 1.25, T_MID = 2.05, T_BI = 2.85, T_EXP = 3.8, T_TURN = 5.35;
     var STEP = 0.75, EXP_STEP = 1.05;                 // each parting takes this long — slow enough to watch
-    var T_FILL = 5.1, FILL = 3.2;                     // the seventh beat: the first unbalanced dot, then the fill: slow → fast → very fast
+    var T_FILL = 5.9, FILL = 3.2;                     // the seventh beat: the first unbalanced dot, then the fill: slow → fast → very fast
     var T_RETURN = T_FILL + FILL, RETURN = 0.7;       // everything back to the one dot
     var DOT_IN = T_RETURN + RETURN - 0.2;             // the honey dot takes over as the last dots arrive home
-    var TOTAL = T_RETURN + RETURN + 0.25;             // ≈ 8s a play; the dot holds a beat at the seam
+    var TOTAL = T_RETURN + RETURN + 0.25;             // ≈ 10s a play; the dot holds a beat at the seam
     var SPIN = reduce ? 0.12 : 0.35, PITCH = 18 * DEG;
     var N = 260, NG = 8;                              // N dots in all; the first NG are the cube's corners
     var FILL_POW = 2.6;                               // the j-th fill dot arrives at (j/M)^(1/FILL_POW): few, then a flood
@@ -110,7 +123,9 @@
     var PARENT = new Int32Array(N), RANKED = new Int32Array(N);
     var TONE_R = new Float64Array(N), TONE_G = new Float64Array(N), TONE_B = new Float64Array(N);
     var EDGES = [];                                   // the cube's 12 edges: corners one bit apart, listed EVEN → ODD
-    var TETRA = [0, 3, 0, 5, 0, 6, 3, 5, 3, 6, 5, 6]; // the triangle in space: the four even corners, all joined
+    // the pyramid: the four even corners, all joined — then the bipyramid: the fifth (corner 7) joined to the triangle
+    var TETRA = [0, 3, 0, 5, 0, 6, 3, 5, 3, 6, 5, 6, 7, 3, 7, 5, 7, 6];
+    var ANG = new Float64Array(NG);                   // each corner's bearing on screen, seen down the diagonal
     function parity(k) { return ((k & 1) + ((k >> 1) & 1) + ((k >> 2) & 1)) & 1; }
     // THE DIAGONAL VIEW: a basis that looks straight down the cube's diagonal (1,1,1),
     // corner 7 toward the viewer — from there the cube reads as a hexagon. Up is
@@ -122,6 +137,7 @@
       var GA = Math.PI * (3 - Math.sqrt(5)), EPS = 0.36, M = N - NG, i, j, k, inv = 1 / Math.sqrt(3);
       for (k = 0; k < NG; k++) {
         UX[k] = (k & 1 ? 1 : -1) * inv; UY[k] = (k & 2 ? 1 : -1) * inv; UZ[k] = (k & 4 ? 1 : -1) * inv;
+        ANG[k] = Math.atan2(UX[k] * BY[0] + UY[k] * BY[1] + UZ[k] * BY[2], UX[k] * BX[0] + UY[k] * BX[1] + UZ[k] * BX[2]);
         if (!parity(k)) for (var bit = 1; bit < 8; bit <<= 1) EDGES.push(k, k ^ bit);   // each even corner: its three directions
       }
       for (i = 0; i < M; i++) {
@@ -184,11 +200,12 @@
     }
 
     // ---- render ---------------------------------------------------------------
-    var W = 0, H = 0, S = 1, cx = 0, cy = 0;
+    var W = 0, H = 0, S = 1, cx = 0, cy = 0, hy = 0;
     function resize() {
       cx = W / 2;
       cy = H * 0.46 - 10;                                  // sphere a touch above centre; the title (index.html #hc-splash .m, top:66%) hugs beneath it — the pair balanced as one vertically-centred group
       S = Math.min(W, H) * FIT / (R * 1.08);               // 1.08 = the perspective peak: the widest the sphere ever gets
+      hy = cy - HOME * S;                                  // the honey dot sits where the line parts, a little above the sphere's centre
     }
     function colour(i, h) {
       return h > 0.001
@@ -197,59 +214,63 @@
     }
 
     // cube space → screen: down the diagonal (BX, BY, BZ), then the turn (yaw about
-    // screen-vertical, pitch about screen-horizontal), then perspective
-    var PJX = 0, PJY = 0, PJZ = 0, PJS = 1, cyw = 1, syw = 0, cp = 1, sp = 0, OFX = 0, OFY = 0, OFZ = 0, SCL = 1;
+    // screen-vertical, pitch about screen-horizontal), then perspective — and on the
+    // way home, everything gathers on screen to the honey dot (keep: 1 → 0)
+    var PJX = 0, PJY = 0, PJZ = 0, PJS = 1, cyw = 1, syw = 0, cp = 1, sp = 0, keep = 1;
     function project(x, y, z) {
-      x = (x + OFX) * SCL; y = (y + OFY) * SCL; z = (z + OFZ) * SCL;
       var dx = x * BX[0] + y * BX[1] + z * BX[2], dy = x * BY[0] + y * BY[1] + z * BY[2], dz = x * BZ[0] + y * BZ[1] + z * BZ[2];
       var x1 = dx * cyw + dz * syw, z1 = -dx * syw + dz * cyw;
       var y2 = dy * cp - z1 * sp, z2 = dy * sp + z1 * cp;
-      PJS = FOV / (FOV + z2); PJX = cx + x1 * PJS * S; PJY = cy - y2 * PJS * S; PJZ = z2;
+      PJS = FOV / (FOV + z2); PJX = cx + x1 * PJS * S * keep; PJY = hy + (cy - y2 * PJS * S - hy) * keep; PJZ = z2;
     }
     function render() {
       ctx.clearRect(0, 0, W, H);
       var T = nowSec, i, j, k;
-      // THE BEATS. Even corners (3, 5, 6, then 0) are the flat world and the triangle
-      // in space; each opens from the centre. The odd corners (1, 2, 4, 7) are where
-      // the even ones' three directions meet — they appear as the edges arrive.
-      var eL = part(T, T_LINE, STEP), eT = part(T, T_TRI, STEP), eM = part(T, T_MID, STEP);
+      // THE BEATS. Corners 3, 5, 6 are the flat world, then 0 (the pyramid) and 7
+      // (the bipyramid): each opens from the centre. The rest (1, 2, 4) are where
+      // the even corners' three directions meet — they appear as the edges arrive.
+      var eL = part(T, T_LINE, STEP), eT = part(T, T_TRI, STEP), eM = part(T, T_MID, STEP), eB = part(T, T_BI, STEP);
       var eX = part(T, T_EXP, EXP_STEP), eTurn = part(T, T_TURN, 1.1);
-      var back = clamp01((T - T_RETURN) / RETURN), keep = 1 - back * back * back;   // the way home starts slow and ends fast
+      // the triangle's place along the view axis, balancing whatever opens around it:
+      // flat in the middle → forward a third for the pyramid → back to the middle for
+      // the bipyramid → forward again as the cube's near face. Its corners stay ON the
+      // sphere, so the ring narrows a touch whenever it leaves the middle.
+      var ringZ = -R / 3 * (eM - eB + eX), ringR = Math.sqrt(R * R - ringZ * ringZ);
+      var back = clamp01((T - T_RETURN) / RETURN); keep = 1 - back * back * back;   // the way home starts slow and ends fast
       var heat = Math.max(1 - eTurn, back);                // honey while the shape is young and on the way home, cool blue once it turns
       var endFade = clamp01((T - DOT_IN) / 0.2);
       // the view: straight down the diagonal, so the cube reads as a hexagon. The
-      // fourth dot tilts it just enough to show depth, then it settles back; after
-      // the hexagon has held, the seventh beat breaks the balance and it turns.
+      // pyramid and the bipyramid tilt it just enough to show depth, then it settles
+      // back; after the hexagon has held, the seventh beat breaks the balance and it
+      // turns. The piece itself never moves off the centre.
       var tiltP = clamp01((T - T_MID) / (T_EXP + EXP_STEP - T_MID));
       var tilt = Math.sin(Math.PI * tiltP) * 15 * DEG;
       var tau = Math.max(0, T - T_TURN), RAMP = 1.2;
       var yaw = SPIN * (tau < RAMP ? tau * tau / (2 * RAMP) : tau - RAMP / 2) + tilt * 0.6;
       var pitch = PITCH * eTurn + tilt; cyw = Math.cos(yaw); syw = Math.sin(yaw); cp = Math.cos(pitch); sp = Math.sin(pitch);
       var vn = 0;
-      // the honey dot is the first corner (3): the frame starts on it, the line
-      // grows down from it, and the frame settles on the triangle's centre as the
-      // fourth dot opens there — "then a center again"
-      var off = 1 - eM; OFX = -A * off; OFY = -A * off; OFZ = A * off;
-      SCL = lerp(0.7, 1, eM);                             // the flat opening hangs below the first dot: drawn smaller so it clears the title
 
       for (j = 0; j < N; j++) {                            // in arrival order: a parent is placed before its children
         i = RANKED[j];
         if (i < NG) {
-          var bx = i & 1 ? A : -A, by = i & 2 ? A : -A, bz = i & 4 ? A : -A, f;
-          if (parity(i)) { if (eX < 0.9) { BORN[i] = 0; continue; } f = 1; HEAT[i] = Math.max(heat, 1 - clamp01((eX - 0.9) / 0.1)); }
-          else {
-            if (i === 0 ? eM <= 0 : eL <= 0) { BORN[i] = 0; continue; }   // still inside the dot it parts from
-            HEAT[i] = heat;
-            if (i === 3) f = 1;                            // the first dot: it stays where the honey dot was
-            else if (i === 0) f = eM;                      // the fourth: opens in the triangle's middle
-            else {                                         // the second goes DOWN from the first; then it splits in two
-              var mx = 0, my = 0, mz = A;                  // midpoint of corners 5 and 6: straight below the first dot
-              var lx = lerp(A, mx, eL), ly = lerp(A, my, eL), lz = lerp(-A, mz, eL);
-              VX[i] = lerp(lx, bx, eT); VY[i] = lerp(ly, by, eT); VZ[i] = lerp(lz, bz, eT);
-              f = -1;
+          if (parity(i) && i !== 7) {                      // 1, 2, 4: where three directions meet
+            if (eX < 0.9) { BORN[i] = 0; continue; }
+            VX[i] = i & 1 ? A : -A; VY[i] = i & 2 ? A : -A; VZ[i] = i & 4 ? A : -A;
+            HEAT[i] = Math.max(heat, 1 - clamp01((eX - 0.9) / 0.1));
+          } else {
+            // placed in the view's own frame (right, up, away), all about the one centre
+            var vx = 0, vy = 0, vz = 0;
+            if (i === 0 || i === 7) {                      // the fourth goes back, the fifth comes forward — both out of the triangle's middle
+              var e = i === 0 ? eM : eB;
+              if (e <= 0) { BORN[i] = 0; continue; }       // still inside the dot it parts from
+              vz = (i === 0 ? R : -R) * e;
+            } else {                                       // the first dot parts EVENLY: 3 goes up to the apex, 5 and 6 down to the base together — then the base splits sideways, nothing else
+              if (eL <= 0) { BORN[i] = 0; continue; }
+              vx = Math.cos(ANG[i]) * ringR * eT; vy = lerp(HOME, Math.sin(ANG[i]) * ringR, eL); vz = ringZ;
             }
+            VX[i] = vx * BX[0] + vy * BY[0] + vz * BZ[0]; VY[i] = vx * BX[1] + vy * BY[1] + vz * BZ[1]; VZ[i] = vx * BX[2] + vy * BY[2] + vz * BZ[2];
+            HEAT[i] = heat;
           }
-          if (f >= 0) { VX[i] = bx * f; VY[i] = by * f; VZ[i] = bz * f; }
         } else {
           var gp = (T - AT[i]) / GL[i];
           if (gp <= 0) { BORN[i] = 0; continue; }          // not split off yet
@@ -262,7 +283,7 @@
         }
         BORN[i] = 1;
         var q = vn++;
-        project(VX[i] * keep, VY[i] * keep, VZ[i] * keep);
+        project(VX[i], VY[i], VZ[i]);
         if (i < NG) { QX[i] = PJX; QY[i] = PJY; }
         PX[q] = PJX; PY[q] = PJY; PZ[q] = PJZ;
         PR[q] = Math.max(0.05, SZ[i] * PJS * lerp(1, 0.5, back) * S);
@@ -294,7 +315,7 @@
           for (k = 0; k < EDGES.length; k += 2) {
             var a0 = EDGES[k], a1 = EDGES[k + 1];                   // even → odd: the reach grows from the even corner
             var ox = (a1 & 1 ? A : -A), oy = (a1 & 2 ? A : -A), oz = (a1 & 4 ? A : -A);
-            project((VX[a0] + (ox - VX[a0]) * eX) * keep, (VY[a0] + (oy - VY[a0]) * eX) * keep, (VZ[a0] + (oz - VZ[a0]) * eX) * keep);
+            project(VX[a0] + (ox - VX[a0]) * eX, VY[a0] + (oy - VY[a0]) * eX, VZ[a0] + (oz - VZ[a0]) * eX);
             if (Math.abs(QX[a0] - PJX) + Math.abs(QY[a0] - PJY) < 0.5) continue;
             ctx.moveTo(QX[a0], QY[a0]); ctx.lineTo(PJX, PJY);
           }
@@ -332,7 +353,7 @@
       var dotA = Math.max(1 - clamp01(eL * 2.5), endFade);
       if (dotA > 0) {
         var dr = DOT_R * S;
-        var wx = cx, wy = cy, wg = 0;
+        var wx = cx, wy = hy, wg = 0;
         if (waggleT > 0) {
           var wIn = easeInOutSine(clamp01(waggleT / 1.6));            // settle into the dance — no jump off the convergence
           var wt = waggleT * 1.7;                                     // dance tempo: one figure-eight ≈ 3.7s
