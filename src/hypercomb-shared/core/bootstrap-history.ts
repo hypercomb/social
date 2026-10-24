@@ -1,7 +1,7 @@
 // hypercomb-shared/core/bootstrap-history.ts
 // hypercomb-web/src/bootstrap/bootstrap-history.ts
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, addressSegment } from '@hypercomb/core'
 import { CompletionUtility } from './completion-utility'
 import { awaitFirstTilePaint } from './first-tile-paint'
 
@@ -35,6 +35,9 @@ export class BootstrapHistory {
       .split('/')
       .filter(Boolean)
       .map(seg => { try { return decodeURIComponent(seg) } catch { return seg } })
+      // …and never back to %20: a space is spelled as a hyphen (core
+      // addressSegment's rule; lineageKey folds both to one place).
+      .map(seg => seg.trim().replace(/\s+/g, '-'))
       .join('/')
 
     // ── Share-link landing intent ──────────────────────────────────
@@ -87,17 +90,19 @@ export class BootstrapHistory {
         const seg = (rawSegments[i] ?? '').trim()
         if (!seg) continue
 
-        path += `/${seg}`
+        path += `/${addressSegment(seg)}`
         index++
 
-        window.history.pushState({ i: index }, '', path)
+        // The real names ride along (Navigation's `hcRaw`) so a Back or a
+        // reload hands the explorer `Big Ideas`, not the `Big-Ideas` it reads.
+        window.history.pushState({ i: index, hcRaw: [...segments, seg] }, '', path)
         steps.push({ index, segment: seg, path })
         segments.push(seg)
       }
 
       try {
         const state = window.history.state as any
-        window.history.replaceState({ ...state, i: index, steps }, '', finalUrl)
+        window.history.replaceState({ ...state, i: index, steps, hcRaw: [...segments] }, '', finalUrl)
       } catch { /* ignore */ }
     } catch {
       try { window.history.replaceState(window.history.state, '', finalUrl) } catch { /* ignore */ }

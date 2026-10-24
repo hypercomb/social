@@ -50,6 +50,13 @@ describe('Navigation address spelling', () => {
     expect(nav.getSelections()).toEqual(['a', 'b'])
   })
 
+  it('a spaced name inside an arriving selection is respelled too', () => {
+    window.history.replaceState(null, '', '/Big%20Ideas/[a%20b,c]')
+    const nav = new Navigation()
+    expect(window.location.pathname).toBe('/Big-Ideas/[a-b,c]')
+    expect(nav.getSelections()).toEqual(['a-b', 'c'])
+  })
+
   it('a cold hyphen link reads as itself (same place: lineageKey folds both)', () => {
     window.history.replaceState(null, '', '/Big-Ideas')
     expect(new Navigation().segmentsRaw()).toEqual(['Big-Ideas'])

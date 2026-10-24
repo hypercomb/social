@@ -313,7 +313,11 @@ export class Navigation extends hypercomb {
     try {
       const parts = window.location.pathname.split('/').filter(Boolean)
       const raw = parts.map(p => this.safeDecode(p).trim())
-      const spelled = parts.map((p, i) => this.bracketRe.test(raw[i]) ? p : addressSegment(raw[i]))
+      // A selection tail `[a b,c]` is spelled name by name, brackets kept.
+      const spelled = parts.map((p, i) => {
+        const m = this.bracketRe.exec(raw[i])
+        return m ? `[${m[1].split(',').map(n => addressSegment(n)).join(',')}]` : addressSegment(raw[i])
+      })
       if (spelled.join('/') === parts.join('/')) return
       for (const name of raw) this.#remember(name)
       const state = (window.history.state ?? {}) as Record<string, unknown>
