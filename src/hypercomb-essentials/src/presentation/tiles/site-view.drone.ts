@@ -26,7 +26,7 @@ import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
 import { scopeCellPageCss } from './cell-page-css-scope.js'
 import { hoistPageStylesheets, stylesheetsSettled } from './cell-page-stylesheets.js'
-import { HEXAGONS_SURFACE, sameSiteSegments, siteFloorFor, siteReturnTarget, type SiteSpawn } from './site-return.js'
+import { HEXAGONS_SURFACE, sameSiteSegments, siteFlipTarget, siteFloorFor, type SiteSpawn } from './site-return.js'
 import { closeSiteContextMenu, isOnSiteContextMenu, openSiteContextMenu, type SiteMenuItem } from './site-context-menu.js'
 import { browserKeepsMenu, isLongPressMenu } from '../../navigation/browser-menu.js'
 
@@ -374,7 +374,12 @@ export class SiteViewDrone extends Drone {
       // after this listener. Gated on a site having actually been on screen
       // this session, so an unrelated mode flip never moves anyone. A PEEL
       // (Ctrl/⌘-click on the exit) stays right here, on this page's hexagons.
-      if (vm?.mode === 'hexagons' && !this.#peelHere && (entry || this.#mount)) this.#returnToSpawn(spawn)
+      // Who dropped it decides where it lands: an ARRIVAL releasing the
+      // surface (the reader walked out) ends right here; anything else is
+      // leaving the site, back the way in.
+      const walkedOut = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+        ?.get<{ releasingArrival?: boolean }>('@diamondcoreprocessor.com/ViewBee')?.releasingArrival === true
+      if (vm?.mode === 'hexagons' && !this.#peelHere && (entry || this.#mount)) this.#returnToSpawn(spawn, walkedOut)
     }
     void this.#reconcile()
   }
@@ -396,10 +401,12 @@ export class SiteViewDrone extends Drone {
    *  of a site's scope and released to the hexagons under us — and the place
    *  follows with `explorerReplace`, so the whole reading session still costs
    *  the single history entry that entered it. */
-  #returnToSpawn(spawn: SiteSpawn | null): void {
+  #returnToSpawn(spawn: SiteSpawn | null, walkedOut: boolean): void {
     const lineage = this.resolve<any>('lineage')
     const current: string[] = [...(lineage?.explorerSegments?.() ?? [])]
-    const target = siteReturnTarget(spawn, current)
+    // An exit goes back the way in; a walk-out ends where the reader now
+    // stands (site-return.ts siteFlipTarget).
+    const target = siteFlipTarget(spawn, current, walkedOut)
     if (target.mode !== HEXAGONS_SURFACE) {
       const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
         ?.get<{ setMode(m: string): void }>('@hypercomb.social/ViewMode')

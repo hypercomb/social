@@ -342,6 +342,13 @@ export class ViewBee extends Worker {
    *  NAVIGATE — a navigate is a navigate, and the destination's view is
    *  its default or not — while backing out of a view the participant
    *  opened themselves just closes it. */
+  /** True only while an ARRIVAL releases the surface — the reader walked
+   *  somewhere the surface does not follow (out of a site's scope, a retreat,
+   *  an `h`-armed walk, the Beehaviors panel up). Every other flip to the
+   *  hexagons is someone leaving the view on purpose. */
+  #releasingArrival = false
+  get releasingArrival(): boolean { return this.#releasingArrival }
+
   isArrivalSurface = (): boolean => {
     if (!this.#autoOpenedView) return false
     const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
@@ -697,7 +704,13 @@ export class ViewBee extends Worker {
       off?.()
       if (timer !== null) clearTimeout(timer)
       if (this.#pendingRelease === cancel) this.#pendingRelease = null
-      if (release && vm.mode === face) vm.setMode(DEFAULT_SURFACE)
+      if (release && vm.mode === face) {
+        // Said for the length of the flip: the site view asks who dropped
+        // the surface, and a WALK-OUT ends where the reader now stands —
+        // only an exit goes back the way in (site-return.ts siteFlipTarget).
+        this.#releasingArrival = true
+        try { vm.setMode(DEFAULT_SURFACE) } finally { this.#releasingArrival = false }
+      }
     }
     const cancel = (): void => finish(false)
     const check = (): void => {

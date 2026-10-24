@@ -6,7 +6,7 @@
 // staring at the raw grid.
 
 import { describe, expect, it } from 'vitest'
-import { HEXAGONS_SURFACE, sameSiteSegments, siteFloorFor, siteReturnTarget } from './site-return.js'
+import { HEXAGONS_SURFACE, sameSiteSegments, siteFlipTarget, siteFloorFor, siteReturnTarget } from './site-return.js'
 
 describe('siteReturnTarget', () => {
 
@@ -80,5 +80,29 @@ describe('siteFloorFor', () => {
   it('a published root that is not above the reader says nothing about this site', () => {
     expect(siteFloorFor(['games', 'arkanoid'], ['minutes'])).toEqual(['games', 'arkanoid'])
     expect(siteFloorFor(['minutes'], ['minutes', '2026-10-14'])).toEqual(['minutes'])
+  })
+})
+
+describe('siteFlipTarget', () => {
+  const spawnAtRoot = { mode: '', segments: [] as string[] }
+
+  it('a WALK-OUT ends where the reader stands — go /colony from a site opened at the root stays on /colony', () => {
+    expect(siteFlipTarget(spawnAtRoot, ['colony'], true)).toEqual({ mode: HEXAGONS_SURFACE, segments: ['colony'] })
+  })
+
+  it('a walk-out into a child that opts out of the site stays on that child too', () => {
+    expect(siteFlipTarget(spawnAtRoot, ['hyperdex', 'x'], true).segments).toEqual(['hyperdex', 'x'])
+  })
+
+  it('an EXIT goes back the way in — wherever the site\'s own links took the reader', () => {
+    expect(siteFlipTarget(spawnAtRoot, ['hyperdex'], false).segments).toEqual([])
+    // toggled on at /dolphin, an in-site link replaced the place with /whales, then Escape
+    expect(siteFlipTarget({ mode: '', segments: ['dolphin'] }, ['whales'], false).segments).toEqual(['dolphin'])
+    expect(siteFlipTarget({ mode: 'square-tile-view', segments: ['family'] }, ['family', 'susan'], false))
+      .toEqual({ mode: 'square-tile-view', segments: ['family'] })
+  })
+
+  it('an exit from a session with no spawn stays put, as before', () => {
+    expect(siteFlipTarget(null, ['x'], false)).toEqual({ mode: HEXAGONS_SURFACE, segments: ['x'] })
   })
 })

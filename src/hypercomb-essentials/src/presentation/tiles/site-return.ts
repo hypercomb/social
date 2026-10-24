@@ -68,3 +68,25 @@ export function siteReturnTarget(
   // An EMPTY spawn path is the hive root, a real place — never a missing one.
   return { mode: spawn.mode || HEXAGONS_SURFACE, segments: spawn.segments }
 }
+
+/**
+ * Where a flip back to the hexagons lands, decided by WHO dropped the
+ * surface — never by where the reader stands (a site's own link can take them
+ * well outside it, and leaving from there is still leaving the site).
+ *
+ *   • An EXIT — the exit button, Escape, `h`, the back gesture — goes back
+ *     the way in: siteReturnTarget.
+ *   • A WALK-OUT — the reader already moved (`go /elsewhere`, another
+ *     session's sentence) and the ARRIVAL there released the surface behind
+ *     them (view.bee `releasingArrival`) — ends where they stand. Sending them
+ *     back to the spawn was the bug: `go /colony` from a site opened at the
+ *     root landed on the root, and the next word found "the hive root".
+ */
+export function siteFlipTarget(
+  spawn: SiteSpawn | null,
+  current: readonly string[],
+  walkedOut: boolean,
+): { mode: string; segments: readonly string[] } {
+  if (walkedOut) return { mode: HEXAGONS_SURFACE, segments: current }
+  return siteReturnTarget(spawn, current)
+}
