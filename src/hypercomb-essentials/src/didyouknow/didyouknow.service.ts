@@ -11,7 +11,9 @@
 //            on the layer where they were shared.
 //   START    `start did you know` switches the game on here, mints the game's
 //            tile on the page you stand on (or finds it) and opens the notes
-//            desk on it.
+//            desk on it. The tile is named for the LAYER (`gameTileName`):
+//            each layer is its own word, so its own notes list and its own
+//            reveal.
 //   SHARE    `did-you-know <idea>` writes your idea as a note on that tile —
 //            making the tile on your page first when it is not there, so the
 //            room hears it. The desk shows everyone's ideas as plain words:
@@ -29,7 +31,8 @@
 // per note, its words and the first participant seen holding it — because a
 // participant who leaves takes their untaken notes with them. The reveal is
 // written from the ledger plus the host's own notes: it names what this hive
-// has seen, never more. In memory only, for the game being played.
+// has seen, never more. In memory only, and kept PER LAYER: a game on one
+// layer never names the ideas seen on another.
 //
 // WHAT ANONYMOUS MEANS HERE. The ideas travel as each participant's own signed
 // notes, so the room's keys ride the wire as they do for every note. The game
@@ -38,11 +41,11 @@
 //
 // A dependency: the drone (didyouknow.drone.ts) registers it.
 
-import { EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
+import { EffectBus, hypercomb } from '@hypercomb/core'
 import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
 import { readGlobalOffKinds } from '../sharing/behavior-enablement.js'
 import { isJoinedHere } from '../sharing/membership.js'
-import { ENABLED_KIND, GAME_NAME, IDEA_MAX, bringers, cleanIdea, isGame, isRevealNote, revealText, type Idea, type Toggle } from './didyouknow.js'
+import { ENABLED_KIND, IDEA_MAX, bringers, cleanIdea, gameTileName, isGameTile, isRevealNote, revealText, type Idea, type Toggle } from './didyouknow.js'
 import { declarationsAt, declaredAt, disableAt, enableAt } from './scope.js'
 
 /** The room's ideas are read a moment after the room or the page changes. */
@@ -91,9 +94,11 @@ export type ToggleOutcome =
   | { state: 'switched-off' }
 
 export class DidYouKnow extends EventTarget {
-  /** The ledger: note id → its words and the first participant seen holding
-   *  it. Insertion order is the order ideas were first seen. */
-  #seen = new Map<string, { text: string; by: string }>()
+  /** The ledger, one per LAYER (its game's word as the key): note id → its
+   *  words and the first participant seen holding it. Insertion order is the
+   *  order ideas were first seen. A layer's reveal reads only that layer's
+   *  ledger. */
+  #seen = new Map<string, Map<string, { text: string; by: string }>>()
   #syncTimer: ReturnType<typeof setTimeout> | null = null
   #syncing = false
   #me = ''
@@ -108,13 +113,18 @@ export class DidYouKnow extends EventTarget {
     window.ioc.whenReady<SwarmNotesShape & EventTarget>('@diamondcoreprocessor.com/SwarmNotes', (swarmNotes) => {
       swarmNotes.addEventListener('change', (e) => {
         const cell = String((e as CustomEvent<{ cell?: string }>).detail?.cell ?? '')
-        if (cell && isGame(cell)) this.#record(swarmNotes, cell)
+        if (cell) this.#record(swarmNotes, cell)
       })
     })
   }
 
-  /** What the ledger has seen, in the order it was first seen. */
-  seen(): ReadonlyMap<string, { text: string; by: string }> { return this.#seen }
+  /** What the ledger has seen on the layer you stand on, in the order it was
+   *  first seen. */
+  seen(): ReadonlyMap<string, { text: string; by: string }> { return this.#ledger(this.#segments()) }
+
+  /** The name of the game's tile on a layer: `did-you-know` at the root,
+   *  `did-you-know-` and the layer's path below it. */
+  tileNameFor(page: readonly string[]): string { return gameTileName(page) }
 
   // ── start ──────────────────────────────────────────────────────────────
 
@@ -128,7 +138,7 @@ export class DidYouKnow extends EventTarget {
     const held = await this.#tileHere(here)
     const name = held ?? await this.#mint(here)
     if (name) this.open(name)
-    return { outcome: held ? 'resumed' : 'started', where: [...here, name ?? GAME_NAME].join('/') }
+    return { outcome: held ? 'resumed' : 'started', where: [...here, name ?? gameTileName(here)].join('/') }
   }
 
   // ── the toggle ─────────────────────────────────────────────────────────
@@ -172,7 +182,7 @@ export class DidYouKnow extends EventTarget {
   async availability(segments: readonly string[]): Promise<'ok' | Unavailable> {
     if (this.#switchedOff()) return 'switched-off'
     if (await declaredAt(segments)) return 'ok'
-    return this.#peerTile() ? 'ok' : 'off'
+    return this.#peerTile(segments) ? 'ok' : 'off'
   }
 
   /** The roster's own switch, honoured as the one switch it is: only an
@@ -222,18 +232,18 @@ export class DidYouKnow extends EventTarget {
     const here = this.#segments()
     const unavailable = await this.availability(here)
     if (unavailable !== 'ok') return unavailable
-    const name = await this.#tileHere(here) ?? this.#peerTile()
+    const name = await this.#tileHere(here) ?? this.#peerTile(here)
     const notes = get<NotesShape>('@diamondcoreprocessor.com/NotesService')
     if (!name || !notes) return 'none'
     const swarmNotes = get<SwarmNotesShape>('@diamondcoreprocessor.com/SwarmNotes')
     await this.#whoAmI()
     if (swarmNotes && isJoinedHere()) {
-      try { await swarmNotes.refresh(name); this.#record(swarmNotes, name) } catch { /* what did not arrive is not named */ }
+      try { await swarmNotes.refresh(name); this.#record(swarmNotes, name, here) } catch { /* what did not arrive is not named */ }
     }
     const own = await notes.getNotesAtSegments([...here, name])
     if (own.some(n => isRevealNote(n.text))) return 'already'
     if (swarmNotes?.rootsFor(name).some(r => isRevealNote(r.note.text))) return 'already'
-    const ideas = this.#ideas(own, swarmNotes)
+    const ideas = this.#ideas(here, own, swarmNotes)
     if (!ideas.length) return 'none'
     const swarm = get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')
     const labelOf = (pubkey: string): string =>
@@ -247,14 +257,15 @@ export class DidYouKnow extends EventTarget {
     return { ideas: ideas.length, people: bringers(ideas) }
   }
 
-  /** Every idea this hive knows, with who brought it: what the ledger saw,
-   *  then the host's own notes (theirs unless the room showed them first as
-   *  someone else's — then they were taken and stay that person's). Ordered
-   *  as the desk first saw them. */
-  #ideas(own: readonly { id: string; text: string }[], swarmNotes: SwarmNotesShape | undefined): Idea[] {
+  /** Every idea this hive knows on the layer `page`, with who brought it: what
+   *  that layer's ledger saw, then the host's own notes (theirs unless the room
+   *  showed them first as someone else's — then they were taken and stay that
+   *  person's). Ordered as the desk first saw them. The page is the one the
+   *  word was said on: the host may have moved on while the room was read. */
+  #ideas(page: readonly string[], own: readonly { id: string; text: string }[], swarmNotes: SwarmNotesShape | undefined): Idea[] {
     const out: Idea[] = []
     const done = new Set<string>()
-    for (const [id, entry] of this.#seen) {
+    for (const [id, entry] of this.#ledger(page)) {
       if (!entry.text || isRevealNote(entry.text)) continue
       out.push({ id, text: entry.text, by: entry.by })
       done.add(id)
@@ -282,12 +293,15 @@ export class DidYouKnow extends EventTarget {
     const here = this.#segments()
     const unavailable = await this.availability(here)
     if (unavailable !== 'ok') return unavailable
-    if (!(await this.#tileHere(here)) && !this.#peerTile()) return 'none'
+    if (!(await this.#tileHere(here)) && !this.#peerTile(here)) return 'none'
     // The ideas land on a tile of yours: make it before taking.
     const mine = await this.#tileHere(here) ?? await this.#mint(here)
     if (!mine) return 'none'
     await swarmNotes.refresh(mine)
-    this.#record(swarmNotes, mine)
+    // The take reads the page you stand on now: moved on, it would write to a
+    // tile this layer's game does not have there. Say it again where you are.
+    if (this.#segments().join('/') !== here.join('/')) return 'none'
+    this.#record(swarmNotes, mine, here)
     const ids = swarmNotes.rootsFor(mine).filter(r => !isRevealNote(r.note.text)).map(r => r.note.id)
     if (!ids.length) return { taken: 0, waiting: 0 }
     const waiting = (await swarmNotes.take(mine, ids)).length
@@ -297,14 +311,28 @@ export class DidYouKnow extends EventTarget {
 
   // ── the ledger ─────────────────────────────────────────────────────────
 
-  /** Record the ideas the room shows on `cell` right now. The first
-   *  participant seen holding an idea is its bringer, and stays so after
-   *  they leave or someone takes it. */
-  #record(swarmNotes: SwarmNotesShape, cell: string): void {
+  /** The ledger of one layer, kept under the layer's game word: the notes list
+   *  belongs to the word, so a layer reached by two spellings of its path is one
+   *  game with one book. */
+  #ledger(page: readonly string[]): Map<string, { text: string; by: string }> {
+    const key = gameTileName(page)
+    let book = this.#seen.get(key)
+    if (!book) { book = new Map(); this.#seen.set(key, book) }
+    return book
+  }
+
+  /** Record the ideas the room shows on `cell` right now, in the ledger of the
+   *  layer `page` (the one you stand on unless a word in flight says which),
+   *  and only when `cell` is that layer's game tile. The first participant seen
+   *  holding an idea is its bringer, and stays so after they leave or someone
+   *  takes it. */
+  #record(swarmNotes: SwarmNotesShape, cell: string, page: readonly string[] = this.#segments()): void {
+    if (!isGameTile(cell, page)) return
+    const book = this.#ledger(page)
     try {
       for (const r of swarmNotes.rootsFor(cell)) {
-        if (isRevealNote(r.note.text) || this.#seen.has(r.note.id)) continue
-        this.#seen.set(r.note.id, { text: r.note.text, by: r.by })
+        if (isRevealNote(r.note.text) || book.has(r.note.id)) continue
+        book.set(r.note.id, { text: r.note.text, by: r.by })
       }
     } catch { /* not in a room, or the cell is not on this page */ }
   }
@@ -320,10 +348,11 @@ export class DidYouKnow extends EventTarget {
       void (async () => {
         const swarmNotes = get<SwarmNotesShape>('@diamondcoreprocessor.com/SwarmNotes')
         if (!swarmNotes) return
-        const name = await this.#tileHere(this.#segments()) ?? this.#peerTile()
+        const page = this.#segments()
+        const name = await this.#tileHere(page) ?? this.#peerTile(page)
         if (!name) return
         await this.#whoAmI()
-        try { await swarmNotes.refresh(name); this.#record(swarmNotes, name) } catch { /* next time */ }
+        try { await swarmNotes.refresh(name); this.#record(swarmNotes, name, page) } catch { /* next time */ }
       })().finally(() => { this.#syncing = false })
     }, SYNC_MS)
   }
@@ -337,28 +366,30 @@ export class DidYouKnow extends EventTarget {
 
   // ── the tile ───────────────────────────────────────────────────────────
 
-  /** The name of the game's tile on this hive's page, or null. */
+  /** The name of the game's tile ON THIS LAYER on this hive's page, or null. */
   async #tileHere(page: readonly string[]): Promise<string | null> {
     const history = get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
     const lineage = get<LineageShape>('@hypercomb.social/Lineage')
     if (!history || !lineage) return null
     try {
       const rows = await readChildrenStrict(history, lineage.domain, page)
-      return rows?.find(r => isGame(r.name))?.name ?? null
+      return rows?.find(r => isGameTile(r.name, page))?.name ?? null
     } catch { return null }
   }
 
-  /** The game's tile as a peer holds it on the page in front of you. */
-  #peerTile(): string | null {
+  /** The layer's game tile as a peer holds it on the page in front of you. A
+   *  peer's game tile of ANOTHER layer is not this layer's game. */
+  #peerTile(page: readonly string[]): string | null {
     const peers = get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')?.peerTilesAtCurrentSig?.() ?? []
-    return peers.find(t => isGame(t.name))?.name ?? null
+    return peers.find(t => isGameTile(t.name, page))?.name ?? null
   }
 
   /** Make the game's tile on this page through the same add the `create`
    *  word runs; a tile made in the swarm is shared. Returns its name. */
   async #mint(page: readonly string[]): Promise<string | null> {
-    // Named the hive's way — `did-you-know`; isGame folds, so either spelling is the game.
-    EffectBus.emit('cell:added', { cell: normalizeCell(GAME_NAME), segments: [...page] })
+    // Named for the layer, the hive's way (`did-you-know-lecture`): the name is
+    // the word, and the word is what keeps this layer's ideas its own.
+    EffectBus.emit('cell:added', { cell: gameTileName(page), segments: [...page] })
     await new hypercomb().act()
     await this.#settled()
     return this.#tileHere(page)

@@ -11,12 +11,19 @@
 //   - `collect` takes the room's ideas onto the participant's own tile
 //   - `reveal` writes one note naming who brought each idea; the desks then
 //     show names again; `collect` after the reveal leaves the reveal behind
+//   - the game's tile is NAMED FOR ITS LAYER (did-you-know at the top,
+//     did-you-know-lecture below it), so each layer is its own word: an idea,
+//     a reveal and a ledger on one layer never reach another, and a layer's
+//     game starts concealed though the root's was revealed. This half shares
+//     through the service (`share`), says `/reveal` as a word, and reads the
+//     desk on the layer's tile; Ben and Cy are not on the layer (their sides
+//     are in the service spec's fakes).
 //   - the game is a TOGGLE a layer declares: `start` at the root switches it on
 //     everywhere; a participant joins a room without switching anything on;
-//     ideas belong to the layer they were shared on; `off` at a layer that
-//     inherits the mark changes nothing; off at the root closes the layers
-//     beneath; `on` on a branch opens that branch and what is beneath it, not
-//     its sibling; `everywhere` opens the sibling; the word alone flips
+//     `off` at a layer that inherits the mark changes nothing; off at the root
+//     closes the layers beneath; `on` on a branch opens that branch and what is
+//     beneath it, not its sibling; `everywhere` opens the sibling; the word
+//     alone flips
 //
 //   node scripts/drive-didyouknow.cjs --url http://localhost:4253/ --relay ws://localhost:7777
 
@@ -170,6 +177,15 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
   H.check('`collect` after the reveal takes the ideas and leaves the reveal where it is',
     benHolds.ok && !(benHolds.value ?? []).some(t => t.startsWith('Revealed ·')), JSON.stringify(benHolds.value))
 
+  // ── THE GAME'S TILE IS NAMED FOR ITS LAYER ─────────────────────────────
+  // Each layer is its own word, so its own notes list: the root's reveal, the
+  // ideas shared on one layer, and the ledger never reach another layer.
+  const lectureTile = await service(a, 'tileNameFor', ['lecture'])
+  const deepTile = await service(a, 'tileNameFor', ['lecture', 'biology'])
+  H.check("the pure name matches: did-you-know at the top, the path below it",
+    tile === 'did-you-know' && lectureTile === 'did-you-know-lecture' && deepTile === 'did-you-know-lecture-biology',
+    JSON.stringify({ tile, lectureTile, deepTile }))
+
   // ── THE TOGGLE: where the game is on ───────────────────────────────────
   // Ben joined the room and played without switching anything on: the room
   // being there was enough, and his hive declares nothing.
@@ -177,17 +193,48 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
   H.check('a participant plays a room without switching anything on', benDeclares?.state === 'none', JSON.stringify(benDeclares))
 
   // `start` at the root switched the game on everywhere. A layer with no room
-  // and no mark of its own plays; its ideas belong to it, not to the root.
+  // and no mark of its own plays, on a tile of its own.
   await H.addTile(a.page, 'lecture'); await H.sleep(1500)
   await goTo(a, ['lecture']); await H.sleep(2000)
   const everywhere = await service(a, 'availability', ['lecture'])
   H.check('`start` at the root switched the game on everywhere', everywhere === 'ok', JSON.stringify(everywhere))
   const IDEA_LAYER = 'light bends around heavy things'
   const sharedHere = await service(a, 'share', IDEA_LAYER)
-  const layerNotes = await H.waitFor(() => notesAt(a, ['lecture', tile]), v => v.includes(IDEA_LAYER), 30000, 750)
-  const rootNotes = await notesAt(a, [tile])
-  H.check("an idea shared on a layer is that layer's data — the root's tile does not hold it",
-    sharedHere === 'shared' && layerNotes.ok && !rootNotes.includes(IDEA_LAYER), JSON.stringify({ sharedHere, layer: layerNotes.value, root: rootNotes }))
+  const layerNotes = await H.waitFor(() => notesAt(a, ['lecture', lectureTile]), v => v.includes(IDEA_LAYER), 30000, 750)
+  await H.sleep(2500) // the word's facet lands a moment after the write; read both tiles after it has
+  const layerNow = await notesAt(a, ['lecture', lectureTile])
+  const rootNow = await notesAt(a, [tile])
+  const lectureKids = await childrenAt(a, ['lecture'])
+  H.check("an idea shared on a layer is on that layer's own tile, which holds nothing of the root's game",
+    sharedHere === 'shared' && layerNotes.ok
+      && has(lectureKids, lectureTile) && !(lectureKids ?? []).some(n => slug(n) === 'did-you-know')
+      && JSON.stringify(layerNow) === JSON.stringify([IDEA_LAYER]),
+    JSON.stringify({ sharedHere, kids: lectureKids, layer: layerNow }))
+  H.check("the root's tile does not hold the layer's idea, and keeps its own reveal",
+    !rootNow.includes(IDEA_LAYER) && rootNow.filter(t => t.startsWith('Revealed ·')).length === 1, JSON.stringify(rootNow))
+
+  // The root's game was revealed; the lecture's was not. Its desk conceals names
+  // from the start, and its reveal names its own ideas and no others (the
+  // ledger holds Ben's and Cy's ideas for the root, and none of them is named here).
+  const lectureHidden = await H.evalSafe(() => a.page.evaluate(({ tile, own }) =>
+    window.ioc.get('@diamondcoreprocessor.com/SwarmNotes').authorsHidden(tile, own), { tile: lectureTile, own: layerNow }))
+  H.check("a layer's game starts concealed even though the root's was revealed", lectureHidden === true, String(lectureHidden))
+  // …and so does the desk the host reads it on: its own rule, on the page it stands on.
+  await openDesk(a, lectureTile)
+  const lectureDesk = await H.waitFor(() => deskState(a), v => slug(v.cell ?? '') === slug(lectureTile), 20000, 500)
+  H.check("the desk on a layer's tile hides who brought each idea", lectureDesk.ok && lectureDesk.value.hidden === true, JSON.stringify({ cell: lectureDesk.value?.cell, hidden: lectureDesk.value?.hidden }))
+  await word(a, '/reveal')
+  const lectureNote = (await H.waitFor(() => notesAt(a, ['lecture', lectureTile]), v => v.some(t => t.startsWith('Revealed ·')), 30000, 750)).value ?? []
+  const lectureRevealText = lectureNote.find(t => t.startsWith('Revealed ·')) ?? ''
+  H.check("a layer's reveal names that layer's ideas and none of the root's",
+    lectureRevealText === `Revealed · 1 idea\n1. ${IDEA_LAYER} — Ana`
+      && !lectureRevealText.includes(IDEA_BEN) && !lectureRevealText.includes(IDEA_CY),
+    JSON.stringify({ lectureRevealText }))
+  const lectureShown = await H.waitFor(() => deskState(a), v => v.hidden === false, 20000, 500)
+  H.check("the layer's desk shows names once its own reveal is among its notes", lectureShown.ok, JSON.stringify({ cell: lectureShown.value?.cell, hidden: lectureShown.value?.hidden }))
+  await H.sleep(2500) // the word's facet lands a moment after the write; read the root after it has
+  const rootAfter = await notesAt(a, [tile])
+  H.check("the layer's reveal does not touch the root's game", rootAfter.filter(t => t.startsWith('Revealed ·')).length === 1 && !rootAfter.some(t => t.includes(IDEA_LAYER)), JSON.stringify(rootAfter))
 
   const inherited = await service(a, 'toggle', 'off')
   H.check('`off` on a layer that only inherits the mark changes nothing and says where it is held',
@@ -199,7 +246,7 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
   await goTo(a, ['lecture']); await H.sleep(2000)
   const afterClose = await service(a, 'availability', ['lecture'])
   const refused = await service(a, 'share', 'this should not be written')
-  const stillOne = await notesAt(a, ['lecture', tile])
+  const stillOne = await notesAt(a, ['lecture', lectureTile])
   H.check('off at the root closes the layers beneath: the word is refused and writes nothing',
     closed?.state === 'off' && afterClose === 'off' && refused === 'off' && !stillOne.includes('this should not be written'),
     JSON.stringify({ closed, afterClose, refused, stillOne }))
@@ -215,9 +262,12 @@ const row = (view, text) => (view?.rows ?? []).find(r => r.text === text)
   const beneath = await service(a, 'availability', ['lecture', 'biology'])
   const IDEA_DEEP = 'cells keep their own time'
   const deepShared = await service(a, 'share', IDEA_DEEP)
-  const deepNotes = await H.waitFor(() => notesAt(a, ['lecture', 'biology', tile]), v => v.includes(IDEA_DEEP), 30000, 750)
-  H.check('the mark holds for everything beneath it — a deeper layer plays, with its own ideas',
-    beneath === 'ok' && deepShared === 'shared' && deepNotes.ok, JSON.stringify({ beneath, deepShared, deep: deepNotes.value }))
+  const deepNotes = await H.waitFor(() => notesAt(a, ['lecture', 'biology', deepTile]), v => v.includes(IDEA_DEEP), 30000, 750)
+  await H.sleep(2000)
+  const deepNow = await notesAt(a, ['lecture', 'biology', deepTile])
+  H.check("the mark holds for everything beneath it: a deeper layer plays on its own tile, holding only its own idea",
+    beneath === 'ok' && deepShared === 'shared' && deepNotes.ok && JSON.stringify(deepNow) === JSON.stringify([IDEA_DEEP]),
+    JSON.stringify({ beneath, deepShared, deep: deepNow }))
 
   // The word alone flips the layer it is said on (no layer above holds a mark
   // yet, so turning it back on writes one here).

@@ -2,8 +2,9 @@
 //
 // `reveal` — the host says who brought what. One note is written on the game's
 // tile listing every idea with its name; the room's desks, finding it, show
-// names again. The reveal is a note, so it can be hidden like any note, and
-// hiding it conceals the names again.
+// names again. A layer's game is revealed once: a reader can wave the note off
+// for themselves (its ✕, for the session, or hiding the room), which puts the
+// names back for them alone; only its author can take it away for everyone.
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider, type MachineGrammar } from '@hypercomb/core'
 import { DYK_KEY } from './didyouknow.js'

@@ -11,8 +11,8 @@
 // "everywhere"; one on a branch is that branch only.
 //
 // The record says WHERE the game may be played. It holds no ideas. Those live
-// on the layer where they were shared — the notes on that layer's own
-// `did you know` tile — so every layer keeps its own set, whatever reaches it.
+// on the layer where they were shared — the notes on that layer's own game
+// tile — so every layer keeps its own set, whatever reaches it.
 //
 // A dependency of the service; it registers nothing.
 

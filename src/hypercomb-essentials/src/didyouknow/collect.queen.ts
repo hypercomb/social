@@ -19,7 +19,7 @@ export class CollectQueenBee extends QueenBee {
   override description = 'Collect the room\'s Did You Know ideas onto your own tile — a list to go back to and learn from'
   override descriptionKey = 'slash.collect'
   override examples = [
-    { input: '/collect', result: 'Takes every idea you do not hold yet onto your own did you know tile' },
+    { input: '/collect', result: 'Takes every idea you do not hold yet onto your own game tile for this layer' },
   ]
   override machine: MachineGrammar = {
     forms: '',
@@ -39,7 +39,7 @@ export class CollectQueenBee extends QueenBee {
     const params = { taken: result.taken, waiting: result.waiting }
     this.#say(result.waiting > 0
       ? this.#t('didyouknow.collect.partial', `collected ${result.taken} ideas — ${result.waiting} are still arriving, say collect again in a moment`, params)
-      : this.#t('didyouknow.collected', `collected ${result.taken} ideas onto your did you know tile`, params))
+      : this.#t('didyouknow.collected', `collected ${result.taken} ideas onto this page's did-you-know tile`, params))
   }
 
   #t(key: string, fallback: string, params?: Record<string, string | number>): string {

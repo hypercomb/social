@@ -821,7 +821,7 @@
   "features.cap.contact": "Contacts",
   "features.cap.contact.desc": "Cartes de contact disponibles dans tout ce sous-arbre.",
   "features.cap.didyouknow": "Did You Know",
-  "features.cap.didyouknow.desc": "Un exercice de réunion dans tout ce sous-arbre : partager des idées sans nom, révéler à la fin, collecter celles qui valent la peine.",
+  "features.cap.didyouknow.desc": "Un exercice de réunion pour cette couche et tout ce qui est dessous ; chaque couche est son propre jeu, avec ses propres idées : partager des idées sans nom, révéler à la fin, collecter celles qui valent la peine.",
   "features.cap.publishGroups": "Groupes de publication",
   "features.cap.publishGroups.desc": "Rassemblez les tuiles de cette couche sous des icônes colorées en haut de la ruche — sélectionnez des tuiles, touchez une icône — et publiez un groupe d’un coup.",
   "features.allow": "autoriser",

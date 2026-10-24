@@ -148,8 +148,8 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   'did-you-know': ['editing', 'network'],  // an idea is one note on the game's tile, shared with the room
                                            // (the desk hides who brought it until the reveal); `off` takes
                                            // the game's mark off a layer, which is why the word is editing
-  reveal: ['additive', 'network'],         // one note on the tile naming who brought each idea; it is a
-                                           // note, so hiding it conceals the names again
+  reveal: ['additive', 'network'],         // one note on the tile naming who brought each idea; a reader
+                                           // can wave it off for themselves, only its author removes it
   collect: ['additive', 'network'],        // takes the room's ideas onto the participant's own tile
                                            // (same signature, shared never copied); removes nothing
 }

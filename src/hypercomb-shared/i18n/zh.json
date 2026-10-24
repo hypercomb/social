@@ -821,7 +821,7 @@
   "features.cap.contact": "联系人",
   "features.cap.contact.desc": "整个子树中均可使用联系人卡片。",
   "features.cap.didyouknow": "Did You Know",
-  "features.cap.didyouknow.desc": "整个子树内的会议练习:匿名分享想法,最后揭晓,并收集值得保留的内容。",
+  "features.cap.didyouknow.desc": "适用于这一层及其下所有层的会议练习;每一层都是独立的游戏,有各自的想法:匿名分享想法,最后揭晓,并收集值得保留的内容。",
   "features.cap.publishGroups": "发布组",
   "features.cap.publishGroups.desc": "把这一层的磁贴归到蜂巢顶部的彩色图标下（选择磁贴，点按图标），一次发布整个组。",
   "features.allow": "允许",

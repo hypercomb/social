@@ -19,6 +19,18 @@ type SwarmNotesShape = {
   concealAuthorsWhen(rule: (cell: string, texts: readonly string[]) => boolean): void
 }
 
+/** The page this hive stands on, as the lineage names it. */
+const currentPage = (): string[] => {
+  const lineage = (window as { ioc?: { get?: <V>(k: string) => V | undefined } }).ioc?.get?.<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+  return (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+}
+
+/** THE RULE the notes desk is taught, as one named function of the page you
+ *  stand on right now: a second drone, or a second teaching, is the same rule,
+ *  and the desk's seam keeps it once. */
+export const concealsOnThisPage = (cell: string, texts: readonly string[]): boolean =>
+  concealsAuthors(cell, texts, currentPage())
+
 export class DidYouKnowDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'Did You Know — a meeting exercise: share what you think the others do not know, with no names until the host reveals them, then collect the ideas worth keeping'
@@ -40,8 +52,10 @@ export class DidYouKnowDrone extends Drone {
           : (t?.t('didyouknow.resumed', params) ?? `${game} is on at /${result.where} — share with "did-you-know <idea>", collect with "collect", reveal with "reveal"`)
       })
     })
+    // The desk asks about a tile of the page you stand on; the rule needs that
+    // page, because the game's tile is named for its layer.
     window.ioc.whenReady<SwarmNotesShape>('@diamondcoreprocessor.com/SwarmNotes', (swarmNotes) => {
-      swarmNotes.concealAuthorsWhen(concealsAuthors)
+      swarmNotes.concealAuthorsWhen(concealsOnThisPage)
     })
   }
 }
