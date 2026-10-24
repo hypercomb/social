@@ -40,6 +40,7 @@ import {
 } from './view-spawn.js'
 
 import { TREE_VIEW } from './tree-view-target.js'
+import { isLongPressMenu } from '../../navigation/browser-menu.js'
 
 /** House palette — steel on ink, matching the other full-viewport views.
  *  A dark canvas is deliberate: the limb hues are the information here, and
@@ -440,6 +441,8 @@ export class TreeViewDrone extends Drone {
   readonly #onContextMenu = (e: MouseEvent): void => {
     const vm = this.#vm()
     if (!vm || vm.mode !== TREE_VIEW) return
+    // A held finger is the browser's long-press, never the way out.
+    if (isLongPressMenu(e)) return
     e.preventDefault()
     // Back gesture — arrival face navigates back, participant-opened peels.
     const gesture = window.ioc?.get<{ backOutOfView?(peel: () => void): void }>('@diamondcoreprocessor.com/BackGesture')

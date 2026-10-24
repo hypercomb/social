@@ -38,6 +38,7 @@ import {
 import { SQUARE_TILE_KIND, SQUARE_TILE_VIEW, LEGACY_WELCOME_KIND } from '../../commands/square-tile-kind.js'
 import type { SquareTilePayload } from '../../commands/square-tile-view.queen.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
+import { isLongPressMenu } from '../../navigation/browser-menu.js'
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -556,6 +557,9 @@ export class SquareTileViewDrone extends Drone {
       timer = null
       origin = null
     }
+    // The browser's long-press menu (an image's Save, a word's selection)
+    // would land on the plate mid-hold; the hold is the plate's own.
+    plate.addEventListener('contextmenu', event => { if (isLongPressMenu(event)) event.preventDefault() })
     plate.addEventListener('pointerdown', event => {
       if (event.pointerType === 'mouse') return
       held = false
@@ -800,7 +804,7 @@ const SCENE_CSS = `
 .wv-tagline{margin:.95rem 0 0;color:#8a7657;font:400 .95rem/1.5 Georgia,serif;letter-spacing:.24em;text-transform:uppercase}
 .wv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:clamp(1rem,2.4vw,1.8rem);justify-items:stretch;align-content:start;max-width:980px;margin:0 auto;width:100%}
 .wv-plate{position:relative;min-width:0;text-align:center;animation:wv-rise .6s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(.05s * var(--i,0));transition:transform .18s ease}
-.wv-door{display:flex;flex-direction:column;gap:.7rem;width:100%;min-width:0;padding:0;border:0;background:none;cursor:pointer;text-align:center}
+.wv-door{display:flex;flex-direction:column;gap:.7rem;width:100%;min-width:0;padding:0;border:0;background:none;cursor:pointer;text-align:center;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .wv-plate:hover,.wv-plate:focus-within{transform:translateY(-5px)}
 .wv-door:focus-visible{outline:2px solid #8b651b;outline-offset:4px}
 .wv-mat{display:block;box-sizing:border-box;width:100%;background:#fffdf7;border:1px solid rgba(184,147,63,.55);padding:9px;box-shadow:0 1px 2px rgba(58,42,28,.08),0 10px 24px -12px rgba(58,42,28,.28);transition:box-shadow .18s ease,border-color .18s ease}

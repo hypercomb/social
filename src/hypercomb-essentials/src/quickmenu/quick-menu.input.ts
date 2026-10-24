@@ -58,6 +58,7 @@
 import { EffectBus, POINTER_GESTURE_END, isPointerConsumed } from '@hypercomb/core'
 import type { InputMode } from '../navigation/input-mode-stack.service.js'
 import { QuickMenuOverlay } from './quick-menu.overlay.js'
+import { isLongPressMenu } from '../navigation/browser-menu.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import {
   HEX_RADIUS,
@@ -867,6 +868,9 @@ export class QuickMenuInput {
 
   #onContextMenu = (e: MouseEvent): void => {
     if (!this.#armed && !this.#sticky) return
+    // The phone's long-press fires while the finger that summoned the ring is
+    // still down — that is the ring's own hold, not a cancel.
+    if (isLongPressMenu(e)) return
     e.preventDefault()
     e.stopPropagation()
     this.#end()

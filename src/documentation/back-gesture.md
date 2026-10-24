@@ -32,11 +32,18 @@ A right-click is resolved top-down; the first rung that answers wins.
    to the page it was opened from rather than to the structural parent. At the
    hive root it is a no-op.
 
-Inside a **website** the gesture walks the site's own pages up to its root,
-and at the root it leaves the site — one gesture, one meaning: right-click
-always comes back out of where you are, and at the root of a site the thing
-you are inside IS the site. Leaving lands on the page that spawned it, in the
-view that spawned it (`documentation/embedded-sites.md` → *Coming back out*).
+A **website** is the one surface where the right button is NOT the way out
+(jwize, 2026-10-22: "they operate like they usually do on their side — website
+(context menu), hexagons (hypercomb view)"). A site reads like a website, so a
+right-click opens the website's own menu and changes nothing on the page:
+**Up one level** (the page above, never above the site's floor — reading a
+site adds no history, so it is not "Back"), **Hexagon view** (this page's
+hexagons), **Copy page link**, and **Copy link address** over an outside link
+(`presentation/tiles/site-context-menu.ts`). It used to walk up a page and,
+at the site's root, drop the reader into the hexagons — on a published site a
+trap door nobody could see. Leaving by the exit button still lands on the page
+that spawned the site, in the view that spawned it
+(`documentation/embedded-sites.md` → *Coming back out*).
 
 Leaving a view you **stepped into** from a tile icon — the tree is the first —
 lands the same way: on the page the icon was clicked from, in the view that was
@@ -57,6 +64,18 @@ resolves to a no-op, so the browser menu never flickers into view.
 
 Ctrl / Cmd is the selection modifier here, so a modified right-click is left
 alone as well.
+
+**A long-press is not a right-click.** A phone fires `contextmenu` for a finger
+held still, and every surface that read it as the right button walked the
+reader back out from under their thumb — closing the tile close-up, leaving
+tree, slides and tutor, dropping a website into the hexagons. A long-press
+never navigates: `navigation/browser-menu.ts` answers "did a held finger send
+this?" (the event's `pointerType`, Chromium's `sourceCapabilities`, Firefox's
+`mozInputSource`, else the last press — a finger still down or lifted under a
+second ago), and every handler asks it before acting. The browser keeps the
+long-press; a surface with a hold gesture of its own (the canvas, the list's
+rows, the tile close-up's picture, the square view's plates, the photo viewer,
+the game canvases) suppresses the browser's menu itself, without navigating.
 
 ## Composing with what is already there
 

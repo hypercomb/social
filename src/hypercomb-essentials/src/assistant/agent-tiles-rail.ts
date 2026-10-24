@@ -99,6 +99,7 @@ import {
   type ConversationGroup, type ConversationStanding,
 } from './chat-threads.js'
 import { readBlurbs, type ChatBlurb } from './chat-blurb.js'
+import { isLongPressMenu } from '../navigation/browser-menu.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { tilePictureCandidates } from '../editor/tile-properties.js'
@@ -880,6 +881,9 @@ export class AgentTilesRail {
     // that would rather aim, and this is the same move without the aiming.
     if (this.#profile.walk) {
       host.addEventListener('contextmenu', event => {
+        // A held finger (holding a row) is the browser's long-press, never
+        // the walk back up.
+        if (isLongPressMenu(event)) return
         event.preventDefault()
         this.#up()
       })

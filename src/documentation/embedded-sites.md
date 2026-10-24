@@ -53,9 +53,36 @@ A site is not a place you walked to — it is a surface that **took over**,
 spawned from wherever you were standing and whatever you were looking at.
 So leaving it has exactly one destination: **the page that spawned it, in
 the view that spawned it.** Nothing is derived, nothing is walked, nothing
-is guessed. Every exit path — the exit button, right-click at the site
-root, Escape, `/website off`, a toggle click — names the hexagons, and the
-renderer turns that into the spawn.
+is guessed. Every exit path — the exit button, Escape, `/website off`, a
+toggle click — names the hexagons, and the renderer turns that into the
+spawn.
+
+**The right button is not an exit on a website** (2026-10-22). A site reads
+like a website, so a right-click opens the website's menu and changes nothing
+on the page (`site-context-menu.ts`): Up one level (the nearest page above,
+passing over empty cells, never above the floor — `..` climbs the same way),
+**Hexagon view** (this page's hexagons — the exit's peel,
+never the spawn, because the spawn may be another view; so it names no key,
+since H is the plain exit), Copy page link, and Copy link address over an
+outside link. The handler listens on the document in the bubble phase, so a
+page that answers its own right-click (a game, a map) keeps it, as under a
+browser's own menu. The menu is raw DOM in a shadow root (a page's unscoped
+stylesheets can't reach it), sized from the reader's default font size (a
+page's rem reset can't shrink it), drawn with inline SVG glyphs (a published
+door loads no icon font), focused on its first row when it opens, and it holds
+the hive's keymap while it is up (`keymap:suppress`), so Enter, the arrows and
+Escape are its own. A press outside puts it away and does nothing else — the
+page hears neither its start nor its end. It is a door into the hive: on a
+published site, opening it starts the sleeping hive's preload. A held finger (a phone's long-press) and an editable field or
+selected text keep the browser's own menu — except a long-press on an in-site
+link, whose href is a route, not an address, so the browser's link menu is
+suppressed there.
+
+**A phone has no menu.** A long-press is the browser's, so a phone visitor on
+a published page that does not opt into the exit
+(`<meta name="hypercomb:exit" content="show">`) has no way into the hexagons —
+deliberately, until a touch door is designed. Before 2026-10-22 the
+long-press was that way, by accident, and it was the bug.
 
 The spawn record (`site-return.ts`, captured by `SiteViewDrone` the moment
 ViewMode flips into `'website'`) has two fields:

@@ -149,17 +149,27 @@ async function main() {
     }
 
     // ── 3. website mode at the site root ────────────────────────────────
-    // Entering the mode captures the current cell as the site entry, which is
-    // the case that used to do nothing at all.
+    // A site reads like a website: the right button opens the website menu
+    // and changes nothing — it used to drop the reader into the hexagons
+    // here. The menu's Hexagon view row is the way to them now.
     await page.evaluate(() => window.ioc?.get?.('@hypercomb.social/ViewMode')?.setMode?.('website'))
     await page.waitForTimeout(2000)
     const site = await where(page)
     check('website mode is up', site.mode === 'website', JSON.stringify(site))
     await page.mouse.click(720, 500, { button: 'right' })
+    await page.waitForTimeout(800)
+    const stayed = await where(page)
+    const rows = await page.evaluate(() => Array.from(document.getElementById('hc-site-menu')?.shadowRoot
+      ?.querySelectorAll('[role="menuitem"]') ?? []).map(r => r.textContent))
+    check('right-click on a site opens the website menu and stays on the site',
+      stayed.mode === 'website' && rows.length > 0, JSON.stringify({ stayed, rows }))
+    await shot('05-site-menu')
+    await page.evaluate(() => Array.from(document.getElementById('hc-site-menu')?.shadowRoot
+      ?.querySelectorAll('[role="menuitem"]') ?? []).find(r => r.textContent?.includes('hexagon'))?.click())
     await page.waitForTimeout(2500)
     const outOfSite = await where(page)
-    check('right-click at the site root leaves the site', outOfSite.mode === 'hexagons', JSON.stringify(outOfSite))
-    await shot('05-left-site')
+    check('the menu\'s Hexagon view row shows the hexagons', outOfSite.mode === 'hexagons', JSON.stringify(outOfSite))
+    await shot('06-hexagon-view')
 
   } finally {
     const failed = results.filter(r => !r.ok)

@@ -143,6 +143,7 @@ import { bindAxes, walkFrom, landOnWalkTarget } from './viewer-walk.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { mountViewerScroller, type ScrollerHandle, type ScrollerSection } from './viewer-scroller.js'
 import { MOBILE_MODE_IOC_KEY, MOBILE_MODE_EFFECT } from '../../preferences/mobile-pheromones.js'
+import { isLongPressMenu } from '../../navigation/browser-menu.js'
 
 const SLIDES_VIEW = 'slides'
 const SIG = /^[0-9a-f]{64}$/
@@ -395,6 +396,8 @@ export class SlidesViewDrone extends Drone {
   readonly #onContextMenu = (e: MouseEvent): void => {
     const vm = this.#vm()
     if (!vm || !this.#surface()) return
+    // A held finger is the browser's long-press, never the way out.
+    if (isLongPressMenu(e)) return
     e.preventDefault()
     // Back gesture — arrival face navigates back, participant-opened peels.
     const gesture = window.ioc?.get<{ backOutOfView?(peel: () => void): void }>('@diamondcoreprocessor.com/BackGesture')

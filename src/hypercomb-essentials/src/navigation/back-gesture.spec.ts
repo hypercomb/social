@@ -42,6 +42,9 @@ beforeEach(async () => {
     register: (_key: string, value: unknown) => { live.push(value as BackGestureType) },
   }
   document.body.innerHTML = ''
+  // The last press is one record on globalThis (browser-menu.ts); a finger
+  // left "down" by one test must not make the next test's click a long-press.
+  delete (globalThis as { __hcLastPress?: unknown }).__hcLastPress
   BackGesture = (await import('./back-gesture.service.js')).BackGesture as unknown as Registry
   while (live.length) live.pop()?.dispose()
 })
@@ -89,6 +92,33 @@ describe('back gesture', () => {
     vi.spyOn(globalThis, 'getSelection').mockReturnValue(selection as unknown as Selection)
     expect(rightClick(text)).toBe(false)
     expect(navigationBack).not.toHaveBeenCalled()
+  })
+
+  it('leaves a long-press to the browser — a held finger never walks back', () => {
+    stand()
+    const target = el()
+    const held = new PointerEvent('contextmenu', { bubbles: true, cancelable: true, pointerType: 'touch', button: 2 })
+    target.dispatchEvent(held)
+    expect(held.defaultPrevented).toBe(false)
+    expect(navigationBack).not.toHaveBeenCalled()
+  })
+
+  it('reads a finger still down as a long-press when the event names no pointer', () => {
+    stand()
+    const target = el()
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', pointerId: 7, isPrimary: true, button: 0 }))
+    expect(rightClick(target)).toBe(false)
+    expect(navigationBack).not.toHaveBeenCalled()
+  })
+
+  it('still answers the mouse right button', () => {
+    stand()
+    const target = el()
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', pointerId: 1, button: 2 }))
+    const click = new PointerEvent('contextmenu', { bubbles: true, cancelable: true, pointerType: 'mouse', button: 2 })
+    target.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
+    expect(navigationBack).toHaveBeenCalledOnce()
   })
 
   it('stands down when a surface closer to the event already answered', () => {

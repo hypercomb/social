@@ -27,6 +27,8 @@ import { openExternalLink } from './document-view-links.js'
 import { scopeCellPageCss } from './cell-page-css-scope.js'
 import { hoistPageStylesheets, stylesheetsSettled } from './cell-page-stylesheets.js'
 import { HEXAGONS_SURFACE, sameSiteSegments, siteFloorFor, siteReturnTarget, type SiteSpawn } from './site-return.js'
+import { closeSiteContextMenu, isOnSiteContextMenu, openSiteContextMenu, type SiteMenuItem } from './site-context-menu.js'
+import { browserKeepsMenu, isLongPressMenu } from '../../navigation/browser-menu.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -269,12 +271,13 @@ export class SiteViewDrone extends Drone {
       }
     }
     if (!this.#globalContextMenuBound) {
-      // Right-click anywhere outside the iframe (or on a cell that has
-      // no per-cell page yet) → navigate up. Mirrors hexagon-view's
-      // right-button-down. The handler is gated on ViewMode='website'
-      // so it doesn't interfere with the hexagon canvas's own right-
-      // click bindings (which already do the same thing in that mode).
-      window.addEventListener('contextmenu', this.#onGlobalContextMenu, true)
+      // Right-click anywhere on the site (or on a cell that has no per-cell
+      // page yet) → the website's menu. Gated on ViewMode='website' so the
+      // hexagon canvas keeps its own right-click (come back out). Document
+      // BUBBLE: everything closer to the press answers first — a page's own
+      // right-click, a surface open over the site — and the back gesture
+      // (window bubble) still answers after, standing down on the claim.
+      document.addEventListener('contextmenu', this.#onGlobalContextMenu)
       this.#globalContextMenuBound = true
     }
     if (!this.#publishedRootBound) {
@@ -330,8 +333,9 @@ export class SiteViewDrone extends Drone {
       vm.removeEventListener('change', this.#onViewModeChange)
     }
     if (this.#globalContextMenuBound) {
-      window.removeEventListener('contextmenu', this.#onGlobalContextMenu, true)
+      document.removeEventListener('contextmenu', this.#onGlobalContextMenu)
     }
+    closeSiteContextMenu()
     this.#removeExitOverlay()
     this.#teardown()
   }
@@ -339,6 +343,9 @@ export class SiteViewDrone extends Drone {
   readonly #onLineageChange = (): void => {
     const segments = [...(this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? [])]
     if (!sameSiteSegments(segments, this.#lastSegments)) {
+      // The menu was about the page that was up; a new page is a new
+      // question. A change that leaves the page where it was keeps it.
+      closeSiteContextMenu()
       this.#prevSegments = this.#lastSegments
       this.#lastSegments = segments
     }
@@ -346,8 +353,9 @@ export class SiteViewDrone extends Drone {
   }
   readonly #onViewModeChange = (): void => {
     // Track session entry: capture on hexagons → website, drop on exit.
-    // Boundary check in #onGlobalContextMenu / onAnchorClick keys off this.
+    // Boundary check in #menuItems / onAnchorClick keys off this.
     if (this.#restoringSpawn) return
+    closeSiteContextMenu()
     const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ mode: string }>('@hypercomb.social/ViewMode')
     if (vm?.mode === 'website') {
       if (this.#siteEntrySegments === null) this.#captureSiteEntry()
@@ -406,50 +414,90 @@ export class SiteViewDrone extends Drone {
       ?.goRaw?.(segments)
   }
 
-  /** Window-level contextmenu handler. Active only in website mode —
-   *  right-click as a universal "back to the site" gesture. The
-   *  capture-phase listener fires before downstream consumers so the
-   *  browser's default context menu never appears in this mode.
-   *
-   *  The "site root" is the cell where this website session began
-   *  (`#siteEntrySegments`), not the hypercomb lineage root. Three
-   *  cases, keyed on the relationship between current segments and
-   *  the site entry:
-   *
-   *   • Inside the site (descendant of entry) → walk up one level.
-   *   • At the site root (segments equal entry) → LEAVE THE SITE.
-   *     One gesture, one meaning: right-click always comes back out
-   *     of where you are, and at the root of a site the thing you are
-   *     inside IS the site. (It used to be a no-op here, on the
-   *     reasoning that the way out was the `/website` toggle — which
-   *     left the reader pressing a gesture that visibly did nothing
-   *     on the one page they most wanted to leave from.) The exit
-   *     runs through ViewMode, so `#onViewModeChange` lands them on
-   *     the spawn exactly as the exit button does.
-   *   • Outside the site (sibling or unrelated cell, e.g. an
-   *     `<a href="/elsewhere">` link navigated to a route not under
-   *     the site root) → jump back to the entry. Without this the
-   *     user gets stranded on a blank route with no page mounted. */
+  /** Document-level contextmenu handler, website mode only. A SITE READS
+   *  LIKE A WEBSITE: the right button opens a menu and changes nothing on the
+   *  page (site-context-menu.ts). It used to walk up a page, and at the
+   *  site's floor drop the reader into the hexagons — on a published site, a
+   *  trap door. The way to the hexagons and up a page are rows in the menu
+   *  now. Bubble phase, so a page that answers its own right-click keeps it;
+   *  it still runs before the back gesture (window bubble), and its
+   *  preventDefault is what keeps that gesture from ALSO walking the
+   *  lineage. Two presses stay the browser's:
+   *   • a held finger — a phone's long-press selects, opens the link menu, or
+   *     is the page's own hold gesture. Except on an IN-SITE link: its href
+   *     is a route the site resolves, not an address, so the browser's link
+   *     menu would copy or open the wrong page — that one is suppressed;
+   *   • an editable field or selected text — paste, copy, spellcheck. The
+   *     real target is read through composedPath, so a field inside a seated
+   *     part's shadow root counts. */
   readonly #onGlobalContextMenu = (e: MouseEvent): void => {
     const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ mode: string }>('@hypercomb.social/ViewMode')
     if (!vm || vm.mode !== 'website') return
+    // The page (or a surface over it) answered its own right-click — as under
+    // a browser's own menu, it owns that press.
+    if (e.defaultPrevented) return
+    if (isLongPressMenu(e)) {
+      if (linkAt(e)?.outside === null) e.preventDefault()
+      return
+    }
+    const first = e.composedPath()[0]
+    const target = first instanceof Element ? first : e.target instanceof Element ? e.target : null
+    if (browserKeepsMenu(target)) return
     e.preventDefault()
+    // A right-click on the menu itself changes nothing.
+    if (isOnSiteContextMenu(e)) return
+    // The Menu key (or Shift+F10) is not the right button; with nothing
+    // focused it carries no real position (Chromium sends 1,1, Firefox 0,0),
+    // and with something focused it carries that element's — worth keeping.
+    const keyboard = e.button !== 2 && e.clientX <= 1 && e.clientY <= 1
+    const at = keyboard ? { x: window.innerWidth / 2, y: window.innerHeight / 3 } : { x: e.clientX, y: e.clientY }
+    openSiteContextMenu(at, this.#menuItems(e), this.#t('site-menu.label', 'Page menu'))
+  }
+
+  /** The website menu's rows for this press. The "site root" is where this
+   *  session began (`#siteEntrySegments`, the published root on a door), not
+   *  the hive root:
+   *   • Up one level — inside the site, the parent page, never above its
+   *     floor; from a route outside the site (a link that left it), the
+   *     site's entry, so nobody is stranded on a blank route. Absent at the
+   *     floor. Not "Back": reading a site adds no history, so this is the
+   *     page above, not the page before.
+   *   • Hexagon view — THIS page's hexagons (the exit's peel), a door into
+   *     the hive. Not the plain exit: that returns to the view the site was
+   *     opened from, which may be another view. No key is named for it — the
+   *     H key IS the plain exit, so naming it here would promise one place
+   *     and land in another.
+   *   • Copy page link, and Copy link address over an outside link. An
+   *     in-site link is a route resolved against the site, so its href is no
+   *     address — it gets no row. */
+  #menuItems(e: MouseEvent): SiteMenuItem[] {
     const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
     const segments = [...(lineage?.explorerSegments?.() ?? [])]
     const entry = this.#siteEntrySegments ?? []
     const insideSite = segments.length >= entry.length
       && entry.every((seg, i) => segments[i] === seg)
-    if (insideSite) {
-      if (segments.length <= entry.length) {
-        const mode = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
-          ?.get<{ setMode(next: string): void }>('@hypercomb.social/ViewMode')
-        mode?.setMode('hexagons')
-        return
-      }
-      this.#navigate(segments.slice(0, -1))
-      return
+    const up = !insideSite ? entry : segments.length > entry.length ? segments.slice(0, -1) : null
+    const copied = this.#t('site-menu.copied', 'Copied')
+    const failed = this.#t('site-menu.copy-failed', 'Couldn\'t copy')
+    const items: SiteMenuItem[] = []
+    if (up) {
+      // Inside the site, up climbs past page-less cells to the nearest page
+      // above (a silent no-op on an empty parent was a dead row).
+      const act = insideSite ? (): void => { void this.#navigateUp(segments, entry) } : (): void => { void this.#navigate(up) }
+      items.push({ icon: 'arrow_upward', label: this.#t('site-menu.up', 'Up one level'), act })
     }
-    void this.#navigate(entry)
+    items.push({ icon: 'hexagon', label: this.#t('site-menu.hexagons', 'Hexagon view'), door: true, act: () => this.#exitToHive(true) })
+    items.push({ icon: 'link', label: this.#t('site-menu.copy-page', 'Copy page link'), done: copied, failed, rule: true, act: () => copyText(window.location.href) })
+    const link = linkAt(e)?.outside
+    if (link) items.push({ icon: 'content_copy', label: this.#t('site-menu.copy-link', 'Copy link address'), done: copied, failed, act: () => copyText(link) })
+    return items
+  }
+
+  /** A catalog string, or the English when the key does not resolve — `t`
+   *  echoes an unknown key back, which must never reach the screen. */
+  #t(key: string, fallback: string): string {
+    const text = window.ioc.get<I18nProvider>(I18N_IOC_KEY)?.t(key)
+    return text && text !== key ? text : fallback
   }
 
   async #reconcile(): Promise<void> {
@@ -1252,10 +1300,10 @@ export class SiteViewDrone extends Drone {
     const entry = this.#siteEntrySegments ?? []
 
     if (href === '..' || href === '../') {
-      // Same site-entry floor as right-click — `..` at or below the site root
-      // is a no-op (we don't eject back to hexagons, only block nav past root).
-      if (segments.length <= entry.length) return
-      await this.#navigate(segments.slice(0, -1))
+      // The same climb as the menu's Up one level — `..` at or below the site
+      // root is a no-op (we don't eject back to hexagons, only block nav past
+      // root), and an empty parent is passed over for the page above it.
+      await this.#navigateUp(segments, entry)
       return
     }
 
@@ -1289,6 +1337,19 @@ export class SiteViewDrone extends Drone {
     // Nothing resolves to a page — navigate the literal reading. #navigate's
     // own dead-end guard still keeps us off a confirmed page-less cell.
     if (uniq[0]) await this.#navigate(uniq[0])
+  }
+
+  /** Up from `from` to the nearest page above it, never above `floor`. A cell
+   *  that resolves with no page is passed over; a cold or unresolved read is
+   *  tried, the same benefit of the doubt #navigate gives. At the floor this
+   *  does nothing. */
+  async #navigateUp(from: readonly string[], floor: readonly string[]): Promise<void> {
+    for (let n = from.length - 1; n >= floor.length; n--) {
+      const at = from.slice(0, n)
+      if (await this.#isDefinitelyPageless(at)) continue
+      await this.#navigate(at)
+      return
+    }
   }
 
   async #navigate(path: readonly string[]): Promise<void> {
@@ -1343,6 +1404,31 @@ export class SiteViewDrone extends Drone {
 // are rewritten to `/@resource/<sig>`. No manifest-keyed `asset:<name>`
 // lookup — per-cell pages reference resources directly by sig.
 // ──────────────────────────────────────────────────────────────────────────
+
+/** Copy to the clipboard. Rejects when the browser will not, so the menu never
+ *  says Copied for nothing. */
+function copyText(text: string): Promise<void> {
+  const clipboard = navigator.clipboard
+  if (!clipboard?.writeText) return Promise.reject(new Error('no clipboard'))
+  return clipboard.writeText(text)
+}
+
+/** The link under the press, if any, read the way the page's click handler
+ *  reads it. `outside` is a real address — absolute http(s), mail, phone,
+ *  protocol-relative, or a resource the host serves — and null for an in-site
+ *  route (resolved against the site, so its href is no address). An empty,
+ *  data: or javascript: href is the browser's and is no link here at all.
+ *  composedPath reaches into a seated part's shadow root. */
+function linkAt(e: MouseEvent): { outside: string | null } | null {
+  for (const node of e.composedPath()) {
+    if (!(node instanceof HTMLAnchorElement) || !node.hasAttribute('href')) continue
+    const href = node.getAttribute('href') ?? ''
+    if (!href || /^(data:|javascript:)/i.test(href)) return null
+    if (href.startsWith('//') || href.startsWith(RESOURCE_URL_PREFIX) || /^blob:/i.test(href)) return { outside: node.href }
+    return { outside: /^(https?:|mailto:|tel:)/i.test(href) ? href : null }
+  }
+  return null
+}
 
 function rewriteCellPageRefs(text: string): string {
   // The rewrite shares its ref patterns with the closure walk's

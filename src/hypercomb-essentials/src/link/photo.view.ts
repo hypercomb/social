@@ -4,6 +4,8 @@
 // chrome — so closing this photo over an open website view can't unhide the
 // chrome the view is still covering.
 
+import { isLongPressMenu } from '../navigation/browser-menu.js'
+
 export class PhotoView extends EventTarget {
   #overlay: HTMLDivElement | null = null
 
@@ -74,7 +76,8 @@ export class PhotoView extends EventTarget {
     // overlay's.
     overlay.addEventListener('contextmenu', (e) => {
       e.preventDefault()
-      this.close()
+      // A held finger only keeps the image menu away; it never closes.
+      if (!isLongPressMenu(e)) this.close()
     })
     document.body.appendChild(overlay)
     this.#overlay = overlay

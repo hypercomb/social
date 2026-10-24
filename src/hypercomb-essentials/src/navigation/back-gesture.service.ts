@@ -36,6 +36,11 @@
 // context menus in the shell anyone actually wants — paste, copy, spellcheck —
 // and neither is a navigation. Everything else in the hive belongs to the hive.
 //
+// A LONG-PRESS IS NOT A RIGHT-CLICK. A phone fires `contextmenu` for a held
+// finger; read as the right button it walked the reader back out from under
+// their thumb. A long-press never navigates — the browser keeps it
+// (browser-menu.ts says which press sent the event).
+//
 // It listens in the BUBBLE phase and stands down on `event.defaultPrevented`,
 // which is what keeps it composable with the per-surface capture handlers that
 // already exist (the canvas, tile-view, tree-view, slides, site-view, the game
@@ -43,6 +48,8 @@
 // surfaces should register here rather than binding their own listener.
 //
 // IoC key: @diamondcoreprocessor.com/BackGesture
+
+import { browserKeepsMenu, isLongPressMenu, watchPresses } from './browser-menu.js'
 
 /** One surface's answer to "come back out". */
 export type BackGestureEntry = {
@@ -65,22 +72,6 @@ type Ioc = { get<T>(key: string): T | undefined }
 const ioc = <T>(key: string): T | undefined =>
   (globalThis as { ioc?: Ioc }).ioc?.get<T>(key)
 
-const EDITABLE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])'
-
-/** Is the participant right-clicking something they can type in? Their menu,
- *  not ours. */
-const isEditable = (target: Element | null): boolean => !!target?.closest?.(EDITABLE)
-
-/** Is there live selected text under the pointer? Then the menu they want is
- *  Copy. A collapsed caret is not a selection. */
-const hasSelectedText = (target: Element | null): boolean => {
-  const selection = globalThis.getSelection?.()
-  if (!selection || selection.isCollapsed || !selection.toString().trim()) return false
-  const anchor = selection.anchorNode
-  const node = anchor?.nodeType === Node.TEXT_NODE ? anchor.parentElement : (anchor as Element | null)
-  return !!node && !!target && (node.contains(target) || target.contains(node))
-}
-
 /** How deep in the document an element sits — used to pick the INNERMOST
  *  hovered scope when several nest. */
 const depthOf = (el: Element): number => {
@@ -94,6 +85,9 @@ export class BackGesture {
   #entries = new Map<string, BackGestureEntry>()
 
   constructor() {
+    // The boot lane builds this first, so every later surface's question
+    // "was that a finger?" has a press on record to answer from.
+    watchPresses()
     window.addEventListener('contextmenu', this.#onContextMenu)
   }
 
@@ -205,8 +199,13 @@ export class BackGesture {
     if (event.defaultPrevented) return
     // Ctrl / Cmd is the selection modifier here, never navigation.
     if (event.ctrlKey || event.metaKey) return
+    // A held finger, not the right button: the browser's long-press.
+    if (isLongPressMenu(event)) return
     const target = event.target instanceof Element ? event.target : null
-    if (isEditable(target) || hasSelectedText(target)) return
+    // The real target, through any shadow root — a field inside one is still
+    // a field.
+    const first = event.composedPath()[0]
+    if (browserKeepsMenu(first instanceof Element ? first : target)) return
 
     // The gesture belongs to the hive from here on, whatever it resolves to —
     // the browser menu never appears over the shell's own surfaces.

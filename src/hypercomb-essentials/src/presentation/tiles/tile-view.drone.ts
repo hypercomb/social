@@ -95,6 +95,7 @@ import { sniffImageMime } from '../../link/photo.js'
 import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig, readTilePropertiesAt, recoverableTileImageSig, unframedTileImageSig } from '../../editor/tile-properties.js'
 import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { nextTile, rememberCloseUpEntry, VIEW_ENTER_PREFIX } from './viewer-walk.js'
+import { isLongPressMenu } from '../../navigation/browser-menu.js'
 import {
   DIM, STEEL, TIGHT_GAP,
   appDeckPage, buildAppDeck, installAppDeckCss, type AppChip,
@@ -665,6 +666,10 @@ export class TileViewDrone extends Drone {
   #onContextMenu = (e: MouseEvent): void => {
     if (!this.#label || this.#suspended) return
     e.preventDefault()
+    // A held finger is the close-up's own hold (the picture's faces), never
+    // the way out — on a phone it used to close the tile under the thumb. The
+    // browser's long-press menu is kept away too, or it lands mid-hold.
+    if (isLongPressMenu(e)) return
     this.close()
   }
 
@@ -736,8 +741,10 @@ export class TileViewDrone extends Drone {
     // which makes the overlay's percent-space exactly the hexagon's box.
     const zone = document.createElement('div')
     zone.dataset['role'] = 'hex-zone'
+    // The hold is a gesture, not a selection: no text select, no callout.
     zone.style.cssText =
-      `flex:0 0 auto;position:relative;box-sizing:content-box;padding:${FACE_PAD};`
+      `flex:0 0 auto;position:relative;box-sizing:content-box;padding:${FACE_PAD};` +
+      '-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;'
     const hexFrame = document.createElement('div')
     hexFrame.dataset['role'] = 'hex-frame'
     // ON A PHONE THE PICTURE RESTS AS A RECTANGLE and becomes the hexagon

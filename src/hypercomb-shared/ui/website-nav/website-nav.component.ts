@@ -52,6 +52,10 @@ export class WebsiteNavComponent implements OnDestroy {
     if (e.key !== 'Escape') return
     const vm = get(VIEW_MODE_KEY) as ViewModeLike | undefined
     if (!vm || vm.mode !== SITE) return
+    // A surface that answers Escape itself says so (the website's right-click
+    // menu): that press puts the menu away, it does not also leave the site.
+    const focused = document.activeElement
+    if (focused instanceof HTMLElement && focused.closest('[data-escape-local]')) return
     // On a published site the exit is the author's call: Escape leaves only
     // where the page asked for the exit button (SiteViewDrone mounts it then).
     if (document.documentElement.dataset['hypercombMode'] === 'visitor' && !document.getElementById('hc-site-exit')) return

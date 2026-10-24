@@ -20,6 +20,7 @@ import { TUTOR_SLOT, TUTOR_SLOT_DECLARATION } from './tutor-slot.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { isFeatureHidden } from '../sharing/feature-hidden.js'
 import { isBehaviorDormant } from '../sharing/behavior-enablement.js'
+import { isLongPressMenu } from '../navigation/browser-menu.js'
 import type { TutorShell } from '../games/tutor/shell.js'
 import { TUTOR_GAME_REGISTRY_IOC_KEY, tutorGameRegistry } from '../games/tutor/game-registry.js'
 import type { StudyItem } from '../games/tutor/deck.types.js'
@@ -115,6 +116,8 @@ export class TutorViewDrone extends Drone {
   readonly #onContextMenu = (e: MouseEvent): void => {
     const vm = this.#vm()
     if (!vm || vm.mode !== TUTOR_VIEW) return
+    // A held finger is the browser's long-press, never the way out.
+    if (isLongPressMenu(e)) return
     e.preventDefault()
     vm.setMode('hexagons')
   }

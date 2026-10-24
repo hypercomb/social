@@ -39,6 +39,7 @@
 import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { WorkflowState, WorkflowStateStep } from './workflow-author.drone.js'
 import type { WorkflowRunState } from './workflow-runner.drone.js'
+import { isLongPressMenu } from '../navigation/browser-menu.js'
 
 export const WORKFLOW_VIEW = 'workflow'
 
@@ -245,8 +246,13 @@ export class WorkflowViewDrone extends Drone {
     host.appendChild(empty)
 
     // Right-click anywhere on the canvas leaves, matching every other
-    // full-viewport view.
-    host.addEventListener('contextmenu', (e) => { e.preventDefault(); this.#exit() })
+    // full-viewport view. A held finger is the browser's long-press, never
+    // the way out.
+    host.addEventListener('contextmenu', (e) => {
+      if (isLongPressMenu(e)) return
+      e.preventDefault()
+      this.#exit()
+    })
 
     document.body.appendChild(host)
     this.#mount = { host, stage, svg, toolbar, title, count, zoomLabel, empty }
