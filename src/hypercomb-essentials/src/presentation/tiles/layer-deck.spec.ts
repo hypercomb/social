@@ -82,7 +82,7 @@ document.body.appendChild(el)
 const sheet = () => el.querySelector('[data-role="sheet"]') as HTMLElement | null
 const plates = () => Array.from(el.querySelectorAll('[data-hc-tv-app]')) as HTMLElement[]
 const plate = (action: string) => plates().find(p => p.dataset['action'] === action) as HTMLElement | undefined
-const titles = () => Array.from(el.querySelectorAll('[data-hc-tv-group]')).map(d => d.getAttribute('aria-label'))
+const firstAction = () => (el.querySelector('[data-hc-tv-app]') as HTMLElement | null)?.dataset['action'] ?? ''
 const isOpen = () => el.style.display !== 'none' && !!sheet()
 const open = () => { EffectBus.emit('layer:deck-open', {}) }
 
@@ -149,7 +149,8 @@ describe('opening', () => {
 describe('the three groups', () => {
   it('open as: the layer\'s toggles, the default accented; a tap closes then view:toggle on', () => {
     open()
-    expect(titles()[0]).toBe('open as')
+    // One icon set, "open as" first.
+    expect(firstAction()).toMatch(/^view-toggle:/)
     const slides = plate('view-toggle:slides')!
     const website = plate('view-toggle:website')!
     expect(slides.firstElementChild?.getAttribute('data-tone')).toBe('accent')
@@ -287,6 +288,6 @@ describe('the ways out', () => {
     EffectBus.emit('view-toggles:changed', { toggles: [] })
     expect(isOpen()).toBe(true)
     expect(plates().length).toBeLessThan(before)
-    expect(titles()[0]).toBe('add here')
+    expect(firstAction()).not.toMatch(/^view-toggle:/)
   })
 })

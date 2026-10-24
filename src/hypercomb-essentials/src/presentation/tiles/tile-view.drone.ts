@@ -24,9 +24,9 @@
 // It opens full-screen with the tile's picture, its name, its notes, and its
 // actions. HOW those actions are drawn depends on the device: a pointer gets
 // the RAIL (bare glyph, caption under it, wrapping down the column), a phone
-// gets the DECK — expansion rows, one per group, each opening to a sideways
-// strip of its items (one open at a time). Same chips,
-// same `run()`, one grammar; the rows themselves are built by `app-deck.ts`,
+// gets the DECK — app-icon plates like a phone's home screen, four across,
+// filling top to bottom, swiped sideways for the next page. Same chips,
+// same `run()`, one grammar; the plates themselves are built by `app-deck.ts`,
 // which the layer's Views sheet shares, so a hand that learned one screen
 // already knows the other. See `#buildDeck`.
 //
@@ -343,7 +343,7 @@ export class TileViewDrone extends Drone {
   #suspendedAt = 0
   /** Live orientation watch, bound only while the view is up. */
   #resizeObserver: ResizeObserver | null = null
-  /** The deck row the card had open when it was last torn down — a suspend, a
+  /** The deck page the card was on when it was last torn down — a suspend, a
    *  step, a rotation — so the re-mount lands on it. Reset on close. */
   #deckPage = 0
   /** Which shape the mounted deck was built for; a rotation past it rebuilds

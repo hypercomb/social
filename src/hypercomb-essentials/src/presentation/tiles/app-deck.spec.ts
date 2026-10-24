@@ -1,15 +1,25 @@
-// app-deck.spec.ts — the phone's menu rows, pinned.
+// app-deck.spec.ts — the phone's home screen of icons, pinned.
 //
+//   · every group's icons run on as ONE set, cut into full pages in order
 //   · the tap door: one view opens, several offer the menu, none walks in
-//   · the built deck is one expansion row per non-empty group, one open at a
-//     time, each opening to its whole group in one strip; it reopens the row
-//     it was asked for, names its dock, and keeps a drag out of the host
+//   · the built deck is a grid four across filled top to bottom, as tall as
+//     its fullest page needs; it lands on the asked page, names its dock,
+//     gives the dots thumb-sized boxes, and keeps a drag out of the host
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { APP_HIT, appDeckPage, buildAppDeck, viewDoorFor, type AppChip } from './app-deck.js'
+import { APP_HIT, appDeckPage, buildAppDeck, pageChips, viewDoorFor, type AppChip } from './app-deck.js'
 
 const chips = (n: number, prefix = 'c'): AppChip[] =>
   Array.from({ length: n }, (_, i) => ({ action: `${prefix}${i}`, glyph: 'star', labelKey: '', fallback: `${prefix} ${i}` }))
+
+describe('pageChips', () => {
+  it('one set across the groups, in order, each page full before the next', () => {
+    const pages = pageChips([{ chips: [1, 2, 3] }, { chips: [] }, { chips: [4, 5, 6, 7, 8] }], 4)
+    expect(pages).toEqual([[1, 2, 3, 4], [5, 6, 7, 8]])
+    expect(pageChips([{ chips: [1, 2, 3, 4, 5] }], 16)).toEqual([[1, 2, 3, 4, 5]])
+    expect(pageChips([{ chips: [] }], 16)).toEqual([])
+  })
+})
 
 describe('viewDoorFor — the tap door', () => {
   it('one view opens it, several offer the menu, none walks in', () => {
@@ -38,75 +48,64 @@ describe('buildAppDeck', () => {
     const section = buildAppDeck({
       groups: [
         { title: 'open as', chips: chips(9, 'v').map(c => ({ ...c, accent: true })) },
-        { title: 'empty', chips: [] },
-        { title: 'actions', chips: chips(3, 'a') },
+        { title: 'actions', chips: chips(12, 'a') },
       ],
       dock: [{ action: 'exit', glyph: 'arrow_back', labelKey: 'x.named', fallback: 'back' }],
       onActivate,
       t,
+      cols: 4,
+      rows: 4,
       ...extra,
     })
     document.body.appendChild(section)
     return { section, onActivate }
   }
-  const heads = (section: HTMLElement) =>
-    Array.from(section.querySelectorAll('[data-hc-tv-group]')) as HTMLElement[]
-  const strips = (section: HTMLElement) =>
-    Array.from(section.querySelectorAll('[data-role="deck-strip"]')) as HTMLElement[]
 
-  it('one row per non-empty group, each holding its whole group in one strip', () => {
+  it('one grid, four across, full pages of sixteen, dots to say there is more', () => {
     const { section } = build()
     expect(section.dataset['role']).toBe('app-deck')
-    expect(heads(section).map(h => h.getAttribute('aria-label'))).toEqual(['open as', 'actions'])
-    expect(Array.from(section.querySelectorAll('[data-role="deck-count"]')).map(c => c.textContent))
-      .toEqual(['9', '3'])
-    expect(strips(section).map(s => s.querySelectorAll('[data-hc-tv-app]').length)).toEqual([9, 3])
-    expect(strips(section)[0].getAttribute('data-hc-tv-deck')).toBe('')
-    // No paging left anywhere.
-    expect(section.querySelector('[data-hc-tv-dot], [data-hc-tv-page-arrow], [data-role="deck-pager"]')).toBeNull()
+    const pages = Array.from(section.querySelectorAll('[data-role="deck-page"]')) as HTMLElement[]
+    expect(pages.map(p => p.querySelectorAll('[data-hc-tv-app]').length)).toEqual([16, 5])
+    expect(pages[0].style.gridTemplateColumns).toContain('repeat(4')
+    // Order runs across the groups: the ninth "open as" icon, then the actions.
+    const first = Array.from(pages[0].querySelectorAll('[data-hc-tv-app]')).map(b => (b as HTMLElement).dataset['action'])
+    expect(first.slice(8, 10)).toEqual(['v8', 'a0'])
+    expect(section.querySelectorAll('[data-hc-tv-dot]').length).toBe(2)
+    expect(section.querySelector('[data-hc-tv-page-arrow], [data-role="deck-title"]')).toBeNull()
+    expect(section.querySelector('[data-role="deck-pager"]')?.getAttribute('data-hc-tv-deck')).toBe('')
   })
 
-  it('opens the first row by default, one at a time; tapping the open row shuts it', () => {
-    const { section } = build()
-    const [first, second] = heads(section)
-    const [one, two] = strips(section)
-    expect(first.getAttribute('aria-expanded')).toBe('true')
-    expect(one.style.display).toBe('flex')
-    expect(two.style.display).toBe('none')
-    second.click()
-    expect(appDeckPage(section)).toBe(1)
-    expect(one.style.display).toBe('none')
-    expect(two.style.display).toBe('flex')
-    expect(first.getAttribute('aria-expanded')).toBe('false')
-    second.click()
-    expect(appDeckPage(section)).toBe(-1)
-    expect(two.style.display).toBe('none')
+  it('is only as tall as its fullest page needs', () => {
+    const section = buildAppDeck({ groups: [{ title: 'a', chips: chips(6) }], onActivate: () => {}, t, cols: 4, rows: 4 })
+    expect(section.dataset['rows']).toBe('2')
+    const nav = section.querySelector('[data-role="deck-nav"]') as HTMLElement
+    expect(nav.style.visibility).toBe('hidden')
   })
 
-  it('opens the row it was asked for and reports it back', () => {
+  it('lands on the page it was asked for and reports it back', () => {
     expect(appDeckPage(build({ page: 1 }).section)).toBe(1)
     expect(appDeckPage(build({ page: 99 }).section)).toBe(1)
-    expect(appDeckPage(build({ page: -1 }).section)).toBe(-1)
     expect(appDeckPage(null)).toBe(0)
   })
 
-  it('names the dock items and gives row heads a thumb-sized box', () => {
+  it('names the dock plates and gives the dots thumb-sized boxes', () => {
     const { section } = build()
     const dock = section.querySelector('[data-role="deck-dock"] [data-hc-tv-app]') as HTMLElement
     expect(dock.getAttribute('aria-label')).toBe('named')
     expect(dock.querySelector('[data-role="app-name"]')?.textContent).toBe('named')
-    expect(heads(section)[0].style.minHeight).toBe(APP_HIT)
+    const dot = section.querySelector('[data-hc-tv-dot]') as HTMLElement
+    expect(dot.style.height).toBe(APP_HIT)
+    expect(dot.firstElementChild).not.toBeNull()
   })
 
   it('tones, badges and readiness', () => {
-    const onActivate = vi.fn()
     const section = buildAppDeck({
       groups: [{ title: 'see', chips: [
         { action: 'lanes', glyph: 'view_column', badge: '3', labelKey: '', fallback: 'lanes' },
         { action: 'remove', glyph: 'delete', labelKey: '', fallback: 'remove', danger: true },
         { action: 'later', glyph: 'star', labelKey: '', fallback: 'later', backingKey: '@x/NotYet' },
       ] }],
-      onActivate,
+      onActivate: vi.fn(),
       t,
     })
     const [lanes, remove, later] = Array.from(section.querySelectorAll('[data-hc-tv-app]')) as HTMLElement[]

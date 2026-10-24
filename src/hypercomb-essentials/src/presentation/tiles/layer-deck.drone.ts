@@ -222,8 +222,8 @@ export class LayerDeckDrone extends Drone {
     this.close()
   }
 
-  /** A rotation changes the sheet's ceiling (taller in landscape, shorter in
-   *  portrait) — rebuild with the same row open. Coalesced to a frame. */
+  /** A rotation changes the row count (one row across in landscape, two in
+   *  portrait) — rebuild on the same page. Coalesced to a frame. */
   #onResize = (): void => {
     if (this.#resizeQueued) return
     this.#resizeQueued = true
