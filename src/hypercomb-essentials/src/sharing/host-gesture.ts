@@ -67,6 +67,10 @@ export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> =
 
     // 1. Consent — names where the bytes go (the hosts named for the
     //    branch; there is no default host) and the signer, before anything.
+    //    Said first, so whoever asked (a session, a manager) hears that the
+    //    publish now waits on a person, and a decline is never silent.
+    const path = `/${segments.join('/')}`
+    activity(t(i18n, 'host.consent-waiting', `waiting for your consent to publish ${path}`, { path }), '○')
     const confirmed = await requestConfirm({
       title: 'host.confirm.title',
       message: 'host.confirm.message',
@@ -74,7 +78,12 @@ export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> =
       confirmLabel: 'host.confirm.allow',
       cancelLabel: 'host.confirm.deny',
     })
-    if (!confirmed) return
+    if (!confirmed) {
+      const declined = t(i18n, 'host.consent-declined', `Not published: ${path} was not allowed.`, { path })
+      activity(declined, '○')
+      toast('tip', t(i18n, 'host.title', 'Publish branch'), declined)
+      return
+    }
 
     let nextNote = 0
     const onProgress = (p: PublishProgress): void => {

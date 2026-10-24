@@ -1704,6 +1704,8 @@
   "host.confirm.message": "「{name}」とその配下すべてが、あなたが指定したホストにアップロードされ、署名付きハイブインデックスに載ります。アップロードはあなたのNostrキーで署名されます。",
   "host.confirm.allow": "公開する",
   "host.confirm.deny": "今はしない",
+  "host.consent-waiting": "{path} の公開について、あなたの許可を待っています",
+  "host.consent-declined": "公開されませんでした: {path} は許可されませんでした。",
   "host.seal-failed": "ブランチを封印できませんでした（コールドまたは解決不能な子があります）。タイルを一度表示してから、もう一度お試しください。",
   "host.uploading": "ブランチをそのホストへアップロード中…",
   "host.progress": "アップロード中 — 残り {pending} 件",

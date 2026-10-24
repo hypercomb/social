@@ -57,11 +57,13 @@ body.hc-view-website {
   //   hc-command-line  — the slash interface (lives in bottom bar)
   //   hc-command-shell — internal of command-line
   //   hc-icon          — generic inline icon, used by command-line
+  // NOT hc-confirm-dialog: a consent asked while a site is up must be seen.
+  // Hidden here, `publish here` on a tile that opens as its website waited
+  // on an invisible dialog forever (2026-10-23).
   hc-activity-log,
   hc-atomizer-bar,
   hc-atomizer-sidebar,
   hc-command-palette,
-  hc-confirm-dialog,
   hc-controls-bar,
   hc-docs-overlay,
   hc-file-explorer,
