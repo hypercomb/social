@@ -175,6 +175,16 @@ describe('linkify', () => {
     expect(control.querySelector('input')).toBeNull()
   })
 
+  it('leaves headers, headings, navigation and buttons alone — only the copy links', () => {
+    const host = page(
+      '<header><span>Business Card</span></header><h1>business card</h1><h3>Business card</h3>' +
+      '<nav>business card</nav><div role="button">business card</div><button>business card</button>' +
+      '<p>business card</p>',
+    )
+    expect(linkify(host, entries)).toBe(1)
+    expect(host.querySelector('a')!.parentElement!.tagName).toBe('P')
+  })
+
   it('changes nothing the second time', () => {
     const host = page('<p>business card, business card</p>')
     expect(linkify(host, entries)).toBe(2)

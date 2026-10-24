@@ -133,9 +133,13 @@ export const compileDoors = (doors: readonly PublishedDoor[]): LinkEntry[] => {
 
 /** Where the rule does not reach: inside these, text stays text. The link
  *  control sits beside its anchor inside the page, so its words are skipped
- *  too — `raise` must never become a link. */
+ *  too — `raise` must never become a link. Headers, headings, navigation and
+ *  anything playing a button are the page's own furniture, never copy
+ *  (jwize, 2026-10-24: "maybe ignore headers and buttons" — a meetup page's
+ *  "Hypercomb Meetup" bar linked away to another hive's `meetup`). */
 const SKIP_SELECTOR =
-  'a, script, style, code, pre, kbd, samp, textarea, button, input, select, option, noscript, svg, ' +
+  'a, script, style, code, pre, kbd, samp, textarea, button, [role="button"], input, select, option, noscript, svg, ' +
+  'header, nav, h1, h2, h3, h4, h5, h6, ' +
   'title, [contenteditable], [contenteditable] *, .' + DOMAIN_LINK_CLASS + ', .' + LINK_CONTROL_CLASS
 
 export interface LinkifyOptions {
