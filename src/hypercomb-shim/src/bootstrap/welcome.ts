@@ -23,7 +23,11 @@
 // but it is still data: text is clamped, and an href must be a plain http(s)
 // address or a path on this origin, so nothing in the file can become script.
 
-export type WelcomeLink = { label: string; href: string; note: string }
+/** The pictures a link may wear: a closed set the shim draws itself, named by
+ *  the staged card, so a door's look is data and never a guess from its words. */
+export const LINK_ICONS = ['tour', 'app', 'host', 'download', 'extension', 'docs', 'source'] as const
+export type LinkIcon = typeof LINK_ICONS[number]
+export type WelcomeLink = { label: string; href: string; note: string; icon?: LinkIcon }
 export type Welcome = {
   title: string
   tagline: string
@@ -44,12 +48,15 @@ export type FrontDoor = {
 export const DEFAULT_TAGLINE =
   'Discover creations, inspect their source, and choose what to carry into your hive.'
 
+/** Where a hive of your own starts, on every host. */
+export const APP_HREF = 'https://hypercomb.io/'
+
 /** The platform's own doors. A host is a directory of files that somebody
  *  chose to serve; these say what the files are for, and they are the same
  *  on every host because they are about the platform, not the host. */
 export const PLATFORM_LINKS: readonly WelcomeLink[] = [
   { label: 'the tour', href: 'https://hypercomb.com/tour/', note: 'what this is, in nineteen minutes' },
-  { label: 'hypercomb.io', href: 'https://hypercomb.io/', note: 'the app — start a hive of your own' },
+  { label: 'hypercomb.io', href: APP_HREF, note: 'the app — start a hive of your own' },
   { label: 'documentation', href: 'https://github.com/hypercomb/social/tree/main/documentation', note: '' },
   { label: 'source', href: 'https://github.com/hypercomb/social', note: 'AGPL-3.0' },
   { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/documentation/licensing.md', note: '' },
@@ -78,7 +85,8 @@ const linksFrom = (value: unknown): WelcomeLink[] => {
     const record = entry as Record<string, unknown>
     const label = text(record?.label, 60)
     const target = href(record?.href)
-    if (label && target) links.push({ label, href: target, note: text(record?.note, 80) })
+    const icon = LINK_ICONS.find(name => name === record?.icon)
+    if (label && target) links.push({ label, href: target, note: text(record?.note, 80), ...(icon ? { icon } : {}) })
   }
   return links
 }

@@ -172,6 +172,31 @@ the apex's own name in DNS.
 - The apex stays the zone root, so every write still lands there.
 - **Use the root path** on the same row puts the card back at the apex.
 
+## What the front door shows
+
+The card a visitor sees is a **showcase** (jwize 2026-10-24: "like your tiles
+with the beautiful images showing and they lead to the subdomains"). A colony
+is a domain and its hives are its subdomains, so the page is:
+
+- **Search at the top**, beside the domain's name and sentence, with a comb of
+  hive pictures around the mark.
+- **One horizontal band per domain**, this one first: every hive the ledger
+  (`/publications.json`, verified heads only) has open on that domain, plus
+  what the domain's public offering pools share. A tile wears the picture its
+  hive's own tile wears and opens the hive at its own address; a hive with no
+  picture wears a cover drawn from its signature. Give a hive's top tile a
+  picture and it appears here at the next publish.
+- **On a phone** the bands are a rolodex: tap a domain and its hives open like
+  an accordion, one domain at a time.
+- **At the foot:** what a member does to share their own favourite things, the
+  staged links (each may name an `icon` from a closed set: `tour`, `app`,
+  `host`, `download`, `extension`, `docs`, `source`), and **Manage this hive**,
+  whose *Creations and sources* is the gallery that turns a domain's offerings
+  on here.
+
+Choosing tiles for a hive elsewhere (`?home=`) is a task, not a visit: that
+page keeps the gallery and its return bar.
+
 ## What the front door calls itself
 
 A link to a claimed domain previews under the domain's own card, not the

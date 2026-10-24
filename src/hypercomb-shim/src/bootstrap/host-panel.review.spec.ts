@@ -117,6 +117,20 @@ afterEach(() => {
   localStorage.removeItem('hypercomb:gallery:pins')
 })
 
+/** A visitor is shown the showcase; the gallery that turns offerings on here
+ *  waits under "Manage this hive", in "Creations and sources". */
+const technical = (root: ShadowRoot, title: string): Promise<HTMLDetailsElement> => vi.waitFor(() => {
+  const found = [...root.querySelectorAll<HTMLDetailsElement>('details.technical')]
+    .find(details => details.querySelector('summary')?.textContent === title)
+  expect(found).toBeDefined()
+  return found!
+})
+const openCuration = async (root: ShadowRoot): Promise<void> => {
+  const curation = await technical(root, 'Creations and sources')
+  curation.open = true
+  curation.dispatchEvent(new Event('toggle'))
+}
+
 it('a card at host.<zone> speaks for its zone', async () => {
   const { cardZone } = await import('./host-panel')
   expect(cardZone('host.pointblanksolutions.ca')).toBe('pointblanksolutions.ca')
@@ -141,6 +155,7 @@ it('shows a returned tile in local revision review and activates only after a cl
   await vi.waitFor(() => expect(effects.stage).toHaveBeenCalledOnce())
   expect(effects.add).not.toHaveBeenCalled()
   await vi.waitFor(() => expect(root.querySelector('.review button')?.textContent).toBe('Turn on here'))
+  await openCuration(root)
   await vi.waitFor(() => expect(root.querySelector<HTMLButtonElement>(
     '.offer-update')?.getAttribute('aria-label')).toBe('Review selected revision of Garden'))
   const sourceLink = [...root.querySelectorAll<HTMLAnchorElement>('.domain-link')]
@@ -198,6 +213,7 @@ it('marks a newer signed head on its tile and sends the visitor to that source',
   const { showHostPanel } = await import('./host-panel')
   showHostPanel()
   const root = document.querySelector('hc-shim-hosts')!.shadowRoot!
+  await openCuration(root)
   await vi.waitFor(() => expect(root.querySelector<HTMLAnchorElement>('.offer-update')?.textContent)
     .toContain('New revision'))
   const badge = root.querySelector<HTMLAnchorElement>('.offer-update')!
@@ -265,6 +281,7 @@ it('selects a text theme on the visited host and activates it only after local r
   root = document.querySelector('hc-shim-hosts')!.shadowRoot!
   await vi.waitFor(() => expect(effects.stageCreation).toHaveBeenCalledOnce())
   expect(effects.addCreation).not.toHaveBeenCalled()
+  await openCuration(root)
   await vi.waitFor(() => expect(root.querySelector<HTMLButtonElement>('.offer-update')).not.toBeNull())
   await vi.waitFor(() => expect(root.querySelector('.review button')?.textContent).toBe('Turn on here'))
   root.querySelector<HTMLButtonElement>('.review button')!.click()
@@ -285,6 +302,7 @@ it('sends a remote text-theme card to its host before local activation', async (
   const { showHostPanel } = await import('./host-panel')
   showHostPanel()
   const root = document.querySelector('hc-shim-hosts')!.shadowRoot!
+  await openCuration(root)
   await vi.waitFor(() => expect(root.querySelector('.offer-main')?.textContent).toContain('Editorial'))
   const details = root.querySelector<HTMLDetailsElement>('.offer-details')!
   const visit = [...details.querySelectorAll<HTMLAnchorElement>('a')]
@@ -322,8 +340,7 @@ it('shows local deployment tiles and known revisions in host details without pac
   const { showHostPanel } = await import('./host-panel')
   showHostPanel()
   const root = document.querySelector('hc-shim-hosts')!.shadowRoot!
-  await vi.waitFor(() => expect(root.querySelector('details.technical')).not.toBeNull())
-  const details = root.querySelector('details.technical') as HTMLDetailsElement
+  const details = await technical(root, 'Deployment tiles and revisions')
   details.open = true
   details.dispatchEvent(new Event('toggle'))
   await vi.waitFor(() => expect(details.textContent).toContain(localRoute))
@@ -421,10 +438,14 @@ it('lays the gallery out one section per domain, this door first', async () => {
   const { showHostPanel } = await import('./host-panel')
   showHostPanel()
   const root = document.querySelector('hc-shim-hosts')!.shadowRoot!
+  // A visitor sees this door's hives first, as a showcase band.
+  await vi.waitFor(() => expect(root.querySelector('.bands .band.own h2')?.textContent).toBe(location.host))
+  await openCuration(root)
   await vi.waitFor(() => expect(root.querySelectorAll('.domain-section')).toHaveLength(2))
   const [own, other] = [...root.querySelectorAll('.domain-section')]
   expect(own!.classList.contains('own')).toBe(true)
-  expect(own!.querySelector('.domain-empty')?.textContent).toBe('Nothing is published here yet.')
+  await vi.waitFor(() => expect(root.querySelector('.domain-section.own .domain-empty')?.textContent)
+    .toBe('Nothing is published here yet.'))
   expect(other!.querySelector('h2')?.textContent).toBe('example.com')
   await vi.waitFor(() => expect(other!.isConnected ? other!.querySelector('.offer b')?.textContent
     : root.querySelectorAll('.domain-section')[1]!.querySelector('.offer b')?.textContent).toBe('Garden'))
@@ -441,6 +462,9 @@ it('shows a tile chosen on another domain grayed in this door until it is review
   const { showHostPanel } = await import('./host-panel')
   showHostPanel()
   const root = document.querySelector('hc-shim-hosts')!.shadowRoot!
+  // Said where the keeper lands, before any section is opened.
+  await vi.waitFor(() => expect(root.querySelector('.waiting-note button')?.textContent).toBe('Review 1 from example.com'))
+  await openCuration(root)
   await vi.waitFor(() => expect(root.querySelector('.domain-section.own .offer-waiting b')?.textContent).toBe('studio'))
   expect(root.querySelector('.domain-section.own .offer-waiting')?.textContent).toContain('Selected on example.com')
   root.querySelector<HTMLButtonElement>('.domain-section.own .offer-waiting .offer-main')!.click()

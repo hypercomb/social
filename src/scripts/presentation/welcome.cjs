@@ -38,11 +38,11 @@ const compose = (doors) => ({
   tagline: 'An open protocol that brings people together. Your work is named by its own content, '
     + 'kept in your hands, and carried by the people who use it.',
   links: [
-    { label: 'Watch the tour', href: '/tour/', note: '≈ 12 minutes · narrated, with captions' },
-    { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the main app — start a hive of your own' },
-    { label: 'Minimal host', href: '/hosts', note: 'manage domains and replicate signed packages' },
-    { label: 'Downloads', href: '/downloads/', note: 'desktop app · Windows, macOS, Linux' },
-    { label: 'Browser extensions', href: '/downloads/#extensions', note: 'Smart Autolinker · No YouTube Shorts' },
+    { label: 'Watch the tour', href: '/tour/', note: '≈ 12 minutes · narrated, with captions', icon: 'tour' },
+    { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the main app — start a hive of your own', icon: 'app' },
+    { label: 'Minimal host', href: '/hosts', note: 'manage domains and replicate signed packages', icon: 'host' },
+    { label: 'Downloads', href: '/downloads/', note: 'desktop app · Windows, macOS, Linux', icon: 'download' },
+    { label: 'Browser extensions', href: '/downloads/#extensions', note: 'Smart Autolinker · No YouTube Shorts', icon: 'extension' },
   ],
   doorsLabel: `live on ${hosts.ZONE} · ${doors.length} ${doors.length === 1 ? 'hive' : 'hives'}`,
   doors: doors.map(d => ({ title: d.title, host: d.host })),

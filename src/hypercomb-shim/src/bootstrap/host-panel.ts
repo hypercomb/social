@@ -18,8 +18,10 @@ import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
 import { hostRouteName } from '@hypercomb/runtime/host-activation'
 import { askHostPackages } from '@hypercomb/runtime/host-packages'
 import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome } from './replicate'
-import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLink } from './welcome'
+import { APP_HREF, frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLink } from './welcome'
 import { pictureOrigins, tilePicture } from './tile-picture'
+import { SHOWCASE_STYLE, exploreSection, matchesDomain, memberSection, readLedger, rootZones, searchTerms, showcase,
+  type LedgerSite } from './showcase'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,
   listRevisionCandidates, publicCreationOrigin, readOfferings, readPublicCreations, rememberRevisionCandidate,
@@ -389,24 +391,6 @@ const replicationMeter = (label: string): { element: HTMLElement; paint(done: nu
 
 type Answer = { packages: HostPackage[]; answered: boolean }
 
-const matchesDomain = (host: string, domain: string): boolean =>
-  host === domain || host.endsWith(`.${domain}`)
-
-const galleryTerms = (query: string): string[] => query.toLowerCase().trim().split(/\s+/).filter(Boolean)
-
-/** A selected host is a root when no other known zone contains it. A signed
- *  offering can still name several route subdomains beneath that root. */
-const rootZones = (zones: string[]): string[] => {
-  const unique = [...new Set(zones.filter(Boolean))]
-  const known = new Set(unique)
-  return unique.filter(zone => {
-    for (let dot = zone.indexOf('.'); dot >= 0; dot = zone.indexOf('.', dot + 1)) {
-      if (known.has(zone.slice(dot + 1))) return false
-    }
-    return true
-  })
-}
-
 const rootDoor = (offer: Offering): string => {
   const host = new URL(offer.route).host
   return offer.doors.filter(door => matchesDomain(host, door)).sort((a, b) => a.length - b.length)[0] ?? host
@@ -508,6 +492,14 @@ class HostPanelElement extends HTMLElement {
   /** The tile each pending review was drawn in, so its bar lands on it. */
   #reviewTiles = new Map<PendingReview, HTMLElement>()
   #selfAnswer: Promise<Answer> | undefined = undefined
+  /** The ledger is read once per card; a re-render after an action redraws
+   *  the showcase without asking the origin again. */
+  #ledger: Promise<LedgerSite[]> | undefined = undefined
+  #ledgerAt = 0
+  #showcaseRefresh: ((ledger: Promise<LedgerSite[]>) => void) | null = null
+  /** A re-render after an action keeps the keeper where they were. */
+  #manageOpen = false
+  #curationOpen = false
   #refreshOnReturn = (): void => {
     if (!this.isConnected || document.visibilityState === 'hidden') return
     for (const zone of new Set([...(this.#galleryPins ?? []), ...this.#gallerySearchZones])) {
@@ -516,6 +508,13 @@ class HostPanelElement extends HTMLElement {
       this.#queueGalleryZone(zone)
     }
     this.#galleryRefresh?.()
+    // A tab left open reads what is published again on return, at most every
+    // half minute, so a hive published meanwhile takes its place.
+    if (this.#showcaseRefresh && Date.now() - this.#ledgerAt > 30_000) {
+      this.#ledgerAt = Date.now()
+      this.#ledger = readLedger()
+      this.#showcaseRefresh(this.#ledger)
+    }
   }
 
   connectedCallback(): void {
@@ -576,27 +575,82 @@ class HostPanelElement extends HTMLElement {
     this.#root.replaceChildren()
 
     const style = document.createElement('style')
-    style.textContent = STYLE
+    style.textContent = STYLE + SHOWCASE_STYLE
 
     const card = document.createElement('div')
     card.className = 'card'
     const panel = document.createElement('div')
     panel.className = 'panel'
 
-    const [identity, ...doorLinks] = this.#frontDoor(door)
-    panel.append(identity, ...doorLinks)
-    if (this.#reviews?.length) panel.append(this.#reviewSection(this.#reviews))
-    panel.append(this.#gallery(rootZones([this.#self, ...zones])))
+    // Choosing tiles for a hive elsewhere is a task, not a visit: it keeps the
+    // gallery and its return bar. Everyone else is shown the place.
+    const home = returnHome()
+    const selecting = !!home && (home.protocol === 'hypercomb:' || home.origin !== location.origin)
+    const manageBody = document.createElement('div')
+    manageBody.className = 'manage-body'
+    if (selecting) {
+      this.#showcaseRefresh = null
+      const [identity, ...doorLinks] = this.#frontDoor(door)
+      panel.append(identity, ...doorLinks)
+      if (this.#reviews?.length) panel.append(this.#reviewSection(this.#reviews))
+      panel.append(this.#gallery(rootZones([this.#self, ...zones])))
+    } else {
+      // THE ROOT IS A SHOWCASE (jwize 2026-10-24): search at the top, a band of
+      // hives per domain, and the doors to everything else at the foot.
+      card.classList.add('showcase-page')
+      if (!this.#ledger) { this.#ledger = readLedger(); this.#ledgerAt = Date.now() }
+      const { hero, bands, refresh } = showcase({
+        self: this.#self || location.host,
+        title: door.title,
+        tagline: door.tagline,
+        sources: zones,
+        ledger: this.#ledger,
+        readShared: zone => Promise.all([readOfferings(zone).catch(() => []), readPublicCreations(zone).catch(() => [])])
+          .then(([offers, creations]) => ({ offers, creations })),
+      })
+      this.#showcaseRefresh = refresh
+      panel.append(hero)
+      if (this.#reviews?.length) panel.append(this.#reviewSection(this.#reviews))
+      else {
+        // A KEEPER'S SELECTIONS WAIT IN SIGHT: tiles chosen on another domain
+        // and not yet turned on here are said where the keeper lands, not only
+        // inside the closed gallery.
+        const waiting = new Map<string, number>()
+        for (const row of this.#pending) if (row.selected !== false) waiting.set(row.source, (waiting.get(row.source) ?? 0) + 1)
+        if (waiting.size) panel.append(this.#waitingNote(waiting))
+      }
+      panel.append(bands, memberSection(this.#self || location.host, APP_HREF))
+      const explore = exploreSection(door.links)
+      if (explore) panel.append(explore)
+      // What this door carries and from where — the gallery that turns a
+      // domain's offerings on here — waits with the rest of the keeping.
+      const curation = document.createElement('details')
+      curation.className = 'technical'
+      const curationSummary = document.createElement('summary')
+      curationSummary.textContent = 'Creations and sources'
+      curation.append(curationSummary)
+      const fill = (): void => {
+        if (curation.childElementCount > 1) return
+        curation.append(this.#gallery(rootZones([this.#self, ...zones])))
+      }
+      curation.addEventListener('toggle', () => {
+        this.#curationOpen = curation.open
+        if (curation.open) fill()
+      })
+      if (this.#curationOpen) { curation.open = true; fill() }
+      manageBody.append(curation)
+    }
     // MANAGEMENT IS HERE, NOT IN THE WAY (jwize 2026-10-07): packages, revisions
     // and deployments wait behind one line at the foot of the welcome.
     const manage = document.createElement('details')
     manage.className = 'manage'
+    manage.open = this.#manageOpen
+    manage.addEventListener('toggle', () => { this.#manageOpen = manage.open })
     const manageSummary = document.createElement('summary')
     const manageNote = document.createElement('small')
-    manageNote.textContent = 'packages, revisions and deployments'
+    manageNote.textContent = selecting ? 'packages, revisions and deployments'
+      : 'creations, sources, packages and deployments'
     manageSummary.append(document.createTextNode('Manage this hive'), manageNote)
-    const manageBody = document.createElement('div')
-    manageBody.className = 'manage-body'
     manage.append(manageSummary, manageBody)
     manageBody.append(this.#packages(zones))
     const technical = document.createElement('details')
@@ -649,6 +703,24 @@ class HostPanelElement extends HTMLElement {
     }
 
     return parts
+  }
+
+  /** Selections made on another domain, one review button per source. */
+  #waitingNote(waiting: Map<string, number>): HTMLElement {
+    const note = document.createElement('div')
+    note.className = 'selection-return waiting-note'
+    const total = [...waiting.values()].reduce((sum, count) => sum + count, 0)
+    const text = document.createElement('span')
+    text.textContent = `${total} selected tile${total === 1 ? '' : 's'} ${total === 1 ? 'waits' : 'wait'} to be turned on here`
+    note.append(text)
+    for (const [source, count] of waiting) {
+      const review = document.createElement('button')
+      review.type = 'button'
+      review.textContent = `Review ${count} from ${source}`
+      review.addEventListener('click', () => { void this.#openPending(source) })
+      note.append(review)
+    }
+    return note
   }
 
   #reviewSection(reviews: PendingReview[]): HTMLElement {
@@ -1053,7 +1125,7 @@ class HostPanelElement extends HTMLElement {
         returnLink.href = returnHref(home, this.#self, [...choices.values()])
         returnLink.setAttribute('aria-label', `Return to my hive with ${choices.size} selected tiles`)
       }
-      const terms = galleryTerms(search.value)
+      const terms = searchTerms(search.value)
       const previous = previousByIdentity()
       const enabled = activeByIdentity()
       const sourceTerm = sourceSearch.value.toLowerCase().trim()
@@ -1552,7 +1624,9 @@ class HostPanelElement extends HTMLElement {
       if (chosenSource !== this.#self) {
         const added = await addHostZone(chosenSource)
         if (added) {
-          this.#galleryPins?.add(added)
+          // The gallery waits closed under Manage, so its pins may not be read
+          // yet: read them first, or saving would write an empty list.
+          this.#pinsFor(rootZones([this.#self, ...await listHostZones()])).add(added)
           this.#savePins()
         }
       }
