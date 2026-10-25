@@ -42,6 +42,19 @@ const LEDGER = {
 const offer = (lineage: string, host: string, pubkey: string, head: string) => ({ kind: 'host:offering' as const,
   title: lineage, lineage, route: `https://${lineage}.${host}/`, pubkey, head, index: {}, doors: [] })
 
+/** The group label stands for the pages: turning through them is how a test reads or reaches one. */
+const labelOf = (bands: HTMLElement): HTMLButtonElement => bands.querySelector('.pager-label') as HTMLButtonElement
+const at = (bands: HTMLElement): number => Number(/group (\d+) of/.exec(labelOf(bands)?.getAttribute('aria-label') ?? '')?.[1] ?? 1) - 1
+const total = (bands: HTMLElement): number => Number(/of (\d+)\./.exec(labelOf(bands)?.getAttribute('aria-label') ?? '')?.[1] ?? 0)
+/** The groups, in order, the one showing starred — read by turning through them and back again. */
+const tabs = (bands: HTMLElement): string[] => {
+  if (!labelOf(bands) || (bands.querySelector('.pager') as HTMLElement).hidden) return []
+  const n = total(bands), start = at(bands), out: string[] = new Array(n)
+  for (let i = 0; i < n; i++) { out[at(bands)] = `${labelOf(bands).textContent}${at(bands) === start ? '*' : ''}`; labelOf(bands).click() }
+  return out
+}
+const goTo = (bands: HTMLElement, index: number): void => { while (at(bands) !== index) labelOf(bands).click() }
+
 describe('parseLedger — the ledger is data', () => {
   it('keeps hosts that are hostnames and every publisher holding a verified head', () => {
     const sites = parseLedger(LEDGER)
@@ -469,7 +482,6 @@ describe('communities — pages after All', () => {
     readOwners: async () => ({ showcase: record, reached: true, unreadable: false, doors: new Map() }),
   })
   const names = (bands: HTMLElement): string[] => [...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent ?? '')
-  const tabs = (bands: HTMLElement): string[] => [...bands.querySelectorAll('.pager-tab')].map(tab => `${tab.textContent}${tab.getAttribute('aria-selected') === 'true' ? '*' : ''}`)
   const pointer = (target: Element, type: string, props: Record<string, unknown>): void => {
     const event = new Event(type, { bubbles: true, cancelable: true })
     for (const [key, value] of Object.entries(props)) Object.defineProperty(event, key, { value })
@@ -485,20 +497,18 @@ describe('communities — pages after All', () => {
     const { bands } = draw()
     await vi.waitFor(() => expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Sneaky']))
     expect(names(bands)).toEqual(['camelflage', 'dylan', 'Minimal host'])
-    expect(bands.querySelector('.pager')?.getAttribute('role')).toBe('tablist')
-    expect(bands.querySelector('.hosted')?.getAttribute('role')).toBe('tabpanel')
   })
 
   it('filters the first row to the community, without the platform doors, and never reveals more than the showcase', async () => {
     const { bands } = draw()
     await vi.waitFor(() => expect(tabs(bands)).toHaveLength(3))
-    ;(bands.querySelectorAll('.pager-tab')[1] as HTMLButtonElement).click()
+    ;goTo(bands, 1)
     expect(tabs(bands)).toEqual(['All', 'Favourites*', 'Sneaky'])
     expect(names(bands)).toEqual(['dylan'])
-    ;(bands.querySelectorAll('.pager-tab')[2] as HTMLButtonElement).click()
+    ;goTo(bands, 2)
     expect(names(bands)).toEqual(['dylan'])
-    expect(bands.querySelector('.hosted')?.getAttribute('aria-labelledby')).toBe(bands.querySelectorAll('.pager-tab')[2]!.id)
-    ;(bands.querySelectorAll('.pager-tab')[0] as HTMLButtonElement).click()
+    expect(bands.querySelector('.hosted')?.getAttribute('aria-labelledby')).toBe('community-label')
+    ;goTo(bands, 0)
     expect(names(bands)).toEqual(['camelflage', 'dylan', 'Minimal host'])
   })
 
@@ -543,8 +553,6 @@ describe('communities — pages after All', () => {
       expect(tabs(bands)).toEqual(['All', 'Favourites*', 'Sneaky'])
       key('End')
       expect(tabs(bands)).toEqual(['All', 'Favourites', 'Sneaky*'])
-      expect(bands.querySelectorAll('.pager-tab')[2]!.getAttribute('tabindex')).toBe('0')
-      expect(bands.querySelectorAll('.pager-tab')[0]!.getAttribute('tabindex')).toBe('-1')
       key('Home')
       expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Sneaky'])
       key('ArrowLeft')
@@ -567,7 +575,7 @@ describe('communities — pages after All', () => {
       readOwners: async () => ({ showcase: record, reached: true, unreadable: false, doors: new Map() }),
     })
     await vi.waitFor(() => expect(tabs(withPeers.bands)).toHaveLength(3))
-    ;(withPeers.bands.querySelectorAll('.pager-tab')[1] as HTMLButtonElement).click()
+    ;goTo(withPeers.bands, 1)
     ;(withPeers.bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
     // jwize.com's row is its master list, whichever community is showing.
     expect([...withPeers.bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['dylan'])
@@ -590,11 +598,11 @@ describe('the launcher — the same tiles, drawn in rows of four', () => {
   })
   const own = (bands: HTMLElement): HTMLElement => bands.querySelector('.dex-row.own .comb') as HTMLElement
   const tab = (bands: HTMLElement, name: string): HTMLButtonElement =>
-    [...bands.querySelectorAll<HTMLButtonElement>('.pager-tab')].find(button => button.textContent === name)!
+    ({ click: () => goTo(bands, tabs(bands).findIndex(entry => entry.replace('*', '') === name)) }) as unknown as HTMLButtonElement
 
   it('draws hexagons unless a view says otherwise — in comb rows', async () => {
     const { bands } = draw(record({}))
-    await vi.waitFor(() => expect(bands.querySelectorAll('.pager-tab')).toHaveLength(3))
+    await vi.waitFor(() => expect(tabs(bands)).toHaveLength(3))
     expect(own(bands).dataset['shape']).toBeUndefined()
     expect(own(bands).querySelector('.comb-row')).not.toBeNull()
   })
@@ -612,7 +620,7 @@ describe('the launcher — the same tiles, drawn in rows of four', () => {
 
   it('lets a community choose its own view, and one that says nothing is drawn as All is', async () => {
     const { bands } = draw(record({}))
-    await vi.waitFor(() => expect(bands.querySelectorAll('.pager-tab')).toHaveLength(3))
+    await vi.waitFor(() => expect(tabs(bands)).toHaveLength(3))
     tab(bands, 'Daily').click()
     expect(own(bands).dataset['shape']).toBe('launcher')
     expect([...own(bands).children].map(node => node.querySelector('.hex-name')?.textContent)).toEqual(['camelflage'])
@@ -630,7 +638,7 @@ describe('the launcher — the same tiles, drawn in rows of four', () => {
     const { bands } = draw(record({ view: 'launcher', communities: [
       { name: 'Plain', items: [{ ...a, lineage: 'dylan' }], domains: [] },
       { name: 'Brand', items: [{ ...a, lineage: 'camelflage' }], domains: [], view: 'hex' }] }))
-    await vi.waitFor(() => expect(bands.querySelectorAll('.pager-tab')).toHaveLength(3))
+    await vi.waitFor(() => expect(tabs(bands)).toHaveLength(3))
     tab(bands, 'Plain').click()
     expect(own(bands).dataset['shape']).toBe('launcher')
     tab(bands, 'Brand').click()
@@ -751,15 +759,15 @@ describe('what the owners meant, and what the page does when it cannot tell', ()
     const record: ShowcaseRecord = { zone: 'hypercomb.com', domains: [], items: [{ ...a, lineage: 'dylan' }, { ...a, lineage: 'camelflage' }],
       communities: [{ name: 'Daily', items: [{ ...a, lineage: 'dylan' }], domains: [] }] }
     const { bands } = draw(async () => owners({ showcase: record }))
-    await vi.waitFor(() => expect(bands.querySelectorAll('.pager-tab')).toHaveLength(2))
+    await vi.waitFor(() => expect(tabs(bands)).toHaveLength(2))
     const hosted = bands.querySelector('.hosted') as HTMLElement
     expect(hosted.classList.contains('swipeable')).toBe(true)
     const key = (init: KeyboardEventInit) => bands.querySelector('.pager')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true, ...init }))
     key({ altKey: true })
     key({ metaKey: true })
-    expect([...bands.querySelectorAll('.pager-tab')].map(tab => tab.getAttribute('aria-selected'))).toEqual(['true', 'false'])
+    expect(tabs(bands)).toEqual(['All*', 'Daily'])
     key({})
-    expect([...bands.querySelectorAll('.pager-tab')].map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'true'])
+    expect(tabs(bands)).toEqual(['All', 'Daily*'])
     // A search takes the swipe's ground away: its misses and its Follow offer sit where they are read.
     const search = bands.parentElement ? undefined : undefined
     void search

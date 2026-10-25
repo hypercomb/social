@@ -916,10 +916,8 @@ ${entry.key}`
   // pages after All. A tab strip names them and a sideways swipe on the list
   // turns them; the accordion beneath stays the master list.
   const pager = el('div', 'pager')
-  pager.setAttribute('role', 'tablist')
   pager.setAttribute('aria-label', 'Communities')
   pager.hidden = true
-  hosted.setAttribute('role', 'tabpanel')
   bandsHost.append(pager, hosted, nothing, suggest, followBar)
   /** The shape asked for on the address (`?view=launcher`), or none. */
   const viewAsked: ShowcaseView | undefined = (() => {
@@ -927,19 +925,16 @@ ${entry.key}`
   })()
   /** The community page showing now, by key; '' is All. */
   let page = ''
-  const tabViews = new Map<string, HTMLButtonElement>()
-  let tabIds = 0
+  /** The one label of the group showing now: a tap on it turns to the next. */
+  const label = el('button', 'pager-label')
+  label.type = 'button'
+  label.id = 'community-label'
   const pages = (): ShowcaseCommunity[] => (signed?.showcase?.communities ?? [])
     .filter(community => community.items.length > 0 || community.domains.length > 0)
   const select = (key: string, focus = false): void => {
     page = key
     paint()
-    const tab = tabViews.get(key)
-    if (tab) {
-      tab.scrollIntoView?.({ inline: 'nearest', block: 'nearest',
-        behavior: globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ? 'auto' : 'smooth' })
-      if (focus) tab.focus()
-    }
+    if (focus) label.focus()
   }
   /** The pages go round: on from the last is All, and back from All is the last (jwize 2026-10-25: "it can cycle as well"). */
   const turn = (by: number): void => {
@@ -947,6 +942,7 @@ ${entry.key}`
     const next = (Math.max(0, keys.indexOf(page)) + by + keys.length) % keys.length
     if (keys[next] !== page) select(keys[next]!)
   }
+  label.addEventListener('click', () => turn(1))
   pager.addEventListener('keydown', event => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
     const keys = ['', ...pages().map(community => communityKey(community.name))]
@@ -1107,35 +1103,16 @@ ${entry.key}`
       try { return within(new URL(place.href).hostname, zone) } catch { return false }
     }))) : []
   }
-  /** The tab strip: kept and updated in place, so a repaint never takes a tab's focus. */
+  /** The label of the current group — All, or a community's name — kept in place so a repaint never takes its focus. */
   const paintPager = (communities: readonly ShowcaseCommunity[]): void => {
-    const entries = [{ key: '', name: 'All' }, ...communities.map(row => ({ key: communityKey(row.name), name: row.name }))]
-    const live = new Set(entries.map(entry => entry.key))
-    for (const [key, tab] of tabViews) if (!live.has(key)) { tab.remove(); tabViews.delete(key) }
-    const order: HTMLButtonElement[] = []
-    for (const entry of entries) {
-      let tab = tabViews.get(entry.key)
-      if (!tab) {
-        tab = el('button', 'pager-tab')
-        tab.type = 'button'
-        tab.setAttribute('role', 'tab')
-        tab.id = `community-tab-${tabIds++}`
-        const key = entry.key
-        tab.addEventListener('click', () => select(key))
-        tabViews.set(entry.key, tab)
-      }
-      tab.textContent = entry.name
-      const on = entry.key === page
-      tab.setAttribute('aria-selected', String(on))
-      tab.tabIndex = on ? 0 : -1
-      order.push(tab)
-    }
-    const current = [...pager.children]
-    if (current.length !== order.length || current.some((node, index) => node !== order[index])) pager.replaceChildren(...order)
+    const names = ['All', ...communities.map(row => row.name)]
+    const at = Math.max(0, ['', ...communities.map(row => communityKey(row.name))].indexOf(page))
+    label.textContent = names[at]!
+    label.setAttribute('aria-label', `${names[at]}, group ${at + 1} of ${names.length}. Press for the next.`)
+    if (label.parentElement !== pager) pager.replaceChildren(label)
     pager.hidden = communities.length === 0
-    const selected = tabViews.get(page)
-    if (selected && !pager.hidden) hosted.setAttribute('aria-labelledby', selected.id)
-    else hosted.removeAttribute('aria-labelledby')
+    if (pager.hidden) hosted.removeAttribute('aria-labelledby')
+    else hosted.setAttribute('aria-labelledby', label.id)
   }
   /** The domain the search offers to follow now, or ''. */
   let offered = ''
@@ -1363,15 +1340,11 @@ export const SHOWCASE_STYLE = `
   font: 500 .66rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
 .hosted-empty[hidden], .dex-row[hidden], .hosted-nothing[hidden], .follow-suggest[hidden], .follow[hidden], .follow-note:empty { display: none; }
 /* the communities: a strip of names after All; the list beneath turns with a swipe */
-.pager { display: flex; gap: .4rem; overflow-x: auto; scrollbar-width: none; margin: 0 -.35rem .5rem; padding: .3rem .35rem; }
-.pager::-webkit-scrollbar { display: none; }
+.pager { margin: 0 0 .5rem; padding: .3rem 0; }
 .pager[hidden] { display: none; }
-.pager-tab { flex: none; padding: .42rem .85rem; border: 1px solid var(--md-outline-variant); border-radius: 999px; cursor: pointer;
-  background: color-mix(in srgb, var(--md-surface-c-lowest) 70%, transparent); color: var(--md-on-surface);
-  font: 500 .85rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); white-space: nowrap; transition: background .2s, border-color .2s, color .2s; }
-.pager-tab:hover { border-color: var(--md-primary); }
-.pager-tab[aria-selected='true'] { border-color: var(--md-primary); background: var(--md-primary); color: var(--md-on-primary); }
-.pager-tab:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.pager-label { padding: .2rem 0; border: 0; background: transparent; cursor: pointer; color: var(--md-on-surface-strong);
+  font: 600 1rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.pager-label:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 .hosted { touch-action: pan-y pinch-zoom; }
 /* THE LAUNCHER (jwize 2026-10-25): the same tiles — the same pictures, names, badges and links — in the traditional rows of four. The hexagon stays the brand's default. */
 .comb[data-shape='launcher'] { --icon: 6rem; display: grid; grid-template-columns: repeat(4, minmax(0, var(--icon))); justify-content: start; gap: 1.3rem 1.1rem; }
@@ -1533,6 +1506,6 @@ a.version-visit { color: var(--md-primary); }
   .version-visit { justify-content: center; max-width: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hex-picture, .hex-motif, .versions, .pager-tab { transition: none !important; animation: none !important; opacity: 1; }
+  .hex-picture, .hex-motif, .versions, .pager-label { transition: none !important; animation: none !important; opacity: 1; }
 }
 `

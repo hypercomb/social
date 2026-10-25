@@ -226,3 +226,11 @@ brand"; "there should be a way on the groups to change launcher renderings").
   would be a separate sealed atom, reached by a link that carries its key in the
   fragment (as a swarm link does), with a random id and the name inside the
   sealed blob. Turning a door off or unpublishing stay the only real hide.
+
+## Groups: one label, not tabs (jwize, 2026-10-25)
+
+"I don't want tabs, I want the label for the current group." The page shows the
+current group's name once (All, or a community); a swipe, the arrow keys or a tap on
+the label turn to the next. **Manage** (not built, hive side) is an icon to the right
+of the search: in it the label can be renamed, every showcase tile is shown, and a
+tile is switched on or off for that group; leaving Manage hides the ones switched off.
