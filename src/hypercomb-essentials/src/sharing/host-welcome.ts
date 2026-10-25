@@ -27,6 +27,7 @@
 
 import { SignatureService } from '@hypercomb/core'
 import { fetchHiveIndex, setHiveRoot, type HiveIndexResult } from './hive-pointer.js'
+import { publisherKeyHex } from './key-list.client.js'
 import { HOST_DOOR_LABEL } from './zone-door.js'
 
 const get = <T,>(key: string): T | undefined => (window as any).ioc?.get?.(key) as T | undefined
@@ -115,7 +116,7 @@ export async function cardOnHost(host: string, sig: string, fetchImpl: typeof fe
  *  field keeps the others. */
 export async function readOwnWelcome(host: string, zone: string, deps: ReadOwnWelcomeDeps = {}): Promise<OwnWelcome> {
   const publicKey = deps.publicKey
-    ?? (() => get<{ getPublicKeyHex?: () => Promise<string | null> }>('@diamondcoreprocessor.com/NostrSigner')?.getPublicKeyHex?.() ?? Promise.resolve(null))
+    ?? (() => publisherKeyHex())
   const pubkey = String((await publicKey().catch(() => null)) ?? '').toLowerCase()
   if (!SIG_RE.test(pubkey)) return { state: 'unknown', reason: 'this hive has no signing key' }
   const index = await (deps.fetchIndex ?? fetchHiveIndex)(host, pubkey).catch(() => ({ ok: false, reason: 'unreachable' }) as HiveIndexResult)

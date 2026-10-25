@@ -1620,6 +1620,7 @@
   "bridge.code-on-line": "追加しませんでした — ブリッジコードは行ではなくプロンプトに入力します。コマンド履歴には「bridge add {name}」だけが残ります。コードを誰かに見られたなら、代わりに {name} に新しいコードを渡してください (bridge give {name})",
   "bridge.one-name": "渡しませんでした — bridge give が受け取るのは名前の一語だけです。コマンド履歴には「bridge give {name}」だけが残ります",
   "slash.follow": "ドメインをフォローする — そこで公開されているものを読む",
+  "slash.keys": "誰があなたの代わりに公開するか — 別の場所に公開を許可する、招待を受ける、場所を外す",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "ヘキサゴンとウェブサイト表示を切替",

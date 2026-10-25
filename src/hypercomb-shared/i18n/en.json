@@ -1925,6 +1925,7 @@
   "bridge.code-on-line": "Not added — a bridge code goes in the prompt, never on the line. The command history keeps only \"bridge add {name}\"; if anyone saw the code, give {name} a new one instead (bridge give {name})",
   "bridge.one-name": "Not given — bridge give takes one word, the name. The command history keeps only \"bridge give {name}\"",
   "slash.follow": "Follow a domain — read what is published there",
+  "slash.keys": "Who publishes for you — let another place publish, take an invite, or take a place off",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "Toggle between hexagons and website rendering",

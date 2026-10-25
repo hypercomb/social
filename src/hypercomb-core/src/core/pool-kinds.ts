@@ -200,6 +200,10 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // What runs on arrival, per conversation, provider or model (essentials
   // assistant/permit-groups.ts, the `permit` word): one current record.
   ['permit:groups', 'document'],
+  // Which anchor this device publishes for (essentials sharing/anchor-binding.ts):
+  // one current record, NEVER replicated — a device that merely synced it would
+  // publish as an anchor whose list does not name its key.
+  ['keys:binding', 'document'],
   // The meeting point a new tab's selector is pre-filled with (hypercomb-
   // shared/core/mesh-session.ts): one current record, never replicated.
   ['mesh:meet-point', 'document'],

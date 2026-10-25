@@ -392,6 +392,9 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Which keys may sign for an anchor: its whole key-list chain, the member
   // named by the anchor (core key-list.ts; becoming-a-host.md).
   'keys:lists',
+  // Which anchor this device publishes for — a DOCUMENT, per participant, never
+  // replicated (essentials sharing/anchor-binding.ts).
+  'keys:binding',
   // A door's landing view as one transfer pack, the member named by the head
   // it was walked from — derived, kept, wipe-safe (blossom-worker
   // serveContentPack, web setup/content-pack.ts).

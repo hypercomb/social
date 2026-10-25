@@ -34,6 +34,7 @@ import {
   type HiveLinkBundle,
 } from './hive-link.js'
 import { fetchHiveIndex, fetchHiveManifestFromAny, nip98Header, putHiveManifest } from './hive-pointer.js'
+import { prepareAnchorHosts, publisherKeyHex } from './key-list.client.js'
 import {
   STAGE_LIVE,
   STAGE_PUBLISHED,
@@ -298,7 +299,7 @@ async function publishBranchNow(
   //     honest 404). A node that is down is skipped for this publish and
   //     named in the result; with no node at all, the publish stops and says
   //     so — it never picks a host the participant did not.
-  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  const pubkey = await publisherKeyHex()
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
   const named = await nodesFor(segs, hostSync)
   if (named.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
@@ -321,6 +322,9 @@ async function publishBranchNow(
     else unreachable.push(door)
   }
   if (answering.length === 0) return { ok: false, failure: 'no-host', reason: `no node answered (${unreachable.join(', ')})` }
+  // A device that publishes for an anchor has the host hold the anchor's list
+  // before any byte goes up, so its uploads are the anchor's (a no-op otherwise).
+  await prepareAnchorHosts(answering)
   hostSync.addPublishNodes?.(answering)
 
   // 2. THE LIGHTS TRAVEL WITH THE TREE. Stamp the branch root with the
@@ -649,7 +653,7 @@ async function unpublishBranchNow(
   const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
   if (segs.length === 0) return { ok: false, failure: 'no-branch' }
 
-  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  const pubkey = await publisherKeyHex()
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
 
   const key = lineageKey(segs)
@@ -756,7 +760,7 @@ async function setBranchDoorsNow(
     return out.ok ? { ok: true, removed: out.removed } : out
   }
 
-  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  const pubkey = await publisherKeyHex()
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
   const key = lineageKey(segs)
   const nodes = await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY))
@@ -831,7 +835,7 @@ async function setBranchAddressNow(
     if (refusal) return { ok: false, failure: refusal }
   }
 
-  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  const pubkey = await publisherKeyHex()
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
   const key = lineageKey(segs)
   const nodes = await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY))
@@ -961,7 +965,7 @@ async function setEntranceNow(
   if (!h) return { ok: false, failure: 'no-host', reason: 'not an address' }
   if (intent.kind === 'on' && !SIG_RE.test(String(intent.page ?? '').toLowerCase())) return { ok: false, failure: 'no-page' }
 
-  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  const pubkey = await publisherKeyHex()
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
   // THE PARTICIPANT'S OWN WRITE DOORS carry the read and the write: the doors
   // the caller read the index through, then the standing targets — the same
@@ -1132,7 +1136,7 @@ async function secureDeleteBranchNow(segments: readonly string[]): Promise<Secur
   if (!signer?.getPublicKeyHex || !signer.signEvent || !hostSync?.closureSigs) return { ok: false, failure: 'services' }
   const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
   if (segs.length === 0) return { ok: false, failure: 'no-branch' }
-  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  const pubkey = await publisherKeyHex()
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
   const key = lineageKey(segs)
 
@@ -1244,8 +1248,8 @@ async function setHiveDoorsNow(
   if (!door || LOOPBACK_RE.test(door)) return { ok: false, failure: 'no-host', reason: 'not a domain' }
   // The key this hive HAS; an extension is asked (it may prompt), a stored key is never minted.
   const extension = !!(globalThis as { nostr?: { getPublicKey?: unknown } }).nostr?.getPublicKey
-  const held = extension ? await signer.getPublicKeyHex() : await signer.knownPublicKeyHex?.()
-  const pubkey = String(held ?? '').toLowerCase()
+  // The key whose index it is: the anchor this device publishes for, else its own.
+  const pubkey = await publisherKeyHex({ known: !extension })
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
   if (pubkey !== String(options.pubkey ?? '').toLowerCase()) return { ok: false, failure: 'not-yours' }
 

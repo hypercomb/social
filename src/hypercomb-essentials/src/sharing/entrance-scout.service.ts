@@ -32,6 +32,7 @@
 
 import { EffectBus, SignatureService, get } from '@hypercomb/core'
 import { fetchHiveIndex, fetchHiveManifestFromAny } from './hive-pointer.js'
+import { publisherKeyHex } from './key-list.client.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { listCommunityHosts } from './community-hosts.js'
 import { readFromHost } from './published-address.js'
@@ -138,7 +139,7 @@ export class EntranceScoutService {
   public readonly check = async (deps: EntranceScoutDeps = {}): Promise<EntranceUpdate[]> => {
     const hosts = await (deps.hosts ?? entranceHosts)()
     if (hosts.length === 0) return []
-    const ownPubkey = deps.ownPubkey ?? (() => get<{ getPublicKeyHex?: () => Promise<string | null> }>(NOSTR_SIGNER_KEY)?.getPublicKeyHex?.() ?? Promise.resolve(null))
+    const ownPubkey = deps.ownPubkey ?? (() => publisherKeyHex())
     const pubkey = String((await ownPubkey().catch(() => null)) ?? '').toLowerCase()
     if (!SIG_RE.test(pubkey)) return []
     const published = deps.published ?? hasPublishedUnder

@@ -3,7 +3,8 @@
 Status: **design, for review** (2026-10-07). **"This computer" BUILT
 2026-10-18** — see *Host your hive from this computer* below; the rest is
 still design. *Letting another place publish for you* (the key list and the
-invite) added 2026-10-24, design; its core check is built.
+invite) added 2026-10-24: the core check, the worker, the client and the
+`keys` word are built; the hosts-window rows and the molecule step are not.
 
 > "We have to make everything automated because we want to be able to walk
 > people through how it's done so they can do it themselves easily." —
@@ -273,8 +274,9 @@ hosting, and this path is hosting. Decide before building step 1.
 
 ## Letting another place publish for you
 
-Status: **design, 2026-10-24.** Step 1 of the build order (the core check)
-is built, and so is step 2 (the worker); nothing else below is.
+Status: **built through step 4 of the build order, 2026-10-24** (the core
+check, the worker, the client, the `keys` word). Not built: the hosts-window
+rows, the molecule step (5), and the readers named under *Not yet reached*.
 
 > "we need a safe way to share our publish key between domains" … "That way
 > I can pass it and unfold it (ie allow publishing to that device)" —
@@ -352,12 +354,18 @@ kind 30570, signed by a key in the list before it
    (the same rule as the door's `#k=`). `<host>` is where the list is held.
    The same text pasted after `keys accept` works where a link can't be
    opened.
-2. **Unfold.** On the new domain or device, the page reads the anchor's list
-   from `<host>`, checks that the invite is in it and not expired, and signs
-   the next list with the invite secret: its own key in (made now if it has
-   none), the invite out. Then it forgets the secret, remembers the anchor
-   (`hc:keys:anchor`, kept on the device; it is not a secret), and from then
-   on publishes for the anchor.
+2. **Unfold.** On the new domain or device, the participant types
+   `keys accept` (a link that merely lands is HELD and never spent: opening
+   one must not make this place publish as somebody else, so the page only
+   says an invitation arrived and what to type, and takes the secret out of
+   the address). The place reads the anchor's list from `<host>`, checks that
+   the invite is in it and not expired, and signs the next list with the
+   invite secret: its own key in (made now if it has none), the invite out.
+   The acceptance is dated within the invite however this place's clock
+   reads, since the host judges the invite's end by its own. Then the secret
+   is forgotten, and the place remembers the anchor in its binding — the
+   per-device, never-replicated document `keys:binding` (not a browser key,
+   and not a secret) — and from then on publishes for the anchor.
 3. **See it.** Every place that reads the list sees the new key with its label
    and can take it off.
 
@@ -469,16 +477,44 @@ two keys.
    `worker.js`: the route, NIP-98 and BUD-02 auth, index reads and writes,
    with `key-lists.worker.spec.js` driving it through the worker's own doors.
 3. Client: the publish path signs with the device's key and addresses by
-   anchor; the read path accepts listed signers.
-4. Words: `keys` (who publishes for you), `keys allow`, `keys accept`,
-   `keys off <label>`; the invite link's landing; rows in the hosts window.
+   anchor; the read path accepts listed signers. **Built 2026-10-24**
+   (`sharing/key-list.client.ts`, `anchor-binding.ts`, and `hive-pointer.ts`):
+   `publisherKeyHex()` is whose index a device writes (its anchor, else its own
+   key), used by the publish path, the hosts words, the offerings, Serve and
+   the entrance scout; a bound device carries the list to a host before it
+   writes there, signs its index tagged `anchor` and `prev`, tags its uploads
+   as the anchor's, and a reader accepts an index a listed key signed for the
+   anchor it pins. `hive-pointer.ts`, `host-sync.service.ts` and
+   `text-theme-offering.ts` are in the eager boot closure, so they load the
+   client lazily (and `host-sync` only for a device that has an anchor).
+4. Words: `keys` (who publishes for you), `keys allow [<domain>]`,
+   `keys accept [<link>] [as <label>]`, `keys off <place>`; the invite
+   link's landing. **Built 2026-10-24** (`sharing/keys.queen.ts`). A machine
+   may read the list and nothing more (machine-declarations: `additive`,
+   `local`). Rows in the hosts window are not built.
 5. Molecules: "the same author" becomes "a key on the same list", which
    closes the one-key-two-devices fork for good.
 
-**Open questions.** (1) The word: `keys`, `devices`, or a sub-word of
-`host`. (2) Equal keys, or should removing a key need the anchor (or two
-keys)? Recommended: equal, as decided 2026-10-07, until a recovery path
-exists.
+**Decided.** The word is `keys` (2026-10-24). Equal keys, as decided
+2026-10-07, until a recovery path exists.
+
+### Not yet reached
+
+A device that publishes for an anchor is the anchor everywhere the code asks
+`publisherKeyHex()`, and nowhere else yet:
+
+- **Other index readers.** Core's `host-offerings.ts` (so the shim's offerings
+  reader) and the shim's `showcase-record.ts` still accept an index signed by
+  the pinned key only, so an index a listed key signed for the anchor stands
+  where the worker and `hive-pointer.ts` read it, and not there. `relay.js`
+  moves an index only for its own publisher: a relay host does not take a
+  listed place's publish.
+- **Molecule head claims** (`head-claim-signer.ts`) are still signed and
+  bucketed by the device's own key: step 5.
+- **The swarm and the rooms** (`swarm.drone.ts`, `room.queen.ts`, questions,
+  did-you-know) keep naming the device key: presence is the place's, not the
+  participant's.
+- **The hosts window** shows no rows for the list yet.
 
 ## What this needs that does not exist
 

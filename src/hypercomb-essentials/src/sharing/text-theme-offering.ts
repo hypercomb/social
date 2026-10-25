@@ -126,7 +126,7 @@ const scope = async (host: string, deps: TextThemeOfferDeps): Promise<
   const endpoint = zoneDoor(sync.publicHostDomain() || selected)
   if (!DOMAIN.test(endpoint)) return { reason: 'Choose a root domain such as example.org.' }
   const signer = get<SignerLike>(SIGNER_KEY)
-  const pubkey = String(await (deps.pubkey?.() ?? signer?.getPublicKeyHex?.()) ?? '').toLowerCase()
+  const pubkey = String(await (deps.pubkey?.() ?? import('./key-list.client.js').then(kl => kl.publisherKeyHex())) ?? '').toLowerCase()
   if (!SIG.test(pubkey)) return { reason: 'A signing key is required.' }
   return { host: selected, endpoint, pubkey, sync }
 }

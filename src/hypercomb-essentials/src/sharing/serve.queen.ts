@@ -27,6 +27,7 @@ import {
   EffectBus, get, HOME_MOLECULE_NAME, QueenBee, SignatureService,
   canonicalLayerJson, latestLayerMarker, writeLayerMarker,
 } from '@hypercomb/core'
+import { publisherKeyHex } from './key-list.client.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 const LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
@@ -152,7 +153,7 @@ export class ServeQueenBee extends QueenBee {
     const page = segments.length ? segments.join('/') : HOME_MOLECULE_NAME
     const history = get<SealHistory>('@diamondcoreprocessor.com/HistoryService')
     const signer = get<Signer>('@diamondcoreprocessor.com/NostrSigner')
-    const pubkey = String((await signer?.getPublicKeyHex?.()) ?? '').toLowerCase()
+    const pubkey = await publisherKeyHex()
     if (!SIG_RE.test(pubkey)) { this.#say(this.#t('serve.failed', 'Could not serve {page}: {reason}', { page, reason: 'no signing key' })); return }
     const head = String((await history?.sealSubtree?.(segments).catch(() => null)) ?? '').toLowerCase()
     if (!SIG_RE.test(head)) { this.#say(this.#t('serve.failed', 'Could not serve {page}: {reason}', { page, reason: 'it could not be sealed — visit its tiles once' })); return }

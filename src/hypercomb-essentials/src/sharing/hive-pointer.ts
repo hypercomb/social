@@ -19,6 +19,12 @@ import { verifyEvent } from 'nostr-tools/pure'
 import { HIVE_INDEX_EVENT_KIND, HIVE_LINK_VERSION } from './hive-link.js'
 import { isPoweredEntrance, readAddresses, readDoorsOf, readEntrances, type ZoneEntrance } from './zone-door.js'
 
+/** The key-list client (whose index is mine, which keys an anchor lists). LAZY:
+ *  this file is in the eager boot-lane closure, which may only shrink
+ *  (doctrine.spec.ts), and a device that publishes for no anchor — every device
+ *  until it takes an invite — never needs it on the boot path. */
+const keyList = () => import('./key-list.client.js')
+
 interface SignerLike {
   signEvent: (evt: { kind: number; created_at: number; tags: string[][]; content: string }) => Promise<Record<string, unknown>>
   getPublicKeyHex?: () => Promise<string | null>
@@ -29,8 +35,12 @@ export interface HiveManifest {
   roots: Record<string, string>
   /** Seconds-epoch of the signed event — the monotonic freshness stamp. */
   createdAt: number
-  /** Publisher pubkey the signature verified against. */
+  /** Publisher pubkey the signature verified against — the ANCHOR the index
+   *  stands for, which a key its list names may have signed for it. */
   pubkey: string
+  /** The nostr event id of this index: the `prev` a key other than the anchor
+   *  names when it replaces it. */
+  eventId?: string
   /** lineageKey → the root domains that branch opens on. The host serves a
    *  branch only on a listed domain; an absent entry grants no door. This
    *  map, signed with the roots, is the per-domain on/off switch. */
@@ -110,16 +120,29 @@ export async function fetchHiveIndex(host: string, pubkey: string): Promise<Hive
   let evt: Record<string, unknown>
   try { evt = await res.json() as Record<string, unknown> } catch { return { ok: false, reason: 'malformed' } }
 
-  return hiveIndexOf(evt, key)
+  // An index another key signed stands only when this host's list for the
+  // anchor names that key (key-list.client.ts), so the list is asked for only then.
+  const signedBy = String(evt?.['pubkey'] ?? '').toLowerCase()
+  const listed = SIG_RE.test(signedBy) && signedBy !== key ? await (await keyList()).listedKeys(host, key).catch(() => null) : undefined
+  return hiveIndexOf(evt, key, listed)
 }
 
 /** A signed index event, verified against the pinned key: the same checks
- *  whether it was fetched from a host or carried by the page. */
-function hiveIndexOf(evt: Record<string, unknown>, key: string): HiveIndexResult {
+ *  whether it was fetched from a host or carried by the page. `listed` is the
+ *  keys the anchor's key list names, for an index a listed key signed FOR it. */
+function hiveIndexOf(evt: Record<string, unknown>, key: string, listed?: ReadonlySet<string> | null): HiveIndexResult {
   if (Number(evt?.['kind']) !== HIVE_INDEX_EVENT_KIND) return { ok: false, reason: 'malformed' }
   // Wrong pubkey and bad signature are BOTH substitution, not corruption:
-  // the host handed back an index that is not this publisher's.
-  if (String(evt?.['pubkey'] ?? '').toLowerCase() !== key) return { ok: false, reason: 'forged' }
+  // the host handed back an index that is not this publisher's. The one other
+  // signer is a key the anchor's list names, on an event that says it is for
+  // this anchor — the tag stops one event standing under another anchor that
+  // also lists the key.
+  const signer = String(evt?.['pubkey'] ?? '').toLowerCase()
+  if (signer !== key) {
+    const tags = Array.isArray(evt?.['tags']) ? evt['tags'] as unknown[] : []
+    const forAnchor = tags.some(t => Array.isArray(t) && t[0] === 'anchor' && String(t[1] ?? '').toLowerCase() === key)
+    if (!forAnchor || !listed?.has(signer)) return { ok: false, reason: 'forged' }
+  }
   try { if (!verifyEvent(evt as never)) return { ok: false, reason: 'forged' } }
   catch { return { ok: false, reason: 'forged' } }
 
@@ -146,6 +169,7 @@ function hiveIndexOf(evt: Record<string, unknown>, key: string): HiveIndexResult
   rememberRead(key, Number(evt['created_at'] ?? 0), signedContent)
   return { ok: true, manifest: {
     roots, createdAt: Number(evt['created_at'] ?? 0), pubkey: key,
+    eventId: String(evt['id'] ?? '').toLowerCase(),
     doors,
     ...(Object.keys(addresses).length > 0 ? { addresses } : {}),
     ...(Object.keys(entrances).length > 0 ? { entrances } : {}),
@@ -270,8 +294,19 @@ async function putHiveManifestNow(
 
   // ONE FRESH READ, right before signing, inside this host's lane — nothing
   // else from this tab can land between it and the PUT below.
-  const pubkeyNow = String((await signer.getPublicKeyHex?.().catch(() => null)) ?? '').toLowerCase()
+  const own = String((await signer.getPublicKeyHex?.().catch(() => null)) ?? '').toLowerCase()
+  // The index this device writes is its ANCHOR's when it publishes for one
+  // (key-list.client.ts): its own key signs, and the host takes it as the
+  // anchor's. The host must hold the anchor's list first, so it is carried.
+  const pubkeyNow = SIG_RE.test(own) ? (await (await keyList()).publisherKeyHex()) || own : ''
+  if (SIG_RE.test(pubkeyNow) && pubkeyNow !== own) await (await keyList()).carryKeyChain(host).catch(() => null)
   const read = SIG_RE.test(pubkeyNow) ? await fetchHiveIndex(host, pubkeyNow).catch(() => null) : null
+  // `['anchor', <anchor>]`, and `['prev', <the index being replaced>]` — so two
+  // places publishing at once cannot drop each other's change. Empty when this
+  // device is its own anchor, which writes exactly as it always did.
+  const anchored = pubkeyNow !== own && SIG_RE.test(pubkeyNow)
+    ? (await keyList()).anchoredTags(pubkeyNow, own, read?.ok ? read.manifest.eventId : undefined)
+    : []
 
   // THE ENTRANCES ARE NEVER CARRIED FROM A STALE READ. Every other writer read
   // the index some time ago — a publish waits minutes for its bytes — and the
@@ -328,11 +363,13 @@ async function putHiveManifestNow(
     signed = await signer.signEvent({
       kind: HIVE_INDEX_EVENT_KIND,
       created_at: Math.max(Math.floor(Number(options.createdAt) || Date.now() / 1000), Math.floor(Number(replaces) || 0) + 1),
-      tags: [],
+      tags: anchored,
       content: JSON.stringify(content),
     })
   } catch { return { ok: false, pubkey: '', createdAt: 0, reason: 'signing failed' } }
-  const pubkey = String(signed?.['pubkey'] ?? '').toLowerCase()
+  const signerKey = String(signed?.['pubkey'] ?? '').toLowerCase()
+  // Written under the ANCHOR when the index was signed for one.
+  const pubkey = anchored.length > 0 && SIG_RE.test(signerKey) ? pubkeyNow : signerKey
   // Read the stamp back off the SIGNED event rather than our own clock: a
   // NIP-07 extension signs an event it composed, and the freshness compare is
   // only meaningful against the value the host will actually serve.
@@ -346,7 +383,7 @@ async function putHiveManifestNow(
   // without it landed on every worker and never on a relay.
   const body = JSON.stringify(signed)
   const payload = await SignatureService.sign(new TextEncoder().encode(body).buffer as ArrayBuffer)
-  const auth = await nip98Header(signer, url, 'PUT', payload)
+  const auth = await nip98Header(signer, url, 'PUT', payload, anchored.length > 0 ? [['anchor', pubkey]] : [])
   if (!auth) return { ok: false, pubkey, createdAt, reason: 'nip-98 signing failed' }
 
   try {
@@ -518,7 +555,7 @@ export type SetHiveRootDeps = {
 export async function setHiveRoot(host: string, key: string, sig: string, deps: SetHiveRootDeps = {}): Promise<SetHiveRootResult> {
   const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
   const putManifest = deps.putManifest ?? putHiveManifest
-  const publicKey = deps.publicKey ?? (() => get<SignerLike>(NOSTR_SIGNER_KEY)?.getPublicKeyHex?.() ?? Promise.resolve(null))
+  const publicKey = deps.publicKey ?? (async () => (await keyList()).publisherKeyHex())
 
   const cleanKey = key.trim()
   const cleanSig = sig.trim().toLowerCase()
@@ -557,7 +594,7 @@ export async function setHiveRoot(host: string, key: string, sig: string, deps: 
 export async function clearHiveRoot(host: string, key: string, deps: SetHiveRootDeps = {}): Promise<SetHiveRootResult> {
   const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
   const putManifest = deps.putManifest ?? putHiveManifest
-  const publicKey = deps.publicKey ?? (() => get<SignerLike>(NOSTR_SIGNER_KEY)?.getPublicKeyHex?.() ?? Promise.resolve(null))
+  const publicKey = deps.publicKey ?? (async () => (await keyList()).publisherKeyHex())
   const cleanKey = key.trim()
   const refuse = (reason: string): SetHiveRootResult => ({ ok: false, key: cleanKey, sig: '', host, pubkey: '', createdAt: 0, reason })
   if (!cleanKey) return refuse('empty key')
@@ -592,7 +629,7 @@ export type SetHostListingResult =
 export async function setHostListing(host: string, meaning: string, on: boolean, deps: SetHiveRootDeps = {}): Promise<SetHostListingResult> {
   const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
   const putManifest = deps.putManifest ?? putHiveManifest
-  const publicKey = deps.publicKey ?? (() => get<SignerLike>(NOSTR_SIGNER_KEY)?.getPublicKeyHex?.() ?? Promise.resolve(null))
+  const publicKey = deps.publicKey ?? (async () => (await keyList()).publisherKeyHex())
   const clean = meaning.trim()
   // A colon meaning can never address a history bag or a word's molecule pool.
   if (!clean.includes(':') || /\s/.test(clean) || clean.length > 160) return { ok: false, reason: 'a listed pool is a colon meaning, such as hypercomb:windows' }
@@ -621,7 +658,7 @@ const MAX_LISTED = 32
 /** A root the participant's OWN index names on `host`, verified, or null. */
 export async function ownHiveRoot(host: string, key: string, deps: Pick<SetHiveRootDeps, 'fetchIndex' | 'publicKey'> = {}): Promise<string | null> {
   const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
-  const publicKey = deps.publicKey ?? (() => get<SignerLike>(NOSTR_SIGNER_KEY)?.getPublicKeyHex?.() ?? Promise.resolve(null))
+  const publicKey = deps.publicKey ?? (async () => (await keyList()).publisherKeyHex())
   const pubkey = String((await publicKey().catch(() => null)) ?? '').toLowerCase()
   if (!SIG_RE.test(pubkey)) return null
   const read = await fetchIndex(host, pubkey)
@@ -632,13 +669,18 @@ export async function ownHiveRoot(host: string, key: string, deps: Pick<SetHiveR
 /** NIP-98 Authorization header — same envelope HostSyncService signs for
  *  byte PUTs: a kind-27235 event binding method + url, base64'd. With
  *  `payload` (the sha256 hex of the exact body sent) it binds the body too,
- *  so a lifted header cannot carry another request. */
-export async function nip98Header(signer: SignerLike, url: string, method: string, payload?: string): Promise<string | null> {
+ *  so a lifted header cannot carry another request. `extraTags` ride after
+ *  those: `['anchor', <key>]` says the request acts AS that anchor, which a
+ *  host honours only when the anchor's key list there names the signer
+ *  (key-list.client.ts; becoming-a-host.md). */
+export async function nip98Header(
+  signer: SignerLike, url: string, method: string, payload?: string, extraTags: readonly string[][] = [],
+): Promise<string | null> {
   try {
     const signed = await signer.signEvent({
       kind: NIP98_KIND,
       created_at: Math.floor(Date.now() / 1000),
-      tags: [['u', url], ['method', method], ...(payload ? [['payload', payload]] : [])],
+      tags: [['u', url], ['method', method], ...(payload ? [['payload', payload]] : []), ...extraTags.map(tag => [...tag])],
       content: '',
     })
     return 'Nostr ' + btoa(unescape(encodeURIComponent(JSON.stringify(signed))))

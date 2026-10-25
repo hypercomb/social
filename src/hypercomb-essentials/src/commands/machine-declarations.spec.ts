@@ -59,6 +59,7 @@ await import('../references/gather/feed.queen.js')
 await import('../references/gather/from.queen.js')
 await import('../references/gather/references.queen.js')
 await import('../sharing/profile.queen.js')
+await import('../sharing/keys.queen.js')
 await import('../sharing/groups.queen.js')
 await import('../sharing/publish.queen.js')
 await import('../questions/start.queen.js')
@@ -109,6 +110,12 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   profile: ['additive', 'local'],      // shows only, from the participant's own host; every set
                                        // form and any other host is refused, so nothing is written
                                        // and no host a model names is ever asked
+  // Judged on arrival (2026-10-24, another place publishes for you — "pass it
+  // and unfold it"). An invite is the power to publish AS the participant, so
+  // every change is refused to a machine; only the list is its.
+  keys: ['additive', 'local'],         // shows who publishes, from the participant's own hosts; allow,
+                                       // accept and off are refused, so nothing is written and no
+                                       // invite is ever made where a model could read it
   // Judged on arrival (2026-10-09, bridge codes).
   bridge: ['destructive', 'local'],    // a ceiling only: every form is refused (who may reach
                                        // this machine is the participant's to say); declared so
@@ -188,6 +195,14 @@ describe('what the corrections refuse', () => {
     for (const line of ['history', 'history on', 'history off', '/a/b history on']) expect(refuse(line), line).toBeUndefined()
     for (const line of ['', 'here', 'on example.com', 'off example.com', 'as blog on example.com', '/a/b', 'history maybe']) {
       expect(refuse(line), line).toContain("participant's")
+    }
+  })
+
+  it('/keys lets a machine read who publishes, and say nothing that changes it', () => {
+    const refuse = declared.get('keys')!.refuse!
+    expect(refuse('')).toBeUndefined()
+    for (const line of ['allow', 'allow jwize.com', 'accept', 'accept https://x.example/#invite=a/b/c', 'off desktop']) {
+      expect(refuse(line), line).toContain('only the participant says it')
     }
   })
 

@@ -20,6 +20,7 @@
 // (blossom-worker/worker.js hasCreationHead).
 import { SignatureService, get } from '@hypercomb/core'
 import { fetchHiveIndex, putHiveManifest } from './hive-pointer.js'
+import { publisherKeyHex } from './key-list.client.js'
 import { zoneDoor } from './zone-door.js'
 
 export const CARD_TEMPLATE_MEANING = 'themes:card'
@@ -94,7 +95,7 @@ export async function setCardTemplateOffering(t: CardTemplate, on: boolean, deps
   const host = zoneDoor(sync.publicHostDomain() || '')
   if (!DOMAIN.test(host)) return { ok: false, reason: 'Name your host first — hosts add <your-domain>.' }
   const signer = get<SignerLike>('@diamondcoreprocessor.com/NostrSigner')
-  const pubkey = String(await (deps.pubkey?.() ?? signer?.getPublicKeyHex?.()) ?? '').toLowerCase()
+  const pubkey = String(await (deps.pubkey?.() ?? publisherKeyHex()) ?? '').toLowerCase()
   if (!SIG.test(pubkey)) return { ok: false, reason: 'A signing key is required.' }
 
   const read = await (deps.readIndex ?? fetchHiveIndex)(host, pubkey)

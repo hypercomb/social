@@ -39,6 +39,7 @@ import { EffectBus, get, I18N_IOC_KEY, SignatureService, type I18nProvider } fro
 import { clearHiveRoot, fetchHiveIndex, listedOf, nip98Header, setHiveRoot, setHostListing } from './hive-pointer.js'
 import { addCommunityHost, hostArtifactSig, hostZone } from './community-hosts.js'
 import { publishWelcome, readOwnWelcome, welcomeZone } from './host-welcome.js'
+import { publisherKeyHex } from './key-list.client.js'
 
 const SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 const SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
@@ -126,7 +127,7 @@ export class HostsQueenBee {
     if (word === 'reach') { await reachWalk(host); return }
 
     if (word === 'following') {
-      const pubkey = String(await get<SignerLike>(SIGNER_KEY)?.getPublicKeyHex?.().catch(() => null) ?? '').toLowerCase()
+      const pubkey = await publisherKeyHex()
       if (!pubkey) { toast(t('hosts.nosigner', 'A signing key is required.'), 'warning'); return }
       const read = await fetchHiveIndex(host, pubkey)
       const zones = read.ok ? Object.keys(read.manifest.roots ?? {}).filter(k => k.startsWith('follow:')).map(k => k.slice('follow:'.length)) : []
@@ -137,7 +138,7 @@ export class HostsQueenBee {
     }
 
     if (word === 'listed') {
-      const pubkey = String(await get<SignerLike>(SIGNER_KEY)?.getPublicKeyHex?.().catch(() => null) ?? '').toLowerCase()
+      const pubkey = await publisherKeyHex()
       if (!pubkey) { toast(t('hosts.nosigner', 'A signing key is required.'), 'warning'); return }
       const read = await fetchHiveIndex(host, pubkey)
       const listed = read.ok ? listedOf(read.manifest.signedContent) : []

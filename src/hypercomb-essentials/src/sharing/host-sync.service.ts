@@ -219,6 +219,8 @@ const DEFAULT_PUBLIC_HOST_DOMAIN = ''
 // coexist in the push pool without ever being listed as queue entries.
 const PUBLIC_MARKER_SUFFIX = 'public'
 const NIP98_KIND = 27235
+/** The device's anchor binding, when it has one (anchor-binding.ts). */
+const ANCHOR_BINDING_KEY = '@hypercomb.social/AnchorBinding'
 // The swarm's liveness beacon (swarm.drone.ts SWARM_LIFECYCLE_KIND and its
 // generation), carried inside a NIP-98 upload to a host that said not-live
 // (#nip98, D7): tag `[ALIVE_TAG, <the signed 30206 event as JSON>]`.
@@ -3790,6 +3792,17 @@ export class HostSyncService extends EventTarget {
       if (typeof relayNow === 'number' && Number.isFinite(relayNow) && relayNow > 0) nowMs = relayNow
     } catch { /* no mesh — the local clock */ }
     const tags: string[][] = [['u', url], ['method', method]]
+    // A device that publishes for an ANCHOR (key-list.client.ts): where the host
+    // holds the anchor's key list with this key on it, the request acts as the
+    // anchor — its uploads count on the anchor's allowance and are its own. Never
+    // asked of a host that has not been seen to hold the list (it would refuse).
+    // Loaded only for a device that has taken an anchor: this file is in the eager
+    // boot-lane closure (doctrine.spec.ts), and every other device never needs it.
+    if (this.#ioc<{ anchor?: () => string | null }>(ANCHOR_BINDING_KEY)?.anchor?.()) {
+      const { anchorTagFor } = await import('./key-list.client.js')
+      const anchorTag = anchorTagFor(url, await this.#getOwnPubkey())
+      if (anchorTag) tags.push(anchorTag)
+    }
     // LIVE HERE TOO (D7). A relay.js host takes a participant's upload only
     // from a key live on ITS socket; one this tab does not meet at answered
     // not-live, so from then on each upload to it carries this key's signed

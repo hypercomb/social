@@ -48,6 +48,7 @@ import {
 } from './entrance-scout.service.js'
 import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
+import { publisherKeyHex } from './key-list.client.js'
 import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
 import {
   PARTICIPANT_FEATURES_POINTER,
@@ -657,7 +658,7 @@ export class PublishStatusDrone extends Drone {
       // tile is ready, so the panel is never an empty page.
       this.#community = await listCommunityHosts()
       this.#served = await servedZones(this.#zone)
-      const pubkey = String((await signer?.getPublicKeyHex?.()) ?? '').toLowerCase()
+      const pubkey = await publisherKeyHex()
       if (!SIG_RE.test(pubkey)) {
         this.#payload = {
           ...this.#payload, open: this.#open, host, zone: this.#zone, pubkey: '', hosts: this.#knownZones(),
