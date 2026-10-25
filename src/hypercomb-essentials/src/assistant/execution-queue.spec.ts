@@ -7,6 +7,7 @@ g.window ??= {}
 g.window.ioc ??= { register: () => {}, get: () => undefined, whenReady: () => {} }
 const { ExecutionQueueStore } = await import('./execution-queue.js')
 const { llmHiveAccess } = await import('./llm-hive-access.js')
+const { PermitGroupsStore } = await import('./permit-groups.js')
 
 const ask = (over: Partial<Parameters<InstanceType<typeof ExecutionQueueStore>['request']>[0]> = {}) => ({
   convoId: 'c1', providerId: 'openrouter', model: 'deepseek/deepseek-v4-flash',
@@ -86,8 +87,9 @@ describe('the execution queue', () => {
     expect(llmHiveAccess.mayRead('openrouter')).toBe(true)
   })
 
-  it('a looser policy releases what it now covers, and the policy sticks', async () => {
-    const queue = new ExecutionQueueStore()
+  it('a looser policy releases what it now covers, and the policy is the groups\'', async () => {
+    const permit = new PermitGroupsStore({ whenStore: () => {} })
+    const queue = new ExecutionQueueStore(permit)
     queue.setMode('manual')
     const change = queue.request(ask({ kind: 'editing' }))
     queue.setAuto('editing', false)
@@ -96,9 +98,39 @@ describe('the execution queue', () => {
     expect(queue.requests()[0].state).toBe('waiting')
     queue.setAuto('editing', true)
     expect(await change.decision).toBe('run')
-    const again = new ExecutionQueueStore()
+    // The window's mode and kinds are the `everyone` group's.
+    expect(permit.group('everyone')).toMatchObject({ mode: 'auto', auto: ['read', 'additive', 'editing'] })
+    const again = new ExecutionQueueStore(permit)
     expect(again.mode()).toBe('auto')
     expect(again.autoKinds()).toEqual(['read', 'additive', 'editing'])
+  })
+
+  it('a provider in a group of its own is judged by that group, and says so on the row', async () => {
+    const permit = new PermitGroupsStore({ whenStore: () => {} })
+    const queue = new ExecutionQueueStore(permit)
+    await permit.addMember('hermes', 'provider', 'hermes-local')
+    permit.setPolicy('hermes', 'auto', ['read'])
+    const change = queue.request(ask({ providerId: 'hermes-local', kind: 'additive' }))
+    expect(queue.requests()[0]).toMatchObject({ state: 'waiting', group: 'hermes' })
+    const read = queue.request(ask({ providerId: 'hermes-local', kind: 'read', lines: ['/read'] }))
+    expect(await read.decision).toBe('run')
+    // Everyone else still runs everything, as before.
+    const other = queue.request(ask({ kind: 'additive' }))
+    expect(await other.decision).toBe('run')
+    expect(queue.requests()[0].group).toBe('everyone')
+    // Loosening the group releases its waiting row.
+    permit.setPolicy('hermes', 'auto', ['read', 'additive'])
+    expect(await change.decision).toBe('run')
+  })
+
+  it('nothing runs by itself while the groups are read, and their arrival releases it', async () => {
+    let arrive: ((store: never) => void) | null = null
+    const permit = new PermitGroupsStore({ whenStore: ready => { arrive = ready as never } })
+    const queue = new ExecutionQueueStore(permit)
+    arrive!({ initialize: async () => {}, openPool: async () => null, getPool: async () => null } as never)
+    const change = queue.request(ask())
+    expect(queue.requests()[0]).toMatchObject({ state: 'waiting', auto: false })
+    expect(await change.decision).toBe('run')
   })
 
   it('stopping the conversation skips what is still waiting', async () => {

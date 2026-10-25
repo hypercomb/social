@@ -197,6 +197,9 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // Routes the participant withholds from outside models (hypercomb-shared/
   // core/ai-withheld.store.ts): one current list, never replicated.
   ['ai:withheld', 'document'],
+  // What runs on arrival, per conversation, provider or model (essentials
+  // assistant/permit-groups.ts, the `permit` word): one current record.
+  ['permit:groups', 'document'],
   // The meeting point a new tab's selector is pre-filled with (hypercomb-
   // shared/core/mesh-session.ts): one current record, never replicated.
   ['mesh:meet-point', 'document'],

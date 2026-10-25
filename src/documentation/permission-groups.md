@@ -1,6 +1,52 @@
 # Permission groups — the managers speak in sentences
 
-Status: **Proposed 2026-10-12 — not built. Decisions for jwize at the end.**
+Status: **Proposed 2026-10-12. Slice one built 2026-10-24 (next section); the
+rest is not built. Decisions for jwize at the end.**
+
+## Built: slice one (2026-10-24)
+
+Groups for the actors that live inside the hive — a conversation, a provider,
+a model — and the word. Bridge codes, the actor door and the decision trail
+are not built.
+
+- **The store**: `assistant/permit-groups.ts` (IoC
+  `@hypercomb.social/PermitGroups`, published beside the queue in
+  `chat.drone.ts`). One `permit@1` document in the pool `permit:groups`
+  (declared in core `pool-kinds.ts`). Built-ins `everyone` and `held`. Members
+  are `{actor, facet, label}`; the actor atom `{actor:1, <facet>:<value>}` is
+  minted silently by signature, and for these three facets the label is the
+  value matched.
+- **The rule**: pure `decide(doc, kind, facts)`. The row's conversation,
+  provider and model pick every group with a matching member, else
+  `everyone`. **A kind runs only if every picked group runs it** — the
+  intersection, so two groups never add up to more than either. The queue's
+  holds and `forceReview` still come first.
+- **The queue**: `execution-queue.ts` judges each row by its facts and stamps
+  `group` on it; mode and kinds are `everyone`'s; the legacy keys seed
+  `everyone` once and are never written (ratchet 3 → 1). Once the Store is
+  known, nothing runs by policy until the document has been read; its arrival
+  releases what it covers.
+- **The word**: `assistant/permit.queen.ts`, `rawArgs`, no machine block —
+  `permit`, `permit <group>`, `permit <group> <kind>…`, `manual`,
+  `everything`, `add provider|model|conversation <id>`, `drop <label>`,
+  `permit held drop <label>`, `dissolve`. Strings go through i18n with English
+  fallbacks; no catalog keys yet.
+- **The chat's own trust switch** no longer runs a row a named group judged:
+  "this conversation runs by itself" stands in for `everyone` only.
+- **Proof**: `permit-groups.spec.ts`, `permit.queen.spec.ts`,
+  `execution-queue.spec.ts`; in the running hive, in a fresh profile,
+  `node scripts/drive-permit.cjs`.
+
+Decided while building, open to jwize's word:
+
+- `trusted` is reserved, not built: the chat window keeps its own switch until
+  step 7, and an older build keeps a `trusted` group it reads rather than
+  erasing it.
+- `add conversation this` waits for the chat window step; an id works now.
+- A held actor is not moved by `add`; only `permit held drop` releases it.
+
+Still true from "What exists today": the bridge operator can say `permit`, as
+it can say `grant` — decision 2 (the authority flag) closes that.
 
 The word is `permit`. Permission groups sit on the one Execution queue, and
 the hive's managers change the hive only through sentences — the words a

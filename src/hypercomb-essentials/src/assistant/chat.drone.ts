@@ -12,6 +12,7 @@ import { Drone } from '@hypercomb/core'
 import { CHAT_THREADS_IOC_KEY, ChatThreads } from './chat-threads.js'
 import { COMPACTION_IOC_KEY, compaction } from './compaction.js'
 import { EXECUTION_QUEUE_IOC_KEY, executionQueue } from './execution-queue.js'
+import { PERMIT_GROUPS_IOC_KEY, permitGroups } from './permit-groups.js'
 import { HARNESS_IOC_KEY, bootHarness, harness } from './harness.js'
 import { claimHarnessPool } from './harness-network.js'
 import { startReceiptLedger } from './agent-receipts.js'
@@ -32,6 +33,9 @@ export class ChatDrone extends Drone {
 window.ioc.register(CHAT_THREADS_IOC_KEY, new ChatThreads())
 publishService(COMPACTION_IOC_KEY, compaction)
 publishService(EXECUTION_QUEUE_IOC_KEY, executionQueue)
+// PERMISSION GROUPS (documentation/permission-groups.md): what the queue runs
+// on arrival, per conversation, provider or model — the `permit` word's store.
+publishService(PERMIT_GROUPS_IOC_KEY, permitGroups)
 // THE HARNESS (documentation/agent-harness.md): the loop's policy record,
 // published here and seeded once the Store answers — the bee wires it.
 publishService(HARNESS_IOC_KEY, harness)

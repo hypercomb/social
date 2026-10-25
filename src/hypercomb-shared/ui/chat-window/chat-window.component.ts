@@ -1269,6 +1269,9 @@ type ExecutionRequestLike = {
   /** Ran on arrival because these exact reads were allowed before. */
   readonly remembered?: boolean
   readonly forceReview?: boolean
+  /** The permission groups that judged it (essentials permit-groups.ts);
+   *  `everyone` when no group names its conversation, provider or model. */
+  readonly group?: string
   readonly outcome?: string
 }
 type ExecutionQueueLike = {
@@ -3370,12 +3373,16 @@ export class ChatWindowComponent implements OnDestroy {
    *  except the holds (execution-queue.ts): what leaves the machine, or
    *  follows someone else's words, was never the trust's to give. Nor is a
    *  row marked for review — a doctrine section, a decision Jev handed back:
-   *  those wait for a hand whatever the policy, and trust is a policy. */
+   *  those wait for a hand whatever the policy, and trust is a policy. Nor is
+   *  a row a permission group judged (`permit`): the trust stands in for
+   *  `everyone`, and a provider or model put in a group of its own — or held —
+   *  is never run past that group by a conversation's switch. */
   #releaseTrusted(): void {
     const queue = this.#execQueue()
     const trusted = this.#autoConvos()
     if (!queue?.requests || !trusted.size) return
     for (const row of queue.requests()) {
+      if (row.group && row.group !== 'everyone') continue
       if (row.state === 'waiting' && trusted.has(row.convoId) && !row.forceReview && !row.needsGrant && !row.leaves && !row.foreign) queue.decide(row.id, 'run')
     }
   }

@@ -346,6 +346,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // other than their own may not read (hypercomb-shared/core/ai-withheld.store.ts).
   // DOCUMENT, per participant, never replicated.
   'ai:withheld',
+  // What runs on arrival, per conversation, provider or model: the permission
+  // groups the `permit` word edits (essentials assistant/permit-groups.ts).
+  // DOCUMENT, per participant, never replicated.
+  'permit:groups',
   // The meeting point this device last met at — a new tab's selector is
   // pre-filled with it beside the origin-wide room and secret, never with its
   // access code (hypercomb-shared/core/mesh-session.ts). DOCUMENT, per

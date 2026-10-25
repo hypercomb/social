@@ -104,7 +104,7 @@
     "hypercomb-essentials/src/assistant/agent-tiles-rail.ts": 1,
     "hypercomb-essentials/src/assistant/change-channel.ts": 1,
     "hypercomb-essentials/src/assistant/chat-thread.ts": 1,
-    "hypercomb-essentials/src/assistant/execution-queue.ts": 3,
+    "hypercomb-essentials/src/assistant/execution-queue.ts": 1,
     "hypercomb-essentials/src/assistant/harness.ts": 1,
     "hypercomb-essentials/src/assistant/host-ai.service.ts": 1,
     "hypercomb-essentials/src/assistant/llm-activation.ts": 2,

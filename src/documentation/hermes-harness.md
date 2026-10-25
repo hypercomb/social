@@ -195,12 +195,14 @@ That is a list and a switch, but it is shared by every machine. Granting
 `file` to the managers grants it to Hermes too.
 
 **What Hermes needs: grants per actor.** The `permit` words in
-[permission-groups](permission-groups.md) are designed and not built — no
-`permit` word exists in code. With them, Hermes gets a group of its own:
+[permission-groups](permission-groups.md) are built for providers, models and
+conversations (2026-10-24); bridge codes are not. Hermes gets a group of its
+own:
 
 ```
-bridge give hermes
-permit hermes add code hermes
+permit hermes add provider <the Hermes spec's id>      built: the model in the hive
+bridge give hermes                                     not yet: the Windows program
+permit hermes add code hermes                          not yet: needs the broker's stamp
 permit hermes                  the group: mode, kinds, members, what ran by policy
 permit hermes read             reads run on arrival; everything else waits for a hand
 permit hermes read additive    additions also run; editing still waits
@@ -230,6 +232,11 @@ Build the `permit` words and the group records exactly as
 steps"). Done when: a `hermes` group exists, `permit hermes` lists it, a
 `read` line from Hermes's code runs on arrival, an `editing` line waits for a
 hand, and the managers' group is unaffected by any change to Hermes's.
+
+**Slice one built 2026-10-24**: groups for providers, models and
+conversations, and the word — enough for the Hermes model in the hive.
+Bridge codes, which the Windows program needs, wait on decisions 3, 4 and 6
+of [permission-groups](permission-groups.md).
 
 ### Gap 2 — read back by words
 

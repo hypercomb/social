@@ -33,10 +33,14 @@
 // A trusted conversation (the chat window's) lifts none of the three either.
 //
 // Requests live for the session — the conversation's turns are the record.
-// The policy is device-local and sticky, like the grant it sits beside.
+// The policy is the participant's permission groups (permit-groups.ts): one
+// document in a pool. The mode and kinds this window shows are the `everyone`
+// group's; a conversation, provider or model put in a group of its own is
+// judged by that group instead, and never by more than every group it is in.
 
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import { llmHiveAccess } from './llm-hive-access.js'
+import { EVERYONE, PermitGroupsStore, permitGroups, type PermitFacts } from './permit-groups.js'
 
 export const EXECUTION_QUEUE_IOC_KEY = '@hypercomb.social/ExecutionQueue'
 
@@ -73,6 +77,9 @@ export type ExecutionRequest = {
   readonly auto: boolean
   /** Ran on arrival because the participant allowed these exact reads before. */
   readonly remembered?: boolean
+  /** The permission groups that judged it, ` ∩ `-joined; `everyone` when no
+   *  group names its conversation, provider or model. */
+  readonly group?: string
   readonly outcome?: string
 }
 
@@ -96,12 +103,6 @@ export type ExecutionAsk = {
   readonly signal?: AbortSignal
 }
 
-const MODE_KEY = 'hc:execution:mode'
-const AUTO_KEY = 'hc:execution:auto'
-/** In the participant's own domain everything runs; the holds still wait. A
- *  device that ever chose its kinds keeps its choice. */
-const DEFAULT_MODE: ExecutionMode = 'auto'
-const DEFAULT_AUTO: readonly ExecutionKind[] = EXECUTION_KINDS
 /** Settled rows kept for the window; waiting rows are never dropped. */
 const KEEP_SETTLED = 40
 const OUTCOME_MAX = 240
@@ -110,28 +111,25 @@ const allowedKey = (providerId: string): string => `hc:execution:allowed:${provi
 /** Newest kept; an old allowance that falls off simply asks again. */
 const ALLOWED_MAX = 500
 
+const factsOf = (entry: ExecutionRequest | ExecutionAsk): PermitFacts =>
+  ({ convoId: entry.convoId, providerId: entry.providerId, model: entry.model })
+
 export class ExecutionQueueStore extends EventTarget {
-  #mode: ExecutionMode = DEFAULT_MODE
-  #auto = new Set<ExecutionKind>(DEFAULT_AUTO)
+  readonly #permit: PermitGroupsStore
   #requests: readonly ExecutionRequest[] = []
   readonly #waiters = new Map<string, (decision: ExecutionDecision) => void>()
   /** What each waiting read resolved to, so a press can remember it. */
   readonly #keysById = new Map<string, readonly string[]>()
   #seq = 0
 
-  constructor() {
+  /** With no groups given, the queue keeps a policy of its own that never
+   *  reaches a pool — a spec's. The hive's queue is handed the hive's groups. */
+  constructor(permit: PermitGroupsStore = new PermitGroupsStore({ whenStore: () => {} })) {
     super()
-    try {
-      const mode = globalThis.localStorage?.getItem(MODE_KEY)
-      if (EXECUTION_MODES.includes(mode as ExecutionMode)) this.#mode = mode as ExecutionMode
-      const auto = globalThis.localStorage?.getItem(AUTO_KEY)
-      if (typeof auto === 'string') {
-        const kinds: unknown = JSON.parse(auto)
-        if (Array.isArray(kinds)) {
-          this.#auto = new Set(kinds.filter((kind): kind is ExecutionKind => EXECUTION_KINDS.includes(kind)))
-        }
-      }
-    } catch { /* defaults */ }
+    this.#permit = permit
+    // A group's policy changed, or the document arrived: show it, and run
+    // what it now covers.
+    permit.addEventListener('change', () => { this.#changed(); this.#releaseCovered() })
     // "UNLESS WE STOP ALLOWING IT." Taking a provider's hive grant away takes
     // every read it was allowed along with it.
     llmHiveAccess.addEventListener('change', event => {
@@ -145,36 +143,34 @@ export class ExecutionQueueStore extends EventTarget {
     })
   }
 
-  mode(): ExecutionMode { return this.#mode }
+  /** The `everyone` group's mode: what runs for whatever no group names. */
+  mode(): ExecutionMode { return this.#permit.group(EVERYONE)?.mode ?? 'manual' }
 
   setMode(mode: ExecutionMode): void {
-    if (!EXECUTION_MODES.includes(mode) || mode === this.#mode) return
-    this.#mode = mode
-    try { globalThis.localStorage?.setItem(MODE_KEY, mode) } catch { /* session-only */ }
-    this.#changed()
-    this.#releaseCovered()
+    if (!EXECUTION_MODES.includes(mode) || mode === this.mode()) return
+    this.#permit.setPolicy(EVERYONE, mode)
   }
 
-  autoKinds(): readonly ExecutionKind[] { return EXECUTION_KINDS.filter(kind => this.#auto.has(kind)) }
+  autoKinds(): readonly ExecutionKind[] {
+    const auto = this.#permit.group(EVERYONE)?.auto ?? []
+    return EXECUTION_KINDS.filter(kind => auto.includes(kind))
+  }
 
   setAuto(kind: ExecutionKind, on: boolean): void {
-    if (!EXECUTION_KINDS.includes(kind) || this.#auto.has(kind) === on) return
-    if (on) this.#auto.add(kind)
-    else this.#auto.delete(kind)
-    try { globalThis.localStorage?.setItem(AUTO_KEY, JSON.stringify(this.autoKinds())) } catch { /* session-only */ }
-    this.#changed()
-    this.#releaseCovered()
+    const auto = this.autoKinds()
+    if (!EXECUTION_KINDS.includes(kind) || auto.includes(kind) === on) return
+    this.#permit.setPolicy(EVERYONE, this.mode(), on ? [...auto, kind] : auto.filter(entry => entry !== kind))
   }
 
   /** Newest first. */
   requests(): readonly ExecutionRequest[] { return this.#requests }
 
   /** Would a request of this kind run the moment it arrives? `held` is a
-   *  change that leaves the machine or follows someone else's words. */
-  runsByPolicy(kind: ExecutionKind, needsGrant: boolean, held = false): boolean {
+   *  change that leaves the machine or follows someone else's words. `facts`
+   *  pick the permission groups that judge it; none picks `everyone`. */
+  runsByPolicy(kind: ExecutionKind, needsGrant: boolean, held = false, facts: PermitFacts = {}): boolean {
     if (needsGrant || held) return false
-    if (this.#mode === 'everything') return true
-    return this.#mode === 'auto' && this.#auto.has(kind)
+    return this.#permit.decide(kind, facts).run
   }
 
   /** Enter a request. `decision` settles at once when the policy covers it. */
@@ -190,7 +186,11 @@ export class ExecutionQueueStore extends EventTarget {
       && keys.every(key => allowed.has(key))
     const leaves = ask.leaves === true
     const foreign = ask.foreign === true
-    const auto = !ask.forceReview && (remembered || this.runsByPolicy(ask.kind, ask.needsGrant, leaves || foreign))
+    // While the groups are still being read nothing runs by itself — not even
+    // a remembered read; the document's arrival releases what it covers.
+    const verdict = this.#permit.decide(ask.kind, factsOf(ask))
+    const byPolicy = !ask.needsGrant && !leaves && !foreign && verdict.run
+    const auto = !ask.forceReview && !verdict.waiting && (remembered || byPolicy)
     const entry: ExecutionRequest = {
       id,
       convoId: String(ask.convoId ?? ''),
@@ -206,6 +206,7 @@ export class ExecutionQueueStore extends EventTarget {
       auto,
       ...(ask.forceReview ? { forceReview: true } : {}),
       ...(remembered ? { remembered: true } : {}),
+      group: verdict.groups.join(' ∩ '),
     }
     if (keys.length) this.#keysById.set(id, keys)
     this.#requests = this.#trim([entry, ...this.#requests])
@@ -288,11 +289,17 @@ export class ExecutionQueueStore extends EventTarget {
     this.#update(id, { state, ...(text ? { outcome: text.slice(0, OUTCOME_MAX) } : {}) })
   }
 
-  /** A looser policy releases what it now covers. */
+  /** A looser policy, or the groups arriving, releases what is now covered. */
   #releaseCovered(): void {
+    if (this.#permit.reading) return
     for (const entry of this.#requests) {
-      if (entry.state === 'waiting' && !entry.forceReview
-        && this.runsByPolicy(entry.kind, entry.needsGrant, entry.leaves === true || entry.foreign === true)) this.decide(entry.id, 'run')
+      if (entry.state !== 'waiting' || entry.forceReview) continue
+      const keys = this.#keysById.get(entry.id) ?? []
+      const allowed = this.#allowedFor(entry.providerId)
+      const remembered = entry.kind === 'read' && entry.needsGrant && keys.length > 0 && keys.every(key => allowed.has(key))
+      if (remembered || this.runsByPolicy(entry.kind, entry.needsGrant, entry.leaves === true || entry.foreign === true, factsOf(entry))) {
+        this.decide(entry.id, 'run')
+      }
     }
   }
 
@@ -311,4 +318,4 @@ export class ExecutionQueueStore extends EventTarget {
   }
 }
 
-export const executionQueue = new ExecutionQueueStore()
+export const executionQueue = new ExecutionQueueStore(permitGroups)
