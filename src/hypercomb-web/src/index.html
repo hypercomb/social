@@ -5,6 +5,13 @@
     <title>Hypercomb</title>
     <base href="/" />
 
+    <!-- interactive-widget=resizes-content: keyboard shrinks the layout viewport
+         (Android) so bottom-anchored chrome rides above it. viewport-fit=cover
+         exposes safe areas while browser zoom remains user-controlled.
+         BEFORE EVERY SCRIPT: until a phone has read this tag its layout
+         viewport is 980px wide, so the phone test below could never match. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+
     <!-- A phone goes to the .com. The hive at hypercomb.io is where creations
          are made; a phone uses them from hypercomb.com, the root page that
          lists what every domain hosts (documentation/using-a-creation.md, "On
@@ -166,10 +173,6 @@
       })();
     </script>
 
-    <!-- interactive-widget=resizes-content: keyboard shrinks the layout viewport
-         (Android) so bottom-anchored chrome rides above it. viewport-fit=cover
-         exposes safe areas while browser zoom remains user-controlled. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <!-- Built by `node scripts/build-favicons.cjs` from one master mark; the
          .ico carries 16/32/48 for the tab, the .svg is what modern browsers
          actually pick and scales to any density. -->
