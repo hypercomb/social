@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 
-const publishBranch = vi.fn(async () => ({ ok: false, failure: 'no-host', reason: 'test' }))
+const publishBranch = vi.fn(async (_segments: readonly string[], _options?: unknown) => ({ ok: false, failure: 'no-host', reason: 'test' }))
 vi.mock('./publish-branch.js', () => ({ publishBranch }))
 vi.mock('./deliver-link.js', () => ({ deliverLink: async () => 'copied' }))
 ;(window as unknown as { ioc: unknown }).ioc = { get: () => undefined, register: () => undefined }

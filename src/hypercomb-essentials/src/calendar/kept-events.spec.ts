@@ -87,7 +87,7 @@ describe('keeping meetings', () => {
     expect((await keepEvents(asks)).kept).toHaveLength(2)
     const again = await keepEvents(asks)
     expect(again.kept).toEqual([])
-    expect(again.already.sort()).toEqual([later.sig, sooner.sig].sort())
+    expect([...again.already].sort()).toEqual([later.sig, sooner.sig].sort())
     expect((await readKeptMeetings()).map(k => k.record.date)).toEqual(['2026-10-31', '2026-11-07'])
     expect(await listKept()).toHaveLength(2)
   })
