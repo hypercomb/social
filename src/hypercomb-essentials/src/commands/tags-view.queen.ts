@@ -9,10 +9,10 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 export class TagsViewQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'tags'
-  override description = 'Open the tag view'
+  override description = 'Open the tags panel, listing the tags you know with their colours and counts'
   override descriptionKey = 'slash.tags'
   override examples = [
-    { input: '/tags', result: 'Opens the right-docked tags panel' },
+    { input: '/tags', result: 'Opens the tags panel, listing every tag you know with its colour and how many visible tiles carry it' },
   ]
 
   protected async execute(): Promise<void> {

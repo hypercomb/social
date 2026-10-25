@@ -61,6 +61,12 @@ export class HostsQueenBee {
   readonly description =
     'Open your host directory — add or remove a host, inspect its packages, and add one to your hive. Publish uses this directory for branch destinations.'
   readonly descriptionKey = 'slash.hosts'
+  readonly examples = [
+    { input: '/hosts', result: 'Opens your host directory, or closes it if it is already open' },
+    { input: '/hosts list hypercomb:windows @example.com', result: 'Signs hypercomb:windows into your index on example.com as a pool you ask it to list, and says so' },
+    { input: '/hosts follow meetups.example.org @example.com', result: 'Signs a follow of meetups.example.org into your index on example.com, and adds that door to your hive so event list can read its meetings' },
+    { input: '/hosts welcome example.com Example | What it is. @example.com', result: 'Signs a front-door card for example.com titled Example, with the tagline "What it is.", and says example.com now goes by "Example". A room link the card already carries is kept' },
+  ]
   // A card's title keeps its case ("Plugin the Matrix"); every sub-word and zone
   // below is folded where it is read.
   readonly rawArgs = true

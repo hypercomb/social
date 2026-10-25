@@ -23,6 +23,13 @@ export interface SlashBehaviour {
    */
   readonly hidden?: boolean
   /**
+   * LISTED BECAUSE OF THIS MACHINE — a word that exists only because of what
+   * is installed or announced here (an agent-bridge CLI's model names), not
+   * because of the build. It works here and is shown here, but it is not part
+   * of the language the build ships, so the how-to site makes no page for it.
+   */
+  readonly local?: boolean
+  /**
    * LINE START ONLY (jwize, 2026-10-16: "I don't see save as" / "I don't see
    * use either"). Listed in autocomplete like any word, but never lit from
    * prose — it runs only as the first word of a line. For a word that is also

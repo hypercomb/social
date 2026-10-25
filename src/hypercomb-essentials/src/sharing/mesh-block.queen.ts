@@ -36,6 +36,11 @@ export class MeshBlockQueenBee {
   readonly slashHidden = true
   readonly description = 'Block a peer pubkey at the dev relay and drop its tiles locally. Args: full 64-hex or 8–16 hex prefix.'
   readonly descriptionKey = 'slash.block-peer'
+  readonly options = ['<pubkey>']
+  readonly examples = [
+    { input: '/block-peer a1b2c3d4', result: 'Asks the relays this hive has open to block every peer whose key starts with a1b2c3d4 (only the bundled dev relay acts on it), and drops what this hive had cached from them' },
+    { input: '/block-peer a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90', result: 'The same for one full key: the dev relay blocks it only if it already holds an event from that key, and this hive drops what it cached from it either way. No word undoes a block; restarting the dev relay clears its list' },
+  ]
 
   invoke(args: string): void {
     const pubkey = (args ?? '').trim().toLowerCase()

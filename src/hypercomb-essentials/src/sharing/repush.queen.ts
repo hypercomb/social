@@ -24,6 +24,9 @@ export class RepushQueenBee {
   readonly command = 'repush'
   readonly description = 'Re-push shared content to your host and report holes'
   readonly descriptionKey = 'slash.repush'
+  readonly examples = [
+    { input: '/repush', result: 'Pushes to your host whatever it is missing and says how many it sent. It also counts content that no store here and no host holds: recipients get a 404 on those until it is brought back and pushed again. With host sync off, and no public host on, it says to turn host sync on' },
+  ]
 
   async invoke(_args: string): Promise<void> {
     const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)

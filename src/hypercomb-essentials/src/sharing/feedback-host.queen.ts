@@ -26,7 +26,12 @@ const chan = (): ChannelLike | undefined =>
 export class FeedbackHostQueenBee {
   readonly command = 'feedback-host'
   readonly description =
-    'Toggle HOST mode: receive and aggregate every participant’s records so the loop can work them into Q&A on your tiles. on (default) | off. Participants publish by default and never need this.'
+    'Turn HOST mode on or off: collect the feedback and Q&A records participants send, so the loop can work them into Q&A on your tiles. A bare word means on. Participants send their own feedback by default and never need this.'
+  readonly options = ['on', 'off']
+  readonly examples = [
+    { input: '/feedback-host', result: 'Host mode goes on in this browser: it starts collecting the feedback and Q&A records participants have sent' },
+    { input: '/feedback-host off', result: 'Host mode goes off in this browser: it stops collecting other people’s feedback, and saves an opt-out, so it stops sending its own too' },
+  ]
 
   async invoke(args: string): Promise<void> {
     const arg = (args ?? '').trim().toLowerCase()
@@ -36,7 +41,7 @@ export class FeedbackHostQueenBee {
       action = 'ON — receiving + aggregating community feedback'
     } else if (arg === 'off' || arg === '0' || arg === 'false') {
       try { chan()?.disable?.() } catch { try { localStorage.setItem(ENABLED_KEY, 'false') } catch { /* ignore */ } }
-      action = 'OFF — you still contribute your own feedback, but no longer receive others’'
+      action = 'OFF — no longer receiving others’ feedback, and no longer sending your own'
     } else {
       EffectBus.emit('toast:show', { type: 'warning', title: '/feedback-host', message: `Unrecognized arg "${arg}". Use: on (or no arg), off.`, duration: 5000 })
       return

@@ -12,6 +12,9 @@ export class ViewsQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'views'
   override description = 'Show the views this layer can be drawn as'
+  override examples = [
+    { input: '/views', result: 'Opens the Beehaviors panel on the layer you are standing on, narrowed to Views' },
+  ]
 
   protected execute(): void {
     EffectBus.emit('features:lens', { lens: 'views' })

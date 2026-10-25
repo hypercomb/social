@@ -47,8 +47,7 @@ export class ImageOnlyQueenBee extends QueenBee {
   override description = 'Hide tile names: every name on the page, or the selected tiles\' own name switch'
   override descriptionKey = 'slash.image-only'
   override examples = [
-    { input: '/image-only', result: 'Every name on the page goes quiet; say it again to bring them back' },
-    { input: '/image-only', result: 'With tiles selected: their own name switch flips, and is saved' },
+    { input: '/image-only', result: 'Every name on the page goes quiet; say it again to bring them back. With tiles selected, it flips just their own name switch instead, and that is saved' },
   ]
 
   override machine = {

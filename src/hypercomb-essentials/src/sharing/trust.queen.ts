@@ -24,6 +24,11 @@ export class TrustQueenBee {
   readonly description = 'Say whose code may run your hive — trust a domain, withdraw it, or list them.'
   readonly descriptionKey = 'slash.trust'
   readonly options = ['<domain>', 'withdraw <domain>']
+  readonly examples = [
+    { input: '/trust', result: 'Shows the domains whose code you trust, or says you trust none yet' },
+    { input: '/trust example.com', result: 'Trusts example.com: the host directory and the activation prompt stop asking before they run its code' },
+    { input: '/trust withdraw example.com', result: 'Withdraws it: those ask about example.com’s code again. Code already running is not stopped. If your hive’s store is not ready, nothing changes and you are told' },
+  ]
 
   slashComplete(args: string): readonly string[] {
     const q = args.toLowerCase().trim()

@@ -435,11 +435,26 @@ class LlmProvider implements SlashBehaviourProvider {
   // Every model word keeps the rest of the line (`rawArgs`): what follows it
   // is the question, verbatim. Read as a sentence, `opus which providers are
   // cheapest` also ran `providers` and opened its window beside the chat.
+  /** One of the four Claude words: the chat opens on that model, and what follows the word is the question. */
+  static #claudeWord(name: string, label: string): ModelWord {
+    return {
+      name,
+      description: `Open the chat with Claude ${label}`,
+      descriptionKey: `slash.${name}`,
+      rawArgs: true,
+      options: ['<question>'],
+      examples: [
+        { input: `/${name}`, result: `Opens the chat on ${label}, resuming your last conversation` },
+        { input: `/${name} what links these tiles?`, result: `Opens the chat on ${label} and asks, in a new conversation` },
+      ],
+    }
+  }
+
   static readonly #BUILT_IN: ModelWord[] = [
-    { name: 'opus', description: 'Open the chat with Claude Opus', descriptionKey: 'slash.opus', rawArgs: true },
-    { name: 'sonnet', description: 'Open the chat with Claude Sonnet', descriptionKey: 'slash.sonnet', rawArgs: true },
-    { name: 'haiku', description: 'Open the chat with Claude Haiku', descriptionKey: 'slash.haiku', rawArgs: true },
-    { name: 'fable', description: 'Open the chat with Claude Fable', descriptionKey: 'slash.fable', rawArgs: true },
+    LlmProvider.#claudeWord('opus', 'Opus'),
+    LlmProvider.#claudeWord('sonnet', 'Sonnet'),
+    LlmProvider.#claudeWord('haiku', 'Haiku'),
+    LlmProvider.#claudeWord('fable', 'Fable'),
   ]
 
   get behaviours(): SlashBehaviour[] {
@@ -458,7 +473,7 @@ class LlmProvider implements SlashBehaviourProvider {
       for (const model of provider.models ?? []) {
         const name = String(model?.name ?? '').trim().toLowerCase()
         if (!name || words.has(name)) continue
-        words.set(name, { name, description: `Ask ${provider.label} (${name})`, rawArgs: true })
+        words.set(name, { name, description: `Ask ${provider.label} (${name})`, rawArgs: true, local: true })
       }
     }
     return [...words.values()]

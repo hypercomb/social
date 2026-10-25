@@ -48,8 +48,11 @@ export class MeshClearQueenBee {
   // Dev-relay-only (see header) — hidden from participant autocomplete;
   // the auto-wrapper duck-reads this field. Still invokable typed in full.
   readonly slashHidden = true
-  readonly description = 'Wipe the dev relay event store and drop all peer caches. Live peers will reappear on their next heartbeat (≤30s).'
+  readonly description = 'Ask the relays to clear their stored events and forget every peer this tab has cached. Live peers reappear on their next heartbeat (about 30 seconds).'
   readonly descriptionKey = 'slash.clear-mesh'
+  readonly examples = [
+    { input: '/clear-mesh', result: 'Asks the connected relays to clear their stored events (only the bundled dev relay does), and forgets the mesh events and peers this tab had cached, so tiles that came from other people drop out of view. Nothing shows on screen: the counts go to the browser console' },
+  ]
 
   invoke(_args: string): void {
     const mesh = get<NostrMeshDroneLike>(NOSTR_MESH_KEY)

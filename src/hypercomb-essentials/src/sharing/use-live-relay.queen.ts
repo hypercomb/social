@@ -122,6 +122,11 @@ export class UseLiveRelayQueenBee {
   readonly description =
     'One-command swarm setup: /use-live-relay [room] [secret] [ws(s)://server] meets at the host you give (or the one this tab already meets at), sets the zone, and goes public. With no host it opens the selector on the host field. Bare = keep the zone this tab is in. "Quote" a room with a space. off = leave, clear = forget this tab host.'
   readonly slashHidden = false
+  readonly examples = [
+    { input: '/use-live-relay downtown rose hypercomb.com', result: 'Meets at hypercomb.com, in the room downtown with the secret rose, and goes public if you were not already. A message names the room and its two words to compare out loud' },
+    { input: '/use-live-relay downtown', result: 'Sets both the room and the secret to downtown and meets at the host this tab already meets at. With no host at all it keeps the words and opens the selector on the host field' },
+    { input: '/use-live-relay off', result: 'Leaves the swarm if this tab had joined. The tab’s host and relay list are left as they are' },
+  ]
   // The room and secret are the zone's identity, capitals and all: the
   // selector and a #meet link keep them as typed, so this word must too, or
   // `Garden Rose` here and `Garden Rose` from a link meet in two rooms.

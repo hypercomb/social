@@ -65,6 +65,11 @@ class HeaderSizeQueenBee extends QueenBee {
   readonly command = 'header'
   override description = 'Set the header size (1 = small, 2 = medium, 3 = large)'
   override descriptionKey = 'slash.header'
+  override options = ['1', '2', '3']
+  override examples = [
+    { input: '/header 2', result: 'Sets the header to the medium size and keeps that choice in this browser' },
+    { input: '/header', result: 'Prints the current header size in the browser console' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const sizes = ['1', '2', '3']

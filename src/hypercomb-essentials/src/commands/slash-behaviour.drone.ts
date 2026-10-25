@@ -291,7 +291,7 @@ class HelpProvider implements SlashBehaviourProvider {
   readonly name = 'help-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'help', description: 'Show reference', descriptionKey: 'slash.help',
+    { name: 'help', description: 'Open the reference sheet of keyboard shortcuts', descriptionKey: 'slash.help',
       examples: [{ input: '/help', result: 'Opens the keyboard shortcut reference sheet' }] }
   ]
 
@@ -304,7 +304,7 @@ class ClearProvider implements SlashBehaviourProvider {
   readonly name = 'clear-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'clear', description: 'Clear active filter', descriptionKey: 'slash.clear',
+    { name: 'clear', description: 'Clear the active filter so every tile shows again', descriptionKey: 'slash.clear',
       examples: [{ input: '/clear', result: 'Clears the active search filter so all tiles show' }] }
   ]
 
@@ -648,8 +648,7 @@ class BreakApartProvider implements SlashBehaviourProvider {
     { name: 'break-apart',
       description: 'Break tiles into the pieces that compose them, via Claude Haiku', descriptionKey: 'slash.break-apart',
       examples: [
-        { input: '/break-apart', result: 'With tiles selected: breaks down each selected tile' },
-        { input: '/break-apart', result: 'With nothing selected: breaks down every leaf tile on this layer' },
+        { input: '/break-apart', result: 'Breaks down each selected tile into the pieces that compose it; with nothing selected, it breaks down every leaf tile on this layer' },
       ] }
   ]
 

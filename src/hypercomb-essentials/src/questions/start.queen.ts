@@ -43,8 +43,7 @@ export class StartQueenBee extends QueenBee {
   override description = 'Start a game here by its name — `start hypercomb q and a`; said where someone already leads it, you join them'
   override descriptionKey = 'slash.start'
   override examples = [
-    { input: '/start hypercomb q and a', result: 'Starts Hypercomb Q and A for the hive you share as the swarm — you lead, and every layer you walk has its questions' },
-    { input: '/start hypercomb q and a', result: 'Said where someone else leads it: you join and follow them through the hive' },
+    { input: '/start hypercomb q and a', result: 'Starts Hypercomb Q and A for the hive you share as the swarm — you lead, and every layer you walk has its questions. Said where someone else leads it, you join and follow them through the hive instead' },
     { input: '/start', result: 'Says which games this hive can start' },
   ]
   // The name is the argument, whole — `q and a` is not three words to read.

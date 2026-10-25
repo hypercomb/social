@@ -1,5 +1,7 @@
 # Slash Behaviour Reference
 
+> **This table is kept by hand and is behind the language.** Every word now has a page made from what it declares, and `howto` lays them all as one site — see [how-to-pages.md](how-to-pages.md).
+
 Type `/` in the command line to access slash behaviours. These are pluggable commands registered by `SlashBehaviourProvider` instances on the `SlashBehaviourDrone`. Autocomplete shows matching commands as you type.
 
 > For general command line behaviors (create, delete, navigate, filter), see [command-line-reference.md](command-line-reference.md).

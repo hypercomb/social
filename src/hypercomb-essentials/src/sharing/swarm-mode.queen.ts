@@ -29,7 +29,13 @@ const isSticky = (): boolean => {
 export class SwarmModeQueenBee {
   readonly command = 'swarm-mode'
   readonly description =
-    'How long what you visited stays shared in a swarm: /swarm-mode sticky keeps every page you visited announced until you leave (default); /swarm-mode ephemeral announces only where you stand. Bare = show the current mode.'
+    'How long what you visited stays shared in a swarm: /swarm-mode sticky keeps the pages you visited announced until you leave (default); /swarm-mode ephemeral announces only where you stand. Bare = show the current mode.'
+  readonly options = ['sticky', 'ephemeral']
+  readonly examples = [
+    { input: '/swarm-mode', result: 'Says which mode this browser is in (sticky is the default). It changes nothing' },
+    { input: '/swarm-mode sticky', result: 'Saves sticky in this browser. While you are in a swarm, the pages you visit stay announced to the others until you leave it' },
+    { input: '/swarm-mode ephemeral', result: 'Saves ephemeral in this browser. While you are in a swarm, only the page you stand on is kept announced; pages you leave fade for the others within a minute or two' },
+  ]
   readonly slashHidden = false
 
   invoke(args: string): void {

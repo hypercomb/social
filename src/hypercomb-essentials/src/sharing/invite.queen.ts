@@ -92,6 +92,10 @@ export class InviteQueenBee {
   readonly description =
     'Invite people to your current meeting place. Copies a meeting link to this room and page; with a tile selected, stamps it as a swarm junction instead.'
   readonly descriptionKey = 'slash.invite'
+  readonly examples = [
+    { input: '/invite', result: 'Shares a meeting link to this room and page, through your device’s share sheet or else your clipboard. Whoever opens it is asked to join and lands on this page. It needs a room and secret set first' },
+    { input: '/invite party', result: 'With one or more tiles selected, stamps each as a swarm junction labelled "party" and shares a link to the first; it needs a room and secret set and host sync on' },
+  ]
 
   /** THE MEETING LINK, whatever is selected — the entry point for the
    *  status line's Invite and the mesh modal's share button. Those are about
