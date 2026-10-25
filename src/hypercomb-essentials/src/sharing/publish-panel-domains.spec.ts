@@ -33,14 +33,19 @@ describe('every domain opens on what it hosts', () => {
   it('lists each app by its path and its address there, from the pure answers', () => {
     expect(TS).toMatch(/from '\.\/publish-apps'/)
     expect(HTML).toMatch(/@for \(app of apps; track app\.key\)/)
-    expect(HTML).toMatch(/\(click\)="visit\(app\)"/)
+    // A press picks the row; a double press (or Enter) goes to the tile.
+    expect(HTML).toMatch(/\(dblclick\)="visit\(app\)"/)
+    expect(HTML).toMatch(/\(keydown\.enter\)="visit\(app\)"/)
     expect(TS).toMatch(/row\.path\.replace\(\/\^\\\/\+\/, ''\)/)
   })
 })
 
 describe('picked apps: in memory, published one after another, or grouped on their page', () => {
-  it('a pick is a checkbox, kept in memory only — nothing is stored', () => {
-    expect(HTML).toMatch(/class="papp-pick"[\s\S]*?role="checkbox"[\s\S]*?\[attr\.aria-checked\]="isPicked\(app\)"/)
+  // jwize 2026-10-24: "get rid of the checkboxes and use a row select like
+  // other places".
+  it('a pick is the row itself — row select, never a checkbox — kept in memory only', () => {
+    expect(HTML).toMatch(/class="papp"[\s\S]*?role="option"[\s\S]*?\[attr\.aria-selected\]="isPicked\(app\)"[\s\S]*?\(click\)="pickRow\(app, apps, \$event\)"/)
+    expect(HTML).not.toMatch(/role="checkbox"/)
     expect(TS).toMatch(/readonly picked = signal<ReadonlySet<string>>\(new Set\(\)\)/)
     expect(TS).not.toMatch(/localStorage/)
   })

@@ -33,7 +33,7 @@ import {
   encodeHiveLinkBundle,
   type HiveLinkBundle,
 } from './hive-link.js'
-import { fetchHiveIndex, fetchHiveManifestFromAny, nip98Header, putHiveManifest } from './hive-pointer.js'
+import { fetchHiveIndex, fetchHiveManifestFromAny, nip98Header, putHiveManifest, type HiveManifest } from './hive-pointer.js'
 import { prepareAnchorHosts, publisherKeyHex } from './key-list.client.js'
 import {
   STAGE_LIVE,
@@ -644,10 +644,13 @@ export async function confirmPublished(
  *  never removed), and any link already shared carries `rootSig` as a cold
  *  fallback, so an old link keeps resolving. Removing the index entry stops
  *  the branch being ADVERTISED and stops it tracking future changes; it does
- *  not un-share what was shared. */
+ *  not un-share what was shared. `left` names the domains a turn-off just took
+ *  off the branch's host marks: each is withdrawn through its own host too
+ *  (editLeftDoors), and `unreached` names any that did not answer. */
 async function unpublishBranchNow(
   segments: readonly string[],
-): Promise<{ ok: true; removed: boolean } | { ok: false; failure: PublishFailure; reason?: string }> {
+  left?: readonly string[],
+): Promise<{ ok: true; removed: boolean; unreached?: string[] } | { ok: false; failure: PublishFailure; reason?: string }> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
   if (!signer?.getPublicKeyHex) return { ok: false, failure: 'services' }
   const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
@@ -667,9 +670,15 @@ async function unpublishBranchNow(
   // An index that does not name the key (withdrawn elsewhere, or never
   // written) still answers the participant: it is not published, and the
   // running list says so too, or its name keeps linking.
-  const already = (): { ok: true; removed: false } => {
+  // The domains it leaves are asked either way: a host of their own may still
+  // hold it when this one never did.
+  const alsoLeft = async (removed: boolean): Promise<{ ok: true; removed: boolean; unreached?: string[] }> => {
+    const unreached = await editLeftDoors(left, indexHost, pubkey, withdrawKey(key))
+    return unreached.length ? { ok: true, removed, unreached } : { ok: true, removed }
+  }
+  const already = (): Promise<{ ok: true; removed: boolean; unreached?: string[] }> => {
     void recordPublishResult({ op: 'unpublish', at: Date.now(), segments: [...segs], lineageKey: key, host: indexHost })
-    return { ok: true, removed: false }
+    return alsoLeft(false)
   }
   if (!read.ok) {
     if (read.reason === 'http' && read.status === 404) return already()
@@ -715,7 +724,7 @@ async function unpublishBranchNow(
   const name = segs[segs.length - 1] ?? ''
   if (isBranchPublic(parentLocation, name)) setBranchPublic(parentLocation, name, false)
   void recordPublishResult({ op: 'unpublish', at: Date.now(), segments: [...segs], lineageKey: key, host: indexHost, sealed: head })
-  return { ok: true, removed: true }
+  return alsoLeft(true)
 }
 
 /** Withdraw `heads` from each stage list; the changed pointers, keyed
@@ -740,24 +749,85 @@ async function withdrawFromStages(
   return pointers
 }
 
+/** One index edit, made on whichever index it is handed; null = that index
+ *  already says it. */
+type IndexEdit = (manifest: HiveManifest) =>
+  { roots: Record<string, string>; doors: Record<string, string[]>; content?: Record<string, unknown> } | null
+
+/** THE DOMAINS A TURN-OFF LEAVES. Their switch moved off the branch's host
+ *  marks before the write, so `nodesFor` no longer names them, and the edit
+ *  went through the hosts of the domains still on. A domain served by a host
+ *  of its own would go on serving the old index — the branch still open there.
+ *  So each one that answers gets the same edit made on ITS index, read and
+ *  verified first like every rewrite (a host that answers with anything but a
+ *  verified index or a 404 is not written, and is named back). Where every
+ *  domain shares one index (one worker), that read already shows the edit and
+ *  nothing more is written. Stage pointers on such a host are left as they
+ *  are; its next publish reconciles them. Answers the doors it could not reach. */
+async function editLeftDoors(left: readonly string[] | undefined, written: string, pubkey: string, edit: IndexEdit): Promise<string[]> {
+  const done = foldContentLabel(written)
+  const doors = [...new Set((left ?? []).map(z => zoneDoor(normalizeHost(z))).filter(Boolean))]
+    .filter(door => isPublishNode(door) && foldContentLabel(door) !== done)
+  const unreached: string[] = []
+  for (const door of doors) {
+    const read = await fetchHiveIndex(door, pubkey)
+    if (!read.ok) {
+      if (!(read.reason === 'http' && read.status === 404)) unreached.push(door)
+      continue
+    }
+    const next = edit(read.manifest)
+    if (!next) continue
+    const put = await putHiveManifest(door, next.roots, next.doors, read.manifest.createdAt,
+      next.content ?? read.manifest.signedContent)
+    if (!put.ok) unreached.push(door)
+  }
+  return unreached
+}
+
+/** The withdrawal of `key`, on any index: its root, doors and own addresses. */
+const withdrawKey = (key: string): IndexEdit => (manifest) => {
+  if (!(key in manifest.roots)) return null
+  const roots = { ...manifest.roots }
+  delete roots[key]
+  const doors = { ...(manifest.doors ?? {}) }
+  delete doors[key]
+  const content = manifest.signedContent ? { ...manifest.signedContent } : undefined
+  if (content && manifest.addresses) {
+    content['addresses'] = Object.fromEntries(Object.entries(manifest.addresses).filter(([, k]) => k !== key))
+  }
+  return { roots, doors, content }
+}
+
+/** Set `key`'s doors to `wanted`, on any index that publishes it. */
+const doorsOf = (key: string, wanted: readonly string[]): IndexEdit => (manifest) => {
+  if (!(key in manifest.roots)) return null
+  const current = manifest.doors?.[key]
+  if (current && current.length === wanted.length && wanted.every(z => current.includes(z))) return null
+  return { roots: manifest.roots, doors: { ...(manifest.doors ?? {}), [key]: [...wanted] } }
+}
+
 
 /** Say which domains an ALREADY-PUBLISHED branch opens on — the per-domain
  *  switch. One signed index rewrite, no seal and no upload: the bytes are
  *  already hosted, so turning a domain on or off is as fast as the index
  *  write. An empty set is a withdrawal (unpublishBranch). A branch not in the
- *  index yet has nothing to open — the caller publishes it instead. */
+ *  index yet has nothing to open — the caller publishes it instead. `left`
+ *  names the domains this change turns off; each gets the edit through its
+ *  own host as well (editLeftDoors), and `unreached` names any that did not
+ *  answer. */
 async function setBranchDoorsNow(
   segments: readonly string[],
   zones: readonly string[],
-): Promise<{ ok: true; removed?: boolean } | { ok: false; failure: PublishFailure; reason?: string }> {
+  left?: readonly string[],
+): Promise<{ ok: true; removed?: boolean; unreached?: string[] } | { ok: false; failure: PublishFailure; reason?: string }> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
   if (!signer?.getPublicKeyHex) return { ok: false, failure: 'services' }
   const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
   if (segs.length === 0) return { ok: false, failure: 'no-branch' }
   const wanted = [...new Set(zones.map(z => normalizeHost(z)).filter(Boolean))]
   if (wanted.length === 0) {
-    const out = await unpublishBranchNow(segs)
-    return out.ok ? { ok: true, removed: out.removed } : out
+    const out = await unpublishBranchNow(segs, left)
+    return out.ok ? { ok: true, removed: out.removed, ...(out.unreached ? { unreached: out.unreached } : {}) } : out
   }
 
   const pubkey = await publisherKeyHex()
@@ -787,7 +857,8 @@ async function setBranchDoorsNow(
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
   // Where it opens changed, so the running list learns its new door.
   recordMovedDoor(segs, key, indexHost, wanted[0] ?? '', read.manifest.addresses, head)
-  return { ok: true }
+  const unreached = await editLeftDoors(left, indexHost, pubkey, doorsOf(key, wanted))
+  return unreached.length ? { ok: true, unreached } : { ok: true }
 }
 
 /** A creation whose doors or own address changed without a publish: one

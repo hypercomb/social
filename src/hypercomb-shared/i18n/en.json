@@ -2188,6 +2188,7 @@
   "publish.done": "Published — its host is serving it.",
   "publish.done-unconfirmed": "Published — its host has not served it back yet. This row re-checks on its own.",
   "publish.unpublished": "Removed from your hive index. The bytes stay hosted and links already shared still resolve — this stops it being advertised, it does not un-share it.",
+  "publish.door.unreached": "Turned off, but {hosts} did not answer, so it may still show there. Turn it off again once that host is back.",
   "publish.made-live": "That version is live again. Your hive keeps its newer changes.",
   "publish.made-live-unconfirmed": "That version is live again, but its host has not served it back yet. This row re-checks on its own.",
   "publish.link-copied": "Link copied.",

@@ -1373,20 +1373,32 @@ export class PublishStatusDrone extends Drone {
     row.doors = next
     this.#paintZones(key, next)
     await setBranchHosts(row.segments, next)
+    // The domain switched off leaves the host marks above, so the write goes
+    // through the domains still on — and through its own host too, named here.
+    const left = on ? [] : [zone]
 
-    if (next.length === 0) { await this.#unpublish(key); return }
+    if (next.length === 0) { await this.#unpublish(key, left); return }
     if (!row.live) { await this.#run(key); return }
 
     row.busyPhase = 'indexing'
     this.#emit()
-    const result = await setBranchDoors(row.segments, next)
+    const result = await setBranchDoors(row.segments, next, left)
     row.busyPhase = null
     if (!result.ok) {
       row.doors = beforeDoors
       this.#toast('error', `publish.failure.${result.failure}`, PUBLISH_FAILURE_TEXT[result.failure])
-    }
+    } else this.#sayUnreached(result.unreached)
     this.#emit()
     void this.#refresh()
+  }
+
+  /** A domain turned off whose own host did not answer still serves the old
+   *  index there — said, never hidden. */
+  #sayUnreached(unreached: readonly string[] | undefined): void {
+    if (!unreached?.length) return
+    const hosts = unreached.join(', ')
+    this.#toast('warning', 'publish.door.unreached',
+      `Turned off, but ${hosts} did not answer, so it may still show there. Turn it off again once that host is back.`, { hosts })
   }
 
   /** OWN ADDRESS — one signed index rewrite giving this creation
@@ -1613,15 +1625,16 @@ export class PublishStatusDrone extends Drone {
     void this.#refresh()
   }
 
-  async #unpublish(key: string): Promise<void> {
+  async #unpublish(key: string, left: readonly string[] = []): Promise<void> {
     if (this.#waitForBatch()) return
     const row = this.#rows.find(r => r.key === key)
     if (!row || row.segments.length === 0) return
-    const result = await unpublishBranch(row.segments)
+    const result = await unpublishBranch(row.segments, left)
     if (!result.ok) {
       this.#toast('error', `publish.failure.${result.failure}`, PUBLISH_FAILURE_TEXT[result.failure])
       return
     }
+    this.#sayUnreached(result.unreached)
     // The honest limit, stated every time: this stops the branch being
     // advertised. It does not un-share what was already shared — the bytes stay
     // hosted and an old link still carries a cold head hint.
