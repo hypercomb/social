@@ -99,6 +99,7 @@ Forward-looking proposals and migration plans — not yet built. Retained so the
 - [three-js-migration-plan.md](three-js-migration-plan.md) — Pixi.js → three.js feasibility and strategy evaluation
 - [shim-extraction-scope.md](shim-extraction-scope.md) — Shipping the shim + host kit as standalone packages: the measured dependency closure, the 18x code-splitting win, and why store.ts is the only blocker
 - [hermes-harness.md](hermes-harness.md) — Hermes as two records in the hive and a desktop conversant that speaks and reads but never changes the hive; context stored in the hive by signature, encapsulation, grants per actor, six gaps
+- [spoken-programs.md](spoken-programs.md) — hypothesis: agents pass a signed spoken plan, not code; code is a derived cache keyed by program signature; safety recomputed by the receiver; what exists, eight possibilities, what would show it wrong
 
 ## Security & Governance
 
