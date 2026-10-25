@@ -389,6 +389,9 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'host:trials',
   // Every publisher's signed index, the member named by their key.
   'hive:indexes',
+  // Which keys may sign for an anchor: its whole key-list chain, the member
+  // named by the anchor (core key-list.ts; becoming-a-host.md).
+  'keys:lists',
   // A door's landing view as one transfer pack, the member named by the head
   // it was walked from — derived, kept, wipe-safe (blossom-worker
   // serveContentPack, web setup/content-pack.ts).

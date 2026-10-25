@@ -1,0 +1,692 @@
+{
+  "$comment": "Key-list conformance vector — documentation/becoming-a-host.md, \"Letting another place publish for you\". Really signed chains (secp256k1, zero aux randomness; each test key's secret is sha256 of its seed — test keys only) and the verdict core gives each. Written by scripts/key-list-vector.mjs, which checks every verdict against core first. Read by key-lists.spec.js (this host) and hypercomb-essentials sharing/key-list.vector.spec.ts (the client). Changing it is a protocol change.",
+  "meaning": "keys:lists",
+  "poolAddress": "b4ccdcfaef300b4afa9169d8764c4319b487950e9733d7ad6b0e65fa7c723468",
+  "anchor": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+  "keys": {
+    "anchor": {
+      "seed": "key-list vector: anchor",
+      "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+    },
+    "desktop": {
+      "seed": "key-list vector: desktop",
+      "pubkey": "609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0"
+    },
+    "phone": {
+      "seed": "key-list vector: phone",
+      "pubkey": "a3fc3ea979b7d440413bff332be6ceecf05d53029c6a4527aed7957e62c989a7"
+    },
+    "stranger": {
+      "seed": "key-list vector: stranger",
+      "pubkey": "2737815be6262e9bfb666c853acc408ad67706d3a557ca40ee71be99d4eb089f"
+    },
+    "invite": {
+      "seed": "key-list vector: invite",
+      "pubkey": "f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288"
+    }
+  },
+  "chains": [
+    {
+      "name": "the anchor alone",
+      "chain": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        }
+      ],
+      "expect": {
+        "ok": true,
+        "keys": [
+          "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+        ]
+      }
+    },
+    {
+      "name": "the anchor adds a desktop",
+      "chain": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000001,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0\",\"label\":\"desktop\"}],\"invites\":[]}",
+          "id": "e2458c8018975ef3420a94cf438d4f672a2cc2de136762daff8e8626aedaa641",
+          "sig": "552f97adf082397c4243908ab034b4914750b2d6f06f2788b713ce7008a5b5ae01b0040cfcc8029724897e77d1c7f074e3c0f7c3b9952b9351b540e4716623cc"
+        }
+      ],
+      "expect": {
+        "ok": true,
+        "keys": [
+          "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0"
+        ]
+      }
+    },
+    {
+      "name": "an invite spent on one key",
+      "chain": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000010,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[{\"pubkey\":\"f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288\",\"until\":1790000600}]}",
+          "id": "ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430",
+          "sig": "bfa17f913152d4a197466139e6b9e9b6248e3f802c18144b7158015b24c42237d2c9ac0ff48ff03c8b39ec917d3f8d2ad2a561e5f49bf991b3726c38d1583c16"
+        },
+        {
+          "pubkey": "f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288",
+          "created_at": 1790000100,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":2,\"prev\":\"ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0\",\"label\":\"jwize.com\"}],\"invites\":[]}",
+          "id": "aab359585045408c7f31a174bed5ad6511a74d0789ebecd39fdde5666d5fc4a3",
+          "sig": "fc3e3983681f4da8633995aceadadb11d093148e0724ad1c6174b4a7cb351763c6cea3e912ef91e953da46e1debdf0d270acff27c45a63bf0300d368c3e13b0a"
+        }
+      ],
+      "expect": {
+        "ok": true,
+        "keys": [
+          "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0"
+        ]
+      }
+    },
+    {
+      "name": "the desktop takes the anchor off",
+      "chain": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000001,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0\",\"label\":\"desktop\"}],\"invites\":[]}",
+          "id": "e2458c8018975ef3420a94cf438d4f672a2cc2de136762daff8e8626aedaa641",
+          "sig": "552f97adf082397c4243908ab034b4914750b2d6f06f2788b713ce7008a5b5ae01b0040cfcc8029724897e77d1c7f074e3c0f7c3b9952b9351b540e4716623cc"
+        },
+        {
+          "pubkey": "609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0",
+          "created_at": 1790000002,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":2,\"prev\":\"e2458c8018975ef3420a94cf438d4f672a2cc2de136762daff8e8626aedaa641\",\"keys\":[{\"pubkey\":\"609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0\",\"label\":\"desktop\"}],\"invites\":[]}",
+          "id": "52e170264d154f31148b5593d8843e123f605bfe7a323750c9c5333fb9ec7a7d",
+          "sig": "0d4c334f7c33f8edaaedd5ea2d90e9733026ff2e6213d6cf2b44350fddf2e1b73d93a0ad320b802efbb0eed9501910faf351dcfaecbfaf9e81578211fa532b20"
+        }
+      ],
+      "expect": {
+        "ok": true,
+        "keys": [
+          "609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0"
+        ]
+      }
+    },
+    {
+      "name": "a stranger signs a step",
+      "chain": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "2737815be6262e9bfb666c853acc408ad67706d3a557ca40ee71be99d4eb089f",
+          "created_at": 1790000001,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"2737815be6262e9bfb666c853acc408ad67706d3a557ca40ee71be99d4eb089f\"}],\"invites\":[]}",
+          "id": "8df326875e85f68ad122a2a6af5173523b090dee2ce53f01389bd7ed8a4db686",
+          "sig": "c65b956273f11d812ae497a7feb58f0bc58d50984c437423c8eba980f4a6b8b932f414b21426e1f09c9cc016dce56652c3b4dc3ef1f43938773694b7873de81b"
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "signer",
+        "at": 1
+      }
+    },
+    {
+      "name": "an invite adds two keys",
+      "chain": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000010,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[{\"pubkey\":\"f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288\",\"until\":1790000600}]}",
+          "id": "ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430",
+          "sig": "bfa17f913152d4a197466139e6b9e9b6248e3f802c18144b7158015b24c42237d2c9ac0ff48ff03c8b39ec917d3f8d2ad2a561e5f49bf991b3726c38d1583c16"
+        },
+        {
+          "pubkey": "f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288",
+          "created_at": 1790000100,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":2,\"prev\":\"ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0\"},{\"pubkey\":\"a3fc3ea979b7d440413bff332be6ceecf05d53029c6a4527aed7957e62c989a7\"}],\"invites\":[]}",
+          "id": "bf857e3bc34f77953397e339d3dc9363a6c8862789e1a6171b0c823ac95447d9",
+          "sig": "28c6424ba8234c004974a9a4f4ca2d9965e6a42ef2f21b9211636c0937b7a0e659690b5053da9fdedd80ea98ca77e3cd9957e42edc13ebacc4221e86f75a143e"
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "invite",
+        "at": 2
+      }
+    },
+    {
+      "name": "an acceptance dated after its invite ends",
+      "chain": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000010,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[{\"pubkey\":\"f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288\",\"until\":1790000600}]}",
+          "id": "ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430",
+          "sig": "bfa17f913152d4a197466139e6b9e9b6248e3f802c18144b7158015b24c42237d2c9ac0ff48ff03c8b39ec917d3f8d2ad2a561e5f49bf991b3726c38d1583c16"
+        },
+        {
+          "pubkey": "f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288",
+          "created_at": 1790000601,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":2,\"prev\":\"ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0\"}],\"invites\":[]}",
+          "id": "66c3be5205f76fc73f049dcfe71e5949eac5112225cc1ad3d0d83e2ef3685aba",
+          "sig": "0b57389363f8712daf154fed768e962c3e044f39a6e11abfb0fab7278e49a7c95b110205a3d6ddb100db7aacda57460ef7ae27b00d583e247505d37aab91661f"
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "invite",
+        "at": 2
+      }
+    },
+    {
+      "name": "a step whose content changed after signing",
+      "chain": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000001,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0\",\"label\":\"desktop\"},{\"pubkey\":\"2737815be6262e9bfb666c853acc408ad67706d3a557ca40ee71be99d4eb089f\"}],\"invites\":[]}",
+          "id": "e2458c8018975ef3420a94cf438d4f672a2cc2de136762daff8e8626aedaa641",
+          "sig": "552f97adf082397c4243908ab034b4914750b2d6f06f2788b713ce7008a5b5ae01b0040cfcc8029724897e77d1c7f074e3c0f7c3b9952b9351b540e4716623cc"
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "signature",
+        "at": 1
+      }
+    }
+  ],
+  "accepts": [
+    {
+      "name": "a host refuses a late spend built on its head",
+      "held": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000010,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[{\"pubkey\":\"f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288\",\"until\":1790000600}]}",
+          "id": "ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430",
+          "sig": "bfa17f913152d4a197466139e6b9e9b6248e3f802c18144b7158015b24c42237d2c9ac0ff48ff03c8b39ec917d3f8d2ad2a561e5f49bf991b3726c38d1583c16"
+        }
+      ],
+      "offered": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000010,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[{\"pubkey\":\"f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288\",\"until\":1790000600}]}",
+          "id": "ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430",
+          "sig": "bfa17f913152d4a197466139e6b9e9b6248e3f802c18144b7158015b24c42237d2c9ac0ff48ff03c8b39ec917d3f8d2ad2a561e5f49bf991b3726c38d1583c16"
+        },
+        {
+          "pubkey": "f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288",
+          "created_at": 1790000100,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":2,\"prev\":\"ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0\",\"label\":\"jwize.com\"}],\"invites\":[]}",
+          "id": "aab359585045408c7f31a174bed5ad6511a74d0789ebecd39fdde5666d5fc4a3",
+          "sig": "fc3e3983681f4da8633995aceadadb11d093148e0724ad1c6174b4a7cb351763c6cea3e912ef91e953da46e1debdf0d270acff27c45a63bf0300d368c3e13b0a"
+        }
+      ],
+      "now": 1790000601,
+      "expect": {
+        "ok": false,
+        "reason": "invite",
+        "at": 2
+      }
+    },
+    {
+      "name": "a host takes a spend while the invite is open",
+      "held": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000010,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[{\"pubkey\":\"f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288\",\"until\":1790000600}]}",
+          "id": "ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430",
+          "sig": "bfa17f913152d4a197466139e6b9e9b6248e3f802c18144b7158015b24c42237d2c9ac0ff48ff03c8b39ec917d3f8d2ad2a561e5f49bf991b3726c38d1583c16"
+        }
+      ],
+      "offered": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000010,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[{\"pubkey\":\"f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288\",\"until\":1790000600}]}",
+          "id": "ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430",
+          "sig": "bfa17f913152d4a197466139e6b9e9b6248e3f802c18144b7158015b24c42237d2c9ac0ff48ff03c8b39ec917d3f8d2ad2a561e5f49bf991b3726c38d1583c16"
+        },
+        {
+          "pubkey": "f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288",
+          "created_at": 1790000100,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":2,\"prev\":\"ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0\",\"label\":\"jwize.com\"}],\"invites\":[]}",
+          "id": "aab359585045408c7f31a174bed5ad6511a74d0789ebecd39fdde5666d5fc4a3",
+          "sig": "fc3e3983681f4da8633995aceadadb11d093148e0724ad1c6174b4a7cb351763c6cea3e912ef91e953da46e1debdf0d270acff27c45a63bf0300d368c3e13b0a"
+        }
+      ],
+      "now": 1790000200,
+      "expect": {
+        "ok": true,
+        "keys": [
+          "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0"
+        ]
+      }
+    },
+    {
+      "name": "a host that was behind takes an old spend",
+      "held": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        }
+      ],
+      "offered": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000010,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[{\"pubkey\":\"f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288\",\"until\":1790000600}]}",
+          "id": "ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430",
+          "sig": "bfa17f913152d4a197466139e6b9e9b6248e3f802c18144b7158015b24c42237d2c9ac0ff48ff03c8b39ec917d3f8d2ad2a561e5f49bf991b3726c38d1583c16"
+        },
+        {
+          "pubkey": "f929deadf026fb14c108e1df8312b19cdfc92ffc9fccd6041845a03b10672288",
+          "created_at": 1790000100,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":2,\"prev\":\"ee4be826ecda7cf2316306cb6f73365e481477001d0030078f69e92b10b5d430\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0\",\"label\":\"jwize.com\"}],\"invites\":[]}",
+          "id": "aab359585045408c7f31a174bed5ad6511a74d0789ebecd39fdde5666d5fc4a3",
+          "sig": "fc3e3983681f4da8633995aceadadb11d093148e0724ad1c6174b4a7cb351763c6cea3e912ef91e953da46e1debdf0d270acff27c45a63bf0300d368c3e13b0a"
+        }
+      ],
+      "now": 1790087000,
+      "expect": {
+        "ok": true,
+        "keys": [
+          "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0"
+        ]
+      }
+    },
+    {
+      "name": "a host refuses a fork",
+      "held": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000001,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"609f26b37b5bc30b31cfe06ac8bee7cf8c15ca39bd732a28a42169a0207b80a0\",\"label\":\"desktop\"}],\"invites\":[]}",
+          "id": "e2458c8018975ef3420a94cf438d4f672a2cc2de136762daff8e8626aedaa641",
+          "sig": "552f97adf082397c4243908ab034b4914750b2d6f06f2788b713ce7008a5b5ae01b0040cfcc8029724897e77d1c7f074e3c0f7c3b9952b9351b540e4716623cc"
+        }
+      ],
+      "offered": [
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000000,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":0,\"prev\":null,\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"}],\"invites\":[]}",
+          "id": "d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784",
+          "sig": "e7d20f2894373a636f1b471e1a3d93a361f9c4d95a400fcdb1611bc22431299d1a7843aad219ef28ca670b354159dc31bbb371d9e52cdf79085071d0ea6b94df"
+        },
+        {
+          "pubkey": "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6",
+          "created_at": 1790000001,
+          "kind": 30570,
+          "tags": [
+            [
+              "d",
+              "0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6"
+            ]
+          ],
+          "content": "{\"v\":1,\"anchor\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"seq\":1,\"prev\":\"d3b71980268550dcbba4fc444986a6bf272e981a7064210c14616e50e107f784\",\"keys\":[{\"pubkey\":\"0f3ea7b7167abd5e12fe5c709596c0af68d96a221733f29f8c3244df0d5e65a6\",\"label\":\"laptop\"},{\"pubkey\":\"a3fc3ea979b7d440413bff332be6ceecf05d53029c6a4527aed7957e62c989a7\"}],\"invites\":[]}",
+          "id": "c161e78618bdb3208c6fad8aac6dcc206f11c7dc5ecb20e3e076b9488673930e",
+          "sig": "b1b771704b6e7c922bf17b4fac01385904532a699b22d5c1f4bce74344428a37649b81053947ef875f2d142982a439c9d9705ba3dee85e3d4ddf729d0392255a"
+        }
+      ],
+      "now": 1790000005,
+      "expect": {
+        "ok": false,
+        "reason": "fork",
+        "at": 1
+      }
+    }
+  ]
+}

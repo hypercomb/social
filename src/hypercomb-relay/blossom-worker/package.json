@@ -5,8 +5,9 @@
   "type": "module",
   "main": "worker.js",
   "scripts": {
-    "check": "node --check worker.js && node --check hosts-forwarder.js",
-    "test": "node --test worker.spec.js",
+    "check": "node --check worker.js && node --check hosts-forwarder.js && node --check key-lists.js",
+    "test": "node --test worker.spec.js key-lists.spec.js key-lists.worker.spec.js",
+    "vector:key-list": "node scripts/key-list-vector.mjs",
     "build:site": "npm --prefix ../../hypercomb-web run build:visitor",
     "dev": "wrangler dev",
     "predeploy": "npm run build:site",

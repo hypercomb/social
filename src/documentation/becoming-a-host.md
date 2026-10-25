@@ -2,7 +2,8 @@
 
 Status: **design, for review** (2026-10-07). **"This computer" BUILT
 2026-10-18** — see *Host your hive from this computer* below; the rest is
-still design.
+still design. *Letting another place publish for you* (the key list and the
+invite) added 2026-10-24, design; its core check is built.
 
 > "We have to make everything automated because we want to be able to walk
 > people through how it's done so they can do it themselves easily." —
@@ -270,6 +271,215 @@ Hypercomb has a word on the command line, so it may also want one — `host`
 itself is free, since the old reason against it was that *publishing* is not
 hosting, and this path is hosting. Decide before building step 1.
 
+## Letting another place publish for you
+
+Status: **design, 2026-10-24.** Step 1 of the build order (the core check)
+is built, and so is step 2 (the worker); nothing else below is.
+
+> "we need a safe way to share our publish key between domains" … "That way
+> I can pass it and unfold it (ie allow publishing to that device)" —
+> jwize, 2026-10-24
+
+**Every place is a device.** A browser keeps storage per domain, so
+hypercomb.com, jwize.com, a localhost dev server and the desktop app each
+make their own key (`hc:nostr:secret-key`, `sharing/nostr-signer.ts`) the
+first time they need one. A host accepts one key for a claimed domain, the
+key that claimed it (`claimedBindings`, `blossom-worker/worker.js`), so only
+that place can publish there today. To everything in this section, another
+domain on the same computer is another device.
+
+**The key never moves; an allowance does.** What you pass is an invite. The
+place that opens it keeps its own key and is added to your signed key list,
+and from then on a host takes its publishes as yours. Copying the secret
+instead is refused for three reasons:
+
+- a secret never travels (above, 2026-10-07);
+- one key in two places is the fork `hypergraph-molecule-lineage.md` still
+  lists as open ("a genuinely new second device on the same key"), and a
+  key per device is the fix that doc names;
+- a copied key that leaks is you, everywhere, for good. A listed key that
+  leaks is one line taken off the list.
+
+### Your anchor
+
+The key that began your lineage is your **anchor**. Everything that already
+names you by key keeps naming it: your signed index at
+`sign('hive:indexes')/<anchor>`, your domain claims, the hive links that pin
+your key, and other people's follow records. From now on the anchor is a
+name. Like any key it can be recycled, and the name stays.
+
+This makes the share hash above concrete. Everyone who exists today began
+with one key, so naming the group by that key leaves every link, claim and
+index where it is. A hash of the first list would be a second name for the
+same group, and everything already pinned would have to move to it.
+
+### The key list
+
+One small signed record says which keys may sign for an anchor right now:
+
+```
+kind 30570, signed by a key in the list before it
+{ "v": 1, "anchor": "<64-hex>", "seq": 3, "prev": "<event id of list 2>",
+  "keys":    [{ "pubkey": "<64-hex>", "label": "desktop" }, …],
+  "invites": [{ "pubkey": "<64-hex>", "until": 1793000000 }] }
+```
+
+- **List 0** is signed by the anchor and lists the anchor.
+- **List n+1** names list n in `prev` by its nostr event id, and is signed by a
+  key in list n's `keys`, or by an invite in list n under the invite rule
+  below. Its `created_at` is never earlier than list n's.
+- **Public keys only.** It may sit in a pool, on any host, in any replica. A
+  list holds at most 64 keys and 64 open invites.
+- **A host keeps the whole chain** at the pointer `sign('keys:lists')/<anchor>`,
+  list 0 first, so one read is the whole proof. A list changes a few times in
+  a lifetime, so the chain stays small (at most 256 lists). `prev` is an event
+  id, the SHA-256 of nostr's canonical serialization of the list, so a list
+  has the same name on every host whatever bytes that host keeps.
+- **The chain only grows.** A host takes an offered chain only when the chain
+  it holds is the start of it. A chain that differs from the one it holds is a
+  fork, and is refused.
+- **Every listed key is equal.** Any one of them may add or remove a key.
+  That is what "a host that trusts one of your keys accepts the others" means
+  (above), and its cost is listed below.
+
+### The invite: pass it, unfold it
+
+1. **Allow.** On a place that can already publish, `keys allow` makes a
+   throwaway invite key, writes the next list with the invite's public key
+   and an `until` ten minutes ahead, and shows a link with a QR code:
+   `https://<where you will open it>/#invite=<host>/<anchor>/<invite secret>`.
+   The secret is in the fragment, which a browser never sends to a server
+   (the same rule as the door's `#k=`). `<host>` is where the list is held.
+   The same text pasted after `keys accept` works where a link can't be
+   opened.
+2. **Unfold.** On the new domain or device, the page reads the anchor's list
+   from `<host>`, checks that the invite is in it and not expired, and signs
+   the next list with the invite secret: its own key in (made now if it has
+   none), the invite out. Then it forgets the secret, remembers the anchor
+   (`hc:keys:anchor`, kept on the device; it is not a secret), and from then
+   on publishes for the anchor.
+3. **See it.** Every place that reads the list sees the new key with its label
+   and can take it off.
+
+**An invite key signs one list, of one shape**: the list before it, with its
+own invite removed and exactly one key added, nothing else changed, before
+`until`. Hosts and readers refuse anything else it signs. A stolen invite can
+therefore add one key within ten minutes. It can never publish or sign
+content, and the key it added shows in the list and can be removed. An
+expired invite does nothing, and the next list any key writes drops it. A new
+invite's `until` must fall after the list that writes it and at most an hour
+later; the words use ten minutes.
+
+**Time, and who can check it.** A reader checks a chain whose steps were
+accepted in the past, so it compares an invite's `until` with the
+acceptance's own `created_at`. Because `created_at` never goes backwards, an
+acceptance is pinned between the invite's issue and its end. A host also
+judges by its own clock the one step built on the list it holds as the
+newest: that is the step it can see happen now, and the one a stolen,
+expired invite cannot backdate past. It does not judge, by today's clock, the
+steps it missed while it was behind. Those happened elsewhere, earlier, and
+refusing an old acceptance among them would leave the host behind for good.
+So the place that writes an invite carries that list to every host it
+publishes to at once, and each of them then holds the invite's list as its
+newest.
+
+### Publishing from an allowed place
+
+- **One index, signed by any listed key.** The allowed place writes the
+  anchor's index, `sign('hive:indexes')/<anchor>`, signed with its own key and
+  carrying the tag `["anchor", "<anchor>"]`. The tag stops the same event
+  from being planted under another anchor whose list also names that key.
+  The NIP-98 caller on the write must be a listed key too.
+- **An index names the index it replaced.** It carries `["prev", "<event
+  id>"]`, the index it was built on, and a host refuses it when that is not
+  the index the host holds. Without this, two places publishing at once would
+  drop each other's change; with it, the second one reads again and retries.
+  An index signed by any key but the anchor must carry `prev`, and a host
+  honours `prev` whenever it is present. Today's rollback rule (`created_at`
+  newer than the held index) stays.
+- **Reading.** A reader that pins the anchor accepts an index signed by the
+  anchor, as today, or by a key in the anchor's current list. That costs one
+  more read, and only when the signer is not the anchor. Anything else is
+  `forged`, as now.
+- **Uploading bytes, and every other signed request.** A request's auth event
+  (NIP-98, or BUD-02 for a Blossom upload) may carry `["anchor", "<anchor>"]`.
+  When the anchor's list on that host names the signer, the request acts as
+  the anchor: its uploads are kept on the anchor's allowance and owned by the
+  anchor. Without the tag, a request acts as its signer, as today.
+- **Writing the chain.** `PUT sign('keys:lists')/<anchor>` is NIP-98-signed,
+  untagged, by any key the chain names: the place that just spent an invite
+  is not on the host's list yet, so it signs as itself.
+- **Hosts learn the list from the places that publish.** Before its index, a
+  place carries the chain to each host it writes, so a host it reaches later
+  already knows the key.
+
+### Taking a place off
+
+To remove a place, write the next list without its key. The device that
+removes it then re-signs the current index with its own key, so nothing the
+removed key signed is still the head. From the moment a host holds that list
+it refuses everything the removed key signs (index writes, uploads, NIP-98),
+with no operator and no redeploy. This is the "destroy an old key" act above.
+
+### A key per domain becomes an anchor per domain
+
+`sealed-audiences.md` gives a domain its own key when it serves different
+content under the same names. With lists, that becomes an anchor per domain:
+jwize.com and pluginthematrix.com are two anchors with two indexes and two
+lists. One device's key may be listed on both, and the publish path signs
+with that key for the anchor bound to the domain it writes. No device holds
+two keys.
+
+### What it costs
+
+- **A stolen device that is still listed can publish as you**, and because
+  every key is equal it can take your other keys off the list, until a
+  recovery path exists. For a claimed domain that path runs through the
+  claim (protocol-spec §21.13: the domain survives key loss). Open, below.
+- **One small signed list per change**, kept in every host's chain, plus one
+  extra read when a reader meets an index that the anchor did not sign.
+- **Membership is public.** Anyone can see how many places publish for an
+  anchor and what they are called. Labels are optional.
+
+### Not chosen
+
+- **Copying the secret** (above).
+- **An index per device.** Two places naming one address contest it, and a
+  contested address binds nobody on a host (`zonePlaces`, worker.js). A reader
+  also cannot tell whose head for a name is newer, because an index's date is
+  when that device last published *anything*.
+- **A NIP-46 remote signer.** One device would keep the key and sign for the
+  others over a relay. It needs no host change, but that device must be online
+  for every publish from every other place. It stays the phone's path
+  (`sealed-audiences.md`, build step 7), not this one.
+
+### Build order
+
+1. Core `key-list.ts`: verify a list chain, the invite rule, and "is this key
+   current for this anchor". Pure, with the schnorr verifier injected the way
+   `head-claim.ts` does it, plus specs. **Built 2026-10-24**
+   (`hypercomb-core/src/core/key-list.ts`; `keys:lists` reserved in the pool
+   census).
+2. Worker: the `sign('keys:lists')/<anchor>` pointer and its chain; index
+   writes and uploads take current keys; `prev` on index writes. Plus a vector
+   file of really signed chains that pins the worker to core's answers.
+   **Host logic built 2026-10-24** (`blossom-worker/key-lists.js`, using
+   core's rules, with `key-list.vector.json` from
+   `scripts/key-list-vector.mjs`, and specs on both sides), and wired into
+   `worker.js`: the route, NIP-98 and BUD-02 auth, index reads and writes,
+   with `key-lists.worker.spec.js` driving it through the worker's own doors.
+3. Client: the publish path signs with the device's key and addresses by
+   anchor; the read path accepts listed signers.
+4. Words: `keys` (who publishes for you), `keys allow`, `keys accept`,
+   `keys off <label>`; the invite link's landing; rows in the hosts window.
+5. Molecules: "the same author" becomes "a key on the same list", which
+   closes the one-key-two-devices fork for good.
+
+**Open questions.** (1) The word: `keys`, `devices`, or a sub-word of
+`host`. (2) Equal keys, or should removing a key need the anchor (or two
+keys)? Recommended: equal, as decided 2026-10-07, until a recovery path
+exists.
+
 ## What this needs that does not exist
 
 - **A walkthrough surface in the hosts window** (a registry-fed shell surface
@@ -286,7 +496,8 @@ hosting, and this path is hosting. Decide before building step 1.
   bytes over HTTP and needs none).
 - **Revocation on every host** — a signed "destroy this key" a host honours
   at any time, without its operator; and the key lineage (first list,
-  signed successors) that says which keys are current.
+  signed successors) that says which keys are current. Designed in
+  *Letting another place publish for you* above (the key list, the invite).
 
 ## Decisions this depends on
 

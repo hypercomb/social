@@ -45,6 +45,8 @@ import { schnorr } from '@noble/curves/secp256k1'
 import { HOST_LISTING_FLOOR, listedMeanings } from '../host-listing.js'
 import { nostrJson } from '../nip05-names.js'
 import { decodeTransferPack, encodeTransferPack, gunzipBytes, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.ts'
+import { KEY_LIST_MEANING } from '../../hypercomb-core/src/core/key-list.ts'
+import { keyLists } from './key-lists.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 // A hostname LABEL, per DNS. A lineage is only a name the wildcard can bring to
@@ -571,8 +573,14 @@ async function verifiedIndex(env, pubkey, failed, rawOf = (key) => heldIndexRaw(
   }
   let evt
   try { evt = JSON.parse(raw ?? 'null') } catch { return null }
-  if (!evt || Number(evt.kind) !== HIVE_KIND || evt.pubkey !== pubkey) return null
+  if (!evt || Number(evt.kind) !== HIVE_KIND) return null
   if (!(await verifyEventSig(evt))) return null
+  // Signed by the key, or by a key its list names (key-lists.js); a key list
+  // that cannot be read is a store that cannot be read.
+  try { if (await anchorKeys.indexSignerRefusal(env, pubkey, evt)) return null } catch {
+    failed?.add(pubkey)
+    return null
+  }
   let content
   try { content = JSON.parse(evt.content) } catch { return null }
   if (!content?.roots || typeof content.roots !== 'object' || Array.isArray(content.roots)
@@ -3922,7 +3930,10 @@ function parseAuthEvent(request) {
 // PRESENT; the deployed HostSyncService signs only [u, method] tags, and
 // the body is bound implicitly anyway — the URL sig == sha256(body) is
 // enforced by the caller (same reasoning as relay.js's writer auth).
-async function verifyNip98(request, evt, expectedMethod = 'PUT') {
+// The key it answers is the key the request ACTS AS (key-lists.js actingKey):
+// its signer, or the anchor its `['anchor', …]` tag names when that anchor's
+// list here holds the signer; a key taken off its own list is refused.
+async function verifyNip98(request, evt, expectedMethod = 'PUT', env) {
   if (!evt) return { ok: false, reason: 'missing Nostr authorization header' }
   if (Number(evt.kind) !== NIP98_KIND) return { ok: false, reason: 'wrong auth event kind (expected NIP-98 27235)' }
   if (!(await verifyEventSig(evt))) return { ok: false, reason: 'invalid auth event signature' }
@@ -3932,13 +3943,13 @@ async function verifyNip98(request, evt, expectedMethod = 'PUT') {
   let signedUrl
   try { signedUrl = new URL(String(tagValue(evt, 'u'))).href } catch { return { ok: false, reason: 'auth u tag is not a URL' } }
   if (signedUrl !== new URL(request.url).href) return { ok: false, reason: 'auth u tag does not match request URL' }
-  return { ok: true, pubkey: String(evt.pubkey).toLowerCase() }
+  return anchorKeys.actingKey(env, evt)
 }
 
 // Dialect 2 — Blossom BUD-02 (kind 24242): t tag 'upload', at least one
 // x tag equal to sha256(body), expiration in the future, created_at not
 // in the future. One event may authorize several blobs (multiple x tags).
-async function verifyBud02(evt, bodyHash) {
+async function verifyBud02(evt, bodyHash, env) {
   if (!evt) return { ok: false, reason: 'missing Nostr authorization header' }
   if (Number(evt.kind) !== BLOSSOM_KIND) return { ok: false, reason: 'wrong auth event kind (expected Blossom 24242)' }
   if (!(await verifyEventSig(evt))) return { ok: false, reason: 'invalid auth event signature' }
@@ -3947,7 +3958,7 @@ async function verifyBud02(evt, bodyHash) {
   if (!(Number(tagValue(evt, 'expiration') || 0) > now)) return { ok: false, reason: 'auth event expired (or missing expiration tag)' }
   if (!tagValues(evt, 't').includes('upload')) return { ok: false, reason: "auth event missing t tag 'upload'" }
   if (!tagValues(evt, 'x').map((x) => x.toLowerCase()).includes(bodyHash)) return { ok: false, reason: 'no x tag matches the sha256 of the upload' }
-  return { ok: true, pubkey: String(evt.pubkey).toLowerCase() }
+  return anchorKeys.actingKey(env, evt)
 }
 
 // ── quota (the host's people, and the grant ledger) ──────────────────────────
@@ -4240,7 +4251,7 @@ async function getPlans(request, env) {
 // POST /plans — the operator offers a plan: its bytes land at their signature
 // and the pool lists it. The same terms twice are the same plan.
 async function postPlan(request, env) {
-  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST')
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST', env)
   if (!auth.ok) return text(401, auth.reason)
   if (!isOperator(env, auth.pubkey)) return text(403, 'only this host\'s operators offer plans')
   let raw
@@ -4263,7 +4274,7 @@ async function postPlan(request, env) {
 // DELETE /plans/<sig> — withdrawn from offer. The bytes stay: a tenant on it
 // keeps its terms, and the record keeps pointing at something.
 async function deletePlan(request, env, sig) {
-  const auth = await verifyNip98(request, parseAuthEvent(request), 'DELETE')
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'DELETE', env)
   if (!auth.ok) return text(401, auth.reason)
   if (!isOperator(env, auth.pubkey)) return text(403, 'only this host\'s operators withdraw plans')
   await env.CONTENT.delete(`${await poolAddress(HOST_PLANS_MEANING)}/${sig}`)
@@ -4274,7 +4285,7 @@ async function deletePlan(request, env, sig) {
 // a key on a plan, paid through `until`. Body: {plan, until, sites?,
 // customer?}. The plan must be bytes this heap holds — offered or withdrawn.
 async function putTenant(request, env, pubkey) {
-  const auth = await verifyNip98(request, parseAuthEvent(request))
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'PUT', env)
   if (!auth.ok) return text(401, auth.reason)
   if (!isOperator(env, auth.pubkey)) return text(403, 'only this host\'s operators set tenants')
   let body
@@ -4296,7 +4307,7 @@ async function putTenant(request, env, pubkey) {
 // GET /tenant — a key reads its own row: the record, its standing and the
 // plan's terms. Never anyone else's.
 async function getTenant(request, env) {
-  const auth = await verifyNip98(request, parseAuthEvent(request), 'GET')
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'GET', env)
   if (!auth.ok) return text(401, auth.reason)
   const now = Math.floor(Date.now() / 1000)
   const tenant = await tenantOf(env, auth.pubkey, now)
@@ -4544,7 +4555,7 @@ async function storeBlob(env, pubkey, sig, body, contentType) {
 const FORGET_MAX = 1000
 
 async function forgetSigs(request, env) {
-  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST')
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST', env)
   if (!auth.ok) return text(401, auth.reason)
   let body
   try { body = await request.json() } catch { return text(400, 'body is not JSON') }
@@ -4888,7 +4899,7 @@ async function readStanding(request, env, claim) {
   if (!headOnly(env) || !withdrawn(claim)) return 'open'
   if (inGrace(claim)) return 'kept'
   if (claim.root && claim.owner && hostKeepsHistory(env) && (await publicRoots(env, claim.owner)).has(claim.root)) return 'kept'
-  if (request && await ownerReads(request, claim)) return 'kept'
+  if (request && await ownerReads(request, env, claim)) return 'kept'
   return 'hidden'
 }
 const hiddenTo = async (request, env, claim) => (await readStanding(request, env, claim)) === 'hidden'
@@ -4911,9 +4922,9 @@ function indexContent(evt) {
 }
 
 /** A withdrawn object is still its owner's: their signed read gets it. */
-async function ownerReads(request, claim) {
+async function ownerReads(request, env, claim) {
   if (!claim?.owner || !request.headers.has('authorization')) return false
-  const auth = await verifyNip98(request, parseAuthEvent(request), request.method)
+  const auth = await verifyNip98(request, parseAuthEvent(request), request.method, env)
   return auth.ok && auth.pubkey === claim.owner
 }
 
@@ -4922,7 +4933,7 @@ async function ownerReads(request, claim) {
 // the bytes. Body {after?: <pubkey>}; answers {walked, complete, next}. Call
 // again with `after: next` until next is null.
 async function reachWalk(request, env) {
-  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST')
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST', env)
   if (!auth.ok) return text(401, auth.reason)
   if (!siteOperators(env).some(([, operator]) => operator === auth.pubkey)) return text(403, 'only this host\'s operators walk its indexes')
   let body = {}
@@ -4960,7 +4971,7 @@ async function reachWalk(request, env) {
 // content; sha256(body) must equal it.
 async function putSig(request, env, sig) {
   const evt = parseAuthEvent(request)
-  const auth = await verifyNip98(request, evt)
+  const auth = await verifyNip98(request, evt, 'PUT', env)
   if (!auth.ok) return text(401, auth.reason)
 
   const body = await request.arrayBuffer()
@@ -4986,7 +4997,7 @@ async function putUpload(request, env) {
   const evt = parseAuthEvent(request)
   const body = await request.arrayBuffer()
   const sig = await sha256Hex(body)
-  const auth = await verifyBud02(evt, sig)
+  const auth = await verifyBud02(evt, sig, env)
   if (!auth.ok) return text(401, auth.reason)
 
   const stored = await storeBlob(env, auth.pubkey, sig, body, request.headers.get('content-type'))
@@ -5009,7 +5020,7 @@ async function headUpload(request, env) {
   const size = Number(request.headers.get('x-content-length'))
   if (!Number.isFinite(size) || size < 0) return text(400, 'missing or malformed X-Content-Length header')
 
-  const auth = await verifyBud02(parseAuthEvent(request), declared)
+  const auth = await verifyBud02(parseAuthEvent(request), declared, env)
   if (!auth.ok) return text(401, auth.reason)
 
   // A withdrawn object is not "already held" to anyone it is hidden from — the
@@ -5033,7 +5044,7 @@ async function headUpload(request, env) {
 // share-flow meter ("2.1 MB of 100 MB") and the plain-language over-quota
 // moment, and is how an operator checks a device key before a flip.
 async function getGrant(request, env) {
-  const auth = await verifyNip98(request, parseAuthEvent(request), 'GET')
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'GET', env)
   if (!auth.ok) return text(401, auth.reason)
   const p = policy(env)
   const now = Math.floor(Date.now() / 1000)
@@ -5321,11 +5332,16 @@ async function validOfferingLocations(evt) {
 }
 
 // PUT /<sign('hive:indexes')>/<pubkey> — NIP-98 proves the CALLER, the body event proves the
-// INDEX. Both must be the path pubkey: a valid guest can't plant an index
+// INDEX. Both must ACT AS the path pubkey: a valid guest can't plant an index
 // under someone else's key, and a leaked index event can't be replanted by
-// a stranger (the NIP-98 envelope binds this URL + freshness).
+// a stranger (the NIP-98 envelope binds this URL + freshness). A key the path
+// key's list names acts as it (key-lists.js): its index carries
+// `['anchor', <path key>]`, and `['prev', <id>]` naming the index it replaced,
+// so two places publishing at once cannot drop each other's change. `prev` is
+// honoured whenever present; two writes landing in the same instant can still
+// race, as the created_at rule always could.
 async function putHive(request, env, pubkey, ctx) {
-  const auth = await verifyNip98(request, parseAuthEvent(request))
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'PUT', env)
   if (!auth.ok) return text(401, auth.reason)
   if (auth.pubkey !== pubkey) return text(403, 'auth pubkey does not match the hive being written')
 
@@ -5334,7 +5350,9 @@ async function putHive(request, env, pubkey, ctx) {
   let evt
   try { evt = JSON.parse(new TextDecoder().decode(body)) } catch { return text(400, 'body is not a JSON nostr event') }
   if (Number(evt?.kind) !== HIVE_KIND) return text(400, `wrong event kind (expected hive index ${HIVE_KIND})`)
-  if (String(evt?.pubkey || '').toLowerCase() !== pubkey) return text(403, 'index event pubkey does not match the hive being written')
+  let refused
+  try { refused = await anchorKeys.indexSignerRefusal(env, pubkey, evt, true) } catch { return text(503, 'the key list held here could not be read') }
+  if (refused) return text(403, refused)
   if (!(await verifyEventSig(evt))) return text(401, 'invalid index event signature')
   if (!validHiveEventContent(evt)) return text(400, 'index content is not {"v","roots":{lineageKey: sig}}')
   if (!await validOfferingLocations(evt)) return text(400, 'offering location is not the hash of its meaning and key')
@@ -5346,6 +5364,13 @@ async function putHive(request, env, pubkey, ctx) {
       return await advancePublishedLocations(env, pubkey, evt)
         ? text(200, 'index already current')
         : text(503, 'signed index is held but a route location is not current; retry this index')
+    }
+    const prev = tagValue(evt, 'prev')
+    if (prev == null && String(evt.pubkey).toLowerCase() !== pubkey) {
+      return text(400, 'an index signed for its anchor names the index it replaces (a prev tag)')
+    }
+    if (prev != null && String(prev).toLowerCase() !== String(stored.id || '').toLowerCase()) {
+      return text(409, 'this index replaces one that is not the index held here - read it again and retry')
     }
     if (Number(evt.created_at || 0) <= Number(stored.created_at || 0)) {
       return text(409, 'a newer (or same-age) index is already held - refusing rollback')
@@ -5390,6 +5415,35 @@ async function getHive(request, env, pubkey) {
   })
 }
 
+// ── who may sign for an anchor (key-lists.js; documentation/becoming-a-host.md)
+//
+// GET/PUT /<sign('keys:lists')>/<anchor> — the anchor's whole key-list chain,
+// list 0 first. It proves itself, so reading needs no auth and grants no
+// trust. A write is NIP-98-signed by a key the chain names, as itself: the
+// place that just spent an invite is not on the held list yet.
+const anchorKeys = keyLists(verifyEventSig)
+
+async function getKeyList(request, env, anchor) {
+  const bytes = await anchorKeys.heldKeyChainBytes(env, anchor)
+  if (bytes == null) return text(404, 'no key list for this anchor')
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      ...CORS,
+    },
+  })
+}
+
+async function putKeyList(request, env, anchor) {
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'PUT', env)
+  if (!auth.ok) return text(401, auth.reason)
+  const answer = await anchorKeys.offerKeyChain(env, anchor, auth.signer, await request.arrayBuffer())
+  return text(answer.status, answer.reason)
+}
+
 // ── swarm room pools (documentation/swarm-pools.md) ──────────────────────────
 //
 // A room is a POOL on this host's one root store: `sign('swarm:' + room
@@ -5430,7 +5484,7 @@ async function roomMemberNames(env, sig) {
 }
 
 async function putRoomMember(request, env, pool, member) {
-  const auth = await verifyNip98(request, parseAuthEvent(request))
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'PUT', env)
   if (!auth.ok) return text(401, auth.reason)
   if (!env.CONTENT?.put || !env.CONTENT?.list) return text(503, 'this host holds no pools')
   const reserved = await listedPool(env, pool)
@@ -5835,7 +5889,7 @@ async function pruneLapsed(env, waiting, now) {
 async function postClaim(request, env, ctx) {
   if (!claimsConfigured(env)) return text(503, 'this host takes no claims')
   const evt = parseAuthEvent(request)
-  const auth = await verifyNip98(request, evt, 'POST')
+  const auth = await verifyNip98(request, evt, 'POST', env)
   if (!auth.ok) return text(401, auth.reason)
   if (!env.CONTENT?.put || !env.CONTENT?.list) return text(503, 'this host holds no pools')
   const raw = await request.arrayBuffer()
@@ -5927,7 +5981,7 @@ async function readClaim(request, env, rawDomain) {
   // Anyone may read a claim. A reader who signs is told whether it is theirs.
   let reader = null
   if (request.headers.has('authorization')) {
-    const auth = await verifyNip98(request, parseAuthEvent(request), 'GET')
+    const auth = await verifyNip98(request, parseAuthEvent(request), 'GET', env)
     if (!auth.ok) return text(401, auth.reason)
     reader = auth.pubkey
   }
@@ -6096,7 +6150,7 @@ async function aiContext(request, env, sigs) {
 async function aiAsk(request, env) {
   if (!env.ANTHROPIC_API_KEY) return text(503, 'AI is not configured on this host (missing ANTHROPIC_API_KEY secret)')
 
-  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST')
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST', env)
   if (!auth.ok) return text(401, auth.reason)
 
   let body
@@ -6426,6 +6480,12 @@ const router = {
     if (indexMatch && indexMatch[1] === await poolAddress(HIVE_INDEXES_MEANING)) {
       if (method === 'GET' || method === 'HEAD') return getHive(request, env, indexMatch[2])
       if (method === 'PUT') return putHive(request, env, indexMatch[2], ctx)
+      return text(405, 'method not allowed')
+    }
+    // …and an ANCHOR'S KEY LIST, the member of sign('keys:lists') named by it.
+    if (indexMatch && indexMatch[1] === await poolAddress(KEY_LIST_MEANING)) {
+      if (method === 'GET' || method === 'HEAD') return getKeyList(request, env, indexMatch[2])
+      if (method === 'PUT') return putKeyList(request, env, indexMatch[2])
       return text(405, 'method not allowed')
     }
 
