@@ -6098,6 +6098,18 @@ test('head only: the old revisions of an install channel are never withdrawn', a
   assert.equal(await read(layerB), 200)
 })
 
+test('head only: a host friend reads the archive with its own signed read; a stranger does not', async () => {
+  const { env, publish } = await headMoveFixture(true)
+  await publish({ revolucion: layerB }, 1_800_000_100)
+  pass()
+  const otherKey = Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 2 : 0)
+  const url = `https://content.pluginthematrix.com/${layerA}`
+  const signedBy = async () => (await worker.fetch(new Request(url, { headers: { authorization: await nip98(url, 'GET', otherKey) } }), env)).status
+  assert.equal(await signedBy(), 404, 'a key the host does not share with is a stranger')
+  env.HOST_FRIENDS = other
+  assert.equal(await signedBy(), 200, 'a host friend reads the withdrawn version')
+})
+
 test('head only: going back to an old head serves it again', async () => {
   const { publish, read } = await headMoveFixture(true)
   await publish({ revolucion: layerB }, 1_800_000_100)

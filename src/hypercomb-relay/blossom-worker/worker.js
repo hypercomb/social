@@ -4932,7 +4932,14 @@ function indexContent(evt) {
 async function ownerReads(request, env, claim) {
   if (!claim?.owner || !request.headers.has('authorization')) return false
   const auth = await verifyNip98(request, parseAuthEvent(request), request.method, env)
-  return auth.ok && auth.pubkey === claim.owner
+  if (!auth.ok) return false
+  // THE ARCHIVE IS OPEN TO FRIENDS (jwize 2026-10-25: "you just give elevated
+  // access to the friends"). A withdrawn version is hidden from strangers, not
+  // from the people this host is shared with: its operators and HOST_FRIENDS
+  // read it with their own signed read, as the owner does.
+  return auth.pubkey === claim.owner
+    || hostFriends(env).includes(auth.pubkey)
+    || siteOperators(env).some(([, operator]) => operator === auth.pubkey)
 }
 
 // POST /reach — the operator's walk before HEAD_ONLY goes on: one held index
