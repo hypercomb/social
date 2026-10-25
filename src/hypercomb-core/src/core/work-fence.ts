@@ -378,9 +378,25 @@ const promisedIn = (said: readonly string[]): string | undefined => {
   return READ_STEP.test(step[1]) ? 'hypercomb-read' : 'hypercomb-do'
 }
 
+/** A REPLY THAT IS ONLY A FENCE OF COMMANDS, the fence untagged or called a
+ *  shell. Asked to "go ahead and do those moves", a hive model answered with
+ *  nothing but a fenced `/into …` line (the first `say` conversation,
+ *  2026-10-25): the fence is the ordinary kind, so the scanner left it as
+ *  prose and the turn ended answered with nothing done. A reply with words of
+ *  its own around a fenced command may be explaining it, and is left alone. */
+const onlyFencedCommands = (said: readonly string[]): boolean => {
+  if (said.length < 3) return false
+  const open = FENCE_RE.exec(said[0])
+  if (!open || !/^(?:|text|txt|sh|bash|shell|console)$/i.test(open[2].trim())) return false
+  if (!closes(said[said.length - 1], open[1])) return false
+  const body = said.slice(1, -1)
+  return body.length > 0 && body.every(line => BARE_COMMAND.test(line))
+}
+
 const unwrittenIn = (lines: readonly string[]): string | undefined => {
   const said = lines.map(line => line.trim()).filter(Boolean)
   if (said.length && said.length <= 8 && said.every(line => BARE_READ.test(line))) return 'hypercomb-read'
+  if (onlyFencedCommands(said)) return 'hypercomb-do'
   const promised = promisedIn(said)
   if (promised) return promised
   let fence: string | null = null

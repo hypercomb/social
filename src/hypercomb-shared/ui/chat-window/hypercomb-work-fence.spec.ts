@@ -388,6 +388,20 @@ describe('a block named and not written', () => {
     expect(splitWork(['I will add it now.', '<tool name="hypercomb-do">create notes</tool>'].join('\n')).unwritten).toBe('hypercomb-do')
   })
 
+  // 2026-10-25: asked to "go ahead and do those moves", a hive model replied
+  // with nothing but a fenced command; the fence is the ordinary kind, so
+  // nothing ran and the turn ended answered.
+  it('reads a reply that is only a fence of commands as a do block never opened', () => {
+    const fence = '```'
+    const reply = (open: string, ...body: string[]): string => [open, ...body, fence].join('\n')
+    expect(splitWork(reply(fence, '/into invoices = [march, april]', '/title roadmap = Road map')).unwritten).toBe('hypercomb-do')
+    expect(splitWork(reply(fence + 'sh', '/into invoices = [march]')).unwritten).toBe('hypercomb-do')
+    // Words around it mean it is being explained; code in another language is code.
+    expect(splitWork('You would write:\n' + reply(fence, '/into invoices = [march]')).unwritten).toBeUndefined()
+    expect(splitWork(reply(fence + 'ts', '/into invoices = [march]')).unwritten).toBeUndefined()
+    expect(splitWork(reply(fence, 'const x = 1')).unwritten).toBeUndefined()
+  })
+
   it('reads bare command lines, written with no block, as a do block never opened', () => {
     const bare = splitWork([
       '/file on /bubble-bobble-dos-v1: REQUIREMENT 7 (partial): ordinary fruit.',
