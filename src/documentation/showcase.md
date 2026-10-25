@@ -90,3 +90,23 @@ What you chose for a domain is one record:
 The front door holds no key and cannot tell you from a visitor, which is why
 the choice is a signed public record and never a switch on the page itself.
 Adoptions (`host:adoptions`) stay what they were: one browser's own.
+
+## Groups: more than one showcase (designed, not built)
+
+jwize, 2026-10-25: "multiple showcases on your mobile — a left-to-right or
+right-to-left swipe to switch showcases. Basically grouping shared data. You
+could start with *all*, and the groups allow filtering. That is best because
+you can then look at it like a bunch of grayed-out tiles while managing, and
+then show the selected ones when viewing. Nothing changes about the accordion:
+it is still the master list with your offerings at the top."
+
+- The accordion is the **master list**: your domain first, then the domains
+  you follow. It does not change.
+- A **showcase is a named group**: a filter over that list. The pages are
+  *All*, then each group; a horizontal swipe on a phone moves between them.
+- **Managing** shows every tile of the master list with the non-members
+  grayed out; a click toggles a tile in or out of the current group.
+  **Viewing** shows only the members.
+- The groups are the Publish panel's existing **Groups** (`publish-groups`),
+  and the record carries them: `groups: [{ name, items }]` beside `items` and
+  `domains`, so a switch is still one commit and undo stays native.
