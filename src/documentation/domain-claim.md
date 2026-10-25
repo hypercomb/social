@@ -215,13 +215,15 @@ is a domain and its hives are its subdomains, so the page is:
   owners choose it per page and per community in the signed showcase (`view`);
   `?view=launcher` asks for it on the address (`showcase.md`, "How a page is
   drawn").
-- **Follow a domain** (jwize, 2026-10-25): the search names a domain nothing
-  here matches, and the miss offers **Follow <domain>**; an input at the foot
-  follows one too, fixed to the bottom of a phone. The domain must answer
-  across origins, as a host does (`/pin`), then it is kept in this browser's
-  `community:hosts` and becomes a row, open, with what it publishes: its own
-  ledger (`/publications.json`), cut to the names under its own domain so a
-  peer cannot claim a place on this one.
+- **Follow a domain** (jwize, 2026-10-25): a search line that names a domain
+  this browser does not follow offers **Follow <domain>** (when nothing matches
+  it says so too); an input at the foot follows one as well, fixed to the bottom
+  of a phone. The domain must answer across origins, as a host does (`/pin`),
+  then it is kept in this browser's `community:hosts` and becomes a row, open,
+  with what it publishes: its own ledger (`/publications.json`), cut to the
+  names under its own domain and drawn as its own word, never as proof of who
+  owns a name here; and the creations it holds itself. The routes its offering
+  pool names are not followed: only this domain's own pool is read for them.
 - **On a desktop** the setup stays beneath the list: **Manage this hive**,
   whose *Creations and sources* is the gallery that turns a domain's offerings
   on here. It is the dashboard and the hosting. A phone shows the list and the
@@ -232,7 +234,7 @@ page keeps the gallery and its return bar.
 
 **One tile per name.** Every publish of one name is one tile on the page
 (jwize 2026-10-24: "an aggregate so we don't duplicate tiles on the home
-pages"). Clicking it opens its details: every version, this domain's pinned first,
+pages"). A tap goes to its content; holding it (or a right-click, the menu key, or Space) opens its details: every version, this domain's pinned first,
 and under each version every domain it opens on, each its own link. Identical
 publishes (one head) are one row however many domains or people carry them;
 the tile counts its owners when there is more than one. What the ledger

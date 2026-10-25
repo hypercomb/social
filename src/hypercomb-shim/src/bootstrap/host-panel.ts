@@ -608,8 +608,11 @@ class HostPanelElement extends HTMLElement {
         swarm: door.swarm,
         sources: zones,
         ledger: this.#ledger,
-        readShared: zone => Promise.all([readOfferings(zone).catch(() => []), readPublicCreations(zone).catch(() => [])])
-          .then(([offers, creations]) => ({ offers, creations })),
+        // A followed domain's offerings name routes anywhere, and reading one would send this
+        // browser to places nobody chose: only this domain's own pool is read for them; a peer
+        // is read by its ledger and by the creations it holds itself.
+        readShared: zone => Promise.all([zone === (this.#self || location.host) ? readOfferings(zone).catch(() => []) : Promise.resolve([]),
+          readPublicCreations(zone).catch(() => [])]).then(([offers, creations]) => ({ offers, creations })),
         readOwners: readZoneOwners,
         // EVERYTHING ON THE HOME PAGE IS A TILE (jwize 2026-10-25): the staged doors
         // and the platform's own are tiles in this domain's row, not panels.

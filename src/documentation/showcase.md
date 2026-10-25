@@ -18,17 +18,44 @@ recommendation").
   origin), closed, each opening onto what that peer publishes. One row is open
   at a time. A stranger follows nothing there, so they see only the showcase;
   you, following your peers, see your whole network. On a phone that is all
-  there is, with the search fixed at the bottom; the desktop keeps the setup
-  beneath it, because it is the dashboard and the hosting (jwize: "desktop
-  gets everything"). The front door draws it
+  there is, with the follow input fixed at the bottom; the desktop keeps the
+  setup beneath it, because it is the dashboard and the hosting (jwize:
+  "desktop gets everything"). The front door draws it
   (`hypercomb-shim/src/bootstrap/showcase.ts`).
+- **A straightforward list, the whole width of the screen** (jwize,
+  2026-10-25: "we want to stick to that really straightforward list that takes
+  up the whole screen width and gives room for you to see and do stuff and open
+  into a viewport similar to the tiles"). On a phone the rows run edge to edge
+  and each opens onto its tiles; on a desktop the list is as wide as the
+  screen allows.
+- **The search stays with you.** It is anchored flush to the top of the
+  screen, in the place the brand was, as the page scrolls; the brand scrolls
+  away and comes back when the page is scrolled back to the top.
+- **A tap goes to the content; a hold says where else it is** (jwize,
+  2026-10-25: "the clickable domains should come up on long hold and reserve
+  click for directly going to their content"). A tile is a link to this
+  domain's own place for the name, so a tap, a middle-click and "open in a tab"
+  all just go. Holding it for half a second (a right-click, the menu key, or
+  Space does the same) opens its versions and domains, and the click that ends
+  the hold goes nowhere. A tile on another origin opens in its own tab.
+- **On other domains, a tap toggles** (jwize, 2026-10-25: "of course on other
+  domains it is just toggling behaviors"): in your hive's Manage view, a tap on
+  a tile of a followed domain switches it into or out of your showcase, the way
+  a behaviour's switch is thrown, and a hold still says where else it is. That
+  belongs to the hive, which holds the key; this page holds none and cannot
+  sign, so on the page a tap always goes to the content. **Not built.**
 - **You** see your whole **community**: your domains, each opening onto what it
   hosts, where you choose what joins your showcase.
 
 "Community" is the word people read; underneath, a domain is a colony
 ([colony = domain](./domain-claim.md)).
 
-## Your community: domains are tiles
+## Your community: domains are tiles (design — not built)
+
+Nothing in this section exists in the hive yet: no hive code calls `signShowcase` or the
+switches below, no `showcase` layer slot is registered, and there is no Manage view.
+The front door's side (reading a signed showcase) and the record's pure functions are
+built; this is where they are headed.
 
 Your community is a list you keep (the `community:hosts` pool). In your hive it
 reads as your **hyperdex**: one tile per domain, drawn from that list. Nothing
@@ -65,6 +92,8 @@ piece someone plugs in extends the pool.
 
 ## The record
 
+The shape and its readers are built; what writes it from the hive is the design above.
+
 What you chose for a domain is one record:
 
 ```json
@@ -85,7 +114,17 @@ What you chose for a domain is one record:
   domains it shows in full (`hypercomb-shim/src/bootstrap/showcase-record.ts`).
   The owners whose record counts are the keys the domain's own root names in
   the ledger.
-- A domain with no record yet shows what opens on it.
+- A domain with no record yet shows what its owners **published here**: the
+  lineages whose signed doors name this domain, which is Publish's switch for it.
+  A lineage with no doors is not shown, even where the worker would open it.
+- A named item is shown unless Publish has turned it off for this domain: the
+  owners' signed doors have the last word on every item the record names. A
+  domain "shown in full" brings everything it hosts, whether or not it opens here.
+- **When it cannot be known, the page shows nothing rather than guess.** If no
+  owner's index could be reached, or an index names a showcase that cannot be
+  fetched or verified, the list says "Could not read what is published here." and
+  draws nothing, never the larger set the owners did not choose. A later read
+  that reaches no one keeps what the page last knew.
 
 The front door holds no key and cannot tell you from a visitor, which is why
 the choice is a signed public record and never a switch on the page itself.

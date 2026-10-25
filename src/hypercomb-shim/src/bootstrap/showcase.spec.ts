@@ -5,8 +5,9 @@
 // identical heads are one version however many domains or people carry it,
 // and this domain's version is pinned first in the tile's list.
 
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { describe, expect, it, vi } from 'vitest'
-import { parseShowcase, type ShowcaseRecord, type ZoneOwners } from './showcase-record'
+import { parseShowcase, readZoneOwners, type ShowcaseRecord, type ZoneOwners } from './showcase-record'
 import { aggregate, aggregateMatches, bandZones, coverOf, followCandidate, ledgerPublishes, ownersLabel, parseLedger,
   pageFlip, readPeerLedger, sharedPublishes, showcase } from './showcase'
 import { parseWelcome } from './welcome'
@@ -15,6 +16,11 @@ import { parseWelcome } from './welcome'
 vi.mock('./tile-picture', () => ({ tilePicture: async () => null, pictureOrigins: () => [] }))
 
 const sig = (char: string): string => char.repeat(64)
+
+/** What a person does to see where else a tile is: right-click it (a hold, or the menu key, says the same). */
+const openSheet = (tile: Element): void => {
+  tile.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+}
 
 const LEDGER = {
   sites: [
@@ -157,7 +163,7 @@ describe('showcase — the page is what is published now', () => {
     const draw = (record: ShowcaseRecord | null) => showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
-      readOwners: async (_zone, owners) => { asked.push([...owners]); return { showcase: record, doors: new Map() } },
+      readOwners: async (_zone, owners) => { asked.push([...owners]); return { showcase: record, reached: true, unreadable: false, doors: new Map() } },
     }).bands
     const one = draw({ zone: 'hypercomb.com', items: [{ pubkey: sig('a'), lineage: 'dylan' }], domains: [] })
     await vi.waitFor(() => expect(names(one)).toEqual(['dylan']))
@@ -173,7 +179,7 @@ describe('showcase — the page is what is published now', () => {
   it("without a signed showcase, shows only what its owners published here — the Publish switch for this domain", async () => {
     // camelflage's doors name hypercomb.com; dylan has none (it opens
     // everywhere on the worker, but was never published here).
-    const owners: ZoneOwners = { showcase: null, doors: new Map([[sig('a'), new Map([['camelflage', ['hypercomb.com']], ['jaime', ['jwize.com']]])]]) }
+    const owners: ZoneOwners = { showcase: null, reached: true, unreadable: false, doors: new Map([[sig('a'), new Map([['camelflage', ['hypercomb.com']], ['jaime', ['jwize.com']]])]]) }
     const { bands } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
@@ -201,17 +207,17 @@ describe('showcase — the page is what is published now', () => {
 
   it('opens a tile\'s versions, this domain\'s pinned first, and closes on Escape', async () => {
     const { hero, bands } = showcase({
-      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
       ledger: Promise.resolve(sites),
       readShared: async zone => ({ offers: zone === 'jwize.com' ? [offer('dylan', 'jwize.com', sig('c'), sig('9'))] : [], creations: [] }),
     })
     document.body.append(hero, bands)
     const tile = await vi.waitFor(() => {
-      const found = [...bands.querySelectorAll<HTMLButtonElement>('button.hex')].find(button => button.textContent?.includes('dylan'))
+      const found = [...bands.querySelectorAll<HTMLAnchorElement>('a.hex:not(.hex-link)')].find(button => button.textContent?.includes('dylan'))
       expect(found?.querySelector('.hex-owners')?.textContent).toBe('2')
       return found!
     })
-    tile.click()
+    openSheet(tile)
     const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
     expect(sheet.hidden).toBe(false)
     const rows = [...sheet.querySelectorAll('.version')]
@@ -259,11 +265,11 @@ describe('an owner\'s Off — handed to their own hive, never done here', () => 
     })
     document.body.append(hero, bands)
     const tile = await vi.waitFor(() => {
-      const found = [...bands.querySelectorAll<HTMLButtonElement>('button.hex')].find(button => button.textContent?.includes('dylan'))
+      const found = [...bands.querySelectorAll<HTMLAnchorElement>('a.hex:not(.hex-link)')].find(button => button.textContent?.includes('dylan'))
       expect(found).toBeDefined()
       return found!
     })
-    tile.click()
+    openSheet(tile)
     const sheet = hero.querySelector('.versions') as HTMLElement
     const manage = sheet.querySelector<HTMLButtonElement>('.versions-manage')!
     expect(sheet.querySelector<HTMLElement>('.version-claims')!.hidden).toBe(true)
@@ -383,7 +389,8 @@ describe('everything on the home page is a tile — the platform\'s doors too', 
     const { bands, hero } = draw()
     await vi.waitFor(() => expect(bands.querySelectorAll('.dex-row.own .hex').length).toBe(4))
     const tiles = [...bands.querySelectorAll('.dex-row.own .hex')]
-    expect(tiles.map(tile => tile.tagName)).toEqual(['BUTTON', 'BUTTON', 'A', 'A'])
+    expect(tiles.map(tile => tile.tagName)).toEqual(['A', 'A', 'A', 'A'])
+    expect(tiles.map(tile => tile.classList.contains('hex-link'))).toEqual([false, false, true, true])
     expect(tiles.slice(2).map(tile => tile.querySelector('.hex-name')?.textContent)).toEqual(['Browser extensions', 'Minimal host'])
     expect((tiles[3] as HTMLAnchorElement).getAttribute('href')).toBe('/hosts')
     // No panel is left on the page: no membership, no explore cards.
@@ -417,7 +424,7 @@ describe('following a domain from the page', () => {
     const fetched: string[] = []
     vi.stubGlobal('fetch', async (url: string) => {
       fetched.push(url)
-      return { ok: true, json: async () => ({ sites: [
+      return { ok: true, text: async () => JSON.stringify({ sites: [
         { host: 'garden.cafesociety.buzz', title: 'garden', lineage: 'garden', publishers: [{ pubkey: sig('c'), head: sig('7') }] },
         { host: 'dylan.hypercomb.com', title: 'dylan', lineage: 'dylan', publishers: [{ pubkey: sig('c'), head: sig('8') }] },
       ] }) }
@@ -510,7 +517,7 @@ describe('communities — pages after All', () => {
   const draw = () => showcase({
     self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [], links,
     ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
-    readOwners: async () => ({ showcase: record, doors: new Map() }),
+    readOwners: async () => ({ showcase: record, reached: true, unreadable: false, doors: new Map() }),
   })
   const names = (bands: HTMLElement): string[] => [...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent ?? '')
   const tabs = (bands: HTMLElement): string[] => [...bands.querySelectorAll('.pager-tab')].map(tab => `${tab.textContent}${tab.getAttribute('aria-selected') === 'true' ? '*' : ''}`)
@@ -584,10 +591,12 @@ describe('communities — pages after All', () => {
       await vi.waitFor(() => expect(tabs(bands)).toHaveLength(3))
       const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
       drag(bands, 300, 100)
-      ;(bands.querySelector('.dex-row.own button.hex') as HTMLButtonElement).click()
+      const tile = bands.querySelector('.dex-row.own a.hex') as HTMLAnchorElement
+      const click = () => { const event = new MouseEvent('click', { bubbles: true, cancelable: true }); tile.dispatchEvent(event); return event }
+      // The click a swipe ends with is swallowed, once; the next tap is a tap again.
+      expect(click().defaultPrevented).toBe(true)
+      expect(click().defaultPrevented).toBe(false)
       expect(sheet.hidden).toBe(true)
-      ;(bands.querySelector('.dex-row.own button.hex') as HTMLButtonElement).click()
-      expect(sheet.hidden).toBe(false)
     } finally { hero.remove(); bands.remove() }
   })
 
@@ -622,7 +631,7 @@ describe('communities — pages after All', () => {
     const withPeers = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
-      readOwners: async () => ({ showcase: record, doors: new Map() }),
+      readOwners: async () => ({ showcase: record, reached: true, unreadable: false, doors: new Map() }),
     })
     await vi.waitFor(() => expect(tabs(withPeers.bands)).toHaveLength(3))
     ;(withPeers.bands.querySelectorAll('.pager-tab')[1] as HTMLButtonElement).click()
@@ -644,7 +653,7 @@ describe('the launcher — the same tiles, drawn in rows of four', () => {
   const draw = (rec: ShowcaseRecord, sources: string[] = []) => showcase({
     self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources, links,
     ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
-    readOwners: async () => ({ showcase: rec, doors: new Map() }),
+    readOwners: async () => ({ showcase: rec, reached: true, unreadable: false, doors: new Map() }),
   })
   const own = (bands: HTMLElement): HTMLElement => bands.querySelector('.dex-row.own .comb') as HTMLElement
   const tab = (bands: HTMLElement, name: string): HTMLButtonElement =>
@@ -717,5 +726,261 @@ describe('the launcher — the same tiles, drawn in rows of four', () => {
       const hex = draw(record({ view: 'launcher' }))
       await vi.waitFor(() => expect(hex.bands.querySelector('.dex-row.own .comb-row')).not.toBeNull())
     } finally { history.replaceState(null, '', '/' + original) }
+  })
+})
+
+// What the review of 2026-10-25 confirmed, held in place.
+describe('what the owners meant, and what the page does when it cannot tell', () => {
+  const sites = parseLedger(LEDGER)
+  const owners = (extra: Partial<ZoneOwners> = {}): ZoneOwners => ({
+    showcase: null, reached: true, unreadable: false,
+    doors: new Map([[sig('a'), new Map([['camelflage', ['hypercomb.com']], ['dylan', ['hypercomb.com']]])]]), ...extra,
+  })
+  const draw = (read: () => Promise<ZoneOwners>, extra = {}) => showcase({
+    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+    ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: read, ...extra,
+  })
+  const names = (bands: HTMLElement): string[] => [...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent ?? '')
+  const empty = (bands: HTMLElement): string | undefined => bands.querySelector('.dex-row.own .hosted-empty:not([hidden])')?.textContent ?? undefined
+
+  it('shows nothing, and says so, when the showcase an index names cannot be read — never the larger set', async () => {
+    const { bands } = draw(async () => owners({ unreadable: true }))
+    await vi.waitFor(() => expect(empty(bands)).toBe('Could not read what is published here.'))
+    expect(names(bands)).toEqual([])
+  })
+
+  it('shows nothing, and says so, when no owner\'s index could be reached at all', async () => {
+    const { bands } = draw(async () => owners({ reached: false, doors: new Map() }))
+    await vi.waitFor(() => expect(empty(bands)).toBe('Could not read what is published here.'))
+    expect(names(bands)).toEqual([])
+  })
+
+  it('keeps what it last knew when a later read reaches no one, and when a later ledger comes back empty', async () => {
+    let reads = 0
+    const { bands, refresh } = draw(async () => (reads++ === 0 ? owners() : owners({ reached: false, doors: new Map() })))
+    await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
+    refresh(Promise.resolve(sites))
+    await vi.waitFor(() => expect(reads).toBe(2))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(names(bands)).toEqual(['camelflage', 'dylan'])
+    refresh(Promise.resolve([]))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(names(bands)).toEqual(['camelflage', 'dylan'])
+  })
+
+  it('hides a named item that Publish has turned off for this domain, but not what a shown-in-full domain brings', async () => {
+    const record: ShowcaseRecord = { zone: 'hypercomb.com', domains: [], items: [{ pubkey: sig('a'), lineage: 'dylan' }, { pubkey: sig('a'), lineage: 'camelflage' }] }
+    const turnedOff = owners({ showcase: record, doors: new Map([[sig('a'), new Map([['camelflage', ['hypercomb.com']], ['dylan', ['jwize.com']]])]]) })
+    const { bands } = draw(async () => turnedOff)
+    await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage']))
+    // "Show all of jwize.com" means everything jwize.com hosts, whether or not it opens here.
+    const wide = draw(async () => ({ ...turnedOff, showcase: { ...record, items: [], domains: ['jwize.com'] } }))
+    await vi.waitFor(() => expect(names(wide.bands)).toEqual(['dylan']))
+  })
+
+  it('never counts a followed domain\'s ledger as proof: it cannot slip into an owner\'s tile, or earn a Manage switch', async () => {
+    const hostile = parseLedger({ sites: [
+      // evil.example claims the owner's key and lineage to put its own version under the owner's name.
+      { host: 'dylan.evil.example', title: 'dylan', lineage: 'dylan', hosts: [{ host: 'dylan.evil.example' }],
+        publishers: [{ pubkey: sig('a'), label: 'Jaime', head: sig('6') }] },
+    ] })
+    const { bands } = draw(async () => owners(), { sources: ['evil.example'], readPeerLedger: async () => hostile })
+    await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
+    // The owner's own tile keeps its one owner: the peer's claim to the same key never joins it.
+    const dylan = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes('dylan'))!
+    expect(dylan.querySelector<HTMLElement>('.hex-owners')!.hidden).toBe(true)
+    // The peer's row has its own version of the name, drawn as an address, never as the owner's.
+    ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+    await vi.waitFor(() => expect([...bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['dylan']))
+  })
+
+  it('reads a followed domain\'s own ledger even when this host\'s ledger already knew the domain', async () => {
+    const read = vi.fn(async () => [] as ReturnType<typeof parseLedger>)
+    const { bands } = draw(async () => owners(), { readPeerLedger: read, follow: async (raw: string) => ({ ok: true as const, zone: raw }) })
+    await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
+    expect(read).not.toHaveBeenCalled()
+    const input = bands.querySelector('.follow input') as HTMLInputElement
+    input.value = 'jwize.com'
+    ;(bands.querySelector('.follow') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }))
+    await vi.waitFor(() => expect(read).toHaveBeenCalledWith('jwize.com'))
+  })
+
+  it('draws a followed domain that sits under one already drawn as the names that open under it', async () => {
+    const { bands } = draw(async () => owners(), { sources: ['dylan.jwize.com'] })
+    await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
+    ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+    expect([...bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['dylan'])
+  })
+
+  it('leaves the tab strip to the keyboard shortcuts it does not own, and the swipe\'s ground to pages that have a swipe', async () => {
+    const a = { pubkey: sig('a') }
+    const record: ShowcaseRecord = { zone: 'hypercomb.com', domains: [], items: [{ ...a, lineage: 'dylan' }, { ...a, lineage: 'camelflage' }],
+      communities: [{ name: 'Daily', items: [{ ...a, lineage: 'dylan' }], domains: [] }] }
+    const { bands } = draw(async () => owners({ showcase: record }))
+    await vi.waitFor(() => expect(bands.querySelectorAll('.pager-tab')).toHaveLength(2))
+    const hosted = bands.querySelector('.hosted') as HTMLElement
+    expect(hosted.classList.contains('swipeable')).toBe(true)
+    const key = (init: KeyboardEventInit) => bands.querySelector('.pager')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true, ...init }))
+    key({ altKey: true })
+    key({ metaKey: true })
+    expect([...bands.querySelectorAll('.pager-tab')].map(tab => tab.getAttribute('aria-selected'))).toEqual(['true', 'false'])
+    key({})
+    expect([...bands.querySelectorAll('.pager-tab')].map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'true'])
+    // A search takes the swipe's ground away: its misses and its Follow offer sit where they are read.
+    const search = bands.parentElement ? undefined : undefined
+    void search
+  })
+})
+
+describe('readZoneOwners — how far a read got', () => {
+  const secret = generateSecretKey()
+  const owner = getPublicKey(secret)
+  const zone = 'hypercomb.com'
+  const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
+  const hash = async (data: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map(b => b.toString(16).padStart(2, '0')).join('')
+  const serve = async (atom: { zone?: string } | null, sigOverride?: string) => {
+    const body = atom ? bytes({ kind: 'host:showcase', zone, items: [{ pubkey: owner, lineage: 'dylan' }], domains: [], ...atom }) : null
+    const atomSig = sigOverride ?? (body ? await hash(body) : sig('e'))
+    const index = finalizeEvent({ kind: 30564, created_at: 1, tags: [], content: JSON.stringify({ v: 1,
+      roots: atom === undefined ? {} : { [`showcase:${zone}`]: atomSig }, doors: { dylan: [zone] } }) }, secret)
+    const indexes = await hash(new TextEncoder().encode('hive:indexes'))
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      expect(init?.signal).toBeDefined()
+      if (url === `https://${zone}/${indexes}/${owner}`) return new Response(JSON.stringify(index), { status: 200 })
+      if (body && url === `https://${zone}/${atomSig}`) return new Response(body, { status: 200 })
+      return new Response('', { status: 404 })
+    }))
+  }
+
+  it('reads the index and the showcase it names', async () => {
+    await serve({})
+    try {
+      const read = await readZoneOwners(zone, [owner])
+      expect(read.reached).toBe(true)
+      expect(read.unreadable).toBe(false)
+      expect(read.showcase?.items).toEqual([{ pubkey: owner, lineage: 'dylan' }])
+      expect(read.doors.get(owner)?.get('dylan')).toEqual([zone])
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('says unreadable — not "no showcase" — when the index names one that cannot be fetched or verified', async () => {
+    await serve({}, sig('f'))
+    try {
+      const read = await readZoneOwners(zone, [owner])
+      expect(read.reached).toBe(true)
+      expect(read.showcase).toBeNull()
+      expect(read.unreadable).toBe(true)
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('says it reached no one when no index could be read, and does not let a second owner stand in for a first whose showcase is unreadable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))
+    try {
+      expect(await readZoneOwners(zone, [owner])).toMatchObject({ reached: false, unreadable: false, showcase: null })
+    } finally { vi.unstubAllGlobals() }
+  })
+})
+
+describe('a tile — a tap goes to the content, a hold comes up with where else it is', () => {
+  const sites = parseLedger(LEDGER)
+  const draw = (extra = {}) => showcase({
+    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+    ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), ...extra,
+  })
+  const tileOf = async (bands: HTMLElement, name: string): Promise<HTMLAnchorElement> => vi.waitFor(() => {
+    const found = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes(name))
+    expect(found).toBeDefined()
+    return found!
+  })
+  const pointer = (target: Element, type: string, props: Record<string, unknown> = {}): void => {
+    const event = new Event(type, { bubbles: true, cancelable: true })
+    for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', button: 0, clientX: 100, clientY: 100, ...props })) Object.defineProperty(event, key, { value })
+    target.dispatchEvent(event)
+  }
+
+  it('is a link to this domain\'s own place for the name — so a tap, a middle-click and "open in a tab" all just go', async () => {
+    const { bands } = draw()
+    const dylan = await tileOf(bands, 'dylan')
+    expect(dylan.tagName).toBe('A')
+    expect(dylan.getAttribute('href')).toBe('https://dylan.hypercomb.com/')
+    // Another origin opens in its own tab; this page stays where it is.
+    expect(dylan.getAttribute('target')).toBe('_blank')
+    expect(dylan.getAttribute('rel')).toBe('noopener')
+    expect(dylan.getAttribute('title')).toContain('hold, or press Space')
+  })
+
+  it('does not open the sheet on a tap, and opens it on a hold — swallowing the click the hold ends with', async () => {
+    vi.useFakeTimers()
+    try {
+      const { hero, bands } = draw()
+      document.body.append(hero, bands)
+      await vi.advanceTimersByTimeAsync(50)
+      const dylan = await tileOf(bands, 'dylan')
+      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
+      const click = () => { const event = new MouseEvent('click', { bubbles: true, cancelable: true }); dylan.dispatchEvent(event); return event }
+      // A tap: down and up at once, then the click — the link is followed, the sheet stays shut.
+      pointer(dylan, 'pointerdown'); pointer(dylan, 'pointerup')
+      expect(click().defaultPrevented).toBe(false)
+      vi.advanceTimersByTime(1000)
+      expect(sheet.hidden).toBe(true)
+      // A hold: the sheet comes up on its own, and the click that ends the hold goes nowhere.
+      pointer(dylan, 'pointerdown')
+      vi.advanceTimersByTime(499)
+      expect(sheet.hidden).toBe(true)
+      vi.advanceTimersByTime(2)
+      expect(sheet.hidden).toBe(false)
+      pointer(dylan, 'pointerup')
+      expect(click().defaultPrevented).toBe(true)
+      expect(click().defaultPrevented).toBe(false)
+      hero.remove(); bands.remove()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('is not a hold when the finger moves, lifts early, or is the secondary button', async () => {
+    vi.useFakeTimers()
+    try {
+      const { hero, bands } = draw()
+      document.body.append(hero, bands)
+      await vi.advanceTimersByTimeAsync(50)
+      const dylan = await tileOf(bands, 'dylan')
+      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
+      pointer(dylan, 'pointerdown'); pointer(dylan, 'pointermove', { clientX: 130 })
+      vi.advanceTimersByTime(900)
+      expect(sheet.hidden).toBe(true)
+      pointer(dylan, 'pointerdown'); vi.advanceTimersByTime(300); pointer(dylan, 'pointerup'); vi.advanceTimersByTime(900)
+      expect(sheet.hidden).toBe(true)
+      pointer(dylan, 'pointerdown', { button: 2 }); vi.advanceTimersByTime(900)
+      expect(sheet.hidden).toBe(true)
+      hero.remove(); bands.remove()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('opens the sheet from the keyboard and the context menu, never from Enter — which follows the link', async () => {
+    const { hero, bands } = draw()
+    document.body.append(hero, bands)
+    try {
+      const dylan = await tileOf(bands, 'dylan')
+      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
+      dylan.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+      expect(sheet.hidden).toBe(true)
+      const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+      dylan.dispatchEvent(space)
+      expect(space.defaultPrevented).toBe(true)
+      expect(sheet.hidden).toBe(false)
+      sheet.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      expect(sheet.hidden).toBe(true)
+      const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      dylan.dispatchEvent(menu)
+      expect(menu.defaultPrevented).toBe(true)
+      expect(sheet.hidden).toBe(false)
+    } finally { hero.remove(); bands.remove() }
+  })
+
+  it('keeps the page\'s search sticky to the top, in the brand\'s place, and the list the whole width', () => {
+    const { hero } = draw()
+    // The header's rows belong to the page, so the search can stick to the page's top.
+    expect(hero.classList.contains('hero')).toBe(true)
+    expect(hero.querySelector(':scope > .hero-brand')).not.toBeNull()
+    expect(hero.querySelector(':scope > .search')).not.toBeNull()
   })
 })

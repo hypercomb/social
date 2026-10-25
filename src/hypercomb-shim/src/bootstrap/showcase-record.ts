@@ -101,11 +101,18 @@ export const parseCommunities = (raw: unknown): ShowcaseCommunity[] => {
 
 /** What a domain's owners sign, as far as its page needs: the showcase they
  *  chose, and where each of their lineages opens (`doors`; a lineage with no
- *  doors is absent, and opens nowhere the page will showcase). */
+ *  doors is absent, and opens nowhere the page will showcase). Two flags say
+ *  how far the read got, because "nothing" and "could not read" are not the
+ *  same answer: `reached` is false when no owner's index could be read at all,
+ *  and `unreadable` is true when an index names a showcase that could not be
+ *  fetched, verified or understood. Either way the page shows nothing rather
+ *  than guess at what the owners meant. */
 export type ZoneOwners = {
   readonly showcase: ShowcaseRecord | null
   /** pubkey → lineage → the domains its signed doors name. */
   readonly doors: ReadonlyMap<string, ReadonlyMap<string, readonly string[]>>
+  readonly reached: boolean
+  readonly unreadable: boolean
 }
 
 /** Does an owner's signed doors open this lineage on this domain, by name?
@@ -133,7 +140,7 @@ export const parseShowcase = (raw: unknown, zone: string): ShowcaseRecord | null
 
 const fetchJson = async (url: string, limit: number): Promise<{ bytes: ArrayBuffer; value: unknown } | null> => {
   try {
-    const response = await fetch(url, { cache: 'no-store' })
+    const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
     if (!response.ok || Number(response.headers.get('content-length') ?? 0) > limit) return null
     const bytes = await response.arrayBuffer()
     return bytes.byteLength <= limit ? { bytes, value: JSON.parse(new TextDecoder().decode(bytes)) } : null
@@ -143,13 +150,17 @@ const fetchJson = async (url: string, limit: number): Promise<{ bytes: ArrayBuff
 /**
  * What the zone's owners sign now — the primary owner first — read from the
  * zone itself and checked here: each index by its signature, the showcase by
- * its name. The first owner who signs a showcase decides it; every owner's
- * doors are kept, so the page shows only what they published here.
+ * its name. The first owner who NAMES a showcase decides it: if that one cannot
+ * be read, the next owner's is not a stand-in. Every owner's doors are kept, so
+ * the page shows only what they published here.
  */
 export const readZoneOwners = async (zone: string, owners: readonly string[]): Promise<ZoneOwners> => {
   const doors = new Map<string, ReadonlyMap<string, readonly string[]>>()
   let showcase: ShowcaseRecord | null = null
-  if (!ZONE.test(zone) && !LOOPBACK.test(zone)) return { showcase, doors }
+  let reached = false
+  let unreadable = false
+  let decided = false
+  if (!ZONE.test(zone) && !LOOPBACK.test(zone)) return { showcase, doors, reached, unreadable }
   const origin = `${LOOPBACK.test(zone) ? 'http' : 'https'}://${zone}`
   const indexes = await SignatureService.sign(new TextEncoder().encode('hive:indexes').buffer as ArrayBuffer)
   for (const pubkey of owners.filter(key => SIG.test(key)).slice(0, 8)) {
@@ -159,20 +170,23 @@ export const readZoneOwners = async (zone: string, owners: readonly string[]): P
     try { if (!verifyEvent(event as never)) continue } catch { continue }
     let content: { roots?: Record<string, unknown>; doors?: Record<string, unknown> } | undefined
     try { content = JSON.parse(String(event['content'] ?? '')) } catch { continue }
+    reached = true
     const opened = new Map<string, readonly string[]>()
     for (const [lineage, listed] of Object.entries(content?.doors ?? {})) {
       if (Array.isArray(listed)) opened.set(lineage, listed.filter((door): door is string => typeof door === 'string').map(door => door.toLowerCase()))
     }
     doors.set(pubkey, opened)
-    if (showcase) continue
+    if (decided) continue
     const sig = String(content?.roots?.[showcaseKey(zone)] ?? '').toLowerCase()
     if (!SIG.test(sig)) continue
+    decided = true
     for (const path of [`/${sig}`, `/content/${sig}`]) {
       const atom = await fetchJson(`${origin}${path}`, 262_144)
       if (!atom || await SignatureService.sign(atom.bytes) !== sig) continue
       const record = parseShowcase(atom.value, zone)
       if (record) { showcase = record; break }
     }
+    if (!showcase) unreadable = true
   }
-  return { showcase, doors }
+  return { showcase, doors, reached, unreadable }
 }

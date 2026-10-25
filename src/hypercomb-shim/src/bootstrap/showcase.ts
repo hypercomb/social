@@ -149,12 +149,12 @@ export const parseLedger = (raw: unknown): LedgerSite[] => {
   for (const entry of sites.slice(0, 500)) {
     if (!entry || typeof entry !== 'object') continue
     const site = entry as Record<string, unknown>
-    const bindings = Array.isArray(site['hosts']) ? site['hosts'] as unknown[] : []
+    const bindings = (Array.isArray(site['hosts']) ? site['hosts'] as unknown[] : []).slice(0, 24)
     const hosts = [site['host'], ...bindings.map(row => (row as { host?: unknown } | null)?.host)]
       .map(host => typeof host === 'string' ? host.trim().toLowerCase() : '')
       .filter(host => HOSTNAME.test(host))
     if (!hosts.length) continue
-    const named = (Array.isArray(site['publishers']) ? site['publishers'] as unknown[] : [])
+    const named = (Array.isArray(site['publishers']) ? site['publishers'] as unknown[] : []).slice(0, 16)
       .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
       .filter(row => typeof row['pubkey'] === 'string' && SIG.test(row['pubkey']))
       .sort((a, b) => Number(b['primary'] === true) - Number(a['primary'] === true))
@@ -186,8 +186,10 @@ export const bandZones = (sites: readonly LedgerSite[], self: string, sources: r
   rootZones([self, ...sites.flatMap(site => site.hosts), ...sources])
     .sort((a, b) => (a === self ? -1 : b === self ? 1 : a.localeCompare(b)))
 
-/** Every publish the ledger names, at the address it answers on each domain. */
-export const ledgerPublishes = (sites: readonly LedgerSite[], zones: readonly string[]): Publish[] => {
+/** Every publish the ledger names, at the address it answers on each domain.
+ *  This host's own ledger is `ledger`, which verifies; a followed domain's is its
+ *  own word and is drawn as `pool`, which never counts as proof of who owns a name. */
+export const ledgerPublishes = (sites: readonly LedgerSite[], zones: readonly string[], source: Publish['source'] = 'ledger'): Publish[] => {
   const out: Publish[] = []
   for (const zone of zones) {
     for (const site of sites) {
@@ -198,7 +200,7 @@ export const ledgerPublishes = (sites: readonly LedgerSite[], zones: readonly st
       for (const publisher of site.publishers) {
         out.push({ zone, kind: 'hive', name: nameOf(site.lineage, site.title), title: site.title,
           head: publisher.head, owner: { pubkey: publisher.pubkey, label: publisher.label },
-          address: host, href, route: href, source: 'ledger', lineage: site.lineage })
+          address: host, href, route: href, source, lineage: site.lineage })
       }
     }
   }
@@ -395,7 +397,9 @@ export const readPeerLedger = async (zone: string): Promise<LedgerSite[]> => {
   try {
     const response = await fetch(`${doorOrigin(zone)}/publications.json`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
     if (!response.ok) return []
-    return parseLedger(await response.json())
+    const body = await response.text()
+    if (body.length > 1_000_000) return []
+    return parseLedger(JSON.parse(body))
       .map(site => ({ ...site, hosts: site.hosts.filter(host => matchesDomain(host, zone)) }))
       .filter(site => site.hosts.length > 0)
   } catch { return [] }
@@ -405,7 +409,7 @@ export const readPeerLedger = async (zone: string): Promise<LedgerSite[]> => {
  *  with an SPA fallback answers 200 with HTML, so the type is checked first. */
 export const readLedger = async (): Promise<LedgerSite[]> => {
   try {
-    const response = await fetch('/publications.json', { cache: 'no-store' })
+    const response = await fetch('/publications.json', { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
     if (!response.ok || !(response.headers.get('content-type') ?? '').toLowerCase().includes('json')) return []
     return parseLedger(await response.json())
   } catch { return [] }
@@ -669,7 +673,15 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     if (opener?.isConnected) opener.focus()
     opener = null
   }
-  backdrop.addEventListener('click', event => { if (event.target === backdrop) closeVersions() })
+  /** The click a hold ends with lands on the sheet that hold just opened under the finger:
+   *  it is not a tap on the backdrop, and the sheet stays. The next real press clears it. */
+  let heldOpen = false
+  backdrop.addEventListener('pointerdown', () => { heldOpen = false })
+  backdrop.addEventListener('click', event => {
+    if (event.target !== backdrop) return
+    if (heldOpen) { heldOpen = false; return }
+    closeVersions()
+  })
   const openVersions = (entry: Aggregate, from: HTMLElement): void => {
     opener = from
     const lead = entry.versions[0]!
@@ -794,22 +806,31 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     ;(list.querySelector('a') as HTMLElement | null)?.focus()
   }
 
-  // ── tiles and bands: ONE button per name, kept and updated in place — a pool
-  //    arriving never swaps a button out from under focus or an open sheet ──
-  type TileView = { tile: HTMLButtonElement; art: HTMLElement; name: HTMLElement; address: HTMLElement
+  // ── tiles: ONE link per name, kept and updated in place — a pool arriving
+  //    never swaps a tile out from under focus or an open sheet ──
+  type TileView = { tile: HTMLAnchorElement; art: HTMLElement; name: HTMLElement; address: HTMLElement
     owners: HTMLElement; head: string; entry: Aggregate }
   const tileViews = new Map<string, TileView>()
+  /** Where a tap goes: this row's own place for the name, else its first. */
+  const placeFor = (entry: Aggregate, row: string): Place => {
+    for (const version of entry.versions) {
+      const place = version.places.find(candidate => candidate.zone === row)
+      if (place) return place
+    }
+    return entry.versions[0]!.places[0]!
+  }
+  /** How long a press is a hold. */
+  const HOLD_MS = 500
   /** A name's tile in one row: the same name may show in your domain's row and
-   *  in the row of the domain it came from, each its own button. */
-  const tileView = (entry: Aggregate, row: string): HTMLButtonElement => {
+   *  in the row of the domain it came from, each its own link. */
+  const tileView = (entry: Aggregate, row: string): HTMLAnchorElement => {
     const lead = entry.versions[0]!
     const id = `${row}
 ${entry.key}`
     let view = tileViews.get(id)
     if (!view) {
-      const tile = el('button', `hex hex-${entry.kind}`)
-      tile.type = 'button'
-      tile.setAttribute('aria-haspopup', 'dialog')
+      const tile = el('a', `hex hex-${entry.kind}`)
+      tile.draggable = false
       const art = el('span', 'hex-art cover')
       const label = el('span', 'hex-label')
       if (entry.kind === 'creation') {
@@ -824,7 +845,38 @@ ${entry.key}`
       const owners = el('span', 'hex-owners')
       tile.append(art, label, owners)
       const made: TileView = { tile, art, name, address, owners, head: '', entry }
-      tile.addEventListener('click', () => openVersions(made.entry, tile))
+      // A TAP GOES STRAIGHT TO THE CONTENT; A HOLD COMES UP WITH WHERE ELSE IT IS (jwize
+      // 2026-10-25: "the clickable domains should come up on long hold and reserve click for
+      // directly going to their content"). A hold, a right-click, the menu key and Space all
+      // open the versions and domains; the click a hold ends with is swallowed.
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let down: { x: number; y: number } | null = null
+      let held = false
+      const stop = (): void => { if (timer) clearTimeout(timer); timer = undefined; down = null }
+      tile.addEventListener('pointerdown', event => {
+        if (event.button > 0) return
+        held = false
+        down = { x: event.clientX, y: event.clientY }
+        timer = setTimeout(() => { stop(); held = true; heldOpen = true; openVersions(made.entry, tile) }, HOLD_MS)
+      })
+      tile.addEventListener('pointermove', event => {
+        if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 10) stop()
+      })
+      for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
+        tile.addEventListener(type, () => { stop(); if (held) setTimeout(() => { held = false }, 0) })
+      }
+      tile.addEventListener('click', event => {
+        if (!held) return
+        held = false
+        event.preventDefault()
+        event.stopPropagation()
+      })
+      tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile) })
+      tile.addEventListener('keydown', event => {
+        if (event.key !== ' ' || event.altKey || event.ctrlKey || event.metaKey) return
+        event.preventDefault()
+        openVersions(made.entry, tile)
+      })
       tileViews.set(id, view = made)
     }
     view.entry = entry
@@ -837,9 +889,14 @@ ${entry.key}`
       wear(view.art, lead.head, lead.route)
       view.head = lead.head
     }
-    view.tile.title = `${entry.title} · ${lead.places[0]!.address}`
+    const place = placeFor(entry, row)
+    view.tile.href = place.href
+    // Somewhere else on the web opens in its own tab; this origin is this site still.
+    if (view.tile.origin !== location.origin) { view.tile.target = '_blank'; view.tile.rel = 'noopener' }
+    else { view.tile.removeAttribute('target'); view.tile.removeAttribute('rel') }
+    view.tile.title = `${entry.title} · ${place.address} — hold, or press Space, for its versions and domains`
     view.name.textContent = entry.title
-    view.address.textContent = lead.places[0]!.address
+    view.address.textContent = place.address
     view.owners.hidden = entry.owners < 2
     view.owners.setAttribute('aria-label', count(entry.owners, 'owner', 'owners'))
     view.owners.replaceChildren(iconOf('people'), document.createTextNode(String(entry.owners)))
@@ -1012,6 +1069,7 @@ ${entry.key}`
     if (keys[next] !== page) select(keys[next]!)
   }
   pager.addEventListener('keydown', event => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
     const keys = ['', ...pages().map(community => communityKey(community.name))]
     const at = keys.indexOf(page)
     const to = event.key === 'ArrowRight' ? (at + 1) % keys.length : event.key === 'ArrowLeft' ? (at - 1 + keys.length) % keys.length
@@ -1047,8 +1105,6 @@ ${entry.key}`
     event.preventDefault()
     event.stopPropagation()
   }, true)
-  /** Everything the page knows to be published: this origin's ledger, and each followed domain's own. */
-  const allSites = (): LedgerSite[] => [...sites, ...[...peerSites.values()].flat()]
 
   // ── THE PLATFORM'S DOORS, AS TILES: the same hexagon as a hive, a link to a
   //    page deployed somewhere — kept, one anchor per address ──
@@ -1082,11 +1138,13 @@ ${entry.key}`
   }
   /** Every publish known now — the ledger's, then each domain's pools — one tile per name. */
   const bands = (): Band[] => {
-    const zones = bandZones(allSites(), options.self, held)
-    const publishes = ledgerPublishes(allSites(), zones)
-    // Only the pools of domains the page still draws: a refresh can drop one.
+    const peers = [...peerSites.values()]
+    const zones = bandZones([...sites, ...peers.flat()], options.self, held)
+    // This host's ledger verifies. A followed domain's ledger is its own word: drawn, never proof.
+    const publishes = [...ledgerPublishes(sites, zones), ...peers.flatMap(list => ledgerPublishes(list, zones, 'pool'))]
+    // Only the pools of this domain and the domains followed: a refresh can drop one.
     for (const [zone, pools] of shared) {
-      if (zones.includes(zone)) publishes.push(...sharedPublishes(zone, pools.offers, pools.creations))
+      if (zones.includes(zone) || held.includes(zone)) publishes.push(...sharedPublishes(zone, pools.offers, pools.creations))
     }
     return aggregate(publishes, zones, options.self)
   }
@@ -1107,26 +1165,23 @@ ${entry.key}`
     }
   }
   const askShared = (zone: string): void => {
-    if (asked.has(zone)) return
-    asked.add(zone)
-    queue.push(zone)
-    drainShared()
-    // A followed domain's published items come from its own ledger.
+    if (!asked.has(zone)) {
+      asked.add(zone)
+      queue.push(zone)
+      drainShared()
+    }
+    // A followed domain's published items come from its own ledger — asked for every
+    // domain followed, whether or not this host's ledger happens to know it too.
     if (zone !== options.self && options.readPeerLedger && held.includes(zone) && !peerAsked.has(zone)) {
       peerAsked.add(zone)
       void options.readPeerLedger(zone).catch(() => []).then(found => {
-        peerSites.set(zone, found)
-        askPictures()
+        // A read that brought back nothing never replaces what was known.
+        if (found.length || !peerSites.has(zone)) peerSites.set(zone, found)
         paint()
       })
     }
   }
-  /** Every version's picture is asked for at once — the tiles and their lists want them all. */
-  const askPictures = (): void => {
-    for (const band of bands()) for (const entry of band.tiles) {
-      for (const version of entry.versions) askPicture(version.head, version.route)
-    }
-  }
+  // Pictures are asked for when a tile is drawn (wear), never for tiles the page hides.
 
   /** What this domain's owners sign; undefined until read, null when it could not be. */
   let signed: ZoneOwners | null | undefined
@@ -1143,8 +1198,17 @@ ${entry.key}`
     || entry.versions.some(version => version.claims.some(claim =>
       items.some(item => item.pubkey === claim.pubkey && item.lineage === claim.lineage)))
   const showcased = (entry: Aggregate): boolean => {
+    // Nothing is known of what the owners meant — no index was reached, or the showcase one names
+    // could not be read: show nothing rather than a larger set than they chose.
+    if (signed && (!signed.reached || signed.unreadable)) return false
     const record = signed?.showcase
-    if (record) return covers(entry, record.items, record.domains)
+    if (record) {
+      if (entry.zones.some(zone => record.domains.includes(zone))) return true
+      // A named item is shown unless Publish has turned it off for this domain.
+      return entry.versions.some(version => version.claims.some(claim =>
+        record.items.some(item => item.pubkey === claim.pubkey && item.lineage === claim.lineage)
+        && doorsOpen(signed!, claim.pubkey, claim.lineage, options.self) !== false))
+    }
     const claims = entry.versions.flatMap(version => version.claims)
     // A domain's own pool offers what it shares here by putting it there.
     if (!claims.length) return entry.zones.includes(options.self)
@@ -1153,6 +1217,15 @@ ${entry.key}`
   }
 
   const within = (zone: string, of: string): boolean => zone === of || zone.endsWith(`.${of}`)
+  /** What a row offers: its band, or — for a followed domain under one already drawn — the parent's names that open under it. */
+  const rowItems = (all: readonly Band[], zone: string): readonly Aggregate[] => {
+    const band = all.find(row => row.zone === zone)
+    if (band) return band.open
+    const parent = all.find(row => within(zone, row.zone))
+    return parent ? parent.open.filter(entry => entry.versions.some(version => version.places.some(place => {
+      try { return within(new URL(place.href).hostname, zone) } catch { return false }
+    }))) : []
+  }
   /** The tab strip: kept and updated in place, so a repaint never takes a tab's focus. */
   const paintPager = (communities: readonly ShowcaseCommunity[]): void => {
     const entries = [{ key: '', name: 'All' }, ...communities.map(row => ({ key: communityKey(row.name), name: row.name }))]
@@ -1189,7 +1262,8 @@ ${entry.key}`
   function paint(): void {
     const terms = searchTerms(search.value)
     const all = bands()
-    for (const band of all) askShared(band.zone)
+    askShared(options.self)
+    for (const zone of held) askShared(zone)
     const unread = !!options.readOwners && signed === undefined
     const communities = pages()
     // A community that is gone is a page that is gone: back to All.
@@ -1210,7 +1284,7 @@ ${entry.key}`
     for (const zone of [options.self, ...[...held].sort()]) {
       const view = rowView(zone)
       const own = zone === options.self
-      const items = own ? everything : (all.find(band => band.zone === zone)?.open ?? []).slice().sort(byTitle)
+      const items = own ? everything : rowItems(all, zone).slice().sort(byTitle)
       const shown = items.filter(entry => aggregateMatches(entry, terms))
       const doors = own ? links.filter(link => linkMatches(link, terms)) : []
       const total = shown.length + doors.length
@@ -1229,13 +1303,15 @@ ${entry.key}`
       }), ...doors.map(link => linkTile(link))] : [], own ? shape : base)
       view.empty.hidden = !open || total > 0
       view.empty.textContent = own && (!ledgerRead || unread) ? 'Reading what is published here…'
-        : own ? 'Nothing is published here yet.' : `Nothing is published on ${zone} yet.`
+        : own && signed && (!signed.reached || signed.unreadable) ? 'Could not read what is published here.'
+          : own ? 'Nothing is published here yet.' : `Nothing is published on ${zone} yet.`
       rows.push(view.section)
     }
     // Re-insert only when the order changed: moving a row takes focus from it.
     const current = [...hosted.children]
     if (current.length !== rows.length || current.some((node, index) => node !== rows[index])) hosted.replaceChildren(...rows)
     paintPager(communities)
+    hosted.classList.toggle('swipeable', communities.length > 0 && !terms.length)
     nothing.hidden = !terms.length || visible > 0
     // A line that names a domain this browser does not follow offers to follow it.
     const candidate = followCandidate(search.value)
@@ -1287,18 +1363,24 @@ ${entry.key}`
     const read = ++reads
     void ledger.then(found => {
       if (read !== reads) return
+      // A read that brought back nothing is a read that failed: the page never trades what it knew for nothing.
+      if (!found.length && sites.length) return
       sites = found
       ledgerRead = true
       // The owners of this domain are the keys its own root names. Until their
       // record is read the list waits rather than show what it may not.
       const owners = found.find(site => site.hosts[0] === options.self)?.owners ?? []
-      void (options.readOwners?.(options.self, owners) ?? Promise.resolve(null))
-        .catch(() => null).then(found => {
+      const owned = options.readOwners?.(options.self, owners)
+      if (owned) {
+        void owned.catch((): ZoneOwners | null => null).then(found => {
           if (read !== reads) return
-          signed = found
+          // A read that reached no owner's index says nothing: keep what was last known,
+          // and where nothing was known show nothing rather than guess.
+          if (!found?.reached && signed?.reached) { paint(); return }
+          signed = found ?? { showcase: null, doors: new Map(), reached: false, unreadable: false }
           paint()
         })
-      askPictures()
+      }
       paint()
     })
   }
@@ -1348,9 +1430,11 @@ export const SHOWCASE_STYLE = `
 /* the header: a small brand row, then the search across the full width. The
    brand takes at most 2.5 times the search's height, margins and all (jwize
    2026-10-24) — lean, never cramped. */
-.card.showcase-page .panel { margin-top: 1.75rem; }
-.hero { margin: 0 0 1.1rem; }
-.hero-brand { display: flex; align-items: center; gap: .75rem; min-width: 0; }
+.card.showcase-page .panel { margin-top: 1.75rem; width: min(100rem, calc(100vw - 3rem)); }
+/* the header's two rows are the page's own: the search sticks flush to the top of the scrolled
+   page where the brand was, and the brand comes back when the page is scrolled back to it */
+.hero { display: contents; }
+.hero-brand { display: flex; align-items: center; gap: .75rem; min-width: 0; margin: 0 0 .15rem; }
 .hero-mark { flex: none; display: grid; width: 2.1rem; height: 2.1rem; }
 .hero-mark svg { width: 100%; height: 100%; }
 .hero-words { display: flex; align-items: baseline; gap: .9rem; flex: 1; min-width: 0; }
@@ -1361,8 +1445,9 @@ export const SHOWCASE_STYLE = `
   font: 500 .66rem/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
 .hero-stats span, .band-meta span { display: inline-flex; align-items: center; gap: .45rem; }
 .hero-stats svg, .band-meta svg { width: .95rem; height: .95rem; color: var(--md-primary); }
-.search { position: relative; display: flex; align-items: center; margin: 1.1rem 0 0; }
-.search svg { position: absolute; z-index: 1; left: .95rem; width: 1.15rem; height: 1.15rem; color: var(--md-primary); pointer-events: none; }
+.search { position: sticky; top: 0; z-index: 25; display: flex; align-items: center; margin: 0; padding: .55rem 0;
+  background: color-mix(in srgb, var(--md-surface-c-low) 90%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.search svg { position: absolute; z-index: 1; left: .95rem; top: 50%; margin-top: -.575rem; width: 1.15rem; height: 1.15rem; color: var(--md-primary); pointer-events: none; }
 .search input {
   flex: 1; width: 100%; padding: .78rem 1rem .78rem 2.8rem; font: 400 1rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif);
   color: var(--md-on-surface-strong); border-radius: var(--hc-radius-control, 2px);
@@ -1393,7 +1478,7 @@ export const SHOWCASE_STYLE = `
   font: 500 .66rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
 .hosted-empty[hidden], .dex-row[hidden], .hosted-nothing[hidden], .follow-suggest[hidden], .follow[hidden], .follow-note:empty { display: none; }
 /* the communities: a strip of names after All; the list beneath turns with a swipe */
-.pager { display: flex; gap: .4rem; overflow-x: auto; scrollbar-width: none; margin: 0 0 .8rem; padding: .1rem 0; }
+.pager { display: flex; gap: .4rem; overflow-x: auto; scrollbar-width: none; margin: -.3rem -.35rem .5rem; padding: .3rem .35rem; }
 .pager::-webkit-scrollbar { display: none; }
 .pager[hidden] { display: none; }
 .pager-tab { flex: none; padding: .42rem .85rem; border: 1px solid var(--md-outline-variant); border-radius: 999px; cursor: pointer;
@@ -1415,11 +1500,10 @@ export const SHOWCASE_STYLE = `
 .comb[data-shape='launcher'] .hex-address, .comb[data-shape='launcher'] .hex-kind { display: none; }
 .comb[data-shape='launcher'] .hex-owners { top: -.3rem; right: -.3rem; left: auto; transform: none; }
 .comb[data-shape='launcher'] .hex.in-showcase::after { top: -.3rem; right: -.3rem; left: auto; transform: none; width: 1.25rem; height: 1.25rem; font-size: .7rem; }
-.comb[data-shape='launcher'] button.hex:hover, .comb[data-shape='launcher'] button.hex:hover:not(:disabled), .comb[data-shape='launcher'] a.hex:hover,
-.comb[data-shape='launcher'] button.hex:focus-visible { background: none; }
+.comb[data-shape='launcher'] a.hex:hover, .comb[data-shape='launcher'] a.hex:focus-visible { background: none; }
 .comb[data-shape='launcher'] .hex:hover > .hex-art { transform: translateY(-2px); }
-.comb[data-shape='launcher'] button.hex:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 3px; }
-.comb[data-shape='launcher'] button.hex:focus-visible > .hex-art { inset: auto; }
+.comb[data-shape='launcher'] a.hex:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 3px; }
+.comb[data-shape='launcher'] a.hex:focus-visible > .hex-art { inset: auto; }
 .hosted-nothing { margin: .4rem 0 1rem; color: var(--md-on-surface-var); }
 /* the platform's doors are tiles: the same hexagon, a glyph for a picture, a link for a click */
 a.hex { color: inherit; text-decoration: none; cursor: pointer; }
@@ -1496,16 +1580,16 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
   font: 500 .58rem/1.3 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .03em; }
 .hex-kind svg { width: .95rem; height: .95rem; color: var(--gold-1); }
 /* only a real tile answers the pointer: a hive's button, or a door's link */
-button.hex { cursor: pointer; }
-button.hex:hover, button.hex:hover:not(:disabled), a.hex:hover { background: linear-gradient(160deg, var(--gold-1), var(--gold-2) 50%, var(--gold-3)); }
-button.hex:hover .hex-picture, button.hex:hover .hex-motif { transform: scale(1.07); }
-button.hex:hover > .hex-art::after, a.hex:hover > .hex-art::after { opacity: .8; }
-button.hex:focus-visible { outline: none; background: var(--md-primary); }
-button.hex:focus-visible > .hex-art { inset: 4px; }
+a.hex { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+a.hex:hover { background: linear-gradient(160deg, var(--gold-1), var(--gold-2) 50%, var(--gold-3)); }
+a.hex:hover .hex-picture, a.hex:hover .hex-motif { transform: scale(1.07); }
+a.hex:hover > .hex-art::after { opacity: .8; }
+a.hex:focus-visible { outline: none; background: var(--md-primary); }
+a.hex:focus-visible > .hex-art { inset: 4px; }
 .hex-owners[hidden] { display: none; }
 
 /* a tile's versions: this domain's pinned first, identical copies counted */
-.versions-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 1rem;
+.versions-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 1rem;
   background: rgb(20 12 4 / .45); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
 .versions-backdrop[hidden] { display: none; }
 .versions { box-sizing: border-box; width: min(36rem, 100%); max-height: min(82vh, 46rem); overflow: auto;
@@ -1573,7 +1657,16 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
 
 /* A PHONE: one column of the same list. */
 @media (max-width: 720px) {
-  .card.showcase-page .panel { margin-top: 1rem; padding-bottom: 5.5rem; }
+  /* the list is the whole width of the screen: rows edge to edge, room to see and to do */
+  .card.showcase-page .panel { margin-top: 0; width: 100%; padding-bottom: 5.5rem; }
+  .hero-brand { padding: .8rem 16px .15rem; }
+  .search { padding: .5rem 16px; }
+  .search svg { left: calc(16px + .95rem); }
+  .pager { margin: 0 0 .5rem; padding: .3rem 16px; }
+  .hosted { gap: 0; }
+  .dex-row { border-left: 0; border-right: 0; border-radius: 0; margin-top: -1px; }
+  .dex-head { padding: 1rem 16px; }
+  .hosted-nothing, .follow-suggest { margin-left: 16px; margin-right: 16px; }
   /* the phone is a dead-simple hyperdex (jwize 2026-10-25): the rows, with the
      search above them and the follow input fixed at the bottom where a thumb is
      — nothing else. The desktop keeps the setup beneath, because it is the
@@ -1582,16 +1675,15 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
     padding: .55rem 16px calc(.55rem + env(safe-area-inset-bottom));
     background: color-mix(in srgb, var(--md-surface) 94%, transparent); border-top: 1px solid var(--md-outline-variant);
     -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
-  .showcase-page details.manage, .showcase-page footer { display: none; }
-  .dex-body { padding: .1rem .5rem .8rem; }
+  .showcase-page details.manage { display: none; }
+  .dex-body { padding: .1rem 12px .9rem; }
   /* the swipe's ground: a short community must not shrink the place a thumb can turn the page */
-  .hosted { min-height: 60vh; min-height: 60dvh; align-content: start; }
+  .hosted.swipeable { min-height: 60vh; min-height: 60dvh; align-content: start; }
   .hero-brand { gap: .6rem; }
   .hero-mark { width: 1.7rem; height: 1.7rem; }
   .hero h1 { font-size: 1.2rem; }
   /* the sentence goes on a phone: the name, the count and the search are the header */
   .hero-tagline { display: none; }
-  .search { margin-top: .8rem; }
   .mini { width: 1.8rem; height: calc(1.8rem * 1.1547); margin-left: -.55rem; }
   .comb { --s: 6.1rem; --g: .36rem; }
   .comb[data-shape='launcher'] { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.1rem .7rem; }
