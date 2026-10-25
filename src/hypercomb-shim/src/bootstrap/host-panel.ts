@@ -18,9 +18,9 @@ import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
 import { hostRouteName } from '@hypercomb/runtime/host-activation'
 import { askHostPackages } from '@hypercomb/runtime/host-packages'
 import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome } from './replicate'
-import { APP_HREF, frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLink } from './welcome'
+import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLink } from './welcome'
 import { pictureOrigins, tilePicture } from './tile-picture'
-import { SHOWCASE_STYLE, exploreSection, matchesDomain, memberSection, readLedger, rootZones, searchTerms, showcase,
+import { SHOWCASE_STYLE, doorOrigin, matchesDomain, readLedger, readPeerLedger, rootZones, searchTerms, showcase,
   type LedgerSite } from './showcase'
 import { readZoneOwners } from './showcase-record'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
@@ -611,6 +611,11 @@ class HostPanelElement extends HTMLElement {
         readShared: zone => Promise.all([readOfferings(zone).catch(() => []), readPublicCreations(zone).catch(() => [])])
           .then(([offers, creations]) => ({ offers, creations })),
         readOwners: readZoneOwners,
+        // EVERYTHING ON THE HOME PAGE IS A TILE (jwize 2026-10-25): the staged doors
+        // and the platform's own are tiles in this domain's row, not panels.
+        links: [...door.links, ...door.footer],
+        follow: raw => this.#follow(raw),
+        readPeerLedger,
       })
       this.#showcaseRefresh = refresh
       panel.append(hero)
@@ -623,9 +628,7 @@ class HostPanelElement extends HTMLElement {
         for (const row of this.#pending) if (row.selected !== false) waiting.set(row.source, (waiting.get(row.source) ?? 0) + 1)
         if (waiting.size) panel.append(this.#waitingNote(waiting))
       }
-      panel.append(bands, memberSection(this.#self || location.host, APP_HREF))
-      const explore = exploreSection(door.links)
-      if (explore) panel.append(explore)
+      panel.append(bands)
       // What this door carries and from where — the gallery that turns a
       // domain's offerings on here — waits with the rest of the keeping.
       const curation = document.createElement('details')
@@ -672,7 +675,8 @@ class HostPanelElement extends HTMLElement {
     })
     manageBody.append(technical)
     panel.append(manage)
-    if (door.footer.length > 0) panel.append(this.#footer(door.footer))
+    // Choosing tiles keeps the old footer; the page's doors are tiles in its list.
+    if (selecting && door.footer.length > 0) panel.append(this.#footer(door.footer))
 
     card.append(panel)
     this.#root.append(style, card)
@@ -680,6 +684,22 @@ class HostPanelElement extends HTMLElement {
       this.#handoffAttempted = true
       void this.#takeHandoff()
     }
+  }
+
+  /** Follow a domain from the page: it must answer the way a Hypercomb host
+   *  does — across origins, since a host exists to be read from — and then it is
+   *  kept in this browser's community. Typed by the person, so no further
+   *  confirm; the check is never skipped. */
+  async #follow(raw: string): Promise<{ ok: true; zone: string } | { ok: false; reason: string }> {
+    const zone = hostZone(raw)
+    const self = this.#self || location.hostname
+    if (!zone) return { ok: false, reason: `${String(raw).trim() || 'That'} is not a domain.` }
+    if (zone === self || zone.endsWith(`.${self}`)) return { ok: false, reason: 'That is this domain.' }
+    try {
+      await fetch(`${doorOrigin(zone)}/pin`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+    } catch { return { ok: false, reason: `${zone} did not answer — it is not a Hypercomb host.` } }
+    const added = await addHostZone(zone)
+    return added ? { ok: true, zone: added } : { ok: false, reason: 'It could not be kept here.' }
   }
 
   #frontDoor(door: FrontDoor): HTMLElement[] {

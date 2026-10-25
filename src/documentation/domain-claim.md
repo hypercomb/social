@@ -196,11 +196,26 @@ is a domain and its hives are its subdomains, so the page is:
 - Every name is one tile; it wears the picture its hive's own tile wears, or
   a cover drawn from its signature. Give a hive's top tile a picture and it
   appears here at the next publish.
-- **At the foot:** what a member does to share their own favourite things, the
-  staged links (each may name an `icon` from a closed set: `tour`, `app`,
-  `host`, `download`, `extension`, `docs`, `source`), and **Manage this hive**,
+- **Everything on the page is a tile** (jwize, 2026-10-25: "everything in
+  your home page should be a tile … the extensions and minimal and everything
+  is just an automaton or we break the architecture. They have deployed
+  webpages that we can navigate to"). The staged links (each may name an `icon`
+  from a closed set: `tour`, `app`, `host`, `download`, `extension`, `docs`,
+  `source`) and the platform's own doors (the tour, the app, documentation,
+  source, licensing) are hexagons in this domain's row, after its hives: the
+  same shape, a glyph for a picture, and a link for a click. No membership
+  panel and no card grid remain.
+- **Follow a domain** (jwize, 2026-10-25): the search names a domain nothing
+  here matches, and the miss offers **Follow <domain>**; an input at the foot
+  follows one too, fixed to the bottom of a phone. The domain must answer
+  across origins, as a host does (`/pin`), then it is kept in this browser's
+  `community:hosts` and becomes a row, open, with what it publishes: its own
+  ledger (`/publications.json`), cut to the names under its own domain so a
+  peer cannot claim a place on this one.
+- **On a desktop** the setup stays beneath the list: **Manage this hive**,
   whose *Creations and sources* is the gallery that turns a domain's offerings
-  on here.
+  on here. It is the dashboard and the hosting. A phone shows the list and the
+  follow input, nothing else.
 
 Choosing tiles for a hive elsewhere (`?home=`) is a task, not a visit: that
 page keeps the gallery and its return bar.

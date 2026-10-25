@@ -65,11 +65,11 @@ export const APP_HREF = 'https://hypercomb.io/'
  *  chose to serve; these say what the files are for, and they are the same
  *  on every host because they are about the platform, not the host. */
 export const PLATFORM_LINKS: readonly WelcomeLink[] = [
-  { label: 'the tour', href: 'https://hypercomb.com/tour/', note: 'what this is, in nineteen minutes' },
-  { label: 'hypercomb.io', href: APP_HREF, note: 'the app — start a hive of your own' },
-  { label: 'documentation', href: 'https://github.com/hypercomb/social/tree/main/documentation', note: '' },
-  { label: 'source', href: 'https://github.com/hypercomb/social', note: 'AGPL-3.0' },
-  { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/documentation/licensing.md', note: '' },
+  { label: 'the tour', href: 'https://hypercomb.com/tour/', note: 'what this is, in nineteen minutes', icon: 'tour' },
+  { label: 'hypercomb.io', href: APP_HREF, note: 'the app — start a hive of your own', icon: 'app' },
+  { label: 'documentation', href: 'https://github.com/hypercomb/social/tree/main/documentation', note: '', icon: 'docs' },
+  { label: 'source', href: 'https://github.com/hypercomb/social', note: 'AGPL-3.0', icon: 'source' },
+  { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/documentation/licensing.md', note: '', icon: 'docs' },
 ]
 
 const text = (value: unknown, max: number): string =>

@@ -369,6 +369,26 @@ export const coverOf = (seed: string): Cover => {
   }
 }
 
+/** The domain a typed line names, or '' when it names none: a bare hostname
+ *  with a dot, whatever scheme or path was pasted around it. */
+export const followCandidate = (text: string): string => {
+  const bare = text.trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, '').split(/[/?#]/)[0] ?? ''
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(bare) ? bare : ''
+}
+
+/** A followed domain's own ledger. A peer speaks only for the names under its
+ *  own domain, so every host outside it is dropped: it cannot claim a place on
+ *  this one. */
+export const readPeerLedger = async (zone: string): Promise<LedgerSite[]> => {
+  try {
+    const response = await fetch(`${doorOrigin(zone)}/publications.json`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+    if (!response.ok) return []
+    return parseLedger(await response.json())
+      .map(site => ({ ...site, hosts: site.hosts.filter(host => matchesDomain(host, zone)) }))
+      .filter(site => site.hosts.length > 0)
+  } catch { return [] }
+}
+
 /** Read the ledger this origin serves, or nothing where it serves none. A host
  *  with an SPA fallback answers 200 with HTML, so the type is checked first. */
 export const readLedger = async (): Promise<LedgerSite[]> => {
@@ -478,6 +498,16 @@ export type ShowcaseOptions = {
   /** What this domain's owners sign — their showcase and their doors
    *  (showcase-record.ts readZoneOwners) — read after every ledger read. */
   readonly readOwners?: (zone: string, owners: readonly string[]) => Promise<ZoneOwners>
+  /** The platform's own doors — the tour, the app, the minimal host, the
+   *  downloads, the extensions — drawn as tiles in this domain's row. They are
+   *  pages deployed somewhere, reached by a link (jwize 2026-10-25: "everything
+   *  in your home page should be a tile … they have deployed webpages that we
+   *  can navigate to"). */
+  readonly links?: readonly WelcomeLink[]
+  /** Follow a domain: checked, then kept in this browser's community. */
+  readonly follow?: (raw: string) => Promise<{ readonly ok: true; readonly zone: string } | { readonly ok: false; readonly reason: string }>
+  /** A followed domain's own ledger, kept to the names under that domain. */
+  readonly readPeerLedger?: (zone: string) => Promise<readonly LedgerSite[]>
 }
 
 export type Showcase = {
@@ -886,11 +916,75 @@ ${entry.key}`
     return view
   }
   const hosted = el('div', 'hosted')
-  bandsHost.append(hosted)
+  const nothing = el('p', 'hosted-nothing')
+  nothing.textContent = 'Nothing matches your search.'
+  // A search that finds nothing, and names a domain, offers to follow it.
+  const suggest = el('div', 'follow-suggest')
+  const suggestGo = el('button')
+  suggestGo.type = 'button'
+  suggest.append(suggestGo)
+  // The domains this browser follows: its community, kept on this origin. Yours
+  // to add to here, at the foot — a stranger follows nothing and sees only this
+  // domain.
+  const held: string[] = [...new Set(options.sources)].filter(zone => zone !== options.self)
+  const peerSites = new Map<string, readonly LedgerSite[]>()
+  const peerAsked = new Set<string>()
+  const followBar = el('form', 'follow')
+  const followNote = el('p', 'follow-note')
+  followNote.setAttribute('role', 'status')
+  const followField = el('div', 'follow-field')
+  const followInput = el('input')
+  followInput.type = 'text'
+  followInput.placeholder = 'Follow a domain, like friend.com'
+  followInput.setAttribute('aria-label', 'Follow a domain')
+  followInput.autocomplete = 'off'
+  followInput.spellcheck = false
+  followInput.autocapitalize = 'none'
+  followInput.inputMode = 'url'
+  const followGo = el('button')
+  followGo.type = 'submit'
+  followGo.textContent = 'Follow'
+  followField.append(iconOf('globe'), followInput, followGo)
+  followBar.append(followNote, followField)
+  followBar.hidden = !options.follow
+  bandsHost.append(hosted, nothing, suggest, followBar)
+  /** Everything the page knows to be published: this origin's ledger, and each followed domain's own. */
+  const allSites = (): LedgerSite[] => [...sites, ...[...peerSites.values()].flat()]
+
+  // ── THE PLATFORM'S DOORS, AS TILES: the same hexagon as a hive, a link to a
+  //    page deployed somewhere — kept, one anchor per address ──
+  const hostOf = (href: string): string => {
+    try { const url = new URL(href, location.origin); return url.host + (url.pathname.length > 1 ? url.pathname.replace(/\/$/, '') : '') } catch { return '' }
+  }
+  const linkTiles = new Map<string, HTMLAnchorElement>()
+  const linkTile = (link: WelcomeLink): HTMLAnchorElement => {
+    const found = linkTiles.get(link.href)
+    if (found) return found
+    const tile = el('a', 'hex hex-link')
+    tile.href = link.href
+    // Somewhere else on the web opens in its own tab; this origin is this site still.
+    if (tile.origin !== location.origin) { tile.target = '_blank'; tile.rel = 'noopener' }
+    tile.title = link.note ? `${link.label} · ${link.note}` : link.label
+    const art = el('span', 'hex-art link-art')
+    art.append(iconOf(link.icon ?? 'link'))
+    const label = el('span', 'hex-label')
+    const name = el('span', 'hex-name')
+    name.textContent = link.label
+    const where = el('span', 'hex-address')
+    where.textContent = hostOf(link.href)
+    label.append(name, where)
+    tile.append(art, label)
+    linkTiles.set(link.href, tile)
+    return tile
+  }
+  const linkMatches = (link: WelcomeLink, terms: readonly string[]): boolean => {
+    const words = `${link.label} ${link.note} ${link.href}`.toLowerCase()
+    return terms.every(term => words.includes(term))
+  }
   /** Every publish known now — the ledger's, then each domain's pools — one tile per name. */
   const bands = (): Band[] => {
-    const zones = bandZones(sites, options.self, options.sources)
-    const publishes = ledgerPublishes(sites, zones)
+    const zones = bandZones(allSites(), options.self, held)
+    const publishes = ledgerPublishes(allSites(), zones)
     // Only the pools of domains the page still draws: a refresh can drop one.
     for (const [zone, pools] of shared) {
       if (zones.includes(zone)) publishes.push(...sharedPublishes(zone, pools.offers, pools.creations))
@@ -918,6 +1012,21 @@ ${entry.key}`
     asked.add(zone)
     queue.push(zone)
     drainShared()
+    // A followed domain's published items come from its own ledger.
+    if (zone !== options.self && options.readPeerLedger && held.includes(zone) && !peerAsked.has(zone)) {
+      peerAsked.add(zone)
+      void options.readPeerLedger(zone).catch(() => []).then(found => {
+        peerSites.set(zone, found)
+        askPictures()
+        paint()
+      })
+    }
+  }
+  /** Every version's picture is asked for at once — the tiles and their lists want them all. */
+  const askPictures = (): void => {
+    for (const band of bands()) for (const entry of band.tiles) {
+      for (const version of entry.versions) askPicture(version.head, version.route)
+    }
   }
 
   /** What this domain's owners sign; undefined until read, null when it could not be. */
@@ -944,41 +1053,54 @@ ${entry.key}`
     return claims.some(claim => doorsOpen(signed!, claim.pubkey, claim.lineage, options.self) === true)
   }
 
+  const within = (zone: string, of: string): boolean => zone === of || zone.endsWith(`.${of}`)
+  /** The domain the search offers to follow now, or ''. */
+  let offered = ''
+
   function paint(): void {
     const terms = searchTerms(search.value)
     const all = bands()
     for (const band of all) askShared(band.zone)
     const unread = !!options.readOwners && signed === undefined
     const everything = unread ? [] : all.flatMap(band => band.tiles).filter(showcased).sort(byTitle)
-    // This domain first; then the domains this browser holds, by name.
-    const held = [...new Set(options.sources)].filter(zone => zone !== options.self).sort()
+    const links = options.links ?? []
+    // This domain first; then the domains this browser follows, by name.
     const rows: HTMLElement[] = []
-    for (const zone of [options.self, ...held]) {
+    let visible = 0
+    for (const zone of [options.self, ...[...held].sort()]) {
       const view = rowView(zone)
       const own = zone === options.self
-      const offered = own ? everything : (all.find(band => band.zone === zone)?.open ?? []).slice().sort(byTitle)
-      const shown = offered.filter(entry => aggregateMatches(entry, terms))
+      const items = own ? everything : (all.find(band => band.zone === zone)?.open ?? []).slice().sort(byTitle)
+      const shown = items.filter(entry => aggregateMatches(entry, terms))
+      const doors = own ? links.filter(link => linkMatches(link, terms)) : []
+      const total = shown.length + doors.length
+      visible += terms.length ? total : 1
       // While a search runs every row holding a match is open; otherwise one is.
-      const open = terms.length ? shown.length > 0 : openRow === zone
+      const open = terms.length ? total > 0 : openRow === zone
       view.section.classList.toggle('open', open)
       view.toggle.setAttribute('aria-expanded', String(open))
-      view.section.hidden = terms.length > 0 && shown.length === 0
-      view.meta.textContent = own ? count(offered.length, 'in the showcase', 'in the showcase') : count(offered.length, 'offered', 'offered')
-      arrange(view.comb, open ? shown.map(entry => {
+      view.section.hidden = terms.length > 0 && total === 0
+      view.meta.textContent = count(items.length + (own ? links.length : 0), 'tile', 'tiles')
+      arrange(view.comb, open ? [...shown.map(entry => {
         const tile = tileView(entry, zone)
-        // In another domain's row, a tile already in this domain's showcase says so.
+        // In another domain's row, a tile already on this domain's page says so.
         tile.classList.toggle('in-showcase', !own && showcased(entry))
         return tile
-      }) : [])
-      view.empty.hidden = !open || shown.length > 0
-      view.empty.textContent = terms.length ? 'Nothing here matches your search.'
-        : own && (!ledgerRead || unread) ? 'Reading what is showcased here…'
-          : own ? 'Nothing is showcased here yet.' : `Nothing is offered on ${zone} yet.`
+      }), ...doors.map(link => linkTile(link))] : [])
+      view.empty.hidden = !open || total > 0
+      view.empty.textContent = own && (!ledgerRead || unread) ? 'Reading what is published here…'
+        : own ? 'Nothing is published here yet.' : `Nothing is published on ${zone} yet.`
       rows.push(view.section)
     }
     // Re-insert only when the order changed: moving a row takes focus from it.
     const current = [...hosted.children]
     if (current.length !== rows.length || current.some((node, index) => node !== rows[index])) hosted.replaceChildren(...rows)
+    nothing.hidden = !terms.length || visible > 0
+    // A line that names a domain this browser does not follow offers to follow it.
+    const candidate = followCandidate(search.value)
+    offered = options.follow && candidate && !held.includes(candidate) && !within(candidate, options.self) ? candidate : ''
+    suggest.hidden = !offered
+    if (offered) suggestGo.textContent = `Follow ${offered}`
     const hives = everything.filter(entry => entry.kind === 'hive')
     const creations = everything.length - hives.length
     stats.replaceChildren()
@@ -990,6 +1112,31 @@ ${entry.key}`
       stats.append(row)
     }
   }
+
+  /** Follow a domain: asked of the host that keeps the list, then drawn as a row, open. */
+  const follow = async (raw: string): Promise<void> => {
+    if (!options.follow) return
+    followGo.disabled = true
+    suggestGo.disabled = true
+    followNote.textContent = 'Checking…'
+    const result = await options.follow(raw).catch(() => ({ ok: false as const, reason: 'Could not follow it.' }))
+    followGo.disabled = false
+    suggestGo.disabled = false
+    if (!result.ok) { followNote.textContent = result.reason; return }
+    if (!held.includes(result.zone)) held.push(result.zone)
+    followInput.value = ''
+    search.value = ''
+    followNote.textContent = `Following ${result.zone}.`
+    openRow = result.zone
+    paint()
+    rowViews.get(result.zone)?.section.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }
+  followBar.addEventListener('submit', event => { event.preventDefault(); void follow(followInput.value) })
+  suggestGo.addEventListener('click', () => { if (offered) void follow(offered) })
+  // Enter in the search follows what it offers, when it found nothing else to open.
+  search.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && offered && !nothing.hidden) { event.preventDefault(); void follow(offered) }
+  })
 
   search.addEventListener('input', () => paint())
   // WHAT IS PUBLISHED NOW: the page is the ledger as read, nothing kept from
@@ -1010,10 +1157,7 @@ ${entry.key}`
           signed = found
           paint()
         })
-      // Every version's picture is asked for at once — the tiles and their lists want them all.
-      for (const band of bands()) for (const entry of band.tiles) {
-        for (const version of entry.versions) askPicture(version.head, version.route)
-      }
+      askPictures()
       paint()
     })
   }
@@ -1023,95 +1167,13 @@ ${entry.key}`
    *  pools are asked again. */
   const refresh = (ledger: Promise<readonly LedgerSite[]>): void => {
     asked.clear()
+    peerAsked.clear()
     takeLedger(ledger)
   }
   return { hero, bands: bandsHost, refresh }
 }
 
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
-
-/** What a member does with a hive: start it, fill it, share it here. */
-export const memberSection = (zone: string, appHref: string): HTMLElement => {
-  const section = el('section', 'member')
-  const words = el('div', 'member-words')
-  const kicker = el('p', 'kicker')
-  kicker.textContent = 'Membership'
-  const heading = el('h2')
-  heading.textContent = 'Share your favourite things'
-  const lede = el('p', 'member-lede')
-  lede.textContent = `Every tile above is somebody's hive — the pictures, links, notes and places they love, `
-    + `arranged their own way. Members of ${zone} publish theirs at an address of their own, right here among the others.`
-  const steps = el('ol', 'steps')
-  const yourAddress = `yourname.${zone}`
-  for (const [icon, title, body] of [
-    ['hive', 'Start your hive', 'Open hypercomb.io. Your hive lives in your own browser: no account to make, nothing to install.'],
-    ['heart', 'Gather your favourites', 'Put what you love on tiles — pictures, links, notes, music, places — and arrange them your way.'],
-    ['share', 'Share it at your address', `As a member, publish a tile and it opens at ${yourAddress} — and takes its place here.`],
-  ] as const) {
-    const step = el('li', 'step')
-    const badge = el('span', 'step-icon')
-    badge.append(iconOf(icon))
-    const name = el('b')
-    name.textContent = title
-    const text = el('span')
-    text.textContent = body
-    step.append(badge, name, text)
-    steps.append(step)
-  }
-  const cta = el('a', 'member-cta')
-  cta.href = appHref
-  cta.target = '_blank'
-  cta.rel = 'noopener'
-  cta.append(document.createTextNode('Start your hive'), iconOf('arrow'))
-  words.append(kicker, heading, lede, steps, cta)
-
-  // Your own tile, waiting: a hive with your name on it, at your address.
-  const art = el('div', 'member-art')
-  art.setAttribute('aria-hidden', 'true')
-  const ring = el('span', 'member-ring')
-  ring.innerHTML = '<svg viewBox="0 0 100 115.47" aria-hidden="true" focusable="false"><polygon points="50,1.5 98.5,29.5 98.5,86 50,114 1.5,86 1.5,29.5" '
-    + 'fill="none" stroke="currentColor" stroke-width=".7" stroke-dasharray="2.4 2.4"/></svg>'
-  const sample = el('span', 'hex member-hex')
-  const sampleArt = el('span', 'hex-art cover')
-  dressCover(sampleArt, 'yourname')
-  const label = el('span', 'hex-label')
-  const name = el('span', 'hex-name')
-  name.textContent = 'yourname'
-  label.append(name)
-  sample.append(sampleArt, label)
-  const address = el('span', 'member-address')
-  address.textContent = yourAddress
-  art.append(ring, sample, address)
-  section.append(words, art)
-  return section
-}
-
-/** The doors to the platform's other features, at the foot of the showcase. */
-export const exploreSection = (links: readonly WelcomeLink[]): HTMLElement | null => {
-  if (!links.length) return null
-  const section = el('section', 'explore')
-  const kicker = el('p', 'kicker')
-  kicker.textContent = 'Explore'
-  const grid = el('div', 'explore-grid')
-  links.forEach((link, index) => {
-    const tile = el('a', index === 0 ? 'explore-tile lead' : 'explore-tile')
-    tile.href = link.href
-    // Somewhere else on the web opens in its own tab; this origin is this site still.
-    if (tile.origin !== location.origin) { tile.target = '_blank'; tile.rel = 'noopener' }
-    const badge = el('span', 'explore-icon')
-    badge.append(iconOf(link.icon ?? 'link'))
-    const name = el('b')
-    name.textContent = link.label
-    const note = el('span')
-    note.textContent = link.note
-    const go = el('span', 'explore-go')
-    go.append(iconOf('arrow'))
-    tile.append(badge, name, note, go)
-    grid.append(tile)
-  })
-  section.append(kicker, grid)
-  return section
-}
 
 // A honeycomb, as a mask: one tile of the lattice, repeated.
 const LATTICE = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='52' height='90' viewBox='0 0 51.96 90'%3E%3Cpath d='M25.98 0V15L51.96 30V60L25.98 75L0 60V30L25.98 15M25.98 75V90' fill='none' stroke='%23000' stroke-width='1.2'/%3E%3C/svg%3E")`
@@ -1188,10 +1250,34 @@ export const SHOWCASE_STYLE = `
 .hosted { position: relative; margin: 0 0 clamp(2rem, 5vh, 3rem); }
 .band-meta { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem;
   font: 500 .66rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
-.hosted-empty[hidden], .dex-row[hidden] { display: none; }
+.hosted-empty[hidden], .dex-row[hidden], .hosted-nothing[hidden], .follow-suggest[hidden], .follow[hidden], .follow-note:empty { display: none; }
+.hosted-nothing { margin: .4rem 0 1rem; color: var(--md-on-surface-var); }
+/* the platform's doors are tiles: the same hexagon, a glyph for a picture, a link for a click */
+a.hex { color: inherit; text-decoration: none; cursor: pointer; }
+.link-art { display: block; background: radial-gradient(circle at 50% 32%, #4a300c, #140b03 78%); color: var(--gold-2); }
+.link-art > svg { position: relative; z-index: 1; display: block; width: 38%; height: 38%; margin: 20% 31% 0; opacity: .95;
+  filter: drop-shadow(0 .3rem .7rem rgb(248 183 58 / .35)); }
+.hex-link:hover .link-art, .hex-link:focus-visible .link-art { color: var(--gold-1); }
+.hex-link:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 3px; }
+/* following a domain: a search that found nothing offers it, and the foot always can */
+.follow-suggest { display: flex; margin: 0 0 1.2rem; }
+.follow-suggest button, .follow-field button { flex: none; padding: .68rem 1.1rem; border: 0; border-radius: var(--hc-radius-control, 2px);
+  background: var(--md-primary); color: var(--md-on-primary); font: 600 .92rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); cursor: pointer; }
+.follow-suggest button:hover:not(:disabled), .follow-field button:hover:not(:disabled) { filter: brightness(1.08); }
+.follow-suggest button:disabled, .follow-field button:disabled { opacity: .6; cursor: default; }
+.follow-suggest button:focus-visible, .follow-field button:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.follow { display: grid; grid-template-columns: minmax(0, 1fr); gap: .45rem; margin: 0 0 clamp(2rem, 5vh, 3rem); }
+.follow-note { margin: 0; color: var(--md-on-surface-var); font-size: .85rem; line-height: 1.4; }
+.follow-field { position: relative; display: flex; align-items: center; gap: .6rem; }
+.follow-field > svg { position: absolute; z-index: 1; left: .95rem; width: 1.1rem; height: 1.1rem; color: var(--md-primary); pointer-events: none; }
+.follow-field input { flex: 1; min-width: 0; padding: .72rem 1rem .72rem 2.7rem; font: 400 1rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif);
+  color: var(--md-on-surface-strong); border-radius: var(--hc-radius-control, 2px); background: var(--md-surface-c-lowest);
+  border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant)); }
+.follow-field input::placeholder { color: var(--md-on-surface-faint); }
+.follow-field input:focus { outline: 2px solid var(--md-primary); outline-offset: 1px; }
 /* the hyperdex: one row per domain, this one first and open */
-.hosted { display: grid; gap: .5rem; margin: 0 0 clamp(2rem, 5vh, 3rem); }
-.dex-row { margin: 0; border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px);
+.hosted { display: grid; grid-template-columns: minmax(0, 1fr); gap: .5rem; margin: 0 0 clamp(2rem, 5vh, 3rem); }
+.dex-row { min-width: 0; margin: 0; border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px);
   background: color-mix(in srgb, var(--md-surface-c-lowest) 72%, transparent); }
 .dex-row.open { border-color: color-mix(in srgb, var(--md-primary) 40%, var(--md-outline-variant)); }
 .dex-head { display: flex; align-items: center; gap: .6rem; width: 100%; padding: .7rem .9rem; border: 0; background: transparent;
@@ -1240,11 +1326,11 @@ export const SHOWCASE_STYLE = `
 .hex-address { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .8;
   font: 500 .58rem/1.3 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .03em; }
 .hex-kind svg { width: .95rem; height: .95rem; color: var(--gold-1); }
-/* only a real tile answers the pointer; the sample tile in the membership panel is a picture */
+/* only a real tile answers the pointer: a hive's button, or a door's link */
 button.hex { cursor: pointer; }
-button.hex:hover, button.hex:hover:not(:disabled) { background: linear-gradient(160deg, var(--gold-1), var(--gold-2) 50%, var(--gold-3)); }
+button.hex:hover, button.hex:hover:not(:disabled), a.hex:hover { background: linear-gradient(160deg, var(--gold-1), var(--gold-2) 50%, var(--gold-3)); }
 button.hex:hover .hex-picture, button.hex:hover .hex-motif { transform: scale(1.07); }
-button.hex:hover > .hex-art::after { opacity: .8; }
+button.hex:hover > .hex-art::after, a.hex:hover > .hex-art::after { opacity: .8; }
 button.hex:focus-visible { outline: none; background: var(--md-primary); }
 button.hex:focus-visible > .hex-art { inset: 4px; }
 .hex-owners[hidden] { display: none; }
@@ -1316,78 +1402,18 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
 .version-off:hover:not(:disabled) { background: color-mix(in srgb, var(--hc-status-alert, #b3261e) 10%, transparent); }
 .version-off:focus-visible, .versions-manage:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 
-/* membership: what a member does, on the colours of the mark */
-.member { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(1.5rem, 4vw, 3.5rem);
-  margin: clamp(3rem, 8vh, 5.5rem) 0 0; padding: clamp(1.5rem, 4vw, 3rem); overflow: hidden; isolation: isolate;
-  border-radius: var(--hc-radius-card, 3px); color: #fdf3dd;
-  background: radial-gradient(42rem 24rem at 102% -5%, rgb(248 183 58 / .5), transparent 65%),
-    radial-gradient(30rem 20rem at -5% 105%, rgb(224 96 126 / .25), transparent 70%),
-    linear-gradient(135deg, #2c1907, #120a03 72%);
-  box-shadow: 0 2rem 4rem -2.5rem rgb(60 30 0 / .75); }
-.member::before { content: ''; position: absolute; inset: 0; z-index: -1; background: var(--gold-1); opacity: .09;
-  -webkit-mask: ${LATTICE} 0 0 / 52px 90px repeat; mask: ${LATTICE} 0 0 / 52px 90px repeat; }
-.kicker { margin: 0 0 .7rem; font: 500 .68rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .26em; text-transform: uppercase; color: var(--md-on-surface-faint); }
-.member .kicker { color: var(--gold-2); }
-.member h2 { margin: 0; color: #fff4d8; font: 500 clamp(2rem, 4.2vw, 3rem)/1.05 'Source Serif 4', Georgia, serif; letter-spacing: -.04em; }
-.member-lede { max-width: 42rem; margin: .9rem 0 0; color: rgb(253 243 221 / .8); font-size: 1.02rem; line-height: 1.6; }
-.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .9rem; margin: 1.7rem 0 1.8rem; padding: 0; list-style: none; }
-.step { display: grid; align-content: start; align-items: start; gap: .45rem; padding: 1rem 1.05rem 1.1rem;
-  border: 1px solid rgb(255 224 138 / .2); border-radius: var(--hc-radius-card, 3px); background: rgb(255 240 210 / .05); }
-.step-icon { display: grid; place-items: center; width: 2.5rem; height: calc(2.5rem * 1.1547); margin-bottom: .2rem; clip-path: var(--hex);
-  background: linear-gradient(160deg, var(--gold-1), var(--gold-3)); color: #2c1907; }
-.step-icon svg { width: 1.2rem; height: 1.2rem; }
-.step b { color: #fff4d8; font: 650 1rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif); }
-.step > span:not(.step-icon) { color: rgb(253 243 221 / .72); font-size: .88rem; line-height: 1.5; overflow-wrap: anywhere; }
-.member-cta { display: inline-flex; align-items: center; gap: .55rem; padding: .9rem 1.25rem; border-radius: var(--hc-radius-control, 2px);
-  background: linear-gradient(180deg, #ffd66d, #f0a224); color: #2c1907; font: 700 .98rem/1 var(--md-font-ui, Inter, system-ui, sans-serif);
-  text-decoration: none; box-shadow: 0 .7rem 1.6rem -.7rem rgb(248 183 58 / .9); transition: filter .2s, transform .2s; }
-.member-cta svg { width: 1.05rem; height: 1.05rem; }
-.member-cta:hover { filter: brightness(1.07); transform: translateY(-1px); }
-.member-cta:focus-visible { outline: 2px solid var(--gold-1); outline-offset: 3px; }
-.member-art { position: relative; display: grid; justify-items: center; gap: 1rem; padding: 1.2rem; }
-.member-ring { position: absolute; top: .1rem; left: 50%; width: 12.8rem; transform: translateX(-50%); color: var(--gold-1); opacity: .6; }
-.member-ring svg { display: block; width: 100%; height: auto; }
-.member-hex { --s: 10.4rem; margin: 1.3rem 0 0; }
-.member-address { padding: .4rem .7rem; border: 1px solid rgb(255 224 138 / .35); border-radius: var(--hc-radius-control, 2px);
-  color: var(--gold-1); font: 500 .78rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .04em; background: rgb(0 0 0 / .25); }
-
-/* the doors to everything else, at the foot */
-.explore { margin: clamp(2.5rem, 6vh, 4rem) 0 0; }
-.explore-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.5rem), 1fr)); gap: .8rem; }
-.explore-tile { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: .9rem; row-gap: .15rem; align-items: center;
-  padding: .95rem 1rem; border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px);
-  background: color-mix(in srgb, var(--md-surface-c-lowest) 72%, transparent); text-decoration: none;
-  transition: transform .2s, border-color .2s, box-shadow .2s; }
-.explore-tile:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--md-primary) 60%, var(--md-outline-variant));
-  box-shadow: 0 1rem 2rem -1.4rem color-mix(in srgb, #7a4a06 70%, transparent); }
-.explore-tile:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
-.explore-icon { grid-row: span 2; display: grid; place-items: center; width: 2.5rem; height: calc(2.5rem * 1.1547); clip-path: var(--hex);
-  background: linear-gradient(160deg, var(--gold-1), var(--gold-3)); color: #2c1907; }
-.explore-icon svg { width: 1.15rem; height: 1.15rem; }
-.explore-tile b { color: var(--md-on-surface-strong); font: 600 .98rem/1.25 var(--md-font-ui, Inter, system-ui, sans-serif); }
-.explore-tile > span:not(.explore-icon):not(.explore-go) { color: var(--md-on-surface-var); font-size: .8rem; line-height: 1.4; }
-.explore-go { grid-row: 1 / span 2; grid-column: 3; color: var(--md-on-surface-faint); }
-.explore-go svg { width: 1rem; height: 1rem; }
-.explore-tile.lead { border-color: color-mix(in srgb, var(--md-primary) 55%, var(--md-outline-variant));
-  background: linear-gradient(120deg, color-mix(in srgb, var(--md-primary) 14%, var(--md-surface-c-lowest)), var(--md-surface-c-lowest)); }
-
-/* Too narrow for the name beside the comb: the comb goes above it. */
-@media (max-width: 1024px) {
-  .member { grid-template-columns: minmax(0, 1fr); }
-  .member-art { display: none; }
-}
 /* A PHONE: one column of the same list. */
 @media (max-width: 720px) {
   .card.showcase-page .panel { margin-top: 1rem; padding-bottom: 5.5rem; }
-  /* the phone is a dead-simple hyperdex (jwize 2026-10-25): the rows, and the
-     search fixed at the bottom where a thumb is — nothing else. The desktop
-     keeps the setup beneath, because it is the dashboard and the hosting. */
-  .search { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; margin: 0;
-    padding: .6rem 16px calc(.6rem + env(safe-area-inset-bottom));
-    background: color-mix(in srgb, var(--md-surface) 92%, transparent); border-top: 1px solid var(--md-outline-variant);
+  /* the phone is a dead-simple hyperdex (jwize 2026-10-25): the rows, with the
+     search above them and the follow input fixed at the bottom where a thumb is
+     — nothing else. The desktop keeps the setup beneath, because it is the
+     dashboard and the hosting. */
+  .follow { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; margin: 0;
+    padding: .55rem 16px calc(.55rem + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--md-surface) 94%, transparent); border-top: 1px solid var(--md-outline-variant);
     -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
-  .search svg { left: calc(16px + .95rem); }
-  .showcase-page .member, .showcase-page .explore, .showcase-page details.manage, .showcase-page footer { display: none; }
+  .showcase-page details.manage, .showcase-page footer { display: none; }
   .dex-body { padding: .1rem .5rem .8rem; }
   .hero-brand { gap: .6rem; }
   .hero-mark { width: 1.7rem; height: 1.7rem; }
@@ -1409,11 +1435,8 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
   .version-list .version { grid-template-columns: auto minmax(0, 1fr); }
   .version-places { grid-column: 1 / -1; justify-items: stretch; }
   .version-visit { justify-content: center; max-width: none; }
-  .member { padding: 1.4rem 1.15rem 1.6rem; }
-  .steps { grid-template-columns: minmax(0, 1fr); }
-  .member-cta { width: 100%; justify-content: center; box-sizing: border-box; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hex-picture, .hex-motif, .explore-tile, .member-cta, .versions { transition: none !important; animation: none !important; opacity: 1; }
+  .hex-picture, .hex-motif, .versions { transition: none !important; animation: none !important; opacity: 1; }
 }
 `

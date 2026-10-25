@@ -7,8 +7,8 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { parseShowcase, type ShowcaseRecord, type ZoneOwners } from './showcase-record'
-import { aggregate, aggregateMatches, bandZones, coverOf, ledgerPublishes, ownersLabel, parseLedger,
-  sharedPublishes, showcase } from './showcase'
+import { aggregate, aggregateMatches, bandZones, coverOf, followCandidate, ledgerPublishes, ownersLabel, parseLedger,
+  readPeerLedger, sharedPublishes, showcase } from './showcase'
 import { parseWelcome } from './welcome'
 
 // Pictures are asked of real doors; here every hive wears its cover.
@@ -166,7 +166,7 @@ describe('showcase — the page is what is published now', () => {
     const whole = draw({ zone: 'hypercomb.com', items: [], domains: ['jwize.com'] })
     await vi.waitFor(() => expect(names(whole)).toEqual(['dylan']))
     const none = draw({ zone: 'hypercomb.com', items: [], domains: [] })
-    await vi.waitFor(() => expect(none.querySelector('.hosted-empty')?.textContent).toBe('Nothing is showcased here yet.'))
+    await vi.waitFor(() => expect(none.querySelector('.hosted-empty')?.textContent).toBe('Nothing is published here yet.'))
     expect(names(none)).toEqual([])
   })
 
@@ -364,5 +364,116 @@ describe('the hyperdex — this domain first and open, then the domains you foll
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
     })
     await vi.waitFor(() => expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan']))
+  })
+})
+
+
+describe('everything on the home page is a tile — the platform\'s doors too', () => {
+  const sites = parseLedger(LEDGER)
+  const links = [
+    { label: 'Browser extensions', href: '/downloads/#extensions', note: 'Smart Autolinker', icon: 'extension' as const },
+    { label: 'Minimal host', href: '/hosts', note: 'manage domains', icon: 'host' as const },
+  ]
+  const draw = (extra = {}) => showcase({
+    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [], links,
+    ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), ...extra,
+  })
+
+  it('draws each door as a hexagon link in this domain\'s row, after its hives, and finds it by search', async () => {
+    const { bands, hero } = draw()
+    await vi.waitFor(() => expect(bands.querySelectorAll('.dex-row.own .hex').length).toBe(4))
+    const tiles = [...bands.querySelectorAll('.dex-row.own .hex')]
+    expect(tiles.map(tile => tile.tagName)).toEqual(['BUTTON', 'BUTTON', 'A', 'A'])
+    expect(tiles.slice(2).map(tile => tile.querySelector('.hex-name')?.textContent)).toEqual(['Browser extensions', 'Minimal host'])
+    expect((tiles[3] as HTMLAnchorElement).getAttribute('href')).toBe('/hosts')
+    // No panel is left on the page: no membership, no explore cards.
+    expect(bands.querySelector('.member, .explore, .explore-tile')).toBeNull()
+    const search = hero.querySelector('input[type=search]') as HTMLInputElement
+    search.value = 'minimal'
+    search.dispatchEvent(new Event('input'))
+    expect([...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent)).toEqual(['Minimal host'])
+  })
+})
+
+describe('following a domain from the page', () => {
+  const sites = parseLedger(LEDGER)
+  const peer = (zone: string) => parseLedger({ sites: [
+    { host: `garden.${zone}`, title: 'garden', lineage: 'garden', hosts: [{ host: `garden.${zone}` }],
+      publishers: [{ pubkey: sig('c'), label: 'Leanne', head: sig('7') }] },
+    // A peer cannot claim a place on another domain.
+    { host: 'dylan.hypercomb.com', title: 'dylan', lineage: 'dylan', hosts: [{ host: 'dylan.hypercomb.com' }],
+      publishers: [{ pubkey: sig('c'), label: 'Leanne', head: sig('8') }] },
+  ] })
+
+  it('reads the domain a typed line names, and nothing else', () => {
+    expect(followCandidate('jwize.com')).toBe('jwize.com')
+    expect(followCandidate('  https://Cafesociety.buzz/menu?x=1 ')).toBe('cafesociety.buzz')
+    expect(followCandidate('dylan')).toBe('')
+    expect(followCandidate('two words.com')).toBe('')
+    expect(followCandidate('')).toBe('')
+  })
+
+  it('keeps a peer\'s ledger to the names under its own domain', async () => {
+    const fetched: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => {
+      fetched.push(url)
+      return { ok: true, json: async () => ({ sites: [
+        { host: 'garden.cafesociety.buzz', title: 'garden', lineage: 'garden', publishers: [{ pubkey: sig('c'), head: sig('7') }] },
+        { host: 'dylan.hypercomb.com', title: 'dylan', lineage: 'dylan', publishers: [{ pubkey: sig('c'), head: sig('8') }] },
+      ] }) }
+    })
+    try {
+      expect((await readPeerLedger('cafesociety.buzz')).map(site => site.hosts)).toEqual([['garden.cafesociety.buzz']])
+      expect(fetched).toEqual(['https://cafesociety.buzz/publications.json'])
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('offers to follow when the search names a domain, and following draws its row open', async () => {
+    const follow = vi.fn(async (raw: string) => ({ ok: true as const, zone: raw.trim() }))
+    const { bands, hero } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      follow, readPeerLedger: async zone => peer(zone),
+    })
+    await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    const suggest = bands.querySelector('.follow-suggest') as HTMLElement
+    const search = hero.querySelector('input[type=search]') as HTMLInputElement
+    expect(suggest.hidden).toBe(true)
+    // The search names a domain nothing here matches: the miss says so and offers it.
+    search.value = 'cafesociety.buzz'
+    search.dispatchEvent(new Event('input'))
+    expect((bands.querySelector('.hosted-nothing') as HTMLElement).hidden).toBe(false)
+    expect(suggest.hidden).toBe(false)
+    expect(suggest.textContent).toBe('Follow cafesociety.buzz')
+    ;(suggest.querySelector('button') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(bands.querySelector('.dex-row:not(.own) .dex-name')?.textContent).toBe('cafesociety.buzz'))
+    expect(follow).toHaveBeenCalledWith('cafesociety.buzz')
+    // The row is open, with what that peer publishes — and only what is under its own domain.
+    await vi.waitFor(() => expect([...bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['garden']))
+    expect(bands.querySelector('.dex-row:not(.own)')?.classList.contains('open')).toBe(true)
+    expect(search.value).toBe('')
+    expect(suggest.hidden).toBe(true)
+  })
+
+  it('says why a domain was not followed, and adds nothing', async () => {
+    const { bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      follow: async () => ({ ok: false, reason: 'nope.example did not answer — it is not a Hypercomb host.' }),
+    })
+    await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    const input = bands.querySelector('.follow input') as HTMLInputElement
+    input.value = 'nope.example'
+    ;(bands.querySelector('.follow') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }))
+    await vi.waitFor(() => expect(bands.querySelector('.follow-note')?.textContent).toContain('did not answer'))
+    expect(bands.querySelectorAll('.dex-row')).toHaveLength(1)
+  })
+
+  it('draws no follow input where nothing can follow', () => {
+    const { bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+    })
+    expect((bands.querySelector('.follow') as HTMLElement).hidden).toBe(true)
   })
 })
