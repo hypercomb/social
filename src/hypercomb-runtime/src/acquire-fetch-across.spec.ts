@@ -59,4 +59,26 @@ describe('fetchAcross', () => {
     expect(thrown).toHaveLength(2)
     vi.unstubAllGlobals()
   })
+
+  // A head-only host answers a withdrawn old version as a 404 and serves it
+  // again on a revert (hosted-tenants.md §4b). The egg that 404 laid must not
+  // outlive the head move: a walk taking a NEW head asks once more.
+  it('a walk for a new head asks again a host an older head\'s miss laid an egg for', async () => {
+    const SIG_C = 'c'.repeat(64)
+    let held = false
+    const fetchMock = vi.fn(async (url: string) => held && url === `https://revert.example/${SIG_C}`
+      ? { ok: true, status: 200, headers: new Headers(), arrayBuffer: async () => new Uint8Array([7]).buffer } as unknown as Response
+      : { ok: false, status: 404, headers: new Headers() } as unknown as Response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(await fetchAcross(['https://revert.example'])(SIG_C)).toBeNull()
+    held = true   // the publisher reverts: the bytes are served again
+    // The same head keeps its egg — nothing is asked.
+    expect(await fetchAcross(['https://revert.example'])(SIG_C)).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // A new head hatches it and asks.
+    expect(await fetchAcross(['https://revert.example'], { newHead: true })(SIG_C)).toBeInstanceOf(Uint8Array)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    vi.unstubAllGlobals()
+  })
 })

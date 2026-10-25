@@ -41,7 +41,7 @@
 // `@hypercomb/core` is EXTERNAL — the import map resolves it to the runtime
 // the shim already loaded, so this bundle shares its instances rather than
 // minting a second set.
-import { INSTALL_IOC_KEY, MARKER_NAME, askUntried, hardDeleteVetoFor, holdArrivals, mayRunBee, registerPoolMeaning, SignatureService, SignatureStore, type ArrivalKind, type EggProbe, type InstallProvider } from '@hypercomb/core'
+import { INSTALL_IOC_KEY, MARKER_NAME, askUntried, hardDeleteVetoFor, hatchEggs, holdArrivals, mayRunBee, registerPoolMeaning, SignatureService, SignatureStore, type ArrivalKind, type EggProbe, type InstallProvider } from '@hypercomb/core'
 // These two are PURE — stateless functions over bytes, no IoC registration, no
 // module state — which is the entire reason they may be bundled in here. The
 // walker IS the protocol; only the io wiring below is ours.
@@ -163,11 +163,27 @@ const probeBytes = async (url: string, onThrow?: () => void): Promise<EggProbe<U
  * about the bytes, and the next walk asks the base afresh. A 5xx or other
  * status stays a per-atom 'unreachable' — that host did answer.
  */
-export const fetchAcross = (origins: readonly string[]) => {
+export const fetchAcross = (
+  origins: readonly string[],
+  /** `newHead`: this walk takes a head this client does not run yet. A miss is
+   *  permanent relative to the head that produced it, never past a head move:
+   *  a head-only host answers a withdrawn version as a plain 404 and serves it
+   *  again on a revert (documentation/hosted-tenants.md §4b). So each
+   *  signature the new head reaches has its egg hatched the first time the
+   *  walk asks for it, and the hosts are asked afresh — once; a miss in this
+   *  walk lays an egg as usual. Only what is missing here is ever asked. */
+  opts: { newHead?: boolean } = {},
+) => {
   const silent = new Set<string>()
-  return (sig: string): Promise<Uint8Array<ArrayBuffer> | null> =>
-    askUntried(sig, origins.filter(base => !silent.has(base)), base =>
+  const hatched = new Set<string>()
+  return async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => {
+    if (opts.newHead && !hatched.has(sig)) {
+      hatched.add(sig)
+      await hatchEggs([sig]).catch(() => [])
+    }
+    return askUntried(sig, origins.filter(base => !silent.has(base)), base =>
       probeBytes(`${base}/${sig}`, () => silent.add(base)))
+  }
 }
 
 /** THE TRANSFER PACK, when it pays (transfer-pack.ts). A package mostly
@@ -608,7 +624,10 @@ export const installPackage = async (
     ...alsoFrom.flatMap(zone => hostBases(zone)),
     ...(originAmong([pkg.zone, ...alsoFrom]) ? selfBases() : []),
   ])]
-  const fetchFrom = fetchAcross(origins)
+  // A ROOT THIS CLIENT DOES NOT RUN IS A NEW HEAD: what it reaches is asked
+  // afresh, whatever an older head's misses laid (fetchAcross `newHead`). A
+  // repair of the running root keeps its eggs — the same head, the same misses.
+  const fetchFrom = fetchAcross(origins, { newHead: pkg.packageSig !== installedPackageSig() })
 
   const beesUrlBase = `/opfs/${await registerPoolMeaning(BEES_MEANING)}`
   const depsUrlBase = `/opfs/${await registerPoolMeaning(DEPENDENCIES_MEANING)}`
@@ -1015,7 +1034,7 @@ export const pickRevision = async (
   if (!root) return fail(refusal || 'no root carries that revision')
 
   const origins = [...new Set([...carried.flatMap(zone => hostBases(zone)), ...(originAmong(carried) ? selfBases() : [])])]
-  const fetchFrom = fetchAcross(origins)
+  const fetchFrom = fetchAcross(origins, { newHead: true })   // a revision taken by hand is a head taken
 
   // THE BRANCH: its layer closure, and the bees it declares.
   const branch = await deriveInventory(revision.layer, io)

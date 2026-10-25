@@ -31,6 +31,11 @@ import { installCandidates, readInstallChannel, type ChannelRead } from '@hyperc
 import { restoreMeetLink } from '@hypercomb/shared/core/invite-capture'
 import { cacheImportMap } from './resolve-import-map'
 import { shellInstallFollow, verifyIndexEvent } from './install-follow'
+import { repairFallback, type RepairFallback } from './repair-fallback'
+import { parseLearnedCriticalBeeSigs } from '@hypercomb/runtime/critical-bees'
+
+/** The render-critical bees learned for the live package (script-preloader). */
+const CRITICAL_BEES_KEY = 'hc:critical-bee-sigs'
 
 export type BootStatus = (
   | { kind: 'cached' }
@@ -318,12 +323,27 @@ export const ensureInstall = async (): Promise<void> => {
     // ones. The old path wiped the cache and took the head of whichever host
     // answered first, which re-versioned a warm hive nobody had asked to move
     // (2026-09-12: a reload swapped a followed build for the bundled one).
-    if (await repairInstalled(cachedManifest)) {
-      console.log('[ensure-install] installed build repaired in place — booting from it')
+    //
+    // A REPAIR THAT MISSED BECAUSE THE HEAD MOVED IS AN UPDATE, NOT A WIPE.
+    // A head-only host answers what only an old head reached as a plain 404
+    // (hosted-tenants.md §4), so a repair of an installed package its host has
+    // moved past can never complete there. When the installed package still
+    // boots without what is missing, it boots, and the move is the ordinary
+    // update notice — upgrade or skip (repair-fallback.ts). Otherwise the
+    // wipe below, as before.
+    const zones = await repairZones()
+    const repaired = await repairInstalled(cachedManifest, zones)
+    const offer = repaired ? null : await offerInsteadOfWipe(cachedManifest, missingBees, missingDeps, zones)
+    if (repaired || offer) {
+      console.log(offer
+        ? `[ensure-install] repair missed — ${offer.zone} moved its install head to ${offer.packageSig.slice(0, 12)}…; booting the installed build and offering the update`
+        : '[ensure-install] installed build repaired in place — booting from it')
       restoreSignatureStore(sigStore)
       restoreCachedBeeDeps()
       localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
       EffectBus.emit('boot:status', { kind: 'cached' } as BootStatus)
+      // The update scout's own payload, so the existing pill answers it.
+      if (offer) EffectBus.emit('update:available', { available: true, newCount: 0, newBees: [], packageSig: offer.packageSig, previous: null, label: '', source: offer.source })
       return
     }
     console.warn('[ensure-install] repair failed — wiping install cache and awaiting fresh install')
@@ -394,15 +414,20 @@ const serviceWorkerSettled = async (timeoutMs = 4000): Promise<void> => {
   } catch { /* a worker we cannot wait for is one we do not wait for */ }
 }
 
+/** The domains a repair asks: this package door, the carried, the known. */
+const repairZones = async (): Promise<string[]> => {
+  const door = sandboxDoor()
+  let carried: string[] = []
+  try { carried = await listHostZones() } catch { /* none carried */ }
+  return [...new Set([...(door ? [door] : []), ...carried, ...DEFAULT_HOST_ZONES])]
+}
+
 /** Fetch what the installed package is missing, from the domains carried
  *  and this origin, for the signature already live — a delta, not a choice. */
-const repairInstalled = async (cached: InstallManifest): Promise<boolean> => {
+const repairInstalled = async (cached: InstallManifest, zones: readonly string[]): Promise<boolean> => {
   const sig = installedPackageSig()
   if (!sig) return false
   try {
-    const door = sandboxDoor()
-    const carried = await listHostZones()
-    const zones = [...new Set([...(door ? [door] : []), ...carried, ...DEFAULT_HOST_ZONES])]
     const outcome = await acquire(sig, zones)
     if (!outcome.ok) {
       console.warn(`[ensure-install] repair of ${sig.slice(0, 12)} incomplete —`, outcome.error ?? `${outcome.holes.length} hole(s)`)
@@ -414,6 +439,40 @@ const repairInstalled = async (cached: InstallManifest): Promise<boolean> => {
     console.warn('[ensure-install] repair threw', error)
     return false
   }
+}
+
+/** Where the host's install head stands, when a repair missed: the package
+ *  door's own root on a door, else the root the followed publisher signed.
+ *  Null — so the wipe — unless the installed package still boots and the head
+ *  moved past it on a host the repair asked (repair-fallback.ts). */
+const offerInsteadOfWipe = async (
+  cached: InstallManifest,
+  missingBees: readonly string[],
+  missingDeps: readonly string[],
+  zones: readonly string[],
+): Promise<Extract<RepairFallback, { kind: 'offer' }> | null> => {
+  const installed = installedPackageSig()
+  let critical: string[] | null = null
+  try { critical = installed ? parseLearnedCriticalBeeSigs(localStorage.getItem(CRITICAL_BEES_KEY), installed, cached.bees ?? []) : null } catch { critical = null }
+  const verdict = await repairFallback({
+    installed,
+    bees: cached.bees ?? [],
+    missingBees,
+    missingDeps,
+    critical,
+    zones,
+    head: async () => {
+      const door = sandboxDoor()
+      if (door) {
+        const pkg = await headPackage(door).catch(() => null)
+        return pkg ? { packageSig: pkg.packageSig, zone: pkg.zone || door, source: 'door' } : null
+      }
+      const channel = await readInstallChannel(shellInstallFollow(), verifyIndexEvent).catch(() => null)
+      return channel?.state === 'named' ? { packageSig: channel.packageSig, zone: channel.zone, source: 'channel' } : null
+    },
+  })
+  if (verdict.kind === 'wipe') { console.warn(`[ensure-install] repair missed; not offering an update instead — ${verdict.reason}`); return null }
+  return verdict
 }
 
 export const installFromHosts = async (): Promise<boolean> => {

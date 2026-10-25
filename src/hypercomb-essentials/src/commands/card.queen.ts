@@ -22,7 +22,8 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 import { listDecorations, replaceDecoration } from './decoration-manifest.js'
 import { CARD_DATA_KIND, CARD_PAGE_KIND, planCommunityWear, planWear, parseCardArgs, routeFrom, type CardRecords } from './card-wear.js'
 import { cardAtHead, type CardAtHead } from './card-read.js'
-import { readAddressHead, readFromHost, type AddressHead } from '../sharing/published-address.js'
+import { readAddressHead, readFromHost } from '../sharing/published-address.js'
+import { heldAddressReader } from '../sharing/held-address-reader.js'
 import { setCardTemplateOffering } from '../sharing/card-template-offering.js'
 import { bringCardTemplate, communityTemplateHosts, findCardTemplates, parseTemplateHandle } from '../sharing/card-templates.js'
 
@@ -162,23 +163,14 @@ const _card = new CardQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/CardQueenBee', _card)
 
 // A card held by its address is read in the hive (documentation/using-a-creation.md, "Holding a published item"):
-// the card page asks where an address stands now, and what card a head holds. Where it stands is asked once per
-// address per boot, like the update scout's one check; only an answer is remembered, so a host that failed is asked
-// again. The bytes are read from the card's own host and checked against their signatures; nothing about that host
-// is kept, so reading a card never makes its host a source for anything else.
-const heads = new Map<string, Promise<AddressHead>>()
-window.ioc.register('@diamondcoreprocessor.com/CardReader', {
-  head: (address: string): Promise<AddressHead> => {
-    const key = String(address ?? '').trim().toLowerCase()
-    let read = heads.get(key)
-    if (!read) {
-      read = readAddressHead(key); heads.set(key, read)
-      void read.then(r => { if ('error' in r) heads.delete(key) }, () => heads.delete(key))
-    }
-    return read
-  },
-  card: (head: string, host: string): Promise<CardAtHead | null> => {
+// the card page asks where an address stands now, and what card a head holds (sharing/held-address-reader.ts — a
+// held head that misses reads its address again, so the page finds a moved head and offers it). The bytes are read
+// from the card's own host and checked against their signatures; nothing about that host is kept, so reading a card
+// never makes its host a source for anything else.
+window.ioc.register('@diamondcoreprocessor.com/CardReader', heldAddressReader<CardAtHead>({
+  readHead: (address: string) => readAddressHead(address),
+  readCard: (head: string, host: string) => {
     const bytes = (sig: string) => readFromHost(host, sig)
     return cardAtHead(head, { layer: bytes, resource: bytes })
   },
-})
+}))

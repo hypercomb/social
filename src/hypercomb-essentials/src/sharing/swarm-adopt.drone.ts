@@ -61,6 +61,7 @@ import { allows as intakeAllows } from '../pheromones/intake-filter.js'
 import { _adoptQueue } from './adopt-queue.service.js'
 import { isJoinedHere } from './membership.js'
 import { visualArtifactSigs } from './visual-hosts.js'
+import { reachedSignatures } from './reached-signatures.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -1987,6 +1988,9 @@ export class SwarmAdoptDrone extends Drone {
   // icon/button): the explicit adopt gesture rides it (ADOPT MEANS GET THE
   // LATEST) and the automatic refresh of adopted branches rides it. The mode
   // name is historical plumbing only.
+  /** Branch heads whose reach was hatched this session (see the fold). */
+  static readonly #hatchedHeads = new Set<string>()
+
   #doCommitBranch = async (
     branchSig: string,
     atSegments: readonly string[],
@@ -2153,6 +2157,19 @@ export class SwarmAdoptDrone extends Drone {
         return 'unavailable'
       }
       this.#clearPendingFold(sig)
+
+      // A HEAD TAKEN HATCHES WHAT IT REACHES. A head-only host answers a
+      // withdrawn version as a plain 404 and serves it again on a revert
+      // (hosted-tenants.md §4b); an egg an older head's miss laid (core
+      // eggs.ts, kept by the service worker for streamed resources) must not
+      // keep this head's pictures from being asked for. By effect, so an
+      // older shell's core simply has no listener. Once per head per session:
+      // the automatic refresh re-folds the same head, and re-asking on every
+      // refresh would bring back the flood the eggs exist to stop.
+      if (!SwarmAdoptDrone.#hatchedHeads.has(sig)) {
+        SwarmAdoptDrone.#hatchedHeads.add(sig)
+        EffectBus.emit('eggs:hatch', { sigs: reachedSignatures([branchLayer, ...treeUpdates.map(u => u.layer)], [sig]) })
+      }
 
       // Remember this branch root so the first visit to it (and to any page
       // beneath it) fits-to-content instead of opening at an arbitrary scale.

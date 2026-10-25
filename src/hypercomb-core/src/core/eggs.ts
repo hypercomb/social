@@ -30,6 +30,7 @@
 // and keep the same record at the same address by hand — change the file shape
 // here and there together.
 
+import { EffectBus } from '../effect-bus.js'
 import { registerPoolMeaning } from './pool-registry.js'
 
 export const EGGS_MEANING = 'eggs:dormant'
@@ -92,15 +93,70 @@ export const layEgg = async (sig: string, refusedBy: readonly string[]): Promise
   } catch { /* the session copy still holds it */ }
 }
 
-/** The bytes arrived: the egg is gone. */
-export const hatchEgg = async (sig: string): Promise<void> => {
-  const tried = known.get(sig)
-  known.set(sig, new Set())
-  // Nothing was ever laid in this session and nothing is on disk to find:
-  // the common case costs one directory lookup at most.
-  if (tried && !tried.size) return
-  try { await (await eggsDir(false))?.removeEntry(sig) } catch { /* no egg to hatch */ }
+/** The service workers keep their own session copy of the same record
+ *  (hypercomb.worker.js, web/dev/shim). A hatch removes the file; this tells
+ *  the worker to drop its copy too, or it keeps answering a stale miss until
+ *  it is restarted. Same message in every copy — change them together. */
+export const EGGS_HATCH_MESSAGE = 'hc:sw:eggs-hatch'
+
+const tellWorker = (sigs: readonly string[] | null): void => {
+  try {
+    const controller = (globalThis.navigator as { serviceWorker?: { controller?: { postMessage(message: unknown): void } | null } } | undefined)
+      ?.serviceWorker?.controller
+    controller?.postMessage({ type: EGGS_HATCH_MESSAGE, sigs })
+  } catch { /* no worker — nothing else holds a copy */ }
 }
+
+/**
+ * HATCH MANY AT ONCE — "these may be asked again". The bytes arrived, or a
+ * NEW HEAD reaches them: a host head-only serves (documentation/
+ * hosted-tenants.md §4) answers a withdrawn old version as a plain 404, and a
+ * revert or public history serves it again. A miss is permanent relative to
+ * the head that produced it, never past a head move — so whoever takes a new
+ * head hatches what it reaches. Session copy and disk alike: a worker can lay
+ * an egg on disk this page's copy never saw, so the disk is always asked.
+ * Returns the signatures that held an egg.
+ */
+export const hatchEggs = async (sigs: Iterable<string>): Promise<string[]> => {
+  const wanted = [...new Set([...sigs].map(sig => String(sig ?? '').toLowerCase()).filter(sig => SIG.test(sig)))]
+  if (!wanted.length) return []
+  const hatched = new Set<string>()
+  for (const sig of wanted) {
+    if (known.get(sig)?.size) hatched.add(sig)
+    known.set(sig, new Set())
+  }
+  try {
+    const dir = await eggsDir(false)
+    if (dir) {
+      for (const sig of wanted) {
+        try { await dir.removeEntry(sig); hatched.add(sig) } catch { /* no egg on disk */ }
+      }
+    }
+  } catch { /* nothing laid */ }
+  const out = wanted.filter(sig => hatched.has(sig))
+  if (out.length) tellWorker(out)
+  return out
+}
+
+/** A MODULE ASKS BY EFFECT, NOT BY IMPORT. A module that took a new head (an
+ *  adopted creation's fold) emits `eggs:hatch { sigs }` instead of importing
+ *  `hatchEggs`, so it needs nothing from a newer core than the shell ships:
+ *  on an older shell the effect simply finds no listener. One listener however
+ *  many times core evaluates (bundled + external). */
+export const EGGS_HATCH_EFFECT = 'eggs:hatch'
+const listening = globalThis as { __hypercombEggsHatchListening?: boolean }
+if (!listening.__hypercombEggsHatchListening) {
+  listening.__hypercombEggsHatchListening = true
+  EffectBus.on<{ sigs?: unknown }>(EGGS_HATCH_EFFECT, payload => {
+    const sigs = payload?.sigs
+    if (Array.isArray(sigs)) void hatchEggs(sigs.filter((sig): sig is string => typeof sig === 'string')).catch(() => {})
+  })
+}
+
+/** The bytes arrived: the egg is gone. The disk is asked even when this
+ *  session's copy is empty — another context (a service worker, an earlier
+ *  page) may have laid it; with no eggs pool at all it is one lookup. */
+export const hatchEgg = async (sig: string): Promise<void> => { await hatchEggs([sig]) }
 
 // ONE ASK IN FLIGHT PER SIGNATURE. An egg is laid when an ask ENDS, so two
 // asks for the same signature started a tick apart (the Hosts window reads
@@ -160,6 +216,7 @@ export const askUntried = async <T>(
 /** Forget every egg — "ask everyone again". Session copy first, then the pool. */
 export const clearEggs = async (): Promise<void> => {
   known.clear()
+  tellWorker(null)
   try {
     const dir = await eggsDir(false)
     if (!dir) return

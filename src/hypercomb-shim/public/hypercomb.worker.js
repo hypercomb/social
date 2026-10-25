@@ -771,12 +771,25 @@ async function layEgg(sig, refused) {
   } catch { /* the session copy still holds it */ }
 }
 
+// The disk is asked even when this copy is empty: the page lays eggs too, and
+// this copy never sees them.
 async function hatchEgg(sig) {
-  const tried = eggsKnown.get(sig)
   eggsKnown.set(sig, new Set())
-  if (tried && !tried.size) return
   try { const dir = await eggsDir(false); if (dir) await dir.removeEntry(sig) } catch { /* no egg */ }
 }
+
+// The page hatched eggs (core eggs.ts hatchEggs: the bytes arrived there, or a
+// NEW HEAD it took reaches them — a head-only host serves a withdrawn version
+// again on a revert). It already removed the files; drop this copy so the next
+// ask reads the disk again. `sigs: null` is clearEggs — forget every one.
+const EGGS_HATCH_MSG = 'hc:sw:eggs-hatch'
+self.addEventListener('message', (event) => {
+  const data = event.data
+  if (!data || data.type !== EGGS_HATCH_MSG) return
+  if (data.sigs === null) { eggsKnown.clear(); return }
+  if (!Array.isArray(data.sigs)) return
+  for (const sig of data.sigs) if (typeof sig === 'string') eggsKnown.delete(sig)
+})
 
 // Try each known host not already refused, in order; the first response whose
 // bytes sha256 to the requested sig wins. Loopback hosts use http
