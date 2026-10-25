@@ -98,6 +98,7 @@ Forward-looking proposals and migration plans — not yet built. Retained so the
 - [sign-meaning-pool-migration-plan.md](sign-meaning-pool-migration-plan.md) — Removing the underscore folders in favour of `sign(meaning)` pools
 - [three-js-migration-plan.md](three-js-migration-plan.md) — Pixi.js → three.js feasibility and strategy evaluation
 - [shim-extraction-scope.md](shim-extraction-scope.md) — Shipping the shim + host kit as standalone packages: the measured dependency closure, the 18x code-splitting win, and why store.ts is the only blocker
+- [hermes-harness.md](hermes-harness.md) — Hermes as two records in the hive and a desktop conversant that speaks and reads but never changes the hive; context stored in the hive by signature, encapsulation, grants per actor, six gaps
 
 ## Security & Governance
 
