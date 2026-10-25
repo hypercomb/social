@@ -617,7 +617,7 @@ export class TileOverlayDrone extends Drone {
     'view:open-for-tile', 'view:active',
     'default-view:indexed',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:open', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'clipboard:take-items', 'clipboard:verb', 'swarm:wand', 'editor:switch-request', 'editor:group-toggle']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:open', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'clipboard:take-items', 'clipboard:verb', 'swarm:wand', 'editor:switch-request']
 
   #dropDragging = false
   #dropGroupOnly = false
@@ -3255,19 +3255,14 @@ export class TileOverlayDrone extends Drone {
           return
         }
       }
-      // Ctrl/cmd+click keeps meaning "this one too": the tile goes in or out
-      // of the group the editor edits together (TileEditorDrone owns that).
-      if (this.#editing && this.#editDockedLabel && e.target === this.#canvas
-        && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-        const label = this.labelAtClient(e.clientX, e.clientY)
-        if (label) {
-          EffectBus.emitTransient('editor:group-toggle', { label })
-          diag('editor-group')
-          return
-        }
+      // Ctrl/cmd+click beside a docked editor is the ordinary selection toggle
+      // below: what is selected is the group the editor edits together.
+      const selecting = this.#editing && !!this.#editDockedLabel
+        && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey
+      if (!selecting) {
+        diag('editing')
+        return
       }
-      diag('editing')
-      return
     }
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) { diag('no-renderer'); return }
     if (e.target !== this.#canvas) { diag('target-not-canvas'); return }

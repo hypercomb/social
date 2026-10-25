@@ -1,7 +1,7 @@
-// Editing a group of tiles: while a tile is open, the hive's selection — when
-// it holds the open tile — is the group. A ctrl+click beside the docked editor
-// puts a tile in or out. A group's save writes each tile only the fields given
-// a value; a tile that already has the value is left alone.
+// Editing a group of tiles: while a tile is open, it and the hive's selection
+// are edited together — the selection made as it is anywhere (ctrl+click,
+// ctrl+drag). A group's save writes each tile only the fields given a value; a
+// tile that already has the value is left alone.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -74,11 +74,11 @@ describe('tile editor — a group of tiles', () => {
     services.set('@hypercomb.social/Store', { getResource: vi.fn(async () => null), putResource: vi.fn() })
   })
 
-  it('a ctrl+click beside the open tile makes a group from it, starting empty', async () => {
+  it('selecting another tile beside the open one makes a group, starting empty', async () => {
     await open('alpha')
     expect(service().grouped).toBe(false)
 
-    EffectBus.emitTransient('editor:group-toggle', { label: 'beta' })
+    selection.toggle('beta')
 
     expect(service().grouped).toBe(true)
     expect(service().group).toEqual(['alpha', 'beta'])
@@ -87,14 +87,14 @@ describe('tile editor — a group of tiles', () => {
     expect(service().dirty).toBe(false)
   })
 
-  it('starts the group from the open tile when the selection was left over from before', async () => {
+  it('opening a tile outside the selection replaces it, as a plain click does', async () => {
     selection.set(['delta', 'epsilon'])
     await open('alpha')
+    expect(selection.selected.size).toBe(0)
     expect(service().grouped).toBe(false)
 
-    EffectBus.emitTransient('editor:group-toggle', { label: 'beta' })
+    selection.toggle('beta')
 
-    expect([...selection.selected]).toEqual(['alpha', 'beta'])
     expect(service().group).toEqual(['alpha', 'beta'])
   })
 
@@ -140,8 +140,8 @@ describe('tile editor — a group of tiles', () => {
   })
 
   it('goes back to the open tile alone, keeping what the group was given', async () => {
-    selection.set(['alpha', 'beta'])
     await open('alpha')
+    selection.toggle('beta')
     service().setBackgroundColor('#00ff00')
 
     selection.toggle('beta')
@@ -156,7 +156,7 @@ describe('tile editor — a group of tiles', () => {
     await open('alpha')
     service().setLink('https://changed.example')
 
-    EffectBus.emitTransient('editor:group-toggle', { label: 'beta' })
+    selection.toggle('beta')
 
     expect(service().properties).toEqual({ link: 'https://changed.example' })
   })

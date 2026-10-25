@@ -82,6 +82,13 @@ class SelectionInputDrone extends Drone {
   // underneath a gesture that means something else entirely.
   #clipboardArmed = false
 
+  // ── BESIDE THE DOCKED EDITOR ────────────────────────────────────────
+  // The open editor locks the gate (`editor`, ZoomDrone) so pan and zoom
+  // stand down beside it, but the hive there stays live for selecting: what
+  // is selected is the group the editor edits together. Only the ctrl paint
+  // runs — no wand, no move.
+  #editorDocked = false
+
   // selection-mode drag: pending until pointer moves beyond threshold
   #pendingDrag = false
   #pendingStartLabel: string | null = null
@@ -111,7 +118,7 @@ class SelectionInputDrone extends Drone {
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode', 'move:drag-end', 'sample:mode', 'select:mode', 'clipboard:open']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode', 'move:drag-end', 'sample:mode', 'select:mode', 'clipboard:open', 'editor:mode']
   protected override emits: string[] = ['selection:painted', 'swarm:wand', 'wand:armed']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -147,6 +154,10 @@ class SelectionInputDrone extends Drone {
     // Swap mode on/off — announced by the clipboard window itself
     // (last-value replayed, so a late drone is current at once).
     this.onEffect<{ open?: boolean }>('clipboard:open', (p) => { this.#clipboardArmed = p?.open === true })
+
+    this.onEffect<{ active?: boolean; surface?: string }>('editor:mode', (p) => {
+      this.#editorDocked = p?.active === true && p.surface === 'dock'
+    })
 
     // click selection via tile:click effect from TileOverlayDrone
     this.onEffect<TileClickPayload>('tile:click', (payload) => {
@@ -264,7 +275,11 @@ class SelectionInputDrone extends Drone {
     const selection = this.#selection()
     if (!selection) return
 
-    if (!this.#gate?.claim('tile-selection')) return
+    // Beside the docked editor the gate is the editor's, so nothing claims
+    // it; the editor's lock alone lets the ctrl paint through (see above).
+    const besideEditor = this.#editorDocked && !!this.#gate?.lockedOnlyBy('editor')
+    if (besideEditor && !e.ctrlKey && !e.metaKey) return
+    if (!besideEditor && !this.#gate?.claim('tile-selection')) return
 
     // ── THE WAND comes FIRST ────────────────────────────────────────
     // Ctrl+press over somebody else's tile is not a selection at all: it
@@ -273,7 +288,7 @@ class SelectionInputDrone extends Drone {
     // trailing ctrl-click's toggle (suppressed in #endWand) — because in
     // a swarm that IS what ctrl+press means, and a second meaning riding
     // along would only get in its way.
-    if ((e.ctrlKey || e.metaKey) && this.#wandEligible(label)) {
+    if (!besideEditor && (e.ctrlKey || e.metaKey) && this.#wandEligible(label)) {
       this.#activePointerId = e.pointerId
       this.#wandActive = true
       this.#wandArmed = true

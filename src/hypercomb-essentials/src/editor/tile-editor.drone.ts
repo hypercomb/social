@@ -77,13 +77,7 @@ type Store = {
 }
 
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
-type Selection = {
-  selected: ReadonlySet<string>
-  isSelected(label: string): boolean
-  add(label: string): void
-  toggle(label: string): void
-  clear(): void
-}
+type Selection = { selected: ReadonlySet<string>; clear(): void }
 
 /** A tile a save wrote, as `tile:saved` announces it. */
 type SavedTile = { cell: string; segments: readonly string[] }
@@ -140,12 +134,10 @@ export class TileEditorDrone {
     EffectBus.on<TileActionPayload>('tile:action', payload => { if (live) this.#onTileAction(payload) })
     live = true
 
-    // A GROUP: while a tile is open, the hive's selection — when it holds the
-    // open tile — is the set of tiles edited together. A ctrl+click beside the
-    // docked editor puts a tile in or out (`editor:group-toggle`, from the
-    // tile overlay, which stands down every other press while editing).
+    // A GROUP: while a tile is open, it and the hive's selection are edited
+    // together. The selection is made as it is anywhere — ctrl+click, ctrl+drag
+    // — beside the docked editor too.
     EffectBus.on('selection:changed', () => this.#onSelection())
-    EffectBus.on<{ label?: unknown }>('editor:group-toggle', payload => this.#onGroupToggle(payload))
 
     // Self-register the 'edit' tile icon. The arranger (tile-actions)
     // merges this with its own catalog, computes positions, and emits
@@ -173,16 +165,15 @@ export class TileEditorDrone {
 
   // ── a group ────────────────────────────────────────────────────
 
-  /** The tiles to edit with `label`: the hive's selection, when it holds it. */
+  /** The tiles to edit with `label`: it and every other selected tile. */
   #groupFor(label: string): string[] {
-    const selected = [...(window.ioc.get<Selection>(SELECTION_KEY)?.selected ?? [])]
-    if (selected.length < 2 || !selected.includes(label)) return []
-    return [label, ...selected.filter(other => other !== label)]
+    const others = [...(window.ioc.get<Selection>(SELECTION_KEY)?.selected ?? [])].filter(other => other !== label)
+    return others.length > 0 ? [label, ...others] : []
   }
 
-  /** The selection moved while a tile is open. A second tile makes a group;
-   *  letting go of all but the open tile — or of the open tile itself — goes
-   *  back to editing it alone, keeping what the group had been given. */
+  /** The selection moved while a tile is open. Another tile makes a group;
+   *  letting go of every other tile goes back to editing the open one alone,
+   *  keeping what the group had been given. */
   #onSelection(): void {
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!service || service.mode !== 'editing' || this.#saving || this.#opening > 0 || !this.#label) return
@@ -203,21 +194,6 @@ export class TileEditorDrone {
     const form = groupFormFrom(service.properties, service.baseline)
     imageEditor?.reset?.(hiveOrientation())
     service.setGroup(group, form)
-  }
-
-  #onGroupToggle = (payload: { label?: unknown } | undefined): void => {
-    const label = typeof payload?.label === 'string' ? payload.label : ''
-    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
-    const selection = window.ioc.get<Selection>(SELECTION_KEY)
-    if (!label || !service || !selection || service.mode !== 'editing') return
-    if (this.#saving || this.#opening > 0 || !this.#label || label === this.#label) return
-    // A selection without the open tile is left over from before: the group
-    // starts from the open tile.
-    if (!selection.isSelected(this.#label)) {
-      selection.clear()
-      selection.add(this.#label)
-    }
-    selection.toggle(label)
   }
 
   /** A group gone back to one tile keeps what the group had been given. */
@@ -335,7 +311,10 @@ export class TileEditorDrone {
     imageEditor?.reset?.(hiveOrientation())
     service.open(targetCell, properties, largeBlob, target.segments, editorSurface())
     this.#label = cell
-    // Opened on a tile of a multi-selection: the selection is the group.
+    // Opening a tile outside the selection replaces it, as a plain click on
+    // the tile does; opened on a tile of a multi-selection, it is the group.
+    const selection = window.ioc.get<Selection>(SELECTION_KEY)
+    if (selection && selection.selected.size > 0 && !selection.selected.has(cell)) selection.clear()
     const group = this.#groupFor(cell)
     if (group.length > 1) {
       service.setGroup(group, options.carry ? { ...options.carry } : {})
@@ -424,12 +403,7 @@ export class TileEditorDrone {
       if (!outcome) return false
       this.#announce(outcome)
     }
-    // Moving on ends a group, and the selection that made it goes with it —
-    // as a plain click on a tile replaces the selection anywhere else.
-    if (service.grouped) {
-      this.#opening++
-      try { window.ioc.get<Selection>(SELECTION_KEY)?.clear() } finally { this.#opening-- }
-    }
+    // Moving on ends a group: the next tile's open replaces the selection.
     await this.#openEditing(label, { stash: !options.save })
     return service.mode === 'editing' && service.cell !== ''
   }

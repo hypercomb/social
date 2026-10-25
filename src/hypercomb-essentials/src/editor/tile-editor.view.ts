@@ -637,7 +637,7 @@ export class TileEditorElement extends HTMLElement {
     error.hidden = true
 
     const groupHint = this.#keep('group-hint', make('p', 'te-hint',
-      t('editor.group-hint', 'Only what you set is saved, to every tile — the rest stays as each tile has it. Ctrl+click a tile to add or remove it.')))
+      t('editor.group-hint', 'Only what you set is saved, to every tile — the rest stays as each tile has it. Select tiles to add or remove them.')))
     groupHint.hidden = true
 
     wrap.append(titleHint, restore, error, groupHint)
