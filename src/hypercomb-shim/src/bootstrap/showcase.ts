@@ -669,7 +669,10 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     heading.textContent = entry.title
     // The domains that hold it as something else. A domain whose copy is signed the same as this
     // domain's own is the same thing, so it is not listed; a click goes to that domain's revision.
-    const mine = entry.versions.find(version => version.places.some(place => place.zone === options.self))?.head
+    // Only a tile that is IN the showcase has a copy of its own to overlap: take it out and every domain
+    // that was left out for holding the same signature is listed again (jwize 2026-10-25: "untap would
+    // reshow domain's items that were omitted due to the same signatures filter").
+    const mine = showcased(entry) ? entry.versions.find(version => version.places.some(place => place.zone === options.self))?.head : undefined
     const list = el('ul', 'version-list')
     const seen = new Set<string>()
     for (const version of entry.versions) {

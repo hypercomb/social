@@ -256,3 +256,11 @@ the ones not in it are grayed) or takes it out (in your own row), and the hive s
 A visitor, or a page with no hive on its origin, gets no answer and taps go nowhere. A hold still lists the
 other domains. **Not yet checked on a real host:** that the page and the hive share an origin there, and the
 key-list path for a second device.
+
+**Untap brings the domains back.** A held tile leaves out the domains whose copy is signed the same as the one in
+your showcase; take the tile out of the showcase and they are listed again.
+
+**Adding a phone is one tap** (jwize 2026-10-25: "the transport and distribution of keys must be safe and
+easy"): `keys allow` on the desktop gives a link (ten minutes, one use); opened on the phone it asks once, in
+words, and the tap adds the phone's own key to your key list. Nothing secret is copied; `keys off` removes it.
+**Not built:** the QR of that link (no offline encoder to check one against), and a revoke row in the window.

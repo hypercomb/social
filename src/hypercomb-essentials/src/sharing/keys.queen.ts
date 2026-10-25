@@ -20,7 +20,7 @@
 // opening one tells you it arrived and what to type. A machine may read who
 // publishes for the participant, and nothing more.
 
-import { EffectBus, QueenBee, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, QueenBee, get, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { AnchorBinding, ANCHOR_BINDING_IOC_KEY } from './anchor-binding.js'
 import { fetchHiveIndex, putHiveManifest } from './hive-pointer.js'
 import {
@@ -106,8 +106,30 @@ export class KeysQueenBee extends QueenBee {
     // An invite link that landed is held, never spent: say it arrived.
     try {
       const parts = captureInvite(window.location, window.history)
-      if (parts) this.#say(t('keys.arrived', 'An invitation to publish for {anchor} arrived. Type keys accept to take it, or ignore it.', { anchor: short(parts.anchor) }), 'info')
+      if (parts) {
+        this.#say(t('keys.arrived', 'An invitation to publish for {anchor} arrived. Type keys accept to take it, or ignore it.', { anchor: short(parts.anchor) }), 'info')
+        void this.#offer()
+      }
     } catch { /* no address to read */ }
+  }
+
+  /** THE ONE TAP (jwize 2026-10-25: "the transport and distribution of keys must be safe and easy"). An invite
+   *  that landed is still never spent on its own: the participant is asked once, in words, and their tap is
+   *  the act. "Not now" leaves it held, and `keys accept` still takes it. The device is named by what it is
+   *  (a phone, or the host it is) so `keys off` can find it. */
+  async #offer(): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    const parts = pendingInvite()
+    if (!parts) return
+    const asked = await requestConfirm({
+      title: t('keys.offer.title', 'Add this device?'),
+      message: t('keys.offer.message', 'Let this device publish for {anchor}. It keeps its own key — nothing secret is copied — the invite works once, and you can take this device off any time with keys off.', { anchor: short(parts.anchor) }),
+      confirmLabel: t('keys.offer.yes', 'Add this device'),
+      cancelLabel: t('keys.offer.no', 'Not now'),
+    }).catch(() => false)
+    if (!asked) return
+    const coarse = !!globalThis.matchMedia?.('(pointer: coarse)')?.matches
+    await this.#accept('', coarse ? 'phone' : '')
   }
 
   override slashComplete(args: string): readonly string[] {
