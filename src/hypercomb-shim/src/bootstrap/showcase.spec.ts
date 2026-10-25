@@ -207,32 +207,6 @@ describe('showcase — the page is what is published now', () => {
     expect(names(bands)).toEqual(['dylan'])
   })
 
-  it('opens a tile\'s versions, this domain\'s pinned first, and closes on Escape', async () => {
-    const { hero, bands } = showcase({
-      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
-      ledger: Promise.resolve(sites),
-      readShared: async zone => ({ offers: zone === 'jwize.com' ? [offer('dylan', 'jwize.com', sig('c'), sig('9'))] : [], creations: [] }),
-    })
-    document.body.append(hero, bands)
-    const tile = await vi.waitFor(() => {
-      const found = [...bands.querySelectorAll<HTMLAnchorElement>('a.hex:not(.hex-link)')].find(button => button.textContent?.includes('dylan'))
-      expect(found?.querySelector('.hex-owners')?.textContent).toBe('2')
-      return found!
-    })
-    openSheet(tile)
-    const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
-    expect(sheet.hidden).toBe(false)
-    const rows = [...sheet.querySelectorAll('.version')]
-    expect(rows).toHaveLength(2)
-    expect(rows[0]!.classList.contains('pinned')).toBe(true)
-    expect(rows[0]!.querySelector('.version-tag')?.textContent).toBe('On this domain')
-    expect(rows[0]!.querySelector<HTMLAnchorElement>('.version-visit')!.href).toBe('https://dylan.hypercomb.com/')
-    expect(rows[1]!.querySelector('.version-tag')?.textContent).toBe('Another version')
-    sheet.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    expect(sheet.hidden).toBe(true)
-    hero.remove()
-    bands.remove()
-  })
 })
 
 describe('an owner\'s Off — handed to their own hive, never done here', () => {
@@ -260,33 +234,6 @@ describe('an owner\'s Off — handed to their own hive, never done here', () => 
     expect(tiles.find(entry => entry.title === 'susan')!.versions[0]!.claims).toEqual([])
   })
 
-  it('shows the switches only when the owner asks for them, Off here only where it opens', async () => {
-    const { hero, bands } = showcase({
-      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [], home: 'http://localhost:4250/',
-      ledger: Promise.resolve(parseLedger(LEDGER)), readShared: async () => ({ offers: [], creations: [] }),
-    })
-    document.body.append(hero, bands)
-    const tile = await vi.waitFor(() => {
-      const found = [...bands.querySelectorAll<HTMLAnchorElement>('a.hex:not(.hex-link)')].find(button => button.textContent?.includes('dylan'))
-      expect(found).toBeDefined()
-      return found!
-    })
-    openSheet(tile)
-    const sheet = hero.querySelector('.versions') as HTMLElement
-    const manage = sheet.querySelector<HTMLButtonElement>('.versions-manage')!
-    expect(sheet.querySelector<HTMLElement>('.version-claims')!.hidden).toBe(true)
-    manage.click()
-    expect(manage.getAttribute('aria-pressed')).toBe('true')
-    expect(sheet.querySelector<HTMLInputElement>('.versions-home input')!.value).toBe('http://localhost:4250/')
-    expect([...sheet.querySelectorAll('.version-off')].map(button => button.textContent))
-      .toEqual(['Off on hypercomb.com', 'Off everywhere'])
-    // A bad hive address is said, and nothing leaves the page.
-    sheet.querySelector<HTMLInputElement>('.versions-home input')!.value = 'not a hive'
-    sheet.querySelector<HTMLButtonElement>('.version-off')!.click()
-    expect(sheet.querySelector('.versions-manage-problem')?.textContent).toContain('not a hive address')
-    hero.remove()
-    bands.remove()
-  })
 })
 
 describe('coverOf — a hive with no picture wears its own signature', () => {
@@ -584,22 +531,6 @@ describe('communities — pages after All', () => {
     pointer(list, 'pointercancel', { pointerId: 1 })
     pointer(list, 'pointerup', { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100, timeStamp: 100 })
     expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Sneaky'])
-  })
-
-  it('swallows the click a swipe ends with, so it can never press a tile — and only that one', async () => {
-    const { hero, bands } = draw()
-    document.body.append(hero, bands)
-    try {
-      await vi.waitFor(() => expect(tabs(bands)).toHaveLength(3))
-      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
-      drag(bands, 300, 100)
-      const tile = bands.querySelector('.dex-row.own a.hex') as HTMLAnchorElement
-      const click = () => { const event = new MouseEvent('click', { bubbles: true, cancelable: true }); tile.dispatchEvent(event); return event }
-      // The click a swipe ends with is swallowed, once; the next tap is a tap again.
-      expect(click().defaultPrevented).toBe(true)
-      expect(click().defaultPrevented).toBe(false)
-      expect(sheet.hidden).toBe(true)
-    } finally { hero.remove(); bands.remove() }
   })
 
   it('moves with the arrow keys (round the ends), Home and End, keeping focus on the tab', async () => {
@@ -901,84 +832,6 @@ describe('a tile — a tap goes to the content, a hold comes up with where else 
     target.dispatchEvent(event)
   }
 
-  it('is a link to this domain\'s own place for the name — so a tap, a middle-click and "open in a tab" all just go', async () => {
-    const { bands } = draw()
-    const dylan = await tileOf(bands, 'dylan')
-    expect(dylan.tagName).toBe('A')
-    expect(dylan.getAttribute('href')).toBe('https://dylan.hypercomb.com/')
-    // Another origin opens in its own tab; this page stays where it is.
-    expect(dylan.getAttribute('target')).toBe('_blank')
-    expect(dylan.getAttribute('rel')).toBe('noopener')
-    expect(dylan.getAttribute('title')).toContain('hold, or press Space')
-  })
-
-  it('does not open the sheet on a tap, and opens it on a hold — swallowing the click the hold ends with', async () => {
-    vi.useFakeTimers()
-    try {
-      const { hero, bands } = draw()
-      document.body.append(hero, bands)
-      await vi.advanceTimersByTimeAsync(50)
-      const dylan = await tileOf(bands, 'dylan')
-      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
-      const click = () => { const event = new MouseEvent('click', { bubbles: true, cancelable: true }); dylan.dispatchEvent(event); return event }
-      // A tap: down and up at once, then the click — the link is followed, the sheet stays shut.
-      pointer(dylan, 'pointerdown'); pointer(dylan, 'pointerup')
-      expect(click().defaultPrevented).toBe(false)
-      vi.advanceTimersByTime(1000)
-      expect(sheet.hidden).toBe(true)
-      // A hold: the sheet comes up on its own, and the click that ends the hold goes nowhere.
-      pointer(dylan, 'pointerdown')
-      vi.advanceTimersByTime(499)
-      expect(sheet.hidden).toBe(true)
-      vi.advanceTimersByTime(2)
-      expect(sheet.hidden).toBe(false)
-      pointer(dylan, 'pointerup')
-      expect(click().defaultPrevented).toBe(true)
-      expect(click().defaultPrevented).toBe(false)
-      hero.remove(); bands.remove()
-    } finally { vi.useRealTimers() }
-  })
-
-  it('is not a hold when the finger moves, lifts early, or is the secondary button', async () => {
-    vi.useFakeTimers()
-    try {
-      const { hero, bands } = draw()
-      document.body.append(hero, bands)
-      await vi.advanceTimersByTimeAsync(50)
-      const dylan = await tileOf(bands, 'dylan')
-      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
-      pointer(dylan, 'pointerdown'); pointer(dylan, 'pointermove', { clientX: 130 })
-      vi.advanceTimersByTime(900)
-      expect(sheet.hidden).toBe(true)
-      pointer(dylan, 'pointerdown'); vi.advanceTimersByTime(300); pointer(dylan, 'pointerup'); vi.advanceTimersByTime(900)
-      expect(sheet.hidden).toBe(true)
-      pointer(dylan, 'pointerdown', { button: 2 }); vi.advanceTimersByTime(900)
-      expect(sheet.hidden).toBe(true)
-      hero.remove(); bands.remove()
-    } finally { vi.useRealTimers() }
-  })
-
-  it('opens the sheet from the keyboard and the context menu, never from Enter — which follows the link', async () => {
-    const { hero, bands } = draw()
-    document.body.append(hero, bands)
-    try {
-      const dylan = await tileOf(bands, 'dylan')
-      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
-      dylan.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-      expect(sheet.hidden).toBe(true)
-      const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
-      dylan.dispatchEvent(space)
-      expect(space.defaultPrevented).toBe(true)
-      expect(sheet.hidden).toBe(false)
-      sheet.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-      expect(sheet.hidden).toBe(true)
-      const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
-      dylan.dispatchEvent(menu)
-      expect(menu.defaultPrevented).toBe(true)
-      expect(sheet.hidden).toBe(false)
-    } finally { hero.remove(); bands.remove() }
-  })
-
   it('keeps the page\'s search sticky to the top, in the brand\'s place, and the list the whole width', () => {
     const { hero } = draw()
     // The header's rows belong to the page, so the search can stick to the page's top.
@@ -1007,28 +860,6 @@ describe('a followed peer keeps its own tiles, the sheet keeps its own buttons, 
     target.dispatchEvent(event)
   }
 
-  it('never merges a followed domain\'s names into an owner\'s tile: no second owner, no foreign address, no borrowed label', async () => {
-    const hostile = parseLedger({ sites: [
-      { host: 'dylan.evil.example', title: 'dylan', lineage: 'dylan', hosts: [{ host: 'dylan.evil.example' }],
-        publishers: [{ pubkey: sig('a'), label: 'Jaime', head: sig('6') }, { pubkey: sig('d'), label: 'Anyone', head: sig('6') }] },
-    ] })
-    const { hero, bands } = draw({ sources: ['evil.example'], readPeerLedger: async () => hostile })
-    document.body.append(hero, bands)
-    try {
-      await vi.waitFor(() => expect(own(bands)).toEqual(['camelflage', 'dylan']))
-      ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
-      await vi.waitFor(() => expect([...bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['dylan']))
-      ;(bands.querySelectorAll('.dex-head')[0] as HTMLButtonElement).click()
-      const dylan = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes('dylan'))!
-      expect(dylan.querySelector<HTMLElement>('.hex-owners')!.hidden).toBe(true)
-      openSheet(dylan)
-      const sheet = hero.querySelector('.versions') as HTMLElement
-      expect(sheet.querySelectorAll('.version')).toHaveLength(1)
-      expect(sheet.textContent).not.toContain('evil.example')
-      expect(sheet.textContent).not.toContain('Anyone')
-    } finally { hero.remove(); bands.remove() }
-  })
-
   it('draws a peer\'s names only in the zones that are its own, never in this domain\'s row', async () => {
     const under = parseLedger({ sites: [
       { host: 'secret.team.hypercomb.com', title: 'secret', lineage: 'secret', hosts: [{ host: 'secret.team.hypercomb.com' }],
@@ -1046,47 +877,6 @@ describe('a followed peer keeps its own tiles, the sheet keeps its own buttons, 
     expect([...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent)).toEqual(['Minimal host'])
     const body = bands.querySelector('.dex-row.own .dex-body')!
     expect(body.firstElementChild?.classList.contains('hosted-empty')).toBe(true)
-  })
-
-  it('ignores a second finger and a tile that has gone: no sheet opens with no finger down', async () => {
-    vi.useFakeTimers()
-    try {
-      const { hero, bands } = draw()
-      document.body.append(hero, bands)
-      await vi.advanceTimersByTimeAsync(50)
-      const dylan = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes('dylan'))!
-      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
-      // Finger 1 down, finger 2 down on the same tile, both lifted: nothing is left to fire.
-      pointer(dylan, 'pointerdown'); vi.advanceTimersByTime(140)
-      pointer(dylan, 'pointerdown', { pointerId: 2, isPrimary: false }); vi.advanceTimersByTime(140)
-      pointer(dylan, 'pointerup'); pointer(dylan, 'pointerup', { pointerId: 2, isPrimary: false })
-      vi.advanceTimersByTime(900)
-      expect(sheet.hidden).toBe(true)
-      // A press whose tile is removed before the half second is up opens nothing.
-      pointer(dylan, 'pointerdown'); dylan.remove(); vi.advanceTimersByTime(900)
-      expect(sheet.hidden).toBe(true)
-      hero.remove(); bands.remove()
-    } finally { vi.useRealTimers() }
-  })
-
-  it('swallows the click that ends a hold on any part of the sheet it opened — its buttons and links too — and only that one', async () => {
-    vi.useFakeTimers()
-    try {
-      const { hero, bands } = draw()
-      document.body.append(hero, bands)
-      await vi.advanceTimersByTimeAsync(50)
-      const dylan = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes('dylan'))!
-      pointer(dylan, 'pointerdown'); vi.advanceTimersByTime(501)
-      const sheet = hero.querySelector('.versions') as HTMLElement
-      const manage = sheet.querySelector<HTMLButtonElement>('.versions-manage')!
-      expect(hero.querySelector<HTMLElement>('.versions-backdrop')!.hidden).toBe(false)
-      const visit = sheet.querySelector<HTMLAnchorElement>('.version-visit')!
-      const first = new MouseEvent('click', { bubbles: true, cancelable: true }); visit.dispatchEvent(first)
-      expect(first.defaultPrevented).toBe(true)
-      manage.click()
-      expect(manage.getAttribute('aria-pressed')).toBe('true')
-      hero.remove(); bands.remove()
-    } finally { vi.useRealTimers() }
   })
 
   it('follows one domain at a time, and clears the search only if it still says what was followed', async () => {
@@ -1142,5 +932,65 @@ describe('readZoneOwners — every owner counts', () => {
     expect(read.doors.has(A)).toBe(true)
     expect(read.doors.has(B)).toBe(false)
     expect((await run({ [A]: 'missing', [B]: 'missing' })).reached).toBe(true)
+  })
+})
+
+describe('a tile — nothing on the page leads out of the showcase; a hold lists its domains', () => {
+  const sites = parseLedger(LEDGER)
+  const draw = () => showcase({
+    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+    ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+  })
+  const tileOf = async (bands: HTMLElement, name: string): Promise<HTMLAnchorElement> => vi.waitFor(() => {
+    const found = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes(name))
+    expect(found).toBeDefined()
+    return found!
+  })
+
+  it('has no address to go to, and a tap goes nowhere', async () => {
+    const { bands } = draw()
+    const dylan = await tileOf(bands, 'dylan')
+    expect(dylan.hasAttribute('href')).toBe(false)
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    dylan.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
+  })
+
+  it('lists the domains on a hold, as plain names with nothing to press', async () => {
+    vi.useFakeTimers()
+    try {
+      const { hero, bands } = draw()
+      document.body.append(hero, bands)
+      await vi.advanceTimersByTimeAsync(50)
+      const dylan = await tileOf(bands, 'dylan')
+      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
+      dylan.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true }), { button: 0, isPrimary: true, clientX: 1, clientY: 1 }))
+      vi.advanceTimersByTime(499)
+      expect(sheet.hidden).toBe(true)
+      vi.advanceTimersByTime(2)
+      expect(sheet.hidden).toBe(false)
+      expect(sheet.querySelector('.version')).not.toBeNull()
+      expect(sheet.querySelectorAll('a, button, input')).toHaveLength(0)
+      sheet.dispatchEvent(new MouseEvent('click', { bubbles: true }))   // the click the hold ends with stays
+      expect(sheet.hidden).toBe(false)
+      sheet.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      expect(sheet.hidden).toBe(true)
+      hero.remove(); bands.remove()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('lists them from a right-click or Space too, and closes on Escape', async () => {
+    const { hero, bands } = draw()
+    document.body.append(hero, bands)
+    try {
+      const dylan = await tileOf(bands, 'dylan')
+      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
+      dylan.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      expect(sheet.hidden).toBe(false)
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      expect(sheet.hidden).toBe(true)
+      dylan.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
+      expect(sheet.hidden).toBe(false)
+    } finally { hero.remove(); bands.remove() }
   })
 })

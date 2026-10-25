@@ -31,13 +31,12 @@ recommendation").
 - **The search stays with you.** It is anchored flush to the top of the
   screen, in the place the brand was, as the page scrolls; the brand scrolls
   away and comes back when the page is scrolled back to the top.
-- **A tap goes to the content; a hold says where else it is** (jwize,
-  2026-10-25: "the clickable domains should come up on long hold and reserve
-  click for directly going to their content"). A tile is a link to this
-  domain's own place for the name, so a tap, a middle-click and "open in a tab"
-  all just go. Holding it for half a second (a right-click, the menu key, or
-  Space does the same) opens its versions and domains, and the click that ends
-  the hold goes nowhere. A tile on another origin opens in its own tab.
+- **A tile goes nowhere; a hold lists its domains** (jwize, 2026-10-25: "no popup
+  and you don't navigate to places outside of your showcase", then "if you hold
+  down on the icon you can look at a list of the domains for a tile, but that is
+  it"). The page is the showcase, not a way out of it: a tap does nothing, and
+  holding a tile (or a right-click, or Space) lists the domains it is on as plain
+  names. No versions, no links, no switches, no Manage.
 - **On other domains, a tap toggles** (jwize, 2026-10-25: "of course on other
   domains it is just toggling behaviors"): in your hive's Manage view, a tap on
   a tile of a followed domain switches it into or out of your showcase, the way

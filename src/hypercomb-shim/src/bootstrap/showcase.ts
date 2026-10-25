@@ -628,185 +628,52 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     return mini
   }
 
-  // ── a tile's versions: this domain's first, every other version after it,
-  //    identical copies counted rather than listed ──
+  // ── a held tile says which domains it is on, and that is all: a list of names, no links, no switches ──
   const backdrop = el('div', 'versions-backdrop')
   backdrop.hidden = true
   const sheet = el('div', 'versions')
   sheet.setAttribute('role', 'dialog')
   sheet.setAttribute('aria-modal', 'true')
-  sheet.setAttribute('aria-labelledby', 'versions-title')
   backdrop.append(sheet)
   // In the hero, not the bands: a band re-orders its own children.
   hero.append(backdrop)
   let opener: HTMLElement | null = null
-  const stops = (): HTMLElement[] => [...sheet.querySelectorAll<HTMLElement>('a[href], button, input')]
-    .filter(stop => !stop.closest('[hidden]'))
-  /** The owner's switches stay shown, and the hive they typed stays typed, for
-   *  the life of the page — this page keeps nothing of theirs beyond it. */
-  let managing = false
-  let homeValue = homeOrigin(options.home) ?? DEFAULT_HOME
-  const activeHere = (): Element | null => (sheet.getRootNode() as ShadowRoot | Document).activeElement
-  // While the sheet is open, Escape and Tab belong to it wherever focus has
-  // wandered: the listeners sit on the document, not on the sheet.
-  const onKey = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeVersions(); return }
-    if (event.key !== 'Tab') return
-    const all = stops()
-    const first = all[0]
-    const last = all[all.length - 1]
-    const active = activeHere()
-    const inside = !!active && sheet.contains(active)
-    if (!inside || (event.shiftKey && active === first) || (!event.shiftKey && active === last)) {
-      event.preventDefault()
-      ;(event.shiftKey ? last : first)?.focus()
-    }
-  }
-  const onFocus = (event: FocusEvent): void => {
-    const target = event.composedPath()[0]
-    if (target instanceof Node && !sheet.contains(target)) stops()[0]?.focus()
-  }
+  /** The click a hold ends with lands on the sheet that hold just opened: it is not a tap on the backdrop. */
+  let heldOpen = false
   const closeVersions = (): void => {
     document.removeEventListener('keydown', onKey, true)
-    document.removeEventListener('focusin', onFocus, true)
     backdrop.hidden = true
     sheet.replaceChildren()
-    // The tile is kept, so it is still on the page to take focus back.
     if (opener?.isConnected) opener.focus()
     opener = null
   }
-  /** The click a hold ends with lands on the sheet that hold just opened under the finger:
-   *  it is not a tap on the backdrop, and the sheet stays. The next real press clears it. */
-  let heldOpen = false
+  const onKey = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeVersions() }
+  }
   backdrop.addEventListener('pointerdown', () => { heldOpen = false })
-  backdrop.addEventListener('keydown', () => { heldOpen = false }, true)
-  // Capture: it runs before the sheet's own buttons and links can see the click.
   backdrop.addEventListener('click', event => {
-    if (heldOpen) { heldOpen = false; event.preventDefault(); event.stopPropagation(); return }
-    if (event.target === backdrop) closeVersions()
-  }, true)
+    if (heldOpen) { heldOpen = false; return }
+    closeVersions()
+    event.stopPropagation()
+  })
   const openVersions = (entry: Aggregate, from: HTMLElement): void => {
     opener = from
-    const lead = entry.versions[0]!
-    const head = el('header', 'versions-head')
-    const titles = el('span', 'versions-titles')
-    const heading = el('h3')
-    heading.id = 'versions-title'
+    const heading = el('h3', 'versions-title')
     heading.textContent = entry.title
-    const meta = el('span', 'band-meta')
-    const domains = new Set(entry.versions.flatMap(version => version.places.map(place => place.zone))).size
-    for (const [icon, words] of [
-      ['people', count(entry.owners, 'owner', 'owners')],
-      ['hive', count(entry.versions.length, 'version', 'versions')],
-      ['globe', count(domains, 'domain', 'domains')],
-    ] as const) {
-      const row = el('span')
-      row.append(iconOf(icon), document.createTextNode(words))
-      meta.append(row)
+    const list = el('ul', 'version-list')
+    const seen = new Set<string>()
+    for (const version of entry.versions) for (const place of version.places) {
+      if (seen.has(place.address)) continue
+      seen.add(place.address)
+      const item = el('li', 'version')
+      item.textContent = place.address
+      list.append(item)
     }
-    titles.append(heading, meta)
-    const close = el('button', 'versions-close')
-    close.type = 'button'
-    close.setAttribute('aria-label', 'Close')
-    close.append(iconOf('close'))
-    close.addEventListener('click', closeVersions)
-    head.append(miniOf(lead.head, lead.route), titles)
-    // AN OWNER'S SWITCHES, folded away: this page holds no key, so Off only
-    // hands the row to the owner's own hive, which asks, signs and comes back.
-    const owned = entry.kind === 'hive' && entry.versions.some(version => version.claims.length)
-    const manage = el('button', 'versions-manage')
-    manage.type = 'button'
-    manage.textContent = 'Yours? Manage it'
-    manage.setAttribute('aria-pressed', String(managing))
-    const panel = el('div', 'versions-manage-panel')
-    const field = el('label', 'versions-home')
-    const fieldName = el('span')
-    fieldName.textContent = 'Your hive'
-    const homeInput = el('input')
-    homeInput.type = 'url'
-    homeInput.value = homeValue
-    homeInput.spellcheck = false
-    homeInput.autocomplete = 'off'
-    homeInput.addEventListener('input', () => { homeValue = homeInput.value })
-    field.append(fieldName, homeInput)
-    const explain = el('p', 'versions-manage-note')
-    explain.textContent = 'Off hands the switch to your hive, which holds your key — it asks before anything changes, and nothing is turned off from this page. Turning off keeps it published; you can turn it back on from Publish.'
-    const problem = el('p', 'versions-manage-problem')
-    problem.setAttribute('role', 'alert')
-    panel.append(field, explain, problem)
-    const showManaging = (): void => {
-      manage.setAttribute('aria-pressed', String(managing))
-      panel.hidden = !managing
-      for (const claims of sheet.querySelectorAll<HTMLElement>('.version-claims')) claims.hidden = !managing
-    }
-    manage.addEventListener('click', () => { managing = !managing; showManaging(); if (managing) homeInput.focus() })
-    if (owned) head.append(manage)
-    head.append(close)
-    const handOff = (version: Version, claim: Claim, scope: 'here' | 'everywhere'): void => {
-      const href = turnOffHref(homeInput.value, { title: entry.title, lineage: claim.lineage, publisher: claim.pubkey,
-        zone: options.self, scope, head: version.head, back: `${location.origin}/` })
-      if (!href) { problem.textContent = 'That is not a hive address — try https://hypercomb.io or http://localhost:4250.'; homeInput.focus(); return }
-      location.assign(href)
-    }
-    const list = el('ol', 'version-list')
-    for (const [index, version] of entry.versions.entries()) {
-      const onThisDomain = version.places.some(place => place.zone === options.self)
-      const row = el('li', index === 0 && onThisDomain ? 'version pinned' : 'version')
-      const about = el('span', 'version-words')
-      const tag = el('span', 'version-tag')
-      tag.textContent = onThisDomain ? 'On this domain' : entry.versions.length > 1 ? 'Another version' : 'Published'
-      const who = el('b', 'version-who')
-      who.textContent = ownersLabel(version.owners)
-      const what = el('span', 'version-what')
-      const zones = new Set(version.places.map(place => place.zone)).size
-      what.textContent = `${version.head.slice(0, 12)}… · ${count(zones, 'domain', 'domains')}`
-        + (version.owners.length > 1 ? ` · ${count(version.owners.length, 'owner', 'owners')}` : '')
-      about.append(tag, who, what)
-      // Every domain this version opens on, each its own way in — the reader
-      // chooses where to go, this domain's place first.
-      const places = el('span', 'version-places')
-      for (const place of version.places) {
-        const visit = el('a', 'version-visit')
-        visit.href = place.href
-        const words = el('span', 'version-visit-label')
-        words.textContent = entry.kind === 'creation' ? `Inspect on ${place.zone}` : place.address
-        visit.append(words, iconOf('arrow'))
-        places.append(visit)
-      }
-      row.append(miniOf(version.head, version.route), about, places)
-      if (entry.kind === 'hive' && version.claims.length) {
-        const claims = el('div', 'version-claims')
-        for (const claim of version.claims) {
-          const line = el('span', 'version-claim')
-          const owner = el('span', 'version-claim-owner')
-          owner.textContent = ownersLabel([claim])
-          line.append(owner)
-          if (claim.zones.includes(options.self)) {
-            const here = el('button', 'version-off')
-            here.type = 'button'
-            here.textContent = `Off on ${options.self}`
-            here.addEventListener('click', () => handOff(version, claim, 'here'))
-            line.append(here)
-          }
-          const everywhere = el('button', 'version-off')
-          everywhere.type = 'button'
-          everywhere.textContent = 'Off everywhere'
-          everywhere.addEventListener('click', () => handOff(version, claim, 'everywhere'))
-          line.append(everywhere)
-          claims.append(line)
-        }
-        row.append(claims)
-      }
-      list.append(row)
-    }
-    sheet.replaceChildren(head, panel, list)
-    showManaging()
-    if (backdrop.hidden) {
-      document.addEventListener('keydown', onKey, true)
-      document.addEventListener('focusin', onFocus, true)
-    }
+    sheet.replaceChildren(heading, list)
+    sheet.tabIndex = -1
     backdrop.hidden = false
-    ;(list.querySelector('a') as HTMLElement | null)?.focus()
+    document.addEventListener('keydown', onKey, true)
+    sheet.focus()
   }
 
   // ── tiles: ONE link per name, kept and updated in place — a pool arriving
@@ -848,37 +715,26 @@ ${entry.key}`
       const owners = el('span', 'hex-owners')
       tile.append(art, label, owners)
       const made: TileView = { tile, art, name, address, owners, head: '', entry }
-      // A TAP GOES STRAIGHT TO THE CONTENT; A HOLD COMES UP WITH WHERE ELSE IT IS (jwize
-      // 2026-10-25: "the clickable domains should come up on long hold and reserve click for
-      // directly going to their content"). A hold, a right-click, the menu key and Space all
-      // open the versions and domains; the click a hold ends with is swallowed.
+      // A HELD TILE (or a right-click, or Space) says which domains it is on. A tap does nothing:
+      // the page is the showcase, not a way out of it.
       let timer: ReturnType<typeof setTimeout> | undefined
       let down: { x: number; y: number } | null = null
-      let held = false
       const stop = (): void => { if (timer) clearTimeout(timer); timer = undefined; down = null }
       tile.addEventListener('pointerdown', event => {
         if (event.button > 0 || !event.isPrimary) return
         stop()
-        held = false
         down = { x: event.clientX, y: event.clientY }
         timer = setTimeout(() => {
           stop()
           if (!tile.isConnected) return
-          held = true; heldOpen = true; openVersions(made.entry, tile)
+          heldOpen = true; openVersions(made.entry, tile)
         }, HOLD_MS)
       })
       tile.addEventListener('pointermove', event => {
         if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 10) stop()
       })
-      for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
-        tile.addEventListener(type, () => { stop(); if (held) setTimeout(() => { held = false }, 0) })
-      }
-      tile.addEventListener('click', event => {
-        if (!held) return
-        held = false
-        event.preventDefault()
-        event.stopPropagation()
-      })
+      for (const type of ['pointerup', 'pointercancel', 'pointerleave']) tile.addEventListener(type, stop)
+      tile.addEventListener('click', event => event.preventDefault())
       tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile) })
       tile.addEventListener('keydown', event => {
         if (event.key !== ' ' || event.altKey || event.ctrlKey || event.metaKey) return
@@ -897,12 +753,9 @@ ${entry.key}`
       wear(view.art, lead.head, lead.route)
       view.head = lead.head
     }
+    // A tile on the page goes nowhere: the showcase is what is shown, and it is not a way out of it.
     const place = placeFor(entry, row)
-    view.tile.href = place.href
-    // Somewhere else on the web opens in its own tab; this origin is this site still.
-    if (view.tile.origin !== location.origin) { view.tile.target = '_blank'; view.tile.rel = 'noopener' }
-    else { view.tile.removeAttribute('target'); view.tile.removeAttribute('rel') }
-    view.tile.title = `${entry.title} · ${place.address} — hold, or press Space, for its versions and domains`
+    view.tile.title = `${entry.title} · ${place.address} — hold to see its domains`
     view.name.textContent = entry.title
     view.address.textContent = place.address
     view.owners.hidden = entry.owners < 2
@@ -1602,72 +1455,17 @@ a.hex:focus-visible { outline: none; background: var(--md-primary); }
 a.hex:focus-visible > .hex-art { inset: 4px; }
 .hex-owners[hidden] { display: none; }
 
-/* a tile's versions: this domain's pinned first, identical copies counted */
+/* a held tile: the domains it is on */
 .versions-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 1rem;
-  background: rgb(20 12 4 / .45); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+  background: rgb(20 12 4 / .45); }
 .versions-backdrop[hidden] { display: none; }
-.versions { box-sizing: border-box; width: min(36rem, 100%); max-height: min(82vh, 46rem); overflow: auto;
-  border: 1px solid color-mix(in srgb, var(--md-primary) 30%, var(--md-outline-variant)); border-radius: var(--hc-radius-floating, 4px);
-  background: var(--md-surface-c-lowest); color: var(--md-on-surface); box-shadow: 0 2rem 4rem -1.5rem rgb(40 20 0 / .6);
-  text-align: left; animation: sc-rise .22s cubic-bezier(.2, 0, 0, 1); }
-@keyframes sc-rise { from { opacity: 0; transform: translateY(.6rem); } }
-.versions-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: .9rem; padding: .95rem 1rem .95rem 1.1rem;
-  border-bottom: 1px solid var(--md-outline-variant);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--md-primary) 10%, var(--md-surface-c-lowest)), var(--md-surface-c-lowest) 70%); }
-.versions-head .mini { width: 2.8rem; height: calc(2.8rem * 1.1547); flex: none; }
-.versions-titles { display: grid; gap: .3rem; min-width: 0; }
-.versions-head h3 { margin: 0; overflow-wrap: anywhere; color: var(--md-on-surface-strong);
-  font: 500 1.55rem/1.1 'Source Serif 4', Georgia, serif; letter-spacing: -.03em; }
-.versions-head .band-meta span { display: inline-flex; align-items: center; gap: .4rem; }
-.versions-head .band-meta svg { width: .9rem; height: .9rem; color: var(--md-primary); }
-.versions-close { flex: none; display: grid; place-items: center; width: 2.3rem; height: 2.3rem; margin-left: auto; padding: 0;
-  border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-on-surface-var); }
-.versions-close svg { width: 1.1rem; height: 1.1rem; }
-.versions-close:hover:not(:disabled) { background: var(--md-surface-c-high); color: var(--md-on-surface-strong); }
-.version-list { list-style: none; margin: 0; padding: .4rem .5rem .6rem; }
-.version-list .version { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .2rem .9rem;
-  padding: .8rem .65rem; border-top: 1px solid var(--md-outline-variant); }
-.version-list .version:first-child { border-top: 0; }
-.version-list .version.pinned { border-radius: var(--hc-radius-card, 3px); background: color-mix(in srgb, var(--md-primary) 9%, transparent); }
-.version .mini { width: 2.4rem; height: calc(2.4rem * 1.1547); margin: 0; }
-.version-words { display: grid; gap: .12rem; min-width: 0; }
-.version-tag { font: 600 .62rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--md-on-surface-faint); }
-.version.pinned .version-tag { color: var(--md-primary); }
-.version-who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--md-on-surface-strong); font: 600 .95rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif); }
-.version-what { overflow-wrap: anywhere; color: var(--md-on-surface-var); font: 500 .72rem/1.35 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-.version-places { display: grid; gap: .35rem; justify-items: end; }
-.version-visit { display: inline-flex; align-items: center; gap: .4rem; max-width: 15rem; padding: .5rem .75rem;
-  border: 1px solid color-mix(in srgb, var(--md-primary) 42%, transparent); border-radius: var(--hc-radius-control, 2px);
-  color: var(--md-primary); font: 600 .8rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); text-decoration: none;
-  transition: background .2s, color .2s; }
-.version-visit-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.version-visit svg { flex: none; width: .9rem; height: .9rem; }
-.version-visit:hover { background: var(--md-primary); color: var(--md-on-primary); }
-.version-visit:focus-visible, .versions-close:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
-/* an owner's switches: folded until "Yours? Manage it" */
-.versions-manage { flex: none; margin-left: auto; padding: .45rem .7rem; border: 1px solid var(--md-outline-variant);
-  border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-on-surface-var);
-  font: 600 .76rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
-.versions-manage[aria-pressed='true'] { border-color: var(--md-primary); color: var(--md-primary);
-  background: color-mix(in srgb, var(--md-primary) 9%, transparent); }
-.versions-manage + .versions-close { margin-left: 0; }
-.versions-manage-panel { display: grid; gap: .45rem; padding: .85rem 1.1rem; border-bottom: 1px solid var(--md-outline-variant);
-  background: color-mix(in srgb, var(--md-primary) 5%, var(--md-surface-c-lowest)); }
-.versions-manage-panel[hidden], .version-claims[hidden] { display: none; }
-.versions-home { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .7rem; }
-.versions-home span { font: 600 .62rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--md-on-surface-faint); }
-.versions-home input { min-width: 0; padding: .5rem .65rem; border-radius: var(--hc-radius-control, 2px); font: 500 .85rem/1.3 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-.versions-manage-note { margin: 0; color: var(--md-on-surface-var); font-size: .78rem; line-height: 1.45; }
-.versions-manage-problem { margin: 0; color: var(--hc-status-alert, #b3261e); font-size: .8rem; }
-.versions-manage-problem:empty { display: none; }
-.version-claims { grid-column: 1 / -1; display: grid; gap: .35rem; padding-top: .35rem; }
-.version-claim { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; }
-.version-claim-owner { margin-right: auto; color: var(--md-on-surface-var); font: 600 .78rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
-.version-off { padding: .4rem .65rem; border: 1px solid color-mix(in srgb, var(--hc-status-alert, #b3261e) 45%, var(--md-outline-variant));
-  border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-on-surface-strong);
-  font: 600 .76rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
-.version-off:hover:not(:disabled) { background: color-mix(in srgb, var(--hc-status-alert, #b3261e) 10%, transparent); }
-.version-off:focus-visible, .versions-manage:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.versions { box-sizing: border-box; width: min(24rem, 100%); max-height: 70vh; overflow: auto; padding: 1rem 1.1rem;
+  background: var(--md-surface-c-low); color: var(--md-on-surface); border: 1px solid var(--md-outline-variant);
+  border-radius: var(--hc-radius-card, 3px); outline: 0; }
+.versions-title { margin: 0 0 .6rem; overflow-wrap: anywhere; color: var(--md-on-surface-strong); }
+.version-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
+.version { overflow-wrap: anywhere; font: 500 .85rem/1.35 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--md-on-surface-var); }
+@media (max-width: 720px) { .versions-backdrop { place-items: end stretch; padding: 0; } .versions { width: 100%; } }
 
 /* A PHONE: one column of the same list. */
 @media (max-width: 720px) {
@@ -1708,8 +1506,6 @@ a.hex:focus-visible > .hex-art { inset: 4px; }
   .hex-label { top: 60%; }
   .hex-owners { top: 9%; padding: .1rem .35rem; font-size: .6rem; }
   .hex-owners svg { width: .7rem; height: .7rem; }
-  /* the versions open as a sheet from the bottom edge */
-  .versions-backdrop { place-items: end stretch; padding: 0; }
   .versions { width: 100%; max-height: 86vh; max-height: 86dvh; padding-bottom: env(safe-area-inset-bottom);
     border-radius: var(--hc-radius-floating, 4px) var(--hc-radius-floating, 4px) 0 0; }
   .version-list .version { grid-template-columns: auto minmax(0, 1fr); }
