@@ -784,20 +784,24 @@ ${entry.key}`
         timer = setTimeout(() => {
           stop()
           if (!tile.isConnected) return
-          held = true; heldOpen = true; openVersions(made.entry, tile)
+          held = true
+          // On the owner's device a hold turns the tile on or off; for anyone else it lists the domains.
+          if (options.owner && ownerKey) void tapTile(made.entry, row)
+          else { heldOpen = true; openVersions(made.entry, tile) }
         }, HOLD_MS)
       })
       tile.addEventListener('pointermove', event => {
         if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 10) stop()
       })
       for (const type of ['pointerup', 'pointercancel', 'pointerleave']) tile.addEventListener(type, stop)
-      // A TAP, on a device whose hive is beside this page, puts the creation into the showcase or takes it
-      // out (jwize 2026-10-25: "you turn stuff on from there by toggling the hexagon"). Anywhere else it
-      // goes nowhere. The click a hold ends with is not a tap.
+      // A TAP VISITS; A HOLD TOGGLES (jwize 2026-10-25: "long press to toggle and single press to visit"). On a
+      // device whose hive is beside this page, holding a tile puts it into the showcase or takes it out; a tap
+      // is the link. The click a hold ends with is swallowed so it never also visits.
       tile.addEventListener('click', event => {
+        if (!held) return
+        held = false
         event.preventDefault()
-        if (held) { held = false; return }
-        void tapTile(made.entry, row)
+        event.stopPropagation()
       })
       tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile) })
       tile.addEventListener('keydown', event => {
@@ -818,9 +822,14 @@ ${entry.key}`
       wear(view.art, lead.head, lead.route)
       view.head = lead.head
     }
-    // A tile on the page goes nowhere: the showcase is what is shown, and it is not a way out of it.
     const place = placeFor(entry, row)
-    view.tile.title = `${entry.title} · ${place.address} — hold to see its domains`
+    view.tile.href = place.href
+    // Somewhere else on the web opens in its own tab; this origin is this site still.
+    if (view.tile.origin !== location.origin) { view.tile.target = '_blank'; view.tile.rel = 'noopener' }
+    else { view.tile.removeAttribute('target'); view.tile.removeAttribute('rel') }
+    view.tile.title = ownerKey && options.owner
+      ? `${entry.title} · ${place.address} — hold to turn it on or off`
+      : `${entry.title} · ${place.address} — hold to see its domains`
     view.name.textContent = entry.title
     view.address.textContent = place.address
     view.owners.hidden = entry.owners < 2

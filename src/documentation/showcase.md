@@ -31,12 +31,12 @@ recommendation").
 - **The search stays with you.** It is anchored flush to the top of the
   screen, in the place the brand was, as the page scrolls; the brand scrolls
   away and comes back when the page is scrolled back to the top.
-- **A tile goes nowhere; a hold lists its domains** (jwize, 2026-10-25: "no popup
-  and you don't navigate to places outside of your showcase", then "if you hold
-  down on the icon you can look at a list of the domains for a tile, but that is
-  it"). The page is the showcase, not a way out of it: a tap does nothing, and
-  holding a tile (or a right-click, or Space) lists the domains it is on as plain
-  names. No versions, no links, no switches, no Manage.
+- **A tap visits; a hold toggles** (jwize, 2026-10-25: "long press to toggle and single press to visit").
+  A tile is a link to the content, so a tap, a middle-click and "open in a tab" all just go. On the
+  owner's own device (a hive of theirs on the same origin answers) holding a tile for half a second puts it
+  into the showcase or takes it out; for anyone else the hold lists the domains that hold a different
+  revision, each a link, and the same-signature ones stay unseen while the tile is in the showcase. A
+  right-click or Space lists the domains for the owner too. The click a hold ends with never also visits.
 - **On other domains, a tap toggles** (jwize, 2026-10-25: "of course on other
   domains it is just toggling behaviors"): in your hive's Manage view, a tap on
   a tile of a followed domain switches it into or out of your showcase, the way
@@ -253,7 +253,7 @@ the device's key is passed to other devices by the key list. So the page asks th
 same-origin BroadcastChannel (`owner-bridge.ts` here, `showcase-bridge.ts` in the hive): `hello` finds out
 whether this device is the owner's; a tap on a tile then puts it into the showcase (in another domain's row;
 the ones not in it are grayed) or takes it out (in your own row), and the hive signs with its tested writer.
-A visitor, or a page with no hive on its origin, gets no answer and taps go nowhere. A hold still lists the
+A visitor, or a page with no hive on its origin, gets no answer and a hold just lists the domains. A hold still lists the
 other domains. **Not yet checked on a real host:** that the page and the hive share an origin there, and the
 key-list path for a second device.
 

@@ -943,7 +943,7 @@ describe('readZoneOwners — every owner counts', () => {
   })
 })
 
-describe('a tile — nothing on the page leads out of the showcase; a hold lists its domains', () => {
+describe('a held tile lists its domains', () => {
   const sites = parseLedger(LEDGER)
   const draw = () => showcase({
     self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
@@ -953,15 +953,6 @@ describe('a tile — nothing on the page leads out of the showcase; a hold lists
     const found = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes(name))
     expect(found).toBeDefined()
     return found!
-  })
-
-  it('has no address to go to, and a tap goes nowhere (the revisions are reached from a hold)', async () => {
-    const { bands } = draw()
-    const dylan = await tileOf(bands, 'dylan')
-    expect(dylan.hasAttribute('href')).toBe(false)
-    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
-    dylan.dispatchEvent(click)
-    expect(click.defaultPrevented).toBe(true)
   })
 
   it('lists on a hold only the domains whose copy differs, each a link to its revision', async () => {
@@ -1021,16 +1012,6 @@ describe('the owner\'s tap — a device whose hive is beside the page puts a til
     return found!
   })
 
-  it('asks the hive to take a tile out of the showcase when the owner taps it in their own row', async () => {
-    const owner = bridge(a)
-    const { bands } = draw(owner)
-    const dylan = await dylanOf(bands)
-    await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
-    await new Promise(resolve => setTimeout(resolve, 0))
-    dylan.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-    await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: false }))
-  })
-
   it('does nothing for a visitor, and when no hive answers', async () => {
     const none = bridge('')
     const { bands } = draw(none)
@@ -1043,46 +1024,89 @@ describe('the owner\'s tap — a device whose hive is beside the page puts a til
     expect(() => tile.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))).not.toThrow()
   })
 
-  it('does not toggle on the click that ends a hold', async () => {
+})
+
+describe('a tap visits, a hold toggles', () => {
+  const sites = parseLedger(LEDGER)
+  const a = sig('a')
+  const record: ShowcaseRecord = { zone: 'hypercomb.com', domains: [], items: [{ pubkey: a, lineage: 'camelflage' }] }
+  const owners = (): ZoneOwners => ({ showcase: record, reached: true, unreadable: false,
+    doors: new Map([[a, new Map([['camelflage', ['hypercomb.com']], ['dylan', ['hypercomb.com', 'jwize.com']]])]]) })
+  const bridge = (key: string) => ({ hello: vi.fn(async () => key), toggle: vi.fn(async () => ({ ok: true as const, changed: false })) })
+  const draw = (owner: ReturnType<typeof bridge> | null, sources: string[] = []) => showcase({
+    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources,
+    ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
+    ...(owner ? { owner } : {}),
+  })
+  const tileIn = async (bands: HTMLElement, selector: string, name: string): Promise<HTMLAnchorElement> => vi.waitFor(() => {
+    const found = [...bands.querySelectorAll<HTMLAnchorElement>(selector)].find(tile => tile.textContent?.includes(name))
+    expect(found).toBeDefined()
+    return found!
+  })
+  const press = (tile: Element): void => {
+    tile.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true }), { button: 0, isPrimary: true, clientX: 1, clientY: 1 }))
+  }
+  const click = (tile: Element): MouseEvent => { const event = new MouseEvent('click', { bubbles: true, cancelable: true }); tile.dispatchEvent(event); return event }
+
+  it('is a link: a tap goes to the content and is not stopped', async () => {
+    const { bands } = draw(null)
+    const camel = await tileIn(bands, '.dex-row.own a.hex', 'camelflage')
+    expect(camel.getAttribute('href')).toBe('https://camelflage.hypercomb.com/')
+    expect(camel.getAttribute('target')).toBe('_blank')
+    expect(click(camel).defaultPrevented).toBe(false)
+  })
+
+  it('on the owner\'s device a hold takes a tile out of the showcase, and the click that ends it does not visit', async () => {
     vi.useFakeTimers()
     try {
       const owner = bridge(a)
       const { hero, bands } = draw(owner)
       document.body.append(hero, bands)
       await vi.advanceTimersByTimeAsync(50)
-      const dylan = await dylanOf(bands)
-      dylan.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true }), { button: 0, isPrimary: true, clientX: 1, clientY: 1 }))
-      vi.advanceTimersByTime(501)
-      dylan.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-      await vi.advanceTimersByTimeAsync(10)
+      const camel = await tileIn(bands, '.dex-row.own a.hex', 'camelflage')
+      press(camel)
+      vi.advanceTimersByTime(499)
       expect(owner.toggle).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(2)
+      await vi.advanceTimersByTimeAsync(10)
+      expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'camelflage', on: false })
+      expect(click(camel).defaultPrevented).toBe(true)
+      expect(click(camel).defaultPrevented).toBe(false)
       hero.remove(); bands.remove()
     } finally { vi.useRealTimers() }
   })
-})
 
-describe('a tile in another domain\'s row — grayed when it is out, still there to turn on, and to turn off again', () => {
-  const sites = parseLedger(LEDGER)
-  const a = sig('a')
-  const record: ShowcaseRecord = { zone: 'hypercomb.com', domains: [], items: [{ pubkey: a, lineage: 'camelflage' }] }
-  const owners = (): ZoneOwners => ({ showcase: record, reached: true, unreadable: false,
-    doors: new Map([[a, new Map([['camelflage', ['hypercomb.com']], ['dylan', ['hypercomb.com', 'jwize.com']]])]]) })
+  it('for a visitor a hold lists the domains and toggles nothing', async () => {
+    vi.useFakeTimers()
+    try {
+      const none = bridge('')
+      const { hero, bands } = draw(none)
+      document.body.append(hero, bands)
+      await vi.advanceTimersByTimeAsync(50)
+      const camel = await tileIn(bands, '.dex-row.own a.hex', 'camelflage')
+      press(camel)
+      vi.advanceTimersByTime(501)
+      expect(none.toggle).not.toHaveBeenCalled()
+      expect((hero.querySelector('.versions-backdrop') as HTMLElement).hidden).toBe(false)
+      hero.remove(); bands.remove()
+    } finally { vi.useRealTimers() }
+  })
 
-  it('stays in its domain\'s row when it is out of the showcase, grayed, and a tap asks to put it in', async () => {
-    const owner = { hello: vi.fn(async () => a), toggle: vi.fn(async () => ({ ok: true as const, changed: false })) }
-    const { bands } = showcase({
-      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
-      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(), owner,
-    })
-    await vi.waitFor(() => expect(bands.querySelectorAll('.dex-head').length).toBeGreaterThan(1))
-    ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
-    const dylan = await vi.waitFor(() => {
-      const found = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row:not(.own) a.hex')].find(tile => tile.textContent?.includes('dylan'))
-      expect(found).toBeDefined()
-      expect(found!.classList.contains('off')).toBe(true)
-      return found!
-    })
-    dylan.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-    await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
+  it('stays in its domain\'s row when it is out of the showcase, grayed, and a hold asks to put it in', async () => {
+    vi.useFakeTimers()
+    try {
+      const owner = bridge(a)
+      const { hero, bands } = draw(owner, ['jwize.com'])
+      document.body.append(hero, bands)
+      await vi.advanceTimersByTimeAsync(50)
+      ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+      const dylan = await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')
+      expect(dylan.classList.contains('off')).toBe(true)
+      press(dylan)
+      vi.advanceTimersByTime(501)
+      await vi.advanceTimersByTimeAsync(10)
+      expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true })
+      hero.remove(); bands.remove()
+    } finally { vi.useRealTimers() }
   })
 })
