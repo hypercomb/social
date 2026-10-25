@@ -6,7 +6,7 @@ import {
   BRIDGE_CODE_STORE_IOC_KEY, bridgeCodeStore,
   type RemoteSubmitRequest, type RemoteSubmitOutcome, type BridgeCodeStore,
 } from '@hypercomb/core'
-import { deliverTurnSig, readTurns, setConversationGoalReached } from './chat-thread.js'
+import { deliverTurnSig, newTileConvoId, readTurns, setConversationGoalReached } from './chat-thread.js'
 import { appendStep, nextSeq as ledgerNextSeq, readSteps, runForAsk } from './chat-steps.js'
 import { MUTATING_OPS, STEP_SILENT_OPS } from './bridge-ops.js'
 import { ParkedLease, monotonicNow } from './bridge-parked.js'
@@ -2285,9 +2285,25 @@ export class ClaudeBridgeWorker extends Worker {
   #askWatch: (() => void) | null = null
 
   async #chatAsk(req: BridgeRequest): Promise<BridgeResponse> {
-    const convoId = typeof req.cell === 'string' ? req.cell.trim() : ''
+    const cell = typeof req.cell === 'string' ? req.cell.trim() : ''
     const text = typeof req.text === 'string' ? req.text.trim().slice(0, 20_000) : ''
-    if (!convoId) return { id: req.id, ok: false, error: 'chat-ask requires `cell` (the convoId)' }
+    const options = (req.payload ?? {}) as { trust?: unknown; open?: unknown; name?: unknown }
+    // A TILE IS ADDRESSED BY ITS ROUTE. `cell` that begins with `/` is a tile,
+    // and the ask starts — or, with a `name`, RECONNECTS to — a conversation
+    // about it: the id is `chat:tile:/route::<name>`, so the same route and name
+    // always reach the same conversation and a harness needs to remember
+    // neither an id nor a session. No name, and each ask is a new conversation.
+    // It is a tile's own conversation, in its list — not a job one, which every
+    // list walk hides — so the participant can open it and read it.
+    let convoId = cell
+    if (cell.startsWith('/')) {
+      const route = cell.split('/').map(part => part.trim()).filter(Boolean)
+      const seed = typeof options.name === 'string'
+        ? options.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48)
+        : ''
+      convoId = newTileConvoId(route, seed || undefined)
+    }
+    if (!convoId) return { id: req.id, ok: false, error: 'chat-ask requires `cell` (a convoId, or a tile route that begins with /)' }
     if (!text) return { id: req.id, ok: false, error: 'chat-ask requires `text`' }
     this.#askWatch ??= EffectBus.on<{ askId?: string }>('chat:asked', result => {
       const askId = String(result?.askId ?? '')
@@ -2298,7 +2314,10 @@ export class ClaudeBridgeWorker extends Worker {
       }
     })
     const askId = `ask-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-    const trust = (req.payload as { trust?: unknown } | undefined)?.trust === true
+    const trust = options.trust === true
+    // SHOWN, WHEN ASKED: `open` brings the participant's chat to the
+    // conversation, so they watch the sentence arrive and the model answer.
+    if (options.open === true) EffectBus.emit('chat:open', { convoId })
     EffectBus.emit('chat:ask', { askId, convoId, text, trust })
     return { id: req.id, ok: true, data: { askId, convoId } }
   }

@@ -76,3 +76,43 @@ describe('an ask always ends', () => {
     expect((await op({ op: 'chat-asked', cell: 'not-an-ask' })).data).toEqual({ done: false, askId: 'not-an-ask' })
   })
 })
+
+// 2026-10-25: a harness addresses a tile by its route, and comes back to the
+// same conversation by the name it gave — nothing to remember but those two.
+describe('a tile is addressed by its route', () => {
+  const asks: { convoId: string; text: string; trust: boolean }[] = []
+  const opened: { convoId?: string }[] = []
+  beforeAll(() => {
+    EffectBus.on<{ convoId: string; text: string; trust: boolean }>('chat:ask', payload => { asks.push(payload) })
+    EffectBus.on<{ convoId?: string }>('chat:open', payload => { opened.push(payload) })
+  })
+
+  it('the same route and name reach the same conversation, and it is never a job one', async () => {
+    const first = await op({ op: 'chat-ask', cell: '/work/invoices', text: 'tidy', payload: { name: 'Tidy Up!' } })
+    const again = await op({ op: 'chat-ask', cell: '/work/invoices', text: 'and the receipts', payload: { name: 'tidy up' } })
+    expect(first.data?.['convoId']).toBe('chat:tile:/work/invoices::tidy-up')
+    expect(again.data?.['convoId']).toBe('chat:tile:/work/invoices::tidy-up')
+    expect(String(first.data?.['convoId'])).not.toContain('::job-')
+  })
+
+  it('without a name each ask is a new conversation on that tile', async () => {
+    const a = await op({ op: 'chat-ask', cell: '/work', text: 'one' })
+    const b = await op({ op: 'chat-ask', cell: '/work', text: 'two' })
+    expect(String(a.data?.['convoId'])).toMatch(/^chat:tile:\/work::\d+-[a-z0-9]+$/)
+    expect(a.data?.['convoId']).not.toBe(b.data?.['convoId'])
+  })
+
+  it('is not trusted unless the caller says so, and opens the chat only when asked', async () => {
+    asks.length = 0; opened.length = 0
+    await op({ op: 'chat-ask', cell: '/work', text: 'quiet', payload: { name: 'quiet' } })
+    expect(asks.at(-1)).toMatchObject({ trust: false })
+    expect(opened).toEqual([])
+    await op({ op: 'chat-ask', cell: '/work', text: 'shown', payload: { name: 'shown', open: true } })
+    expect(opened.at(-1)).toEqual({ convoId: 'chat:tile:/work::shown' })
+  })
+
+  it('a conversation id is carried on as it was given', async () => {
+    const reply = await op({ op: 'chat-ask', cell: 'chat:tile:/work::tidy', text: 'more' })
+    expect(reply.data?.['convoId']).toBe('chat:tile:/work::tidy')
+  })
+})

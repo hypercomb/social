@@ -246,7 +246,12 @@ export class IntoQueenBee extends QueenBee {
     const tiles = page ?? []
     const spelled = (name: string): string | undefined => tiles.find(tile => tile.toLowerCase() === name.toLowerCase())
     const absent = tiles.length ? groups.flatMap(group => group.members).filter(name => !spelled(name)) : []
-    if (absent.length) throw new Error(`into — no tile named ${absent.map(name => `"${name}"`).join(', ')} on ${onPage ? `/${onPage.join('/')}` : 'this page'}`)
+    if (absent.length) {
+      // A model works on a tile it is not standing on, and says its tiles bare:
+      // the failure is where it learns to name the page (2026-10-25).
+      const hint = onPage ? '' : `. If they are on another page, start the line with in /<route>: — for example /into in /${here.join('/') || 'work'}: …`
+      throw new Error(`into — no tile named ${absent.map(name => `"${name}"`).join(', ')} on ${onPage ? `/${onPage.join('/')}` : 'this page'}${hint}`)
+    }
 
     const moves = groups.map(group => ({
       labels: group.members.map(name => spelled(name) ?? name),
