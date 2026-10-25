@@ -9,9 +9,18 @@ recommendation").
 
 ## Two views of one domain
 
-- **A visitor** at your address sees your **showcase**: one list behind a lean
-  header (a small brand row, then the search across the full width). They never
-  see the domains you are connected to. The front door draws it
+- **A domain's page is a hyperdex** (jwize, 2026-10-25: "in the domain on
+  hypercomb.com or persons.com it is a list that is an accordion and the
+  domains you follow are the source for published items belonging to your
+  peers"). Under a lean header (a small brand row, then the search), one row
+  per domain: **this domain first and open**, its tiles its **showcase**;
+  then the domains the viewer follows (`community:hosts`, kept on that
+  origin), closed, each opening onto what that peer publishes. One row is open
+  at a time. A stranger follows nothing there, so they see only the showcase;
+  you, following your peers, see your whole network. On a phone that is all
+  there is, with the search fixed at the bottom; the desktop keeps the setup
+  beneath it, because it is the dashboard and the hosting (jwize: "desktop
+  gets everything"). The front door draws it
   (`hypercomb-shim/src/bootstrap/showcase.ts`).
 - **You** see your whole **community**: your domains, each opening onto what it
   hosts, where you choose what joins your showcase.

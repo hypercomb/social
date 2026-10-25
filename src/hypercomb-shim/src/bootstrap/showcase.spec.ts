@@ -327,3 +327,30 @@ describe('parseShowcase — a signed showcase is data too', () => {
     expect(parseLedger(LEDGER)[0]!.owners).toEqual([sig('a')])
   })
 })
+
+describe('the hyperdex — this domain first and open, then the domains you follow', () => {
+  const sites = parseLedger(LEDGER)
+  const rows = (bands: HTMLElement): string[] => [...bands.querySelectorAll('.dex-row')]
+    .map(row => `${row.querySelector('.dex-name')?.textContent}${row.classList.contains('open') ? ' open' : ''}:`
+      + [...row.querySelectorAll('.hex-name')].map(name => name.textContent).join(','))
+
+  it('opens on this domain\'s showcase; a followed domain opens on what it offers, one row at a time', async () => {
+    const { bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+    })
+    await vi.waitFor(() => expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:']))
+    ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+    expect(rows(bands)).toEqual(['hypercomb.com:', 'jwize.com open:dylan'])
+    // dylan is in this domain's showcase already, and its tile in jwize.com's row says so.
+    expect(bands.querySelector('.dex-row:not(.own) .hex.in-showcase .hex-name')?.textContent).toBe('dylan')
+  })
+
+  it('shows a stranger only the showcase: no domains followed, no other rows', async () => {
+    const { bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+    })
+    await vi.waitFor(() => expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan']))
+  })
+})

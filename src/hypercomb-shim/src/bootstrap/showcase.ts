@@ -757,9 +757,13 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   type TileView = { tile: HTMLButtonElement; art: HTMLElement; name: HTMLElement; address: HTMLElement
     owners: HTMLElement; head: string; entry: Aggregate }
   const tileViews = new Map<string, TileView>()
-  const tileView = (entry: Aggregate): HTMLButtonElement => {
+  /** A name's tile in one row: the same name may show in your domain's row and
+   *  in the row of the domain it came from, each its own button. */
+  const tileView = (entry: Aggregate, row: string): HTMLButtonElement => {
     const lead = entry.versions[0]!
-    let view = tileViews.get(entry.key)
+    const id = `${row}
+${entry.key}`
+    let view = tileViews.get(id)
     if (!view) {
       const tile = el('button', `hex hex-${entry.kind}`)
       tile.type = 'button'
@@ -779,7 +783,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
       tile.append(art, label, owners)
       const made: TileView = { tile, art, name, address, owners, head: '', entry }
       tile.addEventListener('click', () => openVersions(made.entry, tile))
-      tileViews.set(entry.key, view = made)
+      tileViews.set(id, view = made)
     }
     view.entry = entry
     if (view.head !== lead.head) {
@@ -838,15 +842,50 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     for (const { target } of entries) arrange(target as HTMLElement, combTiles.get(target as HTMLElement) ?? [])
   }) : null
 
-  // ── ONE LIST: THIS DOMAIN'S SHOWCASE (jwize 2026-10-24: "your visitors
-  //    should only see your showcase not your connections"). Every name once;
-  //    what the owners signed as `showcase:<zone>`, else what opens here. The
-  //    domains it was gathered from are the owner's, kept in their hive. ──
-  const hosted = el('section', 'hosted')
-  const comb = el('div', 'comb')
-  combs?.observe(comb)
-  const empty = el('p', 'hosted-empty')
-  hosted.append(comb, empty)
+  // ── THE HYPERDEX: ONE ROW PER DOMAIN (jwize 2026-10-25: "above the tiles
+  //    there should be the domain hypercomb.com or your.com. That is the list
+  //    item and it is expanded. After should be more domains … when you expand
+  //    other domains you see the tiles they have to offer"). This domain's row
+  //    comes first and open: its tiles are its showcase — what its owners sign
+  //    as `showcase:<zone>`, else what opens here. The rows after it are the
+  //    domains this browser holds (its community, `options.sources`), so a
+  //    stranger sees only the showcase and you see your whole network. One row
+  //    is open at a time. ──
+  type RowView = { section: HTMLElement; toggle: HTMLButtonElement; meta: HTMLElement; comb: HTMLElement; empty: HTMLElement }
+  const rowViews = new Map<string, RowView>()
+  /** The row open now; this domain's until another is opened. */
+  let openRow = options.self
+  const rowView = (zone: string): RowView => {
+    const found = rowViews.get(zone)
+    if (found) return found
+    const own = zone === options.self
+    const section = el('section', own ? 'dex-row own' : 'dex-row')
+    const id = `dex-${rowViews.size}`
+    const toggle = el('button', 'dex-head')
+    toggle.type = 'button'
+    toggle.setAttribute('aria-controls', id)
+    const name = el('span', 'dex-name')
+    name.textContent = zone
+    const meta = el('span', 'dex-meta')
+    const chevron = el('span', 'dex-chevron')
+    chevron.append(iconOf('chevron'))
+    toggle.append(iconOf('globe'), name, meta, chevron)
+    toggle.addEventListener('click', () => {
+      openRow = openRow === zone ? '' : zone
+      paint()
+    })
+    const body = el('div', 'dex-body')
+    body.id = id
+    const comb = el('div', 'comb')
+    combs?.observe(comb)
+    const empty = el('p', 'hosted-empty')
+    body.append(comb, empty)
+    section.append(toggle, body)
+    const view = { section, toggle, meta, comb, empty }
+    rowViews.set(zone, view)
+    return view
+  }
+  const hosted = el('div', 'hosted')
   bandsHost.append(hosted)
   /** Every publish known now — the ledger's, then each domain's pools — one tile per name. */
   const bands = (): Band[] => {
@@ -896,11 +935,35 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     for (const band of all) askShared(band.zone)
     const unread = !!options.readShowcase && record === undefined
     const everything = unread ? [] : all.flatMap(band => band.tiles).filter(showcased).sort(byTitle)
-    const shown = everything.filter(entry => aggregateMatches(entry, terms))
-    arrange(comb, shown.map(entry => tileView(entry)))
-    empty.hidden = shown.length > 0
-    empty.textContent = terms.length ? 'Nothing here matches your search.'
-      : !ledgerRead || unread ? 'Reading what is showcased here…' : 'Nothing is showcased here yet.'
+    // This domain first; then the domains this browser holds, by name.
+    const held = [...new Set(options.sources)].filter(zone => zone !== options.self).sort()
+    const rows: HTMLElement[] = []
+    for (const zone of [options.self, ...held]) {
+      const view = rowView(zone)
+      const own = zone === options.self
+      const offered = own ? everything : (all.find(band => band.zone === zone)?.open ?? []).slice().sort(byTitle)
+      const shown = offered.filter(entry => aggregateMatches(entry, terms))
+      // While a search runs every row holding a match is open; otherwise one is.
+      const open = terms.length ? shown.length > 0 : openRow === zone
+      view.section.classList.toggle('open', open)
+      view.toggle.setAttribute('aria-expanded', String(open))
+      view.section.hidden = terms.length > 0 && shown.length === 0
+      view.meta.textContent = own ? count(offered.length, 'in the showcase', 'in the showcase') : count(offered.length, 'offered', 'offered')
+      arrange(view.comb, open ? shown.map(entry => {
+        const tile = tileView(entry, zone)
+        // In another domain's row, a tile already in this domain's showcase says so.
+        tile.classList.toggle('in-showcase', !own && showcased(entry))
+        return tile
+      }) : [])
+      view.empty.hidden = !open || shown.length > 0
+      view.empty.textContent = terms.length ? 'Nothing here matches your search.'
+        : own && (!ledgerRead || unread) ? 'Reading what is showcased here…'
+          : own ? 'Nothing is showcased here yet.' : `Nothing is offered on ${zone} yet.`
+      rows.push(view.section)
+    }
+    // Re-insert only when the order changed: moving a row takes focus from it.
+    const current = [...hosted.children]
+    if (current.length !== rows.length || current.some((node, index) => node !== rows[index])) hosted.replaceChildren(...rows)
     const hives = everything.filter(entry => entry.kind === 'hive')
     const creations = everything.length - hives.length
     stats.replaceChildren()
@@ -1110,7 +1173,29 @@ export const SHOWCASE_STYLE = `
 .hosted { position: relative; margin: 0 0 clamp(2rem, 5vh, 3rem); }
 .band-meta { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem;
   font: 500 .66rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
-.hosted-empty[hidden] { display: none; }
+.hosted-empty[hidden], .dex-row[hidden] { display: none; }
+/* the hyperdex: one row per domain, this one first and open */
+.hosted { display: grid; gap: .5rem; margin: 0 0 clamp(2rem, 5vh, 3rem); }
+.dex-row { margin: 0; border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px);
+  background: color-mix(in srgb, var(--md-surface-c-lowest) 72%, transparent); }
+.dex-row.open { border-color: color-mix(in srgb, var(--md-primary) 40%, var(--md-outline-variant)); }
+.dex-head { display: flex; align-items: center; gap: .6rem; width: 100%; padding: .7rem .9rem; border: 0; background: transparent;
+  color: var(--md-on-surface-strong); font: 600 1rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); text-align: left; cursor: pointer; }
+.dex-head:hover:not(:disabled) { background: color-mix(in srgb, var(--md-primary) 6%, transparent); }
+.dex-head:focus-visible { outline: 2px solid var(--md-primary); outline-offset: -2px; }
+.dex-head > svg { flex: none; width: 1.05rem; height: 1.05rem; color: var(--md-primary); }
+.dex-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dex-meta { flex: none; margin-left: auto; color: var(--md-on-surface-faint);
+  font: 500 .66rem/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .12em; text-transform: uppercase; }
+.dex-chevron { display: grid; flex: none; color: var(--md-on-surface-var); transition: transform .2s; }
+.dex-chevron svg { width: 1.1rem; height: 1.1rem; }
+.dex-row.open .dex-chevron { transform: rotate(180deg); color: var(--md-primary); }
+.dex-body { padding: .2rem .9rem 1rem; }
+.dex-row:not(.open) .dex-body { display: none; }
+/* a tile in another domain's row that is already in your showcase */
+.hex.in-showcase::after { content: '✓'; position: absolute; z-index: 3; top: 12%; left: 50%; transform: translateX(-50%);
+  display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%;
+  background: var(--md-primary); color: var(--md-on-primary); font: 700 .8rem/1 var(--md-font-ui, Inter, system-ui, sans-serif); }
 .hosted-empty { margin: 0; padding: 1.3rem 1.2rem; border: 1px dashed var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px); color: var(--md-on-surface-var); }
 .mini { position: relative; width: 2.3rem; height: calc(2.3rem * 1.1547); margin-left: -.7rem; clip-path: var(--hex);
   background: linear-gradient(160deg, var(--gold-1), var(--gold-3)); }
@@ -1278,7 +1363,17 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
 }
 /* A PHONE: one column of the same list. */
 @media (max-width: 720px) {
-  .card.showcase-page .panel { margin-top: 1rem; }
+  .card.showcase-page .panel { margin-top: 1rem; padding-bottom: 5.5rem; }
+  /* the phone is a dead-simple hyperdex (jwize 2026-10-25): the rows, and the
+     search fixed at the bottom where a thumb is — nothing else. The desktop
+     keeps the setup beneath, because it is the dashboard and the hosting. */
+  .search { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; margin: 0;
+    padding: .6rem 16px calc(.6rem + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--md-surface) 92%, transparent); border-top: 1px solid var(--md-outline-variant);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  .search svg { left: calc(16px + .95rem); }
+  .showcase-page .member, .showcase-page .explore, .showcase-page details.manage, .showcase-page footer { display: none; }
+  .dex-body { padding: .1rem .5rem .8rem; }
   .hero-brand { gap: .6rem; }
   .hero-mark { width: 1.7rem; height: 1.7rem; }
   .hero h1 { font-size: 1.2rem; }
