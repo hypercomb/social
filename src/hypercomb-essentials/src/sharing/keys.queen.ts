@@ -27,6 +27,7 @@ import {
   acceptInvite, allowAnother, captureInvite, listKeys, parseInvite, pendingInvite, removeKey,
   type KeysAcceptResult, type KeysAllowResult, type KeysOffResult,
 } from './key-list.client.js'
+import { listCommunityHosts, listZoneBindings } from './community-hosts.js'
 import { showInviteQr } from './invite-qr.view.js'
 import { nodesFor } from './publish-branch.js'
 import { isPublishNode } from './zone-door.js'
@@ -150,10 +151,19 @@ export class KeysQueenBee extends QueenBee {
     }
   }
 
-  /** The nodes this participant publishes to: where the list is kept. */
+  /** The nodes this participant publishes to: where the list is kept. The domains the root is marked with,
+   *  the standing targets, AND the zones this hive holds a binding for — a domain you have claimed is a
+   *  place you publish to even when the root itself carries no host mark (jwize 2026-10-25: "but it was
+   *  already there"). A followed host (`hosts add`) is tried only when nothing is marked or claimed. */
   async #hosts(): Promise<string[]> {
     const hostSync = get<Parameters<typeof nodesFor>[1]>(HOST_SYNC_KEY)
-    return (await nodesFor([], hostSync).catch(() => [] as string[])).filter(isPublishNode)
+    const marked = await nodesFor([], hostSync).catch(() => [] as string[])
+    const bound = (await listZoneBindings().catch(() => [])).map(binding => binding.zone)
+    const nodes = [...new Set([...marked, ...bound])].filter(isPublishNode)
+    if (nodes.length) return nodes
+    // Nothing is marked or claimed: the hosts this hive follows are the last place to look. A host that is
+    // not yours refuses the list, and that refusal is said in words — better than "no host" for one you named.
+    return (await listCommunityHosts().catch(() => [] as string[])).filter(isPublishNode)
   }
 
   async #list(): Promise<void> {
