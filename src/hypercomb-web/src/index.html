@@ -5,6 +5,28 @@
     <title>Hypercomb</title>
     <base href="/" />
 
+    <!-- A phone goes to the .com. The hive at hypercomb.io is where creations
+         are made; a phone uses them from hypercomb.com, the root page that
+         lists what every domain hosts (documentation/using-a-creation.md, "On
+         a phone, you go to the .com"). The hive's mobile view is set aside and
+         kept for reuse, never shown here until it is robust and usable. A
+         phone is the one definition MobileModeService uses: a coarse pointer
+         AND a phone-sized viewport in either orientation. Only hypercomb.io
+         itself is sent on: local dev, the development deploy and the native
+         client keep the hive. Decided once, at load, before anything else
+         runs. -->
+    <script>
+      (function () {
+        try {
+          var host = location.hostname;
+          if (host !== 'hypercomb.io' && host !== 'www.hypercomb.io') return;
+          if (!matchMedia('(pointer: coarse)').matches) return;
+          if (!matchMedia('(max-width: 599px), (max-height: 449px)').matches) return;
+          location.replace('https://hypercomb.com/');
+        } catch (e) {}
+      })();
+    </script>
+
     <!-- Break capture: every client-side break is queued for the break repair
          loop (documentation/break-repair-loop.md). The listeners go on HERE,
          before any stylesheet, script or module can fail, and only hold what

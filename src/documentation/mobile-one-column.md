@@ -1,5 +1,11 @@
 # Mobile, one column — the phone reads a layer as a list, and every control has a word
 
+> **2026-10-24: SET ASIDE.** The hive's mobile view is no longer used. On a
+> phone you go to the .com, a domain's root page, and launch creations from
+> there (`using-a-creation.md`, "On a phone, you go to the .com"). The code
+> this doc describes is kept for reuse, in case a builder for phones is
+> released later.
+
 Status: **PASS 5 BUILT, 2026-09-10** (Jaime: *"three rows of icons, the
 second up from the bottom toggles. The lanes work exactly like they do now
 and everything else does as well."*). The phone is three bands: the list

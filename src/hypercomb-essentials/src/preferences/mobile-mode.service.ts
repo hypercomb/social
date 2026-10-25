@@ -27,6 +27,7 @@ import {
   MOBILE_MODE_IOC_KEY,
   MOBILE_MODE_EFFECT,
 } from './mobile-pheromones.js'
+import { isPublishedVisitorShell } from '../sharing/behavior-enablement.js'
 
 export type MobileOverride = 'on' | 'off' | 'auto'
 
@@ -78,6 +79,12 @@ export class MobileModeService extends EventTarget {
   }
 
   #compute(): boolean {
+    // A LAUNCHED CREATION IS NEVER THE PHONE VIEW. The visitor shell hides the
+    // surfaces the phone view paints into, so turning it on there only had the
+    // list build rows nobody sees. A phone uses creations as they are; the
+    // phone view is set aside (using-a-creation.md, "On a phone, you go to the
+    // .com"). No override reaches past this.
+    if (isPublishedVisitorShell()) return false
     const ov = this.#override()
     return ov ? ov === 'on' : this.#auto()
   }

@@ -1,5 +1,11 @@
 # Mobile Grand Master Plan — the hive as something you READ
 
+> **2026-10-24: SET ASIDE.** The hive's mobile view is no longer used. On a
+> phone you go to the .com, a domain's root page, and launch creations from
+> there (`using-a-creation.md`, "On a phone, you go to the .com"). The code
+> this doc describes is kept for reuse, in case a builder for phones is
+> released later.
+
 **Status: PLAN + Phase 1 BUILT (2026-07-31).** Sits on top of
 `mobile-usable-first-plan.md` (which fixed *can you use it at all*) and
 `mobile-experience-plan.md` (the machinery). This plan answers the next

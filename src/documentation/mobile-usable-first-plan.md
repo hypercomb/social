@@ -1,5 +1,11 @@
 # Mobile Usable-First — Recovery & Upgrade Plan
 
+> **2026-10-24: SET ASIDE.** The hive's mobile view is no longer used. On a
+> phone you go to the .com, a domain's root page, and launch creations from
+> there (`using-a-creation.md`, "On a phone, you go to the .com"). The code
+> this doc describes is kept for reuse, in case a builder for phones is
+> released later.
+
 **Status: PLAN — written 2026-07-28 from a 7-dimension code audit (gate, typing, swarm-join,
 touch, boot/PWA, prior plan, stranded branches). Supersedes the viewer-first POSTURE of
 `mobile-experience-plan.md` where the two conflict; that doc's machinery (mode service,

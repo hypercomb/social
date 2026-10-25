@@ -118,6 +118,22 @@ describe('one definition of mobile — the stamp on <html>', () => {
     expect(seen.at(-1)).toEqual({ active: true })
   })
 
+  it('stays off inside a launched creation, phone and override alike', () => {
+    document.documentElement.dataset['hypercombMode'] = 'visitor'
+    try {
+      device(COARSE, true)
+      device(PHONE, true)
+      const service = new MobileModeService()
+      expect(service.active).toBe(false)
+      expect(root().hcMobile).toBe('off')
+      service.setOverride('on')
+      expect(service.active).toBe(false)
+      expect(root().hcMobile).toBe('off')
+    } finally {
+      delete document.documentElement.dataset['hypercombMode']
+    }
+  })
+
   it('reads the viewport when there is no matchMedia at all', () => {
     Object.defineProperty(window, 'matchMedia', { value: undefined, configurable: true, writable: true })
     Object.defineProperty(window, 'innerWidth', { value: 844, configurable: true, writable: true })

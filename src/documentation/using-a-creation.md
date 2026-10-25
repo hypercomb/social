@@ -203,6 +203,49 @@ How it is built:
   with no scripts. Releasing the address for something else is the host
   operator's act.
 
+## On a phone, you go to the .com
+
+*jwize, 2026-10-24:* "we no longer need the mobile view we have essentially
+phased it out with the root host page. It is your domain a opening to your
+internet and you use the apps on other peoples domains for safety." And: "a
+list of launchables from any host domain which you store data in their
+context domain." And: "so basically you go to the com when you are on mobile."
+And: "if you go to hypercomb.io on mobile you go to the com. unless we release
+an builder so we can keep the code around for recyclying or reuse."
+
+- **On a phone you open a domain's root page, not the hive.** hypercomb.com,
+  or your own domain. Opening hypercomb.io on a phone takes you to
+  hypercomb.com. The root page is your opening to your internet. On a
+  phone it is one row per domain, and opening a row shows the creations that
+  domain hosts ([domain-claim.md](domain-claim.md), "What the front door
+  shows").
+- **It is a launcher.** Every creation in it can be launched from any host
+  domain, and it opens at its own address.
+- **What you keep in a creation stays with that creation's domain.** A
+  creation runs on its host's domain, so your browser keeps its data for that
+  domain alone. Nothing on another domain can read it, and it can't read your
+  hive. That is what makes it safe to use apps on other people's domains.
+- **You choose what shows from your hive.** In the Publish panel, a domain's
+  row opens on the creations it hosts, and turning one on or off there puts
+  it on your front page or takes it off. Everything you host shows up there
+  by itself.
+- **The hive's mobile view is set aside, and its code is kept.** That means
+  the layer list, the rails, the deck, the add sheet and the `mobile` word
+  ([mobile-one-column.md](mobile-one-column.md),
+  [mobile-rails-projection.md](mobile-rails-projection.md),
+  [mobile-experience-plan.md](mobile-experience-plan.md)). The code stays in
+  the tree for reuse, in case a builder for phones is released later. Nothing
+  shows it until it is robust and usable (*jwize:* "we don't want to expose
+  that until it is robust and usable"). The hive at hypercomb.io is where
+  creations are made. A phone uses them from the .com.
+- **A launched creation never turns phone mode on.** Opened on a phone, it
+  shows its hexagons or its page as it would on a desktop. The visitor shell
+  already hid the phone view's surfaces; now phone mode itself stays off
+  there (`MobileModeService`), so nothing builds the list unseen.
+
+The section below is the earlier framing (2026-10-07). Where the two differ,
+this section is the later word.
+
 ## On a phone, the root is people
 
 *jwize, 2026-10-07:* "this is a collaboration software so the first thing we
@@ -277,6 +320,7 @@ mode, or Single App Mode on a supervised iPhone).
 | Offerings of a followed domain in your list | not built |
 | A front page other than a card for a person in the list | not built: every row opens a card today |
 | Pulling up from a front page to the list | built in the card page |
+| A phone uses the root page (the .com), not the hive's mobile view | decided 2026-10-24. The root page's phone layout is built and live on hypercomb.com. Sending a phone from hypercomb.io to hypercomb.com is not built yet. The mobile view's code is kept for reuse |
 | A How-to the first time you reach the Hyperdex (jwize: "mobile is all about connecting people with our creations"): a menu down the middle, each section a popup you read and close, the three ways to set up with pros and cons | built in the card page. It opens by itself once, on doors too (the door keeps `bc.howto`, true or false only); a "How it works" row at the end of the list opens it again |
 | Other front pages and ways in, offered from the list | not built |
 | Editing your own front page in place, nothing kept until you accept | built in the card page ([business-card.md](business-card.md), "Editing a card in place") |

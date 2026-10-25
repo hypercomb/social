@@ -1,5 +1,11 @@
 # Mobile rails — the phone reads the hive as a strip, and never writes it
 
+> **2026-10-24: SET ASIDE.** The hive's mobile view is no longer used. On a
+> phone you go to the .com, a domain's root page, and launch creations from
+> there (`using-a-creation.md`, "On a phone, you go to the .com"). The code
+> this doc describes is kept for reuse, in case a builder for phones is
+> released later.
+
 **Status: BUILT 2026-09-01.** §1–§3 in `ef26fca02` (proof
 `scripts/drive-mobile-rails.cjs` 23/23); §4–§9 in the commit after it (proofs
 `drive-layer-deck.cjs` 15/15, `drive-mobile-scroller.cjs` 16/16,
