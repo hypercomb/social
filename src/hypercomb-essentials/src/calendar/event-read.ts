@@ -10,7 +10,7 @@
 
 import { hostBase, readBySig } from '../sharing/derivation-attestation.js'
 import {
-  coming, eventsPoolAddress, listingNames, parseEvent, readRsvp, rsvpPoolAddress, standingRsvps,
+  coming, eventsPoolAddress, listingNames, parseEvent, readRsvp, rsvpPoolAddress, standingRsvps, withoutSuperseded,
   type EventRecord, type Rsvp,
 } from './event.js'
 
@@ -47,7 +47,7 @@ export async function readEvents(hosts: readonly string[]): Promise<ListedEvent[
       if (record) { out.push({ sig, record, hosts: from }); return }
     }
   }))
-  return out.sort((a, b) => a.record.date.localeCompare(b.record.date) || a.sig.localeCompare(b.sig))
+  return withoutSuperseded(out).sort((a, b) => a.record.date.localeCompare(b.record.date) || a.sig.localeCompare(b.sig))
 }
 
 /** Who is coming to one meeting, as its host lists them: each key's newest

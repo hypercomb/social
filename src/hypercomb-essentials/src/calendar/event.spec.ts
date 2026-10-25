@@ -16,7 +16,7 @@ vi.mock('../sharing/hive-pointer.js', () => ({
 
 const {
   EVENTS_POOL, RSVP_KIND, coming, eventSignature, eventText, hereNow, listingNames, orderEvents, parseEvent, readRsvp,
-  rsvpPoolMeaning, rsvpTemplate, standingRsvps,
+  rsvpPoolMeaning, rsvpTemplate, standingRsvps, withoutSuperseded,
 } = await import('./event.js')
 const { readEvents } = await import('./event-read.js')
 const { parseEventArgs } = await import('./event.queen.js')
@@ -175,5 +175,54 @@ describe('the calendar across hosts', () => {
     const events = await readEvents(['hypercomb.com', 'club.example', 'silent.example', 'gone.example', 'Club.Example'])
     expect(events.map(e => [e.record.title, e.hosts])).toEqual([['Ours', ['hypercomb.com']], ['Theirs', ['hypercomb.com', 'club.example']]])
     expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([url]) => String(url).includes(`/${pool}/`))).toBe(true)
+  })
+
+  it('a meeting that names the one it replaces stands alone: the old record is not read as a meeting, two meetings on a day both stand', async () => {
+    const wrong = eventText({ title: 'Hypercomb Meetup', date: '2026-10-31', time: '09:15', ends: '11:00', where: 'Yaletown', series: 'meetups', host: 'meetups.hypercomb.com', at: 1 })
+    const wrongSig = await sha(wrong)
+    const right = eventText({ title: 'Hypercomb Meetup', date: '2026-10-31', time: '09:30', ends: '10:45', where: 'Yaletown', series: 'meetups', host: 'meetups.hypercomb.com', replaces: wrongSig, at: 2 })
+    const focus = eventText({ title: 'Focus group', date: '2026-10-31', time: '11:00', ends: '12:00', where: 'Yaletown', series: 'meetups', host: 'meetups.hypercomb.com', at: 3 })
+    const [rightSig, focusSig] = [await sha(right), await sha(focus)]
+    heaps['hypercomb.com'] = new Map([[wrongSig, wrong], [rightSig, right], [focusSig, focus]])
+    listings['hypercomb.com'] = [wrongSig, rightSig, focusSig]   // a host that still lists the old one
+    const events = await readEvents(['hypercomb.com'])
+    expect(events.map(e => `${e.record.time} ${e.record.title}`).sort()).toEqual(['09:30 Hypercomb Meetup', '11:00 Focus group'])
+    expect(events.some(e => e.sig === wrongSig)).toBe(false)
+  })
+})
+
+describe('a correction names the record it replaces', () => {
+  const OLD = 'a'.repeat(64)
+  const base = { title: 'Hypercomb Meetup', date: '2026-10-31', where: 'Yaletown', series: 'meetups', host: 'meetups.hypercomb.com' }
+
+  it('is part of the record, in a fixed place, and read back', async () => {
+    const text = eventText({ ...base, time: '09:30', ends: '10:45', replaces: OLD.toUpperCase(), at: 5 })
+    expect(JSON.parse(text).replaces).toBe(OLD)
+    expect(Object.keys(JSON.parse(text)).slice(-2)).toEqual(['replaces', 'at'])
+    expect(parseEvent(text)?.replaces).toBe(OLD)
+    // Without one the record is what it always was: the same bytes, the same signature.
+    const plain = eventText({ ...base, at: 5 })
+    expect('replaces' in JSON.parse(plain)).toBe(false)
+    expect(parseEvent(plain)?.replaces).toBeUndefined()
+    expect(eventText({ ...base, replaces: 'not-a-signature', at: 5 })).toBe(plain)
+  })
+
+  it('removes only what it names — never itself, never another meeting of the day', async () => {
+    const mk = async (extra: Record<string, unknown>) => {
+      const text = eventText({ ...base, ...extra } as Parameters<typeof eventText>[0])
+      return { sig: await sha(text), record: parseEvent(text)! }
+    }
+    const wrong = await mk({ time: '09:15', at: 1 })
+    const right = await mk({ time: '09:30', replaces: wrong.sig, at: 2 })
+    const focus = await mk({ title: 'Focus group', time: '11:00', at: 3 })
+    expect(withoutSuperseded([wrong, right, focus]).map(e => e.sig)).toEqual([right.sig, focus.sig])
+    const selfNamed = { sig: right.sig, record: { ...right.record, replaces: right.sig } }
+    expect(withoutSuperseded([selfNamed]).map(e => e.sig)).toEqual([right.sig])
+  })
+
+  it('reads in the event line: `replaces <sig>` anywhere before the host', () => {
+    const line = parseEventArgs(`2026-10-31 09:30-10:45 at Yaletown Galleria : Hypercomb Meetup replaces ${OLD} on hypercomb.com`)
+    expect(line).toMatchObject({ verb: 'make', date: '2026-10-31', time: '09:30', ends: '10:45', where: 'Yaletown Galleria', title: 'Hypercomb Meetup', replaces: OLD, host: 'hypercomb.com' })
+    expect(parseEventArgs('2026-10-31 at Yaletown on hypercomb.com').replaces).toBe('')
   })
 })

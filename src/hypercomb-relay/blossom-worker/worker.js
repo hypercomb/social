@@ -2424,12 +2424,31 @@ async function noteEvents(env, pubkey, evt) {
   if (!keys.some(key => EVENT_KEY_RE.test(key) || RSVP_KEY_RE.test(key))) return
   // Meetings and their lists are the host's own people's to put here.
   if (!(await isHostPerson(env, pubkey))) return
+  // A meeting that names the one it REPLACES takes its place: the old record
+  // leaves the calendar and is never listed again from this index — a record
+  // is fixed by its signature, so a correction is a newer record, not an edit.
+  // Read from the same index, so the old key may still stand there.
+  const named = []
+  for (const [key, value] of Object.entries(roots)) {
+    const sig = String(value ?? '').toLowerCase()
+    if (SIG_RE.test(sig) && EVENT_KEY_RE.test(key)) named.push(sig)
+  }
+  const replaced = new Set()
+  for (const sig of named) {
+    const record = await heapRecord(env, sig)
+    const old = String(record?.replaces ?? '').toLowerCase()
+    if (record?.kind === EVENT_RECORD_KIND && SIG_RE.test(old) && old !== sig) replaced.add(old)
+  }
   for (const [key, value] of Object.entries(roots)) {
     const sig = String(value ?? '').toLowerCase()
     if (!SIG_RE.test(sig)) continue
-    if (EVENT_KEY_RE.test(key)) await addPoolMember(env, EVENTS_POOL_MEANING, sig)
+    if (EVENT_KEY_RE.test(key) && !replaced.has(sig)) await addPoolMember(env, EVENTS_POOL_MEANING, sig)
     const opened = RSVP_KEY_RE.exec(key)?.[1]
     if (opened) await addPoolMember(env, RSVP_POOLS_MEANING, await poolAddress(`rsvp:${opened}`))
+  }
+  if (replaced.size && env.CONTENT?.delete) {
+    const pool = await poolAddress(EVENTS_POOL_MEANING)
+    for (const old of replaced) await env.CONTENT.delete(`${pool}/${old}`)
   }
 }
 
@@ -2578,6 +2597,7 @@ async function pickUpEvents(env) {
   const pool = await poolAddress(EVENTS_POOL_MEANING)
   const held = new Set(await poolMemberNames(env, EVENTS_POOL_MEANING))
   let picked = 0
+  const superseded = new Set()
   const opensHere = async (zone, record) => {
     const host = publicHostName(String(record?.host || ''))
     return !!host && withinZoneName(host, zone)
@@ -2590,6 +2610,7 @@ async function pickUpEvents(env) {
       let attempts = 0
       for (const name of await listingOf(listing)) {
         if (picked >= PICKUP_MEMBERS || fromHere >= PICKUP_PER_HOST || ++attempts > PICKUP_PER_HOST * 3) break
+        if (superseded.has(name)) continue
         if (held.has(name)) {
           if (await opensHere(zone, await heapRecord(env, name))) {
             await addPoolMember(env, RSVP_POOLS_MEANING, await poolAddress(`rsvp:${name}`))
@@ -2603,6 +2624,13 @@ async function pickUpEvents(env) {
         let parsed
         try { parsed = JSON.parse(new TextDecoder().decode(bytes)) } catch { continue }
         if (parsed?.kind !== EVENT_RECORD_KIND) continue
+        // A meeting that names the one it replaces takes its place here too.
+        const old = String(parsed?.replaces ?? '').toLowerCase()
+        if (SIG_RE.test(old) && old !== name) {
+          superseded.add(old)
+          held.delete(old)
+          try { await env.CONTENT.delete?.(`${pool}/${old}`) } catch { /* it was not listed */ }
+        }
         if (!await env.CONTENT.head(name)) {
           await env.CONTENT.put(name, bytes, {
             httpMetadata: { contentType: 'application/json; charset=utf-8' },

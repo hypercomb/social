@@ -9,8 +9,11 @@
 //   pool     sign('calendar:events') on every community host: one member per
 //            meeting, named by the record's own signature. A calendar is the
 //            union of that ONE derived address across the hosts you carry.
-//   record   { v, kind:'event', title, type?, date, time?, ends?, where, series, host, at }
+//   record   { v, kind:'event', title, type?, date, time?, ends?, where, series, host, replaces?, at }
 //            — `type` is what kind of meeting it is (Beginners, Networking …),
+//            — `replaces` is the signature of the record this one corrects: a
+//              record is fixed by its signature, so a fix is a newer record
+//              that names the old one, and every reader drops the old,
 //            — `series` is the tile the meeting belongs to (its route name),
 //            `host` the door where its list lives, which is where to join.
 //   list     sign('rsvp:<record sig>') on the record's host: one member per
@@ -55,6 +58,8 @@ export interface EventRecord {
   readonly series: string
   /** The door its list lives on: where to join. */
   readonly host: string
+  /** The record this one corrects — a signature. The old one is not shown. */
+  readonly replaces?: string
   readonly at: number
 }
 
@@ -81,7 +86,7 @@ export const eventsPoolAddress = (): Promise<string> => registerPoolMeaning(EVEN
 
 /** The record's bytes, key order fixed so the same meeting is the same signature. */
 export const eventText = (fields: {
-  title: string; type?: string; date: string; time?: string; ends?: string; where: string; series: string; host: string; at?: number
+  title: string; type?: string; date: string; time?: string; ends?: string; where: string; series: string; host: string; replaces?: string; at?: number
 }): string => JSON.stringify({
   v: 1, kind: EVENT_RECORD_KIND,
   title: fields.title.trim(),
@@ -90,6 +95,7 @@ export const eventText = (fields: {
   ...(fields.time ? { time: fields.time } : {}),
   ...(fields.time && fields.ends ? { ends: fields.ends } : {}),
   where: fields.where.trim(), series: fields.series.trim().toLowerCase(), host: fields.host.trim().toLowerCase(),
+  ...(fields.replaces && SIG_RE.test(fields.replaces.toLowerCase()) ? { replaces: fields.replaces.toLowerCase() } : {}),
   at: fields.at ?? Date.now(),
 })
 
@@ -110,7 +116,18 @@ export const parseEvent = (text: string): EventRecord | null => {
   const ends = raw['ends'] === undefined ? undefined : String(raw['ends'])
   if (!title || !DATE_RE.test(date) || !where || !series || !host || (time !== undefined && !TIME_RE.test(time))) return null
   if (ends !== undefined && (!time || !TIME_RE.test(ends))) return null
-  return { v: 1, kind: EVENT_RECORD_KIND, title, ...(type ? { type } : {}), date, ...(time ? { time } : {}), ...(ends ? { ends } : {}), where, series, host, at: Number(raw['at']) || 0 }
+  const replaces = typeof raw['replaces'] === 'string' && SIG_RE.test(raw['replaces'].toLowerCase()) ? raw['replaces'].toLowerCase() : ''
+  return { v: 1, kind: EVENT_RECORD_KIND, title, ...(type ? { type } : {}), date, ...(time ? { time } : {}), ...(ends ? { ends } : {}), where, series, host, ...(replaces ? { replaces } : {}), at: Number(raw['at']) || 0 }
+}
+
+/** The meetings that stand: any record another record names as the one it
+ *  replaces is dropped. A record is fixed by its signature, so a correction is
+ *  a newer record; two different meetings on one day both stand, and only an
+ *  explicit `replaces` removes one. A record never replaces itself. */
+export function withoutSuperseded<T extends { sig: string; record: EventRecord }>(events: readonly T[]): T[] {
+  const replaced = new Set<string>()
+  for (const { sig, record } of events) if (record.replaces && record.replaces !== sig) replaced.add(record.replaces)
+  return events.filter(event => !replaced.has(event.sig))
 }
 
 /** The unsigned claim a key signs: this pool, this meeting, this name — coming,

@@ -9,6 +9,10 @@
 //        index names it `event:<sig>` — the host lists it under
 //        sign('calendar:events') — and `rsvp:<sig>`, which opens its list. A
 //        note on the tile says so.
+//   event <date> ... replaces <sig> on <host>
+//        The same, as the CORRECTION of a record already listed: a record is
+//        fixed by its signature, so the new one names the old, the host takes
+//        the old one off its calendar, and readers drop it. Nothing is edited.
 //   event list on <host>
 //        The calendar: every meeting the host lists, in union with the hosts
 //        you carry, and how many are coming to each.
@@ -65,6 +69,8 @@ export interface EventLine {
   readonly type: string
   /** A meeting named by signature or by its date. */
   readonly ref: string
+  /** The record this meeting corrects (`replaces <sig>`), a signature. */
+  readonly replaces: string
   /** Several meetings, each by signature or date (`keep`). */
   readonly refs: readonly string[]
   readonly who: string
@@ -89,7 +95,11 @@ export const parseEventArgs = (args: string): EventLine => {
     const at = rest.split(/\s+/).find(part => part.startsWith('@'))
     if (at) { host = zoneDoor(at.slice(1)); rest = rest.split(/\s+/).filter(part => part !== at).join(' ') }
   }
-  const none: EventLine = { verb: '', date: '', time: '', ends: '', where: '', title: '', type: '', ref: '', refs: [], who: '', host }
+  // `replaces <sig>` may stand anywhere before the host: it names a record, not a word.
+  let replaces = ''
+  const rep = /(?:^|\s)replaces\s+([0-9a-fA-F]{64})(?=\s|$)/i.exec(rest)
+  if (rep) { replaces = rep[1]!.toLowerCase(); rest = (rest.slice(0, rep.index) + ' ' + rest.slice(rep.index + rep[0].length)).replace(/\s+/g, ' ').trim() }
+  const none: EventLine = { verb: '', date: '', time: '', ends: '', where: '', title: '', type: '', ref: '', replaces: '', refs: [], who: '', host }
   const words = rest.split(/\s+/).filter(Boolean)
   const first = (words[0] ?? '').toLowerCase()
   if (first === 'list') return { ...none, verb: 'list' }
@@ -117,7 +127,7 @@ export const parseEventArgs = (args: string): EventLine => {
     }
     if (title) [title, type] = split(title)
     else [where, type] = split(where)
-    return { ...none, verb: 'make', date: made[1]!, time, ends, where, title, type }
+    return { ...none, verb: 'make', date: made[1]!, time, ends, where, title, type, replaces }
   }
   return none
 }
@@ -181,7 +191,7 @@ export class EventQueenBee extends QueenBee {
     const series = segments[segments.length - 1]!.toLowerCase()
     const door = line.host.split('.')[0] === series ? line.host : `${series}.${line.host}`
     const title = line.title || series.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-    const text = eventText({ title, type: line.type || undefined, date: line.date, time: line.time || undefined, ends: line.ends || undefined, where: line.where, series, host: door })
+    const text = eventText({ title, type: line.type || undefined, date: line.date, time: line.time || undefined, ends: line.ends || undefined, where: line.where, series, host: door, replaces: line.replaces || undefined })
     const bytes = new TextEncoder().encode(text)
     const sig = await eventSignature(text)
 
@@ -200,7 +210,7 @@ export class EventQueenBee extends QueenBee {
 
     const when = `${line.date}${line.time ? ` ${line.time}${line.ends ? `–${line.ends}` : ''}` : ''}`
     await this.#note(segments, `Meeting ${when} at ${line.where} — on the calendar at ${door} (event ${short(sig)})`)
-    say(`event: ${title} ${when} at ${line.where} is on the calendar ${line.host} serves; join at ${door}`)
+    say(`event: ${title} ${when} at ${line.where} is on the calendar ${line.host} serves${line.replaces ? `, in place of ${short(line.replaces)}` : ''}; join at ${door}`)
     tell('success', `${title} ${when} is on the calendar; its list is open at ${door}.`)
   }
 

@@ -5869,9 +5869,9 @@ async function calendarEnv(held = new Map(), extraRoots = {}) {
 }
 
 /** The organizer's index naming its meetings and opening their lists. */
-async function organizerPuts(env, roots) {
+async function organizerPuts(env, roots, at = 1_800_000_200) {
   const url = `https://content.hypercomb.com/${INDEXES}/${pubkey}`
-  const body = JSON.stringify(await signedIndex(roots, 1_800_000_200, undefined, undefined, { listed: ['calendar:events'] }))
+  const body = JSON.stringify(await signedIndex(roots, at, undefined, undefined, { listed: ['calendar:events'] }))
   return worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT') }, body }), env)
 }
 
@@ -5909,6 +5909,66 @@ test('an index naming event:<sig> puts the meeting in the calendar pool, and rsv
   // An rsvp pool nobody opened is no pool at all.
   const unopened = await worker.fetch(new Request(`https://${WRITE_FACE}/${await sha256Hex('rsvp:' + 'b'.repeat(64))}/`), env)
   assert.equal(unopened.status, 404)
+})
+
+/** A meeting record with other fields, for the replacement and same-day cases. */
+const eventRecordWith = (date, fields = {}) =>
+  JSON.stringify({ v: 1, kind: 'event', title: 'Hypercomb Meetup', date, where: 'Yaletown, Vancouver', series: 'meetups', host: 'meetups.pluginthematrix.com', ...fields, at: fields.at ?? 1 })
+
+test('a meeting that names the one it replaces takes its place on the calendar — the old record leaves, and an index still naming it never lists it again', async () => {
+  const wrong = eventRecordWith('2026-10-31', { time: '09:15', ends: '11:00', at: 1 })
+  const wrongSig = await sha256Hex(wrong)
+  const right = eventRecordWith('2026-10-31', { time: '09:30', ends: '10:45', replaces: wrongSig, at: 2 })
+  const rightSig = await sha256Hex(right)
+  const env = await calendarEnv(new Map([[wrongSig, enc(wrong)], [rightSig, enc(right)]]))
+
+  // The wrong one was listed first, as it was.
+  assert.equal((await organizerPuts(env, { [`event:${wrongSig}`]: wrongSig, [`rsvp:${wrongSig}`]: wrongSig })).status, 200)
+  assert(env.CONTENT.held.has(`${EVENTS_POOL}/${wrongSig}`))
+
+  // The index names BOTH (the old key still stands there): only the newer is on the calendar.
+  assert.equal((await organizerPuts(env, {
+    [`event:${wrongSig}`]: wrongSig, [`event:${rightSig}`]: rightSig, [`rsvp:${rightSig}`]: rightSig,
+  }, 1_800_000_201)).status, 200)
+  assert(!env.CONTENT.held.has(`${EVENTS_POOL}/${wrongSig}`), 'the replaced meeting left the calendar')
+  assert(env.CONTENT.held.has(`${EVENTS_POOL}/${rightSig}`), 'the replacement is on it')
+  const calendar = await worker.fetch(new Request(`https://${WRITE_FACE}/${EVENTS_POOL}/`), env)
+  assert.equal(await calendar.text(), `${rightSig}\n`)
+
+  // A later index write — any publish — does not list the old one again.
+  assert.equal((await organizerPuts(env, { [`event:${wrongSig}`]: wrongSig, [`event:${rightSig}`]: rightSig }, 1_800_000_202)).status, 200)
+  assert(!env.CONTENT.held.has(`${EVENTS_POOL}/${wrongSig}`), 'still not listed')
+  // The record itself is untouched: nothing is deleted from the heap, only unlisted.
+  assert(env.CONTENT.held.has(wrongSig), 'the old record is still held by its signature')
+})
+
+test('two different meetings on one day both stay — only an explicit replacement removes a record', async () => {
+  const meetup = eventRecordWith('2026-10-31', { time: '09:30', ends: '10:45', at: 1 })
+  const focus = eventRecordWith('2026-10-31', { title: 'Focus group', time: '11:00', ends: '12:00', at: 2 })
+  const meetupSig = await sha256Hex(meetup)
+  const focusSig = await sha256Hex(focus)
+  const env = await calendarEnv(new Map([[meetupSig, enc(meetup)], [focusSig, enc(focus)]]))
+  assert.equal((await organizerPuts(env, {
+    [`event:${meetupSig}`]: meetupSig, [`event:${focusSig}`]: focusSig, [`rsvp:${meetupSig}`]: meetupSig, [`rsvp:${focusSig}`]: focusSig,
+  })).status, 200)
+  assert(env.CONTENT.held.has(`${EVENTS_POOL}/${meetupSig}`) && env.CONTENT.held.has(`${EVENTS_POOL}/${focusSig}`))
+  // Each has its own list, so each week and each meeting starts empty.
+  assert(env.CONTENT.held.has(`${await sha256Hex('rsvp:pools')}/${await sha256Hex(`rsvp:${meetupSig}`)}`))
+  assert(env.CONTENT.held.has(`${await sha256Hex('rsvp:pools')}/${await sha256Hex(`rsvp:${focusSig}`)}`))
+})
+
+test('a record that names itself, or names nothing it could replace, removes nothing', async () => {
+  const self = eventRecordWith('2026-10-31', { at: 1 })
+  const selfSig = await sha256Hex(self)
+  const odd = eventRecordWith('2026-11-07', { replaces: 'not-a-signature', at: 2 })
+  const oddSig = await sha256Hex(odd)
+  const other = eventRecordWith('2026-11-14', { at: 3 })
+  const otherSig = await sha256Hex(other)
+  const selfNamed = eventRecordWith('2026-11-21', { replaces: otherSig, at: 4 })
+  const env = await calendarEnv(new Map([[selfSig, enc(self)], [oddSig, enc(odd)], [otherSig, enc(other)]]))
+  assert.equal((await organizerPuts(env, { [`event:${selfSig}`]: selfSig, [`event:${oddSig}`]: oddSig, [`event:${otherSig}`]: otherSig })).status, 200)
+  for (const sig of [selfSig, oddSig, otherSig]) assert(env.CONTENT.held.has(`${EVENTS_POOL}/${sig}`), 'all three stay listed')
+  assert.equal(await sha256Hex(selfNamed) === otherSig, false)
 })
 
 test('a stranger joins a meeting with their own signed claim, no grant asked; the claim is read back and the list names it', async () => {
