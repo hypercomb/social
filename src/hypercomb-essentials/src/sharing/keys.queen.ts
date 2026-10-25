@@ -27,6 +27,7 @@ import {
   acceptInvite, allowAnother, captureInvite, listKeys, parseInvite, pendingInvite, removeKey,
   type KeysAcceptResult, type KeysAllowResult, type KeysOffResult,
 } from './key-list.client.js'
+import { showInviteQr } from './invite-qr.view.js'
 import { nodesFor } from './publish-branch.js'
 import { isPublishNode } from './zone-door.js'
 
@@ -181,8 +182,12 @@ export class KeysQueenBee extends QueenBee {
     let copied = false
     try { await navigator.clipboard.writeText(result.link); copied = true } catch { /* shown below */ }
     const minutes = String(Math.max(1, Math.round((result.until - Math.floor(Date.now() / 1000)) / 60)))
+    // The same link as a code, for a phone in the room: its camera reads it and opens the link.
+    const shown = showInviteQr(result.link, result.until)
     this.#say(copied
-      ? t('keys.allowed.copied', 'Link copied. Open it at the other place within {minutes} minutes, then type keys accept there.', { minutes })
+      ? t(shown ? 'keys.allowed.qr' : 'keys.allowed.copied', shown
+        ? 'Link copied, and shown as a code. Point the phone at it, or open the link at the other place, within {minutes} minutes.'
+        : 'Link copied. Open it at the other place within {minutes} minutes, then type keys accept there.', { minutes })
       : t('keys.allowed.shown', 'Open this at the other place within {minutes} minutes, then type keys accept there: {link}', { minutes, link: result.link }), 'success')
   }
 

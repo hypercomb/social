@@ -263,4 +263,4 @@ your showcase; take the tile out of the showcase and they are listed again.
 **Adding a phone is one tap** (jwize 2026-10-25: "the transport and distribution of keys must be safe and
 easy"): `keys allow` on the desktop gives a link (ten minutes, one use); opened on the phone it asks once, in
 words, and the tap adds the phone's own key to your key list. Nothing secret is copied; `keys off` removes it.
-**Not built:** the QR of that link (no offline encoder to check one against), and a revoke row in the window.
+`keys allow` also shows the link as a QR code (`sharing/qr-code.ts`, no third-party code; `invite-qr.view.ts` draws it until the invite ends), so a phone in the room can just be pointed at it. The encoder is held, module for module, to the Python `qrcode` package's output for 13 texts under all 8 masks, versions 1-10 (`qr-code.reference.json`). **Not built:** a revoke row in a window (`keys off` does it).
