@@ -25,6 +25,7 @@
 import { isMetaEnvelope, metaPayloadOf, type HostOffering } from '@hypercomb/core'
 import type { PublicationCard } from './publications-ledger.js'
 import { recoverableTileImageSig } from '../editor/tile-properties.js'
+import { ORDER_SLOT, seatsFrom } from '../history/tile-order.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -116,6 +117,7 @@ export interface StaticLayer {
   readonly children?: unknown
   readonly cells?: unknown
   readonly properties?: unknown
+  readonly order?: unknown
 }
 
 export interface StaticPeersIo {
@@ -169,18 +171,31 @@ export const propsOf = async (layer: StaticLayer, io: StaticPeersIo): Promise<Re
   return (await readThrough(ref, io))?.record ?? null
 }
 
-/** The entry a peer tile becomes: name from the layer, visual from its props. */
+/** Where the publisher's page seats its tiles: the layer's `order[0]`
+ *  (history/tile-order.ts). Empty for a page an older build arranged — its
+ *  seats are still inside each tile's props. */
+export const seatsOf = async (layer: StaticLayer, io: StaticPeersIo): Promise<ReadonlyMap<string, number>> => {
+  const slot = Array.isArray(layer[ORDER_SLOT]) ? layer[ORDER_SLOT] as unknown[] : []
+  const ref = String(slot[0] ?? '').toLowerCase()
+  if (!SIG_RE.test(ref)) return new Map()
+  return seatsFrom((await readThrough(ref, io))?.record) ?? new Map()
+}
+
+/** The entry a peer tile becomes: name from the layer, visual from its props,
+ *  seat from its page (`seat`) before the one an older build left in props. */
 export const entryFor = async (
   layerSig: string,
   layer: StaticLayer,
   pubkey: string,
   io: StaticPeersIo,
+  seat?: number,
 ): Promise<StaticPeerEntry | null> => {
   const name = typeof layer.name === 'string' ? layer.name.trim() : ''
   if (!name) return null
   const props = await propsOf(layer, io)
   const imageSig = props ? recoverableTileImageSig(props) : undefined
-  const index = props && typeof props['index'] === 'number' && Number.isFinite(props['index']) ? props['index'] as number : undefined
+  const index = seat !== undefined ? seat
+    : props && typeof props['index'] === 'number' && Number.isFinite(props['index']) ? props['index'] as number : undefined
   return {
     name, peerPubkey: pubkey, layerSig,
     ...(imageSig ? { imageSig } : {}),
@@ -196,10 +211,12 @@ export const childEntriesOf = async (
   io: StaticPeersIo,
 ): Promise<StaticPeerEntry[]> => {
   const out: StaticPeerEntry[] = []
+  const seats = await seatsOf(layer, io)
   for (const ref of childSigsOf(layer)) {
     const hit = await readThrough(ref, io)
     if (!hit) continue
-    const entry = await entryFor(hit.sig, hit.record as StaticLayer, pubkey, io)
+    const childName = typeof hit.record['name'] === 'string' ? hit.record['name'].trim() : ''
+    const entry = await entryFor(hit.sig, hit.record as StaticLayer, pubkey, io, seats.get(childName))
     if (entry) out.push(entry)
   }
   return out

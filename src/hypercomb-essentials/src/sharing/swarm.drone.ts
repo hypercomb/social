@@ -29,6 +29,7 @@
 import { Drone, EffectBus, lifecyclePreimage, meetingPointKey, normalizeCell, poolAddresses, roomPreimage, SignatureService } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
+import { readOrderAt } from '../history/tile-order.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { MESH_ANSWER_MAX_BYTES, noteVisualHosts, visualArtifactSigs } from './visual-hosts.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
@@ -5042,7 +5043,12 @@ export class SwarmDrone extends Drone {
       // is stripped HERE, where props become a visual. The receiver's own
       // substrate dresses a pictureless tile with their own set, which is
       // what a default is for: a fallback, per participant.
-      const props = withoutSubstrateImage(await readTilePropertiesAt(segments, name))
+      const own = withoutSubstrateImage(await readTilePropertiesAt(segments, name))
+      // WHERE IT SITS IS THE PAGE'S CLAIM (history/tile-order.ts), not the
+      // tile's. The wire keeps carrying it as `index`, so a receiver on any
+      // build seats the tile where this page does.
+      const seat = (await readOrderAt(segments)).get(name)
+      const props = seat === undefined ? own : { ...own, index: seat }
       if (props && Object.keys(props).length > 0) {
         // Canonicalize the merged shape so the whole visual entry
         // is deterministic, not just the props portion.

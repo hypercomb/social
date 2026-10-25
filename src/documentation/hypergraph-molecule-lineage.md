@@ -408,6 +408,14 @@ Tenant A's order and tenant B's order are two atoms in the same directory;
 neither clobbers the other. There is **no global head** — the molecule is a
 set, and only participants have sequences.
 
+**Landed in the current layer model (2026-10-24).** Until molecules carry
+succession atoms, the page's own marker IS one author's ordered claim at one
+moment, so a page's seats live in a page slot: `order`, one sig of a
+`{ name: seat }` resource (`history/tile-order.ts`), keyed by name because the
+name is the identity. A tile's own layer no longer carries `index`; moving,
+pasting or re-seating a tile leaves its signature unchanged. Older tiles'
+`properties.index` is a read-only fallback.
+
 ## The codebase is already walking this way
 
 Three shipped precedents, found by the readers:

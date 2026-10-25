@@ -73,13 +73,15 @@ export class ResourceAttachDrone {
     // a user-provided image, so the reroll affordance must stay hidden.
     const props: Record<string, unknown> = {}
 
-    // Slot index belongs to this appearance, never the canonical default. A
-    // Portal may override content at the root without teleporting every use to
-    // the Portal row's layout position.
-    if (payload.atTop && target.throughPortal) {
-      try { await writeTilePropertiesAt(segments, payload.cell, { index: 0 }) } catch { /* content can still land */ }
-    } else if (payload.atTop) {
-      props['index'] = 0
+    // The seat belongs to this PAGE, never the canonical default: it is the
+    // page's order (history/tile-order.ts), so a Portal may override content
+    // at the root without teleporting every use to the Portal row's layout
+    // position, and no tile is re-minted to carry where it sits.
+    if (payload.atTop) {
+      const committer = window.ioc.get<{ commitOrder?: (segments: readonly string[], order: { set: Record<string, number> }) => Promise<string> }>(
+        '@diamondcoreprocessor.com/LayerCommitter',
+      )
+      try { await committer?.commitOrder?.(segments, { set: { [payload.cell]: 0 } }) } catch { /* content can still land */ }
     }
 
     if (payload.smallPointSig) {

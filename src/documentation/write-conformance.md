@@ -552,17 +552,20 @@ its subtree is never walked or re-committed.
 
 **Remaining, by weight:**
 
-1. **Position is inside the tile (owner decision).** Order is decided by
-   `properties.index` on each tile's own layer (index.nurse.ts, show-cell), so
-   every move re-mints the moved top node to fold in its landing slot
-   (`#captureMoves`, the paste's hover-number target), and every reorder
-   re-mints each placed tile and writes one marker per tile
-   (`#persistDenseRanks`, `#persistPinnedIndices`, `writeTilePropertiesAt`).
-   The sig that travels is therefore never quite the sig that was listed. The
-   doctrine already names this the canonical trap
-   (`hypergraph-molecule-lineage.md`, *slot rides the envelope*; *Ordering*):
-   order belongs to the parent's meta atom or the incidence. Moving it there is
-   the one change that makes a move a pure sig transfer.
+1. ~~**Position is inside the tile (owner decision).**~~ **Fixed 2026-10-24,
+   same day, on jwize's go-ahead.** A page now carries an `order` slot — one
+   sig of a `{ name: seat }` resource (`history/tile-order.ts`) — and every
+   writer seats through it: a move's landing seats ride in the destination's
+   marker and the source drops them in its own; a drag, a rail drag, a
+   sequence arrangement, a place-at, a hover-number paste and the visual
+   distribution are each ONE marker at the page; a new tile takes its seat in
+   the marker that links it (the committer asks the renderer's seat chooser),
+   so a create is still one undo step. No tile is re-minted to carry where it
+   sits — the sig appended is the sig listed. Older tiles' `properties.index`
+   is read as the fallback for a tile its page does not seat, never rewritten;
+   the swarm and static-peer readers take the page's seat first and keep the
+   wire field `index`. Consequence: undo at a page now undoes an arrangement,
+   and a participant on an older build sees seats set after this by name order.
 2. **Identity by path.** Lineage bags are `sha256(lineageKey(segments))`, so a
    moved tile's own history stays at its old route and a re-created name there
    reveals it. `alignPlacedHeads` covers the moved tile's own route only. The

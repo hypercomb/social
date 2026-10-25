@@ -42,8 +42,12 @@ interface HistoryServiceLike {
 interface LayerCommitterLike {
   commitChildrenDeltas(
     segments: readonly string[],
-    changes: { removes?: readonly { sig?: string; label?: string }[]; appends?: readonly string[] },
-  ): Promise<void>
+    changes: {
+      removes?: readonly { sig?: string; label?: string }[]
+      appends?: readonly string[]
+      order?: { set?: Record<string, number>; remove?: readonly string[] }
+    },
+  ): Promise<void | string>
 }
 
 interface StoreLike {
@@ -651,6 +655,8 @@ export class ClipboardWorker extends Worker {
 
     const placed: ClipboardEntry[] = []
     const appends: string[] = []
+    // Hover-number targets: seats in the target page's order, same marker.
+    const seats: Record<string, number> = {}
     const failed: string[] = []
     // A peer's tile landing outside any peer branch: marked once it commits.
     const carried: string[][] = []
@@ -707,18 +713,11 @@ export class ClipboardWorker extends Worker {
         sig = pruned.sig
         layer = pruned.layer
       }
-      // Hover-number paste target: fold the index override into the TOP
-      // node's props and re-mint that one node. The subtree under it is
-      // untouched (its sigs ride along inside the re-minted layer).
+      // Hover-number paste target: a seat in the TARGET page's order
+      // (history/tile-order.ts), written in the same marker as the append.
+      // The placed tile is appended as it is — never re-minted to carry it.
       const target = targets?.[entry.label]
-      if (typeof target === 'number' && Number.isFinite(target) && typeof history.materializeLayer === 'function') {
-        const propsSig = await this.#propsWithIndex(layer, Math.trunc(target))
-        if (propsSig) {
-          const reminted = { ...layer, properties: [propsSig] }
-          sig = await history.materializeLayer(reminted)
-          layer = reminted
-        }
-      }
+      if (typeof target === 'number' && Number.isFinite(target) && target >= 0) seats[entry.label] = Math.trunc(target)
       tPrep += performance.now() - tPrep0
 
       appends.push(sig)
@@ -753,7 +752,10 @@ export class ClipboardWorker extends Worker {
     // ONE surgical commit: the target's children gain the collection sigs.
     // Existing children (warm or cold) ride through verbatim.
     const tCommit0 = performance.now()
-    await committer.commitChildrenDeltas(targetSegments, { appends })
+    await committer.commitChildrenDeltas(targetSegments, {
+      appends,
+      ...(Object.keys(seats).length > 0 ? { order: { set: seats } } : {}),
+    })
     // A route that already has a head of that name would open the OLD tile.
     await alignPlacedHeads(history, lineage.domain, targetSegments, appends)
     tCommit = performance.now() - tCommit0
@@ -847,32 +849,6 @@ export class ClipboardWorker extends Worker {
       return { sig: nextSig, layer: next }
     }
     return await prune(sig, layer, srcPath) ?? { sig, layer }
-  }
-
-  // Build a new props resource = the tile's existing properties with `index`
-  // overridden, content-addressed the SAME way writeTilePropertiesAt does
-  // (sorted keys → JSON) so the sig is consistent. Used by the paste-target
-  // override to set a placed tile's spiral slot inside the re-home cascade.
-  async #propsWithIndex(layer: unknown, index: number): Promise<string | null> {
-    const store = this.#store
-    if (!store?.putResource) return null
-    const slot = (layer as { properties?: readonly unknown[] } | null | undefined)?.properties
-    const existingSig = Array.isArray(slot) && slot.length > 0 ? slot[0] : undefined
-    let props: Record<string, unknown> = {}
-    if (typeof existingSig === 'string' && store.getResource) {
-      try {
-        const blob = await store.getResource(existingSig)
-        if (!blob) return null // props exist but are COLD — a rewrite would STRIP the image; keep the original slot
-        const parsed = JSON.parse(await blob.text())
-        if (parsed && typeof parsed === 'object') props = parsed
-      } catch { return null } // unreadable props — never mint a stripped replacement
-    }
-    const merged: Record<string, unknown> = { ...props, index }
-    const canonical: Record<string, unknown> = {}
-    for (const k of Object.keys(merged).sort()) canonical[k] = merged[k]
-    try {
-      return await store.putResource(new Blob([JSON.stringify(canonical)], { type: 'application/json' }))
-    } catch { return null }
   }
 
   // ── clear ─────────────────────────────────────────────

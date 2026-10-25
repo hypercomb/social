@@ -186,6 +186,10 @@ export async function distributeVisual(opts: {
   let divided = 0
   let derived = 0
   let kept = 0
+  // Where each dressed part sits on the whole's page — the PAGE's order
+  // (history/tile-order.ts), committed once after the loop, never an `index`
+  // inside the part.
+  const seats: Record<string, number> = {}
 
   for (let k = 0; k < parts.length; k++) {
     const part = parts[k]
@@ -234,17 +238,25 @@ export async function distributeVisual(opts: {
       // keeps a theme re-dress from treating it as filler and replacing it.
       substrate: undefined,
     }
-    if (opts.place !== false) updates['index'] = k
 
     try {
       // A part's picture is a piece of THIS whole — never the name's picture.
       await writeTilePropertiesAt(wholeSegments, part, updates, { onlyHere: true })
+      if (opts.place !== false) seats[part] = k
       EffectBus.emit('tile:saved', { cell: part, segments: wholeSegments })
       if (source && slot) divided++
       else derived++
     } catch (err) {
       console.warn('[visual-distribution] could not dress', part, err)
     }
+  }
+
+  if (Object.keys(seats).length > 0) {
+    const committer = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/LayerCommitter') as
+      | { commitOrder?: (segments: readonly string[], order: { set: Record<string, number> }) => Promise<string> }
+      | undefined
+    try { await committer?.commitOrder?.(wholeSegments, { set: seats }) }
+    catch (err) { console.warn('[visual-distribution] could not seat the parts', err) }
   }
 
   console.log(

@@ -3,7 +3,7 @@ import { Drone, EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@h
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { OrderProjection } from '../history/order-projection.js'
-import { writeTilePropertiesAt, seedLayerKeyedEntries } from '../editor/tile-properties.js'
+import { seedLayerKeyedEntries } from '../editor/tile-properties.js'
 import { childNamesOfStrict, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig, flattenLayerTree, alignPlacedHeads } from '../history/layer-placement.js'
 import type { PlacementHistory, PlacementLayer } from '../history/layer-placement.js'
 import { getLaneScrollAxis } from '../sequence/lane-viewport-mode.js'
@@ -26,6 +26,8 @@ interface CopyCommitterLike {
       removes?: readonly { sig?: string; label?: string }[]
       appends?: readonly string[]
       swaps?: readonly { from: string; to: string }[]
+      /** The page's seats, in the same marker (history/tile-order.ts). */
+      order?: { set?: Record<string, number>; remove?: readonly string[] }
     },
   ): Promise<string>
 }
@@ -510,13 +512,16 @@ export class MoveDrone extends Drone {
    * drop-into and promote (the two directions of the same move).
    *
    * Per tile: seal its live subtree into one sig (captureCollectionSig —
-   * the stored child sig is the fallback), then re-mint ONLY its top node
-   * when it needs a landing index at the destination. The subtree itself is
-   * never re-committed; its bytes are pool-addressed and position-
+   * the stored child sig is the fallback). That sig is appended AS IS: where
+   * the tile lands is the destination's claim (history/tile-order.ts), so its
+   * landing seat comes back in `seats` for the destination's own marker and
+   * the tile is never re-minted to carry it. The subtree is never
+   * re-committed either; its bytes are pool-addressed and position-
    * independent, and navigation into it resolves through the parent chain.
    *
-   * Returns the destination's `appends`, the source's `removes` (by stored
-   * sig, with the label as the staleness fallback), and the landed labels.
+   * Returns the destination's `appends` and landing `seats`, the source's
+   * `removes` (by stored sig, with the label as the staleness fallback), and
+   * the landed labels.
    */
   async #captureMoves(
     history: PlacementHistory,
@@ -526,10 +531,11 @@ export class MoveDrone extends Drone {
     destTaken: ReadonlySet<string>,
     startIndex: number,
     verb: string,
-  ): Promise<{ appends: string[]; removes: { sig?: string; label: string }[]; landed: string[] }> {
+  ): Promise<{ appends: string[]; removes: { sig?: string; label: string }[]; landed: string[]; seats: Record<string, number> }> {
     const appends: string[] = []
     const removes: { sig?: string; label: string }[] = []
     const landed: string[] = []
+    const seats: Record<string, number> = {}
     const taken = new Set(destTaken)
     let nextIndex = startIndex
 
@@ -541,30 +547,22 @@ export class MoveDrone extends Drone {
         continue
       }
       const stored = sigByName.get(label)
-      let sig = await captureCollectionSig(history, [...sourceSegments, label], stored)
-      let layer = sig ? await history.getLayerBySig(sig) : null
+      const sig = await captureCollectionSig(history, [...sourceSegments, label], stored)
+      const layer = sig ? await history.getLayerBySig(sig) : null
       if (!sig || !layer) {
         console.warn(`[move] ${verb} source missing for`, label)
         continue
       }
-      // Land after the destination's existing children: fold the index into
-      // the collection by re-minting the top node (pool write, no marker) —
-      // a post-commit props write would race the commit.
-      if (typeof history.materializeLayer === 'function') {
-        const propsSig = await this.#propsWithIndex(layer, nextIndex)
-        if (propsSig) {
-          const reminted: PlacementLayer = { ...layer, properties: [propsSig] }
-          sig = await history.materializeLayer(reminted)
-          layer = reminted
-        }
-      }
+      // Land after the destination's existing children — a seat in the
+      // destination's order, written in the same marker as the append.
+      seats[label] = nextIndex
       appends.push(sig)
       removes.push({ ...(stored ? { sig: stored } : {}), label })
       landed.push(label)
       taken.add(label)
       nextIndex++
     }
-    return { appends, removes, landed }
+    return { appends, removes, landed, seats }
   }
 
   /**
@@ -840,6 +838,7 @@ export class MoveDrone extends Drone {
         appends: string[]
         removes: { sig?: string; label: string }[]
         landed: string[]
+        seats: Record<string, number>
         destEntries: readonly { name: string; sig?: string }[]
       }[] = []
       for (const leg of live) {
@@ -851,10 +850,10 @@ export class MoveDrone extends Drone {
         }
         const { entries: destEntries } = await childEntriesOf(history, destLayer)
         const destTaken = new Set(destEntries.map(e => e.name))
-        const { appends, removes, landed } = await this.#captureMoves(
+        const { appends, removes, landed, seats } = await this.#captureMoves(
           history, source, leg.labels, sigByName, destTaken, destEntries.length, 'move-into',
         )
-        captured.push({ target: leg.target, appends, removes, landed, destEntries })
+        captured.push({ target: leg.target, appends, removes, landed, seats, destEntries })
       }
       if (captured.every(c => c.landed.length === 0)) {
         const name = live[0].target[live[0].target.length - 1] ?? 'there'
@@ -866,11 +865,14 @@ export class MoveDrone extends Drone {
       for (const c of captured) if (c.appends.length) await this.#seedPropsIndex(history, c.appends, c.target)
 
       // ── commit, in the order each topology dictates (see the header) ────────
+      // Each destination's landing seats ride in the marker that appends its
+      // tiles, and the source drops the moved names from its own order in the
+      // marker that removes them — custody of a seat moves with the tile.
       const swaps: { from: string; to: string }[] = []
       const promoted = captured.filter(c => c.appends.length > 0 && parentOfSource(c.target))
       for (const c of captured) {
         if (c.appends.length === 0 || parentOfSource(c.target)) continue
-        const newSig = await committer.commitChildrenDeltas(c.target, { appends: c.appends })
+        const newSig = await committer.commitChildrenDeltas(c.target, { appends: c.appends, order: { set: c.seats } })
         if (!childOfSource(c.target)) continue
         const oldSig = sigByName.get(c.target[c.target.length - 1])
         if (oldSig && newSig && oldSig !== newSig) swaps.push({ from: oldSig, to: newSig })
@@ -878,12 +880,14 @@ export class MoveDrone extends Drone {
       const newSourceSig = await committer.commitChildrenDeltas(source, {
         removes: captured.flatMap(c => c.removes),
         swaps,
+        order: { remove: captured.flatMap(c => c.landed) },
       })
       for (const c of promoted) {
         const oldSig = c.destEntries.find(e => e.name === source[source.length - 1])?.sig
         await committer.commitChildrenDeltas(c.target, {
           appends: c.appends,
           swaps: (oldSig && newSourceSig && oldSig !== newSourceSig) ? [{ from: oldSig, to: newSourceSig }] : [],
+          order: { set: c.seats },
         })
       }
       // A route that already has a head of that name would open the OLD tile.
@@ -975,7 +979,8 @@ export class MoveDrone extends Drone {
     // gesture is MOVE / drop-into ONLY. This path must NEVER produce a copy: if
     // anything ever reaches it, surface an error and cancel — no silent duplicate.
     // (#commitCopyUnsafe is kept, unused, as the reference for the future
-    // named-duplicate flow.)
+    // named-duplicate flow. When it is revived, the copy's seat goes in the
+    // page's order — history/tile-order.ts — never into the copy's props.)
     console.error('[move] commitCopyAt reached but copy-on-drag is removed — cancelled, no copy made')
     this.cancelMove(source)
   }
@@ -1402,12 +1407,13 @@ export class MoveDrone extends Drone {
 
   // ── shared commit logic ────────────────────────────────
   //
-  // The renderer reads each cell's `index` property to place it via
-  // `axial.items.get(index)`. So the only authoritative write is the
-  // per-cell index in #persistPinnedIndices below. The OrderProjection
-  // call records a snapshot of the post-state for history/diff use; the
-  // cell:reorder emit is a cache-invalidation signal only — show-cell's
-  // handler MUST NOT renumber indices on receipt.
+  // The renderer places each tile at the seat its PAGE names
+  // (history/tile-order.ts) via `axial.items.get(seat)`. So the only
+  // authoritative write is the page's order, in #persistPinnedIndices
+  // below — one marker at the page, no tile's own layer touched. The
+  // OrderProjection call records a snapshot of the post-state for
+  // history/diff use; the cell:reorder emit is a cache-invalidation signal
+  // only — show-cell's handler MUST NOT renumber seats on receipt.
 
   async #commitPlacements(placements: Map<string, Axial>): Promise<void> {
     const sparse = this.#reorderNames(placements)
@@ -1418,7 +1424,7 @@ export class MoveDrone extends Drone {
       await orderProjection.reorder(denseOrder)
     }
 
-    // Authoritative write: each placed tile's `index` property = its
+    // Authoritative write: the page's order gives each placed tile its
     // grid index. Gaps are preserved. Render-time collision heal in
     // #orderByIndexPinned demotes any duplicate to the next free slot.
     //
@@ -1453,42 +1459,36 @@ export class MoveDrone extends Drone {
   }
 
   /** The rail commit: walk the strip's slot array in order and give every
-   *  occupied slot the next rank as its `index`, so the committed order IS
-   *  the order on screen and the desktop's spiral reads it back dense. */
+   *  occupied slot the next rank as its seat, so the committed order IS the
+   *  order on screen and the desktop's spiral reads it back dense. */
   async #persistDenseRanks(sparse: readonly string[]): Promise<void> {
-    const lineage = this.resolve<any>('lineage')
-    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    const set: Record<string, number> = {}
     let rank = 0
-    for (const label of sparse) {
-      if (!label) continue
-      const index = rank++
-      try {
-        await writeTilePropertiesAt(parentSegments, label, { index })
-      } catch (err) {
-        console.warn('[move] failed to persist rank for', label, err)
-      }
-    }
+    for (const label of sparse) if (label) set[label] = rank++
+    await this.#commitSeats(set)
   }
 
   async #persistPinnedIndices(placements: Map<string, Axial>): Promise<void> {
-    // Layer-slot write: each placed tile's `index` property goes into the
-    // tile's layer via the `properties` slot. No OPFS dir consulted or
-    // minted — the lineage signature locates the tile's history bag, and
-    // commitSlotSet replaces the slot's single sig with one pointing at
-    // the new merged-properties resource. The cascade folds the new tile-
-    // layer sig into each ancestor's `children` slot, so the index write
-    // produces one undoable / time-travelable marker per ancestor.
-    const lineage = this.resolve<any>('lineage')
-    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
-
+    const set: Record<string, number> = {}
     for (const [label, axial] of placements) {
       const gridIndex = this.#keyToIndex.get(axialKey(axial.q, axial.r))
-      if (gridIndex === undefined) continue
-      try {
-        await writeTilePropertiesAt(parentSegments, label, { index: gridIndex })
-      } catch (err) {
-        console.warn('[move] failed to persist index for', label, err)
-      }
+      if (gridIndex !== undefined) set[label] = gridIndex
+    }
+    await this.#commitSeats(set)
+  }
+
+  /** ONE marker at the page on screen: every seat this arrangement gave.
+   *  The seats are the page's claim (history/tile-order.ts) — no tile is
+   *  re-minted, and undo at the page takes the arrangement back whole. */
+  async #commitSeats(set: Record<string, number>): Promise<void> {
+    if (Object.keys(set).length === 0) return
+    const lineage = this.resolve<any>('lineage')
+    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    const committer = window.ioc.get<{ commitOrder?: (segments: readonly string[], order: { set: Record<string, number> }) => Promise<string> }>('@diamondcoreprocessor.com/LayerCommitter')
+    try {
+      await committer?.commitOrder?.(parentSegments, { set })
+    } catch (err) {
+      console.warn('[move] failed to persist the arrangement', err)
     }
   }
 

@@ -26,6 +26,7 @@ import type { HistoryCursorService } from './history-cursor.service.js'
 import type { LayerSlotRegistry } from './layer-slot-registry.js'
 import { LayerMachine } from './layer-machine.js'
 import { isBareLayer, chooseChildSig } from './child-sig-guard.js'
+import { ORDER_SLOT, hasOrderChanges, nextOrderSig, seatFor, type OrderChanges } from './tile-order.js'
 
 type Lineage = {
   domain?: () => string
@@ -111,12 +112,17 @@ type CommitDelta =
   // behind the head's). `swaps` re-points an existing entry IN PLACE
   // (order preserved) — a move commits the gaining node first, then folds
   // its new sig into the losing parent's same marker for free.
+  //
+  // `order` changes the page's seats (history/tile-order.ts) in the SAME
+  // marker — a move's landing seats ride with its appends, a drag is one
+  // marker at the page, and no tile is re-minted to carry where it sits.
   | {
       kind: 'deltas'
       slot: string
       removes?: readonly { sig?: string; label?: string }[]
       appends?: readonly string[]
       swaps?: readonly { from: string; to: string }[]
+      order?: OrderChanges
     }
   // layer: the layer-as-primitive update. The caller passes the full new
   // layer state — `{ name, ...slots }` where each slot value is an array
@@ -676,6 +682,10 @@ export class LayerCommitter {
    * a `swap` of the gaining node's now-stale sig. No name re-resolution,
    * no re-listing — cold siblings ride through verbatim.
    *
+   * `order` re-seats the page's tiles in the same marker (tile-order.ts):
+   * where a moved or pasted tile lands rides with its append, so the tile
+   * itself is never re-minted to carry its seat.
+   *
    * Returns the location's new head sig, so a caller can fold it into its
    * parent's delta (the move ordering above).
    */
@@ -685,6 +695,7 @@ export class LayerCommitter {
       removes?: readonly { sig?: string; label?: string }[]
       appends?: readonly string[]
       swaps?: readonly { from: string; to: string }[]
+      order?: OrderChanges
     },
   ): Promise<string> {
     const cleaned = this.#cleanSegments(segments) ?? segmentsAtIntent()
@@ -692,6 +703,7 @@ export class LayerCommitter {
       console.error('[LayerCommitter] children deltas refused — no address resolvable')
       return ''
     }
+    const order = hasOrderChanges(changes.order) ? changes.order : undefined
     await this.#machine.requestAndWait({
       segments: cleaned,
       delta: {
@@ -700,8 +712,12 @@ export class LayerCommitter {
         removes: changes.removes?.slice(),
         appends: changes.appends?.slice(),
         swaps: changes.swaps?.slice(),
+        ...(order ? { order } : {}),
       },
     })
+    // The seats ride on the announcement: a renderer about to place a tile
+    // this act moved here seats it where the marker says, not anew.
+    if (order) EffectBus.emit('order:changed', { segments: [...cleaned], set: { ...(order.set ?? {}) } })
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     const lineageInst = get<Lineage>('@hypercomb.social/Lineage')
     if (!history || !lineageInst) return ''
@@ -711,6 +727,33 @@ export class LayerCommitter {
       explorerSegments: () => cleaned,
     } as Lineage)
     return history.latestMarkerSigFor(locSig, name)
+  }
+
+  /**
+   * Re-seat tiles on the page at `segments` — a drag, an arrangement, a
+   * place-at — as ONE marker at that page. Seats are the page's claim
+   * (tile-order.ts); no tile's own layer changes.
+   */
+  public commitOrder(segments: readonly string[], order: OrderChanges): Promise<string> {
+    return this.commitChildrenDeltas(segments, { order })
+  }
+
+  /** Apply `changes` to the head's order inside the commit being built. A
+   *  current order that cannot be read is SKIPPED, never rebuilt from
+   *  nothing — that would unseat every tile on the page. */
+  async #applyOrder(machine: LayerMachine, changes: OrderChanges): Promise<void> {
+    const store = get<{ getResource(sig: string): Promise<Blob | null>; putResource(blob: Blob): Promise<string> }>('@hypercomb.social/Store')
+    if (!store?.getResource || !store.putResource) {
+      console.warn('[LayerCommitter] order change skipped — the store is not ready')
+      return
+    }
+    const current = (machine.getSlot(ORDER_SLOT) as readonly unknown[])[0]
+    const next = await nextOrderSig(typeof current === 'string' ? current : undefined, changes, store)
+    if (next === undefined) {
+      console.warn('[LayerCommitter] order change skipped — the page\'s current order could not be read')
+      return
+    }
+    machine.apply({ slot: ORDER_SLOT, op: 'set', sigs: next === null ? [] : [next] })
   }
 
   /**
@@ -966,6 +1009,9 @@ export class LayerCommitter {
       // children). Always run swap + name-fallback + append; the machine
       // ops are themselves no-ops when nothing actually needs to change,
       // and commitLayer dedup absorbs unchanged ancestor bytes.
+      // Seats for the tiles this import links in NEW, taken in this marker so
+      // a create is one undo step (tile-order.ts).
+      const seats: Record<string, number> = {}
       for (const childPathKey of childrenOf.get(pathKey) ?? []) {
         const transition = transitions.get(childPathKey)
         if (!transition) continue
@@ -994,9 +1040,12 @@ export class LayerCommitter {
           }
           if (!resolved) {
             machine.apply({ slot: 'children', op: 'append', sig: transition.newSig })
+            const seat = seatFor(segments, childName)
+            if (seat !== undefined) seats[childName] = seat
           }
         }
       }
+      if (Object.keys(seats).length > 0) await this.#applyOrder(machine, { set: seats })
 
       const newSig = await history.commitLayer(ancestorLocSig, machine.output(), { marker: baseMarker })
       transitions.set(pathKey, { prevSig, newSig, name: ancestorName })
@@ -1257,6 +1306,7 @@ export class LayerCommitter {
               machine.apply({ slot: d.slot, op: 'append', sig })
             }
           }
+          if (hasOrderChanges(d.order)) await this.#applyOrder(machine, d.order)
         } else if (d.kind === 'name') {
           // Legacy children name → sig resolution at commit time.
           if (d.op === 'add') {
@@ -1269,7 +1319,12 @@ export class LayerCommitter {
             // the name (see the delta type above) — the one deliberate
             // less-detail-over-live publish on the commit path. Gone.
             const cellSig = await history.latestMarkerSigFor(cellLocSig, d.cell)
-            machine.apply({ slot: 'children', op: 'append', sig: cellSig })
+            const linked = machine.apply({ slot: 'children', op: 'append', sig: cellSig }).changed
+            // A NEW tile takes its seat in the marker that adds it, so it is
+            // one undo step (tile-order.ts, "the seat of a tile about to be
+            // linked"). No seat when the page is not on screen.
+            const seat = linked ? seatFor(sub, d.cell) : undefined
+            if (seat !== undefined) await this.#applyOrder(machine, { set: { [d.cell]: seat } })
           } else if (d.op === 'remove') {
             const prevChildren = machine.getSlot('children') as readonly string[]
             for (const sig of prevChildren) {

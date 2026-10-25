@@ -1,21 +1,17 @@
 // presentation/tiles/index.nurse.ts
 //
-// IndexNurse — tends each cell's `index` property. The renderer reads
-// from this nurse to place a tile at its permanent grid index in
-// pinned mode.
+// IndexNurse — reads the `index` an OLDER build wrote inside a tile.
 //
-// Per-cell only (no inheritance). Position is intrinsic to the cell;
-// ancestors don't supply default positions.
+// Where a tile sits is now its PAGE's claim: the page's `order` slot
+// (history/tile-order.ts), read by show-cell `#orderByIndexPinned` before
+// anything here. This nurse answers only for a tile its page does not
+// seat yet — the read-only fallback for hives arranged before the move,
+// never rewritten (data moves forward, it does not heal). Nothing writes
+// `index` into a tile any more.
 //
-// Source of truth contract: this nurse is the ONLY reader of the
-// `index` property outside of bootstrap helpers. Any code that wants
-// a cell's slot index goes through
-// `IndexNurse.read(parentSegments, cellName, cellDir?, cacheKey?)`.
-// The nurse reads the cell's layer's `properties` slot first
-// (canonical), and falls back to the legacy `0000.index` file only
-// when the layer slot is empty AND a `cellDir` handle is provided.
-// `MoveDrone` and `show-cell.#orderByIndexPinned` write `index` via
-// `writeTilePropertiesAt`; the broadcast invalidates this cache.
+// The read: the cell's layer's `properties` slot first, then the legacy
+// `0000.index` file only when the layer slot is empty AND a `cellDir`
+// handle is provided.
 
 import { NurseBee } from '../../history/nurse.bee.js'
 

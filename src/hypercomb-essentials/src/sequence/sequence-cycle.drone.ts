@@ -31,9 +31,9 @@
 //
 // The active position in the cycle is participant-local (its own document,
 // keyed by location) — it is a view preference, like the viewport, not
-// shared content. The arrangement itself IS committed: the reorder goes
-// through `writeTilePropertiesAt({ index })` per tile exactly like a drag,
-// so it is one undoable / time-travelable change.
+// shared content. The arrangement itself IS committed: the reorder is the
+// page's order (history/tile-order.ts), one marker exactly like a drag, so it
+// is one undoable / time-travelable change.
 //
 // After each press the bounding box of the tiles changes shape, so we
 // re-fit the viewport to the new arrangement — the freshly organised set
@@ -45,7 +45,6 @@
 
 import { Drone, hypercomb } from '@hypercomb/core'
 import type { Axial } from '../navigation/hex-detector.js'
-import { writeTilePropertiesAt } from '../editor/tile-properties.js'
 import {
   type AxialLike,
   buildCoordToIndex,
@@ -413,22 +412,23 @@ export class SequenceCycleDrone extends Drone {
   // ── commit ──────────────────────────────────────────────────────────
   //
   // Same authoritative write as a drag (MoveDrone.#persistPinnedIndices):
-  // each tile's `index` property = its new spiral slot. The per-tile write
-  // lock inside writeTilePropertiesAt serialises against concurrent
-  // substrate/image writes so the index is never lost. The processor pulse
-  // coalesces the visual update; cell:reorder invalidates render caches
+  // the page's order gives each tile its new spiral slot — ONE marker at the
+  // page (history/tile-order.ts), no tile's own layer touched. The processor
+  // pulse coalesces the visual update; cell:reorder invalidates render caches
   // (show-cell must NOT renumber on receipt — it is a cache signal only).
 
   #persistPlacement = async (
     segments: readonly string[],
     placement: Map<string, number>,
   ): Promise<void> => {
-    for (const [label, index] of placement) {
-      try {
-        await writeTilePropertiesAt(segments, label, { index })
-      } catch (err) {
-        console.warn('[sequence-cycle] persist index failed for', label, err)
-      }
+    if (placement.size === 0) return
+    const committer = window.ioc.get<{ commitOrder?: (segments: readonly string[], order: { set: Record<string, number> }) => Promise<string> }>(
+      '@diamondcoreprocessor.com/LayerCommitter',
+    )
+    try {
+      await committer?.commitOrder?.(segments, { set: Object.fromEntries(placement) })
+    } catch (err) {
+      console.warn('[sequence-cycle] persist arrangement failed', err)
     }
   }
 

@@ -8,20 +8,16 @@
 //                     Writes cascade through LayerCommitter and mint
 //                     new layer markers. The merkle backbone moves.
 //
-//   NurseBee        : a primary attribute on the cell's `0000`
-//                     (index, background, border, image, ...). Writes
-//                     are local to the cell (or root, when shared);
-//                     they DO NOT cascade through LayerCommitter and
-//                     the layer's signed bytes don't change.
+//   NurseBee        : a primary attribute read from the cell's
+//                     properties (background, border, image, the legacy
+//                     index, ...). Properties live in the cell's layer
+//                     `properties` slot, so a write IS a new layer for
+//                     that cell — its signature changes with it.
 //
-// Why two paths exist: not every observable property of a cell is
-// part of its identity. Position on the grid, the colour of its
-// border, the image atlas pointer — these are ephemeral render
-// concerns. Promoting them to layer slots would mint a new layer
-// marker for every drag, recolour, reskin — and the merkle backbone
-// would churn against changes nobody else cares about. The 0000
-// surface keeps render attributes local; the layer stays merkle-
-// stable for the things that ARE identity (children, slots).
+// That is why POSITION left this surface: where a tile sits is its
+// page's claim (history/tile-order.ts), committed at the page, so a
+// drag or a move never re-mints the tile. The `index` nurse remains only
+// to read what older builds wrote.
 //
 // ── Cache contract ────────────────────────────────────────────────────
 //

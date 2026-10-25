@@ -85,18 +85,13 @@ export class OrderProjection {
   /**
    * Cache the current display order at this location.
    *
-   * Position is NOT layer state. Each cell carries its slot index
-   * permanently in its own `0000` properties (see show-cell's
-   * `#orderByIndexPinned`). Reordering the parent's `children` sig
-   * array would have no semantic effect on placement, so we deliberately
-   * do NOT call `committer.update` here — that would mint layer
-   * markers for non-changes and pollute the merkle backbone.
+   * Placement is the PAGE's `order` slot (history/tile-order.ts), which
+   * MoveDrone commits as one marker per arrangement; the `children` array
+   * order has no say in placement, so nothing is committed here. This is
+   * an in-memory snapshot only.
    *
    * The legacy `historyService.record('reorder', ...)` path that lived
    * here was a dead write (see history-recorder.drone.ts) and is gone.
-   * The authoritative save for a move is `writeCellProperties(cell,
-   * { index })` in MoveDrone — that's already happening alongside this
-   * cache update.
    */
   async reorder(cells: string[]): Promise<string[]> {
     if (!this.#currentSig) return cells

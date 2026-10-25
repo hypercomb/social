@@ -364,7 +364,6 @@ export class ReferencesWindowComponent implements OnDestroy {
     this.saving.set(true)
     let parent = [...c.parentSegments]
     try {
-      const index = this.#targetIndex(c)
       if (c.createTile) {
         parent = [...parent, name]
         const committer = ioc()?.get('@diamondcoreprocessor.com/LayerCommitter') as LayerCommitterLike | undefined
@@ -372,12 +371,13 @@ export class ReferencesWindowComponent implements OnDestroy {
         if (!committer?.importTree || !store?.putResource) throw new Error('Reference writer unavailable')
 
         // The temporary tile and the committed tile share one face and one
-        // slot. Put both properties into the target's first layer commit so
-        // there is no blank/snap frame and no current-location place-at race
-        // while the item picker is showing the Portal source layer.
+        // slot. The face goes into the target's first layer commit so there
+        // is no blank frame; the slot is the PAGE's (history/tile-order.ts) —
+        // the draft holds it, and the link that adds the tile seats it there
+        // in the same marker, with no current-location place-at race while
+        // the item picker is showing the Portal source layer.
         const properties: Record<string, unknown> = {}
         if (typeof c.portal.imageSig === 'string' && c.portal.imageSig) properties['imageSig'] = c.portal.imageSig
-        if (index >= 0) properties['index'] = index
         const propertiesSig = await store.putResource(new Blob(
           [JSON.stringify(Object.fromEntries(Object.entries(properties).sort(([a], [b]) => a.localeCompare(b))))],
           { type: 'application/json' },

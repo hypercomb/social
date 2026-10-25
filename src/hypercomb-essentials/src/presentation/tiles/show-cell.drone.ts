@@ -9,7 +9,8 @@ import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
-import { TILE_PROPERTIES_SLOT_DECLARATION, isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex, recoverableTileImageSig, seedLayerKeyedEntries } from '../../editor/tile-properties.js'
+import { TILE_PROPERTIES_SLOT_DECLARATION, isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex, recoverableTileImageSig, seedLayerKeyedEntries } from '../../editor/tile-properties.js'
+import { readOrderAt, registerSeatChooser, type OrderChanges } from '../../history/tile-order.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
@@ -729,7 +730,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'tile:preview']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'tile:preview']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -1338,6 +1339,13 @@ export class ShowCellDrone extends Drone {
   // set; stale cache entries get caught by the sparse-slot-occupied
   // check anyway, but a fresh cache per location avoids leaks).
   #sessionSlotByLabel = new Map<string, number>()
+
+  // Seats chosen for new tiles not placed yet. The committer asks for a new
+  // tile's seat when it links the tile (history/tile-order.ts), which can be
+  // before this renderer places it; holding the choice keeps the two in
+  // agreement and keeps a second new tile off the same seat. An entry goes
+  // when its tile is placed.
+  readonly #chosenSeats = new Map<string, number>()
 
   // The participant whose layer is on top (from SpotlightService), or
   // null while yours is. Subscribed on the first heartbeat so the
@@ -7393,6 +7401,23 @@ export class ShowCellDrone extends Drone {
       void this.#handlePlaceAt(payload.cell, payload.index)
     })
 
+    // The committer asks this renderer where a new tile on the page it is
+    // showing should sit, so the seat lands in the marker that adds the tile.
+    registerSeatChooser(this.#chooseSeat)
+
+    // The page re-seated its tiles (a drag, a move's landing, a place-at):
+    // the seats are read once per pass, so read them again.
+    this.onEffect<{ segments?: readonly string[]; set?: Record<string, number> }>('order:changed', (payload) => {
+      if (!Array.isArray(payload?.segments) || !this.#segmentsAreCurrent(payload.segments)) return
+      // A tile this act brought here (a move's landing) is placed by the
+      // incremental path before the next pass reads the page — give it the
+      // seat the marker holds.
+      for (const [name, seat] of Object.entries(payload.set ?? {})) this.#chosenSeats.set(name, seat)
+      this.renderedCellsKey = ''
+      this.#layerCellsCache.clear()
+      this.requestRender()
+    })
+
     this.onEffect<{ labels: string[] }>('cell:reorder', (payload) => {
       void this.#handleReorder(payload.labels)
     })
@@ -8398,6 +8423,13 @@ export class ShowCellDrone extends Drone {
     // means we do NOT know this tile's slot; the caller's index gate holds
     // the paint rather than score-filling a tile that owns a real slot.
     const coldByName = new Set<string>()
+    // THE PAGE SAYS WHERE ITS TILES SIT (history/tile-order.ts) — read once
+    // for the pass. A seat it names is the tile's seat; a tile it does not
+    // name falls back to the `index` an older build wrote inside the tile.
+    // A cold read means the page MAY name a seat we cannot see yet, so every
+    // tile it leaves unseated is unknown, never "unindexed".
+    const seatStats = { cold: false }
+    const seats = await readOrderAt(parentSegments, seatStats)
     await Promise.all(localNames.map(async (name) => {
       // The draft owns the release slot for the lifetime of the References
       // composition. Do not ask the layer for an index it cannot have yet and
@@ -8409,6 +8441,11 @@ export class ShowCellDrone extends Drone {
         && draft.parentSegments.every((segment, index) => String(segment) === String(parentSegments[index]))
       if (draft && isDraftHere && draft.index <= maxSlot) {
         idxByName.set(name, draft.index)
+        return
+      }
+      const seat = seats.get(name)
+      if (seat !== undefined) {
+        idxByName.set(name, seat)
         return
       }
       try {
@@ -8425,7 +8462,7 @@ export class ShowCellDrone extends Drone {
               typeof p['index'] === 'number' ? (p['index'] as number) : undefined,
             )
         idxByName.set(name, typeof idx === 'number' ? idx : undefined)
-        if (readStats.cold && typeof idx !== 'number') coldByName.add(name)
+        if ((readStats.cold || seatStats.cold) && typeof idx !== 'number') coldByName.add(name)
       } catch {
         idxByName.set(name, undefined)
         // A throw is never an authoritative "no index" — treat as cold so
@@ -8434,7 +8471,10 @@ export class ShowCellDrone extends Drone {
       }
     }))
     if (orderStats) orderStats.coldIndexNames = [...coldByName].sort()
-    for (const name of localNames) {
+    // The page's seats are placed first: they are its claim, and a seat an
+    // older build left inside some other tile never takes one from them.
+    const byClaim = [...localNames.filter(name => seats.has(name)), ...localNames.filter(name => !seats.has(name))]
+    for (const name of byClaim) {
       const idx = idxByName.get(name)
       if (typeof idx === 'number' && idx >= 0 && idx <= maxSlot) {
         // collision detection: if slot is already occupied, demote to unindexed
@@ -8511,9 +8551,9 @@ export class ShowCellDrone extends Drone {
     // Score-picked slots are a display decision, not content: stamping them
     // into the layer made accidental placements permanent, generated a commit
     // cascade per tile on every cold render, and was the write vector behind
-    // the cross-layer graft. Durable indexes come only from deliberate actions
-    // — cell creation (#placePinnedCell), explicit place-at (#handlePlaceAt),
-    // and the move drone.
+    // the cross-layer graft. Durable seats come only from deliberate acts, as
+    // the page's order (history/tile-order.ts) — a create's link, an explicit
+    // place-at (#handlePlaceAt), and the move drone.
     const lowestFree = (s: readonly string[]): number => {
       for (let i = 0; i <= maxSlot; i++) { const v = s[i]; if (v === '' || v == null) return i }
       return -1
@@ -8534,6 +8574,9 @@ export class ShowCellDrone extends Drone {
     // persisted here: a frame is a way of reading the layer, and the tiles'
     // own indexes survive underneath it untouched, so releasing the frame
     // returns the page exactly as it was arranged.
+    // A seat chosen for a tile this pass has now placed is no longer pending.
+    for (const name of names) this.#chosenSeats.delete(name)
+
     const framed = this.#applyFrame(sparse, parentSegments, maxSlot)
     return framed ?? sparse
   }
@@ -8705,18 +8748,66 @@ export class ShowCellDrone extends Drone {
   }
 
   /**
-   * Pinned-mode incremental placement for a brand-new cell. Picks a slot the
-   * same way #orderByIndexPinned would for an unindexed cell — reuse the
-   * session-cached slot if still free, else the best free slot by viewport
-   * score — injects it into the slot machine at that index, and persists the
-   * index fire-and-forget so the next full render reads it back from Pass 1
-   * (the tile never jumps). Returns the slot, or -1 when the grid is full /
-   * axial isn't ready, signalling the caller to fall back to a full render.
+   * The seat a NEW tile takes on the page on screen — the chooser the
+   * committer asks when it links the tile (history/tile-order.ts), so the
+   * seat lands in the marker that adds it and a create stays one undo step.
+   * The rule is the one the full pass uses for an unseated tile: a bound
+   * sequence's next slot, else this session's seat for the name while it is
+   * free, else the best free slot by viewport score. The choice is held, so
+   * whoever asks second — this renderer placing the tile, or the committer
+   * linking it — gets the same seat. Undefined for a page not on screen.
+   */
+  #chooseSeat = (parentSegments: readonly string[], name: string): number | undefined => {
+    // A References composition owns its release seat until it is saved — and
+    // the page it lands on need not be on screen, since the Portal is browsed
+    // while composing.
+    const draft = this.#referenceDraft
+    if (draft && name && draft.name === name
+      && draft.parentSegments.length === parentSegments.length
+      && draft.parentSegments.every((segment, index) => String(segment) === String(parentSegments[index]))) {
+      return draft.index
+    }
+    if (!name || !this.#slots.seeded || !this.#segmentsAreCurrent(parentSegments)) return undefined
+    const axial = this.resolve<any>('axial')
+    if (!axial?.items) return undefined
+    const maxSlot = axial?.count ?? 60
+    const sparse = [...this.#slots.snapshot().names]
+    const placed = sparse.indexOf(name)
+    if (placed >= 0) return placed
+    const held = this.#chosenSeats.get(name)
+    if (held !== undefined) return held
+    // A seat promised to another new tile is taken.
+    for (const [other, seat] of this.#chosenSeats) if (sparse[seat] === '' || sparse[seat] == null) sparse[seat] = other
+
+    const cachedSlot = this.#sessionSlotByLabel.get(name)
+    const free = (i: number): boolean => { const v = sparse[i]; return v === '' || v == null }
+    // Drop-target sequence (cascading, position→leaf): when this location or
+    // an ancestor is bound to a sequence, a new tile fills the next free
+    // sequence slot before any score-based placement. No-op when nothing is
+    // bound or the sequence is exhausted.
+    const seqSlot = this.#sequenceSlot(parentSegments, maxSlot, free)
+    const seat = seqSlot >= 0
+      ? seqSlot
+      : (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && free(cachedSlot))
+        ? cachedSlot
+        : this.#bestFreeSlotByScore(sparse, maxSlot)
+    if (seat < 0) return undefined
+    this.#chosenSeats.set(name, seat)
+    this.#sessionSlotByLabel.set(name, seat)
+    return seat
+  }
+
+  /**
+   * Pinned-mode incremental placement for a brand-new cell: take the seat
+   * #chooseSeat gives it (the one the committer writes into the marker that
+   * links it) and inject it into the slot machine. The seat is the PAGE's
+   * claim, never written into the tile. Returns the slot, or -1 when the grid
+   * is full / axial isn't ready, signalling the caller to fall back to a full
+   * render.
    */
   #placePinnedCell(name: string, eventSegments?: readonly string[]): number {
     const axial = this.resolve<any>('axial')
     if (!axial?.items) return -1
-    const maxSlot = axial?.count ?? 60
     const sparse = this.#slots.snapshot().names
 
     // Already placed — a re-emitted cell:added for a tile that's already on
@@ -8726,34 +8817,41 @@ export class ShowCellDrone extends Drone {
     const existing = sparse.indexOf(name)
     if (existing >= 0) return existing
 
-    const cachedSlot = this.#sessionSlotByLabel.get(name)
-    const free = (i: number): boolean => { const v = sparse[i]; return v === '' || v == null }
-    // Drop-target sequence (cascading, position→leaf): when this location or
-    // an ancestor is bound to a sequence, a new tile fills the next free
-    // sequence slot before any score-based placement. No-op when nothing is
-    // bound or the sequence is exhausted.
-    const seqSlot = this.#sequenceSlot(eventSegments, maxSlot, free)
-    const slot = seqSlot >= 0
-      ? seqSlot
-      : (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && free(cachedSlot))
-        ? cachedSlot
-        : this.#bestFreeSlotByScore(sparse, maxSlot)
+    // The EVENT's address (captured synchronously with the cell:added that
+    // triggered this placement), never a live lineage re-read — the microtask
+    // defer between event and here is a real navigation window, and a seat
+    // written at the wrong page lands in the wrong page's order.
+    const lineage = this.resolve<any>('lineage')
+    const parentSegments: readonly string[] = eventSegments ?? lineage?.explorerSegments?.() ?? []
+    const slot = this.#chooseSeat(parentSegments, name) ?? -1
     if (slot < 0) return -1
 
     if (!this.#slots.addAt(name, slot, false)) return -1
+    this.#chosenSeats.delete(name)
     this.#sessionSlotByLabel.set(name, slot)
-
-    // Persist against the EVENT's address (captured synchronously with
-    // the cell:added that triggered this placement), never a live lineage
-    // re-read — the microtask defer between event and here is a real
-    // navigation window, and a wrong-location index write cascades the
-    // cell into the wrong layer's children.
-    const lineage = this.resolve<any>('lineage')
-    const parentSegments: readonly string[] = eventSegments ?? lineage?.explorerSegments?.() ?? []
-    void writeTilePropertiesAt(parentSegments, name, { index: slot }).catch(err =>
-      console.warn('[show-cell] failed to persist index for new cell', name, err),
-    )
+    void this.#keepSeat(parentSegments, name, slot)
     return slot
+  }
+
+  /** A tile placed here whose link did not carry its seat — added by a path
+   *  that does not link through the committer, or linked before this page
+   *  could choose — is given it as a marker of its own once every queued
+   *  commit has landed, so it never jumps on the next load. The common
+   *  create already carries it, and this finds nothing to do. */
+  async #keepSeat(parentSegments: readonly string[], name: string, seat: number): Promise<void> {
+    const committer = (window as any).ioc?.get?.('@diamondcoreprocessor.com/LayerCommitter') as
+      | { settled?: () => Promise<void>; commitOrder?: (segments: readonly string[], order: OrderChanges) => Promise<string> }
+      | undefined
+    if (!committer?.commitOrder) return
+    try {
+      await committer.settled?.()
+      const stats = { cold: false }
+      const seats = await readOrderAt(parentSegments, stats)
+      if (stats.cold || seats.has(name)) return
+      await committer.commitOrder(parentSegments, { set: { [name]: seat } })
+    } catch (err) {
+      console.warn('[show-cell] could not keep the seat of', name, err)
+    }
   }
 
   /**
@@ -8864,16 +8962,20 @@ export class ShowCellDrone extends Drone {
   // detection, and next-available-slot fallback in one pass.
 
   async #handlePlaceAt(cell: string, targetIndex: number): Promise<void> {
-    // Index is the source of truth. Place this one cell at the target
-    // index — do not renumber anyone else. Render-time collision heal
-    // (in #orderByIndexPinned) demotes any prior occupant to the next
-    // free slot.
+    // The page's seat is the source of truth. Place this one cell at the
+    // target seat — do not renumber anyone else. Render-time collision heal
+    // (in #orderByIndexPinned) demotes any prior occupant to the next free
+    // slot.
     const lineage = this.resolve<any>('lineage')
     if (!lineage) return
 
     const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    // One marker at the PAGE: where a tile sits is the page's claim.
+    const committer = (window as any).ioc?.get?.('@diamondcoreprocessor.com/LayerCommitter') as
+      | { commitOrder?: (segments: readonly string[], order: OrderChanges) => Promise<string> }
+      | undefined
     try {
-      await writeTilePropertiesAt(parentSegments, cell, { index: targetIndex })
+      await committer?.commitOrder?.(parentSegments, { set: { [cell]: targetIndex } })
     } catch (err) {
       console.warn('[show-cell] place-at failed for', cell, err)
     }
@@ -8884,10 +8986,10 @@ export class ShowCellDrone extends Drone {
   }
 
   async #handleReorder(_labels: string[]): Promise<void> {
-    // Cell index is the source of truth — written per-cell by the move
-    // drone (and similar). This handler only invalidates the renderer's
-    // caches so the next pass re-reads the persisted indices. It MUST
-    // NOT renumber indices densely — that was the snap-back bug.
+    // The page's seats are the source of truth — written by the move drone
+    // (and similar) as the page's order. This handler only invalidates the
+    // renderer's caches so the next pass re-reads them. It MUST NOT
+    // renumber seats densely — that was the snap-back bug.
     this.renderedCellsKey = ''
     this.#layerCellsCache.clear()
     this.requestRender()
