@@ -178,19 +178,24 @@ The card a visitor sees is a **showcase** (jwize 2026-10-24: "like your tiles
 with the beautiful images showing and they lead to the subdomains"). A colony
 is a domain and its hives are its subdomains, so the page is:
 
-- **Search at the top**, beside the domain's name and sentence, with a comb of
-  hive pictures around the mark.
-- **One list of everything hosted** (jwize 2026-10-24: "we collapse all
-  domains into a single list of hosted software"): every hive the ledger
-  (`/publications.json`, verified heads only) has open on any domain, plus what
-  each domain's public offering pools share. The domains are a **filter** on
-  the list (a row of chips with counts, one pressed at a time, *All domains*
-  first), never sections of it, and the search at the top searches the same
-  list. A tile wears the picture its hive's own tile wears; a hive with no
-  picture wears a cover drawn from its signature. Give a hive's top tile a
-  picture and it appears here at the next publish.
-- **On a phone** it is the same list in one column; the domain chips scroll
-  sideways.
+- **A lean header** (jwize 2026-10-24: "this area needs to be lean"): one
+  small brand row (the mark, the domain's name, its sentence on one line, the
+  count) and the **search across the full width** beneath it.
+- **Only this domain's showcase** (jwize 2026-10-24: "your visitors should
+  only see your showcase not your connections"). The owners of a domain (the
+  keys its own root names in the ledger, `/publications.json`) sign what it
+  shows as `showcase:<zone>`: an atom `{ kind: 'host:showcase', zone, items:
+  [{ pubkey, lineage }], domains: [zone] }` named in their signed index, the
+  same path a zone's card takes (`welcome:<zone>`). The page reads the index
+  from the domain itself, checks its signature and the atom's name, and draws
+  exactly the items it names plus everything on the domains it shows in full.
+  A domain with no showcase yet draws what opens on it. Visitors never see
+  the owner's other domains. The owner keeps those in their own hive: their
+  community, one row per domain, where a creation is turned on or off for the
+  showcase (shim `showcase-record.ts`).
+- Every name is one tile; it wears the picture its hive's own tile wears, or
+  a cover drawn from its signature. Give a hive's top tile a picture and it
+  appears here at the next publish.
 - **At the foot:** what a member does to share their own favourite things, the
   staged links (each may name an `icon` from a closed set: `tour`, `app`,
   `host`, `download`, `extension`, `docs`, `source`), and **Manage this hive**,

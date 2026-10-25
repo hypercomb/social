@@ -22,6 +22,7 @@ import { APP_HREF, frontDoorOf, readWelcome, type FrontDoor, type Welcome, type 
 import { pictureOrigins, tilePicture } from './tile-picture'
 import { SHOWCASE_STYLE, exploreSection, matchesDomain, memberSection, readLedger, rootZones, searchTerms, showcase,
   type LedgerSite } from './showcase'
+import { readShowcase } from './showcase-record'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,
   listRevisionCandidates, publicCreationOrigin, readOfferings, readPublicCreations, rememberRevisionCandidate,
@@ -595,8 +596,9 @@ class HostPanelElement extends HTMLElement {
       if (this.#reviews?.length) panel.append(this.#reviewSection(this.#reviews))
       panel.append(this.#gallery(rootZones([this.#self, ...zones])))
     } else {
-      // THE ROOT IS A SHOWCASE (jwize 2026-10-24): search at the top, a band of
-      // hives per domain, and the doors to everything else at the foot.
+      // THE ROOT IS A SHOWCASE (jwize 2026-10-24): a small brand row, the search,
+      // and only what this domain's owners signed as its showcase — never their
+      // connections; the doors to everything else at the foot.
       card.classList.add('showcase-page')
       if (!this.#ledger) { this.#ledger = readLedger(); this.#ledgerAt = Date.now() }
       const { hero, bands, refresh } = showcase({
@@ -608,6 +610,7 @@ class HostPanelElement extends HTMLElement {
         ledger: this.#ledger,
         readShared: zone => Promise.all([readOfferings(zone).catch(() => []), readPublicCreations(zone).catch(() => [])])
           .then(([offers, creations]) => ({ offers, creations })),
+        readShowcase,
       })
       this.#showcaseRefresh = refresh
       panel.append(hero)

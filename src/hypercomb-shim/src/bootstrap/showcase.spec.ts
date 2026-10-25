@@ -6,6 +6,7 @@
 // and this domain's version is pinned first in the tile's list.
 
 import { describe, expect, it, vi } from 'vitest'
+import { parseShowcase, type ShowcaseRecord } from './showcase-record'
 import { aggregate, aggregateMatches, bandZones, coverOf, ledgerPublishes, ownersLabel, parseLedger,
   sharedPublishes, showcase } from './showcase'
 import { parseWelcome } from './welcome'
@@ -140,24 +141,41 @@ describe('aggregate — one tile per name, never a duplicate on the page', () =>
 describe('showcase — the page is what is published now', () => {
   const names = (bands: HTMLElement): string[] =>
     [...bands.querySelectorAll('.comb .hex-name')].map(name => name.textContent ?? '')
-  const chip = (bands: HTMLElement, label: string): HTMLButtonElement | undefined =>
-    [...bands.querySelectorAll<HTMLButtonElement>('.domain-chip')].find(button => button.textContent?.startsWith(label))
   const sites = parseLedger(LEDGER)
 
-  it('draws each name once in one list, a domain filters it, and a new read redraws it', async () => {
+  it('shows what opens on this domain until its owners sign a showcase', async () => {
+    const { bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+    })
+    await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
+    expect(bands.querySelectorAll('.band, .domain-chip')).toHaveLength(0)
+  })
+
+  it('draws exactly the signed showcase: its items and the domains shown in full, never the rest', async () => {
+    const asked: string[][] = []
+    const draw = (record: ShowcaseRecord | null) => showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      readShowcase: async (_zone, owners) => { asked.push([...owners]); return record },
+    }).bands
+    const one = draw({ zone: 'hypercomb.com', items: [{ pubkey: sig('a'), lineage: 'dylan' }], domains: [] })
+    await vi.waitFor(() => expect(names(one)).toEqual(['dylan']))
+    // The owners asked are the keys hypercomb.com's own root names, head or not.
+    expect(asked[0]).toEqual([sig('a')])
+    const whole = draw({ zone: 'hypercomb.com', items: [], domains: ['jwize.com'] })
+    await vi.waitFor(() => expect(names(whole)).toEqual(['dylan']))
+    const none = draw({ zone: 'hypercomb.com', items: [], domains: [] })
+    await vi.waitFor(() => expect(none.querySelector('.hosted-empty')?.textContent).toBe('Nothing is showcased here yet.'))
+    expect(names(none)).toEqual([])
+  })
+
+  it('redraws when the ledger is read again, and only the newest read is believed', async () => {
     const { bands, refresh } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
     })
     await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
-    expect(bands.querySelectorAll('.band')).toHaveLength(0)
-    // jwize.com opens dylan only: pressing it narrows the list, All widens it again.
-    expect(chip(bands, 'jwize.com')?.querySelector('.domain-chip-count')?.textContent).toBe('1')
-    chip(bands, 'jwize.com')!.click()
-    expect(names(bands)).toEqual(['dylan'])
-    expect(chip(bands, 'jwize.com')?.getAttribute('aria-pressed')).toBe('true')
-    chip(bands, 'All domains')!.click()
-    expect(names(bands)).toEqual(['camelflage', 'dylan'])
 
     // camelflage is unpublished; a newer read lands before an older one.
     let late: (value: typeof sites) => void = () => {}
@@ -272,20 +290,19 @@ describe('parseWelcome — a link names its picture from a closed set', () => {
   })
 })
 
-describe('the room first — a front page that hosts a swarm says so above its name', () => {
+describe('the room first — a front page that hosts a swarm says so in its brand row', () => {
   const options = {
     self: 'realones.online', title: 'Real Ones', tagline: '', sources: [],
     ledger: Promise.resolve([]), readShared: async () => ({ offers: [], creations: [] }),
   }
 
-  it('draws "Join the swarm" before the name, pointing at the sealed link', () => {
+  it('draws "Join the swarm" at the top, pointing at the sealed link', () => {
     const link = 'https://swarm.hypercomb.com/#swarm=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@hypercomb.com~KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK'
     const { hero } = showcase({ ...options, swarm: link })
-    const words = hero.querySelector('.hero-words')!
-    const first = words.firstElementChild as HTMLAnchorElement
-    expect(first.className).toBe('hero-swarm')
-    expect(first.getAttribute('href')).toBe(link)
-    expect(first.textContent).toContain('Join the swarm')
+    // In the brand row, at the top of the page.
+    const join = hero.querySelector('.hero-brand .hero-swarm') as HTMLAnchorElement
+    expect(join.getAttribute('href')).toBe(link)
+    expect(join.textContent).toContain('Join the swarm')
   })
 
   it('draws nothing of the kind on a page that hosts no room', () => {
@@ -294,3 +311,19 @@ describe('the room first — a front page that hosts a swarm says so above its n
   })
 })
 
+
+describe('parseShowcase — a signed showcase is data too', () => {
+  it('keeps only this zone\'s record, and only items and domains that survive their check', () => {
+    expect(parseShowcase({ kind: 'host:showcase', zone: 'jwize.com', items: [], domains: [] }, 'hypercomb.com')).toBeNull()
+    expect(parseShowcase({ kind: 'host:welcome', zone: 'hypercomb.com' }, 'hypercomb.com')).toBeNull()
+    expect(parseShowcase({
+      kind: 'host:showcase', zone: 'hypercomb.com',
+      items: [{ pubkey: sig('a'), lineage: 'dylan' }, { pubkey: 'not a key', lineage: 'x' }, { pubkey: sig('b'), lineage: '' }],
+      domains: ['jwize.com', 'javascript:alert(1)', 7],
+    }, 'hypercomb.com')).toEqual({ zone: 'hypercomb.com', items: [{ pubkey: sig('a'), lineage: 'dylan' }], domains: ['jwize.com'] })
+  })
+
+  it('names every key a site\'s root names as its owners, a head or not', () => {
+    expect(parseLedger(LEDGER)[0]!.owners).toEqual([sig('a')])
+  })
+})

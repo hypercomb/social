@@ -18,6 +18,7 @@
 
 import type { HostCreation, HostOffering } from '@hypercomb/core'
 import { pictureOrigins, tilePicture } from './tile-picture'
+import type { ShowcaseRecord } from './showcase-record'
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { LinkIcon, WelcomeLink } from './welcome'
 
@@ -37,6 +38,9 @@ export type LedgerSite = {
   /** Every publisher holding a verified head, the primary first; none for a
    *  domain whose root has published nothing. */
   readonly publishers: readonly LedgerPublisher[]
+  /** Every key the ledger names for the site, a head or not, the primary
+   *  first: a domain's root names its owners even before it publishes. */
+  readonly owners: readonly string[]
 }
 
 /** Somebody who owns a publish: their key, and the name the ledger gives them. */
@@ -150,11 +154,11 @@ export const parseLedger = (raw: unknown): LedgerSite[] => {
       .map(host => typeof host === 'string' ? host.trim().toLowerCase() : '')
       .filter(host => HOSTNAME.test(host))
     if (!hosts.length) continue
-    const publishers = (Array.isArray(site['publishers']) ? site['publishers'] as unknown[] : [])
+    const named = (Array.isArray(site['publishers']) ? site['publishers'] as unknown[] : [])
       .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
-      .filter(row => typeof row['head'] === 'string' && SIG.test(row['head'])
-        && typeof row['pubkey'] === 'string' && SIG.test(row['pubkey']))
+      .filter(row => typeof row['pubkey'] === 'string' && SIG.test(row['pubkey']))
       .sort((a, b) => Number(b['primary'] === true) - Number(a['primary'] === true))
+    const publishers = named.filter(row => typeof row['head'] === 'string' && SIG.test(row['head']))
     const lineage = text(site['lineage'], 200)
     out.push({
       title: text(site['title'], 60) || lineage || hosts[0]!,
@@ -162,6 +166,7 @@ export const parseLedger = (raw: unknown): LedgerSite[] => {
       hosts: [...new Set(hosts)],
       publishers: publishers.map(row => ({ pubkey: row['pubkey'] as string, label: text(row['label'], 40),
         head: row['head'] as string })),
+      owners: [...new Set(named.map(row => row['pubkey'] as string))],
     })
   }
   return out
@@ -409,7 +414,7 @@ const iconOf = (name: keyof typeof ICONS): Element => {
   return holder.firstElementChild ?? holder
 }
 
-/** The platform's mark, gold, for the centre of the hero's comb. */
+/** The platform's mark, gold, beside the page's name. */
 const GOLD_MARK = '<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">'
   + '<defs><linearGradient id="sc-g" gradientUnits="userSpaceOnUse" x1="6" y1="1" x2="26" y2="31">'
   + '<stop offset="0" stop-color="#ffe08a"/><stop offset=".42" stop-color="#f8b73a"/><stop offset="1" stop-color="#d9860b"/></linearGradient>'
@@ -470,6 +475,9 @@ export type ShowcaseOptions = {
   readonly readShared: SharedReader
   /** The hive this page was opened from, when it was — where an owner's Off is handed. */
   readonly home?: string
+  /** The showcase this domain's owners sign (showcase-record.ts readShowcase),
+   *  read after every ledger read. Absent, or null, shows what opens here. */
+  readonly readShowcase?: (zone: string, owners: readonly string[]) => Promise<ShowcaseRecord | null>
 }
 
 export type Showcase = {
@@ -481,24 +489,23 @@ export type Showcase = {
 }
 
 export const showcase = (options: ShowcaseOptions): Showcase => {
+  // THE HEADER IS LEAN (jwize 2026-10-24: "this area needs to be lean … header
+  // with area for branding (small) and then search across the top and then the
+  // list of items"): the mark, the name and its sentence on one small row,
+  // the search across the full width beneath, and the list straight after.
   const hero = el('header', 'hero')
+  const brand = el('div', 'hero-brand')
+  const mark = el('span', 'hero-mark')
+  mark.innerHTML = GOLD_MARK
   const words = el('div', 'hero-words')
   const title = el('h1')
   title.textContent = options.title
-  // As large as its longest word allows: a domain has no space to wrap at, so
-  // pluginthematrix.com is drawn smaller rather than broken mid-word.
-  title.style.setProperty('--chars', String(Math.max(6, ...options.title.split(/\s+/).map(word => word.length))))
   const tagline = el('p', 'hero-tagline')
   tagline.textContent = options.tagline
-  const searchBox = el('label', 'search')
-  const search = el('input')
-  search.type = 'search'
-  search.placeholder = 'Search hives, creations and domains'
-  search.setAttribute('aria-label', 'Search hives, creations and domains')
-  search.autocomplete = 'off'
-  search.spellcheck = false
-  searchBox.append(iconOf('search'), search)
+  tagline.title = options.tagline
+  words.append(title, tagline)
   const stats = el('p', 'hero-stats')
+  brand.append(mark, words, stats)
   // THE ROOM FIRST: a front page whose owner hosts a swarm says so before
   // anything else (room host <domain>). The link carries no words a reader
   // could copy down — the room and its secret travel sealed.
@@ -509,12 +516,17 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     const label = el('span')
     label.textContent = 'Join the swarm'
     join.append(iconOf('hive'), label, iconOf('arrow'))
-    words.append(join)
+    brand.append(join)
   }
-  words.append(title, tagline, searchBox, stats)
-  const mosaic = el('div', 'mosaic')
-  mosaic.setAttribute('aria-hidden', 'true')
-  hero.append(words, mosaic)
+  const searchBox = el('label', 'search')
+  const search = el('input')
+  search.type = 'search'
+  search.placeholder = 'Search hives, creations and domains'
+  search.setAttribute('aria-label', 'Search hives, creations and domains')
+  search.autocomplete = 'off'
+  search.spellcheck = false
+  searchBox.append(iconOf('search'), search)
+  hero.append(brand, searchBox)
 
   const bandsHost = el('div', 'bands')
 
@@ -539,7 +551,6 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
         pictures.set(head, url)
         if (url) {
           for (const art of wearers.get(head) ?? []) wearPicture(art, url, 'hex-picture')
-          placeInMosaic(head, url)
         }
         drainPictures()
       })
@@ -567,61 +578,6 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     wear(art, head, route)
     mini.append(art)
     return mini
-  }
-
-  // ── the hero's comb: the mark in the middle, hives around it. A slot that
-  //    wears a picture keeps it; a picture arriving takes a slot still in cover.
-  const slots: { art: HTMLElement; head: string; pictured: boolean }[] = []
-  const OFFSETS: readonly (readonly [number, number])[] = [[-0.5, -1], [0.5, -1], [1, 0], [0.5, 1], [-0.5, 1], [-1, 0]]
-  const centre = el('span', 'mosaic-cell mosaic-centre')
-  centre.innerHTML = GOLD_MARK
-  mosaic.append(centre)
-  for (const [x, y] of OFFSETS) {
-    const cell = el('span', 'mosaic-cell')
-    cell.style.setProperty('--x', String(x))
-    cell.style.setProperty('--y', String(y))
-    const art = el('span', 'hex-art cover')
-    cell.append(art)
-    mosaic.append(cell)
-    slots.push({ art, head: '', pictured: false })
-  }
-  /** The lead heads the comb may wear; a picture of any other version waits for its sheet. */
-  let mosaicHeads = new Set<string>()
-  const fillMosaic = (heads: readonly string[]): void => {
-    // A hive no longer published leaves the comb with the rest of the page.
-    const live = new Set(heads)
-    mosaicHeads = live
-    for (const slot of slots) {
-      if (!slot.head || live.has(slot.head)) continue
-      slot.art.replaceChildren()
-      slot.art.classList.remove('has-picture')
-      Object.assign(slot, { head: '', pictured: false })
-    }
-    const shown = new Set(slots.map(slot => slot.head))
-    const fresh = heads.filter(head => !shown.has(head) && !!shown.add(head))
-    for (const slot of slots) {
-      if (slot.head) continue
-      const head = fresh.shift()
-      if (!head) break
-      slot.head = head
-      dressCover(slot.art, head)
-      const url = pictures.get(head)
-      if (url) { wearPicture(slot.art, url, 'hex-picture'); slot.pictured = true }
-    }
-  }
-  function placeInMosaic(head: string, url: string): void {
-    if (!mosaicHeads.has(head)) return
-    const held = slots.find(slot => slot.head === head)
-    const slot = held ?? slots.find(row => !row.pictured)
-    if (!slot || slot.pictured) return
-    if (!held) {
-      slot.art.replaceChildren()
-      slot.art.classList.remove('has-picture')
-      slot.head = head
-      dressCover(slot.art, head)
-    }
-    wearPicture(slot.art, url, 'hex-picture')
-    slot.pictured = true
   }
 
   // ── a tile's versions: this domain's first, every other version after it,
@@ -882,45 +838,16 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     for (const { target } of entries) arrange(target as HTMLElement, combTiles.get(target as HTMLElement) ?? [])
   }) : null
 
-  // ── ONE LIST OF HOSTED SOFTWARE (jwize 2026-10-24: "we collapse all domains
-  //    into a single list of hosted software and then when we click we can see
-  //    details with a list of domains and versions … filter as well with the
-  //    canonical top search"). Every name once, whichever domains open it; a
-  //    domain is a filter on the list, never a section of it. ──
+  // ── ONE LIST: THIS DOMAIN'S SHOWCASE (jwize 2026-10-24: "your visitors
+  //    should only see your showcase not your connections"). Every name once;
+  //    what the owners signed as `showcase:<zone>`, else what opens here. The
+  //    domains it was gathered from are the owner's, kept in their hive. ──
   const hosted = el('section', 'hosted')
-  const hostedHead = el('header', 'hosted-head')
-  const hostedTitle = el('h2')
-  hostedTitle.textContent = 'Hosted here'
-  const hostedMeta = el('span', 'band-meta')
-  hostedHead.append(hostedTitle, hostedMeta)
-  const filters = el('div', 'domain-filter')
-  filters.setAttribute('role', 'group')
-  filters.setAttribute('aria-label', 'Show one domain')
   const comb = el('div', 'comb')
   combs?.observe(comb)
   const empty = el('p', 'hosted-empty')
-  hosted.append(hostedHead, filters, comb, empty)
+  hosted.append(comb, empty)
   bandsHost.append(hosted)
-  /** The domain the list is narrowed to, or null for every domain. */
-  let domain: string | null = null
-  type ChipView = { chip: HTMLButtonElement; count: HTMLElement }
-  const chipViews = new Map<string, ChipView>()
-  const chipOf = (zone: string | null): ChipView => {
-    const key = zone ?? ''
-    const found = chipViews.get(key)
-    if (found) return found
-    const chip = el('button', 'domain-chip')
-    chip.type = 'button'
-    const name = el('span')
-    name.textContent = zone ?? 'All domains'
-    const count = el('span', 'domain-chip-count')
-    chip.append(...(zone ? [] : [iconOf('globe')]), name, count)
-    chip.addEventListener('click', () => { domain = zone; paint() })
-    const view = { chip, count }
-    chipViews.set(key, view)
-    return view
-  }
-
   /** Every publish known now — the ledger's, then each domain's pools — one tile per name. */
   const bands = (): Band[] => {
     const zones = bandZones(sites, options.self, options.sources)
@@ -954,52 +881,36 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     drainShared()
   }
 
+  /** What this domain's owners signed it shows; undefined until read, null when none. */
+  let record: ShowcaseRecord | null | undefined
+  const showcased = (entry: Aggregate): boolean => {
+    if (!record) return entry.zones.includes(options.self)
+    if (entry.zones.some(zone => record!.domains.includes(zone))) return true
+    return entry.versions.some(version => version.claims.some(claim =>
+      record!.items.some(item => item.pubkey === claim.pubkey && item.lineage === claim.lineage)))
+  }
+
   function paint(): void {
     const terms = searchTerms(search.value)
     const all = bands()
     for (const band of all) askShared(band.zone)
-    const everything = all.flatMap(band => band.tiles).sort(byTitle)
-    const zoned = all.filter(band => band.open.length)
-    // A domain that no longer opens anything stops being a filter.
-    if (domain && !zoned.some(band => band.zone === domain)) domain = null
-    const chips = [chipOf(null), ...zoned.map(band => chipOf(band.zone))]
-    chips[0]!.count.textContent = String(everything.length)
-    for (const [index, band] of zoned.entries()) chips[index + 1]!.count.textContent = String(band.open.length)
-    for (const [key, view] of chipViews) view.chip.setAttribute('aria-pressed', String(key === (domain ?? '')))
-    filters.hidden = zoned.length < 2
-    // Re-insert only when the order changed: moving a chip takes focus from it.
-    const current = [...filters.children]
-    if (current.length !== chips.length || current.some((node, index) => node !== chips[index]!.chip)) {
-      filters.replaceChildren(...chips.map(view => view.chip))
-    }
-    const scoped = domain ? zoned.find(band => band.zone === domain)!.open : everything
-    const shown = scoped.filter(entry => aggregateMatches(entry, terms))
+    const unread = !!options.readShowcase && record === undefined
+    const everything = unread ? [] : all.flatMap(band => band.tiles).filter(showcased).sort(byTitle)
+    const shown = everything.filter(entry => aggregateMatches(entry, terms))
     arrange(comb, shown.map(entry => tileView(entry)))
     empty.hidden = shown.length > 0
-    empty.textContent = terms.length ? `Nothing${domain ? ` on ${domain}` : ''} matches your search.`
-      : !ledgerRead ? 'Reading what is hosted here…'
-        : domain ? `Nothing is shared on ${domain} yet.` : 'Nothing is hosted here yet.'
+    empty.textContent = terms.length ? 'Nothing here matches your search.'
+      : !ledgerRead || unread ? 'Reading what is showcased here…' : 'Nothing is showcased here yet.'
     const hives = everything.filter(entry => entry.kind === 'hive')
     const creations = everything.length - hives.length
-    for (const target of [stats, hostedMeta]) {
-      target.replaceChildren()
-      if (hives.length) {
-        const row = el('span')
-        row.append(iconOf('hive'), document.createTextNode(count(hives.length, 'hive', 'hives')))
-        target.append(row)
-      }
-      if (zoned.length) {
-        const row = el('span')
-        row.append(iconOf('globe'), document.createTextNode(count(zoned.length, 'domain', 'domains')))
-        target.append(row)
-      }
-      if (creations) {
-        const row = el('span')
-        row.append(iconOf('sparkle'), document.createTextNode(count(creations, 'shared creation', 'shared creations')))
-        target.append(row)
-      }
+    stats.replaceChildren()
+    for (const [n, icon, one, many] of [[hives.length, 'hive', 'hive', 'hives'],
+      [creations, 'sparkle', 'shared creation', 'shared creations']] as const) {
+      if (!n) continue
+      const row = el('span')
+      row.append(iconOf(icon), document.createTextNode(count(n, one, many)))
+      stats.append(row)
     }
-    fillMosaic(hives.map(entry => entry.versions[0]!.head))
   }
 
   search.addEventListener('input', () => paint())
@@ -1012,8 +923,16 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
       if (read !== reads) return
       sites = found
       ledgerRead = true
-      // Every version's picture is asked for at once — the comb at the top
-      // wants the ones that wear one, the tiles and their lists want them all.
+      // The owners of this domain are the keys its own root names. Until their
+      // record is read the list waits rather than show what it may not.
+      const owners = found.find(site => site.hosts[0] === options.self)?.owners ?? []
+      void (options.readShowcase?.(options.self, owners) ?? Promise.resolve(null))
+        .catch(() => null).then(signed => {
+          if (read !== reads) return
+          record = signed
+          paint()
+        })
+      // Every version's picture is asked for at once — the tiles and their lists want them all.
       for (const band of bands()) for (const entry of band.tiles) {
         for (const version of entry.versions) askPicture(version.head, version.route)
       }
@@ -1130,7 +1049,7 @@ export const SHOWCASE_STYLE = `
     linear-gradient(180deg, var(--md-surface-c-low), var(--md-surface) 45%);
 }
 .card.showcase-page::before {
-  content: ''; position: absolute; inset: 0 0 auto; height: 46rem; pointer-events: none;
+  content: ''; position: absolute; inset: 0 0 auto; height: 18rem; pointer-events: none;
   background: var(--md-primary); opacity: .09;
   -webkit-mask: ${LATTICE} 0 0 / 52px 90px repeat, linear-gradient(#000, transparent 85%);
   -webkit-mask-composite: source-in;
@@ -1140,50 +1059,37 @@ export const SHOWCASE_STYLE = `
 .showcase-page .panel { position: relative; }
 
 /* the room, first: a front page that hosts a swarm says so above its name */
-.hero-swarm { display: inline-flex; align-items: center; gap: .55rem; margin: 0 0 1.1rem; padding: .62rem 1.05rem;
+.hero-swarm { flex: none; display: inline-flex; align-items: center; gap: .45rem; padding: .45rem .8rem; font-size: .85rem;
   border-radius: var(--hc-radius-control, 2px); background: var(--md-primary); color: var(--md-on-primary); font-weight: 600; text-decoration: none;
   box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--md-primary) 70%, transparent); }
 .hero-swarm:hover, .hero-swarm:focus-visible { filter: brightness(1.06); }
 .hero-swarm svg { width: 1.05rem; height: 1.05rem; }
-/* the hero: the name, the sentence, the search — and a comb of real hives */
-.hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(1.5rem, 5vw, 4rem); margin: 0 0 clamp(2.5rem, 7vh, 4.5rem); }
-.hero-words { container-type: inline-size; width: 100%; min-width: 0; }
-.hero h1 {
-  --title-size: clamp(3.1rem, 8.5vw, 6.4rem);
-  margin: 0; padding-bottom: .06em; overflow-wrap: anywhere;
-  font: 500 var(--title-size)/.95 'Source Serif 4', Georgia, serif; letter-spacing: -.055em;
-  font-size: min(var(--title-size), calc(100cqi / (var(--chars, 9) * .5)));
-  background: linear-gradient(105deg, var(--md-on-surface-strong) 38%, #b0600c 78%, var(--gold-2));
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-.hero-tagline { max-width: 40rem; margin: 1rem 0 0; color: var(--md-on-surface-var); font-size: clamp(1rem, 1.6vw, 1.18rem); line-height: 1.55; }
-.search { position: relative; display: flex; align-items: center; max-width: 40rem; margin: 1.9rem 0 0; }
-.search svg { position: absolute; z-index: 1; left: 1.05rem; width: 1.3rem; height: 1.3rem; color: var(--md-primary); pointer-events: none; }
-.search input {
-  flex: 1; width: 100%; padding: 1.05rem 1.15rem 1.05rem 3.2rem; font: 400 1.06rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif);
-  color: var(--md-on-surface-strong); border-radius: var(--hc-radius-control, 2px);
-  background: color-mix(in srgb, var(--md-surface-c-lowest) 86%, transparent);
-  border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant));
-  box-shadow: 0 .9rem 2.4rem -1.3rem color-mix(in srgb, #7a4a06 70%, transparent), inset 0 1px 0 color-mix(in srgb, #fff 55%, transparent);
-  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-}
-.search input::placeholder { color: var(--md-on-surface-faint); }
-.search input:focus { outline: 2px solid var(--md-primary); outline-offset: 2px; }
-.hero-stats { display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; min-height: 1rem; margin: 1.1rem 0 0;
-  font: 500 .7rem/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--md-on-surface-faint); }
+/* the header: a small brand row, then the search across the full width. The
+   brand takes at most 2.5 times the search's height, margins and all (jwize
+   2026-10-24) — lean, never cramped. */
+.card.showcase-page .panel { margin-top: 1.75rem; }
+.hero { margin: 0 0 1.1rem; }
+.hero-brand { display: flex; align-items: center; gap: .75rem; min-width: 0; }
+.hero-mark { flex: none; display: grid; width: 2.1rem; height: 2.1rem; }
+.hero-mark svg { width: 100%; height: 100%; }
+.hero-words { display: flex; align-items: baseline; gap: .9rem; flex: 1; min-width: 0; }
+.hero h1 { flex: none; margin: 0; overflow-wrap: anywhere; color: var(--md-on-surface-strong);
+  font: 600 1.45rem/1.15 'Source Serif 4', Georgia, serif; letter-spacing: -.025em; }
+.hero-tagline { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--md-on-surface-var); font-size: .9rem; line-height: 1.4; }
+.hero-stats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .4rem 1.1rem; margin: 0 0 0 auto; flex: none;
+  font: 500 .66rem/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
 .hero-stats span, .band-meta span { display: inline-flex; align-items: center; gap: .45rem; }
 .hero-stats svg, .band-meta svg { width: .95rem; height: .95rem; color: var(--md-primary); }
-
-.mosaic { --w: 8.6rem; --h: calc(var(--w) * 1.1547); --g: .4rem; position: relative; flex: none;
-  width: calc(var(--w) * 3 + var(--g) * 2); height: calc(var(--h) * 2.5 + var(--g) * 2); }
-.mosaic-cell { --x: 0; --y: 0; position: absolute; width: var(--w); height: var(--h); clip-path: var(--hex);
-  left: calc(50% + var(--x) * (var(--w) + var(--g)) - var(--w) / 2);
-  top: calc(50% + var(--y) * (var(--h) * .75 + var(--g) * .866) - var(--h) / 2);
-  background: linear-gradient(160deg, color-mix(in srgb, var(--gold-1) 85%, transparent), color-mix(in srgb, var(--gold-3) 70%, transparent)); }
-.mosaic-cell > .hex-art { inset: 2px; }
-.mosaic-cell > .hex-art::after { display: none; }
-.mosaic-centre { display: grid; place-items: center; background: radial-gradient(circle at 50% 35%, #3d260b, #140b03 75%); }
-.mosaic-centre svg { width: 46%; height: auto; filter: drop-shadow(0 .4rem .9rem rgb(248 183 58 / .35)); }
+.search { position: relative; display: flex; align-items: center; margin: 1.1rem 0 0; }
+.search svg { position: absolute; z-index: 1; left: .95rem; width: 1.15rem; height: 1.15rem; color: var(--md-primary); pointer-events: none; }
+.search input {
+  flex: 1; width: 100%; padding: .78rem 1rem .78rem 2.8rem; font: 400 1rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif);
+  color: var(--md-on-surface-strong); border-radius: var(--hc-radius-control, 2px);
+  background: var(--md-surface-c-lowest);
+  border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant));
+}
+.search input::placeholder { color: var(--md-on-surface-faint); }
+.search input:focus { outline: 2px solid var(--md-primary); outline-offset: 1px; }
 
 /* every hex: a gold frame, art inside it, a name across its lower half */
 .hex-art { position: absolute; inset: 0; overflow: hidden; clip-path: var(--hex); isolation: isolate; color: #fff; }
@@ -1201,27 +1107,10 @@ export const SHOWCASE_STYLE = `
 @keyframes sc-in { to { opacity: 1; } }
 
 .bands { position: relative; }
-.hosted { position: relative; margin: 0 0 clamp(2.6rem, 6vh, 3.8rem); }
-.hosted-head { display: grid; gap: .3rem; padding: .85rem 1.1rem .85rem .9rem;
-  border-top: 1px solid color-mix(in srgb, var(--md-primary) 40%, transparent);
-  border-bottom: 1px solid var(--md-outline-variant);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--md-primary) 12%, transparent), color-mix(in srgb, var(--md-primary) 3%, transparent) 55%, transparent); }
-.hosted-head h2 { margin: 0; color: var(--md-on-surface-strong);
-  font: 500 clamp(1.45rem, 2.6vw, 2.05rem)/1.1 'Source Serif 4', Georgia, serif; letter-spacing: -.035em; }
+.hosted { position: relative; margin: 0 0 clamp(2rem, 5vh, 3rem); }
 .band-meta { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem;
   font: 500 .66rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
-/* the domains: a filter on the one list, one pressed at a time */
-.domain-filter { display: flex; flex-wrap: wrap; gap: .45rem; padding: 1rem 0 1.3rem; }
-.domain-filter[hidden], .hosted-empty[hidden] { display: none; }
-.domain-chip { display: inline-flex; align-items: center; gap: .45rem; padding: .42rem .75rem; cursor: pointer;
-  border: 1px solid var(--md-outline-variant); border-radius: 999px; background: color-mix(in srgb, var(--md-surface-c-lowest) 70%, transparent);
-  color: var(--md-on-surface); font: 500 .82rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); white-space: nowrap; transition: background .2s, border-color .2s, color .2s; }
-.domain-chip svg { width: .9rem; height: .9rem; color: var(--md-primary); }
-.domain-chip-count { color: var(--md-on-surface-faint); font: 500 .7rem/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-.domain-chip:hover { border-color: var(--md-primary); }
-.domain-chip[aria-pressed='true'] { border-color: var(--md-primary); background: var(--md-primary); color: var(--md-on-primary); }
-.domain-chip[aria-pressed='true'] svg, .domain-chip[aria-pressed='true'] .domain-chip-count { color: inherit; opacity: .85; }
-.domain-chip:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.hosted-empty[hidden] { display: none; }
 .hosted-empty { margin: 0; padding: 1.3rem 1.2rem; border: 1px dashed var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px); color: var(--md-on-surface-var); }
 .mini { position: relative; width: 2.3rem; height: calc(2.3rem * 1.1547); margin-left: -.7rem; clip-path: var(--hex);
   background: linear-gradient(160deg, var(--gold-1), var(--gold-3)); }
@@ -1383,28 +1272,19 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
   background: linear-gradient(120deg, color-mix(in srgb, var(--md-primary) 14%, var(--md-surface-c-lowest)), var(--md-surface-c-lowest)); }
 
 /* Too narrow for the name beside the comb: the comb goes above it. */
-@media (max-width: 960px) {
-  .hero { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; gap: 1.4rem; }
-  .mosaic { order: -1; --w: 6.2rem; --g: .3rem; }
-  .search { width: 100%; }
-  .hero-stats { justify-content: center; }
-}
 @media (max-width: 1024px) {
   .member { grid-template-columns: minmax(0, 1fr); }
   .member-art { display: none; }
 }
-/* A PHONE: one column of the same list; the domain filter scrolls sideways. */
+/* A PHONE: one column of the same list. */
 @media (max-width: 720px) {
-  .hero { gap: 1.2rem; margin-bottom: 2rem; }
-  .mosaic { --w: 4.6rem; --g: .25rem; }
-  .hero h1 { --title-size: clamp(2.7rem, 13vw, 3.6rem); }
-  .hero-tagline { font-size: .98rem; }
-  .search { margin-top: 1.3rem; }
-  .hosted-head { padding: .75rem .9rem; }
-  .hosted-head h2 { font-size: 1.28rem; }
-  /* the domains scroll sideways in one line rather than stacking above the list */
-  .domain-filter { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: .85rem 16px 1rem; }
-  .domain-filter::-webkit-scrollbar { display: none; }
+  .card.showcase-page .panel { margin-top: 1rem; }
+  .hero-brand { gap: .6rem; }
+  .hero-mark { width: 1.7rem; height: 1.7rem; }
+  .hero h1 { font-size: 1.2rem; }
+  /* the sentence goes on a phone: the name, the count and the search are the header */
+  .hero-tagline { display: none; }
+  .search { margin-top: .8rem; }
   .mini { width: 1.8rem; height: calc(1.8rem * 1.1547); margin-left: -.55rem; }
   .comb { --s: 6.1rem; --g: .36rem; }
   .hex-name { font-size: .74rem; }
@@ -1424,6 +1304,6 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
   .member-cta { width: 100%; justify-content: center; box-sizing: border-box; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hex-picture, .hex-motif, .explore-tile, .member-cta, .domain-chip, .versions { transition: none !important; animation: none !important; opacity: 1; }
+  .hex-picture, .hex-motif, .explore-tile, .member-cta, .versions { transition: none !important; animation: none !important; opacity: 1; }
 }
 `
