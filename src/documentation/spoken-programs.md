@@ -78,6 +78,46 @@ the agent stops doing the work and becomes the party that **states the need**.
 Hosts, swarms and applications that run declared pieces do the work and
 answer in the same language.
 
+## Hosts as idle processors, by opt-in (jwize, 2026-10-25)
+
+> "we can act as other servers as idle parallel processors ready to go with
+> opt in. The hosts can even charge a membership or currency."
+
+A host that opts in offers its idle capacity to run *pure* work for others.
+`hypercomb-communication-layer.md` (§ collapsed compute, ~L800–1090) has
+already reasoned about the hard half of this, and this hypothesis leans on it
+rather than repeating it:
+
+- **Which work may leave home.** Only pure derivations: the optimize-phase
+  litmus ("could a cold client rebuild this from layers alone?"). A yes can be
+  computed by a stranger and checked; a no depends on a clock, the live hive
+  or the network, and stays home. A `pure` declaration on a word would be the
+  eligibility mark.
+- **A memo table is sound; an oracle is not.** Recomputing is the only proof
+  the work was done. So the check is *attribution*, not consensus: a signed
+  `(input, function, output)` triple, comparable across *k* hosts, with
+  disagreement detectable and attributable. Reputation, not mining.
+- **The trust boundary is still a stub** per that doc (`isTrusted` had no
+  call sites when it was written). Nothing delegates computation yet, so
+  nothing is exposed. Verify before building on this.
+
+What this hypothesis adds: a signed spoken plan whose lines are all `pure`
+and whose effect summary says so is *exactly* the unit that is safe to farm
+out. A plan that touches state stays on the participant's own hive.
+
+**Membership or currency.** A host that offers capacity could charge for it.
+The hive's money thinking lives in `bee-story/the-economy.md`, `el-mercado.md`
+and `install-by-replication.md` (the currency-as-meta-layer idea); I have not
+re-read them for this and do not claim how a charge would be signed, settled
+or refused. It is an open design, and it raises the point the doc already
+makes: once work is paid for, publishing a plausible wrong answer is cheaper
+than computing, so verification by recompute must come before payment, not
+after.
+
+**Possible first experiment (not started):** two hosts, one plan marked pure,
+each computes it, the triples are compared, and a deliberately wrong answer
+from one is detected and attributed to its signer. No payment in it.
+
 ## Possibilities, from least to most uncertain
 
 1. **Lookup read.** A model asks the hive what words exist, what each takes,
