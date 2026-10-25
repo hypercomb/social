@@ -205,6 +205,11 @@ is a domain and its hives are its subdomains, so the page is:
   source, licensing) are hexagons in this domain's row, after its hives: the
   same shape, a glyph for a picture, and a link for a click. No membership
   panel and no card grid remain.
+- **Communities** (jwize, 2026-10-25): when the owners signed named pages in
+  the showcase, a strip of names sits under the search: **All**, then each
+  community, and a sideways swipe on a phone turns the pages, round the ends.
+  A community only filters this domain's row; the followed domains stay the
+  master list (`showcase.md`, "Communities").
 - **Follow a domain** (jwize, 2026-10-25): the search names a domain nothing
   here matches, and the miss offers **Follow <domain>**; an input at the foot
   follows one too, fixed to the bottom of a phone. The domain must answer

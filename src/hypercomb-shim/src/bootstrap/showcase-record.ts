@@ -13,7 +13,7 @@
 // writes it (hypercomb-essentials sharing/showcase-record.ts): a module may not
 // import the shim, and the shim may not import a module.
 
-import { SignatureService } from '@hypercomb/core'
+import { SignatureService, moleculeKey } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 
 const SIG = /^[0-9a-f]{64}$/
@@ -23,7 +23,66 @@ const LOOPBACK = /^(?:[a-z0-9-]+\.)*localhost(?::\d{1,5})?$/
 /** One item turned on: whose it is and which of their lineages. */
 export type ShowcaseItem = { readonly pubkey: string; readonly lineage: string }
 /** A domain's showcase: the items turned on, and the domains shown in full. */
-export type ShowcaseRecord = { readonly zone: string; readonly items: readonly ShowcaseItem[]; readonly domains: readonly string[] }
+export type ShowcaseRecord = { readonly zone: string; readonly items: readonly ShowcaseItem[]; readonly domains: readonly string[]
+  /** The named pages after All, when the owners made any. */
+  readonly communities?: readonly ShowcaseCommunity[] }
+
+/** A community: a named page of the showcase — a filter over what it already
+ *  shows, never a way to show more (jwize 2026-10-25: "you create a community
+ *  that is the name"; "swiping between your communities"). */
+export type ShowcaseCommunity = { readonly name: string; readonly items: readonly ShowcaseItem[]; readonly domains: readonly string[] }
+
+/** The most communities a showcase carries, and the longest name a community has. */
+export const COMMUNITIES_MAX = 24
+export const COMMUNITY_NAME_MAX = 40
+
+/** A community's name as it may be shown: no format or control characters, runs
+ *  of space folded, cut to 40 code points. '' when it is not a name. */
+export const communityName = (raw: unknown): string => {
+  if (typeof raw !== 'string') return ''
+  const clean = raw.replace(/\p{Cf}/gu, '').replace(/[\p{Cc}\s]+/gu, ' ').trim()
+  return [...clean].slice(0, COMMUNITY_NAME_MAX).join('').trim()
+}
+
+/** The identity of a community: its name folded the way a molecule folds a
+ *  name, so 'Games!' and 'games' are one community. '' for a name that is none
+ *  or that is the built-in first page, `all`. */
+export const communityKey = (name: unknown): string => {
+  const clean = communityName(name)
+  const key = clean ? moleculeKey(clean) : ''
+  return key && key !== 'all' ? key : ''
+}
+
+const parseItems = (raw: unknown): ShowcaseItem[] =>
+  (Array.isArray(raw) ? raw as unknown[] : []).slice(0, 2000)
+    .map(row => row as Record<string, unknown> | null)
+    .filter((row): row is Record<string, unknown> => !!row && SIG.test(String(row['pubkey']))
+      && typeof row['lineage'] === 'string' && row['lineage'].length > 0 && row['lineage'].length <= 200)
+    .map(row => ({ pubkey: String(row['pubkey']), lineage: String(row['lineage']) }))
+
+const parseDomains = (raw: unknown): string[] =>
+  (Array.isArray(raw) ? raw as unknown[] : []).slice(0, 200)
+    .filter((domain): domain is string => typeof domain === 'string' && ZONE.test(domain))
+
+/** The communities a record names, believed only as far as each survives its
+ *  check. A community that asks for access this reader does not understand is
+ *  dropped, never shown: an unknown gate fails closed. */
+export const parseCommunities = (raw: unknown): ShowcaseCommunity[] => {
+  const seen = new Set<string>()
+  const out: ShowcaseCommunity[] = []
+  for (const row of (Array.isArray(raw) ? raw as unknown[] : []).slice(0, COMMUNITIES_MAX)) {
+    const entry = row as Record<string, unknown> | null
+    if (!entry || typeof entry !== 'object') continue
+    if (entry['access'] !== undefined && entry['access'] !== 'public') continue
+    const name = communityName(entry['name'])
+    const key = communityKey(name)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push({ name, items: parseItems(entry['items']), domains: parseDomains(entry['domains']) })
+  }
+  return out
+}
+
 
 /** What a domain's owners sign, as far as its page needs: the showcase they
  *  chose, and where each of their lineages opens (`doors`; a lineage with no
@@ -50,14 +109,10 @@ export const showcaseKey = (zone: string): string => `showcase:${zone}`
 export const parseShowcase = (raw: unknown, zone: string): ShowcaseRecord | null => {
   const record = raw as Record<string, unknown> | null
   if (!record || typeof record !== 'object' || record['kind'] !== 'host:showcase' || record['zone'] !== zone) return null
-  const items = (Array.isArray(record['items']) ? record['items'] as unknown[] : []).slice(0, 2000)
-    .map(row => row as Record<string, unknown> | null)
-    .filter((row): row is Record<string, unknown> => !!row && SIG.test(String(row['pubkey']))
-      && typeof row['lineage'] === 'string' && row['lineage'].length > 0 && row['lineage'].length <= 200)
-    .map(row => ({ pubkey: String(row['pubkey']), lineage: String(row['lineage']) }))
-  const domains = (Array.isArray(record['domains']) ? record['domains'] as unknown[] : []).slice(0, 200)
-    .filter((domain): domain is string => typeof domain === 'string' && ZONE.test(domain))
-  return { zone, items, domains }
+  const items = parseItems(record['items'])
+  const domains = parseDomains(record['domains'])
+  const communities = parseCommunities(record['communities'])
+  return { zone, items, domains, ...(communities.length ? { communities } : {}) }
 }
 
 const fetchJson = async (url: string, limit: number): Promise<{ bytes: ArrayBuffer; value: unknown } | null> => {

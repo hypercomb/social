@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { parseShowcase, type ShowcaseRecord, type ZoneOwners } from './showcase-record'
 import { aggregate, aggregateMatches, bandZones, coverOf, followCandidate, ledgerPublishes, ownersLabel, parseLedger,
-  readPeerLedger, sharedPublishes, showcase } from './showcase'
+  pageFlip, readPeerLedger, sharedPublishes, showcase } from './showcase'
 import { parseWelcome } from './welcome'
 
 // Pictures are asked of real doors; here every hive wears its cover.
@@ -475,5 +475,159 @@ describe('following a domain from the page', () => {
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
     })
     expect((bands.querySelector('.follow') as HTMLElement).hidden).toBe(true)
+  })
+})
+
+describe('pageFlip — which way a drag turns the page', () => {
+  it('turns left for next and right for back, once the drag is far enough and clearly sideways', () => {
+    expect(pageFlip(-100, 4, 120)).toBe(1)
+    expect(pageFlip(100, -4, 120)).toBe(-1)
+    expect(pageFlip(-40, 0, 400)).toBe(0)
+    // A short, quick flick commits; a short slow one does not.
+    expect(pageFlip(-30, 2, 60)).toBe(1)
+    expect(pageFlip(-30, 2, 600)).toBe(0)
+    // A vertical scroll is never a swipe: it must be 1.4 times more across than down.
+    expect(pageFlip(-100, 90, 120)).toBe(0)
+    expect(pageFlip(-100, 75, 120)).toBe(0)
+    expect(pageFlip(-100, 60, 120)).toBe(1)
+    expect(pageFlip(0, 0, 0)).toBe(0)
+  })
+})
+
+describe('communities — pages after All', () => {
+  const sites = parseLedger(LEDGER)
+  const a = { pubkey: sig('a') }
+  const record: ShowcaseRecord = {
+    zone: 'hypercomb.com', domains: [], items: [{ ...a, lineage: 'camelflage' }, { ...a, lineage: 'dylan' }],
+    communities: [
+      { name: 'Favourites', items: [{ ...a, lineage: 'dylan' }], domains: [] },
+      { name: 'Empty', items: [], domains: [] },
+      // A community only filters: a member that is not in the showcase never appears.
+      { name: 'Sneaky', items: [{ ...a, lineage: 'dylan' }, { ...a, lineage: 'unpublished' }], domains: [] },
+    ],
+  }
+  const links = [{ label: 'Minimal host', href: '/hosts', note: '', icon: 'host' as const }]
+  const draw = () => showcase({
+    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [], links,
+    ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+    readOwners: async () => ({ showcase: record, doors: new Map() }),
+  })
+  const names = (bands: HTMLElement): string[] => [...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent ?? '')
+  const tabs = (bands: HTMLElement): string[] => [...bands.querySelectorAll('.pager-tab')].map(tab => `${tab.textContent}${tab.getAttribute('aria-selected') === 'true' ? '*' : ''}`)
+  const pointer = (target: Element, type: string, props: Record<string, unknown>): void => {
+    const event = new Event(type, { bubbles: true, cancelable: true })
+    for (const [key, value] of Object.entries(props)) Object.defineProperty(event, key, { value })
+    target.dispatchEvent(event)
+  }
+  const drag = (bands: HTMLElement, from: number, to: number, props: Record<string, unknown> = {}): void => {
+    const list = bands.querySelector('.hosted')!
+    pointer(list, 'pointerdown', { pointerId: 1, pointerType: 'touch', clientX: from, clientY: 200, timeStamp: 0, ...props })
+    pointer(list, 'pointerup', { pointerId: 1, pointerType: 'touch', clientX: to, clientY: 204, timeStamp: 100, ...props })
+  }
+
+  it('shows All first, then each community that has members — an empty one is not a page', async () => {
+    const { bands } = draw()
+    await vi.waitFor(() => expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Sneaky']))
+    expect(names(bands)).toEqual(['camelflage', 'dylan', 'Minimal host'])
+    expect(bands.querySelector('.pager')?.getAttribute('role')).toBe('tablist')
+    expect(bands.querySelector('.hosted')?.getAttribute('role')).toBe('tabpanel')
+  })
+
+  it('filters the first row to the community, without the platform doors, and never reveals more than the showcase', async () => {
+    const { bands } = draw()
+    await vi.waitFor(() => expect(tabs(bands)).toHaveLength(3))
+    ;(bands.querySelectorAll('.pager-tab')[1] as HTMLButtonElement).click()
+    expect(tabs(bands)).toEqual(['All', 'Favourites*', 'Sneaky'])
+    expect(names(bands)).toEqual(['dylan'])
+    ;(bands.querySelectorAll('.pager-tab')[2] as HTMLButtonElement).click()
+    expect(names(bands)).toEqual(['dylan'])
+    expect(bands.querySelector('.hosted')?.getAttribute('aria-labelledby')).toBe(bands.querySelectorAll('.pager-tab')[2]!.id)
+    ;(bands.querySelectorAll('.pager-tab')[0] as HTMLButtonElement).click()
+    expect(names(bands)).toEqual(['camelflage', 'dylan', 'Minimal host'])
+  })
+
+  it('turns with a sideways swipe on the list, and the pages cycle', async () => {
+    const { bands } = draw()
+    await vi.waitFor(() => expect(tabs(bands)).toHaveLength(3))
+    drag(bands, 300, 100)
+    expect(tabs(bands)).toEqual(['All', 'Favourites*', 'Sneaky'])
+    drag(bands, 300, 100)
+    expect(tabs(bands)).toEqual(['All', 'Favourites', 'Sneaky*'])
+    // On from the last page comes round to All; back from All is the last page.
+    drag(bands, 300, 100)
+    expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Sneaky'])
+    drag(bands, 100, 300)
+    expect(tabs(bands)).toEqual(['All', 'Favourites', 'Sneaky*'])
+    drag(bands, 100, 300)
+    expect(tabs(bands)).toEqual(['All', 'Favourites*', 'Sneaky'])
+  })
+
+  it('ignores a mouse, a drag from the screen edge, a vertical scroll and a short drag', async () => {
+    const { bands } = draw()
+    await vi.waitFor(() => expect(tabs(bands)).toHaveLength(3))
+    drag(bands, 300, 100, { pointerType: 'mouse' })
+    drag(bands, 8, 200)
+    drag(bands, 300, 285)
+    const list = bands.querySelector('.hosted')!
+    pointer(list, 'pointerdown', { pointerId: 1, pointerType: 'touch', clientX: 300, clientY: 100, timeStamp: 0 })
+    pointer(list, 'pointerup', { pointerId: 1, pointerType: 'touch', clientX: 200, clientY: 400, timeStamp: 100 })
+    pointer(list, 'pointerdown', { pointerId: 1, pointerType: 'touch', clientX: 300, clientY: 100, timeStamp: 0 })
+    pointer(list, 'pointercancel', { pointerId: 1 })
+    pointer(list, 'pointerup', { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100, timeStamp: 100 })
+    expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Sneaky'])
+  })
+
+  it('swallows the click a swipe ends with, so it can never press a tile — and only that one', async () => {
+    const { hero, bands } = draw()
+    document.body.append(hero, bands)
+    try {
+      await vi.waitFor(() => expect(tabs(bands)).toHaveLength(3))
+      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
+      drag(bands, 300, 100)
+      ;(bands.querySelector('.dex-row.own button.hex') as HTMLButtonElement).click()
+      expect(sheet.hidden).toBe(true)
+      ;(bands.querySelector('.dex-row.own button.hex') as HTMLButtonElement).click()
+      expect(sheet.hidden).toBe(false)
+    } finally { hero.remove(); bands.remove() }
+  })
+
+  it('moves with the arrow keys (round the ends), Home and End, keeping focus on the tab', async () => {
+    const { hero, bands } = draw()
+    document.body.append(hero, bands)
+    try {
+      await vi.waitFor(() => expect(tabs(bands)).toHaveLength(3))
+      const key = (name: string) => bands.querySelector('.pager')!.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }))
+      key('ArrowRight')
+      expect(tabs(bands)).toEqual(['All', 'Favourites*', 'Sneaky'])
+      key('End')
+      expect(tabs(bands)).toEqual(['All', 'Favourites', 'Sneaky*'])
+      expect(bands.querySelectorAll('.pager-tab')[2]!.getAttribute('tabindex')).toBe('0')
+      expect(bands.querySelectorAll('.pager-tab')[0]!.getAttribute('tabindex')).toBe('-1')
+      key('Home')
+      expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Sneaky'])
+      key('ArrowLeft')
+      expect(tabs(bands)).toEqual(['All', 'Favourites', 'Sneaky*'])
+      key('ArrowRight')
+      expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Sneaky'])
+    } finally { hero.remove(); bands.remove() }
+  })
+
+  it('shows no pager where there are no communities, and leaves the followed rows as the master list', async () => {
+    const plain = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+    })
+    await vi.waitFor(() => expect(names(plain.bands)).toEqual(['camelflage', 'dylan']))
+    expect((plain.bands.querySelector('.pager') as HTMLElement).hidden).toBe(true)
+    const withPeers = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      readOwners: async () => ({ showcase: record, doors: new Map() }),
+    })
+    await vi.waitFor(() => expect(tabs(withPeers.bands)).toHaveLength(3))
+    ;(withPeers.bands.querySelectorAll('.pager-tab')[1] as HTMLButtonElement).click()
+    ;(withPeers.bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+    // jwize.com's row is its master list, whichever community is showing.
+    expect([...withPeers.bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['dylan'])
   })
 })

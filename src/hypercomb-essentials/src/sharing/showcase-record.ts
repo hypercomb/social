@@ -13,7 +13,7 @@
 //
 // Full design: documentation/showcase.md.
 
-import { SignatureService } from '@hypercomb/core'
+import { SignatureService, isReservedPoolWord, moleculeKey } from '@hypercomb/core'
 import { setHiveRoot } from './hive-pointer.js'
 
 const get = <T,>(key: string): T | undefined => (window as any).ioc?.get?.(key) as T | undefined
@@ -24,7 +24,66 @@ const ZONE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/
 /** One creation turned on: whose it is and which of their lineages. */
 export type ShowcaseItem = { readonly pubkey: string; readonly lineage: string }
 /** A domain's showcase: the items turned on, and the domains shown in full. */
-export type Showcase = { readonly zone: string; readonly items: readonly ShowcaseItem[]; readonly domains: readonly string[] }
+export type Showcase = { readonly zone: string; readonly items: readonly ShowcaseItem[]; readonly domains: readonly string[]
+  /** The named pages after All, in the order they are swiped. */
+  readonly communities?: readonly ShowcaseCommunity[] }
+
+/** A community: a named page of the showcase — a filter over what it already
+ *  shows, never a way to show more (jwize 2026-10-25: "you create a community
+ *  that is the name"; "swiping between your communities"). */
+export type ShowcaseCommunity = { readonly name: string; readonly items: readonly ShowcaseItem[]; readonly domains: readonly string[] }
+
+/** The most communities a showcase carries, and the longest name a community has. */
+export const COMMUNITIES_MAX = 24
+export const COMMUNITY_NAME_MAX = 40
+
+/** A community's name as it may be shown: no format or control characters, runs
+ *  of space folded, cut to 40 code points. '' when it is not a name. */
+export const communityName = (raw: unknown): string => {
+  if (typeof raw !== 'string') return ''
+  const clean = raw.replace(/\p{Cf}/gu, '').replace(/[\p{Cc}\s]+/gu, ' ').trim()
+  return [...clean].slice(0, COMMUNITY_NAME_MAX).join('').trim()
+}
+
+/** The identity of a community: its name folded the way a molecule folds a
+ *  name, so 'Games!' and 'games' are one community. '' for a name that is none
+ *  or that is the built-in first page, `all`. */
+export const communityKey = (name: unknown): string => {
+  const clean = communityName(name)
+  const key = clean ? moleculeKey(clean) : ''
+  return key && key !== 'all' ? key : ''
+}
+
+const parseItems = (raw: unknown): ShowcaseItem[] =>
+  (Array.isArray(raw) ? raw as unknown[] : []).slice(0, 2000)
+    .map(row => row as Record<string, unknown> | null)
+    .filter((row): row is Record<string, unknown> => !!row && SIG.test(String(row['pubkey']))
+      && typeof row['lineage'] === 'string' && row['lineage'].length > 0 && row['lineage'].length <= 200)
+    .map(row => ({ pubkey: String(row['pubkey']), lineage: String(row['lineage']) }))
+
+const parseDomains = (raw: unknown): string[] =>
+  (Array.isArray(raw) ? raw as unknown[] : []).slice(0, 200)
+    .filter((domain): domain is string => typeof domain === 'string' && ZONE.test(domain))
+
+/** The communities a record names, believed only as far as each survives its
+ *  check. A community that asks for access this reader does not understand is
+ *  dropped, never shown: an unknown gate fails closed. */
+export const parseCommunities = (raw: unknown): ShowcaseCommunity[] => {
+  const seen = new Set<string>()
+  const out: ShowcaseCommunity[] = []
+  for (const row of (Array.isArray(raw) ? raw as unknown[] : []).slice(0, COMMUNITIES_MAX)) {
+    const entry = row as Record<string, unknown> | null
+    if (!entry || typeof entry !== 'object') continue
+    if (entry['access'] !== undefined && entry['access'] !== 'public') continue
+    const name = communityName(entry['name'])
+    const key = communityKey(name)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push({ name, items: parseItems(entry['items']), domains: parseDomains(entry['domains']) })
+  }
+  return out
+}
+
 
 /** The index key for one domain's showcase. Never a pool meaning: it names
  *  one root in a signed index, as `welcome:<zone>` does. */
@@ -37,41 +96,100 @@ const itemId = (item: ShowcaseItem): string => `${item.pubkey}\n${item.lineage}`
 export const parseShowcase = (raw: unknown, zone: string): Showcase | null => {
   const record = raw as Record<string, unknown> | null
   if (!record || typeof record !== 'object' || record['kind'] !== 'host:showcase' || record['zone'] !== zone) return null
-  const items = (Array.isArray(record['items']) ? record['items'] as unknown[] : []).slice(0, 2000)
-    .map(row => row as Record<string, unknown> | null)
-    .filter((row): row is Record<string, unknown> => !!row && SIG.test(String(row['pubkey']))
-      && typeof row['lineage'] === 'string' && row['lineage'].length > 0 && row['lineage'].length <= 200)
-    .map(row => ({ pubkey: String(row['pubkey']), lineage: String(row['lineage']) }))
-  const domains = (Array.isArray(record['domains']) ? record['domains'] as unknown[] : []).slice(0, 200)
-    .filter((domain): domain is string => typeof domain === 'string' && ZONE.test(domain))
-  return { zone, items, domains }
+  const items = parseItems(record['items'])
+  const domains = parseDomains(record['domains'])
+  const communities = parseCommunities(record['communities'])
+  return { zone, items, domains, ...(communities.length ? { communities } : {}) }
 }
 
-/** The record's bytes: canonical — items and domains sorted, no clock — so the
- *  same choice always lands on the same signature, and undoing a switch lands
- *  back on the very resource it left. */
+const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+/** The record's bytes: canonical — items and domains in code-unit order, no
+ *  clock — so the same choice always lands on the same signature, and undoing a
+ *  switch lands back on the very resource it left. Communities come last, in
+ *  the order they are swiped, and only when there are any: a showcase with
+ *  none is the very bytes it was before communities existed. */
 export const showcaseBytes = (showcase: Showcase): Uint8Array => {
-  const items = [...new Map(showcase.items.map(item => [itemId(item), item])).values()]
-    .sort((a, b) => itemId(a).localeCompare(itemId(b)))
-    .map(item => ({ pubkey: item.pubkey, lineage: item.lineage }))
-  const domains = [...new Set(showcase.domains)].sort()
-  return new TextEncoder().encode(JSON.stringify({ kind: 'host:showcase', zone: showcase.zone, items, domains }))
+  const sortedItems = (items: readonly ShowcaseItem[]): { pubkey: string; lineage: string }[] =>
+    [...new Map(items.map(item => [itemId(item), item])).values()]
+      .sort((a, b) => byCode(itemId(a), itemId(b)))
+      .map(item => ({ pubkey: item.pubkey, lineage: item.lineage }))
+  const sortedDomains = (domains: readonly string[]): string[] => [...new Set(domains)].sort(byCode)
+  const seen = new Set<string>()
+  const communities: { name: string; items: { pubkey: string; lineage: string }[]; domains: string[] }[] = []
+  for (const community of showcase.communities ?? []) {
+    const name = communityName(community.name)
+    const key = communityKey(name)
+    if (!key || seen.has(key) || communities.length >= COMMUNITIES_MAX) continue
+    seen.add(key)
+    communities.push({ name, items: sortedItems(community.items), domains: sortedDomains(community.domains) })
+  }
+  return new TextEncoder().encode(JSON.stringify({
+    kind: 'host:showcase', zone: showcase.zone, items: sortedItems(showcase.items), domains: sortedDomains(showcase.domains),
+    ...(communities.length ? { communities } : {}),
+  }))
 }
 
 /** Is this creation in the showcase — named itself, or on a domain shown in full? */
 export const showcases = (showcase: Showcase, item: ShowcaseItem, zones: readonly string[] = []): boolean =>
   showcase.items.some(row => itemId(row) === itemId(item)) || zones.some(zone => showcase.domains.includes(zone))
 
-/** One switch: a named creation on when it was off, off when it was on. */
+/** One switch: a named creation on when it was off, off when it was on. Off
+ *  takes it out of every community in the same commit — a community only ever
+ *  filters what the showcase shows. */
 export const toggleItem = (showcase: Showcase, item: ShowcaseItem): Showcase => {
   const named = showcase.items.some(row => itemId(row) === itemId(item))
-  return { ...showcase, items: named ? showcase.items.filter(row => itemId(row) !== itemId(item)) : [...showcase.items, item] }
+  if (!named) return { ...showcase, items: [...showcase.items, item] }
+  return {
+    ...showcase,
+    items: showcase.items.filter(row => itemId(row) !== itemId(item)),
+    ...(showcase.communities ? { communities: showcase.communities.map(community =>
+      ({ ...community, items: community.items.filter(row => itemId(row) !== itemId(item)) })) } : {}),
+  }
 }
 
-/** "Show all" of a domain, or not. */
-export const toggleDomain = (showcase: Showcase, zone: string): Showcase => ({
+/** "Show all" of a domain, or not. Not takes it out of every community too. */
+export const toggleDomain = (showcase: Showcase, zone: string): Showcase => {
+  if (!showcase.domains.includes(zone)) return { ...showcase, domains: [...showcase.domains, zone] }
+  return {
+    ...showcase,
+    domains: showcase.domains.filter(row => row !== zone),
+    ...(showcase.communities ? { communities: showcase.communities.map(community =>
+      ({ ...community, domains: community.domains.filter(row => row !== zone) })) } : {}),
+  }
+}
+
+/** Why a name did not become a community. */
+export type CommunityRefusal = 'empty' | 'all' | 'reserved' | 'taken' | 'full'
+
+/** Create a community: the name IS the community. It starts with no members.
+ *  `all` is the first page and a reserved pool word is never a name. */
+export const addCommunity = (showcase: Showcase, raw: unknown): { ok: true; showcase: Showcase; key: string } | { ok: false; reason: CommunityRefusal } => {
+  const name = communityName(raw)
+  if (!name) return { ok: false, reason: 'empty' }
+  const key = communityKey(name)
+  if (!key) return { ok: false, reason: 'all' }
+  if (isReservedPoolWord(name)) return { ok: false, reason: 'reserved' }
+  const communities = showcase.communities ?? []
+  if (communities.some(community => communityKey(community.name) === key)) return { ok: false, reason: 'taken' }
+  if (communities.length >= COMMUNITIES_MAX) return { ok: false, reason: 'full' }
+  return { ok: true, key, showcase: { ...showcase, communities: [...communities, { name, items: [], domains: [] }] } }
+}
+
+/** Delete a community. Its members stay in the showcase. */
+export const removeCommunity = (showcase: Showcase, key: string): Showcase => ({
   ...showcase,
-  domains: showcase.domains.includes(zone) ? showcase.domains.filter(row => row !== zone) : [...showcase.domains, zone],
+  communities: (showcase.communities ?? []).filter(community => communityKey(community.name) !== key),
+})
+
+/** One switch inside a community: a creation in when it was out, out when it was in. */
+export const toggleCommunityItem = (showcase: Showcase, key: string, item: ShowcaseItem): Showcase => ({
+  ...showcase,
+  communities: (showcase.communities ?? []).map(community => {
+    if (communityKey(community.name) !== key) return community
+    const named = community.items.some(row => itemId(row) === itemId(item))
+    return { ...community, items: named ? community.items.filter(row => itemId(row) !== itemId(item)) : [...community.items, item] }
+  }),
 })
 
 type HostSyncLike = {

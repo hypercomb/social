@@ -91,22 +91,71 @@ The front door holds no key and cannot tell you from a visitor, which is why
 the choice is a signed public record and never a switch on the page itself.
 Adoptions (`host:adoptions`) stay what they were: one browser's own.
 
-## Groups: more than one showcase (designed, not built)
+## Communities: more than one showcase
 
 jwize, 2026-10-25: "multiple showcases on your mobile — a left-to-right or
 right-to-left swipe to switch showcases. Basically grouping shared data. You
 could start with *all*, and the groups allow filtering. That is best because
 you can then look at it like a bunch of grayed-out tiles while managing, and
 then show the selected ones when viewing. Nothing changes about the accordion:
-it is still the master list with your offerings at the top."
+it is still the master list with your offerings at the top." Then: "Yes they
+can swipe through groups that they have access to." "You create a community
+that is the name." "Swiping between your communities." "It can cycle as
+well."
 
-- The accordion is the **master list**: your domain first, then the domains
-  you follow. It does not change.
-- A **showcase is a named group**: a filter over that list. The pages are
-  *All*, then each group; a horizontal swipe on a phone moves between them.
-- **Managing** shows every tile of the master list with the non-members
-  grayed out; a click toggles a tile in or out of the current group.
-  **Viewing** shows only the members.
-- The groups are the Publish panel's existing **Groups** (`publish-groups`),
-  and the record carries them: `groups: [{ name, items }]` beside `items` and
-  `domains`, so a switch is still one commit and undo stays native.
+A **community** is a named page of your showcase: a filter over what it
+already shows, never a way to show more. (This is a different thing from "your
+community", the domains you follow; where both could be meant, say "a
+community page".)
+
+**What a visitor sees (built).**
+
+- Under the search, a strip of names: **All**, then each community that has
+  members. On a phone a sideways swipe on the list turns the page, and the
+  pages **cycle**: on from the last is All, and back from All is the last. The
+  tabs are a real tablist: arrow keys round the ends, Home and End, roving
+  focus.
+- The swipe is touch and pen only (a mouse has the tabs and the keys). It is
+  committed on release, at least 56px (or a quick 24px flick) and clearly
+  sideways (1.4 times more across than down), so a vertical scroll is never a
+  swipe. It never starts from the screen's own edge, never takes over the
+  browser's scrolling or pinch-zoom, and the click that ends a swipe is
+  swallowed so it can never press a tile.
+- A community page shows this domain's row filtered to its members. The
+  platform's door tiles belong to **All**. The followed domains below it stay
+  the master list. A member that is not in the showcase never appears: the page
+  shows the showcase **and** the community.
+
+**The record (built).** `communities: [{ name, items, domains }]` sits beside
+`items` and `domains`, appended last and only when there are any, so a showcase
+with none keeps the exact bytes and signature it had.
+
+- **A community is its name.** It is cleaned (no format or control
+  characters, spaces folded, forty code points) and keyed by the molecule fold
+  of the name, so `Games!` and `games` are one community. `all` is the first
+  page and is never a name; a reserved pool word is refused when you name one.
+  At most 24, in the order they are swiped.
+- Turning a creation off, or a domain's "show all" off, takes it out of every
+  community in the same commit.
+- Both readers (the front door's and the hive's) hold a record to the same
+  check, pinned by a spec. A reader that meets a community asking for `access`
+  it does not understand drops that community: an unknown gate fails closed.
+- An old front door ignores the field and shows All.
+
+**Not built.**
+
+- **Making one in the hive.** Naming a community, the Manage view (every tile
+  shown, the non-members grayed out, a click toggling membership) and signing
+  the record all live in the hive, with native undo through the `showcase`
+  layer slot. The record's writer is built (`addCommunity`, `removeCommunity`,
+  `toggleCommunityItem`); the screen is not. The Publish panel's Groups are not
+  reused for membership: a group holds child tiles of one page, and a community
+  holds a peer's items too.
+- **Access-gated communities.** Today every community in the record is as public
+  as the showcase: anyone who fetches the record sees every name and member, and
+  a swipe strip is a view, never a lock. "Communities they have access to" is
+  therefore, for now, every community. A gated community cannot live in the
+  public record at all (its name, its count and its members would leak); it
+  would be a separate sealed atom, reached by a link that carries its key in the
+  fragment (as a swarm link does), with a random id and the name inside the
+  sealed blob. Turning a door off or unpublishing stay the only real hide.

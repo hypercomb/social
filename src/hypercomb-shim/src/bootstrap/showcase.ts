@@ -18,7 +18,7 @@
 
 import type { HostCreation, HostOffering } from '@hypercomb/core'
 import { pictureOrigins, tilePicture } from './tile-picture'
-import { doorsOpen, type ZoneOwners } from './showcase-record'
+import { communityKey, doorsOpen, type ShowcaseCommunity, type ShowcaseItem, type ZoneOwners } from './showcase-record'
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { LinkIcon, WelcomeLink } from './welcome'
 
@@ -367,6 +367,18 @@ export const coverOf = (seed: string): Cover => {
     scale: 0.8 + (byte(4) % 50) / 100,
     turn: byte(5) % 60,
   }
+}
+
+/**
+ * WHICH WAY A DRAG TURNS THE PAGE: -1 back, 1 on, 0 not at all. The repo's page
+ * flip rule (viewer-walk, the app deck): committed at release only, far enough —
+ * 56px, or a short quick flick — and clearly sideways, 1.4 times more across
+ * than down, so a vertical scroll is never read as a swipe. Left is next.
+ */
+export const pageFlip = (dx: number, dy: number, ms: number): -1 | 0 | 1 => {
+  const across = Math.abs(dx)
+  const far = across >= 56 || (across >= 24 && across / Math.max(1, ms) >= 0.3)
+  return far && across >= 1.4 * Math.abs(dy) ? (dx < 0 ? 1 : -1) : 0
 }
 
 /** The domain a typed line names, or '' when it names none: a bare hostname
@@ -935,7 +947,7 @@ ${entry.key}`
   const followField = el('div', 'follow-field')
   const followInput = el('input')
   followInput.type = 'text'
-  followInput.placeholder = 'Follow a domain, like friend.com'
+  followInput.placeholder = 'Follow a domain'
   followInput.setAttribute('aria-label', 'Follow a domain')
   followInput.autocomplete = 'off'
   followInput.spellcheck = false
@@ -947,7 +959,73 @@ ${entry.key}`
   followField.append(iconOf('globe'), followInput, followGo)
   followBar.append(followNote, followField)
   followBar.hidden = !options.follow
-  bandsHost.append(hosted, nothing, suggest, followBar)
+  // THE COMMUNITIES (jwize 2026-10-25: "swiping between your communities"): the
+  // pages after All. A tab strip names them and a sideways swipe on the list
+  // turns them; the accordion beneath stays the master list.
+  const pager = el('div', 'pager')
+  pager.setAttribute('role', 'tablist')
+  pager.setAttribute('aria-label', 'Communities')
+  pager.hidden = true
+  hosted.setAttribute('role', 'tabpanel')
+  bandsHost.append(pager, hosted, nothing, suggest, followBar)
+  /** The community page showing now, by key; '' is All. */
+  let page = ''
+  const tabViews = new Map<string, HTMLButtonElement>()
+  let tabIds = 0
+  const pages = (): ShowcaseCommunity[] => (signed?.showcase?.communities ?? [])
+    .filter(community => community.items.length > 0 || community.domains.length > 0)
+  const select = (key: string, focus = false): void => {
+    page = key
+    paint()
+    const tab = tabViews.get(key)
+    if (tab) {
+      tab.scrollIntoView?.({ inline: 'nearest', block: 'nearest',
+        behavior: globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ? 'auto' : 'smooth' })
+      if (focus) tab.focus()
+    }
+  }
+  /** The pages go round: on from the last is All, and back from All is the last (jwize 2026-10-25: "it can cycle as well"). */
+  const turn = (by: number): void => {
+    const keys = ['', ...pages().map(community => communityKey(community.name))]
+    const next = (Math.max(0, keys.indexOf(page)) + by + keys.length) % keys.length
+    if (keys[next] !== page) select(keys[next]!)
+  }
+  pager.addEventListener('keydown', event => {
+    const keys = ['', ...pages().map(community => communityKey(community.name))]
+    const at = keys.indexOf(page)
+    const to = event.key === 'ArrowRight' ? (at + 1) % keys.length : event.key === 'ArrowLeft' ? (at - 1 + keys.length) % keys.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? keys.length - 1 : -1
+    if (to < 0) return
+    event.preventDefault()
+    select(keys[to]!, true)
+  })
+  // The swipe: touch and pen only (a mouse has the tabs and the arrows), never
+  // from the screen's own edge, never calling preventDefault — the browser
+  // keeps the vertical scroll — and the click a swipe ends with is swallowed so
+  // it can never press a tile.
+  let drag: { id: number; x: number; y: number; at: number } | null = null
+  let swiped = false
+  hosted.addEventListener('pointerdown', event => {
+    if (event.pointerType === 'mouse' || pages().length === 0 || event.clientX < 24 || event.clientX > innerWidth - 24) return
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, at: event.timeStamp }
+  })
+  hosted.addEventListener('pointercancel', () => { drag = null })
+  hosted.addEventListener('pointerup', event => {
+    const start = drag
+    drag = null
+    if (!start || event.pointerId !== start.id) return
+    const by = pageFlip(event.clientX - start.x, event.clientY - start.y, event.timeStamp - start.at)
+    if (!by) return
+    swiped = true
+    setTimeout(() => { swiped = false }, 0)
+    turn(by)
+  })
+  hosted.addEventListener('click', event => {
+    if (!swiped) return
+    swiped = false
+    event.preventDefault()
+    event.stopPropagation()
+  }, true)
   /** Everything the page knows to be published: this origin's ledger, and each followed domain's own. */
   const allSites = (): LedgerSite[] => [...sites, ...[...peerSites.values()].flat()]
 
@@ -1039,13 +1117,13 @@ ${entry.key}`
    * lineage with no doors opens everywhere on the worker, which keeps older
    * versions working, but it was never published here, so it is not shown.
    */
+  const covers = (entry: Aggregate, items: readonly ShowcaseItem[], domains: readonly string[]): boolean =>
+    entry.zones.some(zone => domains.includes(zone))
+    || entry.versions.some(version => version.claims.some(claim =>
+      items.some(item => item.pubkey === claim.pubkey && item.lineage === claim.lineage)))
   const showcased = (entry: Aggregate): boolean => {
     const record = signed?.showcase
-    if (record) {
-      if (entry.zones.some(zone => record.domains.includes(zone))) return true
-      return entry.versions.some(version => version.claims.some(claim =>
-        record.items.some(item => item.pubkey === claim.pubkey && item.lineage === claim.lineage)))
-    }
+    if (record) return covers(entry, record.items, record.domains)
     const claims = entry.versions.flatMap(version => version.claims)
     // A domain's own pool offers what it shares here by putting it there.
     if (!claims.length) return entry.zones.includes(options.self)
@@ -1054,6 +1132,36 @@ ${entry.key}`
   }
 
   const within = (zone: string, of: string): boolean => zone === of || zone.endsWith(`.${of}`)
+  /** The tab strip: kept and updated in place, so a repaint never takes a tab's focus. */
+  const paintPager = (communities: readonly ShowcaseCommunity[]): void => {
+    const entries = [{ key: '', name: 'All' }, ...communities.map(row => ({ key: communityKey(row.name), name: row.name }))]
+    const live = new Set(entries.map(entry => entry.key))
+    for (const [key, tab] of tabViews) if (!live.has(key)) { tab.remove(); tabViews.delete(key) }
+    const order: HTMLButtonElement[] = []
+    for (const entry of entries) {
+      let tab = tabViews.get(entry.key)
+      if (!tab) {
+        tab = el('button', 'pager-tab')
+        tab.type = 'button'
+        tab.setAttribute('role', 'tab')
+        tab.id = `community-tab-${tabIds++}`
+        const key = entry.key
+        tab.addEventListener('click', () => select(key))
+        tabViews.set(entry.key, tab)
+      }
+      tab.textContent = entry.name
+      const on = entry.key === page
+      tab.setAttribute('aria-selected', String(on))
+      tab.tabIndex = on ? 0 : -1
+      order.push(tab)
+    }
+    const current = [...pager.children]
+    if (current.length !== order.length || current.some((node, index) => node !== order[index])) pager.replaceChildren(...order)
+    pager.hidden = communities.length === 0
+    const selected = tabViews.get(page)
+    if (selected && !pager.hidden) hosted.setAttribute('aria-labelledby', selected.id)
+    else hosted.removeAttribute('aria-labelledby')
+  }
   /** The domain the search offers to follow now, or ''. */
   let offered = ''
 
@@ -1062,8 +1170,15 @@ ${entry.key}`
     const all = bands()
     for (const band of all) askShared(band.zone)
     const unread = !!options.readOwners && signed === undefined
-    const everything = unread ? [] : all.flatMap(band => band.tiles).filter(showcased).sort(byTitle)
-    const links = options.links ?? []
+    const communities = pages()
+    // A community that is gone is a page that is gone: back to All.
+    if (page && !communities.some(community => communityKey(community.name) === page)) page = ''
+    const community = communities.find(row => communityKey(row.name) === page)
+    // A community only ever filters: its members must already be in the showcase.
+    const everything = unread ? [] : all.flatMap(band => band.tiles).filter(showcased)
+      .filter(entry => !community || covers(entry, community.items, community.domains)).sort(byTitle)
+    // The platform's doors are the first page's; a community is about what is shared.
+    const links = community ? [] : options.links ?? []
     // This domain first; then the domains this browser follows, by name.
     const rows: HTMLElement[] = []
     let visible = 0
@@ -1095,6 +1210,7 @@ ${entry.key}`
     // Re-insert only when the order changed: moving a row takes focus from it.
     const current = [...hosted.children]
     if (current.length !== rows.length || current.some((node, index) => node !== rows[index])) hosted.replaceChildren(...rows)
+    paintPager(communities)
     nothing.hidden = !terms.length || visible > 0
     // A line that names a domain this browser does not follow offers to follow it.
     const candidate = followCandidate(search.value)
@@ -1251,6 +1367,17 @@ export const SHOWCASE_STYLE = `
 .band-meta { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem;
   font: 500 .66rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
 .hosted-empty[hidden], .dex-row[hidden], .hosted-nothing[hidden], .follow-suggest[hidden], .follow[hidden], .follow-note:empty { display: none; }
+/* the communities: a strip of names after All; the list beneath turns with a swipe */
+.pager { display: flex; gap: .4rem; overflow-x: auto; scrollbar-width: none; margin: 0 0 .8rem; padding: .1rem 0; }
+.pager::-webkit-scrollbar { display: none; }
+.pager[hidden] { display: none; }
+.pager-tab { flex: none; padding: .42rem .85rem; border: 1px solid var(--md-outline-variant); border-radius: 999px; cursor: pointer;
+  background: color-mix(in srgb, var(--md-surface-c-lowest) 70%, transparent); color: var(--md-on-surface);
+  font: 500 .85rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); white-space: nowrap; transition: background .2s, border-color .2s, color .2s; }
+.pager-tab:hover { border-color: var(--md-primary); }
+.pager-tab[aria-selected='true'] { border-color: var(--md-primary); background: var(--md-primary); color: var(--md-on-primary); }
+.pager-tab:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.hosted { touch-action: pan-y pinch-zoom; }
 .hosted-nothing { margin: .4rem 0 1rem; color: var(--md-on-surface-var); }
 /* the platform's doors are tiles: the same hexagon, a glyph for a picture, a link for a click */
 a.hex { color: inherit; text-decoration: none; cursor: pointer; }
@@ -1415,6 +1542,8 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
     -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   .showcase-page details.manage, .showcase-page footer { display: none; }
   .dex-body { padding: .1rem .5rem .8rem; }
+  /* the swipe's ground: a short community must not shrink the place a thumb can turn the page */
+  .hosted { min-height: 60vh; min-height: 60dvh; align-content: start; }
   .hero-brand { gap: .6rem; }
   .hero-mark { width: 1.7rem; height: 1.7rem; }
   .hero h1 { font-size: 1.2rem; }
@@ -1437,6 +1566,6 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
   .version-visit { justify-content: center; max-width: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hex-picture, .hex-motif, .versions { transition: none !important; animation: none !important; opacity: 1; }
+  .hex-picture, .hex-motif, .versions, .pager-tab { transition: none !important; animation: none !important; opacity: 1; }
 }
 `
