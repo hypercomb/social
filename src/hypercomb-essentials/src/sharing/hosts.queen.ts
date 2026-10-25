@@ -75,7 +75,9 @@ export class HostsQueenBee {
     const word = (parts[0] ?? '').toLowerCase()
     if (!WORDS.includes(word)) { EffectBus.emit('hosts:view-toggle', {}); return }
 
-    const host = parts.find(p => p.startsWith('@'))?.slice(1)
+    // A host is a name, never a path: the slash form can hand `@x/hosts` back
+    // (the word appended as a route), so the name ends at the first slash.
+    const host = parts.find(p => p.startsWith('@'))?.slice(1).split('/')[0].toLowerCase()
       || String(get<SyncLike>(SYNC_KEY)?.publicHostDomain?.() ?? '').trim().toLowerCase()
     if (!host) { toast(t('hosts.nohost', 'No public host is configured — say @<host>.'), 'warning'); return }
 
