@@ -30,7 +30,7 @@ import {
 } from '@hypercomb/core'
 import { nip98Header } from './hive-pointer.js'
 
-export const ANCHOR_BINDING_IOC_KEY = '@hypercomb.social/AnchorBinding'
+const ANCHOR_BINDING_IOC_KEY = '@hypercomb.social/AnchorBinding'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 /** How long an invite lives. The words offer ten minutes; core allows an hour. */
 export const INVITE_SECONDS = 600
@@ -77,7 +77,7 @@ const verifierOf = (deps: KeyListDeps) => deps.verify ?? ((event: SignedKeyList)
 const hex = (bytes: Uint8Array): string => [...bytes].map(b => b.toString(16).padStart(2, '0')).join('')
 const bytesOf = (text: string): Uint8Array => Uint8Array.from(text.match(/../g) ?? [], pair => parseInt(pair, 16))
 
-export const bareHost = (host: string): string =>
+const bareHost = (host: string): string =>
   String(host ?? '').replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim().toLowerCase()
 
 /** Where an anchor's chain lives on a host: the member of sign('keys:lists')
