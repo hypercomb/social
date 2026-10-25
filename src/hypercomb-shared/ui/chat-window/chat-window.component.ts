@@ -3414,6 +3414,9 @@ export class ChatWindowComponent implements OnDestroy {
     },
   }
   readonly execWaiting = computed(() => this.execRows().filter(row => row.state === 'waiting').length)
+  /** What THIS conversation asked for and is held for a hand — shown in the
+   *  thread itself, where the participant is looking, not only in the column. */
+  readonly heldHere = computed(() => this.execRows().filter(row => row.state === 'waiting' && row.convoId === this.activeId()))
   readonly execModes: readonly ExecutionModeLike[] = ['manual', 'auto', 'everything']
   readonly execKinds: readonly ExecutionKindLike[] = ['read', 'additive', 'editing', 'destructive']
 

@@ -342,6 +342,19 @@ $accent: #7eb6d6;
   color: tw.ink(rgba(224, 180, 92, 0.85));
 }
 
+// A change this conversation asked for, waiting for a hand — in the thread,
+// under the reply, with the column's own Run and Skip words.
+.chat-held {
+  align-self: flex-start;
+  display: grid;
+  gap: 0.3rem;
+  max-width: 92%;
+  margin: 0.2em 0 0;
+  padding: 0.4em 0.7em;
+  border-inline-start: 2px solid var(--hc-window-accent);
+  font-size: 0.8em;
+}
+
 // ── scroll-to-bottom pill ─────────────────────────────────────────────────
 
 // The scroller and its pill. `min-height: 0` at both levels, or the flex child

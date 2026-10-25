@@ -666,6 +666,25 @@
              waiting on you, stopped so it does not loop, or paused. -->
         <p class="chat-wait-hint" role="status" [attr.data-owed]="owedLine()!.kind">{{ owedLine()!.text }}</p>
       }
+      <!-- WHAT WAITS ON YOU, RIGHT HERE (jwize, 2026-10-25: "oh I didn't see the
+           run command" — it lived in a side column that was closed). A change
+           this conversation asked for, held for a hand, shows its lines and
+           the same Run and Skip the Execution column has: one decision, two
+           places to make it. -->
+      @for (row of heldHere(); track row.id) {
+        <div class="chat-held" role="group" [attr.aria-label]="'chat.exec.sec' | t">
+          @for (line of row.lines; track $index) {
+            <code class="chat-exec-line" [attr.title]="line">{{ line }}</code>
+          }
+          <div class="chat-exec-acts">
+            <button type="button" class="chat-exec-word chat-exec-go" (click)="decideExec(row.id, 'run')">{{ (row.needsGrant ? 'chat.exec.allow-once' : 'chat.exec.run') | t }}</button>
+            @if (row.needsGrant) {
+              <button type="button" class="chat-exec-word" (click)="decideExec(row.id, 'always')">{{ 'chat.exec.always' | t }}</button>
+            }
+            <button type="button" class="chat-exec-word" (click)="decideExec(row.id, 'skip')">{{ 'chat.exec.skip' | t }}</button>
+          </div>
+        </div>
+      }
     </div>
 
     @if (workflowSelection(); as selection) {

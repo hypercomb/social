@@ -36,6 +36,14 @@ if (!target || !text) {
   process.exit(2)
 }
 
+// Git Bash rewrites a leading `/` argument into a Windows path before this runs
+// (the first run made the conversation "C:/Program Files/Git/scratch-organize").
+// Say so rather than talk to a conversation that is nowhere.
+if (/^[A-Za-z]:[\\/]/.test(target)) {
+  console.error(`"${target}" is a Windows path, not a tile route: Git Bash rewrote the leading /. Run with MSYS_NO_PATHCONV=1, or write the route inside quotes after a leading space.`)
+  process.exit(2)
+}
+
 const send = request => new Promise((resolve, reject) => {
   const ws = new WebSocket(BRIDGE)
   const timer = setTimeout(() => { ws.close(); reject(new Error('bridge timeout')) }, 15_000)
