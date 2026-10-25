@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 // resolve-import-map registers the Store at import; the map helpers need none of it.
 vi.mock('@hypercomb/runtime/store', () => ({ Store: class {} }))
-vi.mock('@hypercomb/runtime/core-surface', () => ({ CORE_RUNTIME_URL: '/hypercomb-core.runtime.js' }))
+vi.mock('@hypercomb/runtime/core-surface', () => ({ CORE_RUNTIME_URL: '/hypercomb-core.runtime.js', pixiRuntimeUrl: () => '/vendor/pixi.runtime.js' }))
 vi.mock('@hypercomb/runtime/install-index', () => ({ activeInstallIndex: () => null }))
 
 const web = join(dirname(fileURLToPath(import.meta.url)), '..', '..')

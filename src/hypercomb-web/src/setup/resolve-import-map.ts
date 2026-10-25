@@ -2,7 +2,7 @@
 
 import { environment } from '@hypercomb/shared/environments/environment'
 import { Store } from '@hypercomb/runtime/store'
-import { CORE_RUNTIME_URL } from '@hypercomb/runtime/core-surface'
+import { CORE_RUNTIME_URL, pixiRuntimeUrl } from '@hypercomb/runtime/core-surface'
 import { activeInstallIndex } from '@hypercomb/runtime/install-index'
 
 export type ResolvedImports = Record<string, string>
@@ -123,7 +123,7 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
   const aliasSource = new Map<string, string>()
   imports['@hypercomb/core'] = CORE_RUNTIME_URL
-  imports['pixi.js'] = '/vendor/pixi.runtime.js'
+  imports['pixi.js'] = pixiRuntimeUrl()
 
   const store = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
     '@hypercomb.social/Store',

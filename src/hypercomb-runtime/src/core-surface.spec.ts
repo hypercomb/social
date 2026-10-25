@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CORE_RUNTIME_URL, coreCompatibility, coreImportsOf, coreRuntimeUrl, describeCoreMismatch, requiredCoreExports } from './core-surface'
+import { CORE_RUNTIME_URL, PIXI_RUNTIME_URL, coreCompatibility, coreImportsOf, coreRuntimeUrl, describeCoreMismatch, pixiRuntimeUrl, requiredCoreExports } from './core-surface'
 
 const bytes = (s: string): Uint8Array => new TextEncoder().encode(s)
 
@@ -73,5 +73,18 @@ describe('coreRuntimeUrl — the core the page runs, as its import map says', ()
     expect(coreRuntimeUrl(null)).toBe(fixed)
     expect(coreRuntimeUrl(() => { throw new Error('no map') })).toBe(fixed)
     expect(coreRuntimeUrl(() => 'file:///C:/src/hypercomb-core/dist/index.js')).toBe(fixed)
+  })
+})
+
+describe('pixiRuntimeUrl — pixi comes from wherever the page took its core', () => {
+  it('a door maps core under /shell/, so pixi comes from its shell origin too', () => {
+    expect(pixiRuntimeUrl(() => 'https://swarm.hypercomb.com/shell/hypercomb-core.runtime.js')).toBe('/shell' + PIXI_RUNTIME_URL)
+  })
+
+  it('every other page keeps the fixed URL, and so does a page with no map answer', () => {
+    expect(pixiRuntimeUrl(() => 'https://hypercomb.io/hypercomb-core.runtime.js')).toBe(PIXI_RUNTIME_URL)
+    expect(pixiRuntimeUrl(null)).toBe(PIXI_RUNTIME_URL)
+    expect(pixiRuntimeUrl(() => { throw new Error('no map') })).toBe(PIXI_RUNTIME_URL)
+    expect(pixiRuntimeUrl(() => 'https://example.com/shellfish/core.js')).toBe(PIXI_RUNTIME_URL)
   })
 })

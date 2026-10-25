@@ -61,6 +61,23 @@ export const coreRuntimeUrl = (resolve: MetaResolve | null = metaResolve): strin
   return new URL(CORE_RUNTIME_URL, location.origin).href
 }
 
+/** Where every shell's page maps `pixi.js`. */
+export const PIXI_RUNTIME_URL = '/vendor/pixi.runtime.js'
+
+/** THE PIXI THIS PAGE RUNS, from the same signal that places its core. A door
+ *  (swarm.<host>) takes its shell from the shell origin under /shell/, built
+ *  against that origin's pixi; `/vendor/*` is answered by the asset store
+ *  before the worker runs, with the visitor build's older copy (8.17 against
+ *  the shell's 8.22). So where the page maps core under /shell/, pixi comes
+ *  from there too. Root-relative, as the page's own map is. */
+export const pixiRuntimeUrl = (resolve: MetaResolve | null = metaResolve): string => {
+  try {
+    const shelled = new URL(coreRuntimeUrl(resolve)).pathname.startsWith('/shell/')
+    if (shelled) return '/shell' + PIXI_RUNTIME_URL
+  } catch { /* the fixed URL */ }
+  return PIXI_RUNTIME_URL
+}
+
 /** `import { a, b as c } from "@hypercomb/core"` and the `export { … } from`
  *  form. Captures the brace body; the specifier may use either quote. */
 const NAMED_FROM_CORE_RE = /(?:import|export)\s*\{([^}]*)\}\s*from\s*["']@hypercomb\/core["']/g
