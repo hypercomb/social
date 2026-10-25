@@ -1,6 +1,6 @@
 // hypercomb-shim/src/bootstrap/showcase.spec.ts — a domain's root shows its hives.
 //
-// The ledger says which hives are open on which domain; each domain is a band,
+// The ledger says which hives are open on which domain; each domain is a filter,
 // this door's own first. Every publish of one name is ONE tile on the page:
 // identical heads are one version however many domains or people carry it,
 // and this domain's version is pinned first in the tile's list.
@@ -138,29 +138,35 @@ describe('aggregate — one tile per name, never a duplicate on the page', () =>
 })
 
 describe('showcase — the page is what is published now', () => {
-  const names = (bands: HTMLElement, zone: string): string[] =>
-    [...[...bands.querySelectorAll('.band')].find(band => band.querySelector('h2')?.textContent === zone)
-      ?.querySelectorAll('.hex-name') ?? []].map(name => name.textContent ?? '')
+  const names = (bands: HTMLElement): string[] =>
+    [...bands.querySelectorAll('.comb .hex-name')].map(name => name.textContent ?? '')
+  const chip = (bands: HTMLElement, label: string): HTMLButtonElement | undefined =>
+    [...bands.querySelectorAll<HTMLButtonElement>('.domain-chip')].find(button => button.textContent?.startsWith(label))
   const sites = parseLedger(LEDGER)
 
-  it('draws each name once, and redraws when the ledger is read again', async () => {
+  it('draws each name once in one list, a domain filters it, and a new read redraws it', async () => {
     const { bands, refresh } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
     })
-    await vi.waitFor(() => expect(names(bands, 'hypercomb.com')).toEqual(['camelflage', 'dylan']))
-    expect(names(bands, 'jwize.com')).toEqual([])
-    const jwize = [...bands.querySelectorAll('.band')].find(band => band.querySelector('h2')?.textContent === 'jwize.com')!
-    expect(jwize.querySelector('.band-empty')?.textContent).toBe('Its one hive is shown above.')
+    await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
+    expect(bands.querySelectorAll('.band')).toHaveLength(0)
+    // jwize.com opens dylan only: pressing it narrows the list, All widens it again.
+    expect(chip(bands, 'jwize.com')?.querySelector('.domain-chip-count')?.textContent).toBe('1')
+    chip(bands, 'jwize.com')!.click()
+    expect(names(bands)).toEqual(['dylan'])
+    expect(chip(bands, 'jwize.com')?.getAttribute('aria-pressed')).toBe('true')
+    chip(bands, 'All domains')!.click()
+    expect(names(bands)).toEqual(['camelflage', 'dylan'])
 
     // camelflage is unpublished; a newer read lands before an older one.
     let late: (value: typeof sites) => void = () => {}
     refresh(new Promise(resolve => { late = resolve }))
     refresh(Promise.resolve(sites.filter(site => site.lineage !== 'camelflage')))
-    await vi.waitFor(() => expect(names(bands, 'hypercomb.com')).toEqual(['dylan']))
+    await vi.waitFor(() => expect(names(bands)).toEqual(['dylan']))
     late(sites)
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(names(bands, 'hypercomb.com')).toEqual(['dylan'])
+    expect(names(bands)).toEqual(['dylan'])
   })
 
   it('opens a tile\'s versions, this domain\'s pinned first, and closes on Escape', async () => {

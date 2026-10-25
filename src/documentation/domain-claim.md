@@ -180,14 +180,17 @@ is a domain and its hives are its subdomains, so the page is:
 
 - **Search at the top**, beside the domain's name and sentence, with a comb of
   hive pictures around the mark.
-- **One horizontal band per domain**, this one first: every hive the ledger
-  (`/publications.json`, verified heads only) has open on that domain, plus
-  what the domain's public offering pools share. A tile wears the picture its
-  hive's own tile wears and opens the hive at its own address; a hive with no
+- **One list of everything hosted** (jwize 2026-10-24: "we collapse all
+  domains into a single list of hosted software"): every hive the ledger
+  (`/publications.json`, verified heads only) has open on any domain, plus what
+  each domain's public offering pools share. The domains are a **filter** on
+  the list (a row of chips with counts, one pressed at a time, *All domains*
+  first), never sections of it, and the search at the top searches the same
+  list. A tile wears the picture its hive's own tile wears; a hive with no
   picture wears a cover drawn from its signature. Give a hive's top tile a
   picture and it appears here at the next publish.
-- **On a phone** the bands are a rolodex: tap a domain and its hives open like
-  an accordion, one domain at a time.
+- **On a phone** it is the same list in one column; the domain chips scroll
+  sideways.
 - **At the foot:** what a member does to share their own favourite things, the
   staged links (each may name an `icon` from a closed set: `tour`, `app`,
   `host`, `download`, `extension`, `docs`, `source`), and **Manage this hive**,
@@ -199,8 +202,8 @@ page keeps the gallery and its return bar.
 
 **One tile per name.** Every publish of one name is one tile on the page
 (jwize 2026-10-24: "an aggregate so we don't duplicate tiles on the home
-pages"). Clicking it opens its versions: this domain's version pinned first,
-then any other version on another domain, each with a Visit link. Identical
+pages"). Clicking it opens its details: every version, this domain's pinned first,
+and under each version every domain it opens on, each its own link. Identical
 publishes (one head) are one row however many domains or people carry them;
 the tile counts its owners when there is more than one. What the ledger
 verified leads every choice; a domain's pool counts only for addresses under

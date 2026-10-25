@@ -438,8 +438,8 @@ it('lays the gallery out one section per domain, this door first', async () => {
   const { showHostPanel } = await import('./host-panel')
   showHostPanel()
   const root = document.querySelector('hc-shim-hosts')!.shadowRoot!
-  // A visitor sees this door's hives first, as a showcase band.
-  await vi.waitFor(() => expect(root.querySelector('.bands .band.own h2')?.textContent).toBe(location.host))
+  // A visitor sees the showcase: one list of what is hosted, the domains a filter on it.
+  await vi.waitFor(() => expect(root.querySelector('.bands .hosted h2')?.textContent).toBe('Hosted here'))
   await openCuration(root)
   await vi.waitFor(() => expect(root.querySelectorAll('.domain-section')).toHaveLength(2))
   const [own, other] = [...root.querySelectorAll('.domain-section')]

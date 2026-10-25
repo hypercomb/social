@@ -3,10 +3,11 @@
 // A DOMAIN'S ROOT IS A SHOWCASE OF ITS HIVES (jwize 2026-10-24): "the idea
 // behind the root domain is like your tiles with the beautiful images showing
 // and they lead to the subdomains." It is "strictly for showcasing": search
-// at the top, then one horizontal band per domain holding its hives and its
-// shared creations, and the doors to the platform's other features at the
-// bottom, beside what a member does to share their own favourite things. On a
-// phone the bands are a rolodex: a domain opens like an accordion.
+// at the top, then ONE list of everything hosted (jwize, the same day: "we
+// collapse all domains into a single list of hosted software") with the
+// domains as a filter on it, and the doors to the platform's other features at
+// the bottom, beside what a member does to share their own favourite things. A
+// tile opens its details: every version, and every domain each one opens on.
 //
 // A colony is a domain and its hives are its subdomains. Which hives are open
 // on which domain is the ledger this origin already serves — /publications.json,
@@ -474,7 +475,7 @@ export type ShowcaseOptions = {
 export type Showcase = {
   /** The mark, the name, the sentence and the search. */
   readonly hero: HTMLElement
-  /** One band per domain, beneath it. */
+  /** The one list of everything hosted, beneath it. */
   readonly bands: HTMLElement
   readonly refresh: (ledger: Promise<readonly LedgerSite[]>) => void
 }
@@ -516,18 +517,12 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   hero.append(words, mosaic)
 
   const bandsHost = el('div', 'bands')
-  const nothing = el('p', 'bands-nothing')
-  nothing.textContent = 'Nothing matches your search.'
 
   // ── what is known ──
   let sites: readonly LedgerSite[] = []
   let ledgerRead = false
   const shared = new Map<string, { offers: readonly HostOffering[]; creations: readonly HostCreation[] }>()
   const asked = new Set<string>()
-  let open: string | null = null
-  /** Bands closed by hand during the current search. */
-  const collapsed = new Set<string>()
-  let lastTerms = ''
 
   // ── pictures: one ask per head, every box that shows that head wears it ──
   const pictures = new Map<string, string | null>()
@@ -754,13 +749,18 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
       what.textContent = `${version.head.slice(0, 12)}… · ${count(zones, 'domain', 'domains')}`
         + (version.owners.length > 1 ? ` · ${count(version.owners.length, 'owner', 'owners')}` : '')
       about.append(tag, who, what)
-      const place = version.places[0]!
-      const visit = el('a', 'version-visit')
-      visit.href = place.href
-      const words = el('span', 'version-visit-label')
-      words.textContent = entry.kind === 'creation' ? 'Inspect' : `Visit ${place.address}`
-      visit.append(words, iconOf('arrow'))
-      row.append(miniOf(version.head, version.route), about, visit)
+      // Every domain this version opens on, each its own way in — the reader
+      // chooses where to go, this domain's place first.
+      const places = el('span', 'version-places')
+      for (const place of version.places) {
+        const visit = el('a', 'version-visit')
+        visit.href = place.href
+        const words = el('span', 'version-visit-label')
+        words.textContent = entry.kind === 'creation' ? `Inspect on ${place.zone}` : place.address
+        visit.append(words, iconOf('arrow'))
+        places.append(visit)
+      }
+      row.append(miniOf(version.head, version.route), about, places)
       if (entry.kind === 'hive' && version.claims.length) {
         const claims = el('div', 'version-claims')
         for (const claim of version.claims) {
@@ -882,62 +882,42 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     for (const { target } of entries) arrange(target as HTMLElement, combTiles.get(target as HTMLElement) ?? [])
   }) : null
 
-  type BandView = { section: HTMLElement; badge: HTMLElement; meta: HTMLElement; comb: HTMLElement
-    empty: HTMLElement; also: HTMLElement; toggle: HTMLButtonElement; badgeHeads: string | null }
-  const bandViews = new Map<string, BandView>()
-  const bandView = (zone: string): BandView => {
-    const found = bandViews.get(zone)
+  // ── ONE LIST OF HOSTED SOFTWARE (jwize 2026-10-24: "we collapse all domains
+  //    into a single list of hosted software and then when we click we can see
+  //    details with a list of domains and versions … filter as well with the
+  //    canonical top search"). Every name once, whichever domains open it; a
+  //    domain is a filter on the list, never a section of it. ──
+  const hosted = el('section', 'hosted')
+  const hostedHead = el('header', 'hosted-head')
+  const hostedTitle = el('h2')
+  hostedTitle.textContent = 'Hosted here'
+  const hostedMeta = el('span', 'band-meta')
+  hostedHead.append(hostedTitle, hostedMeta)
+  const filters = el('div', 'domain-filter')
+  filters.setAttribute('role', 'group')
+  filters.setAttribute('aria-label', 'Show one domain')
+  const comb = el('div', 'comb')
+  combs?.observe(comb)
+  const empty = el('p', 'hosted-empty')
+  hosted.append(hostedHead, filters, comb, empty)
+  bandsHost.append(hosted)
+  /** The domain the list is narrowed to, or null for every domain. */
+  let domain: string | null = null
+  type ChipView = { chip: HTMLButtonElement; count: HTMLElement }
+  const chipViews = new Map<string, ChipView>()
+  const chipOf = (zone: string | null): ChipView => {
+    const key = zone ?? ''
+    const found = chipViews.get(key)
     if (found) return found
-    const own = zone === options.self
-    const section = el('section', own ? 'band own' : 'band')
-    const id = `band-${bandViews.size}`
-    const head = el('header', 'band-head')
-    const badge = el('span', 'band-badge')
-    const titles = el('span', 'band-titles')
-    const name = el('h2')
-    name.textContent = zone
-    const meta = el('span', 'band-meta')
-    titles.append(name, meta)
-    head.append(badge, titles)
-    const visitFor = (inside: boolean): HTMLAnchorElement => {
-      const visit = el('a', inside ? 'band-visit inside' : 'band-visit')
-      visit.href = `${doorOrigin(zone)}/`
-      visit.append(document.createTextNode(`Visit ${zone}`), iconOf('arrow'))
-      return visit
-    }
-    if (!own) head.append(visitFor(false))
-    const chevron = el('span', 'band-chevron')
-    chevron.append(iconOf('chevron'))
-    head.append(chevron)
-    const toggle = el('button', 'band-toggle')
-    toggle.type = 'button'
-    toggle.setAttribute('aria-controls', id)
-    toggle.setAttribute('aria-label', `Show what ${zone} shares`)
-    toggle.addEventListener('click', () => {
-      // While a search runs every band holding a match is open; a tap closes
-      // one of them (and opens it again) without touching the search.
-      if (searchTerms(search.value).length) {
-        if (!collapsed.delete(zone)) collapsed.add(zone)
-        paint()
-        return
-      }
-      open = open === zone ? null : zone
-      paint()
-      if (open === zone) section.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
-    })
-    head.append(toggle)
-    const body = el('div', 'band-body')
-    body.id = id
-    if (!own) body.append(visitFor(true))
-    const comb = el('div', 'comb')
-    combs?.observe(comb)
-    const empty = el('p', 'band-empty')
-    const also = el('p', 'band-also')
-    body.append(comb, empty, also)
-    section.append(head, body)
-    // No join of heads is ever null, so the first paint always draws the badge.
-    const view = { section, badge, meta, comb, empty, also, toggle, badgeHeads: null }
-    bandViews.set(zone, view)
+    const chip = el('button', 'domain-chip')
+    chip.type = 'button'
+    const name = el('span')
+    name.textContent = zone ?? 'All domains'
+    const count = el('span', 'domain-chip-count')
+    chip.append(...(zone ? [] : [iconOf('globe')]), name, count)
+    chip.addEventListener('click', () => { domain = zone; paint() })
+    const view = { chip, count }
+    chipViews.set(key, view)
     return view
   }
 
@@ -976,95 +956,48 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
 
   function paint(): void {
     const terms = searchTerms(search.value)
-    if (terms.join(' ') !== lastTerms) { lastTerms = terms.join(' '); collapsed.clear() }
     const all = bands()
-    const sections: HTMLElement[] = []
-    let matched = 0
-    for (const band of all) {
-      askShared(band.zone)
-      const view = bandView(band.zone)
-      const own = band.zone === options.self
-      const shown = band.tiles.filter(entry => aggregateMatches(entry, terms))
-      const hiveCount = band.open.filter(entry => entry.kind === 'hive').length
-      const creationCount = band.open.length - hiveCount
-      matched += shown.length
-      view.meta.replaceChildren()
-      if (hiveCount) {
+    for (const band of all) askShared(band.zone)
+    const everything = all.flatMap(band => band.tiles).sort(byTitle)
+    const zoned = all.filter(band => band.open.length)
+    // A domain that no longer opens anything stops being a filter.
+    if (domain && !zoned.some(band => band.zone === domain)) domain = null
+    const chips = [chipOf(null), ...zoned.map(band => chipOf(band.zone))]
+    chips[0]!.count.textContent = String(everything.length)
+    for (const [index, band] of zoned.entries()) chips[index + 1]!.count.textContent = String(band.open.length)
+    for (const [key, view] of chipViews) view.chip.setAttribute('aria-pressed', String(key === (domain ?? '')))
+    filters.hidden = zoned.length < 2
+    // Re-insert only when the order changed: moving a chip takes focus from it.
+    const current = [...filters.children]
+    if (current.length !== chips.length || current.some((node, index) => node !== chips[index]!.chip)) {
+      filters.replaceChildren(...chips.map(view => view.chip))
+    }
+    const scoped = domain ? zoned.find(band => band.zone === domain)!.open : everything
+    const shown = scoped.filter(entry => aggregateMatches(entry, terms))
+    arrange(comb, shown.map(entry => tileView(entry)))
+    empty.hidden = shown.length > 0
+    empty.textContent = terms.length ? `Nothing${domain ? ` on ${domain}` : ''} matches your search.`
+      : !ledgerRead ? 'Reading what is hosted here…'
+        : domain ? `Nothing is shared on ${domain} yet.` : 'Nothing is hosted here yet.'
+    const hives = everything.filter(entry => entry.kind === 'hive')
+    const creations = everything.length - hives.length
+    for (const target of [stats, hostedMeta]) {
+      target.replaceChildren()
+      if (hives.length) {
         const row = el('span')
-        row.append(iconOf('hive'), document.createTextNode(count(hiveCount, 'hive', 'hives')))
-        view.meta.append(row)
+        row.append(iconOf('hive'), document.createTextNode(count(hives.length, 'hive', 'hives')))
+        target.append(row)
       }
-      if (creationCount) {
+      if (zoned.length) {
         const row = el('span')
-        row.append(iconOf('sparkle'), document.createTextNode(count(creationCount, 'shared creation', 'shared creations')))
-        view.meta.append(row)
+        row.append(iconOf('globe'), document.createTextNode(count(zoned.length, 'domain', 'domains')))
+        target.append(row)
       }
-      if (!band.open.length) {
+      if (creations) {
         const row = el('span')
-        row.textContent = own && !ledgerRead ? 'Reading…' : 'Nothing shared yet'
-        view.meta.append(row)
+        row.append(iconOf('sparkle'), document.createTextNode(count(creations, 'shared creation', 'shared creations')))
+        target.append(row)
       }
-      // The badge: the first three hives here — or, when every one is drawn in
-      // a band above, the first three it opens — overlapping like a fan of cards.
-      const firsts = (band.tiles.length ? band.tiles : band.open).slice(0, 3)
-      const heads = firsts.map(entry => entry.versions[0]!.head).join()
-      if (heads !== view.badgeHeads) {
-        view.badgeHeads = heads
-        view.badge.replaceChildren(...(firsts.length
-          ? firsts.map(entry => miniOf(entry.versions[0]!.head, entry.versions[0]!.route))
-          : [(() => { const mini = el('span', 'mini'); const art = el('span', 'hex-art cover');
-            art.append(iconOf('globe')); mini.append(art); return mini })()]))
-        const lead = coverOf(firsts[0]?.versions[0]?.head ?? band.zone)
-        view.section.style.setProperty('--band-c1', lead.from)
-        view.section.style.setProperty('--band-c2', lead.to)
-      }
-      arrange(view.comb, shown.map(entry => tileView(entry)))
-      // A name drawn in a band above is not drawn again: the band says so —
-      // in "hives" when that is all it holds, in "tiles" when creations are among them.
-      const above = band.open.length - band.tiles.length
-      const noun = (n: number): string => (creationCount ? (n === 1 ? 'tile' : 'tiles') : (n === 1 ? 'hive' : 'hives'))
-      view.empty.hidden = shown.length > 0
-      view.empty.textContent = terms.length ? 'Nothing here matches your search.'
-        : own && !ledgerRead ? 'Reading what lives here…'
-          : band.open.length === 1 ? `Its one ${noun(1)} is shown above.`
-            : band.open.length ? `All ${band.open.length} of its ${noun(2)} are shown above.`
-              : `Nothing is shared on ${band.zone} yet.`
-      view.also.hidden = !!terms.length || !shown.length || above <= 0
-      view.also.textContent = above === 1 ? `1 more of its ${noun(2)} is shown above.`
-        : `${above} more of its ${noun(2)} are shown above.`
-      view.section.hidden = terms.length ? shown.length === 0 : !own && band.open.length === 0
-      const isOpen = terms.length ? shown.length > 0 && !collapsed.has(band.zone) : open === band.zone
-      view.section.classList.toggle('open', isOpen)
-      view.toggle.setAttribute('aria-expanded', String(isOpen))
-      sections.push(view.section)
-    }
-    nothing.hidden = !terms.length || matched > 0
-    // Re-insert only when the order changed: moving a section takes focus from
-    // whatever inside it holds focus — the toggle a keyboard just pressed.
-    const order = [...sections, nothing]
-    const current = [...bandsHost.children]
-    if (current.length !== order.length || current.some((node, index) => node !== order[index])) {
-      bandsHost.replaceChildren(...order)
-    }
-    const names = all.flatMap(band => band.tiles)
-    const hives = names.filter(entry => entry.kind === 'hive')
-    const creations = names.length - hives.length
-    const domains = all.filter(band => band.open.length).length
-    stats.replaceChildren()
-    if (hives.length) {
-      const row = el('span')
-      row.append(iconOf('hive'), document.createTextNode(count(hives.length, 'hive', 'hives')))
-      stats.append(row)
-    }
-    if (domains) {
-      const row = el('span')
-      row.append(iconOf('globe'), document.createTextNode(count(domains, 'domain', 'domains')))
-      stats.append(row)
-    }
-    if (creations) {
-      const row = el('span')
-      row.append(iconOf('sparkle'), document.createTextNode(count(creations, 'shared creation', 'shared creations')))
-      stats.append(row)
     }
     fillMosaic(hives.map(entry => entry.versions[0]!.head))
   }
@@ -1268,36 +1201,33 @@ export const SHOWCASE_STYLE = `
 @keyframes sc-in { to { opacity: 1; } }
 
 .bands { position: relative; }
-.bands-nothing { margin: 1rem 0; color: var(--md-on-surface-var); }
-.band { position: relative; margin: 0 0 clamp(2.6rem, 6vh, 3.8rem); }
-.band[hidden], .bands-nothing[hidden], .band-empty[hidden] { display: none; }
-.band-head { position: relative; display: flex; align-items: center; gap: 1.1rem; padding: .85rem 1.1rem .85rem .9rem;
+.hosted { position: relative; margin: 0 0 clamp(2.6rem, 6vh, 3.8rem); }
+.hosted-head { display: grid; gap: .3rem; padding: .85rem 1.1rem .85rem .9rem;
   border-top: 1px solid color-mix(in srgb, var(--md-primary) 40%, transparent);
   border-bottom: 1px solid var(--md-outline-variant);
   background: linear-gradient(90deg, color-mix(in srgb, var(--md-primary) 12%, transparent), color-mix(in srgb, var(--md-primary) 3%, transparent) 55%, transparent); }
-.band-titles { display: grid; gap: .3rem; min-width: 0; }
-.band-head h2 { margin: 0; overflow-wrap: anywhere; color: var(--md-on-surface-strong);
+.hosted-head h2 { margin: 0; color: var(--md-on-surface-strong);
   font: 500 clamp(1.45rem, 2.6vw, 2.05rem)/1.1 'Source Serif 4', Georgia, serif; letter-spacing: -.035em; }
 .band-meta { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem;
   font: 500 .66rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
-.band-badge { display: flex; flex: none; padding-left: .2rem; }
+/* the domains: a filter on the one list, one pressed at a time */
+.domain-filter { display: flex; flex-wrap: wrap; gap: .45rem; padding: 1rem 0 1.3rem; }
+.domain-filter[hidden], .hosted-empty[hidden] { display: none; }
+.domain-chip { display: inline-flex; align-items: center; gap: .45rem; padding: .42rem .75rem; cursor: pointer;
+  border: 1px solid var(--md-outline-variant); border-radius: 999px; background: color-mix(in srgb, var(--md-surface-c-lowest) 70%, transparent);
+  color: var(--md-on-surface); font: 500 .82rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); white-space: nowrap; transition: background .2s, border-color .2s, color .2s; }
+.domain-chip svg { width: .9rem; height: .9rem; color: var(--md-primary); }
+.domain-chip-count { color: var(--md-on-surface-faint); font: 500 .7rem/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.domain-chip:hover { border-color: var(--md-primary); }
+.domain-chip[aria-pressed='true'] { border-color: var(--md-primary); background: var(--md-primary); color: var(--md-on-primary); }
+.domain-chip[aria-pressed='true'] svg, .domain-chip[aria-pressed='true'] .domain-chip-count { color: inherit; opacity: .85; }
+.domain-chip:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.hosted-empty { margin: 0; padding: 1.3rem 1.2rem; border: 1px dashed var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px); color: var(--md-on-surface-var); }
 .mini { position: relative; width: 2.3rem; height: calc(2.3rem * 1.1547); margin-left: -.7rem; clip-path: var(--hex);
   background: linear-gradient(160deg, var(--gold-1), var(--gold-3)); }
 .mini:first-child { margin-left: 0; }
 .mini > .hex-art { inset: 1.5px; }
 .mini > .hex-art:not(.has-picture) { background-color: var(--md-surface-c-high); }
-.band-visit { margin-left: auto; display: inline-flex; flex: none; align-items: center; gap: .45rem; padding: .5rem .8rem;
-  border: 1px solid color-mix(in srgb, var(--md-primary) 42%, transparent); border-radius: var(--hc-radius-control, 2px);
-  background: color-mix(in srgb, var(--md-surface-c-lowest) 60%, transparent); color: var(--md-primary);
-  font: 600 .82rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); text-decoration: none; white-space: nowrap; transition: background .2s, color .2s; }
-.band-visit svg { width: .95rem; height: .95rem; }
-.band-visit:hover { background: var(--md-primary); color: var(--md-on-primary); }
-.band-visit:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
-.band-visit.inside, .band-chevron, .band-toggle { display: none; }
-.band-body { padding-top: 1.4rem; }
-.band-empty { margin: 0; padding: 1.3rem 1.2rem; border: 1px dashed var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px); color: var(--md-on-surface-var); }
-.band-also { margin: .9rem 0 0; color: var(--md-on-surface-faint); font-size: .82rem; }
-.band-also[hidden] { display: none; }
 
 /* the honeycomb: rows of pointy-top hexagons, every other one shifted half a hex */
 .comb { --s: 10.4rem; --g: .6rem; display: grid; justify-content: start; min-width: 0; }
@@ -1363,6 +1293,7 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
 .version.pinned .version-tag { color: var(--md-primary); }
 .version-who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--md-on-surface-strong); font: 600 .95rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif); }
 .version-what { overflow-wrap: anywhere; color: var(--md-on-surface-var); font: 500 .72rem/1.35 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.version-places { display: grid; gap: .35rem; justify-items: end; }
 .version-visit { display: inline-flex; align-items: center; gap: .4rem; max-width: 15rem; padding: .5rem .75rem;
   border: 1px solid color-mix(in srgb, var(--md-primary) 42%, transparent); border-radius: var(--hc-radius-control, 2px);
   color: var(--md-primary); font: 600 .8rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); text-decoration: none;
@@ -1462,32 +1393,18 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
   .member { grid-template-columns: minmax(0, 1fr); }
   .member-art { display: none; }
 }
-/* A PHONE: the bands are a rolodex, and a domain opens like an accordion. */
+/* A PHONE: one column of the same list; the domain filter scrolls sideways. */
 @media (max-width: 720px) {
   .hero { gap: 1.2rem; margin-bottom: 2rem; }
   .mosaic { --w: 4.6rem; --g: .25rem; }
   .hero h1 { --title-size: clamp(2.7rem, 13vw, 3.6rem); }
   .hero-tagline { font-size: .98rem; }
   .search { margin-top: 1.3rem; }
-  .band { margin: 0 0 .55rem; border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px); overflow: hidden;
-    background: color-mix(in srgb, var(--md-surface-c-low) 94%, transparent);
-    box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 45%, transparent), 0 -.35rem .9rem -.7rem rgb(60 35 0 / .35), 0 .5rem 1.2rem -1rem rgb(60 35 0 / .45); }
-  .band::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; z-index: 1;
-    background: linear-gradient(180deg, var(--band-c1, var(--gold-2)), var(--band-c2, var(--gold-3))); }
-  .band.open { border-color: color-mix(in srgb, var(--md-primary) 45%, var(--md-outline-variant));
-    box-shadow: 0 1rem 2rem -1.2rem rgb(60 35 0 / .55); }
-  .band-head { gap: .8rem; padding: .75rem .9rem .75rem 1.05rem; border: 0; background: none; }
-  .band-head h2 { font-size: 1.28rem; }
-  .band-head .band-visit:not(.inside) { display: none; }
-  .band-chevron { display: block; flex: none; margin-left: auto; color: var(--md-on-surface-var); transition: transform .25s; }
-  .band-chevron svg { width: 1.2rem; height: 1.2rem; }
-  .band.open .band-chevron { transform: rotate(180deg); color: var(--md-primary); }
-  .band-toggle { display: block; position: absolute; inset: 0; z-index: 2; width: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
-  .band-toggle:hover:not(:disabled) { background: transparent; }
-  .band-toggle:focus-visible { outline: 2px solid var(--md-primary); outline-offset: -2px; }
-  .band:not(.open) .band-body { display: none; }
-  .band-body { padding: .1rem .55rem .9rem .75rem; }
-  .band-visit.inside { display: inline-flex; margin: 0 0 .6rem .25rem; }
+  .hosted-head { padding: .75rem .9rem; }
+  .hosted-head h2 { font-size: 1.28rem; }
+  /* the domains scroll sideways in one line rather than stacking above the list */
+  .domain-filter { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: .85rem 16px 1rem; }
+  .domain-filter::-webkit-scrollbar { display: none; }
   .mini { width: 1.8rem; height: calc(1.8rem * 1.1547); margin-left: -.55rem; }
   .comb { --s: 6.1rem; --g: .36rem; }
   .hex-name { font-size: .74rem; }
@@ -1500,12 +1417,13 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
   .versions { width: 100%; max-height: 86vh; max-height: 86dvh; padding-bottom: env(safe-area-inset-bottom);
     border-radius: var(--hc-radius-floating, 4px) var(--hc-radius-floating, 4px) 0 0; }
   .version-list .version { grid-template-columns: auto minmax(0, 1fr); }
-  .version-visit { grid-column: 1 / -1; justify-content: center; max-width: none; }
+  .version-places { grid-column: 1 / -1; justify-items: stretch; }
+  .version-visit { justify-content: center; max-width: none; }
   .member { padding: 1.4rem 1.15rem 1.6rem; }
   .steps { grid-template-columns: minmax(0, 1fr); }
   .member-cta { width: 100%; justify-content: center; box-sizing: border-box; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hex-picture, .hex-motif, .explore-tile, .member-cta, .band-chevron, .versions { transition: none !important; animation: none !important; opacity: 1; }
+  .hex-picture, .hex-motif, .explore-tile, .member-cta, .domain-chip, .versions { transition: none !important; animation: none !important; opacity: 1; }
 }
 `
