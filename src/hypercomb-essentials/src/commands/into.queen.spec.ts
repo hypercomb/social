@@ -61,6 +61,38 @@ describe('/into with its tiles named', () => {
     await expect(new IntoQueenBee().invoke('work = domains')).rejects.toThrow('nothing moved into /work')
   })
 
+  it('sends several groups to their new parents as ONE move', async () => {
+    const calls = moveDrone()
+    const many: { source: readonly string[]; moves: readonly { labels: readonly string[]; targetSegments: readonly string[] }[] }[] = []
+    const drone = registrations.get('@diamondcoreprocessor.com/MoveDrone') as Record<string, unknown>
+    drone.commitMoveMany = async (source: readonly string[], moves: typeof many[number]['moves']) => {
+      many.push({ source, moves })
+      return moves.map(m => m.labels)
+    }
+    await new IntoQueenBee().invoke('people = [business-card, domains], /archive/2026 = work')
+    expect(calls).toEqual([])
+    expect(many).toEqual([{ source: [], moves: [
+      { labels: ['Business-Card', 'domains'], targetSegments: ['people'] },
+      { labels: ['work'], targetSegments: ['archive', '2026'] },
+    ] }])
+  })
+
+  it('refuses a tile named for two places, or a group with no =, and moves nothing', async () => {
+    const calls = moveDrone()
+    await expect(new IntoQueenBee().invoke('people = [domains], work = domains')).rejects.toThrow('names "domains" twice')
+    await expect(new IntoQueenBee().invoke('work = domains, people')).rejects.toThrow('needs a destination before the =')
+    expect(calls).toEqual([])
+  })
+
+  it('says which tiles of which group did not land', async () => {
+    moveDrone()
+    const drone = registrations.get('@diamondcoreprocessor.com/MoveDrone') as Record<string, unknown>
+    drone.commitMoveMany = async (_source: readonly string[], moves: readonly { labels: readonly string[] }[]) =>
+      moves.map(m => m.labels.filter(label => label !== 'domains'))
+    await expect(new IntoQueenBee().invoke('people = [Business-Card, domains], archive = work'))
+      .rejects.toThrow('"domains" did not move into /people, which already holds a tile by that name')
+  })
+
   it('still moves the selection when no tiles are named', async () => {
     const calls = moveDrone()
     registrations.set('@diamondcoreprocessor.com/SelectionService', { selected: new Set(['domains']) })

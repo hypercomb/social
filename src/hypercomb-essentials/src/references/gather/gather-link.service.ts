@@ -376,7 +376,15 @@ export class GatherLinkService {
       if (!inGroup) {
         const copy = await resolveLayerAt(history, lineage?.domain, tileRoute)
         if (!copy) continue
-        const moved = await flattenLayerTree(history, copy, memberRoute)
+        // A copy short of a tile is not a move: the page's own copy is about
+        // to stop being listed, and a child whose bytes are not warm here
+        // would then be reachable only through history. Leave it ungathered.
+        const report = { dropped: 0 }
+        const moved = await flattenLayerTree(history, copy, memberRoute, report)
+        if (report.dropped > 0) {
+          console.warn(`[gather] "${tile.name}" left in place — ${report.dropped} of its tiles could not be read here`)
+          continue
+        }
         await committer.importTree(await replacingWhatWasThere(history, lineage?.domain, moved))
       }
       // The page stops listing its own copy, then gathers the group's. Its

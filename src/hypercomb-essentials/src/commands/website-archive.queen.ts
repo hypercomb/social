@@ -41,7 +41,6 @@ import {
   flattenLayerTree,
   resolveLayerAt,
   type PlacementHistory,
-  type PlacementLayer,
 } from '../history/layer-placement.js'
 import { cellLocationSig, seedLayerKeyedTileProps } from '../editor/tile-properties.js'
 
@@ -465,10 +464,12 @@ export async function importArchive(): Promise<void> {
     }
   } catch (err) { console.warn('[website-archive] props seed prep skipped', err) }
 
-  await committer.importTree([
-    { segments: at, layer: { ...((parent ?? {}) as PlacementLayer), children: [...existing, name] } },
-    ...treeUpdates,
-  ])
+  // The archive's root lands in THIS page by importTree's own parent link: the
+  // page is hydrated from its head and gains the root's sig, nothing else. It
+  // used to be passed in as well, with `children` re-listed from the name read
+  // above — a read that skips a sibling it cannot resolve, so a cold sibling
+  // was unlinked from the page by importing a website next to it.
+  await committer.importTree(treeUpdates)
   try {
     for (const [locSig, propSig] of layerSeeds) seedLayerKeyedTileProps(locSig, propSig)
   } catch { /* best-effort cache seed */ }

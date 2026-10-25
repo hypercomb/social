@@ -506,3 +506,84 @@ records are pools. The dead code is gone and the native-filesystem docstring
 agrees with the store. ONE owner decision is left on the census's list, and
 jwize took it on 2026-09-23: the nine bare-word system pools opened eagerly at
 boot move to colon meanings (the colon migration).
+
+## Revisited 2026-10-24 — moving tiles to a new parent
+
+A hive model asked to organize the home page made the group tiles and then
+asked the participant to open each group and paste by hand: the build it ran
+declared no machine grammar for `into`, and `/paste` refuses an argument. The
+question behind it — *is a move pure here?* — was swept across every write
+that adds, updates or moves a tile (three readers: the history primitives;
+move, clipboard and references; the creators and the bridge).
+
+**The membership edit is pure.** `commitChildrenDeltas` hydrates the location's
+head inside the commit queue and applies sig-space appends, removes and swaps;
+a moved tile's collection sig leaves one `children` list and joins another, and
+its subtree is never walked or re-committed.
+
+**Fixed 2026-10-24:**
+
+- **One act for many destinations** — `MoveDrone.commitMoveMany`. Moving k
+  tiles into m groups was 2m markers (the source re-committed per group); it is
+  m + 1, the source losing every moved tile in one marker. `commitMoveInto` is
+  its one-group case, so there is still ONE re-home implementation. Organize
+  and the questions settle use it; `/into` says it as one sentence —
+  `into people = [ana, ben], work = [desk, inbox]`. A tile named for two
+  places, a destination that is the source or a moved tile, refuses the whole
+  act before anything commits.
+- **A placed tile opens as itself** — `alignPlacedHeads` (layer-placement.ts).
+  A location's own head outranks its parent's pointer and bags are keyed by
+  route, so a tile moved or pasted where a same-named tile once lived (moved
+  back after an organize) was listed as itself and OPENED as the old head.
+  Move and paste now advance such a route to the placed layer: same bytes, one
+  marker. Descendant routes are not walked (see *Remaining*, identity by path).
+- **Full-list rewrites from a read** — each now a delta applied to the head:
+  `/remove` (`remove-tiles.ts`), the image paste (`image-paste.worker.ts`,
+  which rebuilt `children` from NAMES), the website archive import (re-listed
+  the page from a non-strict read that skips an unresolvable sibling), and the
+  aggregation menu (`aggregation-layer.ts`; a failed read wiped every member).
+- **Sigs read as names** — `stampCreation` handed the whole layer to `update`,
+  whose `children` slot resolves names, so each child of a stamped tile became
+  an empty tile named after its own hex; it is one `decorations` append. The
+  bridge `update` op refuses 64-hex `children` and names `into` instead.
+- **A lossy copy is not a move** — `flattenLayerTree` reports children it could
+  not read; gather leaves a tile in place rather than unlisting the page's copy
+  of a short subtree.
+
+**Remaining, by weight:**
+
+1. **Position is inside the tile (owner decision).** Order is decided by
+   `properties.index` on each tile's own layer (index.nurse.ts, show-cell), so
+   every move re-mints the moved top node to fold in its landing slot
+   (`#captureMoves`, the paste's hover-number target), and every reorder
+   re-mints each placed tile and writes one marker per tile
+   (`#persistDenseRanks`, `#persistPinnedIndices`, `writeTilePropertiesAt`).
+   The sig that travels is therefore never quite the sig that was listed. The
+   doctrine already names this the canonical trap
+   (`hypergraph-molecule-lineage.md`, *slot rides the envelope*; *Ordering*):
+   order belongs to the parent's meta atom or the incidence. Moving it there is
+   the one change that makes a move a pure sig transfer.
+2. **Identity by path.** Lineage bags are `sha256(lineageKey(segments))`, so a
+   moved tile's own history stays at its old route and a re-created name there
+   reveals it. `alignPlacedHeads` covers the moved tile's own route only. The
+   fix is the molecule-addressed commit (register orders 135–139, 151).
+3. **The commit base can be a stand-in** (read in the source, not reproduced).
+   On a markerless bag under a cold
+   parent `latestMarkerSigFor` returns a pool-written empty layer and a delta
+   commits over it, dropping the parent-carried children
+   (layer-committer.drone.ts `#commit`, `#importTree`). `#warmDestination`
+   papers over it with an identical-bytes marker; the honest fix is to refuse a
+   stand-in base, as `readChildrenStrict` refuses a cold read.
+4. **Silent success.** A remove that misses by sig and label is a no-op yet the
+   delta resolves; `#commit` returns quietly when rewound or previewed, so
+   `commitChildrenDeltas` and `update` read as success (`#importTree` throws).
+5. **Markers per item where one would do** — gather (`gatherOwn`, two per
+   tile), the organizer's multi-source move (`collections.source.ts`), each
+   reference `place()`, the committer's uncoalesced `request()`.
+6. **Derived writes on the commit path** — the layer-keyed props seed (move,
+   paste, archive) belongs in the optimize phase; `seedPropsIndex` and
+   `propsWithIndex` are duplicated between move and clipboard.
+7. **Separate re-home doors** — clipboard cut+paste, gather, portable drop each
+   re-home without `commitMoveMany`; game state inlined in layer slots
+   (solomon, bubble); read-then-SET on the bridge's `decoration-add` and
+   `bag-*` ops. Dead: `LayerTransferService`, `#commitCopyUnsafe`.

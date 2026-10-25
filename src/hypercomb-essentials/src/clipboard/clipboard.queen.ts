@@ -218,7 +218,7 @@ export class PasteQueenBee extends ClipboardVerbQueen {
     reach: 'additive' as const,
     scope: 'hive' as const,
     refuse: (args: string): string | undefined =>
-      args.trim() ? '/paste places what is held here; it takes no argument' : undefined,
+      args.trim() ? '/paste places what is held here; it takes no argument. To put tiles inside another tile, say /into <destination> = [<tile>, <tile>]' : undefined,
   }
 
   protected readonly action = 'paste'

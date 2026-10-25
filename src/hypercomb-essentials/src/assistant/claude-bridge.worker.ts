@@ -2018,13 +2018,24 @@ export class ClaudeBridgeWorker extends Worker {
 
   // Layer-as-primitive update. Caller passes `{ segments, layer }` where
   // layer is `{ name, ...slots }`. Slot names are conventional (children,
-  // tags, notes, etc.). Empty arrays wipe the slot. One awaited cascade
-  // per parent. The receiver mirrors `children` to OPFS folders so the
-  // file tree stays in sync with the merkle layer.
+  // tags, notes, etc.). Empty arrays wipe the slot. One awaited commit at
+  // the location; `children` is a list of tile NAMES, resolved there.
   async #update(req: BridgeRequest): Promise<BridgeResponse> {
     const layer = req.layer
     if (!layer || typeof layer !== 'object') {
       return { id: req.id, ok: false, error: 'no layer provided' }
+    }
+    // A SIG IS NOT A NAME. `children` here resolves each entry as a tile name
+    // at this location, so a layer read back from `layer-at` (whose children
+    // are sigs) and written straight back replaced every child with an empty
+    // tile named after its own hex. Refused, and the move that was meant is
+    // named: a tile changes parent by `submit` with `into`, its sig unchanged.
+    const sentChildren = (layer as { children?: unknown }).children
+    if (Array.isArray(sentChildren) && sentChildren.some(c => /^[0-9a-f]{64}$/.test(String(c ?? '').trim()))) {
+      return {
+        id: req.id, ok: false,
+        error: 'update children are tile NAMES, not signatures; to move tiles to a new parent, submit "into <destination> = [<tile>, ...]"',
+      }
     }
 
     // Build parentSegments from the request — no folder walk, no

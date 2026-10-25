@@ -1,7 +1,7 @@
 // core/clipboard/clipboard.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import { ClipboardService, type ClipboardEntry, type ClipboardOp } from './clipboard.service.js'
-import { childNamesOf, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig } from '../history/layer-placement.js'
+import { childNamesOf, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig, alignPlacedHeads } from '../history/layer-placement.js'
 import { seedLayerKeyedEntries } from '../editor/tile-properties.js'
 import { isPeerContentAt, markCarriedRoot } from '../sharing/adopted-roots.js'
 
@@ -754,6 +754,8 @@ export class ClipboardWorker extends Worker {
     // Existing children (warm or cold) ride through verbatim.
     const tCommit0 = performance.now()
     await committer.commitChildrenDeltas(targetSegments, { appends })
+    // A route that already has a head of that name would open the OLD tile.
+    await alignPlacedHeads(history, lineage.domain, targetSegments, appends)
     tCommit = performance.now() - tCommit0
     // THE WORDS STAY THEIRS where they land (adopted-roots.ts, carried roots).
     for (const path of carried) markCarriedRoot(path)

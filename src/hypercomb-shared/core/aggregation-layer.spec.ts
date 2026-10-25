@@ -42,6 +42,7 @@ class Model {
   resources = new Map<string, string>()       // resSig → text
   #n = 0
   commitSlotSetCalls: Array<{ segments: string[]; slot: string; sigs: string[] }> = []
+  deltaCalls: Array<{ segments: string[]; removes: string[]; appends: string[] }> = []
 
   readonly history = {
     sign: async (l: { explorerSegments: () => readonly string[] }) => hex64('loc:' + l.explorerSegments().join('/')),
@@ -79,6 +80,20 @@ class Model {
       const locSig = hex64('loc:' + segments.join('/'))
       const cur = (this.heads.get(locSig) && this.layers.get(this.heads.get(locSig)!)) || { name: segments[segments.length - 1] }
       await this.history.commitLayer(locSig, { ...cur, [slot]: [...sigs] })
+    },
+    // A children delta applied to the head, as the real committer applies it.
+    commitChildrenDeltas: async (
+      segments: readonly string[],
+      changes: { removes?: readonly { sig?: string }[]; appends?: readonly string[] },
+    ) => {
+      const removes = (changes.removes ?? []).map(r => r.sig ?? '')
+      const appends = [...(changes.appends ?? [])]
+      this.deltaCalls.push({ segments: [...segments], removes, appends })
+      const locSig = hex64('loc:' + segments.join('/'))
+      const cur = (this.heads.get(locSig) && this.layers.get(this.heads.get(locSig)!)) || { name: segments[segments.length - 1] }
+      const children = (cur.children ?? []).filter(sig => !removes.includes(sig))
+      for (const sig of appends) if (!children.includes(sig)) children.push(sig)
+      return this.history.commitLayer(locSig, { ...cur, children })
     },
   }
 
@@ -124,9 +139,8 @@ describe('aggregation-layer — curated menu membership as a layer', () => {
     expect(marker).toMatch(/^[0-9a-f]{64}$/)
 
     // the mutation went through the committer at ['websites'] (undo/redo unit)
-    expect(model.commitSlotSetCalls).toHaveLength(1)
-    expect(model.commitSlotSetCalls[0]).toMatchObject({ segments: ['websites'], slot: 'children' })
-    expect(model.commitSlotSetCalls[0].sigs).toContain(marker)
+    expect(model.deltaCalls).toHaveLength(1)
+    expect(model.deltaCalls[0]).toEqual({ segments: ['websites'], removes: [], appends: [marker] })
 
     const members = await mod.listAggregation('websites')
     expect(members).toHaveLength(1)
@@ -151,22 +165,32 @@ describe('aggregation-layer — curated menu membership as a layer', () => {
   it('disable commits the children minus the member and returns true', async () => {
     await mod.enableAggregation('websites', ['susan'], { label: 'Susan' })
     await mod.enableAggregation('websites', ['howard'], { label: 'Howard' })
-    const before = model.commitSlotSetCalls.length
+    const before = model.deltaCalls.length
 
     const removed = await mod.disableAggregation('websites', ['susan'])
     expect(removed).toBe(true)
-    expect(model.commitSlotSetCalls.length).toBe(before + 1)   // one more commit — one undo step
+    expect(model.deltaCalls.length).toBe(before + 1)   // one more commit — one undo step
+    expect(model.deltaCalls[before].appends).toEqual([])   // a remove, never a rebuilt list
 
     const labels = (await mod.listAggregation('websites')).map(m => m.label)
     expect(labels).toEqual(['Howard'])
   })
 
+  it('a read that fails never wipes the members already there', async () => {
+    await mod.enableAggregation('websites', ['susan'], { label: 'Susan' })
+    const read = model.history.currentLayerAt
+    model.history.currentLayerAt = async () => { throw new Error('cold') }
+    await mod.enableAggregation('websites', ['howard'], { label: 'Howard' })
+    model.history.currentLayerAt = read
+    expect((await mod.listAggregation('websites')).map(m => m.label)).toEqual(['Susan', 'Howard'])
+  })
+
   it('disabling an absent member is a no-op (no commit, returns false)', async () => {
     await mod.enableAggregation('websites', ['susan'], { label: 'Susan' })
-    const before = model.commitSlotSetCalls.length
+    const before = model.deltaCalls.length
     const removed = await mod.disableAggregation('websites', ['nope'])
     expect(removed).toBe(false)
-    expect(model.commitSlotSetCalls.length).toBe(before)
+    expect(model.deltaCalls.length).toBe(before)
   })
 
   it('membership IS the layer: reverting the committed children (undo) restores the prior menu', async () => {

@@ -4,7 +4,7 @@ import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js
 import type { Axial } from '../navigation/hex-detector.js'
 import type { OrderProjection } from '../history/order-projection.js'
 import { writeTilePropertiesAt, seedLayerKeyedEntries } from '../editor/tile-properties.js'
-import { childNamesOfStrict, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig, flattenLayerTree } from '../history/layer-placement.js'
+import { childNamesOfStrict, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig, flattenLayerTree, alignPlacedHeads } from '../history/layer-placement.js'
 import type { PlacementHistory, PlacementLayer } from '../history/layer-placement.js'
 import { getLaneScrollAxis } from '../sequence/lane-viewport-mode.js'
 import { LayerTransferService } from './layer-transfer.service.js'
@@ -691,21 +691,8 @@ export class MoveDrone extends Drone {
    * layer it was on and lives inside the destination, which is why it vanishes
    * from where it used to be.
    *
-   * Same primitives as the other two: one collection sig per tile
-   * (captureCollectionSig), a landing index folded in by re-minting only the top
-   * node, the participant-local render-index seed, and children DELTAS so a
-   * sibling nobody has read stays untouched. What differs is the COMMIT SHAPE,
-   * which follows the topology of the two locations:
-   *
-   *   • destination INSIDE the source (drop-into) → the destination gains, then
-   *     the source loses AND swaps the destination's now-stale sig, free, in the
-   *     same marker.
-   *   • source INSIDE the destination (promote) → the inverse ordering.
-   *   • UNRELATED locations → two plain commits, no swap. There is no shared
-   *     edge for a swap to ride on, and a location resolves from its OWN bag
-   *     head (the parent's stored child sig is only a hint), so both pages read
-   *     correctly afterwards. This is the shape clipboard cut+paste already
-   *     commits in — see clipboard-sig-native.md.
+   * One destination is the one-group case of `commitMoveMany`, so there is ONE
+   * implementation of a re-home; see it for the commit shape.
    *
    * Returns the labels that actually LANDED. A name already taken at the
    * destination is skipped rather than clobbered, because a name is an address.
@@ -715,23 +702,89 @@ export class MoveDrone extends Drone {
     sourceSegments: readonly string[],
     targetSegments: readonly string[],
   ): Promise<readonly string[]> => {
-    const moved = [...new Set(labels)].filter(Boolean)
-    if (moved.length === 0) return []
+    const [landed] = await this.commitMoveMany(sourceSegments, [{ labels, targetSegments }])
+    return landed ?? []
+  }
+
+  /**
+   * Re-home tiles of ONE page into SEVERAL destinations as one act — the shape
+   * of every tidy-up: `people = [ana, ben]`, `work = [desk, inbox]`, … Moving to
+   * a new parent is a membership edit and nothing else. Each tile's collection
+   * sig (captureCollectionSig) leaves the source's `children` and joins the
+   * destination's; the subtree under it is never copied, walked or re-committed,
+   * because its bytes are pool-addressed and position-independent.
+   *
+   * WHY ONE ACT. Said one destination at a time, each move re-committed the
+   * source page — five groups were ten markers and five re-renders of the page
+   * being tidied. Here every destination gains in one marker each, and the
+   * source loses EVERY moved tile in ONE marker: m destinations cost m + 1.
+   *
+   * The commit shape follows the topology of each destination:
+   *
+   *   • INSIDE the source, one level down (drop-into, organize's groups) → the
+   *     destination gains first; the source's one marker then drops the moved
+   *     tiles AND swaps each such destination's now-stale sig, free.
+   *   • the source's PARENT (promote) → the source loses first, then the parent
+   *     gains and swaps the source's stale sig: the inverse ordering.
+   *   • UNRELATED → the destination gains before the source loses, so a failure
+   *     between the commits leaves a tile reachable twice, never nowhere. There
+   *     is no shared edge for a swap to ride on, and a location resolves from
+   *     its OWN bag head (the parent's stored child sig is only a hint), so both
+   *     pages read correctly afterwards — the shape clipboard cut+paste commits
+   *     in (clipboard-sig-native.md).
+   *
+   * Everything is checked before anything commits: a tile named twice, a
+   * destination that is the source, a moved tile, or inside one, refuses the
+   * whole act. Destinations naming the same place merge into one. Returns, per
+   * entry of `moves`, the labels that actually landed.
+   */
+  commitMoveMany = async (
+    sourceSegments: readonly string[],
+    moves: readonly { labels: readonly string[]; targetSegments: readonly string[] }[],
+  ): Promise<readonly (readonly string[])[]> => {
+    const none = moves.map((): readonly string[] => [])
 
     const history = window.ioc.get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
     const committer = window.ioc.get<CopyCommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
     const lineage = this.resolve<any>('lineage')
-    if (!history || !committer || !lineage) return []
+    if (!history || !committer || !lineage) return none
 
     const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
-    const refuse = (key: string, title: string, message: string): readonly string[] => {
+    const refuse = (key: string, title: string, message: string): readonly (readonly string[])[] => {
       EffectBus.emit('toast:show', {
         type: 'info',
         title: i18n?.t(`move.into.${key}.title`) ?? title,
         message: i18n?.t(`move.into.${key}.message`) ?? message,
       })
-      return []
+      return none
     }
+
+    const source = [...sourceSegments]
+    const same = (a: readonly string[], b: readonly string[]): boolean =>
+      a.length === b.length && a.every((s, i) => s === b[i])
+    /** Is `outer` a strict ancestor path of `inner`? */
+    const inside = (outer: readonly string[], inner: readonly string[]): boolean =>
+      outer.length < inner.length && outer.every((s, i) => s === inner[i])
+
+    // One leg per distinct destination, in the order first named.
+    const legs: { target: string[]; labels: string[] }[] = []
+    const claimed = new Set<string>()
+    for (const move of moves) {
+      const target = [...move.targetSegments]
+      const leg = legs.find(l => same(l.target, target)) ?? (legs.push({ target, labels: [] }), legs[legs.length - 1])
+      for (const label of move.labels) {
+        if (!label || leg.labels.includes(label)) continue
+        // A move puts a tile in ONE place. Named for two, it has no answer.
+        if (claimed.has(label)) {
+          console.warn('[move] move-many refused — a tile is named for two destinations', label)
+          return none
+        }
+        claimed.add(label)
+        leg.labels.push(label)
+      }
+    }
+    const live = legs.filter(l => l.labels.length > 0)
+    if (live.length === 0) return none
 
     const cursor = window.ioc.get<{ state?: { rewound?: boolean } }>('@diamondcoreprocessor.com/HistoryCursorService')
     if (cursor?.state?.rewound) {
@@ -740,98 +793,109 @@ export class MoveDrone extends Drone {
         title: i18n?.t('move.rewound.title') ?? 'Viewing history',
         message: i18n?.t('move.rewound.message') ?? "Can’t move while scrubbed back — return to the latest (Restore) to edit.",
       })
-      return []
+      return none
     }
 
-    const source = [...sourceSegments]
-    const target = [...targetSegments]
-    const same = (a: readonly string[], b: readonly string[]): boolean =>
-      a.length === b.length && a.every((s, i) => s === b[i])
-    /** Is `outer` a strict ancestor path of `inner`? */
-    const inside = (outer: readonly string[], inner: readonly string[]): boolean =>
-      outer.length < inner.length && outer.every((s, i) => s === inner[i])
-
-    if (same(source, target)) {
-      return refuse('here', 'Already there',
-        'These tiles are already on that page — there is nothing to move.')
-    }
-    // A tile can never contain itself. Both the destination BEING a moved tile
-    // and the destination living INSIDE one would detach the subtree from the
-    // tree it is part of, and the tiles would be reachable from nowhere.
-    for (const label of moved) {
-      const own = [...source, label]
-      if (same(own, target) || inside(own, target)) {
-        return refuse('self', 'Can’t move a tile into itself',
-          `“${label}” is where you are trying to put it — pick a destination outside it.`)
+    for (const leg of live) {
+      if (same(source, leg.target)) {
+        return refuse('here', 'Already there',
+          'These tiles are already on that page — there is nothing to move.')
+      }
+      // A tile can never contain itself. A destination that IS a moved tile, or
+      // lives inside one, would detach the subtree from the tree it is part of
+      // and the tiles would be reachable from nowhere — whichever leg moves it.
+      for (const label of claimed) {
+        const own = [...source, label]
+        if (same(own, leg.target) || inside(own, leg.target)) {
+          return refuse('self', 'Can’t move a tile into itself',
+            `“${label}” is where you are trying to put it — pick a destination outside it.`)
+        }
       }
     }
 
+    const childOfSource = (target: readonly string[]): boolean =>
+      inside(source, target) && target.length === source.length + 1
+    const parentOfSource = (target: readonly string[]): boolean =>
+      inside(target, source) && source.length === target.length + 1
+
     try {
-      // ── read both ends ──────────────────────────────────────────────────────
+      // ── read the source once ────────────────────────────────────────────────
       const sourceParent = same(source, (lineage.explorerSegments?.() ?? []).map(String))
         ? await this.#resolveCurrentParent(history, lineage, source)
         : await resolveLayerAt(history, lineage.domain, source)
       if (!sourceParent) {
-        console.warn('[move] move-into aborted — source unresolved', { source, moved })
-        return []
+        console.warn('[move] move-into aborted — source unresolved', { source, moves: live })
+        return none
       }
       const { entries: sourceEntries } = await childEntriesOf(history, sourceParent)
       const sigByName = new Map(sourceEntries.map(e => [e.name, e.sig]))
-      if (!moved.every(l => sigByName.has(l))) {
-        console.warn('[move] move-into aborted — tiles not resolvable in the source', { source, moved })
-        return []
+      if (!live.every(leg => leg.labels.every(l => sigByName.has(l)))) {
+        console.warn('[move] move-into aborted — tiles not resolvable in the source', { source, moves: live })
+        return none
       }
 
-      const destLayer = await this.#warmDestination(history, lineage, target)
-      if (!destLayer) {
-        console.warn('[move] move-into aborted — destination unresolved', { target })
-        return refuse('unreachable', 'Can’t reach that page',
-          'The destination could not be read, so nothing was moved.')
+      // ── read every destination before anything commits ──────────────────────
+      const captured: {
+        target: string[]
+        appends: string[]
+        removes: { sig?: string; label: string }[]
+        landed: string[]
+        destEntries: readonly { name: string; sig?: string }[]
+      }[] = []
+      for (const leg of live) {
+        const destLayer = await this.#warmDestination(history, lineage, leg.target)
+        if (!destLayer) {
+          console.warn('[move] move-into aborted — destination unresolved', { target: leg.target })
+          return refuse('unreachable', 'Can’t reach that page',
+            'The destination could not be read, so nothing was moved.')
+        }
+        const { entries: destEntries } = await childEntriesOf(history, destLayer)
+        const destTaken = new Set(destEntries.map(e => e.name))
+        const { appends, removes, landed } = await this.#captureMoves(
+          history, source, leg.labels, sigByName, destTaken, destEntries.length, 'move-into',
+        )
+        captured.push({ target: leg.target, appends, removes, landed, destEntries })
       }
-      const { entries: destEntries } = await childEntriesOf(history, destLayer)
-      const destTaken = new Set(destEntries.map(e => e.name))
-
-      const { appends, removes, landed } = await this.#captureMoves(
-        history, source, moved, sigByName, destTaken, destEntries.length, 'move-into',
-      )
-      if (landed.length === 0) {
-        const name = target[target.length - 1] ?? 'there'
+      if (captured.every(c => c.landed.length === 0)) {
+        const name = live[0].target[live[0].target.length - 1] ?? 'there'
         return refuse('taken', 'Those names are taken',
           `“${name}” already holds a tile by each of those names, and a name is an address — nothing was overwritten.`)
       }
 
       EffectBus.emit('fs:changed', { segments: [...source] })
-      await this.#seedPropsIndex(history, appends, target)
+      for (const c of captured) if (c.appends.length) await this.#seedPropsIndex(history, c.appends, c.target)
 
-      // ── commit, in the order the topology dictates (see the header) ─────────
-      if (inside(source, target) && target.length === source.length + 1) {
-        const label = target[target.length - 1]
-        const oldSig = sigByName.get(label)
-        const newSig = await committer.commitChildrenDeltas(target, { appends })
-        await committer.commitChildrenDeltas(source, {
-          removes,
-          swaps: (oldSig && newSig && oldSig !== newSig) ? [{ from: oldSig, to: newSig }] : [],
-        })
-      } else if (inside(target, source) && source.length === target.length + 1) {
-        const label = source[source.length - 1]
-        const oldSig = destEntries.find(e => e.name === label)?.sig
-        const newSig = await committer.commitChildrenDeltas(source, { removes })
-        await committer.commitChildrenDeltas(target, {
-          appends,
-          swaps: (oldSig && newSig && oldSig !== newSig) ? [{ from: oldSig, to: newSig }] : [],
-        })
-      } else {
-        // Unrelated ends: the destination GAINS first, so a failure between the
-        // two commits leaves the tiles reachable twice rather than nowhere.
-        await committer.commitChildrenDeltas(target, { appends })
-        await committer.commitChildrenDeltas(source, { removes })
+      // ── commit, in the order each topology dictates (see the header) ────────
+      const swaps: { from: string; to: string }[] = []
+      const promoted = captured.filter(c => c.appends.length > 0 && parentOfSource(c.target))
+      for (const c of captured) {
+        if (c.appends.length === 0 || parentOfSource(c.target)) continue
+        const newSig = await committer.commitChildrenDeltas(c.target, { appends: c.appends })
+        if (!childOfSource(c.target)) continue
+        const oldSig = sigByName.get(c.target[c.target.length - 1])
+        if (oldSig && newSig && oldSig !== newSig) swaps.push({ from: oldSig, to: newSig })
       }
+      const newSourceSig = await committer.commitChildrenDeltas(source, {
+        removes: captured.flatMap(c => c.removes),
+        swaps,
+      })
+      for (const c of promoted) {
+        const oldSig = c.destEntries.find(e => e.name === source[source.length - 1])?.sig
+        await committer.commitChildrenDeltas(c.target, {
+          appends: c.appends,
+          swaps: (oldSig && newSourceSig && oldSig !== newSourceSig) ? [{ from: oldSig, to: newSourceSig }] : [],
+        })
+      }
+      // A route that already has a head of that name would open the OLD tile.
+      for (const c of captured) await alignPlacedHeads(history, lineage.domain, c.target, c.appends)
 
       // Carry the segments explicitly on both sides — the awaited commits mean a
       // segment-less emit would bind to wherever the participant has navigated.
-      for (const label of landed) {
-        EffectBus.emit('cell:removed', { cell: label, segments: [...source] })
-        EffectBus.emit('cell:added', { cell: label, segments: [...target], viaUpdate: true })
+      for (const c of captured) {
+        for (const label of c.landed) {
+          EffectBus.emit('cell:removed', { cell: label, segments: [...source] })
+          EffectBus.emit('cell:added', { cell: label, segments: [...c.target], viaUpdate: true })
+        }
       }
 
       // Whichever end is the page ON SCREEN has a new head, and the history
@@ -840,16 +904,16 @@ export class MoveDrone extends Drone {
       // (Drop-into never needed this: its destination is inside the page, so the
       // page's own marker carries the change. A destination somewhere else does.)
       const current = (lineage.explorerSegments?.() ?? []).map(String)
-      if (same(current, target) || same(current, source)) {
-        const cursor = window.ioc.get<{
+      if (same(current, source) || captured.some(c => same(current, c.target))) {
+        const historyCursor = window.ioc.get<{
           refreshForLocation?: (sig: string) => Promise<void> | void
           jumpToLatest?: () => void
         }>('@diamondcoreprocessor.com/HistoryCursorService')
         const locSig = await history.sign({ domain: lineage.domain, explorerSegments: () => current })
           .catch(() => '')
         if (locSig) {
-          await cursor?.refreshForLocation?.(locSig)
-          cursor?.jumpToLatest?.()
+          await historyCursor?.refreshForLocation?.(locSig)
+          historyCursor?.jumpToLatest?.()
         }
       }
 
@@ -857,10 +921,12 @@ export class MoveDrone extends Drone {
       selection?.clear?.()
       this.emitEffect('move:committed', { order: [] })
       void new hypercomb().act()
-      return landed
+
+      const landed = new Set(captured.flatMap(c => c.landed))
+      return moves.map(move => [...new Set(move.labels)].filter(label => landed.has(label)))
     } catch (err) {
-      console.warn('[move] commitMoveInto failed:', err)
-      return []
+      console.warn('[move] commitMoveMany failed:', err)
+      return none
     }
   }
 

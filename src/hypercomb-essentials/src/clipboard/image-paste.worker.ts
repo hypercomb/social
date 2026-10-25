@@ -110,27 +110,19 @@ export class ImagePasteWorker extends Worker {
 
     const history = get('@diamondcoreprocessor.com/HistoryService') as
       { getLayerBySig?: (s: string) => Promise<{ name?: string } | null> } | undefined
-    const committer = get('@diamondcoreprocessor.com/LayerCommitter') as
-      { update?: (segments: readonly string[], layer: { name?: string; [slot: string]: unknown }) => Promise<string> } | undefined
 
     // Resolve existing sibling names from the layer (single source of
-    // truth for "what tiles are here") — STRICT: a cold sibling sig that
-    // fails to resolve must never be silently dropped, because the commit
-    // below re-SETs the parent's children and a dropped name is a
-    // permanent wipe of that tile (the husk class).
-    type ParentLayer = { name?: string; children?: readonly unknown[]; [slot: string]: unknown }
-    const existingNames: string[] = []
+    // truth for "what tiles are here") — only to choose a free name. The
+    // read never becomes a write, so a sibling it could not resolve costs
+    // at worst a name chosen twice, never the tile.
     const existing = new Set<string>()
-    let parentLayer: ParentLayer | null = null
-    let coldMiss = false
     if (typeof lineage.currentLayer === 'function' && history?.getLayerBySig) {
       try {
         const raw = await lineage.currentLayer()
-        parentLayer = (raw && typeof raw === 'object') ? raw as ParentLayer : null
+        const parentLayer = (raw && typeof raw === 'object') ? raw : null
         const strict = await childNamesOfStrict(history as unknown as PlacementHistory, parentLayer as unknown as Parameters<typeof childNamesOfStrict>[1])
-        coldMiss = strict.coldMiss
-        for (const n of strict.names) { existingNames.push(n); existing.add(n) }
-      } catch { parentLayer = null }
+        for (const n of strict.names) existing.add(n)
+      } catch { /* no names known — 'image' is tried as is */ }
     }
 
     let finalName = 'image'
@@ -144,31 +136,14 @@ export class ImagePasteWorker extends Worker {
       .map(s => String(s ?? '').trim())
       .filter(Boolean)
 
-    // SAFE PATH — parent layer read completely: emit cell:added with
-    // viaUpdate (skips the committer's per-event queue) and make ONE
-    // atomic commit that appends the new name to the fully-resolved set.
-    //
-    // FALLBACK — parent unreadable OR a child sig was cold: never SET a
-    // children list we couldn't fully read. Emit cell:added WITHOUT
-    // viaUpdate so the LayerCommitter's own event queue folds the single
-    // add into its current state — the committer merges, it doesn't
-    // re-list, so cold siblings survive. (Fresh empty locations take
-    // this path too and work: empty state + one child.)
-    const update = committer?.update
-    const canSetChildren = parentLayer !== null && !coldMiss && typeof update === 'function'
-    EffectBus.emit('cell:added', { cell: finalName, segments, ...(canSetChildren ? { viaUpdate: true } : {}) })
-
-    if (canSetChildren && parentLayer && update) {
-      const nextParent: { [slot: string]: unknown } = {}
-      for (const [k, v] of Object.entries(parentLayer)) {
-        if (k === 'children') continue
-        nextParent[k] = v
-      }
-      nextParent['children'] = [...existingNames, finalName]
-      await update(segments, nextParent)
-    } else if (coldMiss) {
-      console.warn('[image-paste] cold sibling during paste — deferring children SET to the committer event queue')
-    }
+    // ONE APPEND, THROUGH THE COMMITTER'S OWN QUEUE. The committer adds the
+    // name to the page's head — it merges, it never re-lists — so every
+    // sibling rides through. This used to SET the whole children list from
+    // NAMES whenever the read looked complete, and a name slot resolves each
+    // sibling from its OWN bag: a sibling never committed at its own location
+    // (installed content) came back as an empty {name} stand-in, and an
+    // add that landed between the read and the write was undone.
+    EffectBus.emit('cell:added', { cell: finalName, segments })
     void new hypercomb().act()
 
     return finalName

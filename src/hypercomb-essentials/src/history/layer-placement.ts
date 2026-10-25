@@ -252,6 +252,35 @@ export async function captureCollectionSig(
   return found?.sig ?? null
 }
 
+/** After layers are placed under `target` by sig, make each one's OWN route
+ *  agree with it.
+ *
+ *  A location's own head outranks its parent's pointer (resolveLayerAt), and
+ *  a bag is keyed by route. So a tile placed where a tile of the same name
+ *  once lived — moved back after an organize, filed or pasted where an old one
+ *  was removed — was LISTED as itself and OPENED as that old head, and an edit
+ *  made inside it hydrated from the old head. Where the route already has a
+ *  head, it advances to the placed layer: the same bytes, one marker, nothing
+ *  copied (commitLayer dedups when they already match). A route with no head
+ *  needs nothing — it resolves through the parent. Descendant routes are not
+ *  walked; identity by name (hypergraph-molecule-lineage.md) is the whole fix. */
+export async function alignPlacedHeads(
+  history: PlacementHistory,
+  domain: unknown,
+  target: readonly string[],
+  sigs: readonly string[],
+): Promise<void> {
+  for (const sig of sigs) {
+    const layer = await history.getLayerBySig(sig)
+    if (!layer || typeof layer.name !== 'string' || !layer.name) continue
+    const name = layer.name
+    const locSig = await history.sign({ domain, explorerSegments: () => [...target, name] }).catch(() => '')
+    if (!locSig) continue
+    const head = await history.currentLayerAt(locSig).catch(() => null)
+    if (head) await history.commitLayer(locSig, layer)
+  }
+}
+
 /** Resolve a single child cell's layer (and its sig) via its PARENT's
  *  `children` slot — the authoritative membership path the renderer uses.
  *
@@ -355,6 +384,10 @@ export async function flattenLayerTree(
   history: PlacementHistory,
   layer: PlacementLayer,
   destSegments: readonly string[],
+  /** Counts children skipped because neither their bytes nor the manifest
+   *  resolved. A caller that REMOVES the original after copying must check
+   *  it: the copy is short by that many tiles. */
+  report?: { dropped: number },
 ): Promise<{ segments: string[]; layer: { name?: string; [slot: string]: unknown } }[]> {
   // Read child sigs from whichever canonical child slot the source uses
   // (cells / layers / children) — a built module nests under `cells`, so
@@ -381,7 +414,10 @@ export async function flattenLayerTree(
   const childNames: string[] = []
   for (const sig of childSigs) {
     const child = await resolveChild(String(sig))
-    if (!child || typeof child.name !== 'string' || child.name.length === 0) continue
+    if (!child || typeof child.name !== 'string' || child.name.length === 0) {
+      if (report) report.dropped++
+      continue
+    }
     // Untrusted (adopted) child names arrive here via getLayerBySig on signed
     // peer layers. A name that is really a path (separator/control char) would
     // masquerade as a multi-segment lineage path below (destSegments + name) and
@@ -413,7 +449,7 @@ export async function flattenLayerTree(
     { segments: [...destSegments], layer: node },
   ]
   for (const child of childLayers) {
-    updates.push(...await flattenLayerTree(history, child, [...destSegments, child.name as string]))
+    updates.push(...await flattenLayerTree(history, child, [...destSegments, child.name as string], report))
   }
   return updates
 }

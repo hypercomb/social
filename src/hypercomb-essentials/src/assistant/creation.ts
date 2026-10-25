@@ -36,7 +36,7 @@ type HistoryLike = {
   sign(lineage: { explorerSegments: () => readonly string[] }): Promise<string>
   currentLayerAt(sig: string): Promise<Record<string, unknown> | null>
 }
-type CommitterLike = { update?: (segments: readonly string[], layer: object) => Promise<unknown> }
+type CommitterLike = { commitSlotAppend?: (segments: readonly string[], slot: string, sig: string) => Promise<void> }
 
 /** The id of one structural act. Deterministic: the same task at the same
  *  place and instant is the same creation, so a retry that re-derives it
@@ -66,7 +66,7 @@ export const stampCreation = async (
   const store = get<StoreLike>('@hypercomb.social/Store')
   const history = get<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
   const committer = get<CommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
-  if (!store?.putResource || !history || !committer?.update) return false
+  if (!store?.putResource || !history || !committer?.commitSlotAppend) return false
 
   try {
     const record = {
@@ -92,7 +92,11 @@ export const stampCreation = async (
       : []
     if (prior.includes(sig)) return true
 
-    await committer.update(segments, { ...layer, decorations: [...prior, sig] })
+    // ONE slot append, applied to the head inside the commit queue. This used
+    // to hand the whole layer back to `update`, whose `children` slot reads
+    // NAMES: every child sig came back resolved as a tile named after its own
+    // hex — an empty stand-in in place of each child of the stamped tile.
+    await committer.commitSlotAppend(segments, 'decorations', sig)
     return true
   } catch (err) {
     console.warn('[creation] could not stamp', segments.join('/'), err)

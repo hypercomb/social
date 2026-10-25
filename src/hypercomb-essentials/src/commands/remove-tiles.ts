@@ -21,10 +21,9 @@ export type HistoryServiceLike = {
 }
 
 export type LayerCommitterLike = {
-  update(
+  commitChildrenDeltas(
     segments: readonly string[],
-    layer: { name?: string; [slot: string]: unknown },
-    nameSlots?: ReadonlySet<string>,
+    changes: { removes?: readonly { sig?: string; label?: string }[] },
   ): Promise<string>
 }
 
@@ -68,30 +67,29 @@ export async function removeTilesAt(
 
   if (opts.confirm && !(await opts.confirm(history, parent))) return false
 
-  // SIG-PRESERVING drop. Keep every surviving child's EXACT stored sig and
-  // remove only the target(s). Do NOT rebuild `children` from survivor NAMES:
-  // committer.update resolves a `children` NAME slot via latestMarkerSigFor on
-  // each survivor's OWN bag, which AUTO-MINTS an empty {name} layer for any
-  // survivor whose own bag is cold — e.g. freshly-installed content whose child
-  // bags aren't materialised. That silently replaces a survivor's real sig with
-  // an empty one, so the renderer (which reads each child's image from its
-  // stored sig) paints it as a no-image tile. Dropping the target sig and
-  // re-committing the remaining sigs verbatim preserves every survivor exactly.
+  // SIG-NATIVE drop: name the target sigs and nothing else. The list is never
+  // rebuilt here — not from survivor NAMES (committer.update resolves a name
+  // slot via latestMarkerSigFor on each survivor's own bag, which auto-mints an
+  // empty {name} layer for a cold one and paints it as a no-image tile), and
+  // not from survivor SIGS either: a whole list written from this read undid
+  // any commit that landed at this page between the read and the write. A
+  // removes delta applies to the page's head inside the commit queue, so
+  // every sibling — cold, unread, or just added — rides through untouched.
   const childSigs = Array.isArray(parent.children) ? parent.children : []
   const targetSet = new Set(targets)
-  const survivorSigs: string[] = []
+  const removes: { sig: string; label: string }[] = []
   for (const sig of childSigs) {
     const child = await history.getLayerBySig(sig)
-    // Drop only sigs we can positively identify as a target; keep everything
-    // else (incl. an unreadable sibling) so a cold miss never wipes a tile.
-    if (child && typeof child.name === 'string' && targetSet.has(child.name)) continue
-    survivorSigs.push(String(sig))
+    // Remove only sigs we can positively identify as a target.
+    if (child && typeof child.name === 'string' && targetSet.has(child.name)) {
+      removes.push({ sig: String(sig), label: child.name })
+    }
   }
 
   // NOTHING MATCHED, NOTHING HAPPENED — and it must not say otherwise. The
-  // survivors were then every child, the commit a no-op, and the receipt read
-  // "removed" for a name this page never held (surface audit, false success).
-  if (survivorSigs.length === childSigs.length) return false
+  // commit would have been a no-op, and the receipt read "removed" for a name
+  // this page never held (surface audit, false success).
+  if (removes.length === 0) return false
 
   // Notify downstream UI subscribers (activity log, substrate, slot
   // machine, tile-overlay) BEFORE awaiting the commit so the visual
@@ -100,19 +98,18 @@ export async function removeTilesAt(
   // the visual on it makes deletes feel broken.
   //
   // `viaUpdate: true` tells LayerCommitter's per-event commit listener
-  // to skip queueing — the upcoming committer.update() call IS the
-  // atomic commit for this whole operation. Without the flag, N tiles
+  // to skip queueing — the upcoming children delta IS the atomic commit
+  // for this whole operation. Without the flag, N tiles
   // produce N history markers (one per event); with it, the whole
   // multi-delete collapses into a single marker.
   for (const name of targets) {
     EffectBus.emit('cell:removed', { cell: name, segments, viaUpdate: true })
   }
 
-  // Empty nameSlots → the committer SETs `children` to these exact sigs (no
-  // name→sig re-resolution, no auto-mint). Other slots (decorations, notes,
-  // properties) are preserved — #commit hydrates them from the previous layer.
-  // A refused commit answers '' (it logs "update refused — no address
-  // resolvable"); that is a removal that did not land.
-  const landed = await committer.update(segments, { children: survivorSigs }, new Set<string>())
+  // Other slots (decorations, notes, properties) ride through — the delta
+  // hydrates every slot from the head. A refused commit answers '' (it logs
+  // "children deltas refused — no address resolvable"); that is a removal
+  // that did not land.
+  const landed = await committer.commitChildrenDeltas(segments, { removes })
   return typeof landed === 'string' ? landed !== '' : true
 }

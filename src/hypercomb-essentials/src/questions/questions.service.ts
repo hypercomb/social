@@ -80,7 +80,13 @@ const SORT_SYSTEM = 'You file questions into categories. Answer with one JSON ar
 type LineageShape = { explorerSegments?: () => readonly string[]; domain?: unknown }
 type NavigationShape = { goRaw?: (segments: readonly string[]) => void }
 type CommitterShape = { settled?: () => Promise<void> }
-type MoveShape = { commitMoveInto?: (labels: readonly string[], source: readonly string[], target: readonly string[]) => Promise<readonly string[]> }
+type MoveShape = {
+  commitMoveInto?: (labels: readonly string[], source: readonly string[], target: readonly string[]) => Promise<readonly string[]>
+  commitMoveMany?: (
+    source: readonly string[],
+    moves: readonly { labels: readonly string[]; targetSegments: readonly string[] }[],
+  ) => Promise<readonly (readonly string[])[]>
+}
 type SwarmShape = {
   peerTilesAtCurrentSig?: () => readonly { name: string; peerPubkey: string }[]
   labelFor?: (pubkey: string) => string
@@ -680,9 +686,19 @@ export class Questions extends EventTarget {
       await new hypercomb().act()
       await this.#settled()
     }
-    for (const step of [...plan.create, ...plan.move]) {
-      const landed = await move.commitMoveInto(step.members, page, [...page, named(step)])
-      moved += landed.length
+    // Every step that files questions away from this page is ONE act: each
+    // category gains once and the page loses them all in one marker. A
+    // question claimed by an earlier step stays with it — the act refuses a
+    // tile named for two places, and the step-at-a-time loop let it go first.
+    const claimed = new Set<string>()
+    const steps = [...plan.create, ...plan.move].map(step => ({
+      labels: step.members.filter(member => !claimed.has(member) && (claimed.add(member), true)),
+      targetSegments: [...page, named(step)],
+    })).filter(step => step.labels.length > 0)
+    if (steps.length && move.commitMoveMany) {
+      for (const landed of await move.commitMoveMany(page, steps)) moved += landed.length
+    } else {
+      for (const step of steps) moved += (await move.commitMoveInto(step.labels, page, step.targetSegments)).length
     }
     for (const step of plan.retract) {
       const landed = await move.commitMoveInto(step.members, [...page, step.category], page)

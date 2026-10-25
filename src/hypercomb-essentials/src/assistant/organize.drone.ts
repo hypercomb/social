@@ -19,10 +19,11 @@
 //      optimization back through the `optimization-add` bridge op.
 //
 //   2. APPLY (in the hive, here). This drone validates the plan against the
-//      LIVE layer and applies it with MoveDrone.commitMoveInto — the same
+//      LIVE layer and applies it with MoveDrone.commitMoveMany — the same
 //      primitive drag-drop-into, /into and promote already use, which means
-//      one marker per group, undoable, name collisions skipped rather than
-//      clobbered, and refusal while the history cursor is rewound.
+//      one marker per group plus one for the layer, undoable, name collisions
+//      skipped rather than clobbered, and refusal while the history cursor is
+//      rewound.
 //
 // The split exists because a membership rewrite is the ONE operation that can
 // permanently lose a tile: a cold pool miss makes a child look absent, and
@@ -64,11 +65,10 @@ type CommitterLike = {
   settled?: () => Promise<void>
 }
 type MoveLike = {
-  commitMoveInto?: (
-    labels: readonly string[],
+  commitMoveMany?: (
     sourceSegments: readonly string[],
-    targetSegments: readonly string[],
-  ) => Promise<readonly string[]>
+    moves: readonly { labels: readonly string[]; targetSegments: readonly string[] }[],
+  ) => Promise<readonly (readonly string[])[]>
 }
 
 type PlanGroup = { name: string; members: string[] }
@@ -335,7 +335,7 @@ export class OrganizeDrone extends Drone {
       }
 
       const move = get<MoveLike>('@diamondcoreprocessor.com/MoveDrone')
-      if (!move?.commitMoveInto) {
+      if (!move?.commitMoveMany) {
         this.#reject('the move primitive is unavailable')
         return 0
       }
@@ -354,13 +354,23 @@ export class OrganizeDrone extends Drone {
       const creationId = String((record.payload as Record<string, unknown> | undefined)?.['creationId'] ?? '')
       let unstamped = 0
 
-      const receipt = new ReceiptBuilder()
-      let landedTiles = 0
       for (const g of groups) {
         if (creationId && !await stampCreation([...segments, g.name], creationId, ORGANIZE_TASK, 'group')) {
           console.warn(`[organize] "${g.name}" could not be stamped`)
         }
-        const landed = await move.commitMoveInto(g.members, segments, [...segments, g.name])
+      }
+
+      // ONE ACT FOR EVERY GROUP. Moved a group at a time, the layer being
+      // organized was re-committed once per group; together, each group gains
+      // in one marker and the layer loses every member in one more.
+      const landedByGroup = await move.commitMoveMany(
+        segments, groups.map(g => ({ labels: g.members, targetSegments: [...segments, g.name] })),
+      )
+
+      const receipt = new ReceiptBuilder()
+      let landedTiles = 0
+      for (const [at, g] of groups.entries()) {
+        const landed = landedByGroup[at] ?? []
         landedTiles += landed.length
         if (landed.length === g.members.length) receipt.landed()
         else if (landed.length === 0) receipt.skipped('refused every move')

@@ -43,7 +43,7 @@ describe('/remove', () => {
       getLayerBySig: async (sig: string) => layers[sig] ?? null,
     })
     set('@diamondcoreprocessor.com/LayerCommitter', {
-      update: async (_segments: unknown, layer: unknown) => { commits.push(layer); return commitAnswer },
+      commitChildrenDeltas: async (_segments: unknown, changes: unknown) => { commits.push(changes); return commitAnswer },
     })
     return commits
   }
@@ -62,7 +62,8 @@ describe('/remove', () => {
   it('answers true when the tile really left', async () => {
     const commits = page('newsig')
     expect(await removeTilesAt([], ['drafts'])).toBe(true)
-    expect(commits).toEqual([{ children: ['s2'] }])
+    // A removes delta naming only the tile that left — never a rebuilt list.
+    expect(commits).toEqual([{ removes: [{ sig: 's1', label: 'drafts' }] }])
   })
 })
 

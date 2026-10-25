@@ -223,6 +223,9 @@ describe('what the corrections refuse', () => {
     expect(refuse('archive =')).toBe('/into needs at least one tile name after the =')
     expect(refuse('archive = [drafts, a/b]')).toBe('/into moves tiles of this page; name them, not a route')
     expect(refuse('archive = [drafts, notes]')).toBeUndefined()
+    expect(refuse('people = [ana, ben], work = [desk, inbox]')).toBeUndefined()
+    expect(refuse('people = [ana], work = ana')).toBe('/into names "ana" twice; a tile moves to one place')
+    expect(refuse('people = ana, ben')).toBe('/into needs a destination before the =')
     // /susan is withheld (core ai-withheld.store.ts): it may not leave, and nothing goes in.
     // A store, as the real one is: `covers` reads its own private document, so
     // a door that lifts the method off the store throws (found live, 2026-10-24).
@@ -233,6 +236,7 @@ describe('what the corrections refuse', () => {
     expect(refuse('susan = notes')).toBe('/into: /susan is withheld from outside models; put the tiles somewhere else')
     expect(refuse('/susan/family = notes')).toContain('is withheld from outside models')
     expect(refuse('people = [notes, drafts]')).toBeUndefined()
+    expect(refuse('people = notes, susan = drafts')).toBe('/into: /susan is withheld from outside models; put the tiles somewhere else')
     // Standing in /people, a child that merely shares the name is not withheld.
     ioc.register('@hypercomb.social/Lineage', { explorerSegments: () => ['people'] })
     expect(refuse('archive = susan')).toBeUndefined()

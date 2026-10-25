@@ -15,9 +15,10 @@
 // Every mutation is an ordinary commit at [g] through LayerCommitter, so
 // standing on /websites and pressing undo removes the last menu change and
 // redo restores it — the location's normal linear history, no bespoke
-// markers. The commit pattern mirrors MixedGroupBag.#reconcile exactly (the
-// deterministic child commit + a full-replace of the children slot through
-// the committer FIFO), so the launcher render is unchanged.
+// markers. The launcher child is committed deterministically, as in
+// MixedGroupBag.#reconcile, so the launcher render is unchanged; [g] then
+// gains or loses it by a children DELTA through the committer FIFO, never a
+// re-listed set, so no other member depends on this read being warm.
 //
 // LOCAL by construction: [g] is a disconnected single-segment root, never
 // linked into the hive tree and never synced — so membership stays extrinsic
@@ -44,7 +45,10 @@ type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
 }
 type CommitterLike = {
-  commitSlotSet(segments: readonly string[], slot: string, sigs: readonly string[]): Promise<void>
+  commitChildrenDeltas(
+    segments: readonly string[],
+    changes: { removes?: readonly { sig?: string }[]; appends?: readonly string[] },
+  ): Promise<string>
 }
 
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
@@ -214,7 +218,7 @@ export async function enableAggregation(
   const history = get<HistoryLike>(HISTORY_KEY)
   const store = get<StoreLike>(STORE_KEY)
   const committer = get<CommitterLike>(COMMITTER_KEY)
-  if (!history || !store?.putResource || !committer?.commitSlotSet) return null
+  if (!history || !store?.putResource || !committer?.commitChildrenDeltas) return null
 
   const pageSig = await pageLocSig(history, groupId)
   if (!pageSig) return null
@@ -231,18 +235,20 @@ export async function enableAggregation(
   const childMarker = await history.commitLayer(childLocSig, { name: label, decorations: [decoSig] })
   if (!childMarker || !SIG.test(childMarker)) return null
 
-  // 2. Full-replace [g]'s children through the committer FIFO: existing members
-  //    (minus any prior cell for THIS path — dedupe/replace) plus the new child.
+  // 2. ONE children delta at [g]: drop any prior cell for THIS path (dedupe/
+  //    replace) and gain the new child. It applies to [g]'s head inside the
+  //    committer FIFO, so every other member rides through untouched. This
+  //    used to full-replace the list from the read below, and a read that
+  //    came back empty (a cold bag, a caught failure) wiped every member.
   const key = pathKey(segs)
   const existing = await childSigsOf(history, pageSig)
-  const kept: string[] = []
+  const removes: { sig: string }[] = []
   for (const sig of existing) {
     if (sig === childMarker) continue
     const m = await decodeMember(history, store, sig)
-    if (m && pathKey(m.segments) === key) continue   // replace the prior cell for this path
-    kept.push(sig)
+    if (m && pathKey(m.segments) === key) removes.push({ sig })   // replace the prior cell for this path
   }
-  await committer.commitSlotSet([groupId], 'children', [...kept, childMarker])
+  await committer.commitChildrenDeltas([groupId], { removes, appends: [childMarker] })
 
   EffectBus.emit('aggregation:changed', { groupId, segments: segs, op: 'enable' })
   return childMarker
@@ -260,21 +266,20 @@ export async function disableAggregation(
   const history = get<HistoryLike>(HISTORY_KEY)
   const store = get<StoreLike>(STORE_KEY)
   const committer = get<CommitterLike>(COMMITTER_KEY)
-  if (!history || !store?.getResource || !committer?.commitSlotSet) return false
+  if (!history || !store?.getResource || !committer?.commitChildrenDeltas) return false
 
   const pageSig = await pageLocSig(history, groupId)
   if (!pageSig) return false
 
   const existing = await childSigsOf(history, pageSig)
-  const kept: string[] = []
-  let removed = false
+  const removes: { sig: string }[] = []
   for (const sig of existing) {
     const m = await decodeMember(history, store, sig)
-    if (m && pathKey(m.segments) === key) { removed = true; continue }
-    kept.push(sig)
+    if (m && pathKey(m.segments) === key) removes.push({ sig })
   }
-  if (!removed) return false
-  await committer.commitSlotSet([groupId], 'children', kept)
+  if (removes.length === 0) return false
+  // A removes delta naming only the launcher cell(s) — never a rebuilt list.
+  await committer.commitChildrenDeltas([groupId], { removes })
 
   EffectBus.emit('aggregation:changed', { groupId, segments: norm(segments), op: 'disable' })
   return true

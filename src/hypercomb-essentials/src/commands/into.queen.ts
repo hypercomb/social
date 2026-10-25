@@ -31,6 +31,14 @@
 // see a selection, so its form names the tiles:
 //   /into <destination> = <tile>
 //   /into <destination> = [<tile>, <tile>, ...]
+//
+// A TIDY-UP IS ONE SENTENCE. Organizing a page sends its tiles to several new
+// parents at once, and said one group per line, each line re-committed the
+// page being tidied. Several groups, separated by commas outside the brackets,
+// are ONE act (MoveDrone.commitMoveMany): every destination gains in one
+// marker, the page loses every moved tile in one more, and no tile is copied
+// or re-made — the same signature changes parent:
+//   /into people = [ana, ben], work = [desk, inbox]
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 
@@ -46,15 +54,52 @@ const safeName = (raw: string): string =>
 const parsePath = (raw: string): string[] =>
   raw.split('/').map(safeName).filter(Boolean)
 
-/** The named form: the destination before the `=`, the tiles after it —
- *  `[a, b, c]` or one bare name, the list shape `/copy` and `/remove` read. */
-const readNamed = (args: string): { destination: string; members: string[] } | undefined => {
-  const at = args.indexOf('=')
-  if (at < 0) return undefined
-  const list = args.slice(at + 1).trim()
-  const bracket = list.match(/^\[(.*)\]$/s)
-  const members = (bracket ? bracket[1].split(',') : [list]).map(part => part.trim()).filter(Boolean)
-  return { destination: args.slice(0, at).trim(), members }
+type Group = { destination: string; members: string[] }
+
+/** The commas BETWEEN groups — never one inside a `[a, b]` list. */
+const splitGroups = (text: string): string[] => {
+  const parts: string[] = []
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (ch === '[') depth++
+    else if (ch === ']') depth = Math.max(0, depth - 1)
+    else if (ch === ',' && depth === 0) { parts.push(text.slice(start, i)); start = i + 1 }
+  }
+  parts.push(text.slice(start))
+  return parts.map(part => part.trim()).filter(Boolean)
+}
+
+/** The named form: one or more groups, each the destination before its `=`
+ *  and the tiles after it — `[a, b, c]` or one bare name, the list shape
+ *  `/copy` and `/remove` read. A part with no `=` (`archive = a, b`) comes back
+ *  with no destination, so the refusal can say what is missing. */
+const readNamed = (args: string): Group[] | undefined => {
+  if (!args.includes('=')) return undefined
+  return splitGroups(args).map(part => {
+    const at = part.indexOf('=')
+    if (at < 0) return { destination: '', members: [] }
+    const list = part.slice(at + 1).trim()
+    const bracket = list.match(/^\[(.*)\]$/s)
+    const members = (bracket ? bracket[1].split(',') : [list]).map(name => name.trim()).filter(Boolean)
+    return { destination: part.slice(0, at).trim(), members }
+  })
+}
+
+/** What is wrong with a named sentence before anything is looked up. */
+const shapeProblem = (groups: readonly Group[]): string | undefined => {
+  if (groups.some(group => !parsePath(group.destination).length)) return '/into needs a destination before the ='
+  if (groups.some(group => !group.members.length)) return '/into needs at least one tile name after the ='
+  if (groups.some(group => group.members.some(name => name.includes('/') || name.includes(BACKSLASH)))) {
+    return '/into moves tiles of this page; name them, not a route'
+  }
+  const seen = new Set<string>()
+  for (const name of groups.flatMap(group => group.members)) {
+    if (seen.has(name.toLowerCase())) return `/into names "${name}" twice; a tile moves to one place`
+    seen.add(name.toLowerCase())
+  }
+  return undefined
 }
 
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -66,6 +111,10 @@ type MoveShape = {
     sourceSegments: readonly string[],
     targetSegments: readonly string[],
   ): Promise<readonly string[]>
+  commitMoveMany?(
+    sourceSegments: readonly string[],
+    moves: readonly { labels: readonly string[]; targetSegments: readonly string[] }[],
+  ): Promise<readonly (readonly string[])[]>
 }
 
 export class IntoQueenBee extends QueenBee {
@@ -78,6 +127,7 @@ export class IntoQueenBee extends QueenBee {
     { input: '/into archive', result: 'The selected tiles move inside the tile "archive" on this page' },
     { input: '/into reading/2026', result: 'They move into /reading/2026, wherever you are standing' },
     { input: '/into archive = [drafts, notes]', result: 'Moves "drafts" and "notes" inside "archive", whatever is selected' },
+    { input: '/into people = [ana, ben], work = [desk, inbox]', result: 'Sends each group to its new parent in one move' },
   ]
   /** CUSTODY CHANGES, NOTHING IS TAKEN AWAY: the moved tiles keep their bytes,
    *  markers and bags, and the destination gains them before this page loses
@@ -91,11 +141,11 @@ export class IntoQueenBee extends QueenBee {
    *  tile a machine does not touch. Refused for every machine — this door
    *  cannot tell the participant's own model from an outside one. */
   override machine = {
-    forms: '<destination> = <tile> | <destination> = [<tile>, <tile>, ...]',
-    example: '/into archive = [drafts, notes]',
+    forms: '<destination> = <tile> | <destination> = [<tile>, <tile>, ...] | <destination> = [...], <destination> = [...]',
+    example: '/into people = [ana, ben], work = [desk, inbox]',
     reach: 'editing' as const,
     scope: 'hive' as const,
-    consequence: 'Moves the named tiles of this page inside the destination: a tile on this page, or /<route> anywhere in the hive. They leave this page; nothing is deleted.',
+    consequence: 'Moves the named tiles of this page inside each destination: a tile on this page, or /<route> anywhere in the hive. Several groups in one line are one move. They leave this page; nothing is copied or deleted.',
     refuse: (args: string): string | undefined => this.#refuse(args),
   }
 
@@ -125,21 +175,11 @@ export class IntoQueenBee extends QueenBee {
     const raw = args.trim()
     if (!raw) { this.#log('Into — usage: /into <cell>  or  /into <path>/<cell>'); return }
     const named = readNamed(raw)
+    if (named) return this.#moveNamed(named)
     const here = this.#here()
 
-    // Named tiles must be tiles of this page, spelled as the page spells them.
-    // Without this a phantom name reached the primitive, which aborts quietly,
-    // and the line still read as a move (the clipboard verbs' surface audit).
-    let labels: string[]
-    if (named) {
-      const page = this.#pageTiles()
-      const absent = page.length ? named.members.filter(name => !page.some(tile => tile.toLowerCase() === name.toLowerCase())) : []
-      if (absent.length) throw new Error(`into — no tile named ${absent.map(name => `"${name}"`).join(', ')} on this page`)
-      labels = named.members.map(name => page.find(tile => tile.toLowerCase() === name.toLowerCase()) ?? name)
-    } else {
-      const selection = get<SelectionShape>('@diamondcoreprocessor.com/SelectionService')
-      labels = selection ? [...selection.selected].filter(Boolean) : []
-    }
+    const selection = get<SelectionShape>('@diamondcoreprocessor.com/SelectionService')
+    const labels = selection ? [...selection.selected].filter(Boolean) : []
     if (labels.length === 0) {
       this.#log('Into — select the tiles to move first, then say where they go')
       return
@@ -147,28 +187,17 @@ export class IntoQueenBee extends QueenBee {
 
     const move = get<MoveShape>('@diamondcoreprocessor.com/MoveDrone')
     if (!move?.commitMoveInto) {
-      if (named) throw new Error('into — moving is not ready yet; nothing moved')
       this.#log('Into — unavailable')
       return
     }
 
-    const target = this.#target(named ? named.destination : raw, here)
+    const target = this.#target(raw, here)
     if (target.length === 0) {
-      if (named) throw new Error('into — the destination is not a name; nothing moved')
       this.#log('Into — that is not a name')
       return
     }
 
     const landed = await move.commitMoveInto(labels, here, target)
-    // The primitive says why aloud for a hand on the screen. A NAMED move is
-    // a sentence, and a receipt must never read a move that did not happen.
-    if (named && landed.length < labels.length) {
-      const missed = labels.filter(label => !landed.includes(label))
-      const where = `/${target.join('/')}`
-      throw new Error(landed.length === 0
-        ? `into — nothing moved into ${where}: it could not be read, it is one of the tiles, or it already holds a tile by each of those names`
-        : `into — ${missed.map(name => `"${name}"`).join(', ')} did not move into ${where}, which already holds a tile by that name; nothing was overwritten`)
-    }
     if (landed.length === 0) return   // the primitive has already said why
     this.#log(
       landed.length === 1
@@ -177,26 +206,72 @@ export class IntoQueenBee extends QueenBee {
     )
   }
 
+  /** A sentence that names its tiles — one group, or several as one act. */
+  async #moveNamed(groups: readonly Group[]): Promise<void> {
+    const shape = shapeProblem(groups)
+    if (shape) throw new Error(shape.replace('/into', 'into —'))
+    const here = this.#here()
+
+    // Named tiles must be tiles of this page, spelled as the page spells them.
+    // Without this a phantom name reached the primitive, which aborts quietly,
+    // and the line still read as a move (the clipboard verbs' surface audit).
+    const page = this.#pageTiles()
+    const spelled = (name: string): string | undefined => page.find(tile => tile.toLowerCase() === name.toLowerCase())
+    const absent = page.length ? groups.flatMap(group => group.members).filter(name => !spelled(name)) : []
+    if (absent.length) throw new Error(`into — no tile named ${absent.map(name => `"${name}"`).join(', ')} on this page`)
+
+    const moves = groups.map(group => ({
+      labels: group.members.map(name => spelled(name) ?? name),
+      targetSegments: this.#target(group.destination, here),
+    }))
+    if (moves.some(m => m.targetSegments.length === 0)) throw new Error('into — the destination is not a name; nothing moved')
+
+    const move = get<MoveShape>('@diamondcoreprocessor.com/MoveDrone')
+    const landed = moves.length === 1
+      ? (move?.commitMoveInto ? [await move.commitMoveInto(moves[0].labels, here, moves[0].targetSegments)] : undefined)
+      : (move?.commitMoveMany ? await move.commitMoveMany(here, moves) : undefined)
+    if (!landed) throw new Error('into — moving is not ready yet; nothing moved')
+
+    // The primitive says why aloud for a hand on the screen. A NAMED move is
+    // a sentence, and a receipt must never read a move that did not happen.
+    const where = (m: { targetSegments: readonly string[] }): string => `/${m.targetSegments.join('/')}`
+    const count = landed.reduce((n, labels) => n + labels.length, 0)
+    if (count === 0) {
+      throw new Error(`into — nothing moved into ${[...new Set(moves.map(where))].join(', ')}: a destination could not be read, is one of the tiles, or already holds a tile by each of those names`)
+    }
+    const missed = new Map<string, string[]>()
+    moves.forEach((m, i) => {
+      const left = m.labels.filter(label => !landed[i]?.includes(label)).map(label => `"${label}"`)
+      if (left.length) missed.set(where(m), [...(missed.get(where(m)) ?? []), ...left])
+    })
+    if (missed.size) {
+      const parts = [...missed].map(([to, names]) => `${names.join(', ')} did not move into ${to}`)
+      throw new Error(`into — ${parts.join('; ')}, which already ${missed.size === 1 ? 'holds' : 'hold'} a tile by that name; nothing was overwritten`)
+    }
+    this.#log(moves.length === 1
+      ? (count === 1 ? `Into — "${landed[0][0]}" now lives in ${where(moves[0])}` : `Into — ${count} tiles now live in ${where(moves[0])}`)
+      : `Into — ${count} tiles now live in ${moves.length} places`)
+  }
+
   /** Why a machine may not say this line, or undefined. */
   #refuse(args: string): string | undefined {
     const named = readNamed(args.trim())
     if (!named) return '/into names its tiles — a machine cannot see what is picked: /into <destination> = [<tile>, <tile>]'
-    if (!parsePath(named.destination).length) return '/into needs a destination before the ='
-    if (!named.members.length) return '/into needs at least one tile name after the ='
-    if (named.members.some(name => name.includes('/') || name.includes(BACKSLASH))) {
-      return '/into moves tiles of this page; name them, not a route'
-    }
+    const shape = shapeProblem(named)
+    if (shape) return shape
     const withheld = get<WithheldShape>('@hypercomb.social/AiWithheld')
     if (!withheld?.covers) return undefined
     // Called on the store: `covers` reads the store's own private document.
     const covers = (segments: readonly string[]): boolean => withheld.covers!(segments)
     const here = this.#here()
-    const kept = named.members.filter(name => covers([...here, name]))
+    const kept = named.flatMap(group => group.members).filter(name => covers([...here, name]))
     if (kept.length) {
       return `/into: ${kept.map(name => `"${name}"`).join(', ')} ${kept.length === 1 ? 'is' : 'are'} withheld from outside models and stays where it is; move the others without ${kept.length === 1 ? 'it' : 'them'}`
     }
-    const target = this.#target(named.destination, here)
-    if (covers(target)) return `/into: /${target.join('/')} is withheld from outside models; put the tiles somewhere else`
+    for (const group of named) {
+      const target = this.#target(group.destination, here)
+      if (covers(target)) return `/into: /${target.join('/')} is withheld from outside models; put the tiles somewhere else`
+    }
     return undefined
   }
 
