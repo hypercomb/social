@@ -234,3 +234,13 @@ current group's name once (All, or a community); a swipe, the arrow keys or a ta
 the label turn to the next. **Manage** (not built, hive side) is an icon to the right
 of the search: in it the label can be renamed, every showcase tile is shown, and a
 tile is switched on or off for that group; leaving Manage hides the ones switched off.
+
+### Built (hive side, first cut)
+
+`community <domain>` opens the window (`sharing/community.view.ts`): the search with the Manage icon to its
+right, the current group's label (tap, swipe or arrow keys turn it; in Manage it renames), every candidate
+tile with the ones off grayed (a tap switches it for the group; leaving Manage hides them), new group,
+hexagons/launcher per group, delete, undo/redo (`community.draft.ts`) and **Publish**
+(`community publish`), which asks first and signs `showcase:<zone>`. **Still owed:** the draft is
+in-window undo only, not yet the hive's own history slot, so closing the window drops the undo trail; and the
+candidates are this key's lineages on the zone, not yet the followed domains' tiles.

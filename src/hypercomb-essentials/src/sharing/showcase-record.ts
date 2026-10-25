@@ -244,3 +244,17 @@ export async function signShowcase(showcase: Showcase): Promise<{ ok: true; sig:
   const stamped = await setHiveRoot(showcase.zone, showcaseKey(showcase.zone), sig)
   return stamped.ok ? { ok: true, sig } : { ok: false, reason: stamped.reason ?? 'the index refused it' }
 }
+
+/** Rename a community: the same members under a new name, kept in its place. The new name goes
+ *  through the same check as a new one, and is refused when another community already has it. */
+export const renameCommunity = (showcase: Showcase, key: string, raw: unknown): { ok: true; showcase: Showcase; key: string } | { ok: false; reason: CommunityRefusal } => {
+  const name = communityName(raw)
+  if (!name) return { ok: false, reason: 'empty' }
+  const next = communityKey(name)
+  if (!next) return { ok: false, reason: 'all' }
+  if (isReservedPoolWord(name)) return { ok: false, reason: 'reserved' }
+  const communities = showcase.communities ?? []
+  if (next !== key && communities.some(community => communityKey(community.name) === next)) return { ok: false, reason: 'taken' }
+  return { ok: true, key: next, showcase: { ...showcase,
+    communities: communities.map(community => (communityKey(community.name) === key ? { ...community, name } : community)) } }
+}
