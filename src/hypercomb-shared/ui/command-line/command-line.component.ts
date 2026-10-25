@@ -991,11 +991,23 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#closeLine()
   }
 
+  /** A find is narrowing the hive in front of you. The tiles left standing ARE
+   *  the answer, and hovering one is how you act on it — so the text in the
+   *  line is no longer something being written, and the hive keeps its hover.
+   *  Only the layer reach narrows the surface; a branch or hive find answers
+   *  in rows and leaves the tiles alone. The echo stays silent either way: a
+   *  tile name beside the filter word would still read as part of it. */
+  readonly #filtering = computed(() => {
+    const ctx = this.context()
+    if (!ctx.active || !ctx.normalized) return false
+    return ctx.mode === 'filter' || (ctx.mode === 'find' && reachOf(this.value()).reach === 'layer')
+  })
+
   /** Tell the hive when the line is being written in. The overlay cannot see
    *  Angular state, so the state travels as an effect (sticky, so a drone that
    *  registers later still learns the current answer). */
   readonly #composingBroadcast = effect(() => {
-    EffectBus.emit('command:composing', { composing: this.#composing() })
+    EffectBus.emit('command:composing', { composing: this.#composing() && !this.#filtering() })
   })
 
   // ── status indicators ─────────────────────────────────

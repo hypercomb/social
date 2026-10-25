@@ -4057,9 +4057,12 @@ export class TileOverlayDrone extends Drone {
    *  with an empty menu. This re-derives #currentAxial from the last pointer
    *  when it was cleared, ALWAYS re-looks-up #currentIndex against the fresh
    *  map so both functions agree, then refreshes. No-op mid-navigation (maps
-   *  still describe the leaving level) or while editing (overlay stays hidden). */
+   *  still describe the leaving level), while editing (overlay stays hidden),
+   *  or while the command line is being written in — hover is down then, and
+   *  a band raised here would stick: #suppressHover is latched, so the moves
+   *  that follow could not take it down again. */
   #recoverHover(): void {
-    if (this.#navigationBlocked || this.#editing) return
+    if (this.#navigationBlocked || this.#editing || this.#composing) return
     if (!this.#currentAxial) this.#deriveHoverFromLastPointer()
     else this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
     if (this.#overlay && this.#currentAxial) {
@@ -4212,6 +4215,9 @@ export class TileOverlayDrone extends Drone {
     if (this.#overlay) this.#overlay.visible = false
     this.#currentAxial = null
     this.#currentIndex = undefined
+    // Re-announce the band with nobody owning it. Left as it was, the last
+    // tile's name stays raised over a band that is no longer drawn.
+    this.#layoutIconRow()
     this.#clearHint()
     this.#hideSwapCue()
     // "Nothing hovered" carries NO hex. Broadcasting a placeholder axial here
