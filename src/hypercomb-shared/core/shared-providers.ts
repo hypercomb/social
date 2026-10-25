@@ -17,13 +17,19 @@ import {
   RESOURCE_COMPLETION,
   SCRIPT_PRELOADER,
 } from './tokens'
+import { UrlSerializer } from '@angular/router'
+import { AddressUrlSerializer } from './address-url-serializer'
 
-export const sharedProviders = bridgeProviders([
-  COMPLETION_UTILITY,
-  I18N,
-  LINEAGE,
-  MOVEMENT,
-  NAVIGATION,
-  RESOURCE_COMPLETION,
-  SCRIPT_PRELOADER,
-])
+export const sharedProviders = [
+  ...bridgeProviders([
+    COMPLETION_UTILITY,
+    I18N,
+    LINEAGE,
+    MOVEMENT,
+    NAVIGATION,
+    RESOURCE_COMPLETION,
+    SCRIPT_PRELOADER,
+  ]),
+  // The router keeps selection brackets literal, as Navigation writes them.
+  { provide: UrlSerializer, useClass: AddressUrlSerializer },
+]
