@@ -396,10 +396,15 @@ describe('a block named and not written', () => {
     const reply = (open: string, ...body: string[]): string => [open, ...body, fence].join('\n')
     expect(splitWork(reply(fence, '/into invoices = [march, april]', '/title roadmap = Road map')).unwritten).toBe('hypercomb-do')
     expect(splitWork(reply(fence + 'sh', '/into invoices = [march]')).unwritten).toBe('hypercomb-do')
-    // Words around it mean it is being explained; code in another language is code.
-    expect(splitWork('You would write:\n' + reply(fence, '/into invoices = [march]')).unwritten).toBeUndefined()
+    // With words of its own around it ("ready to run:") it is still sent back — once,
+    // and asked to answer again without it if it was only an example.
+    expect(splitWork('Here is the move block, ready to run:\n' + reply(fence, '/into invoices = [march]') + '\nNothing else moves.').unwritten).toBe('hypercomb-do')
+    // Code in another language is code, and a fence that mixes lines is not a block of commands.
     expect(splitWork(reply(fence + 'ts', '/into invoices = [march]')).unwritten).toBeUndefined()
     expect(splitWork(reply(fence, 'const x = 1')).unwritten).toBeUndefined()
+    expect(splitWork(reply(fence, '/into invoices = [march]', 'then reload the page')).unwritten).toBeUndefined()
+    // An unclosed fence is not a finished block.
+    expect(splitWork([fence, '/into invoices = [march]'].join('\n')).unwritten).toBeUndefined()
   })
 
   it('reads bare command lines, written with no block, as a do block never opened', () => {

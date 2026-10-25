@@ -378,25 +378,32 @@ const promisedIn = (said: readonly string[]): string | undefined => {
   return READ_STEP.test(step[1]) ? 'hypercomb-read' : 'hypercomb-do'
 }
 
-/** A REPLY THAT IS ONLY A FENCE OF COMMANDS, the fence untagged or called a
- *  shell. Asked to "go ahead and do those moves", a hive model answered with
- *  nothing but a fenced `/into …` line (the first `say` conversation,
- *  2026-10-25): the fence is the ordinary kind, so the scanner left it as
- *  prose and the turn ended answered with nothing done. A reply with words of
- *  its own around a fenced command may be explaining it, and is left alone. */
-const onlyFencedCommands = (said: readonly string[]): boolean => {
-  if (said.length < 3) return false
-  const open = FENCE_RE.exec(said[0])
-  if (!open || !/^(?:|text|txt|sh|bash|shell|console)$/i.test(open[2].trim())) return false
-  if (!closes(said[said.length - 1], open[1])) return false
-  const body = said.slice(1, -1)
-  return body.length > 0 && body.every(line => BARE_COMMAND.test(line))
+/** A FENCE OF NOTHING BUT COMMANDS, the fence untagged or called a shell.
+ *  Asked to "go ahead and do those moves", a hive model answered with a fenced
+ *  `/into …` line, once alone and once under "here is the move block, ready to
+ *  run" (the first `say` conversation, 2026-10-25): the fence is the ordinary
+ *  kind, so the scanner left it as prose and the turn ended answered with
+ *  nothing done. This only SENDS THE REPLY BACK — once, with "if you were only
+ *  describing the block, give the answer again without it" — so a fence that
+ *  was an example costs a round and runs nothing. A fence that mixes commands
+ *  with other lines, or is in another language, is code and is left alone. */
+const hasFencedCommands = (lines: readonly string[]): boolean => {
+  for (let at = 0; at < lines.length; at++) {
+    const open = FENCE_RE.exec(lines[at])
+    if (!open || !/^(?:|text|txt|sh|bash|shell|console)$/i.test(open[2].trim())) continue
+    let end = at + 1
+    while (end < lines.length && !closes(lines[end], open[1])) end++
+    const body = lines.slice(at + 1, end).map(line => line.trim()).filter(Boolean)
+    if (end < lines.length && body.length > 0 && body.every(line => BARE_COMMAND.test(line))) return true
+    at = end
+  }
+  return false
 }
 
 const unwrittenIn = (lines: readonly string[]): string | undefined => {
   const said = lines.map(line => line.trim()).filter(Boolean)
   if (said.length && said.length <= 8 && said.every(line => BARE_READ.test(line))) return 'hypercomb-read'
-  if (onlyFencedCommands(said)) return 'hypercomb-do'
+  if (hasFencedCommands(lines)) return 'hypercomb-do'
   const promised = promisedIn(said)
   if (promised) return promised
   let fence: string | null = null
