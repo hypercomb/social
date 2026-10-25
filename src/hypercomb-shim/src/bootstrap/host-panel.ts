@@ -698,9 +698,21 @@ class HostPanelElement extends HTMLElement {
     const self = this.#self || location.hostname
     if (!zone) return { ok: false, reason: `${String(raw).trim() || 'That'} is not a domain.` }
     if (zone === self || zone.endsWith(`.${self}`)) return { ok: false, reason: 'That is this domain.' }
-    try {
-      await fetch(`${doorOrigin(zone)}/pin`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
-    } catch { return { ok: false, reason: `${zone} did not answer — it is not a Hypercomb host.` } }
+    // A host answers one of three ways, across origins — /pin with a signature, a ledger, or a
+    // package manifest — and says so with a good status and the right shape. Anything that merely
+    // allows cross-origin reads is not a host.
+    const origin = doorOrigin(zone)
+    const answers = (path: string, accept: (body: string, type: string) => boolean, method = 'GET'): Promise<boolean> =>
+      fetch(`${origin}${path}`, { method, cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+        .then(async response => response.ok && accept(method === 'HEAD' ? '' : await response.text(), response.headers.get('content-type') ?? ''))
+        .catch(() => false)
+    const json = (body: string, type: string): boolean => type.toLowerCase().includes('json') && /^\s*[{[]/.test(body)
+    const host = (await Promise.all([
+      answers('/pin', body => /^[0-9a-f]{64}\s*$/i.test(body)),
+      answers('/publications.json', json),
+      answers('/content/manifest.json', (_body, type) => type.toLowerCase().includes('json'), 'HEAD'),
+    ])).some(Boolean)
+    if (!host) return { ok: false, reason: `${zone} did not answer like a Hypercomb host.` }
     const added = await addHostZone(zone)
     return added ? { ok: true, zone: added } : { ok: false, reason: 'It could not be kept here.' }
   }
@@ -1635,6 +1647,7 @@ class HostPanelElement extends HTMLElement {
     }
     const chosenSource = source || (choices[0] && !('kind' in choices[0]) ? new URL(choices[0].add).host : '')
     if (!chosenSource) { this.#say('The tile selection has no source domain.', 'bad'); return }
+    if (this.#self && chosenSource.endsWith(`.${this.#self}`)) { this.#say(`${chosenSource} is this host — what it publishes is already on the page.`); return }
     this.#say(`Checking ${chosenSource}…`)
     try {
       const [offered, created] = await Promise.all([readOfferings(chosenSource), readPublicCreations(chosenSource)])
@@ -2056,7 +2069,7 @@ class HostPanelElement extends HTMLElement {
     if (this.#busy) return
     const zone = hostZone(raw)
     if (!zone) { this.#say(`"${raw.trim()}" is not a hostname.`, 'bad'); return }
-    if (zone === this.#self) { this.#say(`${zone} is this host — what it publishes is already on the page.`); return }
+    if (zone === this.#self || zone.endsWith(`.${this.#self}`)) { this.#say(`${zone} is this host — what it publishes is already on the page.`); return }
     const added = await addHostZone(zone)
     if (!added) { this.#say(`Could not add ${zone}.`, 'bad'); return }
     this.#galleryPins?.add(added)

@@ -124,7 +124,14 @@ What you chose for a domain is one record:
   owner's index could be reached, or an index names a showcase that cannot be
   fetched or verified, the list says "Could not read what is published here." and
   draws nothing, never the larger set the owners did not choose. A later read
-  that reaches no one keeps what the page last knew.
+  that reaches no one keeps what the page last knew. Every owner the domain's
+  root names must be read: one that cannot be, by a network error or a bad
+  signature, makes the whole read unknown (an owner with no index here at all is
+  just an owner who has signed nothing). The message sits above the platform's
+  door tiles, where it can be read.
+- **A followed domain's names stay its own.** Its ledger is drawn in its own row
+  and never merges into a tile of this domain's by name, so it cannot add an
+  owner, a label or an address under a tile that is yours.
 
 The front door holds no key and cannot tell you from a visitor, which is why
 the choice is a signed public record and never a switch on the page itself.

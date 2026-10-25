@@ -20,6 +20,8 @@ const sig = (char: string): string => char.repeat(64)
 /** What a person does to see where else a tile is: right-click it (a hold, or the menu key, says the same). */
 const openSheet = (tile: Element): void => {
   tile.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  // What the person does next is a press of its own, which is what ends the sheet's "just opened" grace.
+  document.querySelector('.versions-backdrop')?.dispatchEvent(new Event('pointerdown', { bubbles: true }))
 }
 
 const LEDGER = {
@@ -789,6 +791,7 @@ describe('what the owners meant, and what the page does when it cannot tell', ()
     // The owner's own tile keeps its one owner: the peer's claim to the same key never joins it.
     const dylan = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes('dylan'))!
     expect(dylan.querySelector<HTMLElement>('.hex-owners')!.hidden).toBe(true)
+
     // The peer's row has its own version of the name, drawn as an address, never as the owner's.
     ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
     await vi.waitFor(() => expect([...bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['dylan']))
@@ -894,7 +897,7 @@ describe('a tile — a tap goes to the content, a hold comes up with where else 
   })
   const pointer = (target: Element, type: string, props: Record<string, unknown> = {}): void => {
     const event = new Event(type, { bubbles: true, cancelable: true })
-    for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', button: 0, clientX: 100, clientY: 100, ...props })) Object.defineProperty(event, key, { value })
+    for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', button: 0, isPrimary: true, clientX: 100, clientY: 100, ...props })) Object.defineProperty(event, key, { value })
     target.dispatchEvent(event)
   }
 
@@ -982,5 +985,162 @@ describe('a tile — a tap goes to the content, a hold comes up with where else 
     expect(hero.classList.contains('hero')).toBe(true)
     expect(hero.querySelector(':scope > .hero-brand')).not.toBeNull()
     expect(hero.querySelector(':scope > .search')).not.toBeNull()
+  })
+})
+
+// What the second review confirmed, held in place.
+describe('a followed peer keeps its own tiles, the sheet keeps its own buttons, and the rest of round two', () => {
+  const sites = parseLedger(LEDGER)
+  const a = { pubkey: sig('a') }
+  const owners = (extra: Partial<ZoneOwners> = {}): ZoneOwners => ({
+    showcase: null, reached: true, unreadable: false,
+    doors: new Map([[sig('a'), new Map([['camelflage', ['hypercomb.com']], ['dylan', ['hypercomb.com']]])]]), ...extra,
+  })
+  const draw = (extra = {}) => showcase({
+    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+    ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(), ...extra,
+  })
+  const own = (bands: HTMLElement): string[] => [...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent ?? '')
+  const pointer = (target: Element, type: string, props: Record<string, unknown> = {}): void => {
+    const event = new Event(type, { bubbles: true, cancelable: true })
+    for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', button: 0, isPrimary: true, clientX: 100, clientY: 100, ...props })) Object.defineProperty(event, key, { value })
+    target.dispatchEvent(event)
+  }
+
+  it('never merges a followed domain\'s names into an owner\'s tile: no second owner, no foreign address, no borrowed label', async () => {
+    const hostile = parseLedger({ sites: [
+      { host: 'dylan.evil.example', title: 'dylan', lineage: 'dylan', hosts: [{ host: 'dylan.evil.example' }],
+        publishers: [{ pubkey: sig('a'), label: 'Jaime', head: sig('6') }, { pubkey: sig('d'), label: 'Anyone', head: sig('6') }] },
+    ] })
+    const { hero, bands } = draw({ sources: ['evil.example'], readPeerLedger: async () => hostile })
+    document.body.append(hero, bands)
+    try {
+      await vi.waitFor(() => expect(own(bands)).toEqual(['camelflage', 'dylan']))
+      ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+      await vi.waitFor(() => expect([...bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['dylan']))
+      ;(bands.querySelectorAll('.dex-head')[0] as HTMLButtonElement).click()
+      const dylan = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes('dylan'))!
+      expect(dylan.querySelector<HTMLElement>('.hex-owners')!.hidden).toBe(true)
+      openSheet(dylan)
+      const sheet = hero.querySelector('.versions') as HTMLElement
+      expect(sheet.querySelectorAll('.version')).toHaveLength(1)
+      expect(sheet.textContent).not.toContain('evil.example')
+      expect(sheet.textContent).not.toContain('Anyone')
+    } finally { hero.remove(); bands.remove() }
+  })
+
+  it('draws a peer\'s names only in the zones that are its own, never in this domain\'s row', async () => {
+    const under = parseLedger({ sites: [
+      { host: 'secret.team.hypercomb.com', title: 'secret', lineage: 'secret', hosts: [{ host: 'secret.team.hypercomb.com' }],
+        publishers: [{ pubkey: sig('c'), head: sig('7') }] } ] })
+    const { bands } = draw({ sources: ['team.hypercomb.com'], readPeerLedger: async () => under })
+    await vi.waitFor(() => expect(own(bands)).toEqual(['camelflage', 'dylan']))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(own(bands)).not.toContain('secret')
+  })
+
+  it('says why the list is empty above the platform doors, where it can be read', async () => {
+    const links = [{ label: 'Minimal host', href: '/hosts', note: '', icon: 'host' as const }]
+    const { bands } = draw({ links, readOwners: async () => owners({ reached: false, doors: new Map() }) })
+    await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hosted-empty:not([hidden])')?.textContent).toBe('Could not read what is published here.'))
+    expect([...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent)).toEqual(['Minimal host'])
+    const body = bands.querySelector('.dex-row.own .dex-body')!
+    expect(body.firstElementChild?.classList.contains('hosted-empty')).toBe(true)
+  })
+
+  it('ignores a second finger and a tile that has gone: no sheet opens with no finger down', async () => {
+    vi.useFakeTimers()
+    try {
+      const { hero, bands } = draw()
+      document.body.append(hero, bands)
+      await vi.advanceTimersByTimeAsync(50)
+      const dylan = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes('dylan'))!
+      const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
+      // Finger 1 down, finger 2 down on the same tile, both lifted: nothing is left to fire.
+      pointer(dylan, 'pointerdown'); vi.advanceTimersByTime(140)
+      pointer(dylan, 'pointerdown', { pointerId: 2, isPrimary: false }); vi.advanceTimersByTime(140)
+      pointer(dylan, 'pointerup'); pointer(dylan, 'pointerup', { pointerId: 2, isPrimary: false })
+      vi.advanceTimersByTime(900)
+      expect(sheet.hidden).toBe(true)
+      // A press whose tile is removed before the half second is up opens nothing.
+      pointer(dylan, 'pointerdown'); dylan.remove(); vi.advanceTimersByTime(900)
+      expect(sheet.hidden).toBe(true)
+      hero.remove(); bands.remove()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('swallows the click that ends a hold on any part of the sheet it opened — its buttons and links too — and only that one', async () => {
+    vi.useFakeTimers()
+    try {
+      const { hero, bands } = draw()
+      document.body.append(hero, bands)
+      await vi.advanceTimersByTimeAsync(50)
+      const dylan = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes('dylan'))!
+      pointer(dylan, 'pointerdown'); vi.advanceTimersByTime(501)
+      const sheet = hero.querySelector('.versions') as HTMLElement
+      const manage = sheet.querySelector<HTMLButtonElement>('.versions-manage')!
+      expect(hero.querySelector<HTMLElement>('.versions-backdrop')!.hidden).toBe(false)
+      const visit = sheet.querySelector<HTMLAnchorElement>('.version-visit')!
+      const first = new MouseEvent('click', { bubbles: true, cancelable: true }); visit.dispatchEvent(first)
+      expect(first.defaultPrevented).toBe(true)
+      manage.click()
+      expect(manage.getAttribute('aria-pressed')).toBe('true')
+      hero.remove(); bands.remove()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('follows one domain at a time, and clears the search only if it still says what was followed', async () => {
+    let release: (value: { ok: true; zone: string }) => void = () => {}
+    const follow = vi.fn(() => new Promise<{ ok: true; zone: string }>(resolve => { release = resolve }))
+    const { hero, bands } = draw({ follow })
+    const search = hero.querySelector('input[type=search]') as HTMLInputElement
+    await vi.waitFor(() => expect(own(bands)).toEqual(['camelflage', 'dylan']))
+    search.value = 'friend.example'
+    search.dispatchEvent(new Event('input'))
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    expect(follow).toHaveBeenCalledTimes(1)
+    // The visitor types something else while it waits: it is theirs and is kept.
+    search.value = 'dylan'
+    release({ ok: true, zone: 'friend.example' })
+    await vi.waitFor(() => expect(bands.querySelector('.follow-note')?.textContent).toBe('Following friend.example.'))
+    expect(search.value).toBe('dylan')
+  })
+})
+
+describe('readZoneOwners — every owner counts', () => {
+  const secretA = generateSecretKey(), secretB = generateSecretKey()
+  const A = getPublicKey(secretA), B = getPublicKey(secretB)
+  const zone = 'hypercomb.com'
+  const hash = async (data: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map(b => b.toString(16).padStart(2, '0')).join('')
+  const run = async (answers: Record<string, 'ok' | 'down' | 'missing'>) => {
+    const indexes = await hash(new TextEncoder().encode('hive:indexes'))
+    const index = (secret: Uint8Array) => finalizeEvent({ kind: 30564, created_at: 1, tags: [], content: JSON.stringify({ v: 1, roots: {}, doors: { dylan: [zone] } }) }, secret)
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const who = url.endsWith(A) ? A : url.endsWith(B) ? B : ''
+      const how = answers[who]
+      if (how === 'ok') return new Response(JSON.stringify(index(who === A ? secretA : secretB)), { status: 200 })
+      if (how === 'missing') return new Response('', { status: 404 })
+      return new Response('', { status: 503 })
+    }))
+    void indexes
+    try { return await readZoneOwners(zone, [A, B]) } finally { vi.unstubAllGlobals() }
+  }
+
+  it('reads everyone: reached', async () => {
+    expect((await run({ [A]: 'ok', [B]: 'ok' })).reached).toBe(true)
+  })
+
+  it('knows nothing when ONE owner cannot be read — never a smaller or larger set decided by whoever answered', async () => {
+    expect((await run({ [A]: 'ok', [B]: 'down' })).reached).toBe(false)
+    expect((await run({ [A]: 'down', [B]: 'ok' })).reached).toBe(false)
+  })
+
+  it('treats an owner with no index here as nothing signed, not as a failure', async () => {
+    const read = await run({ [A]: 'ok', [B]: 'missing' })
+    expect(read.reached).toBe(true)
+    expect(read.doors.has(A)).toBe(true)
+    expect(read.doors.has(B)).toBe(false)
+    expect((await run({ [A]: 'missing', [B]: 'missing' })).reached).toBe(true)
   })
 })

@@ -61,6 +61,8 @@ export type Publish = {
   readonly route?: string
   /** Where it was read: the ledger's verified heads lead, a domain's pool follows. */
   readonly source: 'ledger' | 'pool'
+  /** The followed domain whose own word this is. Its names are its own: a peer's publish never merges into a tile of this domain's. */
+  readonly peer?: string
   /** The index key it is published under — known for what the ledger read. */
   readonly lineage?: string
 }
@@ -189,7 +191,7 @@ export const bandZones = (sites: readonly LedgerSite[], self: string, sources: r
 /** Every publish the ledger names, at the address it answers on each domain.
  *  This host's own ledger is `ledger`, which verifies; a followed domain's is its
  *  own word and is drawn as `pool`, which never counts as proof of who owns a name. */
-export const ledgerPublishes = (sites: readonly LedgerSite[], zones: readonly string[], source: Publish['source'] = 'ledger'): Publish[] => {
+export const ledgerPublishes = (sites: readonly LedgerSite[], zones: readonly string[], source: Publish['source'] = 'ledger', peer?: string): Publish[] => {
   const out: Publish[] = []
   for (const zone of zones) {
     for (const site of sites) {
@@ -200,7 +202,7 @@ export const ledgerPublishes = (sites: readonly LedgerSite[], zones: readonly st
       for (const publisher of site.publishers) {
         out.push({ zone, kind: 'hive', name: nameOf(site.lineage, site.title), title: site.title,
           head: publisher.head, owner: { pubkey: publisher.pubkey, label: publisher.label },
-          address: host, href, route: href, source, lineage: site.lineage })
+          address: host, href, route: href, source, lineage: site.lineage, ...(peer ? { peer } : {}) })
       }
     }
   }
@@ -258,7 +260,7 @@ export const aggregate = (publishes: readonly Publish[], zones: readonly string[
     route?: string; ledger: boolean; claims: Map<string, { pubkey: string; label: string; lineage: string; zones: Set<string> }> }
   const groups = new Map<string, Publish[]>()
   for (const publish of publishes) {
-    const key = `${publish.kind}:${publish.name}`
+    const key = `${publish.kind}:${publish.name}${publish.peer ? `@${publish.peer}` : ''}`
     const group = groups.get(key)
     if (group) group.push(publish)
     else groups.set(key, [publish])
@@ -677,11 +679,12 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
    *  it is not a tap on the backdrop, and the sheet stays. The next real press clears it. */
   let heldOpen = false
   backdrop.addEventListener('pointerdown', () => { heldOpen = false })
+  backdrop.addEventListener('keydown', () => { heldOpen = false }, true)
+  // Capture: it runs before the sheet's own buttons and links can see the click.
   backdrop.addEventListener('click', event => {
-    if (event.target !== backdrop) return
-    if (heldOpen) { heldOpen = false; return }
-    closeVersions()
-  })
+    if (heldOpen) { heldOpen = false; event.preventDefault(); event.stopPropagation(); return }
+    if (event.target === backdrop) closeVersions()
+  }, true)
   const openVersions = (entry: Aggregate, from: HTMLElement): void => {
     opener = from
     const lead = entry.versions[0]!
@@ -854,10 +857,15 @@ ${entry.key}`
       let held = false
       const stop = (): void => { if (timer) clearTimeout(timer); timer = undefined; down = null }
       tile.addEventListener('pointerdown', event => {
-        if (event.button > 0) return
+        if (event.button > 0 || !event.isPrimary) return
+        stop()
         held = false
         down = { x: event.clientX, y: event.clientY }
-        timer = setTimeout(() => { stop(); held = true; heldOpen = true; openVersions(made.entry, tile) }, HOLD_MS)
+        timer = setTimeout(() => {
+          stop()
+          if (!tile.isConnected) return
+          held = true; heldOpen = true; openVersions(made.entry, tile)
+        }, HOLD_MS)
       })
       tile.addEventListener('pointermove', event => {
         if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 10) stop()
@@ -995,7 +1003,7 @@ ${entry.key}`
     const comb = el('div', 'comb')
     combs?.observe(comb)
     const empty = el('p', 'hosted-empty')
-    body.append(comb, empty)
+    body.append(empty, comb)
     section.append(toggle, body)
     const view = { section, toggle, meta, comb, empty }
     rowViews.set(zone, view)
@@ -1141,7 +1149,9 @@ ${entry.key}`
     const peers = [...peerSites.values()]
     const zones = bandZones([...sites, ...peers.flat()], options.self, held)
     // This host's ledger verifies. A followed domain's ledger is its own word: drawn, never proof.
-    const publishes = [...ledgerPublishes(sites, zones), ...peers.flatMap(list => ledgerPublishes(list, zones, 'pool'))]
+    // A peer speaks for its own domain only — never for this one — and its names stay its own tiles.
+    const publishes = [...ledgerPublishes(sites, zones), ...[...peerSites].flatMap(([peer, list]) =>
+      ledgerPublishes(list, zones.filter(row => row !== options.self && within(peer, row)), 'pool', peer))]
     // Only the pools of this domain and the domains followed: a refresh can drop one.
     for (const [zone, pools] of shared) {
       if (zones.includes(zone) || held.includes(zone)) publishes.push(...sharedPublishes(zone, pools.offers, pools.creations))
@@ -1301,7 +1311,7 @@ ${entry.key}`
         tile.classList.toggle('in-showcase', !own && showcased(entry))
         return tile
       }), ...doors.map(link => linkTile(link))] : [], own ? shape : base)
-      view.empty.hidden = !open || total > 0
+      view.empty.hidden = !open || (own ? shown.length > 0 && !unread : total > 0)
       view.empty.textContent = own && (!ledgerRead || unread) ? 'Reading what is published here…'
         : own && signed && (!signed.reached || signed.unreadable) ? 'Could not read what is published here.'
           : own ? 'Nothing is published here yet.' : `Nothing is published on ${zone} yet.`
@@ -1331,18 +1341,21 @@ ${entry.key}`
   }
 
   /** Follow a domain: asked of the host that keeps the list, then drawn as a row, open. */
+  let following = false
   const follow = async (raw: string): Promise<void> => {
-    if (!options.follow) return
+    if (!options.follow || following) return
+    following = true
     followGo.disabled = true
     suggestGo.disabled = true
     followNote.textContent = 'Checking…'
     const result = await options.follow(raw).catch(() => ({ ok: false as const, reason: 'Could not follow it.' }))
     followGo.disabled = false
     suggestGo.disabled = false
+    following = false
     if (!result.ok) { followNote.textContent = result.reason; return }
     if (!held.includes(result.zone)) held.push(result.zone)
-    followInput.value = ''
-    search.value = ''
+    if (followCandidate(followInput.value) === result.zone || !followInput.value.trim()) followInput.value = ''
+    if (followCandidate(search.value) === result.zone) search.value = ''
     followNote.textContent = `Following ${result.zone}.`
     openRow = result.zone
     paint()
@@ -1430,7 +1443,8 @@ export const SHOWCASE_STYLE = `
 /* the header: a small brand row, then the search across the full width. The
    brand takes at most 2.5 times the search's height, margins and all (jwize
    2026-10-24) — lean, never cramped. */
-.card.showcase-page .panel { margin-top: 1.75rem; width: min(100rem, calc(100vw - 3rem)); }
+.card.showcase-page { grid-template-columns: minmax(0, 1fr); scroll-padding-top: 4.5rem; }
+.card.showcase-page .panel { margin-top: 1.75rem; width: min(100rem, calc(100vw - 3rem)); min-width: 0; }
 /* the header's two rows are the page's own: the search sticks flush to the top of the scrolled
    page where the brand was, and the brand comes back when the page is scrolled back to it */
 .hero { display: contents; }
@@ -1478,7 +1492,7 @@ export const SHOWCASE_STYLE = `
   font: 500 .66rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
 .hosted-empty[hidden], .dex-row[hidden], .hosted-nothing[hidden], .follow-suggest[hidden], .follow[hidden], .follow-note:empty { display: none; }
 /* the communities: a strip of names after All; the list beneath turns with a swipe */
-.pager { display: flex; gap: .4rem; overflow-x: auto; scrollbar-width: none; margin: -.3rem -.35rem .5rem; padding: .3rem .35rem; }
+.pager { display: flex; gap: .4rem; overflow-x: auto; scrollbar-width: none; margin: 0 -.35rem .5rem; padding: .3rem .35rem; }
 .pager::-webkit-scrollbar { display: none; }
 .pager[hidden] { display: none; }
 .pager-tab { flex: none; padding: .42rem .85rem; border: 1px solid var(--md-outline-variant); border-radius: 999px; cursor: pointer;
@@ -1658,7 +1672,8 @@ a.hex:focus-visible > .hex-art { inset: 4px; }
 /* A PHONE: one column of the same list. */
 @media (max-width: 720px) {
   /* the list is the whole width of the screen: rows edge to edge, room to see and to do */
-  .card.showcase-page .panel { margin-top: 0; width: 100%; padding-bottom: 5.5rem; }
+  .card.showcase-page { scroll-padding-bottom: 5.5rem; }
+  .card.showcase-page .panel { margin-top: 0; width: 100%; min-width: 0; padding-bottom: 5.5rem; }
   .hero-brand { padding: .8rem 16px .15rem; }
   .search { padding: .5rem 16px; }
   .search svg { left: calc(16px + .95rem); }

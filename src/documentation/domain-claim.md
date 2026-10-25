@@ -218,8 +218,11 @@ is a domain and its hives are its subdomains, so the page is:
 - **Follow a domain** (jwize, 2026-10-25): a search line that names a domain
   this browser does not follow offers **Follow <domain>** (when nothing matches
   it says so too); an input at the foot follows one as well, fixed to the bottom
-  of a phone. The domain must answer across origins, as a host does (`/pin`),
-  then it is kept in this browser's `community:hosts` and becomes a row, open,
+  of a phone. The domain must answer the way a host does, across origins and
+  with a good status and the right shape: `/pin` with a signature, or
+  `/publications.json`, or `/content/manifest.json` (a domain that merely allows
+  cross-origin reads is not a host, and one under this domain is never followed
+  here). Then it is kept in this browser's `community:hosts` and becomes a row, open,
   with what it publishes: its own ledger (`/publications.json`), cut to the
   names under its own domain and drawn as its own word, never as proof of who
   owns a name here; and the creations it holds itself. The routes its offering
@@ -231,6 +234,12 @@ is a domain and its hives are its subdomains, so the page is:
 
 Choosing tiles for a hive elsewhere (`?home=`) is a task, not a visit: that
 page keeps the gallery and its return bar.
+
+**Viewing a front door before it is live.** `node scripts/preview-front-door.cjs`
+opens a real browser window at the domain's own address (`--domain <zone>`,
+`hypercomb.com` by default) with the shell built from your working tree and the
+data the domain's own, live: nothing is uploaded or signed. `--phone` is a touch
+phone (hold a tile, swipe the pages); `--no-build` reuses the last build.
 
 **One tile per name.** Every publish of one name is one tile on the page
 (jwize 2026-10-24: "an aggregate so we don't duplicate tiles on the home

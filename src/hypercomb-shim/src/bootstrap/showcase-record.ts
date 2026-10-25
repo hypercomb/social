@@ -138,9 +138,12 @@ export const parseShowcase = (raw: unknown, zone: string): ShowcaseRecord | null
   return { zone, items, domains, ...(communities.length ? { communities } : {}), ...(view ? { view } : {}) }
 }
 
-const fetchJson = async (url: string, limit: number): Promise<{ bytes: ArrayBuffer; value: unknown } | null> => {
+/** A read that failed is `null`; a host that answers that it holds nothing is `'missing'` — an owner
+ *  with no index here yet is not an owner who could not be read. */
+const fetchJson = async (url: string, limit: number): Promise<{ bytes: ArrayBuffer; value: unknown } | null | 'missing'> => {
   try {
     const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+    if (response.status === 404) return 'missing'
     if (!response.ok || Number(response.headers.get('content-length') ?? 0) > limit) return null
     const bytes = await response.arrayBuffer()
     return bytes.byteLength <= limit ? { bytes, value: JSON.parse(new TextDecoder().decode(bytes)) } : null
@@ -157,20 +160,24 @@ const fetchJson = async (url: string, limit: number): Promise<{ bytes: ArrayBuff
 export const readZoneOwners = async (zone: string, owners: readonly string[]): Promise<ZoneOwners> => {
   const doors = new Map<string, ReadonlyMap<string, readonly string[]>>()
   let showcase: ShowcaseRecord | null = null
-  let reached = false
+  // `failed`: an owner this read could not see — a network error, a bad answer, a signature that
+  // does not verify. One such owner makes the whole read unknown, because what they signed may be
+  // the very thing that narrows or widens the rest.
+  let failed = false
   let unreadable = false
   let decided = false
-  if (!ZONE.test(zone) && !LOOPBACK.test(zone)) return { showcase, doors, reached, unreadable }
+  const listed = owners.filter(key => SIG.test(key)).slice(0, 8)
+  if (!ZONE.test(zone) && !LOOPBACK.test(zone)) return { showcase, doors, reached: false, unreadable }
   const origin = `${LOOPBACK.test(zone) ? 'http' : 'https'}://${zone}`
   const indexes = await SignatureService.sign(new TextEncoder().encode('hive:indexes').buffer as ArrayBuffer)
-  for (const pubkey of owners.filter(key => SIG.test(key)).slice(0, 8)) {
+  for (const pubkey of listed) {
     const index = await fetchJson(`${origin}/${indexes}/${pubkey}`, 524_288)
+    if (index === 'missing') continue
     const event = index?.value as Record<string, unknown> | undefined
-    if (!event || Number(event['kind']) !== 30564 || event['pubkey'] !== pubkey) continue
-    try { if (!verifyEvent(event as never)) continue } catch { continue }
+    if (!event || Number(event['kind']) !== 30564 || event['pubkey'] !== pubkey) { failed = true; continue }
+    try { if (!verifyEvent(event as never)) { failed = true; continue } } catch { failed = true; continue }
     let content: { roots?: Record<string, unknown>; doors?: Record<string, unknown> } | undefined
-    try { content = JSON.parse(String(event['content'] ?? '')) } catch { continue }
-    reached = true
+    try { content = JSON.parse(String(event['content'] ?? '')) } catch { failed = true; continue }
     const opened = new Map<string, readonly string[]>()
     for (const [lineage, listed] of Object.entries(content?.doors ?? {})) {
       if (Array.isArray(listed)) opened.set(lineage, listed.filter((door): door is string => typeof door === 'string').map(door => door.toLowerCase()))
@@ -182,11 +189,11 @@ export const readZoneOwners = async (zone: string, owners: readonly string[]): P
     decided = true
     for (const path of [`/${sig}`, `/content/${sig}`]) {
       const atom = await fetchJson(`${origin}${path}`, 262_144)
-      if (!atom || await SignatureService.sign(atom.bytes) !== sig) continue
+      if (!atom || atom === 'missing' || await SignatureService.sign(atom.bytes) !== sig) continue
       const record = parseShowcase(atom.value, zone)
       if (record) { showcase = record; break }
     }
     if (!showcase) unreadable = true
   }
-  return { showcase, doors, reached, unreadable }
+  return { showcase, doors, reached: listed.length > 0 && !failed, unreadable }
 }
