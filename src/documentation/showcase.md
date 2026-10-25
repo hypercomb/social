@@ -142,13 +142,35 @@ with none keeps the exact bytes and signature it had.
   it does not understand drops that community: an unknown gate fails closed.
 - An old front door ignores the field and shows All.
 
+**How a page is drawn (built).** The tiles, their pictures and their
+properties never change; only the shape they are drawn in does (jwize,
+2026-10-25: "a rendering aspect that keeps the same images and properties but
+allows a more traditional row of four launcher. The default is hexagons for the
+brand"; "there should be a way on the groups to change launcher renderings").
+
+- A **view** is a property: `view` on the showcase (how All is drawn) and `view`
+  on a community (how that page is drawn). Absent, a community is drawn as All
+  is, and All is drawn as **hexagons**, the brand's default. An explicit `hex`
+  on a community beats an inherited `launcher`.
+- `hex` is the comb of hexagons. `launcher` is the traditional launcher: the
+  same tiles in rows of four, rounded icons with the name beneath, the same
+  owner counts, check marks and links. A name this reader does not know is not a
+  view, and the page is drawn as hexagons.
+- The followed domains stay the master list, drawn in the shape All has.
+- `?view=launcher` (or `?view=hex`) on the address asks for a shape for whoever
+  is looking, and signs nothing: the way to try one before choosing it.
+- The set is closed on purpose: a view is a name this reader draws. A piece
+  someone plugs in to draw a new shape would arrive as a signature-addressed
+  resource, and that needs a decision about running foreign styling that is not
+  made yet.
+
 **Not built.**
 
-- **Making one in the hive.** Naming a community, the Manage view (every tile
+- **Making one in the hive.** Naming a community, choosing its view, the Manage view (every tile
   shown, the non-members grayed out, a click toggling membership) and signing
   the record all live in the hive, with native undo through the `showcase`
   layer slot. The record's writer is built (`addCommunity`, `removeCommunity`,
-  `toggleCommunityItem`); the screen is not. The Publish panel's Groups are not
+  `toggleCommunityItem`, `setView`, `setCommunityView`); the screen is not. The Publish panel's Groups are not
   reused for membership: a group holds child tiles of one page, and a community
   holds a peer's items too.
 - **Access-gated communities.** Today every community in the record is as public

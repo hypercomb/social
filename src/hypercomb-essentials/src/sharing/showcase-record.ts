@@ -26,12 +26,26 @@ export type ShowcaseItem = { readonly pubkey: string; readonly lineage: string }
 /** A domain's showcase: the items turned on, and the domains shown in full. */
 export type Showcase = { readonly zone: string; readonly items: readonly ShowcaseItem[]; readonly domains: readonly string[]
   /** The named pages after All, in the order they are swiped. */
-  readonly communities?: readonly ShowcaseCommunity[] }
+  readonly communities?: readonly ShowcaseCommunity[]
+  /** How the page is drawn; absent, as hexagons. */
+  readonly view?: ShowcaseView }
+
+/** HOW A PAGE IS DRAWN (jwize 2026-10-25: "a rendering aspect that keeps the
+ *  same images and properties but allows a more traditional row of four
+ *  launcher. The default is hexagons for the brand"; "a way on the groups to
+ *  change launcher renderings"). The tiles, their pictures and their
+ *  properties never change; only the shape they are drawn in does. A closed set
+ *  of names here — a name this reader does not know is not a view, and the page
+ *  is drawn as hexagons. */
+export type ShowcaseView = 'hex' | 'launcher'
+export const parseView = (raw: unknown): ShowcaseView | undefined => (raw === 'hex' || raw === 'launcher' ? raw : undefined)
 
 /** A community: a named page of the showcase — a filter over what it already
  *  shows, never a way to show more (jwize 2026-10-25: "you create a community
  *  that is the name"; "swiping between your communities"). */
-export type ShowcaseCommunity = { readonly name: string; readonly items: readonly ShowcaseItem[]; readonly domains: readonly string[] }
+export type ShowcaseCommunity = { readonly name: string; readonly items: readonly ShowcaseItem[]; readonly domains: readonly string[]
+  /** How this community's page is drawn; absent, it is drawn as All is. */
+  readonly view?: ShowcaseView }
 
 /** The most communities a showcase carries, and the longest name a community has. */
 export const COMMUNITIES_MAX = 24
@@ -79,7 +93,8 @@ export const parseCommunities = (raw: unknown): ShowcaseCommunity[] => {
     const key = communityKey(name)
     if (!key || seen.has(key)) continue
     seen.add(key)
-    out.push({ name, items: parseItems(entry['items']), domains: parseDomains(entry['domains']) })
+    const view = parseView(entry['view'])
+    out.push({ name, items: parseItems(entry['items']), domains: parseDomains(entry['domains']), ...(view ? { view } : {}) })
   }
   return out
 }
@@ -99,7 +114,8 @@ export const parseShowcase = (raw: unknown, zone: string): Showcase | null => {
   const items = parseItems(record['items'])
   const domains = parseDomains(record['domains'])
   const communities = parseCommunities(record['communities'])
-  return { zone, items, domains, ...(communities.length ? { communities } : {}) }
+  const view = parseView(record['view'])
+  return { zone, items, domains, ...(communities.length ? { communities } : {}), ...(view ? { view } : {}) }
 }
 
 const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
@@ -116,17 +132,19 @@ export const showcaseBytes = (showcase: Showcase): Uint8Array => {
       .map(item => ({ pubkey: item.pubkey, lineage: item.lineage }))
   const sortedDomains = (domains: readonly string[]): string[] => [...new Set(domains)].sort(byCode)
   const seen = new Set<string>()
-  const communities: { name: string; items: { pubkey: string; lineage: string }[]; domains: string[] }[] = []
+  const communities: { name: string; items: { pubkey: string; lineage: string }[]; domains: string[]; view?: ShowcaseView }[] = []
   for (const community of showcase.communities ?? []) {
     const name = communityName(community.name)
     const key = communityKey(name)
     if (!key || seen.has(key) || communities.length >= COMMUNITIES_MAX) continue
     seen.add(key)
-    communities.push({ name, items: sortedItems(community.items), domains: sortedDomains(community.domains) })
+    const view = parseView(community.view)
+    communities.push({ name, items: sortedItems(community.items), domains: sortedDomains(community.domains), ...(view ? { view } : {}) })
   }
   return new TextEncoder().encode(JSON.stringify({
     kind: 'host:showcase', zone: showcase.zone, items: sortedItems(showcase.items), domains: sortedDomains(showcase.domains),
     ...(communities.length ? { communities } : {}),
+    ...(parseView(showcase.view) ? { view: parseView(showcase.view) } : {}),
   }))
 }
 
@@ -175,6 +193,22 @@ export const addCommunity = (showcase: Showcase, raw: unknown): { ok: true; show
   if (communities.length >= COMMUNITIES_MAX) return { ok: false, reason: 'full' }
   return { ok: true, key, showcase: { ...showcase, communities: [...communities, { name, items: [], domains: [] }] } }
 }
+
+/** How the page is drawn: hexagons (the brand's default) or the launcher; `undefined` clears it. */
+export const setView = (showcase: Showcase, view: ShowcaseView | undefined): Showcase => {
+  const { view: _gone, ...rest } = showcase
+  return view ? { ...rest, view } : rest
+}
+
+/** How one community is drawn; `undefined` clears it, and it is drawn as All is. */
+export const setCommunityView = (showcase: Showcase, key: string, view: ShowcaseView | undefined): Showcase => ({
+  ...showcase,
+  communities: (showcase.communities ?? []).map(community => {
+    if (communityKey(community.name) !== key) return community
+    const { view: _gone, ...rest } = community
+    return view ? { ...rest, view } : rest
+  }),
+})
 
 /** Delete a community. Its members stay in the showcase. */
 export const removeCommunity = (showcase: Showcase, key: string): Showcase => ({

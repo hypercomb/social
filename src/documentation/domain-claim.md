@@ -210,6 +210,11 @@ is a domain and its hives are its subdomains, so the page is:
   community, and a sideways swipe on a phone turns the pages, round the ends.
   A community only filters this domain's row; the followed domains stay the
   master list (`showcase.md`, "Communities").
+- **Hexagons or a launcher** (jwize, 2026-10-25): the same tiles in the brand's
+  hexagons (the default) or in the traditional launcher, rows of four. The
+  owners choose it per page and per community in the signed showcase (`view`);
+  `?view=launcher` asks for it on the address (`showcase.md`, "How a page is
+  drawn").
 - **Follow a domain** (jwize, 2026-10-25): the search names a domain nothing
   here matches, and the miss offers **Follow <domain>**; an input at the foot
   follows one too, fixed to the bottom of a phone. The domain must answer

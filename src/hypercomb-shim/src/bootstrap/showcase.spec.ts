@@ -631,3 +631,91 @@ describe('communities — pages after All', () => {
     expect([...withPeers.bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['dylan'])
   })
 })
+
+describe('the launcher — the same tiles, drawn in rows of four', () => {
+  const sites = parseLedger(LEDGER)
+  const a = { pubkey: sig('a') }
+  const links = [{ label: 'Minimal host', href: '/hosts', note: '', icon: 'host' as const }]
+  const record = (extra: Partial<ShowcaseRecord>): ShowcaseRecord => ({
+    zone: 'hypercomb.com', domains: [], items: [{ ...a, lineage: 'camelflage' }, { ...a, lineage: 'dylan' }],
+    communities: [{ name: 'Favourites', items: [{ ...a, lineage: 'dylan' }], domains: [] }, { name: 'Daily', items: [{ ...a, lineage: 'camelflage' }], domains: [], view: 'launcher' }],
+    ...extra,
+  })
+  const draw = (rec: ShowcaseRecord, sources: string[] = []) => showcase({
+    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources, links,
+    ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+    readOwners: async () => ({ showcase: rec, doors: new Map() }),
+  })
+  const own = (bands: HTMLElement): HTMLElement => bands.querySelector('.dex-row.own .comb') as HTMLElement
+  const tab = (bands: HTMLElement, name: string): HTMLButtonElement =>
+    [...bands.querySelectorAll<HTMLButtonElement>('.pager-tab')].find(button => button.textContent === name)!
+
+  it('draws hexagons unless a view says otherwise — in comb rows', async () => {
+    const { bands } = draw(record({}))
+    await vi.waitFor(() => expect(bands.querySelectorAll('.pager-tab')).toHaveLength(3))
+    expect(own(bands).dataset['shape']).toBeUndefined()
+    expect(own(bands).querySelector('.comb-row')).not.toBeNull()
+  })
+
+  it('draws the launcher as a plain grid of the very same tiles when the page says so', async () => {
+    const { bands } = draw(record({ view: 'launcher' }))
+    await vi.waitFor(() => expect(own(bands)?.dataset['shape']).toBe('launcher'))
+    expect(own(bands).querySelector('.comb-row')).toBeNull()
+    const kids = [...own(bands).children]
+    expect(kids.map(node => node.querySelector('.hex-name')?.textContent)).toEqual(['camelflage', 'dylan', 'Minimal host'])
+    // The same pictures, names and links: only the shape differs.
+    expect(kids.every(node => node.classList.contains('hex') && node.querySelector('.hex-art'))).toBe(true)
+    expect(kids[2]!.tagName).toBe('A')
+  })
+
+  it('lets a community choose its own view, and one that says nothing is drawn as All is', async () => {
+    const { bands } = draw(record({}))
+    await vi.waitFor(() => expect(bands.querySelectorAll('.pager-tab')).toHaveLength(3))
+    tab(bands, 'Daily').click()
+    expect(own(bands).dataset['shape']).toBe('launcher')
+    expect([...own(bands).children].map(node => node.querySelector('.hex-name')?.textContent)).toEqual(['camelflage'])
+    tab(bands, 'Favourites').click()
+    expect(own(bands).dataset['shape']).toBeUndefined()
+    expect(own(bands).querySelector('.comb-row')).not.toBeNull()
+    tab(bands, 'All').click()
+    expect(own(bands).dataset['shape']).toBeUndefined()
+    // Hexagons once more, then the launcher once more: the comb starts over each time.
+    tab(bands, 'Daily').click()
+    expect(own(bands).dataset['shape']).toBe('launcher')
+  })
+
+  it('inherits All\'s view into a community that has none, and an explicit hex beats it', async () => {
+    const { bands } = draw(record({ view: 'launcher', communities: [
+      { name: 'Plain', items: [{ ...a, lineage: 'dylan' }], domains: [] },
+      { name: 'Brand', items: [{ ...a, lineage: 'camelflage' }], domains: [], view: 'hex' }] }))
+    await vi.waitFor(() => expect(bands.querySelectorAll('.pager-tab')).toHaveLength(3))
+    tab(bands, 'Plain').click()
+    expect(own(bands).dataset['shape']).toBe('launcher')
+    tab(bands, 'Brand').click()
+    expect(own(bands).dataset['shape']).toBeUndefined()
+  })
+
+  it('keeps the followed domains in the view All has, whichever community is showing', async () => {
+    const { bands } = draw(record({ view: 'launcher' }), ['jwize.com'])
+    await vi.waitFor(() => expect(own(bands)?.dataset['shape']).toBe('launcher'))
+    tab(bands, 'Favourites').click()
+    ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+    const peer = bands.querySelector('.dex-row:not(.own) .comb') as HTMLElement
+    await vi.waitFor(() => expect(peer.dataset['shape']).toBe('launcher'))
+  })
+
+  it('takes the shape the address asks for over the signed one, and a shape nobody knows for none', async () => {
+    const original = location.search
+    try {
+      history.replaceState(null, '', '/?view=launcher')
+      const asked = draw(record({}))
+      await vi.waitFor(() => expect(own(asked.bands)?.dataset['shape']).toBe('launcher'))
+      history.replaceState(null, '', '/?view=grid')
+      const unknown = draw(record({ view: 'launcher' }))
+      await vi.waitFor(() => expect(own(unknown.bands)?.dataset['shape']).toBe('launcher'))
+      history.replaceState(null, '', '/?view=hex')
+      const hex = draw(record({ view: 'launcher' }))
+      await vi.waitFor(() => expect(hex.bands.querySelector('.dex-row.own .comb-row')).not.toBeNull())
+    } finally { history.replaceState(null, '', '/' + original) }
+  })
+})

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { addCommunity, communityKey, communityName, parseShowcase, removeCommunity, showcaseBytes, showcaseKey, showcases,
-  toggleCommunityItem, toggleDomain, toggleItem, type Showcase } from './showcase-record'
+  setCommunityView, setView, toggleCommunityItem, toggleDomain, toggleItem, type Showcase } from './showcase-record'
 
 const key = (char: string): string => char.repeat(64)
 const empty: Showcase = { zone: 'hypercomb.com', items: [], domains: [] }
@@ -142,5 +142,46 @@ describe('communities — named pages of the showcase', () => {
     const many = { ...record, communities: Array.from({ length: 80 }, (_, index) => ({ name: `page ${index}`, items: [dylan] })) }
     expect(parseShowcase(many, 'hypercomb.com')!.communities).toHaveLength(24)
     expect(shim.parseShowcase(many, 'hypercomb.com')!.communities).toHaveLength(24)
+  })
+})
+
+describe('view — how a page is drawn, a property of the page and of each community', () => {
+  const text = (showcase: Showcase): string => new TextDecoder().decode(showcaseBytes(showcase))
+  const two = (): Showcase => {
+    const a = addCommunity(toggleItem(empty, dylan), 'Daily')
+    if (!a.ok) throw new Error(a.reason)
+    const b = addCommunity(a.showcase, 'Weekend')
+    if (!b.ok) throw new Error(b.reason)
+    return b.showcase
+  }
+
+  it('is the very bytes it was when no view is set — hexagons are the default and say nothing', () => {
+    expect(text(two())).not.toContain('"view"')
+    expect(text(setView(two(), undefined))).toBe(text(two()))
+  })
+
+  it('is set on the page, or on one community, and cleared again', () => {
+    const page = setView(two(), 'launcher')
+    expect(JSON.parse(text(page)).view).toBe('launcher')
+    const one = setCommunityView(page, 'weekend', 'hex')
+    const written = JSON.parse(text(one))
+    expect(written.communities.map((row: { name: string; view?: string }) => [row.name, row.view])).toEqual([['Daily', undefined], ['Weekend', 'hex']])
+    expect(text(setCommunityView(setView(one, undefined), 'weekend', undefined))).toBe(text(two()))
+  })
+
+  it('is read back the same by the front door, and a name nobody knows is no view', async () => {
+    const shim = await import(/* @vite-ignore */ SHIM_RECORD) as { parseShowcase: (raw: unknown, zone: string) => unknown; parseView: (raw: unknown) => unknown }
+    const written = setCommunityView(setView(two(), 'launcher'), 'daily', 'hex')
+    const raw = JSON.parse(text(written))
+    expect(shim.parseShowcase(raw, 'hypercomb.com')).toEqual(parseShowcase(raw, 'hypercomb.com'))
+    expect(parseShowcase(raw, 'hypercomb.com')!.view).toBe('launcher')
+    expect(parseShowcase(raw, 'hypercomb.com')!.communities![0]!.view).toBe('hex')
+    const odd = { ...raw, view: 'grid', communities: [{ name: 'Daily', items: [dylan], view: '<script>' }] }
+    for (const parse of [parseShowcase, shim.parseShowcase as typeof parseShowcase]) {
+      const read = parse(odd, 'hypercomb.com')!
+      expect(read.view).toBeUndefined()
+      expect(read.communities![0]!.view).toBeUndefined()
+    }
+    for (const value of ['hex', 'launcher', 'Launcher', '', null, 4, {}]) expect(shim.parseView(value)).toBe(['hex', 'launcher'].includes(value as string) ? value : undefined)
   })
 })

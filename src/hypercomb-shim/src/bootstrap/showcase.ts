@@ -18,7 +18,7 @@
 
 import type { HostCreation, HostOffering } from '@hypercomb/core'
 import { pictureOrigins, tilePicture } from './tile-picture'
-import { communityKey, doorsOpen, type ShowcaseCommunity, type ShowcaseItem, type ZoneOwners } from './showcase-record'
+import { communityKey, doorsOpen, parseView, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseView, type ZoneOwners } from './showcase-record'
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { LinkIcon, WelcomeLink } from './welcome'
 
@@ -851,7 +851,24 @@ ${entry.key}`
   // is always the height of the rows it holds.
   const combTiles = new WeakMap<HTMLElement, readonly HTMLElement[]>()
   const combWidths = new WeakMap<HTMLElement, number>()
-  const arrange = (comb: HTMLElement, tiles: readonly HTMLElement[]): void => {
+  const combShapes = new WeakMap<HTMLElement, ShowcaseView>()
+  const arrange = (comb: HTMLElement, tiles: readonly HTMLElement[], shape: ShowcaseView = combShapes.get(comb) ?? 'hex'): void => {
+    // A change of shape starts the comb over: a launcher is the tiles in a plain
+    // grid, hexagons are rows counted from the width.
+    if (combShapes.get(comb) !== shape) {
+      combShapes.set(comb, shape)
+      combTiles.delete(comb)
+      combWidths.delete(comb)
+      comb.replaceChildren()
+      if (shape === 'launcher') comb.dataset['shape'] = 'launcher'
+      else delete comb.dataset['shape']
+    }
+    if (shape === 'launcher') {
+      const kept = [...comb.children]
+      if (kept.length !== tiles.length || kept.some((node, index) => node !== tiles[index])) comb.replaceChildren(...tiles)
+      combTiles.set(comb, tiles)
+      return
+    }
     // The same tiles at the same width are already where they belong: moving
     // them would take focus from a tile and restart its picture's fade.
     const width = comb.clientWidth
@@ -968,6 +985,10 @@ ${entry.key}`
   pager.hidden = true
   hosted.setAttribute('role', 'tabpanel')
   bandsHost.append(pager, hosted, nothing, suggest, followBar)
+  /** The shape asked for on the address (`?view=launcher`), or none. */
+  const viewAsked: ShowcaseView | undefined = (() => {
+    try { return parseView(new URLSearchParams(location.search).get('view')) } catch { return undefined }
+  })()
   /** The community page showing now, by key; '' is All. */
   let page = ''
   const tabViews = new Map<string, HTMLButtonElement>()
@@ -1179,6 +1200,10 @@ ${entry.key}`
       .filter(entry => !community || covers(entry, community.items, community.domains)).sort(byTitle)
     // The platform's doors are the first page's; a community is about what is shared.
     const links = community ? [] : options.links ?? []
+    // HOW IT IS DRAWN: a community's own view, else All's, else the brand's hexagons;
+    // `?view=` on the address overrides it for whoever is looking, and changes nothing signed.
+    const base = viewAsked ?? signed?.showcase?.view ?? 'hex'
+    const shape = viewAsked ?? community?.view ?? base
     // This domain first; then the domains this browser follows, by name.
     const rows: HTMLElement[] = []
     let visible = 0
@@ -1201,7 +1226,7 @@ ${entry.key}`
         // In another domain's row, a tile already on this domain's page says so.
         tile.classList.toggle('in-showcase', !own && showcased(entry))
         return tile
-      }), ...doors.map(link => linkTile(link))] : [])
+      }), ...doors.map(link => linkTile(link))] : [], own ? shape : base)
       view.empty.hidden = !open || total > 0
       view.empty.textContent = own && (!ledgerRead || unread) ? 'Reading what is published here…'
         : own ? 'Nothing is published here yet.' : `Nothing is published on ${zone} yet.`
@@ -1378,6 +1403,23 @@ export const SHOWCASE_STYLE = `
 .pager-tab[aria-selected='true'] { border-color: var(--md-primary); background: var(--md-primary); color: var(--md-on-primary); }
 .pager-tab:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 .hosted { touch-action: pan-y pinch-zoom; }
+/* THE LAUNCHER (jwize 2026-10-25): the same tiles — the same pictures, names, badges and links — in the traditional rows of four. The hexagon stays the brand's default. */
+.comb[data-shape='launcher'] { --icon: 6rem; display: grid; grid-template-columns: repeat(4, minmax(0, var(--icon))); justify-content: start; gap: 1.3rem 1.1rem; }
+.comb[data-shape='launcher'] .hex { width: 100%; height: auto; display: grid; justify-items: center; align-content: start; gap: .45rem;
+  clip-path: none; background: none; transition: none; }
+.comb[data-shape='launcher'] .hex > .hex-art { position: relative; inset: auto; width: 100%; aspect-ratio: 1; clip-path: none; border-radius: 22%;
+  box-shadow: 0 .35rem .9rem -.45rem rgb(60 35 0 / .55), inset 0 0 0 1px rgb(255 255 255 / .18); transition: transform .2s; }
+.comb[data-shape='launcher'] .hex > .hex-art::after { display: none; }
+.comb[data-shape='launcher'] .hex-label { position: static; width: 100%; color: var(--md-on-surface-strong); }
+.comb[data-shape='launcher'] .hex-name { font-size: .78rem; line-height: 1.2; letter-spacing: 0; text-shadow: none; }
+.comb[data-shape='launcher'] .hex-address, .comb[data-shape='launcher'] .hex-kind { display: none; }
+.comb[data-shape='launcher'] .hex-owners { top: -.3rem; right: -.3rem; left: auto; transform: none; }
+.comb[data-shape='launcher'] .hex.in-showcase::after { top: -.3rem; right: -.3rem; left: auto; transform: none; width: 1.25rem; height: 1.25rem; font-size: .7rem; }
+.comb[data-shape='launcher'] button.hex:hover, .comb[data-shape='launcher'] button.hex:hover:not(:disabled), .comb[data-shape='launcher'] a.hex:hover,
+.comb[data-shape='launcher'] button.hex:focus-visible { background: none; }
+.comb[data-shape='launcher'] .hex:hover > .hex-art { transform: translateY(-2px); }
+.comb[data-shape='launcher'] button.hex:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 3px; }
+.comb[data-shape='launcher'] button.hex:focus-visible > .hex-art { inset: auto; }
 .hosted-nothing { margin: .4rem 0 1rem; color: var(--md-on-surface-var); }
 /* the platform's doors are tiles: the same hexagon, a glyph for a picture, a link for a click */
 a.hex { color: inherit; text-decoration: none; cursor: pointer; }
@@ -1552,6 +1594,8 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
   .search { margin-top: .8rem; }
   .mini { width: 1.8rem; height: calc(1.8rem * 1.1547); margin-left: -.55rem; }
   .comb { --s: 6.1rem; --g: .36rem; }
+  .comb[data-shape='launcher'] { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.1rem .7rem; }
+  .comb[data-shape='launcher'] .hex-name { font-size: .72rem; }
   .hex-name { font-size: .74rem; }
   .hex-address { display: none; }
   .hex-label { top: 60%; }
