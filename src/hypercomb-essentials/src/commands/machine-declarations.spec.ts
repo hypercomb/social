@@ -60,6 +60,7 @@ await import('../references/gather/from.queen.js')
 await import('../references/gather/references.queen.js')
 await import('../sharing/profile.queen.js')
 await import('../sharing/groups.queen.js')
+await import('../sharing/publish.queen.js')
 await import('../questions/start.queen.js')
 await import('../questions/question.queen.js')
 await import('../questions/tally.queen.js')
@@ -163,6 +164,10 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   // for the follow session … then we just leave it on").
   walk: ['additive', 'local'],             // moves where you stand, page by page, on a timer; writes
                                            // nothing (followers move by the follow mechanism)
+  // Judged on arrival (2026-10-24, public history — "have that feature with
+  // grant"). Only the history forms are a machine's; opening a branch's
+  // history cannot be taken back, so the ceiling is destructive at the network.
+  publish: ['destructive', 'network'],
 }
 
 describe('every machine declaration, as audited', () => {
@@ -178,6 +183,14 @@ describe('every machine declaration, as audited', () => {
 })
 
 describe('what the corrections refuse', () => {
+  it('/publish lets a machine say only the history forms', () => {
+    const refuse = declared.get('publish')!.refuse!
+    for (const line of ['history', 'history on', 'history off', '/a/b history on']) expect(refuse(line), line).toBeUndefined()
+    for (const line of ['', 'here', 'on example.com', 'off example.com', 'as blog on example.com', '/a/b', 'history maybe']) {
+      expect(refuse(line), line).toContain("participant's")
+    }
+  })
+
   it('/groups lets a machine publish, and never acts on a selection it cannot see', () => {
     const refuse = declared.get('groups')!.refuse!
     expect(refuse('')).toBeUndefined()

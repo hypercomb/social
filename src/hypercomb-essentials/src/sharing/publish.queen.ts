@@ -85,6 +85,22 @@ export class PublishQueenBee {
     'Show what your published hive is serving right now, next to what has changed here since — one row per branch, with publish, re-check and unpublish per row. `publish here` publishes the layer you stand on to its hosts; `publish on <domain>` and `publish off <domain>` switch one domain for it; `publish as <label> on <domain>` gives it its own address there; `publish history` says whether it publishes its history or its head only, and `publish history on` / `publish history off` switch that. Say a route first (`publish /a/b on <domain>`) to name the tile instead of standing on it.'
   readonly descriptionKey = 'slash.publish'
 
+  /** A machine may say only the history forms, and only once the participant
+   *  grants it (`grant allow publish`, at the destructive and network rungs).
+   *  Opening a branch's history is outward and cannot be taken back, so that
+   *  is its ceiling. Every other publish form stays the participant's. */
+  readonly machine = {
+    forms: 'history | history on | history off | /<route> history [on|off]',
+    example: '/publish history',
+    reach: 'destructive' as const,
+    scope: 'network' as const,
+    consequence: "history on serves this branch's earlier versions from its hosts; whatever is served may be copied and cannot be taken back",
+    refuse: (args: string): string | undefined =>
+      /^history(?:\s+(on|off))?$/i.test(splitRoute(String(args ?? '').trim()).rest)
+        ? undefined
+        : "only `publish history [on|off]` is a machine's to say; every other publish form is the participant's",
+  }
+
   async invoke(args: string): Promise<void> {
     const { route, rest } = splitRoute(String(args ?? '').trim())
     const lower = rest.toLowerCase()
