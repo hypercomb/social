@@ -17,6 +17,7 @@
 
 import type { HostCreation, HostOffering } from '@hypercomb/core'
 import { pictureOrigins, tilePicture } from './tile-picture'
+import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { LinkIcon, WelcomeLink } from './welcome'
 
 const SIG = /^[a-f0-9]{64}$/
@@ -55,6 +56,17 @@ export type Publish = {
   readonly route?: string
   /** Where it was read: the ledger's verified heads lead, a domain's pool follows. */
   readonly source: 'ledger' | 'pool'
+  /** The index key it is published under — known for what the ledger read. */
+  readonly lineage?: string
+}
+
+/** One owner's verified publish of a version: what an Off switch names. */
+export type Claim = {
+  readonly pubkey: string
+  readonly label: string
+  readonly lineage: string
+  /** The domains it opens on, as the ledger read them. */
+  readonly zones: readonly string[]
 }
 
 export type Place = { readonly zone: string; readonly address: string; readonly href: string
@@ -69,6 +81,9 @@ export type Version = {
   /** This domain's place first. */
   readonly places: readonly Place[]
   readonly route?: string
+  /** The ledger-verified publishes of it, per owner — only these can be
+   *  turned off, and only by their owner's own hive. */
+  readonly claims: readonly Claim[]
 }
 
 /** A NAME, AS THE PAGE SHOWS IT: one tile, every version behind it. */
@@ -177,7 +192,7 @@ export const ledgerPublishes = (sites: readonly LedgerSite[], zones: readonly st
       for (const publisher of site.publishers) {
         out.push({ zone, kind: 'hive', name: nameOf(site.lineage, site.title), title: site.title,
           head: publisher.head, owner: { pubkey: publisher.pubkey, label: publisher.label },
-          address: host, href, route: href, source: 'ledger' })
+          address: host, href, route: href, source: 'ledger', lineage: site.lineage })
       }
     }
   }
@@ -232,7 +247,7 @@ const byTitle = (a: Aggregate, b: Aggregate): number =>
  */
 export const aggregate = (publishes: readonly Publish[], zones: readonly string[], self: string): Band[] => {
   type Gathering = { head: string; title: string; owners: Map<string, Owner>; places: Map<string, Place>
-    route?: string; ledger: boolean }
+    route?: string; ledger: boolean; claims: Map<string, { pubkey: string; label: string; lineage: string; zones: Set<string> }> }
   const groups = new Map<string, Publish[]>()
   for (const publish of publishes) {
     const key = `${publish.kind}:${publish.name}`
@@ -248,8 +263,15 @@ export const aggregate = (publishes: readonly Publish[], zones: readonly string[
     for (const publish of [...group].sort((a, b) => Number(b.source === 'ledger') - Number(a.source === 'ledger'))) {
       let version = byHead.get(publish.head)
       if (!version) byHead.set(publish.head, version = { head: publish.head, title: publish.title,
-        owners: new Map(), places: new Map(), route: publish.route, ledger: false })
+        owners: new Map(), places: new Map(), route: publish.route, ledger: false, claims: new Map() })
       version.ledger ||= publish.source === 'ledger'
+      if (publish.source === 'ledger' && publish.kind === 'hive' && publish.lineage) {
+        const id = `${publish.owner.pubkey}:${publish.lineage}`
+        let claim = version.claims.get(id)
+        if (!claim) version.claims.set(id, claim = { pubkey: publish.owner.pubkey, label: publish.owner.label,
+          lineage: publish.lineage, zones: new Set() })
+        claim.zones.add(publish.zone)
+      }
       const known = version.owners.get(publish.owner.pubkey)
       if (!known || (!known.label && publish.owner.label)) version.owners.set(publish.owner.pubkey, publish.owner)
       const place = version.places.get(publish.address)
@@ -269,6 +291,8 @@ export const aggregate = (publishes: readonly Publish[], zones: readonly string[
       places: [...version.places.values()].sort((a, b) =>
         Number(b.zone === self) - Number(a.zone === self) || ledgerFirst(a, b) || a.address.localeCompare(b.address)),
       ...(version.route ? { route: version.route } : {}),
+      claims: [...version.claims.values()].map(claim => ({ pubkey: claim.pubkey, label: claim.label,
+        lineage: claim.lineage, zones: [...claim.zones].sort() })),
     })).sort((a, b) => Number(here(b.places)) - Number(here(a.places))
       || Number(byHead.get(b.head)!.ledger) - Number(byHead.get(a.head)!.ledger)
       || b.places.length - a.places.length || a.head.localeCompare(b.head))
@@ -441,6 +465,8 @@ export type ShowcaseOptions = {
   readonly sources: readonly string[]
   readonly ledger: Promise<readonly LedgerSite[]>
   readonly readShared: SharedReader
+  /** The hive this page was opened from, when it was — where an owner's Off is handed. */
+  readonly home?: string
 }
 
 export type Showcase = {
@@ -601,7 +627,12 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   // In the hero, not the bands: a band re-orders its own children.
   hero.append(backdrop)
   let opener: HTMLElement | null = null
-  const stops = (): HTMLElement[] => [...sheet.querySelectorAll<HTMLElement>('a[href], button')]
+  const stops = (): HTMLElement[] => [...sheet.querySelectorAll<HTMLElement>('a[href], button, input')]
+    .filter(stop => !stop.closest('[hidden]'))
+  /** The owner's switches stay shown, and the hive they typed stays typed, for
+   *  the life of the page — this page keeps nothing of theirs beyond it. */
+  let managing = false
+  let homeValue = homeOrigin(options.home) ?? DEFAULT_HOME
   const activeHere = (): Element | null => (sheet.getRootNode() as ShadowRoot | Document).activeElement
   // While the sheet is open, Escape and Tab belong to it wherever focus has
   // wandered: the listeners sit on the document, not on the sheet.
@@ -657,7 +688,44 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     close.setAttribute('aria-label', 'Close')
     close.append(iconOf('close'))
     close.addEventListener('click', closeVersions)
-    head.append(miniOf(lead.head, lead.route), titles, close)
+    head.append(miniOf(lead.head, lead.route), titles)
+    // AN OWNER'S SWITCHES, folded away: this page holds no key, so Off only
+    // hands the row to the owner's own hive, which asks, signs and comes back.
+    const owned = entry.kind === 'hive' && entry.versions.some(version => version.claims.length)
+    const manage = el('button', 'versions-manage')
+    manage.type = 'button'
+    manage.textContent = 'Yours? Manage it'
+    manage.setAttribute('aria-pressed', String(managing))
+    const panel = el('div', 'versions-manage-panel')
+    const field = el('label', 'versions-home')
+    const fieldName = el('span')
+    fieldName.textContent = 'Your hive'
+    const homeInput = el('input')
+    homeInput.type = 'url'
+    homeInput.value = homeValue
+    homeInput.spellcheck = false
+    homeInput.autocomplete = 'off'
+    homeInput.addEventListener('input', () => { homeValue = homeInput.value })
+    field.append(fieldName, homeInput)
+    const explain = el('p', 'versions-manage-note')
+    explain.textContent = 'Off hands the switch to your hive, which holds your key — it asks before anything changes, and nothing is turned off from this page. Turning off keeps it published; you can turn it back on from Publish.'
+    const problem = el('p', 'versions-manage-problem')
+    problem.setAttribute('role', 'alert')
+    panel.append(field, explain, problem)
+    const showManaging = (): void => {
+      manage.setAttribute('aria-pressed', String(managing))
+      panel.hidden = !managing
+      for (const claims of sheet.querySelectorAll<HTMLElement>('.version-claims')) claims.hidden = !managing
+    }
+    manage.addEventListener('click', () => { managing = !managing; showManaging(); if (managing) homeInput.focus() })
+    if (owned) head.append(manage)
+    head.append(close)
+    const handOff = (version: Version, claim: Claim, scope: 'here' | 'everywhere'): void => {
+      const href = turnOffHref(homeInput.value, { title: entry.title, lineage: claim.lineage, publisher: claim.pubkey,
+        zone: options.self, scope, head: version.head, back: `${location.origin}/` })
+      if (!href) { problem.textContent = 'That is not a hive address — try https://hypercomb.io or http://localhost:4250.'; homeInput.focus(); return }
+      location.assign(href)
+    }
     const list = el('ol', 'version-list')
     for (const [index, version] of entry.versions.entries()) {
       const onThisDomain = version.places.some(place => place.zone === options.self)
@@ -679,9 +747,33 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
       words.textContent = entry.kind === 'creation' ? 'Inspect' : `Visit ${place.address}`
       visit.append(words, iconOf('arrow'))
       row.append(miniOf(version.head, version.route), about, visit)
+      if (entry.kind === 'hive' && version.claims.length) {
+        const claims = el('div', 'version-claims')
+        for (const claim of version.claims) {
+          const line = el('span', 'version-claim')
+          const owner = el('span', 'version-claim-owner')
+          owner.textContent = ownersLabel([claim])
+          line.append(owner)
+          if (claim.zones.includes(options.self)) {
+            const here = el('button', 'version-off')
+            here.type = 'button'
+            here.textContent = `Off on ${options.self}`
+            here.addEventListener('click', () => handOff(version, claim, 'here'))
+            line.append(here)
+          }
+          const everywhere = el('button', 'version-off')
+          everywhere.type = 'button'
+          everywhere.textContent = 'Off everywhere'
+          everywhere.addEventListener('click', () => handOff(version, claim, 'everywhere'))
+          line.append(everywhere)
+          claims.append(line)
+        }
+        row.append(claims)
+      }
       list.append(row)
     }
-    sheet.replaceChildren(head, list)
+    sheet.replaceChildren(head, panel, list)
+    showManaging()
     if (backdrop.hidden) {
       document.addEventListener('keydown', onKey, true)
       document.addEventListener('focusin', onFocus, true)
@@ -1259,6 +1351,30 @@ button.hex:focus-visible > .hex-art { inset: 4px; }
 .version-visit svg { flex: none; width: .9rem; height: .9rem; }
 .version-visit:hover { background: var(--md-primary); color: var(--md-on-primary); }
 .version-visit:focus-visible, .versions-close:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+/* an owner's switches: folded until "Yours? Manage it" */
+.versions-manage { flex: none; margin-left: auto; padding: .45rem .7rem; border: 1px solid var(--md-outline-variant);
+  border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-on-surface-var);
+  font: 600 .76rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.versions-manage[aria-pressed='true'] { border-color: var(--md-primary); color: var(--md-primary);
+  background: color-mix(in srgb, var(--md-primary) 9%, transparent); }
+.versions-manage + .versions-close { margin-left: 0; }
+.versions-manage-panel { display: grid; gap: .45rem; padding: .85rem 1.1rem; border-bottom: 1px solid var(--md-outline-variant);
+  background: color-mix(in srgb, var(--md-primary) 5%, var(--md-surface-c-lowest)); }
+.versions-manage-panel[hidden], .version-claims[hidden] { display: none; }
+.versions-home { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .7rem; }
+.versions-home span { font: 600 .62rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--md-on-surface-faint); }
+.versions-home input { min-width: 0; padding: .5rem .65rem; border-radius: var(--hc-radius-control, 2px); font: 500 .85rem/1.3 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.versions-manage-note { margin: 0; color: var(--md-on-surface-var); font-size: .78rem; line-height: 1.45; }
+.versions-manage-problem { margin: 0; color: var(--hc-status-alert, #b3261e); font-size: .8rem; }
+.versions-manage-problem:empty { display: none; }
+.version-claims { grid-column: 1 / -1; display: grid; gap: .35rem; padding-top: .35rem; }
+.version-claim { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; }
+.version-claim-owner { margin-right: auto; color: var(--md-on-surface-var); font: 600 .78rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.version-off { padding: .4rem .65rem; border: 1px solid color-mix(in srgb, var(--hc-status-alert, #b3261e) 45%, var(--md-outline-variant));
+  border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-on-surface-strong);
+  font: 600 .76rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.version-off:hover:not(:disabled) { background: color-mix(in srgb, var(--hc-status-alert, #b3261e) 10%, transparent); }
+.version-off:focus-visible, .versions-manage:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 
 /* membership: what a member does, on the colours of the mark */
 .member { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(1.5rem, 4vw, 3.5rem);

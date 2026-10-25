@@ -191,6 +191,60 @@ describe('showcase — the page is what is published now', () => {
   })
 })
 
+describe('an owner\'s Off — handed to their own hive, never done here', () => {
+  it('builds a link only to a hive\'s address', async () => {
+    const { homeOrigin, turnOffHref } = await import('./turn-off-link')
+    expect(homeOrigin('http://localhost:4250')).toBe('http://localhost:4250/')
+    expect(homeOrigin('hypercomb.io')).toBe('https://hypercomb.io/')
+    expect(homeOrigin('http://hypercomb.io')).toBeNull()
+    expect(homeOrigin('javascript:alert(1)')).toBeNull()
+    expect(homeOrigin('https://me:pw@hypercomb.io')).toBeNull()
+    expect(turnOffHref('ftp://x', { title: 't', lineage: 'l', publisher: sig('a'), zone: 'hypercomb.com',
+      scope: 'here', head: sig('1'), back: 'https://hypercomb.com/' })).toBeNull()
+  })
+
+  it('names the verified owners of a version, and only for hives the ledger read', () => {
+    const sites = parseLedger(LEDGER)
+    const zones = bandZones(sites, 'hypercomb.com')
+    const publishes = [...ledgerPublishes(sites, zones),
+      ...sharedPublishes('hypercomb.com', [offer('susan', 'hypercomb.com', sig('e'), sig('4'))], [])]
+    const tiles = aggregate(publishes, zones, 'hypercomb.com').flatMap(band => band.tiles)
+    const dylan = tiles.find(entry => entry.title === 'dylan')!
+    expect(dylan.versions[0]!.claims).toEqual([{ pubkey: sig('a'), label: 'Jaime', lineage: 'dylan',
+      zones: ['hypercomb.com', 'jwize.com'] }])
+    // A pool's offer is a claim anyone can make: it gets no switch.
+    expect(tiles.find(entry => entry.title === 'susan')!.versions[0]!.claims).toEqual([])
+  })
+
+  it('shows the switches only when the owner asks for them, Off here only where it opens', async () => {
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [], home: 'http://localhost:4250/',
+      ledger: Promise.resolve(parseLedger(LEDGER)), readShared: async () => ({ offers: [], creations: [] }),
+    })
+    document.body.append(hero, bands)
+    const tile = await vi.waitFor(() => {
+      const found = [...bands.querySelectorAll<HTMLButtonElement>('button.hex')].find(button => button.textContent?.includes('dylan'))
+      expect(found).toBeDefined()
+      return found!
+    })
+    tile.click()
+    const sheet = hero.querySelector('.versions') as HTMLElement
+    const manage = sheet.querySelector<HTMLButtonElement>('.versions-manage')!
+    expect(sheet.querySelector<HTMLElement>('.version-claims')!.hidden).toBe(true)
+    manage.click()
+    expect(manage.getAttribute('aria-pressed')).toBe('true')
+    expect(sheet.querySelector<HTMLInputElement>('.versions-home input')!.value).toBe('http://localhost:4250/')
+    expect([...sheet.querySelectorAll('.version-off')].map(button => button.textContent))
+      .toEqual(['Off on hypercomb.com', 'Off everywhere'])
+    // A bad hive address is said, and nothing leaves the page.
+    sheet.querySelector<HTMLInputElement>('.versions-home input')!.value = 'not a hive'
+    sheet.querySelector<HTMLButtonElement>('.version-off')!.click()
+    expect(sheet.querySelector('.versions-manage-problem')?.textContent).toContain('not a hive address')
+    hero.remove()
+    bands.remove()
+  })
+})
+
 describe('coverOf — a hive with no picture wears its own signature', () => {
   it('is the same cover for the same hive, and a different one for another', () => {
     expect(coverOf(sig('1'))).toEqual(coverOf(sig('1')))

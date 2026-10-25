@@ -197,6 +197,54 @@ is a domain and its hives are its subdomains, so the page is:
 Choosing tiles for a hive elsewhere (`?home=`) is a task, not a visit: that
 page keeps the gallery and its return bar.
 
+**One tile per name.** Every publish of one name is one tile on the page
+(jwize 2026-10-24: "an aggregate so we don't duplicate tiles on the home
+pages"). Clicking it opens its versions: this domain's version pinned first,
+then any other version on another domain, each with a Visit link. Identical
+publishes (one head) are one row however many domains or people carry them;
+the tile counts its owners when there is more than one. What the ledger
+verified leads every choice; a domain's pool counts only for addresses under
+that domain.
+
+## Turning a publish off
+
+An owner turns a publish off from any front door (jwize 2026-10-24: "if it is
+my domain I should be able to unpublish directly from hypercomb.com because I
+have the ownership key"). In a tile's versions, **Yours? Manage it** shows a
+*Your hive* field and, on each verified owner's row, **Off on <this domain>**
+and **Off everywhere**.
+
+- **The front door holds no key and never asks for one.** Off hands the row
+  to the owner's own hive: `<hive>/#turn-off=<request>`, the row's public
+  coordinates in the fragment (no server sees it). The hive is hypercomb.io
+  unless the owner types another, such as `http://localhost:4250`.
+- **The hive acts only with the key it already holds** — it never mints one
+  for a link — reads what the turn-off would write, and asks with that result
+  in front of the owner: the index key (beside the link's title when they
+  differ) and which domains it stays open on. On a yes it signs the index,
+  records the result, drops the domain from the branch's host marks (or its
+  next publish would open it again), and goes back to the front door.
+- **The link never chooses a door.** Anyone can make a link, so its domain is
+  only ever the one taken out: the index is read and written through the
+  owner's own publishing hosts. A refusal (another key, a newer head, an index
+  that cannot be read) stays in the hive; only a written turn-off goes back,
+  and only to a domain the index really opened it on.
+- **Turning off is reversible.** Only `doors[key]` moves: off here takes the
+  domain out of the list, off everywhere writes `[]`. The head stays in
+  `roots`, so a domain is turned back on from Publish without publishing
+  again. A publish that opens on every domain (its index names no list) is
+  turned off here from Publish, where its domains are chosen; the front door
+  offers Off everywhere for it. Unpublishing stays its own act.
+- **One writer per hive.** A hive tab admits one writer, so a hand-off that
+  lands while the hive is open in another tab is passed to that tab over a
+  same-origin channel; the new tab says where to look.
+
+Code: `hypercomb-shim/src/bootstrap/turn-off-link.ts` and the versions sheet
+in `showcase.ts`; `hypercomb-shared/core/invite-capture.ts` (the capture and
+relay); `hypercomb-essentials/src/sharing/publish-turn-off.ts` (the one
+validator), `publish-turn-off.drone.ts` (the hive's side) and `setHiveDoors` in
+`publish-branch.ts`.
+
 ## What the front door calls itself
 
 A link to a claimed domain previews under the domain's own card, not the

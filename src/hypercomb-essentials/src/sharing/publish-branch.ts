@@ -63,15 +63,16 @@ const liveHeadsOf = (roots: Record<string, string>, doors: Record<string, readon
     .filter(([k, v]) => !isReservedRootKey(k) && SIG_RE.test(String(v ?? '').toLowerCase()) && (doors[k] ?? []).length > 0)
     .map(([, v]) => String(v).toLowerCase()))
 import { lineageKey } from '../history/lineage-key.js'
-import { hostsOfBranch } from './community-hosts.js'
+import { hostsOfBranch, setBranchHosts } from './community-hosts.js'
 import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-public.js'
-import { knownRoots, listPublishRecords, writePublishRecord, type PublishRecord } from './publish-heads.js'
+import { knownRoots, latestByLineageKey, listPublishRecords, writePublishRecord, type PublishRecord } from './publish-heads.js'
 import { recordPublishResult } from './publish-results.js'
 import { wornKindsWithin, writePublishLights } from '../commands/publish-lights.js'
 import { readGlobalOnKinds } from './behavior-enablement.js'
 import { derivedArrival, derivedArrivalRecord } from './arrival-derive.js'
 import { arrivalPointer } from './arrival-plan-publish.js'
 import { inPublishLane } from './publish-lane.js'
+import { nextDoors, type TurnOffScope } from './publish-turn-off.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
@@ -1188,6 +1189,101 @@ async function secureDeleteBranchNow(segments: readonly string[]): Promise<Secur
   }
 }
 
+export type TurnOffFailure = PublishFailure | 'not-yours' | 'moved' | 'opens-everywhere'
+
+export type TurnOffResult =
+  | { ok: true; host: string; doors: string[]; head: string; unchanged: boolean; written: boolean
+      /** The doors the verified index named before — where the row truly opened. */
+      was: string[] }
+  | { ok: false; failure: TurnOffFailure; reason?: string }
+
+export interface TurnOffOptions {
+  /** The key that signed the row: refused unless it is this hive's. */
+  pubkey: string
+  /** The head the row showed: refused when the index has moved on. */
+  expectHead: string
+  /** Answer what WOULD be written, and write nothing — the confirm sheet asks
+   *  with the exact result in hand. */
+  dryRun?: boolean
+}
+
+/** TURN A PUBLISH OFF — on one domain (`here`) or every domain — WITHOUT
+ *  withdrawing it (jwize 2026-10-24: reversible; unpublishing is its own act).
+ *  `roots[key]` stays and only `doors[key]` moves, so turning a domain back
+ *  on (setBranchDoors) needs no new seal. It never goes through
+ *  unpublishBranchNow, which deletes the root.
+ *
+ *  THE LINK NEVER CHOOSES A DOOR. The request comes from a link anyone can
+ *  make, so its zone is only ever the domain to take OUT: the index is read
+ *  and written through the participant's own write doors (the branch's marks,
+ *  then the standing targets — nodesFor), at the first that holds it (the wipe
+ *  guard). `here` on a key whose index names no doors (open everywhere) is
+ *  refused: no list is guessed. Refuses a key this hive does not hold — asked
+ *  without minting one — and a head the index has moved past. A written
+ *  turn-off is recorded, and the branch's host marks drop the closed domain in
+ *  their own order, so its next publish does not open it again. */
+async function setHiveDoorsNow(
+  zone: string,
+  key: string,
+  scope: TurnOffScope,
+  options: TurnOffOptions,
+): Promise<TurnOffResult> {
+  const signer = get<SignerLike & { knownPublicKeyHex?: () => Promise<string | null> }>(NOSTR_SIGNER_KEY)
+  if (!signer?.getPublicKeyHex) return { ok: false, failure: 'services' }
+  const lineage = String(key ?? '').trim()
+  if (!lineage || isReservedRootKey(lineage)) return { ok: false, failure: 'no-branch' }
+  const door = zoneDoor(normalizeHost(zone))
+  if (!door || LOOPBACK_RE.test(door)) return { ok: false, failure: 'no-host', reason: 'not a domain' }
+  // The key this hive HAS; an extension is asked (it may prompt), a stored key is never minted.
+  const extension = !!(globalThis as { nostr?: { getPublicKey?: unknown } }).nostr?.getPublicKey
+  const held = extension ? await signer.getPublicKeyHex() : await signer.knownPublicKeyHex?.()
+  const pubkey = String(held ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
+  if (pubkey !== String(options.pubkey ?? '').toLowerCase()) return { ok: false, failure: 'not-yours' }
+
+  const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
+  const segments = (await latestByLineageKey(pubkey)).get(lineage)?.record.segments ?? []
+  const nodes = await nodesFor(segments, hostSync)
+  if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no write door of your own' }
+  const found = await verifiedIndexDoor(nodes, pubkey)
+  if (!found.read.ok) {
+    return { ok: false, failure: 'index-unsafe', reason: found.nothing ? 'no index at any door' : found.read.reason }
+  }
+  const manifest = found.read.manifest
+  const head = String(manifest.roots[lineage] ?? '').toLowerCase()
+  if (!SIG_RE.test(head)) return { ok: false, failure: 'no-branch', reason: 'not published' }
+  if (head !== String(options.expectHead ?? '').toLowerCase()) return { ok: false, failure: 'moved', reason: head }
+
+  const listed = manifest.doors?.[lineage]
+  const next = nextDoors(listed, undefined, door, scope)
+  if (!next) return { ok: false, failure: 'opens-everywhere' }
+  const was = [...(listed ?? [])]
+  const unchanged = !!listed && listed.length === next.length && listed.every((entry, i) => entry === next[i])
+  if (unchanged || options.dryRun) return { ok: true, host: found.host, doors: next, head, unchanged, written: false, was }
+
+  const roots = { ...manifest.roots }
+  const doors = { ...(manifest.doors ?? {}), [lineage]: next }
+  hostSync?.addPublishNodes?.([found.host])
+  // Closed everywhere is out of `live`, still in `published`: the index names it.
+  const liveHeads = liveHeadsOf(roots, doors)
+  Object.assign(roots, await withdrawFromStages([STAGE_LIVE], liveHeads.has(head) ? [] : [head], hostSync, pubkey,
+    () => h => liveHeads.has(h)))
+  const put = await putHiveManifest(found.host, roots, doors, manifest.createdAt, manifest.signedContent)
+  if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
+
+  if (segments.length) {
+    // The running list learns where it opens now (nowhere is a withdrawal).
+    if (next.length) recordMovedDoor(segments, lineage, found.host, next[0]!, manifest.addresses, head)
+    else void recordPublishResult({ op: 'unpublish', at: Date.now(), segments: [...segments], lineageKey: lineage, host: found.host, sealed: head })
+    // The marks drop the closed domain in their own order — never minted.
+    try {
+      const marks = await hostsOfBranch(segments)
+      if (marks.length) await setBranchHosts(segments, marks.filter(mark => next.includes(zoneDoor(mark))))
+    } catch { /* the index is the truth; the marks are this hive's memory of it */ }
+  }
+  return { ok: true, host: found.host, doors: next, head, unchanged: false, written: true, was }
+}
+
 // ── THE LANE (publish-lane.ts) ─────────────────────────────────────────────
 //
 // Every act above that publishes or re-signs the index, as the rest of the
@@ -1225,4 +1321,9 @@ export function setEntrance(...args: Parameters<typeof setEntranceNow>): ReturnT
 /** Withdraw a branch and forget its bytes from its hosts — in its turn. */
 export function secureDeleteBranch(...args: Parameters<typeof secureDeleteBranchNow>): ReturnType<typeof secureDeleteBranchNow> {
   return inPublishLane(() => secureDeleteBranchNow(...args))
+}
+
+/** Turn a publish off on one domain or every domain, keeping it published — in its turn. */
+export function setHiveDoors(...args: Parameters<typeof setHiveDoorsNow>): ReturnType<typeof setHiveDoorsNow> {
+  return inPublishLane(() => setHiveDoorsNow(...args))
 }

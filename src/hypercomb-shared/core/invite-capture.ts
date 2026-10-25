@@ -117,6 +117,89 @@ const captureTakeLink = (): boolean => {
 }
 captureTakeLink()
 
+/** TURN OFF — `#turn-off=<request>`: an owner pressed Off on a front door's
+ *  version row and was handed here, to the hive that holds their key
+ *  (documentation/domain-claim.md, "Turning a publish off"). Stashed VERBATIM
+ *  and the URL cleaned; the one validator is essentials'
+ *  sharing/publish-turn-off.ts. MIRRORED there: PENDING_TURN_OFF_KEY,
+ *  TURN_OFF_PREFIX, TURN_OFF_CHANNEL.
+ *
+ *  ONE WRITER PER HIVE: the packed store admits one tab, and a second tab on
+ *  this origin comes up with a dead store. So a hand-off that lands while the
+ *  hive is open in another tab is passed to that tab over a same-origin
+ *  channel, and this one only says where to look. With no answer it is this
+ *  tab's own: it is the hive. */
+const TURN_OFF_PREFIX = '#turn-off='
+const PENDING_TURN_OFF_KEY = 'hc:pending-turn-off'
+const TURN_OFF_CHANNEL = 'hc:turn-off'
+const TURN_OFF_ANSWER_MS = 700
+
+const turnOffChannel: BroadcastChannel | null = (() => {
+  try { return typeof BroadcastChannel === 'function' ? new BroadcastChannel(TURN_OFF_CHANNEL) : null } catch { return null }
+})()
+
+const stashTurnOff = (hash: string, relayed: boolean): boolean => {
+  try { sessionStorage.setItem(PENDING_TURN_OFF_KEY, JSON.stringify({ hash, relayed })) } catch { return false }
+  // Stored, not transient: the bus replays it to the bee when it wakes.
+  EffectBus.emit('publish:turn-off', { at: Date.now() })
+  return true
+}
+
+// Every open hive tab takes a hand-off that landed in another tab — while the
+// sender still waits: a late answer would have both tabs ask.
+turnOffChannel?.addEventListener('message', event => {
+  const data = event.data as { kind?: unknown; hash?: unknown; id?: unknown; at?: unknown } | null
+  if (data?.kind !== 'turn-off' || typeof data.hash !== 'string' || !data.hash.startsWith(TURN_OFF_PREFIX)) return
+  if (typeof data.at !== 'number' || Date.now() - data.at > TURN_OFF_ANSWER_MS / 2) return
+  if (stashTurnOff(data.hash, true)) turnOffChannel.postMessage({ kind: 'turn-off-taken', id: data.id })
+})
+
+/** Where the hand-off went, said in this tab: the hive open elsewhere has it. */
+const sayTurnOffElsewhere = (): void => {
+  const show = (): void => {
+    const note = document.createElement('div')
+    note.setAttribute('role', 'status')
+    note.textContent = 'Your hive is open in another tab — the turn-off is waiting there for you to confirm. You can close this tab.'
+    note.style.cssText = 'position:fixed;left:50%;top:1.2rem;transform:translateX(-50%);z-index:2147483647;max-width:min(36rem,calc(100vw - 2rem));'
+      + 'padding:.9rem 1.1rem;border-radius:4px;background:#2c1907;color:#fff4d8;font:500 .95rem/1.45 system-ui,sans-serif;box-shadow:0 1rem 2rem -1rem rgb(0 0 0 / .6)'
+    document.body.append(note)
+  }
+  if (document.body) show()
+  else document.addEventListener('DOMContentLoaded', show, { once: true })
+}
+
+const captureTurnOff = (): boolean => {
+  try {
+    const hash = window.location.hash ?? ''
+    if (!hash.startsWith(TURN_OFF_PREFIX)) return false
+    // Held before the address is cleaned: a reload in between keeps it.
+    try { sessionStorage.setItem(PENDING_TURN_OFF_KEY, JSON.stringify({ hash, relayed: false })) } catch { /* no storage: the tab answers below */ }
+    window.history.replaceState(window.history.state, '', window.location.pathname + (window.location.search ?? ''))
+    if (!turnOffChannel) return stashTurnOff(hash, false) || true
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    let taken = false
+    const onTaken = (event: MessageEvent): void => {
+      const data = event.data as { kind?: unknown; id?: unknown } | null
+      if (data?.kind !== 'turn-off-taken' || data.id !== id || taken) return
+      taken = true
+      turnOffChannel.removeEventListener('message', onTaken)
+      try { sessionStorage.removeItem(PENDING_TURN_OFF_KEY) } catch { /* nothing held */ }
+      sayTurnOffElsewhere()
+    }
+    turnOffChannel.addEventListener('message', onTaken)
+    turnOffChannel.postMessage({ kind: 'turn-off', hash, id, at: Date.now() })
+    window.setTimeout(() => {
+      turnOffChannel.removeEventListener('message', onTaken)
+      if (!taken) stashTurnOff(hash, false)
+    }, TURN_OFF_ANSWER_MS)
+    return true
+  } catch { return false } // never block boot on capture
+}
+// A hand-off held across a reload wakes the bee again.
+if (!captureTurnOff()) {
+  try { if (sessionStorage.getItem(PENDING_TURN_OFF_KEY)) EffectBus.emit('publish:turn-off', { at: Date.now() }) } catch { /* no storage */ }
+}
+
 /** Take a `#meet=` fragment from the address bar. True when there was one. */
 const captureMeetLink = (): boolean => {
   try {
@@ -147,6 +230,7 @@ const onFragment = (): void => {
   // A link put back for a guest whose storage is blocked stays put — the
   // shell's own synthetic popstate (bootstrap-history) must not take it again.
   if (restoredLink) return
+  if (captureTurnOff()) return
   if (captureSwarmLink()) { EffectBus.emitTransient('meet:pending', { at: Date.now() }); return }
   if (captureTakeLink()) { EffectBus.emitTransient('meet:pending', { at: Date.now() }); return }
   if (!captureMeetLink()) return

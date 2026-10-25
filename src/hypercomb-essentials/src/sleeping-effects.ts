@@ -62,6 +62,7 @@ export const sleepers: readonly Sleeper[] = [
   { command: "sequence", description: "Open Tile arrangements or edit a named drop-target sequence", load: () => import('./sequence/sequence.queen') },
   { wakesOn: ["swarm:leader-moved"], load: () => import('./sharing/follow.drone') },
   { command: "invite", description: "Invite people to your current meeting place. Copies a meeting link to this room and page; with a tile selected, stamps it as a swarm junction instead.", load: () => import('./sharing/invite.queen') },
+  { wakesOn: ["publish:turn-off"], load: () => import('./sharing/publish-turn-off.drone') },
   { command: "repush", description: "Re-push shared content to your host and report holes", load: () => import('./sharing/repush.queen') },
   { wakesOn: ["swarm:subscribe-request-received","swarm:consent-accept","swarm:consent-decline"], load: () => import('./sharing/subscribe-consent.drone') },
   { command: "trust", description: "Say whose code may run your hive — trust a domain, withdraw it, or list them.", load: () => import('./sharing/trust.queen') },
