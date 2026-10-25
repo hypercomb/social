@@ -275,6 +275,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // hosts a reader carries, and a door picks up what its community lists.
   // TRUTH POOL: an organizer's act, never derived.
   'calendar:events',
+  // THE MEETINGS A PARTICIPANT KEEPS (essentials calendar/kept-events.ts): one
+  // current document naming the meeting records they ticked on a domain, each
+  // a resource by its own signature in their store. Their own list — never
+  // sent, never served. TRUTH POOL: a person's choice, not derivable.
+  'calendar:kept',
   // WHICH MEETINGS' LISTS ARE OPEN on a host: the addresses of the
   // sign('rsvp:<record>') pools an organizer's index opened, so a host knows a
   // list when a stranger's claim arrives at it. Host-side only; the lists

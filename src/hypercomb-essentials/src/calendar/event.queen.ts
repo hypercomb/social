@@ -21,6 +21,15 @@
 //   event roll <date|sig> on <host>
 //        Read who is coming and KEEP it in the hive: the roll as a record the
 //        tile you stand on wears (a calendar:roll decoration) and a note.
+//   event keep <date|sig> [<date|sig> ...] on <host>
+//        Keep these meetings on YOUR list - the same signed records, verified
+//        (each must hash to its name and read as a meeting) before anything is
+//        added, then held in your store and your calendar:kept pool. Typed, so
+//        it asks nothing: you chose it. A LINK that names meetings asks first.
+//   event kept
+//        Your list: the meetings you keep, soonest first. Reads no host.
+//   event forget <date|sig>
+//        Take a meeting off your list.
 //
 // The host is said the way publish says it, `on <host>`; `@<host>` is read
 // too. There is no default host (jwize 2026-10-11): a line that names none
@@ -34,6 +43,7 @@ import { listCommunityHosts } from '../sharing/community-hosts.js'
 import { listDecorations, removeDecoration, writeDecoration } from '../commands/decoration-manifest.js'
 import { coming, eventSignature, eventText } from './event.js'
 import { readEvents, readRsvps, type ListedEvent } from './event-read.js'
+import { forgetEvent, keepEvents, readKeptMeetings } from './kept-events.js'
 import type { RsvpOutcome } from './rsvp.drone.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -43,7 +53,7 @@ const short = (sig: string): string => `${sig.slice(0, 12)}…`
 export const ROLL_KIND = 'calendar:roll'
 export const ROLL_RECORD_KIND = 'rsvp-roll'
 
-type Verb = 'make' | 'list' | 'join' | 'here' | 'roll' | ''
+type Verb = 'make' | 'list' | 'join' | 'here' | 'roll' | 'keep' | 'kept' | 'forget' | ''
 export interface EventLine {
   readonly verb: Verb
   readonly date: string
@@ -55,6 +65,8 @@ export interface EventLine {
   readonly type: string
   /** A meeting named by signature or by its date. */
   readonly ref: string
+  /** Several meetings, each by signature or date (`keep`). */
+  readonly refs: readonly string[]
   readonly who: string
   readonly host: string
 }
@@ -77,10 +89,13 @@ export const parseEventArgs = (args: string): EventLine => {
     const at = rest.split(/\s+/).find(part => part.startsWith('@'))
     if (at) { host = zoneDoor(at.slice(1)); rest = rest.split(/\s+/).filter(part => part !== at).join(' ') }
   }
-  const none: EventLine = { verb: '', date: '', time: '', ends: '', where: '', title: '', type: '', ref: '', who: '', host }
+  const none: EventLine = { verb: '', date: '', time: '', ends: '', where: '', title: '', type: '', ref: '', refs: [], who: '', host }
   const words = rest.split(/\s+/).filter(Boolean)
   const first = (words[0] ?? '').toLowerCase()
   if (first === 'list') return { ...none, verb: 'list' }
+  if (first === 'kept') return { ...none, verb: 'kept' }
+  if (first === 'keep') return { ...none, verb: 'keep', refs: words.slice(1).map(word => word.toLowerCase()) }
+  if (first === 'forget') return { ...none, verb: 'forget', ref: (words[1] ?? '').toLowerCase() }
   if (first === 'join' || first === 'here' || first === 'roll') {
     const ref = (words[1] ?? '').toLowerCase()
     const asAt = words.findIndex((word, i) => i > 1 && word.toLowerCase() === 'as')
@@ -121,7 +136,7 @@ export class EventQueenBee extends QueenBee {
   readonly command = 'event'
   override description = 'A meeting on the calendar: add one, read the calendar across your community, join, or keep the roll'
   override descriptionKey = 'slash.event'
-  override options = ['<date> [<time>[-<ends>]] at <where> [: <title>] [| <type>] on <host>', 'list on <host>', 'join <date|sig> as <name> on <host>', 'here <date|sig> as <name> on <host>', 'roll <date|sig> on <host>']
+  override options = ['<date> [<time>[-<ends>]] at <where> [: <title>] [| <type>] on <host>', 'list on <host>', 'join <date|sig> as <name> on <host>', 'here <date|sig> as <name> on <host>', 'roll <date|sig> on <host>', 'keep <date|sig> [<date|sig> ...] on <host>', 'kept', 'forget <date|sig>']
   // Dates, signatures, places and names — the line arrives exactly as said.
   override rawArgs = true
   override examples = [
@@ -129,16 +144,22 @@ export class EventQueenBee extends QueenBee {
     { input: 'event list on hypercomb.com', result: 'Every meeting the host and your community list, and how many are coming' },
     { input: 'event join 2026-10-24 as Jaime on hypercomb.com', result: 'You are on the list for that meeting' },
     { input: 'event roll 2026-10-24 on hypercomb.com', result: 'Who is coming, kept on the tile as a record and a note' },
+    { input: 'event keep 2026-10-24 2026-10-31 on hypercomb.com', result: 'Those meetings are on your list, verified and held here' },
+    { input: 'event kept', result: 'The meetings you keep, soonest first' },
   ]
 
   protected async execute(args: string): Promise<void> {
     const line = parseEventArgs(args)
+    // Your own list reads no host; every other form names one.
+    if (line.verb === 'kept') return this.#kept()
+    if (line.verb === 'forget') return this.#forget(line)
     if (!line.host) { tell('warning', 'Name the host: event 2026-10-24 at Yaletown on example.com, event list on example.com.'); return }
     if (line.verb === 'make') return this.#make(line)
     if (line.verb === 'list') return this.#list(line.host)
     if (line.verb === 'join') return this.#join(line, 'yes')
     if (line.verb === 'here') return this.#join(line, 'here')
     if (line.verb === 'roll') return this.#roll(line)
+    if (line.verb === 'keep') return this.#keep(line)
     tell('warning', 'Say event <date> [<time>] at <where> on <host>, event list on <host>, event join <date> as <name> on <host>, or event roll <date> on <host>.')
   }
 
@@ -198,8 +219,8 @@ export class EventQueenBee extends QueenBee {
     tell('info', `${events.length} meeting${events.length === 1 ? '' : 's'} on the calendar.`)
   }
 
-  async #resolve(ref: string, host: string): Promise<ListedEvent | null> {
-    const events = await this.#calendar(host)
+  /** A meeting named by signature or by its date among those read. */
+  #pick(events: readonly ListedEvent[], ref: string): ListedEvent | null {
     if (SIG_RE.test(ref)) return events.find(e => e.sig === ref) ?? null
     if (DATE_RE.test(ref)) {
       const here = this.#here()
@@ -208,6 +229,56 @@ export class EventQueenBee extends QueenBee {
       return dated.find(e => e.record.series === series) ?? dated[0] ?? null
     }
     return null
+  }
+
+  async #resolve(ref: string, host: string): Promise<ListedEvent | null> {
+    return this.#pick(await this.#calendar(host), ref)
+  }
+
+  /** Keep meetings on your own list. Verified before anything is added
+   *  (kept-events.ts); a typed word asks nothing, and a meeting that does not
+   *  verify is refused by name with nothing written for it. */
+  async #keep(line: EventLine): Promise<void> {
+    if (!line.refs.length) { tell('warning', 'Say which meetings: event keep 2026-10-24 on <host>, or several: event keep 2026-10-24 2026-10-31 on <host>.'); return }
+    const events = await this.#calendar(line.host)
+    const chosen: ListedEvent[] = []
+    const missing: string[] = []
+    for (const ref of line.refs) {
+      const found = this.#pick(events, ref)
+      if (found) chosen.push(found); else missing.push(ref)
+    }
+    for (const ref of missing) tell('warning', `No meeting ${ref} on the calendar ${line.host} serves.`)
+    if (!chosen.length) return
+    const result = await keepEvents(chosen.map(found => ({ sig: found.sig, host: found.hosts[0] ?? line.host })))
+    const named = (sig: string): string => {
+      const record = chosen.find(found => found.sig === sig)?.record
+      return record ? `${record.title} ${record.date}` : short(sig)
+    }
+    for (const sig of result.kept) say(`event: kept ${named(sig)} on your list - ${short(sig)}`)
+    for (const sig of result.already) say(`event: ${named(sig)} is already on your list`)
+    for (const { sig, reason } of result.refused) say(`event: ${named(sig)} was not kept - ${reason}`)
+    if (result.refused.length) tell('warning', `${result.refused.length} not kept: ${result.refused[0]!.reason}.`)
+    if (result.kept.length) tell('success', `${result.kept.length} meeting${result.kept.length === 1 ? '' : 's'} kept on your list.`)
+    else if (result.already.length && !result.refused.length) tell('info', 'Already on your list.')
+  }
+
+  async #kept(): Promise<void> {
+    const kept = await readKeptMeetings()
+    if (!kept.length) { tell('info', 'You keep no meetings yet - event keep <date> on <host>.'); return }
+    for (const { sig, record, host } of kept) {
+      say(`event: ${record.date}${record.time ? ` ${record.time}` : ''} ${record.title}${record.type ? ` (${record.type})` : ''} at ${record.where} - join at ${record.host} - kept from ${host} ${short(sig)}`)
+    }
+    tell('info', `${kept.length} meeting${kept.length === 1 ? '' : 's'} on your list.`)
+  }
+
+  async #forget(line: EventLine): Promise<void> {
+    if (!line.ref) { tell('warning', 'Say which meeting: event forget 2026-10-24.'); return }
+    const kept = await readKeptMeetings()
+    const found = SIG_RE.test(line.ref) ? kept.find(k => k.sig === line.ref) : kept.find(k => k.record.date === line.ref)
+    if (!found) { tell('warning', `No meeting ${line.ref} on your list.`); return }
+    if (!await forgetEvent(found.sig)) { tell('error', 'Your list could not be changed - nothing was removed.'); return }
+    say(`event: ${found.record.title} ${found.record.date} is off your list`)
+    tell('success', `${found.record.title} ${found.record.date} is off your list.`)
   }
 
   async #join(line: EventLine, going: 'yes' | 'here'): Promise<void> {

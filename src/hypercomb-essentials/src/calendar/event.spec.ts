@@ -55,6 +55,10 @@ describe('event lines', () => {
 
   it('reads list, join and roll, and refuses a line with no host or no shape', () => {
     expect(parseEventArgs('list on hypercomb.com')).toMatchObject({ verb: 'list', host: 'hypercomb.com' })
+    expect(parseEventArgs('keep 2026-10-24 2026-10-31 on hypercomb.com')).toMatchObject({ verb: 'keep', refs: ['2026-10-24', '2026-10-31'], host: 'hypercomb.com' })
+    expect(parseEventArgs('keep ' + 'A'.repeat(64) + ' @hypercomb.com')).toMatchObject({ verb: 'keep', refs: ['a'.repeat(64)], host: 'hypercomb.com' })
+    expect(parseEventArgs('kept')).toMatchObject({ verb: 'kept', host: '' })
+    expect(parseEventArgs('forget 2026-10-24')).toMatchObject({ verb: 'forget', ref: '2026-10-24', host: '' })
     expect(parseEventArgs('join 2026-10-24 as Jaime W on hypercomb.com')).toMatchObject({ verb: 'join', ref: '2026-10-24', who: 'Jaime W', host: 'hypercomb.com' })
     expect(parseEventArgs(`roll ${'a'.repeat(64)} on hypercomb.com`)).toMatchObject({ verb: 'roll', ref: 'a'.repeat(64) })
     expect(parseEventArgs('list')).toMatchObject({ verb: 'list', host: '' })
