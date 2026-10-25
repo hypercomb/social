@@ -760,6 +760,42 @@ EXPERT_LESSONS.push({
   },
 })
 
+// ── 172 · a room on a front page ───────────────────────────────────────
+// Not a window: a behaviour that finishes the sharing story the observe window
+// starts. It sits beside the windows because a participant who can invite one
+// person next wants to leave a door open for everyone. Course rules 1 and 2
+// hold to the letter: it is NARRATED, never fired — going public, and signing
+// a card onto a domain, are the participant's own acts.
+
+EXPERT_LESSONS.push({
+  id: 'room-host',
+  level: L,
+  order: 172,
+  title: 'Put a room on a front page',
+  summary: 'One word puts the room you are in at the top of a domain as a Join the swarm button.',
+  pheromones: ['tutorial', 'lesson', 'expert', 'swarm'],
+  teaches: ['room'],
+  requires: () => hasBehaviour('room'),
+  async run(stage) {
+    await stage.flyToRect(stage.commandInput())
+    await stage.say('room-host', 'A door left open',
+      'An invite hands one person a way into your room. room host leaves a door open for everyone: it puts the room you are in at the top of a domain’s front page as a Join the swarm button. Anyone who opens the page can join, and they never see the room’s name or its secret.')
+    stage.highlight(null)
+
+    await stage.say('room-host-say', 'One word, from inside the room',
+      'Be inside the room first, then say: room host example.com @hypercomb.com. The domain is the front page that shows the button. The host after the @ keeps your signed card; set a public host once in hosts and you can leave it off. I am not running it — it signs a card onto a domain, and that is yours to do.')
+
+    await stage.say('room-host-hides', 'Hidden, not secret',
+      'The button’s link carries a key, not the words. It hides the room’s name, its secret, its access code and the page it opens on. It does not keep them from anyone who joins, so the room is public. And it does not hide where the room meets: the meeting host is named in the link.')
+
+    await stage.say('room-host-check', 'It checks its own work',
+      'After signing, the word opens the page again and tells you whether the button is really there. If it is not, it says why: the domain is its own site and does not read signed cards, another publisher’s card comes first, or the page could not be reached to check. It never says done on a guess.')
+
+    await stage.say('room-host-done', 'Taking it down',
+      'room host off example.com signs the card without the room. Older versions of a card are never deleted, so to close a room for good, change its secret. A room on a meeting point that needs an access code hands that code out too, so change the code as well.')
+  },
+})
+
 // ── 175 · the publish window ───────────────────────────────────────────
 // The sharing pair completed. `/host` is the GESTURE; `/publish` is the
 // STATE. Strictly read-only here — course rule 2: nothing is ever published

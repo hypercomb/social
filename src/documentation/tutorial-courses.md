@@ -140,6 +140,13 @@ primary window**, each carrying every behaviour that lives in that window:
 | `window-feedback` | feedback window | arrivals and open questions, reach, answering in the row |
 | `window-observe` | observe viewer | `/observe`, and `/host` / `/invite` narrated |
 | `window-publish` | publish panel | `/publish` — read-only, never fired |
+| `room-host` | *(none — a behaviour)* | `room host <domain>`, `room host off` — narrated, never fired |
+
+**One lesson is not a window.** `room-host` finishes the sharing story the observe
+window starts, and has no surface of its own, so it is gated on `hasBehaviour('room')`
+alone. It is the exception the roster allows: a behaviour a participant reaches next
+after a window, narrated and never fired, since signing a card onto a domain is the
+participant's own act. Retire the `room` behaviour and retire this lesson with it.
 
 **One window, one lesson — and it rots in both directions.** `window-views` used
 to be a row of its own. The Views toolwindow was then retired and `/views`

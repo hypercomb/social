@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Room host · How it works</title>
+<meta name="description" content="How a room goes on a domain's front page as a Join the swarm button: what it hides, what it does not, how to take it down, and why a page may not show it.">
+<style>
+  /* How a room goes on a domain's front page. Same look as the meetups page, but
+     self-contained: system fonts, inline styles, no requests, no script.
+     Scoped under .mp so a hive mounting the page inline never touches its
+     shell. */
+  :root,.mp{
+    --mp-outer:#eae7e7;--mp-bg:#f3f2f2;--mp-surface:#eae9e9;--mp-text:#201e1d;
+    --mp-accent:#ec3013;--mp-strong:#ae1800;--mp-muted:#605d5d;--mp-soft:#444141;
+    --mp-divider:rgba(32,30,29,.4);--mp-hover:rgba(32,30,29,.05);
+    --mp-font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mp-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){
+    :root,.mp{
+      --mp-outer:#121110;--mp-bg:#1b1a19;--mp-surface:#2c2a29;--mp-text:#f1efee;
+      --mp-accent:#ff5a3d;--mp-strong:#ff8a72;--mp-muted:#a8a4a3;--mp-soft:#cfcbca;
+      --mp-divider:rgba(241,239,238,.28);--mp-hover:rgba(241,239,238,.06)}}
+  body:has(> .mp){margin:0;background:var(--mp-outer)}
+  .mp{display:block;min-height:100vh;min-height:100dvh;background:var(--mp-outer);color:var(--mp-text);
+    font:400 16px/1.55 var(--mp-font);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;text-size-adjust:100%;text-wrap:pretty}
+  .mp *,.mp *::before,.mp *::after{box-sizing:border-box;margin:0;padding:0}
+  .mp a{color:var(--mp-accent);text-underline-offset:3px}
+  .mp :focus-visible{outline:2px solid var(--mp-accent);outline-offset:2px}
+  .mp ::selection{background:rgba(236,48,19,.3)}
+
+  .mp .app{max-width:760px;min-height:100vh;min-height:100dvh;margin:0 auto;background:var(--mp-bg)}
+  @media (min-width:762px){.mp .app{border-left:1px solid var(--mp-divider);border-right:1px solid var(--mp-divider)}}
+  .mp header.top{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
+    background:var(--mp-bg);border-bottom:2px solid var(--mp-divider)}
+  .mp .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
+  .mp .brand em{font-style:normal;color:var(--mp-accent)}
+  .mp .panel{display:block;padding:20px max(16px,env(safe-area-inset-right)) 20px max(16px,env(safe-area-inset-left));border-top:2px solid var(--mp-divider)}
+  .mp .panel.lead{border-top:0}
+
+  .mp h1{font-size:clamp(28px,7.5vw,40px);line-height:1.05;letter-spacing:-.02em;font-weight:800;margin-top:4px}
+  .mp h2{font-size:20px;line-height:1.15;font-weight:800}
+  .mp .kicker{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-strong);font-weight:600}
+  .mp .mini{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-muted)}
+  .mp .sub{font-size:14px;color:var(--mp-soft);margin-top:8px}
+  .mp .panel p{margin-top:10px;font-size:15px;color:var(--mp-soft)}
+  .mp .panel p.sub{font-size:14px}
+  .mp code{font:600 .86em/1.4 var(--mp-mono);background:var(--mp-surface);color:var(--mp-text);padding:1px 5px;
+    overflow-wrap:anywhere;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+
+  /* the four tutorial pages */
+  .mp .pages{list-style:none;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border-top:2px solid var(--mp-divider);margin-top:12px}
+  .mp .pages li{display:grid;gap:2px;padding:10px 12px 10px 0;border-bottom:1px solid var(--mp-divider)}
+  .mp .pages li:nth-child(even){padding-left:12px;border-left:1px solid var(--mp-divider)}
+  .mp .pages b{font-weight:800;font-size:16px;line-height:1.2}
+  @media (min-width:560px){
+    .mp .pages{grid-template-columns:repeat(4,minmax(0,1fr))}
+    .mp .pages li + li{padding-left:12px;border-left:1px solid var(--mp-divider)}}
+
+  /* numbered steps */
+  .mp .steps{list-style:none;border-top:2px solid var(--mp-divider);margin-top:12px}
+  .mp .steps li{display:grid;grid-template-columns:2em minmax(0,1fr);gap:0 10px;padding:12px 4px;border-bottom:1px solid var(--mp-divider);
+    font-size:15px;line-height:1.5;color:var(--mp-soft)}
+  .mp .steps .num{font-weight:800;font-size:13px;color:var(--mp-text);font-variant-numeric:tabular-nums;padding-top:2px}
+  .mp .steps b{color:var(--mp-text);font-weight:800}
+
+  /* the game panel, as it reads at the top of the screen */
+  .mp .bar{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;vertical-align:1px;
+    font-size:13px;font-weight:600;line-height:1.2;color:var(--mp-text);border:1px solid var(--mp-divider);padding:2px 2px 2px 8px}
+  .mp .bar span{background:var(--mp-accent);color:var(--mp-bg);font-weight:800;padding:2px 8px}
+
+  .mp .aside{border-top:1px solid var(--mp-divider);margin-top:14px;padding-top:12px}
+
+  /* every word, in two columns */
+  .mp .group{margin-top:16px}
+  .mp .words{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);border-top:2px solid var(--mp-divider);margin-top:6px}
+  .mp .words dt,.mp .words dd{padding:9px 0;border-bottom:1px solid var(--mp-divider)}
+  .mp .words dt{padding-right:12px;font-size:15px;line-height:1.5}
+  .mp .words dd{padding-left:12px;border-left:1px solid var(--mp-divider);font-size:14px;line-height:1.45;color:var(--mp-soft)}
+
+  /* footer links */
+  .mp .links{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:8px}
+  .mp .links a{display:grid;gap:2px;min-height:44px;padding:12px 14px;border:1px solid var(--mp-divider);color:var(--mp-text);text-decoration:none}
+  .mp .links a:hover{border-color:var(--mp-accent);background:var(--mp-hover)}
+  .mp .links b{font-size:15px;font-weight:700;line-height:1.3}
+  .mp .links b::after{content:" \2192";color:var(--mp-accent)}
+  .mp .links span{font-size:13px;color:var(--mp-muted)}
+</style>
+</head>
+<body>
+<div class="mp">
+<div class="app">
+
+  <header class="top">
+    <span class="brand">Hypercomb <em>Rooms</em></span>
+    <span class="mini">Room host</span>
+  </header>
+
+  <main>
+    <section class="panel lead" aria-label="Room host">
+      <header>
+        <span class="kicker">A room on your front page</span>
+        <h1>Room host</h1>
+      </header>
+      <p class="sub">One word puts your room at the top of a domain's front page as a Join the swarm button. Anyone who opens the page can join, and never sees the room's name or secret.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="minute">
+      <h2 id="minute">In one minute</h2>
+      <p>Join the room you want to show. Then, inside it, say:</p>
+      <p><code>room host example.com @hypercomb.com</code></p>
+      <p>The room is sealed, signed into the domain's front-page card, and drawn above the domain's name. The word then opens the page again and tells you whether the button is really there. To take it down, say <code>room host off example.com</code>.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="steps">
+      <h2 id="steps">Step by step</h2>
+      <ol class="steps">
+        <li><span class="num">01</span><span><b>Join the room.</b> The word shows the room you are in, so be inside it first. Without a room it asks you to join one.</span></li>
+        <li><span class="num">02</span><span><b>Say the word.</b> <code>room host &lt;domain&gt; @&lt;host&gt;</code>. The domain is the front page that shows the button. The host is where your signed card is kept; hypercomb.com is the one that holds your published pages. Set it once as your public host in hosts and you can leave it off.</span></li>
+        <li><span class="num">03</span><span><b>Read what it says.</b> It opens the page again, and once more a few seconds later, and tells you one of three things: the button is there, the button is not there and why, or the page could not be reached to check.</span></li>
+        <li><span class="num">04</span><span><b>Change it.</b> Saying the word again from another room replaces the room on the card. The card's title and tagline are kept as they were.</span></li>
+        <li><span class="num">05</span><span><b>Take it down.</b> <code>room host off &lt;domain&gt;</code> signs the card without the room.</span></li>
+      </ol>
+    </section>
+
+    <section class="panel" aria-labelledby="visitor">
+      <h2 id="visitor">If you are the visitor</h2>
+      <ol class="steps">
+        <li><span class="num">01</span><span><b>Open the page.</b> The button reads Join the swarm and sits above the domain's name.</span></li>
+        <li><span class="num">02</span><span><b>Tap it.</b> You land on the swarm door, and it asks before it puts you in the room.</span></li>
+        <li><span class="num">03</span><span><b>Say yes.</b> You are in the room, with everyone else who is.</span></li>
+      </ol>
+    </section>
+
+    <section class="panel" aria-labelledby="hides">
+      <h2 id="hides">What it hides, and what it does not</h2>
+      <p>The link carries a key, not the words. It hides the room's name, its secret, its access code and the page it opens on, from the address bar and from the page's text.</p>
+      <p>It does not keep them from anyone who joins. The room is public, only hidden.</p>
+      <p>It does not hide where the room meets. The meeting host is named in the link, because a browser has to know where to fetch the sealed login.</p>
+      <p class="aside">A room on a meeting point that needs an access code hands that code out too, and the code opens the whole meeting point, not just this room. To close such a room, change the code as well as the secret.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="down">
+      <h2 id="down">Taking it down for good</h2>
+      <p><code>room host off</code> takes the button off the page. Earlier versions of the card are never deleted, so an old copy still holds the old link. To close the room for good, change its secret.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="notshown">
+      <h2 id="notshown">When the page does not show it</h2>
+      <p>A signed card reaches only a front page that the Hypercomb host serves, and only in the order of the domain's publishers. If the button is missing, the word says which of these it is:</p>
+      <ol class="steps">
+        <li><span class="num">01</span><span><b>The domain is its own site.</b> A domain that is served somewhere else does not read signed cards. The word also looks at <code>host.&lt;domain&gt;</code>, where a domain that opens on a page of its own keeps its card.</span></li>
+        <li><span class="num">02</span><span><b>Someone is ahead of you.</b> The first publisher of a domain who signs a card decides whether the page shows a room. A card with no room shows none, so no one behind them can put one there.</span></li>
+        <li><span class="num">03</span><span><b>The page could not be reached.</b> Then the word says so, and does not guess.</span></li>
+      </ol>
+    </section>
+
+    <section class="panel" aria-labelledby="words">
+      <h2 id="words">Every word</h2>
+      <div class="group">
+        <div class="mini">Room host</div>
+        <dl class="words">
+          <dt><code>room host &lt;domain&gt;</code></dt><dd>Put the room you are in on that domain's front page.</dd>
+          <dt><code>room host &lt;domain&gt; @&lt;host&gt;</code></dt><dd>The same, keeping the card on that host.</dd>
+          <dt><code>room host off &lt;domain&gt;</code></dt><dd>Take the room off the front page.</dd>
+        </dl>
+      </div>
+      <div class="group">
+        <div class="mini">The rest of the room</div>
+        <dl class="words">
+          <dt><code>invite</code></dt><dd>Make a link to the room you are in, to hand to someone.</dd>
+          <dt><code>room list</code></dt><dd>The rooms this device remembers.</dd>
+          <dt><code>room forget &lt;room&gt;</code></dt><dd>Stop remembering a room.</dd>
+        </dl>
+      </div>
+    </section>
+  </main>
+
+  <footer class="panel">
+    <div class="mini">More</div>
+    <ul class="links">
+      <li><a href="https://questions.hypercomb.com"><b>Q and A, how it works</b><span>questions.hypercomb.com</span></a></li>
+      <li><a href="https://meetups.hypercomb.com"><b>Meetings and RSVP</b><span>meetups.hypercomb.com</span></a></li>
+    </ul>
+  </footer>
+
+</div>
+</div>
+</body>
+</html>
