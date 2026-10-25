@@ -18,7 +18,7 @@
 
 import type { HostCreation, HostOffering } from '@hypercomb/core'
 import { pictureOrigins, tilePicture } from './tile-picture'
-import type { ShowcaseRecord } from './showcase-record'
+import { doorsOpen, type ZoneOwners } from './showcase-record'
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { LinkIcon, WelcomeLink } from './welcome'
 
@@ -475,9 +475,9 @@ export type ShowcaseOptions = {
   readonly readShared: SharedReader
   /** The hive this page was opened from, when it was — where an owner's Off is handed. */
   readonly home?: string
-  /** The showcase this domain's owners sign (showcase-record.ts readShowcase),
-   *  read after every ledger read. Absent, or null, shows what opens here. */
-  readonly readShowcase?: (zone: string, owners: readonly string[]) => Promise<ShowcaseRecord | null>
+  /** What this domain's owners sign — their showcase and their doors
+   *  (showcase-record.ts readZoneOwners) — read after every ledger read. */
+  readonly readOwners?: (zone: string, owners: readonly string[]) => Promise<ZoneOwners>
 }
 
 export type Showcase = {
@@ -920,20 +920,35 @@ ${entry.key}`
     drainShared()
   }
 
-  /** What this domain's owners signed it shows; undefined until read, null when none. */
-  let record: ShowcaseRecord | null | undefined
+  /** What this domain's owners sign; undefined until read, null when it could not be. */
+  let signed: ZoneOwners | null | undefined
+  /**
+   * IN THIS DOMAIN'S SHOWCASE. What its owners chose, when they signed a
+   * showcase; else what they PUBLISHED here — a lineage whose signed doors
+   * name this domain (jwize 2026-10-25: "what ever you turn on and off on
+   * publish window should be hidden from your public domain showcase"). A
+   * lineage with no doors opens everywhere on the worker, which keeps older
+   * versions working, but it was never published here, so it is not shown.
+   */
   const showcased = (entry: Aggregate): boolean => {
-    if (!record) return entry.zones.includes(options.self)
-    if (entry.zones.some(zone => record!.domains.includes(zone))) return true
-    return entry.versions.some(version => version.claims.some(claim =>
-      record!.items.some(item => item.pubkey === claim.pubkey && item.lineage === claim.lineage)))
+    const record = signed?.showcase
+    if (record) {
+      if (entry.zones.some(zone => record.domains.includes(zone))) return true
+      return entry.versions.some(version => version.claims.some(claim =>
+        record.items.some(item => item.pubkey === claim.pubkey && item.lineage === claim.lineage)))
+    }
+    const claims = entry.versions.flatMap(version => version.claims)
+    // A domain's own pool offers what it shares here by putting it there.
+    if (!claims.length) return entry.zones.includes(options.self)
+    if (!signed) return entry.zones.includes(options.self)
+    return claims.some(claim => doorsOpen(signed!, claim.pubkey, claim.lineage, options.self) === true)
   }
 
   function paint(): void {
     const terms = searchTerms(search.value)
     const all = bands()
     for (const band of all) askShared(band.zone)
-    const unread = !!options.readShowcase && record === undefined
+    const unread = !!options.readOwners && signed === undefined
     const everything = unread ? [] : all.flatMap(band => band.tiles).filter(showcased).sort(byTitle)
     // This domain first; then the domains this browser holds, by name.
     const held = [...new Set(options.sources)].filter(zone => zone !== options.self).sort()
@@ -989,10 +1004,10 @@ ${entry.key}`
       // The owners of this domain are the keys its own root names. Until their
       // record is read the list waits rather than show what it may not.
       const owners = found.find(site => site.hosts[0] === options.self)?.owners ?? []
-      void (options.readShowcase?.(options.self, owners) ?? Promise.resolve(null))
-        .catch(() => null).then(signed => {
+      void (options.readOwners?.(options.self, owners) ?? Promise.resolve(null))
+        .catch(() => null).then(found => {
           if (read !== reads) return
-          record = signed
+          signed = found
           paint()
         })
       // Every version's picture is asked for at once — the tiles and their lists want them all.

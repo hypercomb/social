@@ -22,7 +22,7 @@ import { APP_HREF, frontDoorOf, readWelcome, type FrontDoor, type Welcome, type 
 import { pictureOrigins, tilePicture } from './tile-picture'
 import { SHOWCASE_STYLE, exploreSection, matchesDomain, memberSection, readLedger, rootZones, searchTerms, showcase,
   type LedgerSite } from './showcase'
-import { readShowcase } from './showcase-record'
+import { readZoneOwners } from './showcase-record'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,
   listRevisionCandidates, publicCreationOrigin, readOfferings, readPublicCreations, rememberRevisionCandidate,
@@ -610,7 +610,7 @@ class HostPanelElement extends HTMLElement {
         ledger: this.#ledger,
         readShared: zone => Promise.all([readOfferings(zone).catch(() => []), readPublicCreations(zone).catch(() => [])])
           .then(([offers, creations]) => ({ offers, creations })),
-        readShowcase,
+        readOwners: readZoneOwners,
       })
       this.#showcaseRefresh = refresh
       panel.append(hero)

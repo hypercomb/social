@@ -6,7 +6,7 @@
 // and this domain's version is pinned first in the tile's list.
 
 import { describe, expect, it, vi } from 'vitest'
-import { parseShowcase, type ShowcaseRecord } from './showcase-record'
+import { parseShowcase, type ShowcaseRecord, type ZoneOwners } from './showcase-record'
 import { aggregate, aggregateMatches, bandZones, coverOf, ledgerPublishes, ownersLabel, parseLedger,
   sharedPublishes, showcase } from './showcase'
 import { parseWelcome } from './welcome'
@@ -157,7 +157,7 @@ describe('showcase — the page is what is published now', () => {
     const draw = (record: ShowcaseRecord | null) => showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
-      readShowcase: async (_zone, owners) => { asked.push([...owners]); return record },
+      readOwners: async (_zone, owners) => { asked.push([...owners]); return { showcase: record, doors: new Map() } },
     }).bands
     const one = draw({ zone: 'hypercomb.com', items: [{ pubkey: sig('a'), lineage: 'dylan' }], domains: [] })
     await vi.waitFor(() => expect(names(one)).toEqual(['dylan']))
@@ -168,6 +168,18 @@ describe('showcase — the page is what is published now', () => {
     const none = draw({ zone: 'hypercomb.com', items: [], domains: [] })
     await vi.waitFor(() => expect(none.querySelector('.hosted-empty')?.textContent).toBe('Nothing is showcased here yet.'))
     expect(names(none)).toEqual([])
+  })
+
+  it("without a signed showcase, shows only what its owners published here — the Publish switch for this domain", async () => {
+    // camelflage's doors name hypercomb.com; dylan has none (it opens
+    // everywhere on the worker, but was never published here).
+    const owners: ZoneOwners = { showcase: null, doors: new Map([[sig('a'), new Map([['camelflage', ['hypercomb.com']], ['jaime', ['jwize.com']]])]]) }
+    const { bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      readOwners: async () => owners,
+    })
+    await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage']))
   })
 
   it('redraws when the ledger is read again, and only the newest read is believed', async () => {

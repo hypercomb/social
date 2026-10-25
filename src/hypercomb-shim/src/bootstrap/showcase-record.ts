@@ -25,6 +25,23 @@ export type ShowcaseItem = { readonly pubkey: string; readonly lineage: string }
 /** A domain's showcase: the items turned on, and the domains shown in full. */
 export type ShowcaseRecord = { readonly zone: string; readonly items: readonly ShowcaseItem[]; readonly domains: readonly string[] }
 
+/** What a domain's owners sign, as far as its page needs: the showcase they
+ *  chose, and where each of their lineages opens (`doors`; a lineage with no
+ *  doors is absent, and opens nowhere the page will showcase). */
+export type ZoneOwners = {
+  readonly showcase: ShowcaseRecord | null
+  /** pubkey → lineage → the domains its signed doors name. */
+  readonly doors: ReadonlyMap<string, ReadonlyMap<string, readonly string[]>>
+}
+
+/** Does an owner's signed doors open this lineage on this domain, by name?
+ *  Unknown when the key is not one of the domain's owners. */
+export const doorsOpen = (owners: ZoneOwners, pubkey: string, lineage: string, zone: string): boolean | undefined => {
+  const byLineage = owners.doors.get(pubkey)
+  if (!byLineage) return undefined
+  return (byLineage.get(lineage) ?? []).some(door => door === zone || zone.endsWith(`.${door}`))
+}
+
 /** The index key — and the pool's meaning — for one domain's showcase. */
 export const showcaseKey = (zone: string): string => `showcase:${zone}`
 
@@ -53,13 +70,15 @@ const fetchJson = async (url: string, limit: number): Promise<{ bytes: ArrayBuff
 }
 
 /**
- * The showcase the zone's owners sign now — the primary owner first — read
- * from the zone itself and checked here: the index by its signature, the
- * record by its name. Null when no owner signs one, and then the page shows
- * what opens on the zone, as it always has.
+ * What the zone's owners sign now — the primary owner first — read from the
+ * zone itself and checked here: each index by its signature, the showcase by
+ * its name. The first owner who signs a showcase decides it; every owner's
+ * doors are kept, so the page shows only what they published here.
  */
-export const readShowcase = async (zone: string, owners: readonly string[]): Promise<ShowcaseRecord | null> => {
-  if (!ZONE.test(zone) && !LOOPBACK.test(zone)) return null
+export const readZoneOwners = async (zone: string, owners: readonly string[]): Promise<ZoneOwners> => {
+  const doors = new Map<string, ReadonlyMap<string, readonly string[]>>()
+  let showcase: ShowcaseRecord | null = null
+  if (!ZONE.test(zone) && !LOOPBACK.test(zone)) return { showcase, doors }
   const origin = `${LOOPBACK.test(zone) ? 'http' : 'https'}://${zone}`
   const indexes = await SignatureService.sign(new TextEncoder().encode('hive:indexes').buffer as ArrayBuffer)
   for (const pubkey of owners.filter(key => SIG.test(key)).slice(0, 8)) {
@@ -67,16 +86,22 @@ export const readShowcase = async (zone: string, owners: readonly string[]): Pro
     const event = index?.value as Record<string, unknown> | undefined
     if (!event || Number(event['kind']) !== 30564 || event['pubkey'] !== pubkey) continue
     try { if (!verifyEvent(event as never)) continue } catch { continue }
-    let roots: Record<string, unknown> | undefined
-    try { roots = (JSON.parse(String(event['content'] ?? '')) as { roots?: Record<string, unknown> }).roots } catch { continue }
-    const sig = String(roots?.[showcaseKey(zone)] ?? '').toLowerCase()
+    let content: { roots?: Record<string, unknown>; doors?: Record<string, unknown> } | undefined
+    try { content = JSON.parse(String(event['content'] ?? '')) } catch { continue }
+    const opened = new Map<string, readonly string[]>()
+    for (const [lineage, listed] of Object.entries(content?.doors ?? {})) {
+      if (Array.isArray(listed)) opened.set(lineage, listed.filter((door): door is string => typeof door === 'string').map(door => door.toLowerCase()))
+    }
+    doors.set(pubkey, opened)
+    if (showcase) continue
+    const sig = String(content?.roots?.[showcaseKey(zone)] ?? '').toLowerCase()
     if (!SIG.test(sig)) continue
     for (const path of [`/${sig}`, `/content/${sig}`]) {
       const atom = await fetchJson(`${origin}${path}`, 262_144)
       if (!atom || await SignatureService.sign(atom.bytes) !== sig) continue
       const record = parseShowcase(atom.value, zone)
-      if (record) return record
+      if (record) { showcase = record; break }
     }
   }
-  return null
+  return { showcase, doors }
 }
