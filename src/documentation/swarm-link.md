@@ -94,7 +94,7 @@ obfuscate the location and password").
 - **The link rides the domain's signed card.** It is the `swarm` field of the
   `welcome:<zone>` card (`host-welcome.ts`), kept with the card's title and
   tagline. The worker writes the card into the page (`#hc-welcome`), and the
-  shim draws the button above the domain's name.
+  shim draws the button in the header, on the same row as the domain's name.
 - **One shape only.** The worker (`worker.js` `WELCOME_SWARM_RE`), the module
   and the shim each accept only an https page with a `#swarm=<sig>@<host>~<key>`
   fragment. A `#meet=` link, which spells the room and secret out, is never
@@ -114,7 +114,8 @@ obfuscate the location and password").
   index or card the worker could not read, or whose held index does not
   verify, decides the same: no room, even if they may sign no card. Only the name falls through to a
   later card.
-- **Taking it down.** `room host off <domain>` signs the card without it. A
+- **Taking it down.** `room host off <domain> @<host>` signs the card without
+  it, naming the same host the room was put on. A
   card's history is never deleted, so an older card still holds the old link:
   to close the room for good, change its secret.
 - **Where it lands.** On the room's swarm door when its host has one, else on

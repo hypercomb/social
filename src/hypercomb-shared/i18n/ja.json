@@ -2013,7 +2013,7 @@
   "room.usage.full": "room — 「room」「room asks <ビヘイビア>」「room home」「room start」「room list」「room forget <ルーム>」と入力",
   "room.usage.hosting": "room — 「room」「room asks <ビヘイビア>」「room home」「room start」「room list」「room forget <ルーム>」「room host <ドメイン>」と入力",
   "room.host.say": "room host: ルームを表示するフロントページのドメインを指定してください — room host example.com",
-  "room.host.no-host": "room host: 公開ホストが設定されていません — hosts で追加するか @<ホスト> を指定してください",
+  "room.host.no-host": "room host: 署名付きカードを保管するホストを指定してください — room host <ドメイン> @<ホスト>",
   "room.host.none": "{at} にはルームがありません — 外すものはありません",
   "room.host.off": "{at} にはもうルームが表示されていません",
   "room.host.failed": "{domain} のフロントページは変更されませんでした: {reason}",

@@ -2326,7 +2326,7 @@
   "room.usage.full": "room — say \"room\", \"room asks <behaviours>\", \"room home\", \"room start\", \"room list\" or \"room forget <room>\"",
   "room.usage.hosting": "room — say \"room\", \"room asks <behaviours>\", \"room home\", \"room start\", \"room list\", \"room forget <room>\" or \"room host <domain>\"",
   "room.host.say": "room host: name the domain whose front page shows the room — room host example.com",
-  "room.host.no-host": "room host: no public host is set — add one in hosts, or say @<host>",
+  "room.host.no-host": "room host: say which host keeps your signed card — room host <domain> @<host>",
   "room.host.none": "{at} shows no room — there is none to take off",
   "room.host.off": "{at} no longer shows the room",
   "room.host.failed": "{domain}'s front page was not changed: {reason}",

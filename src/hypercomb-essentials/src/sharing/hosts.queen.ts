@@ -77,7 +77,7 @@ export class HostsQueenBee {
 
     const host = parts.find(p => p.startsWith('@'))?.slice(1)
       || String(get<SyncLike>(SYNC_KEY)?.publicHostDomain?.() ?? '').trim().toLowerCase()
-    if (!host) { toast(t('hosts.nohost', 'No public host is configured — add one in hosts, or say @<host>.'), 'warning'); return }
+    if (!host) { toast(t('hosts.nohost', 'No public host is configured — say @<host>.'), 'warning'); return }
 
     if (word === 'welcome') {
       const rest = parts.slice(1).filter(p => !p.startsWith('@'))

@@ -1198,7 +1198,7 @@ export const SHOWCASE_STYLE = `
 }
 .showcase-page .panel { position: relative; }
 
-/* the room, first: a front page that hosts a swarm says so above its name */
+/* the room, last in the brand row: a front page that hosts a swarm says so beside its name */
 .hero-swarm { flex: none; display: inline-flex; align-items: center; gap: .45rem; padding: .45rem .8rem; font-size: .85rem;
   border-radius: var(--hc-radius-control, 2px); background: var(--md-primary); color: var(--md-on-primary); font-weight: 600; text-decoration: none;
   box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--md-primary) 70%, transparent); }

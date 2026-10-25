@@ -779,20 +779,20 @@ EXPERT_LESSONS.push({
   async run(stage) {
     await stage.flyToRect(stage.commandInput())
     await stage.say('room-host', 'A door left open',
-      'An invite hands one person a way into your room. room host leaves a door open for everyone: it puts the room you are in at the top of a domain’s front page as a Join the swarm button. Anyone who opens the page can join, and they never see the room’s name or its secret.')
+      'An invite hands one person a way into your room. room host leaves a door open for everyone: it puts the room you are in at the top of a domain’s front page as a Join the swarm button. Anyone who opens the page can join. The page and the link never spell out the room’s name or its secret.')
     stage.highlight(null)
 
     await stage.say('room-host-say', 'One word, from inside the room',
-      'Be inside the room first, then say: room host example.com @hypercomb.com. The domain is the front page that shows the button. The host after the @ keeps your signed card; set a public host once in hosts and you can leave it off. I am not running it — it signs a card onto a domain, and that is yours to do.')
+      'Be inside the room first, then say: room host example.com @hypercomb.com. The domain is the front page that shows the button. The host after the @ keeps your signed card; name it every time, and name the same one to take the room down. I am not running it — it signs a card onto a domain, and that is yours to do.')
 
     await stage.say('room-host-hides', 'Hidden, not secret',
-      'The button’s link carries a key, not the words. It hides the room’s name, its secret, its access code and the page it opens on. It does not keep them from anyone who joins, so the room is public. And it does not hide where the room meets: the meeting host is named in the link.')
+      'The button’s link carries a key, not the words. It hides the room’s name, its secret, its access code and the page it opens on from the link, the address bar and the page’s text. It does not keep them from anyone who joins: the sheet that asks a visitor to join names the room, and once they are in they can read both. So the room is public. And it does not hide where the room meets: the meeting host is named in the link.')
 
     await stage.say('room-host-check', 'It checks its own work',
       'After signing, the word opens the page again and tells you whether the button is really there. If it is not, it says why: the domain is its own site and does not read signed cards, another publisher’s card comes first, or the page could not be reached to check. It never says done on a guess.')
 
     await stage.say('room-host-done', 'Taking it down',
-      'room host off example.com signs the card without the room. Older versions of a card are never deleted, so to close a room for good, change its secret. A room on a meeting point that needs an access code hands that code out too, so change the code as well.')
+      'room host off example.com @hypercomb.com signs the card without the room. Older versions of a card are never deleted, so to close a room for good, change its secret. A room on a meeting point that needs an access code hands that code out too, so change the code as well.')
   },
 })
 

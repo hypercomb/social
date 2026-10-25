@@ -253,7 +253,7 @@ export class RoomQueenBee extends QueenBee {
     const sync = get<HostSyncShape>(HOST_SYNC_KEY)
     const cardHost = (rest.find(w => w.startsWith('@'))?.slice(1) || String(sync?.publicHostDomain?.() ?? '')).trim().toLowerCase()
     if (!cardHost) {
-      this.#say(this.#t('room.host.no-host', 'room host: no public host is set — add one in hosts, or say @<host>'), 'warning')
+      this.#say(this.#t('room.host.no-host', 'room host: say which host keeps your signed card — room host <domain> @<host>'), 'warning')
       return
     }
     // A card that could not be read is never taken for no card: a word that

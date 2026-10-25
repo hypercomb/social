@@ -104,40 +104,41 @@
         <span class="kicker">A room on your front page</span>
         <h1>Room host</h1>
       </header>
-      <p class="sub">One word puts your room at the top of a domain's front page as a Join the swarm button. Anyone who opens the page can join, and never sees the room's name or secret.</p>
+      <p class="sub">One word puts your room on a domain's front page as a Join the swarm button. Anyone who opens the page can join. The page and the link never spell out the room's name or secret.</p>
     </section>
 
     <section class="panel" aria-labelledby="minute">
       <h2 id="minute">In one minute</h2>
       <p>Join the room you want to show. Then, inside it, say:</p>
       <p><code>room host example.com @hypercomb.com</code></p>
-      <p>The room is sealed, signed into the domain's front-page card, and drawn above the domain's name. The word then opens the page again and tells you whether the button is really there. To take it down, say <code>room host off example.com</code>.</p>
+      <p>The room is sealed, signed into the domain's front-page card, and drawn in the header at the top of the page, on the same row as the domain's name. The word then opens the page again and tells you whether the button is really there. To take it down, say <code>room host off example.com @hypercomb.com</code>.</p>
     </section>
 
     <section class="panel" aria-labelledby="steps">
       <h2 id="steps">Step by step</h2>
       <ol class="steps">
         <li><span class="num">01</span><span><b>Join the room.</b> The word shows the room you are in, so be inside it first. Without a room it asks you to join one.</span></li>
-        <li><span class="num">02</span><span><b>Say the word.</b> <code>room host &lt;domain&gt; @&lt;host&gt;</code>. The domain is the front page that shows the button. The host is where your signed card is kept; hypercomb.com is the one that holds your published pages. Set it once as your public host in hosts and you can leave it off.</span></li>
+        <li><span class="num">02</span><span><b>Say the word.</b> <code>room host &lt;domain&gt; @&lt;host&gt;</code>. The domain is the front page that shows the button. The host is where your signed card is kept; hypercomb.com is the one that holds your published pages. Name it every time: the word reads and writes the card on that host.</span></li>
         <li><span class="num">03</span><span><b>Read what it says.</b> It opens the page again, and once more a few seconds later, and tells you one of three things: the button is there, the button is not there and why, or the page could not be reached to check.</span></li>
         <li><span class="num">04</span><span><b>Change it.</b> Saying the word again from another room replaces the room on the card. The card's title and tagline are kept as they were.</span></li>
-        <li><span class="num">05</span><span><b>Take it down.</b> <code>room host off &lt;domain&gt;</code> signs the card without the room.</span></li>
+        <li><span class="num">05</span><span><b>Take it down.</b> <code>room host off &lt;domain&gt; @&lt;host&gt;</code> signs the card without the room. Name the same host you put it on.</span></li>
       </ol>
     </section>
 
     <section class="panel" aria-labelledby="visitor">
       <h2 id="visitor">If you are the visitor</h2>
       <ol class="steps">
-        <li><span class="num">01</span><span><b>Open the page.</b> The button reads Join the swarm and sits above the domain's name.</span></li>
-        <li><span class="num">02</span><span><b>Tap it.</b> You land on the swarm door, and it asks before it puts you in the room.</span></li>
+        <li><span class="num">01</span><span><b>Open the page.</b> The button reads Join the swarm and sits in the header at the top, on the same row as the domain's name, at the right.</span></li>
+        <li><span class="num">02</span><span><b>Tap it.</b> If the room's meeting host has a swarm door, you land there; otherwise you land on hypercomb.io. Either way it asks before it puts you in the room, and the sheet names the room.</span></li>
         <li><span class="num">03</span><span><b>Say yes.</b> You are in the room, with everyone else who is.</span></li>
       </ol>
+      <p class="aside">On a phone, hypercomb.io sends you on to hypercomb.com and the link is lost. A room meant for phones needs a meeting host that has a swarm door.</p>
     </section>
 
     <section class="panel" aria-labelledby="hides">
       <h2 id="hides">What it hides, and what it does not</h2>
-      <p>The link carries a key, not the words. It hides the room's name, its secret, its access code and the page it opens on, from the address bar and from the page's text.</p>
-      <p>It does not keep them from anyone who joins. The room is public, only hidden.</p>
+      <p>The link carries a key, not the words. It hides the room's name, its secret, its access code and the page it opens on, from the link, the address bar and the page's text.</p>
+      <p>It does not keep them from anyone who joins. The sheet that asks a visitor to join names the room, and once they are in they can read the room and its secret. The room is public, only hidden.</p>
       <p>It does not hide where the room meets. The meeting host is named in the link, because a browser has to know where to fetch the sealed login.</p>
       <p class="aside">A room on a meeting point that needs an access code hands that code out too, and the code opens the whole meeting point, not just this room. To close such a room, change the code as well as the secret.</p>
     </section>
@@ -164,7 +165,7 @@
         <dl class="words">
           <dt><code>room host &lt;domain&gt;</code></dt><dd>Put the room you are in on that domain's front page.</dd>
           <dt><code>room host &lt;domain&gt; @&lt;host&gt;</code></dt><dd>The same, keeping the card on that host.</dd>
-          <dt><code>room host off &lt;domain&gt;</code></dt><dd>Take the room off the front page.</dd>
+          <dt><code>room host off &lt;domain&gt; @&lt;host&gt;</code></dt><dd>Take the room off the front page.</dd>
         </dl>
       </div>
       <div class="group">
