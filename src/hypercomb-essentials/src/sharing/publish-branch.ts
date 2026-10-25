@@ -206,6 +206,12 @@ export interface PublishOptions {
   /** Stage lists to advance in the same act besides `published` —
    *  `publish here` (the offering act) passes `['shared']`. */
   stages?: readonly StageWord[]
+  /** MAKE AN EARLIER VERSION LIVE (the Versions list): publish this head as
+   *  it is instead of sealing the tile now. Nothing is stamped into the tile
+   *  and nothing is derived from it — the head already carries what it was
+   *  published with. Its closure is staged again from this hive, because a
+   *  head-only host may have let it go when the branch moved on. */
+  head?: string
 }
 
 const normalizeHost = (raw: string): string =>
@@ -271,6 +277,8 @@ async function publishBranchNow(
   const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
   if (segs.length === 0) return { ok: false, failure: 'no-branch' }
   const name = segs[segs.length - 1] ?? ''
+  const head = options.head === undefined ? null : String(options.head).trim().toLowerCase()
+  if (head !== null && !SIG_RE.test(head)) return { ok: false, failure: 'seal-failed' }
 
   // 1. This IS the sanctioned public enumerator for the branch — the swarm
   //    walk (if ever on) agrees with the same mark.
@@ -331,7 +339,7 @@ async function publishBranchNow(
   //    Best-effort — a publication that cannot carry its lights is still a
   //    publication (census unreadable → the full on-list, the old
   //    behaviour, rather than an empty dressing over a live creation).
-  const lit = readGlobalOnKinds()
+  const lit = head ? null : readGlobalOnKinds()
   if (lit) {
     let lights: string[] = [...lit]
     try {
@@ -345,7 +353,7 @@ async function publishBranchNow(
   // 3. A merkle-coherent root from LIVE heads, else fail loud — never
   //    publish a lossy seal, and never auto-heal on the way (see step 6).
   report({ phase: 'sealing' })
-  const sealed = await history.sealSubtree(segs)
+  const sealed = head ?? await history.sealSubtree(segs)
   if (!sealed || !SIG_RE.test(sealed)) return { ok: false, failure: 'seal-failed' }
 
   // 4. Stage the sealed closure and start pushing.
@@ -492,7 +500,7 @@ async function publishBranchNow(
   // stranger can read must find its atom on the host.
   const planRoots: Record<string, string> = {}
   const planKey = arrivalPointer(key)
-  if (!existing[planKey]) {
+  if (!existing[planKey] && !head) {
     const arrive = await derivedArrival(segs).catch(() => null)
     if (arrive) {
       try {

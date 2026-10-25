@@ -54,6 +54,21 @@
       <p class="publish-warn">{{ 'publish.header.collision' | t: collisionParams(collision) }}</p>
     }
 
+    <!-- TWO TABS (jwize 2026-10-24): the list — the tile you are on, every
+         domain and what it hosts, row-selected to publish or group — and
+         this page's groups, row-selected to shorten the list to them. -->
+    <div class="ptabs" role="tablist" [attr.aria-label]="'publish.title' | t">
+      <button type="button" class="ptab" role="tab"
+              [class.is-active]="tab() === 'list'"
+              [attr.aria-selected]="tab() === 'list'"
+              (click)="tab.set('list')">{{ 'publish.tab.list' | t }}@if (filterGroups().length > 0) {<span class="ptab-mark" aria-hidden="true"> ·</span>}</button>
+      <button type="button" class="ptab" role="tab"
+              [class.is-active]="tab() === 'groups'"
+              [attr.aria-selected]="tab() === 'groups'"
+              (click)="tab.set('groups')">{{ 'publish.groups' | t }}@if (groupsHere().length > 0) { ({{ groupsHere().length }})}</button>
+    </div>
+
+    @if (tab() === 'list') {
     <!-- THE LAYER YOU ARE ON — like behaviours. The heading is the tile;
          under it, every domain you carry, each one switch: on = this branch
          is published there, off = it is not. The hive is the list: walk to
@@ -90,6 +105,15 @@
     <!-- EVERY DOMAIN YOU PUBLISH TO, always — one switch each. -->
     @if (domains().length === 0) {
       <p class="pcur-why">{{ 'publish.here.no-domains' | t }}</p>
+    }
+    <!-- SHORTENED TO GROUPS — chosen in the Groups tab. -->
+    @if (filterGroups().length > 0) {
+      <p class="pfilter">
+        @for (g of filterGroups(); track g.meaning) {
+          <span class="pfilter-group" [style.--pg]="g.color"><span class="mat-sym" aria-hidden="true">{{ g.icon }}</span>{{ g.name }}</span>
+        }
+        <button class="pfilter-clear" type="button" (click)="clearGroupFilter()">{{ 'publish.groups.filter-all' | t }}</button>
+      </p>
     }
       <ul class="pdoors">
         @for (zone of domains(); track zone) {
@@ -288,28 +312,38 @@
           }
           @if (domainsOpen.isOpen(zone)) {
             <li class="papps-host">
-              @if (appsOn(zone); as apps) {
-                @if (apps.length === 0 && othersOn(zone).length === 0) {
-                  <p class="papps-none">{{ 'publish.apps.none' | t }}</p>
+              @if (appsShown(zone); as apps) {
+                @if (apps.length === 0 && othersShown(zone).length === 0) {
+                  @if (filterGroups().length > 0) {
+                    <p class="papps-none">{{ 'publish.groups.filter-none' | t }}</p>
+                  } @else {
+                    <p class="papps-none">{{ 'publish.apps.none' | t }}</p>
+                  }
                 } @else {
-                  <ul class="papps" [attr.aria-label]="'publish.domain.show' | t: { zone: zone }">
+                  <!-- ROW SELECT, as the shell's other lists: a press picks
+                       the row or lets it go, Shift picks the run from the
+                       last one, a double press goes to the tile. -->
+                  <ul class="papps" role="listbox" aria-multiselectable="true" [attr.aria-label]="'publish.domain.show' | t: { zone: zone }" [attr.title]="'publish.apps.row-tip' | t">
                     @for (app of apps; track app.key) {
-                      <li class="papp" [class.picked]="isPicked(app)" [class.busy]="!!app.busyPhase">
-                        <button
-                          class="papp-pick"
-                          type="button"
-                          role="checkbox"
-                          [attr.aria-checked]="isPicked(app)"
-                          [attr.aria-label]="'publish.apps.pick' | t: { name: appName(app) }"
-                          (click)="togglePick(app)"
-                        ><span class="papp-box" aria-hidden="true"><span class="mat-sym">check</span></span></button>
+                      <li
+                        class="papp"
+                        role="option"
+                        tabindex="0"
+                        [attr.aria-selected]="isPicked(app)"
+                        [class.picked]="isPicked(app)"
+                        [class.busy]="!!app.busyPhase"
+                        (click)="pickRow(app, apps, $event)"
+                        (dblclick)="visit(app)"
+                        (keydown.enter)="visit(app)"
+                        (keydown.space)="pickRow(app, apps, $event); $event.preventDefault()"
+                      >
                         <div class="papp-meta">
-                          <button class="papp-name" type="button" [title]="'publish.apps.visit' | t" (click)="visit(app)">{{ appName(app) }}</button>
+                          <span class="papp-name">{{ appName(app) }}</span>
                           @if (appAt(app, zone); as shown) {
                             @if ($any(shown).word) {
-                              <a class="papp-at" [href]="appUrl(app, zone)" target="_blank" rel="noopener">{{ $any(shown).word | t }} ↗</a>
+                              <a class="papp-at" [href]="appUrl(app, zone)" target="_blank" rel="noopener" (click)="$event.stopPropagation()" (dblclick)="$event.stopPropagation()">{{ $any(shown).word | t }} ↗</a>
                             } @else {
-                              <a class="papp-at" [href]="appUrl(app, zone)" target="_blank" rel="noopener">{{ $any(shown).at }} ↗</a>
+                              <a class="papp-at" [href]="appUrl(app, zone)" target="_blank" rel="noopener" (click)="$event.stopPropagation()" (dblclick)="$event.stopPropagation()">{{ $any(shown).at }} ↗</a>
                             }
                           } @else {
                             <span class="papp-at papp-noaddress">{{ 'publish.own.needed' | t }}</span>
@@ -318,14 +352,27 @@
                         @if (appChanged(app)) {
                           <span class="papp-changed">{{ 'publish.apps.changed' | t }}</span>
                         }
+                        <!-- TURN OFF HERE — the domain's own switch for this
+                             app, said from its list: the last domain off
+                             withdraws it, exactly as the switch does. -->
+                        <button
+                          class="papp-off"
+                          type="button"
+                          [disabled]="!canSwitch(app)"
+                          [attr.data-tip]="'publish.unpublish-warning' | t"
+                          [attr.aria-label]="'publish.apps.turn-off-on' | t: { name: appName(app), zone: zone }"
+                          (click)="flipDoor(app, zone); $event.stopPropagation()"
+                          (dblclick)="$event.stopPropagation()"
+                          (keydown.enter)="$event.stopPropagation()"
+                          (keydown.space)="$event.stopPropagation()"
+                        >{{ 'publish.apps.turn-off' | t }}</button>
                       </li>
                     }
                     <!-- Published from ANOTHER device: real, so counted and
                          named, but this hive has no path to act on — no pick,
                          and no address, which would only be the domain. -->
-                    @for (other of othersOn(zone); track other.key) {
-                      <li class="papp papp-other">
-                        <span class="papp-pick papp-pick-none" aria-hidden="true"></span>
+                    @for (other of othersShown(zone); track other.key) {
+                      <li class="papp papp-other" role="option" aria-disabled="true">
                         <div class="papp-meta">
                           <span class="papp-name papp-name-quiet">{{ other.key }}</span>
                           <span class="papp-at">{{ 'publish.apps.other-device' | t }}</span>
@@ -370,6 +417,25 @@
             >{{ 'publish.selection.group' | t }}</button>
             <button class="psel-clear" type="button" (click)="clearPicksFromBar()">{{ 'publish.selection.clear' | t }}</button>
           </div>
+          <!-- THE PAGE'S GROUPS, one press each: the picked apps go in, or
+               come out when every one of them is in already. -->
+          @if (pickedGroups().length > 0 && !batch()) {
+            <div class="psel-groups" [attr.aria-label]="'publish.selection.into-group' | t">
+              @for (g of pickedGroups(); track g.meaning) {
+                <button
+                  class="psel-group"
+                  type="button"
+                  [style.--pg]="g.color"
+                  [attr.data-coverage]="pickedCoverage(g)"
+                  [attr.aria-pressed]="pickedCoverage(g) === 'all'"
+                  [attr.data-tip]="(pickedCoverage(g) === 'all' ? 'publish.selection.leave-group' : 'publish.selection.join-group') | t: { name: g.name }"
+                  (click)="togglePickedGroup(g)"
+                >
+                  <span class="mat-sym" aria-hidden="true">{{ g.icon }}</span>{{ g.name }}
+                </button>
+              }
+            </div>
+          }
           @if (!batch() && !pickedChecking() && pickedRows().length > 0 && pickedChanged().length === 0) {
             <p class="psel-note">{{ 'publish.selection.none-changed' | t }}</p>
           }
@@ -380,41 +446,6 @@
         {{ 'publish.action.manage-hosts' | t }}
       </button>
 
-      <!-- PUBLISH GROUPS on this layer (publish-groups.md) — each publishes
-           every tile in it, from here as from the strip at the top of the
-           hive, and from inside a view, where the strip is not drawn. -->
-      @if (groupsHere().length > 0) {
-        <section class="psec">
-          <button
-            class="psec-head"
-            type="button"
-            [attr.aria-expanded]="sectionsOpen.isOpen('groups')"
-            (click)="sectionsOpen.toggle('groups')"
-          >{{ 'publish.groups' | t }} ({{ groupsHere().length }})</button>
-          @if (sectionsOpen.isOpen('groups')) {
-            <div class="psec-body pgroups">
-              @for (g of groupsHere(); track g.meaning) {
-                <div class="pgroup" [style.--pg]="g.color">
-                  <span class="mat-sym pgroup-icon" aria-hidden="true">{{ g.icon }}</span>
-                  <span class="pgroup-name" [title]="g.name">{{ g.name }}</span>
-                  <button
-                    class="pgroup-act"
-                    type="button"
-                    [disabled]="!!g.publishing || g.count === 0 || !!batch()"
-                    (click)="publishGroup(g)"
-                  >
-                    @if (g.publishing; as p) {
-                      {{ 'publish-groups.publishing' | t: { done: p.done, total: p.total } }}
-                    } @else {
-                      {{ 'publish-groups.publish' | t: { count: g.count } }}
-                    }
-                  </button>
-                </div>
-              }
-            </div>
-          }
-        </section>
-      }
     @if (current(); as row) {
 
       <!-- THE DETAILS, folded — one section open at a time, all closed on
@@ -479,6 +510,15 @@
                    the row that says what is out there right now is not a
                    row you can lose. -->
               @if (v.sig !== row.live) {
+                <!-- MAKE LIVE — this head back out into the world, asked
+                     first; the tile here keeps its newer changes. -->
+                <button
+                  class="pdet-version-live"
+                  type="button"
+                  [disabled]="!canSwitch(row)"
+                  [attr.data-tip]="'publish.make-live.tip' | t"
+                  (click)="makeLive(row, v)"
+                >{{ 'publish.make-live.action' | t }}</button>
                 <button
                   class="pdet-version-hide"
                   type="button"
@@ -686,6 +726,65 @@
           </div>
         }
       </section>
+    }
+    } @else {
+      <!-- THE PAGE'S PUBLISH GROUPS (publish-groups.md), row-selected like
+           the list: Filter shortens the list to the picked groups' members
+           and goes back to it; each group also publishes all it holds, from
+           here as from the strip at the top of the hive. -->
+      @if (groupsHere().length === 0) {
+        <p class="pcur-why">{{ 'publish.groups.none' | t }}</p>
+      } @else {
+        <ul class="pgroups" role="listbox" aria-multiselectable="true" [attr.aria-label]="'publish.groups' | t">
+          @for (g of groupsHere(); track g.meaning) {
+            <li
+              class="pgroup"
+              role="option"
+              tabindex="0"
+              [style.--pg]="g.color"
+              [attr.aria-selected]="isGroupPicked(g)"
+              [class.picked]="isGroupPicked(g)"
+              [class.filtering]="isFiltering(g)"
+              (click)="pickGroup(g, $event)"
+              (dblclick)="filterTo([g])"
+              (keydown.enter)="filterTo([g])"
+              (keydown.space)="pickGroup(g, $event); $event.preventDefault()"
+            >
+              <span class="mat-sym pgroup-icon" aria-hidden="true">{{ g.icon }}</span>
+              <span class="pgroup-name" [title]="g.name">{{ g.name }}</span>
+              <button
+                class="pgroup-act"
+                type="button"
+                [disabled]="!!g.publishing || g.count === 0 || !!batch()"
+                (click)="publishGroup(g); $event.stopPropagation()"
+                (dblclick)="$event.stopPropagation()"
+                (keydown.enter)="$event.stopPropagation()"
+                (keydown.space)="$event.stopPropagation()"
+              >
+                @if (g.publishing; as p) {
+                  {{ 'publish-groups.publishing' | t: { done: p.done, total: p.total } }}
+                } @else {
+                  {{ 'publish-groups.publish' | t: { count: g.count } }}
+                }
+              </button>
+            </li>
+          }
+        </ul>
+        <div class="psel">
+          <span class="psel-count">{{ 'publish.selection.count' | t: { count: pickedGroupRows().length } }}</span>
+          <div class="psel-acts">
+            <button
+              class="pcur-action"
+              type="button"
+              [disabled]="pickedGroupRows().length === 0"
+              (click)="filterTo(pickedGroupRows())"
+            >{{ 'publish.groups.filter' | t }}</button>
+            @if (filterGroups().length > 0) {
+              <button class="psel-clear" type="button" (click)="clearGroupFilter()">{{ 'publish.groups.filter-clear' | t }}</button>
+            }
+          </div>
+        </div>
+      }
     }
   </aside>
 }

@@ -6,10 +6,12 @@
 // drawn (publish-groups.md).
 //
 //   1. a layer with a group (made with the `groups` word)
-//   2. `p` opens Publish; its Groups section lists the layer's groups
-//   3. a row reads the group's name and Publish (n); pressing it runs the
-//      group and reports (a fresh profile has no host — it says why)
-//   4. over a takeover view the strip is gone but the panel still lists them
+//   2. `p` opens Publish; its Groups TAB lists the layer's groups
+//   3. a row reads the group's name and Publish (n); pressing Publish runs
+//      the group and reports (a fresh profile has no host — it says why)
+//   4. ROW SELECT: pressing a group's row picks it; Filter goes back to the
+//      list tab shortened to that group; Clear filter shows everything again
+//   5. over a takeover view the strip is gone but the panel still lists them
 //
 // Usage: node scripts/drive-publish-panel-groups.cjs --url http://localhost:4253
 //        [--engine chrome|msedge|chromium] [--out test-results/publish-panel-groups]
@@ -72,10 +74,10 @@ async function main() {
     return !!host && !host.hidden && host.querySelectorAll('.hc-pg-btn[data-meaning]').length > 0
   })
   const panelGroups = () => page.evaluate(() => {
-    const head = [...document.querySelectorAll('.publish-panel .psec-head')].find(h => /Groups/.test(h.textContent ?? ''))
-    if (!head) return null
+    const tab = [...document.querySelectorAll('.publish-panel .ptab')].find(h => /Groups/.test(h.textContent ?? ''))
+    if (!tab) return null
     return {
-      head: (head.textContent ?? '').trim(),
+      head: (tab.textContent ?? '').trim(),
       rows: [...document.querySelectorAll('.publish-panel .pgroup')].map(r => ({
         name: r.querySelector('.pgroup-name')?.textContent?.trim() ?? '',
         icon: r.querySelector('.pgroup-icon')?.textContent?.trim() ?? '',
@@ -127,10 +129,10 @@ async function main() {
     await pressP()
     await settle(5000, () => page.evaluate(() => !!document.querySelector('.publish-panel')))
     const listed = await settle(6000, async () => (await panelGroups()) !== null)
-    check('`p` opens Publish; its Groups section is there', listed, JSON.stringify(await panelGroups()))
+    check('`p` opens Publish; its Groups tab is there', listed, JSON.stringify(await panelGroups()))
 
     // 3.
-    await page.locator('.publish-panel .psec-head').filter({ hasText: 'Groups' }).click()
+    await page.locator('.publish-panel .ptab').filter({ hasText: 'Groups' }).click()
     await settle(3000, async () => ((await panelGroups())?.rows ?? []).length > 0)
     const opened = await panelGroups()
     const row = opened?.rows?.[0]
@@ -144,6 +146,25 @@ async function main() {
     check('pressing it runs the group and reports', reported, JSON.stringify(toast))
 
     // 4.
+    await page.locator('.publish-panel .pgroup-name').first().click()
+    await page.waitForTimeout(300)
+    const picked = await page.evaluate(() => document.querySelector('.publish-panel .pgroup')?.getAttribute('aria-selected') === 'true')
+    await page.locator('.publish-panel .psel .pcur-action').filter({ hasText: 'Filter' }).click()
+    await page.waitForTimeout(400)
+    const filtered = await page.evaluate(() => ({
+      tab: document.querySelector('.publish-panel .ptab.is-active')?.textContent?.trim() ?? '',
+      chip: document.querySelector('.publish-panel .pfilter')?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+    }))
+    check('a pressed group row is picked; Filter goes back to the list, shortened to it',
+      picked && /^List/.test(filtered.tab) && /Blog/.test(filtered.chip), JSON.stringify({ picked, ...filtered }))
+    await shot('04-filtered')
+    await page.locator('.publish-panel .pfilter-clear').click()
+    await page.waitForTimeout(300)
+    const cleared = await page.evaluate(() => !document.querySelector('.publish-panel .pfilter'))
+    check('show all clears the filter', cleared)
+    await page.locator('.publish-panel .ptab').filter({ hasText: 'Groups' }).click()
+
+    // 5.
     await page.evaluate(() => window.ioc.get('@hypercomb.social/ViewMode').setMode('postit'))
     await page.waitForTimeout(1200)
     const stripGone = !(await stripUp())
@@ -152,7 +173,7 @@ async function main() {
     check('over a takeover view the strip is gone, the panel still lists the group',
       stripGone && panelUp && (stillListed?.rows ?? []).some(r => r.name === 'Blog'),
       `stripGone=${stripGone} panel=${panelUp} rows=${JSON.stringify(stillListed?.rows)}`)
-    await shot('04-over-view')
+    await shot('05-over-view')
   } finally {
     const real = errors.filter(e => !/Could not initialize shader|favicon|ResizeObserver/i.test(e))
     if (real.length) console.log('\npage errors:\n  ' + real.slice(0, 8).join('\n  '))

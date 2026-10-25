@@ -32,7 +32,7 @@
 // essentials, so everything crosses as `publish:render` payloads and comes
 // back as intents (publish:run, publish:unpublish, publish:inspect, …).
 
-import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, type I18nProvider, registerPoolMeaning } from '@hypercomb/core'
+import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, requestConfirm, type I18nProvider, registerPoolMeaning } from '@hypercomb/core'
 import { listDecorations } from '../commands/decoration-manifest.js'
 import { CARD_PAGE_KIND } from '../commands/card-wear.js'
 import { conceal, listConcealed, type ConcealedItem } from '../concealment/concealment.js'
@@ -341,14 +341,14 @@ export class PublishStatusDrone extends Drone {
 
   protected override listens: string[] = [
     'publish:view-toggle', 'publish:shown', 'publish:close', 'publish:refresh', 'sync:state',
-    'publish:run', 'publish:run-many', 'publish:unpublish', 'publish:inspect', 'publish:copy-link',
+    'publish:run', 'publish:run-many', 'publish:unpublish', 'publish:make-live', 'publish:inspect', 'publish:copy-link',
     'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
     'hosts:render', 'publish:arrival', 'publish:participant', 'publish:participant-publish',
     'publish:entrance', 'publish:entrance-preview', 'publish:entrance-skip', ENTRANCE_UPDATE_EFFECT, 'hidden:render',
     'keymap:invoke',
   ]
-  protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log', 'hidden:refresh']
+  protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log', 'hidden:refresh', 'confirm:request']
 
   #open = false
   #refreshing = false
@@ -510,6 +510,9 @@ export class PublishStatusDrone extends Drone {
       void this.#ownAddress(String(p?.key ?? ''), String(p?.zone ?? ''), label || null)
     })
     this.onEffect<{ key?: string }>('publish:unpublish', (p) => { void this.#unpublish(String(p?.key ?? '')) })
+    this.onEffect<{ key?: string; sig?: string }>('publish:make-live', (p) => {
+      void this.#makeLive(String(p?.key ?? ''), String(p?.sig ?? ''))
+    })
     this.onEffect<{ key?: string }>('publish:copy-link', (p) => { void this.#copyLink(String(p?.key ?? '')) })
     this.onEffect<{ key?: string; view?: string }>('publish:opens-as', (p) => {
       void this.#setOpensAs(String(p?.key ?? ''), String(p?.view ?? ''))
@@ -1207,8 +1210,9 @@ export class PublishStatusDrone extends Drone {
 
   /** Publish one branch. `batched` is the selected-apps run calling: it says
    *  one summary itself and refreshes once at the end, so a run inside it says
-   *  only what went wrong. Answers whether it published (null = nothing run). */
-  async #run(key: string, batched = false, planned?: PublishRowState): Promise<boolean | null> {
+   *  only what went wrong. `head` publishes that earlier version as it is
+   *  (#makeLive). Answers whether it published (null = nothing run). */
+  async #run(key: string, batched = false, planned?: PublishRowState, head?: string): Promise<boolean | null> {
     // One publish at a time while the selected run is going: both re-sign the
     // same index, and the row being run may be one the batch is about to run.
     if (this.#batch && !batched) {
@@ -1233,7 +1237,9 @@ export class PublishStatusDrone extends Drone {
     // A batched row may have been rebuilt by a sweep and read 'comparing' by
     // the time its turn comes; the state it was picked in still decides.
     const state = row.state === 'comparing' && planned ? planned : row.state
-    const forceReDrain = state === 'pending' || state === 'gone' || state === 'stale-edge'
+    // An earlier version always re-stages: this session may have marked its
+    // atoms already, and a head-only host let them go when the branch moved on.
+    const forceReDrain = !!head || state === 'pending' || state === 'gone' || state === 'stale-edge'
 
     row.busyPhase = 'staging'
     this.#inFlight.add(key)
@@ -1242,6 +1248,7 @@ export class PublishStatusDrone extends Drone {
     try {
       result = await publishBranch(row.segments, {
         forceReDrain,
+        ...(head ? { head } : {}),
         onProgress: (p: PublishProgress) => {
           row.busyPhase = p.phase
           this.#emit()
@@ -1270,7 +1277,13 @@ export class PublishStatusDrone extends Drone {
       if (!batched) void this.#refresh()
       return false
     }
-    if (!batched) this.#toast(
+    if (!batched && head) this.#toast(
+      result.status === 'confirmed' ? 'success' : 'info',
+      result.status === 'confirmed' ? 'publish.made-live' : 'publish.made-live-unconfirmed',
+      result.status === 'confirmed'
+        ? 'That version is live again. Your hive keeps its newer changes.'
+        : 'That version is live again — its host has not served it back yet. This row re-checks on its own.')
+    else if (!batched) this.#toast(
       result.status === 'confirmed' ? 'success' : 'info',
       result.status === 'confirmed' ? 'publish.done' : 'publish.done-unconfirmed',
       result.status === 'confirmed'
@@ -1279,10 +1292,13 @@ export class PublishStatusDrone extends Drone {
     // THE ACT IS THE TRUTH THE ROW PAINTS NOW (audit 2026-10-23): the index
     // write just landed, so the row says so at once — the republish button
     // goes with it — instead of waiting out a sweep that read its snapshots
-    // before the publish and would re-paint 'drift' until the next pass.
+    // before the publish and would re-paint 'drift' until the next pass. An
+    // earlier version made live leaves the tile as it is here, so the row
+    // says it changed here.
     row.live = result.sealed
-    row.here = result.sealed
-    row.state = result.status === 'confirmed' ? 'live' : 'pending'
+    if (!head) row.here = result.sealed
+    row.state = row.here && row.here !== result.sealed ? 'drift'
+      : result.status === 'confirmed' ? 'live' : 'pending'
     this.#emit()
     if (!batched) void this.#refresh()
     return true
@@ -1611,6 +1627,28 @@ export class PublishStatusDrone extends Drone {
     this.#toast('info', 'publish.unpublished',
       'Removed from your hive index. The bytes stay hosted and links already shared still resolve — this stops it being advertised and tracked, it does not un-share it.')
     void this.#refresh()
+  }
+
+  /** MAKE AN EARLIER VERSION LIVE — one of this branch's own published heads
+   *  (its Versions list, read from this hive's ledger), asked once, then
+   *  published as it is through the same run as Publish changes. The tile
+   *  here keeps its newer changes; publishing them is the next act. */
+  async #makeLive(key: string, rawSig: string): Promise<void> {
+    if (this.#waitForBatch()) return
+    const row = this.#rows.find(r => r.key === key)
+    const sig = rawSig.trim().toLowerCase()
+    if (!row || row.segments.length === 0 || row.busyPhase || this.#inFlight.has(key)) return
+    const version = row.versions.find(v => v.sig === sig)
+    if (!version || sig === row.live) return
+    const yes = await requestConfirm({
+      title: 'publish.make-live.title',
+      message: 'publish.make-live.message',
+      messageParams: { name: row.segments[row.segments.length - 1] ?? row.path, sig: sig.slice(0, 8) },
+      confirmLabel: 'publish.make-live.confirm',
+      cancelLabel: 'publish.make-live.cancel',
+    })
+    if (!yes) return
+    await this.#run(key, false, undefined, sig)
   }
 
   async #copyLink(key: string): Promise<void> {

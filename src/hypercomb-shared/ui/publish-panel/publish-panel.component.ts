@@ -55,7 +55,9 @@ import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directiv
 import { signalSession } from '../window-session'
 import { accordion } from '../accordion'
 import { isTransientMode } from '../../core/view-mode.service'
-import { appsOn, groupPage, hasChanges, othersOn, pruneSelection, selectedRows, shownAt } from './publish-apps'
+import { appsOn, groupCoverage, groupPage, hasChanges, inGroup, othersOn, pickedAfterPress, pruneSelection, selectedRows, shownAt } from './publish-apps'
+
+const isShift = (event?: Event): boolean => !!(event as MouseEvent | KeyboardEvent | undefined)?.shiftKey
 
 // Mirrors of the essentials read-model shapes (shared cannot import
 // essentials). Kept field-for-field identical to PublishRenderPayload in
@@ -133,6 +135,8 @@ interface PublishGroupRow {
   icon: string
   color: string
   count: number
+  /** Its members' names on the page. Optional: an older drone sends none. */
+  members?: string[]
   publishing: { done: number; total: number } | null
 }
 
@@ -240,6 +244,8 @@ export class PublishPanelComponent implements OnDestroy {
           return this.domainsOpen.dismiss()
         }
         if (this.picked().size > 0) { this.clearPicks(); return true }
+        if (this.groupPicks().size > 0) { this.groupPicks.set(new Set()); return true }
+        if (this.groupFilter().size > 0) { this.clearGroupFilter(); return true }
         return false
       },
       close: () => this.close(),
@@ -344,6 +350,90 @@ export class PublishPanelComponent implements OnDestroy {
     return othersOn(this.rows(), zone)
   }
 
+  /** THE TWO TABS (jwize 2026-10-24): the list, and this page's groups. */
+  readonly tab = signal<'list' | 'groups'>('list')
+
+  /** THE GROUPS THE LIST IS SHORTENED TO — their meanings. Filter in the
+   *  Groups tab sets them; they read only while those groups are on this
+   *  page, so walking away shows every app again. */
+  readonly groupFilter = signal<ReadonlySet<string>>(new Set())
+  readonly filterGroups = computed<PublishGroupRow[]>(() =>
+    this.groupsHere().filter(g => this.groupFilter().has(g.meaning)))
+
+  /** What a domain's list shows: its apps, or only the filter groups'. */
+  appsShown(zone: string): PublishRow[] {
+    const groups = this.filterGroups()
+    const apps = this.appsOn(zone)
+    if (groups.length === 0) return apps
+    const members = groups.flatMap(g => g.members ?? [])
+    return apps.filter(row => inGroup(row, this.#groups().segments, members))
+  }
+
+  /** Another device's entries belong to no group here. */
+  othersShown(zone: string): PublishRow[] {
+    return this.filterGroups().length > 0 ? [] : this.othersOn(zone)
+  }
+
+  isFiltering(group: PublishGroupRow): boolean {
+    return this.groupFilter().has(group.meaning)
+  }
+
+  /** Filter: the list shortened to these groups' members, opened on the
+   *  first tab at the first domain that hosts one. */
+  filterTo(groups: readonly PublishGroupRow[]): void {
+    if (groups.length === 0) return
+    this.groupFilter.set(new Set(groups.map(g => g.meaning)))
+    this.groupPicks.set(new Set())
+    this.tab.set('list')
+    const open = this.domainsOpen.open()
+    if (open === null || this.appsShown(open).length === 0) {
+      const zone = this.domains().find(z => this.appsShown(z).length > 0)
+      if (zone) this.domainsOpen.reveal(zone)
+    }
+  }
+
+  clearGroupFilter(): void {
+    this.groupFilter.set(new Set())
+  }
+
+  /** The groups picked in the Groups tab — in memory only, like app picks. */
+  readonly groupPicks = signal<ReadonlySet<string>>(new Set())
+  readonly pickedGroupRows = computed<PublishGroupRow[]>(() =>
+    this.groupsHere().filter(g => this.groupPicks().has(g.meaning)))
+  #groupAnchor: string | null = null
+
+  isGroupPicked(group: PublishGroupRow): boolean {
+    return this.groupPicks().has(group.meaning)
+  }
+
+  /** A group row pressed: picked or let go; Shift picks the run from the last. */
+  pickGroup(group: PublishGroupRow, event?: Event): void {
+    const keys = this.groupsHere().map(g => g.meaning)
+    this.groupPicks.set(pickedAfterPress(this.groupPicks(), keys, group.meaning, this.#groupAnchor, isShift(event)))
+    this.#groupAnchor = group.meaning
+  }
+
+  /** The groups the picked apps can go into — the ones on the page they all
+   *  sit on, while this panel knows that page's groups. */
+  readonly pickedGroups = computed<PublishGroupRow[]>(() => {
+    const page = this.pickedPage()
+    const { segments, groups } = this.#groups()
+    return page && page.segments.join('/') === segments.join('/') ? groups : []
+  })
+
+  /** Are the picked apps all in this group already (a press takes them out),
+   *  some of them, or none? */
+  pickedCoverage(group: PublishGroupRow): 'all' | 'some' | 'none' {
+    return groupCoverage(this.pickedPage()?.members ?? [], group.members ?? [])
+  }
+
+  /** The picked apps into this group — or out of it, when all are in. */
+  togglePickedGroup(group: PublishGroupRow): void {
+    const page = this.pickedPage()
+    if (!page || this.batch()) return
+    EffectBus.emit('publish-groups:join', { segments: page.segments, meaning: group.meaning, members: page.members })
+  }
+
   /** Everything a domain hosts, from here or not. */
   hostedOn(zone: string): number {
     return this.appsOn(zone).length + this.othersOn(zone).length
@@ -395,12 +485,15 @@ export class PublishPanelComponent implements OnDestroy {
     return this.picked().has(row.key)
   }
 
-  togglePick(row: PublishRow): void {
+  #pickAnchor: string | null = null
+
+  /** An app row pressed — ROW SELECT, as the shell's other lists: picked or
+   *  let go; Shift picks the run from the last row pressed in this list. */
+  pickRow(row: PublishRow, list: readonly PublishRow[], event?: Event): void {
     if (row.segments.length === 0) return
-    const next = new Set(this.picked())
-    if (next.has(row.key)) next.delete(row.key)
-    else next.add(row.key)
-    this.picked.set(next)
+    const keys = list.filter(r => r.segments.length > 0).map(r => r.key)
+    this.picked.set(pickedAfterPress(this.picked(), keys, row.key, this.#pickAnchor, isShift(event)))
+    this.#pickAnchor = row.key
   }
 
   clearPicks(): void {
@@ -1020,6 +1113,13 @@ export class PublishPanelComponent implements OnDestroy {
    *  clipboard. */
   copySig(sig: string): void {
     try { void navigator.clipboard?.writeText(sig) } catch { /* clipboard denied */ }
+  }
+
+  /** An earlier version back out into the world — the drone asks first, then
+   *  publishes that head as it is. The tile here keeps its newer changes. */
+  makeLive(row: PublishRow, version: { sig: string }): void {
+    if (!this.canSwitch(row) || version.sig === row.live) return
+    EffectBus.emit('publish:make-live', { key: row.key, sig: version.sig })
   }
 
   /** Walk to the branch this row describes. Rows published from another

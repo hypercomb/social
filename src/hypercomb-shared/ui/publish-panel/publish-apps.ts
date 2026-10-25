@@ -88,3 +88,41 @@ export function groupPage(rows: readonly AppRow[]): { segments: string[]; member
   if (!same) return null
   return { segments: [...parent], members: [...new Set(rows.map(row => row.segments[row.segments.length - 1]))] }
 }
+
+// ── BY GROUP (jwize 2026-10-24: "short list by group filters … on click group
+// comes back to list also group management from the main table multiselect
+// and click group") ───────────────────────────────────────────────────────
+
+/** Is this app a member of a group on `page`? A group holds that page's
+ *  tiles by name, so only a direct child wearing one of the names is in. */
+export function inGroup(row: AppRow, page: readonly string[], members: readonly string[]): boolean {
+  return row.segments.length === page.length + 1
+    && page.every((s, i) => row.segments[i] === s)
+    && members.includes(row.segments[row.segments.length - 1])
+}
+
+/** ROW SELECT, as the shell's other lists: a press picks the row or lets it
+ *  go; with Shift it picks every row from the last one pressed to this one
+ *  (the anchor), in the order the list shows them. Keys are what a row is
+ *  picked by. */
+export function pickedAfterPress(picked: ReadonlySet<string>, keys: readonly string[], key: string,
+  anchor: string | null, shift: boolean): ReadonlySet<string> {
+  const from = anchor === null ? -1 : keys.indexOf(anchor)
+  const to = keys.indexOf(key)
+  const next = new Set(picked)
+  if (shift && from >= 0 && to >= 0) {
+    const [lo, hi] = from <= to ? [from, to] : [to, from]
+    for (let i = lo; i <= hi; i++) next.add(keys[i])
+    return next
+  }
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  return next
+}
+
+/** How much of a group the picked names already are: `all` means a press
+ *  takes them out, anything else puts the rest in. */
+export function groupCoverage(picked: readonly string[], members: readonly string[]): 'all' | 'some' | 'none' {
+  const held = picked.filter(name => members.includes(name)).length
+  return picked.length > 0 && held === picked.length ? 'all' : held > 0 ? 'some' : 'none'
+}

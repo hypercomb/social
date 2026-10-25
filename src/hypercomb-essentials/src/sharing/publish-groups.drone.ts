@@ -115,7 +115,7 @@ export class PublishGroupsDrone extends Drone {
   protected override listens = [
     'decorations:changed', 'history:cursor-changed', 'selection:changed', 'view:active',
     'render:cell-count', ENABLEMENT_CHANGED, ICON_PICK_RESULT, ICON_PICKER_OPEN, 'publish-groups:publish',
-    'publish-groups:create',
+    'publish-groups:create', 'publish-groups:join',
   ]
   protected override emits = [
     'group:preview', 'toast:show', 'publish:refresh', 'publish-groups:render', ICON_PICK_REQUEST,
@@ -185,6 +185,14 @@ export class PublishGroupsDrone extends Drone {
       const members = Array.isArray(p?.members) ? p.members.map(m => String(m ?? '').trim()).filter(Boolean) : []
       const name = typeof p?.name === 'string' ? p.name : undefined
       if (segments && members.length) void this.createFromPanel(segments, members, name)
+    })
+    // THE PICKED APPS INTO A GROUP THAT IS THERE (jwize 2026-10-24: "group
+    // management from the main table multiselect and click group").
+    this.onEffect<{ segments?: unknown; meaning?: unknown; members?: unknown }>('publish-groups:join', (p) => {
+      const segments = Array.isArray(p?.segments) ? p.segments.map(s => String(s ?? '').trim()).filter(Boolean) : null
+      const meaning = typeof p?.meaning === 'string' ? p.meaning : ''
+      const members = Array.isArray(p?.members) ? p.members.map(m => String(m ?? '').trim()).filter(Boolean) : []
+      if (segments && meaning && members.length) void this.toggleFromPanel(segments, meaning, members)
     })
     this.onEffect<IconPickResult>(ICON_PICK_RESULT, (result) => {
       const pick = this.#iconPick
@@ -436,6 +444,39 @@ export class PublishGroupsDrone extends Drone {
     }
   }
 
+  /** The Publish panel's picks and one group on their page: every picked tile
+   *  joins it, or, when every one already wears it, every one leaves it — the
+   *  same toggle as tapping the group in the strip with those tiles selected.
+   *  Only children of the page count. Says what changed. */
+  async toggleFromPanel(segments: readonly string[], meaning: string, members: readonly string[]): Promise<void> {
+    try {
+      const reading = await this.#read(segments, true)
+      const shown = reading.shown.find(s => s.group.meaning === meaning)
+      if (!shown) {
+        this.#toast('error', this.#t('publish-groups.gone', 'That group is not on this page any more'))
+        return
+      }
+      const picked = [...new Set(members)].filter(label => reading.children.includes(label))
+      if (picked.length === 0) {
+        this.#toast('error', this.#t('publish-groups.not-on-page', 'None of those are tiles on that page — nothing was grouped'))
+        return
+      }
+      const name = shown.group.name
+      if (picked.every(label => shown.members.has(label))) {
+        await this.leaveGroup(segments, meaning, picked)
+        this.#toast('success', this.#t('publish-groups.left', `${picked.length} left ${name}`, { count: picked.length, name }))
+      } else {
+        const joining = picked.filter(label => !shown.members.has(label))
+        await this.joinGroup(segments, meaning, joining)
+        this.#toast('success', this.#t('publish-groups.joined', `${joining.length} joined ${name}`, { count: joining.length, name }))
+      }
+      this.#schedule()
+    } catch (error) {
+      console.warn('[publish-groups] could not change a group from the panel:', error)
+      this.#toast('error', this.#t('publish-groups.not-changed', 'The group could not be changed'))
+    }
+  }
+
   joinGroup(segments: readonly string[], meaning: string, labels: readonly string[]): Promise<void> {
     return this.#write(async () => {
       const sig = await groupSignature(meaning)
@@ -649,6 +690,9 @@ export class PublishGroupsDrone extends Drone {
         icon: group.icon,
         color: group.color,
         count: members.size,
+        // The panel filters its app lists by these and toggles picks against
+        // them — names of this layer's children, never paths.
+        members: [...members].sort(),
         publishing: this.#publishing.has(group.meaning) ? { ...this.#publishing.get(group.meaning)! } : null,
       })) : [],
     })

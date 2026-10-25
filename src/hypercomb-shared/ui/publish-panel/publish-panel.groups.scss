@@ -1,20 +1,55 @@
 // hypercomb-shared/ui/publish-panel/publish-panel.groups.scss
 //
-// The Publish panel's GROUPS section — one row per publish group on this
-// layer: its icon in its own colour, its name, and Publish (n). Its own sheet
-// in `styleUrls` so the panel's main sheet never grows toward the
-// anyComponentStyle budget (that budget is per compiled sheet).
+// The Publish panel's TABS (the list | this page's groups) and the GROUPS tab
+// — one row per publish group on this layer: its icon in its own colour, its
+// name, and Publish (n); rows are picked by pressing them, like the list's.
+// Its own sheet in `styleUrls` so the panel's main sheet never grows toward
+// the anyComponentStyle budget (that budget is per compiled sheet).
 //
 // A group's colour is the participant's own pastel; `tw.ink` takes it toward
 // the panel's ink on a bright theme so the glyph still reads.
 
 @use '../toolwindow' as tw;
 
+.ptabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 0.15rem;
+  margin: 0.2rem 0 0.35rem;
+  padding: 0 0.5rem;
+  border-bottom: 1px solid rgba(var(--acc), 0.18);
+}
+
+.ptab {
+  appearance: none;
+  margin: 0;
+  padding: 0.32rem 0.7rem 0.28rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+
+  &:hover { color: var(--hc-window-ink-plain); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
+  &.is-active { color: var(--hc-window-ink-loud); border-bottom-color: rgba(var(--acc), 0.8); }
+}
+
+// The list is shortened to groups: its tab says so.
+.ptab-mark { color: rgba(var(--acc), 0.9); }
+
 .pgroups {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.35em;
-  // The same size as a domain's name above it (.pdoor-zone).
+  gap: 0.05rem;
+  // The same size as a domain's name (.pdoor-zone).
   font-size: 0.8rem;
 }
 
@@ -23,6 +58,20 @@
   align-items: center;
   gap: 0.55em;
   min-width: 0;
+  min-height: 2.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: tw.$radius-card;
+  cursor: pointer;
+  user-select: none;
+
+  &:hover { background: rgba(var(--acc), 0.05); }
+  &:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px rgba(var(--acc), 0.55); }
+  &.picked {
+    background: rgba(var(--acc), 0.14);
+    box-shadow: inset 2px 0 0 rgba(var(--acc), 0.85);
+  }
+  // The list is shortened to this group now.
+  &.filtering .pgroup-name { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--pg) 80%, transparent); }
 }
 
 .pgroup-icon {
@@ -53,4 +102,8 @@
 
   &:hover:not(:disabled) { background: color-mix(in srgb, var(--pg) 26%, transparent); }
   &:disabled { opacity: 0.45; cursor: default; }
+}
+
+@media (max-width: 599px), (max-height: 449px) {
+  .publish-panel .pgroup { min-height: 2.75rem; }
 }

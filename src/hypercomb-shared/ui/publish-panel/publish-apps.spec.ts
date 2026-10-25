@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appsOn, groupPage, hasChanges, opensOn, othersOn, pruneSelection, selectedRows, shownAt, type AppRow } from './publish-apps'
+import { appsOn, groupCoverage, groupPage, hasChanges, inGroup, opensOn, othersOn, pickedAfterPress, pruneSelection, selectedRows, shownAt, type AppRow } from './publish-apps'
 
 const row = (path: string, patch: Partial<AppRow> = {}): AppRow => {
   const segments = path.split('/').filter(Boolean)
@@ -70,5 +70,42 @@ describe('selecting apps to publish, or to make a group', () => {
     expect(groupPage([row('/meetups'), row('/revolucion/meetup')])).toBeNull()
     expect(groupPage([row('/a/x'), row('/b/x')])).toBeNull()
     expect(groupPage([])).toBeNull()
+  })
+})
+
+describe('row select, and the list by group', () => {
+  const keys = ['a', 'b', 'c', 'd']
+  const set = (...k: string[]): ReadonlySet<string> => new Set(k)
+
+  it('a press picks a row or lets it go — the rest stay as they were', () => {
+    expect([...pickedAfterPress(set(), keys, 'b', null, false)]).toEqual(['b'])
+    expect([...pickedAfterPress(set('a', 'b'), keys, 'b', 'a', false)]).toEqual(['a'])
+  })
+
+  it('Shift picks every row from the last one pressed, either way, and never lets one go', () => {
+    expect([...pickedAfterPress(set('a'), keys, 'c', 'a', true)].sort()).toEqual(['a', 'b', 'c'])
+    expect([...pickedAfterPress(set(), keys, 'b', 'd', true)].sort()).toEqual(['b', 'c', 'd'])
+    expect([...pickedAfterPress(set('c'), keys, 'c', 'c', true)]).toEqual(['c'])
+  })
+
+  it('Shift with no anchor in the list is a plain press', () => {
+    expect([...pickedAfterPress(set(), keys, 'b', null, true)]).toEqual(['b'])
+    expect([...pickedAfterPress(set(), keys, 'b', 'gone', true)]).toEqual(['b'])
+  })
+
+  it('a group holds its page’s children by name — nothing deeper, nothing on another page', () => {
+    const members = ['meetup', 'agenda']
+    expect(inGroup(row('/revolucion/meetup'), ['revolucion'], members)).toBe(true)
+    expect(inGroup(row('/revolucion/lounge'), ['revolucion'], members)).toBe(false)
+    expect(inGroup(row('/revolucion/meetup/notes'), ['revolucion'], members)).toBe(false)
+    expect(inGroup(row('/other/meetup'), ['revolucion'], members)).toBe(false)
+    expect(inGroup(row('/meetup'), [], members)).toBe(true)
+  })
+
+  it('the picks are all in a group, some, or none — all means a press takes them out', () => {
+    expect(groupCoverage(['a', 'b'], ['a', 'b', 'c'])).toBe('all')
+    expect(groupCoverage(['a', 'x'], ['a', 'b'])).toBe('some')
+    expect(groupCoverage(['x'], ['a'])).toBe('none')
+    expect(groupCoverage([], ['a'])).toBe('none')
   })
 })

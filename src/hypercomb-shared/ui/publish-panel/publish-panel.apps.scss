@@ -1,8 +1,8 @@
 // hypercomb-shared/ui/publish-panel/publish-panel.apps.scss
 //
 // WHAT EACH DOMAIN HOSTS — the chevron on a domain row, the list it opens
-// (each app by its path and its address there, a pick box, a changes mark)
-// and the bar the picks bring up. Its own sheet in `styleUrls`, like the
+// (each app by its path and its address there, picked by pressing its row,
+// a changes mark, a turn-off word) and the bar the picks bring up. Its own sheet in `styleUrls`, like the
 // groups sheet, so the main sheet never grows toward the per-sheet
 // anyComponentStyle budget. Sizes follow the domain rows above (rem).
 
@@ -69,6 +69,8 @@ $amber: #d99a4e;
   gap: 0.05rem;
 }
 
+// ROW SELECT: the row is the pick — pressed, it fills and wears an accent
+// edge; Shift-pressing must never paint a text selection across rows.
 .papp {
   display: flex;
   align-items: center;
@@ -76,47 +78,19 @@ $amber: #d99a4e;
   min-height: 2.25rem;
   padding: 0.2rem 0.5rem;
   border-radius: tw.$radius-card;
+  cursor: pointer;
+  user-select: none;
 
   &:hover { background: rgba(var(--acc), 0.05); }
-  &.picked { background: rgba(var(--acc), 0.1); }
+  &:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px rgba(var(--acc), 0.55); }
+  &.picked {
+    background: rgba(var(--acc), 0.14);
+    box-shadow: inset 2px 0 0 rgba(var(--acc), 0.85);
+  }
   &.busy { opacity: 0.6; }
 }
 
-// The pick: a hit area that grows to the phone's touch size (below), with
-// the box drawn small inside it — an empty square until picked, then a tick.
-.papp-pick {
-  flex: 0 0 auto;
-  width: 1.6rem;
-  min-height: 1.6rem;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: tw.$radius-control;
-  background: none;
-  cursor: pointer;
-
-  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
-  &:hover .papp-box { border-color: rgba(var(--acc), 0.8); }
-  &[aria-checked='true'] .papp-box {
-    border-color: rgba(var(--acc), 0.9);
-    background: rgba(var(--acc), 0.85);
-    // The tick is cut out of the fill in the panel's own ground.
-    color: rgb(var(--hc-panel-pane));
-  }
-}
-
-.papp-box {
-  width: 1.05rem;
-  height: 1.05rem;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(var(--acc), 0.45);
-  border-radius: tw.$radius-control;
-  color: transparent;
-
-  .mat-sym { font-size: 0.85rem; line-height: 1; }
-}
+.papp-other { cursor: default; &:hover { background: none; } }
 
 .papp-meta {
   flex: 1 1 auto;
@@ -126,26 +100,40 @@ $amber: #d99a4e;
 }
 
 .papp-name {
-  align-self: flex-start;
   max-width: 100%;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
   font-size: 0.76rem;
   font-weight: 560;
   line-height: 1.3;
   color: var(--hc-window-ink-loud);
-  text-align: start;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
-
-  &:hover { text-decoration: underline dotted; }
 }
 
+// Plain words, never bordered buttons (consoles stay minimal): turn an app
+// off from its domain's list, make an earlier version live.
+.papp-off,
+.pdet-version-live {
+  flex: 0 0 auto;
+  padding: 0 0.15rem;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.66rem;
+  color: var(--hc-window-ink-quiet);
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover:not(:disabled) { color: var(--hc-window-ink-loud); text-decoration: underline dotted; }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
+  &:disabled { opacity: 0.45; cursor: default; }
+}
+
+// Only as wide as its words: the rest of the line is the row's, and a press
+// there picks it rather than opening the address.
 .papp-at {
+  align-self: flex-start;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -164,11 +152,50 @@ $amber: #d99a4e;
   white-space: nowrap;
 }
 
-// Another device's app: named, never picked — the pick's place kept empty so
-// the names stay in one column.
-.papp-pick-none { cursor: default; }
-.papp-name-quiet { color: var(--hc-window-ink-quiet); font-weight: 500; cursor: default; }
-.papp-name-quiet:hover { text-decoration: none; }
+// Another device's app: named, never picked.
+.papp-name-quiet { color: var(--hc-window-ink-quiet); font-weight: 500; }
+
+// SHORTENED TO GROUPS — the groups the list shows, and the way back to all.
+.pfilter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+  margin: 0.1rem 0.72rem 0.35rem;
+  font-size: 0.72rem;
+}
+
+.pfilter-group,
+.psel-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--hc-window-ink-loud);
+
+  .mat-sym { font-size: 1.05rem; color: tw.ink(var(--pg)); }
+}
+
+// The page's groups under the picks: press one, the picks go in (or come
+// out, when every one is in already — then it reads pressed).
+.psel-groups {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.7rem;
+}
+
+.psel-group {
+  padding: 0.1rem 0.15rem;
+  border: 0;
+  border-radius: tw.$radius-control;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+
+  &:hover { text-decoration: underline dotted; }
+  &[data-coverage='all'] { background: color-mix(in srgb, var(--pg) 20%, transparent); }
+  &[data-coverage='some'] { box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--pg) 70%, transparent); }
+}
 
 // THE PICKS' BAR — under the domains, above Manage hosts.
 .psel {
@@ -203,7 +230,8 @@ $amber: #d99a4e;
   }
 }
 
-.psel-clear {
+.psel-clear,
+.pfilter-clear {
   padding: 0 0.15rem;
   border: 0;
   background: none;
@@ -227,7 +255,7 @@ $amber: #d99a4e;
 // must not publish or withdraw.
 @media (max-width: 599px), (max-height: 449px) {
   .publish-panel .pdoor-expand,
-  .publish-panel .papp-pick {
+  .publish-panel .papp-off {
     min-width: 2.75rem;
     min-height: 2.75rem;
   }
