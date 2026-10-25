@@ -43,6 +43,14 @@ piece someone plugs in extends the pool.
   domain.
 - **Show all**, on a domain, puts everything it hosts in your showcase, now
   and later.
+- **Your community is a versioned view.** Another person's creation shows at
+  a version you see and choose; you can never publish or push anything onto
+  their domain or their creation (jwize, 2026-10-25: "your community should
+  have a versioned view you can't push things on them").
+- **Yours reflect your latest publish.** Wherever your own creations appear
+  in your community, they show your hive's latest published version (jwize,
+  2026-10-25: "for you they should all reflect your hive latest publish
+  version").
 - **Your own domain** is one of the tiles. Its creations can be turned off
   where they open (`setHiveDoors`, the front door's Off) or unpublished.
 
