@@ -1620,6 +1620,43 @@ test('a door asks for its shell bundles under /shell/, and /shell/<file> is the 
   } finally { globalThis.fetch = original }
 })
 
+test('a door runs the core its shell came with — the import map and the core preloads go under /shell/ too', async () => {
+  // The asset store's /hypercomb-core.runtime.js and /core/* are the visitor
+  // build's, as old as the last worker deploy; a newer shell against them died
+  // ("does not provide an export named 'addressSegment'", 2026-10-24).
+  const env = await sandboxEnv({ 'install:swarm': 'd'.repeat(64) })
+  const seen = []
+  const original = globalThis.fetch
+  const page = [
+    `<script>var CORE = { '@hypercomb/core': '/hypercomb-core.runtime.js' };</script>`,
+    '<link rel="modulepreload" href="chunk-ZZ9.js"><link rel="modulepreload" href="/hypercomb-core.runtime.js"><link rel="modulepreload" href="/core/dist/index.js">',
+    '<script src="main-TQO2BYYC.js" type="module"></script><script src="env.js"></script>',
+  ].join('')
+  globalThis.fetch = async (url) => {
+    seen.push(String(url))
+    return String(url).endsWith('/')
+      ? new Response(page, { headers: { 'content-type': 'text/html' } })
+      : new Response('export {}', { headers: { 'content-type': 'text/javascript' } })
+  }
+  try {
+    const html = await (await worker.fetch(new Request('https://swarm.hypercomb.com/'), env)).text()
+    assert.match(html, /'@hypercomb\/core': '\/shell\/hypercomb-core\.runtime\.js'/)
+    assert.match(html, /href="\/shell\/hypercomb-core\.runtime\.js"/)
+    assert.match(html, /href="\/shell\/core\/dist\/index\.js"/)
+    assert.match(html, /href="\/shell\/chunk-ZZ9\.js"/)
+    assert.match(html, /src="env\.js"/, 'files that are not the shell\'s bundles or its core stay as they were')
+    assert.doesNotMatch(html, /["']\/hypercomb-core\.runtime\.js["']|["']\/core\/dist\//, 'no core reference is left on the asset path')
+    // The runtime's own `./core/dist/index.js` lands here, and is the shell origin's.
+    const core = await worker.fetch(new Request('https://swarm.hypercomb.com/shell/core/dist/index.js'), env)
+    assert.equal(core.status, 200)
+    // The core changes under its name: revalidated every load, never held for hours.
+    assert.equal(core.headers.get('cache-control'), 'no-cache')
+    const bundle = await worker.fetch(new Request('https://swarm.hypercomb.com/shell/main-TQO2BYYC.js'), env)
+    assert.notEqual(bundle.headers.get('cache-control'), 'no-cache', 'a hashed bundle keeps its cache rules')
+    assert.deepEqual(seen, ['https://shell.example/', 'https://shell.example/core/dist/index.js', 'https://shell.example/main-TQO2BYYC.js'])
+  } finally { globalThis.fetch = original }
+})
+
 test('the door answers its one package at the flat pool address too — where a shell asks first', async () => {
   const root = 'd'.repeat(64)
   const env = await sandboxEnv({ 'install:swarm': root })
