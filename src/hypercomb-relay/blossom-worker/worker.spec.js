@@ -6088,6 +6088,16 @@ test('head only: a new head withdraws what only the old head reached, and only t
   assert.equal(await read(layerA, true), 200, 'the owner\'s signed read still gets it')
 })
 
+test('head only: the old revisions of an install channel are never withdrawn', async () => {
+  const { publish, read } = await headMoveFixture(true)
+  assert.equal((await publish({ 'install:essentials': layerA }, 1_800_000_050)).status, 200)
+  assert.equal((await publish({ 'install:essentials': layerB }, 1_800_000_100)).status, 200)
+  pass()
+  assert.equal(await read(layerA), 200, 'the old package root stays servable')
+  assert.equal(await read(pictureA), 200, 'and everything it reached')
+  assert.equal(await read(layerB), 200)
+})
+
 test('head only: going back to an old head serves it again', async () => {
   const { publish, read } = await headMoveFixture(true)
   await publish({ revolucion: layerB }, 1_800_000_100)

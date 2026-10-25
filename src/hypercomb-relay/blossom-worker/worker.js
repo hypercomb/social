@@ -4706,6 +4706,8 @@ function inGrace(claim, now = Date.now()) {
  *  `binding:`, `pool:`, `stage:`, `follow:`, `event:` and every other
  *  `word:` key name something else, and never carry the mark. */
 const branchRoot = (key) => !!key && !/^[a-z0-9-]+:/i.test(key)
+/** An install channel's root (`install:<name>`): its revisions never withdraw. */
+const packageRoot = (key) => typeof key === 'string' && key.startsWith('install:')
 
 /** The sigs a JSON value reaches: whole-signature strings, referents skipped. */
 function harvestSigs(value, out) {
@@ -4812,13 +4814,18 @@ async function keepReached(env, pubkey, reached) {
 async function withdrawSuperseded(env, pubkey, before, after) {
   const was = await publisherHeads(env, before)
   const now = await publisherHeads(env, after)
-  const [old, current] = await Promise.all([reachOf(env, was), reachOf(env, now)])
+  // PACKAGE HISTORY IS ALWAYS PUBLIC (jwize 2026-10-25). An install channel's
+  // old revisions are build history every install may repair from or roll
+  // back to, never private edits — so what an old `install:*` root reached
+  // is never withdrawn, whatever else reached it too.
+  const packages = new Map([...was].filter(([, key]) => packageRoot(key)))
+  const [old, current, kept] = await Promise.all([reachOf(env, was), reachOf(env, now), reachOf(env, packages)])
   await keepReached(env, pubkey, current.reached)
-  if (!old.complete || !current.complete || current.missing > 0) return null
+  if (!old.complete || !current.complete || !kept.complete || current.missing > 0) return null
   const at = String(Date.now())
   let count = 0
   for (const [sig, claim] of old.reached) {
-    if (current.reached.has(sig) || claim.owner !== pubkey || claim.shared === '1' || withdrawn(claim)) continue
+    if (current.reached.has(sig) || kept.reached.has(sig) || claim.owner !== pubkey || claim.shared === '1' || withdrawn(claim)) continue
     const root = old.origin.get(sig)
     const mark = { owner: claim.owner, withdrawn: '1', at }
     if (typeof root === 'string' && root !== MANY_ROOTS && branchRoot(root) && root.length <= ROOT_ATTRIBUTION_MAX) mark.root = root
