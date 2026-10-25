@@ -156,9 +156,10 @@ export class TileEditorElement extends HTMLElement {
   #answerDrafts = new Map<string, string>()
 
   // The live preview in the hive: the small pictures a save would write right
-  // now (the twins' captures, signed), and the tile the preview is painted on.
+  // now (the twins' captures, signed), and the tiles the preview is painted on
+  // — the open one, or every tile of a group.
   #previewPictures: { point?: { sig: string; blob: Blob }; flat?: { sig: string; blob: Blob } } = {}
-  #previewLabel = ''
+  #previewLabels = new Set<string>()
 
   // Moving to another tile while docked. `#target` is the tile the panel is
   // built for; `#leaving` is a tile clicked while this one has unsaved changes
@@ -167,6 +168,8 @@ export class TileEditorElement extends HTMLElement {
   #target = ''
   #leaving = ''
   #switchingTo = ''
+  /** Whether the panel last showed a group (see #syncGroup). */
+  #grouped = false
 
   // What this window reserves of the right edge — see #reserve.
   #insetObserver: ResizeObserver | null = null
@@ -340,6 +343,8 @@ export class TileEditorElement extends HTMLElement {
     if (!label || !service || !this.#panel || this.#surface !== 'dock') return
     if (service.mode !== 'editing' || service.saving || this.#switchingTo) return
     if (label === service.cell) return
+    // A tile of the group is already being edited.
+    if (service.grouped && service.group.includes(label)) return
     if (this.#dirty()) { this.#setLeaving(label); return }
     void this.#switchTo(label, false)
   }
@@ -456,7 +461,8 @@ export class TileEditorElement extends HTMLElement {
     // Two columns that dissolve (display: contents) everywhere except a
     // landscape phone, where the stage stays put beside a scrolling column.
     const [picture, tools] = this.#buildPicture()
-    const stageColumn = make('div', 'te-col te-col-stage')
+    this.#keep('picture-tools', tools)
+    const stageColumn = this.#keep('stage-column', make('div', 'te-col te-col-stage'))
     stageColumn.append(picture)
     const fieldColumn = make('div', 'te-col te-col-fields')
     fieldColumn.append(this.#buildNotes(), tools, this.#buildLook(), this.#buildLink(), this.#buildQuestions())
@@ -541,6 +547,7 @@ export class TileEditorElement extends HTMLElement {
     this.#target = ''
     this.#leaving = ''
     this.#switchingTo = ''
+    this.#grouped = false
   }
 
   #ref<T extends HTMLElement>(name: string): T | null {
@@ -578,6 +585,11 @@ export class TileEditorElement extends HTMLElement {
     })
     title.addEventListener('blur', () => this.#commitTitle())
     head.append(title)
+
+    // A group has no one name: the heading says how many tiles it holds.
+    const groupTitle = this.#keep('group-title', make('span', 'te-group-title'))
+    groupTitle.hidden = true
+    head.append(groupTitle)
 
     const portal = this.#keep('portal', make('span', 'te-portal'))
     portal.append(glyph('link'), make('span', '', t('editor.portal-target', 'edits the original')))
@@ -624,7 +636,11 @@ export class TileEditorElement extends HTMLElement {
     error.setAttribute('role', 'alert')
     error.hidden = true
 
-    wrap.append(titleHint, restore, error)
+    const groupHint = this.#keep('group-hint', make('p', 'te-hint',
+      t('editor.group-hint', 'Only what you set is saved, to every tile — the rest stays as each tile has it. Ctrl+click a tile to add or remove it.')))
+    groupHint.hidden = true
+
+    wrap.append(titleHint, restore, error, groupHint)
     return wrap
   }
 
@@ -769,8 +785,13 @@ export class TileEditorElement extends HTMLElement {
     const state = this.#keep('show-name-state', make('span'))
     toggle.append(track, state)
     toggle.addEventListener('click', () => service.setHideText(!service.hideText))
+    // In a group the switch has a third place — leave each tile as it is.
+    const leaveName = this.#keep('show-name-clear', make('button', 'te-chip', t('editor.group-leave', 'leave as is')))
+    leaveName.type = 'button'
+    leaveName.hidden = true
+    leaveName.addEventListener('click', () => service.setHideText(undefined))
     const nameControl = make('div', 'te-control')
-    nameControl.append(toggle)
+    nameControl.append(toggle, leaveName)
     nameRow.append(nameLabel, nameControl)
     section.append(nameRow)
 
@@ -1051,8 +1072,10 @@ export class TileEditorElement extends HTMLElement {
     if (title) title.placeholder = cell
     if (this.#titleFor !== `${cell}|${this.#segments().join('/')}`) this.#loadTitle()
 
-    this.#syncColour('border', service.borderColor, DEFAULT_BORDER)
+    // A group's empty rim is "leave as is", not the default gold.
+    this.#syncColour('border', service.borderColor, service.grouped ? null : DEFAULT_BORDER)
     this.#syncColour('background', service.backgroundColor, null)
+    this.#syncGroup()
 
     const link = this.#ref<HTMLInputElement>('link')
     if (link && document.activeElement !== link && link.value.trim() !== service.link) link.value = service.link
@@ -1071,6 +1094,53 @@ export class TileEditorElement extends HTMLElement {
     this.#syncLayers()
     this.#syncActions()
     this.#emitPreview()
+  }
+
+  /** A group shows only what several tiles can be given at once — no name, no
+   *  picture, no layers, no questions — and every empty field says that it
+   *  leaves each tile as it is. */
+  #syncGroup(): void {
+    const service = this.#service
+    const panel = this.#panel
+    if (!service || !panel) return
+    const grouped = service.grouped
+    panel.toggleAttribute('data-group', grouped)
+    const title = this.#ref('title')
+    if (title) title.hidden = grouped
+    const heading = this.#ref('group-title')
+    if (heading) {
+      heading.hidden = !grouped
+      heading.textContent = grouped ? t('editor.group-title', '{count} tiles', { count: service.group.length }) : ''
+    }
+    const hint = this.#ref('group-hint')
+    if (hint) hint.hidden = !grouped
+    for (const name of ['stage-column', 'picture-tools']) {
+      const node = this.#ref(name)
+      if (node) node.hidden = grouped
+    }
+    if (grouped !== this.#grouped) {
+      // In or out of a group: the open tile's own questions and kept draft
+      // go, or come back.
+      this.#grouped = grouped
+      this.#renderQuestions()
+      this.#renderRestore()
+    }
+    const leave = t('editor.group-leave', 'leave as is')
+    // The hex field is seven characters wide: its empty group state is short.
+    const asIs = t('editor.group-as-is', 'as is')
+    const clears = [['border', 'editor.default', 'default', DEFAULT_BORDER], ['background', 'editor.none', 'none', '']] as const
+    for (const [name, key, fallback, placeholder] of clears) {
+      const clear = this.#ref(`${name}-clear`)
+      if (clear) clear.textContent = grouped ? leave : t(key, fallback)
+      const hex = this.#ref<HTMLInputElement>(`${name}-hex`)
+      if (hex) hex.placeholder = grouped ? asIs : placeholder
+    }
+    const link = this.#ref<HTMLInputElement>('link')
+    if (link) {
+      link.placeholder = grouped
+        ? t('editor.group-link', 'leave each tile’s link')
+        : t('editor.link-placeholder', 'https://...')
+    }
   }
 
   /** `fallback` is what an unset value MEANS (the rim's default gold), shown
@@ -1148,17 +1218,30 @@ export class TileEditorElement extends HTMLElement {
 
     const toggle = this.#ref<HTMLButtonElement>('show-name')
     const state = this.#ref('show-name-state')
-    if (toggle && state) {
+    const leaveName = this.#ref('show-name-clear')
+    if (toggle && state && service.grouped) {
+      // Each tile has its own picture: the switch is always live, and until
+      // it is moved it leaves every tile as it is.
+      const hide = (service.properties as { hideText?: unknown }).hideText
+      toggle.setAttribute('aria-checked', hide === true ? 'false' : hide === false ? 'true' : 'mixed')
+      toggle.disabled = false
+      state.textContent = hide === true ? t('editor.name-hidden', 'hidden over the picture')
+        : hide === false ? t('editor.name-shown', 'shown over the picture')
+        : t('editor.group-leave', 'leave as is')
+      if (leaveName) leaveName.hidden = typeof hide !== 'boolean'
+    } else if (toggle && state) {
       const shows = !service.hideText || !has
       toggle.setAttribute('aria-checked', String(shows))
       toggle.disabled = !has
       state.textContent = has
         ? (shows ? t('editor.name-shown', 'shown over the picture') : t('editor.name-hidden', 'hidden over the picture'))
         : t('editor.show-name-hint', 'always shown without a picture')
+      if (leaveName) leaveName.hidden = true
     }
 
+    // The fill behind a picture set to Fit — in a group, any tile may be one.
     const fill = this.#ref('background-row')
-    if (fill) fill.hidden = !(has && model.mode === 'fit')
+    if (fill) fill.hidden = !service.grouped && !(has && model.mode === 'fit')
 
     const props = service.properties as { small?: { image?: unknown }; flat?: { small?: { image?: unknown } } }
     const hasCapture = typeof props.small?.image === 'string' || typeof props.flat?.small?.image === 'string'
@@ -1329,8 +1412,23 @@ export class TileEditorElement extends HTMLElement {
     if (this.#switchingTo) return
     const page =(ioc<LineageShape>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean).join('/')
+    if (service.grouped) {
+      // A group paints only what it was given; everything else is each
+      // tile's own (an absent border or hideText is the stored one).
+      const props = service.properties as { border?: { color?: unknown }; hideText?: unknown }
+      const border = parseHexColour(props.border?.color) ?? undefined
+      const hideText = typeof props.hideText === 'boolean' ? props.hideText : undefined
+      const labels = new Set(service.group)
+      this.#endPreview(labels)
+      for (const label of labels) {
+        this.#previewLabels.add(label)
+        EffectBus.emitTransient('tile:preview', { label, page, point: null, flat: null, removed: false, border, hideText })
+      }
+      return
+    }
+    this.#endPreview(new Set([service.cell]))
     const picturePending = model.hasImage && !this.#previewPictures.point && !this.#previewPictures.flat
-    this.#previewLabel = service.cell
+    this.#previewLabels.add(service.cell)
     EffectBus.emitTransient('tile:preview', {
       label: service.cell,
       page,
@@ -1343,11 +1441,14 @@ export class TileEditorElement extends HTMLElement {
     })
   }
 
-  #endPreview(): void {
-    if (!this.#previewLabel) return
-    EffectBus.emitTransient('tile:preview', { label: this.#previewLabel, clear: true })
-    this.#previewLabel = ''
-    this.#previewPictures = {}
+  /** End the preview on every tile but those in `keep`. */
+  #endPreview(keep: ReadonlySet<string> = new Set()): void {
+    for (const label of [...this.#previewLabels]) {
+      if (keep.has(label)) continue
+      EffectBus.emitTransient('tile:preview', { label, clear: true })
+      this.#previewLabels.delete(label)
+    }
+    if (keep.size === 0) this.#previewPictures = {}
   }
 
   #setTwin(orientation: HexOrientation, url: string): void {
@@ -1550,8 +1651,9 @@ export class TileEditorElement extends HTMLElement {
       if (a) answers.set(a[1], a[2].trim())
     }
     section.replaceChildren()
-    section.hidden = questions.size === 0
-    if (questions.size === 0) return
+    // A group's questions are each tile's own, asked when it is open alone.
+    section.hidden = questions.size === 0 || service.grouped
+    if (section.hidden) return
     section.append(make('h4', 'te-section-head', t('editor.qa.title', 'questions')))
     for (const [qId, question] of questions) {
       const item = make('div', 'te-question')
@@ -1588,7 +1690,7 @@ export class TileEditorElement extends HTMLElement {
     const service = this.#service
     const strip = this.#ref('restore')
     if (!service || !strip) return
-    strip.hidden = !service.stashFor(service.cell, service.targetSegments)
+    strip.hidden = service.grouped || !service.stashFor(service.cell, service.targetSegments)
   }
 
   async #restore(): Promise<void> {

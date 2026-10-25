@@ -1,6 +1,6 @@
 // editor/tile-editor.drone.ts
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig, readOwnTilePropertiesAt, propertyLayers, editorWrites, ownAfterInherit } from './tile-properties.js'
+import { readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig, readOwnTilePropertiesAt, propertyLayers, editorWrites, ownAfterInherit, groupFormFrom, groupWritesFor } from './tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
 import { portalEditTarget } from './portal-edit-target.js'
 import { parseHexColour } from './hex-capture.js'
@@ -76,6 +76,18 @@ type Store = {
   getResource: (signature: string) => Promise<Blob | null>
 }
 
+const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
+type Selection = {
+  selected: ReadonlySet<string>
+  isSelected(label: string): boolean
+  add(label: string): void
+  toggle(label: string): void
+  clear(): void
+}
+
+/** A tile a save wrote, as `tile:saved` announces it. */
+type SavedTile = { cell: string; segments: readonly string[] }
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value)
 
@@ -113,6 +125,12 @@ const t = (key: string, fallback: string): string => {
 export class TileEditorDrone {
 
   #saving = false
+  /** The hive label the open session was opened from — a Portal's session
+   *  names its target, but the selection names what the hive shows. */
+  #label = ''
+  /** Opens in flight. Each reads the selection when it lands, so a change to
+   *  the selection meanwhile is left to it. */
+  #opening = 0
 
   constructor() {
     // Only a tap made while this drone listens opens the editor. The bus
@@ -121,6 +139,13 @@ export class TileEditorDrone {
     let live = false
     EffectBus.on<TileActionPayload>('tile:action', payload => { if (live) this.#onTileAction(payload) })
     live = true
+
+    // A GROUP: while a tile is open, the hive's selection — when it holds the
+    // open tile — is the set of tiles edited together. A ctrl+click beside the
+    // docked editor puts a tile in or out (`editor:group-toggle`, from the
+    // tile overlay, which stands down every other press while editing).
+    EffectBus.on('selection:changed', () => this.#onSelection())
+    EffectBus.on<{ label?: unknown }>('editor:group-toggle', payload => this.#onGroupToggle(payload))
 
     // Self-register the 'edit' tile icon. The arranger (tile-actions)
     // merges this with its own catalog, computes positions, and emits
@@ -146,9 +171,79 @@ export class TileEditorDrone {
     void this.#openEditing(payload.label)
   }
 
+  // ── a group ────────────────────────────────────────────────────
+
+  /** The tiles to edit with `label`: the hive's selection, when it holds it. */
+  #groupFor(label: string): string[] {
+    const selected = [...(window.ioc.get<Selection>(SELECTION_KEY)?.selected ?? [])]
+    if (selected.length < 2 || !selected.includes(label)) return []
+    return [label, ...selected.filter(other => other !== label)]
+  }
+
+  /** The selection moved while a tile is open. A second tile makes a group;
+   *  letting go of all but the open tile — or of the open tile itself — goes
+   *  back to editing it alone, keeping what the group had been given. */
+  #onSelection(): void {
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    if (!service || service.mode !== 'editing' || this.#saving || this.#opening > 0 || !this.#label) return
+    const group = this.#groupFor(this.#label)
+    if (group.length > 1) {
+      if (!service.grouped) this.#enterGroup(service, group)
+      else if (group.join('\n') !== service.group.join('\n')) service.setGroup(group)
+      return
+    }
+    if (service.grouped) void this.#openEditing(this.#label, { stash: false, carry: service.properties })
+  }
+
+  #enterGroup(service: TileEditorService, group: readonly string[]): void {
+    const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
+    // A group has no picture: one changed on the open tile is kept as its
+    // draft, offered back when the tile is next opened alone.
+    if (imageEditor?.pictureChanged || imageEditor?.framingChanged) this.#stashDraft()
+    const form = groupFormFrom(service.properties, service.baseline)
+    imageEditor?.reset?.(hiveOrientation())
+    service.setGroup(group, form)
+  }
+
+  #onGroupToggle = (payload: { label?: unknown } | undefined): void => {
+    const label = typeof payload?.label === 'string' ? payload.label : ''
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    const selection = window.ioc.get<Selection>(SELECTION_KEY)
+    if (!label || !service || !selection || service.mode !== 'editing') return
+    if (this.#saving || this.#opening > 0 || !this.#label || label === this.#label) return
+    // A selection without the open tile is left over from before: the group
+    // starts from the open tile.
+    if (!selection.isSelected(this.#label)) {
+      selection.clear()
+      selection.add(this.#label)
+    }
+    selection.toggle(label)
+  }
+
+  /** A group gone back to one tile keeps what the group had been given. */
+  #carryInto(service: TileEditorService, form: Readonly<Record<string, unknown>>): void {
+    const colour = (value: unknown): string => {
+      const raw = value && typeof value === 'object' ? (value as { color?: unknown }).color : undefined
+      return typeof raw === 'string' ? raw : ''
+    }
+    if (colour(form['border'])) service.setBorderColor(colour(form['border']))
+    if (colour(form['background'])) service.setBackgroundColor(colour(form['background']))
+    if (typeof form['hideText'] === 'boolean') service.setHideText(form['hideText'])
+    if (typeof form['link'] === 'string' && form['link']) service.setLink(form['link'])
+  }
+
   // ── open editor ────────────────────────────────────────────────
 
-  async #openEditing(cell: string, options: { stash?: boolean } = {}): Promise<void> {
+  async #openEditing(cell: string, options: { stash?: boolean; carry?: Readonly<Record<string, unknown>> } = {}): Promise<void> {
+    this.#opening++
+    try {
+      await this.#open(cell, options)
+    } finally {
+      this.#opening--
+    }
+  }
+
+  async #open(cell: string, options: { stash?: boolean; carry?: Readonly<Record<string, unknown>> }): Promise<void> {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!store || !service) return
@@ -239,6 +334,14 @@ export class TileEditorDrone {
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
     imageEditor?.reset?.(hiveOrientation())
     service.open(targetCell, properties, largeBlob, target.segments, editorSurface())
+    this.#label = cell
+    // Opened on a tile of a multi-selection: the selection is the group.
+    const group = this.#groupFor(cell)
+    if (group.length > 1) {
+      service.setGroup(group, options.carry ? { ...options.carry } : {})
+      return
+    }
+    if (options.carry) this.#carryInto(service, options.carry)
     // Fire and forget: a failed read shows no layers, never an error.
     void this.#readLayers(parentSegments, targetCell).catch(() => undefined)
     if (largeBlob && imageEditor?.loadOriginal) {
@@ -290,7 +393,8 @@ export class TileEditorDrone {
   // which cannot draw anything but the picture. Colours, link and hideText are
   // whatever the session holds — nothing is stamped that the participant did
   // not set. A save that changes nothing writes nothing: no layer, no history
-  // entry, no `tile:saved`.
+  // entry, no `tile:saved`. A GROUP writes each of its tiles only the fields
+  // given a value (`groupWritesFor`) — never a name, never a picture.
 
   readonly saveAndComplete = async (): Promise<void> => {
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
@@ -320,19 +424,26 @@ export class TileEditorDrone {
       if (!outcome) return false
       this.#announce(outcome)
     }
+    // Moving on ends a group, and the selection that made it goes with it —
+    // as a plain click on a tile replaces the selection anywhere else.
+    if (service.grouped) {
+      this.#opening++
+      try { window.ioc.get<Selection>(SELECTION_KEY)?.clear() } finally { this.#opening-- }
+    }
     await this.#openEditing(label, { stash: !options.save })
     return service.mode === 'editing' && service.cell !== ''
   }
 
   /** Write the open session. Null when nothing could be written — the error
    *  is on the session by then. */
-  async #persist(): Promise<{ wrote: boolean; cell: string; segments: readonly string[] } | null> {
+  async #persist(): Promise<SavedTile[] | null> {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
 
     if (!store || !service || !imageEditor) return null
     if (service.mode !== 'editing' || this.#saving) return null
+    if (service.grouped) return this.#persistGroup(service)
     this.#saving = true
     service.setSaving?.(true)
 
@@ -418,16 +529,54 @@ export class TileEditorDrone {
       service.setSaving?.(false)
     }
 
-    return saved ? { wrote, cell: savedCell, segments: segmentsForSave } : null
+    return saved ? (wrote ? [{ cell: savedCell, segments: segmentsForSave }] : []) : null
+  }
+
+  /** Write a group: each tile, one after another, only what is new for it.
+   *  Every tile is addressed as a single edit addresses it — a Portal's
+   *  default through its target — from the page as it was at the gesture. */
+  async #persistGroup(service: TileEditorService): Promise<SavedTile[] | null> {
+    this.#saving = true
+    service.setSaving?.(true)
+    const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    const page = [...(lineage?.explorerSegments?.() ?? [])]
+    const labels = [...service.group]
+    const form = { ...service.properties }
+    const written: SavedTile[] = []
+    try {
+      for (const label of labels) {
+        const target = portalEditTarget(
+          page,
+          label,
+          referenceEditsRootDefaultForLabel(label) ? referenceTargetForLabel(label) : null,
+        )
+        const current = await readTilePropertiesAt(target.parentSegments, target.cell).catch(() => ({}))
+        const updates = groupWritesFor(form, current)
+        if (Object.keys(updates).length === 0) continue
+        await writeTilePropertiesAt(target.parentSegments, target.cell, updates)
+        written.push({ cell: target.cell, segments: target.parentSegments })
+      }
+      return written
+    } catch (err) {
+      console.warn('[tile-editor] group save failed', err)
+      // The tiles already written are written — say so, then keep the draft.
+      this.#announce(written)
+      service.setError?.(t('editor.save-failed', 'Could not save — your changes are still here.'))
+      return null
+    } finally {
+      this.#saving = false
+      service.setSaving?.(false)
+    }
   }
 
   /** Notify via the effect bus (the processor owns synchronize; drones use
    *  effects). Carries the gesture-time segments so downstream commit
    *  listeners address the layer where the edit happened, not wherever the
    *  participant navigated to during the save. */
-  #announce(outcome: { wrote: boolean; cell: string; segments: readonly string[] }): void {
-    if (!outcome.wrote) return
-    EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', { cell: outcome.cell, segments: outcome.segments })
+  #announce(tiles: readonly SavedTile[]): void {
+    for (const tile of tiles) {
+      EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', { cell: tile.cell, segments: tile.segments })
+    }
   }
 
   // ── cancel ─────────────────────────────────────────────────────
@@ -448,6 +597,8 @@ export class TileEditorDrone {
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
     if (!service || service.mode !== 'editing' || typeof service.stash !== 'function') return
+    // A group's draft is no one tile's to be offered back.
+    if (service.grouped) return
     const pictureDirty = !!imageEditor && (imageEditor.pictureChanged || imageEditor.framingChanged)
     if (!service.dirty && !pictureDirty) return
     const source = imageEditor?.hasImage ? imageEditor.source : null

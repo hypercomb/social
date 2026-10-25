@@ -921,6 +921,60 @@ export const ownAfterInherit = (
   return next
 }
 
+// ── A group of tiles, edited together ───────────────────────────────────────
+
+const colourOf = (value: unknown): string => {
+  const colour = value && typeof value === 'object' ? (value as { color?: unknown }).color : undefined
+  return typeof colour === 'string' ? colour : ''
+}
+
+/**
+ * The form a GROUP edit starts from when the open tile's draft already had
+ * changes: only the look and link fields the participant had changed, so
+ * picking more tiles carries what they were doing over to all of them. A
+ * group never clears: a colour or link taken away is not carried. Showing the
+ * name is a value of its own in a group (`hideText: false`).
+ */
+export const groupFormFrom = (
+  form: Readonly<Record<string, unknown>>,
+  baseline: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => {
+  const out: Record<string, unknown> = {}
+  for (const key of ['border', 'background'] as const) {
+    const colour = colourOf(form[key])
+    if (colour && colour !== colourOf(baseline[key])) out[key] = { color: colour }
+  }
+  if ((form['hideText'] === true) !== (baseline['hideText'] === true)) out['hideText'] = form['hideText'] === true
+  const link = typeof form['link'] === 'string' ? form['link'] : ''
+  if (link && link !== baseline['link']) out['link'] = link
+  return out
+}
+
+/**
+ * What a GROUP edit writes to one tile of the group, given that tile's
+ * `current` properties: only the fields the participant gave a value, and only
+ * where the value is new for this tile. A field left empty leaves every tile as
+ * it is. A colour replaces just the colour inside the tile's own border or
+ * background; showing the name clears `hideText`, as the editor does alone.
+ */
+export const groupWritesFor = (
+  form: Readonly<Record<string, unknown>>,
+  current: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => {
+  const updates: Record<string, unknown> = {}
+  for (const key of ['border', 'background'] as const) {
+    const colour = colourOf(form[key])
+    if (!colour || colour === colourOf(current[key])) continue
+    const own = current[key] && typeof current[key] === 'object' ? current[key] as Record<string, unknown> : {}
+    updates[key] = { ...own, color: colour }
+  }
+  if (form['hideText'] === true && current['hideText'] !== true) updates['hideText'] = true
+  if (form['hideText'] === false && current['hideText'] === true) updates['hideText'] = undefined
+  const link = typeof form['link'] === 'string' ? form['link'] : ''
+  if (link && link !== current['link']) updates['link'] = link
+  return updates
+}
+
 /**
  * The repo after a GATHER meets two copies of one name (alias-properties.md,
  * step 3). The `newer` copy's values go to the repo; keys only the `older`

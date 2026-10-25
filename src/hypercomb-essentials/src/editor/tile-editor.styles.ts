@@ -242,6 +242,10 @@ ${S} .te-switch-knob{position:absolute;top:0.15rem;left:0.15rem;width:0.9rem;hei
   transition:transform 150ms ease, background-color 150ms ease;}
 ${S} .te-switch[aria-checked="true"] .te-switch-track{background:var(--hc-window-wash-strong);}
 ${S} .te-switch[aria-checked="true"] .te-switch-knob{transform:translateX(0.9rem);background:rgb(var(--acc));}
+/* A group's "leave as is": the knob rests between the two. */
+${S} .te-switch[aria-checked="mixed"] .te-switch-knob{transform:translateX(0.45rem);}
+${S} .te-group-title{flex:1 1 auto;min-width:0;font-family:var(--te-read);font-size:1.02em;font-weight:500;color:var(--te-ink);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .te-switch:disabled{opacity:0.5;cursor:default;}
 ${S} .te-hint{margin:0;font-family:var(--te-read);font-size:0.74em;line-height:1.45;color:var(--te-ink-quiet);}
 ${S} .te-hint[data-tone="warn"]{color:var(--hc-status-warn,#c98a1b);}

@@ -57,6 +57,9 @@ export class TileEditorService extends EventTarget {
   // exactly what the participant had.
   #repo: Readonly<Record<string, unknown>> = {}
   #beforeChoice = new Map<EditorField, Record<string, unknown>>()
+  // The tiles edited together, the open one first — the hive's selection while
+  // it holds the open tile. Empty (or the open tile alone) is a single edit.
+  #group: readonly string[] = []
 
   // ── getters ────────────────────────────────────────────────────
 
@@ -72,6 +75,10 @@ export class TileEditorService extends EventTarget {
   get error(): string { return this.#error }
   get layers(): Readonly<Record<EditorField, PropertyLayer>> | null { return this.#layers }
   get choices(): ReadonlyMap<EditorField, PropertyChoice> { return this.#choices }
+  get group(): readonly string[] { return this.#group }
+  /** Several tiles at once: no name, no picture, no layers — and a field is
+   *  saved to every tile only once it is given a value. */
+  get grouped(): boolean { return this.#group.length > 1 }
 
   /** The properties exactly as they were when the session opened. */
   get baseline(): Record<string, unknown> { return JSON.parse(this.#baseline) as Record<string, unknown> }
@@ -119,6 +126,7 @@ export class TileEditorService extends EventTarget {
     this.#choices = new Map()
     this.#repo = {}
     this.#beforeChoice = new Map()
+    this.#group = []
     this.#mode = 'editing'
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', {
@@ -142,8 +150,29 @@ export class TileEditorService extends EventTarget {
     this.#choices = new Map()
     this.#repo = {}
     this.#beforeChoice = new Map()
+    this.#group = []
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', payload)
+  }
+
+  /** Edit these tiles together, the open tile first. Becoming a group starts
+   *  the form over from `form` — what the open tile's draft carries across
+   *  (`groupFormFrom`) — since nothing of one tile's own look is the group's.
+   *  Going back to one tile is a fresh open of it, never this. */
+  readonly setGroup = (labels: readonly string[], form: Record<string, unknown> = {}): void => {
+    const was = this.grouped
+    this.#group = [...labels]
+    if (this.grouped && !was) {
+      this.#properties = clone(form)
+      this.#baseline = '{}'
+      this.#largeBlob = null
+      this.#error = ''
+      this.#layers = null
+      this.#choices = new Map()
+      this.#repo = {}
+      this.#beforeChoice = new Map()
+    }
+    this.#emit()
   }
 
   /** The surface can change while a session is open — a window narrowed past
@@ -167,6 +196,7 @@ export class TileEditorService extends EventTarget {
     layers: Readonly<Record<EditorField, PropertyLayer>> | null,
     repo: Readonly<Record<string, unknown>> = {},
   ): void => {
+    if (this.grouped) return
     this.#layers = layers
     this.#repo = clone(repo)
     this.#emit()
@@ -175,7 +205,7 @@ export class TileEditorService extends EventTarget {
   /** Choose for one field — or null to take the choice back. A locked field
    *  takes no choice. */
   readonly choose = (field: EditorField, choice: PropertyChoice | null): void => {
-    if (this.#layers?.[field] === 'locked') return
+    if (this.grouped || this.#layers?.[field] === 'locked') return
     // Undo any earlier preview first, so choices never stack.
     const before = this.#beforeChoice.get(field)
     if (before) {
@@ -245,9 +275,12 @@ export class TileEditorService extends EventTarget {
     this.#emit()
   }
 
-  readonly setHideText = (value: boolean): void => {
+  /** In a group, showing the name is a value of its own (`false`, written to
+   *  every tile) and `undefined` leaves each tile as it is. Alone, showing
+   *  the name is simply the flag's absence. */
+  readonly setHideText = (value: boolean | undefined): void => {
     const props = this.#properties as any
-    const next = value ? true : undefined
+    const next = value === true ? true : value === false && this.grouped ? false : undefined
     if (props.hideText === next) return
     props.hideText = next
     this.#emit()
