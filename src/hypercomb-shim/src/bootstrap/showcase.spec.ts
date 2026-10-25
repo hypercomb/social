@@ -947,7 +947,7 @@ describe('a tile — nothing on the page leads out of the showcase; a hold lists
     return found!
   })
 
-  it('has no address to go to, and a tap goes nowhere', async () => {
+  it('has no address to go to, and a tap goes nowhere (the revisions are reached from a hold)', async () => {
     const { bands } = draw()
     const dylan = await tileOf(bands, 'dylan')
     expect(dylan.hasAttribute('href')).toBe(false)
@@ -956,7 +956,7 @@ describe('a tile — nothing on the page leads out of the showcase; a hold lists
     expect(click.defaultPrevented).toBe(true)
   })
 
-  it('lists the domains on a hold, as plain names with nothing to press', async () => {
+  it('lists on a hold only the domains whose copy differs, each a link to its revision', async () => {
     vi.useFakeTimers()
     try {
       const { hero, bands } = draw()
@@ -970,7 +970,8 @@ describe('a tile — nothing on the page leads out of the showcase; a hold lists
       vi.advanceTimersByTime(2)
       expect(sheet.hidden).toBe(false)
       expect(sheet.querySelector('.version')).not.toBeNull()
-      expect(sheet.querySelectorAll('a, button, input')).toHaveLength(0)
+      // Nothing here differs in signature from this domain's own copy, so nothing is listed.
+      expect(sheet.querySelector('a')).toBeNull()
       sheet.dispatchEvent(new MouseEvent('click', { bubbles: true }))   // the click the hold ends with stays
       expect(sheet.hidden).toBe(false)
       sheet.dispatchEvent(new MouseEvent('click', { bubbles: true }))

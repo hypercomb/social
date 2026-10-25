@@ -628,7 +628,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     return mini
   }
 
-  // ── a held tile says which domains it is on, and that is all: a list of names, no links, no switches ──
+  // ── a held tile lists the domains that hold it differently; a click goes to their revision ──
   const backdrop = el('div', 'versions-backdrop')
   backdrop.hidden = true
   const sheet = el('div', 'versions')
@@ -660,14 +660,32 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     opener = from
     const heading = el('h3', 'versions-title')
     heading.textContent = entry.title
+    // The domains that hold it as something else. A domain whose copy is signed the same as this
+    // domain's own is the same thing, so it is not listed; a click goes to that domain's revision.
+    const mine = entry.versions.find(version => version.places.some(place => place.zone === options.self))?.head
     const list = el('ul', 'version-list')
     const seen = new Set<string>()
-    for (const version of entry.versions) for (const place of version.places) {
-      if (seen.has(place.address)) continue
-      seen.add(place.address)
-      const item = el('li', 'version')
-      item.textContent = place.address
-      list.append(item)
+    for (const version of entry.versions) {
+      if (version.head === mine) continue
+      for (const place of version.places) {
+        if (seen.has(place.address)) continue
+        seen.add(place.address)
+        const item = el('li', 'version')
+        const link = el('a', 'version-visit')
+        link.href = place.href
+        link.target = '_blank'
+        link.rel = 'noopener'
+        link.textContent = place.address
+        const sig = el('span', 'version-sig')
+        sig.textContent = version.head.slice(0, 8)
+        item.append(link, sig)
+        list.append(item)
+      }
+    }
+    if (!list.children.length) {
+      const none = el('li', 'version')
+      none.textContent = 'Every domain holds the same version.'
+      list.append(none)
     }
     sheet.replaceChildren(heading, list)
     sheet.tabIndex = -1
@@ -1464,7 +1482,9 @@ a.hex:focus-visible > .hex-art { inset: 4px; }
   border-radius: var(--hc-radius-card, 3px); outline: 0; }
 .versions-title { margin: 0 0 .6rem; overflow-wrap: anywhere; color: var(--md-on-surface-strong); }
 .version-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
-.version { overflow-wrap: anywhere; font: 500 .85rem/1.35 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--md-on-surface-var); }
+.version { display: flex; justify-content: space-between; gap: .8rem; overflow-wrap: anywhere; font: 500 .85rem/1.35 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--md-on-surface-var); }
+a.version-visit { color: var(--md-primary); }
+.version-sig { opacity: .6; }
 @media (max-width: 720px) { .versions-backdrop { place-items: end stretch; padding: 0; } .versions { width: 100%; } }
 
 /* A PHONE: one column of the same list. */
