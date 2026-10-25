@@ -39,8 +39,16 @@
 // marker, the page loses every moved tile in one more, and no tile is copied
 // or re-made — the same signature changes parent:
 //   /into people = [ana, ben], work = [desk, inbox]
+//
+// A MODEL TIDIES A PAGE IT IS NOT STANDING ON (2026-10-24). A model reads and
+// changes the hive from wherever the participant happens to be, so "tidy
+// /work" from the home page named tiles this page does not hold, and the move
+// was refused. `in /<route>:` says whose tiles they are; every name in the
+// sentence — tiles, and bare destinations — then belongs to that page:
+//   /into in /work: invoices = [march, april], expenses = [taxi]
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
+import { HIVE_TREE_READER_IOC_KEY } from '../assistant/hive-tree-reader.js'
 
 const get = <T,>(key: string): T | undefined => (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
 
@@ -55,6 +63,15 @@ const parsePath = (raw: string): string[] =>
   raw.split('/').map(safeName).filter(Boolean)
 
 type Group = { destination: string; members: string[] }
+
+/** `in /<route>:` ahead of the groups names the page the tiles are on. */
+const IN_PAGE = /^in\s+(\/[^:=]*?)\s*:\s*/i
+
+/** The page a sentence says its tiles are on, and the rest of the sentence. */
+const readPage = (args: string): { page?: string[]; rest: string } => {
+  const said = IN_PAGE.exec(args.trim())
+  return said ? { page: parsePath(said[1]), rest: args.trim().slice(said[0].length) } : { rest: args.trim() }
+}
 
 /** The commas BETWEEN groups — never one inside a `[a, b]` list. */
 const splitGroups = (text: string): string[] => {
@@ -103,6 +120,11 @@ const shapeProblem = (groups: readonly Group[]): string | undefined => {
 }
 
 type LineageShape = { explorerSegments?: () => readonly string[] }
+type TreeReaderShape = {
+  readNode?(segments: readonly string[], options: { maxBytes: number; withContent: boolean }): Promise<
+    { ok: true; children: readonly { name: string }[] } | { ok: false }
+  >
+}
 type WithheldShape = { covers?: (segments: readonly string[]) => boolean }
 type SelectionShape = { selected: ReadonlySet<string> }
 type MoveShape = {
@@ -141,11 +163,11 @@ export class IntoQueenBee extends QueenBee {
    *  tile a machine does not touch. Refused for every machine — this door
    *  cannot tell the participant's own model from an outside one. */
   override machine = {
-    forms: '<destination> = <tile> | <destination> = [<tile>, <tile>, ...] | <destination> = [...], <destination> = [...]',
+    forms: '<destination> = <tile> | <destination> = [<tile>, <tile>, ...] | <destination> = [...], <destination> = [...] | in /<route>: <destination> = [...]',
     example: '/into people = [ana, ben], work = [desk, inbox]',
     reach: 'editing' as const,
     scope: 'hive' as const,
-    consequence: 'Moves the named tiles of this page inside each destination: a tile on this page, or /<route> anywhere in the hive. Several groups in one line are one move. They leave this page; nothing is copied or deleted.',
+    consequence: 'Moves the named tiles of this page inside each destination: a tile on this page, or /<route> anywhere in the hive. Several groups in one line are one move. They leave the page; nothing is copied or deleted. To tidy a page you are not on, start with in /<route>: — then every tile and bare destination is that page\'s (/into in /work: invoices = [march, april]).',
     refuse: (args: string): string | undefined => this.#refuse(args),
   }
 
@@ -174,8 +196,10 @@ export class IntoQueenBee extends QueenBee {
   protected async execute(args: string): Promise<void> {
     const raw = args.trim()
     if (!raw) { this.#log('Into — usage: /into <cell>  or  /into <path>/<cell>'); return }
-    const named = readNamed(raw)
-    if (named) return this.#moveNamed(named)
+    const { page, rest } = readPage(raw)
+    const named = readNamed(rest)
+    if (named) return this.#moveNamed(named, page)
+    if (page) throw new Error('into — after in /<route>: say where each group goes: <destination> = [<tile>, ...]')
     const here = this.#here()
 
     const selection = get<SelectionShape>('@diamondcoreprocessor.com/SelectionService')
@@ -191,7 +215,7 @@ export class IntoQueenBee extends QueenBee {
       return
     }
 
-    const target = this.#target(raw, here)
+    const target = this.#target(raw, here, this.#pageTiles())
     if (target.length === 0) {
       this.#log('Into — that is not a name')
       return
@@ -207,22 +231,26 @@ export class IntoQueenBee extends QueenBee {
   }
 
   /** A sentence that names its tiles — one group, or several as one act. */
-  async #moveNamed(groups: readonly Group[]): Promise<void> {
+  async #moveNamed(groups: readonly Group[], onPage?: readonly string[]): Promise<void> {
     const shape = shapeProblem(groups)
     if (shape) throw new Error(shape.replace('/into', 'into —'))
-    const here = this.#here()
+    const here = onPage ? [...onPage] : this.#here()
 
-    // Named tiles must be tiles of this page, spelled as the page spells them.
+    // Named tiles must be tiles of the page, spelled as the page spells them.
     // Without this a phantom name reached the primitive, which aborts quietly,
     // and the line still read as a move (the clipboard verbs' surface audit).
-    const page = this.#pageTiles()
-    const spelled = (name: string): string | undefined => page.find(tile => tile.toLowerCase() === name.toLowerCase())
-    const absent = page.length ? groups.flatMap(group => group.members).filter(name => !spelled(name)) : []
-    if (absent.length) throw new Error(`into — no tile named ${absent.map(name => `"${name}"`).join(', ')} on this page`)
+    // A page the sentence names is read, and a page that cannot be read is
+    // said — not guessed at.
+    const page = onPage ? await this.#tilesAt(onPage) : this.#pageTiles()
+    if (onPage && !page) throw new Error(`into — /${onPage.join('/')} could not be read; nothing moved`)
+    const tiles = page ?? []
+    const spelled = (name: string): string | undefined => tiles.find(tile => tile.toLowerCase() === name.toLowerCase())
+    const absent = tiles.length ? groups.flatMap(group => group.members).filter(name => !spelled(name)) : []
+    if (absent.length) throw new Error(`into — no tile named ${absent.map(name => `"${name}"`).join(', ')} on ${onPage ? `/${onPage.join('/')}` : 'this page'}`)
 
     const moves = groups.map(group => ({
       labels: group.members.map(name => spelled(name) ?? name),
-      targetSegments: this.#target(group.destination, here),
+      targetSegments: this.#target(group.destination, here, tiles),
     }))
     if (moves.some(m => m.targetSegments.length === 0)) throw new Error('into — the destination is not a name; nothing moved')
 
@@ -255,33 +283,54 @@ export class IntoQueenBee extends QueenBee {
 
   /** Why a machine may not say this line, or undefined. */
   #refuse(args: string): string | undefined {
-    const named = readNamed(args.trim())
-    if (!named) return '/into names its tiles — a machine cannot see what is picked: /into <destination> = [<tile>, <tile>]'
+    const { page, rest } = readPage(args)
+    const named = readNamed(rest)
+    if (!named) {
+      return page
+        ? '/into after in /<route>: needs where each group goes: <destination> = [<tile>, <tile>]'
+        : '/into names its tiles — a machine cannot see what is picked: /into <destination> = [<tile>, <tile>]'
+    }
     const shape = shapeProblem(named)
     if (shape) return shape
     const withheld = get<WithheldShape>('@hypercomb.social/AiWithheld')
     if (!withheld?.covers) return undefined
     // Called on the store: `covers` reads the store's own private document.
     const covers = (segments: readonly string[]): boolean => withheld.covers!(segments)
-    const here = this.#here()
+    const here = page ?? this.#here()
+    // The page itself: a tile may not be moved out of a withheld page either.
+    if (page && covers(page)) return `/into: /${page.join('/')} is withheld from outside models; its tiles stay where they are`
     const kept = named.flatMap(group => group.members).filter(name => covers([...here, name]))
     if (kept.length) {
       return `/into: ${kept.map(name => `"${name}"`).join(', ')} ${kept.length === 1 ? 'is' : 'are'} withheld from outside models and stays where it is; move the others without ${kept.length === 1 ? 'it' : 'them'}`
     }
     for (const group of named) {
-      const target = this.#target(group.destination, here)
-      if (covers(target)) return `/into: /${target.join('/')} is withheld from outside models; put the tiles somewhere else`
+      // Which tile a bare destination means is only known once a named page is
+      // read, so both readings are judged: under the page, and from the root.
+      const readings = page && !group.destination.startsWith('/') && parsePath(group.destination).length === 1
+        ? [[...page, ...parsePath(group.destination)], parsePath(group.destination)]
+        : [this.#target(group.destination, here, this.#pageTiles())]
+      const target = readings.find(covers)
+      if (target) return `/into: /${target.join('/')} is withheld from outside models; put the tiles somewhere else`
     }
     return undefined
   }
 
   /** A bare name means the tile in front of you when there is one. A leading
    *  slash is how you insist on the root reading instead. */
-  #target(raw: string, here: readonly string[]): string[] {
+  #target(raw: string, here: readonly string[], tiles: readonly string[]): string[] {
     const segments = parsePath(raw)
     const absolute = raw.startsWith('/') || segments.length > 1
-    const tile = absolute ? undefined : this.#pageTiles().find(name => name.toLowerCase() === segments[0]?.toLowerCase())
+    const tile = absolute ? undefined : tiles.find(name => name.toLowerCase() === segments[0]?.toLowerCase())
     return tile ? [...here, tile] : segments
+  }
+
+  /** The tiles a named page holds, or undefined when it cannot be read. */
+  async #tilesAt(page: readonly string[]): Promise<string[] | undefined> {
+    const reader = get<TreeReaderShape>(HIVE_TREE_READER_IOC_KEY)
+    try {
+      const listed = await reader?.readNode?.(page, { maxBytes: 8_000, withContent: false })
+      return listed?.ok ? listed.children.map(child => child.name).filter(Boolean) : undefined
+    } catch { return undefined }
   }
 
   #here(): string[] {

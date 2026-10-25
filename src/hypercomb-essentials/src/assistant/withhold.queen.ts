@@ -38,9 +38,20 @@ export class WithholdQueenBee extends QueenBee {
     const text = args.trim()
     const off = /^off\s+/i.test(text)
     const route = (off ? text.replace(/^off\s+/i, '') : text).trim()
+    // THE BUS REPLAYS ITS LAST VALUE to a late subscriber, inside `on` itself —
+    // before `stop` exists (the word threw "Cannot access 'stop' before
+    // initialization" every time the list had been answered once), and with the
+    // PREVIOUS reply, not this request's. What arrives while subscribing is
+    // that replay; only a reply after it is the answer.
     const answered = new Promise<{ routes?: string[]; changed?: boolean }>(resolve => {
-      const stop = EffectBus.on<{ routes?: string[]; changed?: boolean }>('ai:withheld', reply => { stop(); resolve(reply ?? {}) })
-      setTimeout(() => { stop(); resolve({}) }, 2_000)
+      let subscribing = true
+      let stop: (() => void) | undefined
+      stop = EffectBus.on<{ routes?: string[]; changed?: boolean }>('ai:withheld', reply => {
+        if (subscribing) return
+        stop?.(); resolve(reply ?? {})
+      })
+      subscribing = false
+      setTimeout(() => { stop?.(); resolve({}) }, 2_000)
     })
     EffectBus.emit('ai:withhold', route ? { op: off ? 'remove' : 'add', route } : {})
     const reply = await answered

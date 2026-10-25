@@ -93,6 +93,32 @@ describe('/into with its tiles named', () => {
       .rejects.toThrow('"domains" did not move into /people, which already holds a tile by that name')
   })
 
+  it('tidies a page it is not standing on, reading that page for its tiles', async () => {
+    const calls = moveDrone()
+    registrations.set('@diamondcoreprocessor.com/HypercombHiveTreeReader', {
+      readNode: async (segments: readonly string[]) => segments.join('/') === 'work'
+        ? { ok: true, children: ['invoices', 'expenses', 'march', 'taxi'].map(name => ({ name })) } : { ok: false },
+    })
+    await new IntoQueenBee().invoke('in /work: Invoices = [march]')
+    // The page it stands on holds none of these names; only the named page does.
+    expect(calls).toEqual([{ labels: ['march'], source: ['work'], target: ['work', 'invoices'] }])
+    await expect(new IntoQueenBee().invoke('in /work: invoices = [ghost]')).rejects.toThrow('no tile named "ghost" on /work')
+    await expect(new IntoQueenBee().invoke('in /nowhere: invoices = [march]')).rejects.toThrow('/nowhere could not be read')
+    await expect(new IntoQueenBee().invoke('in /work: invoices')).rejects.toThrow('say where each group goes')
+  })
+
+  it('stays out of a withheld page, tile and destination when it names the page', () => {
+    registrations.set('@hypercomb.social/AiWithheld', new (class { readonly #r = ['diary', 'work/secret']; covers(s: readonly string[]) { const k = s.join('/').toLowerCase(); return this.#r.some(r => k === r || k.startsWith(r + '/')) } })())
+    const refuse = new IntoQueenBee().machine.refuse
+    expect(refuse('in /work: invoices = [march]')).toBeUndefined()
+    expect(refuse('in /diary: invoices = [march]')).toContain('/diary is withheld')
+    expect(refuse('in /work: invoices = [secret, march]')).toContain('"secret" is withheld')
+    expect(refuse('in /work: /diary = [march]')).toContain('/diary is withheld')
+    expect(refuse('in /work: diary = [march]')).toContain('/diary is withheld')
+    expect(refuse('in /work: invoices')).toContain('needs where each group goes')
+    registrations.delete('@hypercomb.social/AiWithheld')
+  })
+
   it('still moves the selection when no tiles are named', async () => {
     const calls = moveDrone()
     registrations.set('@diamondcoreprocessor.com/SelectionService', { selected: new Set(['domains']) })
