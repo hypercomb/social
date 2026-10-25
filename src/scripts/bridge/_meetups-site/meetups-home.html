@@ -248,11 +248,15 @@
 
     <!-- MEMBERS -->
     <section class="panel" data-panel="members" aria-label="Members">
+      <span class="kicker">The team</span>
+      <h2>The people who host this community.</h2>
+      <ul class="people" data-team></ul>
+
       <span class="kicker">Members</span>
-      <h2>The people of this community.</h2>
-      <p class="sub">Everyone who has joined a meeting, from the lists the meetings keep. A hosted member carries their own picture and line, from their own host.</p>
+      <h2 data-people-title>Who is coming.</h2>
+      <p class="sub" data-people-sub>Each meeting keeps its own list, so every week starts fresh. Choose a meeting in the Meetings list to see who is coming to it.</p>
       <ul class="people" data-people></ul>
-      <p class="none" data-people-none>Nobody has joined a meeting yet.</p>
+      <p class="none" data-people-none>Nobody has joined this meeting yet.</p>
     </section>
 
     <!-- 3 · COMMUNITY -->
@@ -441,7 +445,7 @@
             if (!c || Number(c.kind) !== 30568 || !Array.isArray(c.tags)) return;
             var tag = function (k) { var t = c.tags.filter(function (t) { return t[0] === k; })[0]; return t ? String(t[1] || '') : ''; };
             var profile = tag('profile').toLowerCase();
-            var row = { who: tag('name').trim(), going: tag('going'), at: Number(c.created_at) || 0, signer: String(c.pubkey || '').toLowerCase(), member: names[i],
+            var row = { who: shownName(tag('name').trim()), going: tag('going'), at: Number(c.created_at) || 0, signer: String(c.pubkey || '').toLowerCase(), member: names[i],
               profile: SIG.test(profile) && tag('host') ? profile : '' };
             if (!row.who || !row.signer) return;
             var held = newest[row.signer];
@@ -456,6 +460,12 @@
       });
       });
     });
+  }
+  // The page promises no email and no personal information: a name typed as
+  // an email address is shown as what comes before the @ — never the address.
+  function shownName(name) {
+    var at = String(name || '').indexOf('@');
+    return at < 0 ? name : (name.slice(0, at).trim() || 'A guest');
   }
   // A hosted attendee's profile, as this door picked it up from their host:
   // believed only when its bytes hash to the name their claim gave, it is a
@@ -691,54 +701,72 @@
     });
     none.hidden = (state.doors || []).length > 0;
   }
-  // THE MEMBERS: one row per key across every meeting's list — the newest
-  // claim names them, a verified profile dresses them, the count says how
-  // many meetings they joined, and a check-in today marks them here now.
+  // THE TEAM: the people who always host, said once by the organizer and
+  // published with this page — not a list anyone joined, and never reset.
+  var TEAM = [
+    { who: 'Jaime Weise' },
+    { who: 'Pavlos' },
+    { who: 'Lea L.' },
+    { who: 'Susan' },
+    { who: 'Ian' }
+  ];
+  function personRow(m, note) {
+    var li = document.createElement('li');
+    if (m.here) li.classList.add('here');
+    var ring = document.createElement('span'); ring.className = 'ring';
+    var hex = document.createElement('span'); hex.className = 'hex';
+    if (m.picture) {
+      var img = document.createElement('img');
+      img.alt = ''; img.loading = 'lazy'; img.src = m.picture;
+      img.onerror = function () { img.remove(); hex.textContent = initial(m.who); };
+      hex.appendChild(img);
+    } else hex.textContent = initial(m.who);
+    ring.appendChild(hex); li.appendChild(ring);
+    var mid = document.createElement('span');
+    var nm = document.createElement('b'); nm.textContent = m.who; mid.appendChild(nm);
+    if (m.about) { var ab = document.createElement('span'); ab.className = 'ab'; ab.textContent = m.about; mid.appendChild(ab); }
+    li.appendChild(mid);
+    var pm = document.createElement('span'); pm.className = 'pm';
+    pm.textContent = note;
+    if (m.here) { var now = document.createElement('span'); now.className = 'now'; now.textContent = ' · here now'; pm.appendChild(now); }
+    li.appendChild(pm);
+    return li;
+  }
+  function renderTeam() {
+    var list = $('[data-team]');
+    list.textContent = '';
+    TEAM.forEach(function (m) { list.appendChild(personRow(m, 'host')); });
+  }
+  // THE MEMBERS OF ONE MEETING: the list that meeting keeps, nothing from any
+  // other week. A new meeting is a new record and so a new, empty list — each
+  // week starts fresh. The newest claim names a person, a verified profile
+  // dresses them, and a check-in on the day marks them here now.
   function membersOf() {
-    var by = {};
-    state.events.forEach(function (ev) {
-      (state.coming[ev.sig] || []).forEach(function (r) {
-        if (!isComing(r)) return;
-        var m = by[r.signer] || (by[r.signer] = { who: r.who, picture: '', about: '', meetings: 0, at: 0, here: false });
-        m.meetings++;
-        if (r.at >= m.at) { m.at = r.at; m.who = r.who; }
-        if (r.picture) m.picture = r.picture;
-        if (r.about) m.about = r.about;
-        if (r.going === 'here' && ev.record.date === today()) m.here = true;
-      });
+    var ev = state.selected, by = {};
+    if (!ev) return [];
+    (state.coming[ev.sig] || []).forEach(function (r) {
+      if (!isComing(r)) return;
+      var m = by[r.signer] || (by[r.signer] = { who: r.who, picture: '', about: '', at: 0, here: false });
+      if (r.at >= m.at) { m.at = r.at; m.who = r.who; }
+      if (r.picture) m.picture = r.picture;
+      if (r.about) m.about = r.about;
+      if (r.going === 'here' && ev.record.date === today()) m.here = true;
     });
     return Object.keys(by).map(function (k) { return by[k]; })
-      .sort(function (a, b) { return (b.here - a.here) || (b.meetings - a.meetings) || (b.at - a.at); });
+      .sort(function (a, b) { return (b.here - a.here) || (b.at - a.at); });
   }
   function renderPeople() {
     var list = $('[data-people]'), none = $('[data-people-none]');
     list.textContent = '';
+    var ev = state.selected;
+    $('[data-people-title]').textContent = ev ? 'Who is coming — ' + dayOf(ev.record) + '.' : 'Who is coming.';
     var rows = membersOf();
     rows.forEach(function (m) {
-      var li = document.createElement('li');
-      if (m.here) li.classList.add('here');
-      var ring = document.createElement('span'); ring.className = 'ring';
-      var hex = document.createElement('span'); hex.className = 'hex';
-      if (m.picture) {
-        var img = document.createElement('img');
-        img.alt = ''; img.loading = 'lazy'; img.src = m.picture;
-        img.onerror = function () { img.remove(); hex.textContent = initial(m.who); };
-        hex.appendChild(img);
-      } else hex.textContent = initial(m.who);
-      ring.appendChild(hex); li.appendChild(ring);
-      var mid = document.createElement('span');
-      var nm = document.createElement('b'); nm.textContent = m.who; mid.appendChild(nm);
-      if (m.about) { var ab = document.createElement('span'); ab.className = 'ab'; ab.textContent = m.about; mid.appendChild(ab); }
-      li.appendChild(mid);
-      var pm = document.createElement('span'); pm.className = 'pm';
-      pm.textContent = m.meetings + (m.meetings === 1 ? ' meeting' : ' meetings');
-      if (m.here) { var now = document.createElement('span'); now.className = 'now'; now.textContent = ' · here now'; pm.appendChild(now); }
-      li.appendChild(pm);
-      list.appendChild(li);
+      list.appendChild(personRow(m, 'coming'));
     });
     none.hidden = rows.length > 0;
   }
-  function render() { renderMeeting(); renderRows(); renderPeople(); renderDoors(); }
+  function render() { renderMeeting(); renderRows(); renderTeam(); renderPeople(); renderDoors(); }
   function select(ev) {
     // Another meeting: the join line and panel belong to the one that owned
     // them, so they reset rather than stand under the new selection.
