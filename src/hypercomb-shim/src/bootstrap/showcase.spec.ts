@@ -1060,3 +1060,29 @@ describe('the owner\'s tap — a device whose hive is beside the page puts a til
     } finally { vi.useRealTimers() }
   })
 })
+
+describe('a tile in another domain\'s row — grayed when it is out, still there to turn on, and to turn off again', () => {
+  const sites = parseLedger(LEDGER)
+  const a = sig('a')
+  const record: ShowcaseRecord = { zone: 'hypercomb.com', domains: [], items: [{ pubkey: a, lineage: 'camelflage' }] }
+  const owners = (): ZoneOwners => ({ showcase: record, reached: true, unreadable: false,
+    doors: new Map([[a, new Map([['camelflage', ['hypercomb.com']], ['dylan', ['hypercomb.com', 'jwize.com']]])]]) })
+
+  it('stays in its domain\'s row when it is out of the showcase, grayed, and a tap asks to put it in', async () => {
+    const owner = { hello: vi.fn(async () => a), toggle: vi.fn(async () => ({ ok: true as const, changed: false })) }
+    const { bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(), owner,
+    })
+    await vi.waitFor(() => expect(bands.querySelectorAll('.dex-head').length).toBeGreaterThan(1))
+    ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+    const dylan = await vi.waitFor(() => {
+      const found = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row:not(.own) a.hex')].find(tile => tile.textContent?.includes('dylan'))
+      expect(found).toBeDefined()
+      expect(found!.classList.contains('off')).toBe(true)
+      return found!
+    })
+    dylan.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
+  })
+})
