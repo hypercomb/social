@@ -70,8 +70,9 @@ A page can only be as good as what the word declares, so the rule is on the
 word. Every word must declare:
 
 - a **description** that is a sentence (at least 20 characters), and
-- **something to try**: an `examples` entry (what to type, what happens), or a
-  `machine` example.
+- **something to try**: an `examples` entry (what to type, what happens). A
+  `machine` example does not count: it is a model's terse form, and a page of
+  only that explains the word to no one.
 
 `howto/howto.census.spec.ts` measures the language the way the site lists it: the
 real slash drone, fed by a registry that behaves like the real one, over every

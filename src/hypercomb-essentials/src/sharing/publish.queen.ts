@@ -84,6 +84,13 @@ export class PublishQueenBee {
   readonly description =
     'Show what your published hive is serving right now, next to what has changed here since — one row per branch, with publish, re-check and unpublish per row. `publish here` publishes the layer you stand on to its hosts; `publish on <domain>` and `publish off <domain>` switch one domain for it; `publish as <label> on <domain>` gives it its own address there; `publish history` says whether it publishes its history or its head only, and `publish history on` / `publish history off` switch that. Say a route first (`publish /a/b on <domain>`) to name the tile instead of standing on it.'
   readonly descriptionKey = 'slash.publish'
+  readonly options = ['here', 'on <domain>', 'off <domain>', 'as <label> on <domain>', 'history [on|off]']
+  readonly examples = [
+    { input: '/publish', result: 'Opens the publish panel, or closes it if it is open: what your hive is serving now, beside what has changed here since' },
+    { input: '/publish /room-host on hypercomb.com', result: 'Switches hypercomb.com on for that tile and publishes it there, asking your consent first; its address becomes room-host.hypercomb.com' },
+    { input: '/publish /room-host as room-host1 on hypercomb.com', result: 'Gives the tile its own address, room-host1.hypercomb.com, instead of room-host.hypercomb.com. The tile has to be published on hypercomb.com already' },
+    { input: '/publish /room-host off hypercomb.com', result: 'Switches that domain off for the tile; when the last domain goes off, the tile is withdrawn' },
+  ]
 
   /** A machine may say only the history forms, and only once the participant
    *  grants it (`grant allow publish`, at the destructive and network rungs).

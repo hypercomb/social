@@ -41,11 +41,11 @@ describe('whatIsMissing — the rule a word cannot ship without', () => {
 
   it('names a description that is not a sentence, and a word with nothing to try', () => {
     expect(whatIsMissing(plain({ description: 'Tags' }))).toEqual(['a description of at least a sentence'])
-    expect(whatIsMissing(plain({ examples: [] }))).toEqual(['at least one example'])
+    expect(whatIsMissing(plain({ examples: [] }))).toEqual(['at least one worked example'])
   })
 
-  it('accepts a machine example in place of a worked one', () => {
-    expect(whatIsMissing(plain({ examples: [], machine: { forms: '', example: '/x', bare: false, reach: 'editing', scope: '', consequence: '' } }))).toEqual([])
+  it('does not take a machine example for a worked one: it is a form for a model, not something a person can try', () => {
+    expect(whatIsMissing(plain({ examples: [], machine: { forms: '', example: '/x', bare: false, reach: 'editing', scope: '', consequence: '' } }))).toEqual(['at least one worked example'])
   })
 })
 

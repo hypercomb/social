@@ -87,7 +87,9 @@ export function factsOf(source: SourceBehaviour): HowToFacts {
 export function whatIsMissing(f: HowToFacts): string[] {
   const missing: string[] = []
   if (f.description.length < 20) missing.push('a description of at least a sentence')
-  if (f.examples.length === 0 && !f.machine) missing.push('at least one example')
+  // A machine example is a model's terse form, not something a person can try:
+  // a word with only that would explain itself to no one reading the page.
+  if (f.examples.length === 0) missing.push('at least one worked example')
   return missing
 }
 
