@@ -265,3 +265,26 @@ describe('parseWelcome — a link names its picture from a closed set', () => {
     ])
   })
 })
+
+describe('the room first — a front page that hosts a swarm says so above its name', () => {
+  const options = {
+    self: 'realones.online', title: 'Real Ones', tagline: '', sources: [],
+    ledger: Promise.resolve([]), readShared: async () => ({ offers: [], creations: [] }),
+  }
+
+  it('draws "Join the swarm" before the name, pointing at the sealed link', () => {
+    const link = 'https://swarm.hypercomb.com/#swarm=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@hypercomb.com~KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK'
+    const { hero } = showcase({ ...options, swarm: link })
+    const words = hero.querySelector('.hero-words')!
+    const first = words.firstElementChild as HTMLAnchorElement
+    expect(first.className).toBe('hero-swarm')
+    expect(first.getAttribute('href')).toBe(link)
+    expect(first.textContent).toContain('Join the swarm')
+  })
+
+  it('draws nothing of the kind on a page that hosts no room', () => {
+    const { hero } = showcase(options)
+    expect(hero.querySelector('.hero-swarm')).toBeNull()
+  })
+})
+

@@ -20,8 +20,10 @@
 //
 // THE RULES THAT BIND IT:
 //   - A secret or an access code is never readable in any pool, resource,
-//     event, log, export or on any host. So the payload is SEALED before it
-//     leaves the device, with core's door seal (content-cipher sealToSecret).
+//     event, log, export or on any host — save through a link its owner put
+//     on a front page (`room host`, documentation/swarm-link.md "On a front
+//     page"). So the payload is SEALED before it leaves the device, with
+//     core's door seal (content-cipher sealToSecret).
 //   - ONE COMBO, ONE LINK (jwize, 2026-10-13: "the blob should be the info
 //     right so the key should be fixed for that combo?"). The key is
 //     sha256 of the login's own bytes under a domain tag, and the door seal
@@ -32,13 +34,15 @@
 //     no more than against the room addresses the meeting point already
 //     sees: the secret's strength guards both. The hosted blob is
 //     ciphertext only — the `HCS1` seal header, then AES-GCM — addressed by
-//     sha256(blob). The host can serve it and can never read it; a reader
-//     that asks core's needsSecret() sees what it is.
+//     sha256(blob). The host can serve it and can never read it — unless
+//     the owner put the link on a front page, whose card carries the key in
+//     a public pool; a reader that asks core's needsSecret() sees what it is.
 //   - The key travels only in the link's #fragment, which a browser never
 //     sends to any server:
 //         <appOrigin>/#swarm=<sig>@<host>~<key>
-//     appOrigin is the page the sharer stands on; it says where the link
-//     lands and never enters identity. The host in the link only says where
+//     appOrigin is where the link lands — the meeting host's swarm door when
+//     it has one, else the sharer's page for `invite` and hypercomb.io for
+//     `room host` — and never enters identity. The host in the link only says where
 //     to fetch: the host inside the sealed login is the truth.
 //   - Nothing derived from the secret goes on the EffectBus, and nothing here
 //     logs. This module imports no bus and writes no storage.
@@ -63,7 +67,7 @@
 // Anyone who holds the link holds the login — the link IS the invitation,
 // exactly as a `#meet=` link is. What changes is that the link no longer
 // spells the secret out: it carries a key, and the host carries a blob it
-// cannot open.
+// cannot open (save a front-page room's, whose key is public by design).
 
 import { SEAL_OVERHEAD_BYTES, SignatureService, needsSecret, openWithSecret, roomText, sealToSecret } from '@hypercomb/core'
 import { isAccessCode, trimLinkTail } from './meeting-invite.js'

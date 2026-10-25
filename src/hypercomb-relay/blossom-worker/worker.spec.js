@@ -1164,6 +1164,109 @@ test('a front door names itself from the card its publisher signs into welcome:<
   } finally { globalThis.fetch = realFetch }
 })
 
+test('a front door carries its zone\'s room — a sealed swarm link only, never another shape — even on a card with no title', async () => {
+  const link = `https://swarm.hypercomb.com/#swarm=${'a'.repeat(64)}@hypercomb.com~${'K'.repeat(43)}`
+  const serve = async (card, staged = null) => {
+    const cardBytes = new TextEncoder().encode(JSON.stringify(card))
+    const cardSig = await sha256Hex(cardBytes)
+    const event = await signedIndex({ pluginthematrix: head, 'welcome:pluginthematrix.com': cardSig })
+    const bindings = { ...ONE_ZONE, 'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], lineage: 'pluginthematrix.com', frontDoor: true } }
+    const { env } = await fixture(event, bindings)
+    env.CONTENT.held.set(cardSig, cardBytes)
+    env.HOST_DOOR_ORIGIN = 'https://door.example'
+    const realFetch = globalThis.fetch
+    globalThis.fetch = async (url) => String(url).endsWith('/welcome.json')
+      ? (staged ? new Response(JSON.stringify(staged), { headers: { 'content-type': 'application/json' } }) : new Response('{}', { status: 404 }))
+      : new Response('<!doctype html><html><head><title>Hypercomb</title></head><body></body></html>', { headers: { 'content-type': 'text/html' } })
+    try {
+      const html = await (await worker.fetch(page('https://pluginthematrix.com/'), env)).text()
+      const data = /<script id="hc-welcome" type="application\/json">([^<]*)<\/script>/.exec(html)
+      return data ? JSON.parse(data[1]) : null
+    } finally { globalThis.fetch = realFetch }
+  }
+  assert.deepEqual(await serve({ title: 'Plugin the Matrix', tagline: 't', links: [], swarm: link }),
+    { title: 'Plugin the Matrix', tagline: 't', links: [], swarm: link })
+  // Only its room: still the zone's card.
+  assert.deepEqual(await serve({ title: '', tagline: '', links: [], swarm: link }), { title: '', tagline: '', links: [], swarm: link })
+  // …and a card that only carries a room keeps the staged name around it, never hides it.
+  assert.deepEqual(await serve({ title: '', tagline: '', links: [], swarm: link }, { title: 'Staged Name', tagline: 'Staged line' }),
+    { title: 'Staged Name', tagline: 'Staged line', links: [], swarm: link })
+  // A link in the clear, or anything else in that field, is not carried.
+  assert.deepEqual(await serve({ title: 'P', tagline: '', links: [], swarm: 'https://swarm.hypercomb.com/#meet=lecture/rose' }), { title: 'P', tagline: '', links: [] })
+  assert.deepEqual(await serve({ title: 'P', tagline: '', links: [], swarm: 'javascript:alert(1)' }), { title: 'P', tagline: '', links: [] })
+})
+
+test('the room is the first publisher\'s to give: a co-publisher never puts one on a page its primary shows none on', async () => {
+  const link = (c) => `https://swarm.hypercomb.com/#swarm=${c.repeat(64)}@hypercomb.com~${'K'.repeat(43)}`
+  const sk2 = Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 2 : 0)
+  const pubkey2 = hex(schnorr.getPublicKey(sk2))
+  const signAs = async (key, pub, roots) => {
+    const event = { pubkey: pub, created_at: 1_800_000_000, kind: 30564, tags: [],
+      content: JSON.stringify({ roots, doors: Object.fromEntries(Object.keys(roots).map(k => [k, ['pluginthematrix.com']])) }) }
+    event.id = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(
+      JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content])))))
+    event.sig = hex(schnorr.sign(event.id, key))
+    return event
+  }
+  const serve = async (primaryCard, otherCard, fail = '') => {
+    const held = new Map()
+    const roots = async (card) => {
+      if (!card) return { pluginthematrix: head }
+      const bytes = new TextEncoder().encode(JSON.stringify(card))
+      const sig = await sha256Hex(JSON.stringify(card))
+      held.set(sig, bytes)
+      return { pluginthematrix: head, 'welcome:pluginthematrix.com': sig }
+    }
+    const primaryRoots = await roots(primaryCard)
+    const events = {
+      [pubkey]: await signAs(sk, pubkey, primaryRoots),
+      [pubkey2]: await signAs(sk2, pubkey2, await roots(otherCard)),
+    }
+    const bindings = { ...ONE_ZONE, 'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], lineage: 'pluginthematrix.com', frontDoor: true,
+      publishers: [{ pubkey: pubkey2, label: 'Guest', primary: false }, { pubkey, label: 'Jaime', primary: true }] } }
+    const { env } = await fixture(events[pubkey], bindings)
+    for (const [k, v] of held) env.CONTENT.held.set(k, v)
+    env.HIVES.get = async (key) => events[key] ? JSON.stringify(events[key]) : null
+    // The store throws on the primary's index, or on the card it names.
+    const throwing = fail === 'index' ? (key) => key.endsWith(`/${pubkey}`)
+      : fail === 'card' ? (key) => key === primaryRoots['welcome:pluginthematrix.com'] : () => false
+    const realGet = env.CONTENT.get
+    env.CONTENT.get = async (key) => { if (throwing(key)) throw new Error('store down'); return realGet(key) }
+    // …or the primary's held index does not verify.
+    if (fail === 'forged') env.HIVES.get = async (key) => key === pubkey ? JSON.stringify({ ...events[pubkey], sig: '0'.repeat(128) }) : events[key] ? JSON.stringify(events[key]) : null
+    env.HOST_DOOR_ORIGIN = 'https://door.example'
+    const realFetch = globalThis.fetch
+    globalThis.fetch = async (url) => String(url).endsWith('/welcome.json')
+      ? new Response('{}', { status: 404 })
+      : new Response('<!doctype html><html><head><title>Hypercomb</title></head><body></body></html>', { headers: { 'content-type': 'text/html' } })
+    try {
+      const html = await (await worker.fetch(page('https://pluginthematrix.com/'), env)).text()
+      const data = /<script id="hc-welcome" type="application\/json">([^<]*)<\/script>/.exec(html)
+      return data ? JSON.parse(data[1]) : null
+    } finally { globalThis.fetch = realFetch }
+  }
+  // The primary took its room off (an empty card): the co-publisher's room is not shown, only its name falls through.
+  assert.deepEqual(await serve({ title: '', tagline: '', links: [] }, { title: 'Guest', tagline: '', links: [], swarm: link('b') }),
+    { title: 'Guest', tagline: '', links: [] })
+  assert.equal(await serve({ title: '', tagline: '', links: [] }, { title: '', tagline: '', links: [], swarm: link('b') }), null)
+  assert.deepEqual(await serve({ title: 'Mine', tagline: '', links: [] }, { title: 'Guest', tagline: '', links: [], swarm: link('b') }),
+    { title: 'Mine', tagline: '', links: [] })
+  // The primary's room wins over the co-publisher's.
+  assert.deepEqual(await serve({ title: 'Mine', tagline: '', links: [], swarm: link('a') }, { title: '', tagline: '', links: [], swarm: link('b') }),
+    { title: 'Mine', tagline: '', links: [], swarm: link('a') })
+  // A primary that signs no card leaves the room to the next publisher who does.
+  assert.deepEqual(await serve(null, { title: 'Guest', tagline: '', links: [], swarm: link('b') }),
+    { title: 'Guest', tagline: '', links: [], swarm: link('b') })
+  // A primary card that could not be read is not no card: no room is shown, only the name falls through.
+  for (const fail of ['index', 'card', 'forged']) {
+    assert.deepEqual(await serve({ title: 'Mine', tagline: '', links: [], swarm: link('a') }, { title: 'Guest', tagline: '', links: [], swarm: link('b') }, fail),
+      { title: 'Guest', tagline: '', links: [] }, fail)
+  }
+  // A room-only primary card keeps the co-publisher's name beside it.
+  assert.deepEqual(await serve({ title: '', tagline: '', links: [], swarm: link('a') }, { title: 'Guest', tagline: 'g', links: [], swarm: link('b') }),
+    { title: 'Guest', tagline: 'g', links: [], swarm: link('a') })
+})
+
 test('a byte mirror serves the host door while retaining its signed read and write routes', async () => {
   const { env } = await fixture()
   env.HOST_DOOR_ORIGIN = 'https://door.example'

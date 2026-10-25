@@ -461,6 +461,8 @@ export type ShowcaseOptions = {
   readonly self: string
   readonly title: string
   readonly tagline: string
+  /** The zone's room (a sealed swarm link), drawn first — or ''. */
+  readonly swarm?: string
   /** Domains this hive added, shown after the ledger's. */
   readonly sources: readonly string[]
   readonly ledger: Promise<readonly LedgerSite[]>
@@ -496,6 +498,18 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   search.spellcheck = false
   searchBox.append(iconOf('search'), search)
   const stats = el('p', 'hero-stats')
+  // THE ROOM FIRST: a front page whose owner hosts a swarm says so before
+  // anything else (room host <domain>). The link carries no words a reader
+  // could copy down — the room and its secret travel sealed.
+  if (options.swarm) {
+    const join = el('a', 'hero-swarm')
+    join.href = options.swarm
+    join.rel = 'noopener'
+    const label = el('span')
+    label.textContent = 'Join the swarm'
+    join.append(iconOf('hive'), label, iconOf('arrow'))
+    words.append(join)
+  }
   words.append(title, tagline, searchBox, stats)
   const mosaic = el('div', 'mosaic')
   mosaic.setAttribute('aria-hidden', 'true')
@@ -1192,6 +1206,12 @@ export const SHOWCASE_STYLE = `
 }
 .showcase-page .panel { position: relative; }
 
+/* the room, first: a front page that hosts a swarm says so above its name */
+.hero-swarm { display: inline-flex; align-items: center; gap: .55rem; margin: 0 0 1.1rem; padding: .62rem 1.05rem;
+  border-radius: var(--hc-radius-control, 2px); background: var(--md-primary); color: var(--md-on-primary); font-weight: 600; text-decoration: none;
+  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--md-primary) 70%, transparent); }
+.hero-swarm:hover, .hero-swarm:focus-visible { filter: brightness(1.06); }
+.hero-swarm svg { width: 1.05rem; height: 1.05rem; }
 /* the hero: the name, the sentence, the search — and a comb of real hives */
 .hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(1.5rem, 5vw, 4rem); margin: 0 0 clamp(2.5rem, 7vh, 4.5rem); }
 .hero-words { container-type: inline-size; width: 100%; min-width: 0; }

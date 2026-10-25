@@ -168,6 +168,14 @@ ledger.
    ✨ to let your AI suggest some.
 5. **Hand out the link.** Use `invite`. When your host has a swarm door, the
    link lands there.
+6. **Or put the room on your domain's front page.** Inside the room, type
+   `room host <domain>`. The front page of that domain then shows "Join the
+   swarm" at its top, for anyone who opens it. The button is the room's
+   sealed link (see `swarm-link.md`, "On a front page"): it hides the room's
+   name and its secret (the meeting host is still named in the link), but it
+   does not keep them. Anyone who opens the page can join. `room host off <domain>` takes the button down.
+   To close the room for good, change its secret: old versions of the card
+   stay readable.
 
 **A participant, in the room**
 

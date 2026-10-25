@@ -99,7 +99,7 @@ describe("readWelcome — a zone's signed card before the shared file", () => {
     globalThis.fetch = (async (url: string) => { asked.push(String(url)); return new Response('{}') }) as typeof fetch
     try {
       const welcome = await readWelcome()
-      expect(welcome).toEqual({ title: 'Real Ones', tagline: 'People, not profiles', links: [] })
+      expect(welcome).toEqual({ title: 'Real Ones', tagline: 'People, not profiles', links: [], swarm: '' })
       expect(asked).toEqual([])
     } finally {
       globalThis.fetch = realFetch
@@ -107,3 +107,54 @@ describe("readWelcome — a zone's signed card before the shared file", () => {
     }
   })
 })
+
+describe('the room at the top — a card may carry its zone\'s sealed swarm link', () => {
+  const LINK = 'https://swarm.hypercomb.com/#swarm=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@hypercomb.com~KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK'
+
+  it('keeps a sealed swarm link on an https page, and nothing else that looks like one', () => {
+    expect(parseWelcome({ title: 'x', swarm: LINK })?.swarm).toBe(LINK)
+    for (const bad of [
+      'https://swarm.hypercomb.com/#meet=lecture/rose',
+      'http://swarm.hypercomb.com/#swarm=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@hypercomb.com~KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK',
+      'javascript:alert(1)//#swarm=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@hypercomb.com~KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK',
+      LINK + '&x=1',
+      'https://swarm.hypercomb.com/#swarm=' + 'a'.repeat(63) + '@hypercomb.com~KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK',
+    ]) expect(parseWelcome({ title: 'x', swarm: bad })?.swarm, bad).toBe('')
+  })
+
+  it('a card that carries only its room keeps the staged name around it, as the worker does', async () => {
+    const script = document.createElement('script')
+    script.id = 'hc-welcome'
+    script.type = 'application/json'
+    script.textContent = JSON.stringify({ title: '', tagline: '', links: [], swarm: LINK })
+    document.head.append(script)
+    const realFetch = globalThis.fetch
+    try {
+      globalThis.fetch = (async () => new Response(JSON.stringify({ title: 'Staged', tagline: 'line', swarm: '' }),
+        { headers: { 'content-type': 'application/json' } })) as typeof fetch
+      expect(await readWelcome()).toEqual({ title: 'Staged', tagline: 'line', links: [], swarm: LINK })
+      globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch
+      expect(await readWelcome()).toEqual({ title: '', tagline: '', links: [], swarm: LINK })
+    } finally {
+      globalThis.fetch = realFetch
+      script.remove()
+    }
+  })
+
+  it('the shared staged file never carries a room — only a signed card does', async () => {
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(JSON.stringify({ title: 'Staged', swarm: LINK }),
+      { headers: { 'content-type': 'application/json' } })) as typeof fetch
+    try {
+      expect(await readWelcome()).toEqual({ title: 'Staged', tagline: '', links: [], swarm: '' })
+    } finally { globalThis.fetch = realFetch }
+  })
+
+  it('a card that carries only its room is still a card, and the front door draws it', () => {
+    const welcome = parseWelcome({ swarm: LINK })
+    expect(welcome).toEqual({ title: '', tagline: '', links: [], swarm: LINK })
+    expect(frontDoorOf(welcome, 'realones.online', 'https://realones.online').swarm).toBe(LINK)
+    expect(frontDoorOf(null, 'realones.online', 'https://realones.online').swarm).toBe('')
+  })
+})
+

@@ -39,15 +39,18 @@ the caller hands out a `#meet=` link, which names the relay whole.
 <appOrigin>/#swarm=<sig>@<host>~<key>
 ```
 
-- `appOrigin` — the page the sharer stands on. It only says where the link
-  lands; it never enters identity.
+- `appOrigin` — where the link lands: the meeting host's swarm door when it
+  has one, else the sharer's page for `invite` and hypercomb.io for
+  `room host`. It never enters identity.
 - `sig` — sha256 of the hosted blob (64 hex).
 - `host` — where the blob is fetched from: `https://<host>/<sig>` (plain http
   on a loopback host). The host *inside* the sealed login is the truth. The
   slot holds only what a minted host can (letters, digits, `.`, `-`, a port,
   an IPv6 bracket) — never a scheme, a `%` escape or a path, so the host the
   link shows is the host it fetches from.
-- `key` — a fresh 256-bit key, base64url without padding (43 characters).
+- `key` — a 256-bit key, base64url without padding (43 characters). It is
+  derived from the login itself (99e3a0381), so one login always makes the
+  same link.
   Its last character is never `-` or `_`, so a link never ends in something a
   chat's linkifier trims off.
 
@@ -80,6 +83,66 @@ throw:
 | `locked` | The key does not open it. |
 | `malformed` | The link, the blob or the login inside is not one (a blob not sealed to a secret is not one). |
 
+## On a front page
+
+`room host <domain>`, typed inside the room, puts the room's sealed link on
+the domain's front page as "Join the swarm", at the top
+(jwize 2026-10-24: "the way to host a swarm should be a link on the home page
+at the top of a domain it sets the credentials for the meet. That way we can
+obfuscate the location and password").
+
+- **The link rides the domain's signed card.** It is the `swarm` field of the
+  `welcome:<zone>` card (`host-welcome.ts`), kept with the card's title and
+  tagline. The worker writes the card into the page (`#hc-welcome`), and the
+  shim draws the button above the domain's name.
+- **One shape only.** The worker (`worker.js` `WELCOME_SWARM_RE`), the module
+  and the shim each accept only an https page with a `#swarm=<sig>@<host>~<key>`
+  fragment. A `#meet=` link, which spells the room and secret out, is never
+  carried.
+- **It is public by design.** Anyone who opens the page holds the link, and so
+  holds the login. The link hides the room (the login's `location`), its
+  secret, its access code and the page it opens on from the address bar and
+  the page text. It does not hide where it meets: the meeting host is named in
+  the link (`@<host>`) and in the swarm door it lands on, because a visitor's
+  browser has to know where to fetch the sealed login. It does not keep any of
+  them from a visitor who joins. That is the owner's choice for a front-page
+  room.
+- **Whose room it is.** The first of the zone's publishers, in order, who
+  signs a card at all decides whether the page shows a room. A card without
+  one, even an empty card, shows none, so a later publisher can never put a
+  room on a page whose first publisher took theirs down. A publisher whose
+  index or card the worker could not read, or whose held index does not
+  verify, decides the same: no room, even if they may sign no card. Only the name falls through to a
+  later card.
+- **Taking it down.** `room host off <domain>` signs the card without it. A
+  card's history is never deleted, so an older card still holds the old link:
+  to close the room for good, change its secret.
+- **Where it lands.** On the room's swarm door when its host has one, else on
+  hypercomb.io. Never on the page the sharer happens to stand on.
+- **It says what the page shows.** After signing, the word reads the page
+  back and reports only what the page shows, for `on` and for `off` alike. The
+  page is the domain's front page, else its door at `host.<domain>`: that is
+  where the card answers when the apex is its own site (an origin host such as
+  hypercomb.com), opens on a creation, or will not answer a hive's read. A
+  door holds a publisher's index for a few seconds (`INDEX_EDGE_SECONDS`), so
+  a read-back that does not yet show the card just signed reads once more
+  after that window. No card seen is an answer only when both pages answered;
+  otherwise the word names the page it could not check. A reason names only
+  what the page shows: a room this card does not carry, the room the card
+  carried before, or a door that does not read this card first. It never says
+  whose room a page shows (one login is one link, on anyone's card), only
+  whether this card carries it. `host.<domain>` typed as the domain names the
+  domain: the door reads the zone's card.
+- **A card it could not read is never written over.** If the current card
+  cannot be read, nothing changes (the same holds for `hosts welcome`, which
+  keeps a card's room when it changes the title).
+- **The name stays the domain's.** A card that only carries a room never
+  takes the page's name; the worker keeps the name from the card or the file
+  that gives one, and adds the room beside it.
+- **A coded room carries its code.** The sealed login includes the meeting
+  point's access code, as every invite does; a visitor could not get in
+  without it. Closing such a room means recycling the code as well.
+
 ## When it fails: the `#meet=` link
 
 Publishing goes through an injected uploader (the merge wires host-sync's
@@ -92,11 +155,16 @@ still happens; only the secret is spelled out in that link.
 
 - **Anyone who holds the link holds the login.** The link is the invitation,
   exactly as a `#meet=` link is. Share it where you would share the secret.
-- **The host can never read it.** The key lives only in the `#fragment`,
-  which a browser never sends to any server; the host serves bytes it cannot
-  open.
+- **The host can never read an invite's link.** The key lives only in the
+  `#fragment`, which a browser never sends to any server; the host serves
+  bytes it cannot open. A front-page room is the owner-accepted exception
+  ("On a front page"): its card carries the whole link, key included, in the
+  public pool sign('welcome:<zone>'), so the card's host and anyone who reads
+  that pool can open its login.
 - A secret or an access code is never readable in any pool, resource, event,
-  log or export. Nothing derived from the secret goes on the EffectBus, and
-  the module logs nothing.
-- Every seal takes a fresh key: sharing one login twice makes two unrelated
-  blobs, so a blob says nothing about who else meets where.
+  log or export, except through a link its owner put on a front page. Nothing
+  derived from the secret goes on the EffectBus, and the module logs nothing.
+- One login makes one sealed fragment: the key is derived from the login
+  (99e3a0381), so the same room, code and page always seal to the same
+  `#swarm=` fragment. The page it lands on can differ between `invite` and
+  `room host`.

@@ -33,7 +33,7 @@
 import { EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { clearHiveRoot, fetchHiveIndex, listedOf, setHiveRoot, setHostListing } from './hive-pointer.js'
 import { addCommunityHost, hostArtifactSig, hostZone } from './community-hosts.js'
-import { publishWelcome, welcomeZone } from './host-welcome.js'
+import { publishWelcome, readOwnWelcome, welcomeZone } from './host-welcome.js'
 
 const SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 const SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
@@ -77,7 +77,11 @@ export class HostsQueenBee {
       const zone = welcomeZone(rest[0])
       const [title = '', tagline = ''] = rest.slice(1).join(' ').split('|').map(part => part.trim())
       if (!zone || !title) { toast(t('hosts.welcomesay', 'Say hosts welcome <zone> <title> | <tagline>, such as hosts welcome example.com Example | What it is.'), 'warning'); return }
-      const done = await publishWelcome(host, zone, title, tagline)
+      // A new title keeps the room the card carries (room host) — and a card
+      // that could not be read is never written over blind.
+      const own = await readOwnWelcome(host, zone)
+      if (own.state === 'unknown') { toast(t('hosts.welcomeunread', 'The card for {zone} could not be read ({reason}) — nothing was changed.', { zone, reason: own.reason }), 'warning'); return }
+      const done = await publishWelcome(host, zone, title, tagline, own.state === 'card' ? own.card.swarm : '')
       if (!done.ok) { toast(t('hosts.welcomefailed', 'The card for {zone} was not published: {reason}', { zone, reason: done.reason }), 'warning'); return }
       toast(t('hosts.welcomed', '{zone} now goes by "{title}".', { zone, title }), 'success')
       return

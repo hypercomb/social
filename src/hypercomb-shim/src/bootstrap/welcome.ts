@@ -22,6 +22,12 @@
 // EVERY FIELD IS UNTRUSTED. The file is static content the operator staged,
 // but it is still data: text is clamped, and an href must be a plain http(s)
 // address or a path on this origin, so nothing in the file can become script.
+//
+// THE ROOM AT THE TOP (jwize 2026-10-24: "the way to host a swarm should be a
+// link on the home page at the top of a domain"). A card may carry `swarm`, a
+// sealed swarm link (#swarm=<sig>@<host>~<key>) its owner put there with `room
+// host <domain>`; the showcase draws it first, as "Join the swarm". It hides
+// the room and its secret; whoever opens the page can join — by design.
 
 /** The pictures a link may wear: a closed set the shim draws itself, named by
  *  the staged card, so a door's look is data and never a guess from its words. */
@@ -32,6 +38,8 @@ export type Welcome = {
   title: string
   tagline: string
   links: WelcomeLink[]
+  /** The zone's room: a sealed swarm link, or '' (absent on a card without one). */
+  swarm?: string
 }
 
 /** The card, resolved: what it shows whether or not anything was staged. */
@@ -39,6 +47,8 @@ export type FrontDoor = {
   readonly title: string
   readonly tagline: string
   readonly links: readonly WelcomeLink[]
+  /** The zone's room, drawn first as "Join the swarm" — or ''. */
+  readonly swarm: string
   /** Where the platform explains itself, minus any door the staged links
    *  already open — `/tour/` on hypercomb.com IS the tour. */
   readonly footer: readonly WelcomeLink[]
@@ -78,6 +88,15 @@ const href = (value: unknown): string => {
   } catch { return '' }
 }
 
+/** The one shape a card's room may take (host-welcome.ts WELCOME_SWARM_RE,
+ *  worker.js): an https page and a sealed #swarm= fragment. */
+export const SWARM_LINK_RE = /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?\/#swarm=[0-9a-f]{64}@[a-z0-9.:[\]-]+~[A-Za-z0-9_-]{43}$/
+
+const swarmFrom = (value: unknown): string => {
+  const link = typeof value === 'string' ? value.trim() : ''
+  return SWARM_LINK_RE.test(link) ? link : ''
+}
+
 const linksFrom = (value: unknown): WelcomeLink[] => {
   if (!Array.isArray(value)) return []
   const links: WelcomeLink[] = []
@@ -101,8 +120,9 @@ export const parseWelcome = (raw: unknown): Welcome | null => {
     title: text(record.title, 60),
     tagline: text(record.tagline, 400),
     links: linksFrom(record.links),
+    swarm: swarmFrom(record.swarm),
   }
-  const empty = !welcome.title && !welcome.tagline && welcome.links.length === 0
+  const empty = !welcome.title && !welcome.tagline && welcome.links.length === 0 && !welcome.swarm
   return empty ? null : welcome
 }
 
@@ -118,16 +138,28 @@ export const readWelcome = async (): Promise<Welcome | null> => {
   // card from the pool sign('welcome:<zone>') — the head the zone's publisher
   // signs — and writes it into the page as `#hc-welcome`. A file staged next to
   // the shell names every zone that shares the origin at once; a pool names one.
+  let card: Welcome | null = null
   try {
     const carried = document.getElementById('hc-welcome')?.textContent
-    const card = carried ? parseWelcome(JSON.parse(carried)) : null
-    if (card) return card
+    card = carried ? parseWelcome(JSON.parse(carried)) : null
   } catch { /* a malformed card is no card; the staged file still answers */ }
+  if (card && (card.title || card.tagline || card.links.length)) return card
+  // A card that carries only its zone's room keeps the staged file's name
+  // around it — as the worker does when it could read the file itself.
+  const staged = await readStaged()
+  if (!card) return staged
+  return staged ? { ...staged, swarm: card.swarm } : card
+}
+
+/** The file staged next to the shell, or null. It never carries a room: a
+ *  room rides only the zone's signed card, never the file every zone shares. */
+const readStaged = async (): Promise<Welcome | null> => {
   try {
     const response = await fetch('/welcome.json', { cache: 'no-store' })
     if (!response.ok) return null
     if (!(response.headers.get('content-type') ?? '').toLowerCase().includes('json')) return null
-    return parseWelcome(await response.json())
+    const raw: unknown = await response.json()
+    return parseWelcome(raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw, swarm: '' } : raw)
   } catch { return null }
 }
 
@@ -160,6 +192,7 @@ export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: s
     title: welcome?.title || hostNameOf(hostname),
     tagline: welcome?.tagline || DEFAULT_TAGLINE,
     links,
+    swarm: welcome?.swarm ?? '',
     footer: PLATFORM_LINKS.filter(door => !links.some(link => sameDoor(link.href, door.href, origin))),
   }
 }

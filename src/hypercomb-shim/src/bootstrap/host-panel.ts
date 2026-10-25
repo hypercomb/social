@@ -603,6 +603,7 @@ class HostPanelElement extends HTMLElement {
         self: this.#self || location.host,
         title: door.title,
         tagline: door.tagline,
+        swarm: door.swarm,
         sources: zones,
         ledger: this.#ledger,
         readShared: zone => Promise.all([readOfferings(zone).catch(() => []), readPublicCreations(zone).catch(() => [])])

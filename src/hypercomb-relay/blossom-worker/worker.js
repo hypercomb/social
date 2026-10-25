@@ -1730,10 +1730,16 @@ async function serveFrontDoor(request, env) {
     const named = host.startsWith('host.') && host.slice(5).includes('.') ? host.slice(5) : host
     // The zone's card from its pool (welcomeCard); a static welcome.json only
     // where no publisher has signed one — the file a plain host still stages.
-    const card = await welcomeCard(env, named)
-    const welcome = card ?? await fetch(`${origin}/welcome.json`, { headers: { accept: 'application/json' } })
-      .then((r) => r.ok && String(r.headers.get('content-type') || '').includes('json') ? r.json() : null)
-      .catch(() => null)
+    const signed = await welcomeCard(env, named)
+    // A card that carries only a room keeps the staged file's name around it.
+    const staged = signed && (signed.title || signed.tagline) ? null
+      : await fetch(`${origin}/welcome.json`, { headers: { accept: 'application/json' } })
+        .then((r) => r.ok && String(r.headers.get('content-type') || '').includes('json') ? r.json() : null)
+        .catch(() => null)
+    const card = signed && !signed.title && !signed.tagline && staged && typeof staged === 'object'
+      ? { title: String(staged.title ?? ''), tagline: String(staged.tagline ?? ''), links: Array.isArray(staged.links) ? staged.links.slice(0, 12) : [], swarm: signed.swarm }
+      : signed
+    const welcome = card ?? staged
     const name = String(welcome?.title || '').trim().slice(0, 60) || named
     const tagline = String(welcome?.tagline || '').trim().slice(0, 400) || FRONT_DOOR_TAGLINE
     headers.delete('Content-Length')
@@ -1755,21 +1761,53 @@ async function serveFrontDoor(request, env) {
  *  only grows and replicates like any pool. The CURRENT card is the one the
  *  zone's own publishers sign now: the primary first, then the rest. */
 const WELCOME_KEY_RE = /^welcome:[a-z0-9.-]+$/
+// A CARD MAY CARRY ITS ZONE'S ROOM (jwize 2026-10-24, `room host <domain>`): a
+// sealed swarm link the front door draws as "Join the swarm" at its top. Only
+// that one shape passes (host-welcome.ts WELCOME_SWARM_RE, shim welcome.ts):
+// an https page and a #swarm=<sig>@<host>~<key> fragment, nothing else.
+const WELCOME_SWARM_RE = /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?\/#swarm=[0-9a-f]{64}@[a-z0-9.:[\]-]+~[A-Za-z0-9_-]{43}$/
 async function welcomeCard(env, zone) {
   const binding = siteBindings(env)[zone]
   const publishers = [...(binding?.publishers ?? [])].sort((a, b) => Number(b.primary) - Number(a.primary))
   const read = indexReader(env)
+  // The NAME and the ROOM are taken apart. The ROOM is the first card's —
+  // the first publisher in order who signs a card at all, even an empty one
+  // (`room host off` on a card that only carried a room), decides whether the
+  // page shows a room, so a later publisher can never put one on a page whose
+  // first publisher shows none. An index or a card that could not be read, or
+  // an index held that does not verify, is not no card: it decides no room,
+  // and only its name falls through. The NAME is the
+  // first card that gives one, so a card that only carries a room never takes
+  // the name.
+  let named = null
+  let swarm = null
   for (const publisher of publishers) {
-    const index = await read(publisher.pubkey).catch(() => null)
-    const record = await heapRecord(env, String(index?.roots?.[`welcome:${zone}`] || '').toLowerCase())
-    if (!record || typeof record !== 'object') continue
+    if (named && swarm !== null) break
+    let index = null
+    let unread = false
+    try { index = await read(publisher.pubkey) } catch { unread = true }
+    if (!index) {
+      // Held but not verifying is not "no index" either.
+      const held = !unread && !read.failed.has(publisher.pubkey) && await read.raw(publisher.pubkey).catch(() => null)
+      if ((unread || read.failed.has(publisher.pubkey) || held) && swarm === null) swarm = ''
+      continue
+    }
+    const cardSig = String(index.roots?.[`welcome:${zone}`] || '').toLowerCase()
+    if (!SIG_RE.test(cardSig)) continue
+    const record = await heapRecord(env, cardSig)
+    if (!record || typeof record !== 'object') {
+      if (swarm === null) swarm = ''
+      continue
+    }
     const title = String(record.title ?? '').trim().slice(0, 60)
     const tagline = String(record.tagline ?? '').trim().slice(0, 400)
-    if (!title && !tagline) continue
+    const room = typeof record.swarm === 'string' && WELCOME_SWARM_RE.test(record.swarm) ? record.swarm : ''
+    if (swarm === null) swarm = room
     // Links ride as data; the shim keeps only what it would stage (welcome.ts parseWelcome).
-    return { title, tagline, links: Array.isArray(record.links) ? record.links.slice(0, 12) : [] }
+    if (!named && (title || tagline)) named = { title, tagline, links: Array.isArray(record.links) ? record.links.slice(0, 12) : [] }
   }
-  return null
+  if (!named && !swarm) return null
+  return { ...(named ?? { title: '', tagline: '', links: [] }), ...(swarm ? { swarm } : {}) }
 }
 
 /** The shim card's own sentence when a host stages none (welcome.ts DEFAULT_TAGLINE). */
