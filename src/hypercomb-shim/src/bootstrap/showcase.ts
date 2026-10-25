@@ -20,6 +20,7 @@ import type { HostCreation, HostOffering } from '@hypercomb/core'
 import { pictureOrigins, tilePicture } from './tile-picture'
 import { communityKey, doorsOpen, parseView, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseView, type ZoneOwners } from './showcase-record'
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
+import type { OwnerBridge } from './owner-bridge'
 import type { LinkIcon, WelcomeLink } from './welcome'
 
 const SIG = /^[a-f0-9]{64}$/
@@ -88,6 +89,8 @@ export type Version = {
   /** This domain's place first. */
   readonly places: readonly Place[]
   readonly route?: string
+  /** The lineage it was published under, when the ledger named one. */
+  readonly lineage?: string
   /** The ledger-verified publishes of it, per owner — only these can be
    *  turned off, and only by their owner's own hive. */
   readonly claims: readonly Claim[]
@@ -257,7 +260,7 @@ const byTitle = (a: Aggregate, b: Aggregate): number =>
  */
 export const aggregate = (publishes: readonly Publish[], zones: readonly string[], self: string): Band[] => {
   type Gathering = { head: string; title: string; owners: Map<string, Owner>; places: Map<string, Place>
-    route?: string; ledger: boolean; claims: Map<string, { pubkey: string; label: string; lineage: string; zones: Set<string> }> }
+    route?: string; lineage?: string; ledger: boolean; claims: Map<string, { pubkey: string; label: string; lineage: string; zones: Set<string> }> }
   const groups = new Map<string, Publish[]>()
   for (const publish of publishes) {
     const key = `${publish.kind}:${publish.name}${publish.peer ? `@${publish.peer}` : ''}`
@@ -274,6 +277,7 @@ export const aggregate = (publishes: readonly Publish[], zones: readonly string[
       let version = byHead.get(publish.head)
       if (!version) byHead.set(publish.head, version = { head: publish.head, title: publish.title,
         owners: new Map(), places: new Map(), route: publish.route, ledger: false, claims: new Map() })
+      if (publish.kind === 'hive' && publish.lineage) version.lineage ??= publish.lineage
       version.ledger ||= publish.source === 'ledger'
       if (publish.source === 'ledger' && publish.kind === 'hive' && publish.lineage) {
         const id = `${publish.owner.pubkey}:${publish.lineage}`
@@ -301,6 +305,7 @@ export const aggregate = (publishes: readonly Publish[], zones: readonly string[
       places: [...version.places.values()].sort((a, b) =>
         Number(b.zone === self) - Number(a.zone === self) || ledgerFirst(a, b) || a.address.localeCompare(b.address)),
       ...(version.route ? { route: version.route } : {}),
+      ...(version.lineage ? { lineage: version.lineage } : {}),
       claims: [...version.claims.values()].map(claim => ({ pubkey: claim.pubkey, label: claim.label,
         lineage: claim.lineage, zones: [...claim.zones].sort() })),
     })).sort((a, b) => Number(here(b.places)) - Number(here(a.places))
@@ -525,6 +530,8 @@ export type ShowcaseOptions = {
   /** Follow a domain: checked, then kept in this browser's community. */
   readonly follow?: (raw: string) => Promise<{ readonly ok: true; readonly zone: string } | { readonly ok: false; readonly reason: string }>
   /** A followed domain's own ledger, kept to the names under that domain. */
+  /** The hive beside this page, when this device is its owner's: a tap on a tile puts it in the showcase or takes it out. */
+  readonly owner?: OwnerBridge | null
   readonly readPeerLedger?: (zone: string) => Promise<readonly LedgerSite[]>
 }
 
@@ -699,6 +706,33 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   type TileView = { tile: HTMLAnchorElement; art: HTMLElement; name: HTMLElement; address: HTMLElement
     owners: HTMLElement; head: string; entry: Aggregate }
   const tileViews = new Map<string, TileView>()
+  /** The key of the hive beside this page, once it has answered; '' for every visitor. */
+  let ownerKey = ''
+  const ownerNote = el('p', 'owner-note')
+  ownerNote.setAttribute('role', 'status')
+  ownerNote.hidden = true
+  let tapping = false
+  const itemOf = (entry: Aggregate, row: string): ShowcaseItem | null => {
+    const version = entry.versions.find(candidate => candidate.places.some(place => place.zone === row)) ?? entry.versions[0]
+    const lineage = version?.lineage ?? ''
+    const owner = version?.owners.find(candidate => candidate.pubkey === ownerKey) ?? version?.owners[0]
+    return lineage && owner ? { pubkey: owner.pubkey, lineage } : null
+  }
+  const tapTile = async (entry: Aggregate, row: string): Promise<void> => {
+    const bridge = options.owner
+    if (!bridge || !ownerKey || tapping) return
+    const item = itemOf(entry, row)
+    if (!item) return
+    // In your own row a tap takes it out; in another domain's row it puts it in, or takes it out again.
+    const on = row === options.self ? false : !showcased(entry)
+    tapping = true
+    ownerNote.hidden = false
+    ownerNote.textContent = on ? `Putting ${entry.title} in your showcase…` : `Taking ${entry.title} out of your showcase…`
+    const result = await bridge.toggle({ zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on })
+    tapping = false
+    ownerNote.textContent = result.ok ? (on ? `${entry.title} is in your showcase.` : `${entry.title} is out of your showcase.`) : `Not changed: ${result.reason}.`
+    if (result.ok && result.changed) takeLedger(options.ledger)
+  }
   /** Where a tap goes: this row's own place for the name, else its first. */
   const placeFor = (entry: Aggregate, row: string): Place => {
     for (const version of entry.versions) {
@@ -737,22 +771,31 @@ ${entry.key}`
       // the page is the showcase, not a way out of it.
       let timer: ReturnType<typeof setTimeout> | undefined
       let down: { x: number; y: number } | null = null
+      let held = false
       const stop = (): void => { if (timer) clearTimeout(timer); timer = undefined; down = null }
       tile.addEventListener('pointerdown', event => {
         if (event.button > 0 || !event.isPrimary) return
         stop()
+        held = false
         down = { x: event.clientX, y: event.clientY }
         timer = setTimeout(() => {
           stop()
           if (!tile.isConnected) return
-          heldOpen = true; openVersions(made.entry, tile)
+          held = true; heldOpen = true; openVersions(made.entry, tile)
         }, HOLD_MS)
       })
       tile.addEventListener('pointermove', event => {
         if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 10) stop()
       })
       for (const type of ['pointerup', 'pointercancel', 'pointerleave']) tile.addEventListener(type, stop)
-      tile.addEventListener('click', event => event.preventDefault())
+      // A TAP, on a device whose hive is beside this page, puts the creation into the showcase or takes it
+      // out (jwize 2026-10-25: "you turn stuff on from there by toggling the hexagon"). Anywhere else it
+      // goes nowhere. The click a hold ends with is not a tap.
+      tile.addEventListener('click', event => {
+        event.preventDefault()
+        if (held) { held = false; return }
+        void tapTile(made.entry, row)
+      })
       tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile) })
       tile.addEventListener('keydown', event => {
         if (event.key !== ' ' || event.altKey || event.ctrlKey || event.metaKey) return
@@ -762,6 +805,7 @@ ${entry.key}`
       tileViews.set(id, view = made)
     }
     view.entry = entry
+    view.tile.classList.toggle('off', !!ownerKey && row !== options.self && !showcased(entry))
     if (view.head !== lead.head) {
       // A new lead version: its own cover and picture, and the old head forgets this box.
       wearers.get(view.head)?.delete(view.art)
@@ -918,7 +962,7 @@ ${entry.key}`
   const pager = el('div', 'pager')
   pager.setAttribute('aria-label', 'Communities')
   pager.hidden = true
-  bandsHost.append(pager, hosted, nothing, suggest, followBar)
+  bandsHost.append(ownerNote, pager, hosted, nothing, suggest, followBar)
   /** The shape asked for on the address (`?view=launcher`), or none. */
   const viewAsked: ShowcaseView | undefined = (() => {
     try { return parseView(new URLSearchParams(location.search).get('view')) } catch { return undefined }
@@ -1247,6 +1291,7 @@ ${entry.key}`
   }
   takeLedger(options.ledger)
   paint()
+  options.owner?.hello().then(key => { if (key) { ownerKey = key; paint() } }).catch(() => undefined)
   /** Read again: what is published now replaces what was, and each domain's
    *  pools are asked again. */
   const refresh = (ledger: Promise<readonly LedgerSite[]>): void => {
@@ -1342,6 +1387,9 @@ export const SHOWCASE_STYLE = `
 /* the communities: a strip of names after All; the list beneath turns with a swipe */
 .pager { margin: 0 0 .5rem; padding: .3rem 0; }
 .pager[hidden] { display: none; }
+.owner-note { margin: 0 0 .5rem; color: var(--md-on-surface-var); font-size: .85rem; }
+.owner-note[hidden] { display: none; }
+.hex.off { opacity: .35; filter: grayscale(1); }
 .pager-label { padding: .2rem 0; border: 0; background: transparent; cursor: pointer; color: var(--md-on-surface-strong);
   font: 600 1rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
 .pager-label:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }

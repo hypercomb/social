@@ -7,6 +7,7 @@
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
 import './community.view.js'
+import './showcase-bridge.js'
 
 export class CommunityQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'

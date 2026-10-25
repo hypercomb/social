@@ -1003,3 +1003,60 @@ describe('a tile — nothing on the page leads out of the showcase; a hold lists
     } finally { hero.remove(); bands.remove() }
   })
 })
+
+describe('the owner\'s tap — a device whose hive is beside the page puts a tile in or takes it out', () => {
+  const sites = parseLedger(LEDGER)
+  const a = sig('a')
+  const owners = (): ZoneOwners => ({ showcase: null, reached: true, unreadable: false,
+    doors: new Map([[a, new Map([['camelflage', ['hypercomb.com']], ['dylan', ['hypercomb.com']]])]]) })
+  const bridge = (key: string) => ({ hello: vi.fn(async () => key), toggle: vi.fn(async () => ({ ok: true as const, changed: false })) })
+  const draw = (owner: ReturnType<typeof bridge> | null) => showcase({
+    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+    ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
+    ...(owner ? { owner } : {}),
+  })
+  const dylanOf = async (bands: HTMLElement): Promise<HTMLAnchorElement> => vi.waitFor(() => {
+    const found = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes('dylan'))
+    expect(found).toBeDefined()
+    return found!
+  })
+
+  it('asks the hive to take a tile out of the showcase when the owner taps it in their own row', async () => {
+    const owner = bridge(a)
+    const { bands } = draw(owner)
+    const dylan = await dylanOf(bands)
+    await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+    await new Promise(resolve => setTimeout(resolve, 0))
+    dylan.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: false }))
+  })
+
+  it('does nothing for a visitor, and when no hive answers', async () => {
+    const none = bridge('')
+    const { bands } = draw(none)
+    const dylan = await dylanOf(bands)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    dylan.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(none.toggle).not.toHaveBeenCalled()
+    const visitor = draw(null)
+    const tile = await dylanOf(visitor.bands)
+    expect(() => tile.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))).not.toThrow()
+  })
+
+  it('does not toggle on the click that ends a hold', async () => {
+    vi.useFakeTimers()
+    try {
+      const owner = bridge(a)
+      const { hero, bands } = draw(owner)
+      document.body.append(hero, bands)
+      await vi.advanceTimersByTimeAsync(50)
+      const dylan = await dylanOf(bands)
+      dylan.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true }), { button: 0, isPrimary: true, clientX: 1, clientY: 1 }))
+      vi.advanceTimersByTime(501)
+      dylan.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      await vi.advanceTimersByTimeAsync(10)
+      expect(owner.toggle).not.toHaveBeenCalled()
+      hero.remove(); bands.remove()
+    } finally { vi.useRealTimers() }
+  })
+})

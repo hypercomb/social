@@ -9,11 +9,10 @@
 
 import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { CommunityDraft } from './community.draft.js'
-import { ownHiveRoot } from './hive-pointer.js'
 import { publisherKeyHex } from './key-list.client.js'
 import {
-  addCommunity, communityKey, parseShowcase, removeCommunity, renameCommunity, setCommunityView, setView,
-  showcaseKey, signShowcase, toggleCommunityItem, toggleItem,
+  addCommunity, communityKey, readSignedShowcase, removeCommunity, renameCommunity, setCommunityView, setView,
+  signShowcase, toggleCommunityItem, toggleItem,
   type Showcase, type ShowcaseItem, type ShowcaseView,
 } from './showcase-record.js'
 
@@ -38,17 +37,6 @@ const candidates = async (zone: string, pubkey: string): Promise<ShowcaseItem[]>
   } catch { return [] }
 }
 
-/** The record this key already signed for the zone, else an empty one. */
-const signedOrEmpty = async (zone: string): Promise<Showcase> => {
-  const empty: Showcase = { zone, items: [], domains: [] }
-  try {
-    const sig = await ownHiveRoot(zone, showcaseKey(zone))
-    if (!sig) return empty
-    const response = await fetch(`https://${zone}/${sig}`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
-    return response.ok ? parseShowcase(await response.json(), zone) ?? empty : empty
-  } catch { return empty }
-}
-
 const same = (a: ShowcaseItem, b: ShowcaseItem): boolean => a.pubkey === b.pubkey && a.lineage === b.lineage
 
 export class CommunityView extends EventTarget {
@@ -71,7 +59,7 @@ export class CommunityView extends EventTarget {
     if (!target) { say('community takes a domain — community <domain>', 'warning'); return }
     const pubkey = String(await publisherKeyHex().catch(() => '') ?? '').toLowerCase()
     if (!SIG.test(pubkey)) { say('community needs your publishing key, and this hive has none yet', 'warning'); return }
-    const [options, signed] = await Promise.all([candidates(target, pubkey), signedOrEmpty(target)])
+    const [options, signed] = await Promise.all([candidates(target, pubkey), readSignedShowcase(target)])
     this.#options = options
     this.#draft = new CommunityDraft(signed)
     this.#page = ''

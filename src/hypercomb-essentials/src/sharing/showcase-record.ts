@@ -14,7 +14,7 @@
 // Full design: documentation/showcase.md.
 
 import { SignatureService, isReservedPoolWord, moleculeKey } from '@hypercomb/core'
-import { setHiveRoot } from './hive-pointer.js'
+import { ownHiveRoot, setHiveRoot } from './hive-pointer.js'
 
 const get = <T,>(key: string): T | undefined => (window as any).ioc?.get?.(key) as T | undefined
 
@@ -257,4 +257,15 @@ export const renameCommunity = (showcase: Showcase, key: string, raw: unknown): 
   if (next !== key && communities.some(community => communityKey(community.name) === next)) return { ok: false, reason: 'taken' }
   return { ok: true, key: next, showcase: { ...showcase,
     communities: communities.map(community => (communityKey(community.name) === key ? { ...community, name } : community)) } }
+}
+
+/** The record this key already signed for the zone, else an empty one. */
+export async function readSignedShowcase(zone: string): Promise<Showcase> {
+  const empty: Showcase = { zone, items: [], domains: [] }
+  try {
+    const sig = await ownHiveRoot(zone, showcaseKey(zone))
+    if (!sig) return empty
+    const response = await fetch(`https://${zone}/${sig}`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+    return response.ok ? parseShowcase(await response.json(), zone) ?? empty : empty
+  } catch { return empty }
 }

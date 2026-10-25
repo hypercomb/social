@@ -244,3 +244,15 @@ hexagons/launcher per group, delete, undo/redo (`community.draft.ts`) and **Publ
 (`community publish`), which asks first and signs `showcase:<zone>`. **Still owed:** the draft is
 in-window undo only, not yet the hive's own history slot, so closing the window drops the undo trail; and the
 candidates are this key's lineages on the zone, not yet the followed domains' tiles.
+
+### The tap on the page, for the owner (jwize 2026-10-25)
+
+"Whatever you're hosting should be able to have that key" and "I should be able to manage my showcase on my
+mobile with the key in my device": a participant's own host holds the page and the hive on one origin, and
+the device's key is passed to other devices by the key list. So the page asks the hive beside it, over a
+same-origin BroadcastChannel (`owner-bridge.ts` here, `showcase-bridge.ts` in the hive): `hello` finds out
+whether this device is the owner's; a tap on a tile then puts it into the showcase (in another domain's row;
+the ones not in it are grayed) or takes it out (in your own row), and the hive signs with its tested writer.
+A visitor, or a page with no hive on its origin, gets no answer and taps go nowhere. A hold still lists the
+other domains. **Not yet checked on a real host:** that the page and the hive share an origin there, and the
+key-list path for a second device.

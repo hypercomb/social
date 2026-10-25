@@ -22,6 +22,7 @@ import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLin
 import { pictureOrigins, tilePicture } from './tile-picture'
 import { SHOWCASE_STYLE, doorOrigin, matchesDomain, readLedger, readPeerLedger, rootZones, searchTerms, showcase,
   type LedgerSite } from './showcase'
+import { ownerBridge } from './owner-bridge'
 import { readZoneOwners } from './showcase-record'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,
@@ -614,6 +615,7 @@ class HostPanelElement extends HTMLElement {
         readShared: zone => Promise.all([zone === (this.#self || location.host) ? readOfferings(zone).catch(() => []) : Promise.resolve([]),
           readPublicCreations(zone).catch(() => [])]).then(([offers, creations]) => ({ offers, creations })),
         readOwners: readZoneOwners,
+        owner: ownerBridge(),
         // EVERYTHING ON THE HOME PAGE IS A TILE (jwize 2026-10-25): the staged doors
         // and the platform's own are tiles in this domain's row, not panels.
         links: [...door.links, ...door.footer],
