@@ -17,13 +17,16 @@ vi.mock('./deliver-link.js', () => ({ deliverLink: async () => 'copied' }))
 const { hostCurrentBranch } = await import('./host-gesture.js')
 
 let said: string[] = []
+let asked: { message?: string; messageParams?: Record<string, string> }[] = []
 let answer = false
 beforeEach(() => {
   said = []
+  asked = []
   publishBranch.mockClear()
 })
 EffectBus.on<{ message: string }>('activity:log', p => { said.push(p.message) })
-EffectBus.on<{ id: string }>('confirm:request', req => {
+EffectBus.on<{ id: string; message?: string; messageParams?: Record<string, string> }>('confirm:request', req => {
+  asked.push(req)
   queueMicrotask(() => EffectBus.emit('confirm:response', { id: req.id, confirmed: answer }))
 })
 
@@ -42,5 +45,18 @@ describe('the publish gesture', () => {
     expect(said[0]).toBe('waiting for your consent to publish /colony')
     expect(publishBranch).toHaveBeenCalledTimes(1)
     expect(publishBranch.mock.calls[0]![0]).toEqual(['colony'])
+  })
+
+  // jwize, 2026-10-25: "the prompt should tell you where it is publishing to".
+  it('names the address it is publishing to in the consent', async () => {
+    answer = false
+    await hostCurrentBranch(['work', 'meetups'], { 'hypercomb.com': 'meetups.hypercomb.com' })
+    expect(asked.at(-1)?.message).toBe('host.confirm.message-where')
+    expect(asked.at(-1)?.messageParams).toEqual({ name: 'meetups', where: 'meetups.hypercomb.com' })
+  })
+
+  it('says whether it published', async () => {
+    answer = false
+    expect(await hostCurrentBranch(['hyperdex'])).toBe(false)
   })
 })

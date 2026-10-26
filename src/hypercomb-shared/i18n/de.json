@@ -1760,6 +1760,7 @@
   "host.not-branch": "Navigieren Sie zu dem Zweig, den Sie veröffentlichen möchten, und versuchen Sie es dann erneut.",
   "host.confirm.title": "Diesen Zweig veröffentlichen?",
   "host.confirm.message": "„{name}“ und alles darunter wird zu den Hosts hochgeladen, die Sie dafür benannt haben, und in Ihren signierten Bienenstock-Index aufgenommen. Ihr Nostr-Schlüssel signiert die Uploads.",
+  "host.confirm.message-where": "„{name}“ und alles darunter wird unter {where} veröffentlicht und in Ihren signierten Bienenstock-Index aufgenommen. Ihr Nostr-Schlüssel signiert die Uploads.",
   "host.confirm.allow": "Veröffentlichen",
   "host.confirm.deny": "Nicht jetzt",
   "host.seal-failed": "Der Zweig konnte nicht versiegelt werden (ein Kind ist kalt oder nicht auflösbar) — besuchen Sie seine Kacheln einmal und versuchen Sie es dann erneut.",

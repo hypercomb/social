@@ -1710,6 +1710,7 @@
   "host.not-branch": "公開したいブランチに移動してから、もう一度お試しください。",
   "host.confirm.title": "このブランチを一般公開しますか？",
   "host.confirm.message": "「{name}」とその配下すべてが、あなたが指定したホストにアップロードされ、署名付きハイブインデックスに載ります。アップロードはあなたのNostrキーで署名されます。",
+  "host.confirm.message-where": "「{name}」とその配下すべてが {where} に公開され、署名付きハイブインデックスに載ります。アップロードはあなたのNostrキーで署名されます。",
   "host.confirm.allow": "公開する",
   "host.confirm.deny": "今はしない",
   "host.consent-waiting": "{path} の公開について、あなたの許可を待っています",

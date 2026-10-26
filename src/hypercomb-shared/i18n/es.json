@@ -1760,6 +1760,7 @@
   "host.not-branch": "Navega a la rama que quieras publicar y luego inténtalo de nuevo.",
   "host.confirm.title": "¿Publicar esta rama públicamente?",
   "host.confirm.message": "«{name}» y todo lo que contiene se subirá a los hosts que nombraste para ella y se incluirá en tu índice de colmena firmado. Tu clave Nostr firma las subidas.",
+  "host.confirm.message-where": "«{name}» y todo lo que contiene se publicará en {where} y se incluirá en tu índice de colmena firmado. Tu clave Nostr firma las subidas.",
   "host.confirm.allow": "Publicar",
   "host.confirm.deny": "Ahora no",
   "host.seal-failed": "La rama no pudo sellarse (un hijo está frío o no se puede resolver) — visita sus mosaicos una vez y luego inténtalo de nuevo.",

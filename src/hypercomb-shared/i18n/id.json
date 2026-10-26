@@ -1760,6 +1760,7 @@
   "host.not-branch": "Buka cabang yang ingin Anda terbitkan, lalu coba lagi.",
   "host.confirm.title": "Terbitkan cabang ini secara publik?",
   "host.confirm.message": "“{name}” dan semua isinya akan diunggah ke host yang Anda sebutkan untuknya dan dicantumkan di indeks sarang bertanda tangan Anda. Kunci Nostr Anda menandatangani unggahan.",
+  "host.confirm.message-where": "“{name}” dan semua isinya akan diterbitkan ke {where} dan dicantumkan di indeks sarang bertanda tangan Anda. Kunci Nostr Anda menandatangani unggahan.",
   "host.confirm.allow": "Terbitkan",
   "host.confirm.deny": "Tidak sekarang",
   "host.seal-failed": "Cabang tidak bisa disegel (ada anak yang dingin atau tidak bisa diselesaikan) — kunjungi ubinnya sekali, lalu coba lagi.",

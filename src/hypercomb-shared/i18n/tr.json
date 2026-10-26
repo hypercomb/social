@@ -1760,6 +1760,7 @@
   "host.not-branch": "Yayınlamak istediğin dalın içine git, sonra tekrar dene.",
   "host.confirm.title": "Bu dal herkese açık yayınlansın mı?",
   "host.confirm.message": "“{name}” ve altındaki her şey onun için belirttiğin sunuculara yüklenecek ve imzalı kovan dizinine eklenecek. Nostr anahtarın yüklemeleri imzalar.",
+  "host.confirm.message-where": "“{name}” ve altındaki her şey {where} adresinde yayınlanacak ve imzalı kovan dizinine eklenecek. Nostr anahtarın yüklemeleri imzalar.",
   "host.confirm.allow": "Yayınla",
   "host.confirm.deny": "Şimdi değil",
   "host.seal-failed": "Dal mühürlenemedi (bir alt öğe soğuk veya çözümlenemiyor) — döşemelerini bir kez ziyaret et, sonra tekrar dene.",

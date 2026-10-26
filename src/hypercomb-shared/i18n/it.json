@@ -1760,6 +1760,7 @@
   "host.not-branch": "Naviga nel ramo che vuoi pubblicare, poi riprova.",
   "host.confirm.title": "Pubblicare questo ramo?",
   "host.confirm.message": "“{name}” e tutto ciò che contiene verrà caricato sugli host che hai indicato per esso e inserito nel tuo indice alveare firmato. La tua chiave Nostr firma i caricamenti.",
+  "host.confirm.message-where": "“{name}” e tutto ciò che contiene verrà pubblicato su {where} e inserito nel tuo indice alveare firmato. La tua chiave Nostr firma i caricamenti.",
   "host.confirm.allow": "Pubblica",
   "host.confirm.deny": "Non ora",
   "host.seal-failed": "Il ramo non può essere sigillato (un figlio è freddo o irrisolvibile) — visita le sue tessere una volta, poi riprova.",

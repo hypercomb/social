@@ -24,8 +24,10 @@
 //      availability gate → index PUT behind the wipe guard → link bundle →
 //      ledger record → confirmation round trip.
 
-import { EffectBus, get, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, get, lineageKey, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { hostsOfBranch } from './community-hosts.js'
 import { deliverLink } from './deliver-link.js'
+import { doorAddress, listPublishResults } from './publish-results.js'
 import { publishBranch, type PublishProgress } from './publish-branch.js'
 import { STAGE_SHARED } from './stage-succession.js'
 
@@ -48,7 +50,26 @@ const toast = (type: string, title: string, message: string): void => {
   EffectBus.emit('toast:show', { type, title, message })
 }
 
-export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> => {
+/** WHERE IT GOES, said before the press (jwize, 2026-10-25: "the prompt should
+ *  tell you where it is publishing to"). Per domain the branch names: the
+ *  address the caller is about to give it (`publish … as <label>`), else the
+ *  one its last publish opened at, else the one the host gives it by rule. A
+ *  domain with no address a reader could open is said as itself. Empty when
+ *  the branch names none, or they cannot be read — the plain message is kept. */
+const destinations = async (segments: readonly string[], own: Readonly<Record<string, string>>): Promise<string[]> => {
+  try {
+    const key = lineageKey(segments)
+    const zones = [...new Set([...await hostsOfBranch(segments), ...Object.keys(own)])]
+    const mine = (await listPublishResults()).filter(r => r.op === 'publish' && r.lineageKey === key).reverse()
+    const bare = (address: string): string => address.replace(/^https?:\/\//, '').replace(/\/$/, '')
+    return zones.map(zone => bare(own[zone] || mine.find(r => r.zone === zone)?.address || doorAddress(zone, segments, key)) || zone)
+  } catch { return [] }
+}
+
+/** Publish a branch after the participant's consent. True when it published.
+ *  `own` maps a domain to the address the caller will give the branch there
+ *  right after (`publish … on <domain> as <label>`), so the consent names it. */
+export const hostCurrentBranch = async (at?: readonly string[], own: Readonly<Record<string, string>> = {}): Promise<boolean> => {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     const lineage = get<LineageLike>(LINEAGE_KEY)
 
@@ -61,7 +82,7 @@ export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> =
       // The whole hive root is not a branch — name the gesture precisely.
       toast('tip', t(i18n, 'host.title', 'Publish branch'),
         t(i18n, 'host.not-branch', 'Navigate into the branch you want to publish, then try again.'))
-      return
+      return false
     }
     const name = segments[segments.length - 1] ?? ''
 
@@ -70,11 +91,12 @@ export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> =
     //    Said first, so whoever asked (a session, a manager) hears that the
     //    publish now waits on a person, and a decline is never silent.
     const path = `/${segments.join('/')}`
+    const where = (await destinations(segments, own)).join(', ')
     activity(t(i18n, 'host.consent-waiting', `waiting for your consent to publish ${path}`, { path }), '○')
     const confirmed = await requestConfirm({
       title: 'host.confirm.title',
-      message: 'host.confirm.message',
-      messageParams: { name },
+      message: where ? 'host.confirm.message-where' : 'host.confirm.message',
+      messageParams: where ? { name, where } : { name },
       confirmLabel: 'host.confirm.allow',
       cancelLabel: 'host.confirm.deny',
     })
@@ -82,7 +104,7 @@ export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> =
       const declined = t(i18n, 'host.consent-declined', `Not published: ${path} was not allowed.`, { path })
       activity(declined, '○')
       toast('tip', t(i18n, 'host.title', 'Publish branch'), declined)
-      return
+      return false
     }
 
     let nextNote = 0
@@ -111,29 +133,29 @@ export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> =
       switch (result.failure) {
         case 'services':
           toast('error', t(i18n, 'host.title', 'Publish branch'), 'Core services are not ready yet.')
-          return
+          return false
         case 'no-branch':
           toast('tip', t(i18n, 'host.title', 'Publish branch'),
             t(i18n, 'host.not-branch', 'Navigate into the branch you want to publish, then try again.'))
-          return
+          return false
         case 'no-host':
           toast('tip', t(i18n, 'host.title', 'Publish branch'),
             t(i18n, 'host.no-host',
               'Nowhere to put the bytes ({reason}) — add a host to this branch, or set one in the hosts panel, then publish again. Nothing was published.',
               { reason: result.reason ?? 'no node' }))
-          return
+          return false
         case 'not-a-node':
           toast('tip', t(i18n, 'host.title', 'Publish branch'),
             t(i18n, 'publish.failure.not-a-node', "{hosts} can't take uploads. A publish goes to a domain without a port — a tunnel's name is one — or to a host on this computer. Nothing was published.",
               { hosts: result.reason ?? '' }))
-          return
+          return false
         case 'seal-failed':
           toast('error', t(i18n, 'host.title', 'Publish branch'),
             t(i18n, 'host.seal-failed', 'The branch could not be sealed (a child is cold or unresolvable) — visit its tiles once, then try again.'))
-          return
+          return false
         case 'no-signer':
           toast('error', t(i18n, 'host.title', 'Publish branch'), 'No signing key available — the hive index must be signed.')
-          return
+          return false
         case 'not-available': {
           // The node said no (TS-4): nothing is uploading, so "publish again
           // in a moment" would be a promise nobody keeps. Name it and its words.
@@ -142,11 +164,11 @@ export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> =
             const reason = result.refused.reason || result.refused.state || 'refused'
             toast('error', t(i18n, 'host.title', 'Publish branch'),
               t(i18n, 'host.publish.refused', `${node} refused the upload (${reason}) — nothing was published`, { node, reason }))
-            return
+            return false
           }
           toast('info', t(i18n, 'host.title', 'Publish branch'),
             t(i18n, 'host.failed', 'The branch is still uploading — your hive index was NOT advanced, so no link points at missing bytes. Uploads retry on their own; publish again in a moment.'))
-          return
+          return false
         }
         case 'index-unsafe':
           // The refusal that protects every OTHER branch: rewriting the index
@@ -155,14 +177,14 @@ export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> =
             t(i18n, 'host.index-unsafe',
               'Your hive index could not be read back ({reason}), so it was left untouched — the bytes are hosted; try again when the host answers.',
               { reason: result.reason ?? 'unreachable' }))
-          return
+          return false
         case 'index-failed':
           toast('error', t(i18n, 'host.title', 'Publish branch'),
             t(i18n, 'host.index-failed', 'The bytes are hosted but the hive index update failed ({reason}) — try again to retry the index.', { reason: result.reason ?? 'unknown' }))
-          return
+          return false
         default:
           toast('error', t(i18n, 'host.title', 'Publish branch'), 'Could not create the link bundle resource.')
-          return
+          return false
       }
     }
 
@@ -202,4 +224,5 @@ export const hostCurrentBranch = async (at?: readonly string[]): Promise<void> =
     }
 
     console.log(`[host] "${name}" sealed=${result.sealed.slice(0, 12)}… index=${result.host}/<sign('hive:indexes')>/${result.pubkey.slice(0, 12)}… link=${result.url} status=${result.status}`)
+    return true
   }

@@ -1760,6 +1760,7 @@
   "host.not-branch": "Navegue até a ramificação que deseja publicar e tente novamente.",
   "host.confirm.title": "Publicar esta ramificação publicamente?",
   "host.confirm.message": "«{name}» e tudo abaixo será enviado aos hosts que você indicou para ela e listado no seu índice de colmeia assinado. Sua chave Nostr assina os envios.",
+  "host.confirm.message-where": "«{name}» e tudo abaixo será publicado em {where} e listado no seu índice de colmeia assinado. Sua chave Nostr assina os envios.",
   "host.confirm.allow": "Publicar",
   "host.confirm.deny": "Agora não",
   "host.seal-failed": "A ramificação não pôde ser selada (um filho está frio ou irresolvível) — visite seus blocos uma vez e tente novamente.",

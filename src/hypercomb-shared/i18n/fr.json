@@ -1760,6 +1760,7 @@
   "host.not-branch": "Naviguez vers la branche que vous souhaitez publier, puis réessayez.",
   "host.confirm.title": "Publier cette branche publiquement ?",
   "host.confirm.message": "« {name} » et tout ce qu'elle contient sera téléversé vers les hôtes que vous avez nommés pour elle et inscrit dans votre index de ruche signé. Votre clé Nostr signe les envois.",
+  "host.confirm.message-where": "« {name} » et tout ce qu'elle contient sera publié sur {where} et inscrit dans votre index de ruche signé. Votre clé Nostr signe les envois.",
   "host.confirm.allow": "Publier",
   "host.confirm.deny": "Pas maintenant",
   "host.seal-failed": "La branche n'a pas pu être scellée (un enfant est froid ou impossible à résoudre) — visitez ses tuiles une fois, puis réessayez.",

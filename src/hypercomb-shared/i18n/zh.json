@@ -1760,6 +1760,7 @@
   "host.not-branch": "请先进入要发布的分支，然后重试。",
   "host.confirm.title": "要公开发布此分支吗？",
   "host.confirm.message": "“{name}”及其下所有内容将上传到你为它指定的主机，并列入你的已签名蜂巢索引。你的 Nostr 密钥为上传签名。",
+  "host.confirm.message-where": "“{name}”及其下所有内容将发布到 {where}，并列入你的已签名蜂巢索引。你的 Nostr 密钥为上传签名。",
   "host.confirm.allow": "发布",
   "host.confirm.deny": "暂不",
   "host.seal-failed": "分支无法密封（某个子项冷启动或无法解析）— 先访问其磁贴，然后再次尝试发布。",

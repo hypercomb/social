@@ -1760,6 +1760,7 @@
   "host.not-branch": "게시할 분기로 이동한 다음 다시 시도하세요.",
   "host.confirm.title": "이 분기를 공개적으로 게시하시겠습니까?",
   "host.confirm.message": "“{name}”과(와) 그 아래 모든 것이 당신이 지정한 호스트에 업로드되고 서명된 하이브 인덱스에 등재됩니다. Nostr 키가 업로드에 서명합니다.",
+  "host.confirm.message-where": "“{name}”과(와) 그 아래 모든 것이 {where}에 게시되고 서명된 하이브 인덱스에 등재됩니다. Nostr 키가 업로드에 서명합니다.",
   "host.confirm.allow": "게시",
   "host.confirm.deny": "나중에",
   "host.seal-failed": "분기를 봉인할 수 없습니다 (하위 항목이 콜드이거나 해석 불가) — 타일을 한 번 방문한 후 다시 시도하세요.",
