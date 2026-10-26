@@ -288,3 +288,12 @@ The page no longer draws groups: no "All" row or word, no group label, no swipe 
 unless asked for; the record and the hive's `community` window still carry them, so nothing signed is lost). The hive's
 own setup ("Manage this hive": creations, sources, packages, deployments) now waits behind the Manage icon, so arrival is the
 brand, the search and the tiles.
+
+### A showcase tile is a belief, not a copy (jwize 2026-10-25)
+
+Turning a tile on names it (`{pubkey, lineage}`) and links to where its author serves it. Your host does not copy a
+third party's bytes (a considered "no": holding someone's bytes and then having them disappear is not believing in
+them, it complicates the host, and nothing can force other hosts to forget anyway). If the author goes, the tile goes
+with them. What an author controls is their own word: their signed doors, which an honest reader honors. Your own
+content reaches your own host by replication, as before; that is the only copying. Private content is encrypted
+on the device and is never public to begin with.
