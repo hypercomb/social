@@ -100,6 +100,35 @@ export class NostrSigner {
     } catch { return null }
   }
 
+  /** NIP-44 to a peer's public key: sealed to them, opened only by their private key. A NIP-07 extension does it
+   *  inside the extension (the key never reaches the page); with none, this device's own key does. With an extension
+   *  that has no NIP-44 it is null, never the local key: the two keys would disagree (see getPublicKeyHex). */
+  public nip44Encrypt = async (peerPubkeyHex: string, plaintext: string): Promise<string | null> => {
+    if (isSandboxDoor()) return null
+    const anyWin = window as any
+    if (anyWin?.nostr) {
+      if (!anyWin.nostr.nip44?.encrypt) return null
+      try { return String(await anyWin.nostr.nip44.encrypt(peerPubkeyHex, plaintext)) } catch { return null }
+    }
+    const secretHex = this.resolveSecretKeyHex()
+    if (!secretHex) return null
+    // Loaded when first used: NIP-44 is not on the boot path, so it stays out of the eager lane.
+    try { const nip44 = await import('nostr-tools/nip44'); return nip44.encrypt(plaintext, nip44.getConversationKey(this.hexToBytes(secretHex) as any, peerPubkeyHex)) } catch { return null }
+  }
+
+  /** Open what a peer sealed to this key: `peerPubkeyHex` is whoever sealed it. Null when it does not open. */
+  public nip44Decrypt = async (peerPubkeyHex: string, payload: string): Promise<string | null> => {
+    if (isSandboxDoor()) return null
+    const anyWin = window as any
+    if (anyWin?.nostr) {
+      if (!anyWin.nostr.nip44?.decrypt) return null
+      try { return String(await anyWin.nostr.nip44.decrypt(peerPubkeyHex, payload)) } catch { return null }
+    }
+    const secretHex = this.resolveSecretKeyHex()
+    if (!secretHex) return null
+    try { const nip44 = await import('nostr-tools/nip44'); return nip44.decrypt(payload, nip44.getConversationKey(this.hexToBytes(secretHex) as any, peerPubkeyHex)) } catch { return null }
+  }
+
   public signEvent = async (evt: NostrEvent): Promise<NostrEvent> => {
     // already signed
     if (evt?.id && evt?.pubkey && evt?.sig) return evt

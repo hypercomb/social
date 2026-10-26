@@ -1,6 +1,6 @@
 # Sealed audiences — one branch, a version per key
 
-**Status:** DESIGNED 2026-10-02, not built. The three decisions below are DECIDED (jwize, the same day: "go with your recommendations").
+**Status:** DESIGNED 2026-10-02. **Slice 1 BUILT 2026-10-26**: the envelope (`sharing/sealed-envelope.ts`: seal one door secret to each member with NIP-44, open it with your own key, canonical bytes, parser) and the signer's `nip44Encrypt` / `nip44Decrypt` (extension passthrough, else this device's key; NIP-44 loads lazily so the boot lane does not grow), with specs including the end-to-end open of a sealed key index. **Not built yet:** the private-branch switch in Publish, the publish step (seal each atom, key index, door, upload), the `sealed` field carried by EVERY index writer, and opening on the reading side. The three decisions below are DECIDED (jwize, the same day: "go with your recommendations").
 
 jwize, 2026-10-02: *"We should have keys that also serve alternate content from
 directories that have encrypted content so we can have a different build for
