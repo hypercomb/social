@@ -109,6 +109,16 @@ Asked again the same day whether drafts belong on a separate domain, jwize kept 
 
 **The proof runs again (2026-10-25): `verify-hive-publish.cjs` 75/75.** It had rotted against three later changes, none in the trial itself: its sentences went through the remote door, which the admission gate (2026-10-01) treats as a machine's, so `module commit` was refused (they now go through `command:submit`, the door Enter uses, as canonical slash); a fresh hive grants a model no word, and the chat offers code writing only to a model that may change something (the harness says `grant allow create` first, as a participant would); and the local host reported indexes from the KV namespace they left on 2026-09-25 (it now reads the `sign('hive:indexes')` pool). One real fault came out of it: on the Enter path a host with a port (`@localhost:4291`) was read as `label:tag` and the line vanished; the module word now keeps its arguments verbatim (`rawArgs`). Run it with `web-4264-bigstack` while `hypercomb-web/public/content` holds more files than the Angular dev server can list.
 
+**Every draft waits for a human (2026-10-26).** jwize: "I have to decide whether to accept the changes always" · "there is no bot accepting going live in the hive" · "it is a human door". The flow is ask → create → try → scan → import → publish:
+
+- A model's draft is flagged in the brood the moment it is written, whether or not the scan found it reaching anything (`module-drafts.ts` `admitInBrood`, reason "nobody has tried it yet"). It runs nowhere in this hive until the participant's `brood accept`, a word no machine may say.
+- `module commit` folds this hive's own held drafts into the trial, which is where they are tried; a stranger's code taken and not accepted still stays out.
+- `module promote` refuses while the trial carries any module this hive still holds (`unacceptedIn`), naming how many and pointing at the brood.
+- A model may say `module commit <change> @<host>` — a trial only. The word is declared `destructive` at the `network`, because a trial is public and signed with the participant's key, so it is off until the participant says `/grant destructive` and `/grant allow module`. Promote, withdraw, take, drop and accept stay human doors.
+- Proof: `verify-hive-publish.cjs` 77/77 — promote is refused while the draft is held, the draft has not run in the publisher's hive, the publisher accepts it by hand, then promote goes through.
+
+Next (jwize, same day): held drafts shown as EGGS on the tile being worked in — only an image and plain properties, no code running, until they hatch on acceptance.
+
 Still owed, from the same conversation: a reviewer that runs the change's tests, a plain-language summary of each change for the participant, reviewers that are deliberately different models, and installing a taken change into the git source.
 
 ## Audit a trial from your own hive (built 2026-09-23)

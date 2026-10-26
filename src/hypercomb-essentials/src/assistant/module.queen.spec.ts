@@ -25,7 +25,7 @@ vi.mock('./module-review.js', async (importOriginal) => {
   }
 })
 
-const { ModuleQueenBee } = await import('./module.queen.js')
+const { ModuleQueenBee, unacceptedIn } = await import('./module.queen.js')
 
 const AUDITED = 'a'.repeat(64)
 const SWAPPED = 'b'.repeat(64)
@@ -108,5 +108,21 @@ describe('module take with held code', () => {
 describe('a host with a port', () => {
   it('reaches the word: the module word keeps its arguments verbatim', () => {
     expect(new ModuleQueenBee().rawArgs).toBe(true)
+  })
+})
+
+// jwize, 2026-10-26: "there is no bot accepting going live in the hive".
+describe('promote goes live only with what you accepted', () => {
+  const install = (bees: string[], deps: string[] = []) => ({
+    modulesOf: async () => ({ root: 'r', bees: bees.map(sig => ({ sig, path: 'p' })), dependencies: deps.map(sig => ({ sig, alias: '' })) }),
+  })
+  it('names every module the trial carries that this hive still holds', async () => {
+    const accepted = new Set(['a', 'd1'])
+    expect(await unacceptedIn('r', ['h'], install(['a', 'b', 'b'], ['d1', 'd2']), async sig => accepted.has(sig))).toEqual(['b', 'd2'])
+    expect(await unacceptedIn('r', ['h'], install(['a'], ['d1']), async sig => accepted.has(sig))).toEqual([])
+  })
+  it('says it cannot tell when the trial cannot be read here', async () => {
+    expect(await unacceptedIn('r', ['h'], { modulesOf: async () => null })).toBeNull()
+    expect(await unacceptedIn('r', ['h'], undefined)).toBeNull()
   })
 })
