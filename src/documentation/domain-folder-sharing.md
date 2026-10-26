@@ -91,6 +91,29 @@ name needs, then a name can be added, moved, retired or recycled by changing the
 - **A recycled name must start empty.** Anything the reader keeps per name (trust, stored state) is keyed by name **and** the
   publisher's key, never by name alone. Today code trust is keyed by domain alone, which is a known gap.
 
+## The pin and a compromised host (jwize 2026-10-26: "overrideable before load, so securable even when compromised")
+
+The pin is the one mutable pointer, so it is where a compromised host would strike. What the loader does today
+(`hypercomb-shim/src/bootstrap-loader.ts`): it asks the **origin's** `/pin` first (so a repin takes effect), fetches the bundle
+that signature names, and **verifies the bytes hash to that pin** before running them; if the fetched pin does not resolve it
+falls back to the last pin that verified and ran (`hc:bootstrap-pin`). That stops a host from serving *wrong bytes under a pin*.
+It does not stop a host from serving *its own pin and its own bundle*: they agree with each other, so the hash check passes.
+
+So "securable" means one more rule, and it is a client-side one, decided before anything loads: **the pin a client acts on comes
+from something it already trusts, never from the origin alone.** Candidates, strongest first: a signed install pointer
+(`install:<name>` in the publisher's signed index, checked against a publisher key the client already holds), then the
+last pin that verified on this device, then a pin the visitor carried in (a link). The origin's `/pin` is then only an
+announcement that a newer pin exists, taken when the signed pointer says so. With that, a compromised host can cost a client
+a 404 and nothing more, and recovery is moving the signed pointer ("update pointer and you are good").
+
+Two limits that no page code can remove: **the first load from an origin the client has no memory of** trusts whatever that
+origin serves as the loader (index.html, main.js), so a first visit is safe only when it arrives with a pin or a publisher
+key (a link, an installed app, a service worker already holding the loader); and **the signing key** is still the root of
+trust (see the key-list notes on recovery).
+
+**Built:** hash-verify of the bundle against its pin; last-known-good fallback. **Not built:** choosing the pin from a signed
+pointer or a carried key instead of the origin's `/pin`; the loader still prefers the origin's.
+
 ## Verified 2026-10-26 (live, hypercomb.com)
 
 | Check | Result |
