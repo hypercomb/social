@@ -264,3 +264,13 @@ your showcase; take the tile out of the showcase and they are listed again.
 easy"): `keys allow` on the desktop gives a link (ten minutes, one use); opened on the phone it asks once, in
 words, and the tap adds the phone's own key to your key list. Nothing secret is copied; `keys off` removes it.
 `keys allow` also shows the link as a QR code (`sharing/qr-code.ts`, no third-party code; `invite-qr.view.ts` draws it until the invite ends), so a phone in the room can just be pointed at it. The encoder is held, module for module, to the Python `qrcode` package's output for 13 texts under all 8 masks, versions 1-10 (`qr-code.reference.json`). **Not built:** a revoke row in a window (`keys off` does it).
+
+### Under another domain a tap turns it on (jwize 2026-10-25, last word)
+
+"They should all be grayed out under other domains and when you click it lights up and it is added to the
+showcase." So the two kinds of row differ: **in the showcase** (this domain's row) a tap visits and a hold takes
+the tile out (on the owner's device) or lists its domains; **under another domain** every tile is grayed unless it
+is already in the showcase, and a tap lights it up and adds it (a second tap takes it out); a hold lists the domains
+and offers the same switch. With a hive beside the page the switch is signed there; with none the tap opens the hive
+that has the key (`#showcase=` link, `showcase-link.ts`; the hive asks once, signs, and returns you). Arrival shows
+only the showcase open. Search and Follow are unchanged.

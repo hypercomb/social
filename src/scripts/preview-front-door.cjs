@@ -8,6 +8,7 @@
 //   node scripts/preview-front-door.cjs --no-build         # reuse the last build
 //   node scripts/preview-front-door.cjs --demo             # with named communities to swipe between
 //   node scripts/preview-front-door.cjs --demo --view launcher   # ... drawn as the launcher
+//   node scripts/preview-front-door.cjs --owner            # --demo, with a stand-in for your hive: a hold toggles
 //
 // --demo signs a showcase with a THROWAWAY key (never yours) that names a few
 // communities, and swaps that key in for the domain's owner in the ledger the
@@ -77,11 +78,27 @@ const demoFor = async (zone, view) => {
       { name: 'Third', items: lineages.slice(third * 2).map(item), domains: [] },
     ].filter(community => community.items.length),
   }))
-  const atomSig = sha(atom)
   const doors = Object.fromEntries(lineages.map(lineage => [lineage, [zone]]))
-  const index = finalizeEvent({ kind: 30564, created_at: Math.floor(Date.now() / 1000), tags: [],
-    content: JSON.stringify({ v: 1, roots: { [`showcase:${zone}`]: atomSig }, doors }) }, secret)
-  return { ledger, key, atom, atomSig, index, indexes: sha(Buffer.from('hive:indexes')) }
+  const state = { ledger, key, atom, atomSig: sha(atom), index: null, indexes: sha(Buffer.from('hive:indexes')), at: Math.floor(Date.now() / 1000) }
+  const sign = () => {
+    state.index = finalizeEvent({ kind: 30564, created_at: state.at++, tags: [],
+      content: JSON.stringify({ v: 1, roots: { [`showcase:${zone}`]: state.atomSig }, doors }) }, secret)
+  }
+  sign()
+  /** The stand-in hive's act: put a lineage into the showcase, or take it out (and out of every community), then re-sign. */
+  state.toggle = (lineage, on) => {
+    const record = JSON.parse(state.atom.toString())
+    const has = record.items.some(row => row.lineage === lineage)
+    if (has === on) return false
+    record.items = on ? [...record.items, item(lineage)] : record.items.filter(row => row.lineage !== lineage)
+    if (!on) record.communities = (record.communities || []).map(community => ({ ...community, items: community.items.filter(row => row.lineage !== lineage) }))
+    if (!doors[lineage]) doors[lineage] = [zone]
+    state.atom = Buffer.from(JSON.stringify(record))
+    state.atomSig = sha(state.atom)
+    sign()
+    return true
+  }
+  return state
 }
 
 const types = {
@@ -91,11 +108,27 @@ const types = {
 
 ;(async () => {
   const phone = flag('phone')
-  const demo = flag('demo') ? await demoFor(domain, value('view', '')) : null
+  const demo = flag('demo') || flag('owner') ? await demoFor(domain, value('view', '')) : null
   const browser = await chromium.launch({ headless: flag('headless'), args: phone ? [] : ['--window-size=1500,1000'] })
   const context = await browser.newContext(phone
     ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, serviceWorkers: 'allow' }
     : { viewport: null, serviceWorkers: 'allow' })
+
+  // --owner: a stand-in for the hive beside the page, over the same channel the real one answers on.
+  if (demo && flag('owner')) {
+    await context.exposeBinding('__hcDemoToggle', (_source, request) => demo.toggle(String(request.lineage), request.on === true))
+    await context.addInitScript(key => {
+      const channel = new BroadcastChannel('hc:showcase')
+      channel.onmessage = async event => {
+        const message = event.data || {}
+        if (message.t === 'hello') channel.postMessage({ t: 'here', id: message.id, pubkey: key })
+        else if (message.t === 'toggle') {
+          const changed = await window.__hcDemoToggle({ lineage: message.lineage, on: message.on })
+          channel.postMessage({ t: 'done', id: message.id, ok: true, changed })
+        }
+      }
+    }, demo.key)
+  }
 
   // The shell is yours; the data is the domain's.
   await context.route(`https://${domain}/**`, async route => {
@@ -123,6 +156,7 @@ const types = {
   page.on('pageerror', error => console.log('[page error]', error.message))
   await page.goto(`https://${domain}/`, { waitUntil: 'domcontentloaded' })
   console.log(`\nThe front door of ${domain}, from your working tree${phone ? ', as a touch phone' : ''}.`)
+  if (demo && flag('owner')) console.log('Owner: a stand-in hive answers on this page, so HOLD a tile to take it out of (or put it into) the showcase. Nothing real is signed.')
   if (demo) console.log('Demo: a throwaway key signs a showcase with communities First, Second, Third — nothing real is changed.')
   if (flag('headless')) {
     await page.waitForTimeout(12000)

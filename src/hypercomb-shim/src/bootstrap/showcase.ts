@@ -21,6 +21,7 @@ import { pictureOrigins, tilePicture } from './tile-picture'
 import { communityKey, doorsOpen, parseView, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseView, type ZoneOwners } from './showcase-record'
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { OwnerBridge } from './owner-bridge'
+import { showcaseHref } from './showcase-link'
 import type { LinkIcon, WelcomeLink } from './welcome'
 
 const SIG = /^[a-f0-9]{64}$/
@@ -663,7 +664,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     closeVersions()
     event.stopPropagation()
   })
-  const openVersions = (entry: Aggregate, from: HTMLElement): void => {
+  const openVersions = (entry: Aggregate, from: HTMLElement, row: string): void => {
     opener = from
     const heading = el('h3', 'versions-title')
     heading.textContent = entry.title
@@ -697,7 +698,33 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
       none.textContent = 'Every domain holds the same version.'
       list.append(none)
     }
-    sheet.replaceChildren(heading, list)
+    // The way to put it in (or take it out): on this device when a hive of yours answers here, else by
+    // handing the switch to the hive that has the key.
+    const item = itemOf(entry, row)
+    const inside = showcased(entry)
+    const label = inside ? 'Take it out of my showcase' : 'Put it in my showcase'
+    let act: HTMLElement | null = null
+    if (item) {
+      if (options.owner && ownerKey) {
+        const button = el('button', 'version-act')
+        button.type = 'button'
+        button.textContent = label
+        button.addEventListener('click', () => { closeVersions(); void tapTile(entry, row) })
+        act = button
+      } else {
+        const href = showcaseHref(options.home, { zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on: !inside,
+          title: entry.title, back: location.href.split('#')[0]! })
+        if (href) {
+          const link = el('a', 'version-act')
+          link.href = href
+          link.target = '_blank'
+          link.rel = 'noopener'
+          link.textContent = label
+          act = link
+        }
+      }
+    }
+    sheet.replaceChildren(...[heading, act, list].filter((node): node is HTMLElement => !!node))
     sheet.tabIndex = -1
     backdrop.hidden = false
     document.addEventListener('keydown', onKey, true)
@@ -785,34 +812,39 @@ ${entry.key}`
           stop()
           if (!tile.isConnected) return
           held = true
-          // On the owner's device a hold turns the tile on or off; for anyone else it lists the domains.
-          if (options.owner && ownerKey) void tapTile(made.entry, row)
-          else { heldOpen = true; openVersions(made.entry, tile) }
+          // In the showcase, on the owner's device, a hold takes the tile out; everywhere else it lists the domains.
+          if (row === options.self && options.owner && ownerKey) void tapTile(made.entry, row)
+          else { heldOpen = true; openVersions(made.entry, tile, row) }
         }, HOLD_MS)
       })
       tile.addEventListener('pointermove', event => {
         if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 10) stop()
       })
       for (const type of ['pointerup', 'pointercancel', 'pointerleave']) tile.addEventListener(type, stop)
-      // A TAP VISITS; A HOLD TOGGLES (jwize 2026-10-25: "long press to toggle and single press to visit"). On a
-      // device whose hive is beside this page, holding a tile puts it into the showcase or takes it out; a tap
-      // is the link. The click a hold ends with is swallowed so it never also visits.
+      // IN THE SHOWCASE A TAP VISITS. UNDER ANOTHER DOMAIN A TAP TURNS THE TILE ON OR OFF (jwize 2026-10-25: "of
+      // course on other domains it is just toggling"; "they should all be grayed out under other domains and
+      // when you click it lights up and it is added to the showcase"). The click a hold ends with is swallowed.
       tile.addEventListener('click', event => {
-        if (!held) return
-        held = false
+        if (held) { held = false; event.preventDefault(); event.stopPropagation(); return }
+        if (row === options.self) return
         event.preventDefault()
-        event.stopPropagation()
+        if (options.owner && ownerKey) { void tapTile(made.entry, row); return }
+        // No hive beside this page: the hive that has the key does it, and the page waits here.
+        const item = itemOf(made.entry, row)
+        const href = item ? showcaseHref(options.home, { zone: options.self, pubkey: item.pubkey, lineage: item.lineage,
+          on: !showcased(made.entry), title: made.entry.title, back: location.href.split('#')[0]! }) : null
+        if (href) window.open(href, '_blank', 'noopener')
       })
-      tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile) })
+      tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile, row) })
       tile.addEventListener('keydown', event => {
         if (event.key !== ' ' || event.altKey || event.ctrlKey || event.metaKey) return
         event.preventDefault()
-        openVersions(made.entry, tile)
+        openVersions(made.entry, tile, row)
       })
       tileViews.set(id, view = made)
     }
     view.entry = entry
-    view.tile.classList.toggle('off', !!ownerKey && row !== options.self && !showcased(entry))
+    view.tile.classList.toggle('off', row !== options.self && !showcased(entry))
     if (view.head !== lead.head) {
       // A new lead version: its own cover and picture, and the old head forgets this box.
       wearers.get(view.head)?.delete(view.art)
@@ -827,9 +859,9 @@ ${entry.key}`
     // Somewhere else on the web opens in its own tab; this origin is this site still.
     if (view.tile.origin !== location.origin) { view.tile.target = '_blank'; view.tile.rel = 'noopener' }
     else { view.tile.removeAttribute('target'); view.tile.removeAttribute('rel') }
-    view.tile.title = ownerKey && options.owner
-      ? `${entry.title} · ${place.address} — hold to turn it on or off`
-      : `${entry.title} · ${place.address} — hold to see its domains`
+    view.tile.title = row === options.self
+      ? `${entry.title} · ${place.address} — tap to visit, hold for more`
+      : `${entry.title} · ${place.address} — tap to ${showcased(entry) ? 'take it out of' : 'put it in'} your showcase, hold for its domains`
     view.name.textContent = entry.title
     view.address.textContent = place.address
     view.owners.hidden = entry.owners < 2
@@ -1515,6 +1547,9 @@ a.hex:focus-visible > .hex-art { inset: 4px; }
   border-radius: var(--hc-radius-card, 3px); outline: 0; }
 .versions-title { margin: 0 0 .6rem; overflow-wrap: anywhere; color: var(--md-on-surface-strong); }
 .version-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
+.version-act { display: block; box-sizing: border-box; width: 100%; margin: 0 0 .7rem; padding: .6rem .8rem; text-align: center; text-decoration: none;
+  border: 1px solid var(--md-primary); border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-primary); cursor: pointer;
+  font: 600 .9rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
 .version { display: flex; justify-content: space-between; gap: .8rem; overflow-wrap: anywhere; font: 500 .85rem/1.35 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--md-on-surface-var); }
 a.version-visit { color: var(--md-primary); }
 .version-sig { opacity: .6; }

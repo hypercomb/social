@@ -13,6 +13,7 @@
 //
 // MIRRORED: hypercomb-shim/src/bootstrap/owner-bridge.ts speaks this; the shim spec holds them together.
 
+import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { publisherKeyHex } from './key-list.client.js'
 import { readSignedShowcase, showcases, signShowcase, toggleItem, type ShowcaseItem } from './showcase-record.js'
 
@@ -72,4 +73,50 @@ export function startShowcaseBridge(): void {
   })
 }
 
+// ── a hand-off from a front door that has no hive beside it (showcase-link.ts in the shim) ──
+
+export const PENDING_SHOWCASE_KEY = 'hc:pending-showcase' // mirror of invite-capture.ts
+const SHOWCASE_PREFIX = '#showcase='
+
+const fromBase64Url = (text: string): string => {
+  const binary = atob(text.replace(/-/g, '+').replace(/_/g, '/'))
+  return new TextDecoder().decode(Uint8Array.from(binary, char => char.charCodeAt(0)))
+}
+
+/** A back-address worth returning to: https, or this machine's own http. */
+const safeBack = (raw: unknown): string => {
+  try {
+    const url = new URL(String(raw ?? ''))
+    return url.protocol === 'https:' || (url.protocol === 'http:' && /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(url.hostname)) ? url.href : ''
+  } catch { return '' }
+}
+
+/** Take the switch a front door handed here: ask once, in words, apply it with this hive's key, go back. */
+export async function takePendingShowcase(): Promise<void> {
+  let hash = ''
+  try { hash = sessionStorage.getItem(PENDING_SHOWCASE_KEY) ?? ''; sessionStorage.removeItem(PENDING_SHOWCASE_KEY) } catch { return }
+  if (!hash.startsWith(SHOWCASE_PREFIX)) return
+  let request: Record<string, unknown>
+  try { request = JSON.parse(fromBase64Url(hash.slice(SHOWCASE_PREFIX.length))) as Record<string, unknown> } catch { return }
+  if (!request || request['v'] !== 1) return
+  const title = String(request['title'] ?? request['lineage'] ?? '').slice(0, 80)
+  const on = request['on'] === true
+  const zone = String(request['zone'] ?? '')
+  const ok = await requestConfirm({
+    title: on ? 'Put it in your showcase?' : 'Take it out of your showcase?',
+    message: `${title} — on ${zone}. Only you can do this; it is signed here with your key.`,
+    confirmLabel: on ? 'Put it in' : 'Take it out',
+    cancelLabel: 'Not now',
+  }).catch(() => false)
+  if (!ok) return
+  const result = await applyToggle({ zone, pubkey: String(request['pubkey'] ?? ''), lineage: String(request['lineage'] ?? ''), on })
+  EffectBus.emit('toast:show', result.ok
+    ? { type: 'success', message: on ? `${title} is in your showcase.` : `${title} is out of your showcase.` }
+    : { type: 'error', message: `Showcase not changed: ${result.reason}` })
+  const back = result.ok ? safeBack(request['back']) : ''
+  if (back) setTimeout(() => { window.location.assign(back) }, 900)
+}
+
 startShowcaseBridge()
+// After boot has settled: the hive may not have its key and host sync up the moment this module loads.
+if (typeof window !== 'undefined') setTimeout(() => { void takePendingShowcase() }, 2500)

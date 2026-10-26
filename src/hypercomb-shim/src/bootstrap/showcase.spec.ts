@@ -1092,21 +1092,19 @@ describe('a tap visits, a hold toggles', () => {
     } finally { vi.useRealTimers() }
   })
 
-  it('stays in its domain\'s row when it is out of the showcase, grayed, and a hold asks to put it in', async () => {
-    vi.useFakeTimers()
+  it('stays in its domain row when it is out of the showcase, grayed, and a tap lights it up and asks to put it in', async () => {
+    const owner = bridge(a)
+    const { hero, bands } = draw(owner, ['jwize.com'])
+    document.body.append(hero, bands)
     try {
-      const owner = bridge(a)
-      const { hero, bands } = draw(owner, ['jwize.com'])
-      document.body.append(hero, bands)
-      await vi.advanceTimersByTimeAsync(50)
+      await vi.waitFor(() => expect(bands.querySelectorAll('.dex-head').length).toBeGreaterThan(1))
       ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
       const dylan = await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')
       expect(dylan.classList.contains('off')).toBe(true)
-      press(dylan)
-      vi.advanceTimersByTime(501)
-      await vi.advanceTimersByTimeAsync(10)
-      expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true })
-      hero.remove(); bands.remove()
-    } finally { vi.useRealTimers() }
+      await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(click(dylan).defaultPrevented).toBe(true)
+      await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
+    } finally { hero.remove(); bands.remove() }
   })
 })

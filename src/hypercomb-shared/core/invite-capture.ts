@@ -117,6 +117,20 @@ const captureTakeLink = (): boolean => {
 }
 captureTakeLink()
 
+/** SHOWCASE — `#showcase=<request>`: a visitor's device with no hive beside the page held a tile and was
+ *  handed here, to the hive that holds their key. Stashed VERBATIM and the URL cleaned; the one validator is
+ *  essentials' sharing/showcase-bridge.ts. MIRRORED there: PENDING_SHOWCASE_KEY, SHOWCASE_PREFIX. */
+const SHOWCASE_PREFIX = '#showcase='
+const PENDING_SHOWCASE_KEY = 'hc:pending-showcase'
+;(function captureShowcase(): void {
+  try {
+    const hash = window.location.hash ?? ''
+    if (!hash.startsWith(SHOWCASE_PREFIX)) return
+    try { sessionStorage.setItem(PENDING_SHOWCASE_KEY, hash) } catch { return }
+    window.history.replaceState(window.history.state, '', window.location.pathname + (window.location.search ?? ''))
+  } catch { /* never block boot on capture */ }
+})()
+
 /** TURN OFF — `#turn-off=<request>`: an owner pressed Off on a front door's
  *  version row and was handed here, to the hive that holds their key
  *  (documentation/domain-claim.md, "Turning a publish off"). Stashed VERBATIM
