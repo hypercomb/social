@@ -1560,7 +1560,7 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
 .dex-chevron { display: grid; flex: none; color: var(--md-on-surface-var); transition: transform .2s; }
 .dex-chevron svg { width: 1.1rem; height: 1.1rem; }
 .dex-row.open .dex-chevron { transform: rotate(180deg); color: var(--md-primary); }
-.dex-body { padding: .2rem 0 1rem; }
+.dex-body { padding: 1rem; }
 .dex-row:not(.open) .dex-body { display: none; }
 /* a tile in another domain's row that is already in your showcase */
 .hex.in-showcase::after { content: '✓'; position: absolute; z-index: 3; top: 12%; left: 50%; transform: translateX(-50%);

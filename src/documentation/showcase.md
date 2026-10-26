@@ -323,3 +323,11 @@ sides on the comb's own edges, the card's side padding is gone, and the gutter b
 Publish panel marks `drift` (published, and its head here has moved on, as it does when a picture is set on a tile): it names
 them, asks once, and runs them one after another to the hosts each names, as the panel's selected-apps run does. It never
 publishes anything that was not already published. The pictures on the front door appear as soon as the republish lands.
+
+### Dark by default, and a padded outer card (jwize 2026-10-26)
+
+The front door's default theme is **dark** (`hypercomb-shim/index.html` sets `data-theme` before first paint to the stored
+`hc:theme`, else `dark`; a visitor who chose another theme keeps it, and `system` still follows the browser). The hive shells'
+own default (`hypercomb-shared/core/theme.service.ts`, `DEFAULT_THEME = 'honey'`) is a separate decision and is unchanged. The
+outer card around the tiles is padded on all sides (`1rem`), so the dark background surrounds the comb completely, while the
+tiles inside still span the card's inner width edge to edge.
