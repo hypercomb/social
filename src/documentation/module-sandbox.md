@@ -96,6 +96,19 @@ jwize: "your peer hosts become your sandbox and you can scan the signed files by
 
 **The host AI answers the people the host admitted (2026-09-24).** With `AI_WRITERS` empty the worker's `/ai/ask` admits only the zones' operators and bound publishers — the keys whose trials it reviews — each under the daily token ceiling; a freshly minted key is refused. An explicit `AI_WRITERS` list still overrides (`host-ai.md`).
 
+## Where you stand (built 2026-10-25)
+
+jwize: "make sure the workflow is very clear what is happening or the participant will be lost". The what-changed panel (`module changes <change>`) opens on four steps, each saying what it touched; the first not yet done is marked as where you stand:
+
+1. **Draft**: written and committed to a trial.
+2. **Trial**: running at `try-<change>.<zone>`, a site of its own with nothing of your hive in it. It opens in a new tab (`noopener`), never in a frame: "we don't need to use iframes".
+3. **Reviewed**: how many readings there are (the host's AI, Jev, people), shown below.
+4. **Your choice**: **Take** takes every changed file into your hive, held in the brood until you accept it. The publisher alone is also offered **Promote** (`<change>.<zone>` runs what the trial ran) and **Withdraw**; both are put on the command line as their sentence (`module promote <change> @<zone>`), never said for the participant. At a door the step says to choose from your own hive.
+
+Asked again the same day whether drafts belong on a separate domain, jwize kept the 2026-09-24 decision: a draft lives at its own `try-` subdomain of the host domain and reaches the real site only by promotion.
+
+Still owed, from the same conversation: a reviewer that runs the change's tests, a plain-language summary of each change for the participant, reviewers that are deliberately different models, and installing a taken change into the git source.
+
 ## Audit a trial from your own hive (built 2026-09-23)
 
 `module audit <change> [@<host>]` — the other half of jwize's sentence: "scan the signed files by signature and audit them using your favorite AI". Trying happens at the publisher's door; auditing happens at home, and runs nothing (essentials `assistant/module-audit.ts`, driven by `module.queen.ts`):
