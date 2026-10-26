@@ -42,7 +42,8 @@ async function resolve(sig: string, origins: readonly string[]): Promise<ArrayBu
   const bytes = await readSig(sig, origins)
   if (!bytes || bytes.byteLength > ENVELOPE_MAX) return bytes
   const envelope = asJson(bytes)
-  const inner = envelope?.['meta'] === 1 ? envelope['resource'] : null
+  // A typed reference is one hop: a resource, or (a child in a layer's `children` slot) a layer.
+  const inner = envelope?.['meta'] === 1 ? (envelope['resource'] ?? envelope['layer']) : null
   return typeof inner === 'string' && SIG.test(inner) ? readSig(inner, origins) : bytes
 }
 
@@ -70,6 +71,45 @@ const imageType = (bytes: ArrayBuffer): string => {
   return ''
 }
 
+/** How far a tile with no picture of its own looks: this many levels of children, and no more layers read than this. */
+const INHERIT_DEPTH = 2
+const INHERIT_READS = 40
+
+/** The picture signature a layer's own properties name, or null: the first properties entry, as before. */
+async function ownPicture(layer: Record<string, unknown> | null, origins: readonly string[]): Promise<string | null> {
+  const propsSig = firstSig(layer?.['properties'])
+  return propsSig ? pictureOf(asJson(await resolve(propsSig, origins))) : null
+}
+
+/** THE PICTURE A TILE WEARS, ELSE THE FIRST ONE ITS CHILDREN WEAR (jwize 2026-10-26: "blanks should always inherit
+ *  what is available when empty"). Its own first; then its children in order, a whole level before the next; read
+ *  breadth-first, a bounded number of layers deep and wide, so a tile with no picture anywhere stays cheap to ask. */
+async function inheritedPicture(head: string, origins: readonly string[]): Promise<string | null> {
+  let level: string[] = [head]
+  let reads = 0
+  const seen = new Set<string>(level)
+  for (let depth = 0; depth <= INHERIT_DEPTH && level.length; depth++) {
+    const layers: Array<Record<string, unknown> | null> = []
+    for (const sig of level) {
+      if (reads++ >= INHERIT_READS) return null
+      layers.push(asJson(await resolve(sig, origins)))
+    }
+    for (const layer of layers) {
+      const picture = await ownPicture(layer, origins)
+      if (picture) return picture
+    }
+    const next: string[] = []
+    for (const layer of layers) {
+      const children = layer?.['children']
+      for (const child of Array.isArray(children) ? children : []) {
+        if (typeof child === 'string' && SIG.test(child) && !seen.has(child)) { seen.add(child); next.push(child) }
+      }
+    }
+    level = next
+  }
+  return null
+}
+
 const pictures = new Map<string, Promise<string | null>>()
 
 /** An object URL for the picture the creation at `head` wears, or null when it
@@ -79,9 +119,7 @@ export const tilePicture = (head: string, origins: readonly string[]): Promise<s
   let found = pictures.get(head)
   if (!found) {
     found = (async () => {
-      const layer = asJson(await resolve(head, origins))
-      const propsSig = firstSig(layer?.['properties'])
-      const picture = propsSig ? pictureOf(asJson(await resolve(propsSig, origins))) : null
+      const picture = await inheritedPicture(head, origins)
       const bytes = picture ? await resolve(picture, origins) : null
       const type = bytes ? imageType(bytes) : ''
       return bytes && type ? URL.createObjectURL(new Blob([bytes], { type })) : null

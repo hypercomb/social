@@ -69,3 +69,41 @@ it('keeps only bytes whose hash is the signature asked for', async () => {
   expect(await tilePicture(head, ['https://door.example'])).toBeNull()
   heap.set(picture, real)
 })
+
+/** A layer with children (each one envelope hop to a layer) and its own properties. */
+const layerWith = async (props: Record<string, unknown>, children: string[] = []): Promise<string> => {
+  const propsSig = await envelope(await put(text(props)), 'properties')
+  const kids: string[] = []
+  for (const child of children) kids.push(await put(text({ meta: 1, layer: child, relation: 'children' })))
+  return put(text({ name: 'tile', children: kids, decorations: [], properties: [propsSig] }))
+}
+
+it('inherits the first child\'s picture when the tile has none of its own', async () => {
+  const picture = await envelope(await put(PNG), 'image')
+  const empty = await layerWith({ index: 1 })
+  const dressed = await layerWith({ small: { image: picture } })
+  const head = await layerWith({ index: 0 }, [empty, dressed])
+  const { tilePicture, urls } = await load()
+  expect(await tilePicture(head, ['https://door.example'])).toBe('blob:1')
+  expect(urls[0]!.type).toBe('image/png')
+})
+
+it('prefers its own picture to any child\'s, and a nearer child to a deeper one', async () => {
+  const own = await envelope(await put(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9, 9])), 'image')
+  const child = await envelope(await put(PNG), 'image')
+  const deep = await envelope(await put(new Uint8Array([0x47, 0x49, 0x46, 0x38, 1, 1, 1, 1])), 'image')
+  const withOwn = await layerWith({ small: { image: own } }, [await layerWith({ small: { image: child } })])
+  const viaChild = await layerWith({}, [await layerWith({}, [await layerWith({ small: { image: deep } })]), await layerWith({ small: { image: child } })])
+  const { tilePicture, urls } = await load()
+  await tilePicture(withOwn, ['https://door.example'])
+  expect(urls[0]!.type).toBe('image/jpeg')
+  await tilePicture(viaChild, ['https://door.example'])
+  expect(urls[1]!.type).toBe('image/png')   // the child one level down, not the grandchild's gif
+})
+
+it('stays null — the generated cover — when nothing below it wears a picture, and does not loop on a cycle', async () => {
+  const leaf = await layerWith({ index: 2 })
+  const head = await layerWith({ index: 0 }, [leaf, leaf])
+  const { tilePicture } = await load()
+  expect(await tilePicture(head, ['https://door.example'])).toBeNull()
+})

@@ -306,3 +306,11 @@ ones you follow); the one pressed is the one whose tiles are shown, grayed unles
 No accordion rows. The search is only for search. The follow box stays at the foot all the time, and when the search holds a valid
 domain nobody follows yet it suggests it in the follow box (never replacing what the person typed there). Following a domain turns
 the filter on to show it.
+
+### Pictures: a tile with none inherits (jwize 2026-10-26)
+
+"Blanks should always inherit what is available when empty." The front door's picture for a hive is its own (`large`, else `small`,
+in its head's first properties entry), else the first child's, level by level (two levels, 40 layer reads at most), else the generated
+cover. Checked on the live hypercomb.com on 2026-10-26: only revolucion and camelflage carry a picture; the other seven publish
+`properties` holding only `index`, and nothing below them or in their website pages carries one either, so they still show the
+generated cover until a picture is set on them in the hive and published (it travels with the publish).
