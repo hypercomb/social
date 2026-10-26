@@ -170,7 +170,7 @@ describe('showcase — the page is what is published now', () => {
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
     })
     await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
-    expect(bands.querySelectorAll('.band, .domain-chip')).toHaveLength(0)
+    expect(bands.querySelectorAll('.band')).toHaveLength(0)
   })
 
   it('draws exactly the signed showcase: its items and the domains shown in full, never the rest', async () => {
@@ -401,7 +401,7 @@ describe('following a domain from the page', () => {
     } finally { vi.unstubAllGlobals() }
   })
 
-  it('offers to follow when the search names a domain, and following draws its row open', async () => {
+  it('keeps the search for searching, and the follow box suggests a domain the search names', async () => {
     const follow = vi.fn(async (raw: string) => ({ ok: true as const, zone: raw.trim() }))
     const { bands, hero } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
@@ -409,24 +409,30 @@ describe('following a domain from the page', () => {
       follow, readPeerLedger: async zone => peer(zone),
     })
     await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
-    ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
-    const suggest = bands.querySelector('.follow-suggest') as HTMLElement
     const search = hero.querySelector('input[type=search]') as HTMLInputElement
-    expect(suggest.hidden).toBe(true)
-    // The search names a domain nothing here matches: the miss says so and offers it.
+    const input = bands.querySelector('.follow input') as HTMLInputElement
+    expect(bands.querySelector('.follow-suggest')).toBeNull()
+    expect((bands.querySelector('.follow') as HTMLElement).hidden).toBe(false)
+    // The search names a domain: the follow box offers it, and the search itself offers nothing.
     search.value = 'cafesociety.buzz'
     search.dispatchEvent(new Event('input'))
-    expect((bands.querySelector('.hosted-nothing') as HTMLElement).hidden).toBe(false)
-    expect(suggest.hidden).toBe(false)
-    expect(suggest.textContent).toBe('Follow cafesociety.buzz')
-    ;(suggest.querySelector('button') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(bands.querySelector('.dex-row:not(.own) .dex-name')?.textContent).toBe('cafesociety.buzz'))
-    expect(follow).toHaveBeenCalledWith('cafesociety.buzz')
-    // The row is open, with what that peer publishes — and only what is under its own domain.
+    expect(input.value).toBe('cafesociety.buzz')
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    expect(follow).not.toHaveBeenCalled()
+    // What was typed in the follow box by the person is not replaced by a later search.
+    input.value = 'mine.example'
+    search.value = 'other.example'
+    search.dispatchEvent(new Event('input'))
+    expect(input.value).toBe('mine.example')
+    input.value = ''
+    search.value = 'cafesociety.buzz'
+    search.dispatchEvent(new Event('input'))
+    ;(bands.querySelector('.follow') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }))
+    await vi.waitFor(() => expect(follow).toHaveBeenCalledWith('cafesociety.buzz'))
+    // The row is there, open, with what that peer publishes — and only what is under its own domain.
     await vi.waitFor(() => expect([...bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['garden']))
     expect(bands.querySelector('.dex-row:not(.own)')?.classList.contains('open')).toBe(true)
-    expect(search.value).toBe('')
-    expect(suggest.hidden).toBe(true)
+    expect(input.value).toBe('')
   })
 
   it('says why a domain was not followed, and adds nothing', async () => {
@@ -895,20 +901,20 @@ describe('a followed peer keeps its own tiles, the sheet keeps its own buttons, 
     expect(body.firstElementChild?.classList.contains('hosted-empty')).toBe(true)
   })
 
-  it('follows one domain at a time, and clears the search only if it still says what was followed', async () => {
+  it('follows one domain at a time, and keeps what the person types in the search while it waits', async () => {
     let release: (value: { ok: true; zone: string }) => void = () => {}
     const follow = vi.fn(() => new Promise<{ ok: true; zone: string }>(resolve => { release = resolve }))
     const { hero, bands } = draw({ follow })
     const search = hero.querySelector('input[type=search]') as HTMLInputElement
+    const input = bands.querySelector('.follow input') as HTMLInputElement
     await vi.waitFor(() => expect(own(bands)).toEqual(['camelflage', 'dylan']))
-    ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
-    search.value = 'friend.example'
-    search.dispatchEvent(new Event('input'))
-    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    input.value = 'friend.example'
+    const form = bands.querySelector('.follow') as HTMLFormElement
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
     expect(follow).toHaveBeenCalledTimes(1)
-    // The visitor types something else while it waits: it is theirs and is kept.
     search.value = 'dylan'
+    search.dispatchEvent(new Event('input'))
     release({ ok: true, zone: 'friend.example' })
     await vi.waitFor(() => expect(bands.querySelector('.follow-note')?.textContent).toBe('Following friend.example.'))
     expect(search.value).toBe('dylan')

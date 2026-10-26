@@ -599,12 +599,14 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   manageButton.setAttribute('aria-label', 'Manage')
   manageButton.setAttribute('aria-pressed', 'false')
   manageButton.append(iconOf('sliders'))
-  manageButton.addEventListener('click', () => {
-    managing = !managing
+  const setManaging = (on: boolean): void => {
+    managing = on
     manageButton.setAttribute('aria-pressed', String(managing))
+    if (managing && !openRow) openRow = options.self
     options.onManage?.(managing)
     paint()
-  })
+  }
+  manageButton.addEventListener('click', () => setManaging(!managing))
   searchBox.append(manageButton)
   hero.append(brand, searchBox)
 
@@ -993,13 +995,16 @@ ${entry.key}`
     return view
   }
   const hosted = el('div', 'hosted')
+  // THE ONLY THING MANAGE DOES (jwize 2026-10-25: "the only thing the manage button should do is filter the
+  // domains"): one view, the same tiles. Manage adds a strip of the domains, and the one picked is the one shown;
+  // its tiles are grayed unless they are already in the showcase, and a tap turns one on.
+  const filterBar = el('div', 'domains')
+  filterBar.setAttribute('role', 'group')
+  filterBar.setAttribute('aria-label', 'Domains')
+  filterBar.hidden = true
+  const chips = new Map<string, HTMLButtonElement>()
   const nothing = el('p', 'hosted-nothing')
   nothing.textContent = 'Nothing matches your search.'
-  // A search that finds nothing, and names a domain, offers to follow it.
-  const suggest = el('div', 'follow-suggest')
-  const suggestGo = el('button')
-  suggestGo.type = 'button'
-  suggest.append(suggestGo)
   // The domains this browser follows: its community, kept on this origin. Yours
   // to add to here, at the foot — a stranger follows nothing and sees only this
   // domain.
@@ -1030,7 +1035,7 @@ ${entry.key}`
   const pager = el('div', 'pager')
   pager.setAttribute('aria-label', 'Communities')
   pager.hidden = true
-  bandsHost.append(ownerNote, pager, hosted, nothing, suggest, followBar)
+  bandsHost.append(ownerNote, pager, filterBar, hosted, nothing, followBar)
   /** The shape asked for on the address (`?view=launcher`), or none. */
   const viewAsked: ShowcaseView | undefined = (() => {
     try { return parseView(new URLSearchParams(location.search).get('view')) } catch { return undefined }
@@ -1227,7 +1232,8 @@ ${entry.key}`
     else hosted.setAttribute('aria-labelledby', label.id)
   }
   /** The domain the search offers to follow now, or ''. */
-  let offered = ''
+  /** What the follow box was last filled with from the search, so only that is ever taken back. */
+  let autoFilled = ''
 
   function paint(): void {
     const terms = searchTerms(search.value)
@@ -1260,10 +1266,10 @@ ${entry.key}`
       const total = shown.length + doors.length
       visible += !managing && !own ? 0 : terms.length ? total : 1
       // While a search runs every row holding a match is open; otherwise one is.
-      const open = !managing ? own : terms.length ? total > 0 : openRow === zone
+      const open = !managing ? own : openRow === zone
       view.section.classList.toggle('open', open)
       view.toggle.setAttribute('aria-expanded', String(open))
-      view.section.hidden = (!managing && !own) || (terms.length > 0 && total === 0)
+      view.section.hidden = !open
       view.meta.textContent = count(items.length + (own ? links.length : 0), 'tile', 'tiles')
       arrange(view.comb, open ? [...shown.map(entry => {
         const tile = tileView(entry, zone)
@@ -1281,15 +1287,35 @@ ${entry.key}`
     const current = [...hosted.children]
     if (current.length !== rows.length || current.some((node, index) => node !== rows[index])) hosted.replaceChildren(...rows)
     paintPager(communities)
+    // The strip of domains: this one first, then the ones followed; the pressed one is the one shown.
+    const zones = [options.self, ...[...held].sort()]
+    for (const [zone, chip] of chips) if (!zones.includes(zone)) { chip.remove(); chips.delete(zone) }
+    for (const zone of zones) {
+      let chip = chips.get(zone)
+      if (!chip) {
+        chip = el('button', 'domain-chip')
+        chip.type = 'button'
+        chip.textContent = zone
+        chip.addEventListener('click', () => { openRow = zone; paint() })
+        chips.set(zone, chip)
+        filterBar.append(chip)
+      }
+      chip.setAttribute('aria-pressed', String(openRow === zone))
+    }
+    filterBar.hidden = !managing
     bandsHost.classList.toggle('managing', managing)
-    followBar.hidden = !options.follow || !managing
+    // The follow box stays at the foot, always (jwize 2026-10-25: "just show the input and follow at the bottom all the time").
+    followBar.hidden = !options.follow
     hosted.classList.toggle('swipeable', communities.length > 0 && !terms.length)
     nothing.hidden = !terms.length || visible > 0
-    // A line that names a domain this browser does not follow offers to follow it.
+    // THE SEARCH IS ONLY FOR SEARCH; the follow box at the foot may suggest what was typed in the search when that
+    // is a valid domain nobody follows yet (jwize 2026-10-25: "the follow can suggest the search if it is a
+    // valid domain"). What the person typed in the follow box themselves is never replaced.
     const candidate = followCandidate(search.value)
-    offered = managing && options.follow && candidate && !held.includes(candidate) && !within(candidate, options.self) ? candidate : ''
-    suggest.hidden = !offered
-    if (offered) suggestGo.textContent = `Follow ${offered}`
+    const suggested = options.follow && candidate && !held.includes(candidate) && !within(candidate, options.self) ? candidate : ''
+    if (suggested) {
+      if (!followInput.value.trim() || followInput.value === autoFilled) { followInput.value = suggested; autoFilled = suggested }
+    } else if (autoFilled && followInput.value === autoFilled) { followInput.value = ''; autoFilled = '' }
     const hives = everything.filter(entry => entry.kind === 'hive')
     const creations = everything.length - hives.length
     stats.replaceChildren()
@@ -1308,27 +1334,22 @@ ${entry.key}`
     if (!options.follow || following) return
     following = true
     followGo.disabled = true
-    suggestGo.disabled = true
     followNote.textContent = 'Checking…'
     const result = await options.follow(raw).catch(() => ({ ok: false as const, reason: 'Could not follow it.' }))
     followGo.disabled = false
-    suggestGo.disabled = false
     following = false
     if (!result.ok) { followNote.textContent = result.reason; return }
     if (!held.includes(result.zone)) held.push(result.zone)
     if (followCandidate(followInput.value) === result.zone || !followInput.value.trim()) followInput.value = ''
-    if (followCandidate(search.value) === result.zone) search.value = ''
+    autoFilled = ''
     followNote.textContent = `Following ${result.zone}.`
     openRow = result.zone
-    paint()
+    // A domain just followed is looked at in the filter: Manage turns on to show it.
+    if (!managing) setManaging(true)
+    else paint()
     rowViews.get(result.zone)?.section.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
   }
   followBar.addEventListener('submit', event => { event.preventDefault(); void follow(followInput.value) })
-  suggestGo.addEventListener('click', () => { if (offered) void follow(offered) })
-  // Enter in the search follows what it offers, when it found nothing else to open.
-  search.addEventListener('keydown', event => {
-    if (event.key === 'Enter' && offered && !nothing.hidden) { event.preventDefault(); void follow(offered) }
-  })
 
   search.addEventListener('input', () => paint())
   // WHAT IS PUBLISHED NOW: the page is the ledger as read, nothing kept from
@@ -1437,7 +1458,14 @@ export const SHOWCASE_STYLE = `
 .search .manage-toggle svg { position: static; margin: 0; width: 1.25rem; height: 1.25rem; color: inherit; }
 .search .manage-toggle[aria-pressed='true'] { border-color: var(--md-primary); color: var(--md-primary); }
 .search .manage-toggle:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
-.bands:not(.managing) .dex-row.own > .dex-head { display: none; }
+.dex-row > .dex-head { display: none; }
+.domains { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 .6rem; }
+.domains[hidden] { display: none; }
+.domain-chip { padding: .42rem .85rem; border: 1px solid var(--md-outline-variant); border-radius: 999px; cursor: pointer;
+  background: color-mix(in srgb, var(--md-surface-c-lowest) 70%, transparent); color: var(--md-on-surface);
+  font: 500 .85rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.domain-chip[aria-pressed='true'] { border-color: var(--md-primary); background: var(--md-primary); color: var(--md-on-primary); }
+.domain-chip:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 .search input::placeholder { color: var(--md-on-surface-faint); }
 .search input:focus { outline: 2px solid var(--md-primary); outline-offset: 1px; }
 

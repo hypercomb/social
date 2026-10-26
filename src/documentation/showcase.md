@@ -298,3 +298,11 @@ bytes for a site you are following, so the byte sharing runs laterally", the fol
 carries the bytes today has not been checked (it is a design stated here, not built behaviour). What an author controls is their own
 word: signed doors, honored by honest readers; nothing forces another host to forget a byte. Private content is encrypted
 on the device and never public.
+
+### One view; Manage only filters the domains (jwize 2026-10-25, latest)
+
+There are no two views. The page is always the same tile grid. The Manage icon adds a strip of the domains (yours first, then the
+ones you follow); the one pressed is the one whose tiles are shown, grayed unless already in the showcase, and a tap turns one on.
+No accordion rows. The search is only for search. The follow box stays at the foot all the time, and when the search holds a valid
+domain nobody follows yet it suggests it in the follow box (never replacing what the person typed there). Following a domain turns
+the filter on to show it.

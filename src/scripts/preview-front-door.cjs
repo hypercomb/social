@@ -162,6 +162,7 @@ const types = {
   if (demo) console.log('Demo: a throwaway key signs a showcase with communities First, Second, Third — nothing real is changed.')
   if (flag('headless')) {
     await page.waitForTimeout(12000)
+    if (flag('manage')) { await page.evaluate(() => document.querySelector('hc-shim-hosts').shadowRoot.querySelector('.manage-toggle').click()); await page.waitForTimeout(800) }
     if (value('shot', '')) await page.screenshot({ path: value('shot', '') })
     console.log('tabs:', await page.evaluate(() => [...document.querySelector('hc-shim-hosts').shadowRoot.querySelectorAll('.pager-tab')].map(tab => tab.textContent).join(' | ')))
     await browser.close()
