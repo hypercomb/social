@@ -274,3 +274,10 @@ is already in the showcase, and a tap lights it up and adds it (a second tap tak
 and offers the same switch. With a hive beside the page the switch is signed there; with none the tap opens the hive
 that has the key (`#showcase=` link, `showcase-link.ts`; the hive asks once, signs, and returns you). Arrival shows
 only the showcase open. Search and Follow are unchanged.
+
+### Arrival is the brand and the tiles (jwize 2026-10-25)
+
+"It should just be the branding and the tiles with a manage button and the current view becomes manage." On
+arrival the page is the brand, the search, and the showcase's tiles, nothing else: no row headers, no other domains, no
+follow box. The Manage icon, to the right of the search, turns that same view into the manager: every domain you
+follow as a row, their tiles grayed until turned on, and the follow box. Pressing it again returns to the showcase.

@@ -431,7 +431,8 @@ const svg = (body: string): string =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`
 
 const ICONS: Record<LinkIcon | 'search' | 'arrow' | 'chevron' | 'hive' | 'sparkle' | 'heart' | 'share' | 'globe' | 'link'
-  | 'people' | 'close', string> = {
+  | 'people' | 'close' | 'sliders', string> = {
+  sliders: svg('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>'),
   people: svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3.3 2.8-5.2 5.5-5.2s4.9 1.9 5.5 5.2"/><circle cx="16.8" cy="9.5" r="2.6"/><path d="M15.6 14.1c2.6.2 4.4 1.9 4.9 4.9"/>'),
   close: svg('<path d="m6 6 12 12M18 6 6 18"/>'),
   search: svg('<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>'),
@@ -582,6 +583,23 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   search.autocomplete = 'off'
   search.spellcheck = false
   searchBox.append(iconOf('search'), search)
+  // MANAGE (jwize 2026-10-25: "it should just be the branding and the tiles with a manage button and the
+  // current view becomes manage"). On arrival the page is the brand and the showcase's tiles. The button, to the
+  // right of the search, turns that same view into the manager: the domains you follow as rows, their tiles grayed
+  // until you turn them on, and the follow box.
+  let managing = false
+  const manageButton = el('button', 'manage')
+  manageButton.type = 'button'
+  manageButton.title = 'Manage'
+  manageButton.setAttribute('aria-label', 'Manage')
+  manageButton.setAttribute('aria-pressed', 'false')
+  manageButton.append(iconOf('sliders'))
+  manageButton.addEventListener('click', () => {
+    managing = !managing
+    manageButton.setAttribute('aria-pressed', String(managing))
+    paint()
+  })
+  searchBox.append(manageButton)
   hero.append(brand, searchBox)
 
   const bandsHost = el('div', 'bands')
@@ -1234,12 +1252,12 @@ ${entry.key}`
       const shown = items.filter(entry => aggregateMatches(entry, terms))
       const doors = own ? links.filter(link => linkMatches(link, terms)) : []
       const total = shown.length + doors.length
-      visible += terms.length ? total : 1
+      visible += !managing && !own ? 0 : terms.length ? total : 1
       // While a search runs every row holding a match is open; otherwise one is.
-      const open = terms.length ? total > 0 : openRow === zone
+      const open = !managing ? own : terms.length ? total > 0 : openRow === zone
       view.section.classList.toggle('open', open)
       view.toggle.setAttribute('aria-expanded', String(open))
-      view.section.hidden = terms.length > 0 && total === 0
+      view.section.hidden = (!managing && !own) || (terms.length > 0 && total === 0)
       view.meta.textContent = count(items.length + (own ? links.length : 0), 'tile', 'tiles')
       arrange(view.comb, open ? [...shown.map(entry => {
         const tile = tileView(entry, zone)
@@ -1257,11 +1275,13 @@ ${entry.key}`
     const current = [...hosted.children]
     if (current.length !== rows.length || current.some((node, index) => node !== rows[index])) hosted.replaceChildren(...rows)
     paintPager(communities)
+    bandsHost.classList.toggle('managing', managing)
+    followBar.hidden = !options.follow || !managing
     hosted.classList.toggle('swipeable', communities.length > 0 && !terms.length)
     nothing.hidden = !terms.length || visible > 0
     // A line that names a domain this browser does not follow offers to follow it.
     const candidate = followCandidate(search.value)
-    offered = options.follow && candidate && !held.includes(candidate) && !within(candidate, options.self) ? candidate : ''
+    offered = managing && options.follow && candidate && !held.includes(candidate) && !within(candidate, options.self) ? candidate : ''
     suggest.hidden = !offered
     if (offered) suggestGo.textContent = `Follow ${offered}`
     const hives = everything.filter(entry => entry.kind === 'hive')
@@ -1405,6 +1425,13 @@ export const SHOWCASE_STYLE = `
   background: var(--md-surface-c-lowest);
   border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant));
 }
+.search .manage { flex: none; display: grid; place-items: center; width: 2.9rem; height: 2.9rem; margin-left: .5rem; padding: 0; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant)); border-radius: var(--hc-radius-control, 2px);
+  background: var(--md-surface-c-lowest); color: var(--md-on-surface); }
+.search .manage svg { position: static; margin: 0; width: 1.25rem; height: 1.25rem; color: inherit; }
+.search .manage[aria-pressed='true'] { border-color: var(--md-primary); color: var(--md-primary); }
+.search .manage:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.bands:not(.managing) .dex-row.own > .dex-head { display: none; }
 .search input::placeholder { color: var(--md-on-surface-faint); }
 .search input:focus { outline: 2px solid var(--md-primary); outline-offset: 1px; }
 
