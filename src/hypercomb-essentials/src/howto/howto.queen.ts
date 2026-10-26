@@ -117,7 +117,7 @@ export class HowToQueenBee extends QueenBee {
     const drone = get<CensusShape>('@diamondcoreprocessor.com/SlashBehaviourDrone')
     const preloader = get<PreloaderShape>('@hypercomb.social/ScriptPreloader')
     if (preloader?.wakeWord) {
-      const names = (drone?.entries?.() ?? []).map(e => String(e.name ?? '')).filter(Boolean)
+      const names = (drone?.entries?.() ?? []).map(e => String(e['name'] ?? '')).filter(Boolean)
       await Promise.allSettled(names.map(name => preloader.wakeWord!(name)))
     }
     const entries = drone?.entries?.() ?? []

@@ -45,12 +45,9 @@
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
-import { writeDecoration, listDecorations, removeDecoration } from './decoration-manifest.js'
+import { listDecorations, removeDecoration } from './decoration-manifest.js'
 import { SITE_ARTIFACT_KIND } from '../pheromones/enrollment.js'
-import { mintContentRef, terminalContentSig } from '../presentation/tiles/artifact-content.js'
-import { GALLERY_KIND, LIGHTBOX_VIEW, PICTURE_RELATION, galleryImageSigsAt } from './lightbox-kind.js'
-
-const SIG = /^[0-9a-f]{64}$/
+import { GALLERY_KIND, LIGHTBOX_VIEW, galleryImageSigsAt, holdPictures } from './lightbox-kind.js'
 
 const get = <T,>(key: string): T | undefined => (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
 
@@ -148,43 +145,18 @@ export class LightboxQueenBee extends QueenBee {
     if (!store?.putResource) { this.#log('Lightbox — storage unavailable'); return }
     const label = segments[segments.length - 1] ?? ''
     try {
-      const added: string[] = []
+      const bytesSigs: string[] = []
       for (const file of files) {
         const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'application/octet-stream' })
-        const bytesSig = await store.putResource(blob)
-        if (!SIG.test(bytesSig)) continue
-        // THE LIFE PRIMITIVE: the gallery points at a typed incidence, and the
-        // incidence points at the bytes. Never raw bytes in a payload field.
-        const ref = await mintContentRef(store, bytesSig, PICTURE_RELATION)
-        if (SIG.test(ref)) added.push(ref)
+        bytesSigs.push(await store.putResource(blob))
       }
-      if (added.length === 0) { this.#log('Lightbox — nothing could be stored', '○'); return }
-
-      const existing = await listDecorations<{ images?: unknown }>({ kind: GALLERY_KIND, segments })
-      const kept: string[] = []
-      for (const { record } of existing) {
-        const imgs = record.payload?.images
-        if (Array.isArray(imgs)) {
-          for (const s of imgs) {
-            const v = String(s)
-            if (SIG.test(v) && !kept.includes(v)) kept.push(v)
-          }
-        }
-      }
-      const images = [...kept, ...added.filter(s => !kept.includes(s))]
-
-      await writeDecoration({
-        kind: GALLERY_KIND,
-        appliesTo: segments,
-        segments,
-        payload: { images },
-        mark: 'persistent',
-      })
-      // One gallery per tile: the merged record replaces the old ones.
-      for (const e of existing) removeDecoration({ sig: e.sig, segments })
+      const before = (await galleryImageSigsAt(segments)).length
+      const images = await holdPictures(segments, bytesSigs)
+      if (images.length === 0) { this.#log('Lightbox — nothing could be stored', '○'); return }
+      const added = Math.max(0, images.length - before)
 
       this.#log(
-        `Lightbox — ${added.length} image${added.length === 1 ? '' : 's'} on "${label}" (${images.length} total)`,
+        `Lightbox — ${added} image${added === 1 ? '' : 's'} on "${label}" (${images.length} total)`,
         '▶',
       )
     } catch (err) {

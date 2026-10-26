@@ -6,8 +6,8 @@
 // a value (atomic-modules-plan.md), so they live here, in a dependency both
 // import.
 
-import { listDecorations } from './decoration-manifest.js'
-import { terminalContentSig } from '../presentation/tiles/artifact-content.js'
+import { listDecorations, writeDecoration, removeDecoration } from './decoration-manifest.js'
+import { mintContentRef, terminalContentSig } from '../presentation/tiles/artifact-content.js'
 
 const SIG = /^[0-9a-f]{64}$/
 
@@ -64,4 +64,46 @@ export async function galleryImageSigsAt(segments: readonly string[]): Promise<s
     }
   } catch { /* no readable gallery at this location */ }
   return out
+}
+
+/**
+ * Hold pictures on a tile — the ONE way a picture joins a tile's collection.
+ *
+ * Each byte signature is minted into a typed incidence (the Life Primitive hop,
+ * never raw bytes in a payload field) and merged into the tile's single gallery
+ * decoration, which is REPLACED by the merged record. Pictures already held are
+ * kept, so adding a picture never loses the ones before it. Returns the refs now
+ * held. `/lightbox add`, the tile editor's save and the images wall's pool pick
+ * all come through here, so a tile's pictures are retained however they arrived.
+ */
+export async function holdPictures(
+  segments: readonly string[],
+  bytesSigs: readonly string[],
+): Promise<string[]> {
+  const store = get<{ putResource(blob: Blob): Promise<string> }>('@hypercomb.social/Store')
+  if (!store || segments.length === 0) return []
+  const added: string[] = []
+  for (const bytesSig of bytesSigs) {
+    if (!SIG.test(bytesSig)) continue
+    const ref = await mintContentRef(store, bytesSig, PICTURE_RELATION)
+    if (SIG.test(ref) && !added.includes(ref)) added.push(ref)
+  }
+  if (added.length === 0) return []
+
+  const existing = await listDecorations<{ images?: unknown }>({ kind: GALLERY_KIND, segments })
+  const kept: string[] = []
+  for (const { record } of existing) {
+    const imgs = record.payload?.images
+    if (!Array.isArray(imgs)) continue
+    for (const value of imgs) {
+      const ref = String(value)
+      if (SIG.test(ref) && !kept.includes(ref)) kept.push(ref)
+    }
+  }
+  const images = [...kept, ...added.filter(ref => !kept.includes(ref))]
+  if (images.length === kept.length) return images        // already held — no new revision
+
+  await writeDecoration({ kind: GALLERY_KIND, appliesTo: segments, segments, payload: { images }, mark: 'persistent' })
+  for (const e of existing) removeDecoration({ sig: e.sig, segments })
+  return images
 }

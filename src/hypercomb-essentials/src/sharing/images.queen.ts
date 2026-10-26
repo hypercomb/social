@@ -1,32 +1,28 @@
 // sharing/images.queen.ts
 //
-// /images — open the wall of pictures the room is carrying for a tile.
+// /images — open the wall of pictures a tile holds, and those other hosts publish for it.
 //
 //   /images            — the selected tile
 //   /images <tile>     — that tile
 //
-// The same wall the tile's images icon opens. It exists as a behaviour because
-// that icon is EVIDENCE-BASED: it appears on a tile you hold exactly when a
-// participant is publishing a picture for it, and vanishes the moment nobody
-// is. That is right for an icon and wrong as the only door — a room where the
-// pictures are arriving in bursts leaves you hunting for an affordance that
-// blinks. Typing the word always works, and says plainly when there is nothing
-// to choose from rather than showing nothing at all.
+// The same wall the tile's images icon opens. The icon appears only once a tile
+// holds more than one picture; the word always works, and it is the door to the
+// pictures other hosts publish under the tile's name, which never gate the icon.
+// The wall says plainly when there is nothing to choose from.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import { canonicalPeerImageCandidates } from './peer-images.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
 
 export class ImagesQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'images'
-  override description = 'Open the room\'s pictures for a tile and choose one'
+  override description = 'Open the pictures a tile holds, and what other hosts publish for it, and choose one'
   override descriptionKey = 'slash.images'
   override options = ['<cell name>']
   override examples = [
-    { input: '/images', result: 'The pictures the room is carrying for the selected tile' },
-    { input: '/images garden', result: 'The pictures offered for "garden"' },
+    { input: '/images', result: 'The pictures held for the selected tile, and those other hosts publish for it' },
+    { input: '/images garden', result: 'The pictures held and offered for "garden"' },
   ]
 
   override slashComplete(args: string): readonly string[] {
@@ -39,14 +35,6 @@ export class ImagesQueenBee extends QueenBee {
   protected async execute(args: string): Promise<void> {
     const label = args.trim().toLowerCase() || this.#selected()
     if (!label) { this.#log('name a tile, or select one first'); return }
-
-    const offered = await canonicalPeerImageCandidates(label)
-    const themes = (get('@diamondcoreprocessor.com/BackgroundThemes') as
-      { themes?: readonly unknown[] } | undefined)?.themes ?? []
-    if (offered.length === 0 && themes.length === 0) {
-      this.#log(`nobody in the room is offering a picture for "${label}"`)
-      return
-    }
 
     const segments = (get('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined)
       ?.explorerSegments?.() ?? []

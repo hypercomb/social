@@ -82,7 +82,7 @@ const poolMembers = (value: unknown): string[] => {
  * records through the normal verified content broker. The pool index is the
  * discovery document; every member/layer/property/image byte remains
  * signature-addressed and SHA-gated by Store.getResource. */
-const meaningPoolImageCandidates = async (name: string): Promise<readonly PeerImageCandidate[]> => {
+export const meaningPoolImageCandidates = async (name: string): Promise<readonly PeerImageCandidate[]> => {
   const broker = ioc(BROKER_KEY) as BrokerLike | undefined
   const store = ioc(STORE_KEY) as StoreLike | undefined
   if (!store?.getResource) return []

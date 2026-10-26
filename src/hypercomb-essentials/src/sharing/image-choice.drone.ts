@@ -1,31 +1,27 @@
 // sharing/image-choice.drone.ts
 //
-// THE IMAGE HIVE — every picture the room is carrying for one tile, laid out
-// as ordinary tiles. Click one and it becomes your tile's picture.
+// THE IMAGES WALL — the pictures a tile holds, laid out as ordinary tiles.
+// Click one and it becomes the tile's picture.
 //
-// In a swarm everybody brings their own image for the same tile. Clicking the
-// images icon replaces the mesh with a hive of those pictures: yours in the
-// middle slot, then one tile per distinct picture any participant is
-// publishing here, each wearing the name of who is offering it. They are laid
-// out on the SAME axial matrix a real layer uses, at full size, so the choice
-// looks like the hive it came from — not like a dialog over it.
+// A tile's pictures are a COLLECTION (the lightbox gallery, kept by
+// `holdPictures`): every picture saved through the editor stays in it, so
+// nothing a tile has worn is lost. Opening the wall replaces the mesh with that
+// collection on the SAME axial matrix a real layer uses, then adds what other
+// hosts publish under the tile's name — the pool of meaning `sign(name)`, asked
+// of every known host, so images are shared across domains by the name alone.
 //
-//   CLICK a tile → that picture becomes yours. One revision, undoable.
+//   CLICK a tile → that picture becomes the tile's. One revision, undoable.
+//                  Positioning is the editor's job, opened afterwards.
 //   ESC / empty  → everything snaps back. Nothing was written.
 //
-// The hive is hidden through `render:set-hive-visible`, the same takeover
-// lever wave-view and the screensaver use, so show-cell keeps ownership of
-// its own mesh. Every exit path restores it — including dispose — because a
-// stranded pick would leave a blank canvas.
+// The hive is hidden through `render:set-hive-visible`, the same takeover lever
+// wave-view and the screensaver use, and every exit path restores it. While the
+// wall is up this drone OWNS the pointer so tile-overlay cannot act on the
+// hidden layer beneath.
 //
-// While the pick is up this drone OWNS the pointer: moves and presses are
-// stopped at window capture so tile-overlay cannot act on the hidden layer
-// underneath.
-//
-// Read-only until the click: candidates are POINTERS off the wire, and the
-// bytes behind them are pulled for the picture you see (and again, as a
-// guarantee, before anything is written). A picture nobody can serve never
-// becomes your tile — it paints as a labelled hex that refuses to be picked.
+// A cross-host picture is a POINTER until clicked: its bytes are pulled for the
+// preview, and again, as a guarantee, before anything is written. One nobody can
+// serve paints as a labelled hex that refuses to be picked.
 
 import {
   Drone,
@@ -35,25 +31,18 @@ import {
 } from '@hypercomb/core'
 import { Container, Graphics, Point, Sprite, Text, Texture } from 'pixi.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
-import {
-  cellLocationSig,
-  readTilePropertiesAt,
-  readTilePropsIndex,
-  writeTilePropertiesAt,
-} from '../editor/tile-properties.js'
+import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
-import { galleryImageSigsAt } from '../commands/lightbox-kind.js'
-import { fetchThroughContentHop } from '../presentation/tiles/artifact-content.js'
-import { canonicalPeerImageCandidates, previewSigOf, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
+import { galleryImageSigsAt, holdPictures } from '../commands/lightbox-kind.js'
+import { fetchThroughContentHop, terminalContentSig } from '../presentation/tiles/artifact-content.js'
+import { meaningPoolImageCandidates, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
 import { imageChoiceWriteTargets } from './image-choice-targets.js'
 
 type Axial = { q: number; r: number }
 
-/** One choice on screen: a picture, who is offering it, where it sits, and the
- *  pointers that get written if it is picked. `pos` is in the pick layer's own
- *  coordinates — the layer pans and zooms, so a choice is found by DISTANCE
- *  from the cursor rather than by asking the hive's hex detector, which only
- *  ever knew about the untransformed mesh. */
+/** One choice on screen. `held` is a picture of the tile's own collection (its
+ *  large bytes); otherwise it is a cross-host picture carried by pointers.
+ *  `pos` is in the wall layer's own coordinates. */
 type Choice = {
   slot: Axial
   pos: { x: number; y: number }
@@ -61,9 +50,7 @@ type Choice = {
   previewSig: string
   who: string
   mine: boolean
-  kind?: 'picture' | 'theme' | 'theme-picture'
-  themeId?: string
-  itemName?: string
+  held: boolean
 }
 type ChoiceEntry = Omit<Choice, 'slot' | 'pos'>
 
@@ -73,9 +60,6 @@ const PICK_Z = 7006                 // above wave-view's dive (7005)
 // bites it SAYS SO rather than quietly showing a subset.
 const MAX_CHOICES = 400
 const ZOOM_MIN = 0.15
-const ZOOM_MAX = 4
-const ZOOM_STEP = 1.12              // per wheel notch
-const DRAG_SLOP = 6                 // px before a press becomes a pan, not a pick
 const TILE_FILL = 0x0e1018
 const TILE_FILL_ALPHA = 0.96
 const TILE_BORDER = 0x7eb6d6        // steel hairline (matches chrome)
@@ -103,7 +87,7 @@ export class ImageChoiceDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'sharing'
   override description =
-    'The image hive: every picture the room is carrying for a tile, as tiles — click one and it becomes yours.'
+    'The images wall: the pictures a tile holds, plus what other hosts publish for its name, as tiles — click one and it becomes the tile\'s.'
 
   // ── render plumbing ───────────────────────────────────────────────
   #renderContainer: Container | null = null
@@ -114,22 +98,24 @@ export class ImageChoiceDrone extends Drone {
   #circumRadius = 32                        // the hex itself
   #flat = false
 
-  // ── pick state ────────────────────────────────────────────────────
+  // ── wall state ────────────────────────────────────────────────────
   #label = ''                               // the tile being dressed
   #segments: string[] = []                  // its PARENT path
-  #currentPreview = ''                      // image this tile wears on entry
   #layer: Container | null = null
   #choices: Choice[] = []
-  #choiceByAxial = new Map<string, Choice>()
   #hoverKey: string | null = null
   #hiveHidden = false
   #buildToken = 0
   #applying = false
   // A browser synthesizes `click` after the pointerup that chooses a picture.
-  // The chooser is often closed by then, so this one-shot latch keeps that
-  // trailing click from landing on (and navigating into) the restored hive.
+  // This one-shot latch keeps that trailing click from landing on (and
+  // navigating into) the restored hive.
   #suppressTrailingClick = false
   #lastClient: { x: number; y: number } | null = null
+  /** Armed from the open until the wall is painted, and the place it opened at;
+   *  a cell-count from anywhere else means the participant navigated away. */
+  #open_ = false
+  #openedAt = ''
 
   #textures = new Map<string, Texture | null>()
 
@@ -164,10 +150,7 @@ export class ImageChoiceDrone extends Drone {
       void this.#open(label, payload?.segments ?? [])
     })
 
-    // A layer landing under the pick: back out ONLY when it is a different
-    // PLACE. In a swarm this fires on every peer burst — closing on all of
-    // them would make the choice unusable exactly where it is needed, and the
-    // choices themselves are re-read live when it reopens.
+    // A layer landing under the wall: back out ONLY when it is a different PLACE.
     this.onEffect('render:cell-count', () => {
       if (!this.#layer && !this.#open_) return
       if (this.#locationKey() !== this.#openedAt) this.#close()
@@ -178,7 +161,6 @@ export class ImageChoiceDrone extends Drone {
     window.addEventListener('pointerup', this.#onPointerUp, true)
     window.addEventListener('pointercancel', this.#onPointerUp, true)
     window.addEventListener('click', this.#onClick, true)
-    window.addEventListener('wheel', this.#onWheel, { capture: true, passive: false })
     window.addEventListener('keydown', this.#onKeyDown, true)
     window.addEventListener('blur', this.#onWindowBlur)
   }
@@ -189,20 +171,12 @@ export class ImageChoiceDrone extends Drone {
     window.removeEventListener('pointerup', this.#onPointerUp, true)
     window.removeEventListener('pointercancel', this.#onPointerUp, true)
     window.removeEventListener('click', this.#onClick, true)
-    window.removeEventListener('wheel', this.#onWheel, true)
     window.removeEventListener('keydown', this.#onKeyDown, true)
     window.removeEventListener('blur', this.#onWindowBlur)
     this.#close()                            // never strand a hidden hive
     for (const t of this.#textures.values()) { try { t?.destroy(true) } catch { /* gone */ } }
     this.#textures.clear()
   }
-
-  /** Armed from the click until the hive is painted — so a second click, or a
-   *  render arriving mid-resolution, is judged against a pick that exists. */
-  #open_ = false
-  /** The place the pick was opened at; a cell-count from anywhere else means
-   *  the participant navigated away. */
-  #openedAt = ''
 
   #locationKey(): string {
     const segs = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
@@ -217,36 +191,10 @@ export class ImageChoiceDrone extends Drone {
 
   // ── input ─────────────────────────────────────────────────────────
 
-  // A wall of pictures is navigated the way the hive itself is: drag to move,
-  // wheel or pinch to zoom. The gestures are handled HERE rather than left to
-  // the pan/zoom drones because the pick owns the pointer while it is up — the
-  // mesh underneath is hidden and nothing else may act on it — so the picker
-  // has to answer the same gestures itself or the wall would be frozen.
-  #pointers = new Map<number, { x: number; y: number }>()
-  #panning = false
-  #moved = 0                                 // px travelled since the press
-  #pinchStart = 0
-  #pinchStartZoom = 1
-  #zoom = 1
-
   #onPointerMove = (e: PointerEvent): void => {
     this.#lastClient = { x: e.clientX, y: e.clientY }
     if (!this.#layer) return
     e.stopPropagation()
-
-    const prior = this.#pointers.get(e.pointerId)
-    if (prior) this.#pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
-
-    if (this.#pointers.size >= 2) { this.#pinchTo(); return }
-
-    if (prior) {
-      this.#moved += Math.hypot(e.clientX - prior.x, e.clientY - prior.y)
-      if (this.#moved > DRAG_SLOP) this.#panning = true
-      if (this.#panning) {
-        this.#panBy(prior, { x: e.clientX, y: e.clientY })
-        return
-      }
-    }
     this.#updateHover()
   }
 
@@ -254,99 +202,29 @@ export class ImageChoiceDrone extends Drone {
     if (!this.#layer) return
     e.preventDefault()
     e.stopImmediatePropagation()             // tile-overlay must not act on the hidden layer
-    if (e.button !== 0 && e.pointerType === 'mouse') { this.#close(); return }
-    this.#pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
-    if (this.#pointers.size === 2) {
-      // Second finger down — this is a pinch from here, never a pick.
-      this.#panning = true
-      this.#pinchStart = this.#pinchSpan()
-      this.#pinchStartZoom = this.#zoom
-    }
-    this.#moved = 0
+    if (e.button !== 0 && e.pointerType === 'mouse') this.#close()
   }
 
-  /** The PICK happens on release, so a drag across the wall is navigation and
-   *  only a press that stayed put is a choice. */
+  /** The PICK happens on release. */
   #onPointerUp = (e: PointerEvent): void => {
-    if (!this.#layer) { this.#pointers.delete(e.pointerId); return }
+    if (!this.#layer) return
     e.preventDefault()
     e.stopImmediatePropagation()
-    const wasPanning = this.#panning
-    this.#pointers.delete(e.pointerId)
-    if (this.#pointers.size === 0) { this.#panning = false; this.#pinchStart = 0 }
-    if (wasPanning) return                   // a pan never picks and never closes
-
+    if (e.button !== 0 && e.pointerType === 'mouse') return
     const choice = this.#choiceUnderCursor(e.clientX, e.clientY)
     this.#suppressTrailingClick = true
-    if (!choice) { this.#close(); return }   // a tap on empty space backs out
-    if (choice.kind === 'theme' && choice.themeId) {
-      void this.#openTheme(choice.themeId)
-      return
-    }
-    if (choice.mine) { this.#close(); return }  // already wearing it — nothing to write
+    // Empty space backs out; the picture already worn has nothing to write.
+    if (!choice || choice.mine) { this.#close(); return }
     void this.#apply(choice)
   }
 
   #onClick = (e: MouseEvent): void => {
-    // While the chooser is visible it owns clicks. After a selection closes
-    // it, swallow exactly the synthesized click belonging to that release.
+    // While the wall is visible it owns clicks. After a selection closes it,
+    // swallow exactly the synthesized click belonging to that release.
     if (!this.#layer && !this.#suppressTrailingClick) return
     this.#suppressTrailingClick = false
     e.preventDefault()
     e.stopImmediatePropagation()
-  }
-
-  #onWheel = (e: WheelEvent): void => {
-    if (!this.#layer) return
-    e.preventDefault()
-    e.stopPropagation()
-    const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP
-    this.#zoomAbout(e.clientX, e.clientY, this.#zoom * factor)
-    this.#updateHover()
-  }
-
-  /** Move the wall by the cursor's travel, in the layer's parent space. */
-  #panBy(from: { x: number; y: number }, to: { x: number; y: number }): void {
-    const a = this.#toParent(from.x, from.y)
-    const b = this.#toParent(to.x, to.y)
-    if (!a || !b || !this.#layer) return
-    this.#layer.position.set(this.#layer.position.x + (b.x - a.x), this.#layer.position.y + (b.y - a.y))
-  }
-
-  #pinchSpan(): number {
-    const [a, b] = [...this.#pointers.values()]
-    return a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0
-  }
-
-  #pinchTo(): void {
-    const span = this.#pinchSpan()
-    if (!this.#pinchStart || !span) return
-    const [a, b] = [...this.#pointers.values()]
-    this.#zoomAbout((a.x + b.x) / 2, (a.y + b.y) / 2, this.#pinchStartZoom * (span / this.#pinchStart))
-  }
-
-  /** Zoom so the picture under the given screen point stays under it. */
-  #zoomAbout(clientX: number, clientY: number, target: number): void {
-    if (!this.#layer) return
-    const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, target))
-    const anchor = this.#toParent(clientX, clientY)
-    if (!anchor) return
-    const local = {
-      x: (anchor.x - this.#layer.position.x) / this.#zoom,
-      y: (anchor.y - this.#layer.position.y) / this.#zoom,
-    }
-    this.#zoom = next
-    this.#layer.scale.set(next)
-    this.#layer.position.set(anchor.x - local.x * next, anchor.y - local.y * next)
-  }
-
-  /** A screen point in the pick layer's PARENT coordinates (the hive's own
-   *  content space) — the space `layer.position` is measured in. */
-  #toParent(clientX: number, clientY: number): { x: number; y: number } | null {
-    const global = this.#toGlobal(clientX, clientY)
-    if (!global || !this.#renderContainer) return null
-    const p = this.#renderContainer.toLocal(new Point(global.x, global.y))
-    return { x: p.x, y: p.y }
   }
 
   #onKeyDown = (e: KeyboardEvent): void => {
@@ -359,77 +237,48 @@ export class ImageChoiceDrone extends Drone {
 
   // ── lifecycle ─────────────────────────────────────────────────────
 
-  /** Gather the room's pictures for `label`, decode them, and put them on the
-   *  grid. Nothing is hidden until there is a complete hive to put in its
-   *  place — resolving behind a blank canvas would flash. */
+  /** Gather the tile's pictures and what other hosts publish for its name,
+   *  decode them, and put them on the grid. Nothing is hidden until there is a
+   *  complete wall to put in the hive's place. */
   async #open(label: string, segments: readonly string[]): Promise<void> {
     this.#close()
-    // #close invalidates any older build. Mint this opening's token AFTER it,
-    // otherwise the chooser cancels itself before its first awaited read.
+    // #close invalidates any older build. Mint this opening's token AFTER it.
     const token = ++this.#buildToken
     this.#open_ = true
     this.#label = label
     this.#segments = segments.map(s => String(s ?? '').trim()).filter(Boolean)
     this.#openedAt = this.#segments.join('/')
 
-    const mine = await this.#myImageProps(label)
-    if (token !== this.#buildToken) return
-    const minePreview = mine ? previewSigOf(mine) : ''
-    this.#currentPreview = minePreview
-
-    const entries: ChoiceEntry[] = []
-    if (mine && minePreview) {
-      entries.push({ props: mine, previewSig: minePreview, who: this.#t('images.yours', 'yours'), mine: true })
-    }
-
-    // Pictures explicitly held by this tile (/lightbox add). They belong in
-    // the chooser even in solo mode; the currently worn one folds into the
-    // opaque "yours" tile and every other held picture starts shaded.
+    const worn = await this.#wornLarge(label)
     const held = await galleryImageSigsAt([...this.#segments, label])
     if (token !== this.#buildToken) return
-    for (let i = 0; i < held.length && entries.length < MAX_CHOICES; i++) {
-      const imageSig = held[i]
-      if (imageSig === minePreview || entries.some(entry => entry.previewSig === imageSig)) continue
-      entries.push({
-        props: { imageSig },
-        previewSig: imageSig,
-        who: `${this.#t('images.held', 'held')} ${i + 1}`,
-        mine: false,
-        kind: 'picture',
-      })
-    }
-    const themes = this.#backgroundThemes()?.themes ?? []
-    const themeEntries: ChoiceEntry[] = themes.map(theme => ({
-      props: {} as PeerImageProps,
-      previewSig: theme.preview ?? '',
-      who: theme.label,
-      mine: false,
-      kind: 'theme' as const,
-      themeId: theme.id,
+
+    const entries: ChoiceEntry[] = held.slice(0, MAX_CHOICES).map((imageSig, i) => ({
+      props: { imageSig },
+      previewSig: imageSig,
+      who: imageSig === worn ? this.#t('images.yours', 'yours') : `${i + 1}`,
+      mine: imageSig === worn,
+      held: true,
     }))
-    const allEntries = [...entries, ...themeEntries]
-    if (allEntries.length < 2) { this.#open_ = false; return }
 
-    // OPEN FIRST. Pool/server discovery and image decoding are enrichment,
-    // never a gate on acknowledging the click. Theme entrances and local
-    // choices land immediately as shaded labelled tiles; their pictures fill
-    // in as bytes resolve.
-    this.#paintEntries(allEntries)
-    void this.#hydrateEntries(allEntries, token)
+    // Cross-host variants: the pool `sign(name)` on every known host. Nothing
+    // more is needed to share pictures between domains than the tile's name.
+    const offered = await meaningPoolImageCandidates(label).catch(() => [] as readonly PeerImageCandidate[])
+    if (token !== this.#buildToken) return
+    for (const candidate of offered) {
+      if (entries.length >= MAX_CHOICES) break
+      if (entries.some(entry => entry.previewSig === candidate.previewSig)) continue
+      entries.push({ props: candidate.props, previewSig: candidate.previewSig, who: this.#who(candidate), mine: false, held: false })
+    }
+    if (entries.length < 2) {
+      this.#open_ = false
+      this.emitEffect('toast:show', { type: 'info', message: this.#t('images.none', 'Only one picture for this tile — nothing to choose from yet.') })
+      return
+    }
 
-    // Remote meaning pools can include slow or offline servers. Merge their
-    // verified variants into the layer when ready without holding the initial
-    // chooser hostage to network latency.
-    void canonicalPeerImageCandidates(label).then(async offered => {
-      if (token !== this.#buildToken) return
-      const merged = [...allEntries]
-      for (const candidate of offered) {
-        if (merged.length >= MAX_CHOICES) break
-        if (candidate.previewSig === minePreview || merged.some(entry => entry.previewSig === candidate.previewSig)) continue
-        merged.push({ props: candidate.props, previewSig: candidate.previewSig, who: this.#who(candidate), mine: false })
-      }
-      await this.#hydrateEntries(merged, token)
-    }).catch(() => { /* local/theme chooser remains usable */ })
+    await Promise.all(entries.map(entry => this.#texture(entry.previewSig)))
+    if (token !== this.#buildToken) return
+    this.#paintEntries(entries)
   }
 
   #paintEntries(entries: readonly ChoiceEntry[]): void {
@@ -441,87 +290,25 @@ export class ImageChoiceDrone extends Drone {
     if (choices.length) this.#paint(choices)
   }
 
-  async #hydrateEntries(entries: readonly ChoiceEntry[], token: number): Promise<void> {
-    await Promise.all(entries.filter(entry => entry.previewSig).map(entry => this.#texture(entry.previewSig)))
-    if (token !== this.#buildToken) return
-    this.#paintEntries(entries)
-  }
-
-  #backgroundThemes() {
-    return window.ioc.get<{
-      themes: readonly { id: string; label: string; preview?: string }[]
-      active: string | null
-      activeItem: string | null
-      choices(id: string): Promise<{ name: string; imageSig: string }[]>
-      set(input: string): Promise<string | null>
-    }>('@diamondcoreprocessor.com/BackgroundThemes')
-  }
-
-  async #openTheme(themeId: string): Promise<void> {
-    const service = this.#backgroundThemes()
-    if (!service) return
-    const token = ++this.#buildToken
-    const items = await service.choices(themeId)
-    if (token !== this.#buildToken || items.length === 0) return
-    const entries = items.map(item => ({
-      props: { imageSig: item.imageSig } as PeerImageProps,
-      previewSig: item.imageSig,
-      who: item.name,
-      mine: item.imageSig === this.#currentPreview,
-      kind: 'theme-picture' as const,
-      themeId,
-      itemName: item.name,
-    }))
-    for (const entry of entries) {
-      await this.#texture(entry.previewSig)
-      if (token !== this.#buildToken) return
-    }
-    const slots = this.#gridSlots(entries.length)
-    this.#paint(entries.map((entry, index) => {
-      const p = this.#axialToPixel(slots[index].q, slots[index].r)
-      return { ...entry, slot: slots[index], pos: { x: p.x + this.#meshOffset.x, y: p.y + this.#meshOffset.y } }
-    }))
-  }
-
   #who(candidate: PeerImageCandidate): string {
     const names = candidate.peers.map(p => p.label || p.pubkey.slice(0, 8))
     return names.length <= 2 ? names.join(', ') : `${names[0]} +${names.length - 1}`
   }
 
-  /** The image pointers already on the participant's own tile, read from the
-   *  canonical properties slot (the layer) with the participant-local index as
-   *  the fallback — the same two stores, in the same order, the renderer uses,
-   *  so "yours" is whatever you can actually see on the tile. */
-  async #myImageProps(label: string): Promise<PeerImageProps | undefined> {
-    const pointers = (props: Record<string, unknown> | null): PeerImageProps | undefined => {
-      if (!props) return undefined
-      const out: PeerImageProps = {}
-      const direct = props['imageSig']
-      const small = (props['small'] as { image?: string } | undefined)?.image
-      const flat = ((props['flat'] as { small?: { image?: string } } | undefined)?.small)?.image
-      const point = (props['point'] as { image?: string } | undefined)?.image
-      if (typeof direct === 'string') out.imageSig = direct
-      if (typeof small === 'string') out.small = { image: small }
-      if (typeof flat === 'string') out.flat = { small: { image: flat } }
-      if (typeof point === 'string') out.point = { image: point }
-      return previewSigOf(out) ? out : undefined
-    }
-
+  /** The signature of the picture the tile wears now (its large copy), read
+   *  from the tile's own properties. */
+  async #wornLarge(label: string): Promise<string> {
     try {
       // A Portal row READS what it dresses: the target where the item lives.
       const [target] = imageChoiceWriteTargets(this.#segments, label, this.#portalTarget(label))
-      if (!target) return undefined
-      const editsRoot = target.role === 'root-default'
-      const parentSegments = target.parentSegments
-      const selected = pointers(await readTilePropertiesAt(parentSegments, target.cell))
-      if (selected) return selected
-      const key = await cellLocationSig(parentSegments, target.cell)
-      const index = readTilePropsIndex()
-      const sig = index[key] ?? (editsRoot ? undefined : index[label])
-      if (!sig) return undefined
-      const blob = await this.#store()?.getResource?.(sig)
-      return blob ? pointers(JSON.parse(await blob.text())) : undefined
-    } catch { return undefined }
+      if (!target) return ''
+      const props = await readTilePropertiesAt(target.parentSegments, target.cell)
+      const large = (props['large'] as { image?: unknown } | undefined)?.image
+      if (typeof large !== 'string') return ''
+      // Stored as a content hop; the collection is compared at its terminal bytes.
+      const store = window.ioc.get<{ getResourceLocal(sig: string): Promise<Blob | null> }>('@hypercomb.social/Store')
+      return (store ? await terminalContentSig(store, large) : null) ?? large
+    } catch { return '' }
   }
 
   /** The route a Portal default-authoring row points at; null for any other
@@ -530,7 +317,7 @@ export class ImageChoiceDrone extends Drone {
     return referenceEditsRootDefaultForLabel(label) ? referenceTargetForLabel(label) : null
   }
 
-  /** Restore the hive and drop everything the pick owned. Safe to call twice. */
+  /** Restore the hive and drop everything the wall owned. Safe to call twice. */
   #close(): void {
     this.#buildToken++                       // cancel any in-flight resolution
     this.#open_ = false
@@ -540,15 +327,9 @@ export class ImageChoiceDrone extends Drone {
       this.#layer = null
     }
     this.#choices = []
-    this.#choiceByAxial.clear()
     this.#hoverKey = null
-    this.#pointers.clear()
-    this.#panning = false
-    this.#pinchStart = 0
-    this.#zoom = 1                           // the next wall opens fitted, not where this one was left
     this.#label = ''
     this.#segments = []
-    this.#currentPreview = ''
     if (this.#hiveHidden) {
       this.#hiveHidden = false
       this.emitEffect('render:set-hive-visible', { visible: true })
@@ -558,52 +339,56 @@ export class ImageChoiceDrone extends Drone {
   // ── the commit ────────────────────────────────────────────────────
 
   /**
-   * Wear this picture. Pulls every pointer's bytes first — a picture nobody
-   * can serve must not become your tile — then writes ONE revision carrying
-   * the new pointers, drops the old full-size original (a peer publishes hex
-   * thumbnails only, so keeping it would leave the lightbox showing a picture
-   * the tile no longer wears) and the substrate default mark (a picture you
-   * chose on purpose is not filler), and re-points the participant-local
-   * index at the canonical sig so the tile repaints at once.
+   * Wear this picture, as ONE revision.
+   *
+   * A held picture is the tile's large copy: it becomes `large` at its default
+   * framing and the stale thumbnails go, so the tile paints from it at once and
+   * the editor — opened afterwards — positions it. A cross-host picture has its
+   * bytes pulled first (one nobody can serve must not become the tile), then its
+   * pointers are written and the picture joins the tile's collection, so it
+   * stays after the next pick. Either way the substrate default mark goes (a
+   * picture chosen on purpose is not filler).
    */
   async #apply(choice: Choice): Promise<void> {
     if (this.#applying) return
     this.#applying = true
     const label = this.#label
     try {
-      const sigs = [choice.props.small?.image, choice.props.flat?.small.image, choice.props.point?.image, choice.props.imageSig]
-        .filter((s): s is string => typeof s === 'string')
-      const blobs = await Promise.all(sigs.map(s => this.#bytes(s)))
+      const sigs = choice.held
+        ? [choice.props.imageSig]
+        : [choice.props.small?.image, choice.props.flat?.small.image, choice.props.point?.image, choice.props.imageSig]
+      const blobs = await Promise.all(sigs.filter((s): s is string => typeof s === 'string').map(s => this.#bytes(s)))
       if (blobs.some(b => !b)) {
         this.emitEffect('toast:show', { type: 'warning', message: this.#t('images.failed', 'That picture could not be fetched — nothing changed.') })
         return
       }
 
-      // The chooser dresses the tile that opened it. The tile already exists,
-      // so resolving/creating a canonical root is neither necessary nor safe:
-      // a temporarily unavailable reference service used to abort this local
-      // write and make a perfectly valid click close without changing anything.
-      // New image relationships use the Life Primitive: the tile carries a
-      // meta incidence, and that typed incidence carries the immutable image
-      // resource. Readers follow the hop explicitly — `getResource` does NOT do
-      // it on its own (only `getResourceResolvedLocal` and `getLayerBytes` do),
-      // which is why every fetch here goes through `fetchThroughContentHop`.
-      // Raw legacy image sigs pass through the same path unchanged and are
-      // upgraded the next time somebody chooses them.
+      // Readers follow the Life Primitive hop explicitly — every fetch here goes
+      // through `fetchThroughContentHop`; `getResource` does not do it alone.
       const targets = imageChoiceWriteTargets(this.#segments, label, this.#portalTarget(label))
       for (const target of targets) {
         const existing = await readTilePropertiesAt(target.parentSegments, target.cell)
-        const updates: Record<string, unknown> = {
-          small: choice.props.small,
-          flat: choice.props.flat,
-          point: choice.props.point,
-          imageSig: choice.props.imageSig,
-          large: undefined,
-          substrate: undefined,
-        }
         const oldLarge = ((existing['large'] as { image?: string } | undefined)?.image) ?? ''
+        const updates: Record<string, unknown> = choice.held
+          ? {
+              large: { image: choice.props.imageSig, x: 0, y: 0, scale: 1 },
+              small: undefined, flat: undefined, point: undefined, imageSig: undefined, substrate: undefined,
+            }
+          : {
+              small: choice.props.small,
+              flat: choice.props.flat,
+              point: choice.props.point,
+              imageSig: choice.props.imageSig,
+              large: undefined,
+              substrate: undefined,
+            }
         if (oldLarge && existing['link'] === `${RESOURCE_URL_PREFIX}${oldLarge}`) {
           updates['link'] = undefined
+        }
+        if (!choice.held) {
+          // The collection is the tile's memory of every picture it has worn:
+          // keep what this replaces and what it becomes.
+          await holdPictures([...target.parentSegments, target.cell], [oldLarge, choice.previewSig]).catch(() => undefined)
         }
         await writeTilePropertiesAt(target.parentSegments, target.cell, updates)
         this.emitEffect('tile:saved', {
@@ -639,12 +424,10 @@ export class ImageChoiceDrone extends Drone {
     layer.zIndex = PICK_Z
     const r = this.#circumRadius
 
-    this.#choiceByAxial.clear()
     for (const c of choices) {
       const tile = this.#buildTile(r, c)
       tile.position.set(c.pos.x, c.pos.y)
       layer.addChild(tile)
-      this.#choiceByAxial.set(`${c.slot.q},${c.slot.r}`, c)
     }
 
     // What you are choosing FOR, above the hive — without it a screen of
@@ -673,14 +456,8 @@ export class ImageChoiceDrone extends Drone {
     this.#updateHover()
   }
 
-  /**
-   * Open showing ALL of them. A wall of a hundred pictures laid out at tile
-   * size is far wider than the screen, and landing on a corner of it with no
-   * clue that the rest exists is the same failure as capping the list. So the
-   * wall is scaled to fit the viewport on arrival — zoomed out if there are
-   * many, never zoomed IN past life size if there are few — and the wheel and
-   * a drag take it from there.
-   */
+  /** Open showing ALL of them: the wall is scaled to fit the viewport — zoomed
+   *  out if there are many, never in past life size — centred where the hive was. */
   #fitToScreen(choices: Choice[]): void {
     if (!this.#layer || !this.#renderer || choices.length === 0) return
     const r = this.#circumRadius * 2.2                 // tile + its label breathing room
@@ -693,15 +470,15 @@ export class ImageChoiceDrone extends Drone {
     const viewH = this.#renderer.screen.height / scale
     if (!(viewW > 0) || !(viewH > 0)) return
 
-    this.#zoom = Math.max(ZOOM_MIN, Math.min(1, Math.min(viewW / width, viewH / height) * 0.9))
-    this.#layer.scale.set(this.#zoom)
+    const zoom = Math.max(ZOOM_MIN, Math.min(1, Math.min(viewW / width, viewH / height) * 0.9))
+    this.#layer.scale.set(zoom)
     // Hold the mesh centre still while scaling about the layer's origin, so the
     // wall opens centred where the hive was.
     const cx = (Math.max(...xs) + Math.min(...xs)) / 2
     const cy = (Math.max(...ys) + Math.min(...ys)) / 2
     this.#layer.position.set(
-      this.#meshOffset.x - cx * this.#zoom,
-      this.#meshOffset.y - cy * this.#zoom,
+      this.#meshOffset.x - cx * zoom,
+      this.#meshOffset.y - cy * zoom,
     )
   }
 
@@ -794,8 +571,7 @@ export class ImageChoiceDrone extends Drone {
   #updateHover(): void {
     if (!this.#layer) return
     const choice = this.#lastClient ? this.#nearestChoice(this.#lastClient.x, this.#lastClient.y) : null
-    const selectable = choice && (choice.kind === 'theme' || this.#textures.get(choice.previewSig))
-    const hit = selectable && choice && !choice.mine
+    const hit = choice && this.#textures.get(choice.previewSig) && !choice.mine
       ? `${choice.slot.q},${choice.slot.r}` : null
     if (hit === this.#hoverKey) return
     this.#hoverKey = hit
@@ -811,17 +587,12 @@ export class ImageChoiceDrone extends Drone {
   #choiceUnderCursor(clientX: number, clientY: number): Choice | null {
     const choice = this.#nearestChoice(clientX, clientY)
     // An unresolved picture is a labelled hex, not a choice.
-    return choice && (choice.kind === 'theme' || choice.mine || this.#textures.get(choice.previewSig)) ? choice : null
+    return choice && (choice.mine || this.#textures.get(choice.previewSig)) ? choice : null
   }
 
-  /**
-   * The choice under a screen point — nearest centre within a hexagon's reach.
-   *
-   * NOT the hive's hex detector: that answers for the mesh's own untransformed
-   * grid, and this wall pans and zooms independently of it, so asking the
-   * detector would return the tile that WOULD be under the cursor if the wall
-   * had never moved. Distance in the layer's own space is the honest question.
-   */
+  /** The choice under a screen point: nearest centre within a hexagon's reach,
+   *  measured in the wall layer's own space (the hive's hex detector knows only the
+   *  untransformed mesh). */
   #nearestChoice(clientX: number, clientY: number): Choice | null {
     if (!this.#layer) return null
     const global = this.#toGlobal(clientX, clientY)
@@ -836,8 +607,6 @@ export class ImageChoiceDrone extends Drone {
     }
     return best
   }
-
-  // ── bytes ─────────────────────────────────────────────────────────
 
   #store() {
     return window.ioc.get<{
@@ -863,9 +632,7 @@ export class ImageChoiceDrone extends Drone {
     if (this.#textures.has(sig)) return this.#textures.get(sig) ?? null
     let tex: Texture | null = null
     try {
-      const blob = sig.startsWith('/')
-        ? await fetch(sig, { cache: 'force-cache' }).then(r => r.ok ? r.blob() : null)
-        : await this.#bytes(sig)
+      const blob = await this.#bytes(sig)
       if (blob) tex = Texture.from(await createImageBitmap(blob))
     } catch { tex = null }
     if (this.#textures.size >= TEXTURE_CACHE_MAX) {

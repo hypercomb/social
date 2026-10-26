@@ -5,6 +5,7 @@ import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../c
 import { portalEditTarget } from './portal-edit-target.js'
 import { parseHexColour } from './hex-capture.js'
 import { largeImage } from './arm-resource.js'
+import { holdPictures } from '../commands/lightbox-kind.js'
 import { editorSurface } from './editor-surface.js'
 import { TileEditorService } from './tile-editor.service.js'
 import { ImageEditorService } from './image-editor.service.js'
@@ -433,6 +434,8 @@ export class TileEditorDrone {
     const segmentsForSave: readonly string[] = targetSegments.slice(0, -1)
     let saved = false
     let wrote = false
+    // Pictures this save puts on the tile, kept in its collection afterwards.
+    const toHold: string[] = []
 
     try {
       // A picture dropped a moment ago may still be decoding.
@@ -464,6 +467,10 @@ export class TileEditorDrone {
         const point = imageEditor.framingFor('point-top')
         const flat = imageEditor.framingFor('flat-top')
         const flatProps = isRecord(props['flat']) ? props['flat'] : {}
+        // The picture it replaces is kept too, so a tile that starts with one
+        // picture and gains a second holds both.
+        const previousLarge = ((service as { baseline?: Record<string, unknown> }).baseline?.['large'] as { image?: unknown } | undefined)?.image
+        if (pictureChanged) toHold.push(...(typeof previousLarge === 'string' ? [previousLarge] : []), largeSig)
         props['large'] = { image: largeSig, x: point.x, y: point.y, scale: point.scale / large.ratio }
         props['small'] = { image: pointSig }
         props['flat'] = { ...flatProps, large: { x: flat.x, y: flat.y, scale: flat.scale / large.ratio }, small: { image: flatSig } }
@@ -493,6 +500,10 @@ export class TileEditorDrone {
           await writeTilePropertiesAt(segmentsForSave, savedCell, props)
         }
         wrote = true
+      }
+      if (toHold.length > 0) {
+        await holdPictures([...segmentsForSave, savedCell], toHold)
+          .catch(err => console.warn('[tile-editor] could not hold the picture', err))
       }
       saved = true
     } catch (err) {
