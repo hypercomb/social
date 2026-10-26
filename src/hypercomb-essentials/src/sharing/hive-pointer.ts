@@ -58,6 +58,9 @@ export interface HiveManifest {
   /** Optional public declarations. Values are held as signed data here; the
    *  offering reader decides their meaning when that protocol is defined. */
   offerings?: Record<string, unknown>
+  /** SEALED VERSIONS (documentation/sealed-audiences.md): per branch, the signatures of the envelopes that carry a
+   *  private version's door secret to its audience, in the order a reader tries them. Carried through every write. */
+  sealed?: Record<string, string[]>
   /** The verified event's complete content. A roots/doors rewrite must carry
    *  fields it does not interpret, or one ordinary publish erases them. */
   signedContent?: Record<string, unknown>
@@ -165,6 +168,7 @@ function hiveIndexOf(evt: Record<string, unknown>, key: string, listed?: Readonl
   }
   const addresses = readAddresses(signedContent['addresses'], roots)
   const doors = readDoors(signedContent['doors'], roots)
+  const sealed = readSealed(signedContent['sealed'], roots)
   const entrances = readEntrances(signedContent['entrances'], { roots, addresses, doors })
   rememberRead(key, Number(evt['created_at'] ?? 0), signedContent)
   return { ok: true, manifest: {
@@ -172,10 +176,24 @@ function hiveIndexOf(evt: Record<string, unknown>, key: string, listed?: Readonl
     eventId: String(evt['id'] ?? '').toLowerCase(),
     doors,
     ...(Object.keys(addresses).length > 0 ? { addresses } : {}),
+    ...(Object.keys(sealed).length > 0 ? { sealed } : {}),
     ...(Object.keys(entrances).length > 0 ? { entrances } : {}),
     ...(rawOfferings !== undefined ? { offerings: rawOfferings as Record<string, unknown> } : {}),
     signedContent,
   } }
+}
+
+/** The sealed map, leniently: per branch the envelope signatures, kept only for a branch the roots still name and only
+ *  as well-formed signatures, at most 16 per branch. A malformed entry drops that entry, never the index. */
+export function readSealed(raw: unknown, roots: Record<string, string>): Record<string, string[]> {
+  const sealed: Record<string, string[]> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return sealed
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(key in roots) || !Array.isArray(value)) continue
+    const sigs = [...new Set(value.map(sig => String(sig ?? '').trim().toLowerCase()).filter(sig => SIG_RE.test(sig)))].slice(0, 16)
+    if (sigs.length > 0) sealed[key] = sigs
+  }
+  return sealed
 }
 
 /** The signed doors map, leniently: a malformed entry drops that entry, so
@@ -344,6 +362,12 @@ async function putHiveManifestNow(
     // key's implicit label on a domain its doors open): unpublishing, closing
     // a door or moving an address drops the entrance with it. Omitted when
     // empty so an index without them stays byte-identical.
+    // THE SEALED VERSIONS ride through every write exactly as the doors do — only for branches the roots still name
+    // (unpublishing one takes its envelopes with it), omitted when empty so an index without them is byte-identical.
+    // A writer that dropped this would withdraw every private version at once.
+    const nextSealed = readSealed(content['sealed'], roots)
+    if (Object.keys(nextSealed).length > 0) content['sealed'] = nextSealed
+    else delete content['sealed']
     if (fresh !== undefined && fresh !== NO_INDEX) content['entrances'] = fresh ?? undefined
     const nextEntrances = readEntrances(content['entrances'], { roots, addresses: nextAddresses, doors: nextDoors ?? {} })
     // NO STALE COPY SIGNS POWERS. When the fresh read could not be trusted,
@@ -685,4 +709,37 @@ export async function nip98Header(
     })
     return 'Nostr ' + btoa(unescape(encodeURIComponent(JSON.stringify(signed))))
   } catch { return null }
+}
+
+/** Name (or stop naming) the envelopes of a branch's private versions in the participant's OWN index on `host`, under
+ *  the same rules as `setHiveRoot`: only a verified read is a baseline, the merge touches exactly that branch's entry,
+ *  and an entry already as asked no-ops (`reason: 'unchanged'`). The branch must already be a root: a private version
+ *  hangs off a published branch, and the index never names an envelope for a branch it does not publish. */
+export async function setHiveSealed(host: string, key: string, envelopes: readonly string[], deps: SetHiveRootDeps = {}): Promise<SetHiveRootResult> {
+  const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
+  const putManifest = deps.putManifest ?? putHiveManifest
+  const publicKey = deps.publicKey ?? (async () => (await keyList()).publisherKeyHex())
+  const cleanKey = key.trim()
+  const sigs = [...new Set(envelopes.map(sig => String(sig ?? '').trim().toLowerCase()))]
+  const refuse = (reason: string): SetHiveRootResult => ({ ok: false, key: cleanKey, sig: '', host, pubkey: '', createdAt: 0, reason })
+  if (!cleanKey) return refuse('empty key')
+  if (sigs.some(sig => !SIG_RE.test(sig)) || sigs.length > 16) return refuse('an envelope is not a 64-hex signature')
+  const pubkey = String((await publicKey().catch(() => null)) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return refuse('no signer')
+  const read = await fetchIndex(host, pubkey)
+  if (!read.ok) return refuse(read.reason === 'http' && read.status === 404 ? 'not-published' : `index-unsafe: ${read.reason}`)
+  if (!(cleanKey in read.manifest.roots)) return refuse('not-published')
+  const existing = readSealed(read.manifest.signedContent?.['sealed'], read.manifest.roots)
+  if (sameJson(existing[cleanKey] ?? [], sigs)) {
+    return { ok: true, key: cleanKey, sig: '', host, pubkey, createdAt: read.manifest.createdAt, reason: 'unchanged' }
+  }
+  const next = { ...existing }
+  if (sigs.length > 0) next[cleanKey] = sigs
+  else delete next[cleanKey]
+  const content: Record<string, unknown> = { ...(read.manifest.signedContent ?? {}) }
+  if (Object.keys(next).length > 0) content['sealed'] = next
+  else delete content['sealed']
+  const put = await putManifest(host, read.manifest.roots, read.manifest.doors ?? {}, read.manifest.createdAt, content)
+  if (!put.ok) return refuse(put.reason ?? 'index write failed')
+  return { ok: true, key: cleanKey, sig: '', host, pubkey: put.pubkey, createdAt: put.createdAt }
 }
