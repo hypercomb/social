@@ -289,11 +289,12 @@ unless asked for; the record and the hive's `community` window still carry them,
 own setup ("Manage this hive": creations, sources, packages, deployments) now waits behind the Manage icon, so arrival is the
 brand, the search and the tiles.
 
-### A showcase tile is a belief, not a copy (jwize 2026-10-25)
+### A showcase tile is a belief; carrying bytes belongs to following (jwize 2026-10-25)
 
-Turning a tile on names it (`{pubkey, lineage}`) and links to where its author serves it. Your host does not copy a
-third party's bytes (a considered "no": holding someone's bytes and then having them disappear is not believing in
-them, it complicates the host, and nothing can force other hosts to forget anyway). If the author goes, the tile goes
-with them. What an author controls is their own word: their signed doors, which an honest reader honors. Your own
-content reaches your own host by replication, as before; that is the only copying. Private content is encrypted
-on the device and is never public to begin with.
+Turning a tile on names it (`{pubkey, lineage}`) and links to where its author serves it: the ACT of adding to a showcase copies
+nothing ("it goes against the ethos of believing in somebody", and a host that only supplies a third party's bytes is no
+better than a redirect when they vanish). Carrying bytes is a different act and belongs to FOLLOWING: "you always carry the
+bytes for a site you are following, so the byte sharing runs laterally", the followers being the copies. Whether following
+carries the bytes today has not been checked (it is a design stated here, not built behaviour). What an author controls is their own
+word: signed doors, honored by honest readers; nothing forces another host to forget a byte. Private content is encrypted
+on the device and never public.
