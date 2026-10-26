@@ -281,3 +281,10 @@ only the showcase open. Search and Follow are unchanged.
 arrival the page is the brand, the search, and the showcase's tiles, nothing else: no row headers, no other domains, no
 follow box. The Manage icon, to the right of the search, turns that same view into the manager: every domain you
 follow as a row, their tiles grayed until turned on, and the follow box. Pressing it again returns to the showcase.
+
+### Groups are set aside (jwize 2026-10-25: "we aren't doing groups for now")
+
+The page no longer draws groups: no "All" row or word, no group label, no swipe between pages (`groups` is an option, off
+unless asked for; the record and the hive's `community` window still carry them, so nothing signed is lost). The hive's
+own setup ("Manage this hive": creations, sources, packages, deployments) now waits behind the Manage icon, so arrival is the
+brand, the search and the tiles.

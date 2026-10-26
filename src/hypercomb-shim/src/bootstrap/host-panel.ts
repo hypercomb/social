@@ -616,6 +616,7 @@ class HostPanelElement extends HTMLElement {
           readPublicCreations(zone).catch(() => [])]).then(([offers, creations]) => ({ offers, creations })),
         readOwners: readZoneOwners,
         owner: ownerBridge(),
+        onManage: on => { manage.hidden = !on },
         // EVERYTHING ON THE HOME PAGE IS A TILE (jwize 2026-10-25): the staged doors
         // and the platform's own are tiles in this domain's row, not panels.
         links: [...door.links, ...door.footer],
@@ -656,6 +657,8 @@ class HostPanelElement extends HTMLElement {
     // and deployments wait behind one line at the foot of the welcome.
     const manage = document.createElement('details')
     manage.className = 'manage'
+    // The page is the brand and the tiles; the setup waits until Manage is turned on.
+    manage.hidden = true
     manage.open = this.#manageOpen
     manage.addEventListener('toggle', () => { this.#manageOpen = manage.open })
     const manageSummary = document.createElement('summary')

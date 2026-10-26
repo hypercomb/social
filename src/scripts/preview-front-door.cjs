@@ -8,6 +8,7 @@
 //   node scripts/preview-front-door.cjs --no-build         # reuse the last build
 //   node scripts/preview-front-door.cjs --demo             # with named communities to swipe between
 //   node scripts/preview-front-door.cjs --demo --view launcher   # ... drawn as the launcher
+//   node scripts/preview-front-door.cjs --edge             # in Microsoft Edge instead of Chromium
 //   node scripts/preview-front-door.cjs --owner            # --demo, with a stand-in for your hive: a hold toggles
 //
 // --demo signs a showcase with a THROWAWAY key (never yours) that names a few
@@ -109,7 +110,8 @@ const types = {
 ;(async () => {
   const phone = flag('phone')
   const demo = flag('demo') || flag('owner') ? await demoFor(domain, value('view', '')) : null
-  const browser = await chromium.launch({ headless: flag('headless'), args: phone ? [] : ['--window-size=1500,1000'] })
+  // --edge opens it in Microsoft Edge (this machine's own), else Playwright's Chromium.
+  const browser = await chromium.launch({ headless: flag('headless'), ...(flag('edge') ? { channel: 'msedge' } : {}), args: phone ? [] : ['--window-size=1500,1000'] })
   const context = await browser.newContext(phone
     ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, serviceWorkers: 'allow' }
     : { viewport: null, serviceWorkers: 'allow' })
@@ -160,6 +162,7 @@ const types = {
   if (demo) console.log('Demo: a throwaway key signs a showcase with communities First, Second, Third — nothing real is changed.')
   if (flag('headless')) {
     await page.waitForTimeout(12000)
+    if (value('shot', '')) await page.screenshot({ path: value('shot', '') })
     console.log('tabs:', await page.evaluate(() => [...document.querySelector('hc-shim-hosts').shadowRoot.querySelectorAll('.pager-tab')].map(tab => tab.textContent).join(' | ')))
     await browser.close()
     return

@@ -532,6 +532,11 @@ export type ShowcaseOptions = {
   /** Follow a domain: checked, then kept in this browser's community. */
   readonly follow?: (raw: string) => Promise<{ readonly ok: true; readonly zone: string } | { readonly ok: false; readonly reason: string }>
   /** A followed domain's own ledger, kept to the names under that domain. */
+  /** Groups (named pages of the showcase, swiped between) are set aside for now (jwize 2026-10-25: "we aren't
+   *  doing groups for now"): off unless asked for. The record still carries them; the page does not draw them. */
+  readonly groups?: boolean
+  /** Told when Manage is turned on or off: the hive's own setup shows only while the page is managing. */
+  readonly onManage?: (managing: boolean) => void
   /** The hive beside this page, when this device is its owner's: a tap on a tile puts it in the showcase or takes it out. */
   readonly owner?: OwnerBridge | null
   readonly readPeerLedger?: (zone: string) => Promise<readonly LedgerSite[]>
@@ -588,7 +593,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   // right of the search, turns that same view into the manager: the domains you follow as rows, their tiles grayed
   // until you turn them on, and the follow box.
   let managing = false
-  const manageButton = el('button', 'manage')
+  const manageButton = el('button', 'manage-toggle')
   manageButton.type = 'button'
   manageButton.title = 'Manage'
   manageButton.setAttribute('aria-label', 'Manage')
@@ -597,6 +602,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   manageButton.addEventListener('click', () => {
     managing = !managing
     manageButton.setAttribute('aria-pressed', String(managing))
+    options.onManage?.(managing)
     paint()
   })
   searchBox.append(manageButton)
@@ -1035,7 +1041,7 @@ ${entry.key}`
   const label = el('button', 'pager-label')
   label.type = 'button'
   label.id = 'community-label'
-  const pages = (): ShowcaseCommunity[] => (signed?.showcase?.communities ?? [])
+  const pages = (): ShowcaseCommunity[] => (options.groups ? signed?.showcase?.communities ?? [] : [])
     .filter(community => community.items.length > 0 || community.domains.length > 0)
   const select = (key: string, focus = false): void => {
     page = key
@@ -1425,12 +1431,12 @@ export const SHOWCASE_STYLE = `
   background: var(--md-surface-c-lowest);
   border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant));
 }
-.search .manage { flex: none; display: grid; place-items: center; width: 2.9rem; height: 2.9rem; margin-left: .5rem; padding: 0; cursor: pointer;
+.search .manage-toggle { flex: none; display: grid; place-items: center; width: 2.9rem; height: 2.9rem; margin-left: .5rem; padding: 0; cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant)); border-radius: var(--hc-radius-control, 2px);
   background: var(--md-surface-c-lowest); color: var(--md-on-surface); }
-.search .manage svg { position: static; margin: 0; width: 1.25rem; height: 1.25rem; color: inherit; }
-.search .manage[aria-pressed='true'] { border-color: var(--md-primary); color: var(--md-primary); }
-.search .manage:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.search .manage-toggle svg { position: static; margin: 0; width: 1.25rem; height: 1.25rem; color: inherit; }
+.search .manage-toggle[aria-pressed='true'] { border-color: var(--md-primary); color: var(--md-primary); }
+.search .manage-toggle:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 .bands:not(.managing) .dex-row.own > .dex-head { display: none; }
 .search input::placeholder { color: var(--md-on-surface-faint); }
 .search input:focus { outline: 2px solid var(--md-primary); outline-offset: 1px; }

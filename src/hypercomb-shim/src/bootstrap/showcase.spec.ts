@@ -176,7 +176,7 @@ describe('showcase — the page is what is published now', () => {
   it('draws exactly the signed showcase: its items and the domains shown in full, never the rest', async () => {
     const asked: string[][] = []
     const draw = (record: ShowcaseRecord | null) => showcase({
-      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      self: 'hypercomb.com', groups: true, title: 'hypercomb', tagline: '', sources: [],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
       readOwners: async (_zone, owners) => { asked.push([...owners]); return { showcase: record, reached: true, unreadable: false, doors: new Map() } },
     }).bands
@@ -322,7 +322,7 @@ describe('the hyperdex — this domain first and open, then the domains you foll
     // On arrival only the showcase shows; Manage turns the same view into the manager.
     await vi.waitFor(() => expect([...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent)).toEqual(['camelflage', 'dylan']))
     expect([...bands.querySelectorAll<HTMLElement>('.dex-row')].filter(row => !row.hidden)).toHaveLength(1)
-    ;(hero.querySelector('.manage') as HTMLButtonElement).click()
+    ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
     await vi.waitFor(() => expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:']))
     ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
     expect(rows(bands)).toEqual(['hypercomb.com:', 'jwize.com open:dylan'])
@@ -409,7 +409,7 @@ describe('following a domain from the page', () => {
       follow, readPeerLedger: async zone => peer(zone),
     })
     await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
-    ;(hero.querySelector('.manage') as HTMLButtonElement).click()
+    ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
     const suggest = bands.querySelector('.follow-suggest') as HTMLElement
     const search = hero.querySelector('input[type=search]') as HTMLInputElement
     expect(suggest.hidden).toBe(true)
@@ -482,7 +482,7 @@ describe('communities — pages after All', () => {
   }
   const links = [{ label: 'Minimal host', href: '/hosts', note: '', icon: 'host' as const }]
   const draw = () => showcase({
-    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [], links,
+    self: 'hypercomb.com', groups: true, title: 'hypercomb', tagline: '', sources: [], links,
     ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
     readOwners: async () => ({ showcase: record, reached: true, unreadable: false, doors: new Map() }),
   })
@@ -575,13 +575,13 @@ describe('communities — pages after All', () => {
     await vi.waitFor(() => expect(names(plain.bands)).toEqual(['camelflage', 'dylan']))
     expect((plain.bands.querySelector('.pager') as HTMLElement).hidden).toBe(true)
     const withPeers = showcase({
-      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      self: 'hypercomb.com', groups: true, title: 'hypercomb', tagline: '', sources: ['jwize.com'],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
       readOwners: async () => ({ showcase: record, reached: true, unreadable: false, doors: new Map() }),
     })
     await vi.waitFor(() => expect(tabs(withPeers.bands)).toHaveLength(3))
     ;goTo(withPeers.bands, 1)
-    ;(withPeers.hero.querySelector('.manage') as HTMLButtonElement).click()
+    ;(withPeers.hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
     ;(withPeers.bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
     // jwize.com's row is its master list, whichever community is showing.
     expect([...withPeers.bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['dylan'])
@@ -598,7 +598,7 @@ describe('the launcher — the same tiles, drawn in rows of four', () => {
     ...extra,
   })
   const draw = (rec: ShowcaseRecord, sources: string[] = []) => showcase({
-    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources, links,
+    self: 'hypercomb.com', groups: true, title: 'hypercomb', tagline: '', sources, links,
     ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
     readOwners: async () => ({ showcase: rec, reached: true, unreadable: false, doors: new Map() }),
   })
@@ -684,7 +684,7 @@ describe('what the owners meant, and what the page does when it cannot tell', ()
     doors: new Map([[sig('a'), new Map([['camelflage', ['hypercomb.com']], ['dylan', ['hypercomb.com']]])]]), ...extra,
   })
   const draw = (read: () => Promise<ZoneOwners>, extra = {}) => showcase({
-    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+    self: 'hypercomb.com', groups: true, title: 'hypercomb', tagline: '', sources: [],
     ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: read, ...extra,
   })
   const names = (bands: HTMLElement): string[] => [...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent ?? '')
@@ -733,7 +733,7 @@ describe('what the owners meant, and what the page does when it cannot tell', ()
     ] })
     const { bands, hero } = draw(async () => owners(), { sources: ['evil.example'], readPeerLedger: async () => hostile })
     await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
-    ;(hero.querySelector('.manage') as HTMLButtonElement).click()
+    ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
     // The owner's own tile keeps its one owner: the peer's claim to the same key never joins it.
     const dylan = [...bands.querySelectorAll<HTMLAnchorElement>('.dex-row.own a.hex')].find(tile => tile.textContent?.includes('dylan'))!
     expect(dylan.querySelector<HTMLElement>('.hex-owners')!.hidden).toBe(true)
@@ -757,7 +757,7 @@ describe('what the owners meant, and what the page does when it cannot tell', ()
   it('draws a followed domain that sits under one already drawn as the names that open under it', async () => {
     const { bands, hero } = draw(async () => owners(), { sources: ['dylan.jwize.com'] })
     await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
-    ;(hero.querySelector('.manage') as HTMLButtonElement).click()
+    ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
     ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
     expect([...bands.querySelectorAll('.dex-row:not(.own) .hex-name')].map(name => name.textContent)).toEqual(['dylan'])
   })
@@ -901,7 +901,7 @@ describe('a followed peer keeps its own tiles, the sheet keeps its own buttons, 
     const { hero, bands } = draw({ follow })
     const search = hero.querySelector('input[type=search]') as HTMLInputElement
     await vi.waitFor(() => expect(own(bands)).toEqual(['camelflage', 'dylan']))
-    ;(hero.querySelector('.manage') as HTMLButtonElement).click()
+    ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
     search.value = 'friend.example'
     search.dispatchEvent(new Event('input'))
     search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
@@ -1106,7 +1106,7 @@ describe('a tap visits, a hold toggles', () => {
     const { hero, bands } = draw(owner, ['jwize.com'])
     document.body.append(hero, bands)
     try {
-      ;(hero.querySelector('.manage') as HTMLButtonElement).click()
+      ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
       await vi.waitFor(() => expect(bands.querySelectorAll('.dex-head').length).toBeGreaterThan(1))
       ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
       const dylan = await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')
