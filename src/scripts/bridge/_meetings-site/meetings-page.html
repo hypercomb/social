@@ -2,119 +2,77 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hypercomb Beginner Meetings</title>
-<meta name="description" content="Six evenings that take a newcomer from opening a hive to building a first bee. Bring a laptop; nothing to install.">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hypercomb Meetings</title>
+<meta name="description" content="Hypercomb courses are coming soon. Our free weekly meetup is on now — find the next one on the meetups calendar.">
 <style>
-  .mtp{--bg:#FBF7EE;--panel:#FFFDF8;--ink:#231C0F;--muted:#6D6350;--line:#E6DCC5;
-    --honey:#B8790A;--honey-soft:rgba(184,121,10,.11);--honey-ink:#7A4E00;
-    display:block;min-height:100vh;background:var(--bg);color:var(--ink);
-    font:16px/1.6 'Segoe UI',system-ui,-apple-system,'Helvetica Neue',sans-serif;
-    -webkit-font-smoothing:antialiased}
+  /* Same modernist grammar as the meetups page — hairline dividers, square
+     corners, one accent — with the accent moved to a cool indigo on a clean
+     neutral ground. Scoped under .mtp: the hive mounts a page inline. */
+  .mtp{--bg:#f6f7f9;--panel:#ffffff;--text:#16181d;--muted:#5a606b;--divider:color-mix(in srgb,#16181d 22%,transparent);
+    --accent:#3b4cf0;--accent-ink:#2330c4;--accent-soft:color-mix(in srgb,#3b4cf0 9%,transparent);
+    --font:system-ui,-apple-system,"Segoe UI","Helvetica Neue",sans-serif;
+    display:block;min-height:100vh;background:var(--bg);color:var(--text);
+    font:400 16px/1.55 var(--font);text-wrap:pretty;-webkit-font-smoothing:antialiased}
   @media (prefers-color-scheme:dark){
-    .mtp{--bg:#17130B;--panel:#201A10;--ink:#F3EADA;--muted:#B3A68C;--line:#3A3020;
-      --honey:#E9A93A;--honey-soft:rgba(233,169,58,.13);--honey-ink:#F5C46B}
+    .mtp{--bg:#0e1015;--panel:#161922;--text:#eef0f5;--muted:#a1a8b6;--divider:color-mix(in srgb,#eef0f5 24%,transparent);
+      --accent:#7c8bff;--accent-ink:#a6b0ff;--accent-soft:color-mix(in srgb,#7c8bff 14%,transparent)}
   }
-  .mtp *{box-sizing:border-box;margin:0;padding:0}
-  .mtp .wrap{max-width:1040px;margin:0 auto;padding:0 16px 88px}
-  .mtp code{font:.9em/1.4 Consolas,'Cascadia Mono',ui-monospace,monospace;
-    background:var(--honey-soft);color:var(--honey-ink);padding:.08em .38em;border-radius:5px;white-space:nowrap}
+  .mtp *,.mtp *::before,.mtp *::after{box-sizing:border-box;margin:0;padding:0}
+  .mtp a{color:var(--accent-ink);text-underline-offset:3px}
+  .mtp :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .mtp ::selection{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+  .mtp code{font:600 .85em/1.4 ui-monospace,Consolas,"Cascadia Mono",monospace;background:var(--accent-soft);color:var(--accent-ink);padding:2px 6px}
 
-  .mtp header{padding:64px 0 8px;display:grid;grid-template-columns:1fr auto;gap:32px;align-items:center}
-  .mtp .eyebrow{font:12px/1.4 Consolas,'Cascadia Mono',ui-monospace,monospace;letter-spacing:.16em;
-    text-transform:uppercase;color:var(--honey);margin-bottom:14px}
-  .mtp h1{font-size:clamp(34px,6.2vw,62px);font-weight:800;line-height:1.03;letter-spacing:-.025em;
-    margin-bottom:18px;text-wrap:balance}
-  .mtp .lede{font-size:18.5px;color:var(--muted);max-width:60ch}
-  .mtp .lede b{color:var(--ink);font-weight:600}
-  .mtp .comb{width:200px;height:auto;color:var(--honey)}
-  .mtp .facts{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
-  .mtp .fact{border:1px solid var(--line);background:var(--panel);border-radius:999px;
-    padding:7px 15px;font-size:14px;color:var(--muted)}
-  .mtp .fact b{color:var(--ink);font-weight:600}
+  .mtp .wrap{max-width:760px;margin:0 auto;min-height:100vh;background:var(--bg)}
+  @media (min-width:762px){.mtp .wrap{border-left:1px solid var(--divider);border-right:1px solid var(--divider)}}
+  .mtp .top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;border-bottom:2px solid var(--divider)}
+  .mtp .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
+  .mtp .brand em{font-style:normal;color:var(--accent)}
+  .mtp .top a{font-size:13px;font-weight:700;text-decoration:none;color:var(--text)}
+  .mtp .top a:hover{color:var(--accent)}
 
-  .mtp h2{font-size:clamp(24px,3.4vw,30px);font-weight:750;letter-spacing:-.015em;margin:72px 0 8px;text-wrap:balance}
-  .mtp .intro{color:var(--muted);max-width:66ch;margin-bottom:26px}
+  .mtp section{padding:28px 20px;border-top:2px solid var(--divider)}
+  .mtp section:first-of-type{border-top:0}
+  .mtp .kicker{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--accent-ink);margin-bottom:10px}
+  .mtp h1{font-size:clamp(30px,7vw,46px);line-height:1.04;letter-spacing:-.025em;font-weight:800;margin-bottom:14px;text-wrap:balance}
+  .mtp h2{font-size:clamp(22px,4.4vw,28px);line-height:1.12;letter-spacing:-.015em;font-weight:800;margin-bottom:10px;text-wrap:balance}
+  .mtp .lede{font-size:17px;color:var(--muted);max-width:56ch}
+  .mtp .sub{font-size:14px;color:var(--muted);max-width:60ch}
 
-  .mtp .ramp{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:16px}
-  .mtp .night{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:16px;
-    padding:22px;display:flex;flex-direction:column;gap:10px}
-  .mtp .night .hex{width:46px;height:52px;flex:none;display:grid;place-items:center;
-    clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
-    background:var(--honey);color:var(--panel);font-weight:800;font-size:20px}
-  .mtp .night .top{display:flex;gap:14px;align-items:center;padding-right:84px}
-  .mtp .night h3{font-size:19px;font-weight:700;line-height:1.25}
-  .mtp .night .tag{font-size:12.5px;color:var(--muted);margin-top:3px}
-  .mtp .night .q{font-style:italic;color:var(--muted);font-size:15px}
-  .mtp .night .idea{font-size:15px}
-  .mtp .night .can{font-size:14px;color:var(--muted);border-top:1px dashed var(--line);padding-top:10px;margin-top:auto}
-  .mtp .night .can b{color:var(--ink);font-weight:600}
-  .mtp .night .monthly{position:absolute;top:16px;right:16px;font-size:11px;
-    letter-spacing:.08em;text-transform:uppercase;color:var(--honey-ink);background:var(--honey-soft);
-    padding:3px 9px;border-radius:999px}
-  .mtp .note{font-size:14.5px;color:var(--muted);margin-top:16px;max-width:72ch}
+  .mtp .soon{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center;margin-top:22px;
+    border:1px solid var(--divider);background:var(--panel);padding:18px}
+  .mtp .soon svg{width:58px;height:auto;color:var(--accent)}
+  .mtp .soon b{display:block;font-size:19px;font-weight:800;line-height:1.2}
+  .mtp .soon span{font-size:14px;color:var(--muted)}
+  .mtp .chip{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    border:1px solid var(--accent);color:var(--accent-ink);padding:2px 8px;margin-bottom:8px}
 
-  .mtp .show{list-style:none;border-left:2px solid var(--line);margin-left:8px}
-  .mtp .show li{position:relative;padding:0 0 22px 26px;display:grid;grid-template-columns:64px 1fr;gap:4px 14px}
-  .mtp .show li:last-child{padding-bottom:0}
-  .mtp .show li::before{content:"";position:absolute;left:-7px;top:6px;width:12px;height:12px;border-radius:50%;
-    background:var(--bg);border:2px solid var(--honey)}
-  .mtp .show time{font:600 15px/1.5 Consolas,'Cascadia Mono',ui-monospace,monospace;color:var(--honey-ink)}
-  .mtp .show b{font-weight:650}
-  .mtp .show span{grid-column:2;color:var(--muted);font-size:15px}
+  .mtp .facts{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid var(--divider);margin-top:20px}
+  .mtp .facts > div{padding:12px 12px 12px 0;border-bottom:1px solid var(--divider)}
+  .mtp .facts > div:nth-child(even){padding-left:12px;border-left:1px solid var(--divider)}
+  .mtp .mini{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .mtp .big{font-weight:800;font-size:18px;line-height:1.2;margin-top:2px}
+  .mtp .actions{margin-top:20px;display:flex;gap:10px;flex-wrap:wrap}
+  .mtp .btn{display:inline-flex;align-items:center;gap:8px;min-height:46px;padding:10px 18px;font:800 14px/1.2 var(--font);
+    text-decoration:none;border:1px solid var(--accent);background:var(--accent);color:#fff;transition:background .18s ease}
+  .mtp .btn:hover{background:var(--accent-ink);color:#fff}
+  .mtp .btn.ghost{background:transparent;color:var(--text);border-color:var(--divider)}
+  .mtp .btn.ghost:hover{background:var(--accent-soft);color:var(--text)}
 
-  .mtp .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));gap:18px}
-  .mtp .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px}
-  .mtp .card h3{font-size:17px;font-weight:700;margin-bottom:10px}
-  .mtp .card ul,.mtp .card ol{padding-left:20px;color:var(--muted);font-size:15px;display:grid;gap:8px}
-  .mtp .card li b{color:var(--ink);font-weight:600}
+  .mtp .list{list-style:none;border-top:2px solid var(--divider);margin-top:16px}
+  .mtp .list li{display:grid;grid-template-columns:34px 1fr;gap:12px;padding:12px 4px;border-bottom:1px solid var(--divider)}
+  .mtp .list .n{font-weight:800;font-size:13px;color:var(--accent-ink);font-feature-settings:"tnum";padding-top:2px}
+  .mtp .list b{font-weight:800}
+  .mtp .list span{display:block;font-size:14px;color:var(--muted)}
 
-  .mtp .tbl{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
-  .mtp table{border-collapse:collapse;width:100%;min-width:440px;font-size:15px}
-  .mtp th,.mtp td{text-align:left;padding:10px 16px;border-bottom:1px solid var(--line);vertical-align:top}
-  .mtp tbody tr:last-child td{border-bottom:0}
-  .mtp th{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
-  .mtp td:last-child{color:var(--muted)}
-  .mtp .sigils{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:14px;margin-top:18px}
-  .mtp .sigil{display:flex;gap:14px;align-items:center;background:var(--honey-soft);border-radius:14px;padding:14px 16px}
-  .mtp .sigil kbd{font:800 22px/1 Consolas,'Cascadia Mono',ui-monospace,monospace;color:var(--honey-ink);min-width:48px;text-align:center}
-  .mtp .sigil span{font-size:14.5px}
+  .mtp footer{padding:18px 20px 40px;border-top:2px solid var(--divider);font-size:12px;color:var(--muted);
+    display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:space-between}
 
-  .mtp .join{margin-top:72px;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:30px 28px;
-    display:grid;grid-template-columns:1fr auto;gap:20px;align-items:center}
-  .mtp .join h2{margin:0 0 8px}
-  .mtp .join p{color:var(--muted);max-width:60ch}
-  .mtp .join .tbd{font-size:14px;color:var(--honey-ink);background:var(--honey-soft);padding:8px 14px;border-radius:10px}
-
-  .mtp footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);
-    font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:space-between}
-
-
-  /* Quiet motion. Only when the page's script runs and the reader has not
-     asked for less motion; without either, everything is simply there. */
-  .mtp.mtp-motion [data-reveal]{opacity:0;transform:translateY(14px);
-    transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);
-    transition-delay:var(--d,0ms)}
-  .mtp.mtp-motion [data-reveal].in{opacity:1;transform:none}
-  .mtp.mtp-motion .comb .core{animation:mtp-breathe 7s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
-  @keyframes mtp-breathe{0%,100%{opacity:.78;transform:scale(.97)}50%{opacity:1;transform:scale(1)}}
-  .mtp .night{transition:border-color .25s ease,transform .25s ease,box-shadow .25s ease}
-  @media (hover:hover){
-    .mtp .night:hover{border-color:var(--honey);transform:translateY(-2px);
-      box-shadow:0 10px 24px -18px rgba(0,0,0,.45)}
-  }
-  @media (prefers-reduced-motion:reduce){
-    .mtp.mtp-motion [data-reveal]{opacity:1;transform:none;transition:none}
-    .mtp.mtp-motion .comb .core{animation:none}
-    .mtp .night{transition:none}
-    .mtp .night:hover{transform:none}
-  }
-
-  @media (max-width:720px){
-    .mtp header{grid-template-columns:1fr;padding-top:40px}
-    .mtp .comb{display:none}
-    .mtp .join{grid-template-columns:1fr;padding:24px 20px}
-    .mtp .show li{grid-template-columns:52px 1fr}
+  @media (max-width:520px){
+    .mtp .soon{grid-template-columns:1fr}
+    .mtp .facts{grid-template-columns:1fr}
+    .mtp .facts > div:nth-child(even){padding-left:0;border-left:0}
   }
 </style>
 </head>
@@ -122,206 +80,62 @@
 <div class="mtp">
 <div class="wrap">
 
-<header>
-  <div>
-    <p class="eyebrow">Hypercomb · beginner meetings</p>
-    <h1>Six evenings from your first hive to your first bee.</h1>
-    <p class="lede">A hands-on night for people who make things and are tired of losing them in folders.
-      <b>Bring a laptop, nothing to install.</b> A ten-minute live demo, then you build in a shared hive
-      with a bee guiding you and a buddy beside you.</p>
-    <div class="facts">
-      <span class="fact"><b>90 minutes</b> a night</span>
-      <span class="fact"><b>8 to 15</b> people</span>
-      <span class="fact"><b>Free</b>, first-timers welcome</span>
-      <span class="fact">Coffee and snacks included</span>
+<div class="top">
+  <span class="brand">Hypercomb <em>Meetings</em></span>
+  <a href="https://meetups.hypercomb.com">Meetups calendar &#8599;</a>
+</div>
+
+<section aria-label="Courses">
+  <span class="kicker">Courses</span>
+  <h1>Courses are coming soon.</h1>
+  <p class="lede">We are shaping hands-on courses for people who make things and want to keep them. The lineup is not final, so we are not promising one yet.</p>
+  <div class="soon">
+    <svg viewBox="0 0 200 180" aria-hidden="true">
+      <g fill="none" stroke="currentColor" stroke-width="5">
+        <polygon points="100,8 140,31 140,77 100,100 60,77 60,31"/>
+        <polygon points="60,77 100,100 100,146 60,169 20,146 20,100" opacity=".5"/>
+        <polygon points="140,77 180,100 180,146 140,169 100,146 100,100" opacity=".5"/>
+      </g>
+    </svg>
+    <div>
+      <span class="chip">Coming soon</span>
+      <b>Details to be announced.</b>
+      <span>Topics, dates and venue will appear here once they are settled.</span>
     </div>
   </div>
-  <svg class="comb" viewBox="0 0 200 180" aria-hidden="true">
-    <g fill="none" stroke="currentColor" stroke-width="3">
-      <polygon points="100,8 140,31 140,77 100,100 60,77 60,31"/>
-      <polygon points="60,77 100,100 100,146 60,169 20,146 20,100" opacity=".55"/>
-      <polygon points="140,77 180,100 180,146 140,169 100,146 100,100" opacity=".55"/>
-    </g>
-    <polygon points="100,26 124,40 124,68 100,82 76,68 76,40" fill="currentColor" opacity=".2"/>
-    <polygon class="core" points="140,104 156,113 156,132 140,141 124,132 124,113" fill="currentColor" opacity=".85"/>
-  </svg>
-</header>
+</section>
 
-<h2 data-reveal>The six nights</h2>
-<p class="intro" data-reveal>One idea per night, in the order the app's own tutorial teaches them. The demo is the idea;
-  the hands-on hour is the matching course, flown by the bee with <code>/tutorial</code>.</p>
-
-<div class="ramp">
-  <article class="night" data-reveal>
-    <span class="monthly">Every month</span>
-    <div class="top"><div class="hex">1</div><div><h3>Welcome to the hive</h3><div class="tag">Course: <code>/tutorial start</code></div></div></div>
-    <p class="q">Where did the last thing you shared actually go, and who can still see it?</p>
-    <p class="idea">Presence is permission. A hive exists while people are in it, and nothing is stored unless someone publishes it.</p>
-    <p class="can"><b>You leave able to</b> join a hive from a QR code, go in and out of cells, zoom, pan and select.</p>
-  </article>
-  <article class="night" data-reveal>
-    <span class="monthly">Every month</span>
-    <div class="top"><div class="hex">2</div><div><h3>Make things by typing</h3><div class="tag">Course: <code>/tutorial beginner</code></div></div></div>
-    <p class="q">How many clicks does it take to make a folder, name it, and put a note in it?</p>
-    <p class="idea">One command line, three stances: a name creates, <code>/</code> commands, <code>?</code> asks.</p>
-    <p class="can"><b>You leave able to</b> create and edit cells, copy, cut, paste, undo, redo, fit and center.</p>
-  </article>
-  <article class="night" data-reveal>
-    <div class="top"><div class="hex">3</div><div><h3>Find and mean</h3><div class="tag">Course: <code>/tutorial intermediate</code></div></div></div>
-    <p class="q">How do you find a thing when you forgot where you put it but remember what it was about?</p>
-    <p class="idea">A mark is a word the hive can search. A pheromone is a signal from a reader, never a label.</p>
-    <p class="can"><b>You leave able to</b> filter a layer, search a branch or the whole hive, and add marks, titles and references.</p>
-  </article>
-  <article class="night" data-reveal>
-    <div class="top"><div class="hex">4</div><div><h3>Share by signature</h3><div class="tag">Course: sharing lessons and <code>/language</code></div></div></div>
-    <p class="q">Why does the same photo exist nine times across your devices?</p>
-    <p class="idea">Same content, same signature. One hash is the name, the version and the permission.</p>
-    <p class="can"><b>You leave able to</b> explain a signature, share one, pull content from a host and switch the language.</p>
-  </article>
-  <article class="night" data-reveal>
-    <div class="top"><div class="hex">5</div><div><h3>The windows</h3><div class="tag">Course: <code>/tutorial expert</code></div></div></div>
-    <p class="q">Which window do you open to undo yesterday?</p>
-    <p class="idea">One window per job: palette, editor, notes, files, history, rewind and the assistant.</p>
-    <p class="can"><b>You leave able to</b> use every primary window, rewind the night's hive and ask the assistant.</p>
-  </article>
-  <article class="night" data-reveal>
-    <div class="top"><div class="hex">6</div><div><h3>Build a bee</h3><div class="tag">Pair build, for anyone who reads code</div></div></div>
-    <p class="q">What is the smallest thing you could add to the app without asking anyone?</p>
-    <p class="idea">A drone senses and acts on every heartbeat and talks only through the effect bus.</p>
-    <p class="can"><b>You leave able to</b> read a drone, change one effect and see the hive react.</p>
-  </article>
-</div>
-<p class="note" data-reveal>Nights 1 and 2 run every month, so you can start any time. Nights 3 to 6 rotate, and regulars can repeat any of them.
-  If your first visit lands on a later night, a buddy pairs with you and you fly the starter course instead.</p>
-
-<h2 data-reveal>How a night runs</h2>
-<p class="intro" data-reveal>The same shape every time, so regulars know the rhythm and you can arrive late without missing the point.</p>
-<ol class="show" data-reveal>
-  <li><time>0:00</time><b>Doors, coffee, snacks</b><span>A hex name tag with a bee sticker, and a QR code on the screen that joins the evening's hive.</span></li>
-  <li><time>0:15</time><b>Intro round</b><span>One question for the room, thirty seconds each.</span></li>
-  <li><time>0:30</time><b>Short demo</b><span>Ten minutes, one idea, live in the app. No slides: the hive is the slide.</span></li>
-  <li><time>0:45</time><b>Hands-on</b><span>The bee flies the night's course while helpers roam. Everyone builds something in the shared hive.</span></li>
-  <li><time>1:15</time><b>Show-and-tell</b><span>What people built, then free mingling by the food.</span></li>
-  <li><time>1:30</time><b>Close</b><span>One takeaway each and next night's topic. The hive goes away with the people, as promised.</span></li>
-</ol>
-
-<h2 data-reveal>Fun, food and people</h2>
-<p class="intro" data-reveal>People are bees, the room is the hive, and nothing is stored unless someone publishes it.</p>
-<div class="cols">
-  <div class="card" data-reveal>
-    <h3>Icebreakers in the app</h3>
-    <ul>
-      <li><b>Hive bingo.</b> A grid of cells on the big screen, filled with each other's names, live.</li>
-      <li><b>Six-neighbour chain.</b> Add a cell next to the last person's, naming something you share.</li>
-      <li><b>Signature match.</b> The first table to find the content behind a signature picks the music.</li>
-      <li><b>Pheromone vote.</b> Mark the demo you liked most; the winner presents first next time.</li>
-    </ul>
+<section aria-label="Meetups">
+  <span class="kicker">Meetups &middot; on now</span>
+  <h2>Meet us at the weekly meetup.</h2>
+  <p class="sub">A free, welcoming get-together for anyone building their community online. Beginners welcome. No account, no email. Bring a laptop and your questions.</p>
+  <div class="facts">
+    <div><div class="mini">Cost</div><div class="big">Free</div></div>
+    <div><div class="mini">Who</div><div class="big">Everyone, beginners included</div></div>
+    <div><div class="mini">When and where</div><div class="big">See the calendar</div></div>
+    <div><div class="mini">Join</div><div class="big">From the calendar, no sign-up form</div></div>
   </div>
-  <div class="card" data-reveal>
-    <h3>Intro questions</h3>
-    <ol>
-      <li>Name, what you make, and one thing you would put in a hive tonight.</li>
-      <li>What is the last thing you lost in a folder and never found again?</li>
-      <li>What did you build last month that nobody saw?</li>
-      <li>Describe your job in three cells, drawn live.</li>
-    </ol>
+  <div class="actions">
+    <a class="btn" href="https://meetups.hypercomb.com">Open the meetups calendar <span aria-hidden="true">&rarr;</span></a>
   </div>
-  <div class="card" data-reveal>
-    <h3>Why people come back</h3>
-    <ul>
-      <li><b>Buddy bees.</b> Every first-timer is paired with a regular for the hands-on hour.</li>
-      <li><b>Lightning slot.</b> Five minutes for one member to show what they built since last time.</li>
-      <li><b>A shared contact cell,</b> published only if the room says yes.</li>
-      <li><b>Honey on the table:</b> coffee, honey-lemon tea, something sweet and something savoury.</li>
-    </ul>
-  </div>
-</div>
+</section>
 
-<h2 data-reveal>Cheat sheet</h2>
-<p class="intro" data-reveal>Every first-timer gets this on paper. Everything on it is also in the app under <code>/help</code>.</p>
-<div class="tbl" data-reveal>
-<table>
-  <thead><tr><th>Want to</th><th>Type</th><th>Then</th></tr></thead>
-  <tbody>
-    <tr><td>Make a cell</td><td><code>name</code></td><td>Enter</td></tr>
-    <tr><td>Make a cell and walk into it</td><td><code>/name</code></td><td>Enter</td></tr>
-    <tr><td>Make a cell inside another</td><td><code>parent/child</code></td><td>Enter</td></tr>
-    <tr><td>Walk into a cell</td><td><code>name</code></td><td>Shift+Enter</td></tr>
-    <tr><td>Go back up</td><td><code>..</code></td><td>Enter</td></tr>
-    <tr><td>Find on this layer</td><td><code>?word</code></td><td>Type; matches stay bright</td></tr>
-    <tr><td>Find in this branch</td><td><code>?[word]</code></td><td>Type</td></tr>
-    <tr><td>Find in the whole hive</td><td><code>?@word</code></td><td>Type</td></tr>
-    <tr><td>Select several</td><td><code>[a, b, c]</code></td><td>Enter</td></tr>
-    <tr><td>Delete</td><td><code>~name</code></td><td>Enter</td></tr>
-    <tr><td>Undo, redo</td><td>Ctrl+Z, Ctrl+Y</td><td></td></tr>
-    <tr><td>See every command</td><td><code>/help</code></td><td>Enter</td></tr>
-    <tr><td>Let the bee teach you</td><td><code>/tutorial</code></td><td>Enter, pick a course</td></tr>
-    <tr><td>Switch language</td><td><code>/language ja</code></td><td>Enter</td></tr>
-  </tbody>
-</table>
-</div>
-<div class="sigils" data-reveal>
-  <div class="sigil"><kbd>abc</kbd><span>A bare name creates.</span></div>
-  <div class="sigil"><kbd>/</kbd><span>A slash commands.</span></div>
-  <div class="sigil"><kbd>?</kbd><span>A question mark asks.</span></div>
-</div>
-
-<section class="join" data-reveal>
-  <div>
-    <h2 data-reveal>Come to a night</h2>
-    <p>Free, fifteen spots, with a waitlist. Registration asks one question, "What do you make?", so the host knows who to pair you with.
-      Bring a laptop with a modern browser.</p>
-  </div>
-  <span class="tbd">Dates and venue announced soon</span>
+<section aria-label="Until then">
+  <span class="kicker">Until courses open</span>
+  <h2>Learn it at the meetup.</h2>
+  <ol class="list">
+    <li><span class="n">01</span><div><b>Find the next meetup</b><span>Dates, venue and who is coming are all on the calendar.</span></div></li>
+    <li><span class="n">02</span><div><b>Come and ask</b><span>Bring what you are working on. We help you get started and walk you through it live.</span></div></li>
+    <li><span class="n">03</span><div><b>Check back here</b><span>When the courses are decided, they will be announced on this page.</span></div></li>
+  </ol>
 </section>
 
 <footer>
-  <span>Hypercomb Beginner Meetings · meetings.hypercomb.com</span>
-  <span>The hive exists only while we are in the room.</span>
+  <span>Hypercomb Meetings &middot; meetings.hypercomb.com</span>
+  <span>Meetups live at meetups.hypercomb.com</span>
 </footer>
 
 </div>
 </div>
-<script>
-(function () {
-  var roots = document.querySelectorAll('.mtp:not([data-motion-ready])');
-  var root = roots[roots.length - 1];
-  if (!root) return;
-  root.setAttribute('data-motion-ready', '');
-  var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  // No motion at all where it could hide content: reduced motion asked for,
-  // no observer, or no viewport to observe against (a hidden frame).
-  if (still || !('IntersectionObserver' in window) || !window.innerHeight) return;
-  var marks = root.querySelectorAll('[data-reveal]');
-  var shown = 0;
-  var show = function (el) { if (!el.classList.contains('in')) { el.classList.add('in'); shown++; } };
-  root.classList.add('mtp-motion');
-  // The nights arrive in order, a beat apart; the cards likewise.
-  var nights = root.querySelectorAll('.night[data-reveal]');
-  for (var i = 0; i < nights.length; i++) nights[i].style.setProperty('--d', (i % 3) * 90 + 'ms');
-  var cards = root.querySelectorAll('.card[data-reveal]');
-  for (var j = 0; j < cards.length; j++) cards[j].style.setProperty('--d', j * 90 + 'ms');
-  var seen = new IntersectionObserver(function (entries) {
-    entries.forEach(function (e) {
-      if (!e.isIntersecting) return;
-      show(e.target);
-      seen.unobserve(e.target);
-    });
-  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
-  for (var k = 0; k < marks.length; k++) {
-    // Already in view, or scrolled past: there, at once (on the next frame,
-    // so the first paint can still ease in).
-    if (marks[k].getBoundingClientRect().top < window.innerHeight) {
-      (function (el) { requestAnimationFrame(function () { show(el); }); })(marks[k]);
-    } else seen.observe(marks[k]);
-  }
-  // Failsafe: an observer that never fires must never leave the page blank.
-  setTimeout(function () {
-    if (shown > 0) return;
-    seen.disconnect();
-    root.classList.remove('mtp-motion');
-  }, 2500);
-})();
-</script>
 </body>
 </html>
