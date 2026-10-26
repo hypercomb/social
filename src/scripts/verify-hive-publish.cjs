@@ -136,7 +136,7 @@ const announcedOn = page => page.evaluate(() => {
   check('Jev judged the write as a write row, with the header as the model wrote it', !!judged && judged.rows.some(r => r.includes(`${target.bee} ${target.section}`)))
   check('Jev was asked toward, beyond, grounded and every doctrine section', !!judged && ['write_toward', 'write_beyond', 'write_grounded'].every(k => judged.questions.includes(k)) && judged.questions.filter(k => /^write_rule\d+$/.test(k)).length >= 3)
   check('Jev judged the write against the Life Primitive — its shape and its rules', !!judged && ['### The Life Primitive', '### The Life Primitive — its rules'].every(rule => judged.rules.includes(rule)), JSON.stringify(judged?.rules))
-  check('the write ran through Execution as an edit', run.decided.some(d => d.kind === 'editing' && /^write /.test(d.lines[0])), JSON.stringify(run.decided))
+  check('the write ran through Execution as an edit', run.executed.some(d => d.kind === 'editing' && d.state === 'ran' && /^write /.test(d.lines[0])), JSON.stringify(run.executed))
   check('the draft is picked at the module\'s path', !!run.drafted && run.drafted[0].path === target.path)
 
   // ── 2. COMMIT OPENS A SANDBOX — the live channel does not move ──────────
@@ -146,7 +146,7 @@ const announcedOn = page => page.evaluate(() => {
   console.log('   toasts:', JSON.stringify(shown))
   const sandboxRoot = await pub.installed()
   const state1 = await hostState()
-  check('module commit was accepted', said.accepted && said.outcome?.kind === 'ran', JSON.stringify(said.outcome))
+  check('module commit was accepted', said.accepted && (shown ?? []).some(m => /^Sandbox /.test(m)), JSON.stringify(shown))
   check('the committed root runs here as the trunk', !!sandboxRoot && sandboxRoot !== LOCAL_ROOT, sandboxRoot?.slice(0, 12))
   check('the sandbox channel names the committed root', channelOf(state1, pubkey, `install:${SANDBOX}`) === sandboxRoot)
   check('the live channel was NOT moved', channelOf(state1, pubkey, 'install:essentials') === null)

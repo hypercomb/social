@@ -308,6 +308,11 @@ const zoneTrials = async (zone: string): Promise<{ ok: true; trials: SandboxTria
 export class ModuleQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'module'
+  /** Kept verbatim: a host is `@<host>`, and one with a port (`@localhost:4291`,
+   *  a machine serving on its own port) has a colon the tag extractor took for
+   *  `label:tag` — the line was stripped before the word ran and nothing
+   *  answered (measured 2026-10-25). The word folds its own arguments. */
+  override readonly rawArgs = true
   override description = 'See, drop, try in public, or promote what runs here'
   override descriptionKey = 'slash.module'
   override options = ['list', 'drop <path>', 'commit [<change>] @<host>', 'promote <change> [<channel>] @<host>', 'withdraw <change> @<host>', 'review <change> @<host>', 'assess <change> [accept|refuse|unclear <note>] @<host>', 'trials [@<host>]', 'changes <change> [@<host>]', 'take <change> [<path>] [@<host>]', 'focus @<host>', 'audit <change> [@<host>]']

@@ -101,3 +101,12 @@ describe('module take with held code', () => {
     expect((toasts.at(-1) as { actionEffect?: string } | undefined)?.actionEffect).toBe('brood:open')
   })
 })
+
+// 2026-10-25: `module trials @localhost:4291` vanished on the Enter path — the
+// tag extractor read `localhost:4291` as `label:tag` and stripped the line
+// before the word ran. A word whose arguments name hosts keeps them verbatim.
+describe('a host with a port', () => {
+  it('reaches the word: the module word keeps its arguments verbatim', () => {
+    expect(new ModuleQueenBee().rawArgs).toBe(true)
+  })
+})

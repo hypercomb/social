@@ -107,6 +107,8 @@ jwize: "make sure the workflow is very clear what is happening or the participan
 
 Asked again the same day whether drafts belong on a separate domain, jwize kept the 2026-09-24 decision: a draft lives at its own `try-` subdomain of the host domain and reaches the real site only by promotion.
 
+**The proof runs again (2026-10-25): `verify-hive-publish.cjs` 75/75.** It had rotted against three later changes, none in the trial itself: its sentences went through the remote door, which the admission gate (2026-10-01) treats as a machine's, so `module commit` was refused (they now go through `command:submit`, the door Enter uses, as canonical slash); a fresh hive grants a model no word, and the chat offers code writing only to a model that may change something (the harness says `grant allow create` first, as a participant would); and the local host reported indexes from the KV namespace they left on 2026-09-25 (it now reads the `sign('hive:indexes')` pool). One real fault came out of it: on the Enter path a host with a port (`@localhost:4291`) was read as `label:tag` and the line vanished; the module word now keeps its arguments verbatim (`rawArgs`). Run it with `web-4264-bigstack` while `hypercomb-web/public/content` holds more files than the Angular dev server can list.
+
 Still owed, from the same conversation: a reviewer that runs the change's tests, a plain-language summary of each change for the participant, reviewers that are deliberately different models, and installing a taken change into the git source.
 
 ## Audit a trial from your own hive (built 2026-09-23)
