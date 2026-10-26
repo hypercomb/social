@@ -934,9 +934,14 @@ ${entry.key}`
     }
     if (!tiles.length || !width) { comb.replaceChildren(row(tiles, false)); return }
     if (!tiles[0]!.isConnected) comb.replaceChildren(row(tiles.slice(0, 1), false))
+    // Measure at the stylesheet's size, then grow the tiles just enough that a full row spans the comb EDGE TO EDGE
+    // (jwize 2026-10-26: "the tiles need to be flush with the flat sides of the outer pointy-top hexagons"): the outer
+    // hexagons' flat sides then sit on the comb's own edges, with no leftover strip to the right.
+    comb.style.removeProperty('--s')
     const size = tiles[0]!.getBoundingClientRect().width
     const gap = Number.parseFloat(getComputedStyle(tiles[0]!.parentElement!).columnGap) || 0
     const fit = Math.max(1, Math.floor((width + gap) / (size + gap)))
+    if (fit > 1) comb.style.setProperty('--s', `${(width - (fit - 1) * gap) / fit}px`)
     const zigzag = fit > 1 || width >= 1.5 * (size + gap) - gap
     const rows: HTMLElement[] = []
     for (let at = 0, line = 0; at < tiles.length; line++) {
@@ -1555,7 +1560,7 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
 .dex-chevron { display: grid; flex: none; color: var(--md-on-surface-var); transition: transform .2s; }
 .dex-chevron svg { width: 1.1rem; height: 1.1rem; }
 .dex-row.open .dex-chevron { transform: rotate(180deg); color: var(--md-primary); }
-.dex-body { padding: .2rem .9rem 1rem; }
+.dex-body { padding: .2rem 0 1rem; }
 .dex-row:not(.open) .dex-body { display: none; }
 /* a tile in another domain's row that is already in your showcase */
 .hex.in-showcase::after { content: '✓'; position: absolute; z-index: 3; top: 12%; left: 50%; transform: translateX(-50%);
@@ -1569,7 +1574,7 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
 .mini > .hex-art:not(.has-picture) { background-color: var(--md-surface-c-high); }
 
 /* the honeycomb: rows of pointy-top hexagons, every other one shifted half a hex */
-.comb { --s: 10.4rem; --g: .6rem; display: grid; justify-content: start; min-width: 0; }
+.comb { --s: 10.4rem; --g: .2rem; display: grid; justify-content: start; min-width: 0; }
 .comb-row { display: flex; gap: var(--g); }
 .comb-row + .comb-row { margin-top: calc(var(--g) * .866 - var(--s) * .2887); }
 .comb-row.shift { padding-left: calc((var(--s) + var(--g)) / 2); }
@@ -1647,7 +1652,7 @@ a.version-visit { color: var(--md-primary); }
   /* the sentence goes on a phone: the name, the count and the search are the header */
   .hero-tagline { display: none; }
   .mini { width: 1.8rem; height: calc(1.8rem * 1.1547); margin-left: -.55rem; }
-  .comb { --s: 6.1rem; --g: .36rem; }
+  .comb { --s: 6.1rem; --g: .12rem; }
   .comb[data-shape='launcher'] { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.1rem .7rem; }
   .comb[data-shape='launcher'] .hex-name { font-size: .72rem; }
   .hex-name { font-size: .74rem; }

@@ -314,3 +314,12 @@ in its head's first properties entry), else the first child's, level by level (t
 cover. Checked on the live hypercomb.com on 2026-10-26: only revolucion and camelflage carry a picture; the other seven publish
 `properties` holding only `index`, and nothing below them or in their website pages carries one either, so they still show the
 generated cover until a picture is set on them in the hive and published (it travels with the publish).
+
+### The comb is flush, and updated pictures have a word (jwize 2026-10-26)
+
+The honeycomb spans its card **edge to edge**: the tiles are grown just enough that a full row has the outer hexagons' flat
+sides on the comb's own edges, the card's side padding is gone, and the gutter between tiles is `.2rem` (`.12rem` on a phone).
+**`republish`** (`sharing/republish.queen.ts`, the participant's word like every publish form) publishes again every page the
+Publish panel marks `drift` (published, and its head here has moved on, as it does when a picture is set on a tile): it names
+them, asks once, and runs them one after another to the hosts each names, as the panel's selected-apps run does. It never
+publishes anything that was not already published. The pictures on the front door appear as soon as the republish lands.

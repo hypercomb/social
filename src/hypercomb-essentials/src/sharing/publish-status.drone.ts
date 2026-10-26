@@ -96,7 +96,7 @@ import {
   APEX_LABEL, creationUrl, topOpenIn, entranceAddresses, entranceHost, foldDnsLabel, isPoweredEntrance, ownAddressRefusal, ownLabelOn,
   zoneDoor, type ZoneEntrance,
 } from './zone-door.js'
-import { batchOrder } from './publish-batch.js'
+import { batchOrder, driftedRows } from './publish-batch.js'
 
 /** English fallbacks for every way publishing can stop. Each one names what
  *  happened AND what it means for the participant's existing links — the
@@ -342,7 +342,7 @@ export class PublishStatusDrone extends Drone {
 
   protected override listens: string[] = [
     'publish:view-toggle', 'publish:shown', 'publish:close', 'publish:refresh', 'sync:state',
-    'publish:run', 'publish:run-many', 'publish:unpublish', 'publish:make-live', 'publish:inspect', 'publish:copy-link',
+    'publish:run', 'publish:run-many', 'publish:run-drifted', 'publish:unpublish', 'publish:make-live', 'publish:inspect', 'publish:copy-link',
     'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
     'hosts:render', 'publish:arrival', 'publish:participant', 'publish:participant-publish',
@@ -500,6 +500,9 @@ export class PublishStatusDrone extends Drone {
     this.onEffect<{ keys?: unknown }>('publish:run-many', (p) => {
       void this.#runMany(Array.isArray(p?.keys) ? p.keys.map(k => String(k ?? '')).filter(Boolean) : [])
     })
+    // WHAT CHANGED SINCE IT WENT OUT (`republish`): every published page whose head here has moved on from the one the
+    // world sees — a new picture, a new note — republished in one go, after one question that names them.
+    this.onEffect('publish:run-drifted', () => { void this.#runDrifted() })
     this.onEffect<{ key?: string; zone?: string; on?: boolean }>('publish:door', (p) => {
       void this.#door(String(p?.key ?? ''), String(p?.zone ?? ''), p?.on === true)
     })
@@ -1309,6 +1312,30 @@ export class PublishStatusDrone extends Drone {
    *  Publish changes, ONE AFTER ANOTHER (publish-batch.ts: every run re-signs
    *  the host's whole index), deepest first. The panel shows how far it is;
    *  one line says how it went; one sweep follows. */
+  async #runDrifted(): Promise<void> {
+    if (this.#batch || this.#inFlight.size > 0) {
+      this.#toast('tip', 'publish.batch.busy', 'The picked apps are still publishing — try again when they are done.')
+      return
+    }
+    // Read the world against here, now, and wait for the reading (a sweep already running answers for itself).
+    await this.#refresh()
+    for (let waited = 0; this.#refreshing && waited < 60_000; waited += 250) await new Promise(resolve => setTimeout(resolve, 250))
+    const drifted = driftedRows(this.#rows)
+    if (drifted.length === 0) {
+      this.#toast('info', 'publish.drift.none', 'Everything published is up to date with what is here.')
+      return
+    }
+    const names = drifted.map(row => row.path || row.segments.join('/'))
+    const ok = await requestConfirm({
+      title: (get(I18N_IOC_KEY) as I18nProvider | undefined)?.t('publish.drift.title') ?? 'Republish what changed?',
+      message: `${names.slice(0, 12).join(', ')}${names.length > 12 ? ` and ${names.length - 12} more` : ''} — ${drifted.length} published page(s) have moved on since they went out (a new picture, a new note). This sends what is here now to the hosts each one names.`,
+      confirmLabel: 'Republish',
+      cancelLabel: 'Not now',
+    }).catch(() => false)
+    if (!ok) return
+    await this.#runMany(drifted.map(row => row.key))
+  }
+
   async #runMany(keys: readonly string[]): Promise<void> {
     if (this.#batch || this.#inFlight.size > 0) {
       this.#toast('tip', 'publish.batch.busy', 'The picked apps are still publishing — try again when they are done.')

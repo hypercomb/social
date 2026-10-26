@@ -23,3 +23,10 @@ export function batchOrder<T extends BatchRow>(rows: readonly T[], keys: readonl
     .filter(row => wanted.has(row.key) && row.segments.length > 0)
     .sort((a, b) => b.segments.length - a.segments.length || a.path.localeCompare(b.path))
 }
+
+/** WHAT CHANGED SINCE IT WENT OUT: the rows whose verified index names a head and whose head here has moved on from it —
+ *  the Publish panel's `drift` — and nothing else. A row that was never published, one whose host could not be read, and one
+ *  that is already live are all left alone: republishing never publishes anything new. */
+export function driftedRows<T extends BatchRow & { state: string; live: string | null; here: string | null }>(rows: readonly T[]): T[] {
+  return rows.filter(row => row.state === 'drift' && !!row.live && !!row.here && row.live !== row.here && row.segments.length > 0)
+}
