@@ -57,7 +57,7 @@ beforeEach(() => {
       return index ? Response.json(index) : new Response('none', { status: 404 })
     }
     const held = atoms.get(url.pathname.slice(1))
-    return held ? new Response(held) : new Response('none', { status: 404 })
+    return held ? new Response(held as unknown as BodyInit) : new Response('none', { status: 404 })
   }) as typeof fetch
 })
 afterEach(() => { globalThis.fetch = realFetch; registry.clear() })

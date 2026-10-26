@@ -187,3 +187,9 @@ domain — the publish path signs with the key bound to the domain it writes.
 - [hypercomb-communication-layer.md](hypercomb-communication-layer.md) — notes
   that `infrastructure.md:214` describes a different scheme than the code; this
   design builds on the code
+
+## The word (built 2026-10-26)
+
+`private` (`sharing/private.queen.ts`): alone, who the page you stand on is sealed to; `private <key> [<key> ...]` (64-hex or npub)
+seals it to them after asking in words (ciphertext to your host, an envelope named in the signed index); `private off` stops naming the
+private versions (ciphertext already on hosts stays, unnamed). The page must already be published. Not yet run against a live host.

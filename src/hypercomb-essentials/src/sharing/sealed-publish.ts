@@ -139,19 +139,15 @@ export type PublishPrivateResult =
   | SealedPublishResult
   | { ok: false; reason: 'services' | 'no-signer' | 'no-nip44' | 'no-host' | 'not-published' }
 
-/** A private version of ONE published branch for `members`: the ciphertext goes to the host its index lives on, and the
- *  envelope is named in the signed index beside the branch's public root. The head is the one the index already names
- *  (or `options.head`, a sealed head the store holds); the branch must already be published, since a private version
- *  hangs off a root. `members` are public keys. A branch with a private version and NO public one is a design question
- *  still open (what the root names), so it is not made here.
- *
- *  It never seals the subtree itself: that recursive seal is a courtesy the doctrine ratchet only lets shrink. */
-export async function publishPrivate(segments: readonly string[], members: readonly string[], options: { head?: string } = {}): Promise<PublishPrivateResult> {
+/** Where a branch's private versions live: the host whose index already names the branch as a root, that index's key for
+ *  it, the envelopes it already names, and the root. Null reasons say what is missing. */
+export async function findBranchIndex(segments: readonly string[]): Promise<
+  | { ok: true; host: string; key: string; publisher: string; own: string; previous: string[]; head: string }
+  | { ok: false; reason: 'services' | 'no-signer' | 'no-host' | 'not-published' }
+> {
   const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
-  const hostSync = get<Parameters<typeof nodesFor>[1]>('@diamondcoreprocessor.com/HostSyncService')
-  const nip44 = liveNip44()
   if (segs.length === 0) return { ok: false, reason: 'services' }
-  if (!nip44) return { ok: false, reason: 'no-nip44' }
+  const hostSync = get<Parameters<typeof nodesFor>[1]>('@diamondcoreprocessor.com/HostSyncService')
   // Two keys: this device's OWN key seals (and is what a member opens against), while the index is the ANCHOR's when
   // this device publishes for one. The anchor is sealed to as well, so a device that holds it opens the version.
   const signer = get<SignerLike>('@diamondcoreprocessor.com/NostrSigner')
@@ -161,22 +157,59 @@ export async function publishPrivate(segments: readonly string[], members: reado
   const hosts = (await nodesFor(segs, hostSync).catch(() => [] as string[])).filter(isPublishNode)
   const key = lineageKey(segs)
   // The host whose index already names this branch is where its private version belongs.
-  let host = ''
-  let previous: string[] = []
-  let head = ''
   for (const candidate of hosts) {
     const read = await fetchHiveIndex(candidate, publisher)
-    if (read.ok && key in read.manifest.roots) { host = candidate; previous = read.manifest.sealed?.[key] ?? []; head = read.manifest.roots[key]!; break }
+    if (read.ok && key in read.manifest.roots) {
+      return { ok: true, host: candidate, key, publisher, own, previous: read.manifest.sealed?.[key] ?? [], head: read.manifest.roots[key]! }
+    }
   }
-  if (!host) return { ok: false, reason: hosts.length ? 'not-published' : 'no-host' }
-  if (options.head && /^[0-9a-f]{64}$/.test(options.head)) head = options.head
-  return publishSealed(head, [...new Set([publisher, ...members])], {
-    getBytes: liveGetBytes, upload: liveUpload(host), nip44, publisher: own, previous,
+  return { ok: false, reason: hosts.length ? 'not-published' : 'no-host' }
+}
+
+/** A private version of ONE published branch for `members`: the ciphertext goes to the host its index lives on, and the
+ *  envelope is named in the signed index beside the branch's public root. The head is the one the index already names
+ *  (or `options.head`, a sealed head the store holds); the branch must already be published, since a private version
+ *  hangs off a root. `members` are public keys. A branch with a private version and NO public one is a design question
+ *  still open (what the root names), so it is not made here.
+ *
+ *  It never seals the subtree itself: that recursive seal is a courtesy the doctrine ratchet only lets shrink. */
+export async function publishPrivate(segments: readonly string[], members: readonly string[], options: { head?: string } = {}): Promise<PublishPrivateResult> {
+  const nip44 = liveNip44()
+  if (!nip44) return { ok: false, reason: 'no-nip44' }
+  const found = await findBranchIndex(segments)
+  if (!found.ok) return found
+  const head = options.head && /^[0-9a-f]{64}$/.test(options.head) ? options.head : found.head
+  return publishSealed(head, [...new Set([found.publisher, ...members])], {
+    getBytes: liveGetBytes, upload: liveUpload(found.host), nip44, publisher: found.own, previous: found.previous,
     setSealed: async envelopes => {
-      const named = await setHiveSealed(host, key, envelopes)
+      const named = await setHiveSealed(found.host, found.key, envelopes)
       return { ok: named.ok, ...(named.reason ? { reason: named.reason } : {}) }
     },
   })
+}
+
+/** Take every private version of a branch out of its index. The ciphertext stays where hosts hold it, unnamed. */
+export async function withdrawPrivate(segments: readonly string[]): Promise<{ ok: true; had: number } | { ok: false; reason: string }> {
+  const found = await findBranchIndex(segments)
+  if (!found.ok) return found
+  const named = await setHiveSealed(found.host, found.key, [])
+  return named.ok ? { ok: true, had: found.previous.length } : { ok: false, reason: named.reason ?? 'index write failed' }
+}
+
+/** Who a branch's newest private version is sealed to — visible by design — or null when it names none or cannot be read. */
+export async function privateAudience(segments: readonly string[]): Promise<string[] | null> {
+  const found = await findBranchIndex(segments)
+  if (!found.ok || found.previous.length === 0) return null
+  try {
+    const bare = found.host.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+    const scheme = /^(localhost|127\.|\[::1\])/.test(bare) ? 'http' : 'https'
+    const response = await fetch(`${scheme}://${bare}/${found.previous[0]}`, { cache: 'no-store' })
+    if (!response.ok) return null
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    if ((await signBytes(bytes)) !== found.previous[0]) return null
+    const envelope = parseEnvelope(JSON.parse(new TextDecoder().decode(bytes)))
+    return envelope ? Object.keys(envelope.seals).sort() : null
+  } catch { return null }
 }
 
 /** The first private version of a branch that THIS device's key can open, or null: the index is read and verified from
