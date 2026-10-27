@@ -438,18 +438,67 @@ describe('following a domain from the page', () => {
     expect(input.value).toBe('')
   })
 
-  it('says why a domain was not followed, and adds nothing', async () => {
+  it('shows the domain at once as checking, and a failed one stays as "not found" with the reason, kept nowhere', async () => {
+    let answer: (value: { ok: false; reason: string }) => void = () => {}
+    const follow = vi.fn(() => new Promise<{ ok: false; reason: string }>(resolve => { answer = resolve }))
     const { bands } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
-      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
-      follow: async () => ({ ok: false, reason: 'nope.example did not answer — it is not a Hypercomb host.' }),
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), follow,
     })
     await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
     const input = bands.querySelector('.follow input') as HTMLInputElement
     input.value = 'nope.example'
     ;(bands.querySelector('.follow') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }))
-    await vi.waitFor(() => expect(bands.querySelector('.follow-note')?.textContent).toContain('did not answer'))
-    expect(bands.querySelectorAll('.dex-row')).toHaveLength(1)
+    // Before the host has answered the row is already there.
+    await vi.waitFor(() => expect(bands.querySelectorAll('.dex-row')).toHaveLength(2))
+    const row = () => bands.querySelectorAll('.dex-row')[0] as HTMLElement
+    expect(row().querySelector('.dex-name')?.textContent).toBe('nope.example')
+    expect(row().querySelector('.dex-meta')?.textContent).toBe('Checking…')
+    answer({ ok: false, reason: 'nope.example did not answer — it is not a Hypercomb host.' })
+    await vi.waitFor(() => expect(row().querySelector('.dex-meta')?.textContent).toBe('Not found'))
+    expect(row().classList.contains('missing')).toBe(true)
+    expect(row().querySelector('.hosted-empty')?.textContent).toContain('nope.example was not found')
+    expect(bands.querySelector('.follow-note')?.textContent).toContain('did not answer')
+  })
+
+  it('takes a not-found row away when anything else is clicked, a new domain is asked for, or the page is refreshed', async () => {
+    const follow = vi.fn(async () => ({ ok: false as const, reason: 'nothing answered.' }))
+    const make = () => showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), follow, readPeerLedger: async () => [],
+    })
+    const miss = async (handle: ReturnType<typeof make>, zone: string) => {
+      const input = handle.bands.querySelector('.follow input') as HTMLInputElement
+      input.value = zone
+      ;(handle.bands.querySelector('.follow') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }))
+      await vi.waitFor(() => expect([...handle.bands.querySelectorAll('.dex-meta')].some(meta => meta.textContent === 'Not found')).toBe(true))
+    }
+    const names = (handle: ReturnType<typeof make>) => [...handle.bands.querySelectorAll('.dex-row .dex-name')].map(name => name.textContent)
+
+    // another row clicked
+    const one = make()
+    await vi.waitFor(() => expect(one.bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    await miss(one, 'first.example')
+    expect(names(one)).toContain('first.example')
+    ;(one.bands.querySelector('.dex-row:not(.missing) + .dex-row .dex-head, .dex-row.missing + .dex-row .dex-head') as HTMLButtonElement).click()
+    expect(names(one)).not.toContain('first.example')
+
+    // a new domain asked for
+    const two = make()
+    await vi.waitFor(() => expect(two.bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    await miss(two, 'first.example')
+    const input = two.bands.querySelector('.follow input') as HTMLInputElement
+    input.value = 'second.example'
+    ;(two.bands.querySelector('.follow') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }))
+    await vi.waitFor(() => expect(names(two)).toContain('second.example'))
+    expect(names(two)).not.toContain('first.example')
+
+    // the page refreshed
+    const three = make()
+    await vi.waitFor(() => expect(three.bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    await miss(three, 'first.example')
+    three.refresh(Promise.resolve(sites))
+    await vi.waitFor(() => expect(names(three)).not.toContain('first.example'))
   })
 
   it('draws no follow input where nothing can follow', () => {

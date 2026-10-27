@@ -357,3 +357,10 @@ accordion at all: only the showcase.
 
 The page's side margin is `.5rem` (it was `1.5rem`), and the brand row, the search with its Manage icon, the card and the follow input with
 its button all share the same left and right edge (measured: 8px to the window's edge at 1500px, all five at the same x).
+
+### A domain being checked shows at once, and "not found" does not stay (jwize 2026-10-26)
+
+Following a domain adds its row the moment it is asked for, marked **Checking…**, before the host has been asked. If the host
+answers like a host it becomes an ordinary followed row; if not, the row stays with **Not found** and the reason, toned as a
+warning. That row is temporary and kept nowhere: it goes when the page is refreshed, when another row is opened, when Manage is
+toggled, or when another domain is asked for.

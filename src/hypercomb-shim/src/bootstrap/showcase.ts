@@ -601,6 +601,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   manageButton.append(iconOf('sliders'))
   const setManaging = (on: boolean): void => {
     managing = on
+    dropMissing()
     manageButton.setAttribute('aria-pressed', String(managing))
     if (managing && !openRow) openRow = options.self
     options.onManage?.(managing)
@@ -985,6 +986,7 @@ ${entry.key}`
     chevron.append(iconOf('chevron'))
     toggle.append(iconOf('globe'), name, meta, chevron)
     toggle.addEventListener('click', () => {
+      dropMissing(zone)
       openRow = openRow === zone ? '' : zone
       paint()
     })
@@ -1006,6 +1008,16 @@ ${entry.key}`
   // to add to here, at the foot — a stranger follows nothing and sees only this
   // domain.
   const held: string[] = [...new Set(options.sources)].filter(zone => zone !== options.self)
+  // A DOMAIN BEING CHECKED, OR NOT FOUND (jwize 2026-10-26: "add the domain temporarily before check and not found message, and
+  // when refreshed or a new item is clicked remove the items that say not found"): the row is there the moment the domain is
+  // asked for, says it is checking, and — if the host does not answer — stays with its message until the page is refreshed or
+  // anything else is clicked. A domain that checks out stops being temporary and joins the list.
+  const pending = new Map<string, { state: 'checking' | 'missing'; reason: string }>()
+  const dropMissing = (except = ''): void => {
+    let changed = false
+    for (const [zone, entry] of pending) if (entry.state === 'missing' && zone !== except) { pending.delete(zone); changed = true }
+    if (changed) { for (const zone of [...rowViews.keys()]) if (!pending.has(zone) && !held.includes(zone) && zone !== options.self) { rowViews.get(zone)?.section.remove(); rowViews.delete(zone) } }
+  }
   const peerSites = new Map<string, readonly LedgerSite[]>()
   const peerAsked = new Set<string>()
   const followBar = el('form', 'follow')
@@ -1257,7 +1269,7 @@ ${entry.key}`
     // AN ACCORDION OF DOMAINS, THE OPEN ONE ALWAYS AT THE TOP (jwize 2026-10-26: "you click the domain view and it is an accordion
     // of domains with the open one showing the available; they are below the open item, which is always at the top"). While
     // managing, every domain is a row; the open row shows its tiles and is first, the rest follow below it as headers.
-    const everyZone = [options.self, ...[...held].sort()]
+    const everyZone = [options.self, ...[...held].sort(), ...[...pending.keys()].filter(zone => !held.includes(zone))]
     const order = managing && openRow && everyZone.includes(openRow) ? [openRow, ...everyZone.filter(zone => zone !== openRow)] : everyZone
     for (const zone of order) {
       const view = rowView(zone)
@@ -1272,7 +1284,9 @@ ${entry.key}`
       view.section.classList.toggle('open', open)
       view.toggle.setAttribute('aria-expanded', String(open))
       view.section.hidden = !managing && !own
-      view.meta.textContent = count(items.length + (own ? links.length : 0), 'tile', 'tiles')
+      const temp = pending.get(zone)
+      view.meta.textContent = temp ? (temp.state === 'checking' ? 'Checking…' : 'Not found') : count(items.length + (own ? links.length : 0), 'tile', 'tiles')
+      view.section.classList.toggle('missing', temp?.state === 'missing')
       arrange(view.comb, open ? [...shown.map(entry => {
         const tile = tileView(entry, zone)
         // In another domain's row, a tile already on this domain's page says so.
@@ -1280,7 +1294,8 @@ ${entry.key}`
         return tile
       }), ...doors.map(link => linkTile(link))] : [], own ? shape : base)
       view.empty.hidden = !open || (own ? shown.length > 0 && !unread : total > 0)
-      view.empty.textContent = own && (!ledgerRead || unread) ? 'Reading what is published here…'
+      view.empty.textContent = temp ? (temp.state === 'checking' ? `Checking ${zone}…` : `${zone} was not found — ${temp.reason}`)
+        : own && (!ledgerRead || unread) ? 'Reading what is published here…'
         : own && signed && (!signed.reached || signed.unreadable) ? 'Could not read what is published here.'
           : own ? 'Nothing is published here yet.' : `Nothing is published on ${zone} yet.`
       rows.push(view.section)
@@ -1321,10 +1336,26 @@ ${entry.key}`
     following = true
     followGo.disabled = true
     followNote.textContent = 'Checking…'
+    // The row appears NOW, before the host has been asked, so the person sees what is being looked for.
+    const asked = followCandidate(raw)
+    const temporary = !!asked && !held.includes(asked) && !within(asked, options.self)
+    if (temporary) {
+      dropMissing(asked)
+      pending.set(asked, { state: 'checking', reason: '' })
+      openRow = asked
+      if (!managing) setManaging(true)
+      else paint()
+    }
     const result = await options.follow(raw).catch(() => ({ ok: false as const, reason: 'Could not follow it.' }))
     followGo.disabled = false
     following = false
-    if (!result.ok) { followNote.textContent = result.reason; return }
+    if (!result.ok) {
+      followNote.textContent = result.reason
+      if (temporary) { pending.set(asked, { state: 'missing', reason: result.reason }); paint() }
+      return
+    }
+    if (asked) pending.delete(asked)
+    pending.delete(result.zone)
     if (!held.includes(result.zone)) held.push(result.zone)
     if (followCandidate(followInput.value) === result.zone || !followInput.value.trim()) followInput.value = ''
     autoFilled = ''
@@ -1372,6 +1403,7 @@ ${entry.key}`
   /** Read again: what is published now replaces what was, and each domain's
    *  pools are asked again. */
   const refresh = (ledger: Promise<readonly LedgerSite[]>): void => {
+    dropMissing()
     asked.clear()
     peerAsked.clear()
     takeLedger(ledger)
@@ -1448,6 +1480,9 @@ export const SHOWCASE_STYLE = `
 /* managing: the open domain is the first row and takes the free height; the others sit below it as plain header rows */
 .bands.managing > .hosted { grid-template-rows: minmax(min-content, 1fr); grid-auto-rows: min-content; align-content: start; }
 .bands > .hosted > .dex-row:not(.open) { align-self: start; }
+/* a domain that was asked for and not found: a temporary row, toned as a warning until something else is clicked */
+.dex-row.missing { border-color: color-mix(in srgb, var(--hc-status-alert, #b3261e) 55%, var(--md-outline-variant)); }
+.dex-row.missing .dex-meta { color: var(--hc-status-alert, #b3261e); }
 .search input::placeholder { color: var(--md-on-surface-faint); }
 .search input:focus { outline: 2px solid var(--md-primary); outline-offset: 1px; }
 
