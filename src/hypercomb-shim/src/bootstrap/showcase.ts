@@ -1544,7 +1544,11 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
    is exactly as tall as its tiles, and the gap to the bar is the search's own .55rem. */
 .card.showcase-page .panel { display: flex; flex-direction: column; min-height: calc(100dvh - 1.75rem); margin-bottom: 0; }
 .bands { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
-.bands > .hosted { margin-bottom: .55rem; }
+.bands > .hosted { margin-bottom: 0; flex: 1 1 auto; align-content: stretch; }
+/* NO DEAD AREA (jwize 2026-10-26: "need to close the dead area"): the open card takes the whole space between the search and
+   the follow bar, so the dark surface runs unbroken from one to the other and the tiles sit at its top. */
+.bands > .hosted > .dex-row.open { display: flex; flex-direction: column; }
+.bands > .hosted > .dex-row.open > .dex-body { flex: 1 1 auto; }
 .follow-note { margin: 0; color: var(--md-on-surface-var); font-size: .85rem; line-height: 1.4; }
 .follow-field { position: relative; display: flex; align-items: center; gap: .6rem; }
 .follow-field > svg { position: absolute; z-index: 1; left: .95rem; width: 1.1rem; height: 1.1rem; color: var(--md-primary); pointer-events: none; }

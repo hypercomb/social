@@ -338,3 +338,9 @@ The follow input and its button are anchored to the bottom of the screen (sticky
 least the screen tall), so a short list leaves the bar at the bottom and a long one carries it along. The outer card is exactly
 as tall as its tiles plus its own padding, and the gap between it and the bar is the search's `.55rem`. The gutter between tiles
 is `.3rem` (`.18rem` on a phone), a very slight increase on the first flush layout.
+
+### No dead area, and symmetrical gutters (jwize 2026-10-26)
+
+The open card takes the whole space between the search and the follow bar, so the dark surface runs unbroken from one to the
+other with the tiles at its top. The gutter above the card (from the search) and the gutter below it (to the follow input) are
+the same `.55rem`, so the card is centred between its two inputs.
