@@ -1414,7 +1414,7 @@ export const SHOWCASE_STYLE = `
    brand takes at most 2.5 times the search's height, margins and all (jwize
    2026-10-24) — lean, never cramped. */
 .card.showcase-page { grid-template-columns: minmax(0, 1fr); scroll-padding-top: 4.5rem; }
-.card.showcase-page .panel { margin-top: 1.75rem; width: min(100rem, calc(100vw - 3rem)); min-width: 0; }
+.card.showcase-page .panel { margin-top: 1.75rem; width: min(100rem, calc(100vw - 1rem)); min-width: 0; }
 /* the header's two rows are the page's own: the search sticks flush to the top of the scrolled
    page where the brand was, and the brand comes back when the page is scrolled back to it */
 .hero { display: contents; }

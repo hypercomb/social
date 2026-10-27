@@ -352,3 +352,8 @@ which is always at the top." Under Manage every domain is a row (globe, name, ti
 is always the FIRST row; the other domains follow below it as header rows. Opening another domain moves it to the top and the one it
 replaced drops below. (An earlier pass drew the domains as tags, then as a dropdown list; neither is kept.) On arrival there is no
 accordion at all: only the showcase.
+
+### Side margins (jwize 2026-10-26)
+
+The page's side margin is `.5rem` (it was `1.5rem`), and the brand row, the search with its Manage icon, the card and the follow input with
+its button all share the same left and right edge (measured: 8px to the window's edge at 1500px, all five at the same x).
