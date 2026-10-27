@@ -8,6 +8,7 @@
 //   node scripts/preview-front-door.cjs --no-build         # reuse the last build
 //   node scripts/preview-front-door.cjs --demo             # with named communities to swipe between
 //   node scripts/preview-front-door.cjs --demo --view launcher   # ... drawn as the launcher
+//   node scripts/preview-front-door.cjs --profile two      # a second window while the first is still open
 //   node scripts/preview-front-door.cjs --fresh            # forget the followed domains kept from earlier runs
 //   node scripts/preview-front-door.cjs --edge             # in Microsoft Edge instead of Chromium
 //   node scripts/preview-front-door.cjs --owner            # --demo, with a stand-in for your hive: a hold toggles
@@ -115,7 +116,7 @@ const types = {
   // A window keeps its own profile between runs (the domains you follow are kept in it, as in a real browser), so
   // closing and reopening the preview does not forget them. --fresh starts empty; a headless run is always fresh.
   const persistent = !flag('headless') && !flag('fresh')
-  const profile = path.join(os.tmpdir(), 'hypercomb-front-door-profile')
+  const profile = path.join(os.tmpdir(), value('profile', 'hypercomb-front-door-profile'))   // --profile <name> when another window already holds the default
   if (flag('fresh')) fs.rmSync(profile, { recursive: true, force: true })
   const launch = { headless: flag('headless'), ...(flag('edge') ? { channel: 'msedge' } : {}), args: phone ? [] : ['--window-size=1500,1000'] }
   const contextOptions = phone
