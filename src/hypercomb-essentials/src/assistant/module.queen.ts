@@ -88,7 +88,7 @@
 // Only a courtesy: this file is itself the publisher's code at their door,
 // and the host's gate is the real guard.
 
-import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, isSandboxDoor, mayRunBee, sandboxDoorOf, type I18nProvider, type InstallProvider, type ModuleDraftsProvider, registerPoolMeaning } from '@hypercomb/core'
+import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, isSandboxDoor, sandboxDoorOf, type I18nProvider, type InstallProvider, type ModuleDraftsProvider, registerPoolMeaning } from '@hypercomb/core'
 import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer.js'
 import { JEV_IOC_KEY, jevDoctrineSections, type JevReadingInput, type JevReadingResult, type JevPassInput, type JevPassResult } from './jev-decision.js'
 import { assessSandbox, changedPaths, countedAssessors, doorReader, jevReadTrial, publishChange, readChange, readSandboxDoor, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial, jevPassZone } from './module-review.js'
@@ -133,23 +133,6 @@ type JevLike = { enabled?(): boolean; readyForHive?(): boolean; reading?(input: 
 type InstallLike = Parameters<typeof takeDepsFrom>[0] & Pick<InstallProvider, 'modulesOf'> & {
   selection?(): Promise<{ picks: Record<string, { root: string; byHand?: boolean }> }>
 }
-/** The code in `root` this hive still holds — never accepted here. Promote
- *  refuses while there is any: nothing goes live that the participant has
- *  not accepted (jwize, 2026-10-26: "there is no bot accepting going live in
- *  the hive"). Null when the root cannot be read here. */
-export const unacceptedIn = async (
-  root: string, zones: readonly string[], install: Pick<InstallProvider, 'modulesOf'> | undefined,
-  mayRun: (sig: string) => Promise<boolean> = mayRunBee,
-): Promise<string[] | null> => {
-  const modules = await install?.modulesOf?.(root, zones).catch(() => null)
-  if (!modules) return null
-  const held: string[] = []
-  for (const sig of new Set([...modules.bees.map(bee => bee.sig), ...modules.dependencies.map(dep => dep.sig)])) {
-    if (!(await mayRun(sig))) held.push(sig)
-  }
-  return held
-}
-
 type Say = (key: string, fallback: string, params?: Record<string, string | number>) => string
 type Toast = (message: string, type?: string) => void
 
@@ -325,11 +308,6 @@ const zoneTrials = async (zone: string): Promise<{ ok: true; trials: SandboxTria
 export class ModuleQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'module'
-  /** Kept verbatim: a host is `@<host>`, and one with a port (`@localhost:4291`,
-   *  a machine serving on its own port) has a colon the tag extractor took for
-   *  `label:tag` — the line was stripped before the word ran and nothing
-   *  answered (measured 2026-10-25). The word folds its own arguments. */
-  override readonly rawArgs = true
   override description = 'See, drop, try in public, or promote what runs here'
   override descriptionKey = 'slash.module'
   override options = ['list', 'drop <path>', 'commit [<change>] @<host>', 'promote <change> [<channel>] @<host>', 'withdraw <change> @<host>', 'review <change> @<host>', 'assess <change> [accept|refuse|unclear <note>] @<host>', 'trials [@<host>]', 'changes <change> [@<host>]', 'take <change> [<path>] [@<host>]', 'focus @<host>', 'audit <change> [@<host>]']
@@ -346,33 +324,17 @@ export class ModuleQueenBee extends QueenBee {
    *  a signature nobody is shown. That is taking a thing off where it is
    *  listed — destructive — so it joins the words only the participant says,
    *  and what is left writes nothing and never leaves this browser. */
-  //
-  // A MACHINE MAY ALSO COMMIT A TRIAL (jwize, 2026-10-26: "the ai does all the
-  // work and even publishes it to the domain and then I can look at it and
-  // accept the changes"). A commit opens `try-<change>.<host>` and nothing
-  // else: the live channel does not move, and every draft in it is still held
-  // in this hive until the hand accepts it (module-drafts.ts admitInBrood).
-  // Declared at the top rung, because a trial is public and signed with the
-  // participant's key; granting it is the participant's own act. Promote,
-  // withdraw, take and accept stay human doors.
   override machine = {
-    forms: 'list | commit <change> @<host>',
-    example: '/module commit tidy-rooms @hypercomb.com',
+    forms: 'list',
+    example: '/module list',
     bare: true,
-    reach: 'destructive' as const,
-    scope: 'network' as const,
-    consequence: "commit publishes a trial at try-<change>.<host>, public and signed with your key; nothing in it runs in your hive or goes live until you accept it",
+    reach: 'additive' as const,
+    scope: 'local' as const,
     refuse: (args: string): string | undefined => {
       // `|| 'list'`, not a destructuring default: ''.split() yields [''], so the
       // default never applied and the bare word this block calls a real call
       // (`bare: true`) was refused.
-      const parts = args.trim().split(/\s+/)
-      const word = parts[0] || 'list'
-      if (word === 'commit') {
-        if (!parts.some(part => part.startsWith('@') && part.length > 1)) return '/module commit needs the host it opens the trial on: /module commit <change> @<host>'
-        if (!parts.slice(1).some(part => !part.startsWith('@'))) return '/module commit needs a name for the trial: /module commit <change> @<host>'
-        return undefined
-      }
+      const word = args.trim().split(/\s+/)[0] || 'list'
       if (PUBLISHING.has(word)) return `/module ${word} publishes; only the participant says it`
       if (word === 'take') return '/module take brings somebody else\'s code into this hive; only the participant says it'
       if (word === 'audit') return '/module audit spends the participant\'s model; only the participant says it'
@@ -445,12 +407,6 @@ export class ModuleQueenBee extends QueenBee {
       if (live.startsWith(SANDBOX_PREFIX)) { toast(t('module.notlive', '{channel} is a sandbox, not a live channel.', { channel: live }), 'warning'); return }
       const root = await ownHiveRoot(host, `${INSTALL_CHANNEL_PREFIX}${name}`).catch(() => null)
       if (!root) { toast(t('module.nosandbox', 'You have no sandbox {name} on {host}.', { name, host }), 'warning'); return }
-      const waiting = await unacceptedIn(root, [host], window.ioc?.get?.(INSTALL_IOC_KEY) as InstallLike | undefined)
-      if (waiting === null) { toast(t('module.promote.unread', 'Not promoted: {name} could not be read here, so it is not known whether you accepted everything in it.', { name }), 'warning'); return }
-      if (waiting.length) {
-        toast(t('module.promote.held', 'Not promoted: {name} carries {count} module(s) you have not accepted. Try it, then say brood and accept what you want to go live.', { name, count: waiting.length }), 'warning')
-        return
-      }
       const stamped = await setHiveRoot(host, `${INSTALL_CHANNEL_PREFIX}${live}`, root).catch(error => ({ ok: false, reason: error instanceof Error ? error.message : 'refused' }))
       if (!stamped.ok) { toast(t('module.unstamped', 'The install channel was not stamped: {reason}', { reason: stamped.reason ?? 'refused' }), 'warning'); return }
       if (live !== site) {

@@ -17,7 +17,6 @@
 
 import { Drone } from '@hypercomb/core'
 import { listDecorations, removeDecorationAndWait, writeDecoration } from '../commands/decoration-manifest.js'
-import { ensureWebsiteBoundAt } from '../commands/website-binding.js'
 import { FILES_ATTACHMENT_KIND, listAttachments, writeAttachment, type AttachmentPayload } from './files-attachment.js'
 import { extOf } from './file-types.js'
 
@@ -143,7 +142,6 @@ export class TileFilesDrone extends Drone {
       const committer = this.resolve<CommitterLike>('committer')
       if (!committer?.commitSlotSet) return { ok: false, error: 'the layer committer is not available' }
       await committer.commitSlotSet(segments, WEBSITE_SLOT, [...slot.filter(s => s !== htmlSig), htmlSig])
-      await this.#bind(segments)
       return { ok: true, tile: segments, sig: htmlSig, created: false, unchanged: false }
     }
     // The page decoration keeps what the prior one said about itself (its
@@ -158,18 +156,7 @@ export class TileFilesDrone extends Drone {
       segments,
       mark: 'persistent',
     })
-    await this.#bind(segments)
     return { ok: true, tile: segments, sig: htmlSig, created: !current, unchanged: false }
-  }
-
-  /** A PAGE IS ONLY SEEN WHERE ITS BEHAVIOUR IS AWAKE. A hive that binds the website
-   *  behaviour to the tiles that hold sites reads every other tile as dormant, and the
-   *  view quietly falls back to hexagons: a page a model wrote existed and could not
-   *  be reached (jwize's hive, 2026-10-25). The `/website page` word binds the tile it
-   *  dresses; so does a write. Never load-bearing: a failure here leaves the page
-   *  written. */
-  async #bind(segments: readonly string[]): Promise<void> {
-    try { await ensureWebsiteBoundAt(segments) } catch { /* the page is written; binding is re-derived by the session sweep */ }
   }
 
   async #writeFile(segments: readonly string[], payload: AttachmentPayload): Promise<TileFileWrite> {

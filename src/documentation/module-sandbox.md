@@ -96,31 +96,6 @@ jwize: "your peer hosts become your sandbox and you can scan the signed files by
 
 **The host AI answers the people the host admitted (2026-09-24).** With `AI_WRITERS` empty the worker's `/ai/ask` admits only the zones' operators and bound publishers — the keys whose trials it reviews — each under the daily token ceiling; a freshly minted key is refused. An explicit `AI_WRITERS` list still overrides (`host-ai.md`).
 
-## Where you stand (built 2026-10-25)
-
-jwize: "make sure the workflow is very clear what is happening or the participant will be lost". The what-changed panel (`module changes <change>`) opens on four steps, each saying what it touched; the first not yet done is marked as where you stand:
-
-1. **Draft**: written and committed to a trial.
-2. **Trial**: running at `try-<change>.<zone>`, a site of its own with nothing of your hive in it. It opens in a new tab (`noopener`), never in a frame: "we don't need to use iframes".
-3. **Reviewed**: how many readings there are (the host's AI, Jev, people), shown below.
-4. **Your choice**: **Take** takes every changed file into your hive, held in the brood until you accept it. The publisher alone is also offered **Promote** (`<change>.<zone>` runs what the trial ran) and **Withdraw**; both are put on the command line as their sentence (`module promote <change> @<zone>`), never said for the participant. At a door the step says to choose from your own hive.
-
-Asked again the same day whether drafts belong on a separate domain, jwize kept the 2026-09-24 decision: a draft lives at its own `try-` subdomain of the host domain and reaches the real site only by promotion.
-
-**The proof runs again (2026-10-25): `verify-hive-publish.cjs` 75/75.** It had rotted against three later changes, none in the trial itself: its sentences went through the remote door, which the admission gate (2026-10-01) treats as a machine's, so `module commit` was refused (they now go through `command:submit`, the door Enter uses, as canonical slash); a fresh hive grants a model no word, and the chat offers code writing only to a model that may change something (the harness says `grant allow create` first, as a participant would); and the local host reported indexes from the KV namespace they left on 2026-09-25 (it now reads the `sign('hive:indexes')` pool). One real fault came out of it: on the Enter path a host with a port (`@localhost:4291`) was read as `label:tag` and the line vanished; the module word now keeps its arguments verbatim (`rawArgs`). Run it with `web-4264-bigstack` while `hypercomb-web/public/content` holds more files than the Angular dev server can list.
-
-**Every draft waits for a human (2026-10-26).** jwize: "I have to decide whether to accept the changes always" · "there is no bot accepting going live in the hive" · "it is a human door". The flow is ask → create → try → scan → import → publish:
-
-- A model's draft is flagged in the brood the moment it is written, whether or not the scan found it reaching anything (`module-drafts.ts` `admitInBrood`, reason "nobody has tried it yet"). It runs nowhere in this hive until the participant's `brood accept`, a word no machine may say.
-- `module commit` folds this hive's own held drafts into the trial, which is where they are tried; a stranger's code taken and not accepted still stays out.
-- `module promote` refuses while the trial carries any module this hive still holds (`unacceptedIn`), naming how many and pointing at the brood.
-- A model may say `module commit <change> @<host>` — a trial only. The word is declared `destructive` at the `network`, because a trial is public and signed with the participant's key, so it is off until the participant says `/grant destructive` and `/grant allow module`. Promote, withdraw, take, drop and accept stay human doors.
-- Proof: `verify-hive-publish.cjs` 77/77 — promote is refused while the draft is held, the draft has not run in the publisher's hive, the publisher accepts it by hand, then promote goes through.
-
-Next (jwize, same day): held drafts shown as EGGS on the tile being worked in — only an image and plain properties, no code running, until they hatch on acceptance.
-
-Still owed, from the same conversation: a reviewer that runs the change's tests, a plain-language summary of each change for the participant, reviewers that are deliberately different models, and installing a taken change into the git source.
-
 ## Audit a trial from your own hive (built 2026-09-23)
 
 `module audit <change> [@<host>]` — the other half of jwize's sentence: "scan the signed files by signature and audit them using your favorite AI". Trying happens at the publisher's door; auditing happens at home, and runs nothing (essentials `assistant/module-audit.ts`, driven by `module.queen.ts`):

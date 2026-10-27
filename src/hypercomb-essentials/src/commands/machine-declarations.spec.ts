@@ -101,7 +101,7 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
                                        // layer commit each, so the tile is the ceiling
   organism: ['editing', 'local'],      // a projection, never a commit
   // Corrected by the audit.
-  module: ['destructive', 'network'], // list, and commit a TRIAL (public, the participant's key; 2026-10-26); promote, take, drop stay the participant's
+  module: ['additive', 'local'],       // was editing/network: list only; drop is the participant's
   postit: ['editing', 'tile'],         // was additive: `here <text>` replaces an existing note
   feed: ['editing', 'page'],           // was additive: `<page> off` switches a target off
   from: ['editing', 'page'],           // was additive: `<group> off` detaches a link
@@ -233,21 +233,12 @@ describe('what the corrections refuse', () => {
     }
   })
 
-  // 2026-10-26: a machine may also commit a TRIAL — never promote, withdraw,
-  // take or drop, and never accept (brood offers a machine nothing).
-  it('/module lets a machine look and commit a trial, and nothing else', () => {
+  it('/module lets a machine look, and nothing else', () => {
     const refuse = declared.get('module')!.refuse!
     expect(refuse('')).toBeUndefined()
     expect(refuse('list')).toBeUndefined()
-    expect(refuse('commit fresh-rooms @example.com')).toBeUndefined()
-    expect(refuse('commit fresh-rooms')).toContain('needs the host')
-    expect(refuse('commit @example.com')).toContain('needs a name')
     expect(refuse('drop games/solomon')).toBe("/module drop takes the participant's draft off what runs; only the participant says it")
-    for (const word of ['promote fresh-rooms @example.com', 'withdraw fresh-rooms @example.com', 'assess fresh-rooms accept @example.com']) {
-      expect(refuse(word)).toContain('only the participant says it')
-    }
-    expect(refuse('take fresh-rooms')).toContain('only the participant says it')
-    expect(declared.get('brood')).toBeUndefined()
+    expect(refuse('commit fresh-rooms')).toContain('only the participant says it')
   })
 
   it("/profile lets a machine look, on the participant's own host, and nothing else", () => {

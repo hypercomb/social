@@ -120,18 +120,19 @@ describe('commitSelection', () => {
     expect((w.read(cells[0]!)['cells'] as string[])[0]).toBe(draft.layerSig)
   })
 
-  // jwize, 2026-10-26: "I have to decide whether to accept the changes always".
-  // Every draft is held until accepted, and a commit opens a TRIAL — the one
-  // place a held draft is tried. So a held draft of this hive's own is folded
-  // into the trial, and still runs nowhere here until the hand accepts it.
-  it("folds a held draft of this hive's own into the trial: the trial is where it is tried", async () => {
+  it('never folds a draft the audit held: it stays a pick until you accept it', async () => {
     const w = await world()
     const draft = await draftLabyrinth(w)
     const held = { ...w.deps, mayRun: async (sig: string) => sig !== draft.beeSig }
+    expect(await commitSelection('essentials', held)).toEqual({
+      ok: false, error: 'nothing to commit: the code at games/solomon still waits in the brood — accept it there first',
+    })
+    // Beside a change that may run, it is named as held back and left out.
+    w.turnOff('notes')
     const outcome = await commitSelection('essentials', held)
-    expect(outcome).toMatchObject({ ok: true, held: [] })
+    expect(outcome).toMatchObject({ ok: true, drafts: [], held: ['games/solomon'], off: ['notes'] })
     if (!outcome.ok) return
-    expect(outcome.drafts).toEqual(['games/solomon'])
+    expect(outcome.changes).toEqual([])
   })
 
   it('has nothing to commit when nothing would change', async () => {

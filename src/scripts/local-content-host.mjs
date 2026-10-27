@@ -21,7 +21,6 @@
 // says how many files it was shown and whether the change's proof marker was
 // among them, so a harness can prove the host's AI read the changed code.
 import http from 'node:http'
-import { createHash } from 'node:crypto'
 import zlib from 'node:zlib'
 import worker from '../hypercomb-relay/blossom-worker/worker.js'
 
@@ -87,8 +86,6 @@ const kv = () => {
   return { values, get: async (key) => values.get(key) ?? null, put: async (key, value) => { values.set(key, String(value)) }, delete: async (key) => { values.delete(key) } }
 }
 
-/** sign('hive:indexes') — where the worker keeps each publisher's signed index. */
-const HIVE_INDEXES = createHash('sha256').update('hive:indexes').digest('hex')
 const bindings = {}
 const env = { CONTENT: r2(), HIVES: kv(), GRANTS: kv(), AUTO_GRANT: '1', SANDBOX_SHELL_ORIGIN: shell, SITE_BINDINGS: '{}', ...(aiStub ? { ANTHROPIC_API_KEY: 'local-stub' } : {}) }
 
@@ -107,15 +104,7 @@ http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({
       content: [...env.CONTENT.objects.keys()].sort(),
-      // Indexes live in the content pool sign('hive:indexes')/<pubkey> since
-      // 2026-09-25; the KV namespace is only a drain source. Both are read,
-      // the pool winning, so a harness sees every publisher's index.
-      hives: {
-        ...Object.fromEntries([...env.HIVES.values].map(([key, value]) => [key, JSON.parse(value)])),
-        ...Object.fromEntries([...env.CONTENT.objects.entries()]
-          .filter(([key]) => key.startsWith(`${HIVE_INDEXES}/`))
-          .map(([key, entry]) => [key.slice(HIVE_INDEXES.length + 1), JSON.parse(new TextDecoder().decode(entry.bytes))])),
-      },
+      hives: Object.fromEntries([...env.HIVES.values].map(([key, value]) => [key, JSON.parse(value)])),
     }))
     return
   }

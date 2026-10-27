@@ -43,29 +43,7 @@ export interface AdoptQueueEntry {
   tries: number
   /** Epoch ms before which this entry must not be retried. */
   nextAt: number
-  /** Taken as ONE page tile (the wand): while the offer is live it folds as
-   *  a page; once the swarm is over it heals from the hosts by signature. */
-  page?: boolean
-  /** Epoch ms the participant asked — the queue view's age column. */
-  addedAt?: number
-  /** An empty egg holds its place in the hive while the bytes are out of
-   *  reach (see the drone's #layEgg). */
-  egg?: boolean
-  /** Who published it, and the last moment their offer was seen live — the
-   *  queue view tells a publisher still in the swarm from one who left. */
-  pubkey?: string
-  seenAt?: number
 }
-
-/** One finished adopt, kept in memory for the queue view only. */
-export interface AdoptQueueDone {
-  sig: string
-  label: string
-  at: string[]
-  doneAt: number
-}
-
-const DONE_KEPT = 100
 
 /** Backoff for an entry that couldn't land yet. The last rung REPEATS
  *  forever: a queue that gives up is the bug this replaces. Slow enough
@@ -94,39 +72,6 @@ export class AdoptQueueService extends EventTarget {
 
   get entries(): readonly AdoptQueueEntry[] { return this.#entries }
 
-  /** Finished this session, newest first — the queue view's "adopted" list.
-   *  Memory only: the queue's one localStorage write stays the queue itself. */
-  #done: AdoptQueueDone[] = []
-  get done(): readonly AdoptQueueDone[] { return this.#done }
-
-  /** The entry a fetch is in flight for right now (key), or null. */
-  #active: string | null = null
-  isActive(sig: string, at: readonly string[]): boolean { return this.#active === keyOf(sig, at) }
-  setActive(sig: string | null, at: readonly string[] = []): void {
-    this.#active = sig ? keyOf(sig, at) : null
-    this.dispatchEvent(new CustomEvent('change'))
-  }
-
-  /** Is `label` owed at `at`? True from the click until it lands — the adopt
-   *  icon stays gone for exactly this long, so a second press can't double it. */
-  isQueued(label: string, at: readonly string[]): boolean {
-    const here = [...at].join('/')
-    return this.#entries.some(e => e.label === label && e.at.join('/') === here)
-  }
-
-  /** The publisher's offer was seen live just now. Throttled — presence
-   *  moves every beat, the queue's one storage write must not. */
-  touchSeen(sig: string, at: readonly string[], now = Date.now()): void {
-    const entry = this.#entries.find(e => keyOf(e.sig, e.at) === keyOf(sig, at))
-    if (entry && now - (entry.seenAt ?? 0) > 15_000) { entry.seenAt = now; this.#flush() }
-  }
-
-  /** Mark an entry as holding an egg. */
-  markEgg(sig: string, at: readonly string[]): void {
-    const entry = this.#entries.find(e => keyOf(e.sig, e.at) === keyOf(sig, at))
-    if (entry && !entry.egg) { entry.egg = true; this.#flush() }
-  }
-
   /** Owed entries, total. Zero = the queue is satisfied. */
   get remaining(): number { return this.#entries.length }
 
@@ -140,7 +85,7 @@ export class AdoptQueueService extends EventTarget {
    *  already owed must not double it), order preserved, appended after
    *  anything already owed. Returns the entries actually added. */
   enqueueAll(
-    picks: readonly { sig: string; label: string; at: readonly string[]; domain?: string; page?: boolean; pubkey?: string }[],
+    picks: readonly { sig: string; label: string; at: readonly string[]; domain?: string }[],
     batch: string,
   ): AdoptQueueEntry[] {
     const added: AdoptQueueEntry[] = []
@@ -151,7 +96,7 @@ export class AdoptQueueService extends EventTarget {
       const at = (Array.isArray(p.at) ? p.at : []).map(s => String(s ?? '').trim()).filter(Boolean)
       const key = keyOf(sig, at)
       if (this.#entries.some(e => keyOf(e.sig, e.at) === key)) continue
-      const entry: AdoptQueueEntry = { sig, label, at, domain: p.domain, batch, tries: 0, nextAt: 0, page: p.page, addedAt: Date.now(), pubkey: p.pubkey, seenAt: p.pubkey ? Date.now() : undefined }
+      const entry: AdoptQueueEntry = { sig, label, at, domain: p.domain, batch, tries: 0, nextAt: 0 }
       this.#entries.push(entry)
       added.push(entry)
     }
@@ -176,12 +121,9 @@ export class AdoptQueueService extends EventTarget {
   /** The entry landed (committed or already present) — drop it. */
   complete(sig: string, at: readonly string[]): void {
     const key = keyOf(sig, at)
-    const gone = this.#entries.find(e => keyOf(e.sig, e.at) === key)
-    if (this.#active === key) this.#active = null
-    if (!gone) return
-    this.#entries = this.#entries.filter(e => e !== gone)
-    this.#done = [{ sig: gone.sig, label: gone.label, at: gone.at, doneAt: Date.now() }, ...this.#done].slice(0, DONE_KEPT)
-    this.#flush()
+    const before = this.#entries.length
+    this.#entries = this.#entries.filter(e => keyOf(e.sig, e.at) !== key)
+    if (this.#entries.length !== before) this.#flush()
   }
 
   /** The attempt didn't land. The entry STAYS owed and backs off — the last

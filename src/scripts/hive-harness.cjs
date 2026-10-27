@@ -88,20 +88,14 @@ const openHive = async (browser, who, web) => {
   return { context, page, installed: () => installedOf(page) }
 }
 
-/** Say a word on the command line, as the participant would: through the
- *  door Enter uses (`command:submit`), never the remote one. Since the
- *  admission gate (2026-10-01) a remote line is a MACHINE's, and the words
- *  this harness says — commit, promote, take, accept — are the participant's
- *  alone. The participant's door reports no outcome; callers read what the
- *  hive said (toasts, state). */
-const say = async (page, text) => {
-  // Canonical slash: a bare line on this door is read as prose first, and a
-  // sentence such as `module commit x @host` was never heard as the word.
-  const line = text.trimStart().startsWith('/') ? text : `/${text.trimStart()}`
-  await page.evaluate(said => globalThis.__hypercombEffectBus.emit('command:submit', { text: said }), line)
-  await sleep(300)
-  return { accepted: true, outcome: null }
-}
+/** Say a word on the command line, as the participant would. */
+const say = (page, text) => page.evaluate(line => new Promise(resolve => {
+  let accepted = false
+  globalThis.__hypercombEffectBus.emitTransient('command-line:remote-submit', {
+    text: line, accept: () => { accepted = true }, complete: outcome => resolve({ accepted, outcome }),
+  })
+  setTimeout(() => resolve({ accepted, outcome: 'no completion within 60s' }), 60_000)
+}), text)
 
 /** Every toast the page shows from now on. */
 const watchToasts = page => page.evaluate(() => {
@@ -204,10 +198,6 @@ const draftThroughChat = async (page, target, newBody) => {
     return waiting.map(r => ({ kind: r.kind, lines: r.lines, forceReview: !!r.forceReview }))
   }).then(rows => rows.length && decided.push(...rows)).catch(() => {}), 400)
   try {
-    // A fresh hive grants a model no word (machine admission), and the chat
-    // offers code writing only to a model that may change something — so the
-    // participant allows one ordinary word first, as they would.
-    await say(page, 'grant allow create')
     await page.evaluate(() => globalThis.__hypercombEffectBus.emit('chat:open', {}))
     await page.waitForSelector('hc-chat-window .chat-input', { timeout: 30_000 })
     await sleep(600)
@@ -224,10 +214,7 @@ const draftThroughChat = async (page, target, newBody) => {
       }
       return null
     }), 60_000, 800)
-    // Everything Execution saw, whether a hand or the participant's policy ran it.
-    const executed = await page.evaluate(() => window.ioc.get('@hypercomb.social/ExecutionQueue').requests()
-      .map(r => ({ kind: r.kind, state: r.state, lines: r.lines })))
-    return { drafted, reply, workerCalls, jevCalls, decided, executed }
+    return { drafted, reply, workerCalls, jevCalls, decided }
   } finally {
     clearInterval(runner)
   }

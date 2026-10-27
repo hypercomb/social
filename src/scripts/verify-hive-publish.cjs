@@ -136,7 +136,7 @@ const announcedOn = page => page.evaluate(() => {
   check('Jev judged the write as a write row, with the header as the model wrote it', !!judged && judged.rows.some(r => r.includes(`${target.bee} ${target.section}`)))
   check('Jev was asked toward, beyond, grounded and every doctrine section', !!judged && ['write_toward', 'write_beyond', 'write_grounded'].every(k => judged.questions.includes(k)) && judged.questions.filter(k => /^write_rule\d+$/.test(k)).length >= 3)
   check('Jev judged the write against the Life Primitive — its shape and its rules', !!judged && ['### The Life Primitive', '### The Life Primitive — its rules'].every(rule => judged.rules.includes(rule)), JSON.stringify(judged?.rules))
-  check('the write ran through Execution as an edit', run.executed.some(d => d.kind === 'editing' && d.state === 'ran' && /^write /.test(d.lines[0])), JSON.stringify(run.executed))
+  check('the write ran through Execution as an edit', run.decided.some(d => d.kind === 'editing' && /^write /.test(d.lines[0])), JSON.stringify(run.decided))
   check('the draft is picked at the module\'s path', !!run.drafted && run.drafted[0].path === target.path)
 
   // ── 2. COMMIT OPENS A SANDBOX — the live channel does not move ──────────
@@ -146,7 +146,7 @@ const announcedOn = page => page.evaluate(() => {
   console.log('   toasts:', JSON.stringify(shown))
   const sandboxRoot = await pub.installed()
   const state1 = await hostState()
-  check('module commit was accepted', said.accepted && (shown ?? []).some(m => /^Sandbox /.test(m)), JSON.stringify(shown))
+  check('module commit was accepted', said.accepted && said.outcome?.kind === 'ran', JSON.stringify(said.outcome))
   check('the committed root runs here as the trunk', !!sandboxRoot && sandboxRoot !== LOCAL_ROOT, sandboxRoot?.slice(0, 12))
   check('the sandbox channel names the committed root', channelOf(state1, pubkey, `install:${SANDBOX}`) === sandboxRoot)
   check('the live channel was NOT moved', channelOf(state1, pubkey, 'install:essentials') === null)
@@ -399,27 +399,6 @@ const announcedOn = page => page.evaluate(() => {
   // ── 4. PROMOTE: its own site first, then the live channel ─────────────────
   // jwize 2026-09-24: "try.yoursub.domain.com then when deployed will be on
   // yoursub.domain.com" — with no channel named, the site the trial is named for.
-  // NOTHING GOES LIVE THAT YOU HAVE NOT ACCEPTED (jwize, 2026-10-26). The
-  // model's draft is held in the publisher's own brood from the moment it was
-  // written; promote refuses while the trial carries it. First the refusal,
-  // then the participant accepts it by hand, as the follower did.
-  await H.watchToasts(page)
-  await H.say(page, `module promote ${CHANGE} @${WRITE}`)
-  const refusedLive = await H.toastsUntil(page, /^Not promoted/, 60_000)
-  check('promote refuses while the trial carries a draft you have not accepted', (refusedLive ?? []).some(m => m.includes('you have not accepted')), JSON.stringify(refusedLive))
-  const ownHeld = await page.evaluate(async () => {
-    const core = await import('@hypercomb/core')
-    return (await core.broodRoster()).filter(record => record.source.kind === 'own' && !record.ruling).map(record => record.sig)
-  })
-  check("the model's draft waits in the publisher's own brood, never run here", ownHeld.length > 0 && await page.evaluate(() => globalThis.__hivePublishProof ?? null) === null, `${ownHeld.length} held`)
-  await page.evaluate(() => {
-    const bus = globalThis.__hypercombEffectBus
-    let live = false
-    bus.on('confirm:request', request => { if (live && request?.id) queueMicrotask(() => bus.emit('confirm:response', { id: request.id, confirmed: true })) })
-    live = true
-  })
-  for (const sig of ownHeld) await H.say(page, `brood accept ${sig.slice(0, 12)}`)
-  await H.toastsUntil(page, /^Accepted/, 60_000)
   await H.watchToasts(page)
   await H.say(page, `module promote ${CHANGE} @${WRITE}`)
   const siteToasts = await H.toastsUntil(page, /^Promoted |not stamped|no sandbox/)
