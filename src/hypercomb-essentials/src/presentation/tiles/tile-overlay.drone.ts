@@ -88,6 +88,8 @@ function isLauncherLocation(segs: readonly unknown[]): boolean {
 type OverlayAction = {
   name: string
   button: HexIconButton
+  /** The author SVG, so the caption can draw the icon after its label. */
+  svgMarkup?: string
   profile: OverlayProfileKey
   genotype?: string
   /** Lives in the hidden danger row (delete) — revealed by tapping ⋮ (more).
@@ -211,10 +213,10 @@ const DEFAULT_ICON_SIZE = 7     // integer for pixel-perfect rendering
 const MAX_ROW_ICONS = 5
 /** Icon rows the band can hold under the name. */
 const MAX_ICON_ROWS = 2
-/** Centre-to-centre between the two rows — one band row each (0.15 × 32 ≈ 4.8,
+/** Centre-to-centre between the two rows — a plate (9.4) plus a margin, not a band row (0.15 × 32 ≈ 4.8,
  *  doubled). The block is centred on ICON_Y, so a single row sits dead centre
  *  and two rows straddle it. */
-const ICON_ROW_PITCH = 10
+const ICON_ROW_PITCH = 12
 /** The hex's horizontal half-extent (√3/2 × 32) — the bound every icon
  *  surface measures against. */
 const HEX_INRADIUS = 27.7
@@ -222,7 +224,7 @@ const HEX_INRADIUS = 27.7
  *  inradius less an edge margin, doubled. Mirrors computeIconPositions. The
  *  action row compresses to fit it; the arrange pool WRAPS at it. One
  *  constant, so the two surfaces cannot drift apart. */
-const ICON_ROW_AVAILABLE = (HEX_INRADIUS - 3) * 2
+const ICON_ROW_AVAILABLE = (HEX_INRADIUS - 5.2) * 2
 
 // ── The label row, for icons PINNED to it (`labelRow`) ────────────
 /** HALF-height of one band row in overlay-local units — the shader's
@@ -285,11 +287,7 @@ const VIEW_PENDING_SAND = 0xe6bf72
 const REREGISTER_REPAIR_MS = 1500
 
 const HINT_DELAY_MS = 110     // near-instant hover-to-hint — just long enough to filter a mouse glance crossing the icon
-const HINT_Y_OFFSET = 17        // below the label band — moved up 7 with ICON_Y (absolute, does not follow on its own)
-const HINT_FONT_SIZE = 6
-const HINT_COLOR = 0xeaf0ff     // near-white — reads crisp against the dark hint pill
-const HINT_EXPANDED_FONT_SIZE = 5
-const HINT_MAX_WIDTH = 66
+const HINT_CAPTION_SOURCE = 'icon-hint'
 // Tooltip pill behind the hint text — turns the bare floating glyph into a
 // clean, legible label that reads against any tile content.
 const HINT_PILL_FILL = 0x0c0c1a
@@ -554,13 +552,8 @@ export class TileOverlayDrone extends Drone {
   #activeOrder: Map<OverlayProfileKey, string[]> = new Map()
 
   // ── Action hint state ──────────────────────────────────────────
-  #hintText: Text | null = null
-  #hintBg: Graphics | null = null
-  #hintIcon: Sprite | null = null
-  #hintDescriptionText: Text | null = null
   #hintTimer: ReturnType<typeof setTimeout> | null = null
   #hintActionName: string | null = null
-  #hintExpanded = false
   /** The verb pill over the hovered tile (see SWAP_CUE_* consts). */
   #swapCue: Container | null = null
   /** Last `clipboard:verb` published, so a per-move refresh that resolves to
@@ -617,7 +610,7 @@ export class TileOverlayDrone extends Drone {
     'view:open-for-tile', 'view:active',
     'default-view:indexed',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:open', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'clipboard:take-items', 'clipboard:verb', 'swarm:wand', 'editor:switch-request']
+  protected override emits = ['tile:hover', 'caption:show', 'caption:clear', 'tile:action', 'tile:click', 'tile:open', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'clipboard:take-items', 'clipboard:verb', 'swarm:wand', 'editor:switch-request']
 
   #dropDragging = false
   #dropGroupOnly = false
@@ -1683,6 +1676,7 @@ export class TileOverlayDrone extends Drone {
       this.#actions.push({
         name: desc.name,
         button: btn,
+        svgMarkup: desc.svgMarkup,
         profile: key,
         genotype: desc.genotype,
         dangerRow: desc.dangerRow,
@@ -2827,123 +2821,15 @@ export class TileOverlayDrone extends Drone {
     return window.ioc.get<I18nProvider>(I18N_IOC_KEY) ?? undefined
   }
 
+  /** The icon's explanation goes to the CAPTION (top-centre, under the command
+   *  line) — one quiet place, never a dropdown drawn over the tiles it explains. */
   #showHint(actionName: string): void {
-    if (!this.#overlay) return
     const action = this.#actions.find(a => a.name === actionName && a.button.hovered)
     if (!action?.labelKey) return
-
     const i18n = this.#resolveI18n()
-    const label = i18n?.t(action.labelKey) ?? action.name
-
-    this.#clearHintText()
-
-    const hcFont = getComputedStyle(document.documentElement).getPropertyValue('--hc-font').trim()
-
-    this.#hintText = new Text({
-      text: label,
-      style: new TextStyle({
-        fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
-        fontSize: HINT_FONT_SIZE,
-        fontWeight: '600',
-        fill: HINT_COLOR,
-        align: 'center',
-      }),
-      resolution: this.#screenTextResolution(),
-      roundPixels: true,
-    })
-    this.#hintText.anchor.set(0.5, 0)
-    this.#hintText.position.set(action.button.position.x, HINT_Y_OFFSET)
-    // Pill behind the label, added first so the text sits on top.
-    this.#hintBg = this.#makeHintPill(this.#hintText, action.button.position.x, HINT_Y_OFFSET)
-    this.#overlay.addChild(this.#hintBg)
-    this.#overlay.addChild(this.#hintText)
-    this.#hintExpanded = false
-
-    // An icon has one explanation, so show it as one complete card from the
-    // start. A label-only phase made the same hint look like two separate
-    // popups as it expanded.
-    this.#expandHint()
-  }
-
-  #expandHint(): void {
-    if (!this.#overlay || !this.#hintActionName || this.#hintExpanded) return
-    const action = this.#actions.find(a => a.name === this.#hintActionName)
-    if (!action?.descriptionKey) return
-
-    const i18n = this.#resolveI18n()
-    const description = i18n?.t(action.descriptionKey) ?? ''
-    if (!description) return
-
-    const hcFont = getComputedStyle(document.documentElement).getPropertyValue('--hc-font').trim()
-
-    this.#hintDescriptionText = new Text({
-      text: description,
-      style: new TextStyle({
-        fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
-        fontSize: HINT_EXPANDED_FONT_SIZE,
-        fill: HINT_COLOR,
-        align: 'left',
-        lineHeight: 6.5,
-        wordWrap: true,
-        wordWrapWidth: HINT_MAX_WIDTH,
-      }),
-      resolution: this.#screenTextResolution(),
-      roundPixels: true,
-    })
-    this.#hintDescriptionText.anchor.set(0, 0)
-
-    // The expanded hint is one panel: the operation leads at the start and
-    // its explanation flows directly underneath. Previously each line owned
-    // a separate pill, which read as two overlapping popups.
-    const headerGap = 2
-    const rowGap = 1.75
-    const iconSize = 6.5
-    const titleHeight = this.#hintText?.height ?? HINT_FONT_SIZE
-    const textWidth = Math.max(
-      this.#hintText?.width ?? 0,
-      this.#hintDescriptionText.width,
-    )
-    const contentWidth = iconSize + headerGap + textWidth
-    const left = -contentWidth / 2
-    const textLeft = left + iconSize + headerGap
-
-    const sourceIcon = action.button.children.find(child => child instanceof Sprite)
-    if (sourceIcon instanceof Sprite) {
-      this.#hintIcon = new Sprite(sourceIcon.texture)
-      this.#hintIcon.anchor.set(0.5)
-      this.#hintIcon.width = iconSize
-      this.#hintIcon.height = iconSize
-      this.#hintIcon.tint = sourceIcon.tint
-      this.#hintIcon.alpha = 0.9
-      this.#hintIcon.position.set(left + iconSize / 2, HINT_Y_OFFSET + titleHeight / 2)
-    }
-    if (this.#hintText) {
-      this.#hintText.anchor.set(0, 0)
-      this.#hintText.position.set(textLeft, HINT_Y_OFFSET)
-    }
-    const yBelow = HINT_Y_OFFSET + titleHeight + rowGap
-    this.#hintDescriptionText.position.set(textLeft, yBelow)
-    this.#hintDescriptionText.alpha = 0.72
-
-    if (this.#hintBg) {
-      this.#hintBg.parent?.removeChild(this.#hintBg)
-      this.#hintBg.destroy()
-    }
-    const panelWidth = contentWidth + HINT_PILL_PAD_X * 2
-    const panelHeight = titleHeight + rowGap + this.#hintDescriptionText.height + HINT_PILL_PAD_Y * 2
-    this.#hintBg = new Graphics()
-    this.#hintBg.roundRect(
-      -panelWidth / 2,
-      HINT_Y_OFFSET - HINT_PILL_PAD_Y,
-      panelWidth,
-      panelHeight,
-      HINT_PILL_RADIUS,
-    )
-    this.#hintBg.fill({ color: HINT_PILL_FILL, alpha: HINT_PILL_ALPHA })
-    this.#overlay.addChildAt(this.#hintBg, this.#overlay.getChildIndex(this.#hintText!))
-    if (this.#hintIcon) this.#overlay.addChild(this.#hintIcon)
-    this.#overlay.addChild(this.#hintDescriptionText)
-    this.#hintExpanded = true
+    const title = i18n?.t(action.labelKey) ?? action.name
+    const text = action.descriptionKey ? (i18n?.t(action.descriptionKey) ?? '') : ''
+    this.emitEffect('caption:show', { source: HINT_CAPTION_SOURCE, title, text, icon: action.svgMarkup })
   }
 
   #clearHint(): void {
@@ -2951,9 +2837,8 @@ export class TileOverlayDrone extends Drone {
       clearTimeout(this.#hintTimer)
       this.#hintTimer = null
     }
+    if (this.#hintActionName) this.emitEffect('caption:clear', { source: HINT_CAPTION_SOURCE })
     this.#hintActionName = null
-    this.#hintExpanded = false
-    this.#clearHintText()
   }
 
   /** Raster density that puts one texel of a world-space Text on one device
@@ -2969,8 +2854,8 @@ export class TileOverlayDrone extends Drone {
    *  positions stay valid. A few compares per frame when nothing is showing. */
   #followTextResolution(): void {
     const cueText = this.#swapCue?.children.find((child): child is Text => child instanceof Text) ?? null
-    if (!this.#hintText && !this.#hintDescriptionText && !cueText) return
-    followTextResolution([this.#hintText, this.#hintDescriptionText, cueText], this.#screenTextResolution())
+    if (!cueText) return
+    followTextResolution([cueText], this.#screenTextResolution())
   }
 
   /** Rounded translucent pill sized to a hint Text (anchored 0.5,0 at
@@ -2982,29 +2867,6 @@ export class TileOverlayDrone extends Drone {
     g.roundRect(centerX - w / 2, topY - HINT_PILL_PAD_Y, w, h, HINT_PILL_RADIUS)
     g.fill({ color: HINT_PILL_FILL, alpha: HINT_PILL_ALPHA })
     return g
-  }
-
-  #clearHintText(): void {
-    if (this.#hintBg) {
-      this.#hintBg.parent?.removeChild(this.#hintBg)
-      this.#hintBg.destroy()
-      this.#hintBg = null
-    }
-    if (this.#hintText) {
-      this.#hintText.parent?.removeChild(this.#hintText)
-      this.#hintText.destroy()
-      this.#hintText = null
-    }
-    if (this.#hintIcon) {
-      this.#hintIcon.parent?.removeChild(this.#hintIcon)
-      this.#hintIcon.destroy()
-      this.#hintIcon = null
-    }
-    if (this.#hintDescriptionText) {
-      this.#hintDescriptionText.parent?.removeChild(this.#hintDescriptionText)
-      this.#hintDescriptionText.destroy()
-      this.#hintDescriptionText = null
-    }
   }
 
   /** True when the current location is a launch-group page (the website /

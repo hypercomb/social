@@ -24,7 +24,7 @@ import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { setTileStacks, type StackVariant } from './tile-stack.js'
 import { seatUnindexed } from './unindexed-seating.js'
-import { participantVariantVisual } from './participant-variant.js'
+import { isPublishedLink, participantVariantVisual } from './participant-variant.js'
 import { hideStorageKey, isCellPublic } from './tile-public.js'
 import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
@@ -710,6 +710,9 @@ function upgradeThinPack(
   optimizer.enqueue(parentLayerSig, childSigs)
 }
 
+/** See #revealsName. */
+const HOVER_REVEALS_NAME = false
+
 export class ShowCellDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   /** Render-critical: loaded first so the hexagons paint (the root's criticalBees). */
@@ -733,7 +736,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'tile:preview']
+  protected override listens = ['render:host-ready', 'render:names-on-hover', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'tile:preview']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -1228,8 +1231,19 @@ export class ShowCellDrone extends Drone {
    *  name back, per-tile setting or not. The single answer for every
    *  labelUV write site (bake, in-place update, hover reveal). */
   #hidesName(hideText: boolean | undefined, imagePresent: boolean): boolean {
-    return !!hideText && imagePresent && !this.#textOnly
+    return this.#wantsHidden(hideText) && imagePresent && !this.#textOnly
   }
+  /** NAMES ON HOVER IS THE DEFAULT (jwize, 2026-10-26): a tile that wears a
+   *  picture shows its name only under the pointer, so the pictures read clean
+   *  and the name arrives when you ask for it. A tile with no picture has nothing
+   *  to hide behind and always shows its name (#hidesName). `hc:names-on-hover`
+   *  = '0' (or render:names-on-hover { on:false }) brings every name back. */
+  #namesOnHover = (() => { try { return localStorage.getItem('hc:names-on-hover') !== '0' } catch { return true } })()
+  /** The hovered tile's name is NOT drawn on the tile: the caption (top-centre,
+   *  caption.drone.ts) carries it, big. Flip HOVER_REVEALS_NAME to bring the
+   *  on-tile reveal back. */
+  #revealsName(label: string, revealed: string | null): boolean { return HOVER_REVEALS_NAME && label === revealed }
+  #wantsHidden(hideText: boolean | undefined): boolean { return !!hideText || this.#namesOnHover }
   /** Rows the hovered tile's label band must hold (overlay:band-rows). Held as
    *  drone state, not just pushed at the shader, because a render pass can
    *  REBUILD the shader — and the overlay only re-lays-out when the hovered hex
@@ -7121,6 +7135,15 @@ export class ShowCellDrone extends Drone {
       }
     })
 
+    // render:names-on-hover — the participant's switch for the default above.
+    this.onEffect<{ on: boolean }>('render:names-on-hover', (payload) => {
+      const on = payload?.on !== false
+      if (this.#namesOnHover === on) return
+      this.#namesOnHover = on
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // substrate fade-in: when substrate config changes, animate images from 0 → 1
     this.onEffect('substrate:changed', () => {
       this.#startSubstrateFade()
@@ -9830,7 +9853,7 @@ export class ShowCellDrone extends Drone {
         }
 
         // extract link presence
-        const hasLink = typeof props?.link === 'string' && props.link.length > 0
+        const hasLink = isPublishedLink(props?.link)
         linkCache.set(cell.label, hasLink)
         cell.hasLink = hasLink
 
@@ -11369,7 +11392,7 @@ export class ShowCellDrone extends Drone {
       // would take a slot from another out-of-view cell — every pass, for
       // every such cell.
       const unbaked = !foreign && !!this.#labelView && !this.#labelView.has(c.label) && !this.atlas!.hasLabel(atlasLabel)
-      const ruv = (this.#hidesName(c.hideText, !!imgUV) && c.label !== revealLabel) || unbaked
+      const ruv = (this.#hidesName(c.hideText, !!imgUV) && !this.#revealsName(c.label, revealLabel)) || unbaked
         ? { u0: 0, v0: 0, u1: 0, v1: 0 }
         : this.atlas!.getLabelUV(atlasLabel)
       for (let i = 0; i < 4; i++) {
@@ -11690,18 +11713,18 @@ export class ShowCellDrone extends Drone {
     (this.#shapeModeByLabel.get(label) ?? 0) > 0
 
   #labelIsHidden(label: string): boolean {
-    if (label === this.#hoverRevealLabel) return false
+    if (this.#revealsName(label, this.#hoverRevealLabel)) return false
     // A tile under a live edit hides its name by the EDIT, not by what is stored.
     const preview = this.#tilePreviews.get(label)
     if (preview) {
       const hideText = preview.hideText ?? this.cellHideTextCache.get(label) ?? false
-      if (!hideText || preview.removed) return false
+      if (!this.#wantsHidden(hideText) || preview.removed) return false
       const picture = this.#flat ? preview.flat : preview.point
       const sig = picture?.sig ?? this.cellImageCache.get(label)
       return this.#hidesName(true, !!(sig && this.imageAtlas?.getImageUV(sig)))
     }
     const cell = this.renderedCells.get(label)
-    if (!cell?.hideText || cell.plain || !cell.imageSig) return false
+    if (!cell || !this.#wantsHidden(cell.hideText) || cell.plain || !cell.imageSig) return false
     return this.#hidesName(true, !!this.imageAtlas?.getImageUV(cell.imageSig))
   }
 
@@ -11719,14 +11742,14 @@ export class ShowCellDrone extends Drone {
     const wasHiding = (l: string | null): boolean => {
       if (!l) return false
       const cell = this.renderedCells.get(l)
-      if (!cell?.hideText || cell.plain || !cell.imageSig) return false
+      if (!cell || !this.#wantsHidden(cell.hideText) || cell.plain || !cell.imageSig) return false
       return this.#hidesName(true, !!this.imageAtlas?.getImageUV(cell.imageSig))
     }
     const prevFlips = wasHiding(prev)   // prev was revealed → re-hide it
     const nextFlips = wasHiding(next)   // next was hidden → reveal it
 
     this.#hoverRevealLabel = next
-    if (!prevFlips && !nextFlips) return
+    if (!HOVER_REVEALS_NAME || (!prevFlips && !nextFlips)) return
 
     const labelUV = this.#buf.labelUV
     if (!labelUV || !this.atlas || !this.geom) return
@@ -11863,7 +11886,7 @@ export class ShowCellDrone extends Drone {
     this.#writeCellRgb(borderColor, i, r, g, b)
 
     const hideText = preview.hideText ?? this.cellHideTextCache.get(preview.label) ?? false
-    if (this.#hidesName(hideText, !!uv) && preview.label !== this.#hoverRevealLabel) {
+    if (this.#hidesName(hideText, !!uv) && !this.#revealsName(preview.label, this.#hoverRevealLabel)) {
       this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
     } else {
       const ruv = this.atlas.getLabelUV(preview.label)
@@ -11893,7 +11916,7 @@ export class ShowCellDrone extends Drone {
     const [r, g, b] = this.cellBorderColorCache.get(label) ?? PREVIEW_DEFAULT_BORDER
     this.#writeCellRgb(borderColor, i, r, g, b)
     const hideText = this.cellHideTextCache.get(label) ?? false
-    if (this.#hidesName(hideText, !!uv) && label !== this.#hoverRevealLabel) {
+    if (this.#hidesName(hideText, !!uv) && !this.#revealsName(label, this.#hoverRevealLabel)) {
       this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
     } else {
       const ruv = this.atlas.getLabelUV(label)
@@ -11948,7 +11971,7 @@ export class ShowCellDrone extends Drone {
     // hidden — unless this is the hovered tile, which is revealing its name,
     // or text-only mode is on, where no tile hides its name (#hidesName).
     const ht = this.cellHideTextCache.get(label) ?? false
-    if (this.#hidesName(ht, !!imgUV) && label !== this.#hoverRevealLabel) {
+    if (this.#hidesName(ht, !!imgUV) && !this.#revealsName(label, this.#hoverRevealLabel)) {
       this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
     } else {
       const atlasLabel = this.#pendingCellMutations.has(label) && !this.atlas.hasLabel(label)

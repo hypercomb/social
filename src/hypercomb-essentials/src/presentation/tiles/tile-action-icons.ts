@@ -15,10 +15,10 @@
 // are absolute and do not follow; the arrange hit-test derives from this
 // constant and does.
 export const ICON_Y = 5
-export const ICON_SPACING = 10       // tighter to match 75 % icon scale
+export const ICON_SPACING = 11       // plates (9.4 wide) keep a 1.6 margin between them
 export const ICON_SIZE = 7           // matches DEFAULT_ICON_SIZE in tile-overlay
 export const HEX_INRADIUS = 27.7     // √3/2 × 32 — safe horizontal bound
-export const EDGE_MARGIN = 3         // keep icons this far from hex edge
+export const EDGE_MARGIN = 5.2       // icon CENTRES stay this far from the hex edge, so a plate clears the border
 
 export function computeIconPositions(activeNames: string[]): { x: number; y: number }[] {
   const count = activeNames.length

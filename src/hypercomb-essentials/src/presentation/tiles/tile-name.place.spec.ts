@@ -103,6 +103,28 @@ describe('TileNameDrone places only the names that moved', () => {
     expect(written.length).toBe(40)
   })
 
+  it('the names leave with the hive during a takeover and return with it', () => {
+    EffectBus.emit('render:cell-count', page(5))
+    const root = document.querySelector('.hc-tile-names') as HTMLElement
+    expect(root.hidden).toBe(false)
+    EffectBus.emit('render:set-hive-visible', { visible: false })
+    expect(root.hidden).toBe(true)
+    // text-only toggling mid-takeover must not bring them back over the wall
+    EffectBus.emit('tile:toggle-text', { imageOnly: false })
+    expect(root.hidden).toBe(true)
+    EffectBus.emit('render:set-hive-visible', { visible: true })
+    expect(root.hidden).toBe(false)
+  })
+
+  it('the page names step aside while a dive is painted and return when it clears', () => {
+    EffectBus.emit('render:cell-count', page(5))
+    const root = document.querySelector('.hc-tile-names') as HTMLElement
+    EffectBus.emit('render:dive-painted', { count: 4 })
+    expect(root.hidden).toBe(true)
+    EffectBus.emit('render:dive-painted', { count: 0 })
+    expect(root.hidden).toBe(false)
+  })
+
   it('a name that was hidden and shows again keeps its place without a write', () => {
     let hidden = false
     services.set('@diamondcoreprocessor.com/ShowCellDrone', {

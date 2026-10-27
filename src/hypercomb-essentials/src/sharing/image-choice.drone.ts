@@ -60,6 +60,11 @@ const PICK_Z = 7006                 // above wave-view's dive (7005)
 // bites it SAYS SO rather than quietly showing a subset.
 const MAX_CHOICES = 400
 const ZOOM_MIN = 0.15
+/** Screen px kept clear at the top for the caption, and at the other edges. */
+const WALL_HEADER_PX = 76
+const WALL_MARGIN_PX = 24
+/** The wall is fitted a little under full, so it breathes inside its area. */
+const WALL_SHRINK = 0.88
 const TILE_FILL = 0x0e1018
 const TILE_FILL_ALPHA = 0.96
 const TILE_BORDER = 0x7eb6d6        // steel hairline (matches chrome)
@@ -70,7 +75,7 @@ const MINE_BORDER_WIDTH = 2.4
 const HOVER_BORDER = 0xa8ffd8       // the tile a click would commit to
 const HOVER_BORDER_WIDTH = 2.4
 const TILE_LABEL_FILL = 0xdceaf5
-const TITLE_FILL = 0x9fc4dc
+const CAPTION_SOURCE = 'images'
 const LABEL_SIZE_FACTOR = 0.22
 const LABEL_MAX_WIDTH_FACTOR = 1.45
 // The label band, copied from the hex shader's own numbers (hex-sdf.shader.ts:
@@ -123,7 +128,7 @@ export class ImageChoiceDrone extends Drone {
     'render:host-ready', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'images:open', 'render:cell-count',
   ]
-  protected override emits = ['render:set-hive-visible', 'tile:saved', 'toast:show']
+  protected override emits = ['render:set-hive-visible', 'tile:hover', 'caption:show', 'caption:clear', 'tile:saved', 'toast:show']
 
   #wired = false
 
@@ -321,6 +326,7 @@ export class ImageChoiceDrone extends Drone {
   #close(): void {
     this.#buildToken++                       // cancel any in-flight resolution
     this.#open_ = false
+    this.emitEffect('caption:clear', { source: CAPTION_SOURCE })
     if (this.#layer) {
       this.#layer.parent?.removeChild(this.#layer)
       this.#layer.destroy({ children: true })  // textures are cache-owned, not auto-destroyed
@@ -412,6 +418,9 @@ export class ImageChoiceDrone extends Drone {
 
     if (!this.#hiveHidden) {
       this.#hiveHidden = true
+      // The tile under the pointer when the wall opened is no longer there to be
+      // hovered — clear it so no hover text (name, holder count, band) is left.
+      this.emitEffect('tile:hover', { label: null })
       this.emitEffect('render:set-hive-visible', { visible: false })
     }
 
@@ -430,23 +439,10 @@ export class ImageChoiceDrone extends Drone {
       layer.addChild(tile)
     }
 
-    // What you are choosing FOR, above the hive — without it a screen of
-    // pictures says nothing about which tile is about to change.
-    const title = new Text({
-      text: `${this.#t('images.title', 'Images for')} ${this.#label} — ${this.#t('images.hint', 'click to use, Esc to cancel')}`,
-      style: {
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        fontSize: r * 0.26,
-        fontWeight: '600',
-        fill: TITLE_FILL,
-        align: 'center',
-      },
-    })
-    title.resolution = LABEL_RESOLUTION(this.#worldScale())
-    title.anchor.set(0.5)
-    const top = Math.min(...choices.map(c => this.#axialToPixel(c.slot.q, c.slot.r).y))
-    title.position.set(this.#meshOffset.x, top + this.#meshOffset.y - r * 1.7)
-    layer.addChild(title)
+    // What you are choosing FOR — a screen of pictures says nothing about which
+    // tile is about to change, so the caption (top-centre, under the command
+    // line) names it. Cleared by #close with the rest of the wall.
+    this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: this.#t('images.select', 'select image'), text: this.#label })
 
     this.#renderContainer.addChild(layer)
     this.#layer = layer
@@ -466,20 +462,26 @@ export class ImageChoiceDrone extends Drone {
     const width = Math.max(...xs) - Math.min(...xs) + r * 2
     const height = Math.max(...ys) - Math.min(...ys) + r * 2
     const scale = this.#containerScale()
-    const viewW = this.#renderer.screen.width / scale
-    const viewH = this.#renderer.screen.height / scale
+    const screen = this.#renderer.screen
+    // The caption owns a band at the top (under the command line); the wall is
+    // fitted into what is left and centred in it, so nothing runs under the
+    // header or off the bottom — never anchored on the hive's own centre, which
+    // is not the middle of the space that remains.
+    const areaTop = Math.min(WALL_HEADER_PX, screen.height * 0.25)
+    const areaW = screen.width - WALL_MARGIN_PX * 2
+    const areaH = screen.height - areaTop - WALL_MARGIN_PX
+    const viewW = areaW / scale
+    const viewH = areaH / scale
     if (!(viewW > 0) || !(viewH > 0)) return
 
-    const zoom = Math.max(ZOOM_MIN, Math.min(1, Math.min(viewW / width, viewH / height) * 0.9))
+    const zoom = Math.max(ZOOM_MIN, Math.min(1, Math.min(viewW / width, viewH / height) * WALL_SHRINK))
     this.#layer.scale.set(zoom)
-    // Hold the mesh centre still while scaling about the layer's origin, so the
-    // wall opens centred where the hive was.
     const cx = (Math.max(...xs) + Math.min(...xs)) / 2
     const cy = (Math.max(...ys) + Math.min(...ys)) / 2
-    this.#layer.position.set(
-      this.#meshOffset.x - cx * zoom,
-      this.#meshOffset.y - cy * zoom,
-    )
+    const target = this.#renderContainer
+      ? this.#renderContainer.toLocal(new Point(WALL_MARGIN_PX + areaW / 2, areaTop + areaH / 2))
+      : { x: this.#meshOffset.x, y: this.#meshOffset.y }
+    this.#layer.position.set(target.x - cx * zoom, target.y - cy * zoom)
   }
 
   /** Accumulated scale of the render container — local units to renderer px. */
@@ -575,6 +577,10 @@ export class ImageChoiceDrone extends Drone {
       ? `${choice.slot.q},${choice.slot.r}` : null
     if (hit === this.#hoverKey) return
     this.#hoverKey = hit
+    // Who offers the picture under the pointer — the caption says it, so the
+    // tile itself stays a picture. Back to the wall's own words when none is hovered.
+    if (choice && hit) this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: choice.who, text: choice.held ? this.#t('images.held', 'held on this tile') : this.#t('images.offered', 'offered by another host') })
+    else this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: this.#t('images.select', 'select image'), text: this.#label })
 
     for (let i = 0; i < this.#choices.length; i++) {
       const c = this.#choices[i]

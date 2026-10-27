@@ -7,13 +7,40 @@ import { Container, Graphics, Sprite, Texture } from 'pixi.js'
 
 // ── Hover backdrop ──────────────────────────────────────────────────
 
+/** Reach of the hit test past the glyph — wide enough that neighbouring icons
+ *  meet with no dead gap between them (the pointer never falls out of one key
+ *  before it is in the next, so the caption does not flicker). */
 const BACKDROP_PAD = 2
-const BACKDROP_RADIUS = 1.5
+/** How far the drawn plate stands off the glyph. Smaller than the hit reach, so
+ *  the plates keep a margin between them. */
+const PLATE_PAD = 1.2
 const BACKDROP_FILL = 0x0c0c1a
-const BACKDROP_FILL_ALPHA = 0.72
-const BACKDROP_STROKE = 0x6688cc
-const BACKDROP_STROKE_ALPHA = 0.35
+const BACKDROP_FILL_ALPHA = 0.86
+const BACKDROP_STROKE = 0xa8ffd8
+const BACKDROP_STROKE_ALPHA = 0.75
 const BACKDROP_STROKE_WIDTH = 0.6
+
+// ── Resting plate ───────────────────────────────────────────────────
+// An icon is no longer a bare glyph floating on the picture: it rests on a
+// small plate with two chamfered corners (top-left, bottom-right) — the cut
+// that makes it read as a key rather than a sticker — and a lit triangle in
+// the other corner. Hover raises the plate and lights the triangle; the
+// caption at the top of the screen says what the key does.
+const PLATE_FILL = 0x0c0c1a
+const PLATE_FILL_ALPHA = 0.46
+const PLATE_STROKE = 0x7eb6d6
+const PLATE_STROKE_ALPHA = 0.28
+const PLATE_STROKE_WIDTH = 0.4
+const CHAMFER = 1.5
+const MARK_SIZE = 1.7
+const MARK_COLOR = 0x7eb6d6
+const MARK_REST_ALPHA = 0.5
+const MARK_HOVER_COLOR = 0xa8ffd8
+
+/** A rectangle of half-size `r` with its top-left and bottom-right corners cut. */
+const chamfered = (r: number, c: number): number[] => [
+  -r + c, -r,   r, -r,   r, r - c,   r - c, r,   -r, r,   -r, -r + c,
+]
 
 // ── Selected ring ───────────────────────────────────────────────────
 // A STANDING mark (not a hover state): this icon names the tile's default.
@@ -200,6 +227,9 @@ export type IconButtonConfig = {
 
 export class HexIconButton extends Container {
   #sprite: Sprite | null = null
+  #plate: Graphics
+  #mark: Graphics
+  #markLit: Graphics
   #backdrop: Graphics
   #ring: Graphics
   #selected = false
@@ -217,10 +247,16 @@ export class HexIconButton extends Container {
     this.#size = config.size
     this.#normalTint = config.tint ?? 0xffffff
     this.#hoverTint = config.hoverTint ?? 0xc8d8ff
+    this.#plate = this.#buildPlate()
+    this.addChild(this.#plate)
     this.#backdrop = this.#buildBackdrop()
     this.addChild(this.#backdrop)
     this.#ring = this.#buildRing()
     this.addChild(this.#ring)
+    this.#mark = this.#buildMark(false)
+    this.#markLit = this.#buildMark(true)
+    this.#markLit.visible = false
+    this.addChild(this.#mark, this.#markLit)
   }
 
   // ── Async icon load ────────────────────────────────────────────────
@@ -307,6 +343,9 @@ export class HexIconButton extends Container {
     if (this.#hovered === value) return
     this.#hovered = value
     this.#backdrop.visible = value
+    this.#plate.visible = !value
+    this.#mark.visible = !value
+    this.#markLit.visible = value
     if (this.#sprite) {
       this.#sprite.tint = value ? this.#hoverTint : this.#normalTint
     }
@@ -354,22 +393,41 @@ export class HexIconButton extends Container {
   // ── Internals ──────────────────────────────────────────────────────
 
   #buildBackdrop(): Graphics {
-    const r = this.#size / 2 + BACKDROP_PAD
+    const r = this.#size / 2 + PLATE_PAD
     const g = new Graphics()
-    g.roundRect(-r, -r, r * 2, r * 2, BACKDROP_RADIUS)
+    g.poly(chamfered(r, CHAMFER), true)
     g.fill({ color: BACKDROP_FILL, alpha: BACKDROP_FILL_ALPHA })
-    g.roundRect(-r, -r, r * 2, r * 2, BACKDROP_RADIUS)
+    g.poly(chamfered(r, CHAMFER), true)
     g.stroke({ color: BACKDROP_STROKE, alpha: BACKDROP_STROKE_ALPHA, width: BACKDROP_STROKE_WIDTH })
     g.visible = false
     return g
   }
 
-  #buildRing(): Graphics {
-    const r = this.#size / 2 + BACKDROP_PAD
+  #buildPlate(): Graphics {
+    const r = this.#size / 2 + PLATE_PAD
     const g = new Graphics()
-    g.roundRect(-r, -r, r * 2, r * 2, BACKDROP_RADIUS)
+    g.poly(chamfered(r, CHAMFER), true)
+    g.fill({ color: PLATE_FILL, alpha: PLATE_FILL_ALPHA })
+    g.poly(chamfered(r, CHAMFER), true)
+    g.stroke({ color: PLATE_STROKE, alpha: PLATE_STROKE_ALPHA, width: PLATE_STROKE_WIDTH })
+    return g
+  }
+
+  /** The lit triangle in the top-right corner — quiet at rest, bright on hover. */
+  #buildMark(lit: boolean): Graphics {
+    const r = this.#size / 2 + PLATE_PAD
+    const g = new Graphics()
+    g.poly([r - MARK_SIZE, -r, r, -r, r, -r + MARK_SIZE], true)
+    g.fill({ color: lit ? MARK_HOVER_COLOR : MARK_COLOR, alpha: lit ? 1 : MARK_REST_ALPHA })
+    return g
+  }
+
+  #buildRing(): Graphics {
+    const r = this.#size / 2 + PLATE_PAD
+    const g = new Graphics()
+    g.poly(chamfered(r, CHAMFER), true)
     g.fill({ color: SELECTED_STROKE, alpha: SELECTED_FILL_ALPHA })
-    g.roundRect(-r, -r, r * 2, r * 2, BACKDROP_RADIUS)
+    g.poly(chamfered(r, CHAMFER), true)
     g.stroke({ color: SELECTED_STROKE, alpha: SELECTED_STROKE_ALPHA, width: SELECTED_STROKE_WIDTH })
     g.visible = false
     return g

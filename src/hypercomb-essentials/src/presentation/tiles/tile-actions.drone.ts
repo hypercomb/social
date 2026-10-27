@@ -183,7 +183,6 @@ const BACKING_KEY_BY_ACTION: Record<string, string> = {
 
 const ICON_REGISTRY: IconRegistryEntry[] = [
   // ── private profile ──
-  { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private', labelKey: 'action.command', descriptionKey: 'action.command.description' },
   // 'edit' icon is provided by TileEditorDrone via IconProviderRegistry —
   // when the editor drone is toggled off it never registers, the icon
   // never appears, and the merged-available filter strips it from default

@@ -5,6 +5,12 @@
 const SIG_RE = /^[0-9a-f]{64}$/i
 const COLOR_RE = /^#?[0-9a-f]{6}$/i
 
+/** A link worth a link icon: one that POINTS somewhere published. A tile that
+ *  only holds its own picture carries a link to that picture's resource — an
+ *  internal pointer, not a published address — and that is no link to show. */
+export const isPublishedLink = (link: unknown): boolean =>
+  typeof link === 'string' && link.length > 0 && !link.startsWith('/@resource/')
+
 export type ParticipantVariantVisual = {
   readonly imageSig?: string
   readonly borderColor?: [number, number, number]
@@ -54,7 +60,7 @@ export const participantVariantVisual = (
     ...(imageSig ? { imageSig } : {}),
     ...(borderColor ? { borderColor } : {}),
     tags,
-    hasLink: typeof props['link'] === 'string' && props['link'].length > 0,
+    hasLink: isPublishedLink(props['link']),
     hasSubstrate: props['substrate'] === true,
     hideText: props['hideText'] === true,
   }

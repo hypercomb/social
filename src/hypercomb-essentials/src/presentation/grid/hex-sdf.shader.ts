@@ -640,13 +640,17 @@ export class HexSdfTextureShader {
       float bandH = rowH * mix(1.0, u_bandRows, hovered);
       float bandAA = max(u_radiusPx * 0.02, 0.6);
       float bandD = abs(local.y) - bandH;
-      float bandMask = (1.0 - smoothstep(0.0, bandAA, bandD)) * max(labelPresent, hovered);
+      // THE HOVER BAND IS GONE (2026-10-26): each icon now rests on its own plate
+      // and the hovered tile's name is carried by the caption at the top of the
+      // screen, so nothing needs a strip behind it. The band is only ever the
+      // resting pill behind a name that is drawn.
+      float bandMask = (1.0 - smoothstep(0.0, bandAA, bandD)) * labelPresent * (1.0 - hovered);
       // NEAR-OPAQUE (2026-09-09). The resting band darkened the picture by
       // only 55%, so whatever sat behind the name bled through the band and
       // around every letter, and the white ink had nothing solid to stand on.
       // 0.85 at rest / 0.90 on hover keeps a trace of the picture for
       // continuity while giving the text and the icons a solid ground.
-      color.rgb = mix(color.rgb, vec3(0.0), bandMask * mix(imgBlend * 0.85, 0.90, hovered) * u_labelMix);
+      color.rgb = mix(color.rgb, vec3(0.0), bandMask * imgBlend * 0.85 * u_labelMix);
 
       // Hairline ruler on the seam UNDER THE NAME — it divides what the tile is
       // called from what you can do to it, so it sits at the bottom of the top

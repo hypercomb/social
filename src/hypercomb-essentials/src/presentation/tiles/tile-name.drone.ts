@@ -128,7 +128,7 @@ export class TileNameDrone extends Drone {
   protected override listens: string[] = [
     'render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'render:set-pivot', 'render:set-text-only', 'tile:toggle-text',
-    'tile:hover', 'overlay:band-rows', 'render:big-head-mode', 'render:name-visibility',
+    'tile:hover', 'overlay:band-rows', 'render:big-head-mode', 'render:name-visibility', 'render:set-hive-visible', 'render:dive-painted',
     TILE_STACK_DEPTHS, 'location:changed',
   ]
   protected override emits: string[] = ['tile-names:dom']
@@ -150,6 +150,10 @@ export class TileNameDrone extends Drone {
   #flat = false
   #pivot = false
   #visible = true
+  /** A takeover owns the surface (render:set-hive-visible { visible: false }). */
+  #hiveHidden = false
+  /** A wave dive is painted over this page (render:dive-painted, count > 0). */
+  #diving = false
   #hovered: string | null = null
   #bigHead = (() => { try { return localStorage.getItem(BIG_HEAD_KEY) === '1' } catch { return false } })()
   #band: BandRowsPayload = { rows: 1, label: null }
@@ -176,7 +180,20 @@ export class TileNameDrone extends Drone {
     // bare emit still flips.
     this.onEffect<{ imageOnly?: boolean } | undefined>('tile:toggle-text', (p) => {
       this.#visible = p?.imageOnly == null ? !this.#visible : !p.imageOnly
-      if (this.#root) this.#root.hidden = !this.#visible
+      this.#syncRoot()
+    })
+    // A takeover (the images wall, the screensaver) hides the Pixi hive, but the
+    // names are DOM text over the canvas and would be left floating on top of
+    // whatever took the surface. They follow the hive: hidden with it, back with it.
+    this.onEffect<{ visible: boolean }>('render:set-hive-visible', (p) => {
+      this.#hiveHidden = !p?.visible
+      this.#syncRoot()
+    })
+    // A dive paints another layer's tiles in this page's slots with the page's
+    // mesh hidden; the page's names would sit over pictures they do not belong to.
+    this.onEffect<{ count?: number }>('render:dive-painted', (p) => {
+      this.#diving = (p?.count ?? 0) > 0
+      this.#syncRoot()
     })
     this.onEffect<HoverPayload>('tile:hover', (p) => { this.#hovered = p?.label ?? null; this.#refreshAll() })
     // Depths belong to a page: arriving somewhere else drops them, so a count
@@ -222,7 +239,7 @@ export class TileNameDrone extends Drone {
 
     const root = document.createElement('div')
     root.className = this.#bigHead ? 'hc-tile-names hc-big-head' : 'hc-tile-names'
-    root.hidden = !this.#visible
+    root.hidden = !this.#visible || this.#hiveHidden || this.#diving
     const world = document.createElement('div')
     world.className = 'hc-tile-names-world'
     root.appendChild(world)
@@ -240,6 +257,10 @@ export class TileNameDrone extends Drone {
     for (const label of this.#cells.keys()) this.#spanFor(label)
     this.#placeAll()
     this.emitEffect('tile-names:dom', { on: true })
+  }
+
+  #syncRoot(): void {
+    if (this.#root) this.#root.hidden = !this.#visible || this.#hiveHidden || this.#diving
   }
 
   /** The root is the canvas's CSS box, so names past its edge clip exactly
@@ -338,7 +359,7 @@ export class TileNameDrone extends Drone {
     if (holders.textContent !== count) holders.textContent = count
     if (holders.hidden !== !count) holders.hidden = !count
 
-    const hidden = !!sc && (sc.shaderDrawsName(label) || (label !== this.#hovered && sc.nameHidden(label)))
+    const hidden = !!sc && (sc.shaderDrawsName(label) || sc.nameHidden(label))
     if (span.hidden !== hidden) span.hidden = hidden
     if (hidden) return
 
