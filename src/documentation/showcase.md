@@ -331,3 +331,10 @@ The front door's default theme is **dark** (`hypercomb-shim/index.html` sets `da
 own default (`hypercomb-shared/core/theme.service.ts`, `DEFAULT_THEME = 'honey'`) is a separate decision and is unchanged. The
 outer card around the tiles is padded on all sides (`1rem`), so the dark background surrounds the comb completely, while the
 tiles inside still span the card's inner width edge to edge.
+
+### The follow bar is anchored; the card fits its tiles (jwize 2026-10-26)
+
+The follow input and its button are anchored to the bottom of the screen (sticky, pushed to the foot of a panel that is at
+least the screen tall), so a short list leaves the bar at the bottom and a long one carries it along. The outer card is exactly
+as tall as its tiles plus its own padding, and the gap between it and the bar is the search's `.55rem`. The gutter between tiles
+is `.3rem` (`.18rem` on a phone), a very slight increase on the first flush layout.

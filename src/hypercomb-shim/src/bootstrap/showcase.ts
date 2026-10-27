@@ -1535,7 +1535,16 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
 .follow-suggest button:hover:not(:disabled), .follow-field button:hover:not(:disabled) { filter: brightness(1.08); }
 .follow-suggest button:disabled, .follow-field button:disabled { opacity: .6; cursor: default; }
 .follow-suggest button:focus-visible, .follow-field button:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
-.follow { display: grid; grid-template-columns: minmax(0, 1fr); gap: .45rem; margin: 0 0 clamp(2rem, 5vh, 3rem); }
+.follow { display: grid; grid-template-columns: minmax(0, 1fr); gap: .45rem; margin: auto 0 0; padding: .55rem 0;
+  position: sticky; bottom: 0; z-index: 25;
+  background: color-mix(in srgb, var(--md-surface-c-low) 90%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+/* ANCHORED TO THE BOTTOM (jwize 2026-10-26: "anchor the input and follow to the bottom and expand the div fit to content, aside
+   from the same gutter as the top input and the div"): the panel is at least the screen tall and the follow bar is pushed to
+   its foot, so a short list leaves the bar at the bottom of the screen and a long one carries it along; the card above
+   is exactly as tall as its tiles, and the gap to the bar is the search's own .55rem. */
+.card.showcase-page .panel { display: flex; flex-direction: column; min-height: calc(100dvh - 1.75rem); margin-bottom: 0; }
+.bands { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.bands > .hosted { margin-bottom: .55rem; }
 .follow-note { margin: 0; color: var(--md-on-surface-var); font-size: .85rem; line-height: 1.4; }
 .follow-field { position: relative; display: flex; align-items: center; gap: .6rem; }
 .follow-field > svg { position: absolute; z-index: 1; left: .95rem; width: 1.1rem; height: 1.1rem; color: var(--md-primary); pointer-events: none; }
@@ -1574,7 +1583,7 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
 .mini > .hex-art:not(.has-picture) { background-color: var(--md-surface-c-high); }
 
 /* the honeycomb: rows of pointy-top hexagons, every other one shifted half a hex */
-.comb { --s: 10.4rem; --g: .2rem; display: grid; justify-content: start; min-width: 0; }
+.comb { --s: 10.4rem; --g: .3rem; display: grid; justify-content: start; min-width: 0; }
 .comb-row { display: flex; gap: var(--g); }
 .comb-row + .comb-row { margin-top: calc(var(--g) * .866 - var(--s) * .2887); }
 .comb-row.shift { padding-left: calc((var(--s) + var(--g)) / 2); }
@@ -1652,7 +1661,7 @@ a.version-visit { color: var(--md-primary); }
   /* the sentence goes on a phone: the name, the count and the search are the header */
   .hero-tagline { display: none; }
   .mini { width: 1.8rem; height: calc(1.8rem * 1.1547); margin-left: -.55rem; }
-  .comb { --s: 6.1rem; --g: .12rem; }
+  .comb { --s: 6.1rem; --g: .18rem; }
   .comb[data-shape='launcher'] { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.1rem .7rem; }
   .comb[data-shape='launcher'] .hex-name { font-size: .72rem; }
   .hex-name { font-size: .74rem; }
