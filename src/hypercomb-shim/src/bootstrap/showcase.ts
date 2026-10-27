@@ -1007,6 +1007,27 @@ ${entry.key}`
   filterBar.setAttribute('role', 'group')
   filterBar.setAttribute('aria-label', 'Domains')
   filterBar.hidden = true
+  // A LIST, NOT TAGS (jwize 2026-10-26: "the domains need to collapse to a list, not a horizontal tag view"): the domain
+  // being looked at is one row; pressing it opens the list of every domain, one per line, and choosing one closes it again.
+  const domainHead = el('button', 'domains-head')
+  domainHead.type = 'button'
+  domainHead.setAttribute('aria-haspopup', 'listbox')
+  const domainName = el('span', 'domains-name')
+  const domainChevron = el('span', 'dex-chevron')
+  domainChevron.append(iconOf('chevron'))
+  domainHead.append(iconOf('globe'), domainName, domainChevron)
+  const domainList = el('div', 'domains-list')
+  domainList.setAttribute('role', 'listbox')
+  domainList.hidden = true
+  filterBar.append(domainHead, domainList)
+  let domainsOpen = false
+  const setDomainsOpen = (on: boolean): void => {
+    domainsOpen = on
+    domainList.hidden = !on
+    domainHead.setAttribute('aria-expanded', String(on))
+    filterBar.classList.toggle('open', on)
+  }
+  domainHead.addEventListener('click', () => setDomainsOpen(!domainsOpen))
   const chips = new Map<string, HTMLButtonElement>()
   const nothing = el('p', 'hosted-nothing')
   nothing.textContent = 'Nothing matches your search.'
@@ -1298,15 +1319,17 @@ ${entry.key}`
     for (const zone of zones) {
       let chip = chips.get(zone)
       if (!chip) {
-        chip = el('button', 'domain-chip')
+        chip = el('button', 'domain-item')
         chip.type = 'button'
+        chip.setAttribute('role', 'option')
         chip.textContent = zone
-        chip.addEventListener('click', () => { openRow = zone; paint() })
+        chip.addEventListener('click', () => { openRow = zone; setDomainsOpen(false); paint() })
         chips.set(zone, chip)
-        filterBar.append(chip)
+        domainList.append(chip)
       }
-      chip.setAttribute('aria-pressed', String(openRow === zone))
+      chip.setAttribute('aria-selected', String(openRow === zone))
     }
+    domainName.textContent = openRow || options.self
     filterBar.hidden = !managing
     bandsHost.classList.toggle('managing', managing)
     // The follow box stays at the foot, always (jwize 2026-10-25: "just show the input and follow at the bottom all the time").
@@ -1464,13 +1487,22 @@ export const SHOWCASE_STYLE = `
 .search .manage-toggle[aria-pressed='true'] { border-color: var(--md-primary); color: var(--md-primary); }
 .search .manage-toggle:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 .dex-row > .dex-head { display: none; }
-.domains { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 .6rem; }
-.domains[hidden] { display: none; }
-.domain-chip { padding: .42rem .85rem; border: 1px solid var(--md-outline-variant); border-radius: 999px; cursor: pointer;
-  background: color-mix(in srgb, var(--md-surface-c-lowest) 70%, transparent); color: var(--md-on-surface);
-  font: 500 .85rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
-.domain-chip[aria-pressed='true'] { border-color: var(--md-primary); background: var(--md-primary); color: var(--md-on-primary); }
-.domain-chip:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.domains { margin: 0 0 .55rem; border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px);
+  background: color-mix(in srgb, var(--md-surface-c-lowest) 70%, transparent); overflow: hidden; }
+.domains[hidden], .domains-list[hidden] { display: none; }
+.domains-head { display: flex; align-items: center; gap: .6rem; width: 100%; padding: .65rem .9rem; border: 0; background: transparent; cursor: pointer;
+  color: var(--md-on-surface-strong); font: 600 .95rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); text-align: left; }
+.domains-head > svg { flex: none; width: 1.05rem; height: 1.05rem; color: var(--md-primary); }
+.domains-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.domains.open .dex-chevron { transform: rotate(180deg); color: var(--md-primary); }
+.domains-list { display: grid; border-top: 1px solid var(--md-outline-variant); }
+.domain-item { display: block; width: 100%; padding: .6rem .9rem .6rem 2.55rem; border: 0; border-top: 1px solid var(--md-outline-variant);
+  background: transparent; cursor: pointer; text-align: left; color: var(--md-on-surface);
+  font: 500 .9rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.domain-item:first-child { border-top: 0; }
+.domain-item:hover { background: color-mix(in srgb, var(--md-primary) 8%, transparent); }
+.domain-item[aria-selected='true'] { color: var(--md-primary); font-weight: 700; }
+.domains-head:focus-visible, .domain-item:focus-visible { outline: 2px solid var(--md-primary); outline-offset: -2px; }
 .search input::placeholder { color: var(--md-on-surface-faint); }
 .search input:focus { outline: 2px solid var(--md-primary); outline-offset: 1px; }
 

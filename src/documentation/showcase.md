@@ -344,3 +344,9 @@ is `.3rem` (`.18rem` on a phone), a very slight increase on the first flush layo
 The open card takes the whole space between the search and the follow bar, so the dark surface runs unbroken from one to the
 other with the tiles at its top. The gutter above the card (from the search) and the gutter below it (to the follow input) are
 the same `.55rem`, so the card is centred between its two inputs.
+
+### The domains are a list that collapses (jwize 2026-10-26)
+
+"The domains need to collapse to a list, not a horizontal tag view." Under Manage the domain being looked at is one row (globe, its
+name, a chevron); pressing it opens the list of every domain, one per line, the current one marked; choosing one shows its tiles and
+closes the list. No tags, no horizontal strip.
