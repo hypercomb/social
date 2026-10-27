@@ -40,10 +40,18 @@ it('reads the picture a creation wears: head layer → properties → picture, o
   expect(urls[0]!.type).toBe('image/png')
 })
 
-it('prefers the chosen original over the capture', async () => {
+it('prefers the capture, which carries the hive zoom and position, over the stored original', async () => {
   const original = await envelope(await put(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9, 9])), 'image')
   const capture = await envelope(await put(PNG), 'image')
-  const head = await publish({ small: { image: capture }, large: { image: original } })
+  const head = await publish({ small: { image: capture }, large: { image: original, x: 4, y: 80, scale: 2 } })
+  const { tilePicture, urls } = await load()
+  await tilePicture(head, ['https://door.example'])
+  expect(urls[0]!.type).toBe('image/png')
+})
+
+it('falls back to the stored original only when a tile has no capture', async () => {
+  const original = await envelope(await put(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9, 9])), 'image')
+  const head = await publish({ large: { image: original } })
   const { tilePicture, urls } = await load()
   await tilePicture(head, ['https://door.example'])
   expect(urls[0]!.type).toBe('image/jpeg')

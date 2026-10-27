@@ -52,9 +52,13 @@ const firstSig = (value: unknown): string | null => {
   return list.find((entry): entry is string => typeof entry === 'string' && SIG.test(entry)) ?? null
 }
 
-/** The picture a tile wears: the chosen original first, then its capture. */
+/** The picture a tile wears: its CAPTURE first, then the stored original (jwize 2026-10-26: "the zoom and position don't match").
+ *  The hive does not draw the original: it draws the capture (`small.image`, the point-top hexagon box at 346x400), which is the
+ *  original already cropped and zoomed by the framing the participant chose (`large.{x,y,scale}`) — "what is framed on screen is,
+ *  by construction, what is saved" (editor/crop-math.ts). The front door shows that same capture, so the zoom and the position
+ *  are the hive's exactly. The original is only the fallback for a tile that has no capture, and then it is simply centred. */
 const pictureOf = (props: Record<string, unknown> | null): string | null => {
-  for (const face of ['large', 'small']) {
+  for (const face of ['small', 'large']) {
     const image = (props?.[face] as { image?: unknown } | undefined)?.image
     if (typeof image === 'string' && SIG.test(image)) return image
   }

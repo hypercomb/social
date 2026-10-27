@@ -379,3 +379,10 @@ a refresh, opening another row, toggling Manage and searching leave it alone (sp
 (shown under Manage) that forgets it in the store (`removeHostZone`) and drops the row; if the store cannot forget it the row stays and says
 so. Only the temporary rows (Checking…, Not found) are ever dropped by anything else. The local preview window now keeps its own profile between
 runs for the same reason (`--fresh` starts empty).
+
+### The front door shows the hive's capture, so zoom and position match (jwize 2026-10-26)
+
+A tile's picture is stored twice: the original (`large.image` plus a framing `large.{x,y,scale}`) and a CAPTURE (`small.image`, the point-top hexagon box
+at 346x400) that is the original already cropped and zoomed by that framing. The hive draws the capture; the front door used to draw the original
+centred, so the zoom and position differed (the agenda globe was cropped). It now shows the capture first and the original only for a tile with no
+capture. Checked on every hive the live ledger lists: each capture resolves as a 346x400 image, so all of them frame as the hive does.
