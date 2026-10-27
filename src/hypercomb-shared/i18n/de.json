@@ -595,6 +595,8 @@
   "images.select": "Bild auswählen",
   "images.held": "auf dieser Kachel gehalten",
   "images.offered": "von einem anderen Host angeboten",
+  "images.fresh": "neu — noch nicht gesehen",
+  "images.dismiss": "neue Bilder sind umrandet; Esc verwirft sie",
   "images.held": "auf dieser Kachel gehalten",
   "images.offered": "von einem anderen Host angeboten",
   "images.yours": "deine",

@@ -595,6 +595,8 @@
   "images.select": "selecionar imagem",
   "images.held": "guardada neste bloco",
   "images.offered": "oferecida por outro anfitrião",
+  "images.fresh": "nova — ainda não vista",
+  "images.dismiss": "imagens novas têm um anel; Esc as dispensa",
   "images.held": "guardada neste bloco",
   "images.offered": "oferecida por outro anfitrião",
   "images.yours": "suas",

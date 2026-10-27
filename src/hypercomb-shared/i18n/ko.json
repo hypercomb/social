@@ -595,6 +595,8 @@
   "images.select": "이미지 선택",
   "images.held": "이 타일에 보관됨",
   "images.offered": "다른 호스트가 제공",
+  "images.fresh": "새 이미지 — 처음 보는 것",
+  "images.dismiss": "새 이미지는 원으로 표시됩니다. Esc로 넘깁니다",
   "images.held": "이 타일에 보관됨",
   "images.offered": "다른 호스트가 제공",
   "images.yours": "내 것",

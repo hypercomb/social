@@ -595,6 +595,8 @@
   "images.select": "seleziona immagine",
   "images.held": "conservata su questa tessera",
   "images.offered": "offerta da un altro host",
+  "images.fresh": "nuova — mai vista",
+  "images.dismiss": "le immagini nuove hanno un anello; Esc le scarta",
   "images.held": "conservata su questa tessera",
   "images.offered": "offerta da un altro host",
   "images.yours": "tua",

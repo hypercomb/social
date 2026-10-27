@@ -659,6 +659,8 @@
   "images.select": "画像を選択",
   "images.held": "このタイルに保存済み",
   "images.offered": "他のホストが提供",
+  "images.fresh": "新着 — 未確認",
+  "images.dismiss": "新しい画像は輪で示されます。Escで見送ります",
   "images.held": "このタイルに保存済み",
   "images.offered": "他のホストが提供",
   "images.yours": "自分",

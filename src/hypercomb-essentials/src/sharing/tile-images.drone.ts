@@ -18,7 +18,7 @@
 import { Drone } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext } from '../presentation/tiles/tile-overlay.drone.js'
 import { galleryImageSigsAt } from '../commands/lightbox-kind.js'
-import { meaningPoolImageCandidates } from './peer-images.js'
+import { offeredPictures } from './image-updates.js'
 
 // collections — Material Icons Filled. A stack of pictures: several versions
 // of one thing, which is exactly what the room is offering.
@@ -38,26 +38,6 @@ const pending = new Set<string>()
 const heldSigs = new Map<string, ReadonlySet<string>>()
 const keyOf = (segments: readonly string[], label: string): string => [...segments, label].join('/')
 
-// What domains report for a NAME — keyed by the name alone, never the path: the
-// pool is one pool wherever the tile sits. Hosts can report later, so an answer
-// is re-asked after a while rather than held for good.
-const OFFERED_TTL_MS = 45_000
-const offered = new Map<string, { at: number; previews: ReadonlySet<string> }>()
-const offeredPending = new Set<string>()
-
-const offeredFor = (label: string): ReadonlySet<string> => {
-  const known = offered.get(label)
-  const fresh = known && Date.now() - known.at < OFFERED_TTL_MS
-  if (!fresh && !offeredPending.has(label)) {
-    offeredPending.add(label)
-    void meaningPoolImageCandidates(label)
-      .then(found => { offered.set(label, { at: Date.now(), previews: new Set(found.map(c => c.previewSig)) }) })
-      .catch(() => { offered.set(label, { at: Date.now(), previews: new Set() }) })
-      .finally(() => { offeredPending.delete(label) })
-  }
-  return known?.previews ?? new Set()
-}
-
 /** Pictures there are to choose between: held on this tile, plus what domains
  *  offer for its name that the tile does not already hold. */
 const choices = (label: string): number => {
@@ -73,7 +53,7 @@ const choices = (label: string): number => {
   }
   const held = heldSigs.get(key)
   let extra = 0
-  for (const sig of offeredFor(label)) if (!held?.has(sig)) extra++
+  for (const sig of offeredPictures(label)) if (!held?.has(sig)) extra++
   return (known ?? 0) + extra
 }
 

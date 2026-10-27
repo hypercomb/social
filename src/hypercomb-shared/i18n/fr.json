@@ -595,6 +595,8 @@
   "images.select": "choisir une image",
   "images.held": "conservée sur cette tuile",
   "images.offered": "proposée par un autre hôte",
+  "images.fresh": "nouvelle — jamais vue",
+  "images.dismiss": "les nouvelles images sont cerclées ; Échap les écarte",
   "images.held": "conservée sur cette tuile",
   "images.offered": "proposée par un autre hôte",
   "images.yours": "les vôtres",

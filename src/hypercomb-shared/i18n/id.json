@@ -595,6 +595,8 @@
   "images.select": "pilih gambar",
   "images.held": "disimpan di ubin ini",
   "images.offered": "ditawarkan oleh host lain",
+  "images.fresh": "baru — belum pernah dilihat",
+  "images.dismiss": "gambar baru diberi cincin; Esc mengabaikannya",
   "images.held": "disimpan di ubin ini",
   "images.offered": "ditawarkan oleh host lain",
   "images.yours": "milik Anda",

@@ -595,6 +595,8 @@
   "images.select": "选择图片",
   "images.held": "已保存在此图块",
   "images.offered": "由其他主机提供",
+  "images.fresh": "新图片 — 尚未查看",
+  "images.dismiss": "新图片带有圆环；按 Esc 忽略",
   "images.held": "已保存在此图块",
   "images.offered": "由其他主机提供",
   "images.yours": "你的",

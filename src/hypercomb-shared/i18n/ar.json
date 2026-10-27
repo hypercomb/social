@@ -595,6 +595,8 @@
   "images.select": "اختر صورة",
   "images.held": "محفوظة على هذه البلاطة",
   "images.offered": "مقدّمة من مضيف آخر",
+  "images.fresh": "جديدة — لم تُشاهد من قبل",
+  "images.dismiss": "الصور الجديدة محاطة بحلقة؛ Esc يتجاهلها",
   "images.held": "محفوظة على هذه البلاطة",
   "images.offered": "مقدّمة من مضيف آخر",
   "images.yours": "لك",

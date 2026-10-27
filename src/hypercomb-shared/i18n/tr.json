@@ -595,6 +595,8 @@
   "images.select": "görsel seç",
   "images.held": "bu karoda tutuluyor",
   "images.offered": "başka bir ana makine sundu",
+  "images.fresh": "yeni — daha önce görülmedi",
+  "images.dismiss": "yeni görseller halkalıdır; Esc onları geçer",
   "images.held": "bu karoda tutuluyor",
   "images.offered": "başka bir ana makine sundu",
   "images.yours": "senin",

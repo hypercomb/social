@@ -24,7 +24,7 @@ export class RepublishQueenBee extends QueenBee {
     { input: '/republish', result: 'Names the published pages that have moved on, asks once, and republishes them to the hosts they name' },
   ]
 
-  readonly machine = {
+  override readonly machine = {
     forms: '',
     example: '/republish',
     reach: 'destructive' as const,

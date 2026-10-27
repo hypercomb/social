@@ -595,6 +595,8 @@
   "images.select": "छवि चुनें",
   "images.held": "इस टाइल पर रखी है",
   "images.offered": "किसी अन्य होस्ट द्वारा प्रस्तुत",
+  "images.fresh": "नई — पहले नहीं देखी",
+  "images.dismiss": "नई तस्वीरें घेरे में हैं; Esc उन्हें हटा देता है",
   "images.held": "इस टाइल पर रखी है",
   "images.offered": "किसी अन्य होस्ट द्वारा प्रस्तुत",
   "images.yours": "आपकी",

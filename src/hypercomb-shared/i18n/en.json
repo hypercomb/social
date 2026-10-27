@@ -804,6 +804,8 @@
   "images.select": "select image",
   "images.held": "held on this tile",
   "images.offered": "offered by another host",
+  "images.fresh": "new — not seen before",
+  "images.dismiss": "new pictures are ringed; Esc dismisses them",
   "images.held": "held on this tile",
   "images.offered": "offered by another host",
   "images.yours": "yours",

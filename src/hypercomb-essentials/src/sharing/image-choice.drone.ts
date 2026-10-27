@@ -37,6 +37,7 @@ import { galleryImageSigsAt, holdPictures } from '../commands/lightbox-kind.js'
 import { fetchThroughContentHop, terminalContentSig } from '../presentation/tiles/artifact-content.js'
 import { meaningPoolImageCandidates, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
 import { imageChoiceWriteTargets } from './image-choice-targets.js'
+import { markSeen, unseenNow } from './image-updates.js'
 
 type Axial = { q: number; r: number }
 
@@ -51,6 +52,8 @@ type Choice = {
   who: string
   mine: boolean
   held: boolean
+  /** Offered by a domain and not yet shown to this participant — the reason a badge was raised. */
+  fresh?: boolean
 }
 type ChoiceEntry = Omit<Choice, 'slot' | 'pos'>
 
@@ -219,7 +222,7 @@ export class ImageChoiceDrone extends Drone {
     const choice = this.#choiceUnderCursor(e.clientX, e.clientY)
     this.#suppressTrailingClick = true
     // Empty space backs out; the picture already worn has nothing to write.
-    if (!choice || choice.mine) { this.#close(); return }
+    if (!choice || choice.mine) { this.#dismiss(); return }
     void this.#apply(choice)
   }
 
@@ -235,7 +238,7 @@ export class ImageChoiceDrone extends Drone {
   #onKeyDown = (e: KeyboardEvent): void => {
     if (!this.#layer || e.key !== 'Escape') return
     e.stopPropagation()
-    this.#close()
+    this.#dismiss()
   }
 
   #onWindowBlur = (): void => { this.#close() }
@@ -269,11 +272,12 @@ export class ImageChoiceDrone extends Drone {
     // Cross-host variants: the pool `sign(name)` on every known host. Nothing
     // more is needed to share pictures between domains than the tile's name.
     const offered = await meaningPoolImageCandidates(label).catch(() => [] as readonly PeerImageCandidate[])
+    const fresh = await unseenNow(label).catch(() => new Set<string>() as ReadonlySet<string>)
     if (token !== this.#buildToken) return
     for (const candidate of offered) {
       if (entries.length >= MAX_CHOICES) break
       if (entries.some(entry => entry.previewSig === candidate.previewSig)) continue
-      entries.push({ props: candidate.props, previewSig: candidate.previewSig, who: this.#who(candidate), mine: false, held: false })
+      entries.push({ props: candidate.props, previewSig: candidate.previewSig, who: this.#who(candidate), mine: false, held: false, fresh: fresh.has(candidate.previewSig) })
     }
     if (entries.length < 2) {
       this.#open_ = false
@@ -284,6 +288,14 @@ export class ImageChoiceDrone extends Drone {
     await Promise.all(entries.map(entry => this.#texture(entry.previewSig)))
     if (token !== this.#buildToken) return
     this.#paintEntries(entries)
+  }
+
+  /** What the caption says under the title: the tile, and — when some pictures are
+   *  new — how to answer them. */
+  #wallText(choices: readonly Choice[]): string {
+    return choices.some(c => c.fresh)
+      ? `${this.#label} — ${this.#t('images.dismiss', 'new pictures are ringed; Esc dismisses them')}`
+      : this.#label
   }
 
   #paintEntries(entries: readonly ChoiceEntry[]): void {
@@ -320,6 +332,16 @@ export class ImageChoiceDrone extends Drone {
    *  tile, so it dresses its own appearance. Never the hive root. */
   #portalTarget(label: string): readonly string[] | null {
     return referenceEditsRootDefaultForLabel(label) ? referenceTargetForLabel(label) : null
+  }
+
+  /** Close the wall having LOOKED: every picture on it is marked seen, so the
+   *  tile's new-pictures badge is answered. (Leaving by navigating away, or the
+   *  window losing focus, is not an answer — that is a plain #close.) */
+  #dismiss(): void {
+    const label = this.#label
+    const shown = this.#choices.map(c => c.previewSig)
+    this.#close()
+    if (label && shown.length) void markSeen(label, shown)
   }
 
   /** Restore the hive and drop everything the wall owned. Safe to call twice. */
@@ -359,6 +381,7 @@ export class ImageChoiceDrone extends Drone {
     if (this.#applying) return
     this.#applying = true
     const label = this.#label
+    const shown = this.#choices.map(c => c.previewSig)
     try {
       const sigs = choice.held
         ? [choice.props.imageSig]
@@ -402,6 +425,8 @@ export class ImageChoiceDrone extends Drone {
           segments: target.parentSegments,
         })
       }
+      // Taking a picture answers the badge: everything on the wall was seen.
+      if (shown.length) void markSeen(label, shown)
     } catch (err) {
       console.warn('[image-choice] apply failed', err)
       this.emitEffect('toast:show', { type: 'warning', message: this.#t('images.failed', 'That picture could not be fetched — nothing changed.') })
@@ -442,7 +467,7 @@ export class ImageChoiceDrone extends Drone {
     // What you are choosing FOR — a screen of pictures says nothing about which
     // tile is about to change, so the caption (top-centre, under the command
     // line) names it. Cleared by #close with the rest of the wall.
-    this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: this.#t('images.select', 'select image'), text: this.#label })
+    this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: this.#t('images.select', 'select image'), text: this.#wallText(choices) })
 
     this.#renderContainer.addChild(layer)
     this.#layer = layer
@@ -506,9 +531,9 @@ export class ImageChoiceDrone extends Drone {
     body.fill({ color: TILE_FILL, alpha: TILE_FILL_ALPHA })
     body.poly(verts, true)
     body.stroke({
-      color: c.mine ? MINE_BORDER : TILE_BORDER,
+      color: c.mine ? MINE_BORDER : c.fresh ? HOVER_BORDER : TILE_BORDER,
       alpha: TILE_BORDER_ALPHA,
-      width: c.mine ? MINE_BORDER_WIDTH : TILE_BORDER_WIDTH,
+      width: c.mine ? MINE_BORDER_WIDTH : c.fresh ? HOVER_BORDER_WIDTH : TILE_BORDER_WIDTH,
     })
     node.addChild(body)
 
@@ -579,8 +604,8 @@ export class ImageChoiceDrone extends Drone {
     this.#hoverKey = hit
     // Who offers the picture under the pointer — the caption says it, so the
     // tile itself stays a picture. Back to the wall's own words when none is hovered.
-    if (choice && hit) this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: choice.who, text: choice.held ? this.#t('images.held', 'held on this tile') : this.#t('images.offered', 'offered by another host') })
-    else this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: this.#t('images.select', 'select image'), text: this.#label })
+    if (choice && hit) this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: choice.who, text: choice.held ? this.#t('images.held', 'held on this tile') : choice.fresh ? this.#t('images.fresh', 'new — not seen before') : this.#t('images.offered', 'offered by another host') })
+    else this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: this.#t('images.select', 'select image'), text: this.#wallText(this.#choices) })
 
     for (let i = 0; i < this.#choices.length; i++) {
       const c = this.#choices[i]

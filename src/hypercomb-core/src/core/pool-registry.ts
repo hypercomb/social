@@ -114,6 +114,12 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // built, so a visitor unpacks nothing. DERIVED-CACHE POOL: recomputable
   // from the package, never load-bearing, complete or absent.
   'install:index',
+  // WHICH PICTURES A PARTICIPANT HAS BEEN SHOWN for a name (essentials
+  // sharing/image-updates.ts): one private record per name, the member keyed
+  // by the signature of the name, listing only picture signatures. It is what
+  // lets a tile's new-pictures badge appear once and clear when answered.
+  // TRUTH POOL — the participant's own, never published and never counted.
+  'image:seen',
   // The participant's saved screen backdrops, sorted into the world they
   // suit — one content-addressed doc { light: [sigs], dark: [sigs] } written
   // by CanvasBackgroundService (presentation/background). The sigs point at

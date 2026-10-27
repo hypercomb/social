@@ -595,6 +595,8 @@
   "images.select": "selecciona una imagen",
   "images.held": "guardada en este mosaico",
   "images.offered": "ofrecida por otro anfitrión",
+  "images.fresh": "nueva — no vista antes",
+  "images.dismiss": "las imágenes nuevas llevan un anillo; Esc las descarta",
   "images.held": "guardada en este mosaico",
   "images.offered": "ofrecida por otro anfitrión",
   "images.yours": "tuya",
