@@ -386,3 +386,9 @@ A tile's picture is stored twice: the original (`large.image` plus a framing `la
 at 346x400) that is the original already cropped and zoomed by that framing. The hive draws the capture; the front door used to draw the original
 centred, so the zoom and position differed (the agenda globe was cropped). It now shows the capture first and the original only for a tile with no
 capture. Checked on every hive the live ledger lists: each capture resolves as a 346x400 image, so all of them frame as the hive does.
+
+### Collapse them all to the top (jwize 2026-10-26)
+
+Pressing the open domain's header collapses it, and then NO row is open, so none takes the free height: every domain stays a plain
+header row and they stack from the top, in order. (It used to leave the first collapsed row at the top and push the next one to the bottom.)
+Opening any header brings it back to the top with its tiles.

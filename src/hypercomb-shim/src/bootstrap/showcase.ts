@@ -1330,6 +1330,9 @@ ${entry.key}`
     if (current.length !== rows.length || current.some((node, index) => node !== rows[index])) hosted.replaceChildren(...rows)
     paintPager(communities)
     bandsHost.classList.toggle('managing', managing)
+    // WHEN THE OPEN ROW IS COLLAPSED, EVERY ROW SITS AT THE TOP (jwize 2026-10-26: "if you collapse the row showing data they should
+    // all collapse to the top"): with nothing open there is no row to take the free height, so the rows stack from the top.
+    hosted.classList.toggle('none-open', managing && !everyZone.includes(openRow))
     // The follow box stays at the foot, always (jwize 2026-10-25: "just show the input and follow at the bottom all the time").
     followBar.hidden = !options.follow
     hosted.classList.toggle('swipeable', communities.length > 0 && !terms.length)
@@ -1505,6 +1508,7 @@ export const SHOWCASE_STYLE = `
 /* managing: the open domain is the first row and takes the free height; the others sit below it as plain header rows */
 .bands.managing > .hosted { grid-template-rows: minmax(min-content, 1fr); grid-auto-rows: min-content; align-content: start; }
 .bands > .hosted > .dex-row:not(.open) { align-self: start; }
+.bands.managing > .hosted.none-open { grid-template-rows: none; }
 /* a domain that was asked for and not found: a temporary row, toned as a warning until something else is clicked */
 .dex-row.missing { border-color: color-mix(in srgb, var(--hc-status-alert, #b3261e) 55%, var(--md-outline-variant)); }
 .dex-row.missing .dex-meta { color: var(--hc-status-alert, #b3261e); }

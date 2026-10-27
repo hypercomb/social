@@ -1232,3 +1232,24 @@ describe('a followed domain is alive when added and leaves only when removed', (
     expect(names(handle)).toContain('jwize.com')
   })
 })
+
+describe('collapsing the open domain collapses them all to the top', () => {
+  const sites = parseLedger(LEDGER)
+  it('marks the list as having nothing open, so the rows stack from the top, and reopens one on a click', async () => {
+    const handle = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readPeerLedger: async () => [],
+    })
+    await vi.waitFor(() => expect(handle.bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    ;(handle.hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
+    const hosted = handle.bands.querySelector('.hosted') as HTMLElement
+    expect(hosted.classList.contains('none-open')).toBe(false)
+    ;(handle.bands.querySelectorAll('.dex-head')[0] as HTMLButtonElement).click()   // collapse the open one
+    expect(handle.bands.querySelectorAll('.dex-row.open')).toHaveLength(0)
+    expect(hosted.classList.contains('none-open')).toBe(true)
+    expect([...handle.bands.querySelectorAll('.dex-row')].filter(row => !(row as HTMLElement).hidden)).toHaveLength(2)
+    ;(handle.bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()   // open the other
+    expect(hosted.classList.contains('none-open')).toBe(false)
+    expect(handle.bands.querySelector('.dex-row')?.classList.contains('open')).toBe(true)
+  })
+})
