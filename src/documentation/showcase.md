@@ -345,8 +345,10 @@ The open card takes the whole space between the search and the follow bar, so th
 other with the tiles at its top. The gutter above the card (from the search) and the gutter below it (to the follow input) are
 the same `.55rem`, so the card is centred between its two inputs.
 
-### The domains are a list that collapses (jwize 2026-10-26)
+### The domains are an accordion, the open one always on top (jwize 2026-10-26)
 
-"The domains need to collapse to a list, not a horizontal tag view." Under Manage the domain being looked at is one row (globe, its
-name, a chevron); pressing it opens the list of every domain, one per line, the current one marked; choosing one shows its tiles and
-closes the list. No tags, no horizontal strip.
+"You click the domain view and it is an accordion of domains with the open one showing the available; they are below the open item,
+which is always at the top." Under Manage every domain is a row (globe, name, tile count, chevron). The open row shows its tiles and
+is always the FIRST row; the other domains follow below it as header rows. Opening another domain moves it to the top and the one it
+replaced drops below. (An earlier pass drew the domains as tags, then as a dropdown list; neither is kept.) On arrival there is no
+accordion at all: only the showcase.

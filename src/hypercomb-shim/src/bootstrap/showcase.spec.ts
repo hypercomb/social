@@ -325,9 +325,12 @@ describe('the hyperdex — this domain first and open, then the domains you foll
     ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
     await vi.waitFor(() => expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:']))
     ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
-    expect(rows(bands)).toEqual(['hypercomb.com:', 'jwize.com open:dylan'])
+    // The open domain is always the first row, and the one it replaced goes below it as a header.
+    expect(rows(bands)).toEqual(['jwize.com open:dylan', 'hypercomb.com:'])
     // dylan is in this domain's showcase already, and its tile in jwize.com's row says so.
     expect(bands.querySelector('.dex-row:not(.own) .hex.in-showcase .hex-name')?.textContent).toBe('dylan')
+    ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+    expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:'])
   })
 
   it('shows a stranger only the showcase: no domains followed, no other rows', async () => {
