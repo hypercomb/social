@@ -1649,26 +1649,29 @@ a.version-visit { color: var(--md-primary); }
 /* A PHONE: one column of the same list. */
 @media (max-width: 720px) {
   /* the list is the whole width of the screen: rows edge to edge, room to see and to do */
-  .card.showcase-page { scroll-padding-bottom: 5.5rem; }
-  .card.showcase-page .panel { margin-top: 0; width: 100%; min-width: 0; padding-bottom: 5.5rem; }
-  .hero-brand { padding: .8rem 16px .15rem; }
-  .search { padding: .5rem 16px; }
-  .search svg { left: calc(16px + .95rem); }
-  .pager { margin: 0 0 .5rem; padding: .3rem 16px; }
+  .card.showcase-page { scroll-padding-bottom: 0; }
+  /* ONE SIDE MARGIN, NARROW OR WIDE (jwize 2026-10-26: "when squeezed it has a margin again"): everything sits .5rem from the
+     screen edge, the same as the wide page, and the follow bar is in the flow at the foot of a screen-tall panel, so the card
+     fills right down to it with no band between. */
+  .card.showcase-page .panel { margin-top: 0; width: 100%; min-width: 0; padding-bottom: 0; min-height: 100dvh; }
+  .hero-brand { padding: .8rem .5rem .15rem; }
+  .search { padding: .55rem .5rem; }
+  .search svg { left: calc(.5rem + .95rem); }
+  .pager { margin: 0 0 .5rem; padding: .3rem .5rem; }
   .hosted { gap: 0; }
   .dex-row { border-left: 0; border-right: 0; border-radius: 0; margin-top: -1px; }
-  .dex-head { padding: 1rem 16px; }
-  .hosted-nothing, .follow-suggest { margin-left: 16px; margin-right: 16px; }
+  .dex-head { padding: 1rem .5rem; }
+  .hosted-nothing, .follow-suggest { margin-left: .5rem; margin-right: .5rem; }
   /* the phone is a dead-simple hyperdex (jwize 2026-10-25): the rows, with the
      search above them and the follow input fixed at the bottom where a thumb is
      — nothing else. The desktop keeps the setup beneath, because it is the
      dashboard and the hosting. */
-  .follow { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; margin: 0;
-    padding: .55rem 16px calc(.55rem + env(safe-area-inset-bottom));
+  .follow { position: sticky; z-index: 25; bottom: 0; margin: auto 0 0;
+    padding: .55rem .5rem calc(.55rem + env(safe-area-inset-bottom));
     background: color-mix(in srgb, var(--md-surface) 94%, transparent); border-top: 1px solid var(--md-outline-variant);
     -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   .showcase-page details.manage { display: none; }
-  .dex-body { padding: .1rem 12px .9rem; }
+  .dex-body { padding: .5rem; }
   /* the swipe's ground: a short community must not shrink the place a thumb can turn the page */
   .hosted.swipeable { min-height: 60vh; min-height: 60dvh; align-content: start; }
   .hero-brand { gap: .6rem; }

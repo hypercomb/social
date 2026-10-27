@@ -364,3 +364,9 @@ Following a domain adds its row the moment it is asked for, marked **Checking…
 answers like a host it becomes an ordinary followed row; if not, the row stays with **Not found** and the reason, toned as a
 warning. That row is temporary and kept nowhere: it goes when the page is refreshed, when another row is opened, when Manage is
 toggled, or when another domain is asked for.
+
+### Narrow is the same page (jwize 2026-10-26: "when squeezed it has a margin again")
+
+Under 720px the page keeps the same `.5rem` side margin as the wide one: the brand, the search, the comb and the follow input all
+start 8px from the screen edge (measured at 378px). The follow bar is no longer fixed over the page; it is in the flow at the foot of a
+screen-tall panel, sticky to the bottom, so the card fills right down to it and no band is left between them.
