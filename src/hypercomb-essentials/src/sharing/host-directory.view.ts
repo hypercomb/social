@@ -965,6 +965,24 @@ export class HostDirectoryElement extends HTMLElement {
     else body.append(make('p', 'hd-note', t('hosts.no-match', 'Nothing matches “{query}”.', { query: this.#query.trim() })))
   }
 
+  /** Block or Resume for one zone the shell already owns. The button only
+   *  names the zone. The shell script that ran before any bee is the writer,
+   *  and only for a click the browser itself dispatched inside this element.
+   *  A word (`follow`, a claim) and a script call leave the firewall where it
+   *  is. The repaint runs after that script, on the way back up. */
+  #firewallToggle(owned: string, paused: readonly string[]): HTMLButtonElement {
+    const blocked = paused.includes(owned)
+    const toggle = button('hd-link', blocked
+      ? t('hosts.firewall.resume', 'Resume {host}', { host: owned })
+      : t('hosts.firewall.block', 'Block {host}', { host: owned }),
+    blocked
+      ? t('hosts.firewall.resume-tip', 'Let this shell connect to {host} again', { host: owned })
+      : t('hosts.firewall.block-tip', 'Pause every connection from this shell to {host}', { host: owned }))
+    toggle.setAttribute('data-hc-firewall', owned)
+    toggle.addEventListener('click', () => this.#render())
+    return toggle
+  }
+
   /** An open domain: its own acts as lines, then its packages. */
   #sectionBody(zone: string): HTMLElement {
     const section = make('div', 'hd-section-body')
@@ -990,6 +1008,13 @@ export class HostDirectoryElement extends HTMLElement {
         visit.title = t('hosts.visit-tip', 'Open {host} in a new tab', { host: this.#scope })
         addLine(visit)
       }
+      // THE FIREWALL SWITCH: a host is open by default; Block pauses every
+      // connection to its zone until Resume. Only a shell that runs the
+      // outgoing firewall offers it, and only for a zone that shell owns.
+      // The click is the human door. This view does not write the list.
+      const firewall = (window as { __hcFirewall?: { zones(): string[]; paused(): string[] } }).__hcFirewall
+      const owned = firewall?.zones().find(z => this.#scope === z || this.#scope.endsWith('.' + z))
+      if (firewall && owned) addLine(this.#firewallToggle(owned, firewall.paused()))
       const remove = button('hd-link', t('hosts.remove-short', 'Remove'), t('hosts.remove', 'Remove {host} from your host directory', { host: this.#scope }))
       remove.addEventListener('click', () => {
         const zone = this.#scope
@@ -998,10 +1023,18 @@ export class HostDirectoryElement extends HTMLElement {
         this.#render()
       })
       addLine(remove)
-    } else if (this.#mine.length) {
-      const mine = button('hd-link', t('hosts.mine.open', 'In your hive ({count})', { count: this.#mine.length }))
-      mine.addEventListener('click', () => { this.#view = 'mine'; this.#render() })
-      addLine(mine)
+    } else {
+      if (this.#mine.length) {
+        const mine = button('hd-link', t('hosts.mine.open', 'In your hive ({count})', { count: this.#mine.length }))
+        mine.addEventListener('click', () => { this.#view = 'mine'; this.#render() })
+        addLine(mine)
+      }
+      // THE FIREWALL: your own zones are open by default and each can be
+      // paused here, by a click. Only a shell that runs the outgoing firewall
+      // has the list. A sentence does not flip one.
+      const wall = (window as { __hcFirewall?: { zones(): string[]; paused(): string[] } }).__hcFirewall
+      const held = wall?.paused() ?? []
+      for (const owned of wall?.zones() ?? []) addLine(this.#firewallToggle(owned, held))
     }
     if (lines.childElementCount) section.append(lines)
 

@@ -48,6 +48,74 @@ const SW_DOMAINS_MSG = 'hc:sw:domains'
 const DOMAINS_CACHE_KEY = '/__hc_sw_domains__'
 let KNOWN_DOMAINS = []
 
+// Outgoing firewall for a loopback shell. The page posts hosts, and a
+// restarted worker reloads the ones it persisted. A bee loads after this file
+// and must not be able to widen either list. The worker's own hostname
+// decides — the page cannot change it. A public shell is the live hive and
+// keeps every host it already had.
+function hostIsLoopback(hostname) {
+  const host = String(hostname || '').toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' ||
+    (host.endsWith('.localhost') && host.length > '.localhost'.length)
+}
+
+function shellIsLoopback() {
+  return hostIsLoopback((self.location && self.location.hostname) || '')
+}
+
+function loopbackHost(raw) {
+  const host = String(raw || '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
+  if (!host || host.indexOf('@') !== -1) return ''
+  let hostname = host
+  if (hostname.startsWith('[')) {
+    const end = hostname.indexOf(']')
+    if (end === -1) return ''
+    hostname = hostname.slice(1, end)
+  } else {
+    hostname = hostname.replace(/:\d+$/, '')
+  }
+  return hostIsLoopback(hostname) || (hostname === host && hostIsOwned(hostname)) ? host : ''
+}
+
+// The participant's own Cloudflare zones: reachable from a loopback shell
+// unless paused in the hosts list. Mirrored in the shell's OWNED_ZONES.
+const OWNED_ZONES = ['hypercomb.com', 'jwize.com', 'pluginthematrix.com', 'pluginthematrix.io', 'realones.online', 'cafesociety.buzz', 'pointblanksolutions.ca']
+let PAUSED_ZONES = []
+
+function hostIsOwned(hostname) {
+  const host = String(hostname || '').toLowerCase()
+  return OWNED_ZONES.some(zone => (host === zone || host.endsWith('.' + zone)) && !PAUSED_ZONES.includes(zone))
+}
+
+// The page's firewall script tells this worker which zones are paused. A bee
+// can post the same message, so the script keeps a token it minted before any
+// bee loaded and sends that token with the native postMessage it captured.
+// The first door announcement wins. A pause list without that token is ignored,
+// which is how a sentence and a later script fail to open or close a zone.
+let DOOR_TOKEN = ''
+self.addEventListener('message', (event) => {
+  const data = event.data
+  if (!data) return
+  if (data.type === 'hc:sw:door') {
+    if (!DOOR_TOKEN && typeof data.token === 'string' && data.token) DOOR_TOKEN = data.token
+    return
+  }
+  if (data.type !== 'hc:sw:paused' || !Array.isArray(data.zones)) return
+  if (!DOOR_TOKEN || data.token !== DOOR_TOKEN) return
+  PAUSED_ZONES = data.zones.filter(z => OWNED_ZONES.includes(z))
+})
+
+function filterShellDomains(list, loopback) {
+  if (!loopback) return list || []
+  const kept = []
+  const items = Array.isArray(list) ? list : []
+  for (let i = 0; i < items.length; i++) {
+    const host = loopbackHost(items[i])
+    if (host) kept.push(host)
+  }
+  return kept
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting())
 })
@@ -68,7 +136,10 @@ self.addEventListener('activate', (event) => {
         names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n))
       ))
       .then(() => loadDomains())
-      .then(domains => { if (domains.length) KNOWN_DOMAINS = domains })
+      .then(domains => {
+        const kept = filterShellDomains(domains, shellIsLoopback())
+        if (kept.length) KNOWN_DOMAINS = kept
+      })
       .then(() => self.clients.claim())
   )
 })
@@ -78,14 +149,16 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('message', (event) => {
   const data = event.data
   if (!data || data.type !== SW_DOMAINS_MSG) return
-  const domains = Array.isArray(data.domains)
+  const incoming = Array.isArray(data.domains)
     ? data.domains.filter((d) => typeof d === 'string' && d)
     : []
+  const domains = filterShellDomains(incoming, shellIsLoopback())
   if (domains.length) {
     // MERGE with what we already know — posts arrive from two independent
     // senders (the boot re-post and the broker's learned-host pushes) and a
-    // replace would let whichever fired last drop the other's hosts.
-    KNOWN_DOMAINS = [...new Set([...domains, ...KNOWN_DOMAINS])]
+    // replace would let whichever fired last drop the other's hosts. On a
+    // loopback shell both sides are already reduced to loopback hosts.
+    KNOWN_DOMAINS = [...new Set([...domains, ...filterShellDomains(KNOWN_DOMAINS, shellIsLoopback())])]
     void persistDomains(KNOWN_DOMAINS)
   }
 })
@@ -728,20 +801,25 @@ self.addEventListener('message', (event) => {
 })
 
 // Try each known host not already refused, in order; the first response whose
-// bytes sha256 to the requested sig wins. Loopback hosts use http
-// (content-side analog of the mesh allow-loopback); real domains use https.
-// Returns { buf, contentType } or null. Verification is the backstop — a
+// bytes sha256 to the requested sig wins. Loopback hosts, including
+// *.localhost, use http (content-side analog of the mesh allow-loopback);
+// real domains use https. On a loopback shell a host that is not loopback is
+// skipped before any request: the page can post one, and a persisted list can
+// still name one, and neither may leave the machine. Returns
+// { buf, contentType } or null. Verification is the backstop — a
 // wrong/hostile domain can only cost a 404, never serve incorrect bytes — and
 // the egg makes that 404 cost ONCE per host, not once per repaint.
 async function fetchResourceFromHosts(sig) {
-  let domains = KNOWN_DOMAINS
-  if (!domains || domains.length === 0) domains = await loadDomains()
+  const loopback = shellIsLoopback()
+  let domains = filterShellDomains(KNOWN_DOMAINS, loopback)
+  if (!domains || domains.length === 0) domains = filterShellDomains(await loadDomains(), loopback)
   const tried = /^[0-9a-f]{64}$/.test(sig) ? await eggTried(sig) : new Set()
   const refused = []
   for (const raw of (domains || [])) {
     const host = String(raw || '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
     if (!host) continue
-    const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
+    if (loopback && !loopbackHost(host)) continue
+    const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?|(?:.+\.)?localhost)(?::\d+)?$/i.test(host) ? 'http' : 'https'
     const origin = `${scheme}://${host}`
     if (tried.has(origin)) continue
     let unreachable = false

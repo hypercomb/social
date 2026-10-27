@@ -56,14 +56,30 @@ const toast = (type: string, title: string, message: string): void => {
  *  one its last publish opened at, else the one the host gives it by rule. A
  *  domain with no address a reader could open is said as itself. Empty when
  *  the branch names none, or they cannot be read — the plain message is kept. */
-const destinations = async (segments: readonly string[], own: Readonly<Record<string, string>>): Promise<string[]> => {
+const destinations = async (segments: readonly string[], own: Readonly<Record<string, string>>, i18n?: I18nProvider): Promise<{ labels: string[]; blocked: string[] }> => {
   try {
     const key = lineageKey(segments)
     const zones = [...new Set([...await hostsOfBranch(segments), ...Object.keys(own)])]
     const mine = (await listPublishResults()).filter(r => r.op === 'publish' && r.lineageKey === key).reverse()
     const bare = (address: string): string => address.replace(/^https?:\/\//, '').replace(/\/$/, '')
-    return zones.map(zone => bare(own[zone] || mine.find(r => r.zone === zone)?.address || doorAddress(zone, segments, key)) || zone)
-  } catch { return [] }
+    // THE FIREWALL SAYS ITS STATE: a shell that runs the outgoing firewall
+    // names its owned zones and which of them are paused. Each such domain is
+    // said as open or blocked, because a blocked one cannot be reached by this
+    // publish. A shell without the firewall says nothing.
+    const wall = (window as { __hcFirewall?: { zones(): string[]; paused(): string[] } }).__hcFirewall
+    // A blocked one is opened by the press itself (see hostCurrentBranch), and
+    // the popup says so — the participant never has to leave it to unblock.
+    const held = wall?.paused() ?? []
+    const blocked = new Set<string>()
+    const state = (zone: string): string => {
+      const owned = wall?.zones().find(z => zone === z || zone.endsWith(`.${z}`))
+      if (!owned) return ''
+      if (held.includes(owned)) { blocked.add(owned); return ` (${t(i18n, 'host.confirm.domain-blocked', 'blocked — Publish will open it')})` }
+      return ` (${t(i18n, 'host.confirm.domain-open', 'open')})`
+    }
+    const labels = zones.map(zone => (bare(own[zone] || mine.find(r => r.zone === zone)?.address || doorAddress(zone, segments, key)) || zone) + state(zone))
+    return { labels, blocked: [...blocked] }
+  } catch { return { labels: [], blocked: [] } }
 }
 
 /** Publish a branch after the participant's consent. True when it published.
@@ -91,7 +107,8 @@ export const hostCurrentBranch = async (at?: readonly string[], own: Readonly<Re
     //    Said first, so whoever asked (a session, a manager) hears that the
     //    publish now waits on a person, and a decline is never silent.
     const path = `/${segments.join('/')}`
-    const where = (await destinations(segments, own)).join(', ')
+    const dest = await destinations(segments, own, i18n)
+    const where = dest.labels.join(', ')
     activity(t(i18n, 'host.consent-waiting', `waiting for your consent to publish ${path}`, { path }), '○')
     const confirmed = await requestConfirm({
       title: 'host.confirm.title',
@@ -105,6 +122,15 @@ export const hostCurrentBranch = async (at?: readonly string[], own: Readonly<Re
       activity(declined, '○')
       toast('tip', t(i18n, 'host.title', 'Publish branch'), declined)
       return false
+    }
+
+    // THE FIREWALL OPENS ON THE FLY: the participant was told, in the popup, that
+    // pressing Publish opens a blocked destination. It stays open afterwards —
+    // blocking it again is the hosts panel's switch.
+    const wall = (window as { __hcFirewall?: { setPaused(zone: string, on: boolean): string[] } }).__hcFirewall
+    for (const zone of dest.blocked) {
+      wall?.setPaused(zone, false)
+      activity(t(i18n, 'host.firewall-opened', `opened ${zone} in the firewall for this publish`, { zone }), '●')
     }
 
     let nextNote = 0

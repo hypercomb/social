@@ -55,6 +55,53 @@ describe('the publish gesture', () => {
     expect(asked.at(-1)?.messageParams).toEqual({ name: 'meetups', where: 'meetups.hypercomb.com' })
   })
 
+  // jwize, 2026-10-26: the popup must show whether a domain is blocked or not.
+  it('says whether each owned domain is open or blocked by the firewall', async () => {
+    answer = false
+    const w = window as unknown as { __hcFirewall?: unknown }
+    let paused: string[] = []
+    const opened: string[] = []
+    w.__hcFirewall = {
+      zones: () => ['hypercomb.com', 'jwize.com'],
+      paused: () => paused,
+      setPaused: (zone: string, on: boolean) => { if (!on) { opened.push(zone); paused = paused.filter(z => z !== zone) } return paused },
+    }
+    try {
+      await hostCurrentBranch(['work', 'meetings'], { 'hypercomb.com': 'meetings.hypercomb.com' })
+      expect(asked.at(-1)?.messageParams?.where).toBe('meetings.hypercomb.com (open)')
+      paused = ['hypercomb.com']
+      await hostCurrentBranch(['work', 'meetings'], { 'hypercomb.com': 'meetings.hypercomb.com' })
+      expect(asked.at(-1)?.messageParams?.where).toBe('meetings.hypercomb.com (blocked — Publish will open it)')
+      // declining opens nothing
+      expect(opened).toEqual([])
+      expect(paused).toEqual(['hypercomb.com'])
+      // a host the firewall does not own carries no state
+      await hostCurrentBranch(['work', 'meetings'], { 'example.org': 'meetings.example.org' })
+      expect(asked.at(-1)?.messageParams?.where).toBe('meetings.example.org')
+    } finally {
+      delete w.__hcFirewall
+    }
+  })
+
+  // jwize, 2026-10-26: "you should be able to open firewall on the fly when publishing".
+  it('opens a blocked destination when the participant presses Publish', async () => {
+    answer = true
+    const w = window as unknown as { __hcFirewall?: unknown }
+    let paused = ['hypercomb.com']
+    w.__hcFirewall = {
+      zones: () => ['hypercomb.com'],
+      paused: () => paused,
+      setPaused: (zone: string, on: boolean) => { if (!on) paused = paused.filter(z => z !== zone); return paused },
+    }
+    try {
+      await hostCurrentBranch(['work', 'meetings'], { 'hypercomb.com': 'meetings.hypercomb.com' })
+      expect(paused).toEqual([])
+      expect(said).toContain('opened hypercomb.com in the firewall for this publish')
+    } finally {
+      delete w.__hcFirewall
+    }
+  })
+
   it('says whether it published', async () => {
     answer = false
     expect(await hostCurrentBranch(['hyperdex'])).toBe(false)

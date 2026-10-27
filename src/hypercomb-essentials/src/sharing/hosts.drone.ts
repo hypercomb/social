@@ -178,6 +178,10 @@ export class HostsDrone extends Drone {
     // so `HYPERCOMB.com` and `https://hypercomb.com/` are the one host they
     // obviously are. A value that is not a hostname mints nothing and says so
     // rather than adding an entry that can never resolve.
+    //
+    // This writes the community pool and nothing else. The outgoing firewall
+    // does not move because a word said `follow` or a claim landed. Block and
+    // Resume in the directory are a click, and the shell script is the writer.
     this.onEffect<{ zone?: string }>('hosts:add', (p) => {
       const raw = String(p?.zone ?? '').trim()
       if (!raw) return

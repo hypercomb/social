@@ -2,6 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <!-- Outgoing firewall. This policy is delivered with the document, so a bee
+       that loads later cannot widen it. Loopback only: this file is the local
+       start (localhost:4250). The live shell is a different document and does
+       not carry this policy. No default-src: a bare 'self' would block the
+       inline scripts and styles this page is built from. script-src and
+       style-src are named, with inline allowed, so an external script or
+       stylesheet cannot carry bytes out either. -->
+  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* http://127.0.0.1:* http://*.localhost:* https://localhost:* https://127.0.0.1:* https://*.localhost:* ws://localhost:* ws://127.0.0.1:* ws://*.localhost:* wss://localhost:* wss://127.0.0.1:* wss://*.localhost:* https://hypercomb.com https://*.hypercomb.com wss://hypercomb.com wss://*.hypercomb.com https://jwize.com https://*.jwize.com wss://jwize.com wss://*.jwize.com https://pluginthematrix.com https://*.pluginthematrix.com wss://pluginthematrix.com wss://*.pluginthematrix.com https://pluginthematrix.io https://*.pluginthematrix.io wss://pluginthematrix.io wss://*.pluginthematrix.io https://realones.online https://*.realones.online wss://realones.online wss://*.realones.online https://cafesociety.buzz https://*.cafesociety.buzz wss://cafesociety.buzz wss://*.cafesociety.buzz https://pointblanksolutions.ca https://*.pointblanksolutions.ca wss://pointblanksolutions.ca wss://*.pointblanksolutions.ca blob: data:; worker-src 'self' blob:; frame-src 'self' blob: data:; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>Hypercomb Development</title>
   <base href="/">
 
@@ -46,6 +54,286 @@
       console.error = function () { var args = Array.prototype.slice.call(arguments); report.apply(null, args); take('reported', args); };
       var warn = console.warn.bind(console);
       console.warn = function () { var args = Array.prototype.slice.call(arguments); warn.apply(null, args); take('warned', args); };
+    })();
+  </script>
+
+  <!-- hc-outgoing-firewall: runs after break-capture and before every other
+       script. Break-capture does not touch the network, so the natives captured
+       here are the originals. The wrappers are non-configurable: a later script
+       cannot put fetch back. A fresh iframe still has native fetch; the policy
+       on this document is what stops that iframe. -->
+  <script>
+    (function () {
+      if (window.__hcOutgoingFirewall) return;
+      var failures = [];
+      // The zones this participant owns on Cloudflare: each, and every name
+      // under it, over a secure scheme. Mirrored in the connect-src above and in
+      // the worker's OWNED_ZONES; nothing else leaves the machine.
+      var OWNED_ZONES = ['hypercomb.com', 'jwize.com', 'pluginthematrix.com', 'pluginthematrix.io', 'realones.online', 'cafesociety.buzz', 'pointblanksolutions.ca'];
+      // A zone the participant has paused in the hosts list is blocked at once.
+      // The list lives in this closure. A later script can write the storage
+      // key and it still changes nothing here: the click below is the writer.
+      var PAUSE_KEY = 'hc:firewall-paused';
+      var pausedZones = [];
+      try {
+        var stored = JSON.parse(localStorage.getItem(PAUSE_KEY) || '[]');
+        if (Array.isArray(stored)) {
+          pausedZones = stored.filter(function (zone) { return OWNED_ZONES.indexOf(zone) !== -1; });
+        }
+      } catch (e) {}
+      function paused() { return pausedZones.slice(); }
+      function owned(host) {
+        for (var i = 0; i < OWNED_ZONES.length; i++) {
+          var zone = OWNED_ZONES[i];
+          if ((host === zone || host.endsWith('.' + zone)) && pausedZones.indexOf(zone) === -1) return true;
+        }
+        return false;
+      }
+      function safe(value) {
+        try {
+          var url = new URL(String(value), location.href);
+          if (url.protocol === 'blob:' || url.protocol === 'data:') return true;
+          if (url.protocol === 'about:') return url.pathname === 'blank' || url.pathname === 'srcdoc';
+          if (url.origin === location.origin) return true;
+          var host = String(url.hostname || '').toLowerCase();
+          var loopback = host === 'localhost' || host === '127.0.0.1' || host === '::1' ||
+            (host.length > '.localhost'.length && host.endsWith('.localhost'));
+          if (!loopback) return (url.protocol === 'https:' || url.protocol === 'wss:') && owned(host);
+          return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'ws:' || url.protocol === 'wss:';
+        } catch (e) {
+          return false;
+        }
+      }
+      function pin(obj, key, value) {
+        try {
+          Object.defineProperty(obj, key, { configurable: false, writable: false, enumerable: true, value: value });
+        } catch (e) {
+          failures.push(e);
+        }
+      }
+      class DeadSocket extends EventTarget {
+        constructor(url) {
+          super();
+          this.url = String(url);
+          this.readyState = 0;
+          this.bufferedAmount = 0;
+          this.extensions = '';
+          this.protocol = '';
+          this.binaryType = 'blob';
+          this.onopen = null;
+          this.onerror = null;
+          this.onclose = null;
+          this.onmessage = null;
+          var socket = this;
+          setTimeout(function () {
+            socket.readyState = 3;
+            var error = new Event('error');
+            if (typeof socket.onerror === 'function') socket.onerror.call(socket, error);
+            socket.dispatchEvent(error);
+            var closed = new CloseEvent('close', { code: 1006, reason: 'outgoing firewall', wasClean: false });
+            if (typeof socket.onclose === 'function') socket.onclose.call(socket, closed);
+            socket.dispatchEvent(closed);
+          }, 0);
+        }
+        send() {}
+        close() { this.readyState = 3; }
+      }
+
+      if (typeof window.fetch === 'function') {
+        var nativeFetch = window.fetch.bind(window);
+        pin(window, 'fetch', function (input, init) {
+          var raw = input;
+          try { if (typeof Request === 'function' && input instanceof Request) raw = input.url; } catch (e) {}
+          if (!safe(raw)) return Promise.reject(new TypeError('Failed to fetch: outgoing firewall'));
+          return nativeFetch(input, init);
+        });
+      }
+
+      if (typeof window.WebSocket === 'function') {
+        var NativeWebSocket = window.WebSocket;
+        function FirewallWebSocket(url, protocols) {
+          if (!safe(url)) return new DeadSocket(url);
+          if (protocols === undefined) return new NativeWebSocket(url);
+          return new NativeWebSocket(url, protocols);
+        }
+        FirewallWebSocket.prototype = NativeWebSocket.prototype;
+        FirewallWebSocket.CONNECTING = NativeWebSocket.CONNECTING;
+        FirewallWebSocket.OPEN = NativeWebSocket.OPEN;
+        FirewallWebSocket.CLOSING = NativeWebSocket.CLOSING;
+        FirewallWebSocket.CLOSED = NativeWebSocket.CLOSED;
+        pin(window, 'WebSocket', FirewallWebSocket);
+      }
+
+      if (typeof window.EventSource === 'function') {
+        var NativeEventSource = window.EventSource;
+        function FirewallEventSource(url, options) {
+          if (!safe(url)) return new DeadSocket(url);
+          if (options === undefined) return new NativeEventSource(url);
+          return new NativeEventSource(url, options);
+        }
+        FirewallEventSource.prototype = NativeEventSource.prototype;
+        pin(window, 'EventSource', FirewallEventSource);
+      }
+
+      if (typeof XMLHttpRequest === 'function' && XMLHttpRequest.prototype) {
+        var nativeOpen = XMLHttpRequest.prototype.open;
+        pin(XMLHttpRequest.prototype, 'open', function (method, url) {
+          if (!safe(url)) throw new DOMException('outgoing firewall', 'SecurityError');
+          return nativeOpen.apply(this, arguments);
+        });
+      }
+
+      if (typeof navigator.sendBeacon === 'function') {
+        var nativeBeacon = navigator.sendBeacon.bind(navigator);
+        var guardedBeacon = function (url, data) {
+          if (!safe(url)) return false;
+          return nativeBeacon(url, data);
+        };
+        // An own property and the prototype. Pinning only the prototype still
+        // lets `navigator.sendBeacon = ...` create an own property that shadows it.
+        if (typeof Navigator === 'function' && Navigator.prototype) pin(Navigator.prototype, 'sendBeacon', guardedBeacon);
+        pin(navigator, 'sendBeacon', guardedBeacon);
+      }
+
+      if (typeof window.open === 'function') {
+        var nativeWindowOpen = window.open.bind(window);
+        pin(window, 'open', function (url, target, features) {
+          if (url != null && url !== '' && !safe(url)) return null;
+          return nativeWindowOpen(url, target, features);
+        });
+      }
+
+      function refusePeer() { throw new TypeError('outgoing firewall: peer connections are refused'); }
+      if (typeof window.RTCPeerConnection === 'function') pin(window, 'RTCPeerConnection', refusePeer);
+      if (typeof window.webkitRTCPeerConnection === 'function') pin(window, 'webkitRTCPeerConnection', refusePeer);
+      if (typeof window.WebTransport === 'function') {
+        var NativeWebTransport = window.WebTransport;
+        function FirewallWebTransport(url, options) {
+          if (!safe(url)) throw new TypeError('outgoing firewall');
+          if (options === undefined) return new NativeWebTransport(url);
+          return new NativeWebTransport(url, options);
+        }
+        pin(window, 'WebTransport', FirewallWebTransport);
+      }
+
+      if (typeof ServiceWorkerContainer !== 'undefined' && ServiceWorkerContainer.prototype && typeof ServiceWorkerContainer.prototype.register === 'function') {
+        var nativeRegister = ServiceWorkerContainer.prototype.register;
+        pin(ServiceWorkerContainer.prototype, 'register', function (scriptURL, options) {
+          try {
+            var url = new URL(String(scriptURL), location.href);
+            if (url.origin !== location.origin || url.pathname !== '/hypercomb.worker.js') {
+              return Promise.reject(new TypeError('Failed to register a ServiceWorker: outgoing firewall'));
+            }
+          } catch (e) {
+            return Promise.reject(new TypeError('Failed to register a ServiceWorker: outgoing firewall'));
+          }
+          return nativeRegister.call(this, scriptURL, options);
+        });
+      }
+
+      if (window.navigation && typeof window.navigation.addEventListener === 'function') {
+        window.navigation.addEventListener('navigate', function (event) {
+          var dest = event.destination && event.destination.url;
+          if (!dest || safe(dest)) return;
+          if (event.cancelable) event.preventDefault();
+        });
+      }
+
+      // HUMAN DOOR. Adding a pause or taking one off is a click in the hosts
+      // panel. A bee, a queen, and a sentence cannot. setPaused is a read: a
+      // call from script returns the list and writes nothing. The button wears
+      // data-hc-firewall="<zone>" inside <hc-host-directory>. This listener was
+      // registered before any bee, and it ignores a click the page dispatched.
+      var nativeSetItem = Storage.prototype.setItem;
+      var nativeRemoveItem = Storage.prototype.removeItem;
+      var nativeClear = Storage.prototype.clear;
+      function writePaused() {
+        try { nativeSetItem.call(localStorage, PAUSE_KEY, JSON.stringify(pausedZones)); } catch (e) {}
+      }
+      try {
+        Object.defineProperty(Storage.prototype, 'setItem', {
+          configurable: false, writable: false,
+          value: function (key, value) {
+            if (String(key) === PAUSE_KEY) return;
+            return nativeSetItem.apply(this, arguments);
+          },
+        });
+        Object.defineProperty(Storage.prototype, 'removeItem', {
+          configurable: false, writable: false,
+          value: function (key) {
+            if (String(key) === PAUSE_KEY) return;
+            return nativeRemoveItem.apply(this, arguments);
+          },
+        });
+        Object.defineProperty(Storage.prototype, 'clear', {
+          configurable: false, writable: false,
+          value: function () {
+            var result = nativeClear.apply(this, arguments);
+            writePaused();
+            return result;
+          },
+        });
+      } catch (e) {}
+      try {
+        var trust = Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted');
+        if (trust && trust.configurable && trust.get) {
+          Object.defineProperty(Event.prototype, 'isTrusted', { configurable: false, enumerable: !!trust.enumerable, get: trust.get });
+        }
+      } catch (e) {}
+      var doorToken = String(Math.random());
+      try {
+        if (window.crypto && crypto.getRandomValues) {
+          var tokenBytes = new Uint8Array(16);
+          crypto.getRandomValues(tokenBytes);
+          doorToken = '';
+          for (var b = 0; b < tokenBytes.length; b++) doorToken += ('0' + tokenBytes[b].toString(16)).slice(-2);
+        }
+      } catch (e) {}
+      var nativeWorkerPost = (typeof ServiceWorker === 'function' && ServiceWorker.prototype) ? ServiceWorker.prototype.postMessage : null;
+      function tellWorker(message) {
+        try {
+          var controller = navigator.serviceWorker && navigator.serviceWorker.controller;
+          if (controller && nativeWorkerPost) nativeWorkerPost.call(controller, message);
+        } catch (e) {}
+      }
+      function announceDoor() { tellWorker({ type: 'hc:sw:door', token: doorToken }); }
+      try {
+        if (navigator.serviceWorker && typeof navigator.serviceWorker.addEventListener === 'function') {
+          navigator.serviceWorker.addEventListener('controllerchange', announceDoor);
+        }
+      } catch (e) {}
+      announceDoor();
+      // Chrome records isTrusted on the event itself, and the page cannot
+      // redefine it. A click the page dispatches carries false.
+      function humanClick(event) {
+        return !!event && event.isTrusted === true;
+      }
+      document.addEventListener('click', function (event) {
+        if (!humanClick(event)) return;
+        var node = event.target;
+        if (node && node.nodeType === 3) node = node.parentElement;
+        if (!node || typeof node.closest !== 'function') return;
+        var button = node.closest('[data-hc-firewall]');
+        if (!button || typeof button.closest !== 'function' || !button.closest('hc-host-directory')) return;
+        var zone = button.getAttribute('data-hc-firewall');
+        if (OWNED_ZONES.indexOf(zone) === -1) return;
+        var next = pausedZones.filter(function (z) { return z !== zone; });
+        if (next.length === pausedZones.length) next.push(zone);
+        pausedZones = next;
+        writePaused();
+        tellWorker({ type: 'hc:sw:paused', token: doorToken, zones: next.slice() });
+      }, true);
+
+      pin(window, '__hcOutgoingFirewall', true);
+      // zones() and paused() are reads. setPaused writes nothing: the click
+      // above is the only way the list moves, and the worker ignores a pause
+      // message that did not come with the token this script keeps.
+      pin(window, '__hcFirewall', {
+        zones: function () { return OWNED_ZONES.slice(); },
+        paused: paused,
+        setPaused: function () { return paused(); },
+      });
+      if (failures.length) throw failures[0];
     })();
   </script>
 
