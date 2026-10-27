@@ -8,6 +8,7 @@
 //   node scripts/preview-front-door.cjs --no-build         # reuse the last build
 //   node scripts/preview-front-door.cjs --demo             # with named communities to swipe between
 //   node scripts/preview-front-door.cjs --demo --view launcher   # ... drawn as the launcher
+//   node scripts/preview-front-door.cjs --fresh            # forget the followed domains kept from earlier runs
 //   node scripts/preview-front-door.cjs --edge             # in Microsoft Edge instead of Chromium
 //   node scripts/preview-front-door.cjs --owner            # --demo, with a stand-in for your hive: a hold toggles
 //
@@ -111,10 +112,17 @@ const types = {
   const phone = flag('phone')
   const demo = flag('demo') || flag('owner') ? await demoFor(domain, value('view', '')) : null
   // --edge opens it in Microsoft Edge (this machine's own), else Playwright's Chromium.
-  const browser = await chromium.launch({ headless: flag('headless'), ...(flag('edge') ? { channel: 'msedge' } : {}), args: phone ? [] : ['--window-size=1500,1000'] })
-  const context = await browser.newContext(phone
+  // A window keeps its own profile between runs (the domains you follow are kept in it, as in a real browser), so
+  // closing and reopening the preview does not forget them. --fresh starts empty; a headless run is always fresh.
+  const persistent = !flag('headless') && !flag('fresh')
+  const profile = path.join(os.tmpdir(), 'hypercomb-front-door-profile')
+  if (flag('fresh')) fs.rmSync(profile, { recursive: true, force: true })
+  const launch = { headless: flag('headless'), ...(flag('edge') ? { channel: 'msedge' } : {}), args: phone ? [] : ['--window-size=1500,1000'] }
+  const contextOptions = phone
     ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, serviceWorkers: 'allow' }
-    : { viewport: null, serviceWorkers: 'allow' })
+    : { viewport: null, serviceWorkers: 'allow' }
+  const browser = persistent ? null : await chromium.launch(launch)
+  const context = persistent ? await chromium.launchPersistentContext(profile, { ...launch, ...contextOptions }) : await browser.newContext(contextOptions)
 
   // --owner: a stand-in for the hive beside the page, over the same channel the real one answers on.
   if (demo && flag('owner')) {
@@ -154,7 +162,7 @@ const types = {
     return route.continue()
   })
 
-  const page = await context.newPage()
+  const page = context.pages()[0] ?? await context.newPage()
   page.on('pageerror', error => console.log('[page error]', error.message))
   await page.goto(`https://${domain}/`, { waitUntil: 'domcontentloaded' })
   console.log(`\nThe front door of ${domain}, from your working tree${phone ? ', as a touch phone' : ''}.`)
@@ -166,9 +174,9 @@ const types = {
     if (flag('domains')) { await page.evaluate(() => document.querySelector('hc-shim-hosts').shadowRoot.querySelector('.domains-head').click()); await page.waitForTimeout(400) }
     if (value('shot', '')) await page.screenshot({ path: value('shot', '') })
     console.log('tabs:', await page.evaluate(() => [...document.querySelector('hc-shim-hosts').shadowRoot.querySelectorAll('.pager-tab')].map(tab => tab.textContent).join(' | ')))
-    await browser.close()
+    await (browser ?? context).close()
     return
   }
   console.log('Close the window to stop.')
-  await new Promise(resolve => browser.on('disconnected', resolve))
+  await new Promise(resolve => (browser ?? context).on(browser ? 'disconnected' : 'close', resolve))
 })().catch(error => { console.error(error); process.exit(1) })

@@ -621,6 +621,7 @@ class HostPanelElement extends HTMLElement {
         // and the platform's own are tiles in this domain's row, not panels.
         links: [...door.links, ...door.footer],
         follow: raw => this.#follow(raw),
+        unfollow: zone => removeHostZone(zone),
         readPeerLedger,
       })
       this.#showcaseRefresh = refresh

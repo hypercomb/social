@@ -530,6 +530,8 @@ export type ShowcaseOptions = {
    *  can navigate to"). */
   readonly links?: readonly WelcomeLink[]
   /** Follow a domain: checked, then kept in this browser's community. */
+  /** Stop following a domain: forget it where the browser kept it. True when it is gone. */
+  readonly unfollow?: (zone: string) => Promise<boolean>
   readonly follow?: (raw: string) => Promise<{ readonly ok: true; readonly zone: string } | { readonly ok: false; readonly reason: string }>
   /** A followed domain's own ledger, kept to the names under that domain. */
   /** Groups (named pages of the showcase, swiped between) are set aside for now (jwize 2026-10-25: "we aren't
@@ -997,6 +999,17 @@ ${entry.key}`
     const empty = el('p', 'hosted-empty')
     body.append(empty, comb)
     section.append(toggle, body)
+    // A DOMAIN LEAVES ONLY WHEN IT IS REMOVED (jwize 2026-10-26: "they need to be alive when added and only leave when
+    // removed"): a followed domain has a remove control; nothing else — a refresh, a click elsewhere — takes it away.
+    if (!own) {
+      const remove = el('button', 'dex-remove')
+      remove.type = 'button'
+      remove.title = `Remove ${zone}`
+      remove.setAttribute('aria-label', `Remove ${zone}`)
+      remove.append(iconOf('close'))
+      remove.addEventListener('click', event => { event.stopPropagation(); void removeDomain(zone) })
+      section.append(remove)
+    }
     const view = { section, toggle, meta, comb, empty }
     rowViews.set(zone, view)
     return view
@@ -1013,6 +1026,18 @@ ${entry.key}`
   // asked for, says it is checking, and — if the host does not answer — stays with its message until the page is refreshed or
   // anything else is clicked. A domain that checks out stops being temporary and joins the list.
   const pending = new Map<string, { state: 'checking' | 'missing'; reason: string }>()
+  const removeDomain = async (zone: string): Promise<void> => {
+    // A row that was only being checked, or was not found, was never kept: removing it is only forgetting it.
+    if (pending.has(zone)) pending.delete(zone)
+    else if (options.unfollow && !(await options.unfollow(zone).catch(() => false))) { followNote.textContent = `Could not remove ${zone}.`; return }
+    const at = held.indexOf(zone)
+    if (at >= 0) held.splice(at, 1)
+    rowViews.get(zone)?.section.remove()
+    rowViews.delete(zone)
+    if (openRow === zone) openRow = options.self
+    followNote.textContent = `Removed ${zone}.`
+    paint()
+  }
   const dropMissing = (except = ''): void => {
     let changed = false
     for (const [zone, entry] of pending) if (entry.state === 'missing' && zone !== except) { pending.delete(zone); changed = true }
@@ -1483,6 +1508,12 @@ export const SHOWCASE_STYLE = `
 /* a domain that was asked for and not found: a temporary row, toned as a warning until something else is clicked */
 .dex-row.missing { border-color: color-mix(in srgb, var(--hc-status-alert, #b3261e) 55%, var(--md-outline-variant)); }
 .dex-row.missing .dex-meta { color: var(--hc-status-alert, #b3261e); }
+.dex-row { position: relative; }
+.dex-remove { position: absolute; top: .45rem; right: 3.1rem; display: grid; place-items: center; width: 2rem; height: 2rem; padding: 0; z-index: 2;
+  border: 0; border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-on-surface-var); cursor: pointer; }
+.dex-remove svg { width: .95rem; height: .95rem; }
+.dex-remove:hover, .dex-remove:focus-visible { background: color-mix(in srgb, var(--hc-status-alert, #b3261e) 18%, transparent); color: var(--hc-status-alert, #b3261e); outline: none; }
+.bands:not(.managing) .dex-remove { display: none; }
 .search input::placeholder { color: var(--md-on-surface-faint); }
 .search input:focus { outline: 2px solid var(--md-primary); outline-offset: 1px; }
 

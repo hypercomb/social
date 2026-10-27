@@ -1176,3 +1176,59 @@ describe('a tap visits, a hold toggles', () => {
     } finally { hero.remove(); bands.remove() }
   })
 })
+
+describe('a followed domain is alive when added and leaves only when removed', () => {
+  const sites = parseLedger(LEDGER)
+  const make = (extra = {}) => showcase({
+    self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+    ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readPeerLedger: async () => [], ...extra,
+  })
+  const names = (handle: ReturnType<typeof make>) => [...handle.bands.querySelectorAll('.dex-row .dex-name')].map(name => name.textContent)
+
+  it('a refresh, another row opened, Manage toggled and a search never take it away', async () => {
+    const handle = make()
+    await vi.waitFor(() => expect(handle.bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    ;(handle.hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
+    expect(names(handle)).toContain('jwize.com')
+    handle.refresh(Promise.resolve(sites))
+    ;(handle.bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+    ;(handle.hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
+    ;(handle.hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
+    const search = handle.hero.querySelector('input[type=search]') as HTMLInputElement
+    search.value = 'dylan'
+    search.dispatchEvent(new Event('input'))
+    expect(names(handle)).toContain('jwize.com')
+  })
+
+  it('a domain that checked out stays through a refresh', async () => {
+    const follow = vi.fn(async (raw: string) => ({ ok: true as const, zone: raw.trim() }))
+    const handle = make({ sources: [], follow })
+    await vi.waitFor(() => expect(handle.bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    const input = handle.bands.querySelector('.follow input') as HTMLInputElement
+    input.value = 'friend.example'
+    ;(handle.bands.querySelector('.follow') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }))
+    await vi.waitFor(() => expect(names(handle)).toContain('friend.example'))
+    handle.refresh(Promise.resolve(sites))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(names(handle)).toContain('friend.example')
+  })
+
+  it('leaves when its remove control is pressed: the store is told, and the row is gone', async () => {
+    const unfollow = vi.fn(async () => true)
+    const handle = make({ unfollow })
+    await vi.waitFor(() => expect(handle.bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    ;(handle.hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
+    ;(handle.bands.querySelector('.dex-remove') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(names(handle)).not.toContain('jwize.com'))
+    expect(unfollow).toHaveBeenCalledWith('jwize.com')
+  })
+
+  it('stays, and says so, when the store could not forget it', async () => {
+    const handle = make({ unfollow: async () => false })
+    await vi.waitFor(() => expect(handle.bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    ;(handle.hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
+    ;(handle.bands.querySelector('.dex-remove') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(handle.bands.querySelector('.follow-note')?.textContent).toBe('Could not remove jwize.com.'))
+    expect(names(handle)).toContain('jwize.com')
+  })
+})

@@ -370,3 +370,12 @@ toggled, or when another domain is asked for.
 Under 720px the page keeps the same `.5rem` side margin as the wide one: the brand, the search, the comb and the follow input all
 start 8px from the screen edge (measured at 378px). The follow bar is no longer fixed over the page; it is in the flow at the foot of a
 screen-tall panel, sticky to the bottom, so the card fills right down to it and no band is left between them.
+
+### A followed domain is alive when added and leaves only when removed (jwize 2026-10-26)
+
+Checked on the live page in a persistent browser profile: a followed domain (realones.online) is still listed after a reload and after
+the browser was closed and reopened; it lives in the browser's `community:hosts` pool, not in the page. Nothing but removal takes it away:
+a refresh, opening another row, toggling Manage and searching leave it alone (specs). Each followed row now has a **remove** control
+(shown under Manage) that forgets it in the store (`removeHostZone`) and drops the row; if the store cannot forget it the row stays and says
+so. Only the temporary rows (Checking…, Not found) are ever dropped by anything else. The local preview window now keeps its own profile between
+runs for the same reason (`--fresh` starts empty).
