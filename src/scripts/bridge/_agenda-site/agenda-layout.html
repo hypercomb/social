@@ -1,0 +1,99 @@
+<style>
+  /* The date layout. A resource, not a page: a date uses it and fills the
+     holes from its parameter. Scoped under .mp. */
+  .mp{
+    --mp-outer:#eae7e7;--mp-bg:#f3f2f2;--mp-surface:#eae9e9;--mp-text:#201e1d;
+    --mp-accent:#ec3013;--mp-strong:#ae1800;--mp-muted:#605d5d;--mp-soft:#444141;
+    --mp-divider:rgba(32,30,29,.4);--mp-hover:rgba(32,30,29,.05);
+    --mp-font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mp-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){
+    .mp{
+      --mp-outer:#121110;--mp-bg:#1b1a19;--mp-surface:#2c2a29;--mp-text:#f1efee;
+      --mp-accent:#ff5a3d;--mp-strong:#ff8a72;--mp-muted:#a8a4a3;--mp-soft:#cfcbca;
+      --mp-divider:rgba(241,239,238,.28);--mp-hover:rgba(241,239,238,.06)}}
+  .mp{display:block;min-height:100vh;min-height:100dvh;background:var(--mp-outer);color:var(--mp-text);
+    font:400 16px/1.55 var(--mp-font);-webkit-font-smoothing:antialiased;text-wrap:pretty}
+  .mp *,.mp *::before,.mp *::after{box-sizing:border-box;margin:0;padding:0}
+  .mp a{color:var(--mp-accent);text-underline-offset:3px}
+  .mp :focus-visible{outline:2px solid var(--mp-accent);outline-offset:2px}
+  .mp .app{max-width:760px;min-height:100vh;min-height:100dvh;margin:0 auto;background:var(--mp-bg)}
+  @media (min-width:762px){.mp .app{border-left:1px solid var(--mp-divider);border-right:1px solid var(--mp-divider)}}
+  .mp header.top{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
+    background:var(--mp-bg);border-bottom:2px solid var(--mp-divider)}
+  .mp .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
+  .mp .brand em{font-style:normal;color:var(--mp-accent)}
+  .mp .panel{display:block;padding:20px max(16px,env(safe-area-inset-right)) 20px max(16px,env(safe-area-inset-left));border-top:2px solid var(--mp-divider)}
+  .mp .panel.lead{border-top:0}
+  .mp h1{font-size:clamp(28px,7.5vw,40px);line-height:1.05;letter-spacing:-.02em;font-weight:800;margin-top:4px}
+  .mp h2{font-size:20px;line-height:1.15;font-weight:800}
+  .mp .kicker{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-strong);font-weight:600}
+  .mp .mini{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-muted)}
+  .mp .sub{font-size:14px;color:var(--mp-soft);margin-top:8px}
+  .mp .facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border-top:2px solid var(--mp-divider);margin-top:16px}
+  .mp .facts > div{padding:8px 12px 8px 0}
+  .mp .facts > div + div{padding:8px 0 8px 12px;border-left:1px solid var(--mp-divider)}
+  .mp .big{font-weight:800;font-size:19px;line-height:1.15;margin-top:2px}
+  .mp .facts .sub{margin-top:2px;font-size:13px}
+  .mp .bring{border-top:1px solid var(--mp-divider);padding-top:12px;font-size:15px;color:var(--mp-soft)}
+  .mp .bring b{color:var(--mp-text);font-weight:800}
+  .mp .show{list-style:none;border-top:2px solid var(--mp-divider);margin-top:12px}
+  .mp .show li{display:grid;grid-template-columns:3.3em minmax(0,1fr) auto;gap:0 12px;align-items:baseline;
+    padding:12px 4px;border-bottom:1px solid var(--mp-divider)}
+  .mp .show time{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+  .mp .show b{display:block;font-weight:800;font-size:16px;line-height:1.25}
+  .mp .show .note{display:block;font-size:14px;line-height:1.45;color:var(--mp-soft);margin-top:3px}
+  .mp .show .min{font-size:13px;font-weight:600;color:var(--mp-strong);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .mp .show li.end{border-bottom:0}
+  .mp .show li.end b{color:var(--mp-strong)}
+  .mp .links{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:8px}
+  .mp .links a{display:grid;gap:2px;min-height:44px;padding:12px 14px;border:1px solid var(--mp-divider);color:var(--mp-text);text-decoration:none}
+  .mp .links a:hover{border-color:var(--mp-accent);background:var(--mp-hover)}
+  .mp .links b{font-size:15px;font-weight:700;line-height:1.3}
+  .mp .links b::after{content:" \2192";color:var(--mp-accent)}
+  .mp .links span{font-size:13px;color:var(--mp-muted)}
+</style>
+<div class="mp">
+<div class="app">
+  <header class="top">
+    <span class="brand">Hypercomb <em>Meetup</em></span>
+    <span class="mini">Agenda</span>
+  </header>
+  <main>
+    <section class="panel lead" aria-label="The meeting">
+      <header>
+        <span class="kicker">Meetup agenda</span>
+        <h1 data-title>Agenda</h1>
+      </header>
+      <p class="sub" data-line hidden></p>
+      <div class="facts">
+        <div>
+          <div class="mini">When</div>
+          <div class="big" data-when></div>
+          <div class="sub" data-when-note></div>
+        </div>
+        <div>
+          <div class="mini">Where</div>
+          <div class="big" data-where></div>
+          <div class="sub" data-address></div>
+        </div>
+      </div>
+      <p class="bring" data-bring hidden><b>Bring</b> <span data-bring-text></span></p>
+    </section>
+    <section class="panel" aria-labelledby="show-title">
+      <span class="kicker">Run of show</span>
+      <h2 id="show-title">The morning, block by block.</h2>
+      <ol class="show" data-show></ol>
+    </section>
+  </main>
+  <footer class="panel">
+    <div class="mini">More</div>
+    <ul class="links">
+      <li><a href="/"><b>All agendas</b><span>Every date</span></a></li>
+      <li><a href="https://questions.hypercomb.com"><b>How the tutorial and Q and A work</b><span>questions.hypercomb.com</span></a></li>
+      <li><a href="https://meetups.hypercomb.com"><b>Meetings and RSVP</b><span>meetups.hypercomb.com</span></a></li>
+    </ul>
+  </footer>
+</div>
+</div>

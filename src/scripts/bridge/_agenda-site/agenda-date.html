@@ -5,93 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>Meetup agenda</title>
-<meta name="description" content="One Hypercomb meetup agenda. The date's own layout, filled from its parameter.">
-<style>
-  /* One date. This layout is the child's, shared by every date. The agenda
-     resource is the parameter: the page decoration's payload.parameter, or
-     the cell's parameter slot. Nothing about a particular morning is copied
-     into this file. Scoped under .mp. */
-  :root,.mp{
-    --mp-outer:#eae7e7;--mp-bg:#f3f2f2;--mp-surface:#eae9e9;--mp-text:#201e1d;
-    --mp-accent:#ec3013;--mp-strong:#ae1800;--mp-muted:#605d5d;--mp-soft:#444141;
-    --mp-divider:rgba(32,30,29,.4);--mp-hover:rgba(32,30,29,.05);
-    --mp-font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-    --mp-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-  @media (prefers-color-scheme:dark){
-    :root,.mp{
-      --mp-outer:#121110;--mp-bg:#1b1a19;--mp-surface:#2c2a29;--mp-text:#f1efee;
-      --mp-accent:#ff5a3d;--mp-strong:#ff8a72;--mp-muted:#a8a4a3;--mp-soft:#cfcbca;
-      --mp-divider:rgba(241,239,238,.28);--mp-hover:rgba(241,239,238,.06)}}
-  body:has(> .mp){margin:0;background:var(--mp-outer)}
-  .mp{display:block;min-height:100vh;min-height:100dvh;background:var(--mp-outer);color:var(--mp-text);
-    font:400 16px/1.55 var(--mp-font);-webkit-font-smoothing:antialiased;text-wrap:pretty}
-  .mp *,.mp *::before,.mp *::after{box-sizing:border-box;margin:0;padding:0}
-  .mp a{color:var(--mp-accent);text-underline-offset:3px}
-  .mp :focus-visible{outline:2px solid var(--mp-accent);outline-offset:2px}
-  .mp .app{max-width:760px;min-height:100vh;min-height:100dvh;margin:0 auto;background:var(--mp-bg)}
-  @media (min-width:762px){.mp .app{border-left:1px solid var(--mp-divider);border-right:1px solid var(--mp-divider)}}
-  .mp header.top{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;
-    padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
-    background:var(--mp-bg);border-bottom:2px solid var(--mp-divider)}
-  .mp .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
-  .mp .brand em{font-style:normal;color:var(--mp-accent)}
-  .mp .panel{display:block;padding:20px max(16px,env(safe-area-inset-right)) 20px max(16px,env(safe-area-inset-left));border-top:2px solid var(--mp-divider)}
-  .mp .panel.lead{border-top:0}
-  .mp h1{font-size:clamp(28px,7.5vw,40px);line-height:1.05;letter-spacing:-.02em;font-weight:800;margin-top:4px}
-  .mp h2{font-size:20px;line-height:1.15;font-weight:800}
-  .mp .kicker{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-strong);font-weight:600}
-  .mp .mini{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-muted)}
-  .mp .sub{font-size:14px;color:var(--mp-soft);margin-top:8px}
-  .mp code{font:600 .86em/1.4 var(--mp-mono);background:var(--mp-surface);color:var(--mp-text);padding:1px 5px}
-  .mp .facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border-top:2px solid var(--mp-divider);margin-top:16px}
-  .mp .facts > div{padding:8px 12px 8px 0}
-  .mp .facts > div + div{padding:8px 0 8px 12px;border-left:1px solid var(--mp-divider)}
-  .mp .big{font-weight:800;font-size:19px;line-height:1.15;margin-top:2px}
-  .mp .facts .sub{margin-top:2px;font-size:13px}
-  .mp .bring{border-top:1px solid var(--mp-divider);padding-top:12px;font-size:15px;color:var(--mp-soft)}
-  .mp .bring b{color:var(--mp-text);font-weight:800}
-  .mp .show{list-style:none;border-top:2px solid var(--mp-divider);margin-top:12px}
-  .mp .show li{display:grid;grid-template-columns:3.3em minmax(0,1fr) auto;gap:0 12px;align-items:baseline;
-    padding:12px 4px;border-bottom:1px solid var(--mp-divider)}
-  .mp .show time{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
-  .mp .show b{display:block;font-weight:800;font-size:16px;line-height:1.25}
-  .mp .show .note{display:block;font-size:14px;line-height:1.45;color:var(--mp-soft);margin-top:3px}
-  .mp .show .min{font-size:13px;font-weight:600;color:var(--mp-strong);white-space:nowrap;font-variant-numeric:tabular-nums}
-  .mp .show li.end{border-bottom:0}
-  .mp .show li.end b{color:var(--mp-strong)}
-  .mp .links{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:8px}
-  .mp .links a{display:grid;gap:2px;min-height:44px;padding:12px 14px;border:1px solid var(--mp-divider);color:var(--mp-text);text-decoration:none}
-  .mp .links a:hover{border-color:var(--mp-accent);background:var(--mp-hover)}
-  .mp .links b{font-size:15px;font-weight:700;line-height:1.3}
-  .mp .links b::after{content:" \2192";color:var(--mp-accent)}
-  .mp .links span{font-size:13px;color:var(--mp-muted)}
-</style>
+<meta name="description" content="One Hypercomb meetup agenda. The layout is a resource this page uses. The agenda resource is the parameter.">
 </head>
 <body>
-<div class="mp">
-<div class="app">
-  <header class="top">
-    <span class="brand">Hypercomb <em>Meetup</em></span>
-    <span class="mini">Agenda</span>
-  </header>
-  <main data-body></main>
-  <footer class="panel">
-    <div class="mini">More</div>
-    <ul class="links">
-      <li><a href="/"><b>All agendas</b><span>Every date</span></a></li>
-      <li><a href="https://questions.hypercomb.com"><b>How the tutorial and Q and A work</b><span>questions.hypercomb.com</span></a></li>
-      <li><a href="https://meetups.hypercomb.com"><b>Meetings and RSVP</b><span>meetups.hypercomb.com</span></a></li>
-    </ul>
-  </footer>
-</div>
-</div>
+<div data-root></div>
 <script>
 (function () {
-  var roots = document.querySelectorAll('.mp:not([data-ready])');
+  var roots = document.querySelectorAll('[data-root]:not([data-ready])');
   var root = roots[roots.length - 1];
   if (!root) return;
   root.setAttribute('data-ready', '');
-  var body = root.querySelector('[data-body]');
   var SIG = /^[0-9a-f]{64}$/;
   var DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
   var HISTORY = '@diamondcoreprocessor.com/HistoryService';
@@ -201,7 +124,7 @@
       if (SIG.test(String(value.resource || ''))) return asLayer(String(value.resource), depth + 1);
       return Promise.resolve(null);
     }
-    if (value.name || value.children || value.decorations || value.parameter) return Promise.resolve(value);
+    if (value.name || value.children || value.decorations || value.parameter || value.template) return Promise.resolve(value);
     return Promise.resolve(null);
   }
   function recordOf(sig) {
@@ -263,7 +186,7 @@
               var meta = null;
               try { meta = marker ? JSON.parse(marker) : null; } catch (e) { meta = null; }
               if (!meta || !SIG.test(String(meta.layer || ''))) return null;
-              return resourceJson(String(meta.layer));
+              return asLayer(String(meta.layer), 0);
             });
           });
         });
@@ -271,8 +194,8 @@
       return chain;
     });
   }
-  function childNamed(root, date) {
-    var kids = root && Array.isArray(root.children) ? root.children : [];
+  function childNamed(parent, date) {
+    var kids = parent && Array.isArray(parent.children) ? parent.children : [];
     return kids.reduce(function (chain, kid) {
       return chain.then(function (found) {
         if (found) return found;
@@ -282,104 +205,111 @@
       });
     }, Promise.resolve(null));
   }
-  function load() {
+  function parentLayer() {
+    return liveLayer(['agenda']).then(function (layer) {
+      if (layer && layer.name === 'agenda') return layer;
+      return doorRoot();
+    });
+  }
+  // The layout is a resource the parent names. Follow a meta to the bytes.
+  function layoutText(parent) {
+    var named = parent && parent.template != null ? parent.template : [];
+    var list = Array.isArray(named) ? named : [named];
+    return list.reduce(function (chain, entry) {
+      return chain.then(function (found) {
+        if (found) return found;
+        var sig = String(entry || '');
+        if (!SIG.test(sig)) return '';
+        return resourceText(sig).then(function (text) {
+          var rec = null;
+          try { rec = text ? JSON.parse(text) : null; } catch (e) { rec = null; }
+          if (rec && rec.meta === 1 && SIG.test(String(rec.resource || ''))) {
+            return resourceText(String(rec.resource)).then(function (body) {
+              return body && body.indexOf('data-title') >= 0 ? body : '';
+            });
+          }
+          return text && text.indexOf('data-title') >= 0 ? text : '';
+        });
+      });
+    }, Promise.resolve(''));
+  }
+  function hereLayer(parent) {
     var date = dateFromHere();
-    var tries = [];
-    if (date) tries.push(['agenda', date]);
-    tries.push(['agenda']);
-    var chain = Promise.resolve(null);
-    tries.forEach(function (segments) {
-      chain = chain.then(function (found) {
-        if (found && (String(found.name || '') === date || found.parameter || found.decorations)) return found;
-        return liveLayer(segments).then(function (layer) { return layer || found; });
-      });
-    });
-    return chain.then(function (layer) {
-      if (layer && date && String(layer.name || '') === date) return layer;
-      if (layer && date && Array.isArray(layer.children)) {
-        return childNamed(layer, date).then(function (child) { return child || layer; });
-      }
-      return doorRoot().then(function (root) {
-        if (!date) return root;
-        return childNamed(root, date).then(function (child) { return child || root; });
-      });
-    }).then(function (layer) {
-      return parameterOf(layer).then(function (agenda) {
-        if (agenda) return agenda;
-        return date ? { date: date, title: longDate(date), blocks: [], missing: true } : null;
-      });
+    var first = date ? liveLayer(['agenda', date]) : Promise.resolve(null);
+    return first.then(function (layer) {
+      if (layer && (!date || String(layer.name || '') === date)) return layer;
+      return childNamed(parent, date);
     });
   }
-  function el(tag, className, text) {
-    var node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text != null) node.textContent = text;
-    return node;
-  }
-  function paint(row) {
-    body.textContent = '';
-    var lead = el('section', 'panel lead');
-    lead.setAttribute('aria-label', 'The meeting');
-    var head = document.createElement('header');
-    head.appendChild(el('span', 'kicker', 'Meetup agenda'));
-    head.appendChild(el('h1', '', (row && row.title) || 'Agenda'));
-    lead.appendChild(head);
+  function fill(row) {
+    var q = function (sel) { return root.querySelector(sel); };
+    var title = q('[data-title]');
+    if (title) title.textContent = (row && row.title) || 'Agenda';
+    var line = q('[data-line]');
+    if (line) {
+      line.textContent = row && row.line || '';
+      line.hidden = !(row && row.line);
+    }
+    var when = q('[data-when]');
+    if (when) when.textContent = row && row.time && row.ends ? row.time + '–' + row.ends : (row && row.time) || '';
+    var note = q('[data-when-note]');
+    if (note) note.textContent = (row && row.whenNote) || '';
+    var where = q('[data-where]');
+    if (where) where.textContent = (row && row.where) || '';
+    var address = q('[data-address]');
+    if (address) address.textContent = (row && row.address) || '';
+    var bring = q('[data-bring]');
+    var bringText = q('[data-bring-text]');
+    if (bringText) bringText.textContent = (row && row.bring) || '';
+    if (bring) bring.hidden = !(row && row.bring);
+    var show = q('[data-show]');
+    if (show) {
+      show.textContent = '';
+      (row && row.blocks || []).forEach(function (block, index, all) {
+        var li = document.createElement('li');
+        if (index === all.length - 1) li.className = 'end';
+        var time = document.createElement('time');
+        time.textContent = block.time || '';
+        var text = document.createElement('div');
+        var name = document.createElement('b');
+        name.textContent = block.title || '';
+        text.appendChild(name);
+        if (block.note) {
+          var span = document.createElement('span');
+          span.className = 'note';
+          span.textContent = block.note;
+          text.appendChild(span);
+        }
+        var min = document.createElement('span');
+        min.className = 'min';
+        min.textContent = block.min || '';
+        li.appendChild(time); li.appendChild(text); li.appendChild(min);
+        show.appendChild(li);
+      });
+    }
     if (row && row.missing) {
-      lead.appendChild(el('p', 'sub', 'This date has no agenda yet.'));
-      body.appendChild(lead);
-      return;
+      if (line) { line.hidden = false; line.textContent = 'This date has no agenda yet.'; }
     }
-    if (row && row.line) lead.appendChild(el('p', 'sub', row.line));
-    var facts = el('div', 'facts');
-    var when = el('div');
-    when.appendChild(el('div', 'mini', 'When'));
-    var whenBig = el('div', 'big', row && row.time && row.ends ? row.time + '–' + row.ends : (row && row.time) || '');
-    when.appendChild(whenBig);
-    if (row && row.whenNote) when.appendChild(el('div', 'sub', row.whenNote));
-    var where = el('div');
-    where.appendChild(el('div', 'mini', 'Where'));
-    where.appendChild(el('div', 'big', (row && row.where) || ''));
-    if (row && row.address) where.appendChild(el('div', 'sub', row.address));
-    facts.appendChild(when); facts.appendChild(where);
-    lead.appendChild(facts);
-    if (row && row.bring) {
-      var bring = el('p', 'bring');
-      bring.appendChild(el('b', '', 'Bring'));
-      bring.appendChild(document.createTextNode(' ' + row.bring));
-      lead.appendChild(bring);
-    }
-    body.appendChild(lead);
-    var show = el('section', 'panel');
-    show.appendChild(el('span', 'kicker', 'Run of show'));
-    var h2 = el('h2', '', 'The morning, block by block.');
-    h2.id = 'show-title';
-    show.setAttribute('aria-labelledby', 'show-title');
-    show.appendChild(h2);
-    var ol = el('ol', 'show');
-    (row && row.blocks || []).forEach(function (block, index, all) {
-      var li = document.createElement('li');
-      if (index === all.length - 1) li.className = 'end';
-      li.appendChild(el('time', '', block.time || ''));
-      var text = document.createElement('div');
-      text.appendChild(el('b', '', block.title || ''));
-      if (block.note) text.appendChild(el('span', 'note', block.note));
-      li.appendChild(text);
-      li.appendChild(el('span', 'min', block.min || ''));
-      ol.appendChild(li);
-    });
-    show.appendChild(ol);
-    body.appendChild(show);
-    var title = root.querySelector('title');
-    if (title && row && row.title) title.textContent = row.title;
+    document.title = (row && row.title) || 'Meetup agenda';
   }
   function boot(left) {
-    load().then(function (row) {
-      if (row && !row.missing) { paint(row); return; }
-      if (left > 0) { setTimeout(function () { boot(left - 1); }, 400); return; }
-      paint(row);
+    parentLayer().then(function (parent) {
+      return Promise.all([layoutText(parent), hereLayer(parent)]).then(function (both) {
+        var html = both[0];
+        var layer = both[1];
+        if (!html) {
+          if (left > 0) { setTimeout(function () { boot(left - 1); }, 400); return; }
+          root.textContent = 'This date has no layout.';
+          return;
+        }
+        root.innerHTML = html;
+        return parameterOf(layer).then(function (agenda) {
+          var date = dateFromHere();
+          fill(agenda || { date: date, title: longDate(date) || 'Agenda', blocks: [], missing: true });
+        });
+      });
     }, function () {
       if (left > 0) setTimeout(function () { boot(left - 1); }, 400);
-      else paint({ title: 'Agenda', missing: true, blocks: [] });
     });
   }
   boot(8);
