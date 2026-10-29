@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Meetup agendas</title>
+<meta name="description" content="Every Hypercomb meetup agenda, one date a row.">
+<style>
+  /* The agenda home is the business-card list: a dark column, a search that
+     stays at the top, and one row per agenda. An agenda is a data item — a
+     resource — not a page. The list layer holds either that list of resource
+     signatures, or one reference to a meta whose resource is the list. A
+     member can be a meta with the agenda JSON embedded on data. The page
+     also reads an agenda:list decoration and the agenda:list pool when they
+     already name items. Opening the page never creates the pool. The
+     row shows the name, when, and where, and opens onto the morning. Scoped
+     under .ag so a hive mounting the page inline never touches its shell. */
+  .ag{
+    --ag-bg:#060606;--ag-ink:#ececee;--ag-muted:#b4b4b9;--ag-line:rgba(255,255,255,.09);
+    --ag-gold:#f2b63e;--ag-gold-hi:#f6c453;--ag-gold-rgb:242,182,62;
+    display:block;min-height:100vh;min-height:100dvh;background:#000;color:var(--ag-ink);
+    font:16px/1.45 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  body:has(> .ag){margin:0;background:#000}
+  .ag *,.ag *::before,.ag *::after{box-sizing:border-box}
+  .ag a{color:inherit;text-decoration:none}
+  .ag :focus-visible{outline:2px solid var(--ag-gold-hi);outline-offset:2px}
+  .ag ::selection{background:rgba(var(--ag-gold-rgb),.35)}
+  .ag .app{max-width:520px;min-height:100vh;min-height:100dvh;margin:0 auto;
+    padding:max(22px,env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom))}
+  .ag h1{font-size:.74rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ag-gold);
+    margin:2px 2px 12px;font-weight:600}
+  .ag .search{display:block;position:sticky;top:max(10px,env(safe-area-inset-top));z-index:2;
+    width:100%;min-height:44px;margin:0 0 12px;padding:9px 11px;
+    border:1px solid var(--ag-line);border-radius:2px;background:rgba(8,8,9,.92);color:var(--ag-ink);
+    font:inherit}
+  .ag .search::placeholder{color:var(--ag-muted)}
+  .ag .search:focus{outline:none;border-color:rgba(var(--ag-gold-rgb),.7);box-shadow:0 0 0 1px rgba(var(--ag-gold-rgb),.35)}
+  .ag .rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+  .ag .mini{display:flex;align-items:center;gap:10px;height:68px;padding:0 14px 0 8px;border-radius:6px;
+    background:linear-gradient(160deg,#1d1d20,#0f0f10 55%,#070708);border:1px solid rgba(var(--ag-gold-rgb),.5);
+    box-shadow:0 6px 22px rgba(0,0,0,.45)}
+  .ag .mini:hover{border-color:var(--ag-gold-hi)}
+  .ag .slot{flex:none;width:40px;height:44px;display:grid;place-items:center;color:var(--ag-gold);font-weight:600;font-size:15px}
+  .ag .who{flex:1;min-width:0}
+  .ag .who b{display:block;color:var(--ag-gold-hi);font-weight:500;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ag .who small{display:block;color:var(--ag-muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ag .none{color:var(--ag-muted);text-align:center;padding:26px 10px;font-size:.9rem}
+  .ag .item{display:flex;flex-direction:column;gap:8px}
+  .ag .mini{width:100%;appearance:none;-webkit-appearance:none;border:1px solid rgba(var(--ag-gold-rgb),.5);font:inherit;text-align:left;cursor:pointer;color:inherit;background:linear-gradient(160deg,#1d1d20,#0f0f10 55%,#070708)}
+  .ag .detail{padding:4px 8px 8px 58px}
+  .ag .detail[hidden]{display:none}
+  .ag .line{color:var(--ag-muted);font-size:14px;margin:0 0 10px}
+  .ag .facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 16px;margin:0 0 10px}
+  .ag .facts b{display:block;color:var(--ag-gold-hi);font-weight:500;font-size:15px}
+  .ag .facts span{display:block;color:var(--ag-muted);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+  .ag .facts small{display:block;color:var(--ag-muted);font-size:13px;font-weight:400}
+  .ag .kicker{color:var(--ag-gold);font-size:12px;letter-spacing:.08em;text-transform:uppercase;margin:4px 0 6px}
+  .ag .bring{color:var(--ag-muted);font-size:14px;margin:0 0 12px}
+  .ag .bring b{color:var(--ag-ink);font-weight:600}
+  .ag .show{list-style:none;margin:0;padding:0;border-top:1px solid var(--ag-line)}
+  .ag .show li{display:grid;grid-template-columns:3.2em minmax(0,1fr) auto;gap:2px 10px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--ag-line)}
+  .ag .show time{color:var(--ag-gold);font-size:14px;font-variant-numeric:tabular-nums}
+  .ag .show b{display:block;color:var(--ag-ink);font-weight:500;font-size:15px}
+  .ag .show .note{display:block;color:var(--ag-muted);font-size:13px}
+  .ag .show .min{color:var(--ag-gold);font-size:12px;white-space:nowrap}
+  .ag .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+</style>
+</head>
+<body>
+<div class="ag">
+<div class="app">
+  <main>
+    <h1>Agendas</h1>
+    <p class="sr" data-count role="status"></p>
+    <label class="sr" for="ag-q">Search agendas</label>
+    <input class="search" id="ag-q" type="search" placeholder="Search dates" data-search>
+    <ul class="rows" data-rows></ul>
+    <p class="none" data-empty hidden>No agendas yet.</p>
+    <p class="none" data-nomatch hidden>Nothing matches.</p>
+  </main>
+</div>
+</div>
+<script>
+(function () {
+  var roots = document.querySelectorAll('.ag:not([data-ready])');
+  var root = roots[roots.length - 1];
+  if (!root) return;
+  root.setAttribute('data-ready', '');
+  var $ = function (sel) { return root.querySelector(sel); };
+  var SIG = /^[0-9a-f]{64}$/;
+  var DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+  var HISTORY = '@diamondcoreprocessor.com/HistoryService';
+  var STORE = '@hypercomb.social/Store';
+  var state = { rows: [], q: '' };
+
+  function ioc(key) {
+    try { return window.ioc && window.ioc.get && window.ioc.get(key); } catch (e) { return null; }
+  }
+  function sha256(text) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    });
+  }
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function longDate(iso) {
+    var m = DATE.exec(iso);
+    if (!m) return '';
+    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return d.toLocaleDateString('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+  }
+  function bases() {
+    var out = [];
+    if (/^https?:$/.test(location.protocol)) out.push(location.origin);
+    if (location.host !== 'agenda.hypercomb.com') out.push('https://agenda.hypercomb.com');
+    return out;
+  }
+  function textAt(url) {
+    return fetch(url, { cache: 'force-cache' }).then(function (res) { return res.ok ? res.text() : ''; }, function () { return ''; });
+  }
+  function jsonAt(url) {
+    return textAt(url).then(function (text) { try { return text ? JSON.parse(text) : null; } catch (e) { return null; } });
+  }
+  function resourceText(sig) {
+    // A 200 is not the bytes: the hive shell answers every path. Keep a
+    // network body only when it hashes to the signature it was asked by.
+    var net = function () {
+      return bases().reduce(function (p, base) {
+        return p.then(function (found) {
+          if (found) return found;
+          return textAt(base + '/' + sig).then(function (text) {
+            if (!text) return '';
+            return sha256(text).then(function (h) { return h === sig ? text : ''; });
+          });
+        });
+      }, Promise.resolve(''));
+    };
+    var store = ioc(STORE);
+    // Raw bytes first. getResource follows a resource hop and would hide a
+    // meta that carries the agenda JSON on data.
+    var local = store && store.getResourceLocal
+      ? Promise.resolve(store.getResourceLocal(sig)).then(function (blob) {
+          return blob && blob.text ? blob.text() : '';
+        }, function () { return ''; })
+      : Promise.resolve('');
+    return local.then(function (text) {
+      if (text) return text;
+      return net().then(function (found) {
+        if (found) return found;
+        if (!store || !store.getResource) return '';
+        return Promise.resolve(store.getResource(sig)).then(function (blob) {
+          return blob && blob.text ? blob.text() : '';
+        }, function () { return ''; });
+      });
+    });
+  }
+  function resourceJson(sig) {
+    return resourceText(sig).then(function (text) { try { return text ? JSON.parse(text) : null; } catch (e) { return null; } });
+  }
+  function liveLayer(history, segments) {
+    return Promise.resolve(history.sign({ explorerSegments: function () { return segments; } })).then(function (sig) {
+      return history.currentLayerAt(sig);
+    }).catch(function () { return null; });
+  }
+  function agendaLayer(history) {
+    var lineage = ioc('@hypercomb.social/Lineage');
+    var here = [];
+    try { here = (lineage && lineage.explorerSegments && lineage.explorerSegments()) || []; } catch (e) { here = []; }
+    here = here.map(function (s) { return String(s || '').trim(); }).filter(Boolean);
+    var at = here.lastIndexOf('agenda');
+    var tries = [];
+    if (at >= 0) tries.push(here.slice(0, at + 1));
+    tries.push(['agenda']);
+    tries.push(here);
+    tries.push([]);
+    var seen = {};
+    var chain = Promise.resolve(null);
+    tries.forEach(function (segments) {
+      var key = segments.join('/');
+      if (seen[key]) return;
+      seen[key] = 1;
+      chain = chain.then(function (found) {
+        if (found) return found;
+        return liveLayer(history, segments).then(function (layer) {
+          return layer && layer.name === 'agenda' ? layer : null;
+        });
+      });
+    });
+    return chain;
+  }
+  function doorLayer() {
+    return sha256('agenda.hypercomb.com').then(function (bag) {
+      var chain = Promise.resolve(null);
+      bases().forEach(function (base) {
+        chain = chain.then(function (found) {
+          if (found) return found;
+          return fetch(base + '/' + bag + '/', { cache: 'no-store' }).then(function (res) {
+            if (!res.ok) return null;
+            return res.text().then(function (text) {
+              var names = text.split('\n').map(function (s) { return s.trim(); }).filter(function (s) { return /^\d{8}$/.test(s); });
+              var last = names[names.length - 1];
+              if (!last) return null;
+              return jsonAt(base + '/' + bag + '/' + last).then(function (meta) {
+                if (!meta || !SIG.test(String(meta.layer || ''))) return null;
+                return jsonAt(base + '/' + meta.layer);
+              });
+            });
+          }, function () { return null; });
+        });
+      });
+      return chain;
+    });
+  }
+  var LIST_POOL = 'agenda:list';
+  function asAgenda(rec) {
+    if (!rec || rec.kind !== 'agenda' || !DATE.test(String(rec.date || ''))) return null;
+    rec.date = String(rec.date);
+    rec.title = String(rec.title || longDate(rec.date) || rec.date);
+    rec.blocks = Array.isArray(rec.blocks) ? rec.blocks : [];
+    return rec;
+  }
+  function listedSigs(layer) {
+    var decos = layer && Array.isArray(layer.decorations) ? layer.decorations : [];
+    return decos.reduce(function (chain, entry) {
+      var sig = String(entry || '');
+      if (!SIG.test(sig)) return chain;
+      return chain.then(function (found) {
+        return resourceJson(sig).then(function (rec) {
+          var items = rec && rec.kind === 'agenda:list' && rec.payload && rec.payload.items;
+          if (!Array.isArray(items)) return found;
+          items.forEach(function (item) {
+            var s = String(item || '');
+            if (SIG.test(s) && found.indexOf(s) < 0) found.push(s);
+          });
+          return found;
+        });
+      });
+    }, Promise.resolve([]));
+  }
+  function sigsIn(text) {
+    var rec = null;
+    try { rec = text ? JSON.parse(text) : null; } catch (e) { return []; }
+    if (!rec) return [];
+    if (rec.kind === 'agenda' && DATE.test(String(rec.date || ''))) return ['__self__'];
+    var items = rec.kind === 'agenda:list' ? (rec.items || (rec.payload && rec.payload.items)) : null;
+    if (!Array.isArray(items)) return [];
+    return items.map(function (item) { return String(item || ''); }).filter(function (s) { return SIG.test(s); });
+  }
+  function poolText(sig) {
+    var store = ioc(STORE);
+    if (!store || !store.openPool) return Promise.resolve('');
+    return Promise.resolve(store.openPool(LIST_POOL)).then(function (dir) {
+      if (!dir || !dir.getFileHandle) return '';
+      return dir.getFileHandle(sig).then(function (handle) { return handle.getFile(); }).then(function (file) {
+        return file.text();
+      }).then(function (text) {
+        return sha256(text).then(function (h) { return h === sig ? text : ''; });
+      });
+    }, function () { return ''; });
+  }
+  function poolSigs() {
+    var store = ioc(STORE);
+    if (!store || !store.openPool) return Promise.resolve([]);
+    return Promise.resolve(store.openPool(LIST_POOL)).then(function (dir) {
+      if (!dir) return [];
+      var current = store.getPoolDoc
+        ? Promise.resolve(store.getPoolDoc(dir)).then(function (buf) {
+            if (!buf) return [];
+            var text = new TextDecoder().decode(buf);
+            var found = sigsIn(text);
+            if (found.indexOf('__self__') < 0) return found;
+            return sha256(text).then(function (sig) { return SIG.test(sig) ? [sig] : []; });
+          }, function () { return []; })
+        : Promise.resolve([]);
+      var members = !dir.entries ? Promise.resolve([]) : (function () {
+        var names = [];
+        var walk = function (it) {
+          return it.next().then(function (step) {
+            if (step.done) return names;
+            var name = String((step.value && step.value[0]) || '');
+            if (SIG.test(name)) names.push(name);
+            return walk(it);
+          });
+        };
+        return walk(dir.entries()).then(function (sigs) {
+          return Promise.all(sigs.map(function (sig) {
+            return poolText(sig).then(function (text) {
+              var found = sigsIn(text);
+              if (found.indexOf('__self__') >= 0) return [sig];
+              return [];
+            });
+          }));
+        }).then(function (groups) {
+          var out = [];
+          groups.forEach(function (group) { group.forEach(function (sig) { if (out.indexOf(sig) < 0) out.push(sig); }); });
+          return out;
+        });
+      })();
+      return Promise.all([current, members]).then(function (both) {
+        var out = [];
+        both.forEach(function (list) { (list || []).forEach(function (sig) { if (out.indexOf(sig) < 0) out.push(sig); }); });
+        return out;
+      });
+    }, function () { return []; });
+  }
+  function flatten(groups) {
+    var out = [];
+    (groups || []).forEach(function (list) { (list || []).forEach(function (row) { if (row) out.push(row); }); });
+    return out;
+  }
+  function rowsFrom(value, depth) {
+    if (value == null || depth > 6) return Promise.resolve([]);
+    if (typeof value === 'string') {
+      var text = value.trim();
+      if (SIG.test(text)) {
+        return resourceText(text).then(function (body) { return body || poolText(text); }).then(function (body) {
+          var rec = null;
+          try { rec = body ? JSON.parse(body) : null; } catch (e) { rec = null; }
+          return rowsFrom(rec, depth + 1);
+        }, function () { return []; });
+      }
+      try { return rowsFrom(JSON.parse(text), depth + 1); } catch (e) { return Promise.resolve([]); }
+    }
+    if (Array.isArray(value)) {
+      return Promise.all(value.map(function (item) { return rowsFrom(item, depth + 1); })).then(flatten);
+    }
+    if (value.meta === 1) {
+      return rowsFrom(value.data, depth + 1).then(function (rows) {
+        if (rows.length) return rows;
+        var hop = SIG.test(String(value.resource || '')) ? rowsFrom(String(value.resource), depth + 1) : Promise.resolve([]);
+        return hop.then(function (followed) { return followed.length ? followed : (asAgenda(value) ? [asAgenda(value)] : []); });
+      });
+    }
+    var agenda = asAgenda(value);
+    if (agenda) return Promise.resolve([agenda]);
+    var items = value.kind === 'agenda:list' ? (value.items || (value.payload && value.payload.items)) : null;
+    if (Array.isArray(items)) return rowsFrom(items, depth + 1);
+    return Promise.resolve([]);
+  }
+  function itemsOf(layer) {
+    return Promise.all([
+      rowsFrom(layer && layer.list, 0),
+      listedSigs(layer).then(function (sigs) { return Promise.all(sigs.map(function (sig) { return rowsFrom(sig, 0); })).then(flatten); }),
+      poolSigs().then(function (sigs) { return Promise.all(sigs.map(function (sig) { return rowsFrom(sig, 0); })).then(flatten); }),
+    ]).then(function (groups) {
+      var seen = {};
+      return flatten(groups).filter(function (row) {
+        if (seen[row.date]) return false;
+        seen[row.date] = 1;
+        return true;
+      });
+    });
+  }
+  function ordered(rows) {
+    var t = today();
+    return rows.slice().sort(function (a, b) {
+      var af = a.date >= t, bf = b.date >= t;
+      if (af !== bf) return af ? -1 : 1;
+      if (af) return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+      return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+    });
+  }
+  function span(text) {
+    var when = String(text || '').trim();
+    if (!when) return '';
+    var ends = String(arguments[1] || '').trim();
+    var where = String(arguments[2] || '').trim();
+    return [when && ends ? when + '–' + ends : when || ends, where].filter(Boolean).join(' · ');
+  }
+  function matches(row) {
+    if (!state.q) return true;
+    var blocks = (row.blocks || []).map(function (b) { return (b.title || '') + ' ' + (b.note || ''); }).join(' ');
+    var hay = [row.date, row.title, row.line, row.where, row.address, longDate(row.date), blocks].join(' ').toLowerCase();
+    return state.q.toLowerCase().split(/\s+/).every(function (w) { return !w || hay.indexOf(w) >= 0; });
+  }
+  function render() {
+    var into = $('[data-rows]');
+    into.textContent = '';
+    var shown = ordered(state.rows).filter(matches);
+    shown.forEach(function (row, index) {
+      var li = document.createElement('li');
+      li.className = 'item';
+      var open = shown.length === 1 || index === 0;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mini';
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      var slot = document.createElement('span');
+      slot.className = 'slot';
+      slot.textContent = row.date.slice(8);
+      var who = document.createElement('span');
+      who.className = 'who';
+      var b = document.createElement('b');
+      b.textContent = row.title;
+      var small = document.createElement('small');
+      small.textContent = span(row.time, row.ends, row.where) || longDate(row.date);
+      who.appendChild(b); who.appendChild(small);
+      btn.appendChild(slot); btn.appendChild(who);
+      var detail = document.createElement('div');
+      detail.className = 'detail';
+      detail.hidden = !open;
+      if (row.line) {
+        var line = document.createElement('p');
+        line.className = 'line';
+        line.textContent = row.line;
+        detail.appendChild(line);
+      }
+      var facts = document.createElement('div');
+      facts.className = 'facts';
+      function addFact(label, strong, sub) {
+        if (!strong && !sub) return;
+        var cell = document.createElement('div');
+        var name = document.createElement('span');
+        name.textContent = label;
+        var value = document.createElement('b');
+        value.textContent = strong || sub;
+        cell.appendChild(name); cell.appendChild(value);
+        if (sub && strong) {
+          var under = document.createElement('small');
+          under.textContent = sub;
+          cell.appendChild(under);
+        }
+        facts.appendChild(cell);
+      }
+      addFact('When', span(row.time, row.ends) || longDate(row.date), row.whenNote || '');
+      addFact('Where', row.where || '', row.address || '');
+      if (facts.childNodes.length) detail.appendChild(facts);
+      if (row.bring) {
+        var bring = document.createElement('p');
+        bring.className = 'bring';
+        var bb = document.createElement('b');
+        bb.textContent = 'Bring ';
+        bring.appendChild(bb);
+        bring.appendChild(document.createTextNode(row.bring));
+        detail.appendChild(bring);
+      }
+      if (row.blocks.length) {
+        var kicker = document.createElement('p');
+        kicker.className = 'kicker';
+        kicker.textContent = 'Run of show';
+        detail.appendChild(kicker);
+        var ol = document.createElement('ol');
+        ol.className = 'show';
+        row.blocks.forEach(function (block) {
+          var item = document.createElement('li');
+          var time = document.createElement('time');
+          time.textContent = block.time || '';
+          var body = document.createElement('div');
+          var name = document.createElement('b');
+          name.textContent = block.title || '';
+          body.appendChild(name);
+          if (block.note) {
+            var note = document.createElement('span');
+            note.className = 'note';
+            note.textContent = block.note;
+            body.appendChild(note);
+          }
+          var min = document.createElement('span');
+          min.className = 'min';
+          min.textContent = block.min || '';
+          item.appendChild(time); item.appendChild(body); item.appendChild(min);
+          ol.appendChild(item);
+        });
+        detail.appendChild(ol);
+      }
+      btn.addEventListener('click', function () {
+        detail.hidden = !detail.hidden;
+        btn.setAttribute('aria-expanded', detail.hidden ? 'false' : 'true');
+      });
+      li.appendChild(btn); li.appendChild(detail);
+      into.appendChild(li);
+    });
+    var n = state.rows.length;
+    $('[data-count]').textContent = n === 1 ? '1 date' : n + ' dates';
+    $('[data-empty]').hidden = n > 0;
+    $('[data-nomatch]').hidden = !(n > 0 && shown.length === 0);
+  }
+  $('[data-search]').addEventListener('input', function (e) {
+    state.q = String(e.target.value || '').trim();
+    render();
+  });
+  var history = ioc(HISTORY);
+  var read = history && history.sign && history.currentLayerAt
+    ? agendaLayer(history).then(function (layer) { return layer || doorLayer(); })
+    : doorLayer();
+  read.then(function (layer) { return itemsOf(layer); }).then(function (rows) {
+    state.rows = rows;
+    render();
+  }, function () { render(); });
+})();
+</script>
+</body>
+</html>

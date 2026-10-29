@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "kind": "agenda",
+  "date": "2026-10-24",
+  "title": "Saturday, October 24",
+  "line": "A morning with the people of this community. Free, all welcome.",
+  "time": "9:15",
+  "ends": "11:00",
+  "whenNote": "Saturday morning",
+  "where": "Yaletown Galleria",
+  "address": "1080 Mainland St, Vancouver",
+  "bring": "a phone with a browser.",
+  "blocks": [
+    {"time": "9:15", "title": "Network and get seated", "note": "Say hello and find a seat.", "min": "15 min"},
+    {"time": "9:30", "title": "Introductions", "note": "Your first name, one community you belong to, and one thing you would put on a page of your own. About 30 seconds each.", "min": "10 min"},
+    {"time": "9:40", "title": "What is Hypercomb", "note": "People first. An open protocol nobody owns. Every thing has a fingerprint, so peers can check it and everyone can serve it. Host your own domain and content.", "min": "5 min"},
+    {"time": "9:45", "title": "Join the room", "note": "Scan the code, open the link, say yes to join.", "min": "5 min"},
+    {"time": "9:50", "title": "The tutorial", "note": "The host says start tutorial. Tap Join on the panel at the top, and the explanation plays itself — everyone moving page to page together.", "min": "15 min"},
+    {"time": "10:05", "title": "Q and A", "note": "Ask, answer, and take the answers you like. The host's tally scores them.", "min": "25 min"},
+    {"time": "10:30", "title": "Discussion", "note": "Talk through what came up in the questions: what surprised you, and what you would build.", "min": "15 min"},
+    {"time": "10:45", "title": "Networking", "note": "Stay and talk.", "min": "15 min"},
+    {"time": "11:00", "title": "Done", "note": "Thank you for coming.", "min": ""}
+  ]
+}
