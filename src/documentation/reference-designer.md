@@ -338,9 +338,10 @@ A link nobody can see is a link nobody can trust, so every part of it shows:
 - **The breadcrumb says it in words.** `[team] ◆ ← people` on a linked page
   (click → people); `[people] ◆ → team` on a group whose targets are on. The
   earlier pills were icon-only — their words lived in a tooltip.
-- **Reference tiles wear a mark, always.** Two interlocked links at the top of
-  the tile (hex-sdf), the mirror of the branch chevron. The portal ring only
-  ever drew on hover, so a reference looked exactly like a copy.
+- **Reference tiles wear no special paint.** The two interlocked links at the
+  top of the tile were removed (jwize, 2026-10-28): they read as an infinity
+  badge on the picture. The moving border is a pathway with hexagon children,
+  and only while the pointer is on it. A leaf, reference or not, stays still.
 - **Every change toasts.** `/from`, `/feed`, a gathered make, a feed. Bare
   `/from` / `/feed` say what is linked, nothing included. A refusal says WHY
   (`GatherLinkService.link`), and a doorway named as the group is followed to
