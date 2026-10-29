@@ -121,8 +121,9 @@ ${ROLES}{
 
 /* ── the name, in place on the band ───────────────────────────────────── */
 .te-dg-name{position:absolute;margin:0;padding:0 .15em;border:0;border-bottom:2px dotted color-mix(in srgb,var(--dg-on-scrim) 50%,transparent);
-  background:transparent;text-align:center;text-overflow:ellipsis;font-family:var(--dg-mono);font-weight:400;letter-spacing:.04em;
+  background:transparent;text-align:center;font-family:var(--dg-mono);font-weight:400;letter-spacing:.04em;
   color:var(--dg-on-scrim);caret-color:var(--dg-accent);outline:none;pointer-events:none;border-radius:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease;}
 .te-dg-name:focus{pointer-events:auto;background:var(--dg-tints);border-bottom:2px solid var(--dg-accent);}
 .te-dg-name[data-ghost="true"]{color:color-mix(in srgb,var(--dg-on-scrim) 62%,transparent);border-bottom-style:dashed;}
@@ -131,7 +132,7 @@ ${ROLES}{
 .te-dg-bandlabel{position:absolute;display:grid;place-items:center;pointer-events:none;font-family:var(--dg-mono);letter-spacing:.04em;color:var(--dg-on-scrim);}
 
 /* ── a callout: the tab is the control, the drawn part its visual twin ── */
-.te-dg-callout{position:absolute;pointer-events:auto;z-index:3;border-radius:4px;outline:1px solid transparent;outline-offset:0;}
+.te-dg-callout{position:absolute;pointer-events:auto;z-index:3;border-radius:4px;outline:1px solid var(--dg-line);outline-offset:0;background:var(--dg-ground);}
 .te-dg-callout[data-open]{z-index:6;background:var(--dg-ground);outline-color:var(--dg-edgef);}
 .te-dg-callout[data-grow="up"]{display:flex;flex-direction:column-reverse;}
 .te-dg-callout[data-covered]{visibility:hidden;}

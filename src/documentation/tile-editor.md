@@ -63,10 +63,13 @@ Used when the desk is at least 56.25em wide and the stage can be at least 320
 
 The stage size is one number shared by the art, the lit layer, the name input
 and the camera, computed in `diagram/layout.ts` from the viewport (minus the
-card gutters, the toolbar and a margin, capped at 760 em-pixels). An open card
-never changes it: cards float over the gutter, so the tile does not shrink when
-one opens. The tab columns sit beside the widest the tile can be (the union of
-its variants), so tabs never move when the variant turns.
+card gutters, the toolbar and a margin above and below, capped at 440
+em-pixels). The cap is what keeps the hexagon a specimen: a larger desk gets
+margin, not a larger tile, so the labels, the toolbar and the floating tools
+row stay on screen. An open card never changes it: cards float over the gutter,
+so the tile does not shrink when one opens. The tab columns sit beside the
+widest the tile can be (the union of its variants), so tabs never move when
+the variant turns.
 
 ### Narrow arrangement
 
@@ -75,8 +78,9 @@ It is the **same DOM**, rearranged:
 
 - The list becomes a **drawer** (a rung of the Escape ladder; choosing a row
   closes it). The header gains the drawer toggle.
-- The tile is **sticky at the top** (200–380 px) so a pinned part stays visible
-  while a lower field is edited.
+- The tile is **sticky at the top** (200–280 px, about 30% of the window) so
+  the rows under it stay on the screen, and a pinned part stays visible while
+  a lower field is edited.
 - Tabs become full-width rows of at least 44px, one open at a time, expanding in
   place into their card. The picture toolbar moves into the Picture row's card
   (the same node, moved).

@@ -22,8 +22,14 @@ export const MARGIN = 8
 export const HEAD = 32
 export const TOOL = 44
 export const GAP_TOOL = 22
-export const MAX_STAGE = 760
+/** The specimen stays a specimen. Larger desks get margin, not a bigger tile,
+ *  so the labels, the toolbar and the floating tools row all stay on screen. */
+export const MAX_STAGE = 440
 export const MIN_STAGE = 320
+/** The undocked tools row floats on the desk and is not part of
+ *  `--hc-controls-bottom`. The drawing keeps this much clear of the viewport
+ *  edge, above and below, so a label never sits under that row. */
+const FLOOR_EM = 4.5
 
 /** Desk widths (in em) where the list gives ground and where wide stops. */
 export const RAIL_FULL_EM = 82.5
@@ -96,13 +102,18 @@ export function layoutFor(i: LayoutInput): LayoutOut {
   const tab = (compact ? TAB_COMPACT : TAB) * U
   const vph = i.desk.h - HEADER_EM * em
   const r = bareRatio(i.model, i.variant)
-  // as large as the desk allows; an open card never changes it (cards float over the gutters)
+  // Wide enough for a card on each side; an open card never changes it (cards float over the gutters).
+  // Short enough that the same margin stands above the top label and below the toolbar.
   const byWidth = (vpw - 2 * (card + (GAP + MARGIN) * U)) / (1 - 2 * r)
-  const wide = Math.round(Math.min(vph - (TOOL + GAP_TOOL + 30) * U, byWidth, MAX_STAGE * U))
+  const chrome = (TOOL + GAP_TOOL) * U
+  const keep = Math.max(40 * U, HEAD * U, FLOOR_EM * em)
+  const byHeight = vph - chrome - 2 * keep
+  const wide = Math.round(Math.min(byHeight, byWidth, MAX_STAGE * U))
   const isWide = wideDesk && wide >= MIN_STAGE * U
 
   if (!isWide) {
-    const size = Math.round(clamp(Math.min(i.rootWidth - 48 * U, (i.innerHeight ?? i.desk.h) * 0.36), 200, 380))
+    const room = i.innerHeight ?? i.desk.h
+    const size = Math.round(clamp(Math.min(i.rootWidth - 48 * U, room * 0.3), 200 * U, 280 * U))
     return {
       layout: 'narrow', list, size, compact: false, tab, card,
       figure: { left: 0, top: 0 }, unit: U,

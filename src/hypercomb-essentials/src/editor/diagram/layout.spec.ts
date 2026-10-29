@@ -15,10 +15,10 @@ const at = (w: number, h: number, scale = 1, extra: Partial<LayoutInput> = {}) =
 
 describe('layoutFor: the stage size at 100% text', () => {
   it.each([
-    [1920, 1080, 760],
-    [1680, 1000, 760],
-    [1440, 900, 616],
-    [1100, 760, 497],
+    [1920, 1080, 440],
+    [1680, 1000, 440],
+    [1440, 900, 440],
+    [1100, 760, 440],
     [1024, 768, 421],
     [960, 700, 357],
   ])('%i x %i -> %i', (w, h, s) => {
@@ -36,10 +36,11 @@ describe('layoutFor: the stage size at 100% text', () => {
   })
 
   // the mid-width list is 11.5em on paper; the mock rendered it ~211px (its content
-  // would not shrink), which is where 563 and 477 come from. Hand the measured width in.
+  // would not shrink). These desks are under the 440 cap, so the extra list
+  // width still shrinks the stage. Hand the measured width in.
   it.each([
-    [1366, 768, 563, 590],
-    [1280, 800, 477, 504],
+    [1156, 900, 401, 428],
+    [1180, 900, 425, 440],
   ])('%i x %i: %i with the measured list, %i from the nominal one', (w, h, measured, nominal) => {
     expect(at(w, h).list).toBe('mid')
     expect(at(w, h).size).toBe(nominal)
@@ -51,15 +52,15 @@ describe('layoutFor: the stage size at 100% text', () => {
     const phone = at(390, 844)
     expect(phone.layout).toBe('narrow')
     expect(phone.size).toBeGreaterThanOrEqual(200)
-    expect(phone.size).toBeLessThanOrEqual(380)
+    expect(phone.size).toBeLessThanOrEqual(280)
     expect(phone.figure).toEqual({ left: 0, top: 0 })
   })
 })
 
 describe('layoutFor: text size', () => {
   it('140% text flips earlier and changes the numbers', () => {
-    expect(at(1920, 1080, 1.4).size).toBe(789)
-    expect(at(1440, 900, 1.4).size).toBe(618)
+    expect(at(1920, 1080, 1.4).size).toBe(616)
+    expect(at(1440, 900, 1.4).size).toBe(544)
     expect(at(1280, 800, 1.4).layout).toBe('narrow')
   })
 })

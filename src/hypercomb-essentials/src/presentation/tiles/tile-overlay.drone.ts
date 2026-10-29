@@ -1090,6 +1090,10 @@ export class TileOverlayDrone extends Drone {
         }
         if (payload.active) {
           this.#editCooldown = false
+          // The desk covers the hive. The icon hint that was up under the
+          // pointer would otherwise stay painted over the desk until the
+          // pointer moves. A docked editor leaves the hive beside it live.
+          if (payload.surface !== 'dock') this.#suppressHover()
         } else {
           this.#editCooldown = true
           this.#editCooldownTimer = setTimeout(() => {

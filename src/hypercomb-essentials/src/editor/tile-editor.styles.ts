@@ -78,7 +78,8 @@ ${S} .hc-rail-back.root{color:var(--hc-window-ink-quiet);}
 
 /* ── HEADER ────────────────────────────────────────────────────────────── */
 ${S} .te-head{flex:0 0 auto;position:relative;display:flex;align-items:center;gap:0.5em;
-  height:2.75em;box-sizing:border-box;padding:0 0.5em 0 0.9em;}
+  height:2.75em;box-sizing:border-box;padding:0 0.5em 0 0.9em;
+  box-shadow:inset 0 -1px 0 var(--te-rule);}
 ${S} .te-reading{flex:0 1 auto;min-width:0;font-family:var(--te-read);font-size:1.02em;font-weight:500;color:var(--te-ink);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .te-address{flex:0 1 auto;min-width:0;font-size:0.72em;color:var(--te-ink-quiet);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -119,7 +120,7 @@ ${S} .te-leave-choices{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:
 /* ── BODY: the list, and the viewport the drawing lives in ──────────────── */
 ${S} .te-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:row;position:relative;}
 ${S} .te-list{flex:0 0 auto;display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden;box-sizing:border-box;
-  background:var(--md-surface,#0d151e);}
+  background:var(--md-surface,#0d151e);box-shadow:inset -1px 0 0 var(--te-rule);}
 ${S} .te-panel[data-list="full"] .te-list{width:14.5em;}
 ${S} .te-panel[data-list="mid"] .te-list{width:11.5em;}
 ${S} .te-panel[data-list="faces"] .te-list{width:3.7em;}
@@ -182,7 +183,7 @@ ${S} .te-look-name{visibility:hidden;}
 ${S} .te-empty{position:absolute;inset:0;display:grid;grid-template-rows:1fr 2.6em 1fr;justify-items:center;
   pointer-events:none;color:var(--hc-window-on-scrim,rgba(255,255,255,0.96));text-align:center;}
 ${S} .te-empty-mark{align-self:end;margin-bottom:0.2em;font-size:1.9em;opacity:0.78;}
-${S} .te-empty-tools{align-self:start;display:flex;flex-direction:column;align-items:center;gap:0.45em;margin-top:0.3em;}
+${S} .te-empty-tools{align-self:start;display:flex;flex-direction:column;align-items:center;gap:0.45em;margin-top:0.3em;max-width:68%;}
 ${S} .te-empty-tools p{margin:0;font-family:var(--te-read);font-size:0.74em;color:var(--hc-window-on-scrim-quiet,rgba(255,255,255,0.82));}
 ${S} .te-empty-tools div{display:flex;gap:0.35em;pointer-events:auto;}
 ${S} .te-empty-btn{appearance:none;border:0;display:inline-flex;align-items:center;gap:0.35em;height:1.95em;padding:0 0.8em;
