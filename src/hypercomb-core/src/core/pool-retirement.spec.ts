@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   BARE_WORD_POOL_MEANINGS, RETIRED_POOL_MEANINGS, SCOPED_POOL_MEANINGS,
-  isPoolAddress, poolMeaningOf,
+  canonicalPoolMeaning, isPoolAddress, poolMeaningOf,
 } from './pool-registry.js'
 import { validatePoolSpelling } from './molecule-address.js'
 
@@ -21,7 +21,9 @@ describe('retired pool meanings', () => {
     for (const meaning of RETIRED_POOL_MEANINGS) {
       const address = await addressOf(meaning)
       expect(await isPoolAddress(address), `${meaning} is not a known pool address`).toBe(true)
-      expect(await poolMeaningOf(address)).toBe(meaning)
+      // The directory stays a pool. The text it announces is the current name,
+      // so a listing does not keep showing the spelling that was retired.
+      expect(await poolMeaningOf(address)).toBe(canonicalPoolMeaning(meaning))
     }
   })
 

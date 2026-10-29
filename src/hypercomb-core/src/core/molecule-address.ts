@@ -27,7 +27,7 @@
 
 import { SignatureService } from './signature.service.js'
 import { canonicalizeLineageSegment } from './lineage-key.js'
-import { BARE_WORD_POOL_MEANINGS, reservedColonScopes } from './pool-registry.js'
+import { BARE_WORD_POOL_MEANINGS, reservedColonScopes, spellPoolMeaning } from './pool-registry.js'
 
 /** A 64-hex signature — the only thing that may follow a colon besides a
  *  reserved system word. */
@@ -238,11 +238,15 @@ export const validatePoolSpelling = (
 ): SpellingVerdict => {
   const raw = String(meaning ?? '').trim()
   if (!raw) return { ok: false, reason: 'an empty spelling addresses the ROOT, not a pool' }
+  // The standard name: letters, digits, single hyphens, and at most one
+  // system colon. Shown when the caller's text is not already that name.
+  const spelled = spellPoolMeaning(raw)
+  const suggestion = spelled && spelled !== raw ? spelled : undefined
   if (raw.includes('/')) {
     return {
       ok: false,
       reason: 'a pool address is one hash of one word — a slash is a path, and paths are routes, never addresses',
-      suggestion: raw.split('/').filter(Boolean).join('-'),
+      suggestion,
     }
   }
 
@@ -251,7 +255,7 @@ export const validatePoolSpelling = (
     return {
       ok: false,
       reason: 'a pool never contains another pool — everything below the first level is a bucket, never a new meaning',
-      suggestion: `${parts[0]}:${parts.slice(1).join('-')}`,
+      suggestion,
     }
   }
 
@@ -268,7 +272,7 @@ export const validatePoolSpelling = (
     return {
       ok: false,
       reason: `after a colon: a reserved system word or a 64-hex signature, never a user word — '${scope}' is not reserved and '${tail}' is not a signature`,
-      suggestion: `${scope}-${tail}`,
+      suggestion,
     }
   }
 

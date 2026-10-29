@@ -46,6 +46,20 @@ canonicalization folds plurals.
 `cigar:brand`. Two user words joined by a colon is a path with a different
 separator, and it costs both things that make colons useful (below).
 
+**2a. A word is letters, digits, and single hyphens.** `standardName`
+(`lineage-key.ts`) is the spelling a human types and an AI emits. Letters of
+any script and digits stay. Every other run — space, slash, quote, underscore,
+a colon that is not the one system colon — becomes one hyphen. Hyphens never
+repeat and never sit on an edge. Case is folded, so `My Tile` and `my-tile`
+are one name. Digits stay, because `chapter-1` and `chapter-2` are different
+names. `spellPoolMeaning` applies that to a pool meaning and keeps at most
+one system colon (`games:solomon-talk`).
+
+A rename does not rewrite the old directory in place. The old spelling is a
+ref (`POOL_MENDS` in `pool-registry.ts`): still a real address, still seeded
+so a root walk does not prune it, and read when the current directory misses.
+Writes open the current name only. The boot absorb copies the members across.
+
 **3. After a colon: a reserved system word, or a 64-hex signature. Never a user
 word.** This is what keeps the two namespaces apart.
 

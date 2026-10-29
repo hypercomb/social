@@ -34,6 +34,7 @@
 // collision-proof by construction. The doctrine ratchet in `doctrine.spec.ts`
 // freezes the bare-word set below — it may only shrink, never grow.
 
+import { standardName } from './lineage-key.js'
 import { SignatureService } from './signature.service.js'
 
 /**
@@ -755,32 +756,58 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'derivation:dialects',
 ])
 
-/** Every meaning known at build time. */
 /**
- * SPELLINGS THAT WERE ONCE WRITTEN AND ARE NO LONGER WRITTEN.
+ * A RENAME LEAVES A REF.
  *
- * A pool's address is the hash of its meaning, so RESPELLING A MEANING MOVES
- * IT. The bytes already written under the old spelling do not move with it,
- * and data never heals: the old address stays a read-fallback in whatever
- * module owns the feature, and nothing ever writes it again.
+ * A pool's address is the hash of its spelling, so a new name is a new
+ * directory. `from` is the obsolete connection: still seeded, so a root walk
+ * never prunes it as a lineage bag, and still readable, so the bytes are not
+ * stranded. `to` is the current name — the only directory writes open.
+ * `poolSignature` hashes the spelling it is given (the ref has to stay
+ * addressable). `getPool` / `openPool` resolve through `canonicalPoolMeaning`
+ * first, and a read of `to` that misses falls through to each `from`.
  *
- * They stay SEEDED for one reason that matters more than tidiness: anything
- * that walks, prunes or enumerates the root asks this registry whether a
- * sig-named directory is a pool. Forget a retired address and its directory
- * looks like a lineage bag to the next prune. Seeding it here keeps that
- * answer right from boot rather than from whenever the owning module happens
- * to load.
+ * The boot absorb copies members across. A colon-scoped `from` can give up
+ * its directory once it is empty. A bare-word `from` is also a tile's lineage
+ * bag, so its `000x` markers stay and the directory stays with them.
  *
- * NOT part of SCOPED_POOL_MEANINGS: these are history, so the spelling rules
- * that govern live meanings do not apply to them, and they reserve no scope.
- * This list may grow when a meaning is retired; an entry may never be removed.
+ * A row stays while any replica may still hold `from`. Dropping it early
+ * makes the old directory look like a lineage bag.
  */
-export const RETIRED_POOL_MEANINGS: readonly string[] = Object.freeze([
-  // → 'games:solomon-talk' (2026-09-20). Read-fallback in
-  // essentials/games/solomon/resident-chat.ts; nothing writes it.
-  'games:solomon:talk',
+export const POOL_MENDS: readonly { readonly from: string; readonly to: string }[] = Object.freeze([
+  // Two colons (2026-09-20). A pool never contains a pool, so the tail is
+  // one hyphenated word. The old directory is the ref.
+  { from: 'games:solomon:talk', to: 'games:solomon-talk' },
 ])
 
+/** Obsolete spellings. Derived from `POOL_MENDS` — never a second list.
+ *  Seeded, and not part of `SCOPED_POOL_MEANINGS`: history, not a live scope. */
+export const RETIRED_POOL_MEANINGS: readonly string[] = Object.freeze(
+  POOL_MENDS.map(mend => mend.from),
+)
+
+/** obsolete spelling → current name. Built once. */
+const MEND_TO = new Map<string, string>(POOL_MENDS.map(mend => [mend.from, mend.to]))
+
+/** Spellings seen this session that are not yet a durable row. A caller that
+ *  still passes the old text keeps the old directory reachable until reboot;
+ *  a rename that must survive reboot is a row in `POOL_MENDS`. */
+const learnedObsolete = new Map<string, Set<string>>()
+
+/** Follow refs to the current name. A cycle returns the spelling we started
+ *  from — a loop must not walk a write onto itself forever. */
+export const mendTarget = (meaning: string): string => {
+  let current = String(meaning ?? '').trim()
+  const seen = new Set<string>()
+  while (MEND_TO.has(current) && !seen.has(current)) {
+    seen.add(current)
+    current = MEND_TO.get(current) ?? current
+  }
+  return seen.has(current) ? String(meaning ?? '').trim() : current
+}
+
+/** Every meaning known at build time. Retired spellings included: their
+ *  directories are still pools until the ref is gone. */
 const SEED_MEANINGS: readonly string[] = Object.freeze([
   ...BARE_WORD_POOL_MEANINGS,
   ...SCOPED_POOL_MEANINGS,
@@ -801,7 +828,11 @@ const derive = async (meaning: string): Promise<string> => {
     new TextEncoder().encode(meaning).buffer as ArrayBuffer,
   )
   addressByMeaning.set(meaning, sig)
-  meaningByAddress.set(sig, meaning)
+  // An obsolete spelling announces the current name. The directory is still
+  // a pool — the ref — and the text a walker shows is the name it mends to.
+  const label = mendTarget(meaning)
+  const labeled = meaningByAddress.get(sig)
+  if (!labeled || labeled === meaning) meaningByAddress.set(sig, label)
   return sig
 }
 
@@ -862,6 +893,69 @@ export const reservedColonScopes = (): ReadonlySet<string> => {
     if (colon > 0) scopes.add(meaning.slice(0, colon))
   }
   return scopes
+}
+
+const SIGNATURE_TAIL = /^[0-9a-f]{64}$/i
+
+/**
+ * The standard spelling of a pool meaning.
+ *
+ * Each word is `standardName`: letters, digits, single hyphens, case folded.
+ * One colon stays, and only when it is the system form — a reserved scope,
+ * or a 64-hex subject. Any further colon, slash, or other punctuation is a
+ * hyphen in the tail. `games:solomon:talk` and `games:solomon-talk` are one
+ * name. A user colon (`cigar:brand`) is punctuation too, so the name is
+ * `cigar-brand`.
+ *
+ * Idempotent on every live seeded meaning. It does not hash and it does not
+ * follow a rename ref — `canonicalPoolMeaning` does that.
+ */
+export const spellPoolMeaning = (raw: unknown): string => {
+  const text = String(raw ?? '').trim()
+  if (!text) return ''
+  const parts = text.split(':')
+  if (parts.length === 2 && SIGNATURE_TAIL.test(parts[1] ?? '')) {
+    const scope = standardName(parts[0])
+    return scope ? `${scope}:${(parts[1] ?? '').toLowerCase()}` : ''
+  }
+  const scope = standardName(parts[0])
+  const tail = standardName(parts.slice(1).join('-'))
+  if (parts.length >= 2 && scope && tail && reservedColonScopes().has(scope)) {
+    return `${scope}:${tail}`
+  }
+  return standardName(parts.join('-'))
+}
+
+/** The directory a call writes: the standard spelling, then any rename ref. */
+export const canonicalPoolMeaning = (meaning: string): string => {
+  const raw = String(meaning ?? '').trim()
+  if (!raw) return ''
+  return mendTarget(spellPoolMeaning(raw) || raw)
+}
+
+/** Remember an obsolete spelling for the rest of this session. A reboot only
+ *  remembers rows in `POOL_MENDS`. */
+export const noteObsoleteSpelling = (canonical: string, raw: string): void => {
+  const name = mendTarget(canonical)
+  const from = String(raw ?? '').trim()
+  if (!name || !from || from === name) return
+  let set = learnedObsolete.get(name)
+  if (!set) { set = new Set(); learnedObsolete.set(name, set) }
+  set.add(from)
+}
+
+/** Obsolete spellings whose bytes still belong to `meaning`. Durable rows
+ *  plus anything `noteObsoleteSpelling` saw this session. */
+export const obsoletePoolSpellings = (meaning: string): readonly string[] => {
+  const name = canonicalPoolMeaning(meaning)
+  if (!name) return []
+  const found = new Set<string>()
+  for (const mend of POOL_MENDS) {
+    if (mendTarget(mend.to) === name) found.add(mend.from)
+  }
+  for (const extra of learnedObsolete.get(name) ?? []) found.add(extra)
+  found.delete(name)
+  return [...found]
 }
 
 /** sign(meaning) → meaning for every known pool, for labelling a root

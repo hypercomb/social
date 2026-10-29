@@ -364,3 +364,25 @@ describe('putPoolDoc — a key never enters a pool', () => {
     }
   })
 })
+
+describe('a renamed pool reads the directory it left behind', () => {
+  it('returns the obsolete bytes when the current directory is empty, and the current bytes when it has them', async () => {
+    const currentSig = await StoreClass.poolSignature('games:solomon-talk')
+    const obsoleteSig = await StoreClass.poolSignature('games:solomon:talk')
+    const root = new MockDir('opfs')
+    const current = new MockDir(currentSig)
+    const obsolete = new MockDir(obsoleteSig)
+    obsolete.put(await sha256('mara-talk'), '{"residentId":"mara"}')
+    root.dirs.set(obsoleteSig, obsolete)
+    const host = store as unknown as { opfsRoot?: MockDir }
+    const previous = host.opfsRoot
+    host.opfsRoot = root
+    try {
+      expect(textOf(await store.getPoolDoc(current))).toBe('{"residentId":"mara"}')
+      current.put(await sha256('newer-talk'), '{"residentId":"newer"}')
+      expect(textOf(await store.getPoolDoc(current))).toBe('{"residentId":"newer"}')
+    } finally {
+      host.opfsRoot = previous
+    }
+  })
+})

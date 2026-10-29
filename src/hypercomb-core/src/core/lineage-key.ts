@@ -59,6 +59,33 @@ export const canonicalizeLineageSegment = (raw: unknown): string =>
   String(raw ?? '').normalize('NFC').replace(SEPARATORS, '-').replace(EDGE_HYPHENS, '')
 
 /**
+ * THE NAME A HUMAN TYPES AND AN AI EMITS.
+ *
+ * Letters of any script, digits, and single hyphens. Every other run —
+ * space, slash, colon, quote, underscore, emoji — becomes one hyphen.
+ * Hyphens never repeat and never sit on an edge. Case is folded with the
+ * locale-independent `toLowerCase`, so `My Tile` and `my-tile` are one name
+ * and two machines agree on it.
+ *
+ * Digits stay. `chapter 1` and `chapter 2` are different names; folding the
+ * number into the hyphen would make them the same tile. A non-Latin letter
+ * stays, so a Japanese name is still that name.
+ *
+ * This is NOT the lineage preimage. `canonicalizeLineageSegment` keeps case
+ * because history bags and swarm channels already hash that string. Folding
+ * case there would move every bag. A pool meaning's words pass through here;
+ * a rename leaves the old spelling as a ref (`POOL_MENDS`).
+ *
+ * Idempotent — spelling an already-standard name changes nothing.
+ */
+export const standardName = (raw: unknown): string =>
+  String(raw ?? '')
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(SEPARATORS, '-')
+    .replace(EDGE_HYPHENS, '')
+
+/**
  * The canonical key for a lineage path — the exact preimage hashed into a
  * sigbag address. Canonicalize each segment, drop segments that were empty to
  * begin with, join with '/'. After canonicalization no segment can contain '/',

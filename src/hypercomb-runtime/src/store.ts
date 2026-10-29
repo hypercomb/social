@@ -15,6 +15,10 @@ import {
   markerName,
   metaPayloadOf,
   mintMetaEnvelope,
+  canonicalPoolMeaning,
+  noteObsoleteSpelling,
+  obsoletePoolSpellings,
+  POOL_MENDS,
   poolMeaningOf,
   registerPoolMeaning,
   resolveMetaArtifact,
@@ -303,15 +307,39 @@ export class Store extends EventTarget {
   public static poolSignature = (meaning: string): Promise<string> =>
     registerPoolMeaning(meaning)
 
+  /** Open the directory a meaning names. `create` lands on the CURRENT name
+   *  (`canonicalPoolMeaning`) and makes it. A read that finds no current
+   *  directory follows obsolete refs and does not create them. The hash of
+   *  the exact spelling stays `poolSignature` — a ref has to remain a real
+   *  address. */
+  #poolDirectory = async (meaning: string, create: boolean): Promise<FileSystemDirectoryHandle | null> => {
+    if (!this.#opfsAvailable || !this.opfsRoot) return null
+    const raw = String(meaning ?? '').trim()
+    const name = canonicalPoolMeaning(raw)
+    if (!name) return null
+    if (raw !== name) {
+      noteObsoleteSpelling(name, raw)
+      await registerPoolMeaning(raw)
+    }
+    try {
+      return await this.opfsRoot.getDirectoryHandle(await Store.poolSignature(name), { create })
+    } catch {
+      if (create) return null
+    }
+    for (const obsolete of obsoletePoolSpellings(name)) {
+      try {
+        return await this.opfsRoot.getDirectoryHandle(await Store.poolSignature(obsolete), { create: false })
+      } catch { /* this replica does not hold that ref */ }
+    }
+    return null
+  }
+
   /** Open (creating if needed) the pool dir for a meaning — for IoC
    *  consumers that need a pool Store doesn't pre-open. Null when OPFS
-   *  is unavailable. */
-  public getPool = async (meaning: string): Promise<FileSystemDirectoryHandle | null> => {
-    if (!this.#opfsAvailable) return null
-    try {
-      return await this.opfsRoot.getDirectoryHandle(await Store.poolSignature(meaning), { create: true })
-    } catch { return null }
-  }
+   *  is unavailable. A retired or punctuated spelling opens the current
+   *  directory, so a write never lands in the obsolete one. */
+  public getPool = async (meaning: string): Promise<FileSystemDirectoryHandle | null> =>
+    this.#poolDirectory(meaning, true)
 
   /** THE READ-ONLY OPEN — it never CREATES. That is the whole guarantee, and
    *  it holds on every backend.
@@ -343,12 +371,8 @@ export class Store extends EventTarget {
    *  Registering the meaning still happens (`poolSignature` derives and
    *  registers), because knowing an address is a pool is exactly what makes
    *  a walker safe — that half was never the cost. */
-  public openPool = async (meaning: string): Promise<FileSystemDirectoryHandle | null> => {
-    if (!this.#opfsAvailable) return null
-    try {
-      return await this.opfsRoot.getDirectoryHandle(await Store.poolSignature(meaning), { create: false })
-    } catch { return null }
-  }
+  public openPool = async (meaning: string): Promise<FileSystemDirectoryHandle | null> =>
+    this.#poolDirectory(meaning, false)
 
   // -------------------------------------------------
   // content-addressed document pools
@@ -488,6 +512,41 @@ export class Store extends EventTarget {
    *  bare-word address) is not a document head and falls back the same way.
    *  Null when the pool/sub-bucket is absent or empty. */
   public getPoolDoc = async (
+    pool: FileSystemDirectoryHandle | undefined,
+    subKey?: string,
+  ): Promise<ArrayBuffer | null> => {
+    if (!pool) return null
+    // The current name wins when this handle is an obsolete ref. A miss
+    // then walks the other refs of the same name. A directory that is not
+    // a known pool reads exactly as it always did.
+    const label = pool.name ? await poolMeaningOf(pool.name) : undefined
+    if (label && this.opfsRoot) {
+      try {
+        const currentSig = await Store.poolSignature(canonicalPoolMeaning(label))
+        if (currentSig !== pool.name) {
+          const current = await this.opfsRoot.getDirectoryHandle(currentSig, { create: false })
+          const newer = await Store.#readPoolDoc(current, subKey)
+          if (newer) return newer
+        }
+      } catch { /* the current directory is not on this replica yet */ }
+    }
+    const local = await Store.#readPoolDoc(pool, subKey)
+    if (local || !label || !this.opfsRoot) return local
+    for (const obsolete of obsoletePoolSpellings(label)) {
+      try {
+        const sig = await Store.poolSignature(obsolete)
+        if (sig === pool.name) continue
+        const dir = await this.opfsRoot.getDirectoryHandle(sig, { create: false })
+        const older = await Store.#readPoolDoc(dir, subKey)
+        if (older) return older
+      } catch { /* that ref is not held here */ }
+    }
+    return null
+  }
+
+  /** The bytes in THIS directory. No mend — `getPoolDoc` decides which
+   *  directories to ask. */
+  static #readPoolDoc = async (
     pool: FileSystemDirectoryHandle | undefined,
     subKey?: string,
   ): Promise<ArrayBuffer | null> => {
@@ -1786,6 +1845,26 @@ export class Store extends EventTarget {
       this.legacyTranslations = undefined
     }
     await this.#absorbBarePools()
+    await this.#absorbMends()
+  }
+
+  /** Copy each rename's obsolete directory into its current one. A bare-word
+   *  ref keeps its `000x` markers — that directory is also a tile's history.
+   *  A colon-scoped ref is only a pool, so an empty one is removed. */
+  #absorbMends = async (): Promise<void> => {
+    if (!this.opfsRoot) return
+    for (const mend of POOL_MENDS) {
+      if (!mend.from || mend.from === mend.to) continue
+      const fromSig = await Store.poolSignature(mend.from)
+      const toSig = await Store.poolSignature(mend.to)
+      if (fromSig === toSig) continue
+      let source: FileSystemDirectoryHandle | undefined
+      try { source = await this.opfsRoot.getDirectoryHandle(fromSig) } catch { source = undefined }
+      if (!source) continue
+      const target = await this.opfsRoot.getDirectoryHandle(toSig, { create: true })
+      await this.#absorbLegacyBucketDir(source, target, fromSig)
+      await this.#absorbLegacyPool(source, target, fromSig, !mend.from.includes(':'))
+    }
   }
 
   /** THE COLON MIGRATION'S DRAIN: each system pool's bare-spelled directory
