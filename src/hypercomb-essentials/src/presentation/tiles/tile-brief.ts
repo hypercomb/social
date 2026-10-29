@@ -131,7 +131,7 @@ export async function readTileBrief(
   return {
     segments: path,
     label,
-    title: (label ? titleForLabel(label, navigator.language) : '') || label,
+    title: (label ? titleForLabel(label) : '') || label,
     lists: split.lists,
     notes: split.notes,
     behaviors: behaviors.map(behavior => ({

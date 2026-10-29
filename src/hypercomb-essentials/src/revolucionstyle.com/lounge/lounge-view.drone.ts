@@ -172,7 +172,7 @@ export class LoungeViewDrone extends Drone {
 
     // ── the only chrome: a way out, and the camera ──────────────────────
     const label = segments.at(-1) ?? ''
-    const title = payload.label || titleForLabel(label, navigator.language) || label
+    const title = payload.label || titleForLabel(label) || label
 
     const close = document.createElement('button')
     close.type = 'button'

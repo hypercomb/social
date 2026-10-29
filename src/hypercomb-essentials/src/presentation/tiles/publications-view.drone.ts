@@ -198,7 +198,7 @@ export class PublicationsViewDrone extends Drone {
       const payload = records.at(-1)?.record.payload
       const label = segments.at(-1) ?? ''
       title = payload?.title
-        || (label ? titleForLabel(label, navigator.language) || label : 'Publications')
+        || (label ? titleForLabel(label) || label : 'Publications')
       tagline = payload?.tagline ?? ''
 
       // The directory never lists itself — by origin when deployed, by the

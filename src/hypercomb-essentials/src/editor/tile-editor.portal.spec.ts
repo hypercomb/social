@@ -78,7 +78,6 @@ describe('TileEditorDrone Portal defaults', () => {
       { border: { color: '#336699' } },
       null,
       ['people'],
-      'dock',
     )
   })
 
@@ -100,7 +99,6 @@ describe('TileEditorDrone Portal defaults', () => {
       { small: { image: 'a'.repeat(64) } },
       null,
       ['sets', 'family', 'people'],
-      'dock',
     )
   })
 

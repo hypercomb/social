@@ -410,7 +410,7 @@ export class PostitViewDrone extends Drone {
         note.style.width = ''
         note.style.height = ''
       }
-      const title = titleForLabel(cell.label, navigator.language) || cell.label
+      const title = titleForLabel(cell.label) || cell.label
       note.title = `Open the post-it on "${title}"`
       const heading = note.querySelector('.postit-sticky-title')
       if (heading && heading.textContent !== title) heading.textContent = title
@@ -657,7 +657,7 @@ export class PostitViewDrone extends Drone {
     const payload = records.at(-1)?.record.payload
     const label = segments.at(-1) ?? ''
     const title = payload?.title
-      || (label ? titleForLabel(label, navigator.language) || label : 'Post-it')
+      || (label ? titleForLabel(label) || label : 'Post-it')
     // What the post will show, read before anything comes down — so the swap
     // below is one synchronous step: the page, the text, or (no authored
     // content) the tile's own image.

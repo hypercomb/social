@@ -1013,3 +1013,143 @@ describe('tiles rail — the live count never counts one question twice', () => 
     EffectBus.emit('chat:tile-busy', { path: '/diagrams', busy: false })
   })
 })
+
+// ── THE TILE EDITOR'S LIST ─────────────────────────────────────────────
+//
+// The editor mounts the same rail with no chats and no context gathering. A
+// row there is a tile to OPEN, and the chord that gathers context elsewhere
+// is the chord that puts a tile in or out of the editor's GROUP. The editor
+// decides who is in the group (it can refuse a toggle), so the rail only
+// shows it. Rows read as the tile's name in this language, with the address
+// kept in the tooltip.
+describe('tiles rail — the tile editor profile', () => {
+  let host: HTMLElement
+  let rail: InstanceType<typeof AgentTilesRail>
+  let toggled: string[]
+  let opened: Array<string | null>
+  let chosen: number
+
+  const rows = (): HTMLButtonElement[] =>
+    [...host.querySelectorAll(`${TILE_ROWS} .hc-rail-main`)] as HTMLButtonElement[]
+
+  const mountEditorRail = async (extra: Record<string, unknown> = {}): Promise<void> => {
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    toggled = []
+    opened = []
+    chosen = 0
+    rail = new AgentTilesRail({
+      chats: false,
+      choose: false,
+      badge: () => 0,
+      toggle: row => { toggled.push(row.name) },
+      ...extra,
+    })
+    rail.onSubjectChanged = subject => opened.push(subject?.name ?? null)
+    rail.onSelectionChanged = () => { chosen++ }
+    rail.mount(host)
+    await settle()
+  }
+
+  it('ctrl, meta and shift-click and Space toggle a row; a plain click opens it', async () => {
+    await mountEditorRail()
+
+    rows()[0].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    rows()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true }))
+    rows()[2].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }))
+    rows()[0].dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
+    expect(toggled).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos', 'pheromone-workflow'])
+    expect(opened).toEqual([])
+
+    rows()[1].click()
+    expect(opened).toEqual(['diagrams'])
+    expect(toggled.length).toBe(4)
+  })
+
+  it('shows no conversation furniture and keeps no context of its own', async () => {
+    await mountEditorRail()
+    expect(host.querySelector('.hc-rail-convos')).toBeNull()
+    expect(host.querySelector('.hc-rail-hive')).toBeNull()
+    rows()[0].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    expect(rail.selection).toEqual([])
+    expect(chosen).toBe(0)
+  })
+
+  it('draws the tile’s name in place of its address, and keeps the address reachable', async () => {
+    await mountEditorRail({
+      labelOf: (row: { name: string }) => (row.name === 'diagrams' ? 'Diagram Sheets' : row.name),
+    })
+    expect(names(host)).toEqual(['pheromone-workflow', 'Diagram Sheets', 'ai-videos'])
+    expect(rows()[1].title).toContain('diagrams')
+    expect(rows()[1].querySelector('.hc-rail-icon')?.textContent).toBe('D')
+  })
+
+  it('finds a tile by its name or by its address', async () => {
+    await mountEditorRail({
+      labelOf: (row: { name: string }) => (row.name === 'diagrams' ? 'Diagram Sheets' : row.name),
+    })
+    const find = host.querySelector('.hc-rail-find input') as HTMLInputElement
+    const type = (value: string): void => { find.value = value; find.dispatchEvent(new Event('input')) }
+    type('sheets')
+    expect(names(host)).toEqual(['Diagram Sheets'])
+    type('diagrams')
+    expect(names(host)).toEqual(['Diagram Sheets'])
+  })
+
+  it('marks the tiles it is told to, silently, and lets them go', async () => {
+    await mountEditorRail()
+    rail.showSelection([['pheromone-workflow'], ['ai-videos']])
+    expect(rows().map(row => row.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'true'])
+    expect(host.querySelectorAll(`${TILE_ROWS} .hc-rail-row.chosen`).length).toBe(2)
+    expect(chosen).toBe(0)
+    expect(opened).toEqual([])
+
+    // a repaint keeps them
+    rail.paint()
+    expect(rows().map(row => row.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'true'])
+
+    rail.showSelection([])
+    expect(rows().map(row => row.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'false'])
+  })
+
+  it('outlines the sibling a refused name collided with, quietly, and lets it go', async () => {
+    await mountEditorRail()
+    rail.markSibling(['ai-videos'])
+    const marked = host.querySelectorAll(`${TILE_ROWS} .hc-rail-row.sibling`)
+    expect(marked.length).toBe(1)
+    expect(marked[0].querySelector('.hc-rail-name')?.textContent).toBe('ai-videos')
+    expect(marked[0].querySelector('.hc-rail-same')?.textContent).toBe('same name')
+    expect(opened).toEqual([])
+    expect(chosen).toBe(0)
+
+    rail.paint()
+    expect(host.querySelectorAll(`${TILE_ROWS} .hc-rail-row.sibling`).length).toBe(1)
+    expect(host.querySelectorAll('.hc-rail-same').length).toBe(1)
+
+    rail.markSibling(null)
+    expect(host.querySelectorAll('.hc-rail-row.sibling').length).toBe(0)
+    expect(host.querySelectorAll('.hc-rail-same').length).toBe(0)
+  })
+
+  it('right-click at the root level is left alone, so the surface can back out', async () => {
+    await mountEditorRail()
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    host.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('lights a tile on another level by moving the list there, without announcing it', async () => {
+    await mountEditorRail()
+    let moved = 0
+    rail.onLevelChanged = () => { moved++ }
+
+    rail.showCurrent('inside', ['pheromone-workflow'])
+    await settle()
+
+    expect(names(host)).toEqual(['inside'])
+    expect(rows()[0].getAttribute('aria-current')).toBe('true')
+    expect(rail.subject?.path).toEqual(['pheromone-workflow'])
+    expect(moved).toBe(0)
+    expect(opened).toEqual([])
+  })
+})

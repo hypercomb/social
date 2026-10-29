@@ -22,13 +22,13 @@ import {
   listDecorations,
   type DecorationRecord,
 } from './decoration-manifest.js'
-import { TAG_DECORATION_KIND, tagSigFor, TITLE_DECORATION_KIND, titleForSegments } from './decoration-kind-index.js'
+import {
+  TAG_DECORATION_KIND, tagSigFor, TITLE_DECORATION_KIND, titleForSegments, activeTitleLocale,
+} from './decoration-kind-index.js'
 import { canonicalizeLineageSegment } from '../history/lineage-key.js'
-import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 
 /** The locale a title is written in when the caller doesn't name one. */
-const activeLocale = (): string =>
-  (window.ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.locale ?? 'en'
+const activeLocale = activeTitleLocale
 
 /** Just enough of HistoryService to enumerate a cell's siblings. */
 type HistoryLike = {
@@ -80,14 +80,30 @@ export class DecorationService {
     return title ? canonicalizeLineageSegment(title) : ''
   }
 
+  /** How a cell READS right now, synchronously: its title for this locale
+   *  (default: the active locale) from the index, otherwise its own name. This
+   *  is the string a list row or heading should draw — the name is the
+   *  ADDRESS, so a list that draws it alone never shows a rename. '' title
+   *  here can also mean "the index has not walked this cell yet"; the caller
+   *  then shows the address, which is honest. */
+  readingAt(segments: readonly string[], locale?: string): string {
+    return titleForSegments(segments, locale ?? activeLocale()) || (segments[segments.length - 1] ?? '')
+  }
+
   /** How a sibling READS right now: its title for this locale if it has one,
    *  otherwise its own name. This is the string the participant actually sees,
-   *  which is what a duplicate check has to compare against. */
+   *  which is what a duplicate check has to compare against.
+   *
+   *  Index first — a title the index holds is answered without touching OPFS.
+   *  Only a sibling the index shows no title for falls back to reading its
+   *  slot, because an empty answer can also mean the index has not walked it. */
   async #readingOf(segments: readonly string[], locale: string): Promise<string> {
+    const indexed = titleForSegments(segments, locale)
+    if (indexed) return indexed
     return (await this.titleOf(segments, locale)) || (segments[segments.length - 1] ?? '')
   }
 
-  /** The reading of a sibling that already looks like `text`, or null.
+  /** The reading AND the address of a sibling that already looks like `text`, or null.
    *
    *  Titles cannot COLLIDE the way names can — the address is untouched and
    *  `appliesTo: []` means two cells with the same title even share one record.
@@ -102,16 +118,18 @@ export class DecorationService {
     segments: readonly string[],
     text: string,
     locale?: string,
-  ): Promise<string | null> {
+  ): Promise<{ reading: string; address: string } | null> {
     const target = locale ?? activeLocale()
     const wanted = text.trim().toLowerCase()
     if (!wanted) return null                       // clearing can never duplicate
     const parent = segments.slice(0, -1)
-    for (const name of await this.#siblingNames(segments)) {
-      const reading = await this.#readingOf([...parent, name], target)
-      if (reading.trim().toLowerCase() === wanted) return reading
-    }
-    return null
+    // Every sibling is read at once: a cold scan of a large page was a
+    // sequential OPFS read per sibling, which left the heading looking
+    // committed for seconds while nothing had been written.
+    const names = await this.#siblingNames(segments)
+    const readings = await Promise.all(names.map(name => this.#readingOf([...parent, name], target)))
+    const at = readings.findIndex(reading => reading.trim().toLowerCase() === wanted)
+    return at < 0 ? null : { reading: readings[at], address: names[at] }
   }
 
   /** Names of the cells alongside `segments`, self excluded. Read from the
@@ -125,9 +143,9 @@ export class DecorationService {
     const parentSig = await history.sign({ explorerSegments: () => parent })
     const layer = await history.currentLayerAt(parentSig)
     const children = Array.isArray(layer?.['children']) ? (layer['children'] as unknown[]) : []
+    const layers = await Promise.all(children.map(sig => history.getLayerBySig(String(sig ?? ''))))
     const names: string[] = []
-    for (const sig of children) {
-      const child = await history.getLayerBySig(String(sig ?? ''))
+    for (const child of layers) {
       const name = typeof child?.['name'] === 'string' ? (child['name'] as string) : ''
       if (name && name !== self) names.push(name)
     }
@@ -142,7 +160,10 @@ export class DecorationService {
       kind: TITLE_DECORATION_KIND,
       segments,
     })
-    for (const entry of records) {
+    // Newest record first — the index keeps the LAST title record it sees, so
+    // the heading and the hive must read the same one when a slot ever holds
+    // more than one.
+    for (const entry of [...records].reverse()) {
       const byLocale = entry.record.payload?.text
       const value = byLocale && typeof byLocale === 'object' ? byLocale[target] : undefined
       if (typeof value === 'string' && value.trim()) return value.trim()
@@ -164,7 +185,30 @@ export class DecorationService {
    *
    *  Both `/title` and the tile editor funnel through here — the editor lives
    *  in shared and reaches it via IoC, never by import. */
-  async setTitle(
+  setTitle(
+    segments: readonly string[],
+    text: string,
+    locale?: string,
+  ): Promise<'set' | 'cleared' | 'noop' | 'duplicate'> {
+    // One title write at a time per PAGE. Two overlapping writes on a tile each
+    // read the old record and each appended a new one, leaving two records —
+    // the heading then read the first and the hive the last. Serialising per
+    // parent also closes the sibling race: two tiles titled at once to the same
+    // words would each pass the duplicate check before either had written.
+    const lane = segments.slice(0, -1).join('/')
+    const run = (this.#titleLanes.get(lane) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.#setTitleNow(segments, text, locale))
+    const tail = run.catch(() => undefined)
+    this.#titleLanes.set(lane, tail)
+    void tail.then(() => { if (this.#titleLanes.get(lane) === tail) this.#titleLanes.delete(lane) })
+    return run
+  }
+
+  /** The tail of the title write in flight for each page, by parent path. */
+  #titleLanes = new Map<string, Promise<unknown>>()
+
+  async #setTitleNow(
     segments: readonly string[],
     text: string,
     locale?: string,

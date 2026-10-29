@@ -2,14 +2,23 @@
 import { EffectBus } from '@hypercomb/core'
 import { EDITOR_FIELDS, type EditorField, type PropertyChoice, type PropertyLayer } from './tile-properties.js'
 
-/** Where an editing session is shown. `dock` sits beside the hive, which
- *  stays visible; `page` is a full-height page on a phone. A payload with no
- *  surface is the old modal and keeps its old meaning for anyone listening. */
-export type EditorSurfaceKind = 'dock' | 'page'
+import { MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 
+/** The app's phone mode — pointer and size, or the `/mobile on` override. */
+export const mobileModeActive = (): boolean => {
+  try {
+    const mobile = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
+      ?.get?.(MOBILE_MODE_IOC_KEY) as { active?: boolean } | undefined
+    return mobile?.active === true
+  } catch { return false }
+}
+
+/** The editor is one full-screen desk. `surface` stays on the payload and is
+ *  always 'screen': a payload with no surface is the old modal, and anyone
+ *  listening would hide the pixi host as one. */
 export type EditorModePayload = {
   active: boolean
-  surface?: EditorSurfaceKind
+  surface?: 'screen'
   label?: string
   segments?: readonly string[]
 }
@@ -43,7 +52,6 @@ export class TileEditorService extends EventTarget {
   #properties: Record<string, unknown> = {}
   #baseline = '{}'
   #largeBlob: Blob | null = null
-  #surface: EditorSurfaceKind = 'dock'
   #saving = false
   #error = ''
   #stash: EditorDraftStash | null = null
@@ -70,7 +78,6 @@ export class TileEditorService extends EventTarget {
   get targetSegments(): readonly string[] { return this.#targetSegments }
   get properties(): Record<string, unknown> { return this.#properties }
   get largeBlob(): Blob | null { return this.#largeBlob }
-  get surface(): EditorSurfaceKind { return this.#surface }
   get saving(): boolean { return this.#saving }
   get error(): string { return this.#error }
   get layers(): Readonly<Record<EditorField, PropertyLayer>> | null { return this.#layers }
@@ -112,14 +119,12 @@ export class TileEditorService extends EventTarget {
     properties: Record<string, unknown>,
     largeBlob: Blob | null,
     targetSegments: readonly string[] = [],
-    surface: EditorSurfaceKind = 'dock',
   ): void => {
     this.#cell = cell
     this.#targetSegments = [...targetSegments]
     this.#properties = clone(properties)
     this.#baseline = JSON.stringify(this.#properties)
     this.#largeBlob = largeBlob
-    this.#surface = surface
     this.#saving = false
     this.#error = ''
     this.#layers = null
@@ -130,13 +135,13 @@ export class TileEditorService extends EventTarget {
     this.#mode = 'editing'
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', {
-      active: true, surface, label: cell, segments: [...targetSegments],
+      active: true, surface: 'screen', label: cell, segments: [...targetSegments],
     })
   }
 
   readonly close = (): void => {
     const payload: EditorModePayload = {
-      active: false, surface: this.#surface, label: this.#cell, segments: [...this.#targetSegments],
+      active: false, surface: 'screen', label: this.#cell, segments: [...this.#targetSegments],
     }
     this.#mode = 'idle'
     this.#cell = ''
@@ -172,15 +177,6 @@ export class TileEditorService extends EventTarget {
       this.#repo = {}
       this.#beforeChoice = new Map()
     }
-    this.#emit()
-  }
-
-  /** The surface can change while a session is open — a window narrowed past
-   *  the dock, a phone rotated. Nobody listening to `editor:mode` treats the
-   *  two differently any more, so this is local. */
-  readonly setSurface = (surface: EditorSurfaceKind): void => {
-    if (surface === this.#surface) return
-    this.#surface = surface
     this.#emit()
   }
 

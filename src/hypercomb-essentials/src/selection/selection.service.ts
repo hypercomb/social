@@ -115,6 +115,23 @@ export class SelectionService extends EventTarget {
     this.#notify()
   }
 
+  /** Make `labels` the whole selection in ONE announcement. Looping `clear`
+   *  then `add` tells every listener about each step, and a listener that
+   *  reacts to a selection (the tile editor opens a group on it) would be
+   *  thrashed through every half-built set on the way. `active` defaults to
+   *  the first label. Announces nothing when the set is already exactly this. */
+  replace(labels: readonly string[], active?: string): void {
+    const next = new Set(labels)
+    const nextActive = active && next.has(active) ? active : (next.values().next().value ?? null)
+    const same = next.size === this.#items.size
+      && [...next].every(label => this.#items.has(label))
+      && nextActive === this.#active
+    if (same) return
+    this.#items = next
+    this.#active = nextActive
+    this.#notify()
+  }
+
   clear(): void {
     if (this.#items.size === 0) return
     this.#items.clear()

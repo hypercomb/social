@@ -1,12 +1,11 @@
 // editor/tile-editor.drone.ts
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig, readOwnTilePropertiesAt, propertyLayers, editorWrites, ownAfterInherit, groupFormFrom, groupWritesFor } from './tile-properties.js'
-import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
+import { referenceEditsRootDefaultForLabel, referenceTargetForLabel, ensureDecorationsIndexed } from '../commands/decoration-kind-index.js'
 import { portalEditTarget } from './portal-edit-target.js'
 import { parseHexColour } from './hex-capture.js'
 import { largeImage } from './arm-resource.js'
 import { holdPictures } from '../commands/lightbox-kind.js'
-import { editorSurface } from './editor-surface.js'
 import { TileEditorService } from './tile-editor.service.js'
 import { ImageEditorService } from './image-editor.service.js'
 
@@ -78,7 +77,13 @@ type Store = {
 }
 
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
-type Selection = { selected: ReadonlySet<string>; clear(): void }
+type Selection = {
+  selected: ReadonlySet<string>
+  isSelected(label: string): boolean
+  add(label: string): void
+  toggle(label: string): void
+  clear(): void
+}
 
 /** A tile a save wrote, as `tile:saved` announces it. */
 type SavedTile = { cell: string; segments: readonly string[] }
@@ -117,12 +122,29 @@ const t = (key: string, fallback: string): string => {
   } catch { return fallback }
 }
 
+const NAVIGATION_KEY = '@hypercomb.social/Navigation'
+type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
+type LineageLike = { explorerSegments?: () => readonly string[] }
+
+const sameSegments = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((segment, index) => segment === b[index])
+
+const hereSegments = (): readonly string[] =>
+  window.ioc.get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []
+
 export class TileEditorDrone {
 
   #saving = false
   /** The hive label the open session was opened from — a Portal's session
    *  names its target, but the selection names what the hive shows. */
   #label = ''
+  /** The page that label sits on. The tile list can reach a tile on any level,
+   *  so the session says which page it was opened from. */
+  #parent: readonly string[] = []
+  /** Where the participant stood when the editor opened. Closing puts them
+   *  back there, as the notes desk does — walking the list to edit a tile on
+   *  another level is a trip, not a move. */
+  #origin: readonly string[] | null = null
   /** Opens in flight. Each reads the selection when it lands, so a change to
    *  the selection meanwhile is left to it. */
   #opening = 0
@@ -136,9 +158,10 @@ export class TileEditorDrone {
     live = true
 
     // A GROUP: while a tile is open, it and the hive's selection are edited
-    // together. The selection is made as it is anywhere — ctrl+click, ctrl+drag
-    // — beside the docked editor too.
+    // together. The desk covers the hive, so the tile list toggles membership
+    // (`editor:group-toggle`). A selection made before the desk opened still counts.
     EffectBus.on('selection:changed', () => this.#onSelection())
+    EffectBus.on<{ label?: unknown }>('editor:group-toggle', payload => this.#onGroupToggle(payload))
 
     // Self-register the 'edit' tile icon. The arranger (tile-actions)
     // merges this with its own catalog, computes positions, and emits
@@ -155,6 +178,14 @@ export class TileEditorDrone {
       labelKey: 'action.edit',
       descriptionKey: 'action.edit.description',
     })
+  }
+
+  /** The tile the editor is on, and the page it sits on — null when closed.
+   *  `label` is what the hive and the tile list call the tile (a Portal's
+   *  session edits its target, so the session's own cell can differ). */
+  get openTile(): { label: string; parent: readonly string[] } | null {
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    return service?.mode === 'editing' && this.#label ? { label: this.#label, parent: this.#parent } : null
   }
 
   // ── effect handler ─────────────────────────────────────────────
@@ -185,6 +216,21 @@ export class TileEditorDrone {
       return
     }
     if (service.grouped) void this.#openEditing(this.#label, { stash: false, carry: service.properties })
+  }
+
+  #onGroupToggle = (payload: { label?: unknown } | undefined): void => {
+    const label = typeof payload?.label === 'string' ? payload.label : ''
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    const selection = window.ioc.get<Selection>(SELECTION_KEY)
+    if (!label || !service || !selection || service.mode !== 'editing') return
+    if (this.#saving || this.#opening > 0 || !this.#label || label === this.#label) return
+    // A selection without the open tile is left over from before: the group
+    // starts from the open tile.
+    if (!selection.isSelected(this.#label)) {
+      selection.clear()
+      selection.add(this.#label)
+    }
+    selection.toggle(label)
   }
 
   #enterGroup(service: TileEditorService, group: readonly string[]): void {
@@ -246,6 +292,9 @@ export class TileEditorDrone {
       explorerDir?: () => Promise<FileSystemDirectoryHandle | null>
     }>('@hypercomb.social/Lineage')
     const appearanceParent = lineage?.explorerSegments?.() ?? []
+    // The first tile opened remembers where the participant stood; a move
+    // from tile to tile keeps the first.
+    if (service.mode !== 'editing') this.#origin = [...appearanceParent]
     // A Portal starts with the original canonical details and edits that
     // target as the participant's DEFAULT for future uses. The reference leaf
     // remains a lightweight appearance; an appearance-local override is a
@@ -310,8 +359,9 @@ export class TileEditorDrone {
     if (!(await viewReady)) return
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
     imageEditor?.reset?.(hiveOrientation())
-    service.open(targetCell, properties, largeBlob, target.segments, editorSurface())
+    service.open(targetCell, properties, largeBlob, target.segments)
     this.#label = cell
+    this.#parent = [...appearanceParent]
     // Opening a tile outside the selection replaces it, as a plain click on
     // the tile does; opened on a tile of a multi-selection, it is the group.
     const selection = window.ioc.get<Selection>(SELECTION_KEY)
@@ -386,6 +436,25 @@ export class TileEditorDrone {
     service?.close()
     imageEditor?.destroy()
     this.#announce(outcome)
+    this.#returnToOrigin()
+  }
+
+  /** Back to the page the editor was opened from, when the tile list took the
+   *  participant elsewhere. Nothing moves when they never left. */
+  #returnToOrigin(): void {
+    const origin = this.#origin
+    this.#origin = null
+    if (!origin || sameSegments(origin, hereSegments())) return
+    window.ioc.get<NavigationLike>(NAVIGATION_KEY)?.goRaw?.(origin)
+  }
+
+  /** Wait for the location to land after a walk: Lineage follows the
+   *  navigation, and a tile read before it has is read from the wrong page. */
+  async #settleAt(segments: readonly string[]): Promise<boolean> {
+    for (let wait = 0; wait < 40 && !sameSegments(segments, hereSegments()); wait++) {
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    return sameSegments(segments, hereSegments())
   }
 
   // ── switch (called by the editor view) ─────────────────────────
@@ -396,7 +465,7 @@ export class TileEditorDrone {
   // changed draft is kept, exactly as a cancel keeps it, and offered back
   // when the tile is opened again.
 
-  readonly switchTo = async (label: string, options: { save?: boolean } = {}): Promise<boolean> => {
+  readonly switchTo = async (label: string, options: { save?: boolean; parent?: readonly string[] } = {}): Promise<boolean> => {
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!service || service.mode !== 'editing' || this.#saving || !label) return false
     if (options.save) {
@@ -404,7 +473,37 @@ export class TileEditorDrone {
       if (!outcome) return false
       this.#announce(outcome)
     }
-    // Moving on ends a group: the next tile's open replaces the selection.
+    // The tile list reaches tiles on any level. A tile on another page is
+    // opened FROM that page: the participant walks there first, because the
+    // appearance a tile edits, its title, its portal and its notes are all
+    // read from where they stand. The selection is let go and the walk is
+    // held inside the same guard, so the selection change the walk causes is
+    // not mistaken for a group edit of the tile being left.
+    const moving = !!options.parent && !sameSegments(options.parent, hereSegments())
+    // Moving on ends a group, and the selection that made it goes with it —
+    // as a plain click on a tile replaces the selection anywhere else.
+    if (service.grouped || moving) {
+      this.#opening++
+      try {
+        if (service.grouped) window.ioc.get<Selection>(SELECTION_KEY)?.clear()
+        if (moving && options.parent) {
+          const before = [...hereSegments()]
+          const navigation = window.ioc.get<NavigationLike>(NAVIGATION_KEY)
+          navigation?.goRaw?.(options.parent)
+          try {
+            // A location that never landed is not the tile's page: nothing is
+            // opened (it would be read from the wrong page), the walk is undone.
+            if (!(await this.#settleAt(options.parent))) { navigation?.goRaw?.(before); return false }
+            await ensureDecorationsIndexed([label], options.parent)
+          } catch (error) {
+            // The hive has walked but the editor has not: put the hive back.
+            console.warn('[tile-editor] could not move to the tile', error)
+            navigation?.goRaw?.(before)
+            return false
+          }
+        }
+      } finally { this.#opening-- }
+    }
     await this.#openEditing(label, { stash: !options.save })
     return service.mode === 'editing' && service.cell !== ''
   }
@@ -575,6 +674,7 @@ export class TileEditorDrone {
     this.#stashDraft()
     service?.close()
     imageEditor?.destroy()
+    this.#returnToOrigin()
   }
 
   /** Keep a changed draft that is about to be thrown away. */

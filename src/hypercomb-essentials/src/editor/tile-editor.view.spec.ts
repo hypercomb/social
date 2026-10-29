@@ -50,19 +50,34 @@ describe('tile editor view — stylesheet contracts', () => {
   installTileEditorStyles()
   const css = document.getElementById('hc-tile-editor-style')?.textContent ?? ''
 
-  it('floors fields at 16px on touch so iOS never zooms, and actions at 44px', () => {
+  it('floors the title at 16px on touch so iOS never zooms, and actions at 44px', () => {
     const coarse = css.slice(css.indexOf('@media (pointer: coarse)'))
-    expect(coarse).toMatch(/\.te-input,[^{]*\.te-title\{font-size:max\(16px, 1em\);min-height:44px;\}/)
+    expect(coarse).toMatch(/\.te-title\{font-size:max\(16px, 1em\);min-height:44px;\}/)
     expect(coarse).toMatch(/\.te-icon-btn,[^{]*\{min-width:44px;min-height:44px;\}/)
-    expect(css).toMatch(/\[data-surface="page"\] \.te-input,[^{]*\{font-size:max\(16px, 1em\);min-height:44px;\}/)
+    // the narrow arrangement gives the same floors with no pointer query
+    expect(css).toMatch(/\[data-layout="narrow"\] \.te-title\{font-size:max\(16px, 1em\);\}/)
+    expect(css).toMatch(/\[data-layout="narrow"\] \.te-icon-btn,[^{]*\{min-width:44px;min-height:44px;\}/)
   })
 
-  it('is seamless: the pane has no border and no shadow, only the page ground', () => {
+  it('is one opaque desk: the page ground, no border, no shadow, no backdrop filter', () => {
     const start = css.indexOf(' .te-panel{')
     const pane = css.slice(start, css.indexOf('}', start))
-    expect(pane).toContain('background:var(--te-ground)')
+    expect(pane).toContain('background:var(--md-surface,#0d151e)')
     expect(pane).not.toMatch(/\bborder\s*:/)
     expect(pane).not.toMatch(/box-shadow/)
+    expect(css).not.toMatch(/backdrop-filter/)
+  })
+
+  it('is the Notes and Chat box: above the command palette, the shell rail left outside it', () => {
+    const start = css.indexOf(' .te-panel{')
+    const pane = css.slice(start, css.indexOf('}', start))
+    expect(pane).toContain('z-index:60001')
+    expect(pane).toContain('left:var(--hc-controls-left,0px)!important')
+    // the docked-panel primitive writes these inline; the stylesheet wins
+    expect(pane).toMatch(/right:[^;]*!important/)
+    expect(pane).toContain('width:auto!important')
+    expect(pane).toContain('max-width:none!important')
+    expect(css).not.toContain('100002')
   })
 
   it('takes its identity deep under a bright look, and honours reduced motion', () => {

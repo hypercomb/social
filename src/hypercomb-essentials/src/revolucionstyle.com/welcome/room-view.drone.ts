@@ -272,7 +272,7 @@ export class RoomViewDrone extends Drone {
     const close = document.createElement('button')
     close.type = 'button'
     close.className = 'hc-room-close'
-    close.setAttribute('aria-label', `Leave ${titleForLabel(label, navigator.language) || label}`)
+    close.setAttribute('aria-label', `Leave ${titleForLabel(label) || label}`)
     close.textContent = '×'
     close.onclick = () => this.#vm()?.setMode('hexagons')
     const chrome = document.createElement('style')

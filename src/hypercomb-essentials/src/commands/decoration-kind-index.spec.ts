@@ -481,3 +481,44 @@ describe('decoration index — a reference’s demanded bouquet', () => {
     expect(index.referenceTargetForLabel('people')).toEqual(['people'])
   })
 })
+
+describe('a title cleared under a sig the index never saw appended', () => {
+  // The slot names a decoration by its committed wrapper, not by the sig the
+  // append event carried, so the removal arrives under a sig the reverse cache
+  // has never met. The index must read the record, learn its kind, and drop it.
+  const wrapper = (text: Record<string, string>, tag: string) => {
+    const sig = String(900 + tag.length + text['en']!.length).padStart(64, '0')
+    resources.set(sig, JSON.stringify({ kind: 'title', appliesTo: [], payload: { text } }))
+    return sig
+  }
+
+  it('drops the title and announces it on clear', async () => {
+    const seen: unknown[] = []
+    const off = EffectBus.on('title:indexed', (p: unknown) => { seen.push(p) })
+    await decorate(['clearme'], titleSig({ en: 'Zed' }))
+    expect(index.titleForSegments(['clearme'], 'en')).toBe('Zed')
+    seen.length = 0
+
+    EffectBus.emit('decorations:changed', { segments: ['clearme'], op: 'removeSig', sig: wrapper({ en: 'Zed' }, 'a') })
+    await vi.waitFor(() => expect(index.titleForSegments(['clearme'], 'en')).toBe(''))
+    expect(seen).toEqual([{ label: 'clearme' }])
+    ;(off as unknown as (() => void) | undefined)?.()
+  })
+
+  it('keeps the replacement when a replace arrives remove-then-append', async () => {
+    await decorate(['swap'], titleSig({ en: 'Zed' }))
+    const yak = titleSig({ en: 'Yak' })
+    layers.set('swap', [yak])
+    EffectBus.emit('decorations:changed', { segments: ['swap'], op: 'removeSig', sig: wrapper({ en: 'Zed' }, 'b') })
+    EffectBus.emit('decorations:changed', { segments: ['swap'], op: 'append', sig: yak })
+    await vi.waitFor(() => expect(index.titleForSegments(['swap'], 'en')).toBe('Yak'))
+    await new Promise(r => setTimeout(r, 20))
+    expect(index.titleForSegments(['swap'], 'en')).toBe('Yak')
+  })
+
+  it('clears every locale the record carried', async () => {
+    await decorate(['multi'], titleSig({ en: 'Zed', ja: 'ゼッド' }))
+    EffectBus.emit('decorations:changed', { segments: ['multi'], op: 'removeSig', sig: wrapper({ en: 'Zed', ja: 'ゼッド' }, 'c') })
+    await vi.waitFor(() => expect(index.titlesForSegments(['multi'])).toEqual({}))
+  })
+})

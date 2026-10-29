@@ -6,8 +6,13 @@
 // compositor transform, the tile's look drawn over it, and the gestures that
 // frame it:
 //
-//   drag            pan (the pointer is captured, so a release outside the
-//                   stage still ends the drag)
+//   tap             a press that ends inside the slop: handed to the diagram
+//                   (`onTap`) as a click on the part under it. Nothing is
+//                   captured at the press, so what is drawn there keeps its
+//                   own click
+//   drag            pan, once the pointer is past the slop (then it is
+//                   captured, so a release outside the stage still ends the
+//                   drag). The `click` that follows a drag is swallowed
 //   two fingers     zoom about their centroid and carry the picture with it;
 //                   lifting one hands over to a pan with no jump
 //   wheel / pinch   zoom about the cursor (a trackpad pinch arrives as a wheel
@@ -18,6 +23,10 @@
 // Past a limit a gesture shows only a share of the overshoot and settles back
 // when released. The framing STORED in the model is always the clamped one;
 // the rubber band is display only.
+//
+// The stage never computes a shape: it asks `geometry()` for the model's
+// silhouette and hands it to the look overlay and to the picture's clip. It
+// never reparents or rebuilds anything mid-gesture (a rebuild drops capture).
 //
 // The stage owns no framing of its own. It reads `ImageEditorService` and
 // writes back to it; the view re-renders from the model's change event.
@@ -36,6 +45,7 @@ import {
 } from './crop-math.js'
 import { TileLookOverlay, type TileLook } from './tile-look-overlay.js'
 import type { ImageEditorService } from './image-editor.service.js'
+import type { ModelGeometry } from './models/tile-model.js'
 
 const SETTLE_MS = 180
 const WHEEL_STEP = 0.0015
@@ -54,7 +64,22 @@ const lerp = (a: Framing, b: Framing, t: number): Framing => ({
   scale: a.scale * Math.pow(b.scale / a.scale, t),
 })
 
-export type StageLook = Pick<TileLook, 'border'>
+export type StageLook = Pick<TileLook, 'border' | 'name' | 'showName'> & { fill?: string }
+
+export interface StageOptions {
+  /** The stage asks; it never computes a shape. */
+  readonly geometry: () => ModelGeometry
+  readonly onCommit: () => void
+  /** After every render. */
+  readonly onRender?: () => void
+  /** A press that ended inside the slop: the diagram's click on the part under it. */
+  readonly onTap?: (e: PointerEvent) => void
+  /** A pan or pinch began / ended: the diagram suspends hover. */
+  readonly onGesture?: (on: boolean) => void
+  readonly slop?: { readonly mouse: number; readonly touch: number }
+}
+
+export const DEFAULT_SLOP = { mouse: 6, touch: 10 } as const
 
 export class CropStage {
   readonly el: HTMLDivElement
@@ -62,12 +87,19 @@ export class CropStage {
 
   #model: ImageEditorService
   #picture: HTMLImageElement
-  #look: StageLook = { border: '' }
+  #clipper: HTMLDivElement
+  #look: StageLook = { border: '', name: '', showName: true }
+  #options: StageOptions
   #onCommit: () => void
 
   /** The framing on screen while a gesture or a settle is in progress. */
   #live: Framing | null = null
   #pointers = new Map<number, Point>()
+  /** The one press that has not yet become a gesture: a tap in waiting. */
+  #press: { id: number; x: number; y: number; touch: boolean } | null = null
+  /** A drag or pinch happened since the last press: the click after it is not a click. */
+  #moved = false
+  #gestureOn = false
   #pan: { start: Framing; from: Point } | null = null
   #pinch: { start: Framing; centroid: Point; distance: number } | null = null
   #settleFrame = 0
@@ -76,9 +108,10 @@ export class CropStage {
   #size = 0
   #baseKey = ''
 
-  constructor(model: ImageEditorService, onCommit: () => void) {
+  constructor(model: ImageEditorService, options: StageOptions) {
     this.#model = model
-    this.#onCommit = onCommit
+    this.#options = options
+    this.#onCommit = options.onCommit
 
     this.el = document.createElement('div')
     this.el.className = 'te-stage'
@@ -92,15 +125,22 @@ export class CropStage {
     this.#picture.draggable = false
     this.#picture.decoding = 'async'
 
-    // The name is not drawn on the tile. The text field edits it, and the hive
-    // still draws it. The band only backs that name, so it stays off too.
-    this.el.append(this.#picture, this.overlay.svg)
+    // The picture sits in its own layer so a model that hard-clips it can cut
+    // it by the mask without the clip moving with the picture.
+    this.#clipper = document.createElement('div')
+    this.#clipper.className = 'te-stage-clip'
+    this.#clipper.style.cssText = 'position:absolute;inset:0;pointer-events:none;'
+    this.#clipper.append(this.#picture)
+
+    this.el.append(this.#clipper, this.overlay.svg, this.overlay.name)
 
     this.el.addEventListener('pointerdown', this.#onPointerDown)
     this.el.addEventListener('pointermove', this.#onPointerMove)
     this.el.addEventListener('pointerup', this.#onPointerEnd)
     this.el.addEventListener('pointercancel', this.#onPointerEnd)
     this.el.addEventListener('lostpointercapture', this.#onPointerEnd)
+    // Capture phase: the click that ends a drag never reaches a part.
+    this.el.addEventListener('click', this.#onClick, true)
     this.el.addEventListener('wheel', this.#onWheel, { passive: false })
     this.el.addEventListener('dblclick', this.#onDoubleClick)
     this.el.addEventListener('keydown', this.#onKeyDown)
@@ -121,12 +161,16 @@ export class CropStage {
 
   get gesturing(): boolean { return this.#pan !== null || this.#pinch !== null }
 
+  /** The stage's side in CSS pixels, as last laid out. */
+  get size(): number { return this.el.clientWidth || this.#size }
+
   dispose(): void {
     this.#observer?.disconnect()
     this.#observer = null
     if (this.#settleFrame) cancelAnimationFrame(this.#settleFrame)
     if (this.#commitTimer) clearTimeout(this.#commitTimer)
     this.#pointers.clear()
+    this.#press = null
     this.#pan = null
     this.#pinch = null
     this.el.remove()
@@ -138,6 +182,7 @@ export class CropStage {
     const model = this.#model
     const size = this.el.clientWidth || this.#size
     if (size > 0) this.#size = size
+    const geometry = this.#options.geometry()
     const natural = model.natural
     const side = model.side
     const hasPicture = model.hasImage && !!natural
@@ -173,14 +218,31 @@ export class CropStage {
       this.#baseKey = ''
     }
 
-    this.overlay.update(size, side, {
-      orientation: model.orientation,
+    // A model that hard-clips its picture cuts it by the mask; one that fades
+    // lets it run on under the outside fade.
+    this.#clipper.style.clipPath = geometry.fade ? '' : `path('${geometry.mask}')`
+
+    this.overlay.update(geometry, {
       border: this.#look.border,
-      name: '',
-      showName: false,
+      name: this.#look.name,
+      // An empty tile always shows its name — the renderer only hides names
+      // over a picture.
+      showName: this.#look.showName || !hasPicture,
       hasPicture,
       dragging: this.gesturing,
+      fill: this.#look.fill ?? '',
+      picture: hasPicture && natural && size > 0 ? this.#pictureRect(natural, size) : null,
     })
+    this.#options.onRender?.()
+  }
+
+  /** The framed picture in stage pixels, from the framing on screen. */
+  #pictureRect(natural: { width: number; height: number }, size: number): { x: number; y: number; w: number; h: number } {
+    const framing = this.#live ?? this.#model.framingFor()
+    const k = size / frameSize(this.#model.side)
+    const w = natural.width * framing.scale * k
+    const h = natural.height * framing.scale * k
+    return { x: size / 2 + framing.x * k - w / 2, y: size / 2 + framing.y * k - h / 2, w, h }
   }
 
   // ── pointer gestures ──────────────────────────────────────────
@@ -205,18 +267,61 @@ export class CropStage {
     this.render()
   }
 
+  #slopFor(touch: boolean): number {
+    const slop = this.#options.slop ?? DEFAULT_SLOP
+    return touch ? slop.touch : slop.mouse
+  }
+
+  #capture(id: number): void {
+    try { this.el.setPointerCapture(id) } catch { /* not capturable */ }
+  }
+
   #onPointerDown = (e: PointerEvent): void => {
-    if (!this.#model.hasImage) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
     this.#cancelSettle()
     // A primary press with stale ids still tracked means an earlier release
     // never arrived (a system gesture, a lost capture) — start clean.
-    if (e.isPrimary && this.#pointers.size > 0) this.#pointers.clear()
-    try { this.el.setPointerCapture(e.pointerId) } catch { /* not capturable */ }
+    if (e.isPrimary && this.#pointers.size > 0) {
+      this.#pointers.clear()
+      this.#press = null
+      this.#pan = null
+      this.#pinch = null
+      this.#endGesture()
+    }
+    if (e.isPrimary) this.#moved = false
     this.#pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
     e.preventDefault()
     this.el.focus({ preventScroll: true })
-    this.#beginFromPointers()
+    if (!this.#model.hasImage) {
+      // Nothing to frame: the press can only be a tap on a part.
+      this.#press = this.#pointers.size === 1
+        ? { id: e.pointerId, x: e.clientX, y: e.clientY, touch: e.pointerType !== 'mouse' }
+        : null
+      return
+    }
+    if (this.#pointers.size >= 2) {
+      // A second finger is a pinch at once: no tap is in waiting any more.
+      this.#press = null
+      for (const id of this.#pointers.keys()) this.#capture(id)
+      this.#beginFromPointers()
+    } else {
+      // NO capture yet: a press that never moves is a click on the part under it.
+      this.#press = { id: e.pointerId, x: e.clientX, y: e.clientY, touch: e.pointerType !== 'mouse' }
+    }
+  }
+
+  #beginGesture(): void {
+    if (this.#gestureOn) return
+    this.#gestureOn = true
+    this.#moved = true
+    this.#options.onGesture?.(true)
+  }
+
+  #endGesture(): void {
+    this.el.dataset['gesture'] = ''
+    if (!this.#gestureOn) return
+    this.#gestureOn = false
+    this.#options.onGesture?.(false)
   }
 
   #beginFromPointers(): void {
@@ -234,6 +339,7 @@ export class CropStage {
       this.#pinch = null
       this.#pan = { start: current, from: this.#frameAt(tracked[0]) }
     }
+    this.#beginGesture()
     this.el.dataset['gesture'] = this.#pinch ? 'pinch' : this.#pan ? 'pan' : ''
     this.render()
   }
@@ -241,6 +347,18 @@ export class CropStage {
   #onPointerMove = (e: PointerEvent): void => {
     if (!this.#pointers.has(e.pointerId)) return
     this.#pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const press = this.#press
+    if (press && press.id === e.pointerId) {
+      // Inside the slop it is still a tap in waiting.
+      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < this.#slopFor(press.touch)) return
+      if (!this.#model.hasImage) return
+      this.#press = null
+      this.#capture(e.pointerId)
+      // The pan begins from where the pointer is now, so the picture does not
+      // jump by the slop.
+      this.#beginFromPointers()
+      return
+    }
     const tracked = [...this.#pointers.values()]
     if (this.#pinch && tracked.length >= 2) {
       const [a, b] = tracked
@@ -259,6 +377,13 @@ export class CropStage {
 
   #onPointerEnd = (e: PointerEvent): void => {
     if (!this.#pointers.delete(e.pointerId)) return
+    const press = this.#press
+    if (press && press.id === e.pointerId) {
+      // Never left the slop: a tap — but only a release is one.
+      this.#press = null
+      if (e.type === 'pointerup') this.#options.onTap?.(e)
+      return
+    }
     if (this.#pointers.size > 0) {
       // One finger of a pinch lifted: carry on as a pan from where the picture
       // is now, so nothing jumps.
@@ -266,10 +391,19 @@ export class CropStage {
       this.#beginFromPointers()
       return
     }
+    const was = this.gesturing
     this.#pan = null
     this.#pinch = null
-    this.el.dataset['gesture'] = ''
-    this.#settleTo(this.#clamped(this.#current()))
+    this.#endGesture()
+    if (was) this.#settleTo(this.#clamped(this.#current()))
+  }
+
+  /** The click that ends a drag is the drag's release, not a click on a part. */
+  #onClick = (e: MouseEvent): void => {
+    if (!this.#moved) return
+    this.#moved = false
+    e.stopPropagation()
+    e.preventDefault()
   }
 
   #settleTo(target: Framing): void {

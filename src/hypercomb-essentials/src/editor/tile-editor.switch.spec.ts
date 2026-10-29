@@ -46,7 +46,7 @@ describe('tile editor — moving to another tile while docked', () => {
 
   beforeEach(() => {
     switchTo = vi.fn(async (label: string) => {
-      service().open(label, {}, null, [], 'dock')
+      service().open(label, {}, null, [])
       return true
     })
     services.set('@diamondcoreprocessor.com/TileEditorDrone', {
@@ -58,7 +58,7 @@ describe('tile editor — moving to another tile while docked', () => {
     offPreview = EffectBus.on<{ label: string; clear?: boolean }>('tile:preview', p => { previews.push(p) })
     host = document.createElement('hc-tile-editor')
     document.body.appendChild(host)
-    service().open('alpha', {}, null, [], 'dock')
+    service().open('alpha', {}, null, [])
   })
 
   afterEach(() => {

@@ -242,7 +242,7 @@ export class SquareTileViewDrone extends Drone {
     const payload = records.at(-1)?.record.payload
     const label = segments.at(-1) ?? ''
     const title = payload?.title
-      || (label ? titleForLabel(label, navigator.language) || label : 'Welcome')
+      || (label ? titleForLabel(label) || label : 'Welcome')
 
     // The plates' bytes are handed over as object URLs, so this pass's URLs
     // are collected apart from the live set and only adopted AFTER the old
@@ -282,7 +282,7 @@ export class SquareTileViewDrone extends Drone {
     const panels = await Promise.all(page.cells.map(async cell => ({
       label: cell.label,
       segments: cell.segments,
-      title: titleForLabel(cell.label, navigator.language) || cell.label,
+      title: titleForLabel(cell.label) || cell.label,
       imageUrl: await this.#tileImageUrl(cell.segments, sink),
     })))
     return { panels, narrowed: page.narrowed }
@@ -719,7 +719,7 @@ export class SquareTileViewDrone extends Drone {
     }
     const siblings: BriefSibling[] = await Promise.all(names.map(async name => ({
       label: name,
-      title: titleForLabel(name, navigator.language) || name,
+      title: titleForLabel(name) || name,
       imageUrl: name === label ? imageUrl : await this.#tileImageUrl([...parent, name], sink),
       current: name === label,
     })))

@@ -32,7 +32,7 @@
 // The walk is idempotent and additive: it only adds kinds, never
 // subtracts (subtraction happens on explicit `removeSig` events).
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { hiddenKeysSync, hiddenKey } from '../sharing/feature-hidden.js'
 
 // ── Location keys ─────────────────────────────────────────────────────
@@ -566,8 +566,17 @@ export const TITLE_DECORATION_KIND = 'title'
 /** Map<locationKey, Record<locale, title>>. */
 const titleByKey = new Map<string, Record<string, string>>()
 
-/** The title for a cell in `locale`, or '' when it carries none for that
- *  locale — the caller then falls back to i18n and finally the raw name.
+/** The locale a title is written and read under: the app's language key
+ *  (`I18n.locale`, "en"), NOT the browser's tag ("en-US"). A reader that asked
+ *  the browser for its language missed every title the editor and `/title`
+ *  wrote, so a renamed tile kept its old address on those surfaces. */
+export function activeTitleLocale(): string {
+  return (window.ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.locale ?? 'en'
+}
+
+/** The title for a cell in `locale` (default: the active locale), or '' when it
+ *  carries none for that locale — the caller then falls back to i18n and
+ *  finally the raw name.
  *
  *  Deliberately does NOT fall back across locales: titling in English must not
  *  put English text in front of a Japanese reader. An untranslated tile shows
@@ -575,7 +584,7 @@ const titleByKey = new Map<string, Record<string, string>>()
  *
  *  Synchronous and O(1) — the atlas label resolver calls this per cell per
  *  bake, so it must never touch OPFS. */
-export function titleForLabel(label: string, locale: string): string {
+export function titleForLabel(label: string, locale: string = activeTitleLocale()): string {
   return titleByKey.get(keyForLabel(label))?.[locale] ?? ''
 }
 
@@ -1104,6 +1113,10 @@ type DecorationsChangedPayload = {
   readonly sig?: string
 }
 
+/** Per cell: a removal whose kind is still being read. Later events for the
+ *  same cell queue behind it so the index sees them in the order they came. */
+const pendingResolve = new Map<string, Promise<void>>()
+
 EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | undefined) => {
   if (!payload?.segments || !payload?.sig || !payload?.op) return
   const segments = payload.segments
@@ -1113,6 +1126,8 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
   // The event carries the FULL path, so the write lands at the exact cell that
   // changed — never at whatever else happens to share its name.
   const key = locationKey(segments)
+  // Order: nothing for this cell overtakes a removal still resolving its kind.
+  for (let waiting = pendingResolve.get(key); waiting; waiting = pendingResolve.get(key)) await waiting
   // Remember where this cell lives so the hidden filter can ask the pool
   // "is this kind hidden HERE?" (the pool keys by kind + location).
   segmentsByKey.set(key, segments)
@@ -1182,6 +1197,28 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
       }
     }
   } else if (payload.op === 'removeSig') {
+    // A slot can name a decoration by a DIFFERENT sig than the one its append
+    // event carried (the layer commit wraps the record in an incidence, and a
+    // reader listing the slot only ever sees the wrapper). The reverse cache
+    // then misses, and a title set earlier in this session survived being
+    // cleared. Resolve the kind from the record itself and remember it. While
+    // that read is in flight every later event for this cell waits behind it,
+    // so a replace (remove, then append) can never land out of order.
+    if (!kindBySig.has(sig)) {
+      const resolving = (async () => {
+        const record = await fetchDecorationRecord(sig)
+        if (!record || typeof record.kind !== 'string') return
+        kindBySig.set(sig, record.kind)
+        if (record.kind === TAG_DECORATION_KIND) {
+          const name = tagNameOf(record)
+          if (name) nameBySig.set(sig, name)
+        }
+      })()
+      const tail = resolving.catch(() => undefined)
+        .finally(() => { if (pendingResolve.get(key) === tail) pendingResolve.delete(key) })
+      pendingResolve.set(key, tail)
+      await tail
+    }
     const kind = kindBySig.get(sig)
     if (kind && takeoverKinds().has(kind)) {
       // A TAKEOVER claim is not dropped on the spot. `replaceDecoration` is

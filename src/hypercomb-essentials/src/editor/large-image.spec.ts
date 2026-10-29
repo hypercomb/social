@@ -135,7 +135,7 @@ describe('the tile editor saving a NEW picture', () => {
       destroy: () => {},
     })
     const service = services.get('@diamondcoreprocessor.com/TileEditorService') as TileEditorService
-    service.open('pic', {}, null, ['pic'], 'dock')
+    service.open('pic', {}, null, ['pic'])
     const drone = services.get('@diamondcoreprocessor.com/TileEditorDrone') as { saveAndComplete(): Promise<void> }
     await drone.saveAndComplete()
 

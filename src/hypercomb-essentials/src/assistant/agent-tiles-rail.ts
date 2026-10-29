@@ -163,6 +163,17 @@ export type RailProfile = {
   /** The pointer entering (event) or leaving (null) a row. The notes panel
    *  peeks at what is written on the tile under the pointer. */
   readonly onHover?: (row: { readonly name: string; readonly segments: readonly string[] }, event: PointerEvent | null) => void
+  /** A SECOND CHORD FOR THE SAME ROW: ctrl/meta/shift-click and Space call
+   *  this instead of gathering the row as context, and return. For a surface
+   *  whose rows are not context but MEMBERS of something it edits together
+   *  (the tile editor's group). Without it the chord keeps the meaning
+   *  `choose` gives it, and with `choose` off it is an ordinary open. */
+  readonly toggle?: (row: { readonly name: string; readonly segments: readonly string[] }) => void
+  /** What a row READS as. The row's name is the tile's ADDRESS, and a tile
+   *  that was given a name in this language reads as that name everywhere
+   *  else — a list that drew only the address would never show a rename. The
+   *  address stays in the row's tooltip, and the find box matches both. */
+  readonly labelOf?: (row: { readonly name: string; readonly segments: readonly string[] }) => string
   /** What the search box says it does. */
   readonly findLabel?: string
   /** What a click on a row does, for the row's tooltip. */
@@ -484,6 +495,10 @@ const RAIL_CSS = `
   clip-path:polygon(50% 0,100% 0,100% 100%,0 100%,0 0);
   box-shadow:inset 0 0 0 2px #0c1118;}
 .hc-rail-row.chosen{background:rgba(${STEEL},0.07);}
+/* SIBLING — the tile a refused name collided with. Outlined in the alert
+   role, quietly, with the words "same name" beside it. */
+.hc-rail-row.sibling{box-shadow:inset 0 0 0 1px var(--hc-status-alert, #e0707a);}
+.hc-rail-same{flex:0 0 auto;font-size:0.72rem;color:var(--hc-status-alert, #e0707a);}
 
 /* LIVE — the count, no ring. A digit is information a colour cannot be, and
    it is its own reduced-motion fallback: the breath is affect, the numeral
@@ -704,6 +719,12 @@ export class AgentTilesRail {
   readonly #waiters = new Map<string, Set<HTMLElement>>()
   /** The row you are IN — the conversation everything typed belongs to. */
   #subject: RailPick | null = null
+  /** Rows the SURFACE marks as chosen without the rail having been asked —
+   *  the tile editor's group, which the editor decides (it can refuse a
+   *  toggle) and the rail only shows. Drawn exactly as a chosen row. */
+  readonly #marked = new Set<string>()
+  /** The row a refused name collided with (a path key), or null. */
+  #sibling: string | null = null
   /** Rows CHOSEN as context, by row key. Survives walking levels on purpose:
    *  gathering is the whole point, and a set that emptied every time you went
    *  inside a tile could never span a hive. */
@@ -946,6 +967,9 @@ export class AgentTilesRail {
         // A held finger (holding a row) is the browser's long-press, never
         // the walk back up.
         if (isLongPressMenu(event)) return
+        // At the ROOT there is nothing to go back to: leave the gesture
+        // alone so whoever owns the surface (BackGesture) can back out.
+        if (this.#trail.length <= 1) return
         event.preventDefault()
         this.#up()
       })
@@ -1026,13 +1050,59 @@ export class AgentTilesRail {
   /** Light the row for `name` on the level in hand WITHOUT announcing it —
    *  the surface already knows (the tile was clicked on the canvas). Silent
    *  on purpose: announcing would bounce straight back as another change. */
-  showCurrent(name: string | null): void {
+  showCurrent(name: string | null, level?: readonly string[]): void {
     if (!name) { this.#subject = null; this.#markCurrent(null); return }
-    const segments = [...this.#here(), name]
+    // With a `level` the tile may be on a level the list is not showing (the
+    // editor moved to a tile somewhere else in the hive): the subject is set
+    // FIRST so the level that arrives draws the row already lit.
+    const path = level ? [...level].map(s => String(s ?? '')).filter(Boolean) : [...this.#here()]
+    const segments = [...path, name]
     const key = pathKey(segments)
-    if (this.#subject?.key === key) return
-    this.#subject = { key, path: [...this.#here()], name }
+    if (this.#subject?.key !== key) this.#subject = { key, path, name }
+    if (level && pathKey(path) !== pathKey(this.#here())) { this.showLevel(path); return }
     this.#markCurrent(this.#rowFor(key))
+  }
+
+  /** Mark exactly these tiles as chosen WITHOUT announcing it — the surface
+   *  decides which tiles are chosen (the editor's group can refuse a toggle),
+   *  and a rail that kept its own count would drift from it. Paths are full
+   *  tile paths; marks survive walking levels, like the rail's own picks. */
+  showSelection(paths: readonly (readonly string[])[]): void {
+    this.#marked.clear()
+    for (const path of paths) this.#marked.add(pathKey(path))
+    for (const row of this.#list?.querySelectorAll<HTMLElement>('.hc-rail-row') ?? []) {
+      const on = this.#isChosen(row.dataset['key'] ?? '')
+      row.classList.toggle('chosen', on)
+      row.querySelector('.hc-rail-main')?.setAttribute('aria-pressed', on ? 'true' : 'false')
+    }
+  }
+
+  /** Quietly outline the row at `segments` (full tile path) with the words
+   *  "same name" — the tile a refused name collided with. `null` clears it.
+   *  Silent: nothing is announced. The mark survives a repaint and a walk. */
+  markSibling(segments: readonly string[] | null): void {
+    this.#sibling = segments && segments.length ? pathKey(segments) : null
+    for (const wrap of this.#list?.querySelectorAll<HTMLElement>('.hc-rail-row') ?? []) {
+      this.#paintSibling(wrap, wrap.dataset['key'] ?? '')
+    }
+  }
+
+  #paintSibling(wrap: HTMLElement, key: string): void {
+    const on = this.#sibling !== null && key === this.#sibling
+    wrap.classList.toggle('sibling', on)
+    const main = wrap.querySelector('.hc-rail-main')
+    const word = wrap.querySelector('.hc-rail-same')
+    if (!on) { word?.remove(); return }
+    if (word || !main) return
+    const same = document.createElement('span')
+    same.className = 'hc-rail-same'
+    same.textContent = this.#t('editor.same-name', 'same name')
+    main.querySelector('.hc-rail-name')?.after(same)
+  }
+
+  /** Chosen by the rail's own gesture, or marked by the surface. */
+  #isChosen(key: string): boolean {
+    return this.#chosen.has(key) || this.#marked.has(key)
   }
 
   /** Light the conversation the window has open WITHOUT announcing it — the
@@ -1195,8 +1265,15 @@ export class AgentTilesRail {
     const also = this.#profile.matches
     return listed.filter(row =>
       row.name.toLowerCase().includes(needle)
+      || this.#readingOf(row).toLowerCase().includes(needle)
       || this.#blurbMatches(row, needle)
       || (also ? also(row, this.#query) : false))
+  }
+
+  /** What a row reads as: the surface's reading, or the address. */
+  #readingOf(row: RailRow): string {
+    const label = this.#profile.labelOf?.(row)
+    return label && label.trim() ? label : row.name
   }
 
   /** Does anything said on this tile match? A blurb is written down, so the
@@ -1344,7 +1421,7 @@ export class AgentTilesRail {
       wrap.dataset['key'] = key
       wrap.setAttribute('role', 'listitem')
       wrap.classList.toggle('current', current)
-      wrap.classList.toggle('chosen', this.#chosen.has(key))
+      wrap.classList.toggle('chosen', this.#isChosen(key))
 
       const main = document.createElement('button')
       main.type = 'button'
@@ -1355,16 +1432,22 @@ export class AgentTilesRail {
       if (current) main.setAttribute('aria-current', 'true')
       // Chosen is a TOGGLE, and a toggle says so: aria-pressed is the whole
       // difference between "this row is lit" and "this row is switched on".
-      main.setAttribute('aria-pressed', this.#chosen.has(key) ? 'true' : 'false')
+      main.setAttribute('aria-pressed', this.#isChosen(key) ? 'true' : 'false')
+
+      // WHAT THE ROW READS AS: the surface's reading of the tile (its name in
+      // this language) when it has one, otherwise the address. The address
+      // stays reachable in the tooltip.
+      const reading = this.#readingOf(row)
+      if (reading !== row.name) main.title = `${talkHint} — ${row.name}`
 
       const icon = document.createElement('span')
       icon.className = 'hc-rail-icon'
-      icon.textContent = [...row.name.trim()][0]?.toUpperCase() ?? '·'
+      icon.textContent = [...reading.trim()][0]?.toUpperCase() ?? '·'
       if (row.propsSig) this.#settleIcon(icon, row.propsSig)
 
       const name = document.createElement('span')
       name.className = 'hc-rail-name'
-      name.textContent = row.name
+      name.textContent = reading
 
       // HOW MANY CONVERSATIONS THIS TILE HOLDS, beside the thing they are
       // about. Now that the line IS the conversation control, "which one am
@@ -1393,6 +1476,13 @@ export class AgentTilesRail {
       // THE ROW MOVES TO THIS LAYER. The arrow moves to its child. A surface
       // without chats still picks the tile. Ctrl-click only gathers context.
       main.addEventListener('click', event => {
+        // The surface's own chord first: a row that is a MEMBER (the editor's
+        // group) rather than context takes ctrl, meta and shift alike.
+        if ((event.ctrlKey || event.metaKey || event.shiftKey) && this.#profile.toggle) {
+          event.preventDefault()
+          this.#profile.toggle(row)
+          return
+        }
         if ((event.ctrlKey || event.metaKey) && this.#profile.choose) {
           this.#toggleChosen(wrap, key, row)
           return
@@ -1419,6 +1509,11 @@ export class AgentTilesRail {
           this.#up()
         } else if (event.key === ' ' || event.key === 'Spacebar') {
           // The keyboard's ctrl-click. Enter still opens the conversation.
+          if (this.#profile.toggle) {
+            event.preventDefault()
+            this.#profile.toggle(row)
+            return
+          }
           if (!this.#profile.choose) return
           event.preventDefault()
           this.#toggleChosen(wrap, key, row)
@@ -1476,7 +1571,8 @@ export class AgentTilesRail {
       group.classList.toggle('current', current)
       wrap.append(main)
       // A chat click is the drill, so the row has no second control. A list
-      // whose click picks the tile (the notes desk) still walks with this.
+      // whose click picks the tile (the notes desk, the tile editor) still
+      // walks with this.
       if (!this.#profile.chats && row.childCount > 0 && this.#profile.walk) {
         const walk = document.createElement('button')
         walk.type = 'button'
@@ -1491,6 +1587,7 @@ export class AgentTilesRail {
         })
         wrap.append(walk)
       }
+      this.#paintSibling(wrap, key)
       group.appendChild(wrap)
       if (this.#profile.chats && this.#expanded.has(key)) group.appendChild(this.#chatsPanel(key, row))
       list.appendChild(group)

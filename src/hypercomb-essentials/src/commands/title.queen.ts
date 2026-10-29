@@ -27,7 +27,7 @@
 // The trade is deliberate: the path and URL keep the name the tile was born
 // with. Re-addressing a tile for real is a separate, heavier operation.
 
-import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { QueenBee, EffectBus, I18N_IOC_KEY, normalizeCell, type I18nProvider } from '@hypercomb/core'
 
 const get = <T,>(key: string): T | undefined => (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
 
@@ -49,7 +49,7 @@ type DecorationShape = {
     segments: readonly string[],
     text: string,
     locale?: string,
-  ): Promise<string | null>
+  ): Promise<{ reading: string; address: string } | null>
 }
 
 export class TitleQueenBee extends QueenBee {
@@ -57,6 +57,11 @@ export class TitleQueenBee extends QueenBee {
   readonly command = 'title'
   override description = "Set a tile's display name without moving it"
   override descriptionKey = 'slash.title'
+
+  /** The text after `=` is PROSE the participant chose — keep its case. Without
+   *  this the line is lowercased on the way in (`/title child = Second Child`
+   *  stored "second child"), which is how every other prose queen opts out. */
+  override rawArgs = true
   override options = ['<text>', '<cell> = <text>', '<cell> =']
   override examples = [
     { input: '/title Chapter One', result: 'The tile you are inside draws as "Chapter One"' },
@@ -121,7 +126,9 @@ export class TitleQueenBee extends QueenBee {
       segments = here
       text = raw
     } else {
-      const cell = safeName(raw.slice(0, eq))
+      // The address is lowercase by construction; the line now arrives with the
+      // case the participant typed, so fold the CELL back to its address here.
+      const cell = normalizeCell(safeName(raw.slice(0, eq)))
       if (!cell) { this.#log('Title — needs a tile name before the "="'); return }
       segments = [...here, cell]
       text = raw.slice(eq + 1).trim()
@@ -149,7 +156,7 @@ export class TitleQueenBee extends QueenBee {
         // Name the tile that took it — "already used" without saying by what
         // leaves the participant hunting for it.
         const clash = await decorations.duplicateTitle(segments, text, locale)
-        this.#log(`Title — a tile here already reads "${clash ?? text}"`)
+        this.#log(`Title — a tile here already reads "${clash?.reading ?? text}"`)
         return
       }
       if (outcome === 'noop') { this.#log(`Title — "${label}" already reads that way in ${locale}`); return }
