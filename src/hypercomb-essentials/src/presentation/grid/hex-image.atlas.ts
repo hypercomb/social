@@ -44,6 +44,9 @@ export class HexImageAtlas {
   // eviction deleted the sig's LIVE map entry and the tile silently lost
   // its image. One shared promise per sig means one slot per sig.
   readonly #inFlight = new Map<string, Promise<ImageUV | null>>()
+  /** `soon` is the small startup sprite. A later `sharp` load may replace
+   *  those pixels in the same slot. `sharp` never gives the slot back. */
+  readonly #grade = new Map<string, 'soon' | 'sharp'>()
   // Sigs whose slots must NOT be reused for other content. The renderer
   // pins every image currently on screen: evicting an on-screen sig makes
   // its baked UV sample foreign pixels until a repaint lands, and the
@@ -87,6 +90,12 @@ export class HexImageAtlas {
 
   hasImage(sig: string): boolean {
     return this.#map.has(sig)
+  }
+
+  /** True while the slot still holds the small startup sprite. The sharp
+   *  picture has not replaced it yet. */
+  isSoon(sig: string): boolean {
+    return this.#grade.get(sig) === 'soon'
   }
 
   getImageUV(sig: string): ImageUV | null {
@@ -148,16 +157,31 @@ export class HexImageAtlas {
     return count
   }
 
-  async loadImage(sig: string, blob: Blob): Promise<ImageUV | null> {
+  async loadImage(sig: string, blob: Blob, grade: 'soon' | 'sharp' = 'sharp'): Promise<ImageUV | null> {
     const existing = this.#map.get(sig)
-    if (existing) return existing
+    const held = this.#grade.get(sig)
+    // A sharp picture stays. A small sprite stays until the sharp one arrives,
+    // and a second sprite must not paint back over it.
+    if (existing && (held !== 'soon' || grade !== 'sharp')) return existing
+
+    if (existing && held === 'soon' && grade === 'sharp') {
+      const pending = this.#inFlight.get(sig)
+      if (pending) await pending
+      if (this.#grade.get(sig) !== 'soon') return this.#map.get(sig) ?? null
+      const busy = this.#inFlight.get(sig)
+      if (busy) return busy
+      const slot = this.#slotToSig.indexOf(sig)
+      const load = this.#loadInto(sig, blob, 'sharp', slot >= 0 ? slot : undefined)
+      this.#inFlight.set(sig, load)
+      try { return await load } finally { this.#inFlight.delete(sig) }
+    }
 
     if (this.hasFailed(sig)) return null
 
     const pending = this.#inFlight.get(sig)
     if (pending) return pending
 
-    const load = this.#loadInto(sig, blob)
+    const load = this.#loadInto(sig, blob, grade)
     this.#inFlight.set(sig, load)
     try {
       return await load
@@ -189,10 +213,23 @@ export class HexImageAtlas {
     return -1
   }
 
-  async #loadInto(sig: string, blob: Blob): Promise<ImageUV | null> {
+  async #loadInto(
+    sig: string,
+    blob: Blob,
+    grade: 'soon' | 'sharp' = 'sharp',
+    forcedSlot?: number,
+  ): Promise<ImageUV | null> {
     const tLoad = performance.now()
     // Before the decode: a picture with nowhere to go costs nothing.
-    let slot = this.#allocSlot(sig)
+    // A startup sprite being sharpened reuses its own slot, so the tile
+    // never goes blank between the two.
+    let slot: number
+    if (forcedSlot !== undefined && forcedSlot >= 0 && forcedSlot < this.#slotToSig.length) {
+      const holder = this.#slotToSig[forcedSlot]
+      slot = holder === null || holder === sig || !this.#pinned.has(holder) ? forcedSlot : this.#allocSlot(sig)
+    } else {
+      slot = this.#allocSlot(sig)
+    }
     if (slot < 0) return null
 
     let bitmap: ImageBitmap
@@ -290,6 +327,7 @@ export class HexImageAtlas {
     const previous = this.#slotToSig[slot]
     if (previous !== null && previous !== sig) {
       this.#map.delete(previous)
+      this.#grade.delete(previous)
       this.#evictionGeneration++
       window.dispatchEvent(new CustomEvent('hex-image-atlas:evicted', { detail: { sig: previous } }))
     }
@@ -316,8 +354,16 @@ export class HexImageAtlas {
     const v1 = (row * this.#cellPx + padY + imgH) / this.#atlas.height
 
     const uv: ImageUV = { u0, v0, u1, v1 }
+    const wasSoon = this.#grade.get(sig) === 'soon'
     this.#map.set(sig, uv)
     this.#slotToSig[slot] = sig
+    this.#grade.set(sig, grade)
+    // Same slot, sharper pixels. The geometry's UVs may have moved with
+    // the new aspect, so the renderer rebuilds them. The pixels themselves
+    // are already in the atlas the next frame samples.
+    if (wasSoon && grade === 'sharp') {
+      window.dispatchEvent(new CustomEvent('hex-image-atlas:upgraded', { detail: { sig } }))
+    }
 
     const loadMs = performance.now() - tLoad
     if (loadMs > 5) {
@@ -337,6 +383,7 @@ export class HexImageAtlas {
   /** Remove a specific entry (e.g. after re-save) so next load picks up the new image */
   invalidate(sig: string): void {
     this.#map.delete(sig)
+    this.#grade.delete(sig)
     this.#failures.delete(sig)
     // slotToSig keeps the phantom — it's harmless: either the slot is
     // reused (eviction is a no-op since #map already lacks the entry),

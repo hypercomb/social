@@ -581,6 +581,9 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   //                        and never a walk (search/hive-search.ts)
   //   thumbnails:hex     — hex thumbnails keyed by SOURCE IMAGE SIGNATURE
   //                        (presentation/tiles/thumbnails.ts)
+  //   sprites:boot       — one screen of those thumbnails, keyed by the
+  //                        signature of the sorted source-image set
+  //                        (presentation/tiles/boot-sprite.ts)
   //   molecule:index     — the DECLARED VOCABULARY, keyed by the layer sig it
   //                        derives from: which molecule addresses a subtree's
   //                        names fold to (molecule/molecule-index.ts). It must
@@ -593,6 +596,7 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'molecule:index',
   'search:index',
   'thumbnails:hex',
+  'sprites:boot',
   // RESERVED AHEAD OF ITS BUILD, like `pheromones:deposits` above: the hive
   // entry point from documentation/known-location-pools.md, name → sealed
   // head, proved buildable today by history/hives-names-shape.spec.ts. The

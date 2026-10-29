@@ -144,6 +144,9 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['molecule:index', 'index'],
   ['search:index', 'index'],
   ['thumbnails:hex', 'index'],
+  // One screen of tile pictures, keyed by the signature of the sorted
+  // source-image set (presentation/tiles/boot-sprite.ts). Recomputable.
+  ['sprites:boot', 'index'],
   ['visual-optimization', 'index'],
   // SETS — the participant's own members, and they travel.
   ['backgrounds:saved', 'set'],

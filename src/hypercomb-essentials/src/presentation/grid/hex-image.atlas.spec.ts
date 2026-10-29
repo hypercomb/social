@@ -109,6 +109,32 @@ describe('HexImageAtlas atomic replacement', () => {
     expect(late.close).toHaveBeenCalled()
   })
 
+  it('paints the small sprite first and replaces it in the same slot', async () => {
+    decode.mockResolvedValue(bitmap())
+    const atlas = new HexImageAtlas({ render: vi.fn() }, 8, 1, 2)
+    await atlas.loadImage('tile', new Blob(['soon']), 'soon')
+    expect(atlas.isSoon('tile')).toBe(true)
+
+    const upgraded: string[] = []
+    const onUpgraded = (event: Event): void => {
+      upgraded.push((event as CustomEvent<{ sig: string }>).detail.sig)
+    }
+    window.addEventListener('hex-image-atlas:upgraded', onUpgraded)
+    try {
+      await atlas.loadImage('tile', new Blob(['sharp']), 'sharp')
+      expect(atlas.hasImage('tile')).toBe(true)
+      expect(atlas.isSoon('tile')).toBe(false)
+      expect(upgraded).toEqual(['tile'])
+      expect(decode).toHaveBeenCalledTimes(2)
+
+      await atlas.loadImage('tile', new Blob(['soon-again']), 'soon')
+      expect(atlas.isSoon('tile')).toBe(false)
+      expect(decode).toHaveBeenCalledTimes(2)
+    } finally {
+      window.removeEventListener('hex-image-atlas:upgraded', onUpgraded)
+    }
+  })
+
   it('wakes the renderer when a decode-failure cooldown expires', () => {
     const source = readFileSync(join(__dirname, 'hex-image.atlas.ts'), 'utf8')
     expect(source).toMatch(/count === HexImageAtlas\.MAX_RETRIES[\s\S]*setTimeout/)

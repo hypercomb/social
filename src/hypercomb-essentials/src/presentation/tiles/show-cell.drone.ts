@@ -6,6 +6,7 @@ import type { HostReadyPayload } from './pixi-host.worker.js'
 import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { publishOwnedProjection } from './derived-projection-cache.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
+import { readThumbnail, type ThumbnailStore } from './thumbnails.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
@@ -142,7 +143,7 @@ export type DiveCell = {
   hasBranch: boolean
   hideText: boolean
   borderColor?: [number, number, number]
-  /** A reference tile — hovers with the portal shimmer, as on its own page. */
+  /** A reference. Paint ignores this: the moving border is hasBranch, on hover. */
   portal: boolean
 }
 type ReferenceDraftPreview = {
@@ -737,12 +738,15 @@ export class ShowCellDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:names-on-hover', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'tile:preview']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'thumbnail:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
   private atlas: HexLabelAtlas | null = null
   private imageAtlas: HexImageAtlas | null = null
+  /** Image sigs whose small sprite is already up and whose sharp picture
+   *  is being decoded off the paint path. */
+  readonly #sharpening = new Set<string>()
   private atlasRenderer: unknown = null
 
   // cache: cell label → small image signature (avoids re-reading 0000 on every render)
@@ -1101,7 +1105,6 @@ export class ShowCellDrone extends Drone {
   #diveMesh: any | null = null
   #diveGeom: Geometry | null = null
   #diveCells: Cell[] = []
-  #divePortals: ReadonlySet<string> = new Set<string>()
   readonly #diveLabelToIndex = new Map<string, number>()
   #diveHoverLabel: string | null = null
   #diveToken = 0
@@ -1280,6 +1283,9 @@ export class ShowCellDrone extends Drone {
     if (!this.shader) return
     this.shader.setHoveredIndex(label !== null ? this.#labelToIndex.get(label) ?? -1 : -1)
     this.#setHoverOpaque(label)
+    // A dive paints with the same shader and owns the clock itself. On the
+    // page, the border moves only for a tile that has hexagon children.
+    if (!this.#diveActive) this.#setPathwayHover(!!label && this.renderedCells.get(label)?.hasBranch === true)
   }
   #substrateFadeStart: number | null = null
   #substrateFadeRaf = 0
@@ -1289,13 +1295,13 @@ export class ShowCellDrone extends Drone {
   #driftRaf = 0
   #driftActive = false
   #driftStart = 0
-  // Portal shimmer clock — advances u_time while a reference/portal tile is
-  // hovered so its magical hover animates on an otherwise-static hive page. It
+  // Pathway hover clock — advances u_time while a tile with hexagon children
+  // is hovered, so its border breathes on an otherwise-static hive page. It
   // shares the u_time uniform and #driftStart origin with launcher drift; only
   // one drives the clock at a time (drift wins on launcher pages, where u_time
-  // is already ticking, so the shimmer rides it for free).
-  #portalShimmerRaf = 0
-  #portalShimmerActive = false
+  // is already ticking, so the hover rides it for free). A leaf never starts it.
+  #pathwayHoverRaf = 0
+  #pathwayHoverActive = false
   #showHiddenItems = false
   #currentHiddenSet = new Set<string>()
   /** Launcher-page tiles whose behaviour is switched off — painted as hidden
@@ -2510,6 +2516,13 @@ export class ShowCellDrone extends Drone {
     }
     // Clean scan — every on-screen sig is resolvable again; reset the bound.
     this.#evictRepaintCount = 0
+  }
+
+  /** The small sprite was replaced by the sharp picture in the same slot.
+   *  Rebuild geometry so the UVs match the new pixels. */
+  readonly #onAtlasUpgraded = (): void => {
+    this.#forceNextRender = true
+    this.requestRender()
   }
 
   /** Label-atlas twin of #onAtlasEvicted. A displaced on-screen label's
@@ -5911,6 +5924,7 @@ export class ShowCellDrone extends Drone {
     // rebuilds geometry itself.
     window.addEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
     window.addEventListener('hex-image-atlas:retry', this.#onAtlasEvicted)
+    window.addEventListener('hex-image-atlas:upgraded', this.#onAtlasUpgraded)
     // Label-atlas twin — in-place updates bake uncached labels on demand,
     // and once the 256-slot label ring has wrapped, such a bake displaces
     // an on-screen label whose baked UV then shows the WRONG text.
@@ -7538,10 +7552,6 @@ export class ShowCellDrone extends Drone {
       this.#applyHover(hoverLabel)
       if (!this.shader) return
 
-      // Drive the shimmer clock only while a reference/portal tile is hovered,
-      // so u_time (and the magical hover animation) idles the rest of the time.
-      this.#setPortalShimmer(hoverLabel !== null && referenceTargetForLabel(hoverLabel) !== null)
-
       // Emit hovered tile's tags for UI highlight
       this.emitEffect('tile:hover-tags', { tags: hoverLabel ? this.#tagsFor(hoverLabel) : [] })
     })
@@ -7687,6 +7697,7 @@ export class ShowCellDrone extends Drone {
     window.removeEventListener('navigate', this.onNavigate)
     window.removeEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
     window.removeEventListener('hex-image-atlas:retry', this.#onAtlasEvicted)
+    window.removeEventListener('hex-image-atlas:upgraded', this.#onAtlasUpgraded)
     window.removeEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)
 
     if (this.#clusterRetryTimer) { clearTimeout(this.#clusterRetryTimer); this.#clusterRetryTimer = null }
@@ -7704,10 +7715,10 @@ export class ShowCellDrone extends Drone {
       this.#driftRaf = 0
     }
 
-    this.#portalShimmerActive = false
-    if (this.#portalShimmerRaf) {
-      cancelAnimationFrame(this.#portalShimmerRaf)
-      this.#portalShimmerRaf = 0
+    this.#pathwayHoverActive = false
+    if (this.#pathwayHoverRaf) {
+      cancelAnimationFrame(this.#pathwayHoverRaf)
+      this.#pathwayHoverRaf = 0
     }
 
     if (this.lineageChangeListening) {
@@ -7855,27 +7866,27 @@ export class ShowCellDrone extends Drone {
     }
   }
 
-  /** Start/stop the portal shimmer clock. A reference/portal tile's hover ring
-   *  breathes and spins (fragment shader, keyed on u_time); u_time is otherwise
-   *  frozen on a normal hive page, so we tick it only while a portal is hovered.
-   *  No-op when launcher drift already owns the clock (u_time is live there).
+  /** Start/stop the pathway hover clock. A tile with hexagon children breathes
+   *  on hover (fragment shader, keyed on u_time); u_time is otherwise frozen
+   *  on a normal hive page, so we tick it only while such a tile is hovered.
+   *  A leaf never starts it. No-op when launcher drift already owns the clock.
    *  Idempotent. */
-  #setPortalShimmer = (active: boolean): void => {
-    if (active === this.#portalShimmerActive) return
-    this.#portalShimmerActive = active
+  #setPathwayHover = (active: boolean): void => {
+    if (active === this.#pathwayHoverActive) return
+    this.#pathwayHoverActive = active
     if (active) {
       if (this.#driftActive) return                    // drift already advances u_time
       if (!this.#driftStart) this.#driftStart = performance.now()
-      if (!this.#portalShimmerRaf) {
+      if (!this.#pathwayHoverRaf) {
         const tick = (): void => {
-          if (!this.#portalShimmerActive || this.#driftActive) { this.#portalShimmerRaf = 0; return }
+          if (!this.#pathwayHoverActive || this.#driftActive) { this.#pathwayHoverRaf = 0; return }
           this.shader?.setTime((performance.now() - this.#driftStart) / 1000)
-          this.#portalShimmerRaf = requestAnimationFrame(tick)
+          this.#pathwayHoverRaf = requestAnimationFrame(tick)
         }
-        this.#portalShimmerRaf = requestAnimationFrame(tick)
+        this.#pathwayHoverRaf = requestAnimationFrame(tick)
       }
     } else {
-      if (this.#portalShimmerRaf) { cancelAnimationFrame(this.#portalShimmerRaf); this.#portalShimmerRaf = 0 }
+      if (this.#pathwayHoverRaf) { cancelAnimationFrame(this.#pathwayHoverRaf); this.#pathwayHoverRaf = 0 }
     }
   }
 
@@ -8032,9 +8043,9 @@ export class ShowCellDrone extends Drone {
       try { this.geom.destroy(true) } catch { /* ignore */ }
     }
 
-    // No mesh on screen → no launcher page to drift, no portal to shimmer.
+    // No mesh on screen → no launcher page to drift, no pathway hover to run.
     this.#setDrift(false, 0)
-    this.#setPortalShimmer(false)
+    this.#setPathwayHover(false)
 
     if (!retainWarmMesh) {
       this.hexMesh = null
@@ -9354,6 +9365,7 @@ export class ShowCellDrone extends Drone {
   ): Promise<void> => {
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
       {
+        getPool: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
         getResource: (sig: string) => Promise<Blob | null>
         getResourceLocal: (sig: string) => Promise<Blob | null>
         getOptimizedVisual?: (sig: string) => Promise<Blob | null>
@@ -9542,23 +9554,40 @@ export class ShowCellDrone extends Drone {
     // Per-batch dedup so cells sharing an image (e.g. substrate fills) only fetch + decode once
     const inFlightImages = new Map<string, Promise<void>>()
     const loadImageOnce = (sig: string): Promise<void> => {
-      if (imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) return Promise.resolve()
+      if (imageAtlas.hasFailed(sig)) return Promise.resolve()
       // View preparation resolves the exact image signatures and display
       // properties, but GPU decode/upload belongs to the sliced idle bake
       // queue. Decoding every destination cell here via Promise.all monopolized
       // the main thread while other, already-ready tiles were being clicked.
       if (prepareOnly) return Promise.resolve()
+      // Already sharp: nothing to wait for. Still the small sprite: the
+      // paint can use it now, and the sharp picture replaces it afterwards.
+      if (imageAtlas.hasImage(sig) && !imageAtlas.isSoon(sig)) return Promise.resolve()
+      if (imageAtlas.isSoon(sig)) {
+        void this.#sharpenImage(sig)
+        return Promise.resolve()
+      }
       const existing = inFlightImages.get(sig)
       if (existing) return existing
       const promise = (async () => {
         try {
+          // THE SMALL SPRITE FIRST. A 96px thumbnail decodes in milliseconds
+          // and the tile is on screen. The cell-sized visual replaces it
+          // off this path, so a page of tiles does not wait on full images.
+          const thumb = await readThumbnail(store as ThumbnailStore, sig)
+          if (thumb) {
+            await imageAtlas.loadImage(sig, thumb, 'soon')
+            void this.#sharpenImage(sig)
+            return
+          }
+          this.emitEffect('thumbnail:wanted', { sig })
           // LOCAL only — a miss never stalls the batch; the detached fill
           // pulls the bytes and a follow-up render atlas-loads them.
           // Cell-sized optimized visual first: same pixels the atlas would
           // bake from the raw, pre-downscaled so the decode is milliseconds.
           const blob = await this.#localDecodeBlob(sig)
           if (!blob) { fillFromHost(sig); return }
-          await imageAtlas.loadImage(sig, blob)
+          await imageAtlas.loadImage(sig, blob, 'sharp')
         } catch (error) {
           console.warn(`[show-cell] atlas load failed for ${sig.slice(0, 12)}…`, error)
         }
@@ -10490,6 +10519,24 @@ export class ShowCellDrone extends Drone {
     }
   }
 
+  /** Replace a startup sprite with the cell-sized picture, off the paint
+   *  path. The tile is already showing the sprite; this only sharpens it. */
+  #sharpenImage = async (sig: string): Promise<void> => {
+    if (this.#sharpening.has(sig)) return
+    const atlas = this.imageAtlas
+    if (!atlas?.isSoon(sig)) return
+    this.#sharpening.add(sig)
+    try {
+      const blob = await this.#localDecodeBlob(sig)
+      if (!blob || !this.imageAtlas?.isSoon(sig)) return
+      await this.imageAtlas.loadImage(sig, blob, 'sharp')
+    } catch {
+      // The sprite stays. A later pass can sharpen it.
+    } finally {
+      this.#sharpening.delete(sig)
+    }
+  }
+
   /** The cheapest LOCAL bytes for an image sig: the cell-sized optimized
    *  visual when minted, else the raw resource. Never network. A raw
    *  fallback heavy enough to matter demands the optimized form for next
@@ -11312,10 +11359,10 @@ export class ShowCellDrone extends Drone {
   /** `foreign` — the cells belong to ANOTHER layer (a dive): read nothing
    *  location-scoped for them (selection, shade, peers, hidden dimming,
    *  launcher shapes, the page's hover) and overwrite none of the page's
-   *  buffer bookkeeping; portals and the hover-reveal come from the caller. */
+   *  buffer bookkeeping; the hover-reveal comes from the caller. */
   private buildFillQuadGeometry(
     cells: Cell[], r: number, gap: number, hw: number, hh: number,
-    foreign?: { portals: ReadonlySet<string>; reveal: string | null },
+    foreign?: { reveal: string | null },
   ): Geometry {
     const spacing = r + gap
 
@@ -11350,16 +11397,13 @@ export class ShowCellDrone extends Drone {
     // Per-tile launcher silhouette (0 hex · 2 invader; 1 retired) — lets a
     // mixed launch-group page render each group's own shape without sharing.
     const shapeAttr = new Float32Array(cells.length * 4)
-    // Per-tile portal flag — a reference tile (doorway to another lineage) gets
-    // the magical hover shimmer instead of the plain pathway/leaf ring.
-    const portal = new Float32Array(cells.length * 4)
     // Per-tile presence (shader vPresence): x is how many people in the room
     // hold the tile (the wax), y is 1 when the layer on top does not hold it
     // (it sits below). A dive writes zeros: its tiles are nobody's here.
     const presence = new Float32Array(cells.length * 8)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0, pp = 0
+    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0
     let ci = 0
 
     if (!foreign) this.#shadedLabels.clear()
@@ -11473,13 +11517,6 @@ export class ShowCellDrone extends Drone {
       shapeAttr.set([sm, sm, sm, sm], sap)
       sap += 4
 
-      // Reference/portal tiles hover with the magical shimmer (see hex-sdf
-      // fragment). referenceTargetForLabel returns the target segments (or null
-      // for a non-reference) from the same decoration index the click path uses.
-      const pv2 = (foreign ? foreign.portals.has(c.label) : referenceTargetForLabel(c.label) !== null) ? 1 : 0
-      portal.set([pv2, pv2, pv2, pv2], pp)
-      pp += 4
-
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -11500,7 +11537,6 @@ export class ShowCellDrone extends Drone {
       ; (g as any).addAttribute('aUnshared', unshared, 1)
       ; (g as any).addAttribute('aShaded', shaded, 1)
       ; (g as any).addAttribute('aShapeMode', shapeAttr, 1)
-      ; (g as any).addAttribute('aIsPortal', portal, 1)
       ; (g as any).addAttribute('aPresence', presence, 2)
       ; (g as any).addIndex(idx)
 
@@ -11536,7 +11572,6 @@ export class ShowCellDrone extends Drone {
       q: d.q, r: d.r, label: d.label, external: false, imageSig: d.imageSig,
       hasBranch: d.hasBranch, hideText: d.hideText, borderColor: d.borderColor, heat: 0,
     }))
-    const portals = new Set(input.filter(d => d.portal).map(d => d.label))
 
     // Pin the UNION of what is on screen and what is about to be: neither the
     // page underneath nor the dive may lose its glyphs or pixels to the other.
@@ -11557,7 +11592,6 @@ export class ShowCellDrone extends Drone {
     if (!this.layer || !this.hexMesh || !this.shader) { this.#clearDive(); return }
 
     this.#diveCells = cells
-    this.#divePortals = portals
     this.#rebuildDiveGeometry()
     if (!this.#diveHidMain) { this.#diveHidMain = true; this.hexMesh.visible = false }
     this.#diveActive = true
@@ -11577,7 +11611,7 @@ export class ShowCellDrone extends Drone {
     const hexHalfH = this.#flat ? circumRadiusPx : pointReachPx
     const geom = this.buildFillQuadGeometry(
       this.#diveCells, circumRadiusPx, gapPx, hexHalfW + padPx, hexHalfH + padPx,
-      { portals: this.#divePortals, reveal: this.#diveHoverLabel },
+      { reveal: this.#diveHoverLabel },
     )
     this.#diveLabelToIndex.clear()
     this.#diveCells.forEach((c, i) => this.#diveLabelToIndex.set(c.label, i))
@@ -11614,6 +11648,8 @@ export class ShowCellDrone extends Drone {
   #applyDiveHover(): void {
     const i = this.#diveHoverLabel ? this.#diveLabelToIndex.get(this.#diveHoverLabel) : undefined
     this.shader?.setHoveredIndex(i ?? -1)
+    const cell = this.#diveHoverLabel ? this.#diveCells.find(c => c.label === this.#diveHoverLabel) : undefined
+    this.#setPathwayHover(cell?.hasBranch === true)
   }
 
   /** Give the page back exactly as it was: its mesh, its pins, its hover —
@@ -11633,7 +11669,6 @@ export class ShowCellDrone extends Drone {
       this.#diveGeom = null
     }
     this.#diveCells = []
-    this.#divePortals = new Set<string>()
     this.#diveLabelToIndex.clear()
     this.#diveHoverLabel = null
     if (this.#diveHidMain) {
@@ -11650,6 +11685,7 @@ export class ShowCellDrone extends Drone {
     this.imageAtlas?.setPinned([...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])))
     const restored = this.#hoverRevealLabel ? this.#labelToIndex.get(this.#hoverRevealLabel) : undefined
     this.shader?.setHoveredIndex(restored ?? -1)
+    this.#setPathwayHover(!!this.#hoverRevealLabel && this.renderedCells.get(this.#hoverRevealLabel)?.hasBranch === true)
     this.requestRender()
   }
 
