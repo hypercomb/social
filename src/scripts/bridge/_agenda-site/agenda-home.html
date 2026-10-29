@@ -9,9 +9,9 @@
 <style>
   /* The agenda home is the business-card list: a dark column, a search that
      stays at the top, and one row per date. The row is a link to that date's
-     child. The layout is a resource the parent names in its template slot,
-     and the date page uses that resource. The agenda resource is the
-     parameter. Card text comes from the child's parameter,
+     child. The date's page is the layout resource. It is not a behaviour.
+     The agenda resource is the parameter. Card text comes from the child's
+     parameter,
      then from the parent's list. Opening the page never creates the pool.
      Scoped under .ag so a hive mounting the page inline never touches its shell. */
   .ag{
