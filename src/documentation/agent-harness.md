@@ -418,3 +418,12 @@ domains that mention a creation, the creations a domain names, the gaps
 where copy says a name nobody has published yet. That last one is a
 publish waiting to happen, and the copy already links to it the moment it
 does.
+
+**Package lookup is a word (jwize, 2026-10-29).** When the harness on a mission
+door needs something about a word, it asks the servers and the builds they
+hold. The first answer is meta. A code task is a later read of one domain, and
+it returns a recommendation the harness moves forward on
+([build-debug-isolation.md](build-debug-isolation.md)). A skewer is the wider conventional slice: one kind of meta through every
+word, across every shared domain or a specialty group of them. A domain
+that does not answer stays unknown. The mission stays on its own
+subdomain. This spider stays the walk that follows the copy.

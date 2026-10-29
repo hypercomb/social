@@ -154,6 +154,19 @@ export const namedFromVerdict = (verdict: AttestationVerdict | null | undefined,
   return verdict.reason === 'not-named' && verdict.named ? verdict.named : ''
 }
 
+/** The root a shell with nothing installed should take. `announced` is what
+ *  the scout last heard. A fresh verdict that names another root wins, so a
+ *  page left open across a stamp cannot take the package the publisher has
+ *  stopped naming. */
+export const namedWhenUninstalled = (
+  announced: string,
+  verdict: AttestationVerdict | null | undefined,
+): string => {
+  if (verdict?.ok && verdict.witnessed === 'current') return announced
+  if (verdict && !verdict.ok && verdict.reason === 'not-named' && verdict.named) return verdict.named
+  return announced
+}
+
 export interface DirectoryRow {
   path: string
   name: string
@@ -1427,14 +1440,30 @@ export class HostDirectoryElement extends HTMLElement {
   /** Move the trunk to what the followed publisher names now. Picks stay picked. */
   async #updateAll(): Promise<void> {
     const reach = port()
-    const next = this.#next
-    if (!reach || !next || this.#busy) return
+    if (!reach || this.#busy) return
     this.#busy = '*'
     this.#error = ''
-    const held = new Set<string>()
-    this.#held = held
     this.#renderBody()
+    const held = new Set<string>()
     try {
+      // The bar may still name the root the page opened on. Read what the
+      // publisher names now and take that, before a single byte is asked for.
+      const trunk = this.#selection?.trunk ?? null
+      const named = await this.#namedRoot(trunk)
+      if (named) {
+        this.#named = named
+        if (this.#next?.root !== named) {
+          this.#offerable = this.#offerFor(named)
+          this.#next = await this.#tree(named, this.#channelSources())
+        }
+      }
+      const next = this.#next
+      if (!next || (named && next.root !== named)) {
+        this.#error = t('packages.updates.not-held', 'An update is ready, but none of your hosts has it yet')
+        return
+      }
+      this.#held = held
+      this.#renderBody()
       const had = await this.#runningFiles(reach)
       this.#had = had
       const outcome = await reach.install.acquire(next.root, [...new Set([...this.#sources(), ...this.#channelSources()])], {
@@ -1646,12 +1675,19 @@ export class HostDirectoryElement extends HTMLElement {
     return { trunk, picks: {}, applied: [], eclipsed: [], nodes: tree?.nodes ?? [] }
   }
 
-  /** What the followed publisher names NOW: a fresh read of its index about
-   *  the installed build (namedFromVerdict) — never a witness, which only
-   *  says a root was named once. When that read cannot say, the scout's
-   *  announcement, else `''` (unknown — the window then cuts nothing). */
+  /** What the followed publisher names NOW. An installed build is read fresh
+   *  (namedFromVerdict) — never from a witness, which only says a root was
+   *  named once. A shell with nothing installed (localhost's source shell)
+   *  attests the announcement the same way, so Update all follows a stamp
+   *  that landed after the page opened. When that read cannot say, the
+   *  scout's announcement, else `''` (unknown — the window then cuts nothing). */
   async #namedRoot(installedSig: string | null): Promise<string> {
-    if (!installedSig) return this.#announced
+    if (!installedSig) {
+      const announced = this.#announced
+      if (!SIG_RE.test(announced)) return announced
+      const verdict = await attestPackage(announced, this.#zones, { fresh: true }).catch(() => null)
+      return namedWhenUninstalled(announced, verdict)
+    }
     const verdict = await attestPackage(installedSig, this.#zones, { fresh: true }).catch(() => null)
     return namedFromVerdict(verdict, installedSig) || this.#announced
   }

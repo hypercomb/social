@@ -41,6 +41,8 @@ new code for a separate activation choice.
 
 **Sandboxes go to `hypercomb.com`.** Its `*` wildcard is already live, and sites are already served at `<label>.hypercomb.com`. Nested labels are refused, so a sandbox and a site share one label space: every sandbox is named `try-<change>`, which no site uses.
 
+**Depths under a door (jwize, 2026-10-29)** are the later decision, written in [build-debug-isolation.md](build-debug-isolation.md). The work is package management, an AI upgrade included: each party composes on its own origin, and a trait is the only interface between them. The label rule in this section stays: `*.<zone>` covers one level, and a name with two labels waits until the parent door has its own wildcard. Until then a party uses another one-label door, `try-<mission>-<party>.<zone>`.
+
 ## Decided (jwize, 2026-09-22): anyone's trial may be taken, held
 
 A trial is taken into your own hive at one path whoever opened it — but what it brings does not run until you accept it in the brood with the two warnings. The alternatives were followed publishers' trials only, or doors only (no trial code enters a hive until a followed publisher promotes it).

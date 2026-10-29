@@ -79,6 +79,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 ## Operations
 
+- [build-debug-isolation.md](build-debug-isolation.md) — Package management, including an AI upgrade. A normal request runs a minified runtime from the shared heap; a debug request stays readable. A folder can be minified on its own into `derived:<that layer>` by the transpiler this tree signs. Lookup is a word, and a skewer may read every word across shared domains or a specialty group. The mint is local; a nested depth is decided and not built (2026-10-29)
 - [publishing.md](publishing.md) — How to publish today: content, modules, and apps — three rails and their gotchas
 - [infrastructure.md](infrastructure.md) — Decentralized design: two relays, no centralized hosting
 - [hosting-from-a-machine.md](hosting-from-a-machine.md) — Being a host: the desktop client and the headless `hypercomb-serve` answer the host contract live out of the store, with no export step

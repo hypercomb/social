@@ -33,6 +33,12 @@ names every package by path with only the bees its own layer declares, and
 reports `complete` — a walk with a layer it could not read never becomes an
 activation. (`package-units.ts` still reads the top level for older callers.)
 
+Composing a new package — files off, a folder taken from another signature, a
+trait left open, including an upgrade of the AI package — is minted on the
+host's file view and tried on a mission door
+([build-debug-isolation.md](build-debug-isolation.md)). This window is where a
+composed root is taken into what runs.
+
 ## What runs: the trunk, and picks over it
 
 What runs is the **trunk** — the root you installed — with **picks** laid over

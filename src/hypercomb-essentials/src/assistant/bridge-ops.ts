@@ -23,7 +23,7 @@
  *  (see the worker's QUIET LANDING comment). */
 export const MUTATING_OPS: ReadonlySet<string> = new Set([
   'update', 'note-add', 'note-delete', 'note-split', 'put-resource',
-  'optimization-add', 'optimization-remove', 'decoration-add',
+  'optimization-add', 'optimization-remove', 'pool-put', 'decoration-add',
   'bag-add', 'bag-remove', 'bag-set', 'build-record', 'stamp',
   'add', 'remove', 'summary-add', 'chat-reply', 'chat-goal-reached', 'submit',
 ])

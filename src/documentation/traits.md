@@ -346,6 +346,15 @@ is the address. A subdomain is a route, and a route is never an address
 top-level hive made from a hierarchy is already what publishing a branch does.
 Nothing here needs a second origin.
 
+**What crosses a door (jwize, 2026-10-29).** A workplace is its own origin: one
+task, one door ([build-debug-isolation.md](build-debug-isolation.md)). The
+paragraph above stands. A trait is not that door, and it is not an address.
+The trait is the one word the workplace speaks. The harness on that door asks
+the word of the servers and the builds they hold, and the first answer is
+meta. A skewer may also read every word across the shared domains, or across
+a specialty group of them. A filler published from the contributor's own
+domain is the signature that answers it.
+
 ## Ledger — what is true today
 
 | | Status |

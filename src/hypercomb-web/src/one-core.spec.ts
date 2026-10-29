@@ -29,6 +29,15 @@ describe('one core', () => {
     }
   })
 
+  it('the visitor page plugs a minified runtime before the readable map', () => {
+    const html = read('src/index.visitor.html')
+    const early = html.indexOf('id="hc-early-runtime"')
+    const map = html.indexOf(`"@hypercomb/core": "${CORE_RUNTIME_URL}"`)
+    expect(early).toBeGreaterThan(0)
+    expect(map).toBeGreaterThan(early)
+    expect(html).toContain('hc:verbose')
+  })
+
   it('every build points the core preload at its real address', () => {
     const scripts = JSON.parse(read('package.json')).scripts
     expect(scripts.build).toContain('one-core-index.mjs')

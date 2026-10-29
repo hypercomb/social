@@ -50,7 +50,7 @@ vi.mock('../editor/resource-thumbnail.js', () => ({
 
 import { EffectBus } from '@hypercomb/core'
 import { generateHexThumbnails } from '../editor/resource-thumbnail.js'
-import { imageWallHasChoice, imagesButtonVisible } from './image-collection.js'
+import { imageWallHasChoice, imagesButtonVisible, offeredPictureCount } from './image-collection.js'
 import {
   announceHeldImages,
   announceReplacedPicture,
@@ -69,13 +69,22 @@ describe('images button and wall', () => {
     const worn = hex('a')
     expect(imagesButtonVisible({ held: [worn], worn, extra: 0 })).toBe(false)
     expect(imagesButtonVisible({ held: [], worn: '', extra: 0 })).toBe(false)
-    expect(imagesButtonVisible({ held: [], worn: '', extra: 1 })).toBe(false)
   })
 
   it('shows the button for a picture the tile is not wearing, and for any real choice', () => {
     expect(imagesButtonVisible({ held: [hex('b')], worn: '', extra: 0 })).toBe(true)
     expect(imagesButtonVisible({ held: [hex('a'), hex('b')], worn: hex('a'), extra: 0 })).toBe(true)
+    expect(imagesButtonVisible({ held: [], worn: '', extra: 1 })).toBe(true)
     expect(imagesButtonVisible({ held: [], worn: '', extra: 2 })).toBe(true)
+  })
+
+  it('counts a swarm picture once, and not when the tile already wears it', () => {
+    const worn = hex('a')
+    const other = hex('b')
+    const held = new Set([worn])
+    expect(offeredPictureCount(worn, held, [worn, worn, other, other])).toBe(1)
+    expect(offeredPictureCount(worn, held, [worn])).toBe(0)
+    expect(offeredPictureCount('', undefined, ['', other])).toBe(1)
   })
 
   it('opens the wall for a single picture that is not the one worn', () => {

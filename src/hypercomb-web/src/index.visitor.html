@@ -60,9 +60,27 @@
         } catch (error) {}
       })();
     </script>
+    <!-- A NORMAL REQUEST runs the compiled runtime from the shared heap.
+         The visitor build stamps window.__hcRuntime to /content/<sig> before
+         this script. hc:verbose is a debug request and leaves the readable
+         map below in place. A build that stamped nothing does the same.
+         The map this writes is parsed before the readable one, so its
+         @hypercomb/core wins. A sandbox door never serves this page. -->
+    <script id="hc-early-runtime">
+      (function () {
+        var verbose = null;
+        try { verbose = window.localStorage.getItem('hc:verbose'); } catch (error) {}
+        var runtime = window.__hcRuntime;
+        if (verbose || typeof runtime !== 'string' || !/^\/content\/[0-9a-f]{64}$/.test(runtime)) return;
+        document.write('<' + 'link rel="modulepreload" href="' + runtime + '">'
+          + '<' + 'script type="importmap">{"imports":{"@hypercomb/core":"' + runtime + '"}}'
+          + '<\/' + 'script>');
+      })();
+    </script>
     <!-- ONE CORE: the shell imports the same @hypercomb/core module every bee
          imports (angular.json externalDependencies), mapped before any module
-         script so both the polyfills and main resolve it. -->
+         script so both the polyfills and main resolve it. This is the
+         readable runtime. A normal request already mapped the minified one. -->
     <script type="importmap">{ "imports": { "@hypercomb/core": "/hypercomb-core.runtime.js" } }</script>
 
     <meta

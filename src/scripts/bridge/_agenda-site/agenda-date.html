@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Meetup agenda</title>
+<meta name="description" content="One Hypercomb meetup agenda. The date's own layout, filled from its parameter.">
+<style>
+  /* One date. This layout is the child's, shared by every date. The agenda
+     resource is the parameter: the page decoration's payload.parameter, or
+     the cell's parameter slot. Nothing about a particular morning is copied
+     into this file. Scoped under .mp. */
+  :root,.mp{
+    --mp-outer:#eae7e7;--mp-bg:#f3f2f2;--mp-surface:#eae9e9;--mp-text:#201e1d;
+    --mp-accent:#ec3013;--mp-strong:#ae1800;--mp-muted:#605d5d;--mp-soft:#444141;
+    --mp-divider:rgba(32,30,29,.4);--mp-hover:rgba(32,30,29,.05);
+    --mp-font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mp-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){
+    :root,.mp{
+      --mp-outer:#121110;--mp-bg:#1b1a19;--mp-surface:#2c2a29;--mp-text:#f1efee;
+      --mp-accent:#ff5a3d;--mp-strong:#ff8a72;--mp-muted:#a8a4a3;--mp-soft:#cfcbca;
+      --mp-divider:rgba(241,239,238,.28);--mp-hover:rgba(241,239,238,.06)}}
+  body:has(> .mp){margin:0;background:var(--mp-outer)}
+  .mp{display:block;min-height:100vh;min-height:100dvh;background:var(--mp-outer);color:var(--mp-text);
+    font:400 16px/1.55 var(--mp-font);-webkit-font-smoothing:antialiased;text-wrap:pretty}
+  .mp *,.mp *::before,.mp *::after{box-sizing:border-box;margin:0;padding:0}
+  .mp a{color:var(--mp-accent);text-underline-offset:3px}
+  .mp :focus-visible{outline:2px solid var(--mp-accent);outline-offset:2px}
+  .mp .app{max-width:760px;min-height:100vh;min-height:100dvh;margin:0 auto;background:var(--mp-bg)}
+  @media (min-width:762px){.mp .app{border-left:1px solid var(--mp-divider);border-right:1px solid var(--mp-divider)}}
+  .mp header.top{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
+    background:var(--mp-bg);border-bottom:2px solid var(--mp-divider)}
+  .mp .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
+  .mp .brand em{font-style:normal;color:var(--mp-accent)}
+  .mp .panel{display:block;padding:20px max(16px,env(safe-area-inset-right)) 20px max(16px,env(safe-area-inset-left));border-top:2px solid var(--mp-divider)}
+  .mp .panel.lead{border-top:0}
+  .mp h1{font-size:clamp(28px,7.5vw,40px);line-height:1.05;letter-spacing:-.02em;font-weight:800;margin-top:4px}
+  .mp h2{font-size:20px;line-height:1.15;font-weight:800}
+  .mp .kicker{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-strong);font-weight:600}
+  .mp .mini{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-muted)}
+  .mp .sub{font-size:14px;color:var(--mp-soft);margin-top:8px}
+  .mp code{font:600 .86em/1.4 var(--mp-mono);background:var(--mp-surface);color:var(--mp-text);padding:1px 5px}
+  .mp .facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border-top:2px solid var(--mp-divider);margin-top:16px}
+  .mp .facts > div{padding:8px 12px 8px 0}
+  .mp .facts > div + div{padding:8px 0 8px 12px;border-left:1px solid var(--mp-divider)}
+  .mp .big{font-weight:800;font-size:19px;line-height:1.15;margin-top:2px}
+  .mp .facts .sub{margin-top:2px;font-size:13px}
+  .mp .bring{border-top:1px solid var(--mp-divider);padding-top:12px;font-size:15px;color:var(--mp-soft)}
+  .mp .bring b{color:var(--mp-text);font-weight:800}
+  .mp .show{list-style:none;border-top:2px solid var(--mp-divider);margin-top:12px}
+  .mp .show li{display:grid;grid-template-columns:3.3em minmax(0,1fr) auto;gap:0 12px;align-items:baseline;
+    padding:12px 4px;border-bottom:1px solid var(--mp-divider)}
+  .mp .show time{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+  .mp .show b{display:block;font-weight:800;font-size:16px;line-height:1.25}
+  .mp .show .note{display:block;font-size:14px;line-height:1.45;color:var(--mp-soft);margin-top:3px}
+  .mp .show .min{font-size:13px;font-weight:600;color:var(--mp-strong);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .mp .show li.end{border-bottom:0}
+  .mp .show li.end b{color:var(--mp-strong)}
+  .mp .links{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:8px}
+  .mp .links a{display:grid;gap:2px;min-height:44px;padding:12px 14px;border:1px solid var(--mp-divider);color:var(--mp-text);text-decoration:none}
+  .mp .links a:hover{border-color:var(--mp-accent);background:var(--mp-hover)}
+  .mp .links b{font-size:15px;font-weight:700;line-height:1.3}
+  .mp .links b::after{content:" \2192";color:var(--mp-accent)}
+  .mp .links span{font-size:13px;color:var(--mp-muted)}
+</style>
+</head>
+<body>
+<div class="mp">
+<div class="app">
+  <header class="top">
+    <span class="brand">Hypercomb <em>Meetup</em></span>
+    <span class="mini">Agenda</span>
+  </header>
+  <main data-body></main>
+  <footer class="panel">
+    <div class="mini">More</div>
+    <ul class="links">
+      <li><a href="/"><b>All agendas</b><span>Every date</span></a></li>
+      <li><a href="https://questions.hypercomb.com"><b>How the tutorial and Q and A work</b><span>questions.hypercomb.com</span></a></li>
+      <li><a href="https://meetups.hypercomb.com"><b>Meetings and RSVP</b><span>meetups.hypercomb.com</span></a></li>
+    </ul>
+  </footer>
+</div>
+</div>
+<script>
+(function () {
+  var roots = document.querySelectorAll('.mp:not([data-ready])');
+  var root = roots[roots.length - 1];
+  if (!root) return;
+  root.setAttribute('data-ready', '');
+  var body = root.querySelector('[data-body]');
+  var SIG = /^[0-9a-f]{64}$/;
+  var DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+  var HISTORY = '@diamondcoreprocessor.com/HistoryService';
+  var STORE = '@hypercomb.social/Store';
+
+  function ioc(key) {
+    try { return window.ioc && window.ioc.get && window.ioc.get(key); } catch (e) { return null; }
+  }
+  function sha256(text) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    });
+  }
+  function longDate(iso) {
+    var m = DATE.exec(iso);
+    if (!m) return '';
+    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return d.toLocaleDateString('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+  }
+  function bases() {
+    var out = [];
+    if (/^https?:$/.test(location.protocol)) out.push(location.origin);
+    if (location.host !== 'agenda.hypercomb.com') out.push('https://agenda.hypercomb.com');
+    return out;
+  }
+  function textAt(url) {
+    return fetch(url, { cache: 'force-cache' }).then(function (res) { return res.ok ? res.text() : ''; }, function () { return ''; });
+  }
+  function resourceText(sig) {
+    var net = function () {
+      return bases().reduce(function (p, base) {
+        return p.then(function (found) {
+          if (found) return found;
+          return textAt(base + '/' + sig).then(function (text) {
+            if (!text) return '';
+            return sha256(text).then(function (h) { return h === sig ? text : ''; });
+          });
+        });
+      }, Promise.resolve(''));
+    };
+    var store = ioc(STORE);
+    var local = store && store.getResourceLocal
+      ? Promise.resolve(store.getResourceLocal(sig)).then(function (blob) {
+          return blob && blob.text ? blob.text() : '';
+        }, function () { return ''; })
+      : Promise.resolve('');
+    return local.then(function (text) {
+      if (text) return text;
+      return net().then(function (found) {
+        if (found) return found;
+        if (!store || !store.getResource) return '';
+        return Promise.resolve(store.getResource(sig)).then(function (blob) {
+          return blob && blob.text ? blob.text() : '';
+        }, function () { return ''; });
+      });
+    });
+  }
+  function resourceJson(sig) {
+    return resourceText(sig).then(function (text) { try { return text ? JSON.parse(text) : null; } catch (e) { return null; } });
+  }
+  function asAgenda(rec) {
+    if (!rec || rec.kind !== 'agenda' || !DATE.test(String(rec.date || ''))) return null;
+    rec.date = String(rec.date);
+    rec.title = String(rec.title || longDate(rec.date) || rec.date);
+    rec.blocks = Array.isArray(rec.blocks) ? rec.blocks : [];
+    return rec;
+  }
+  function rowsFrom(value, depth) {
+    if (value == null || depth > 6) return Promise.resolve([]);
+    if (typeof value === 'string') {
+      var text = value.trim();
+      if (SIG.test(text)) {
+        return resourceText(text).then(function (bodyText) {
+          var rec = null;
+          try { rec = bodyText ? JSON.parse(bodyText) : null; } catch (e) { rec = null; }
+          return rowsFrom(rec, depth + 1);
+        }, function () { return []; });
+      }
+      try { return rowsFrom(JSON.parse(text), depth + 1); } catch (e) { return Promise.resolve([]); }
+    }
+    if (Array.isArray(value)) {
+      return Promise.all(value.map(function (item) { return rowsFrom(item, depth + 1); })).then(function (groups) {
+        var out = [];
+        groups.forEach(function (list) { (list || []).forEach(function (row) { if (row) out.push(row); }); });
+        return out;
+      });
+    }
+    if (value.meta === 1) {
+      return rowsFrom(value.data, depth + 1).then(function (rows) {
+        if (rows.length) return rows;
+        var hop = SIG.test(String(value.resource || '')) ? rowsFrom(String(value.resource), depth + 1) : Promise.resolve([]);
+        return hop.then(function (followed) { return followed.length ? followed : (asAgenda(value) ? [asAgenda(value)] : []); });
+      });
+    }
+    var agenda = asAgenda(value);
+    if (agenda) return Promise.resolve([agenda]);
+    return Promise.resolve([]);
+  }
+  function asLayer(value, depth) {
+    if (value == null || depth > 6) return Promise.resolve(null);
+    if (typeof value === 'string') {
+      if (!SIG.test(value.trim())) return Promise.resolve(null);
+      return resourceJson(value.trim()).then(function (rec) { return asLayer(rec, depth + 1); });
+    }
+    if (value.meta === 1) {
+      if (SIG.test(String(value.layer || ''))) return asLayer(String(value.layer), depth + 1);
+      if (SIG.test(String(value.resource || ''))) return asLayer(String(value.resource), depth + 1);
+      return Promise.resolve(null);
+    }
+    if (value.name || value.children || value.decorations || value.parameter) return Promise.resolve(value);
+    return Promise.resolve(null);
+  }
+  function recordOf(sig) {
+    return resourceJson(sig).then(function (rec) {
+      if (rec && rec.meta === 1 && SIG.test(String(rec.resource || ''))) return resourceJson(String(rec.resource));
+      return rec;
+    });
+  }
+  function parameterOf(layer) {
+    if (!layer) return Promise.resolve(null);
+    var direct = layer.parameter != null
+      ? rowsFrom(layer.parameter, 0).then(function (rows) { return rows[0] || null; })
+      : Promise.resolve(null);
+    return direct.then(function (found) {
+      if (found) return found;
+      var decos = Array.isArray(layer.decorations) ? layer.decorations : [];
+      return decos.reduce(function (chain, entry) {
+        return chain.then(function (hit) {
+          if (hit) return hit;
+          var sig = String(entry || '');
+          if (!SIG.test(sig)) return null;
+          return recordOf(sig).then(function (rec) {
+            var payload = rec && rec.kind === 'visual:website:page' ? rec.payload : null;
+            if (!payload || payload.parameter == null) return null;
+            return rowsFrom(payload.parameter, 0).then(function (rows) { return rows[0] || null; });
+          });
+        });
+      }, Promise.resolve(null));
+    });
+  }
+  function liveLayer(segments) {
+    var history = ioc(HISTORY);
+    if (!history || !history.sign || !history.currentLayerAt) return Promise.resolve(null);
+    return Promise.resolve(history.sign({ explorerSegments: function () { return segments; } })).then(function (sig) {
+      return history.currentLayerAt(sig);
+    }).catch(function () { return null; });
+  }
+  function dateFromHere() {
+    var lineage = ioc('@hypercomb.social/Lineage');
+    var segs = [];
+    try { segs = (lineage && lineage.explorerSegments && lineage.explorerSegments()) || []; } catch (e) { segs = []; }
+    segs = segs.map(function (s) { return String(s || '').trim(); }).filter(Boolean);
+    var fromPath = location.pathname.split('/').filter(Boolean);
+    var all = segs.concat(fromPath);
+    for (var i = all.length - 1; i >= 0; i--) if (DATE.test(all[i])) return all[i];
+    return '';
+  }
+  function doorRoot() {
+    return sha256('agenda.hypercomb.com').then(function (bag) {
+      var chain = Promise.resolve(null);
+      bases().forEach(function (base) {
+        chain = chain.then(function (found) {
+          if (found) return found;
+          return textAt(base + '/' + bag + '/').then(function (text) {
+            var names = String(text || '').split('\n').map(function (s) { return s.trim(); }).filter(function (s) { return /^\d{8}$/.test(s); });
+            var last = names[names.length - 1];
+            if (!last) return null;
+            return textAt(base + '/' + bag + '/' + last).then(function (marker) {
+              var meta = null;
+              try { meta = marker ? JSON.parse(marker) : null; } catch (e) { meta = null; }
+              if (!meta || !SIG.test(String(meta.layer || ''))) return null;
+              return resourceJson(String(meta.layer));
+            });
+          });
+        });
+      });
+      return chain;
+    });
+  }
+  function childNamed(root, date) {
+    var kids = root && Array.isArray(root.children) ? root.children : [];
+    return kids.reduce(function (chain, kid) {
+      return chain.then(function (found) {
+        if (found) return found;
+        return asLayer(kid, 0).then(function (child) {
+          return child && String(child.name || '') === date ? child : null;
+        });
+      });
+    }, Promise.resolve(null));
+  }
+  function load() {
+    var date = dateFromHere();
+    var tries = [];
+    if (date) tries.push(['agenda', date]);
+    tries.push(['agenda']);
+    var chain = Promise.resolve(null);
+    tries.forEach(function (segments) {
+      chain = chain.then(function (found) {
+        if (found && (String(found.name || '') === date || found.parameter || found.decorations)) return found;
+        return liveLayer(segments).then(function (layer) { return layer || found; });
+      });
+    });
+    return chain.then(function (layer) {
+      if (layer && date && String(layer.name || '') === date) return layer;
+      if (layer && date && Array.isArray(layer.children)) {
+        return childNamed(layer, date).then(function (child) { return child || layer; });
+      }
+      return doorRoot().then(function (root) {
+        if (!date) return root;
+        return childNamed(root, date).then(function (child) { return child || root; });
+      });
+    }).then(function (layer) {
+      return parameterOf(layer).then(function (agenda) {
+        if (agenda) return agenda;
+        return date ? { date: date, title: longDate(date), blocks: [], missing: true } : null;
+      });
+    });
+  }
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+  function paint(row) {
+    body.textContent = '';
+    var lead = el('section', 'panel lead');
+    lead.setAttribute('aria-label', 'The meeting');
+    var head = document.createElement('header');
+    head.appendChild(el('span', 'kicker', 'Meetup agenda'));
+    head.appendChild(el('h1', '', (row && row.title) || 'Agenda'));
+    lead.appendChild(head);
+    if (row && row.missing) {
+      lead.appendChild(el('p', 'sub', 'This date has no agenda yet.'));
+      body.appendChild(lead);
+      return;
+    }
+    if (row && row.line) lead.appendChild(el('p', 'sub', row.line));
+    var facts = el('div', 'facts');
+    var when = el('div');
+    when.appendChild(el('div', 'mini', 'When'));
+    var whenBig = el('div', 'big', row && row.time && row.ends ? row.time + '–' + row.ends : (row && row.time) || '');
+    when.appendChild(whenBig);
+    if (row && row.whenNote) when.appendChild(el('div', 'sub', row.whenNote));
+    var where = el('div');
+    where.appendChild(el('div', 'mini', 'Where'));
+    where.appendChild(el('div', 'big', (row && row.where) || ''));
+    if (row && row.address) where.appendChild(el('div', 'sub', row.address));
+    facts.appendChild(when); facts.appendChild(where);
+    lead.appendChild(facts);
+    if (row && row.bring) {
+      var bring = el('p', 'bring');
+      bring.appendChild(el('b', '', 'Bring'));
+      bring.appendChild(document.createTextNode(' ' + row.bring));
+      lead.appendChild(bring);
+    }
+    body.appendChild(lead);
+    var show = el('section', 'panel');
+    show.appendChild(el('span', 'kicker', 'Run of show'));
+    var h2 = el('h2', '', 'The morning, block by block.');
+    h2.id = 'show-title';
+    show.setAttribute('aria-labelledby', 'show-title');
+    show.appendChild(h2);
+    var ol = el('ol', 'show');
+    (row && row.blocks || []).forEach(function (block, index, all) {
+      var li = document.createElement('li');
+      if (index === all.length - 1) li.className = 'end';
+      li.appendChild(el('time', '', block.time || ''));
+      var text = document.createElement('div');
+      text.appendChild(el('b', '', block.title || ''));
+      if (block.note) text.appendChild(el('span', 'note', block.note));
+      li.appendChild(text);
+      li.appendChild(el('span', 'min', block.min || ''));
+      ol.appendChild(li);
+    });
+    show.appendChild(ol);
+    body.appendChild(show);
+    var title = root.querySelector('title');
+    if (title && row && row.title) title.textContent = row.title;
+  }
+  function boot(left) {
+    load().then(function (row) {
+      if (row && !row.missing) { paint(row); return; }
+      if (left > 0) { setTimeout(function () { boot(left - 1); }, 400); return; }
+      paint(row);
+    }, function () {
+      if (left > 0) setTimeout(function () { boot(left - 1); }, 400);
+      else paint({ title: 'Agenda', missing: true, blocks: [] });
+    });
+  }
+  boot(8);
+})();
+</script>
+</body>
+</html>

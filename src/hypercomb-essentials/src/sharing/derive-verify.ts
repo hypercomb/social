@@ -15,7 +15,7 @@
 // is. A shell that does not carry the version a record names cannot verify
 // it here, and says so.
 
-import { deriveMinifiedTree, registerPoolMeaning } from '@hypercomb/core'
+import { deriveMinifiedTree, minifyModuleBody, registerPoolMeaning, transpilerSignature } from '@hypercomb/core'
 import { hostBase, readBySig } from './derivation-attestation.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -84,22 +84,42 @@ export type VerifyResult =
   | { ok: true; outcome: 'reproduced' | 'differs'; got: string; ran: string; modules: number }
   | { ok: false; reason: string }
 
-/** Re-derive `recordSig` from the inputs its host serves, with this shell's
- *  esbuild, and say whether the same record came out. */
+/** Re-derive `recordSig` from the inputs its host serves. A record whose tool
+ *  is this shell's transpiler runs that program. A record whose tool is
+ *  `esbuild@<version>` runs that esbuild from this shell. Neither fetches a
+ *  transform the record names. */
 export const verifyDerivation = async (host: string, recordSig: string): Promise<VerifyResult> => {
   const record = await readDerivationRecord(host, recordSig)
   if (!record) return { ok: false, reason: 'that host does not serve this record' }
   if (record.kind !== 'minify') return { ok: false, reason: `a "${record.kind}" derivation cannot be re-run here yet` }
+  const held = new Map<string, Uint8Array | null>()
+  const read = async (sig: string): Promise<Uint8Array | null> => {
+    if (!held.has(sig)) held.set(sig, await readBySig(host, sig))
+    return held.get(sig) ?? null
+  }
+  if (SIG_RE.test(record.tool)) {
+    const ours = await transpilerSignature()
+    if (record.tool !== ours) {
+      return { ok: false, reason: `this shell's transpiler is ${ours.slice(0, 12)} and the record names ${record.tool.slice(0, 12)}` }
+    }
+    try {
+      const tree = await deriveMinifiedTree(record.from, read, async body => minifyModuleBody(body), { name: record.tool, options: record.options })
+      return {
+        ok: true,
+        outcome: tree.derivation.sig === recordSig ? 'reproduced' : 'differs',
+        got: tree.derivation.sig,
+        ran: ours,
+        modules: tree.modules.size,
+      }
+    } catch (err) {
+      return { ok: false, reason: `the inputs could not be re-derived: ${(err as Error)?.message ?? err}` }
+    }
+  }
   const version = ESBUILD_TOOL_RE.exec(record.tool)?.[1]
   if (!version) return { ok: false, reason: `this hive re-runs esbuild, and the record was made by ${record.tool}` }
   const esbuild = await shellEsbuild(version)
   if (!esbuild) {
     return { ok: false, reason: `this hive's shell does not carry esbuild-wasm ${version} — verify from a terminal (verify-minified-package.mjs --host) and say "derive attest"` }
-  }
-  const held = new Map<string, Uint8Array | null>()
-  const read = async (sig: string): Promise<Uint8Array | null> => {
-    if (!held.has(sig)) held.set(sig, await readBySig(host, sig))
-    return held.get(sig) ?? null
   }
   try {
     const tree = await deriveMinifiedTree(record.from, read,

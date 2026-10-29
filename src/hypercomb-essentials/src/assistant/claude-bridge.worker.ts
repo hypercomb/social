@@ -669,6 +669,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'gather-own':   return this.#gatherOwn(req)
       case 'slice-create': return this.#sliceCreate(req)
       case 'put-resource': return this.#putResource(req)
+      case 'pool-put':     return this.#poolPut(req)
       case 'get-resource': return this.#getResource(req)
       case 'optimization-add':    return this.#optimizationAdd(req)
       case 'chat-reply':   return this.#chatReply(req)
@@ -737,6 +738,44 @@ export class ClaudeBridgeWorker extends Worker {
     const blob = new Blob([bytes as BlobPart])
     const sig = await store.putResource(blob)
     return { id: req.id, ok: true, data: { sig, bytes: bytes.byteLength } }
+  }
+
+  // The agenda list's pool. A date is a resource in `agenda:list`, not a
+  // page. This writes that one pool only: the same bytes land at the content
+  // root and as the pool's document, both named by their signature. Versions
+  // stay, so an earlier date remains a member beside the new one.
+  async #poolPut(req: BridgeRequest): Promise<BridgeResponse> {
+    const meaning = String(req.key ?? '').trim()
+    if (meaning !== 'agenda:list') {
+      return { id: req.id, ok: false, error: 'pool-put only writes the agenda:list pool' }
+    }
+    const text = typeof req.text === 'string' ? req.text : ''
+    if (!text || text.length > 100_000) return { id: req.id, ok: false, error: 'pool-put requires `text`' }
+    let parsed: { kind?: unknown }
+    try { parsed = JSON.parse(text) as { kind?: unknown } } catch {
+      return { id: req.id, ok: false, error: 'pool-put text must be JSON' }
+    }
+    if (parsed?.kind !== 'agenda' && parsed?.kind !== 'agenda:list') {
+      return { id: req.id, ok: false, error: 'pool-put only stores an agenda or an agenda:list document' }
+    }
+    const store = get<{
+      getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
+      putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer) => Promise<string | null>
+      putResource?: (blob: Blob) => Promise<string>
+    }>('@hypercomb.social/Store')
+    if (!store?.getPool || !store.putPoolDoc || !store.putResource) {
+      return { id: req.id, ok: false, error: 'Store pool writer is not available' }
+    }
+    const pool = await store.getPool(meaning)
+    if (!pool) return { id: req.id, ok: false, error: 'agenda:list pool could not be opened' }
+    const bytes = new TextEncoder().encode(text)
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+    const resourceSig = await store.putResource(new Blob([buffer.slice(0)]))
+    const poolSig = await store.putPoolDoc(pool, buffer.slice(0))
+    if (!poolSig || poolSig !== resourceSig) {
+      return { id: req.id, ok: false, error: 'the agenda did not land in the list pool by its own signature' }
+    }
+    return { id: req.id, ok: true, data: { sig: poolSig, meaning, bytes: bytes.byteLength } }
   }
 
   // Content-addressed get: sig in, bytes out. Returns text when the

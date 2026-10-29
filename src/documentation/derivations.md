@@ -1,8 +1,12 @@
 # Derivations — one record for everything made from something else
 
 status: **doctrine, proposed 2026-10-18.** First dialect built and live
-(`minify`, commit 6a207a974, worker 394caada). The pools below are designed,
-not built.
+(`minify`, commit 6a207a974, worker 394caada). A layer can be derived on its
+own (2026-10-29): the record is a member of `derived:<that layer>`, the
+dialect record is a member of `derivation:dialects`, and `tool` is the
+signature of the transpiler in `hypercomb-core/src/core/minify-transpiler.ts`.
+The visitor package built by esbuild still records `derivedFrom` and
+`derivation` on its root and does not write those pools.
 
 companions: `optimize-phase.md` (derived caches, never truth),
 `signature-system.md` (signatures compose), `known-location-pools.md` (pools of
@@ -115,6 +119,16 @@ up for the same record, and anyone may add a dialect by writing a member.
 (Hosts already keep the attestation shape for packages: `assess:<root>`, one
 member per assessing key, re-verified as read — `attest:` generalises it.)
 
+## One layer at a time
+
+jwize, 2026-10-29: "We should really be able to in the same way we use pools of meaning layer amenification strategically with our own compilation transpiler."
+
+A package is a branch. A layer anywhere in it is a package of its own. Minifying that layer runs the same walk as the whole tree, starting at that layer's signature. Ancestors stay as they were. The new root is the minified layer. Its record names the readable layer, and the record's signature is a member of `sign('derived:<that layer>')`. The dialect record, `{ v, kind, tool, mode }`, is a member of `sign('derivation:dialects')`.
+
+`tool` on that record is the signature of this tree's transpiler. The program is the source between the markers in `minify-transpiler.ts`, and the signature is the hash of that text. It drops comments and spare spaces, keeps every name, and keeps a newline that separated two tokens. A module it cannot read stays the readable bytes. A verifier on a shell that holds the same program re-runs it. A verifier does not fetch a transform a record names.
+
+The host file view does this for the folder that is open. The minified signature can be the folder a later mint chooses, which rewrites the layers above it. The bytes of the minified layer are the pack from that view. Writing them into the origin's store happens when that store is already open. Nothing here moves a published head, and a visitor runs the minified layer when a publisher names that root.
+
 ## The first dialect: `minify` (built)
 
 The visitor of a published site runs a minified derivation of the readable
@@ -173,6 +187,10 @@ one.
 3. The `attest:` pool and a word that re-derives a record and publishes the
    attestation (`derive verify <record sig>`), with the reader side that counts
    attestations.
-4. The `derived:` and `derivation:dialects` pools; existing derived artifacts
-   take the common record when next touched.
-5. `tool` becomes the transform's own signature, dialect by dialect.
+4. The `derived:` and `derivation:dialects` pools. Built for a layer minified
+   with the transpiler above. An artifact that was derived before that, the
+   esbuild visitor package included, takes the membership when it is next
+   derived. Nothing already written is rewritten.
+5. `tool` becomes the transform's own signature, dialect by dialect. Built
+   for this transpiler. An `esbuild@<version>` record stays that name, and a
+   shell re-runs it with the esbuild it already carries.

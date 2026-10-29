@@ -1,16 +1,13 @@
 // sharing/tile-images.drone.ts
 //
-// The IMAGES icon on the tile — "this tile holds more than one picture."
+// The IMAGES icon on the tile — "this tile can wear another picture."
 //
-// One overlay affordance that appears on a tile you HOLD when its collection
-// (`holdPictures`) has something to choose: more than one picture, or a
-// picture it holds that it is not already wearing (a paste while the pointer
-// rests on the tile). The name is the pool — `sign(name)`, asked of every
-// known host — so the same
-// name answers the same anywhere in the hierarchy, and a picture a domain
-// publishes for "howard" lights the icon on every "howard" you hold once
-// there is a real choice. The picture the tile already wears, alone, is no
-// choice, so no icon. The icon opens the images wall when it is clicked.
+// One overlay affordance that appears on a tile you HOLD when there is a
+// picture it is not already wearing: one it holds (a paste while the pointer
+// rests on the tile), one a domain publishes for the name, or one another
+// participant in the swarm is showing for that same name. The picture the
+// tile already wears, alone, is no choice, so no icon. The icon opens the
+// images wall when it is clicked.
 //
 // Held tiles only (`private` = your hive, `public-own` = your tile with the
 // mesh open). A peer-only tile is not yours to dress — the verb there is
@@ -19,8 +16,9 @@
 import { Drone, EffectBus } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext } from '../presentation/tiles/tile-overlay.drone.js'
 import { galleryImageSigsAt } from '../commands/lightbox-kind.js'
-import { imagesButtonVisible } from './image-collection.js'
+import { imagesButtonVisible, offeredPictureCount } from './image-collection.js'
 import { offeredPictures } from './image-updates.js'
+import { peerImageCandidates } from './peer-images.js'
 import { wornPictureSig } from './tile-image-intake.js'
 
 // collections — Material Icons Filled. A stack of pictures: several versions
@@ -85,12 +83,15 @@ const offerChoice = (label: string): boolean => {
       })
   }
   const held = heldSigs.get(key)
-  let extra = 0
-  for (const sig of offeredPictures(label)) if (!held?.has(sig)) extra++
+  const worn = wornSigs.get(key) ?? ''
+  const offered = [
+    ...offeredPictures(label),
+    ...peerImageCandidates(label).map(candidate => candidate.previewSig),
+  ]
   return imagesButtonVisible({
     held: [...(held ?? [])],
-    worn: wornSigs.get(key) ?? '',
-    extra,
+    worn,
+    extra: offeredPictureCount(worn, held, offered),
   })
 }
 

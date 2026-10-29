@@ -7,8 +7,9 @@
 // `holdPictures`): every picture saved through the editor stays in it, so
 // nothing a tile has worn is lost. Opening the wall replaces the mesh with that
 // collection on the SAME axial matrix a real layer uses, then adds what other
-// hosts publish under the tile's name — the pool of meaning `sign(name)`, asked
-// of every known host, so images are shared across domains by the name alone.
+// hosts publish under the tile's name and what the other participants in the
+// swarm are showing for that name. Hosts are asked at `sign(name)`. The swarm
+// is the live room, read at the canonical root and at the lineage you are in.
 //
 //   CLICK a tile → that picture becomes the tile's. One revision, undoable.
 //                  Positioning is the editor's job, opened afterwards.
@@ -36,7 +37,7 @@ import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../c
 import { galleryImageSigsAt, holdPictures } from '../commands/lightbox-kind.js'
 import { imageWallHasChoice } from './image-collection.js'
 import { fetchThroughContentHop, terminalContentSig } from '../presentation/tiles/artifact-content.js'
-import { meaningPoolImageCandidates, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
+import { canonicalPeerImageCandidates, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
 import { imageChoiceWriteTargets } from './image-choice-targets.js'
 import { markSeen, unseenNow } from './image-updates.js'
 
@@ -282,9 +283,9 @@ export class ImageChoiceDrone extends Drone {
     }
     if (entries.length > MAX_CHOICES) entries.length = MAX_CHOICES
 
-    // Cross-host variants: the pool `sign(name)` on every known host. Nothing
-    // more is needed to share pictures between domains than the tile's name.
-    const offered = await meaningPoolImageCandidates(label).catch(() => [] as readonly PeerImageCandidate[])
+    // Hosts at `sign(name)`, plus the pictures the swarm is showing for this
+    // name. One picture from either place is enough to choose.
+    const offered = await canonicalPeerImageCandidates(label).catch(() => [] as readonly PeerImageCandidate[])
     const fresh = await unseenNow(label).catch(() => new Set<string>() as ReadonlySet<string>)
     if (token !== this.#buildToken) return
     for (const candidate of offered) {

@@ -115,7 +115,7 @@ Nothing below is claimed until it moves a number here. Today the reports disagre
 
 This finishes your minification rule and the render caches with ONE record shape (`documentation/derivations.md`).
 
-- Write the record sig as a member of `sign('derived:<inputSig>')` when deriving (minify first). A reader cross-checks without a minifier: rebuild the derived root from the readable layers + the record's module map (a pure remap) and require it to equal the served root, and require `record.from` to be the root a signed pointer names.
+- Write the record sig as a member of `sign('derived:<inputSig>')` when deriving (minify first). A reader cross-checks without a minifier: rebuild the derived root from the readable layers + the record's module map (a pure remap) and require it to equal the served root, and require `record.from` to be the root a signed pointer names. **Partly built 2026-10-29:** a layer derived with `minify-transpiler.ts` writes that membership, and `remapMinifiedRoot` is the cross-check. The esbuild visitor package does not write the pool yet. Attestations still do not decide which bytes a visitor runs.
 - Attestations decide for participants: prefer minified bytes only when that check passes AND enough followed keys attest "reproduced"; otherwise the readable package, which already ships beside it.
 - Pin esbuild exactly (not `^0.27.0`; the live CI deletes the lockfile); `tool` becomes the transform's own signature (step 5 of derivations.md); deploy esbuild-wasm where `derive verify` runs.
 - Re-key the render caches (`visual-optimization`, `thumbnails:hex`, `system:manifests`) to the same shape: derived bytes at their OWN hash, verified on read (today they are stored under the input sig and rendered unverified — a P1/P2 gap).

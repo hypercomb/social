@@ -5,19 +5,37 @@
 // other.
 //
 // One picture that is already the one the tile wears is no choice. A picture
-// pasted onto the tile under the pointer, which the tile is not wearing yet,
-// is a choice of one — the button appears and the wall offers it.
+// the tile is not wearing — one it holds, one a host publishes for the name,
+// or one someone in the swarm is showing — is a choice of one. The button
+// appears and the wall offers it.
+
+/** Pictures offered by a host or by someone in the swarm, excluding the one
+ *  the tile wears and any it already holds. Each signature counts once. */
+export function offeredPictureCount(
+  worn: string,
+  held: ReadonlySet<string> | undefined,
+  sigs: readonly string[],
+): number {
+  const seen = new Set<string>()
+  for (const sig of sigs) {
+    if (!sig || sig === worn || held?.has(sig)) continue
+    seen.add(sig)
+  }
+  return seen.size
+}
 
 /** Show the images button? `held` is the collection (terminal byte sigs),
  *  `worn` is the picture the tile is wearing now ('' when it has none of its
- *  own), `extra` is pictures other hosts offer that this tile does not hold. */
+ *  own), `extra` is pictures from a host or the swarm that this tile does
+ *  not hold and is not wearing. One of those is already a choice. */
 export function imagesButtonVisible(input: {
   held: readonly string[]
   worn: string
   extra: number
 }): boolean {
   const held = input.held.filter(sig => sig.length > 0)
-  if (held.length + input.extra > 1) return true
+  if (input.extra > 0) return true
+  if (held.length > 1) return true
   return held.length === 1 && held[0] !== input.worn
 }
 

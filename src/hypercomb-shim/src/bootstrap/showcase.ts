@@ -542,6 +542,8 @@ export type ShowcaseOptions = {
   /** The hive beside this page, when this device is its owner's: a tap on a tile puts it in the showcase or takes it out. */
   readonly owner?: OwnerBridge | null
   readonly readPeerLedger?: (zone: string) => Promise<readonly LedgerSite[]>
+  /** Open this signature as files on the host page. */
+  readonly onOpenHead?: (head: string, zone: string) => void
 }
 
 export type Showcase = {
@@ -724,6 +726,18 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
         const sig = el('span', 'version-sig')
         sig.textContent = version.head.slice(0, 8)
         item.append(link, sig)
+        if (options.onOpenHead) {
+          const files = el('button', 'version-files')
+          files.type = 'button'
+          files.textContent = 'Files'
+          const head = version.head
+          const zone = place.zone
+          files.addEventListener('click', () => {
+            closeVersions()
+            options.onOpenHead?.(head, zone)
+          })
+          item.append(files)
+        }
         list.append(item)
       }
     }

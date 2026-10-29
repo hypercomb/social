@@ -8,14 +8,11 @@
 <meta name="description" content="Every Hypercomb meetup agenda, one date a row.">
 <style>
   /* The agenda home is the business-card list: a dark column, a search that
-     stays at the top, and one row per agenda. An agenda is a data item — a
-     resource — not a page. The list layer holds either that list of resource
-     signatures, or one reference to a meta whose resource is the list. A
-     member can be a meta with the agenda JSON embedded on data. The page
-     also reads an agenda:list decoration and the agenda:list pool when they
-     already name items. Opening the page never creates the pool. The
-     row shows the name, when, and where, and opens onto the morning. Scoped
-     under .ag so a hive mounting the page inline never touches its shell. */
+     stays at the top, and one row per date. The row is a link to that date's
+     child. The child has its own layout, and the agenda resource is the
+     parameter that layout reads. Card text comes from the child's parameter,
+     then from the parent's list. Opening the page never creates the pool.
+     Scoped under .ag so a hive mounting the page inline never touches its shell. */
   .ag{
     --ag-bg:#060606;--ag-ink:#ececee;--ag-muted:#b4b4b9;--ag-line:rgba(255,255,255,.09);
     --ag-gold:#f2b63e;--ag-gold-hi:#f6c453;--ag-gold-rgb:242,182,62;
@@ -46,24 +43,7 @@
   .ag .who b{display:block;color:var(--ag-gold-hi);font-weight:500;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ag .who small{display:block;color:var(--ag-muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ag .none{color:var(--ag-muted);text-align:center;padding:26px 10px;font-size:.9rem}
-  .ag .item{display:flex;flex-direction:column;gap:8px}
-  .ag .mini{width:100%;appearance:none;-webkit-appearance:none;border:1px solid rgba(var(--ag-gold-rgb),.5);font:inherit;text-align:left;cursor:pointer;color:inherit;background:linear-gradient(160deg,#1d1d20,#0f0f10 55%,#070708)}
-  .ag .detail{padding:4px 8px 8px 58px}
-  .ag .detail[hidden]{display:none}
-  .ag .line{color:var(--ag-muted);font-size:14px;margin:0 0 10px}
-  .ag .facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 16px;margin:0 0 10px}
-  .ag .facts b{display:block;color:var(--ag-gold-hi);font-weight:500;font-size:15px}
-  .ag .facts span{display:block;color:var(--ag-muted);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
-  .ag .facts small{display:block;color:var(--ag-muted);font-size:13px;font-weight:400}
-  .ag .kicker{color:var(--ag-gold);font-size:12px;letter-spacing:.08em;text-transform:uppercase;margin:4px 0 6px}
-  .ag .bring{color:var(--ag-muted);font-size:14px;margin:0 0 12px}
-  .ag .bring b{color:var(--ag-ink);font-weight:600}
-  .ag .show{list-style:none;margin:0;padding:0;border-top:1px solid var(--ag-line)}
-  .ag .show li{display:grid;grid-template-columns:3.2em minmax(0,1fr) auto;gap:2px 10px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--ag-line)}
-  .ag .show time{color:var(--ag-gold);font-size:14px;font-variant-numeric:tabular-nums}
-  .ag .show b{display:block;color:var(--ag-ink);font-weight:500;font-size:15px}
-  .ag .show .note{display:block;color:var(--ag-muted);font-size:13px}
-  .ag .show .min{color:var(--ag-gold);font-size:12px;white-space:nowrap}
+  .ag .mini{width:100%;color:inherit;cursor:pointer}
   .ag .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 </style>
 </head>
@@ -340,18 +320,85 @@
     if (Array.isArray(items)) return rowsFrom(items, depth + 1);
     return Promise.resolve([]);
   }
+  function asLayer(value, depth) {
+    if (value == null || depth > 6) return Promise.resolve(null);
+    if (typeof value === 'string') {
+      var text = value.trim();
+      if (!SIG.test(text)) return Promise.resolve(null);
+      return resourceJson(text).then(function (rec) { return asLayer(rec, depth + 1); });
+    }
+    if (value.meta === 1) {
+      if (SIG.test(String(value.layer || ''))) return asLayer(String(value.layer), depth + 1);
+      if (SIG.test(String(value.resource || ''))) return asLayer(String(value.resource), depth + 1);
+      return Promise.resolve(null);
+    }
+    if (value.name || value.children || value.decorations || value.parameter) return Promise.resolve(value);
+    return Promise.resolve(null);
+  }
+  function recordOf(sig) {
+    return resourceJson(sig).then(function (rec) {
+      if (rec && rec.meta === 1 && SIG.test(String(rec.resource || ''))) return resourceJson(String(rec.resource));
+      return rec;
+    });
+  }
+  function parameterOf(layer) {
+    if (!layer) return Promise.resolve(null);
+    var direct = layer.parameter != null
+      ? rowsFrom(layer.parameter, 0).then(function (rows) { return rows[0] || null; })
+      : Promise.resolve(null);
+    return direct.then(function (found) {
+      if (found) return found;
+      var decos = Array.isArray(layer.decorations) ? layer.decorations : [];
+      return decos.reduce(function (chain, entry) {
+        return chain.then(function (hit) {
+          if (hit) return hit;
+          var sig = String(entry || '');
+          if (!SIG.test(sig)) return null;
+          return recordOf(sig).then(function (rec) {
+            var payload = rec && rec.kind === 'visual:website:page' ? rec.payload : null;
+            if (!payload || payload.parameter == null) return null;
+            return rowsFrom(payload.parameter, 0).then(function (rows) { return rows[0] || null; });
+          });
+        });
+      }, Promise.resolve(null));
+    });
+  }
+  function childCards(layer) {
+    var kids = layer && Array.isArray(layer.children) ? layer.children : [];
+    return Promise.all(kids.map(function (kid) {
+      return asLayer(kid, 0).then(function (child) {
+        if (!child) return null;
+        var name = String(child.name || '');
+        if (!DATE.test(name)) return null;
+        return parameterOf(child).then(function (agenda) {
+          var row = agenda || { date: name, title: longDate(name), blocks: [] };
+          row.date = name;
+          row.title = String(row.title || longDate(name) || name);
+          row.blocks = Array.isArray(row.blocks) ? row.blocks : [];
+          return row;
+        });
+      });
+    })).then(function (rows) { return rows.filter(Boolean); });
+  }
   function itemsOf(layer) {
     return Promise.all([
+      childCards(layer),
       rowsFrom(layer && layer.list, 0),
       listedSigs(layer).then(function (sigs) { return Promise.all(sigs.map(function (sig) { return rowsFrom(sig, 0); })).then(flatten); }),
       poolSigs().then(function (sigs) { return Promise.all(sigs.map(function (sig) { return rowsFrom(sig, 0); })).then(flatten); }),
     ]).then(function (groups) {
+      var fill = {};
+      flatten(groups.slice(1)).forEach(function (row) { if (row && row.date && !fill[row.date]) fill[row.date] = row; });
+      var children = groups[0] || [];
+      var base = children.length ? children : flatten(groups.slice(1));
       var seen = {};
-      return flatten(groups).filter(function (row) {
-        if (seen[row.date]) return false;
+      return base.map(function (row) {
+        if (!row || seen[row.date]) return null;
         seen[row.date] = 1;
-        return true;
-      });
+        var extra = fill[row.date];
+        if (extra && !row.where && !row.time && !row.line) return extra;
+        return row;
+      }).filter(Boolean);
     });
   }
   function ordered(rows) {
@@ -380,14 +427,11 @@
     var into = $('[data-rows]');
     into.textContent = '';
     var shown = ordered(state.rows).filter(matches);
-    shown.forEach(function (row, index) {
+    shown.forEach(function (row) {
       var li = document.createElement('li');
-      li.className = 'item';
-      var open = shown.length === 1 || index === 0;
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'mini';
-      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      var link = document.createElement('a');
+      link.className = 'mini';
+      link.href = '/' + encodeURIComponent(row.date);
       var slot = document.createElement('span');
       slot.className = 'slot';
       slot.textContent = row.date.slice(8);
@@ -398,79 +442,8 @@
       var small = document.createElement('small');
       small.textContent = span(row.time, row.ends, row.where) || longDate(row.date);
       who.appendChild(b); who.appendChild(small);
-      btn.appendChild(slot); btn.appendChild(who);
-      var detail = document.createElement('div');
-      detail.className = 'detail';
-      detail.hidden = !open;
-      if (row.line) {
-        var line = document.createElement('p');
-        line.className = 'line';
-        line.textContent = row.line;
-        detail.appendChild(line);
-      }
-      var facts = document.createElement('div');
-      facts.className = 'facts';
-      function addFact(label, strong, sub) {
-        if (!strong && !sub) return;
-        var cell = document.createElement('div');
-        var name = document.createElement('span');
-        name.textContent = label;
-        var value = document.createElement('b');
-        value.textContent = strong || sub;
-        cell.appendChild(name); cell.appendChild(value);
-        if (sub && strong) {
-          var under = document.createElement('small');
-          under.textContent = sub;
-          cell.appendChild(under);
-        }
-        facts.appendChild(cell);
-      }
-      addFact('When', span(row.time, row.ends) || longDate(row.date), row.whenNote || '');
-      addFact('Where', row.where || '', row.address || '');
-      if (facts.childNodes.length) detail.appendChild(facts);
-      if (row.bring) {
-        var bring = document.createElement('p');
-        bring.className = 'bring';
-        var bb = document.createElement('b');
-        bb.textContent = 'Bring ';
-        bring.appendChild(bb);
-        bring.appendChild(document.createTextNode(row.bring));
-        detail.appendChild(bring);
-      }
-      if (row.blocks.length) {
-        var kicker = document.createElement('p');
-        kicker.className = 'kicker';
-        kicker.textContent = 'Run of show';
-        detail.appendChild(kicker);
-        var ol = document.createElement('ol');
-        ol.className = 'show';
-        row.blocks.forEach(function (block) {
-          var item = document.createElement('li');
-          var time = document.createElement('time');
-          time.textContent = block.time || '';
-          var body = document.createElement('div');
-          var name = document.createElement('b');
-          name.textContent = block.title || '';
-          body.appendChild(name);
-          if (block.note) {
-            var note = document.createElement('span');
-            note.className = 'note';
-            note.textContent = block.note;
-            body.appendChild(note);
-          }
-          var min = document.createElement('span');
-          min.className = 'min';
-          min.textContent = block.min || '';
-          item.appendChild(time); item.appendChild(body); item.appendChild(min);
-          ol.appendChild(item);
-        });
-        detail.appendChild(ol);
-      }
-      btn.addEventListener('click', function () {
-        detail.hidden = !detail.hidden;
-        btn.setAttribute('aria-expanded', detail.hidden ? 'false' : 'true');
-      });
-      li.appendChild(btn); li.appendChild(detail);
+      link.appendChild(slot); link.appendChild(who);
+      li.appendChild(link);
       into.appendChild(li);
     });
     var n = state.rows.length;

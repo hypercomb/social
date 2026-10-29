@@ -4,7 +4,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from './signature.service.js'
-import { deriveMinifiedTree, splitHead, walkPackage } from './derivation.js'
+import { isPoolAddress, registerPoolMeaning } from './pool-registry.js'
+import { deriveMinifiedLayer, deriveMinifiedTree, derivedMeaning, remapMinifiedRoot, splitHead, walkPackage } from './derivation.js'
+import { minifyModuleBody, ownedMinifyTool } from './minify-transpiler.js'
 
 const enc = (text: string): Uint8Array => new TextEncoder().encode(text)
 const dec = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
@@ -102,11 +104,44 @@ describe('deriveMinifiedTree', () => {
     expect(a.derivation.sig).toBe(b.derivation.sig)
   })
 
+  it('walks a child named by { sig } the same way it walks a string', async () => {
+    const pkg = await toyPackage()
+    const wrapped = JSON.stringify({ name: 'root', cells: [{ sig: pkg.child }] })
+    const bytes = enc(wrapped)
+    const root = await sigOf(bytes)
+    pkg.files.set(root, bytes)
+    const walked = await walkPackage(root, pkg.read)
+    expect(walked.layers).toContain(pkg.child)
+  })
+
   it('a different tool or option is a different record', async () => {
     const pkg = await toyPackage()
     const a = await deriveMinifiedTree(pkg.root, pkg.read, minify, TOOL)
     const b = await deriveMinifiedTree(pkg.root, pkg.read, minify, { name: 'test-minify@2', options: TOOL.options })
     expect(a.derivation.sig).not.toBe(b.derivation.sig)
     expect(a.root).not.toBe(b.root)
+  })
+})
+
+describe('a layer, derived on its own', () => {
+  it('writes the record as the member of derived:<that layer> and leaves the parent', async () => {
+    const pkg = await toyPackage()
+    const tool = await ownedMinifyTool()
+    const tree = await deriveMinifiedLayer(pkg.child, pkg.read, async body => minifyModuleBody(body), tool)
+    expect(derivedMeaning(pkg.child)).toBe(`derived:${pkg.child}`)
+    expect(tree.membership.pool).toBe(`derived:${pkg.child}`)
+    expect(tree.membership.member).toBe(tree.derivation.sig)
+    expect(tree.membership.dialects).toBe('derivation:dialects')
+    expect(tree.files.has(pkg.root)).toBe(false)
+    expect(tree.root).not.toBe(pkg.child)
+    const record = JSON.parse(dec(tree.derivation.bytes))
+    expect(record).toMatchObject({ v: 1, kind: 'minify', from: pkg.child, tool: tool.name })
+    expect(record.tool).toMatch(/^[a-f0-9]{64}$/)
+    expect(dec(tree.derivation.bytes)).not.toContain(tree.root)
+    const dialect = JSON.parse(dec(tree.membership.dialectBytes))
+    expect(dialect).toEqual({ v: 1, kind: 'minify', tool: tool.name, mode: 'reproduce' })
+    expect(await remapMinifiedRoot(pkg.child, pkg.read, tree.modules, tree.derivation.sig)).toBe(tree.root)
+    expect(await isPoolAddress(await registerPoolMeaning(tree.membership.pool))).toBe(true)
+    expect(await isPoolAddress(await registerPoolMeaning(tree.membership.dialects))).toBe(true)
   })
 })

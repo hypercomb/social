@@ -24,6 +24,8 @@ import { SHOWCASE_STYLE, doorOrigin, matchesDomain, readLedger, readPeerLedger, 
   type LedgerSite } from './showcase'
 import { ownerBridge } from './owner-bridge'
 import { readZoneOwners } from './showcase-record'
+import { branchView } from './branch-view'
+import { readFromZone, readVerified } from './branch-files'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,
   listRevisionCandidates, publicCreationOrigin, readOfferings, readPublicCreations, rememberRevisionCandidate,
@@ -477,6 +479,9 @@ class HostPanelElement extends HTMLElement {
   #reviews: PendingReview[] | null = null
   #reviewSource = ''
   #pending: PendingSelection[] = []
+  /** Bumps on every render so a late selection list cannot mark a card that
+   *  has already been replaced. */
+  #renderSeq = 0
   #nativeUnlisten: (() => void) | null = null
   /** The origin you are standing on, as a zone — `` when it is not one
    *  (a file:// preview, an address with no dots that is not loopback).
@@ -562,18 +567,22 @@ class HostPanelElement extends HTMLElement {
   async #render(): Promise<void> {
     // The front door is read once per card, not once per render: adding a
     // domain must not re-ask the origin for a file that cannot have changed.
-    if (this.#welcome === undefined) this.#welcome = await readWelcome()
-    if (!this.isConnected) return
+    // The welcome and the followed domains are asked together. The selection
+    // list does not hold the tiles back: it only adds the waiting note.
+    const token = ++this.#renderSeq
+    const welcomePromise = this.#welcome === undefined ? readWelcome() : Promise.resolve(this.#welcome)
+    const zonesPromise = listHostZones()
+    const pendingPromise = listPendingSelections().catch(() => [] as PendingSelection[])
+    const [welcome, zonesAll] = await Promise.all([welcomePromise, zonesPromise])
+    if (token !== this.#renderSeq || !this.isConnected) return
+    this.#welcome = welcome
     // Named as the zone it is — `localhost:4270` on a machine, the hostname
     // everywhere else — so the title and the box below it agree.
     const door: FrontDoor = frontDoorOf(this.#welcome, this.#self || location.hostname, location.origin)
-    if (!this.isConnected) return
+    if (token !== this.#renderSeq || !this.isConnected) return
     // The tab is named for the place, not for the shell that drew it.
     document.title = door.title
-    const zones = (await listHostZones()).filter(zone => zone !== this.#self)
-    if (!this.isConnected) return
-    this.#pending = await listPendingSelections().catch(() => [])
-    if (!this.isConnected) return
+    const zones = zonesAll.filter(zone => zone !== this.#self)
     this.#root.replaceChildren()
 
     const style = document.createElement('style')
@@ -588,6 +597,7 @@ class HostPanelElement extends HTMLElement {
     // gallery and its return bar. Everyone else is shown the place.
     const home = returnHome()
     const selecting = !!home && (home.protocol === 'hypercomb:' || home.origin !== location.origin)
+    let waitingAnchor: HTMLElement | null = null
     const manageBody = document.createElement('div')
     manageBody.className = 'manage-body'
     if (selecting) {
@@ -623,18 +633,12 @@ class HostPanelElement extends HTMLElement {
         follow: raw => this.#follow(raw),
         unfollow: zone => removeHostZone(zone),
         readPeerLedger,
+        onOpenHead: (head, zone) => { this.#openBranch(head, zone) },
       })
       this.#showcaseRefresh = refresh
       panel.append(hero)
       if (this.#reviews?.length) panel.append(this.#reviewSection(this.#reviews))
-      else {
-        // A KEEPER'S SELECTIONS WAIT IN SIGHT: tiles chosen on another domain
-        // and not yet turned on here are said where the keeper lands, not only
-        // inside the closed gallery.
-        const waiting = new Map<string, number>()
-        for (const row of this.#pending) if (row.selected !== false) waiting.set(row.source, (waiting.get(row.source) ?? 0) + 1)
-        if (waiting.size) panel.append(this.#waitingNote(waiting))
-      }
+      else waitingAnchor = bands
       panel.append(bands)
       // What this door carries and from where — the gallery that turns a
       // domain's offerings on here — waits with the rest of the keeping.
@@ -668,6 +672,7 @@ class HostPanelElement extends HTMLElement {
       : 'creations, sources, packages and deployments'
     manageSummary.append(document.createTextNode('Manage this hive'), manageNote)
     manage.append(manageSummary, manageBody)
+    panel.append(this.#filesOpener(zones))
     manageBody.append(this.#packages(zones))
     const technical = document.createElement('details')
     technical.className = 'technical'
@@ -689,6 +694,14 @@ class HostPanelElement extends HTMLElement {
 
     card.append(panel)
     this.#root.append(style, card)
+    void pendingPromise.then(rows => {
+      if (token !== this.#renderSeq || !this.isConnected) return
+      this.#pending = rows
+      if (!waitingAnchor?.isConnected) return
+      const waiting = new Map<string, number>()
+      for (const row of rows) if (row.selected !== false) waiting.set(row.source, (waiting.get(row.source) ?? 0) + 1)
+      if (waiting.size) waitingAnchor.before(this.#waitingNote(waiting))
+    })
     if (!this.#handoffAttempted && ['add', 'select'].some(key => new URLSearchParams(location.search).has(key))) {
       this.#handoffAttempted = true
       void this.#takeHandoff()
@@ -1756,6 +1769,69 @@ class HostPanelElement extends HTMLElement {
     }
   }
 
+  /** Any signature on this page, opened as the folders it names. A followed
+   *  domain opens the revision it publishes now. */
+  #filesOpener(zones: string[]): HTMLElement {
+    const section = document.createElement('section')
+    section.className = 'files-open'
+    const heading = document.createElement('h2')
+    heading.className = 'lbl'
+    heading.textContent = 'Files'
+    const form = document.createElement('form')
+    const input = document.createElement('input')
+    input.placeholder = '64-character signature'
+    input.spellcheck = false
+    input.autocapitalize = 'off'
+    input.setAttribute('aria-label', 'Signature to open')
+    const open = document.createElement('button')
+    open.type = 'submit'
+    open.textContent = 'Open'
+    form.append(input, open)
+    form.addEventListener('submit', event => {
+      event.preventDefault()
+      const sig = input.value.trim().toLowerCase()
+      if (!/^[a-f0-9]{64}$/.test(sig)) return
+      this.#openBranch(sig, this.#self || zones[0] || '')
+    })
+    section.append(heading, form)
+    const loaded = installedPackageSig()
+    if (loaded) {
+      const here = document.createElement('button')
+      here.type = 'button'
+      here.textContent = `Loaded here ${loaded.slice(0, 12)}…`
+      here.addEventListener('click', () => { this.#openBranch(loaded, this.#self || zones[0] || '') })
+      section.append(here)
+    }
+    for (const zone of [this.#self, ...zones].filter((zone): zone is string => !!zone)) {
+      const latest = document.createElement('button')
+      latest.type = 'button'
+      latest.textContent = `Latest on ${zone}`
+      latest.addEventListener('click', () => {
+        void this.#ask(zone).then(answer => {
+          const pkg = answer.packages[0]
+          if (!pkg) return
+          this.#openBranch(pkg.packageSig, pkg.zone, pkg.base)
+        })
+      })
+      section.append(latest)
+    }
+    return section
+  }
+
+  #openBranch(sig: string, zone: string, base?: string): void {
+    const panel = this.#root.querySelector('.panel')
+    if (!panel) return
+    this.#root.querySelector('.branch-view')?.remove()
+    const view = branchView({
+      rootSig: sig,
+      source: zone,
+      installed: installedPackageSig() ?? undefined,
+      read: file => base ? readVerified(base, file) : zone ? readFromZone(zone, file) : Promise.resolve(null),
+    })
+    panel.append(view)
+    view.scrollIntoView({ block: 'start' })
+  }
+
   /** THE PACKAGE THIS HIVE RUNS, and where to take another from. Not tiles:
    *  a package is transport inventory, not a creation. It is still the one
    *  act that turns a cold origin into a working hive, so the card keeps it —
@@ -1836,7 +1912,15 @@ class HostPanelElement extends HTMLElement {
     const take = document.createElement('button')
     take.type = 'submit'
     take.textContent = 'Replicate'
-    form.append(input, take)
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.textContent = 'Open'
+    open.addEventListener('click', () => {
+      const sig = input.value.trim().toLowerCase()
+      if (!/^[a-f0-9]{64}$/.test(sig)) return
+      this.#openBranch(sig, this.#self)
+    })
+    form.append(input, take, open)
     form.addEventListener('submit', event => {
       event.preventDefault()
       void this.#installSignature(input.value, take)
@@ -1964,13 +2048,17 @@ class HostPanelElement extends HTMLElement {
     const take = document.createElement('button')
     take.type = 'button'
     take.textContent = pkg.packageSig === installedPackageSig() ? 'Repair' : 'Replicate'
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.textContent = 'Open'
+    open.addEventListener('click', () => { this.#openBranch(pkg.packageSig, pkg.zone, pkg.base) })
     // A row that states its atoms gives the bar an end; one that does not
     // (admission derives the real inventory) moves as a count.
     const total = new Set([...pkg.layers, ...pkg.bees, ...pkg.dependencies].map(bareSig)).size
     take.addEventListener('click', () => {
       void this.#replicate(pkg.packageSig, take, row, total, onHeld => installPackage(pkg, [], { onHeld }))
     })
-    row.append(label, take)
+    row.append(label, take, open)
     return row
   }
 

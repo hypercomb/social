@@ -52,7 +52,10 @@ mesh.
   Then it joins live. The mesh carries only new things.
 - **Subdomains.** A subdomain is a door, never a store. `lecture.jwize.com` maps to
   a pool address plus a package, chosen by the `Host` header and never by the
-  page address or the referrer. Doors are one level deep.
+  page address or the referrer. Doors are one level deep on the certificate a
+  zone holds today. A further depth is another door and another origin
+  ([build-debug-isolation.md](build-debug-isolation.md)). Storage stays the flat
+  files and pools on this page.
 - **Projections per audience.** An entrance serves a root that does not name
   what that audience shouldn't see: a projection with its own signature that
   reuses shared atoms. Elevated heads require a request signed with a key the

@@ -57,6 +57,49 @@ for (const entry of await readdir(source, { withFileTypes: true })) {
 await mkdir(outputContent, { recursive: true })
 const { tsImport } = await import('tsx/esm/api')
 
+// THE COMPILED RUNTIME, EARLY (hypercomb-runtime/src/early-runtime.ts).
+// A normal request's first module is this file: core, bundled and minified
+// (whitespace and syntax only, every name kept), named by its own hash, in
+// the shared content heap. The page's early script reads window.__hcRuntime.
+// A debug request (hc:verbose) and a build with VISITOR_MINIFY=0 keep the
+// readable /hypercomb-core.runtime.js. A sandbox door does not serve this page.
+if (process.env.VISITOR_MINIFY !== '0') {
+  try {
+    const esbuild = await import('esbuild')
+    const built = await esbuild.build({
+      entryPoints: [join(output, 'hypercomb-core.runtime.js')],
+      bundle: true,
+      format: 'esm',
+      platform: 'browser',
+      target: 'es2022',
+      minifyWhitespace: true,
+      minifySyntax: true,
+      treeShaking: false,
+      legalComments: 'none',
+      charset: 'utf8',
+      write: false,
+      absWorkingDir: output,
+      logLevel: 'silent',
+    })
+    const bytes = built.outputFiles?.[0]?.contents
+    if (!bytes?.byteLength) throw new Error('esbuild wrote no runtime')
+    const runtimeSig = createHash('sha256').update(bytes).digest('hex')
+    await writeFile(join(outputContent, runtimeSig), bytes)
+    await writeFile(join(output, 'runtime'), `${runtimeSig}\n`, 'utf8')
+    const page = join(output, 'index.html')
+    let html = await readFile(page, 'utf8')
+    const slot = '<script id="hc-early-runtime">'
+    if (!html.includes(slot)) throw new Error('visitor page has no early-runtime slot')
+    html = html.replace(slot, `<script>window.__hcRuntime="/content/${runtimeSig}"</script>${slot}`)
+    html = html.replace('<link rel="modulepreload" href="/core/dist/index.js">', '')
+    html = html.replaceAll('href="/hypercomb-core.runtime.js"', `href="/content/${runtimeSig}"`)
+    await writeFile(page, html, 'utf8')
+    console.log(`[visitor-assets] early runtime ${runtimeSig.slice(0, 12)}… (${(bytes.byteLength / 1024).toFixed(0)} KB) in the shared heap`)
+  } catch (err) {
+    console.warn(`[visitor-assets] early runtime skipped — visitors keep the readable runtime: ${err?.message ?? err}`)
+  }
+}
+
 // THE VISITOR RUNS A MINIFIED DERIVATION (hypercomb-runtime/src/minified-
 // package.ts; jwize 2026-10-18). The signed package stays readable — the
 // source lives in the hive. A published site ships a package derived from it:

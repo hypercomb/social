@@ -746,6 +746,13 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // a commit about something else, so the spelling was the accident. The old
   // address is retired below and still read.
   'games:solomon-talk',
+  // THE MINIFY DIALECT (documentation/derivations.md). One record: kind,
+  // the transform's signature, the mode. `derived:<signature>` is the other
+  // pool, a facet addressed when that layer is derived, the same way
+  // `attest:<signature>` is addressed when a record is attested. A facet is
+  // not seeded: its subject is a signature, and registerPoolMeaning records
+  // it at the moment it is addressed.
+  'derivation:dialects',
 ])
 
 /** Every meaning known at build time. */

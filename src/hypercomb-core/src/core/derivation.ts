@@ -19,10 +19,33 @@
 // the same esbuild compiled to WebAssembly in a browser. A module it cannot
 // handle, or that does not shrink, keeps its readable bytes and signature.
 
+import { registerPoolMeaning } from './pool-registry.js'
 import { SignatureService } from './signature.service.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 const SIG_FILE_RE = /^([a-f0-9]{64})(\.js)?$/
+
+/** What has been derived from one signature. A facet, addressed when a layer is derived. */
+const DERIVED_PREFIX = 'derived:'
+/** Which dialects exist. Seeded in the pool registry. */
+export const DIALECTS_MEANING = 'derivation:dialects'
+
+/** `derived:<signature>`, or null when the subject is not a signature. */
+export const derivedMeaning = (inputSig: string): string | null => {
+  const sig = String(inputSig ?? '').trim().toLowerCase()
+  return SIG_RE.test(sig) ? `${DERIVED_PREFIX}${sig}` : null
+}
+
+/** A string signature, or the `sig` a `{ sig }` entry carries. Bare, or with `.js`. */
+const cellSig = (entry: unknown): string => {
+  const raw = typeof entry === 'string'
+    ? entry
+    : entry && typeof entry === 'object'
+      ? String((entry as { sig?: unknown }).sig ?? '')
+      : ''
+  const bare = raw.replace(/\.js$/i, '').toLowerCase()
+  return SIG_RE.test(bare) ? bare : ''
+}
 
 /** The layer fields that name modules; `dependencies` are the aliased ones. */
 const BEE_FIELDS = ['bees', 'criticalBees', 'bootBees'] as const
@@ -102,22 +125,54 @@ export const walkPackage = async (
     const layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
     parsed.set(sig, layer)
     layers.push(sig)
-    const name = (entry: unknown): string => String(entry ?? '').replace(/\.js$/i, '').toLowerCase()
     for (const field of BEE_FIELDS) {
-      for (const entry of Array.isArray(layer[field]) ? layer[field] as unknown[] : []) { const s = name(entry); if (SIG_RE.test(s)) bees.add(s) }
+      for (const entry of Array.isArray(layer[field]) ? layer[field] as unknown[] : []) { const s = cellSig(entry); if (s) bees.add(s) }
     }
-    for (const entry of Array.isArray(layer[DEPENDENCY_FIELD]) ? layer[DEPENDENCY_FIELD] as unknown[] : []) { const s = name(entry); if (SIG_RE.test(s)) dependencies.add(s) }
+    for (const entry of Array.isArray(layer[DEPENDENCY_FIELD]) ? layer[DEPENDENCY_FIELD] as unknown[] : []) { const s = cellSig(entry); if (s) dependencies.add(s) }
     const next = new Set(trail).add(sig)
     for (const cell of Array.isArray(layer['cells']) ? layer['cells'] as unknown[] : []) {
-      if (typeof cell === 'string' && SIG_RE.test(cell)) await visit(cell, next)
+      const child = cellSig(cell)
+      if (child) await visit(child, next)
     }
   }
   await visit(rootSig, new Set())
   return { layers, bees: [...bees], dependencies: [...dependencies], parsed }
 }
 
+/** Layers re-hashed bottom-up. The root names its readable self and the record.
+ *  A child named by a string or by `{ sig }` is rewritten before its parent. */
+const rewriteDerivedLayers = async (
+  rootSig: string,
+  walked: { layers: readonly string[]; parsed: ReadonlyMap<string, Record<string, unknown>> },
+  modules: ReadonlyMap<string, string>,
+  derivationSig: string,
+  files: Map<string, Uint8Array>,
+): Promise<{ root: string; layers: Map<string, string> }> => {
+  const layers = new Map<string, string>()
+  const deriveLayer = async (sig: string): Promise<string> => {
+    const done = layers.get(sig)
+    if (done) return done
+    const layer = walked.parsed.get(sig)!
+    for (const cell of Array.isArray(layer['cells']) ? layer['cells'] as unknown[] : []) {
+      const child = cellSig(cell)
+      if (child && walked.parsed.has(child)) await deriveLayer(child)
+    }
+    const rewritten = remap(layer, new Map([...modules, ...layers])) as Record<string, unknown>
+    const named = sig === rootSig ? { ...rewritten, derivedFrom: rootSig, derivation: derivationSig } : rewritten
+    const out = encode(JSON.stringify(named))
+    const to = await signBytes(out)
+    layers.set(sig, to)
+    files.set(to, out)
+    return to
+  }
+  const root = await deriveLayer(rootSig)
+  for (const sig of walked.layers) await deriveLayer(sig)
+  return { root, layers }
+}
+
 /** Derive the minified tree of a readable package. `read` answers any file of
- *  the readable package by signature. */
+ *  the readable package by signature. The same walk derives one layer: pass
+ *  that layer's signature. */
 export const deriveMinifiedTree = async (
   rootSig: string,
   read: (signature: string) => Promise<Uint8Array | null>,
@@ -158,28 +213,68 @@ export const deriveMinifiedTree = async (
 
   // 3. THE LAYERS, bottom-up: a child's new signature is known before its
   //    parent is rewritten, so the whole tree re-hashes to a new root.
-  const layers = new Map<string, string>()
-  const deriveLayer = async (sig: string): Promise<string> => {
-    const done = layers.get(sig)
-    if (done) return done
-    const layer = walked.parsed.get(sig)!
-    for (const cell of Array.isArray(layer['cells']) ? layer['cells'] as unknown[] : []) {
-      if (typeof cell === 'string' && walked.parsed.has(cell)) await deriveLayer(cell)
-    }
-    const rewritten = remap(layer, new Map([...modules, ...layers])) as Record<string, unknown>
-    const named = sig === rootSig ? { ...rewritten, derivedFrom: rootSig, derivation: derivation.sig } : rewritten
-    const out = encode(JSON.stringify(named))
-    const to = await signBytes(out)
-    layers.set(sig, to)
-    files.set(to, out)
-    return to
-  }
-  const root = await deriveLayer(rootSig)
-  for (const sig of walked.layers) await deriveLayer(sig)
+  const { root, layers } = await rewriteDerivedLayers(rootSig, walked, modules, derivation.sig, files)
 
   return {
     root,
     readable: { layers: walked.layers, bees: walked.bees, dependencies: walked.dependencies },
     files, derivation, modules, layers,
   }
+}
+
+export type DerivedMembership = {
+  /** `derived:<the readable signature>`. */
+  readonly pool: string
+  /** The derivation record. The pool's member is this signature. */
+  readonly member: string
+  /** `derivation:dialects`. */
+  readonly dialects: typeof DIALECTS_MEANING
+  /** The dialect record: kind, the transform's signature, the mode. */
+  readonly dialect: string
+  readonly dialectBytes: Uint8Array
+}
+
+/** The pool membership of one derivation. Registers both meanings for this
+ *  session, so a root walk can tell the directories from lineage bags. */
+export const derivedMembership = async (
+  from: string,
+  derivation: { readonly sig: string; readonly bytes: Uint8Array },
+): Promise<DerivedMembership | null> => {
+  const pool = derivedMeaning(from)
+  if (!pool || !SIG_RE.test(derivation.sig)) return null
+  let tool = ''
+  try { tool = String((JSON.parse(new TextDecoder().decode(derivation.bytes)) as { tool?: unknown }).tool ?? '') } catch { return null }
+  if (!tool) return null
+  const dialectBytes = encode(JSON.stringify({ v: 1, kind: 'minify', tool, mode: 'reproduce' }))
+  const dialect = await signBytes(dialectBytes)
+  await registerPoolMeaning(pool)
+  await registerPoolMeaning(DIALECTS_MEANING)
+  return { pool, member: derivation.sig, dialects: DIALECTS_MEANING, dialect, dialectBytes }
+}
+
+/** Minify one layer. Ancestors of that layer are not rewritten. The record is
+ *  the member of `derived:<that layer>`. */
+export const deriveMinifiedLayer = async (
+  layerSig: string,
+  read: (signature: string) => Promise<Uint8Array | null>,
+  minify: MinifyBody,
+  tool: DerivationTool,
+): Promise<MinifiedTree & { readonly membership: DerivedMembership }> => {
+  const tree = await deriveMinifiedTree(layerSig, read, minify, tool)
+  const membership = await derivedMembership(layerSig, tree.derivation)
+  if (!membership) throw new Error('a layer signature is 64 hex')
+  return { ...tree, membership }
+}
+
+/** The derived root, from the readable layers and the record's module map.
+ *  No minifier. The result matches a derivation that used this map. */
+export const remapMinifiedRoot = async (
+  rootSig: string,
+  read: (signature: string) => Promise<Uint8Array | null>,
+  modules: ReadonlyMap<string, string>,
+  derivationSig: string,
+): Promise<string> => {
+  const walked = await walkPackage(rootSig, read)
+  const { root } = await rewriteDerivedLayers(rootSig, walked, modules, derivationSig, new Map())
+  return root
 }

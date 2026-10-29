@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
+import { directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
 import { ATTESTED_PACKAGES_KEY, attestPackage } from './package-attestation'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -424,6 +424,21 @@ describe('the host directory', () => {
     // A fresh read naming P itself: P is current, and a host on R is not behind it falsely — R is newer only if named.
     expect(namedFromVerdict(await attestPackage(P, [], { storage, publisher, fetchIndex: indexNaming(P), fresh: true }), P)).toBe(P)
     expect(VIEW).toMatch(/attestPackage\(installedSig, this\.#zones, \{ fresh: true \}\)/)
+  })
+
+  it('a shell with nothing installed takes the root the publisher names now', () => {
+    const [oldRoot, named] = ['c'.repeat(64), 'd'.repeat(64)]
+    const publisher = 'e'.repeat(64)
+    expect(namedWhenUninstalled(oldRoot, { ok: false, reason: 'not-named', named })).toBe(named)
+    expect(namedWhenUninstalled(named, { ok: true, pubkey: publisher, witnessed: 'current' })).toBe(named)
+    // A witness, or a read that cannot say, leaves the announcement. It is not a guess.
+    expect(namedWhenUninstalled(oldRoot, { ok: true, pubkey: publisher, witnessed: 'held' })).toBe(oldRoot)
+    expect(namedWhenUninstalled(oldRoot, null)).toBe(oldRoot)
+    expect(VIEW).toMatch(/attestPackage\(announced, this\.#zones, \{ fresh: true \}\)/)
+    expect(VIEW).toMatch(/namedWhenUninstalled\(announced, verdict\)/)
+    const updateAll = VIEW.slice(VIEW.indexOf('async #updateAll()'), VIEW.indexOf('async #runningFiles('))
+    expect(updateAll).toMatch(/const named = await this\.#namedRoot\(trunk\)/)
+    expect(updateAll.indexOf('this.#namedRoot(trunk)')).toBeLessThan(updateAll.indexOf('install.acquire('))
   })
 
   it('both sentences speak every language the window does', () => {

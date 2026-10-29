@@ -18,7 +18,7 @@ describe('the bridge verb sets', () => {
       'add', 'bag-add', 'bag-remove', 'bag-set', 'build-record',
       'chat-goal-reached', 'chat-reply', 'decoration-add',
       'note-add', 'note-delete', 'note-split',
-      'optimization-add', 'optimization-remove', 'put-resource',
+      'optimization-add', 'optimization-remove', 'pool-put', 'put-resource',
       'remove', 'stamp', 'submit', 'summary-add', 'update',
     ])
   })
