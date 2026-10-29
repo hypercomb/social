@@ -5,6 +5,7 @@
 // all business logic to the parent via inputs/outputs.
 
 import { Component, computed, effect, ElementRef, HostBinding, inject, input, output, signal, ViewChild, type AfterViewInit, type OnDestroy } from '@angular/core'
+import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { TextScaleComponent, surfaceScale, stepSurfaceScale } from '../text-scale/text-scale.component'
 
@@ -136,6 +137,12 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     const vw = window.innerWidth || document.documentElement.clientWidth
     const vh = window.innerHeight || document.documentElement.clientHeight
     const isPhone = vw <= 599
+    // A docked tool window reserves its edge in `--hc-inset-*`. The options
+    // pane is the right column, so the cap is that free edge. The raw viewport
+    // edge lets the window cover the column.
+    const insetLeft = this.#edgeInset('left')
+    const insetRight = this.#edgeInset('right')
+    const rightEdge = vw - insetRight
 
     // Horizontal: line up the dropdown's left edge with the text CARET. With no
     // text the caret sits at the input start, so the list opens flush at the left
@@ -143,12 +150,12 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     // the bar from the left instead (no room to offset).
     const anchorX = isPhone ? null : this.#caretScreenX()
     let left = anchorX ?? r.left
-    left = Math.max(8, Math.min(left, vw - 224))   // keep ~14rem on-screen
+    left = Math.max(8 + insetLeft, Math.min(left, rightEdge - 224))   // keep ~14rem on-screen
     host.style.setProperty('--intel-left', `${Math.round(left)}px`)
     host.style.setProperty('--intel-width', `${Math.round(r.width)}px`)
-    // Cap the panel to the space between its left edge and the viewport's right
-    // edge so the two-pane (list + detail) can never run off the side.
-    host.style.setProperty('--intel-maxw', `${Math.round(vw - left - 8)}px`)
+    // Cap the panel to the space between its left edge and the free right edge
+    // so the two-pane (list + detail) stays beside an open panel.
+    host.style.setProperty('--intel-maxw', `${Math.max(160, Math.round(rightEdge - left - 8))}px`)
 
     // Vertical: open UP off a bottom-anchored bar (dev/web pin it to the bottom),
     // DOWN off a top-anchored one. Snug (2px) against the bar.
@@ -189,6 +196,13 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     mirror.remove()
     const padLeft = parseFloat(cs.paddingLeft) || 0
     return rect.left + padLeft + textWidth - input.scrollLeft
+  }
+
+  /** Pixels a docked panel reserves on one edge. Zero when none is open. */
+  #edgeInset(side: 'left' | 'right'): number {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue(`--hc-inset-${side}`)
+    const value = Number.parseFloat(raw)
+    return Number.isFinite(value) && value > 0 ? value : 0
   }
 
   private get inputElement(): HTMLInputElement | undefined {
@@ -746,9 +760,13 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     const reflow = (): void => { if (this.effectiveShowCompletions()) this.#positionIntel() }
     window.addEventListener('resize', reflow)
     window.addEventListener('scroll', reflow, true)
+    // Opening or resizing a tool window does not resize the viewport, and the
+    // options pane is what that window would otherwise cover.
+    const offInset = EffectBus.on('viewport:inset', () => reflow())
     this.#reflowTeardown = (): void => {
       window.removeEventListener('resize', reflow)
       window.removeEventListener('scroll', reflow, true)
+      offInset()
     }
   }
 
