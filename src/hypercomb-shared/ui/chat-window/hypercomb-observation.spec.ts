@@ -492,6 +492,28 @@ describe('LLM context projection substitutes for content on /read only', () => {
     expect(out).not.toContain('"content"')
   })
 
+  it('keeps a counted slot’s signatures beside the projection', async () => {
+    const decoration = 'd'.repeat(64)
+    ;(window as unknown as { ioc: unknown }).ioc = {
+      get: (key: string) => key === '@diamondcoreprocessor.com/LlmContext'
+        ? { project: async () => ({ text: 'press-kit\ndecorations: 1', minted: true }) }
+        : undefined,
+    }
+    const reader = readerFor()
+    const base = reader.readNode as ReturnType<typeof vi.fn>
+    const inner = base.getMockImplementation()!
+    base.mockImplementation(async (segments, options) => ({
+      ...(await inner(segments, options)),
+      content: { ...(options.withContent ? { decorations: [decoration] } : {}) },
+    }))
+    const out = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/read /press-kit'], []), reader))
+    expect(out).toContain('"projection":"press-kit\\ndecorations: 1"')
+    expect(out).toContain(`"decorations":["${decoration}"]`)
+    expect(out).toContain('read <signature> opens one')
+    expect(out).not.toContain('"content"')
+  })
+
   it('answers exactly as before when no LLM context service is registered', async () => {
     const out = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
       parseHypercombObservationGrammars(['/read /humidor'], []), readerFor()))

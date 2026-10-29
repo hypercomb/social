@@ -203,6 +203,21 @@ describe('showcase — the page is what is published now', () => {
     await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage']))
   })
 
+  it('hides a door that is still signed when the live list does not name its head', async () => {
+    // Both open on this domain. Only camelflage's head is live, so dylan is
+    // not on the visitor site even though its door still names the domain.
+    const owners: ZoneOwners = {
+      showcase: null, reached: true, unreadable: false, live: new Set([sig('2')]),
+      doors: new Map([[sig('a'), new Map([['camelflage', ['hypercomb.com']], ['dylan', ['hypercomb.com']]])]]),
+    }
+    const { bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      readOwners: async () => owners,
+    })
+    await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage']))
+  })
+
   it('redraws when the ledger is read again, and only the newest read is believed', async () => {
     const { bands, refresh } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],

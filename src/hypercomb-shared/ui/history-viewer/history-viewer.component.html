@@ -169,6 +169,24 @@
                 [attr.aria-label]="'history.close-slice' | t"
                 (click)="closeSlice()">×</button>
       </header>
+      @if (slice.generation; as made) {
+        <div class="slice-section slice-generation">
+          <div class="slice-section-header">{{ 'history.generation' | t }}</div>
+          <p class="slice-generation-prompt">{{ generationWords(made) }}</p>
+          @if (made.name && made.positive && made.positive !== made.name) {
+            <p class="slice-generation-meta">{{ made.positive }}</p>
+          }
+          @if (generationMeta(made); as meta) {
+            <p class="slice-generation-meta">{{ meta }}</p>
+          }
+          @if (made.negative) {
+            <p class="slice-generation-negative">{{ made.negative }}</p>
+          }
+          <button type="button"
+                  class="slice-generation-use"
+                  (click)="useGeneration(made)">{{ 'history.use-generation' | t }}</button>
+        </div>
+      }
       <pre class="slice-json">@for (line of slice.lines; track $index) {@if (lineSig(line.text); as sig) {<span class="slice-line slice-sig" [attr.data-status]="line.status" [attr.data-sig]="sig" (click)="drillIntoSig(sig)" role="button" tabindex="0">{{ line.text }}</span>
 } @else {<span class="slice-line" [attr.data-status]="line.status">{{ line.text }}</span>
 }}</pre>

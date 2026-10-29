@@ -28,6 +28,10 @@ dist/
 # repository-local scratch root; OS temp is preferred for heavyweight work.
 /.tmp/
 
+# Website trials staged by the local hive. The bytes are the page a model
+# wrote; the dev server reads them back at try-<name>.localhost.
+src/hypercomb-dev/.try-pages/
+
 # Safety net for accidentally package-local scratch workspaces. These hidden
 # namespaces are reserved as disposable by AGENTS.md and may never hold source.
 **/.tmp/

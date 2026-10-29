@@ -259,13 +259,14 @@ export const renameCommunity = (showcase: Showcase, key: string, raw: unknown): 
     communities: communities.map(community => (communityKey(community.name) === key ? { ...community, name } : community)) } }
 }
 
-/** The record this key already signed for the zone, else an empty one. */
-export async function readSignedShowcase(zone: string): Promise<Showcase> {
-  const empty: Showcase = { zone, items: [], domains: [] }
-  try {
-    const sig = await ownHiveRoot(zone, showcaseKey(zone))
-    if (!sig) return empty
-    const response = await fetch(`https://${zone}/${sig}`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
-    return response.ok ? parseShowcase(await response.json(), zone) ?? empty : empty
-  } catch { return empty }
+/** The record this key already signed for the zone. Null when none is signed.
+ *  Throws when a named record cannot be read: that is not an empty showcase. */
+export async function readSignedShowcase(zone: string): Promise<Showcase | null> {
+  const sig = await ownHiveRoot(zone, showcaseKey(zone))
+  if (!sig) return null
+  const response = await fetch(`https://${zone}/${sig}`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+  if (!response.ok) throw new Error('could not read the showcase')
+  const record = parseShowcase(await response.json(), zone)
+  if (!record) throw new Error('could not read the showcase')
+  return record
 }

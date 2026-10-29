@@ -9,7 +9,7 @@
        inline scripts and styles this page is built from. script-src and
        style-src are named, with inline allowed, so an external script or
        stylesheet cannot carry bytes out either. -->
-  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* http://127.0.0.1:* http://*.localhost:* https://localhost:* https://127.0.0.1:* https://*.localhost:* ws://localhost:* ws://127.0.0.1:* ws://*.localhost:* wss://localhost:* wss://127.0.0.1:* wss://*.localhost:* https://hypercomb.com https://*.hypercomb.com wss://hypercomb.com wss://*.hypercomb.com https://jwize.com https://*.jwize.com wss://jwize.com wss://*.jwize.com https://pluginthematrix.com https://*.pluginthematrix.com wss://pluginthematrix.com wss://*.pluginthematrix.com https://pluginthematrix.io https://*.pluginthematrix.io wss://pluginthematrix.io wss://*.pluginthematrix.io https://realones.online https://*.realones.online wss://realones.online wss://*.realones.online https://cafesociety.buzz https://*.cafesociety.buzz wss://cafesociety.buzz wss://*.cafesociety.buzz https://pointblanksolutions.ca https://*.pointblanksolutions.ca wss://pointblanksolutions.ca wss://*.pointblanksolutions.ca blob: data:; worker-src 'self' blob:; frame-src 'self' blob: data:; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* http://127.0.0.1:* http://*.localhost:* https://localhost:* https://127.0.0.1:* https://*.localhost:* ws://localhost:* ws://127.0.0.1:* ws://*.localhost:* wss://localhost:* wss://127.0.0.1:* wss://*.localhost:* https://hypercomb.com https://*.hypercomb.com wss://hypercomb.com wss://*.hypercomb.com https://jwize.com https://*.jwize.com wss://jwize.com wss://*.jwize.com https://pluginthematrix.com https://*.pluginthematrix.com wss://pluginthematrix.com wss://*.pluginthematrix.com https://pluginthematrix.io https://*.pluginthematrix.io wss://pluginthematrix.io wss://*.pluginthematrix.io https://realones.online https://*.realones.online wss://realones.online wss://*.realones.online https://cafesociety.buzz https://*.cafesociety.buzz wss://cafesociety.buzz wss://*.cafesociety.buzz https://pointblanksolutions.ca https://*.pointblanksolutions.ca wss://pointblanksolutions.ca wss://*.pointblanksolutions.ca https://hypercomb.io wss://hypercomb.io https://www.hypercomb.io wss://www.hypercomb.io https://api.anthropic.com https://api.openai.com https://api.x.ai https://generativelanguage.googleapis.com https://api.deepseek.com https://api.mistral.ai https://openrouter.ai blob: data:; worker-src 'self' blob:; frame-src 'self' blob: data:; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>Hypercomb Development</title>
   <base href="/">
 
@@ -68,8 +68,13 @@
       var failures = [];
       // The zones this participant owns on Cloudflare: each, and every name
       // under it, over a secure scheme. Mirrored in the connect-src above and in
-      // the worker's OWNED_ZONES; nothing else leaves the machine.
+      // the worker's OWNED_ZONES. A paused zone is blocked. These are not
+      // exceptions: an exception cannot be paused and is not a content host.
       var OWNED_ZONES = ['hypercomb.com', 'jwize.com', 'pluginthematrix.com', 'pluginthematrix.io', 'realones.online', 'cafesociety.buzz', 'pointblanksolutions.ca'];
+      // Chat exceptions, exact hosts only. hypercomb.io is the app. The rest
+      // are the model endpoints the chat calls directly. A name under one of
+      // them, or a lookalike, stays refused.
+      var EXCEPTIONS = ['hypercomb.io', 'www.hypercomb.io', 'api.anthropic.com', 'api.openai.com', 'api.x.ai', 'generativelanguage.googleapis.com', 'api.deepseek.com', 'api.mistral.ai', 'openrouter.ai'];
       // A zone the participant has paused in the hosts list is blocked at once.
       // The list lives in this closure. A later script can write the storage
       // key and it still changes nothing here: the click below is the writer.
@@ -89,6 +94,12 @@
         }
         return false;
       }
+      function excepted(host) {
+        for (var j = 0; j < EXCEPTIONS.length; j++) {
+          if (host === EXCEPTIONS[j]) return true;
+        }
+        return false;
+      }
       function safe(value) {
         try {
           var url = new URL(String(value), location.href);
@@ -98,8 +109,22 @@
           var host = String(url.hostname || '').toLowerCase();
           var loopback = host === 'localhost' || host === '127.0.0.1' || host === '::1' ||
             (host.length > '.localhost'.length && host.endsWith('.localhost'));
-          if (!loopback) return (url.protocol === 'https:' || url.protocol === 'wss:') && owned(host);
+          if (!loopback) return (url.protocol === 'https:' || url.protocol === 'wss:') && (owned(host) || excepted(host));
           return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'ws:' || url.protocol === 'wss:';
+        } catch (e) {
+          return false;
+        }
+      }
+      // The editor's image search, and nothing else on Google. Fetch, XHR and
+      // sockets stay refused: this only lets a tab open on the image grid.
+      function imageSearch(value) {
+        try {
+          var url = new URL(String(value), location.href);
+          if (url.protocol !== 'https:') return false;
+          var host = String(url.hostname || '').toLowerCase();
+          if (host !== 'www.google.com' && host !== 'google.com') return false;
+          if (url.pathname !== '/search') return false;
+          return url.searchParams.get('udm') === '2' || url.searchParams.get('tbm') === 'isch';
         } catch (e) {
           return false;
         }
@@ -198,7 +223,7 @@
       if (typeof window.open === 'function') {
         var nativeWindowOpen = window.open.bind(window);
         pin(window, 'open', function (url, target, features) {
-          if (url != null && url !== '' && !safe(url)) return null;
+          if (url != null && url !== '' && !safe(url) && !imageSearch(url)) return null;
           return nativeWindowOpen(url, target, features);
         });
       }
@@ -234,7 +259,7 @@
       if (window.navigation && typeof window.navigation.addEventListener === 'function') {
         window.navigation.addEventListener('navigate', function (event) {
           var dest = event.destination && event.destination.url;
-          if (!dest || safe(dest)) return;
+          if (!dest || safe(dest) || imageSearch(dest)) return;
           if (event.cancelable) event.preventDefault();
         });
       }

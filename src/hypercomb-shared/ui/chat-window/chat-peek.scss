@@ -49,19 +49,16 @@ $accent: #7eb6d6;
     display: none;
   }
 
-  // THE TOOL ROW SURVIVES THE FOLD. Its reading half — which conversation,
-  // and the acts on that conversation — goes with the transcript, but the
-  // two window tools in it do not: one of them is the way BACK from the
-  // fold, and a control that hides itself the moment you press it is a trap.
-  // So the row stays, emptied down to its tools, reading as a second line of
-  // the header rather than as a bar of its own.
-  // Header at the top, footer at the bottom, hive in between.
+  // The fold control lives in the header now, with the other window icons.
+  // The conversation bar folds away with the thread. Header at the top,
+  // footer at the bottom, hive in between.
   .chat-foot {
     margin-top: auto;
   }
 
+  .chat-bar { display: none; }
+
   .chat-header,
-  .chat-bar,
   .chat-foot {
     pointer-events: auto;
     position: relative;
@@ -81,19 +78,8 @@ $accent: #7eb6d6;
     }
   }
 
-  // One underline, under the PAIR — the header and the tool row are one band
-  // while folded, and two accent lines would say they are two.
-  .chat-bar {
-    justify-content: flex-end;
-    border-bottom: none;
-
-    > *:not(.chat-tool) {
-      display: none;
-    }
-
-    &::before {
-      border-bottom: 1px solid rgba(var(--acc), 0.28);
-    }
+  .chat-header::before {
+    border-bottom: 1px solid rgba(var(--acc), 0.28);
   }
 
   .chat-foot::before {
@@ -123,7 +109,16 @@ $accent: #7eb6d6;
 .chat-head-actions {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  flex: 0 0 auto;
+  gap: 0.15rem;
+}
+
+.chat-head-split {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 1rem;
+  margin: 0 0.2rem;
+  background: rgba(var(--hc-panel-ink), 0.16);
 }
 
 // EVERY ICON BUTTON IN THE WINDOW IS THIS ONE (jwize, 2026-10-01: "icon and

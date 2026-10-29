@@ -9,30 +9,9 @@
          (Android) so bottom-anchored chrome rides above it. viewport-fit=cover
          exposes safe areas while browser zoom remains user-controlled.
          BEFORE EVERY SCRIPT: until a phone has read this tag its layout
-         viewport is 980px wide, so the phone test below could never match. -->
+         viewport is 980px wide, so the phone test after the import map
+         could never match. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-
-    <!-- A phone goes to the .com. The hive at hypercomb.io is where creations
-         are made; a phone uses them from hypercomb.com, the root page that
-         lists what every domain hosts (documentation/using-a-creation.md, "On
-         a phone, you go to the .com"). The hive's mobile view is set aside and
-         kept for reuse, never shown here until it is robust and usable. A
-         phone is the one definition MobileModeService uses: a coarse pointer
-         AND a phone-sized viewport in either orientation. Only hypercomb.io
-         itself is sent on: local dev, the development deploy and the native
-         client keep the hive. Decided once, at load, before anything else
-         runs. -->
-    <script>
-      (function () {
-        try {
-          var host = location.hostname;
-          if (host !== 'hypercomb.io' && host !== 'www.hypercomb.io') return;
-          if (!matchMedia('(pointer: coarse)').matches) return;
-          if (!matchMedia('(max-width: 599px), (max-height: 449px)').matches) return;
-          location.replace('https://hypercomb.com/');
-        } catch (e) {}
-      })();
-    </script>
 
     <!-- Break capture: every client-side break is queued for the break repair
          loop (documentation/break-repair-loop.md). The listeners go on HERE,
@@ -137,6 +116,98 @@
           var el = document.documentElement;
           if (t === 'system') el.removeAttribute('data-theme');
           else el.setAttribute('data-theme', t || 'honey');
+        } catch (e) {}
+      })();
+    </script>
+
+    <!-- hc-phone-gateway. A phone at hypercomb.io is the gateway
+         (documentation/using-a-creation.md, "On a phone, hypercomb.io is the
+         gateway"). It stays on this origin and runs the bootstrap signature
+         hypercomb.com publishes at /pin right now — the signed initial, the
+         same bytes the .com runs, verified before they are imported. That
+         initial is the simplified installer: connect and follow hosts here;
+         a creation opens on its own domain. The hive's mobile view stays set
+         aside. Desktop, local dev, the development deploy and every other
+         host keep the hive. The pin is read, never written into this file.
+         This script follows the import map because that module's only bare
+         import is @hypercomb/core, and it follows the theme stamp so the
+         panel inherits the honey tokens. A miss, a bad hash or a boot that
+         throws leaves the promise false and main.ts boots the hive. Nothing
+         redirects. Decided once, at load. -->
+    <script>
+      (function () {
+        function phoneGatewayHost(host) {
+          return host === 'hypercomb.io' || host === 'www.hypercomb.io';
+        }
+        function parsePin(text) {
+          var pin = String(text || '').trim().toLowerCase();
+          return /^[a-f0-9]+$/.test(pin) && pin.length === 64 ? pin : '';
+        }
+        function sha256Hex(bytes) {
+          return crypto.subtle.digest('SHA-256', bytes).then(function (digest) {
+            var view = new Uint8Array(digest);
+            var hex = '';
+            for (var i = 0; i < view.length; i++) {
+              var b = view[i].toString(16);
+              hex += b.length === 1 ? '0' + b : b;
+            }
+            return hex;
+          });
+        }
+        function whenBody() {
+          if (document.body) return Promise.resolve();
+          return new Promise(function (resolve) {
+            document.addEventListener('DOMContentLoaded', function () { resolve(); }, { once: true });
+          });
+        }
+        async function servePinnedInitial(importer) {
+          var origin = 'https://hypercomb.com';
+          var load = importer || function (url) { return import(url); };
+          var fetchInit = { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' };
+          try {
+            var pinRes = await fetch(origin + '/pin', fetchInit);
+            if (!pinRes.ok) return false;
+            var pin = parsePin(await pinRes.text());
+            if (!pin) return false;
+            var byteRes = await fetch(origin + '/' + pin, fetchInit);
+            if (!byteRes.ok) return false;
+            var bytes = await byteRes.arrayBuffer();
+            if (await sha256Hex(bytes) !== pin) return false;
+            var url = URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
+            try {
+              var module = await load(url);
+              if (!module || typeof module.boot !== 'function') return false;
+              var acquisition = module.boot({ reason: 'cold' });
+              if (!acquisition || typeof acquisition.prompt !== 'function') return false;
+              await whenBody();
+              acquisition.prompt();
+              // The genesis splash keeps a canvas worker until its own dismiss
+              // runs. Removing the node alone leaves that worker drawing.
+              if (typeof window.__hcDismissSplash === 'function') window.__hcDismissSplash();
+              else {
+                var splash = document.getElementById('hc-splash');
+                if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+              }
+              return true;
+            } catch (runError) {
+              var hung = document.querySelector('hc-shim-hosts');
+              if (hung && hung.parentNode) hung.parentNode.removeChild(hung);
+              return false;
+            } finally {
+              URL.revokeObjectURL(url);
+            }
+          } catch (loadError) {
+            return false;
+          }
+        }
+        try {
+          if (!phoneGatewayHost(location.hostname)) return;
+          if (!matchMedia('(pointer: coarse)').matches) return;
+          if (!matchMedia('(max-width: 599px), (max-height: 449px)').matches) return;
+          window.__hcPhoneGateway = servePinnedInitial().then(function (ok) {
+            if (!ok) console.warn('[phone-gateway] the pinned initial did not run; the hive will boot');
+            return ok;
+          });
         } catch (e) {}
       })();
     </script>

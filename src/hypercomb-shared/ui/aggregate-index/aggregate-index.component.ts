@@ -345,10 +345,10 @@ export class AggregateIndexComponent implements OnDestroy {
     // `segments`, so a staged tile names itself rather than "whatever is called
     // that on the page I am looking at now".
     //
-    // It does NOT outlive a hop: `#onLineage` drops it on every navigation (see
-    // the note there for why, and for the one flow that costs). So an empty
-    // update is always honoured — there is no longer a stale capture for it to
-    // be told apart from.
+    // It does NOT outlive a hop: `#onNavigate` drops it when the page changes
+    // (see the note there). A file change on the page you are standing on is
+    // not a hop, so an empty update is still honoured — there is no stale
+    // capture for it to be told apart from.
     this.#cleanups.push(onSelection(({ selected }) => {
       const here = this.#segments()
       this.selection.set(selected.map(label => ({ label, segments: [...here, label] })))
@@ -412,7 +412,7 @@ export class AggregateIndexComponent implements OnDestroy {
     // moved the hive but left `here()` stale, so the return control never
     // appeared). `navigate` is the shell-wide signal, so track that too — the
     // panel's location mirror has to be right or the way back is invisible.
-    window.addEventListener('navigate', this.#onLineage)
+    window.addEventListener('navigate', this.#onNavigate)
     this.#ensureLineage()
     this.#refresh()
   }
@@ -423,7 +423,7 @@ export class AggregateIndexComponent implements OnDestroy {
     aggregateSources.removeEventListener('change', this.#sourceChanged)
     this.#boundSource?.changed?.removeEventListener('change', this.#sourceChanged)
     window.removeEventListener('synchronize', this.#sourceChanged)
-    window.removeEventListener('navigate', this.#onLineage)
+    window.removeEventListener('navigate', this.#onNavigate)
     this.#lineage?.removeEventListener?.('change', this.#onLineage)
     this.#detachDrag()
   }
@@ -1189,9 +1189,19 @@ export class AggregateIndexComponent implements OnDestroy {
    *  the cost is one flow: "select tiles → step INTO the collection → press
    *  Add" can no longer complete, because the step in is now what clears the
    *  tray. Picking the destination from the panel's own row (Add to <name>)
-   *  does the same job without moving the hive, and still works. */
-  #onLineage = (): void => {
+   *  does the same job without moving the hive, and still works.
+   *
+   *  A lineage `change` is not a hop. Creating a tile, and every other file
+   *  write, invalidates lineage while the page stays put. Dropping the
+   *  canvas selection there wiped a selection the same moment it was made,
+   *  and again when a picture was written onto those tiles. The location
+   *  mirror still refreshes; only `navigate` empties the tray. */
+  #onNavigate = (): void => {
     this.#dropStaged()
+    this.#refresh()
+  }
+
+  #onLineage = (): void => {
     this.#refresh()
   }
 

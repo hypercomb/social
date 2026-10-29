@@ -14,8 +14,9 @@
 // MIRRORED: hypercomb-shim/src/bootstrap/owner-bridge.ts speaks this; the shim spec holds them together.
 
 import { EffectBus, requestConfirm } from '@hypercomb/core'
+import { fetchHiveIndex } from './hive-pointer.js'
 import { publisherKeyHex } from './key-list.client.js'
-import { readSignedShowcase, showcases, signShowcase, toggleItem, type ShowcaseItem } from './showcase-record.js'
+import { readSignedShowcase, showcases, signShowcase, toggleItem, type Showcase, type ShowcaseItem } from './showcase-record.js'
 
 export const SHOWCASE_CHANNEL = 'hc:showcase'
 
@@ -29,22 +30,71 @@ export type BridgeDeps = {
   readonly own?: () => Promise<string>
   readonly read?: typeof readSignedShowcase
   readonly sign?: typeof signShowcase
+  /** Lineages this key publishes on the zone. Null when that list could not be read. */
+  readonly published?: (zone: string, pubkey: string) => Promise<readonly ShowcaseItem[] | null>
+}
+
+/** Lineages whose signed doors name this zone. Null when the index cannot be read.
+ *  An absent door is not published here, matching the front door. */
+const doorsOnZone = async (zone: string, pubkey: string): Promise<readonly ShowcaseItem[] | null> => {
+  const read = await fetchHiveIndex(zone, pubkey)
+  if (!read.ok) return null
+  const items: ShowcaseItem[] = []
+  for (const [lineage, listed] of Object.entries(read.manifest.doors ?? {})) {
+    if (!lineage || lineage.length > 200 || /[\s\x00-\x1f\x7f]/.test(lineage)) continue
+    const opens = listed.some(door => {
+      const name = door.toLowerCase()
+      return name === zone || zone.endsWith(`.${name}`)
+    })
+    if (opens) items.push({ pubkey, lineage })
+  }
+  return items
+}
+
+const signResult = async (record: Showcase, deps: BridgeDeps): Promise<ToggleResult> => {
+  const signed = await (deps.sign ?? signShowcase)(record)
+  return signed.ok ? { ok: true, changed: true } : { ok: false, reason: signed.reason }
 }
 
 /** Put one creation into the showcase of `zone`, or take it out, and sign the result. Idempotent: a creation
- *  already in the state asked for changes nothing and signs nothing. */
+ *  already in the state asked for changes nothing and signs nothing. A missing showcase is not an empty
+ *  one: taking a creation out writes the doors that name this zone, minus that creation. */
 export async function applyToggle(request: ToggleRequest, deps: BridgeDeps = {}): Promise<ToggleResult> {
   const zone = String(request.zone ?? '').toLowerCase()
   const lineage = String(request.lineage ?? '')
   const pubkey = String(request.pubkey ?? '').toLowerCase()
-  if (!ZONE.test(zone) || !SIG.test(pubkey) || !lineage || lineage.length > 200 || lineage.includes('/')) return { ok: false, reason: 'bad request' }
+  if (!ZONE.test(zone) || !SIG.test(pubkey) || lineage.length < 1 || lineage.length > 200 || /[\s\x00-\x1f\x7f]/.test(lineage)) {
+    return { ok: false, reason: 'bad request' }
+  }
   const own = String(await (deps.own ?? (() => publisherKeyHex({ known: true })))().catch(() => '') ?? '').toLowerCase()
   if (!SIG.test(own)) return { ok: false, reason: 'no key on this device' }
   const item: ShowcaseItem = { pubkey, lineage }
-  const current = await (deps.read ?? readSignedShowcase)(zone)
-  if (showcases(current, item) === (request.on === true)) return { ok: true, changed: false }
-  const signed = await (deps.sign ?? signShowcase)(toggleItem(current, item))
-  return signed.ok ? { ok: true, changed: true } : { ok: false, reason: signed.reason }
+  let current: Showcase | null
+  try {
+    current = await (deps.read ?? readSignedShowcase)(zone)
+  } catch {
+    return { ok: false, reason: 'could not read the showcase' }
+  }
+  if (current) {
+    if (showcases(current, item) === (request.on === true)) return { ok: true, changed: false }
+    return signResult(toggleItem(current, item), deps)
+  }
+  // No record yet. Turning one on starts a showcase that names only that creation.
+  if (request.on === true) return signResult(toggleItem({ zone, items: [], domains: [] }, item), deps)
+  // Turning one off records everything still published here. An explicit empty record is left alone above.
+  let open: readonly ShowcaseItem[] | null
+  try {
+    open = await (deps.published ?? doorsOnZone)(zone, pubkey)
+  } catch {
+    return { ok: false, reason: 'could not read what is published here' }
+  }
+  if (!open) return { ok: false, reason: 'could not read what is published here' }
+  if (!open.some(row => row.pubkey === pubkey && row.lineage === lineage)) return { ok: true, changed: false }
+  return signResult({
+    zone,
+    items: open.filter(row => !(row.pubkey === pubkey && row.lineage === lineage)),
+    domains: [],
+  }, deps)
 }
 
 let started = false

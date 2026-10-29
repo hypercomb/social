@@ -3,9 +3,10 @@
 // NEW PICTURES FOR A NAME — what domains offer, and what THIS participant has
 // already been shown.
 //
-// A tile's pictures are a pool by NAME (`sign(name)`, asked of every known
-// host — peer-images.ts), so the answer is the same wherever that name sits in
-// your hierarchy; every cache here is keyed by the name alone. When a domain
+// A tile's pictures are a pool by NAME (`sign(name)` — peer-images.ts). The
+// answer is the same wherever that name sits in the hierarchy; every cache
+// here is keyed by the name alone. A scan asks only a host that has already
+// answered a pool, so painting the hive does not 404 every publisher. When a domain
 // reports a picture for a name that this participant has not seen, the tile
 // wears a badge (image-update-badge.drone.ts); opening the images wall and
 // either taking a picture or dismissing marks what was on offer as SEEN.
@@ -97,7 +98,7 @@ const writeSeen = async (label: string, seen: ReadonlySet<string>): Promise<bool
 
 const refresh = async (label: string): Promise<void> => {
   try {
-    const found = await meaningPoolImageCandidates(label)
+    const found = await meaningPoolImageCandidates(label, 'scan')
     const offered = new Set(found.map(c => c.previewSig))
     const seen = await readSeen(label)
     let unseen: Set<string>

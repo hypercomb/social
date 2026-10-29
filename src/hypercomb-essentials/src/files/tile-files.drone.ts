@@ -4,9 +4,9 @@
 // `hypercomb-write` block uses to make a file (hypercomb-work-fence.ts). Two
 // kinds of file live on a tile:
 //
-//   page — the tile's website page: the HTML its site view mounts
-//          (site-view.drone.ts: `website` slot → `visual:website:page`
-//          decoration → legacy `context`).
+//   page — the tile's website page. The bytes are a resource. A page written
+//          here is a trial: it opens at try-<name>.<this host> and the site
+//          view does not mount it in this hive.
 //   file — an attachment by name: a `files:attachment` decoration whose
 //          payload points at the bytes (files-attachment.ts).
 //
@@ -17,8 +17,10 @@
 
 import { Drone } from '@hypercomb/core'
 import { listDecorations, removeDecorationAndWait, writeDecoration } from '../commands/decoration-manifest.js'
+import { ensureWebsiteBoundAt } from '../commands/website-binding.js'
 import { FILES_ATTACHMENT_KIND, listAttachments, writeAttachment, type AttachmentPayload } from './files-attachment.js'
 import { extOf } from './file-types.js'
+import { rememberTrial, stageTrial, trialLabel, trialOrigin } from './try-page.js'
 
 export const TILE_FILES_IOC_KEY = '@diamondcoreprocessor.com/TileFilesDrone'
 
@@ -47,7 +49,7 @@ export type TileFileRead =
   | { readonly ok: false; readonly error: string }
 
 export type TileFileWrite =
-  | { readonly ok: true; readonly tile: readonly string[]; readonly sig: string; readonly created: boolean; readonly unchanged: boolean }
+  | { readonly ok: true; readonly tile: readonly string[]; readonly sig: string; readonly created: boolean; readonly unchanged: boolean; readonly trial?: string; readonly vector?: string }
   | { readonly ok: false; readonly error: string }
 
 type StoreLike = {
@@ -126,13 +128,13 @@ export class TileFilesDrone extends Drone {
     const blob = new Blob([text], { type })
     const sig = await store.putResource(blob)
     return target.kind === 'page'
-      ? this.#writePage(tile.segments, sig)
+      ? this.#writePage(tile.segments, sig, text)
       : this.#writeFile(tile.segments, { name, mime: type, size: blob.size, sig })
   }
 
-  async #writePage(segments: readonly string[], htmlSig: string): Promise<TileFileWrite> {
+  async #writePage(segments: readonly string[], htmlSig: string, html: string): Promise<TileFileWrite> {
     const current = await this.resolve<SiteViewLike>('siteView')?.resolvePageSig?.(segments) ?? null
-    if (current === htmlSig) return { ok: true, tile: segments, sig: htmlSig, created: false, unchanged: true }
+    if (current === htmlSig) return { ok: true, tile: segments, sig: htmlSig, created: false, unchanged: true, ...this.#trial(segments) }
     // A page kept in the `website` slot wins over a decoration, so it is
     // written where the renderer will find it.
     const history = this.resolve<HistoryLike>('history')
@@ -142,7 +144,8 @@ export class TileFilesDrone extends Drone {
       const committer = this.resolve<CommitterLike>('committer')
       if (!committer?.commitSlotSet) return { ok: false, error: 'the layer committer is not available' }
       await committer.commitSlotSet(segments, WEBSITE_SLOT, [...slot.filter(s => s !== htmlSig), htmlSig])
-      return { ok: true, tile: segments, sig: htmlSig, created: false, unchanged: false }
+      await this.#bind(segments)
+      return { ok: true, tile: segments, sig: htmlSig, created: false, unchanged: false, ...await this.#stage(segments, htmlSig, html) }
     }
     // The page decoration keeps what the prior one said about itself (its
     // label, its icon) and changes only the bytes it points at.
@@ -156,7 +159,33 @@ export class TileFilesDrone extends Drone {
       segments,
       mark: 'persistent',
     })
-    return { ok: true, tile: segments, sig: htmlSig, created: !current, unchanged: false }
+    await this.#bind(segments)
+    return { ok: true, tile: segments, sig: htmlSig, created: !current, unchanged: false, ...await this.#stage(segments, htmlSig, html) }
+  }
+
+  /** The page is already a resource. Mark it as a trial and hand the same
+   *  bytes to the sandbox host. A host that is down does not fail the write. */
+  async #stage(segments: readonly string[], htmlSig: string, html: string): Promise<{ trial: string; vector?: string } | Record<string, never>> {
+    const label = trialLabel(segments)
+    if (!label) return {}
+    rememberTrial(htmlSig, label)
+    const staged = await stageTrial(label, html)
+    return { trial: `${trialOrigin(label)}/`, ...(staged.vector ? { vector: staged.vector } : {}) }
+  }
+
+  #trial(segments: readonly string[]): { trial: string } | Record<string, never> {
+    const label = trialLabel(segments)
+    return label ? { trial: `${trialOrigin(label)}/` } : {}
+  }
+
+  /** A PAGE IS ONLY SEEN WHERE ITS BEHAVIOUR IS AWAKE. A hive that binds the website
+   *  behaviour to the tiles that hold sites reads every other tile as dormant, and the
+   *  view quietly falls back to hexagons: a page a model wrote existed and could not
+   *  be reached (jwize's hive, 2026-10-25). The `/website page` word binds the tile it
+   *  dresses; so does a write. Never load-bearing: a failure here leaves the page
+   *  written. */
+  async #bind(segments: readonly string[]): Promise<void> {
+    try { await ensureWebsiteBoundAt(segments) } catch { /* the page is written; binding is re-derived by the session sweep */ }
   }
 
   async #writeFile(segments: readonly string[], payload: AttachmentPayload): Promise<TileFileWrite> {

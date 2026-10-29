@@ -11,6 +11,14 @@
 // its note; and steps to the previous or next trial the zone lists, so a
 // group working together can walk every trial in turn without leaving.
 //
+// ON TOP, WHERE YOU ARE (jwize, 2026-10-25: "make sure the workflow is very
+// clear what is happening or the participant will be lost"): four steps —
+// draft, trial, reviewed, your choice — each saying what it touched, the
+// first one not yet done marked as where you stand. The trial opens in its
+// own tab, never inside this page. The choice is the participant's: take
+// holds what it brings in the brood, and promote and withdraw are put on the
+// command line as the sentence they are, for the participant to say.
+//
 // Each changed file can be TAKEN into this hive at its path (module-review.ts
 // takeTrial, the same act as `module take`): made by hand, so what it brings
 // waits in the brood until the participant accepts it there.
@@ -65,12 +73,18 @@ export class SandboxChangeElement extends HTMLElement {
   #trials: readonly SandboxTrial[] = []
   /** Whose assessments count here (countedAssessors): this hive's key and the publisher it follows. */
   #counted: ReadonlySet<string> = countedAssessors()
+  /** This hive's own key, when it can be read — the publisher alone promotes and withdraws. */
+  #me: string | null = null
   #turn = 0
   /** What taking each path came to, while this trial is shown. */
   #taking = new Map<string, { text: string; held: boolean }>()
 
   /** SEAMS, replaced in a spec so no test reads a real door or a real install. */
   reader: (door: string) => (sig: string) => Promise<string | null> = doorReader
+  me: () => Promise<string | null> = async () => {
+    const signer = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/NostrSigner') as { getPublicKeyHex?(): Promise<string | null> } | undefined
+    return await signer?.getPublicKeyHex?.() ?? null
+  }
   taker: () => TakeDeps | null = () => {
     type Install = Parameters<typeof takeDepsFrom>[0]
     const install = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(INSTALL_KEY) as Partial<Install> | undefined
@@ -105,8 +119,8 @@ export class SandboxChangeElement extends HTMLElement {
         .then(res => res.ok ? res.json() : null).then(trialsOf).catch(() => [] as SandboxTrial[]),
     ])
     if (turn !== this.#turn) return
-    const signer = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/NostrSigner') as { getPublicKeyHex?(): Promise<string | null> } | undefined
-    this.#counted = countedAssessors(await signer?.getPublicKeyHex?.().catch(() => null))
+    this.#me = (await this.me().catch(() => null))?.toLowerCase() ?? null
+    this.#counted = countedAssessors(this.#me)
     if (turn !== this.#turn) return
     this.#reading = reading
     this.#trials = trials
@@ -223,6 +237,7 @@ export class SandboxChangeElement extends HTMLElement {
     door.textContent = t('module.panel.door', 'open the door')
     meta.append(' · ', door)
     body.appendChild(meta)
+    body.appendChild(this.#steps(shown, reading))
 
     if (!reading) {
       body.appendChild(el('p', 'hc-trial-quiet', t('module.panel.reading', 'Reading the change…')))
@@ -289,6 +304,75 @@ export class SandboxChangeElement extends HTMLElement {
     return body
   }
 
+  /** Draft → trial → reviewed → your choice, the first not yet done marked as here. */
+  #steps(shown: SandboxChangePayload, reading: TrialReading | null): HTMLElement {
+    const change = shown.name.replace(/^try-/, '')
+    const zone = new URL(zoneOf(shown.door, shown.name)).host
+    const doorHost = new URL(shown.door).host
+    const readings = reading ? (reading.review ? 1 : 0) + (reading.jev ? 1 : 0) + reading.people.length : 0
+    const taken = [...this.#taking.values()]
+    const paths = (reading?.files ?? []).map(file => file.path).filter((path): path is string => !!path)
+    const mine = !!this.#me && this.#me === shown.site.pubkey.toLowerCase()
+    const atDoor = isSandboxDoor()
+
+    const trial = document.createElement('a')
+    trial.href = shown.door
+    trial.target = '_blank'
+    trial.rel = 'noopener'
+    trial.textContent = t('module.steps.open', 'open it in a new tab')
+
+    const acts: HTMLElement[] = []
+    if (!atDoor && paths.length && paths.some(path => !this.#taking.has(path))) {
+      acts.push(act(t('module.steps.take', 'Take'), t('module.steps.takewhy', 'Bring this change into your hive. What it brings waits in the brood until you accept it.'), () => {
+        for (const path of paths) void this.#take(path)
+      }))
+    }
+    if (!atDoor && mine) {
+      acts.push(act(t('module.steps.promote', 'Promote'), t('module.steps.promotewhy', 'Put "module promote {change} @{zone}" on your command line: {change}.{zone} would run what this trial runs. Press Enter to say it.', { change, zone }),
+        () => this.#say(`module promote ${change} @${zone}`)))
+      acts.push(act(t('module.steps.withdraw', 'Withdraw'), t('module.steps.withdrawwhy', 'Put "module withdraw {change} @{zone}" on your command line: the trial stops answering. Press Enter to say it.', { change, zone }),
+        () => this.#say(`module withdraw ${change} @${zone}`)))
+    }
+
+    const choice = atDoor
+      ? t('module.steps.choiceatdoor', 'Choose from your own hive — this tab is the trial, and it writes nothing.')
+      : taken.some(entry => entry.held)
+        ? t('module.steps.choiceheld', 'Taken. It waits in the brood until you accept it there.')
+        : taken.length
+          ? t('module.steps.choicetaken', 'Taken.')
+          : mine
+            ? t('module.steps.choicemine', 'Take it into your hive, promote it to {change}.{zone}, or withdraw it. Nothing changes until you do.', { change, zone })
+            : t('module.steps.choice', 'Take it into your hive, held until you accept it. Nothing changes until you do.')
+
+    const steps: { title: string; text: string; done: boolean; extra?: HTMLElement[] }[] = [
+      { title: t('module.steps.draft', 'Draft'), text: t('module.steps.drafttext', 'Written and committed to a trial.'), done: true },
+      { title: t('module.steps.trial', 'Trial'), text: t('module.steps.trialtext', 'Running at {door}, a site of its own: nothing of your hive is in it.', { door: doorHost }), done: true, extra: [trial] },
+      {
+        title: t('module.steps.reviewed', 'Reviewed'),
+        text: !reading ? t('module.steps.reading', 'Reading the reviews…')
+          : readings ? t('module.steps.readings', '{count} readings, below.', { count: readings })
+          : t('module.steps.unread', 'Nobody has read it yet.'),
+        done: readings > 0,
+      },
+      { title: t('module.steps.choicetitle', 'Your choice'), text: choice, done: taken.length > 0, extra: acts },
+    ]
+    const here = steps.findIndex(step => !step.done)
+    const list = el('ol', 'hc-trial-steps')
+    steps.forEach((step, at) => {
+      const item = el('li', `hc-trial-step${step.done ? ' is-done' : ''}${at === here ? ' is-here' : ''}`)
+      item.append(el('span', 'hc-trial-step-title', step.title), ' ', el('span', 'hc-trial-step-text', step.text))
+      for (const extra of step.extra ?? []) item.append(' ', extra)
+      list.appendChild(item)
+    })
+    return list
+  }
+
+  /** A word the participant says, put on their command line — never said for them. */
+  #say(sentence: string): void {
+    EffectBus.emit('search:prefill', { value: sentence, focus: true })
+    this.close()
+  }
+
   #file(file: TrialReading['files'][number]): HTMLElement {
     const block = el('section', 'hc-trial-file')
     const head = el('div', 'hc-trial-file-head')
@@ -345,6 +429,13 @@ const word = (glyph: string, label: string, run: () => void): HTMLButtonElement 
   return button
 }
 
+/** One of the choice's acts: a plain word, its consequence on hover. */
+const act = (label: string, why: string, run: () => void): HTMLButtonElement => {
+  const button = word(label, why, run)
+  button.classList.add('hc-trial-act')
+  return button
+}
+
 const diffRow = (row: DiffRow): HTMLElement => {
   if (row.kind === 'skip') return el('div', 'hc-trial-row is-skip', t('module.panel.unchanged', '⋯ {lines} unchanged lines', { lines: row.count }))
   const mark = row.kind === 'add' ? '+' : row.kind === 'remove' ? '−' : ' '
@@ -396,6 +487,14 @@ function ensureStyles(): void {
     .hc-trial-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0.7rem 0.75rem 1.2rem; }
     .hc-trial-meta { margin: 0 0 0.5rem; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
     .hc-trial-door { color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86)); }
+    .hc-trial-steps { margin: 0.2rem 0 0.4rem; padding-left: 1.4rem; }
+    .hc-trial-step { margin: 0.2rem 0; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
+    .hc-trial-step.is-done .hc-trial-step-title::after { content: ' \\2713'; }
+    .hc-trial-step.is-here { color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86)); }
+    .hc-trial-step.is-here .hc-trial-step-title { color: var(--hc-window-ink-loud, #eef2f5); }
+    .hc-trial-step-title { font-weight: 600; }
+    .hc-trial-step a { color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86)); }
+    .hc-trial-word.hc-trial-act { min-width: 0; height: auto; padding: 0 0.15rem; font-size: 0.92em; text-decoration: underline; }
     .hc-trial-section {
       margin: 0.9rem 0 0.35rem; font-size: 0.82em; font-weight: 600; letter-spacing: 0.06em;
       text-transform: uppercase; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62));

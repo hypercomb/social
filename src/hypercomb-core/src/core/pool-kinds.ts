@@ -152,6 +152,10 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['backgrounds:saved', 'set'],
   ['comfy:generations', 'set'],
   ['comfy:workflows', 'set'],
+  ['comfy:prompts', 'set'],
+  // The Comfy form as last left for one model and LoRA set. Working state:
+  // one current record, not a history, and not replicated as a library.
+  ['comfy:drafts', 'document'],
   ['community:hosts', 'set'],
   // The calendar's meetings and the lists a host has opened (documentation/calendar-events.md).
   ['calendar:events', 'set'],

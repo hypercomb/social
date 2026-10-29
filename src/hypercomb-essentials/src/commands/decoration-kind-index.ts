@@ -721,6 +721,28 @@ export function countLabelsWithKind(kind: string): number {
   return n
 }
 
+/** Other indexed places that carry `kind`. `except` paths are the place
+ *  already under the pointer, so a reading of "where else" does not name
+ *  itself. The index is every cell this session has rendered. */
+export function placesWithKind(
+  kind: string,
+  except: readonly string[] = [],
+): readonly { path: string; label: string }[] {
+  if (!kind) return []
+  const skip = new Set(except)
+  const found: { path: string; label: string }[] = []
+  for (const [key, set] of kindsByKey) {
+    if (!set.has(kind) || isKindHidden(key, kind)) continue
+    const segments = segmentsByKey.get(key)
+    if (!segments?.length) continue
+    const path = `/${segments.join('/')}`
+    if (skip.has(path)) continue
+    found.push({ path, label: segments[segments.length - 1] ?? '' })
+    if (found.length >= 4) break
+  }
+  return found
+}
+
 /** How many indexed cells carry the tag `name`. */
 export function countLabelsWithTag(name: string): number {
   if (!name) return 0

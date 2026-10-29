@@ -82,8 +82,8 @@ export class MobileModeService extends EventTarget {
     // A LAUNCHED CREATION IS NEVER THE PHONE VIEW. The visitor shell hides the
     // surfaces the phone view paints into, so turning it on there only had the
     // list build rows nobody sees. A phone uses creations as they are; the
-    // phone view is set aside (using-a-creation.md, "On a phone, you go to the
-    // .com"). No override reaches past this.
+    // phone view is set aside (using-a-creation.md, "On a phone, hypercomb.io
+    // is the gateway"). No override reaches past this.
     if (isPublishedVisitorShell()) return false
     const ov = this.#override()
     return ov ? ov === 'on' : this.#auto()

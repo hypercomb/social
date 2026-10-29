@@ -53,7 +53,7 @@ this is not a token economy. there is no "hive coin" appreciating in value while
 
 when a bee visits a flower, it does not just take. it leaves pollen from the last flower it visited. pollination is contribution as a side effect of participation. the flower is fertilized not because the bee intended it, but because the bee showed up.
 
-in hypercomb, **pollinating** is the act of contributing to the workers within the hive's tiles. you pollinate by funding a cell — directing stablecoin to a task you believe in. this is not investment in the speculative sense. there is no return on capital. there is a return on *completion* — the project gets built, the community gets what it needed, and the bees who did the work get paid.
+in hypercomb, **pollinating** a cell with nectar is the act of contributing to the workers within the hive's tiles. you do it by funding a cell — directing stablecoin to a task you believe in. the other pollination, the one the host is for, is the flower: publishing, a visit, replication, and a host that feels safe enough to grow. that is [the flower](the-flower.md). this is not investment in the speculative sense. there is no return on capital. there is a return on *completion* — the project gets built, the community gets what it needed, and the bees who did the work get paid.
 
 pollination can come from anywhere. a single patron can fund the entire hive. a thousand participants can each fund one cell. the funding pattern does not matter to the architecture. what matters is that every tile eventually has what it needs — enough nectar to produce honey.
 

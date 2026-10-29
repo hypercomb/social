@@ -10,11 +10,11 @@
 // never blacked out, because a crop, a rim colour and a name are judged
 // against the tiles around them.
 //
-// Top to bottom: the tile's name (it IS the heading — edit it in place); the
-// picture, framed under the tile's own look; Fill / Fit, zoom and reset; the
+// Top to bottom: the picture, framed under the tile's own look, without the
+// name drawn on it; Fill / Fit, zoom and reset; the
 // two orientations as live thumbnails of the bytes a save will write, linked or
-// framed apart; where the picture comes from; the rim colour, whether the name
-// shows, the fill behind a Fit picture; the link; open questions; Save.
+// framed apart; where the picture comes from; the tile's text, the rim colour,
+// whether the name shows, the fill behind a Fit picture; the link; open questions; Save.
 //
 // A framework-free custom element contributed through the ShellSurfaceRegistry
 // — never an Angular class, never a tag in app.html. It holds no state of its
@@ -569,23 +569,6 @@ export class TileEditorElement extends HTMLElement {
       head.append(back)
     }
 
-    const title = this.#keep('title', make('input', 'te-title'))
-    title.type = 'text'
-    title.name = 'tile-name'
-    title.autocomplete = 'off'
-    title.spellcheck = false
-    title.setAttribute('enterkeyhint', 'done')
-    title.setAttribute('aria-label', t('editor.name', 'name'))
-    title.title = t('editor.name-hint', 'How this tile reads in your language.')
-    title.placeholder = this.#service?.cell ?? ''
-    title.addEventListener('input', () => {
-      title.removeAttribute('aria-invalid')
-      this.#setTitleHint('')
-      this.#syncLook()
-    })
-    title.addEventListener('blur', () => this.#commitTitle())
-    head.append(title)
-
     // A group has no one name: the heading says how many tiles it holds.
     const groupTitle = this.#keep('group-title', make('span', 'te-group-title'))
     groupTitle.hidden = true
@@ -735,6 +718,8 @@ export class TileEditorElement extends HTMLElement {
     pick.addEventListener('click', () => this.#pickFile(false))
     const cam = this.#keep('camera', iconButton('photo_camera', t('editor.camera', 'camera'), 'camera'))
     cam.addEventListener('click', () => this.#openCamera())
+    // Google's image grid opens in its own tab. The firewall allows that tab
+    // and nothing else on Google. The words are the tile's text.
     const search = iconButton('search', t('editor.search-google', 'search images'), 'search')
     search.addEventListener('click', () => {
       const q = this.#ref<HTMLInputElement>('title')?.value.trim() || this.#service?.cell || ''
@@ -766,6 +751,28 @@ export class TileEditorElement extends HTMLElement {
     const service = this.#service!
     const section = make('section', 'te-section')
     section.append(make('h4', 'te-section-head', t('editor.look', 'look')))
+
+    // The tile's text. It is not drawn on the picture; this field is where it
+    // is edited. Empty shows the tile's own name and does not rename it.
+    const textRow = this.#keep('text-row', make('div', 'te-field'))
+    const textLabel = make('span', 'te-label')
+    textLabel.append(glyph('text_fields'), document.createTextNode(t('editor.text', 'text')))
+    const title = this.#keep('title', make('input', 'te-input te-title'))
+    title.type = 'text'
+    title.name = 'tile-name'
+    title.autocomplete = 'off'
+    title.spellcheck = false
+    title.setAttribute('enterkeyhint', 'done')
+    title.setAttribute('aria-label', t('editor.text', 'text'))
+    title.title = t('editor.name-hint', 'How this tile reads in your language.')
+    title.placeholder = this.#service?.cell ?? ''
+    title.addEventListener('input', () => {
+      title.removeAttribute('aria-invalid')
+      this.#setTitleHint('')
+    })
+    title.addEventListener('blur', () => this.#commitTitle())
+    textRow.append(textLabel, title)
+    section.append(textRow)
 
     // Rim colour
     const border = this.#colourField('border', 'border_color', t('editor.border', 'border'), DEFAULT_BORDER,
@@ -1107,6 +1114,8 @@ export class TileEditorElement extends HTMLElement {
     panel.toggleAttribute('data-group', grouped)
     const title = this.#ref('title')
     if (title) title.hidden = grouped
+    const textRow = this.#ref('text-row')
+    if (textRow) textRow.hidden = grouped
     const heading = this.#ref('group-title')
     if (heading) {
       heading.hidden = !grouped
@@ -1161,11 +1170,8 @@ export class TileEditorElement extends HTMLElement {
   #syncLook(): void {
     const service = this.#service
     if (!service || !this.#stage) return
-    const name = this.#ref<HTMLInputElement>('title')?.value.trim() || service.cell
     this.#stage.setLook({
       border: parseHexColour(service.borderColor) ?? DEFAULT_BORDER,
-      name,
-      showName: !service.hideText,
     })
   }
 

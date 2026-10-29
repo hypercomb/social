@@ -17,6 +17,9 @@ import {
   workBudget,
   blockUnwrittenMessage,
   fileFailedMessage,
+  fileRanMessage,
+  pageChangeUnready,
+  sandboxRule,
   tileFileLabel,
 } from './hypercomb-work-fence'
 import { claimsUnranChange, unranChangeMessage } from './hypercomb-work-fence'
@@ -565,7 +568,27 @@ describe('what the model is told', () => {
     expect(open).toContain('WRITING FILES')
     expect(open).toContain('page /<route>')
     expect(open).toContain('file /<route> <name.ext>')
+    expect(open).toContain('try-<tile>.<this host>')
+    expect(open).toContain('It does not run in this hive.')
     expect(workInstruction(base)).not.toContain('WRITING FILES')
+  })
+
+  it('tells the model a written page is a sandbox, not this hive', () => {
+    const told = fileRanMessage({ label: 'page /studio', sig: 'a'.repeat(64), created: true, unchanged: false, trial: 'http://try-studio.localhost:4250/' }, 'make a website')
+    expect(told).not.toContain('http://try-studio.localhost:4250/')
+    expect(told).toContain('SANDBOX line of the current message')
+    expect(told).toContain('does not run in this hive')
+    expect(told).toContain('Do not publish')
+    expect(told).toContain('You cannot')
+    const rule = sandboxRule('http://localhost:4250/', '/press-kit')
+    expect(rule).toContain('http://try-press-kit.localhost:4250/')
+    expect(rule).toContain('An address in an earlier receipt is not')
+    expect(rule).toContain('code trialOrigin')
+    expect(workInstruction({ canRead: true, readsRunFreely: true, readsPerBlock: 2, canChange: true, vocabulary: '/x' })).toContain('not answered from a receipt')
+    expect(sandboxRule('https://hypercomb.io/', '/press-kit')).toContain('https://try-press-kit.hypercomb.io/')
+    expect(pageChangeUnready(['press-kit'], [])).toContain('read /press-kit')
+    expect(pageChangeUnready(['press-kit'], ['read /press-kit'])).toContain('code trialOrigin')
+    expect(pageChangeUnready(['press-kit'], ['read /press-kit', 'code trialOrigin'])).toBeNull()
   })
 
   it('a failed edit sends the file back as it is now', () => {

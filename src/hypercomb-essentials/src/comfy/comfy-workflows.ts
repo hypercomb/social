@@ -127,6 +127,11 @@ export const activeWorkflow = (): ComfyWorkflowSpec => {
   return roster.get(chosen) ?? roster.get(BUILTIN_WORKFLOW_ID) ?? builtinWorkflow()
 }
 
+/** The id the participant last chose, or '' when they have not chosen. */
+export const preferredWorkflowId = (): string => {
+  try { return localStorage.getItem(ACTIVE_KEY) ?? '' } catch { return '' }
+}
+
 export const setActiveWorkflow = (id: string): boolean => {
   const key = String(id ?? '').trim().toLowerCase()
   if (!roster.has(key)) return false

@@ -3,7 +3,7 @@
 // /comfy — make a picture with your own machine.
 //
 //   /comfy                          — open the ComfyUI window
-//   /comfy a lantern in fog         — make that, onto the selected tile
+//   /comfy a lantern in fog         — make that, as its own tile
 //   /comfy host                     — where ComfyUI is, and whether it answers
 //   /comfy host discover            — try the usual addresses
 //   /comfy host 127.0.0.1:8188      — point somewhere else
@@ -170,18 +170,16 @@ export class ComfyQueenBee extends QueenBee {
   // ── making one ──────────────────────────────────────────────────────────
 
   async #generate(prompt: string): Promise<void> {
-    const cell = comfyService.targetCell()
-    if (!cell) { this.#log('select a tile first — the picture goes on it'); return }
-
-    this.#log(`${activeWorkflow().label} — "${prompt}" onto "${cell}"`, '◇')
-    const results = await comfyService.run({ positive: prompt, cell, attach: true })
+    this.#log(`${activeWorkflow().label} — "${prompt}"`, '◇')
+    const help = comfyService.help
+    const results = await comfyService.run({
+      positive: prompt,
+      attach: false,
+      tiles: true,
+      fromTile: help.fromTile,
+      reviewers: help.reviewers,
+    })
     if (!results.length) { this.#log(comfyService.job.message ?? 'no picture'); return }
-    if (results.length > 1) {
-      // The rest of a batch is not lost — the window is holding it. The run
-      // only says so: the window opens from its own word, never from a run
-      // finishing (and a bare toggle here closed it when it was already up).
-      this.#log(`${results.length} made — the rest wait in the ComfyUI window (comfy)`, '◇')
-    }
   }
 
   // ── where it runs ───────────────────────────────────────────────────────

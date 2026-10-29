@@ -19,6 +19,8 @@ picture crosses at a time, and only when a participant keeps it.
 | `essentials/comfy/comfy-folder.ts` | The **live folder** — ComfyUI's own directory, opened once from Windows Explorer. |
 | `essentials/comfy/comfy.service.ts` | The run: apply → queue → wait → read back → store → attach → record. |
 | `essentials/comfy/comfy.queen.ts` | `/comfy`, and the command object behind its dropdown. |
+| `essentials/comfy/comfy-prompts.ts` | The `comfy:prompts` pool: one kept state per member. |
+| `essentials/comfy/comfy-draft.ts` | The `comfy:drafts` pool: the form last left on each model and LoRA set. |
 | `essentials/comfy/comfy.drone.ts` | The surface's data side: one `comfy:render` payload out, intents in. |
 | `shared/ui/comfy-panel/` | The docked tool window. Angular, registry-fed, `hcDockedPanel`. |
 
@@ -179,9 +181,18 @@ index and no scan.
   "model": "sd15.safetensors", "at": 1756600000000 }
 ```
 
-The provenance belongs to the **bytes**, not to the tile wearing them today,
-so the tile's props are untouched. The ComfyUI address is deliberately absent:
-a record that travels must not name a host the reader does not have.
+The same JSON is stored as a resource. When the picture lands on a tile, that
+revision's properties name it (`generation`). The name on the record is the
+one the participant typed for the tile. History shows that name. Opening the
+row still shows the prompt. Opening it shows the seed, the size, the steps, the
+cfg, the model and the workflow. Use loads those knobs into the Comfy window.
+Generate stays a separate press. Seeking the row restores the picture.
+
+The pool stays the lookup by image signature: reroll, a result that never
+landed, and a picture attached before the revision carried the name. A Life
+incidence on the picture unwraps to the raw image signature the pool file is
+named by. The ComfyUI address is deliberately absent: a record that travels
+must not name a host the reader does not have.
 
 This is what makes `/comfy reroll` possible from a tile alone — read the
 record off the picture the tile is wearing, run it again with a new seed.
@@ -193,7 +204,7 @@ record off the picture the tile is wearing, run it again with a new seed.
 
 ```
 /comfy                          open the window
-/comfy a lantern in fog         make that, onto the selected tile
+/comfy a lantern in fog         make that, as its own tile
 /comfy host                     where ComfyUI is, and whether it answers
 /comfy host discover            try the usual addresses
 /comfy host 127.0.0.1:8188      point somewhere else
@@ -255,16 +266,67 @@ Four stacked sections, in the order a person needs them:
    shows no negative field; a participant is never given a knob that turns
    nothing.
 
-Then Generate, a progress bar, and the results strip. The window does **not**
-attach on its own — you are there to choose, and a batch that landed itself on
-a tile would have chosen for you. `/comfy <prompt>` does attach, because you
-typed it at a tile.
+Then Generate, a progress bar, and the results strip. With tiles selected,
+Generate makes one picture for each of them and puts it on that tile. A tile
+leaves the selection when its picture lands. Tiles still waiting stay
+selected. With nothing selected, each picture waits for a name. The name field under
+the picture is the prompt. Enter puts that picture on the hive under the
+name they typed. A blank name makes nothing. Click a picture and it opens
+large in the middle of the screen. Escape closes that picture and leaves the
+window open.
+`/comfy <prompt>` does the same.
+
+**From the tile.** A switch under the prompt, and a reviewer count from 1 to
+8. When it is on and tiles are selected, each tile's picture and its
+properties are read first. That many reviewers each write a prompt that keeps
+the participant's own words. Jev picks one. When Jev is not switched on, the
+first reviewer's prompt is the one that runs, and the participant's words
+still stay in it. When Jev declines, the participant's own words run as
+written. Nothing selected keeps the ordinary prompt: there is no tile to
+read. The switch lasts for the visit. Reroll does not ask the reviewers
+again.
+
+**A new prompt.** Two buttons under the prompt fill the box and do not start
+a picture. New from tile writes a prompt from the selected tile's name and
+properties, plus a random light, manner, and ground. Nothing selected says
+to select a tile and leaves the words as they are. Common words writes a
+prompt from common picture words and does not need a tile. Each press is a
+new roll.
+
+**Continuing.** The words and the knobs stay with the model and the LoRAs
+that were loaded. Moving to another model, or another set of LoRAs, puts
+this form aside and brings back the one last used there. The first visit
+uses that workflow's own defaults. Klein tile and Klein background share
+one continuation: they load the same model and no LoRA. The two SDXL rich
+workflows share, because they load the same checkpoint and the same LoRAs.
+SDXL icon is its own, because its LoRA is different. That record lives in
+`comfy:drafts`, one current copy per combination. Keep is still the library.
+
+**The prompt library.** Library and Keep are in the window whenever it is
+open. Keep writes the words and the knobs — workflow, size, steps, cfg, seed,
+negative, and whether the tile is helping — into `comfy:prompts`. One state
+is one member, named by its own bytes, so keeping the same state again does
+not add a second row. The list shows only the words. A row opens the rest.
+Use puts that state back into the form, including its workflow, and does not
+start a picture. Generate is still the participant's own press.
+
+Under the workflow, the window lists every model and LoRA these recipes use.
+The selected workflow's files are marked active, and that mark moves as soon
+as the workflow changes. The next Generate times each loader: the row shows
+how many seconds ComfyUI spent loading it, or cached when it did not reload.
+
+**Icons.** SDXL icon is its own workflow for a square interface mark. It
+loads SDXL base and Icons Redmond at strength 0.8, and it samples a 1024
+square in 24 steps. The words `icredm, icons, app icon` stay on their own
+text node and combine with the subject, so a new prompt keeps the trigger.
+A visit starts on Klein tile when those files are present.
 
 **The form is local to the panel.** A textarea whose value round-trips through
 the bus on every keystroke fights the typist and loses the caret. What crosses
 is the *seed* — what the active workflow's seams currently hold, plus which
-knobs exist at all — and the panel re-seeds only when the workflow changes.
-The whole set goes back once, with `comfy:generate`.
+knobs exist at all. The panel uses that seed the first time a model and its
+LoRAs are on screen, and after that it continues from the form it kept for
+them. The whole set goes back once, with `comfy:generate`.
 
 ---
 

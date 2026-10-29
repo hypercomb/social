@@ -129,7 +129,13 @@
           "options": {
             "port": 4200,
             "open": false,
-            "proxyConfig": "proxy.conf.cjs"
+            "proxyConfig": "proxy.conf.cjs",
+            "headers": {
+              "X-Content-Type-Options": "nosniff",
+              "Referrer-Policy": "no-referrer",
+              "Permissions-Policy": "geolocation=(), payment=(), usb=(), serial=(), hid=(), bluetooth=(), midi=()",
+              "Content-Security-Policy": "frame-ancestors 'self'"
+            }
           },
           "configurations": {
             "development": {

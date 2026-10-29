@@ -19,6 +19,7 @@ const fake = vi.hoisted(() => ({
   tree: new Map<string, string[]>(),
   layers: new Map<string, Record<string, unknown>>(),
   slotSets: [] as { segments: string[]; slot: string; sigs: string[] }[],
+  bound: [] as string[][],
   page: new Map<string, string>(),
   services: new Map<string, unknown>(),
 }))
@@ -31,6 +32,10 @@ vi.hoisted(() => {
     whenReady: () => {},
   }
 })
+
+vi.mock('../commands/website-binding.js', () => ({
+  ensureWebsiteBoundAt: async (segments: string[]) => { fake.bound.push([...segments]) },
+}))
 
 vi.mock('../commands/decoration-manifest.js', () => ({
   listDecorations: async ({ kind, segments }: { kind: string; segments: string[] }) =>
@@ -76,6 +81,7 @@ beforeEach(() => {
   fake.removed.length = 0
   fake.written.length = 0
   fake.slotSets.length = 0
+  fake.bound.length = 0
   fake.tree.set('', ['Proposal'])
   fake.tree.set('Proposal', ['plan'])
 })
@@ -131,6 +137,25 @@ describe('a tile\'s page', () => {
     await new TileFilesDrone().write({ route: ['Proposal', 'plan'], kind: 'page' }, '<p>v2</p>')
     expect(fake.slotSets).toEqual([{ segments: ['Proposal', 'plan'], slot: 'website', sigs: ['8'.repeat(64), await sha('<p>v2</p>')] }])
     expect(fake.written).toEqual([])
+  })
+
+  // 2026-10-25: a model's page was written, and the website view dropped back to
+  // hexagons on it — the hive binds the website behaviour to the tiles that hold
+  // sites, and a write did not bind its tile the way /website page does.
+  it('binds the website behaviour to the tile it writes a page on, whichever way the page is kept', async () => {
+    await new TileFilesDrone().write({ route: ['Proposal', 'plan'], kind: 'page' }, '<p>one</p>')
+    expect(fake.bound).toEqual([['Proposal', 'plan']])
+    fake.layers.set('Proposal/plan', { website: ['8'.repeat(64)] })
+    fake.page.set('Proposal/plan', '8'.repeat(64))
+    await new TileFilesDrone().write({ route: ['Proposal', 'plan'], kind: 'page' }, '<p>two</p>')
+    expect(fake.bound).toEqual([['Proposal', 'plan'], ['Proposal', 'plan']])
+  })
+
+  it('does not bind for a page that changed nothing, or for a text file', async () => {
+    fake.page.set('Proposal/plan', await sha('<p>same</p>'))
+    await new TileFilesDrone().write({ route: ['Proposal', 'plan'], kind: 'page' }, '<p>same</p>')
+    await new TileFilesDrone().write({ route: ['Proposal'], kind: 'file', name: 'notes.md' }, '# Notes')
+    expect(fake.bound).toEqual([])
   })
 
   it('changes nothing when the page already holds that text', async () => {

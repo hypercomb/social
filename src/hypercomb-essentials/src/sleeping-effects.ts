@@ -48,6 +48,7 @@ export const sleepers: readonly Sleeper[] = [
   { wakesOn: ["files:teaser:request","files:teaser:request-pin","files:teaser:request-hide"], load: () => import('./files/files-teaser.drone') },
   { command: "files", description: "Browse files attached to the selected tiles, or every tile in view", load: () => import('./files/files.queen') },
   { command: "format", description: "Copy visual formatting from the active tile", load: () => import('./format/format.queen') },
+  { command: "guide", description: "The bee becomes the cursor. Over a tile it names the beehaviors. Stay and it reads what is attached and where the same beehavior shows. Press and the tile comes to center for a choice. Letting go flies the view home and the cursor returns", load: () => import('./guide/guide.queen') },
   { command: "consolidate-history", description: "Relocate leftover legacy history bags to the root and remove the drained folder", load: () => import('./history/consolidate-history.queen') },
   { wakesOn: ["history:promoted"], load: () => import('./history/rewound-commit.drone') },
   { command: "howto", description: "Lay the how-to site: one tile, how, with a page for every word the hive understands, made from what each word declares. Publish it once to give the whole language a front door", load: () => import('./howto/howto.queen') },

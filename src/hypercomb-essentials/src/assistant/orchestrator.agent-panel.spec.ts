@@ -16,6 +16,9 @@ vi.mock('./chat-route.js', () => ({
   drainRouteFlows: vi.fn(async () => ({ organized: 0, behind: 0, elapsedMs: 0 })),
   readRoute: vi.fn(),
   organizeRoute: vi.fn(),
+  readRouteFlow: vi.fn(async () => null),
+  flowMatches: vi.fn(() => false),
+  flowOpenSteps: vi.fn(() => 0),
 }))
 
 const KEY = '@diamondcoreprocessor.com/AgentPanelView'

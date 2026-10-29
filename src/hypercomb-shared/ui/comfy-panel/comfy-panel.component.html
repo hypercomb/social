@@ -121,6 +121,32 @@
         }
       </section>
 
+      @if (weights().length) {
+        <section class="comfy-block">
+          <div class="comfy-section">{{ 'comfy.models' | t }}</div>
+          <ul class="comfy-weights">
+            @for (row of weights(); track row.file) {
+              <li class="comfy-weight" [class.on]="row.active" [class.loading]="row.loading" [attr.aria-current]="row.active ? 'true' : null">
+                <span class="comfy-weight-mark" aria-hidden="true"></span>
+                <span class="comfy-weight-name">{{ row.label }}</span>
+                <span class="comfy-weight-kind">{{ kindKey(row.kind) | t }}</span>
+                <span class="comfy-weight-time">
+                  @if (row.loading) {
+                    {{ 'comfy.weight-loading' | t }} {{ seconds(row) }}
+                  } @else if (row.cached) {
+                    {{ 'comfy.weight-cached' | t }}
+                  } @else if (row.ms != null) {
+                    {{ seconds(row) }}
+                  } @else if (row.active) {
+                    {{ 'comfy.weight-next' | t }}
+                  }
+                </span>
+              </li>
+            }
+          </ul>
+        </section>
+      }
+
       <!-- ONE CONTROL PER SEAM — the form is what this workflow OFFERS, never
            a fixed list, so a knob that would turn nothing is never drawn. -->
       <section class="comfy-block">
@@ -129,17 +155,46 @@
             class="comfy-prompt"
             rows="3"
             [value]="positive()"
-            (input)="positive.set($any($event.target).value)"
+            (input)="setPositive($any($event.target).value)"
             [attr.placeholder]="'comfy.prompt' | t"
             [attr.aria-label]="'comfy.prompt' | t"
           ></textarea>
+          <div class="comfy-help">
+            <label class="comfy-check">
+              <input
+                type="checkbox"
+                [checked]="fromTile()"
+                (change)="setFromTile($any($event.target).checked)"
+              />
+              <span>{{ 'comfy.from-tile' | t }}</span>
+            </label>
+            <label class="comfy-number">
+              <span>{{ 'comfy.reviewers' | t }}</span>
+              <input
+                type="number"
+                min="1"
+                max="8"
+                step="1"
+                [value]="reviewers()"
+                (change)="setReviewers($any($event.target))"
+                [attr.aria-label]="'comfy.reviewers' | t"
+              />
+            </label>
+          </div>
+          @if (fromTile()) {
+            <p class="comfy-note">{{ 'comfy.from-tile-note' | t }}</p>
+          }
+          <div class="comfy-rolls">
+            <button type="button" class="comfy-chip" (click)="rollPrompt('tile')">{{ 'comfy.roll-tile' | t }}</button>
+            <button type="button" class="comfy-chip" (click)="rollPrompt('words')">{{ 'comfy.roll-words' | t }}</button>
+          </div>
         }
         @if (offers('negative')) {
           <input
             class="comfy-input"
             type="text"
             [value]="negative()"
-            (input)="negative.set($any($event.target).value)"
+            (input)="setNegative($any($event.target).value)"
             [attr.placeholder]="'comfy.negative' | t"
             [attr.aria-label]="'comfy.negative' | t"
           />
@@ -161,17 +216,86 @@
             class="comfy-input"
             type="text"
             [value]="seed()"
-            (input)="seed.set($any($event.target).value)"
+            (input)="setSeed($any($event.target).value)"
             [attr.placeholder]="'comfy.seed-hint' | t"
             [attr.aria-label]="'comfy.seed' | t"
           />
         }
       </section>
 
+      <!-- THE LIBRARY. Open whenever the window is. The list is the words;
+           the row opens the rest; Use loads the form and does not generate. -->
+      <section class="comfy-block">
+        <div class="comfy-row">
+          <button class="comfy-chip" type="button" (click)="toggleLibrary()">{{ 'comfy.library' | t }}</button>
+          <button class="comfy-chip" type="button" (click)="keepPrompt()">{{ 'comfy.keep-prompt' | t }}</button>
+        </div>
+        @if (libraryNote()) {
+          <p class="comfy-note">{{ 'comfy.keep-need' | t }}</p>
+        }
+        @if (libraryOpen()) {
+          @if (!prompts().length) {
+            <p class="comfy-note">{{ 'comfy.library-empty' | t }}</p>
+          } @else {
+            <ul class="comfy-prompts">
+              @for (row of prompts(); track row.sig) {
+                <li>
+                  <button
+                    type="button"
+                    class="comfy-prompt-row"
+                    [class.on]="row.sig === selectedPrompt()"
+                    (click)="pickPrompt(row.sig)"
+                  >{{ row.text }}</button>
+                </li>
+              }
+            </ul>
+          }
+          @if (chosen(); as row) {
+            <div class="comfy-prompt-detail">
+              @if (row.label || row.workflow) {
+                <p>{{ row.label || row.workflow }}</p>
+              }
+              @if (row.model) {
+                <p>{{ row.model }}</p>
+              }
+              @if (row.width != null || row.height != null) {
+                <p>{{ row.width }} x {{ row.height }}</p>
+              }
+              @if (row.steps != null) {
+                <p>{{ 'comfy.steps' | t }} {{ row.steps }}</p>
+              }
+              @if (row.cfg != null) {
+                <p>{{ 'comfy.cfg' | t }} {{ row.cfg }}</p>
+              }
+              @if (row.batch != null) {
+                <p>{{ 'comfy.batch' | t }} {{ row.batch }}</p>
+              }
+              @if (row.seed != null) {
+                <p>{{ 'comfy.seed' | t }} {{ row.seed }}</p>
+              }
+              @if (row.negative) {
+                <p>{{ row.negative }}</p>
+              }
+              @if (row.fromTile) {
+                <p>{{ 'comfy.from-tile' | t }}</p>
+              }
+              @if (row.reviewers != null) {
+                <p>{{ 'comfy.reviewers' | t }} {{ row.reviewers }}</p>
+              }
+              <button class="comfy-chip" type="button" (click)="usePrompt()">{{ 'comfy.use-prompt' | t }}</button>
+            </div>
+          }
+        }
+      </section>
+
       <!-- THE RUN. -->
       <section class="comfy-block">
         <p class="comfy-target">
-          {{ target() ? (('comfy.onto' | t) + ' "' + target() + '"') : ('comfy.no-tile' | t) }}
+          @if (targets().length) {
+            {{ 'comfy.onto-these' | t }} {{ targets().join(', ') }}
+          } @else {
+            {{ 'comfy.no-tile' | t }}
+          }
         </p>
         <button class="comfy-run" type="button" (click)="run()">
           {{ (busy() ? 'comfy.stop' : 'comfy.generate') | t }}
@@ -192,22 +316,50 @@
           <div class="comfy-section">{{ 'comfy.results' | t }}</div>
           <div class="comfy-strip">
             @for (result of results(); track result.url; let i = $index) {
-              <button
-                class="comfy-thumb"
-                type="button"
-                draggable="true"
-                (click)="attach(i)"
-                (dragstart)="dragResult($event, i)"
-                [title]="('comfy.seed' | t) + ' ' + result.seed"
-              >
-                <img [src]="result.url" [alt]="result.filename" />
-              </button>
+              <div class="comfy-made">
+                <button
+                  class="comfy-thumb"
+                  type="button"
+                  draggable="true"
+                  (click)="look(result)"
+                  (dragstart)="dragResult($event, i)"
+                  [title]="'comfy.look' | t"
+                >
+                  <img [src]="result.url" [alt]="result.filename" />
+                </button>
+                @if (nameResults() && !result.placed) {
+                  <form class="comfy-name" (submit)="$event.preventDefault(); placeNamed(i, nameField)">
+                    <input
+                      #nameField
+                      class="comfy-input comfy-name-field"
+                      type="text"
+                      [attr.placeholder]="'comfy.name-hint' | t"
+                      [attr.aria-label]="'comfy.name-picture' | t"
+                    />
+                    <button class="comfy-name-go" type="submit">{{ 'comfy.name-picture' | t }}</button>
+                  </form>
+                }
+              </div>
             }
           </div>
-          <p class="comfy-note">{{ 'comfy.keep-note' | t }}</p>
+          <p class="comfy-note">{{ (nameResults() ? 'comfy.name-note' : 'comfy.keep-note') | t }}</p>
         </section>
       }
 
     </div>
   </aside>
+
+  @if (looking(); as picture) {
+    <div class="comfy-look" [class.comfy-look-away]="carrying()" (mousedown)="holdLookFocus($event)" (click)="closeLook()" role="dialog" aria-modal="true" [attr.aria-label]="picture.filename">
+      <button class="comfy-look-close" type="button" (click)="closeLook()" [attr.aria-label]="'comfy.look-close' | t">×</button>
+      <img
+        [src]="picture.url"
+        [alt]="picture.filename"
+        draggable="true"
+        (dragstart)="dragLook($event, picture)"
+        (dragend)="endLookDrag()"
+        (click)="$event.stopPropagation()"
+      />
+    </div>
+  }
 }

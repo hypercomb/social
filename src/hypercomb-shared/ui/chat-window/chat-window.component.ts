@@ -112,6 +112,7 @@ import {
   AGENT_FOLD, AGENT_FRONT, AGENT_HANDOVER, AGENT_MODEL_REQUEST, AGENT_ROUND, AGENT_ROUTE, AGENT_VERIFY, holdAwake,
   type AgentHandoverEvent, type AgentRoundEvent, type AgentSpent, type AgentStageEffect,
   AGENT_STEPS_IOC_KEY, shippedFoldStep, shippedFrontStep, shippedHandoverStep, shippedReceiptStep, shippedRouteStep, shippedStretchStep, shippedVerifyStep,
+  isSandboxLabel,
   type AgentStepRegistry, type FrontDecisionLike, type HandoverStep, type VerifyDecisionLike, type WorkMessage,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -121,7 +122,7 @@ import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 // module"; runtime module-drafts.ts).
 import { applySectionEdits, draftModule } from '@hypercomb/runtime/module-drafts'
 import { installedPackageSig } from '@hypercomb/runtime/installed-package'
-import { doctrineFailedMessage, doctrineRanMessage, fileFailedMessage, fileRanMessage, parseWriteBlock, readsAskedIn, routesNamedIn, tileFileLabel, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage, type TileFileWriteRequest } from './hypercomb-work-fence'
+import { doctrineFailedMessage, doctrineRanMessage, fileFailedMessage, fileRanMessage, pageChangeUnready, parseWriteBlock, readsAskedIn, routesNamedIn, sandboxRule, tileFileLabel, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage, type TileFileWriteRequest } from './hypercomb-work-fence'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'
@@ -130,7 +131,9 @@ import { resolveEntryImageUrl } from '../clipboard-thumbs'
 import { hivePathSegments, renderChatMarkdown, type ChatMarkdownOptions } from './chat-markdown'
 import { hiveSentenceHtml, hiveSentenceParts, sentenceAccent, type SentencePart, type SentenceReader } from '../hive-sentence/hive-sentence'
 import { isHostRunLive, liveHostConvos, liveHostRun, startHostRun, stopHostRun, type HostAsk } from './host-stream'
-import { owedAfter, owedCue, type LegEnd, type OwedLike, type OwedPatchLike } from './owed-step'
+import { askIdeasOf } from './ask-ideas'
+import { hiveConversationMove } from './hive-conversation'
+import { owedAfter, owedCue, pageChangeStillOwed, workBeaconOf, type LegEnd, type OwedLike, type OwedPatchLike, type WorkBeaconOwed, type WorkBeaconState, type WorkPending } from './owed-step'
 import {
   callableBehaviours,
   hypercombActionProviderId,
@@ -963,6 +966,15 @@ export const TILE_DRAG_TYPE = 'application/x-hypercomb-tile'
 export type DroppedTile = { readonly name: string; readonly path: string; readonly sig: string }
 type TilesRailLike = {
   showConversation?(convoId: string): void
+  /** Open a tile's conversation without putting it in the reading pane. */
+  visit?(segments: readonly string[]): void
+  /** The conversation a visit opened, once the participant comes back to it. */
+  recall?(segments: readonly string[]): RailPickLike | null
+  armed?(path: string): boolean
+  /** The layer the rail is standing on. The header names this place. */
+  here?(): readonly string[]
+  /** The rail walked. The header follows. The hive canvas does not. */
+  onLevelChanged?: (segments: readonly string[]) => void
   onSubjectChanged: (subject: RailPickLike | null) => void
   onSelectionChanged: (selection: RailPickLike[]) => void
   readonly subject: RailPickLike | null
@@ -978,7 +990,7 @@ type TilesRailLike = {
   clearSelection(): void
   dispose(): void
 }
-type TilesRailFactoryLike = { create?: () => TilesRailLike }
+type TilesRailFactoryLike = { create?: (profile?: { readonly title?: boolean }) => TilesRailLike }
 type BridgeLike = { connected?: boolean; listening?: boolean; connectedAt?: number }
 
 /** Is a session parked? `listening` is the newer worker's word; an older
@@ -1227,7 +1239,7 @@ type TileFileTarget = { route: readonly string[]; kind: 'page' | 'file'; name?: 
 type TileFilesLike = {
   read(target: TileFileTarget): Promise<{ ok: true; text: string | null } | { ok: false; error: string }>
   write(target: TileFileTarget, text: string): Promise<
-    { ok: true; sig: string; created: boolean; unchanged: boolean } | { ok: false; error: string }
+    { ok: true; sig: string; created: boolean; unchanged: boolean; trial?: string; vector?: string } | { ok: false; error: string }
   >
 }
 /** assistant/llm-hive-access.ts — which keyed providers may read the hive. */
@@ -1623,6 +1635,18 @@ type ModeRegistryLike = {
 /** Words that open a read sentence, for the one look (ui/hive-sentence). */
 const READ_VERBS: ReadonlySet<string> = new Set(OBSERVATION_VERBS)
 
+/** A conversation belongs to the layer in hand when it IS that layer, or it
+ *  sits on that layer. A chat with no tile is the hive's, and shows at the
+ *  root. The rail's list uses the same rule. */
+const conversationOnLayer = (path: string, here: readonly string[]): boolean => {
+  const layer = '/' + here.map(part => String(part ?? '').trim()).filter(Boolean).join('/')
+  const owned = path || '/'
+  if (owned === layer) return true
+  const cut = owned.lastIndexOf('/')
+  const parent = cut <= 0 ? '/' : owned.slice(0, cut)
+  return parent === layer
+}
+
 @Component({
   selector: 'hc-chat-window',
   standalone: true,
@@ -1758,7 +1782,13 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** What the conversation on screen still owes, as one line under it —
    *  carrying on, waiting on you, stopped, paused (owed-step.ts owedCue). */
-  readonly owedLine = signal<{ readonly kind: 'continue' | 'waiting' | 'paused'; readonly text: string } | null>(null)
+  readonly owedLine = signal<WorkBeaconOwed | null>(null)
+  /** When this turn last showed a word or a progress line. A quiet beacon
+   *  counts from here, so silence is a duration and the round staying open. */
+  readonly #lastSignAt = signal(0)
+  /** Ticks while a retry countdown is on screen and the wait clock is not. */
+  readonly #beaconNow = signal(0)
+  #beaconTimer: ReturnType<typeof setInterval> | null = null
 
   /** The QUEUED bridge ask's record signature. Withdrawing an ask is removing
    *  that record from the optimization pool, so this is the whole handle on a
@@ -2400,9 +2430,8 @@ export class ChatWindowComponent implements OnDestroy {
   // sidebar — the sidebar exists only in full screen, and a thread resumed
   // from the roster has no sidebar state at all. The id knows: a tile chat is
   // `chat:tile:/dolphin/site`, and everything else is about nothing in
-  // particular. Without this the window opened on a thread and said only
-  // "Chat", which is the one thing it could say that is never wrong and never
-  // useful.
+  // particular. An ask still reads this path. The header does not: the header
+  // names the layer the rail is standing on.
 
   /** The tile path this conversation belongs to, or '' for a free chat. */
   readonly subjectPath = computed(() => {
@@ -2410,39 +2439,36 @@ export class ChatWindowComponent implements OnDestroy {
     return this.#threads()?.tilePathOf?.(this.activeId()) ?? ''
   })
 
-  /** What the header says: the tile's own name, or nothing to name. */
-  readonly subjectName = computed(() => {
-    const path = this.subjectPath()
-    if (!path || path === '/') return ''
-    const segments = path.split('/').filter(Boolean)
-    return segments[segments.length - 1] ?? ''
-  })
+  /** The layer the rail is standing on. Empty is the hive, the root. */
+  readonly layerHere = signal<readonly string[]>([])
+
+  /** The place the header names, as a path. `/` at the root. */
+  readonly layerPath = computed(() => '/' + this.layerHere().join('/'))
+
+  /** The place the header names. Empty at the root, so the hive mark shows. */
+  readonly layerName = computed(() => this.layerHere()[this.layerHere().length - 1] ?? '')
 
   // ── WHAT YOU PICKED, SHOWN AT THE TOP ───────────────────────────────────
   //
-  // The sidebar says which row is selected; this says the same thing at the
-  // head of the reading column, where your eye already is once you have
-  // stopped choosing and started asking. A NAME alone was not enough — the
-  // rail identifies a tile by its PICTURE, and the header identified the same
-  // tile by a word, so the two did not obviously agree. Now the header wears
-  // the tile's own picture, resolved through the SAME resolver the shelf
-  // squares use, so one tile can never show two faces in one window.
+  // The rail says which layer you are standing on; this says the same thing
+  // at the head of the reading column. A NAME alone was not enough — the
+  // rail identifies a tile by its PICTURE, and the header wears that layer's
+  // picture, resolved through the SAME resolver the shelf squares use.
   //
   // Best-effort and never load-bearing: no picture (or a cold index) leaves
   // the header exactly what it was — the name on its own.
 
-  /** The selected tile's picture as a blob: URL, or '' for none. */
+  /** The layer's picture as a blob: URL, or '' for none. */
   readonly subjectThumb = signal('')
   #subjectThumbUrl: string | null = null
   #subjectThumbToken = 0
 
-  /** Resolve the picture for whatever the window is now about. Every path
-   *  through here revokes the URL it replaces, and a superseding change wins
-   *  the race — the same discipline `#refreshContextThumbs` keeps. */
+  /** Resolve the picture for the layer the header names. Every path through
+   *  here revokes the URL it replaces, and a superseding change wins the race
+   *  — the same discipline `#refreshContextThumbs` keeps. */
   async #refreshSubjectThumb(): Promise<void> {
     const token = ++this.#subjectThumbToken
-    const path = this.subjectPath()
-    const segments = path.split('/').filter(Boolean)
+    const segments = [...this.layerHere()]
     const label = segments[segments.length - 1] ?? ''
     const url = label
       ? await resolveEntryImageUrl(label, segments.slice(0, -1), 'large').catch(() => null)
@@ -2529,11 +2555,13 @@ export class ChatWindowComponent implements OnDestroy {
     return rows.sort((a, b) => b.lastAt - a.lastAt)
   })
 
-  /** The list as it is READ — everything that has not been put away. */
-  readonly liveRoster = computed(() => this.roster().filter(row => !row.archived))
+  /** The list as it is READ — this layer's conversations that are still out. */
+  readonly liveRoster = computed(() => this.roster().filter(row =>
+    !row.archived && conversationOnLayer(row.tile, this.layerHere())))
 
-  /** And what has been. Shown only when asked for; see `archiveOpen`. */
-  readonly filedRoster = computed(() => this.roster().filter(row => row.archived))
+  /** And what has been put away on this layer. Shown only when asked for. */
+  readonly filedRoster = computed(() => this.roster().filter(row =>
+    row.archived && conversationOnLayer(row.tile, this.layerHere())))
 
   /** What each listed conversation's workflow says. Read only while the flat
    *  list is what the participant has — the rail reads its own. */
@@ -2775,6 +2803,10 @@ export class ChatWindowComponent implements OnDestroy {
    *  in the DOM — so the trail you drilled and the tiles you chose survive
    *  leaving and re-entering full screen. */
   #rail: TilesRailLike | null = null
+  /** Where the hive was standing, as `a/b`. A lineage `change` that does not
+   *  move this is a cache invalidation, not navigation. */
+  #stoodPath = ''
+  #hiveBound = false
 
   /** The rail picks last reported, keyed by row key — what lets a selection
    *  change flow into the clipboard as ADDS and REMOVES rather than a
@@ -4737,6 +4769,95 @@ export class ChatWindowComponent implements OnDestroy {
     this.waiting() && !this.hostStreaming() && !this.sessionListening()
     && this.bridgeConfigured() && !!this.pendingSig())
 
+  /** THE STATUS THAT STAYS PUT. The transcript's "Thinking…" line scrolled
+   *  away, and a gap between rounds looked the same as a hang, a timeout, or
+   *  the token limit. This names which one it is and stays above the composer. */
+  readonly workBeacon = computed((): { readonly state: WorkBeaconState; readonly text: string } | null => {
+    this.elapsed()
+    const now = this.#beaconNow() || Date.now()
+    const owed = this.owedLine()
+    const meter = this.legMeter()
+    const budget = workBudget(undefined, activeHarness(this.#harnessMark(this.activeId())).budget)
+    const signed = this.#lastSignAt()
+    const view = workBeaconOf({
+      now,
+      waiting: this.waiting(),
+      unattended: this.unattended(),
+      activity: this.turnActivity(),
+      quietMs: this.waiting() && signed ? Math.max(0, Date.now() - signed) : 0,
+      elapsed: this.elapsedLabel(),
+      owed,
+      pending: this.#workPending(),
+      rounds: meter?.rounds ?? 0,
+      ktokens: meter?.ktokens ?? 0,
+      budgetRounds: budget.rounds,
+      budgetK: Math.max(1, Math.round(budget.tokens / 1000)),
+    })
+    return view ? { state: view.state, text: this.#said(view.key, view.fallback, view.params) } : null
+  })
+
+  /** Which suggestion the empty composer is showing. Reset when the status
+   *  changes, so the first line is always the one about the current wait. */
+  readonly #ideaAt = signal(0)
+  readonly #ideaKey = signal('')
+
+  readonly askView = computed(() => {
+    const beacon = this.workBeacon()
+    const open = (this.route()?.flow?.nodes ?? []).filter(node => node.state === 'open')
+    const step = open[open.length - 1]?.title ?? ''
+    const ideas = askIdeasOf({ state: beacon?.state ?? null, step })
+    const key = `${beacon?.state ?? ''}|${step}`
+    const at = this.#ideaKey() === key ? this.#ideaAt() : 0
+    const index = ideas.length ? ((at % ideas.length) + ideas.length) % ideas.length : 0
+    return { ideas, index, key, text: ideas[index] ?? 'Ask anything.' }
+  })
+
+  /** Empty composer: the ghost may show. A started line hides it. */
+  readonly composerBlank = signal(true)
+
+  /** One hint. A new id rebuilds the ghost so its fade starts over. */
+  readonly askHint = computed(() => {
+    if (!this.composerBlank()) return []
+    const view = this.askView()
+    return [{ id: `${view.key}:${view.index}`, text: view.text, many: view.ideas.length > 1 }]
+  })
+
+  #ideaDrift: ReturnType<typeof setInterval> | null = null
+
+  /** A wait the turn clock does not name: Execution, an open question, or
+   *  workflow steps still open. The side columns can be closed; this is what
+   *  keeps the pending work on the beacon. */
+  #workPending(): WorkPending | null {
+    const clip = (text: string): string => text.replace(/\s+/g, ' ').trim().slice(0, 140)
+    const id = this.activeId()
+    const rows = this.execRows().filter(row => row.convoId === id)
+    const held = rows.filter(row => row.state === 'waiting')
+    if (held.length) {
+      const row = held[0]!
+      const because = row.needsGrant ? 'Needs a grant'
+        : row.leaves ? 'It leaves this machine'
+          : row.foreign ? 'It follows someone else’s words'
+            : row.forceReview ? 'Marked for review'
+              : 'Waiting on you'
+      const more = held.length > 1 ? ` · ${held.length} waiting` : ''
+      return { kind: 'exec-you', text: `${because} in Execution: ${clip(row.lines[0] ?? row.kind)}${more}` }
+    }
+    const asked = this.openQuestion()
+    const prompt = asked?.question?.state === 'open' ? asked.question.prompt : ''
+    if (prompt) return { kind: 'question', text: `Waiting on your answer: ${clip(prompt)}` }
+    const running = rows.filter(row => row.state === 'running')
+    if (running.length) {
+      const row = running[0]!
+      const more = running.length > 1 ? ` · ${running.length} running` : ''
+      return { kind: 'exec-run', text: `Running in Execution: ${clip(row.lines[0] ?? row.kind)}${more}` }
+    }
+    const open = (this.route()?.flow?.nodes ?? []).filter(node => node.state === 'open')
+    if (!open.length) return null
+    const title = clip(open[open.length - 1]?.title ?? '')
+    const count = open.length === 1 ? '1 open step for the agent' : `${open.length} open steps for the agent`
+    return { kind: 'steps', text: title ? `${count}: ${title}` : count }
+  }
+
   /** m:ss once past a minute — a bare "127s" makes people do arithmetic. */
   readonly elapsedLabel = computed(() => {
     const seconds = this.elapsed()
@@ -4885,6 +5006,9 @@ export class ChatWindowComponent implements OnDestroy {
 
   #cleanups: (() => void)[] = []
   #elapsedTimer: ReturnType<typeof setInterval> | null = null
+  /** A trial switcher handed this load a comparison. Read once, then stripped from the address. */
+  #trialHandoff: { label: string; picked: string; ask: string } | null = null
+  #trialHandoffSent = false
 
   #onSync = (): void => { if (this.visible()) this.#refreshContext() }
   #onNetworkChange = (): void => {
@@ -4914,11 +5038,10 @@ export class ChatWindowComponent implements OnDestroy {
       setTimeout(() => void highlightBlocks(this.scroller()?.nativeElement), 0)
     })
 
-    // The header follows the selection. `subjectPath` is the one signal that
-    // knows what the window is about — it already recomputes as the thread
-    // moves — so reading it here is the whole subscription.
+    // The header follows the layer the rail is standing on. The picture is
+    // that place. The open conversation's tile stays `subjectPath`.
     effect(() => {
-      this.subjectPath()
+      this.layerHere()
       void this.#refreshSubjectThumb()
     })
 
@@ -4932,13 +5055,15 @@ export class ChatWindowComponent implements OnDestroy {
     effect(() => {
       const host = this.chatRail()?.nativeElement
       if (!host) return
-      if (this.#rail) { this.#rail.mount(host); return }
+      if (this.#rail) { this.#rail.mount(host); this.#noteLayer(); return }
       const registry = ioc() as { get?(k: string): unknown; whenReady?(k: string, cb: (v: unknown) => void): void } | undefined
       const key = '@diamondcoreprocessor.com/AgentTilesRailFactory'
       const bring = (factory: TilesRailFactoryLike | undefined): void => {
         if (this.#rail || !factory?.create) return
-        this.#rail = factory.create()
+        // The header names the layer. The rail does not say it a second time.
+        this.#rail = factory.create({ title: false })
         this.#rail.onSubjectChanged = subject => { void this.#enterSubject(subject) }
+        this.#rail.onLevelChanged = segments => { this.layerHere.set([...(segments ?? [])]) }
         // Rail picks flow INTO the clipboard as deltas — never a wholesale
         // replace, because the clipboard also holds what the hive's takes
         // and the header's drops gathered, and a ctrl-click in the sidebar
@@ -4966,6 +5091,7 @@ export class ChatWindowComponent implements OnDestroy {
         // factory lands — mount into whatever full screen is showing NOW.
         const live = this.chatRail()?.nativeElement
         if (live) this.#rail.mount(live)
+        this.#noteLayer()
       }
       const now = registry?.get?.(key) as TilesRailFactoryLike | undefined
       if (now) bring(now)
@@ -4988,10 +5114,27 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
       'chat:open', payload => { void this.open(payload) }))
 
+    // A click on the hive opens that tile's conversation and leaves the
+    // reading pane where it is. Going into the tile does the same. Coming
+    // back is what puts the conversation in view.
+    this.#cleanups.push(EffectBus.on<{ label?: string; ctrlKey?: boolean; metaKey?: boolean }>(
+      'tile:click', payload => this.#armHiveTile(payload)))
+    this.#cleanups.push(EffectBus.on<{ action?: string; label?: string }>(
+      'tile:action', payload => {
+        if (payload?.action !== 'open') return
+        this.#armHiveTile(payload)
+      }))
+    const lineageRegistry = (globalThis as {
+      ioc?: { get?: (k: string) => unknown; whenReady?: (k: string, cb: (v: unknown) => void) => void }
+    }).ioc
+    const lineageNow = lineageRegistry?.get?.('@hypercomb.social/Lineage')
+    if (lineageNow) this.#bindHiveLocation(lineageNow)
+    else lineageRegistry?.whenReady?.('@hypercomb.social/Lineage', value => this.#bindHiveLocation(value))
+
     // THE METER READS THE STAGES, not the loop: the same facts any surface
     // gets, from the same bus, with replay for a window opened mid-turn.
-    this.#cleanups.push(EffectBus.on<AgentRoundEvent>(AGENT_ROUND, p => this.#meterFrom(p)))
-    this.#cleanups.push(EffectBus.on<AgentHandoverEvent>(AGENT_HANDOVER, p => this.#meterFrom(p)))
+    this.#cleanups.push(EffectBus.on<AgentRoundEvent>(AGENT_ROUND, p => { this.#meterFrom(p); this.#noteSign(p?.convoId) }))
+    this.#cleanups.push(EffectBus.on<AgentHandoverEvent>(AGENT_HANDOVER, p => { this.#meterFrom(p); this.#noteSign(p?.convoId) }))
     this.#cleanups.push(EffectBus.on('chat:route-flow-changed', () => {
       if (!this.railVisible() && this.listOpen()) void this.#refreshListStandings(this.liveRoster().map(row => row.convoId))
     }))
@@ -5149,16 +5292,29 @@ export class ChatWindowComponent implements OnDestroy {
     // and what it still owes, from its record.
     this.#cleanups.push(EffectBus.on<{ id?: string; activity?: string }>('agent:progress', payload => {
       const activity = typeof payload?.activity === 'string' ? payload.activity.trim() : ''
-      if (activity && payload?.id === this.#beeId(this.activeId()) && this.waiting()) this.turnActivity.set(activity)
+      if (activity && payload?.id === this.#beeId(this.activeId()) && this.waiting()) {
+        this.turnActivity.set(activity)
+        this.#noteSign()
+      }
     }))
     this.#cleanups.push(EffectBus.on<{ convoId?: string; round?: number; model?: string }>('agent:route', payload => {
       if (!payload?.convoId || payload.convoId !== this.activeId() || !this.waiting()) return
       const model = String(payload.model ?? '').replace(/^~/, '').split('/').pop() || 'the model'
       const round = Number(payload.round) || 1
       this.turnActivity.set(this.#said('chat.working.round', `Round ${round} — ${model} is working`, { round, model }))
+      this.#noteSign()
     }))
     this.#cleanups.push(EffectBus.on<{ convoId?: string }>('chat:owed', payload => {
       if (payload?.convoId && payload.convoId === this.activeId()) void this.#refreshOwedLine()
+    }))
+    // The orchestrator re-armed a stall (stall-pickup.ts). Carry it on when
+    // this is the conversation on screen. Opening it later does the same,
+    // from #load. A chat that is not on screen keeps the record until it is.
+    this.#cleanups.push(EffectBus.on<{ convoId?: string }>('chat:unstick', payload => {
+      const convoId = typeof payload?.convoId === 'string' ? payload.convoId : ''
+      if (!convoId || convoId !== this.activeId()) return
+      void this.#refreshOwedLine()
+      void this.#carryOn(convoId)
     }))
 
     // WHO ANSWERS CAN CHANGE WHILE YOU ARE LOOKING AT IT — a key arrives, a
@@ -5225,16 +5381,19 @@ export class ChatWindowComponent implements OnDestroy {
     // A local-bridge participant keeps the existing boot-open behavior without
     // stealing command-line focus. Everyone else opens chat deliberately; an
     // unconfigured participant then sees the setup-required view.
+    this.#readTrialHandoff()
     this.#refreshAvailability()
     this.#refreshDesignation()
     EffectBus.emit('chat:window-state', { open: this.visible() })
-    if (this.visible()) {
+    if (this.#trialHandoff) void this.#sendTrialHandoff()
+    else if (this.visible()) {
       this.#refreshContext()
       void this.#resume()
     }
     ;(globalThis as { ioc?: { whenReady?: (k: string, cb: () => void) => void } }).ioc
       ?.whenReady?.('@diamondcoreprocessor.com/ChatThreads', () => {
-        if (this.enabled() && this.visible() && this.turns().length === 0 && !this.waiting()) void this.#resume()
+        if (this.#trialHandoff) void this.#sendTrialHandoff()
+        else if (this.enabled() && this.visible() && this.turns().length === 0 && !this.waiting()) void this.#resume()
         // WHETHER OR NOT THE WINDOW IS OPEN. A question left out over a reload
         // is marked on its TILE as much as in here, and the rail's thinking
         // mark is the only sign of it for someone who has the panel folded
@@ -5245,11 +5404,16 @@ export class ChatWindowComponent implements OnDestroy {
     ;(globalThis as { ioc?: { whenReady?: (k: string, cb: (value: unknown) => void) => void } }).ioc
       ?.whenReady?.(HOST_AI_IOC_KEY, value => {
         this.hostConfigured.set(!!(value as HostAiLike | undefined)?.configured)
+        if (this.#trialHandoff) void this.#sendTrialHandoff()
       })
     ;(globalThis as { ioc?: { whenReady?: (k: string, cb: () => void) => void } }).ioc
-      ?.whenReady?.(LLM_ROUTER_IOC_KEY, () => this.#refreshDesignation())
+      ?.whenReady?.(LLM_ROUTER_IOC_KEY, () => {
+        this.#refreshDesignation()
+        if (this.#trialHandoff) void this.#sendTrialHandoff()
+      })
     ;(globalThis as { ioc?: { whenReady?: (k: string, cb: (value: unknown) => void) => void } }).ioc
       ?.whenReady?.(EXECUTION_QUEUE_IOC_KEY, value => this.#bindExecution(value as ExecutionQueueLike))
+    this.#armIdeaDrift()
   }
 
   ngOnDestroy(): void {
@@ -5269,6 +5433,8 @@ export class ChatWindowComponent implements OnDestroy {
     this.#railQuery = null
     if (this.#retryTimer) clearInterval(this.#retryTimer)
     this.#stopClock()
+    this.#stopBeaconClock()
+    this.#stopIdeaDrift()
     // A suppression left behind deafens the whole hive, and `focusout` never
     // arrives when the window is destroyed out from under the focus.
     this.#releaseQuestionKeys()
@@ -5549,7 +5715,11 @@ export class ChatWindowComponent implements OnDestroy {
     const owed = convoId ? await this.#threads()?.readOwed?.(convoId) : undefined
     if (convoId !== this.activeId()) return
     const cue = owedCue(owed, Date.now())
-    this.owedLine.set(cue ? { kind: cue.kind, text: this.#said(cue.key, cue.fallback, cue.params) } : null)
+    this.owedLine.set(cue && owed ? {
+      kind: cue.kind, why: owed.why, left: owed.left, next: owed.next,
+      text: this.#said(cue.key, cue.fallback, cue.params),
+    } : null)
+    this.#touchBeaconClock()
   }
 
   /** A catalog line, or its English when the catalog does not have it yet. */
@@ -5570,9 +5740,11 @@ export class ChatWindowComponent implements OnDestroy {
       this.streaming.set('')
       this.pendingSig.set('')
       this.elapsed.set(0)
+      this.#touchBeaconClock()
       return
     }
     this.waiting.set(true)
+    this.#lastSignAt.set(Date.now())
     this.askedAt.set(out.askedAt)
     this.pendingSig.set(out.sig)
     // A HOST ANSWER STILL ARRIVING ON THIS THREAD. The run kept the text while
@@ -5583,6 +5755,32 @@ export class ChatWindowComponent implements OnDestroy {
       if (!this.waiting()) { this.#stopClock(); return }
       this.elapsed.set(Math.max(0, Math.round((Date.now() - this.askedAt()) / 1000)))
     }, ELAPSED_TICK_MS)
+    this.#touchBeaconClock()
+  }
+
+  /** A word or a progress line arrived, so the quiet clock starts over. */
+  #noteSign(convoId?: string): void {
+    if (convoId && convoId !== this.activeId()) return
+    this.#lastSignAt.set(Date.now())
+  }
+
+  /** Keep the retry countdown moving while the turn clock is stopped. */
+  #touchBeaconClock(): void {
+    const owed = this.owedLine()
+    // The turn clock already refreshes a live round. This one is only for the
+    // countdown between legs, when that clock is stopped.
+    const need = !this.waiting() && !!owed && owed.kind === 'continue' && owed.next > Date.now()
+    if (need) {
+      if (!this.#beaconTimer) this.#beaconTimer = setInterval(() => this.#beaconNow.set(Date.now()), ELAPSED_TICK_MS)
+      return
+    }
+    this.#stopBeaconClock()
+  }
+
+  #stopBeaconClock(): void {
+    if (!this.#beaconTimer) return
+    clearInterval(this.#beaconTimer)
+    this.#beaconTimer = null
   }
 
   /** Tell the list which tile is thinking. The rail cannot see this window's
@@ -5736,6 +5934,55 @@ export class ChatWindowComponent implements OnDestroy {
   }
 
   // ── opening and closing ─────────────────────────────────────────────────
+
+  /** The trial page asked for a comparison. Take it once, and take it off the
+   *  address so a reload does not send it again. */
+  #readTrialHandoff(): void {
+    try {
+      if (typeof location === 'undefined' || !location.search.includes('hc-trial')) return
+      const params = new URLSearchParams(location.search)
+      const label = (params.get('hc-trial') ?? '').trim().toLowerCase()
+      if (!isSandboxLabel(label)) return
+      this.#trialHandoff = {
+        label,
+        picked: (params.get('picked') ?? '').trim().slice(0, 240),
+        ask: (params.get('ask') ?? '').replace(/\s+/g, ' ').trim().slice(0, 400),
+      }
+      params.delete('hc-trial')
+      params.delete('picked')
+      params.delete('ask')
+      const query = params.toString()
+      history.replaceState(history.state, '', `${location.pathname}${query ? `?${query}` : ''}${location.hash}`)
+    } catch { /* this load still sends the handoff once */ }
+  }
+
+  /** Last path segment, in the same shape a trial label uses after its prefix. */
+  #tileSlug(path: string): string {
+    const last = path.split('/').filter(Boolean).pop() ?? ''
+    return last.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  }
+
+  async #sendTrialHandoff(): Promise<void> {
+    const handoff = this.#trialHandoff
+    if (!handoff || this.#trialHandoffSent) return
+    const threads = this.#threads()
+    if (!threads || !this.enabled()) return
+    this.#trialHandoffSent = true
+    const slug = handoff.label.startsWith('try-') ? handoff.label.slice(4) : ''
+    let convoId: string | undefined
+    try {
+      const list = await threads.listConversations()
+      const matches = list.filter(convo => {
+        if (convo.archived) return false
+        return this.#tileSlug(threads.tilePathOf?.(convo.convoId) ?? '') === slug
+      })
+      matches.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0))
+      convoId = matches[0]?.convoId
+    } catch { /* a new chat still carries the ask */ }
+    const ask = handoff.ask || 'Improve the page from the checked revisions.'
+    const prefill = `Compare the checked revisions of this tile (${handoff.picked || 'none checked'}) and apply this ask: ${ask} Trial ${handoff.label}. Read the page. Look up code trialOrigin. Write the next build on this same tile, with a short summary of the changes. Say the SANDBOX line and the vector the receipt names. Do not name a different tile.`
+    await this.open(convoId ? { convoId, prefill } : { prefill })
+  }
 
   /**
    * Show the window.
@@ -6109,12 +6356,15 @@ export class ChatWindowComponent implements OnDestroy {
     if (!element) return
     element.value = text
     this.autosize(element)
+    this.#noteComposer()
   }
 
   /** The sidebar clicked a row: leave the current thinking where it is, then
    *  arrive in that tile's conversation. A tile nobody has spoken to reads as
-   *  an empty thread — dormant, not missing. */
-  async #enterSubject(subject: RailPickLike | null): Promise<void> {
+   *  an empty thread — dormant, not missing. `focus` is false when the hive
+   *  itself came back to the tile: the conversation opens, and the canvas
+   *  keeps the pointer. */
+  async #enterSubject(subject: RailPickLike | null, focus = true): Promise<void> {
     await this.#flushDraft()
     this.railSubject.set(subject)
     if (!subject) return
@@ -6127,7 +6377,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (convoId) await this.#load(convoId)
     await this.#restoreDraft()
     this.listOpen.set(false)
-    this.#focus()
+    if (focus) this.#focus()
   }
 
   /** Start a fresh thread. It does not appear in the list until it holds a
@@ -6174,6 +6424,7 @@ export class ChatWindowComponent implements OnDestroy {
     this.#heldDraft = ''
     const box = this.input()?.nativeElement
     if (box) { box.value = ''; this.autosize(box) }
+    this.#noteComposer()
     this.turns.set([])
     this.streaming.set('')
     this.#clearRoute()
@@ -6231,6 +6482,7 @@ export class ChatWindowComponent implements OnDestroy {
       this.#heldDraft = ''
       const box = this.input()?.nativeElement
       if (box) { box.value = ''; this.autosize(box) }
+      this.#noteComposer()
     }
 
     await threads.deleteConversation(convoId)
@@ -6331,6 +6583,66 @@ export class ChatWindowComponent implements OnDestroy {
 
   // ── context ─────────────────────────────────────────────────────────────
 
+  #hiveSegments(): string[] {
+    const lineage = ioc()?.get('@hypercomb.social/Lineage') as LineageLike | undefined
+    return (lineage?.explorerSegments?.() ?? []).map(part => String(part ?? '').trim()).filter(Boolean)
+  }
+
+  /** Lineage announces `change` for a cache invalidation too. Only a move
+   *  of the path opens or shows a conversation. */
+  #bindHiveLocation(lineage: unknown): void {
+    if (this.#hiveBound) return
+    const target = lineage as (EventTarget & LineageLike) | undefined
+    if (!target?.addEventListener) return
+    this.#hiveBound = true
+    const pathOf = (): string => (target.explorerSegments?.() ?? [])
+      .map(part => String(part ?? '').trim()).filter(Boolean).join('/')
+    this.#stoodPath = pathOf()
+    const onLineage = (): void => this.#followHiveLocation(pathOf())
+    target.addEventListener('change', onLineage)
+    this.#cleanups.push(() => target.removeEventListener('change', onLineage))
+  }
+
+  /** Click, or the leaf's open: the conversation is armed and stays out of
+   *  the reading pane. The same tile again puts it in view. */
+  #armHiveTile(payload: { label?: string; ctrlKey?: boolean; metaKey?: boolean } | undefined): void {
+    if (payload?.ctrlKey || payload?.metaKey) return
+    const label = String(payload?.label ?? '').trim()
+    const rail = this.#rail
+    if (!label || !rail?.visit || !rail.recall || !rail.armed) return
+    const segments = [...this.#hiveSegments(), label]
+    const path = '/' + segments.join('/')
+    if (rail.armed(path)) {
+      const pick = rail.recall(segments)
+      if (pick && pick.convoId !== this.activeId()) void this.#enterSubject(pick, false)
+      return
+    }
+    rail.visit(segments)
+  }
+
+  /** Going into a tile arms its conversation. Coming back out shows it. */
+  #followHiveLocation(nextPath: string): void {
+    const prev = this.#stoodPath.split('/').filter(Boolean)
+    const next = nextPath.split('/').filter(Boolean)
+    if (nextPath === this.#stoodPath) return
+    this.#stoodPath = nextPath
+    const rail = this.#rail
+    if (!rail?.visit || !rail.recall) return
+    const move = hiveConversationMove(prev, next)
+    if (move.kind === 'enter') { rail.visit(move.segments); return }
+    if (move.kind === 'back') {
+      const pick = rail.recall(move.segments)
+      if (pick && pick.convoId !== this.activeId()) void this.#enterSubject(pick, false)
+    }
+  }
+
+  /** The header names the layer the rail is standing on. The hive canvas
+   *  can be somewhere else; this does not pull the rail along. */
+  #noteLayer(): void {
+    const here = this.#rail?.here?.()
+    if (here) this.layerHere.set([...here])
+  }
+
   /** Where we are and what is selected. Read live from the hive, never stored
    *  on the conversation: a thread outlives the page it was started on. */
   #refreshContext(): void {
@@ -6416,7 +6728,7 @@ export class ChatWindowComponent implements OnDestroy {
     // continuing itself keeps the running total and the record.
     if (!opts.auto) { this.#task.delete(convoId); this.legMeter.set(null); this.#forgetOwed(convoId) }
 
-    if (element && text === undefined) { element.value = ''; this.autosize(element) }
+    if (element && text === undefined) { element.value = ''; this.autosize(element); this.#noteComposer() }
     // SENT IS NOT HELD. The thinking became a turn; leaving a copy in the
     // drafts pool would show the tile as still having something unsaid.
     void this.#flushDraft()
@@ -6733,7 +7045,15 @@ export class ChatWindowComponent implements OnDestroy {
     if (!release) return
     try {
       if (!free()) return
-      this.#task.set(convoId, { rounds: owed.spent.rounds, tokens: owed.spent.tokens, legs: owed.spent.legs + 1 })
+      // A pickup written without a spent total must not wipe what this window
+      // has already charged to the request.
+      const held = this.#task.get(convoId)
+      const spent = owed.spent
+      this.#task.set(convoId, {
+        rounds: Math.max(spent.rounds, held?.rounds ?? 0),
+        tokens: Math.max(spent.tokens, held?.tokens ?? 0),
+        legs: Math.max(spent.legs, held?.legs ?? 0) + 1,
+      })
       await this.send(handoverStepNow(mark).continueWord(owed.left), { auto: true })
     } finally { release() }
   }
@@ -7060,6 +7380,7 @@ export class ChatWindowComponent implements OnDestroy {
         canWriteDoctrine,
         canWriteFiles,
       }),
+      canWriteFiles ? sandboxRule(undefined, grammarContext.page) : '',
       !(canRead || canChange)
         ? ''
         : readsFreely(providerId)
@@ -7200,6 +7521,18 @@ export class ChatWindowComponent implements OnDestroy {
         if (snapshotIds.length > LEG_SNAPSHOTS_KEPT) snapshotIds.splice(0, snapshotIds.length - LEG_SNAPSHOTS_KEPT)
       }
       const ran: string[] = []
+      // A leg that stops with the work unfinished records it before it returns.
+      // Otherwise the turn looks done and nothing picks it up.
+      const legSpent = (): { rounds: number; tokens: number; legs: number } => {
+        const task = component.#task.get(convoId)
+        return { rounds: task?.rounds ?? rounds, tokens: task?.tokens ?? 0, legs: task?.legs ?? 0 }
+      }
+      const oweLeft = (left: string, worked: boolean): Promise<string | undefined> => component.#owe(
+        convoId, { kind: 'left', left, budgetSpent: false, worked, spent: legSpent() }, owedEpoch, signal,
+      )
+      const owePark = (why: 'question' | 'gave-up', left: string): Promise<string | undefined> => component.#owe(
+        convoId, { kind: 'park', why, left, spent: legSpent() }, owedEpoch, signal,
+      )
       // How the last read or change settled — what jev:outcome reports.
       let lastRun: 'ran' | 'skipped' | 'failed' = 'failed'
       let decisionCalls = 0
@@ -7812,6 +8145,13 @@ export class ChatWindowComponent implements OnDestroy {
         const label = tileFileLabel(parsed)
         const grammar = `write ${label}`
         const target: TileFileTarget = { route: parsed.route, kind: parsed.target, ...(parsed.name ? { name: parsed.name } : {}) }
+        if (parsed.target === 'page') {
+          const current = await tileFiles.read(target).catch(() => null)
+          if (current && current.ok && current.text) {
+            const why = pageChangeUnready(parsed.route, [...(component.#readSignatures.get(convoId)?.values() ?? [])])
+            if (why) throw new WorkRefused(why)
+          }
+        }
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal,
@@ -7849,7 +8189,7 @@ export class ChatWindowComponent implements OnDestroy {
         queue.settle(entry.id, 'ran')
         lastRun = 'ran'
         EffectBus.emit('toast:show', { type: 'success', message: outcome.unchanged ? `${label} unchanged` : `${label} ${outcome.created ? 'created' : 'updated'}` })
-        return fileRanMessage({ label, sig: outcome.sig, created: outcome.created, unchanged: outcome.unchanged }, message)
+        return fileRanMessage({ label, sig: outcome.sig, created: outcome.created, unchanged: outcome.unchanged, trial: outcome.trial, vector: outcome.vector }, message)
       }
 
       // THE PARTICIPANT SPEAKS THE HIVE'S LANGUAGE. A table question offers
@@ -8010,6 +8350,7 @@ export class ChatWindowComponent implements OnDestroy {
               from: gaveUp, needs: work.handoff, tier: moved.need.tier,
             })
             yield '\n\nNo model switched on can take it, so a stronger one is asked for: the request is filed (`models requests` reads them). `models add <model id> deep` puts a model on the list for deep work only; then say continue.'
+            await owePark('gave-up', 'No model switched on can take the rest of this request.')
             return ''
           }
           pinned = undefined
@@ -8111,19 +8452,27 @@ export class ChatWindowComponent implements OnDestroy {
           // A model that wrote "what is still left" in prose and forgot the
           // fence still handed over; the words say so, and stopping there
           // would be the old cap wearing a new name.
-          const left = handoverStep.left({
+          const handed = handoverStep.left({
             ...(work.left ? { left: work.left } : {}),
             ...(work.request ? { requestLines: work.request.lines } : {}),
             prose: work.prose, lastRound, proseFallback: harnessNow.handover.proseFallback,
           })
+          const pageLeft = handed ? undefined : pageChangeStillOwed(
+            message, work.prose, readRounds > 0,
+            ran.some(line => line.startsWith('write page /')),
+            `${lastRun}` === 'skipped',
+          )
+          const left = handed || pageLeft
           // WHAT THIS LEG LEAVES OWED goes to the conversation's own record
           // (owed-step.ts), never to this window's memory: the handover, a
           // promise the reply made and did not keep, a wait on the participant,
           // the spent budget, or nothing at all. `#carryOn` acts on it — now,
           // after a refresh, or when the conversation is opened again.
           const task = component.#task.get(convoId)
-          const legSpent = { rounds: task?.rounds ?? rounds, tokens: task?.tokens ?? 0, legs: task?.legs ?? 0 }
-          const worked = readRounds > 0 || ran.length > 0
+          const legSpentNow = { rounds: task?.rounds ?? rounds, tokens: task?.tokens ?? 0, legs: task?.legs ?? 0 }
+          // A page that was only read did not finish. Counting that read as
+          // work would keep the same leftover from ever being called a stall.
+          const worked = pageLeft ? false : (readRounds > 0 || ran.length > 0)
           if (left) {
             // Shown on the turn; the record, not this, is what carries it on.
             component.#turnMeta.set(convoId, {
@@ -8133,11 +8482,11 @@ export class ChatWindowComponent implements OnDestroy {
             })
             stage(AGENT_HANDOVER, { round: rounds, left, budgetSpent, spent: spentOf() })
             wrote = true
-            const said = await component.#owe(convoId, { kind: 'left', left, budgetSpent, worked, spent: legSpent }, owedEpoch, signal)
+            const said = await component.#owe(convoId, { kind: 'left', left, budgetSpent, worked, spent: legSpentNow }, owedEpoch, signal)
             if (budgetSpent) yield handoverStep.pausedNote(task ?? { rounds, tokens: 0 })
             else if (said) yield said
           } else {
-            const said = await component.#owe(convoId, { kind: 'answered', prose: work.prose, worked, spent: legSpent }, owedEpoch, signal)
+            const said = await component.#owe(convoId, { kind: 'answered', prose: work.prose, worked, spent: legSpentNow }, owedEpoch, signal)
             if (said) { wrote = true; yield said }
           }
           if (snapshotIds.length && treeReader && !await treeReader.validateSnapshots(snapshotIds, signal)) {
@@ -8202,6 +8551,7 @@ export class ChatWindowComponent implements OnDestroy {
               if (ran.length) yield `\n\nEarlier commands ran: ${ran.join(' · ')}`
               yield `\n\n${formatJevUsage(settledAttempts)}`
               yield `\n\n${step.text}`
+              await owePark('question', step.text.replace(/\s+/g, ' ').trim().slice(0, 500))
               return ''
             }
             if (step.kind === 'answer') {
@@ -8240,6 +8590,7 @@ export class ChatWindowComponent implements OnDestroy {
             const detail = error instanceof Error ? error.message : 'the work could not continue'
             wrote = true
             yield `\n\nHypercomb stopped the work: ${detail}.`
+            await oweLeft(`The hive stopped the work (${detail}). Finish it from there.`, false)
             return ''
           }
           // A refusal goes back to the model in the gate's own words, so it
@@ -8263,6 +8614,7 @@ export class ChatWindowComponent implements OnDestroy {
             if (refusedInARow >= MAX_REFUSALS_IN_A_ROW) {
               wrote = true
               yield `\n\nThe hive turned back ${refusedInARow} blocks in a row and stopped asking. The last reason: ${reason}`
+              await oweLeft(`The hive turned the block back (${reason}). Write it a different way and finish the request.`, false)
               return ''
             }
           }
@@ -8453,6 +8805,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (!convoId || convoId !== this.activeId()) return
     this.hostStreaming.set(true)
     this.streaming.set(String(payload?.text ?? ''))
+    this.#noteSign()
     this.#scrollDown()
   }
 
@@ -8578,10 +8931,50 @@ export class ChatWindowComponent implements OnDestroy {
    */
   onInputKey(event: KeyboardEvent): void {
     event.stopPropagation()
+    if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && this.#composerEmpty()) {
+      const view = this.askView()
+      if (view.ideas.length > 1) {
+        event.preventDefault()
+        const dir = event.key === 'ArrowDown' ? 1 : -1
+        const next = (view.index + dir + view.ideas.length) % view.ideas.length
+        this.#ideaKey.set(view.key)
+        this.#ideaAt.set(next)
+        this.#armIdeaDrift()
+      }
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       void this.send()
     }
+  }
+
+  /** Up and down walk suggestions only while the person has not started a line. */
+  #composerEmpty(): boolean {
+    return !(this.input()?.nativeElement?.value ?? '').trim()
+  }
+
+  #noteComposer(): void {
+    const blank = this.#composerEmpty()
+    if (blank !== this.composerBlank()) this.composerBlank.set(blank)
+  }
+
+  /** A few hints trade places. One hint only breathes, so this stays quiet. */
+  #armIdeaDrift(): void {
+    this.#stopIdeaDrift()
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    this.#ideaDrift = setInterval(() => {
+      if (!this.composerBlank()) return
+      const view = this.askView()
+      if (view.ideas.length < 2) return
+      this.#ideaKey.set(view.key)
+      this.#ideaAt.set((view.index + 1) % view.ideas.length)
+    }, 6400)
+  }
+
+  #stopIdeaDrift(): void {
+    if (this.#ideaDrift !== null) clearInterval(this.#ideaDrift)
+    this.#ideaDrift = null
   }
 
   /** Grow with the message, to a ceiling — past that the box scrolls, so the
@@ -8593,6 +8986,7 @@ export class ChatWindowComponent implements OnDestroy {
 
   onInput(event: Event): void {
     this.autosize(event.target as HTMLTextAreaElement)
+    this.#noteComposer()
     this.#holdDraft()
   }
 
@@ -8772,6 +9166,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (!element) return
     element.value = text
     this.autosize(element)
+    this.#noteComposer()
     element.focus()
     element.setSelectionRange(element.value.length, element.value.length)
   }

@@ -13,12 +13,20 @@
 //                           on: it names the domain, then publishes (asking
 //                           your consent, as `publish here` does) — the tile's
 //                           name becomes <name>.<domain>
+//   publish on <domain> as <label>
+//                           the same, with its OWN ADDRESS said at the end:
+//                           https://<label>.<domain>. The label is checked
+//                           first, the consent names that address, and the
+//                           address is set once the publish lands (jwize,
+//                           2026-10-25: "as should just be the modifier at
+//                           the end")
 //   publish off <domain>    switch it OFF; the last door off withdraws the tile
 //   publish as <label> on <domain>
 //                           give the tile its OWN ADDRESS on that domain —
 //                           https://<label>.<domain> instead of <name>.<domain>
 //                           (`@` is the domain itself: its front page). The
 //                           tile must already be published on that domain.
+//                           The older spelling of the modifier above.
 //   publish history         say whether this branch publishes its history or
 //                           its head only (the default) — changes nothing
 //   publish history on      publish its history too: a `publish:history`
@@ -82,12 +90,13 @@ export class PublishQueenBee {
    *  Tongue read `publish /revolucion/lounge …` as `revolucion/lounge …`. */
   readonly rawArgs = true
   readonly description =
-    'Show what your published hive is serving right now, next to what has changed here since — one row per branch, with publish, re-check and unpublish per row. `publish here` publishes the layer you stand on to its hosts; `publish on <domain>` and `publish off <domain>` switch one domain for it; `publish as <label> on <domain>` gives it its own address there; `publish history` says whether it publishes its history or its head only, and `publish history on` / `publish history off` switch that. Say a route first (`publish /a/b on <domain>`) to name the tile instead of standing on it.'
+    'Show what your published hive is serving right now, next to what has changed here since — one row per branch, with publish, re-check and unpublish per row. `publish here` publishes the layer you stand on to its hosts; `publish on <domain>` and `publish off <domain>` switch one domain for it; `publish on <domain> as <label>` publishes it there at its own address, <label>.<domain>; `publish history` says whether it publishes its history or its head only, and `publish history on` / `publish history off` switch that. Say a route first (`publish /a/b on <domain>`) to name the tile instead of standing on it.'
   readonly descriptionKey = 'slash.publish'
-  readonly options = ['here', 'on <domain>', 'off <domain>', 'as <label> on <domain>', 'history [on|off]']
+  readonly options = ['here', 'on <domain>', 'on <domain> as <label>', 'off <domain>', 'as <label> on <domain>', 'history [on|off]']
   readonly examples = [
     { input: '/publish', result: 'Opens the publish panel, or closes it if it is open: what your hive is serving now, beside what has changed here since' },
     { input: '/publish /room-host on hypercomb.com', result: 'Switches hypercomb.com on for that tile and publishes it there, asking your consent first; its address becomes room-host.hypercomb.com' },
+    { input: '/publish /work/meetups on hypercomb.com as meetups', result: 'Publishes the tile on hypercomb.com at its own address, meetups.hypercomb.com, asking your consent first; the consent names that address' },
     { input: '/publish /room-host as room-host1 on hypercomb.com', result: 'Gives the tile its own address, room-host1.hypercomb.com, instead of room-host.hypercomb.com. The tile has to be published on hypercomb.com already' },
     { input: '/publish /room-host off hypercomb.com', result: 'Switches that domain off for the tile; when the last domain goes off, the tile is withdrawn' },
   ]
@@ -116,8 +125,12 @@ export class PublishQueenBee {
     // list riding along: the offering act. Joining offers what this served.
     // With a route and nothing else, the same act for that tile.
     if (lower === 'here' || (route && !rest)) { await hostCurrentBranch(route ?? undefined); return }
-    const door = lower.match(/^(on|off)(?:\s+(\S+))?$/)
-    if (door) { await this.#door(route, door[1] === 'on', door[2] ?? ''); return }
+    const door = rest.match(/^(on|off)(?:\s+(\S+))?(?:\s+as(?:\s+(\S+))?)?$/i)
+    if (door) {
+      const label = /\sas(?:\s|$)/i.test(rest) ? (door[3] ?? '').toLowerCase() : null
+      await this.#door(route, door[1].toLowerCase() === 'on', door[2] ?? '', label)
+      return
+    }
     const own = lower.match(/^as(?:\s+(\S+))?(?:\s+on(?:\s+(\S+))?)?$/)
     if (own) { await this.#address(route, own[1] ?? '', own[2] ?? ''); return }
     if (lower === 'history' || lower.startsWith('history ')) {
@@ -150,11 +163,20 @@ export class PublishQueenBee {
     return segments
   }
 
-  async #door(route: readonly string[] | null, on: boolean, raw: string): Promise<void> {
+  async #door(route: readonly string[] | null, on: boolean, raw: string, label: string | null = null): Promise<void> {
     const segments = this.#segments(route)
     const fail = (message: string): never => { say(message, 'warning'); throw new Error(message) }
     const zone = hostZone(raw)
     if (!zone) fail(`Say the domain: publish ${on ? 'on' : 'off'} <domain>, for example hypercomb.com.`)
+    // The address is checked before anything is published, so a bad name
+    // never leaves the tile published somewhere it did not ask for.
+    if (label !== null) {
+      if (!on) fail('An address goes with on: publish on <domain> as <label>.')
+      if (!label) fail(`Say the name: publish /${segments.join('/')} on ${zone} as <label>, for example as meet-ups — "@" is the domain itself.`)
+      const refusal = ownAddressRefusal(label)
+      if (refusal === 'not-a-label') fail('An address name is letters, digits and hyphens, up to 63 characters, with no hyphen at either end.')
+      if (refusal === 'reserved') fail('"content", "host" and names starting with "try-" belong to the host — choose another name.')
+    }
 
     const name = segments[segments.length - 1]
     const named = await hostsOfBranch(segments)
@@ -164,7 +186,9 @@ export class PublishQueenBee {
       await setBranchHosts(segments, next)
       // Publishing reads the marks just written: the doors follow them. The
       // tile goes in as read above, never re-read from a tab that may move.
-      await hostCurrentBranch(segments)
+      const own = label ? { [zone]: label === APEX_LABEL ? zone : `${label}.${zone}` } : {}
+      const published = await hostCurrentBranch(segments, own)
+      if (published && label) await this.#address(segments, label, zone)
       return
     }
 

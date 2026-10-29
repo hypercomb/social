@@ -68,6 +68,35 @@ const ioc = (key: string): unknown =>
 const hostUrl = (host: string): string =>
   `${/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host) ? 'http' : 'https'}://${host}`
 
+// A scan (the badge, the images button) looks at every visible name. It asks
+// only a host that has already answered a pool. Asking every learned
+// publisher for a name that is not there is one console 404 per host, on
+// every hive load. Choosing a picture still asks every host for that one
+// name, and a host that answers joins later scans.
+const POOL_SCAN_QUIET_MS = 5 * 60_000
+const poolPublishers = new Set<string>()
+const poolQuietUntil = new Map<string, number>()
+const poolTail = new Map<string, Promise<void>>()
+
+const poolQuiet = (host: string): boolean => {
+  if (poolPublishers.has(host)) return false
+  const until = poolQuietUntil.get(host) ?? 0
+  if (until > Date.now()) return true
+  if (until) poolQuietUntil.delete(host)
+  return false
+}
+
+const notePoolMiss = (host: string): void => {
+  if (!host || poolPublishers.has(host)) return
+  poolQuietUntil.set(host, Date.now() + POOL_SCAN_QUIET_MS)
+}
+
+const afterPool = (host: string, job: () => Promise<void>): Promise<void> => {
+  const next = (poolTail.get(host) ?? Promise.resolve()).then(job, job)
+  poolTail.set(host, next)
+  return next
+}
+
 const poolMembers = (value: unknown): string[] => {
   const raw = Array.isArray(value)
     ? value
@@ -78,32 +107,47 @@ const poolMembers = (value: unknown): string[] => {
     .filter(value => SIG_RE.test(value)).slice(0, MAX_POOL_MEMBERS)
 }
 
-/** Ask every known server for sign(name), then resolve its canonical variant
+/** Ask known servers for sign(name), then resolve its canonical variant
  * records through the normal verified content broker. The pool index is the
  * discovery document; every member/layer/property/image byte remains
- * signature-addressed and SHA-gated by Store.getResource. */
-export const meaningPoolImageCandidates = async (name: string): Promise<readonly PeerImageCandidate[]> => {
+ * signature-addressed and SHA-gated by Store.getResource.
+ *
+ * `choose` is one name the participant opened — every host is asked.
+ * `scan` is the badge walking the visible hive. It asks only hosts that
+ * have already answered a pool, so a load does not 404 the whole list. */
+export const meaningPoolImageCandidates = async (
+  name: string,
+  mode: 'scan' | 'choose' = 'choose',
+): Promise<readonly PeerImageCandidate[]> => {
   const broker = ioc(BROKER_KEY) as BrokerLike | undefined
   const store = ioc(STORE_KEY) as StoreLike | undefined
   if (!store?.getResource) return []
-  const hosts = broker?.knownContentHosts?.() ?? []
+  const known = broker?.knownContentHosts?.() ?? []
+  const hosts = mode === 'scan' ? known.filter(host => poolPublishers.has(host)) : known
   if (!hosts.length) return []
 
   const address = await SignatureService.sign(
     new TextEncoder().encode(name).buffer as ArrayBuffer,
   )
   const membersByHost = new Map<string, string[]>()
-  await Promise.all(hosts.map(async host => {
+  const ask = async (host: string): Promise<void> => {
+    if (mode === 'scan' && poolQuiet(host)) return
     try {
       const response = await fetch(`${hostUrl(host)}/${address}`, {
         cache: 'no-cache',
         signal: AbortSignal.timeout(2_500),
       })
-      if (!response.ok) return
+      if (!response.ok) {
+        if (response.status === 404 || response.status === 410) notePoolMiss(host)
+        return
+      }
       const members = poolMembers(await response.json())
+      poolPublishers.add(host)
+      poolQuietUntil.delete(host)
       if (members.length) membersByHost.set(host, members)
-    } catch { /* this server has no pool for the name */ }
-  }))
+    } catch { notePoolMiss(host) }
+  }
+  await Promise.all(hosts.map(host => mode === 'scan' ? afterPool(host, () => ask(host)) : ask(host)))
 
   const candidates: PeerImageCandidate[] = []
   for (const [host, members] of membersByHost) {

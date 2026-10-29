@@ -20,28 +20,41 @@
 // WHAT IS RECORDED, AND WHERE. The prompt, the seed, the workflow and the
 // model that made a picture are written into `comfy:generations` under the
 // IMAGE'S OWN SIGNATURE — the sig-keyed record pattern, so the lookup is
-// "here are some bytes, what made them" with no index and no scan. That is
-// what makes a re-roll possible from a tile alone (`/comfy.reroll`), and it
-// is the honest place for the provenance: it belongs to the bytes, not to the
-// tile that happens to be wearing them today. The tile's props are untouched.
+// "here are some bytes, what made them" with no index and no scan. The same
+// record is also a resource, and the tile revision that receives the picture
+// names it. History can return to that revision, and the details come with it.
 //
 // THE SOCKET IS NEVER THE TRUTH. Progress comes over the WebSocket because a
 // progress bar should move; the RESULT is read from `/history`, always, even
 // when the socket already delivered it. A dropped socket must cost a
 // participant a progress bar, never a picture.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, isReservedPoolWord } from '@hypercomb/core'
+import { createTile } from '../commands/trait-read.js'
 import { storeImageResources } from '../editor/arm-resource.js'
 import { readTilePropertiesAt, tilePictureCandidates } from '../editor/tile-properties.js'
+import { promptFromTile, promptFromWords } from './comfy-roll.js'
 import { comfyFolder, importable, tooLargeMessage } from './comfy-folder.js'
 import { ComfyHost, comfyHost, type ComfyFileRef } from './comfy-host.js'
+import { readyRecipes } from './comfy-recipes.js'
 import { activeWorkflow, comfyWorkflow } from './comfy-workflows.js'
 import {
   applyParams,
   randomSeed,
+  type ComfyGraph,
   type ComfyParams,
   type ComfyWorkflowSpec,
 } from './comfy-workflow.js'
+import { emptyLoadClock, noteCached, noteExecuting, type LoadClock } from './comfy-weights.js'
+import {
+  COMFY_REVIEWER_DEFAULT,
+  clampReviewers,
+  helpedPrompt,
+  pictureContext,
+  REVIEWER_SYSTEM,
+  tileBriefText,
+  type ReviewerAsk,
+} from './comfy-help.js'
 
 export const COMFY_SERVICE_KEY = '@diamondcoreprocessor.com/ComfyService'
 
@@ -71,6 +84,10 @@ export interface ComfyResult {
   file: ComfyFileRef
   seed: number
   workflowId: string
+  /** The generation record, when it was stored. The tile revision names it. */
+  generationSig?: string
+  /** The name the participant gave this picture, once it is a tile. */
+  placedAs?: string
 }
 
 /** What a picture was made from. Content, keyed by the picture's signature. */
@@ -78,6 +95,8 @@ export interface ComfyGenerationRecord {
   kind: 'comfy-generation@1'
   workflow: string
   label?: string
+  /** The name the participant gave the picture. Absent until they type one. */
+  name?: string
   positive?: string
   negative?: string
   seed?: number
@@ -94,10 +113,23 @@ export interface ComfyRunRequest extends ComfyParams {
   workflowId?: string
   /** Where the picture lands. The selection when unnamed. */
   cell?: string
-  /** Put the first result on the tile without asking. The command line does
-   *  (you typed a prompt at a tile); the window does not (you are choosing). */
+  /** Put the first result on `cell` (or the selection) when `tiles` is not set. */
   attach?: boolean
+  /** Each picture becomes its own hive tile. The window and `/comfy <prompt>` do.
+   *  A caller that only wants the bytes (a substrate candidate) leaves this unset.
+   *  When tiles are selected, those tiles receive the pictures instead. */
+  tiles?: boolean
+  /** Read each selected tile's picture and properties before the prompt is set. */
+  fromTile?: boolean
+  /** How many reviewers write a prompt. Jev picks one. */
+  reviewers?: number
 }
+
+/** A tiles run paints every selected tile, one picture each. An empty
+ *  selection means new tiles. A caller that is not making tiles (a re-roll,
+ *  a substrate candidate) does not paint the selection. */
+export const cellsToPaint = (makeTiles: boolean, selected: readonly string[]): string[] =>
+  makeTiles ? selected.filter(name => name.trim().length > 0) : []
 
 type DirLike = {
   getFileHandle(name: string, options?: { create?: boolean }): Promise<{
@@ -108,6 +140,8 @@ type DirLike = {
 type StoreLike = {
   initialize?: () => Promise<void>
   getPool?: (meaning: string) => Promise<DirLike | null>
+  putResource?: (blob: Blob) => Promise<string>
+  getResource?: (sig: string) => Promise<Blob | null>
 }
 
 const ioc = <T,>(key: string): T | undefined =>
@@ -124,13 +158,38 @@ const POLL_MS = 1500
 export class ComfyService extends EventTarget {
   #job: ComfyJob = { state: 'idle' }
   #results: ComfyResult[] = []
+  /** The last run made pictures that are not on a tile until they are named. */
+  #awaitingNames = false
   /** endpoint → the checkpoints that host actually has. */
   #checkpoints = new Map<string, string[]>()
   #listening = false
+  /** The graph whose loader nodes the clock is timing. */
+  #runGraph: ComfyGraph | null = null
+  #clock: LoadClock = emptyLoadClock()
+  /** True only between queue and the run ending, so a late socket frame
+   *  cannot start a new load after the picture is already done. */
+  #timing = false
+  #fromTile = false
+  #reviewers = COMFY_REVIEWER_DEFAULT
+  /** Set while reviewers are writing, so Stop can end that and not the host. */
+  #helpAbort: AbortController | null = null
 
   get job(): ComfyJob { return this.#job }
+  /** The from-the-tile switch, for `/comfy <prompt>` after the window set it. */
+  get help(): { fromTile: boolean; reviewers: number } {
+    return { fromTile: this.#fromTile, reviewers: this.#reviewers }
+  }
+
+  setHelp(next: { fromTile?: boolean; reviewers?: number }): void {
+    if (typeof next.fromTile === 'boolean') this.#fromTile = next.fromTile
+    if (next.reviewers !== undefined) this.#reviewers = clampReviewers(next.reviewers)
+  }
+  /** Load times for the model list. Milliseconds survive a new run; the
+   *  open loader does not. */
+  get loadClock(): LoadClock { return this.#clock }
   /** The pictures from the last run, newest run only. */
   get results(): readonly ComfyResult[] { return this.#results }
+  get awaitingNames(): boolean { return this.#awaitingNames }
 
   #setJob(job: ComfyJob): void {
     this.#job = job
@@ -154,6 +213,45 @@ export class ComfyService extends EventTarget {
     if (first) return first
     const drone = ioc<{ selectedLabels?: string[] }>('@diamondcoreprocessor.com/TileSelectionDrone')
     return drone?.selectedLabels?.[0] ?? null
+  }
+
+  /**
+   * A new prompt for the form. `words` uses common picture words. `tile`
+   * uses the selected tile. Nothing selected makes no tile prompt.
+   * Generate stays the participant's own press.
+   */
+  async rollPrompt(kind: string): Promise<string | null> {
+    if (kind === 'words') {
+      this.#clearRollMiss()
+      return promptFromWords()
+    }
+    const cell = this.targetCell()
+    if (!cell) {
+      this.#setJob({ state: 'error', message: 'Select a tile first.' })
+      return null
+    }
+    let props: unknown = {}
+    try { props = await readTilePropertiesAt(this.#segments(), cell) } catch { /* the name still helps */ }
+    const made = promptFromTile(cell, props)
+    if (made) this.#clearRollMiss()
+    return made || null
+  }
+
+  /** A later roll that did make a prompt should not keep the miss sentence. */
+  #clearRollMiss(): void {
+    if (this.#job.state === 'error' && this.#job.message === 'Select a tile first.') {
+      this.#setJob({ state: 'idle', message: '' })
+    }
+  }
+
+  /** Every tile in the selection, in the order they were selected. */
+  selectedCells(): string[] {
+    const selection = ioc<{ selected?: ReadonlySet<string> }>(
+      '@diamondcoreprocessor.com/SelectionService')
+    const named = selection?.selected ? [...selection.selected] : []
+    if (named.length) return named
+    const drone = ioc<{ selectedLabels?: string[] }>('@diamondcoreprocessor.com/TileSelectionDrone')
+    return (drone?.selectedLabels ?? []).filter(name => !!name)
   }
 
   #segments(): readonly string[] {
@@ -207,6 +305,16 @@ export class ComfyService extends EventTarget {
       this.#setJob({ ...this.#job, message: 'a run is already going' })
       return []
     }
+    if (typeof request.fromTile === 'boolean' || typeof request.reviewers === 'number') {
+      this.setHelp({
+        ...(typeof request.fromTile === 'boolean' ? { fromTile: request.fromTile } : {}),
+        ...(typeof request.reviewers === 'number' ? { reviewers: request.reviewers } : {}),
+      })
+    }
+
+    // The local server, and the workflows it can already run, before a graph
+    // is chosen. A down server is a sentence, not a cached empty roster.
+    await readyRecipes()
 
     const workflow: ComfyWorkflowSpec = (request.workflowId ? comfyWorkflow(request.workflowId) : undefined)
       ?? activeWorkflow()
@@ -220,6 +328,97 @@ export class ComfyService extends EventTarget {
       return []
     }
 
+    // A selection means those tiles. One picture each, on the tile itself.
+    // Nothing selected keeps the pictures until the participant names them.
+    this.#awaitingNames = false
+    const painting = cellsToPaint(request.tiles === true, this.selectedCells())
+    if (painting.length) return this.#paintEach(request, painting)
+
+    const results = await this.#produce(request)
+    if (!results.length) return []
+
+    if (request.tiles) {
+      this.#awaitingNames = true
+      this.#setJob({
+        state: 'done',
+        message: results.length === 1
+          ? 'Name the picture to put it on the hive.'
+          : 'Name each picture to put it on the hive.',
+      })
+      EffectBus.emit('comfy:results', { count: results.length, workflow: workflow.id })
+      return results
+    }
+
+    if (request.attach !== false) {
+      const cell = request.cell ?? this.targetCell()
+      if (cell && results[0]) this.attach(results[0], cell)
+    }
+
+    this.#setJob({
+      state: 'done',
+      message: `${results.length} picture${results.length === 1 ? '' : 's'}`,
+    })
+    EffectBus.emit('comfy:results', { count: results.length, workflow: workflow.id })
+    return results
+  }
+
+  /** One picture for each selected tile. A tile leaves the selection when
+   *  its picture lands. The ones still waiting stay selected. The list was
+   *  taken before the first picture, so dropping one does not skip the rest. */
+  async #paintEach(request: ComfyRunRequest, cells: readonly string[]): Promise<readonly ComfyResult[]> {
+    this.#releaseResults()
+    const gathered: ComfyResult[] = []
+    const painted: string[] = []
+    for (let i = 0; i < cells.length; i++) {
+      if (i > 0 && (this.#job.state === 'idle' || this.#job.state === 'error')) break
+      const cell = cells[i] as string
+      let next = request
+      if (request.fromTile === true) {
+        const positive = await this.#helpPositive(cell, request.positive ?? '', request.reviewers)
+        if (positive === null) {
+          if (painted.length && this.#job.state !== 'idle') this.#finishPainted(painted, gathered, request.workflowId)
+          return gathered
+        }
+        if (positive) next = { ...request, positive }
+      }
+      const seed = typeof request.seed === 'number' ? request.seed + i : randomSeed()
+      const progress = cells.length > 1 ? `${cell} (${i + 1}/${cells.length})` : cell
+      const batch = await this.#produce(
+        { ...next, seed, batch: 1, tiles: false, attach: false },
+        progress,
+        false,
+      )
+      const picture = batch[0]
+      if (!picture) {
+        if (painted.length) this.#finishPainted(painted, gathered, request.workflowId)
+        return gathered
+      }
+      this.attach(picture, cell)
+      gathered.push(picture)
+      painted.push(cell)
+      this.#results = gathered.slice()
+      this.#setJob({ state: 'running', message: `"${cell}"` })
+    }
+    this.#finishPainted(painted, gathered, request.workflowId)
+    return gathered
+  }
+
+  #finishPainted(painted: readonly string[], gathered: readonly ComfyResult[], workflowId?: string): void {
+    this.#results = gathered.slice()
+    this.#setJob({
+      state: 'done',
+      message: painted.map(name => `"${name}"`).join(', '),
+    })
+    EffectBus.emit('comfy:results', { count: gathered.length, workflow: workflowId ?? activeWorkflow().id })
+  }
+
+  /**
+   * Queue one graph and bring its pictures back. Does not decide where they
+   * land — the caller paints a selection, makes tiles, or attaches.
+   */
+  async #produce(request: ComfyRunRequest, progress?: string, release = true): Promise<ComfyResult[]> {
+    const workflow: ComfyWorkflowSpec = (request.workflowId ? comfyWorkflow(request.workflowId) : undefined)
+      ?? activeWorkflow()
     const seed = typeof request.seed === 'number' ? request.seed : randomSeed()
     const checkpoint = await this.#resolveCheckpoint(
       request.checkpoint ?? (workflow.seams.checkpoint
@@ -228,28 +427,30 @@ export class ComfyService extends EventTarget {
 
     const graph = applyParams(workflow.graph, workflow.seams, { ...request, seed, checkpoint })
 
-    this.#releaseResults()
-    this.#setJob({ state: 'queued', message: `${workflow.label} — queued` })
+    if (release) this.#releaseResults()
+    const where = progress ? `${workflow.label} — ${progress}` : `${workflow.label} — queued`
+    this.#setJob({ state: 'queued', message: where })
 
     let promptId: string
     try {
+      this.#beginLoads(graph)
       this.#attachSocket()
       promptId = await comfyHost.queue(graph)
     } catch (err) {
+      this.#closeLoad()
       this.#setJob({ state: 'error', message: (err as Error)?.message ?? 'the server refused the workflow' })
       return []
     }
 
-    this.#setJob({ state: 'running', promptId, message: workflow.label })
+    this.#setJob({ state: 'running', promptId, message: progress ? `${workflow.label} — ${progress}` : workflow.label })
 
     const run = await this.#await(promptId)
+    this.#closeLoad()
     if (!run) {
       this.#setJob({ state: 'error', promptId, message: 'the run did not finish' })
       return []
     }
 
-    // The named output node first; anything the run produced otherwise. A
-    // workflow whose save node was renamed still gives back its pictures.
     const files = ComfyHost.filesOf(run, workflow.seams.output?.node).length
       ? ComfyHost.filesOf(run, workflow.seams.output?.node)
       : ComfyHost.filesOf(run)
@@ -265,42 +466,155 @@ export class ComfyService extends EventTarget {
     for (const file of files) {
       const blob = await this.#readFile(file)
       if (!blob || !blob.size) continue
-      // THE ONE GATE ON WHAT ENTERS THE HIVE. Everything past this line
-      // travels — into the store, into a publish, into an adopter's tree — so
-      // an oversized picture is left where it already is (comfy-folder.ts).
+      // Past this line the bytes enter the hive. An oversized picture stays
+      // where ComfyUI wrote it (comfy-folder.ts).
       if (!importable(blob.size)) { refused = tooLargeMessage(blob.size); continue }
       const stored = await storeImageResources(blob)
       if (!stored) continue
-      const result: ComfyResult = { ...stored, file, seed, workflowId: workflow.id }
+      const generationSig = await this.#record(
+        { ...stored, file, seed, workflowId: workflow.id },
+        workflow,
+        { ...request, seed, checkpoint },
+      )
+      const result: ComfyResult = {
+        ...stored, file, seed, workflowId: workflow.id,
+        ...(generationSig ? { generationSig } : {}),
+      }
       results.push(result)
-      await this.#record(result, workflow, { ...request, seed, checkpoint })
     }
 
-    this.#results = results
+    if (release) this.#results = results
     if (!results.length) {
       this.#setJob({ state: 'error', promptId, message: refused || 'the pictures could not be read back' })
       return []
     }
-
-    this.#setJob({
-      state: 'done',
-      promptId,
-      message: `${results.length} picture${results.length === 1 ? '' : 's'}`,
-    })
-    EffectBus.emit('comfy:results', { count: results.length, workflow: workflow.id })
-
-    if (request.attach !== false) {
-      const cell = request.cell ?? this.targetCell()
-      if (cell && results[0]) this.attach(results[0], cell)
-    }
     return results
   }
 
-  /** Stop the run that is going, if one is. */
+  /**
+   * The prompt for one tile: reviewers read its picture and its properties,
+   * Jev picks, and the participant's words stay in. Null means Stop.
+   */
+  async #helpPositive(cell: string, own: string, reviewers: number | undefined): Promise<string | null> {
+    const abort = new AbortController()
+    this.#helpAbort = abort
+    this.#setJob({ state: 'running', message: `choosing a prompt for ${cell}` })
+    try {
+      const context = await this.#tileContext(cell)
+      if (abort.signal.aborted) return null
+      const [{ callModel }, { jevDecision }] = await Promise.all([
+        import('../assistant/llm-dispatch.js'),
+        import('../assistant/jev-decision.service.js'),
+      ])
+      const image = context.image
+      const propose = async (ask: ReviewerAsk): Promise<string> => {
+        const once = async (withImage: boolean): Promise<string> => {
+          const result = await callModel({
+            need: { tier: 'fast' },
+            maxTokens: 200,
+            system: REVIEWER_SYSTEM,
+            messages: [{
+              role: 'user',
+              content: ask.content,
+              ...(withImage && image ? { images: [image] } : {}),
+            }],
+            signal: abort.signal,
+          })
+          return result.text
+        }
+        try {
+          return await once(!!image)
+        } catch (err) {
+          if (abort.signal.aborted || !image) throw err
+          return await once(false)
+        }
+      }
+      const choose = async (options: readonly string[]): Promise<number> => {
+        if (abort.signal.aborted) throw new Error('stopped')
+        if (!jevDecision.readyForHive()) return -1
+        const result = await jevDecision.pickComfy({
+          tile: cell,
+          own: own.trim(),
+          brief: context.brief,
+          options: [...options],
+        }, abort.signal)
+        return result.index < 0 ? -2 : result.index
+      }
+      const positive = await helpedPrompt({
+        own,
+        brief: context.brief,
+        reviewers: reviewers ?? this.#reviewers,
+        propose,
+        choose,
+        stopped: () => abort.signal.aborted,
+      })
+      return abort.signal.aborted ? null : positive
+    } catch {
+      return abort.signal.aborted ? null : own.trim()
+    } finally {
+      if (this.#helpAbort === abort) this.#helpAbort = null
+    }
+  }
+
+  /** Properties in words, plus the picture when its bytes are here. */
+  async #tileContext(cell: string): Promise<{ brief: string; image?: { mime: string; base64: string } }> {
+    let props: unknown = {}
+    try { props = await readTilePropertiesAt(this.#segments(), cell) } catch { /* the name still helps */ }
+    let reading = ''
+    let image: { mime: string; base64: string } | undefined
+    try {
+      const held = ioc<{ getResource?: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+      if (held?.getResource) {
+        for (const sig of tilePictureCandidates(props)) {
+          const blob = await held.getResource(sig)
+          if (!blob || blob.size <= 0) continue
+          const seen = await pictureContext(blob)
+          reading = seen.reading
+          image = seen.image
+          break
+        }
+      }
+    } catch { /* the properties still help */ }
+    return { brief: tileBriefText(cell, props, reading), image }
+  }
+
+  /** Stop the run that is going, if one is. A prompt still being chosen does
+   *  not interrupt the host — that would stop someone else's picture. */
   async cancel(): Promise<void> {
+    if (this.#helpAbort) {
+      this.#helpAbort.abort()
+      this.#helpAbort = null
+      this.#setJob({ state: 'idle', message: 'stopped' })
+      return
+    }
     if (this.#job.state !== 'queued' && this.#job.state !== 'running') return
     await comfyHost.interrupt()
+    this.#closeLoad()
     this.#setJob({ state: 'idle', message: 'stopped' })
+  }
+
+  /** Start timing this graph. Earlier load times stay; the open node does not,
+   *  so the same loader can be measured again. */
+  #beginLoads(graph: ComfyGraph): void {
+    this.#runGraph = graph
+    this.#clock = { ...this.#clock, node: null, file: null, since: 0 }
+    this.#timing = true
+  }
+
+  #noteNode(nodeId: string | null): void {
+    const graph = this.#runGraph
+    if (!graph) return
+    const next = noteExecuting(this.#clock, graph, nodeId, Date.now())
+    if (next === this.#clock) return
+    this.#clock = next
+    EffectBus.emit('comfy:loads', {})
+  }
+
+  /** Close whatever loader is open. A second call is a no-op. */
+  #closeLoad(): void {
+    if (!this.#timing && !this.#clock.file) return
+    this.#timing = false
+    this.#noteNode(null)
   }
 
   #attachSocket(): void {
@@ -308,6 +622,11 @@ export class ComfyService extends EventTarget {
     this.#listening = true
     comfyHost.listen({
       onProgress: progress => {
+        // Step ticks repeat the same node. Only a new node id moves the clock,
+        // and a status frame (no node) must not close the loader.
+        if (this.#timing && typeof progress.node === 'string' && progress.node) {
+          this.#noteNode(progress.node)
+        }
         if (this.#job.state !== 'running' && this.#job.state !== 'queued') return
         const fraction = progress.max ? (progress.value ?? 0) / progress.max : undefined
         this.#setJob({
@@ -317,7 +636,16 @@ export class ComfyService extends EventTarget {
           ...(progress.queued !== undefined ? { queued: progress.queued } : {}),
         })
       },
+      onCached: nodeIds => {
+        const graph = this.#runGraph
+        if (!this.#timing || !graph) return
+        const next = noteCached(this.#clock, graph, nodeIds)
+        if (next === this.#clock) return
+        this.#clock = next
+        EffectBus.emit('comfy:loads', {})
+      },
       onError: (_promptId, message) => {
+        this.#closeLoad()
         if (this.#job.state === 'running' || this.#job.state === 'queued') {
           this.#setJob({ state: 'error', message })
         }
@@ -367,19 +695,31 @@ export class ComfyService extends EventTarget {
       smallFlatSig: result.smallFlatSig,
       url: null,
       type: 'image',
+      ...(result.generationSig ? { generationSig: result.generationSig } : {}),
     })
+    this.#dropSelected(target)
     EffectBus.emit('activity:log', { message: `picture on "${target}"`, icon: '◈' })
     return true
   }
 
+  /** The tile's picture just changed. It is no longer part of the batch. */
+  #dropSelected(label: string): void {
+    ioc<{ remove?: (label: string) => void }>(
+      '@diamondcoreprocessor.com/SelectionService')?.remove?.(label)
+  }
+
   /** Arm the command-line chevron slot with a result already in the store —
    *  the sigs are already known, so this skips `storeImageResources` entirely
-   *  rather than re-hashing bytes `run()` or `keep()` just hashed. */
-  #arm(result: ComfyResult): void {
+   *  rather than re-hashing bytes `run()` or `keep()` just hashed.
+   *
+   *  `preview` is false when a tile is about to be created from this arm.
+   *  Dismissing the arm revokes its object URL, and that URL is also the
+   *  panel thumbnail. */
+  #arm(result: ComfyResult, preview = true): void {
     EffectBus.emit('command:arm-resource', {
       armId: null,
       atTop: false,
-      previewUrl: result.previewUrl,
+      previewUrl: preview ? result.previewUrl : '',
       largeSig: result.largeSig,
       smallPointSig: result.smallPointSig,
       smallFlatSig: result.smallFlatSig,
@@ -387,7 +727,59 @@ export class ComfyService extends EventTarget {
       type: 'image',
       attachment: null,
       name: null,
+      ...(result.generationSig ? { generationSig: result.generationSig } : {}),
     })
+  }
+
+  /**
+   * Put one finished picture on a new tile under the name the participant
+   * typed. A blank name and a reserved word make nothing. The command line
+   * is the create door, so a name it refuses leaves the picture unnamed.
+   */
+  async placeNamed(index: number, raw: string): Promise<boolean> {
+    const name = raw.trim()
+    const parts = name.split('/').map(part => part.trim()).filter(Boolean)
+    if (!parts.length) {
+      this.#setJob({ state: 'error', message: 'Type a name first.' })
+      return false
+    }
+    const reserved = parts.find(part => isReservedPoolWord(part))
+    if (reserved) {
+      this.#setJob({ state: 'error', message: `"${reserved}" is a reserved word. Choose another name.` })
+      return false
+    }
+    const result = this.#results[index]
+    if (!result || result.placedAs) return false
+    await this.#stampName(result, name)
+    this.#arm(result, false)
+    const ok = await Promise.race([
+      createTile(name),
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 20_000)),
+    ])
+    if (!ok) {
+      this.#arm(result, true)
+      this.#setJob({ state: 'error', message: 'That name was not accepted.' })
+      return false
+    }
+    result.placedAs = name
+    this.#awaitingNames = this.#results.some(one => !one.placedAs)
+    this.#setJob({ state: 'done', message: `"${name}" is on the hive` })
+    EffectBus.emit('activity:log', { message: `"${name}" is a tile`, icon: '◈' })
+    this.#selectTiles(this.#results.flatMap(one => one.placedAs ? [one.placedAs] : []))
+    return true
+  }
+
+  #selectTiles(names: readonly string[]): void {
+    const selection = ioc<{
+      clear: () => void
+      add: (label: string) => void
+      setActive: (label: string) => void
+    }>('@diamondcoreprocessor.com/SelectionService')
+    if (!selection) return
+    selection.clear()
+    for (const name of names) selection.add(name)
+    const last = names[names.length - 1]
+    if (last) selection.setActive(last)
   }
 
   /**
@@ -439,10 +831,10 @@ export class ComfyService extends EventTarget {
     return await held.getPool(COMFY_GENERATIONS_POOL)
   }
 
-  /** Write "these exact bytes were made like this", named by the bytes. */
-  async #record(result: ComfyResult, workflow: ComfyWorkflowSpec, params: ComfyParams): Promise<void> {
-    const dir = await this.#pool()
-    if (!dir) return
+  /** Write "these exact bytes were made like this", named by the bytes.
+   *  The same JSON is a resource, so the tile revision can name it.
+   *  The participant's name is written later, when they give the picture one. */
+  async #record(result: ComfyResult, workflow: ComfyWorkflowSpec, params: ComfyParams): Promise<string | null> {
     const record: ComfyGenerationRecord = {
       kind: 'comfy-generation@1',
       workflow: workflow.id,
@@ -457,12 +849,34 @@ export class ComfyService extends EventTarget {
       ...(params.checkpoint ? { model: params.checkpoint } : {}),
       at: Date.now(),
     }
+    return this.#persistGeneration(result.largeSig, record)
+  }
+
+  /** The name they typed, on the same record the tile revision will name. */
+  async #stampName(result: ComfyResult, name: string): Promise<void> {
+    const existing = await this.generationOf(result.largeSig)
+      ?? (result.generationSig ? await this.#generationNamed({ generation: result.generationSig }) : null)
+    if (!existing) return
+    const sig = await this.#persistGeneration(result.largeSig, { ...existing, name })
+    if (sig) result.generationSig = sig
+  }
+
+  /** One writer for the pool file and the resource. The pool member stays
+   *  keyed by the image signature; the resource signature is what a tile names. */
+  async #persistGeneration(imageSig: string, record: ComfyGenerationRecord): Promise<string | null> {
+    const bytes = new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer
+    const dir = await this.#pool()
+    if (dir) {
+      try {
+        const handle = await dir.getFileHandle(imageSig, { create: true })
+        const writable = await handle.createWritable()
+        try { await writable.write(bytes) } finally { await writable.close() }
+      } catch { /* a picture without its pool record is still a picture */ }
+    }
     try {
-      const bytes = new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer
-      const handle = await dir.getFileHandle(result.largeSig, { create: true })
-      const writable = await handle.createWritable()
-      try { await writable.write(bytes) } finally { await writable.close() }
-    } catch { /* a picture without its record is still a picture */ }
+      const sig = await store()?.putResource?.(new Blob([bytes], { type: 'application/json' }))
+      return sig && /^[0-9a-f]{64}$/.test(sig) ? sig : null
+    } catch { return null }
   }
 
   /** What made these bytes, if this hive knows. */
@@ -478,10 +892,25 @@ export class ComfyService extends EventTarget {
     } catch { return null }
   }
 
+  /** The record a tile revision names, when the properties carry one.
+   *  `getResource` follows a Life incidence to the record. */
+  async #generationNamed(props: unknown): Promise<ComfyGenerationRecord | null> {
+    const sig = (props as { generation?: unknown } | null)?.generation
+    if (typeof sig !== 'string' || !/^[0-9a-f]{64}$/.test(sig)) return null
+    try {
+      const blob = await store()?.getResource?.(sig)
+      if (!blob) return null
+      const parsed = JSON.parse(await blob.text()) as ComfyGenerationRecord
+      return parsed?.kind === 'comfy-generation@1' ? parsed : null
+    } catch { return null }
+  }
+
   /** What made the picture this tile is wearing. */
   async generationOfCell(cell: string): Promise<ComfyGenerationRecord | null> {
     try {
       const props = await readTilePropertiesAt(this.#segments(), cell)
+      const named = await this.#generationNamed(props)
+      if (named) return named
       for (const sig of tilePictureCandidates(props)) {
         const record = await this.generationOf(sig)
         if (record) return record

@@ -34,6 +34,7 @@ import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
 import { galleryImageSigsAt, holdPictures } from '../commands/lightbox-kind.js'
+import { imageWallHasChoice } from './image-collection.js'
 import { fetchThroughContentHop, terminalContentSig } from '../presentation/tiles/artifact-content.js'
 import { meaningPoolImageCandidates, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
 import { imageChoiceWriteTargets } from './image-choice-targets.js'
@@ -268,6 +269,18 @@ export class ImageChoiceDrone extends Drone {
       mine: imageSig === worn,
       held: true,
     }))
+    // The picture the tile wears belongs on the wall even when the collection
+    // has not recorded it yet.
+    if (worn && !entries.some(entry => entry.previewSig === worn)) {
+      entries.unshift({
+        props: { imageSig: worn },
+        previewSig: worn,
+        who: this.#t('images.yours', 'yours'),
+        mine: true,
+        held: true,
+      })
+    }
+    if (entries.length > MAX_CHOICES) entries.length = MAX_CHOICES
 
     // Cross-host variants: the pool `sign(name)` on every known host. Nothing
     // more is needed to share pictures between domains than the tile's name.
@@ -279,7 +292,9 @@ export class ImageChoiceDrone extends Drone {
       if (entries.some(entry => entry.previewSig === candidate.previewSig)) continue
       entries.push({ props: candidate.props, previewSig: candidate.previewSig, who: this.#who(candidate), mine: false, held: false, fresh: fresh.has(candidate.previewSig) })
     }
-    if (entries.length < 2) {
+    // One picture the tile is not wearing is still a choice — a paste onto
+    // the tile that has not been picked yet. The worn picture alone is not.
+    if (!imageWallHasChoice(entries)) {
       this.#open_ = false
       this.emitEffect('toast:show', { type: 'info', message: this.#t('images.none', 'Only one picture for this tile — nothing to choose from yet.') })
       return

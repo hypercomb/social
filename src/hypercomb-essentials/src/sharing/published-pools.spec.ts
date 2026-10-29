@@ -116,6 +116,14 @@ describe('probePublishedPool', () => {
     expect(accepted).toHaveLength(2)
   })
 
+  it('does not probe the public byte mirror — that GET 404s on every boot', async () => {
+    const spy = vi.fn(async () => new Response('', { status: 404 }))
+    vi.stubGlobal('fetch', spy)
+    EffectBus.emit('domain:learned', { host: 'hypercomb.com' })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(spy).not.toHaveBeenCalled()
+  })
+
   it('learning a domain never places — the domain:learned trigger only probes', async () => {
     const { members, poolSig, index } = await domain([{ id: 'one' }])
     serve('learned.example', poolSig, index, members)

@@ -18,9 +18,27 @@ forward — whether the conversation is on screen or not, after a refresh, on
 another model when one falls off — until the work is answered, or it is honestly
 waiting on the participant, which the rail then says.
 
-No orchestrator pushes conversations along and nothing wakes them on a timer
-for its own sake: the record says what is owed and why, and the runner acts on
-what the record says.
+Revised 2026-10-27, Jaime: *"the chats should never fall idle, if anything an
+orchestrator should figure out that things are stalled and help you pick up
+where you left off so we are not stuck."*
+
+A conversation that has stalled — the same leftover twice with nothing done,
+two idle legs, or three empty promises — is not left for the participant to
+type "continue". The orchestrator reads that record and re-arms it: state
+`continue`, why `unstick`, and a `left` that names what is still open and asks
+for a different concrete step. A hold is the same kind of break: the leg ended
+without recording the rest, so it is picked up rather than left idle. The
+window sends that word for the conversation on screen, and sends it when that
+conversation is opened or resumed. A chat with no owed record, quiet, whose
+workflow is current and still has open steps, is armed the same way, and those
+steps stay owed past the first few pickups. The request budget is what stops
+the work. A page change that was only read still owes the write. A question,
+a model that gave up, an interrupted leg, a spent budget, and a manager's ask
+(`asker`) stay as they are, and a park writes that record so the chat does not
+look finished. The same continue word is not replayed. The orchestrator still
+does not retire another agent on a timer. Phase 1 still sends from the
+conversation on screen; the record is what lets every other stalled chat carry
+on once it is that one.
 
 ## What the audit found
 

@@ -198,6 +198,8 @@ const tell = (report: ClaimReport): void => {
     case 'active':
       toast(say('domain.claim.active', '{domain} is yours. Any tile can be switched on there in the Publish panel.', { domain: report.domain }), 'success', 10_000)
       // The hosts drone is the community pool's one writer; it normalizes the zone.
+      // The claim does not change the outgoing firewall. Block and Resume there
+      // are a click in the hosts panel.
       EffectBus.emit('hosts:add', { zone: report.domain })
       EffectBus.emit('domain:claimed', { domain: report.domain })
       return

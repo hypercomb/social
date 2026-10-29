@@ -63,13 +63,14 @@ export const APP_HREF = 'https://hypercomb.io/'
 
 /** The platform's own doors. A host is a directory of files that somebody
  *  chose to serve; these say what the files are for, and they are the same
- *  on every host because they are about the platform, not the host. */
+ *  on every host because they are about the platform, not the host.
+ *  Licensing lives under `src/documentation`. The repository root has no
+ *  `documentation` folder, and a link there is a 404. */
 export const PLATFORM_LINKS: readonly WelcomeLink[] = [
   { label: 'the tour', href: 'https://hypercomb.com/tour/', note: 'what this is, in nineteen minutes', icon: 'tour' },
   { label: 'hypercomb.io', href: APP_HREF, note: 'the app — start a hive of your own', icon: 'app' },
-  { label: 'documentation', href: 'https://github.com/hypercomb/social/tree/main/documentation', note: '', icon: 'docs' },
   { label: 'source', href: 'https://github.com/hypercomb/social', note: 'AGPL-3.0', icon: 'source' },
-  { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/documentation/licensing.md', note: '', icon: 'docs' },
+  { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/src/documentation/licensing.md', note: '', icon: 'docs' },
 ]
 
 const text = (value: unknown, max: number): string =>

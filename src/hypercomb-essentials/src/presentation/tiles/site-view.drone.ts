@@ -31,6 +31,7 @@ import { closeSiteContextMenu, isOnSiteContextMenu, openSiteContextMenu, type Si
 import { browserKeepsMenu, isLongPressMenu } from '../../navigation/browser-menu.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
 import { myHiveOrigin, visitorDoorHref } from '../../sharing/visitor-door.view.js'
+import { listTrialVersions, pageHome, releaseTrial, stageTrial, trialBase, trialOf, trialOrigin, trialVersionLabel } from '../../files/try-page.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -224,6 +225,8 @@ export class SiteViewDrone extends Drone {
    *  run, no resources stream. Cleared once the feature is verified (or on
    *  exit / a switch to a local page). */
   #reviewOverlay: HTMLDivElement | null = null
+  /** A model-written page, shown as a door to its sandbox instead of mounted. */
+  #trialOverlay: HTMLDivElement | null = null
   #featureVerifiedBound = false
   /** The current site's toggle identity, mirrored from ViewBee's
    *  `view-toggles:changed` so the exit wears the site's own glyph + label;
@@ -638,6 +641,15 @@ export class SiteViewDrone extends Drone {
         this.#teardown()
         return
       }
+
+      const trial = trialOf(cellPageSig)
+      if (trial) {
+        this.#removeReviewGate()
+        this.#teardown()
+        this.#showTrial(cellPageSig, trial, store)
+        return
+      }
+      this.#removeTrial()
 
       const publisher = this.#pagePublisherDomain(cellPageSig)
       if (featureNeedsReview(segments, cellPageSig, publisher)) {
@@ -1221,6 +1233,94 @@ export class SiteViewDrone extends Drone {
     })
   }
 
+  /** The page stays a resource. This card opens it on its own origin. */
+  #showTrial(
+    sig: string,
+    label: string,
+    store: { getResource: (sig: string) => Promise<Blob | null> },
+  ): void {
+    this.#ensureExitOverlay()
+    const base = trialBase(label)
+    const origin = trialOrigin(base)
+    let card = this.#trialOverlay
+    if (!card) {
+      card = document.createElement('div')
+      card.id = 'hc-page-trial'
+      card.style.cssText = REVIEW_GATE_CSS
+      const title = document.createElement('div')
+      title.style.cssText = 'font-size:1.25rem;font-weight:600;color:#eaf3f9'
+      title.textContent = 'This page is a trial'
+      const body = document.createElement('div')
+      body.style.cssText = 'max-width:34rem;line-height:1.5;opacity:.85'
+      body.dataset['trialBody'] = '1'
+      const open = document.createElement('button')
+      open.type = 'button'
+      open.className = 'hc-trial-open'
+      open.textContent = 'Line them up'
+      open.style.cssText = 'margin-top:.5rem;padding:.6rem 1.2rem;border:1px solid rgba(126,182,214,.6);border-radius:var(--hc-radius-control, 2px);background:rgba(126,182,214,.16);color:#eaf3f9;cursor:pointer;font-size:.95rem'
+      const versions = document.createElement('div')
+      versions.className = 'hc-trial-versions'
+      versions.style.cssText = 'display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.4rem'
+      const bring = document.createElement('button')
+      bring.type = 'button'
+      bring.className = 'hc-trial-home'
+      bring.style.cssText = open.style.cssText
+      card.append(title, body, open, versions, bring)
+      document.body.appendChild(card)
+      this.#trialOverlay = card
+    }
+    const body = card.querySelector('[data-trial-body]')
+    const home = pageHome()
+    const place = home.where === 'localhost' ? 'localhost' : home.name
+    if (body) body.textContent = `Versions of this page line up at ${origin}. Each version is its own origin from the same pool, so each one has its own memory. Bringing the page into ${place} is your decision.`
+    const paintVersions = async (): Promise<void> => {
+      const row = card?.querySelector('.hc-trial-versions')
+      if (!row) return
+      const pool = await listTrialVersions(base)
+      row.replaceChildren()
+      for (const version of pool.versions) {
+        const name = trialVersionLabel(base, version)
+        if (!name) continue
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'hc-trial-version'
+        button.textContent = `v${version}`
+        button.style.cssText = 'padding:.35rem .7rem;border:1px solid rgba(126,182,214,.6);border-radius:var(--hc-radius-control, 2px);background:transparent;color:#eaf3f9;cursor:pointer;font-size:.85rem'
+        button.onclick = () => { window.open(`${trialOrigin(name)}/`, '_blank', 'noopener,noreferrer') }
+        row.append(button)
+      }
+    }
+    void paintVersions()
+    const open = card.querySelector('.hc-trial-open') as HTMLButtonElement | null
+    if (open) open.onclick = () => {
+      void (async () => {
+        const blob = await store.getResource(sig).catch(() => null)
+        const staged = blob ? await stageTrial(label, await blob.text()) : { ok: false, version: null, label: base }
+        if (!staged.ok && body) body.textContent = `This hive did not take the page, so ${origin} has nothing to show. Reload the hive and open the sandbox again.`
+        if (!staged.ok) return
+        await paintVersions()
+        window.open(`${origin}/`, '_blank', 'noopener,noreferrer')
+      })()
+    }
+    const bring = card.querySelector('.hc-trial-home') as HTMLButtonElement | null
+    if (bring) {
+      bring.textContent = `Bring it into ${place}`
+      bring.onclick = (event) => {
+        if (!event.isTrusted) return
+        if (!window.confirm(`Bring this page into ${place}? It will run there.`)) return
+        if (!releaseTrial(sig)) return
+        void this.#reconcile()
+      }
+    }
+  }
+
+  #removeTrial(): void {
+    if (this.#trialOverlay) {
+      this.#trialOverlay.remove()
+      this.#trialOverlay = null
+    }
+  }
+
   #removeReviewGate(): void {
     if (this.#reviewOverlay) {
       this.#reviewOverlay.remove()
@@ -1260,6 +1360,7 @@ export class SiteViewDrone extends Drone {
   }
 
   #teardown(): void {
+    this.#removeTrial()
     if (this.#mount) {
       try { this.#mount.unmount() } catch { /* noop */ }
       this.#mount.host.remove()

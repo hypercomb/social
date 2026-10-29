@@ -54,7 +54,7 @@ const lerp = (a: Framing, b: Framing, t: number): Framing => ({
   scale: a.scale * Math.pow(b.scale / a.scale, t),
 })
 
-export type StageLook = Pick<TileLook, 'border' | 'name' | 'showName'>
+export type StageLook = Pick<TileLook, 'border'>
 
 export class CropStage {
   readonly el: HTMLDivElement
@@ -62,7 +62,7 @@ export class CropStage {
 
   #model: ImageEditorService
   #picture: HTMLImageElement
-  #look: StageLook = { border: '', name: '', showName: true }
+  #look: StageLook = { border: '' }
   #onCommit: () => void
 
   /** The framing on screen while a gesture or a settle is in progress. */
@@ -92,7 +92,9 @@ export class CropStage {
     this.#picture.draggable = false
     this.#picture.decoding = 'async'
 
-    this.el.append(this.#picture, this.overlay.svg, this.overlay.name)
+    // The name is not drawn on the tile. The text field edits it, and the hive
+    // still draws it. The band only backs that name, so it stays off too.
+    this.el.append(this.#picture, this.overlay.svg)
 
     this.el.addEventListener('pointerdown', this.#onPointerDown)
     this.el.addEventListener('pointermove', this.#onPointerMove)
@@ -174,10 +176,8 @@ export class CropStage {
     this.overlay.update(size, side, {
       orientation: model.orientation,
       border: this.#look.border,
-      name: this.#look.name,
-      // An empty tile always shows its name — the renderer only hides names
-      // over a picture.
-      showName: this.#look.showName || !hasPicture,
+      name: '',
+      showName: false,
       hasPicture,
       dragging: this.gesturing,
     })

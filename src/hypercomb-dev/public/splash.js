@@ -473,6 +473,9 @@
       setTimeout(function () { unplug(); if (splash.parentNode) splash.parentNode.removeChild(splash); }, 520);
     });
   }
+  // The phone gateway paints over the hive and has to stop this worker.
+  // dismiss() is the only path that terminates it.
+  window.__hcDismissSplash = dismiss;
   // WALL-CLOCK BACKSTOP (frame-independent): the 3-play cap only accrues while
   // frames run, so a hidden/throttled boot could outlive it indefinitely.
   // After 20s real time with no ready signal: rest on click-to-enter (built

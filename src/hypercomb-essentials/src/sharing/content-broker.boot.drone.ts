@@ -429,6 +429,13 @@ const OWNER_SUBTREE_MAX = 8192
 // corruption.
 const BETA_FALLBACK_DOMAINS = ['hypercomb.com', 'hypercomb.com/content'] as const
 
+// The app shell. It answers every `/<sig>` with the page and sends no
+// Access-Control-Allow-Origin to another origin, so a localhost hive that
+// treated it as a content host paid a CORS error per signature and waited
+// on that failure before the cascade could move on (localhost:4250, the
+// guide pass that logged one blocked fetch per atom). Never a byte source.
+const SHELL_HOSTS = new Set(['hypercomb.io', 'www.hypercomb.io'])
+
 export type ContentType = 'layer' | 'resource' | 'dependency' | 'bee'
 
 // Visuals-by-composedSig is the second flavor of fetch this drone
@@ -649,6 +656,31 @@ export class ContentBrokerDrone extends Drone {
   // fires for a host we keep missing against.
   #hostLegacyDead = new Set<string>()
 
+  // A host that threw (CORS, network, the probe timeout) is down for a
+  // cooldown. One failure covers every signature still in this burst and
+  // the ones that follow; a host that answers, even with 404, is not down.
+  // The cooldown doubles up to MAX_MISS_TTL_MS and clears when the host speaks.
+  #hostUnreachableUntil = new Map<string, number>()
+  #hostUnreachableBackoff = new Map<string, number>()
+  // Hosts that have returned an HTTP response this session.
+  #hostSpoke = new Set<string>()
+  // The first in-flight contact with a host that has not spoken yet. Later
+  // signatures wait on it, so a dead host cannot be asked once per signature
+  // before anyone has seen it fail.
+  #hostContact = new Map<string, { promise: Promise<void>; release: () => void }>()
+
+  // An unattributed 404 says this signature is not on that host. It does not
+  // say the next local miss is there either. Learned publishers stay quiet
+  // for further unattributed asks (the cooldown doubles like a throw). A
+  // signature that names the host is still asked. The public heap is not
+  // quieted: the next unattributed signature might be there.
+  #unattributedQuietUntil = new Map<string, number>()
+  #unattributedQuietBackoff = new Map<string, number>()
+  // One unattributed probe per host. The rest of a burst waits, and a 404
+  // quiets the host before they start, so a page of local misses cannot
+  // log one 404 per signature per publisher.
+  #unattributedSlot = new Map<string, { promise: Promise<void>; release: () => void }>()
+
   // Full-cascade miss window per sig (egg semantics — see fetchBySig).
   // Cleared by new knowledge (#noteDomains / noteDomain) or lapse.
   #fetchMissUntil = new Map<string, number>()
@@ -768,7 +800,9 @@ export class ContentBrokerDrone extends Drone {
     // Re-seed learned publisher hosts from the persisted list so adopted
     // content keeps resolving across reloads (see #sessionKnownDomains).
     queueMicrotask(() => {
-      for (const host of this.#loadPersistedHosts()) this.#sessionKnownDomains.add(host)
+      for (const host of this.#loadPersistedHosts()) {
+        if (!this.#isShellHost(host)) this.#sessionKnownDomains.add(host)
+      }
     })
   }
 
@@ -935,10 +969,18 @@ export class ContentBrokerDrone extends Drone {
   // grows monotonically until the drone restarts.
   #noteDomains = (sig: string, domains: string[], inferred = false): void => {
     if (!domains.length) return
+    // Domain tags arrive in several equivalent forms (bare host, https://,
+    // or wss://). Store the same fetch target only once so a re-announcement
+    // with a different scheme cannot masquerade as new knowledge and reopen
+    // a missing signature's backoff window.
+    const normalizedDomains = domains
+      .map(domain => this.#domainToHost(String(domain ?? '')))
+      .filter(domain => domain && !this.#isShellHost(domain))
+    if (!normalizedDomains.length) return
     const map = inferred ? this.#inferredDomainsBySig : this.#knownDomainsBySig
     const set = map.get(sig) ?? new Set<string>()
     const before = this.getKnownDomains(sig).length
-    for (const d of domains) set.add(d)
+    for (const domain of normalizedDomains) set.add(domain)
     map.set(sig, set)
     // Did we actually LEARN anything? Re-hearing a host we already had is not
     // new knowledge, and treating it as such is a retry storm: the closure
@@ -950,7 +992,7 @@ export class ContentBrokerDrone extends Drone {
     const learnedSomething = this.getKnownDomains(sig).length > before
     // The HOST half of the knowledge is durable: persist + hand to the SW so
     // reloads and DOM-side /@resource/ fetches can still reach the publisher.
-    for (const d of domains) this.#learnHost(d)
+    for (const domain of normalizedDomains) this.#learnHost(domain)
     // New address knowledge for this sig — its egg may now hatch; lift
     // the miss window AND reset the backoff so the next ask re-dials
     // immediately (not on the backed-off schedule).
@@ -988,7 +1030,7 @@ export class ContentBrokerDrone extends Drone {
    *  Idempotent per host; a no-op for hosts already known this session. */
   #learnHost = (raw: string): void => {
     const host = this.#domainToHost(raw)
-    if (!host || this.#sessionKnownDomains.has(host)) return
+    if (!host || this.#isShellHost(host) || this.#sessionKnownDomains.has(host)) return
     this.#sessionKnownDomains.add(host)
     try {
       const list = [host, ...this.#loadPersistedHosts().filter(h => h !== host)]
@@ -1017,7 +1059,7 @@ export class ContentBrokerDrone extends Drone {
         this.#domainToHost(this.#getSelfDomain()),
         ...this.#getCommunityDomains(),
         ...this.#sessionKnownDomains,
-      ].filter(Boolean))]
+      ].filter(domain => domain && !this.#isShellHost(domain)))]
       if (!domains.length) return
       const post = (target: ServiceWorker | null | undefined): void => {
         target?.postMessage({ type: 'hc:sw:domains', domains })
@@ -1037,7 +1079,7 @@ export class ContentBrokerDrone extends Drone {
     ...this.#getCommunityDomains(),
     ...this.#sessionKnownDomains,
     ...this.#loadPersistedHosts(),
-  ].filter(Boolean))]
+  ].filter(domain => domain && !this.#isShellHost(domain)))]
 
   /** Record a full-cascade miss for `s` with exponential backoff: first miss
    *  suppresses re-dialing for FETCH_MISS_TTL_MS, each consecutive miss doubles
@@ -1084,13 +1126,135 @@ export class ContentBrokerDrone extends Drone {
 
   // Map a domain advertisement (which may be wss://host, https://host,
   // or bare host) to a hostname suitable for building HTTPS URLs.
-  // Strips scheme prefix, trims trailing slash.
+  // Strips scheme prefix, trims trailing slash, lowercases, and drops a
+  // trailing dot on the name. Two spellings of one host must be one entry:
+  // a case or dot variant used to look like new knowledge and reopen every
+  // miss window for that signature.
   #domainToHost = (domain: string): string => {
-    return String(domain ?? '')
-      .replace(/^wss?:\/\//, '')
-      .replace(/^https?:\/\//, '')
+    const raw = String(domain ?? '')
+      .replace(/^wss?:\/\//i, '')
+      .replace(/^https?:\/\//i, '')
       .replace(/\/+$/, '')
       .trim()
+      .toLowerCase()
+    if (!raw) return ''
+    const slash = raw.indexOf('/')
+    const head = slash === -1 ? raw : raw.slice(0, slash)
+    const path = slash === -1 ? '' : raw.slice(slash)
+    if (head.startsWith('[')) return `${head}${path}`
+    const colon = head.lastIndexOf(':')
+    const name = (colon === -1 ? head : head.slice(0, colon)).replace(/\.+$/, '')
+    const port = colon === -1 ? '' : head.slice(colon)
+    return name ? `${name}${port}${path}` : ''
+  }
+
+  /** The app shell (hypercomb.io) never serves a content byte. */
+  #isShellHost = (host: string): boolean => {
+    const head = String(host ?? '').split('/')[0] ?? ''
+    const name = head.startsWith('[') ? head : head.replace(/:\d+$/, '')
+    return SHELL_HOSTS.has(name)
+  }
+
+  #hostIsDown = (host: string): boolean => {
+    const until = this.#hostUnreachableUntil.get(host) ?? 0
+    if (!until) return false
+    if (Date.now() >= until) {
+      this.#hostUnreachableUntil.delete(host)
+      return false
+    }
+    return true
+  }
+
+  /** True when this caller owns the first contact. Synchronous, so a burst
+   *  of signatures has exactly one leader. */
+  #claimHostContact = (host: string): boolean => {
+    if (this.#hostSpoke.has(host) || this.#hostContact.has(host)) return false
+    let release!: () => void
+    const promise = new Promise<void>(resolve => { release = resolve })
+    this.#hostContact.set(host, { promise, release })
+    return true
+  }
+
+  #waitHostContact = (host: string, cancelled: AbortSignal): Promise<void> => {
+    const contact = this.#hostContact.get(host)
+    if (!contact || cancelled.aborted) return Promise.resolve()
+    return new Promise(resolve => {
+      const done = (): void => resolve()
+      void contact.promise.then(done, done)
+      cancelled.addEventListener('abort', done, { once: true })
+    })
+  }
+
+  /** `true` the host answered. `false` it threw. `null` no verdict (the
+   *  probe was cancelled because another host already won). */
+  #settleHostContact = (host: string, verdict: true | false | null): void => {
+    if (verdict === true) {
+      this.#hostSpoke.add(host)
+      this.#hostUnreachableUntil.delete(host)
+      this.#hostUnreachableBackoff.delete(host)
+    } else if (verdict === false && !this.#hostSpoke.has(host)) {
+      const prev = this.#hostUnreachableBackoff.get(host) ?? 0
+      const ttl = prev ? Math.min(prev * 2, MAX_MISS_TTL_MS) : FETCH_MISS_TTL_MS
+      this.#hostUnreachableBackoff.set(host, ttl)
+      this.#hostUnreachableUntil.set(host, Date.now() + ttl)
+    }
+    const contact = this.#hostContact.get(host)
+    if (!contact) return
+    this.#hostContact.delete(host)
+    contact.release()
+  }
+
+  /** The public heap. A 404 here is per signature: the next one may be there. */
+  #isBetaMirror = (host: string): boolean =>
+    (BETA_FALLBACK_DOMAINS as readonly string[]).includes(host)
+
+  #unattributedQuiet = (host: string): boolean => {
+    if (this.#isBetaMirror(host)) return false
+    const until = this.#unattributedQuietUntil.get(host) ?? 0
+    if (!until) return false
+    if (Date.now() >= until) {
+      this.#unattributedQuietUntil.delete(host)
+      return false
+    }
+    return true
+  }
+
+  #noteUnattributedMiss = (host: string): void => {
+    if (!host || this.#isBetaMirror(host)) return
+    const prev = this.#unattributedQuietBackoff.get(host) ?? 0
+    const ttl = prev ? Math.min(prev * 2, MAX_MISS_TTL_MS) : FETCH_MISS_TTL_MS
+    this.#unattributedQuietBackoff.set(host, ttl)
+    this.#unattributedQuietUntil.set(host, Date.now() + ttl)
+  }
+
+  #clearUnattributedQuiet = (host: string): void => {
+    this.#unattributedQuietUntil.delete(host)
+    this.#unattributedQuietBackoff.delete(host)
+  }
+
+  #claimUnattributedSlot = (host: string): boolean => {
+    if (this.#unattributedSlot.has(host)) return false
+    let release!: () => void
+    const promise = new Promise<void>(resolve => { release = resolve })
+    this.#unattributedSlot.set(host, { promise, release })
+    return true
+  }
+
+  #waitUnattributedSlot = (host: string, cancelled: AbortSignal): Promise<void> => {
+    const slot = this.#unattributedSlot.get(host)
+    if (!slot || cancelled.aborted) return Promise.resolve()
+    return new Promise(resolve => {
+      const done = (): void => resolve()
+      void slot.promise.then(done, done)
+      cancelled.addEventListener('abort', done, { once: true })
+    })
+  }
+
+  #releaseUnattributedSlot = (host: string): void => {
+    const slot = this.#unattributedSlot.get(host)
+    if (!slot) return
+    this.#unattributedSlot.delete(host)
+    slot.release()
   }
 
   // Flat root sig-pool — ONE type-agnostic route. The typed dirs
@@ -1192,7 +1356,7 @@ export class ContentBrokerDrone extends Drone {
     const seen = new Set<string>()
     const push = (raw: string): void => {
       const host = this.#domainToHost(raw)
-      if (!host || seen.has(host)) return
+      if (!host || seen.has(host) || this.#isShellHost(host) || this.#hostIsDown(host)) return
       seen.add(host)
       ordered.push(host)
     }
@@ -1210,7 +1374,7 @@ export class ContentBrokerDrone extends Drone {
     for (const [wave, map] of [[0, this.#knownDomainsBySig], [1, this.#inferredDomainsBySig]] as const) {
       for (const domain of map.get(sig) ?? []) {
         const host = this.#domainToHost(domain)
-        if (!host || claimed.has(host)) continue
+        if (!host || claimed.has(host) || this.#isShellHost(host) || this.#hostIsDown(host)) continue
         claimed.add(host)
         waves[wave]!.push(host)
       }
@@ -1254,13 +1418,54 @@ export class ContentBrokerDrone extends Drone {
     // acceptance — a wrong-bytes fallback is rejected like any other tier.
     for (const host of this.#getFallbackDomains()) push(host)
 
-    waves.push(ordered.filter(host => !claimed.has(host)))
+    // Learned publishers that already 404'd an unattributed signature stay
+    // out of this wave. Attributed and inferred waves above still ask them.
+    waves.push(ordered.filter(host => !claimed.has(host) && !this.#unattributedQuiet(host)))
     if (waves.every(wave => wave.length === 0)) return null
 
     // Start at most three hosts in preference order; the first verified
     // response wins and cancels outstanding probes. A dead host must not
     // block a healthy publisher behind repeated multi-second timeouts.
-    const probe = async (host: string, cancelled: AbortSignal): Promise<Uint8Array | null> => {
+    const probe = async (host: string, cancelled: AbortSignal, unattributed = false): Promise<Uint8Array | null> => {
+      if (this.#isShellHost(host) || this.#hostIsDown(host)) return null
+      if (unattributed && this.#unattributedQuiet(host)) return null
+      // The first signature to touch a silent host is the leader. Everyone
+      // else waits for that one contact: a CORS failure or a timeout then
+      // silences the host for the cooldown, instead of one console error
+      // and one stalled probe per signature. A 404 leaves the host up. It
+      // quiets only further unattributed asks — see #noteUnattributedMiss.
+      let leader = false
+      while (!this.#hostSpoke.has(host) && !this.#hostIsDown(host) && !cancelled.aborted) {
+        if (this.#claimHostContact(host)) { leader = true; break }
+        await this.#waitHostContact(host, cancelled)
+      }
+      if (cancelled.aborted || this.#hostIsDown(host)) return null
+      if (unattributed && this.#unattributedQuiet(host)) return null
+      // One unattributed probe at a time. A burst of local misses waits
+      // here, and the 404 quiets the host before the waiters ask.
+      const holdSlot = unattributed && !this.#isBetaMirror(host)
+      let slot = false
+      if (holdSlot) {
+        while (!cancelled.aborted) {
+          if (this.#unattributedQuiet(host)) return null
+          if (this.#claimUnattributedSlot(host)) { slot = true; break }
+          await this.#waitUnattributedSlot(host, cancelled)
+        }
+        if (!slot || cancelled.aborted || this.#unattributedQuiet(host)) {
+          if (slot) this.#releaseUnattributedSlot(host)
+          return null
+        }
+      }
+      let settled = false
+      let sawResponse = false
+      let threw = false
+      let notFound = false
+      const settle = (verdict: true | false | null): void => {
+        if (!leader || settled) return
+        settled = true
+        this.#settleHostContact(host, verdict)
+      }
+      try {
       // Loopback hosts are served over plain http — the content-side analog
       // of the mesh's allow-loopback. Real domains always use https.
       const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
@@ -1309,12 +1514,17 @@ export class ContentBrokerDrone extends Drone {
             cache: tryPath === flatPath ? 'default' : 'no-store',
             signal: probeCtrl.signal,
           })
+          sawResponse = true
           if (!res.ok) {
             if (tryPath === flatPath && res.status === 404) flatMissed = true
-            if (tryPath === path && flatMissed && res.status === 404) this.#hostLegacyDead.add(host)
+            if (tryPath === path && flatMissed && (res.status === 404 || res.status === 410)) this.#hostLegacyDead.add(host)
             // 404 = the host answered but doesn't have it; anything else
             // (5xx, 403, …) = the host isn't usefully reachable for bytes.
-            this.#mintOutcome(host, res.status === 404 ? 'not-found' : 'unreachable')
+            // Hold the leader through a not-found so the other shape is
+            // tried before anyone else starts the same miss.
+            if (res.status === 404 || res.status === 410) notFound = true
+            else settle(true)
+            this.#mintOutcome(host, res.status === 404 || res.status === 410 ? 'not-found' : 'unreachable')
             continue
           }
           // SPA fallback guard: sig-addressed bytes are never text/html —
@@ -1322,9 +1532,12 @@ export class ContentBrokerDrone extends Drone {
           // origin 200s with index.html). Health-wise this IS a not-found:
           // the host answered, it just doesn't serve this sig.
           if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) {
+            notFound = true
             this.#mintOutcome(host, 'not-found')
             continue
           }
+          notFound = false
+          settle(true)
           // Capability memo: this host serves real (non-HTML) bytes on this
           // URL shape — remember it and stop probing the other shape. Set
           // before verification: even mismatched bytes prove the shape.
@@ -1358,6 +1571,7 @@ export class ContentBrokerDrone extends Drone {
           this.#mintOutcome(host, 'ok')
           return bytes
         } catch (err) {
+          threw = true
           if (cancelled.aborted) return null
           // network error / CORS / cert issue / probe timeout — try next
           // path / host. Our own probe abort is the one distinguishable
@@ -1374,10 +1588,20 @@ export class ContentBrokerDrone extends Drone {
         }
       }
       return null
+      } finally {
+        // Record the miss before releasing waiters. A 404 observed before
+        // a cancel still counts: this signature is not there.
+        if (unattributed && notFound) this.#noteUnattributedMiss(host)
+        if (sawResponse) settle(true)
+        else if (threw && !cancelled.aborted) settle(false)
+        else settle(null)
+        if (slot) this.#releaseUnattributedSlot(host)
+      }
     }
-    for (const wave of waves) {
-      if (wave.length === 0) continue
-      const hit = await firstAvailableHost(wave, probe)
+    for (let i = 0; i < waves.length; i++) {
+      const wave = waves[i]
+      if (!wave || wave.length === 0) continue
+      const hit = await firstAvailableHost(wave, (host, signal) => probe(host, signal, i === waves.length - 1))
       if (hit) return hit
     }
     return null
@@ -1412,12 +1636,20 @@ export class ContentBrokerDrone extends Drone {
    */
   public noteDomain = (domain: string): void => {
     const host = this.#domainToHost(String(domain ?? ''))
-    if (host) {
+    if (host && !this.#isShellHost(host)) {
+      // The adopt handoff names this host again. Local misses that quieted
+      // it must not hide the signatures that handoff is about to read.
+      this.#clearUnattributedQuiet(host)
+      const isNewFetchSource = !this.#sessionKnownDomains.has(host)
       this.#learnHost(host)   // session set + persisted list + service worker
       // A new session-wide fetch source can satisfy ANY pending egg —
       // clear all miss windows + backoff (rare event: adopt handoff, config).
-      this.#fetchMissUntil.clear()
-      this.#missBackoff.clear()
+      // Re-announcing an existing source is not new knowledge and must not
+      // turn every unresolved signature into an immediate retry.
+      if (isNewFetchSource) {
+        this.#fetchMissUntil.clear()
+        this.#missBackoff.clear()
+      }
     }
   }
 

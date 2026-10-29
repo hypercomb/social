@@ -19,6 +19,9 @@
 // pool, written through the hosts window's own effects (`hosts:add`,
 // `hosts:remove`), so the window and this word can never disagree.
 //
+// The word does not open or close the outgoing firewall. That list moves
+// when the person clicks Block or Resume in the hosts panel.
+//
 // Not follow.drone.ts: that is following a PARTICIPANT around the hive (you
 // go where they go). This is following a DOMAIN (you read what it publishes).
 

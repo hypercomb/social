@@ -597,8 +597,6 @@
   "images.offered": "由其他主机提供",
   "images.fresh": "新图片 — 尚未查看",
   "images.dismiss": "新图片带有圆环；按 Esc 忽略",
-  "images.held": "已保存在此图块",
-  "images.offered": "由其他主机提供",
   "images.yours": "你的",
   "images.unavailable": "未发送",
   "images.failed": "无法获取该图片 — 未做任何更改。",

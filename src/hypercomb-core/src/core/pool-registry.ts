@@ -144,11 +144,14 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // O(1) by the bytes you are holding). Prompt, seed, workflow and model for
   // anything ComfyUI generated into this hive
   // (essentials/comfy/comfy.service.ts), which is what makes `/comfy reroll`
-  // possible from a tile alone. TRUTH POOL — an act, not a derivation; no
-  // cold client could rebuild "I asked for this" from layers, so it is never
-  // minted from the optimize phase. The ComfyUI ADDRESS is deliberately NOT
-  // in it: a machine address is device-local (hc:comfy:endpoint), and a
-  // record that travels must not name a host the reader does not have.
+  // possible from a tile alone. TRUTH POOL — an act, not a derivation, so
+  // never minted from the optimize phase. An attached picture's tile revision
+  // also names the same JSON, so that history point can be read back. The
+  // pool remains the lookup for a result that never landed, and for pictures
+  // attached before the layer carried the name. The ComfyUI ADDRESS is
+  // deliberately NOT in it: a machine address is device-local
+  // (hc:comfy:endpoint), and a record that travels must not name a host the
+  // reader does not have.
   'comfy:generations',
   // COMFYUI WORKFLOWS THIS HIVE HOLDS — sig-named `comfy-workflow@1` specs
   // (the API-format node graph plus its inferred seams), swept at boot by
@@ -158,6 +161,18 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Content, and small by construction: a workflow is a recipe, never a
   // model — no checkpoint, LoRA or output ever enters the hive through it.
   'comfy:workflows',
+  // PROMPTS THE PARTICIPANT KEPT — one sig-named `comfy-prompt@1` per distinct
+  // state (the words plus the knobs that were set), swept when the Comfy
+  // window asks (essentials/comfy/comfy-prompts.ts). The list shows the
+  // words; the member holds the rest. TRUTH POOL — a keep is an act, not a
+  // derivation, so it is never minted from the optimize phase. Colon-scoped.
+  // Not a published offering: a prompt library is the participant's, the way
+  // `comfy:generations` is, and a host does not hand it out.
+  'comfy:prompts',
+  // THE FORM AS IT WAS LEFT, per model and LoRA set (essentials/comfy/comfy-draft.ts).
+  // Working state, one current record per combination, not a keep and not a
+  // published offering. A move away replaces it. The library stays the save.
+  'comfy:drafts',
   // THE LAYOUTS THIS PARTICIPANT MADE — one sig-named member per saved
   // arrangement, each `{ kind:'layout-creation@1', name, pieceSig }` naming
   // the root layout piece it was designed as

@@ -330,6 +330,73 @@ $accent: #7eb6d6;
   font-variant-numeric: tabular-nums;
 }
 
+// THE BEACON. Pinned above the composer. A live turn pulses. A quiet round
+// stays honey and says how long it has been since the last word. A retry, a
+// budget stop, a give-up, and a wait on you each wear their own mark, and
+// none of them pulse like work that is still arriving.
+.chat-beacon {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55em;
+  margin: 0 0 0.55em;
+  padding: 0.45em 0.7em;
+  border: 1px solid rgba(var(--acc), 0.4);
+  border-radius: var(--hc-radius-card, 3px);
+  background: rgba(var(--acc), 0.1);
+  color: var(--hc-window-ink-loud);
+  font-size: 0.78em;
+  line-height: 1.45;
+}
+
+.chat-beacon-dot {
+  flex: 0 0 auto;
+  width: 0.55em;
+  height: 0.55em;
+  margin-top: 0.35em;
+  border-radius: 50%;
+  background: var(--hc-window-accent, #{$accent});
+  animation: chat-beacon-pulse 1.4s ease-in-out infinite;
+}
+
+.chat-beacon-text {
+  min-width: 0;
+}
+
+.chat-beacon[data-state='quiet'],
+.chat-beacon[data-state='retry'],
+.chat-beacon[data-state='carry'],
+.chat-beacon[data-state='steps'] {
+  border-color: rgba(224, 180, 92, 0.55);
+  background: rgba(224, 180, 92, 0.12);
+
+  .chat-beacon-dot {
+    background: #e0b45c;
+    animation-duration: 2.2s;
+  }
+}
+
+.chat-beacon[data-state='budget'],
+.chat-beacon[data-state='gave-up'],
+.chat-beacon[data-state='you'],
+.chat-beacon[data-state='unattended'] {
+  border-color: rgba(224, 180, 92, 0.7);
+  background: rgba(224, 180, 92, 0.14);
+
+  .chat-beacon-dot {
+    background: #e0b45c;
+    animation: none;
+  }
+}
+
+@keyframes chat-beacon-pulse {
+  0%, 100% { transform: scale(0.8); opacity: 0.45; }
+  50% { transform: scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-beacon-dot { animation: none; }
+}
+
 // Nobody is listening. Honey-warm, like every other "this needs you" in the
 // window — not red, because nothing is broken.
 .chat-wait-hint {

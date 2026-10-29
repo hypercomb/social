@@ -2481,6 +2481,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       name?: string | null
       armId?: string | null
       atTop?: boolean
+      generationSig?: string
     }>('command:arm-resource', (payload) => {
       if (!payload || (!payload.largeSig && !payload.url)) return
       // A link arms on release and is filled in when its card arrives. Once the
@@ -2643,6 +2644,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     armId?: string | null
     /** Pin the created tile to the first slot — a dropped link lands on top. */
     atTop?: boolean
+    /** Generation record for a picture this hive made. */
+    generationSig?: string
   } | null>(null)
   #armResourceUnsub?: () => void
   #disarmResourceUnsub?: () => void
@@ -4181,6 +4184,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         type: armed.type,
         attachment: armed.attachment ?? null,
         atTop: armed.atTop === true,
+        ...(armed.generationSig ? { generationSig: armed.generationSig } : {}),
       })
       this.onArmedResourceDismiss()
     }

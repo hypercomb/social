@@ -45,6 +45,7 @@ import { schnorr } from '@noble/curves/secp256k1'
 import { HOST_LISTING_FLOOR, listedMeanings } from '../host-listing.js'
 import { nostrJson } from '../nip05-names.js'
 import { decodeTransferPack, encodeTransferPack, gunzipBytes, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.ts'
+import { INSTANCE_HEAD_KEY, INSTANCE_HEAD_PATH, formatInstanceHead, parseInstanceHead } from '../../hypercomb-runtime/src/instance-head.ts'
 import { KEY_LIST_MEANING } from '../../hypercomb-core/src/core/key-list.ts'
 import { keyLists } from './key-lists.js'
 
@@ -854,15 +855,25 @@ async function claimedFrontDoor(env, host) {
  *  inferred or written; the branch becomes explicit the next time its
  *  publisher publishes with doors. The same reading as the Publish window's
  *  doorOn. */
+/** A door may name the port it is reached on (`localhost:4291`). The request
+ *  hostname never includes that port, so the name compared is the host alone. */
+function hostName(value) {
+  return String(value || '').toLowerCase().replace(/:\d{1,5}$/, '')
+}
+
 function opensOn(index, lineage, host, env) {
   if (!host) return false
   const listed = index?.doors?.[lineage]
   if (listed === undefined) return !explicitDoorsOn(env, host)
   if (!Array.isArray(listed)) return false
   const h = String(host).toLowerCase()
+  const name = hostName(h)
   return listed.some((z) => {
     const zone = String(z || '').toLowerCase()
-    return !!zone && (h === zone || h.endsWith('.' + zone))
+    if (!zone) return false
+    if (h === zone || h.endsWith('.' + zone)) return true
+    const bare = hostName(zone)
+    return !!bare && (name === bare || name.endsWith('.' + bare))
   })
 }
 
@@ -1029,21 +1040,33 @@ async function hostsOfLineage(env, read, lineage) {
   const zones = wildcardZones(bindings)
   const doors = []
   const claimed = new Set()
+  // A hand-bound door is the authority and claims its zone before any wildcard
+  // name is asked, so those stay in order. Wildcard zones do not claim one
+  // another, so their bags are listed together (newestLocation caps how many
+  // lists run). Skipping a zone already claimed means this read does not seed
+  // a marker on a name the sequential walk would never have opened.
   const consider = async (candidate) => {
     const host = String(candidate || '').toLowerCase()
     const zone = zoneOfHost(zones, host)
-    if (zone && claimed.has(zone)) return
+    if (zone && claimed.has(zone)) return null
     const { site, implicit } = resolveSite(env, host)
-    if (!site || site.lineage !== lineage) return
-    if (!(await anyPublishedRoot(env, site, read, host))) return
-    if (zone) claimed.add(zone)
-    doors.push({ host, implicit })
+    if (!site || site.lineage !== lineage) return null
+    if (!(await anyPublishedRoot(env, site, read, host))) return null
+    return { host, implicit, zone }
+  }
+  const accept = (door) => {
+    if (!door) return
+    if (door.zone && claimed.has(door.zone)) return
+    if (door.zone) claimed.add(door.zone)
+    doors.push({ host: door.host, implicit: door.implicit })
   }
   for (const [host, bound] of Object.entries(bindings)) {
-    if (bound.lineage === lineage && bound.routed) await consider(host)
+    if (bound.lineage === lineage && bound.routed) accept(await consider(host))
   }
   if (lineage && !lineage.includes('/') && DNS_LABEL_RE.test(lineage)) {
-    for (const zone of zones) await consider(`${lineage}.${zone}`)
+    const rest = []
+    for (const zone of zones) if (!claimed.has(zone)) rest.push(`${lineage}.${zone}`)
+    for (const door of await Promise.all(rest.map(consider))) accept(door)
   }
   return doors
 }
@@ -1060,6 +1083,21 @@ async function hostsOfLineage(env, read, lineage) {
 const HOST_PUBLICATIONS_MEANING = 'host:publications'
 const HOST_TRIALS_MEANING = 'host:trials'
 
+/** Plates in `jobs`, run `limit` at a time, results in job order. A null entry
+ *  is a root place that did not resolve and is left out by the caller. */
+async function platesInOrder(jobs, limit) {
+  const out = new Array(jobs.length)
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(limit, jobs.length) }, async () => {
+    while (cursor < jobs.length) {
+      const index = cursor++
+      out[index] = await jobs[index]()
+    }
+  })
+  await Promise.all(workers)
+  return out
+}
+
 async function servePublications(request, scoped) {
   const { protocol, hostname } = new URL(request.url)
   const directory = directoryEnv(scoped, hostname.toLowerCase())
@@ -1071,52 +1109,81 @@ async function servePublications(request, scoped) {
   // to earn two entries; now that an entry carries every door the creation
   // answers on, they would be the same plate twice.
   const named = new Set()
+  const bound = []
   for (const [host, site] of Object.entries(bindings)) {
     if (named.has(site.lineage)) continue
     named.add(site.lineage)
-    sites.push(await ledgerEntry(env, read, protocol, host, site))
+    bound.push(() => ledgerEntry(env, read, protocol, host, site))
   }
 
   // The names publishing brought to life. An explicit binding already claimed
   // its lineage above; the first zone to name one keeps it, at the address
   // that outranks the others: its OWN ADDRESS, else its ROOT PATH on a
   // front-door zone, else (top-level, legacy) its label under the zone.
+  // Which plates exist is decided here, in this order, before any of them
+  // lists a bag. The lists then run together (platesInOrder); a root that
+  // comes back empty does not claim its lineage, so a later label door can.
+  const addressed = []
   for (const zone of wildcardZones(bindings)) {
     for (const [host, site] of (await zonePlaces(env, zone, read)).addresses) {
       if (named.has(site.lineage)) continue
       named.add(site.lineage)
-      sites.push(await ledgerEntry(env, read, protocol, host, site, true))
+      addressed.push(() => ledgerEntry(env, read, protocol, host, site, true))
     }
   }
+  // One lineage can be a root on more than one zone. The first zone that
+  // resolves keeps it — a later zone is asked only when the earlier one comes
+  // back empty — and the plates stay in the order the zones were walked.
+  const rootOrder = []
+  const rootTries = new Map()
   for (const zone of wildcardZones(bindings)) {
     for (const [lineage, place] of (await zonePlaces(env, zone, read)).roots) {
       if (named.has(lineage)) continue
-      const entry = await rootPlaceEntry(env, read, protocol, zone, lineage, place)
-      if (!entry) continue
-      named.add(lineage)
-      sites.push(entry)
+      let tries = rootTries.get(lineage)
+      if (!tries) { tries = []; rootTries.set(lineage, tries); rootOrder.push(lineage) }
+      tries.push({ zone, place })
     }
   }
+  const [boundSites, addressedSites, rootedSites] = await Promise.all([
+    platesInOrder(bound, LOCATION_READS),
+    platesInOrder(addressed, LOCATION_READS),
+    platesInOrder(rootOrder.map(lineage => async () => {
+      for (const { zone, place } of rootTries.get(lineage)) {
+        const entry = await rootPlaceEntry(env, read, protocol, zone, lineage, place)
+        if (entry) return entry
+      }
+      return null
+    }), LOCATION_READS),
+  ])
+  sites.push(...boundSites, ...addressedSites)
+  rootOrder.forEach((lineage, index) => {
+    const entry = rootedSites[index]
+    if (!entry) return
+    named.add(lineage)
+    sites.push(entry)
+  })
+  const derived = []
   for (const zone of wildcardZones(bindings)) {
     const publisher = bindings[zone].publishers.find(p => p.primary) || bindings[zone].publishers[0]
-    if (publisher) {
-      const index = await read(publisher.pubkey)
-      if (!index) continue
-      for (const [lineage, sig] of Object.entries(index.roots)) {
-        // Nested lineages need their own custom domain + binding — the
-        // wildcard maps a single label, never a path.
-        if (named.has(lineage) || lineage.includes('/')) continue
-        if (!SIG_RE.test(String(sig || '').toLowerCase())) continue
-        const host = `${lineage}.${zone}`
-        const resolved = resolveSite(env, host)
-        if (!resolved.implicit || resolved.site?.lineage !== lineage) continue
-        // Switched off on this domain: the next zone that opens it keeps the plate.
-        if (!opensOn(index, lineage, host, env)) continue
-        named.add(lineage)
-        sites.push(await ledgerEntry(env, read, protocol, host, resolved.site))
-      }
+    if (!publisher) continue
+    const index = await read(publisher.pubkey)
+    if (!index) continue
+    for (const [lineage, sig] of Object.entries(index.roots)) {
+      // Nested lineages need their own custom domain + binding — the
+      // wildcard maps a single label, never a path.
+      if (named.has(lineage) || lineage.includes('/')) continue
+      if (!SIG_RE.test(String(sig || '').toLowerCase())) continue
+      const host = `${lineage}.${zone}`
+      const resolved = resolveSite(env, host)
+      if (!resolved.implicit || resolved.site?.lineage !== lineage) continue
+      // Switched off on this domain: the next zone that opens it keeps the plate.
+      if (!opensOn(index, lineage, host, env)) continue
+      named.add(lineage)
+      const site = resolved.site
+      derived.push(() => ledgerEntry(env, read, protocol, host, site))
     }
   }
+  sites.push(...await platesInOrder(derived, LOCATION_READS))
   return json(200, { sites }, { 'Cache-Control': 'no-store' })
 }
 
@@ -1335,16 +1402,49 @@ async function routeMarkers(env, host) {
  *  isolate's write is seen within this window. */
 const LOCATION_TTL_MS = 5_000
 const newestAt = new Map()
+/** One list in flight per location, so a directory that asks the same door
+ *  from several plates shares the bag read. */
+const newestPending = new Map()
+/** How many location bags one isolate lists at once. The directory used to
+ *  walk every plate's bag in a single line — measured on hypercomb.com
+ *  2026-10-27, publications.json took 3–6s and the tiles could not draw until
+ *  it returned, while one bag was ~100ms. Sixteen keeps that walk wide
+ *  without opening a list per plate all at once. */
+const LOCATION_READS = 16
+let locationReadsActive = 0
+const locationReadQueue = []
+const locationGate = (task) => new Promise((resolve, reject) => {
+  const start = () => {
+    locationReadsActive++
+    Promise.resolve().then(task).then(resolve, reject).finally(() => {
+      locationReadsActive--
+      const next = locationReadQueue.shift()
+      if (next) next()
+    })
+  }
+  if (locationReadsActive < LOCATION_READS) start()
+  else locationReadQueue.push(start)
+})
 
 /** A location's marker names and its newest record, cached per isolate. */
 async function newestLocation(env, location) {
+  const freshEnough = (held) => held && Date.now() - held.at < LOCATION_TTL_MS && held.env === env.CONTENT
   const held = newestAt.get(location)
-  if (held && Date.now() - held.at < LOCATION_TTL_MS && held.env === env.CONTENT) return held
-  const names = await locationMarkers(env, location)
-  const record = names?.length ? await locationRecord(env, location, names.at(-1)) : null
-  const fresh = { names, record, at: Date.now(), env: env.CONTENT }
-  newestAt.set(location, fresh)
-  return fresh
+  if (freshEnough(held)) return held
+  const pending = newestPending.get(location)
+  if (pending) return pending
+  const promise = locationGate(async () => {
+    const again = newestAt.get(location)
+    if (freshEnough(again)) return again
+    const names = await locationMarkers(env, location)
+    const record = names?.length ? await locationRecord(env, location, names.at(-1)) : null
+    const fresh = { names, record, at: Date.now(), env: env.CONTENT }
+    newestAt.set(location, fresh)
+    return fresh
+  })
+  newestPending.set(location, promise)
+  try { return await promise }
+  finally { if (newestPending.get(location) === promise) newestPending.delete(location) }
 }
 
 /** One marker's record, or null. Markers are small, immutable JSON. */
@@ -2233,12 +2333,78 @@ async function siteOpen(env, site, read, host, reuse) {
   return answer
 }
 
+/** The shared instance head, from the one bin. Absent, or not a head, is null.
+ *  The asset copy is not read here: a page already carries the bundle's own
+ *  pointer, and this file is how a newer build is named without a redeploy. */
+async function readInstanceHead(env) {
+  try {
+    const object = await env.CONTENT?.get?.(INSTANCE_HEAD_KEY)
+    if (!object?.arrayBuffer) return null
+    const text = new TextDecoder().decode(new Uint8Array(await object.arrayBuffer()))
+    return parseInstanceHead(text)
+  } catch { return null }
+}
+
+/** `/head` on every name: the same file, never the page, never cached. */
+async function serveInstanceHead(request, env) {
+  let parsed = await readInstanceHead(env)
+  if (!parsed && env.ASSETS?.fetch) {
+    try {
+      const url = new URL(request.url)
+      url.pathname = INSTANCE_HEAD_PATH
+      url.search = ''
+      const asset = await env.ASSETS.fetch(new Request(url))
+      if (asset.ok) parsed = parseInstanceHead(await asset.text())
+      else try { await asset.body?.cancel?.() } catch { /* released */ }
+    } catch { parsed = null }
+  }
+  if (!parsed) return text(404, 'no instance head')
+  const body = formatInstanceHead(parsed.package, parsed.derivation)
+  return new Response(request.method === 'HEAD' ? null : body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  })
+}
+
+/** A `/content/` file the asset store does not hold, from the shared bin.
+ *  The name is the key: a signature, or a pool member. Hash-named bytes are
+ *  safe to keep; a marker that can be rewritten is not. */
+async function serveSharedBin(request, env) {
+  const pathname = new URL(request.url).pathname
+  if (!pathname.startsWith('/content/')) return null
+  const key = pathname.slice('/content/'.length).replace(/\/+$/, '')
+  if (!key || !env.CONTENT?.get) return null
+  const object = await env.CONTENT.get(key)
+  if (!object?.arrayBuffer) return null
+  const bytes = new Uint8Array(await object.arrayBuffer())
+  const member = key.slice(key.lastIndexOf('/') + 1)
+  const heldForever = SIG_RE.test(member) || SIG_RE.test(key)
+  const indexPool = await poolAddress('install:index')
+  const headers = {
+    'Content-Type': key.startsWith(`${indexPool}/`) ? 'application/json; charset=utf-8' : 'application/octet-stream',
+    'Content-Length': String(bytes.byteLength),
+    'Cache-Control': heldForever ? IMMUTABLE : 'no-store',
+    'Access-Control-Allow-Origin': '*',
+    'X-Content-Type-Options': 'nosniff',
+  }
+  return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers })
+}
+
 /** The head of the package pool this page installs from — the newest
  *  host:packages marker, as ensureInstall would read it: the promoted
- *  package's member, or the bundle's own. */
+ *  package's member, the shared instance head, or the bundle's own. */
 async function installPointer(request, env, site, promoted) {
   const pool = await poolAddress(HOST_PACKAGES_MEANING)
   if (promoted) return { pool, marker: '00000000', text: `${promoted.root}\n${site.lineage}` }
+  // One head for every name that has not published a package of its own.
+  // Rewriting it moves every such subdomain together.
+  const shared = await readInstanceHead(env)
+  if (shared) return { pool, marker: '00000000', text: `${shared.package}\ninstance` }
   if (!env.ASSETS?.fetch) return null
   // The deployed engine's own pointer is a constant of this worker version —
   // the asset store cannot change under a running isolate — so once read it
@@ -3090,14 +3256,15 @@ const PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=(), payment=()
 /** The participant shell, fetched from where it is deployed. https only, but
  *  a loopback origin on http, for proving the door on one machine.
  *
- *  THE DOOR'S OWN POLICY, on every response it sends. The publisher's package
- *  runs here with full page power, so the page is held to what a hive needs:
- *  it reaches https and wss hosts — on a loopback zone also exactly that
- *  zone's two http faces, never a bare http: or ws: that would open the
- *  visitor's own machine (a local model, the bridge) — it is never framed,
- *  posts no form, takes no device and keeps no cookie. Scripts are left alone
- *  on purpose: the shell injects an import map and loads its bees as blob:
- *  modules, and a script-src would stop the boot. */
+ *  THE DOOR'S OWN POLICY, on every response it sends, before any package code
+ *  runs. A bee cannot widen it. A public door reaches https and wss hosts,
+ *  which is how its package reads the hive. A loopback door reaches only
+ *  itself and that zone's two http faces — never https:, wss:, or a bare
+ *  http: or ws: that would open the rest of this machine (a local model, the
+ *  bridge) or the network. It is never framed, posts no form, takes no device
+ *  and keeps no cookie. Scripts are left alone on purpose: the shell injects
+ *  an import map and loads its bees as blob: modules, and a script-src would
+ *  stop the boot. */
 // A DOOR'S SHELL FILES LIVE UNDER /shell/. The participant shell's hashed
 // bundles share their names' shape (`main-*.js`, `chunk-*.js`, …) with the
 // visitor engine's, and `run_worker_first` hands those root paths straight to
@@ -3124,6 +3291,16 @@ const SHELL_CORE_RE = /(["'])\/(hypercomb-core\.runtime\.js|core\/dist\/[\w./-]+
 // revalidated on every load (its ETag keeps that a 304).
 const SHELL_HASHED_RE = /^\/(?:main|chunk|polyfills|styles|worker)-[A-Za-z0-9]+\.(?:js|css)$/
 
+// Before any module. Non-configurable, so the package cannot redefine it.
+// An extension that already pinned its own signer stays; nothing else can.
+function pinNostrOff(html) {
+  const pin = '<script>try{Object.defineProperty(window,"nostr",{value:void 0,writable:false,configurable:false})}catch(e){}</script>'
+  const head = /<head[^>]*>/i.exec(html)
+  if (!head) return pin + html
+  const at = head.index + head[0].length
+  return html.slice(0, at) + pin + html.slice(at)
+}
+
 async function serveSandboxShell(request, env, zone) {
   const origin = String(env.SANDBOX_SHELL_ORIGIN || '').replace(/\/+$/, '')
   const loopback = /^http:\/\/((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(origin)
@@ -3139,10 +3316,16 @@ async function serveSandboxShell(request, env, zone) {
   headers.delete('content-encoding')
   headers.delete('content-length')
   const port = url.port ? `:${url.port}` : ''
-  const local = LOOPBACK_ZONE_RE.test(String(zone || '')) ? ` http://${zone}${port} http://content.${zone}${port}` : ''
+  const loopbackZone = LOOPBACK_ZONE_RE.test(String(zone || ''))
+  const local = loopbackZone ? ` http://${zone}${port} http://content.${zone}${port}` : ''
   // worker-src keeps a data: worker (an opaque origin) out; blob: and the
-  // shell's own scripts are what a hive's workers are made of.
-  headers.set('Content-Security-Policy', `connect-src 'self' https: wss: blob: data:${local}; worker-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'none'`)
+  // shell's own scripts are what a hive's workers are made of. On a loopback
+  // zone the scheme list stops at this machine: https: and wss: are how a
+  // compromised package would leave, and this header is already in force.
+  const connect = loopbackZone
+    ? `connect-src 'self' blob: data:${local}`
+    : `connect-src 'self' https: wss: blob: data:${local}`
+  headers.set('Content-Security-Policy', `${connect}; worker-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'none'`)
   headers.set('Permissions-Policy', PERMISSIONS_POLICY)
   headers.set('Referrer-Policy', 'no-referrer')
   headers.set('Cross-Origin-Opener-Policy', 'same-origin')
@@ -3150,9 +3333,14 @@ async function serveSandboxShell(request, env, zone) {
   headers.delete('set-cookie')
   if (url.pathname.startsWith(SHELL_PREFIX) && !SHELL_HASHED_RE.test(upstreamPath)) headers.set('Cache-Control', 'no-cache')
   if (request.method !== 'HEAD' && /text\/html/i.test(headers.get('content-type') || '')) {
-    const page = (await upstream.text())
+    let page = (await upstream.text())
       .replace(SHELL_BUNDLE_RE, (_, attr, file) => `${attr}="${SHELL_PREFIX}${file}"`)
       .replace(SHELL_CORE_RE, (_, quote, path) => `${quote}${SHELL_PREFIX}${path}${quote}`)
+    // A try- door's package has full page power, and it arrives only after
+    // this document. The signer is pinned here, while the page is still the
+    // shell's, so the package cannot put window.nostr back. A swarm door
+    // signs; it is not pinned.
+    if (SANDBOX_LABEL_RE.test(url.hostname.split('.')[0])) page = pinNostrOff(page)
     return new Response(page, { status: upstream.status, headers })
   }
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
@@ -3208,7 +3396,14 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
   // marker until the first gap; a page of HTML where a marker should be reads
   // as a member that will not parse, and the old 307 to / read as a host that
   // does not answer.
-  if (response.status === 404 && !spa) return text(404, 'not in this package')
+  if (response.status === 404 && !spa) {
+    try { await response.body?.cancel?.() } catch { /* released */ }
+    // One bin. A file published under its own name answers here even when
+    // this deploy's asset copy does not hold it yet.
+    const fromBin = await serveSharedBin(request, env)
+    if (fromBin) return fromBin
+    return text(404, 'not in this package')
+  }
   // A page the asset store does not hold is the shell's to route: the visitor
   // reads the page's route from `location.pathname` (main.visitor.ts), so a
   // deep link into a site (`/2026-10-14`) must be answered AT that path. The
@@ -6723,6 +6918,12 @@ const router = {
     env = routed.env
     // The relay face (no site), or a zone root, which writes for its zone.
     const writeFace = !site || isZoneRoot(env, requestUrl.hostname)
+
+    // THE INSTANCE HEAD. One file, the same bytes on every name. A real file
+    // wins before any page, card, or sandbox.
+    if ((method === 'GET' || method === 'HEAD') && pathname === INSTANCE_HEAD_PATH) {
+      return serveInstanceHead(request, env)
+    }
 
     // NIP-05 — THE ONE STANDARDS-FIXED NAMED ROUTE. Not a drain route and not
     // ours to retire: the address is fixed by the standard, and every Nostr

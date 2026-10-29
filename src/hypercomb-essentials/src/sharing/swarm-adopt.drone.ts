@@ -59,6 +59,7 @@ import { setDivergedLabels, clearPeerDivergence } from './peer-divergence.js'
 import { publisherHoldsUnheldBelow } from './branch-difference.js'
 import { allows as intakeAllows } from '../pheromones/intake-filter.js'
 import { _adoptQueue } from './adopt-queue.service.js'
+import { ADOPT_QUEUE_OWNER, ADOPT_QUEUE_SURFACE, AdoptQueueElement } from './adopt-queue.view.js'
 import { isJoinedHere } from './membership.js'
 import { visualArtifactSigs } from './visual-hosts.js'
 import { reachedSignatures } from './reached-signatures.js'
@@ -115,10 +116,15 @@ const ADOPT_QUEUE_KEY = '@diamondcoreprocessor.com/AdoptQueueService'
  *  without the service simply resolves undefined and the direct fold runs. */
 interface AdoptQueueLike {
   enqueueAll: (
-    picks: readonly { sig: string; label: string; at: readonly string[]; domain?: string }[],
+    picks: readonly { sig: string; label: string; at: readonly string[]; domain?: string; page?: boolean; pubkey?: string }[],
     batch: string,
   ) => unknown
-  next: () => { sig: string; label: string; at: string[]; domain?: string } | null
+  entries?: readonly { sig: string; label: string; at: string[]; pubkey?: string }[]
+  touchSeen?: (sig: string, at: readonly string[]) => void
+  next: () => { sig: string; label: string; at: string[]; domain?: string; page?: boolean } | null
+  isQueued?: (label: string, at: readonly string[]) => boolean
+  setActive?: (sig: string | null, at?: readonly string[]) => void
+  markEgg?: (sig: string, at: readonly string[]) => void
   waitMs: () => number | null
   complete: (sig: string, at: readonly string[]) => void
   defer: (sig: string, at: readonly string[]) => void
@@ -244,7 +250,7 @@ export class SwarmAdoptDrone extends Drone {
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
   protected override listens: string[] = ['tile:action', 'features:download', 'swarm:peers-changed', 'swarm:tile-visited', 'swarm:wand']
-  protected override emits: string[] = ['adopt:started', 'fs:changed', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome', 'toast:show', 'swarm:visit-folded']
+  protected override emits: string[] = ['adopt:started', 'fs:changed', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome', 'toast:show', 'swarm:visit-folded', 'adopt:queued']
 
   // Latest installer registry projection — cached for the Done-gated fold.
 
@@ -278,7 +284,7 @@ export class SwarmAdoptDrone extends Drone {
     //      works without ever having navigated into the tile.
     // Debounced off the peers-changed burst; the result is a sync-readable
     // set the overlay reads, never a commit.
-    this.onEffect('swarm:peers-changed', () => { this.#scheduleDivergenceScan(); this.#hintWand() })
+    this.onEffect('swarm:peers-changed', () => { this.#scheduleDivergenceScan(); this.#hintWand(); this.#noteOwedPublishers() })
 
     // The answer is LOCATION-scoped. Leaving invalidates it immediately —
     // carrying it across would light adopt on a same-named tile somewhere
@@ -813,6 +819,10 @@ export class SwarmAdoptDrone extends Drone {
   public wandEligible = (label: string): boolean => {
     const name = String(label ?? '').trim()
     if (!name) return false
+    // OWED IS TAKEN: from the press until it lands the icon is gone, so a
+    // second press can't double the ask. The queue (sticky, in the queue
+    // view) is what remembers it from here.
+    if (this.#adoptQueue()?.isQueued?.(name, this.#currentSegments())) return false
     const inZone = isJoinedHere()
     // A STATIC offer is takeable in private mode — nothing of yours leaves
     // when you take a public host's tile; the zone flag governs the mesh.
@@ -866,6 +876,20 @@ export class SwarmAdoptDrone extends Drone {
     if (await this.#isHeldHere(at, label)) { this.#visitStage('wand-held', { name: label }); return }
     this.#visitStage('wand-folding', { name: label, at: [...path] })
     clearAdoptTombstone(path)
+    // QUEUE FIRST: the signature and its host are the handle, so the take
+    // outlives the swarm — if the publisher goes quiet the queue heals the
+    // tile from whichever host still serves the merkle root. No signature
+    // witnessed (static offer without one) → the direct fold, as before.
+    const branch = this.#resolvePeerBranch(label)
+    const queue = this.#adoptQueue()
+    if (branch && queue) {
+      queue.enqueueAll([{ sig: branch.layerSig, label, at, domain: branch.domain, page: true, pubkey: branch.pubkey }], `wand:${Date.now()}`)
+      // The tile pulses at once (the same touch a take always gave).
+      EffectBus.emitTransient('swarm:wand', { label })
+      EffectBus.emit('adopt:queued', { label, at })
+      void this.#drainAdoptQueue()
+      return
+    }
     await this.#foldPageTile(at, label, entry)
   }
 
@@ -1048,6 +1072,19 @@ export class SwarmAdoptDrone extends Drone {
     return ok
   }
 
+  /** Presence for the queue view: an owed entry whose publisher still offers
+   *  that tile where it was asked is seen NOW; one that isn't simply keeps
+   *  its old seenAt, which is how the view tells a publisher who left. */
+  #noteOwedPublishers = (): void => {
+    const queue = this.#adoptQueue()
+    if (!queue?.entries?.length || !queue.touchSeen) return
+    const here = this.#currentSegments().join('/')
+    for (const e of queue.entries) {
+      if (!e.pubkey || e.at.join('/') !== here) continue
+      if (this.#resolvePeerBranch(e.label, e.pubkey)?.pubkey === e.pubkey) queue.touchSeen(e.sig, e.at)
+    }
+  }
+
   #adoptQueue = (): AdoptQueueLike | undefined =>
     this.#ioc()?.get?.(ADOPT_QUEUE_KEY) as AdoptQueueLike | undefined
 
@@ -1078,6 +1115,7 @@ export class SwarmAdoptDrone extends Drone {
         if (!entry) break
         const branch = { layerSig: entry.sig, at: entry.at, domain: entry.domain, label: entry.label }
         let landed = false
+        queue.setActive?.(entry.sig, entry.at)
         try {
           // A tile we already hold is ADDITIVE — add the children the peer
           // publishes that we lack, never re-home (a shared tile stays one
@@ -1085,6 +1123,11 @@ export class SwarmAdoptDrone extends Drone {
           if (await this.#isHeldHere(entry.at, entry.label)) {
             await this.#additiveAdoptHeld(branch)
             landed = true
+          } else if (entry.page && entry.at.join('/') === this.#currentSegments().join('/')
+            && this.#peerEntryFor(entry.label)) {
+            // The offer is still live where it was asked: fold it as the ONE
+            // page tile it was taken as.
+            landed = await this.#foldPageTile(entry.at, entry.label, this.#peerEntryFor(entry.label)!)
           } else {
             const res = await this.adoptResolvedBranch(branch, { silent: true })
             landed = res === 'committed' || res === 'exists'
@@ -1093,7 +1136,7 @@ export class SwarmAdoptDrone extends Drone {
             // the tile in the hive now, empty, and let the queue keep trying
             // until it hatches. 'rewound' is not a missing file (the cursor is
             // in history) and must never lay one.
-            if (!landed && res === 'unavailable') await this.#layEgg(branch)
+            if (!landed && res === 'unavailable') { await this.#layEgg(branch); queue.markEgg?.(entry.sig, entry.at) }
           }
         } catch (err) {
           console.warn('[swarm-adopt] queued adopt threw', { sig: entry.sig.slice(0, 8), err })
@@ -1107,6 +1150,7 @@ export class SwarmAdoptDrone extends Drone {
       if (batch && panelLabel && queue.remainingIn(batch) === 0) this.#openBehaviours(panelLabel)
     } finally {
       this.#draining = false
+      queue.setActive?.(null)
     }
 
     // Anything still owed is backing off — come back when the soonest is due.
@@ -2373,3 +2417,15 @@ const _swarmAdopt = new SwarmAdoptDrone()
   '@diamondcoreprocessor.com/SwarmAdoptDrone',
   _swarmAdopt,
 )
+
+// The queue's window: what was adopted and what is still in transit, full
+// screen. A framework-free element on the shell's surface registry.
+if (typeof customElements !== 'undefined' && !customElements.get(ADOPT_QUEUE_SURFACE)) {
+  customElements.define(ADOPT_QUEUE_SURFACE, AdoptQueueElement)
+}
+;(window as { ioc?: { whenReady?: (k: string, cb: (v: { add(s: unknown): void }) => void) => void } })
+  .ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
+    try {
+      registry.add({ name: ADOPT_QUEUE_SURFACE, owner: ADOPT_QUEUE_OWNER, element: ADOPT_QUEUE_SURFACE, order: 530 })
+    } catch { /* duplicate add (hot reload) — the mounted surface is live */ }
+  })

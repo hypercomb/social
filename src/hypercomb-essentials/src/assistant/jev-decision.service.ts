@@ -11,6 +11,7 @@ import { corroborate, jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type 
 import { jevEvidenceText } from './jev-evidence.js'
 import { jevFileInput, jevFileQuestions, jevFileResult, type JevFileResult } from './jev-file.js'
 import { jevSortInput, jevSortQuestions, jevSortResult, type JevSortResult } from './jev-sort.js'
+import { jevComfyInput, jevComfyQuestions, jevComfyResult, jevComfyState, type JevComfyResult } from './jev-comfy.js'
 
 /** A subset of material ALREADY sent to / received from the worker whose
  * table is being judged. Never fetches hive content, accepts signatures to
@@ -199,6 +200,17 @@ export class JevDecisionService {
     if (!this.readyForHive()) throw new Error('Sorting needs Jev switched on and OpenRouter allowed to read the hive')
     const input = jevSortInput(raw)
     const result = await this.#post({ state: input, questions: jevSortQuestions(input) }, body => jevSortResult(body, input), signal, 40_000)
+    if (!this.readyForHive()) throw new Error('OpenRouter access changed during the decision')
+    return result
+  }
+
+  /** JEV PICKS A PICTURE PROMPT (jev-comfy.ts). The reviewers already wrote
+   *  the options from the tile. This call only chooses which one runs. */
+  async pickComfy(raw: unknown, signal?: AbortSignal): Promise<JevComfyResult> {
+    signal?.throwIfAborted()
+    if (!this.readyForHive()) throw new Error('Choosing a prompt needs Jev switched on and OpenRouter allowed to read the hive')
+    const input = jevComfyInput(raw)
+    const result = await this.#post({ state: jevComfyState(input), questions: jevComfyQuestions(input) }, body => jevComfyResult(body, input), signal, 20_000)
     if (!this.readyForHive()) throw new Error('OpenRouter access changed during the decision')
     return result
   }

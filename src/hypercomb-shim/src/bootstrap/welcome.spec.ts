@@ -76,7 +76,7 @@ describe('frontDoorOf — the default experience, and a staged one on top', () =
     }, 'hypercomb.com', 'https://hypercomb.com')
     expect(door.title).toBe('hypercomb')
     expect(door.tagline).toBe('An open software platform.')
-    expect(door.footer.map(link => link.label)).toEqual(['documentation', 'source', 'licensing'])
+    expect(door.footer.map(link => link.label)).toEqual(['source', 'licensing'])
   })
 
   it('a staged title or tagline that is empty falls back to the default, field by field', () => {

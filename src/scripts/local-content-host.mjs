@@ -3,7 +3,7 @@
 // this machine over in-memory storage, for proving publish and replication
 // end to end without touching the real host.
 //
-//   node scripts/local-content-host.mjs [port=4291] [shell=http://localhost:4260] [--ai-stub]
+//   node scripts/local-content-host.mjs [port=4291] [shell=http://localhost:4260] [--ai-stub] [--visitor-assets <dir>] [--restore <dir>]
 //
 // Everything a browser meets is the real worker (hypercomb-relay/blossom-worker
 // worker.js): NIP-98 signed uploads checked against the body's sha256, the
@@ -21,12 +21,51 @@
 // says how many files it was shown and whether the change's proof marker was
 // among them, so a harness can prove the host's AI read the changed code.
 import http from 'node:http'
+import fs from 'node:fs'
+import path from 'node:path'
+import { createHash } from 'node:crypto'
 import zlib from 'node:zlib'
 import worker from '../hypercomb-relay/blossom-worker/worker.js'
 
 const port = Number(process.argv[2] || 4291)
 const shell = process.argv[3] && !process.argv[3].startsWith('--') ? process.argv[3] : 'http://localhost:4260'
 const aiStub = process.argv.includes('--ai-stub')
+const assetsFlag = process.argv.indexOf('--visitor-assets')
+const assetsRoot = assetsFlag >= 0 ? path.resolve(process.argv[assetsFlag + 1] || '') : ''
+const restoreFlag = process.argv.indexOf('--restore')
+const restoreRoot = restoreFlag >= 0 ? path.resolve(process.argv[restoreFlag + 1] || '') : ''
+
+const contentType = (file) => {
+  switch (path.extname(file).toLowerCase()) {
+    case '.html': return 'text/html; charset=utf-8'
+    case '.js': return 'text/javascript; charset=utf-8'
+    case '.css': return 'text/css; charset=utf-8'
+    case '.json': return 'application/json'
+    case '.svg': return 'image/svg+xml'
+    case '.png': return 'image/png'
+    case '.ico': return 'image/x-icon'
+    default: return 'application/octet-stream'
+  }
+}
+
+// The visitor engine reads its shell from ASSETS. This host has none unless a
+// built visitor directory is named; a published site then answers 503.
+const assets = assetsRoot ? {
+  fetch: async (request) => {
+    const url = new URL(request.url)
+    let rel = decodeURIComponent(url.pathname)
+    if (rel.endsWith('/')) rel += 'index.html'
+    const root = path.resolve(assetsRoot)
+    const file = path.resolve(root, `.${rel}`)
+    if (file !== root && !file.startsWith(root + path.sep)) return new Response('no', { status: 403 })
+    try {
+      const bytes = fs.readFileSync(file)
+      return new Response(bytes, { status: 200, headers: { 'content-type': contentType(file) } })
+    } catch {
+      return new Response('missing', { status: 404 })
+    }
+  },
+} : null
 
 if (aiStub) {
   const upstream = globalThis.fetch
@@ -86,8 +125,66 @@ const kv = () => {
   return { values, get: async (key) => values.get(key) ?? null, put: async (key, value) => { values.set(key, String(value)) }, delete: async (key) => { values.delete(key) } }
 }
 
+/** sign('hive:indexes') — where the worker keeps each publisher's signed index. */
+const HIVE_INDEXES = createHash('sha256').update('hive:indexes').digest('hex')
 const bindings = {}
-const env = { CONTENT: r2(), HIVES: kv(), GRANTS: kv(), AUTO_GRANT: '1', SANDBOX_SHELL_ORIGIN: shell, SITE_BINDINGS: '{}', ...(aiStub ? { ANTHROPIC_API_KEY: 'local-stub' } : {}) }
+const env = { CONTENT: r2(), HIVES: kv(), GRANTS: kv(), AUTO_GRANT: '1', SANDBOX_SHELL_ORIGIN: shell, SITE_BINDINGS: '{}', ...(assets ? { ASSETS: assets } : {}), ...(aiStub ? { ANTHROPIC_API_KEY: 'local-stub' } : {}) }
+
+// A restart of this process forgets the heap. `--restore` puts a snapshot back
+// before the first request: one file per flat signature, and index.json as the
+// publisher's signed hive index (the KV the worker drains into the pool).
+if (restoreRoot) {
+  const blobs = path.join(restoreRoot, 'blobs')
+  for (const name of fs.existsSync(blobs) ? fs.readdirSync(blobs) : []) {
+    if (!/^[0-9a-f]{64}$/.test(name)) continue
+    env.CONTENT.objects.set(name, { bytes: fs.readFileSync(path.join(blobs, name)), httpMetadata: {} })
+  }
+  const indexFile = path.join(restoreRoot, 'index.json')
+  if (fs.existsSync(indexFile)) {
+    const raw = fs.readFileSync(indexFile, 'utf8')
+    const pubkey = JSON.parse(raw).pubkey
+    if (pubkey) env.HIVES.values.set(pubkey, raw)
+  }
+  console.log(`[local-content-host] restored ${env.CONTENT.objects.size} objects`)
+}
+
+// A replicated website page is the deployment. The visitor shell boots the
+// whole package — every default tile — and a trial that only replicated a
+// page stays black behind that cover. `/` on a plain label serves the page
+// the signed layer names. A try- door, the host card, and anything without a
+// page still go to the worker.
+const bytesOfKey = (sig) => {
+  const entry = /^[0-9a-f]{64}$/.test(String(sig || '')) ? env.CONTENT.objects.get(sig) : null
+  return entry ? entry.bytes : null
+}
+const jsonOf = (sig) => {
+  const bytes = bytesOfKey(sig)
+  return bytes ? JSON.parse(Buffer.from(bytes).toString('utf8')) : null
+}
+const replicatedPage = (hostHeader) => {
+  const host = String(hostHeader || '').split(':')[0].toLowerCase()
+  const match = /^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.localhost$/.exec(host)
+  if (!match) return null
+  const label = match[1]
+  if (label === 'content' || label === 'host' || label === 'swarm' || label.startsWith('try-')) return null
+  const publishers = bindings.localhost?.publishers ?? []
+  for (const publisher of publishers) {
+    let raw = env.HIVES.values.get(publisher.pubkey) ?? null
+    if (!raw) raw = bytesOfKey(`${HIVE_INDEXES}/${publisher.pubkey}`) ? Buffer.from(bytesOfKey(`${HIVE_INDEXES}/${publisher.pubkey}`)).toString('utf8') : null
+    if (!raw) continue
+    try {
+      const content = JSON.parse(JSON.parse(raw).content)
+      const layer = jsonOf(content?.roots?.[label])
+      for (const deco of layer?.decorations ?? []) {
+        const record = jsonOf(jsonOf(deco)?.resource)
+        if (record?.kind !== 'visual:website:page') continue
+        const html = bytesOfKey(record.payload?.htmlSig)
+        if (html) return html
+      }
+    } catch { /* this publisher's index is not a page */ }
+  }
+  return null
+}
 
 http.createServer(async (req, res) => {
   const url = `http://${req.headers.host || `localhost:${port}`}${req.url}`
@@ -104,7 +201,15 @@ http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({
       content: [...env.CONTENT.objects.keys()].sort(),
-      hives: Object.fromEntries([...env.HIVES.values].map(([key, value]) => [key, JSON.parse(value)])),
+      // Indexes live in the content pool sign('hive:indexes')/<pubkey> since
+      // 2026-09-25; the KV namespace is only a drain source. Both are read,
+      // the pool winning, so a harness sees every publisher's index.
+      hives: {
+        ...Object.fromEntries([...env.HIVES.values].map(([key, value]) => [key, JSON.parse(value)])),
+        ...Object.fromEntries([...env.CONTENT.objects.entries()]
+          .filter(([key]) => key.startsWith(`${HIVE_INDEXES}/`))
+          .map(([key, entry]) => [key.slice(HIVE_INDEXES.length + 1), JSON.parse(new TextDecoder().decode(entry.bytes))])),
+      },
     }))
     return
   }
@@ -119,6 +224,15 @@ http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ ok: true, bindings }))
     return
+  }
+  const asked = new URL(url)
+  if ((req.method === 'GET' || req.method === 'HEAD') && asked.pathname === '/') {
+    const page = replicatedPage(req.headers.host)
+    if (page) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(req.method === 'HEAD' ? undefined : page)
+      return
+    }
   }
   const body = ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks)
   try {

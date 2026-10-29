@@ -168,6 +168,10 @@ export type HypercombNodeRead =
      *  a `/read` (never `/list`) whose layer sig had — or could derive — a
      *  projection; when present, `content` is omitted, which is the saving. */
     readonly projection?: string
+    /** Signature arrays the projection reduced to a count (`decorations: 1`).
+     *  Kept beside the projection so a later read can open one. Not part of
+     *  the projection text: that record must not pin signatures. */
+    readonly slots?: Readonly<Record<string, readonly string[]>>
     readonly truncated?: boolean
     /** `/read` of a tile by route: its notes, live from the notes service
      *  (essentials hive-tree-reader.ts `#withNotes`), flattened. */
@@ -476,12 +480,28 @@ const withProjection = async (read: HypercombNodeRead): Promise<HypercombNodeRea
   if (!service?.project) return read
   const projected = await service.project(read.layerSig).catch(() => null)
   if (!projected?.text) return read
+  const slots = slotSigsOf(read.content)
   const { content: _content, ...rest } = read
   // The projection's notes are the layer's slot only — what predates the
   // notes facet. With the live notes on the read, they would be a second,
   // shorter list of the same tile's notes; a model counted that one.
   const projection = read.notes ? withoutNotesBlock(projected.text) : projected.text
-  return { ...rest, projection }
+  return { ...rest, projection, ...(slots ? { slots } : {}) }
+}
+
+/** Arrays of bare signatures the projection will only count. Notes and
+ *  properties are already written out as text. A mixed array is left out:
+ *  the count would not match the signatures. */
+export const slotSigsOf = (content: Record<string, unknown> | undefined): Record<string, string[]> | undefined => {
+  if (!content) return undefined
+  const slots: Record<string, string[]> = {}
+  for (const [slot, value] of Object.entries(content)) {
+    if (slot === 'name' || slot === 'notes' || slot === 'properties' || slot === 'children') continue
+    if (!Array.isArray(value) || value.length === 0 || value.length > 64) continue
+    if (!value.every(item => typeof item === 'string' && SIG.test(item))) continue
+    slots[slot] = [...value]
+  }
+  return Object.keys(slots).length ? slots : undefined
 }
 
 /** The `notes:` block of a projection (assistant/llm-context.ts): the
@@ -619,8 +639,8 @@ export const foreignReads = (
     let carried: unknown
     if (result.kind === 'node' && observation.verb === 'read') {
       if (!(observation.sig ? from(observation.sig) : at())) return
-      const { layerSig, children, content, projection, unresolved } = result.read
-      carried = { layerSig, children, content, projection, unresolved }
+      const { layerSig, children, content, projection, unresolved, slots } = result.read
+      carried = { layerSig, children, content, projection, unresolved, slots }
     } else if (result.kind === 'summary') {
       if (!at()) return
       carried = { layerSig: result.read.layerSig, text: result.read.text }
@@ -767,12 +787,24 @@ const safeNode = (read: HypercombNodeRead, expectedRoot: string, maxChildren: nu
     children,
     ...(unresolved.length ? { unresolved: [...unresolved] } : {}),
     ...(read.projection !== undefined
-      ? { projection: read.projection, truncated: read.truncated === true }
+      ? { projection: read.projection, truncated: read.truncated === true, ...keptSlots(read.slots) }
       : read.content && typeof read.content === 'object' ? { content: read.content, truncated: read.truncated === true } : {}),
     ...(read.snapshot ? { snapshot: read.snapshot } : {}),
     ...(read.code?.length ? { code: safeHits(read.code) } : {}),
     ...safeNotes(read),
   }
+}
+
+/** Signature arrays kept beside a projection. A bad slot is left off. */
+const keptSlots = (slots: Readonly<Record<string, readonly string[]>> | undefined): { slots: Record<string, string[]> } | Record<string, never> => {
+  if (!slots || typeof slots !== 'object') return {}
+  const out: Record<string, string[]> = {}
+  for (const [slot, value] of Object.entries(slots)) {
+    if (!/^[a-z][a-zA-Z0-9]{0,40}$/.test(slot) || !Array.isArray(value) || value.length === 0 || value.length > 64) continue
+    if (!value.every(item => typeof item === 'string' && SIG.test(item))) continue
+    out[slot] = [...value]
+  }
+  return Object.keys(out).length ? { slots: out } : {}
 }
 
 /** A tile's live notes: text only, bounded, no control characters but the
@@ -950,7 +982,10 @@ export const formatHypercombObservationReceipt = (
         ? { unresolved: node.unresolved, unresolvedNote: 'children whose layers are not on this device yet; read <signature> may still open one' }
         : {}),
       ...(node.projection !== undefined
-        ? { projection: node.projection, truncated: node.truncated === true }
+        ? {
+          projection: node.projection, truncated: node.truncated === true,
+          ...(node.slots ? { slots: node.slots, slotsNote: 'the projection counts these slots. the signatures are here. read <signature> opens one.' } : {}),
+        }
         : node.content ? { content: node.content, truncated: node.truncated === true } : {}),
       ...(node.notes
         ? {

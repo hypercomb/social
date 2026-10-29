@@ -14,7 +14,7 @@ import {
   preloadPassCompleted,
   preloadStampSatisfies,
   readCodeDepth,
-  remainingAncestorPreloadDepth,
+  reversePreloadPlan,
   takePreloadBreadthSlice,
   type FaceOwner,
   type PreloadDepthStamp,
@@ -3542,6 +3542,9 @@ export class HistoryService {
     // Told, after the pass returns, whether every face within reach was dealt
     // with — the faces warm as a tail nobody waits on (#warmFaceTail).
     onFacesDone?: (done: boolean) => void,
+    /** Parents within this same radius. Off when the caller is already the
+     *  way-back pass, so a parent does not walk its own parents again. */
+    includeAncestors = true,
   ): Promise<boolean> => {
     if (!HistoryService.#SIG_RE.test(rootSig)) return false
     const startMs = performance.now()
@@ -3566,8 +3569,9 @@ export class HistoryService {
     // all immediate sibling destinations finish before a grandchild can begin.
     // The order is STRUCTURAL only: nothing about where the participant has
     // been or how long they stayed is recorded or consulted (no tracking —
-    // jwize, 2026-10-03), so every node scores 0 and the slice keeps the order
-    // the children were pushed in.
+    // jwize, 2026-10-03), so every node scores 0 and the slice keeps the
+    // order the nodes were pushed in. The parent joins the first step,
+    // behind the page you stand on. Each further parent is the next layer.
     const store = get<StoreContentWarm>('@hypercomb.social/Store')
     // Superseded-by-navigation check: captured now, compared per node. The
     // moment the user navigates again this walk is warming a STALE
@@ -3581,15 +3585,89 @@ export class HistoryService {
     // sig). That memo is what makes a click instant — bytes alone never were —
     // and because it is keyed by an immutable content sig it is valid GLOBALLY:
     // preparing a view anywhere prepares it everywhere, permanently.
-    type WarmNode = { sig: string; depth: number; score: number; parentSegments: readonly string[] }
+    // `depth` is the queue order, one layer per phase. The parent shares
+    // depth 0 with the page you stand on. Each further parent is the next
+    // phase, and that phase does not start until this layer has finished.
+    // `localDepth` is the depth within this expansion (the forward root, or one parent), so
+    // a parent's tiles still count as near. `fromHere` is hops from the
+    // participant; faces use it, because a parent in the first step is still
+    // one hop up. `expandDepth` is how far THIS expansion still descends.
+    type WarmNode = {
+      sig: string
+      depth: number
+      localDepth: number
+      fromHere: number
+      score: number
+      parentSegments: readonly string[]
+      expandDepth: number
+    }
     const startSegments = rootSegments.map(s => String(s ?? '').trim()).filter(Boolean)
-    const frontier: WarmNode[] = [{ sig: rootSig, depth: 0, score: 0, parentSegments: startSegments }]
+    const frontier: WarmNode[] = [{
+      sig: rootSig,
+      depth: 0,
+      localDepth: 0,
+      fromHere: 0,
+      score: 0,
+      parentSegments: startSegments,
+      expandDepth: maxDepth,
+    }]
     const CONCURRENCY = 12
     // The tiles within the code radius, with what the walk already read of
     // them — their faces warm AFTER the pass (#warmFaceTail).
     const faces: FaceCandidate[] = []
+    // THE SAME RADIUS, UPWARD, ONE LAYER PER PHASE. The parent is queued with
+    // the page you stand on. The grandparent is the next phase, after this
+    // layer finishes, and so on. Each parent expands through the tiles on
+    // its page, and those tiles are the following phase. A leaf still
+    // continues the loop until the parents are queued.
+    const reversePlan = includeAncestors ? reversePreloadPlan(maxDepth, startSegments.length) : []
+    const reverseStamp: { sig: string; depth: number }[] = []
+    let reverseCursor = 0
+    const seedReverseThrough = async (throughDistance: number): Promise<boolean> => {
+      while (reverseCursor < reversePlan.length && reversePlan[reverseCursor].distance <= throughDistance) {
+        if (this.#preloadGeneration !== gen) return false
+        const step = reversePlan[reverseCursor++]
+        const ancestorSegments = startSegments.slice(0, startSegments.length - step.levelsUp)
+        try {
+          const locationSig = await this.sign({ explorerSegments: () => ancestorSegments })
+          if (this.#preloadGeneration !== gen) return false
+          if (!locationSig) continue
+          let headSig = this.#latestSigByLineage.get(locationSig)
+          if (!headSig) {
+            try { await this.#warmLineageHead(locationSig) } catch { /* stay cold */ }
+            if (this.#preloadGeneration !== gen) return false
+            headSig = this.#latestSigByLineage.get(locationSig)
+          }
+          if (!headSig || !HistoryService.#SIG_RE.test(headSig) || visited.has(headSig)) continue
+          visited.add(headSig)
+          frontier.push({
+            sig: headSig,
+            depth: step.distance,
+            localDepth: 0,
+            fromHere: step.levelsUp,
+            score: 0,
+            parentSegments: ancestorSegments,
+            expandDepth: step.expandDepth,
+          })
+          reverseStamp.push({ sig: headSig, depth: step.expandDepth })
+        } catch { /* a cold parent is correct, just slower */ }
+      }
+      return this.#preloadGeneration === gen
+    }
 
-    while (frontier.length && walked < HistoryService.#PRELOAD_NODE_BUDGET && this.#preloadGeneration === gen) {
+    while (
+      (frontier.length > 0 || reverseCursor < reversePlan.length)
+      && walked < HistoryService.#PRELOAD_NODE_BUDGET
+      && this.#preloadGeneration === gen
+    ) {
+      const nearest = frontier.reduce((min, node) => Math.min(min, node.depth), Number.POSITIVE_INFINITY)
+      const through = frontier.length > 0 ? nearest : (reversePlan[reverseCursor]?.distance ?? 0)
+      if (!(await seedReverseThrough(through))) { superseded = true; break }
+      // A parent with no head must not end the walk while later parents remain.
+      if (frontier.length === 0) {
+        if (reverseCursor >= reversePlan.length) break
+        continue
+      }
       const slice = takePreloadBreadthSlice(frontier, CONCURRENCY)
       let cursor = 0
       const worker = async (): Promise<void> => {
@@ -3614,12 +3692,14 @@ export class HistoryService {
           // its children (1 — this view's tiles), and grandchildren (2 — the
           // props+images that must paint the moment a child is clicked;
           // without them a first visit pays ~1.3-1.9s of OPFS image reads AT
-          // CLICK TIME — measured). Deeper levels warm layer BYTES only.
+          // CLICK TIME — measured). The same three levels count from a parent,
+          // so the page going back is bright too. Deeper levels warm layer
+          // BYTES only.
           // Safe at this volume ONLY because reads are side-effect-bounded:
           // the #stageToHost rate limiter keeps read-triggered staging to a
           // trickle (the earlier flood was staging's per-sig durable-queue
           // writes, not the reads themselves).
-          if (node.depth <= 2 && this.#warmedTiles.get(node.sig) !== this.#treeEpoch) {
+          if (node.localDepth <= 2 && this.#warmedTiles.get(node.sig) !== this.#treeEpoch) {
             // ONCE PER TILE PER TREE STATE. Neighbourhood warms overlap heavily
             // (every navigation warms a subtree that shares most of its nodes
             // with the last one), and re-warming an already-warm tile is pure
@@ -3640,12 +3720,12 @@ export class HistoryService {
           // this layer's content sig, so the most-USED path down the hive gets
           // its views prepared first, and proximity is served by the visible
           // branches doing the same from the render side.
-          // The root node IS `startSegments` (empty = the hive root, the old
-          // behaviour); every other node is its parent's path plus its name.
-          const ownSegments = node.depth === 0
-            ? startSegments
+          // A localDepth of 0 IS that expansion's path (the forward root, or
+          // a parent). Every other node is its parent's path plus its name.
+          const ownSegments = node.localDepth === 0
+            ? node.parentSegments
             : [...node.parentSegments, String(layer.name ?? '')].filter(Boolean)
-          if (node.depth <= 2 && this.#preparedViews.get(node.sig) !== this.#treeEpoch) {
+          if (node.localDepth <= 2 && this.#preparedViews.get(node.sig) !== this.#treeEpoch) {
             // ONCE PER VIEW PER TREE STATE, and the guard sits OUTSIDE the
             // resolution: prepareView itself is a no-op when the memo holds,
             // but reaching it cost a sign() plus a latestMarkerSigFor() — a bag
@@ -3683,9 +3763,10 @@ export class HistoryService {
           }
           // ITS FACE is one more child when it is within the code radius:
           // warming it loads the code opening this tile's view needs.
-          if (node.depth <= faceDepth) faces.push({ layer, segments: ownSegments, score: node.score })
-          // Enqueue children weighted by usage, bounded by depth.
-          if (node.depth + 1 < maxDepth) {
+          if (node.fromHere <= faceDepth) faces.push({ layer, segments: ownSegments, score: node.score })
+          // Enqueue children within this expansion's depth. A parent expands
+          // through its tiles; the forward root expands through its own.
+          if (node.localDepth + 1 < node.expandDepth) {
             const children = Array.isArray(layer.children) ? layer.children : []
             for (const childSig of children) {
               if (HistoryService.#SIG_RE.test(childSig) && !visited.has(childSig)) {
@@ -3693,8 +3774,11 @@ export class HistoryService {
                 frontier.push({
                   sig: childSig,
                   depth: node.depth + 1,
-                  score: 0,
+                  localDepth: node.localDepth + 1,
+                  fromHere: node.fromHere + 1,
+                  score: node.score,
                   parentSegments: ownSegments,
+                  expandDepth: node.expandDepth,
                 })
               }
             }
@@ -3711,7 +3795,7 @@ export class HistoryService {
       .map(([d, n]) => `d${d}:${n}`)
       .join(' ')
     const complete = preloadPassCompleted({
-      frontierRemaining: frontier.length,
+      frontierRemaining: frontier.length + (reversePlan.length - reverseCursor),
       incomplete,
       generationAtStart: gen,
       generationNow: this.#preloadGeneration,
@@ -3721,10 +3805,18 @@ export class HistoryService {
     const outcome = superseded || this.#preloadGeneration !== gen
       ? 'SUPERSEDED by navigation'
       : complete ? 'done' : 'INCOMPLETE'
+    if (complete) {
+      for (const ancestor of reverseStamp) {
+        this.#warmedDepthByHead.set(
+          ancestor.sig,
+          mergePreloadStamp(this.#warmedDepthByHead.get(ancestor.sig), ancestor.depth, epochAtStart),
+        )
+      }
+    }
     console.log(
       `[preload] preloadFromRoot ${outcome} ` +
       `(breadth-first): ${walked} tiles warmed from ${rootSig.slice(0, 12)} ` +
-      `(${cacheHits} already cached) in ${elapsed}ms. depths: ${depthSummary}`
+      `(${cacheHits} already cached, ${reverseStamp.length} parents) in ${elapsed}ms. depths: ${depthSummary}`
     )
     // THE FACES, AFTER THE TILES — and not awaited by whoever asked for the
     // tiles: the way back and the proximity warm never wait on code. The tail
@@ -3895,8 +3987,8 @@ export class HistoryService {
    *     that is about to run;
    *  2. exempt the click's own `navigate` event from bumping again, so the
    *     warm started here survives the navigation that caused it;
-   *  3. warm the destination — head first, then its bounded subtree — through
-   *     the same cooperatively-sliced walk everything else uses.
+   *  3. warm the destination — and the parents within the same depth, each
+   *     through the tiles on that page — by the same cooperatively-sliced walk.
    *
    * Fire-and-forget and entirely best-effort: preloading is an optimization,
    * so nothing here may block, slow, or fail a navigation. Entering an
@@ -3912,13 +4004,11 @@ export class HistoryService {
       try {
         const locationSig = await this.sign({ explorerSegments: () => path })
         if (!locationSig) return
-        await this.preloadNeighbourhood(locationSig, HistoryService.#PRELOAD_MAX_DEPTH, path)
-        // FORWARD FIRST, THEN THE WAY BACK. Where they are going outranks
-        // everything; the moment it is warm, warm the route home too — the
-        // participant is one gesture from taking it — unless they already
-        // went somewhere else.
         if (this.#preloadGeneration !== gen) return
-        await this.preloadAncestors(path, undefined, gen)
+        // The neighbourhood is a ball, one layer per phase. The destination
+        // and its parent are the first step. Each further parent, and the
+        // tiles on a parent page, wait for that layer to finish.
+        await this.preloadNeighbourhood(locationSig, HistoryService.#PRELOAD_MAX_DEPTH, path)
       } catch { /* opportunistic — a cold render is correct, just slower */ }
     })()
   }
@@ -3928,18 +4018,19 @@ export class HistoryService {
    * preload in reverse to the preload depth as well as the forward vectors,
    * otherwise moving back nothing will be loaded").
    *
-   * Every warm so far pointed DOWN: the current location and its descendants.
-   * But half of all navigation is BACK, and the way out is not in the subtree
-   * you are warming — arrive anywhere by a route that skipped the ancestors
-   * (a deep link, a reference portal, an adopt, a reload at a deep path) and
-   * the whole way home is cold. So the neighbourhood is a BALL, not a cone:
-   * `#PRELOAD_MAX_DEPTH` levels down AND the same number up.
+   * Half of navigation is BACK. The way out is not in the subtree you are
+   * warming — arrive by a deep link, a reference portal, an adopt, or a
+   * reload and the way home is cold. The neighbourhood walk folds this plan
+   * into its own frontier when it has the path. This entry is the same plan
+   * for a caller that starts from the path: `#PRELOAD_MAX_DEPTH` levels up,
+   * and each of those pages through its tiles.
    *
-   * One level per ancestor is exactly right and exactly cheap: a layer's pack
-   * carries every sibling's visual, so warming an ancestor at depth 1 gives
-   * back-navigation the entire page it will paint in two reads — while
-   * descending from that ancestor would re-walk the branch we are already in.
-   * Nearest ancestor first: back goes one step at a time.
+   * Each ancestor is its own downward walk, deep enough to include the tiles
+   * on that page (remainingAncestorPreloadDepth — a depth of 1 is the page
+   * alone, and those tiles then load on the way back). Nearest first.
+   * `includeAncestors` stays off here: this loop IS the reverse direction,
+   * and the neighbourhood walk already folds the same plan into its frontier
+   * when it is given the path.
    */
   public readonly preloadAncestors = async (
     segments: readonly string[],
@@ -3949,24 +4040,23 @@ export class HistoryService {
     gen: number = this.#preloadGeneration,
   ): Promise<void> => {
     const path = segments.map(s => String(s ?? '').trim()).filter(Boolean)
-    for (let up = 1; up <= depth && path.length - up >= 0; up++) {
+    for (const step of reversePreloadPlan(depth, path.length)) {
       // The participant moved on — the way back from a location they have
       // left is no longer the way back. Preloading never outranks live
       // navigation.
       if (this.#preloadGeneration !== gen) return
-      const ancestor = path.slice(0, path.length - up)
+      const ancestor = path.slice(0, path.length - step.levelsUp)
       try {
         const locationSig = await this.sign({ explorerSegments: () => ancestor })
         if (!locationSig) continue
-        // Spend the remaining radius from each ancestor going sideways and
-        // down. Nearby ancestors expose siblings and their children.
         await this.preloadNeighbourhood(
           locationSig,
-          remainingAncestorPreloadDepth(depth, up),
+          step.expandDepth,
           ancestor,
           // Faces spend the code radius going up too: the way back warms
           // only what is still within reach.
-          up,
+          step.levelsUp,
+          false,
         )
       } catch { /* opportunistic — a cold render is correct, just slower */ }
     }
@@ -3983,6 +4073,9 @@ export class HistoryService {
      *  1 an ancestor or a declared one-click destination. Faces spend it —
      *  preload-policy.ts faceDepthFor. */
     levelsAway = 0,
+    /** When the path is known, the same radius also walks parents. The
+     *  dedicated way-back pass passes false so the two do not recurse. */
+    includeAncestors = true,
   ): Promise<void> => {
     const faceDepth = faceDepthFor(HistoryService.#PRELOAD_CODE_DEPTH, levelsAway)
     if (!HistoryService.#SIG_RE.test(locationSig)) return
@@ -4018,7 +4111,7 @@ export class HistoryService {
             mergePreloadStamp(this.#warmedDepthByHead.get(headSig), maxDepth, epochAtStart, faceDepth),
           )
         }
-      })
+      }, includeAncestors)
       // Scheduled, capped, incomplete, superseded, or invalidated work never
       // earns a completion stamp. Its useful prefix remains cached, but a
       // later/deeper request is still allowed to finish the radius.

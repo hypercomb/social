@@ -28,6 +28,13 @@
 // pointerdown and paint. A gesture tool that can stall is not a gesture
 // tool.
 //
+// ── On a tile, the ring is a layer ────────────────────────────────────
+//
+// When the menu belongs to a tile on the hive, it is drawn in that tile's
+// render layer, around the tile, and the cursor stays where it is. Holding
+// ctrl over a tile raises the selection menu the same way. The cursor-hiding
+// DOM ring remains for every surface that is not the hive.
+//
 // ── One exception: a phone, on a tile ─────────────────────────────────
 //
 // A long-press over a tile in mobile mode does NOT summon the ring. There,
@@ -58,8 +65,11 @@
 import { EffectBus, POINTER_GESTURE_END, isPointerConsumed } from '@hypercomb/core'
 import type { InputMode } from '../navigation/input-mode-stack.service.js'
 import { QuickMenuOverlay } from './quick-menu.overlay.js'
+import { QuickMenuLayer } from './quick-menu.layer.js'
+import { fireQuickMenuSlot } from './quick-menu.fire.js'
 import { isLongPressMenu } from '../navigation/browser-menu.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
+import { isTypingTarget, selectionMenuWanted } from './quick-menu.tile-menu.js'
 import {
   HEX_RADIUS,
   OPPOSITE_DIRECTION,
@@ -107,8 +117,12 @@ const TOUCH_MOVE_SOURCE = 'touch-move'
  *  it only stops the pointer wandering off into empty screen while locked. */
 const REACH = RING_DISTANCE + HEX_RADIUS * 1.1
 
-type SlashLike = { execute(name: string, args: string): unknown }
-type OverlayLike = { labelAtClient(x: number, y: number): string | null }
+type CellAt = { q: number; r: number; label: string }
+type OverlayLike = {
+  labelAtClient(x: number, y: number): string | null
+  cellAtClient?(x: number, y: number): CellAt | null
+  axialForLabel?(label: string): { q: number; r: number } | null
+}
 type LineageLike = { explorerSegments?: () => readonly string[] }
 type GateLike = {
   lock(owner: string): void
@@ -128,9 +142,31 @@ type Level = {
   readonly focus: { readonly x: number; readonly y: number }
 }
 
+const SELECTION_MENU = 'selection'
+
 export class QuickMenuInput {
   #overlay = new QuickMenuOverlay()
+  #layer: QuickMenuLayer | null = null
   #cursorStyle: HTMLStyleElement | null = null
+  /** Tile the on-screen menu is drawn around, when it is a layer. */
+  #anchor: { q: number; r: number } | null = null
+  /** The quick-menu gesture took the gate. A tile layer does not. */
+  #gateHeld = false
+  #ctrlDown = false
+  /** Escape dismissed the ctrl menu; it stays down until ctrl is released. */
+  #ctrlLatchedOff = false
+  #ctrlShown = false
+  #pointerDown = false
+  /** The pointer that set #pointerDown. A lost pointerup matches this id. */
+  #buttonPointer: number | null = null
+  #slotPress: QuickMenuDirection | null = null
+  #slotPointer: number | null = null
+  #hoverCell: CellAt | null = null
+  #activeLabel: string | null = null
+  #wand = false
+  #clipboard = false
+  #onCtrlIcon = false
+  #onTile = false
 
   #levels: Level[] = []
   #pointerId: number | null = null
@@ -224,6 +260,47 @@ export class QuickMenuInput {
 
     EffectBus.on<{ canvas?: HTMLCanvasElement }>('render:host-ready', payload => {
       this.#canvas = payload?.canvas ?? null
+      this.#syncCtrlMenu()
+    })
+
+    EffectBus.on<{ q?: number; r?: number; label?: string | null }>('tile:hover', (payload) => {
+      const label = typeof payload?.label === 'string' ? payload.label.trim() : ''
+      this.#hoverCell = label && typeof payload?.q === 'number' && typeof payload?.r === 'number'
+        ? { q: payload.q, r: payload.r, label }
+        : null
+      this.#syncCtrlMenu()
+    })
+
+    EffectBus.on<{ selected?: unknown; active?: unknown }>('selection:changed', (payload) => {
+      if (!Array.isArray(payload?.selected)) return
+      const active = payload.active
+      const first = payload.selected.find((value): value is string => typeof value === 'string' && value.length > 0)
+      this.#activeLabel = typeof active === 'string' && active ? active : first ?? null
+    })
+
+    EffectBus.on<{ active?: boolean }>('wand:armed', (payload) => {
+      this.#wand = payload?.active === true
+      this.#syncCtrlMenu()
+    })
+
+    EffectBus.on<{ open?: boolean }>('clipboard:open', (payload) => {
+      this.#clipboard = payload?.open === true
+      this.#syncCtrlMenu()
+    })
+
+    EffectBus.on<{ held?: boolean }>('overlay:ctrl-band', (payload) => {
+      this.#onCtrlIcon = payload?.held === true
+      this.#syncCtrlMenu()
+    })
+
+    window.addEventListener('blur', () => {
+      this.#ctrlDown = false
+      this.#ctrlLatchedOff = false
+      this.#pointerDown = false
+      this.#buttonPointer = null
+      this.#slotPress = null
+      this.#slotPointer = null
+      this.#syncCtrlMenu()
     })
 
     // The keyboard trigger. KeymapService owns the keydown — it already knows
@@ -257,6 +334,7 @@ export class QuickMenuInput {
     // cannot preserve meaningful screen-space focus while the viewport moves.
     window.addEventListener('resize', () => {
       if (!this.#painted) return
+      if (this.#anchor) { this.#paint(); return }
       const focus = this.#centre()
       this.#levels = this.#levels.length
         ? [{ ...this.#levels[0], focus }]
@@ -327,6 +405,24 @@ export class QuickMenuInput {
   }
 
   #onPointerDown = (e: PointerEvent): void => {
+    // A click on a selection-menu option. The tile body is not one, so a
+    // ctrl+click there still selects. Stopping the event keeps the paint
+    // and the tile click from also reading this press.
+    if (this.#ctrlShown && !this.#armed && !this.#sticky && e.button === 0) {
+      const slot = this.#tiles().slotAtClient(e.clientX, e.clientY, 'pick')
+      if (slot) {
+        e.preventDefault()
+        e.stopPropagation()
+        this.#slotPress = slot
+        this.#slotPointer = e.pointerId
+        return
+      }
+    }
+    if (e.button === 0 || e.button === 1) {
+      this.#pointerDown = true
+      this.#buttonPointer = e.pointerId
+      if (this.#ctrlShown) this.#syncCtrlMenu()
+    }
     // Sticky ring up: any press commits what is lit (or cancels on centre).
     if (this.#sticky) {
       e.preventDefault()
@@ -411,7 +507,10 @@ export class QuickMenuInput {
         // here aims the ring instead of also picking the tile up.
         if (owner === TOUCH_MOVE_SOURCE) gate?.release?.(TOUCH_MOVE_SOURCE)
         try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
-        this.#begin(e.pointerId)
+        const cell = at
+          ? get<OverlayLike>('@diamondcoreprocessor.com/TileOverlayDrone')?.cellAtClient?.(at.x, at.y) ?? null
+          : null
+        this.#begin(e.pointerId, cell?.label ? { q: cell.q, r: cell.r } : null)
         this.#tileLabel = overlay
         this.#paint()
       }, HOLD_MS)
@@ -423,7 +522,10 @@ export class QuickMenuInput {
     if (this.#isChrome(e.target)) return
     e.preventDefault()
     e.stopPropagation()
-    this.#begin(e.pointerId)
+    const cell = e.target === this.#canvas
+      ? get<OverlayLike>('@diamondcoreprocessor.com/TileOverlayDrone')?.cellAtClient?.(e.clientX, e.clientY) ?? null
+      : null
+    this.#begin(e.pointerId, cell?.label ? { q: cell.q, r: cell.r } : null)
     this.#bloomTimer = setTimeout(() => {
       this.#bloomTimer = null
       this.#paint()
@@ -435,8 +537,9 @@ export class QuickMenuInput {
     return { x: window.innerWidth / 2, y: window.innerHeight / 2 }
   }
 
-  /** Claim the pointer and start tracking direction — with or without paint. */
-  #begin(pointerId: number): void {
+  /** Claim the pointer and start tracking direction — with or without paint.
+   *  `anchor` draws the menu in the tile's layer instead of the cursor ring. */
+  #begin(pointerId: number, anchor: { q: number; r: number } | null = null): void {
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
     if (!registry) return
     this.warmup()
@@ -450,9 +553,15 @@ export class QuickMenuInput {
     this.#leftDeadZone = false
     this.#justFocused = false
     this.#virtual = focus
+    this.#ctrlShown = false
+    this.#anchor = this.#usableAnchor(anchor)
+    this.#layer?.hide()
+
+    if (this.#anchor) return
 
     get<GateLike>('@diamondcoreprocessor.com/InputGate')?.lock(OWNER)
     get<StackLike>('@diamondcoreprocessor.com/InputModeStack')?.push(this.#mode)
+    this.#gateHeld = true
     this.#requestLock()
   }
 
@@ -527,6 +636,18 @@ export class QuickMenuInput {
 
     const centre = level.focus
     const backLabel = registry.label({ label: 'back', labelKey: 'quickmenu.back' })
+    if (this.#anchor) {
+      this.#overlay.clear()
+      document.documentElement.classList.remove('hc-quick-menu-active')
+      const layer = this.#tiles()
+      layer.place(this.#anchor.q, this.#anchor.r)
+      layer.show(level.definition, registry.label, level.back, backLabel)
+      layer.highlight(this.#current)
+      this.#painted = true
+      this.#publishOnTile()
+      return
+    }
+    this.#layer?.hide()
     this.#overlay.paint(level.definition, centre, level.back, registry.label, backLabel, fromFocus)
     // Only the ROOT ring carries the tile: descend and the centre is that
     // ring's own zero-travel verb again.
@@ -536,11 +657,15 @@ export class QuickMenuInput {
     this.#overlay.setCursor(this.#virtual.x - centre.x, this.#virtual.y - centre.y)
     document.documentElement.classList.add('hc-quick-menu-active')
     this.#painted = true
+    this.#publishOnTile()
   }
 
   // ── aim ─────────────────────────────────────────────────────────────
 
   #onPointerMove = (e: PointerEvent): void => {
+    if (this.#ctrlShown && !this.#armed && !this.#sticky) {
+      this.#tiles().highlight(this.#tiles().slotAtClient(e.clientX, e.clientY, 'pick'))
+    }
     if (this.#sticky) {
       this.#advance(e)
       return
@@ -579,6 +704,10 @@ export class QuickMenuInput {
    * we fall back to the absolute position.
    */
   #advance(e: PointerEvent): void {
+    if (this.#anchor) {
+      this.#aim(this.#tiles().slotAtClient(e.clientX, e.clientY, 'gesture'))
+      return
+    }
     const level = this.#levels[this.#levels.length - 1]
     if (!level) return
     const centre = level.focus
@@ -601,6 +730,35 @@ export class QuickMenuInput {
       this.#virtual = { x: centre.x + dx, y: centre.y + dy }
     }
     this.#track(dx, dy)
+  }
+
+  /** Pointing at an option on the tile layer. Outside every hex, and not on
+   *  the tile, is the same as coming back to the centre: release cancels. */
+  #aim(slot: QuickMenuDirection | null): void {
+    const level = this.#levels[this.#levels.length - 1]
+    if (!level) return
+    if (slot === null) {
+      if (this.#current !== 'centre') {
+        this.#leftDeadZone = true
+        this.#current = 'centre'
+        this.#justFocused = false
+        if (this.#painted) this.#layer?.highlight(null)
+      }
+      return
+    }
+    if (slot !== 'centre' && !this.#leftDeadZone) this.#leftDeadZone = true
+    const previous = this.#current
+    this.#current = slot
+    if (slot !== 'centre') this.#justFocused = false
+    if (this.#painted) this.#layer?.highlight(slot)
+    if (slot === previous || slot === 'centre') return
+    if (level.back && slot === level.back) { this.#ascend(); return }
+    const found = this.#slotFor(slot)
+    if (found?.action.kind === 'menu') { this.#descend(found.action.menu, slot); return }
+    if (found?.activation === 'arrive') {
+      this.#end()
+      this.#fire(found)
+    }
   }
 
   #track(dx: number, dy: number): void {
@@ -690,6 +848,21 @@ export class QuickMenuInput {
   // ── commit ──────────────────────────────────────────────────────────
 
   #onPointerUp = (e: PointerEvent): void => {
+    if (this.#slotPress && (this.#slotPointer === null || e.pointerId === this.#slotPointer)) {
+      const pressed = this.#slotPress
+      this.#slotPress = null
+      this.#slotPointer = null
+      this.#noteButtons(e)
+      const still = this.#layer?.slotAtClient(e.clientX, e.clientY, 'pick') ?? null
+      if (still === pressed) {
+        const slot = this.#layer?.slotFor(pressed)
+        if (slot) fireQuickMenuSlot(slot)
+      }
+      this.#syncCtrlMenu()
+      return
+    }
+    this.#noteButtons(e)
+    this.#syncCtrlMenu()
     if (e.pointerType === 'touch') {
       this.#touches.delete(e.pointerId)
       // HELD A TILE, NEVER MOVED, LET GO — the tile's own screen. Nothing was
@@ -732,11 +905,17 @@ export class QuickMenuInput {
     // Some other gesture consumed this finger — its release is not ours to
     // read as "let go without moving".
     if (this.#pendingView?.pointerId === pointerId) this.#pendingView = null
+    const dropped = this.#dropButton(pointerId, 0)
     if (pointerId === this.#pointerId) { this.#clearTimers(); this.#pointerId = null }
-    if (this.#touches.size === 0 && this.#armed && !this.#sticky && !this.#heldKey) this.#end()
+    if (this.#touches.size === 0 && this.#armed && !this.#sticky && !this.#heldKey) {
+      this.#end()
+      return
+    }
+    if (dropped) this.#syncCtrlMenu()
   }
 
   #onPointerCancel = (e: PointerEvent): void => {
+    const dropped = this.#dropButton(e.pointerId, e.buttons)
     if (this.#pendingView?.pointerId === e.pointerId) this.#pendingView = null
     if (e.pointerType === 'touch') {
       this.#touches.delete(e.pointerId)
@@ -745,8 +924,32 @@ export class QuickMenuInput {
         return
       }
     }
-    if (e.pointerId !== this.#pointerId) return
+    if (e.pointerId !== this.#pointerId) {
+      if (dropped) this.#syncCtrlMenu()
+      return
+    }
     this.#end()
+  }
+
+  /** A pointerup that never arrives must not leave the select menu hidden. */
+  #dropButton(pointerId: number, buttons: number): boolean {
+    let dropped = false
+    if (this.#slotPointer === pointerId) {
+      this.#slotPress = null
+      this.#slotPointer = null
+      dropped = true
+    }
+    if (this.#buttonPointer === pointerId) {
+      this.#buttonPointer = null
+      this.#pointerDown = buttons !== 0
+      dropped = true
+    }
+    return dropped
+  }
+
+  #noteButtons(e: PointerEvent): void {
+    this.#pointerDown = e.buttons !== 0
+    if (!this.#pointerDown) this.#buttonPointer = null
   }
 
   #release(): void {
@@ -762,6 +965,10 @@ export class QuickMenuInput {
 
     // Left and came back — the escape hatch. Nothing fires.
     if (this.#leftDeadZone && direction === 'centre') { this.#end(); return }
+
+    // On a tile the six directions are the options. The centre is the tile,
+    // so releasing there does not run the centre verb.
+    if (direction === 'centre' && this.#anchor && !this.#tileLabel) { this.#end(); return }
 
     // HELD A TILE AND LET GO. The subject was decided by where the finger
     // landed, so the zero-travel slot is that tile's own screen rather than the
@@ -791,29 +998,9 @@ export class QuickMenuInput {
   }
 
   #fire(slot: QuickMenuSlot): void {
-    const action = slot.action
-    if (action.kind === 'command') {
-      const slash = get<SlashLike>('@diamondcoreprocessor.com/SlashBehaviourDrone')
-      try {
-        void Promise.resolve(slash?.execute(action.command, action.args ?? '')).catch(err =>
-          console.warn('[quick-menu] behaviour failed', action.command, err),
-        )
-      } catch (err) {
-        console.warn('[quick-menu] behaviour threw', action.command, err)
-      }
-      return
-    }
-    if (action.kind === 'effect') {
-      EffectBus.emit(action.effect, action.payload ?? {})
-      return
-    }
-    if (action.kind === 'key') {
-      // Fired AFTER #end(), so the ring is down and the mode stack released
-      // before the surface underneath sees the key.
-      for (const type of ['keydown', 'keyup'] as const) {
-        window.dispatchEvent(new KeyboardEvent(type, { key: action.key, bubbles: true, cancelable: true }))
-      }
-    }
+    // The ring is already down: #release calls #end before #fire, so the
+    // surface underneath sees a command, effect, or key with the menu gone.
+    fireQuickMenuSlot(slot)
   }
 
   // ── end ─────────────────────────────────────────────────────────────
@@ -834,7 +1021,8 @@ export class QuickMenuInput {
     const key = event?.key
     if (!key || event?.repeat) return
 
-    this.#begin(-1)
+    const cell = this.#hoverCell
+    this.#begin(-1, cell ? { q: cell.q, r: cell.r } : null)
     this.#pointerId = null
     this.#heldKey = key
     this.#bloomTimer = setTimeout(() => {
@@ -844,6 +1032,11 @@ export class QuickMenuInput {
   }
 
   #onKeyUp = (e: KeyboardEvent): void => {
+    if (e.key === 'Control' || e.key === 'Meta') {
+      this.#ctrlDown = e.ctrlKey || e.metaKey
+      if (!this.#ctrlDown) this.#ctrlLatchedOff = false
+      this.#syncCtrlMenu()
+    }
     if (!this.#heldKey || e.key !== this.#heldKey) return
     this.#heldKey = null
     if (!this.#armed) return
@@ -859,10 +1052,18 @@ export class QuickMenuInput {
   }
 
   #onKeyDown = (e: KeyboardEvent): void => {
+    if (e.key === 'Control' || e.key === 'Meta') {
+      if (!e.repeat) {
+        this.#ctrlDown = true
+        this.#syncCtrlMenu()
+      }
+      return
+    }
     if (e.key !== 'Escape') return
-    if (!this.#armed && !this.#sticky) return
+    if (!this.#armed && !this.#sticky && !this.#ctrlShown) return
     e.preventDefault()
     e.stopPropagation()
+    this.#ctrlLatchedOff = this.#ctrlDown
     this.#end()
   }
 
@@ -909,7 +1110,7 @@ export class QuickMenuInput {
 
   #end(): void {
     this.#clearTimers()
-    const wasClaimed = this.#armed || this.#sticky
+    const gesture = this.#armed || this.#sticky
     this.#armed = false
     this.#sticky = false
     this.#painted = false
@@ -922,6 +1123,7 @@ export class QuickMenuInput {
     this.#current = 'centre'
     this.#leftDeadZone = false
     this.#justFocused = false
+    this.#anchor = null
     this.#overlay.clear()
     document.documentElement.classList.remove('hc-quick-menu-active')
     // Give the cursor back. The browser restores it to exactly where it was
@@ -930,9 +1132,13 @@ export class QuickMenuInput {
     if (document.pointerLockElement) {
       try { document.exitPointerLock?.() } catch { /* already gone */ }
     }
-    if (!wasClaimed) return
-    get<StackLike>('@diamondcoreprocessor.com/InputModeStack')?.pop(OWNER)
-    get<GateLike>('@diamondcoreprocessor.com/InputGate')?.unlock(OWNER)
+    if (gesture) this.#layer?.hide()
+    if (this.#gateHeld) {
+      this.#gateHeld = false
+      get<StackLike>('@diamondcoreprocessor.com/InputModeStack')?.pop(OWNER)
+      get<GateLike>('@diamondcoreprocessor.com/InputGate')?.unlock(OWNER)
+    }
+    this.#syncCtrlMenu()
   }
 
   // ── external summon ─────────────────────────────────────────────────
@@ -949,6 +1155,7 @@ export class QuickMenuInput {
     if (!definition) return false
 
     this.#end()
+    this.#ctrlShown = false
     this.warmup()
     const focus = this.#centre()
     this.#levels = [{ definition, back: null, focus }]
@@ -957,11 +1164,82 @@ export class QuickMenuInput {
     this.#leftDeadZone = false
     this.#justFocused = false
     this.#virtual = focus
+    this.#anchor = this.#openAnchor(name)
+    if (this.#anchor) {
+      this.#paint()
+      return true
+    }
     get<GateLike>('@diamondcoreprocessor.com/InputGate')?.lock(OWNER)
     get<StackLike>('@diamondcoreprocessor.com/InputModeStack')?.push(this.#mode)
+    this.#gateHeld = true
     this.#paint()
     this.#requestLock()
     return true
+  }
+
+  // ── tile layer ──────────────────────────────────────────────────────
+
+  #tiles(): QuickMenuLayer {
+    return this.#layer ??= new QuickMenuLayer()
+  }
+
+  /** A tile anchor is only for the hive, and only where a finger is not the
+   *  pointer — a phone keeps the large ring. */
+  #usableAnchor(anchor: { q: number; r: number } | null): { q: number; r: number } | null {
+    if (!anchor || this.#isMobile()) return null
+    const mode = get<{ mode?: string }>('@hypercomb.social/ViewMode')?.mode
+    if (mode && mode !== 'hexagons') return null
+    return anchor
+  }
+
+  /** Where `/menu` and the selection ring should sit. The selection menu
+   *  prefers the tile the set is acting on; any other menu prefers the tile
+   *  under the pointer. */
+  #openAnchor(name: string | undefined): { q: number; r: number } | null {
+    const overlay = get<OverlayLike>('@diamondcoreprocessor.com/TileOverlayDrone')
+    if (name === SELECTION_MENU && this.#activeLabel) {
+      const at = overlay?.axialForLabel?.(this.#activeLabel) ?? null
+      const usable = this.#usableAnchor(at)
+      if (usable) return usable
+    }
+    return this.#usableAnchor(this.#hoverCell ? { q: this.#hoverCell.q, r: this.#hoverCell.r } : null)
+  }
+
+  #syncCtrlMenu(): void {
+    const want = selectionMenuWanted({
+      ctrl: this.#ctrlDown,
+      overTile: !!this.#hoverCell,
+      buttonDown: this.#pointerDown && !this.#slotPress,
+      typing: isTypingTarget(document.activeElement),
+      wand: this.#wand,
+      clipboard: this.#clipboard,
+      gesture: this.#armed || this.#sticky,
+      onCtrlIcon: this.#onCtrlIcon,
+      latchedOff: this.#ctrlLatchedOff,
+    })
+    if (!want || !this.#hoverCell) {
+      if (this.#ctrlShown) {
+        this.#ctrlShown = false
+        if (!(this.#anchor && (this.#armed || this.#sticky))) this.#layer?.hide()
+      }
+      this.#publishOnTile()
+      return
+    }
+    const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
+    const definition = registry?.byName(SELECTION_MENU)
+    if (!registry || !definition) return
+    this.#ctrlShown = true
+    const layer = this.#tiles()
+    layer.place(this.#hoverCell.q, this.#hoverCell.r)
+    layer.show(definition, registry.label, null, '')
+    this.#publishOnTile()
+  }
+
+  #publishOnTile(): void {
+    const active = this.#ctrlShown || (!!this.#anchor && this.#painted)
+    if (active === this.#onTile) return
+    this.#onTile = active
+    EffectBus.emit('quick-menu:on-tile', { active })
   }
 
   /** Dismiss whatever is open. */

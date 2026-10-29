@@ -284,6 +284,69 @@ test('a page carries the head of its package pool, and its bundled assets reuse 
   assert.deepEqual(reads, [])
 })
 
+test('every name reads one instance head, and a file missing from the asset copy comes from the shared bin', async () => {
+  const { env } = await fixture()
+  const pkg = 'ab'.repeat(32)
+  const next = 'ef'.repeat(32)
+  const derivation = 'cd'.repeat(32)
+  const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+  env.ASSETS.fetch = async (request) => {
+    const path = new URL(request.url).pathname
+    if (path.startsWith('/content/')) return new Response('missing', { status: 404 })
+    return new Response(shell, { headers: { 'content-type': 'text/html' } })
+  }
+  // No head yet: the path is not the page.
+  const missing = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/head'), env)
+  assert.equal(missing.status, 404)
+  assert.doesNotMatch(await missing.text(), /doctype/i)
+
+  await env.CONTENT.put('head', new TextEncoder().encode(`${pkg.toUpperCase()}\n${derivation}\n`))
+  const first = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/head'), env)
+  const second = await worker.fetch(new Request('https://pluginthematrix.com/head'), env)
+  const headText = `${pkg}\n${derivation}\n`
+  assert.equal(first.status, 200)
+  assert.equal(first.headers.get('cache-control'), 'no-store')
+  assert.equal(first.headers.get('content-type'), 'text/plain; charset=utf-8')
+  assert.equal(await first.text(), headText)
+  assert.equal(await second.text(), headText)
+
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+  const install = /<script id="hc-install" type="application\/json">([^<]*)<\/script>/.exec(html)
+  assert(install, 'the page boots the package the head names')
+  assert.equal(JSON.parse(install[1]).text.split('\n')[0], pkg)
+
+  // Two different files in the one bin. Updating the head does not touch them.
+  const indexPool = await sha256Hex('install:index')
+  const older = '{"package":"older"}'
+  const newer = '{"package":"newer"}'
+  await env.CONTENT.put(`${indexPool}/${pkg}`, new TextEncoder().encode(older))
+  await env.CONTENT.put(`${indexPool}/${next}`, new TextEncoder().encode(newer))
+  const olderFile = await worker.fetch(new Request(`https://pluginthematrix.com/content/${indexPool}/${pkg}`), env)
+  const newerFile = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${indexPool}/${next}`), env)
+  assert.equal(olderFile.status, 200)
+  assert.equal(olderFile.headers.get('content-type'), 'application/json; charset=utf-8')
+  assert.equal(await olderFile.text(), older)
+  assert.equal(await newerFile.text(), newer)
+
+  await env.CONTENT.put('head', new TextEncoder().encode(`${next}\n`))
+  const moved = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/head'), env)
+  assert.equal(await moved.text(), `${next}\n`)
+  assert.equal(await (await worker.fetch(new Request(`https://pluginthematrix.com/content/${indexPool}/${pkg}`), env)).text(), older)
+})
+
+test('a name that publishes its own package boots that package, not the shared head', async () => {
+  const own = 'ee'.repeat(32)
+  const shared = 'ab'.repeat(32)
+  const { env } = await fixture(await signedIndex({ revolucion: head, 'install:revolucion': own }))
+  await env.CONTENT.put('head', new TextEncoder().encode(`${shared}\n`))
+  env.ASSETS.fetch = async () => new Response('<!doctype html><html><head><title>x</title></head><body></body></html>', { headers: { 'content-type': 'text/html' } })
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+  const install = /<script id="hc-install" type="application\/json">([^<]*)<\/script>/.exec(html)
+  assert(install, 'the page still carries an install pointer')
+  assert.equal(JSON.parse(install[1]).text.split('\n')[0], own)
+  assert.notEqual(JSON.parse(install[1]).text.split('\n')[0], shared)
+})
+
 test('the install index goes out as JSON, so the edge compresses it', async () => {
   const { env } = await fixture()
   const pool = await sha256Hex('install:index')
@@ -1593,6 +1656,7 @@ test('the swarm door hands every other path to the participant shell', async () 
   try {
     const response = await worker.fetch(new Request('https://swarm.hypercomb.com/'), env)
     assert.equal(response.status, 200)
+    assert.equal(await response.text(), '<!doctype html>shell')
     assert.deepEqual(seen, ['https://shell.example/'])
   } finally { globalThis.fetch = original }
 })
@@ -1978,7 +2042,7 @@ test('a door wears its own policy: never framed, no bare http or ws, no cookie',
   const env = await sandboxEnv({ 'install:try-fresh-rooms': 'b'.repeat(64) })
   const response = await doorShell('https://try-fresh-rooms.hypercomb.com/', env)
   assert.equal(response.status, 200)
-  assert.equal(await response.text(), '<!doctype html>shell')
+  assert.equal(await response.text(), '<script>try{Object.defineProperty(window,"nostr",{value:void 0,writable:false,configurable:false})}catch(e){}</script><!doctype html>shell')
   const csp = response.headers.get('content-security-policy')
   for (const directive of ["frame-ancestors 'none'", "object-src 'none'", "base-uri 'self'", "form-action 'none'"]) assert.ok(csp.includes(directive), directive)
   // Scripts are left alone: the shell injects an import map and loads blob: bees.
@@ -2004,7 +2068,7 @@ test('a door on a loopback zone reaches exactly its own two http faces', async (
   env.SITE_BINDINGS = JSON.stringify({ localhost: { title: 'local', lineage: 'localhost', publishers: [{ pubkey, label: 'Jaime', primary: true }] } })
   const response = await doorShell('http://try-fresh-rooms.localhost:4291/', env)
   assert.equal(response.status, 200)
-  assert.deepEqual(connectSrc(response), ["'self'", 'https:', 'wss:', 'blob:', 'data:', 'http://localhost:4291', 'http://content.localhost:4291'])
+  assert.deepEqual(connectSrc(response), ["'self'", 'blob:', 'data:', 'http://localhost:4291', 'http://content.localhost:4291'])
 })
 
 test('a door writes nothing at our hosts — refused before any route, while home and Node still write', async () => {

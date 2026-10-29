@@ -208,6 +208,15 @@ if (derived) {
   )
 }
 
+// THE INSTANCE HEAD. One mutable file at the asset root. It names the
+// package this build ships — the minified derivation when that succeeded —
+// so every subdomain can boot it. The bin's other files stay hash-named.
+{
+  const { formatInstanceHead } = await tsImport('../../hypercomb-runtime/src/instance-head.ts', import.meta.url)
+  await writeFile(join(output, 'head'), formatInstanceHead(shipSig, derived?.derivation?.sig ?? null), 'utf8')
+  console.log(`[visitor-assets] /head names ${shipSig.slice(0, 12)}…${derived ? ' (minified)' : ''}`)
+}
+
 let bytes = 0
 const addSize = async (path) => {
   const held = await stat(path)

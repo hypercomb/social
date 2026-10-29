@@ -192,11 +192,16 @@ the click takes you to the real place). Pressing the watcher again, or closing
 its panel, puts everything down. There is no separate console, board, or list:
 the audit is made of the same material as the hive.
 
-**It reports, it never intervenes.** A stalled ask is still the participant's
-request, and a slow routine may be slow for a good reason. Retiring or
-restarting someone else's work on a timer would destroy data to satisfy a
-heuristic, so it does not. It makes the state visible and leaves the decision
-where it belongs.
+**It reports, and it does not retire anyone else's agent.** A stalled ask is
+still the participant's request, and a slow routine may be slow for a good
+reason. Retiring or restarting someone else's agent on a timer would destroy
+data to satisfy a heuristic, so it does not. It makes that state visible and
+leaves the decision where it belongs.
+
+A stalled *chat* is the exception (2026-10-27). When a conversation has stalled
+with work still open, the orchestrator re-arms that conversation's own owed
+record and the window picks the work up from what was left, by a different
+step. A question, a hold, a spent budget, and a manager's ask stay put.
 
 In a backgrounded tab the browser throttles timers to roughly once a minute,
 so the sweep slows down when nobody is looking. That is fine — and worth

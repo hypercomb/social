@@ -1,4 +1,21 @@
 const { get } = require('node:http')
+const { handleTrial } = require('./try-page-door.cjs')
+
+// A website trial is one stored HTML document. Answer it here, before the
+// dev server would send the hive. A try- name with no page falls through,
+// which is how a module door still boots.
+const trialFirst = (next) => async (request, response, options) => {
+  try {
+    if (await handleTrial(request, response)) return '/trial-done'
+  } catch {
+    if (!response.writableEnded) {
+      response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+      response.end('the trial page could not be served')
+    }
+    return '/trial-done'
+  }
+  return next ? next(request, response, options) : undefined
+}
 
 const brokerHealthy = (port) => new Promise((resolve) => {
   let settled = false
@@ -40,13 +57,20 @@ module.exports = {
     secure: true,
     changeOrigin: true,
     rewrite: path => path.replace(/^\/anthropic/, ''),
+    bypass: trialFirst(),
   },
   '/claude-bridge-health': {
     target: 'http://localhost:2401',
-    bypass: bridgeHealth(2401),
+    bypass: trialFirst(bridgeHealth(2401)),
   },
   '/claude-bridge-health-2411': {
     target: 'http://localhost:2411',
-    bypass: bridgeHealth(2411),
+    bypass: trialFirst(bridgeHealth(2411)),
+  },
+  // Last, so the paths above still match first. Every other request on a
+  // try- name that has a page is the page. Everything else is the hive.
+  '^/': {
+    target: 'http://127.0.0.1:9',
+    bypass: trialFirst((_request) => _request.url),
   },
 }

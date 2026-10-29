@@ -627,8 +627,13 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   const routes = new Map<string, string>()
   const waiting: string[] = []
   let readers = 0
+  // One tile's picture is a short chain (its layer, its properties, the
+  // image). Four of those chains left the rest of the row waiting on the
+  // first handful. Eight matches what one HTTP/2 connection can carry while
+  // the pictures are still arriving one chain at a time inside each tile.
+  const PICTURE_READERS = 8
   const drainPictures = (): void => {
-    while (readers < 4 && waiting.length) {
+    while (readers < PICTURE_READERS && waiting.length) {
       const head = waiting.shift()!
       readers++
       void tilePicture(head, pictureOrigins(routes.get(head) ?? location.origin)).then(url => {
@@ -1220,6 +1225,8 @@ ${entry.key}`
    * publish window should be hidden from your public domain showcase"). A
    * lineage with no doors opens everywhere on the worker, which keeps older
    * versions working, but it was never published here, so it is not shown.
+   * A head the owner's live list does not name is not on the visitor site
+   * either, even when a door still names the domain.
    */
   const covers = (entry: Aggregate, items: readonly ShowcaseItem[], domains: readonly string[]): boolean =>
     entry.zones.some(zone => domains.includes(zone))
@@ -1229,11 +1236,13 @@ ${entry.key}`
     // Nothing is known of what the owners meant — no index was reached, or the showcase one names
     // could not be read: show nothing rather than a larger set than they chose.
     if (signed && (!signed.reached || signed.unreadable)) return false
+    // No live list: a door is enough. A list: a head it does not name stays off the visitor site.
+    const liveHere = (head: string): boolean => !signed?.live || signed.live.has(head)
     const record = signed?.showcase
     if (record) {
       if (entry.zones.some(zone => record.domains.includes(zone))) return true
       // A named item is shown unless Publish has turned it off for this domain.
-      return entry.versions.some(version => version.claims.some(claim =>
+      return entry.versions.some(version => liveHere(version.head) && version.claims.some(claim =>
         record.items.some(item => item.pubkey === claim.pubkey && item.lineage === claim.lineage)
         && doorsOpen(signed!, claim.pubkey, claim.lineage, options.self) !== false))
     }
@@ -1241,7 +1250,8 @@ ${entry.key}`
     // A domain's own pool offers what it shares here by putting it there.
     if (!claims.length) return entry.zones.includes(options.self)
     if (!signed) return entry.zones.includes(options.self)
-    return claims.some(claim => doorsOpen(signed!, claim.pubkey, claim.lineage, options.self) === true)
+    return entry.versions.some(version => liveHere(version.head) && version.claims.some(claim =>
+      doorsOpen(signed!, claim.pubkey, claim.lineage, options.self) === true))
   }
 
   const within = (zone: string, of: string): boolean => zone === of || zone.endsWith(`.${of}`)

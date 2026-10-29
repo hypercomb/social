@@ -4,16 +4,19 @@
 //
 // Three paths:
 //   Editor open  → replace image in current editor session.
-//   Occupied hex → open editor for that tile with the new image.
+//   Occupied hex → the first dropped picture becomes the one that tile
+//                  wears. The picture it wore stays in its image collection,
+//                  and so does every other picture in the same drop.
 //   Empty area   → arm the image in the command-line chevron slot; the
 //                  user types a cell name and presses Enter to commit.
 
-import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { extractDroppedUrl } from '../link/link-drop-destination.js'
 import { isImageUrl } from '../link/photo.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 import { armImageBlob } from './arm-resource.js'
+import { announceSwappedImages, swapImagesOnTile } from '../sharing/tile-image-intake.js'
 
 const t = (key: string, fallback: string): string => {
   try {
@@ -29,6 +32,8 @@ type DropTarget = {
   label: string | null
   index: number
   hasImage: boolean
+  /** False when the pointer has left the hive. Absent means it is over a hex. */
+  over?: boolean
 }
 
 export class ImageDropDrone extends Drone {
@@ -36,7 +41,7 @@ export class ImageDropDrone extends Drone {
   override genotype = 'editor'
 
   public override description =
-    'Intercepts drag-and-drop image files from the desktop and routes them into the tile editor.'
+    'A picture dropped on a tile becomes the picture that tile wears. The previous one stays available from the images button.'
 
   protected override emits = ['drop:dragging', 'command:arm-resource', 'toast:show']
   protected override listens = ['render:host-ready', 'drop:target', 'editor:mode']
@@ -48,6 +53,10 @@ export class ImageDropDrone extends Drone {
 
   /** Last hex position reported by TileOverlayDrone during drag. */
   #lastTarget: DropTarget | null = null
+  /** That hex at the moment of release. Clearing the drag tells the overlay
+   *  the pointer has left, and the overlay answers with a nowhere target
+   *  before the drop handler can read {@link #lastTarget}. */
+  #releasedOn: DropTarget | null = null
 
   constructor() {
     super()
@@ -129,14 +138,18 @@ export class ImageDropDrone extends Drone {
 
   /** Capture-phase drop listener. Always clears the dragging flag so a
    *  child handler that calls stopPropagation() can't strand `drop:dragging`
-   *  at `true`. Does NOT preventDefault / stopPropagation — the bubble-
-   *  phase #onDrop (which routes the file) and any child handlers still
-   *  run normally. */
+   *  at `true`. The landing hex is remembered first: clearing the drag makes
+   *  the overlay report nowhere, and that report arrives before the bubble
+   *  handler routes the file. Does NOT preventDefault / stopPropagation. */
   #onDropCapture = (_e: DragEvent): void => {
+    this.#releasedOn = this.#lastTarget
     if (this.#dragging) this.#clearDragging()
   }
 
   #onDrop = (e: DragEvent): void => {
+    const dropTarget = this.#releasedOn ?? this.#lastTarget
+    this.#releasedOn = null
+
     // don't steal drops from inputs
     const tgt = e.target as HTMLElement | null
     if (tgt?.closest?.('input, textarea, select, [contenteditable]')) return
@@ -179,33 +192,25 @@ export class ImageDropDrone extends Drone {
     const draggedUrl = extractDroppedUrl(e.dataTransfer)
     if (draggedUrl && !isImageUrl(draggedUrl)) { this.#clearDragging(); return }
 
-    // find the first image file
     const files = e.dataTransfer?.files
     if (!files) { this.#clearDragging(); return }
 
-    let imageFile: File | null = null
+    const images: File[] = []
     for (let i = 0; i < files.length; i++) {
-      if (files[i].type.startsWith('image/')) {
-        imageFile = files[i]
-        break
-      }
+      if (files[i].type.startsWith('image/')) images.push(files[i])
     }
-
-    if (!imageFile) { this.#clearDragging(); return }
+    if (images.length === 0) { this.#clearDragging(); return }
 
     e.preventDefault()
-
-    // snapshot the target before clearing drag state
-    const dropTarget = this.#lastTarget
     this.#clearDragging()
 
     // A drop that fails must SAY so. This used to be a bare `void`: a full
     // device turned the drop into an unhandled rejection and the picture
     // simply never appeared. The store already says "out of space" once.
-    void this.#routeImage(imageFile, dropTarget).catch(error => {
+    void this.#routeImages(images, dropTarget).catch(error => {
       console.warn('[image-drop] the dropped picture could not be used', error)
-      const e = error as { name?: unknown; code?: unknown } | null
-      if (e?.name === 'QuotaExceededError' || e?.code === 22) return
+      const failed = error as { name?: unknown; code?: unknown } | null
+      if (failed?.name === 'QuotaExceededError' || failed?.code === 22) return
       this.emitEffect('toast:show', {
         type: 'warning',
         message: t('drop.image-failed', 'That picture could not be added — try again, or try another picture.'),
@@ -215,35 +220,42 @@ export class ImageDropDrone extends Drone {
 
   // ── routing ───────────────────────────────────────────────────
 
-  async #routeImage(file: File, target: DropTarget | null): Promise<void> {
-    const blob = new Blob([await file.arrayBuffer()], { type: file.type })
+  async #routeImages(files: readonly File[], target: DropTarget | null): Promise<void> {
+    const blobs = await this.#blobsOf(files)
     const editorSvc = this.#editorService
 
     // Path A: editor already open — replace image (user can still cancel via editor)
     if (editorSvc?.mode === 'editing') {
-      editorSvc.setLargeBlob(blob)
-      await this.#loadImageWhenReady(blob)
+      editorSvc.setLargeBlob(blobs[0])
+      await this.#loadImageWhenReady(blobs[0])
       return
     }
 
-    // Path B: dropped on an occupied tile — open editor for that tile with the new image
-    if (target?.occupied && target.label) {
-      EffectBus.emit('tile:action', {
-        action: 'edit',
-        label: target.label,
-        q: target.q,
-        r: target.r,
-        index: target.index,
-      })
-      await this.#waitForEditorMode()
-      this.#editorService?.setLargeBlob(blob)
-      await this.#loadImageWhenReady(blob)
+    // Path B: dropped on an occupied tile — that picture is the one the tile
+    // wears now. The one it wore stays in the collection, so the images
+    // button can offer it back. Nothing opens.
+    if (target && target.over !== false && target.occupied && target.label) {
+      const lineage = get('@hypercomb.social/Lineage') as
+        { explorerSegments?: () => readonly string[] } | undefined
+      const parent = (lineage?.explorerSegments?.() ?? [])
+        .map(segment => String(segment ?? '').trim())
+        .filter(Boolean)
+      const swapped = await swapImagesOnTile(parent, target.label, blobs)
+      announceSwappedImages(target.label, swapped)
       return
     }
 
     // Path C: dropped on empty position — arm the resource in the command-line
     // chevron slot. The user types a cell name and presses Enter to commit.
-    await this.#armResource(blob)
+    await this.#armResource(blobs[0])
+  }
+
+  async #blobsOf(files: readonly File[]): Promise<Blob[]> {
+    const blobs: Blob[] = []
+    for (const file of files) {
+      blobs.push(new Blob([await file.arrayBuffer()], { type: file.type || 'image/png' }))
+    }
+    return blobs
   }
 
   /**
@@ -304,16 +316,6 @@ export class ImageDropDrone extends Drone {
     }
 
     this.emitEffect('drop:dragging', { active: false, previewUrl: null })
-  }
-
-  async #waitForEditorMode(): Promise<void> {
-    if (this.#editorService?.mode === 'editing') return
-    await new Promise<void>(resolve => {
-      const off = EffectBus.on<{ active: boolean }>('editor:mode', (payload) => {
-        if (payload?.active) { off(); resolve() }
-      })
-      setTimeout(() => { off(); resolve() }, 2000)
-    })
   }
 
   async #loadImageWhenReady(blob: Blob): Promise<void> {

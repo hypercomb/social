@@ -113,6 +113,11 @@ export type ZoneOwners = {
   readonly doors: ReadonlyMap<string, ReadonlyMap<string, readonly string[]>>
   readonly reached: boolean
   readonly unreadable: boolean
+  /** Heads the first owner lists as live (`stage:live`). Absent when that
+   *  index has no live list: a door is enough, as it was before the list
+   *  existed. Present: a head that is not in it is not on the visitor site,
+   *  even when a door still names the domain. */
+  readonly live?: ReadonlySet<string>
 }
 
 /** Does an owner's signed doors open this lineage on this domain, by name?
@@ -125,6 +130,46 @@ export const doorsOpen = (owners: ZoneOwners, pubkey: string, lineage: string, z
 
 /** The index key — and the pool's meaning — for one domain's showcase. */
 export const showcaseKey = (zone: string): string => `showcase:${zone}`
+
+/** The index key of the author's live list: the heads a visitor site may show. */
+const LIVE_ROOT = 'stage:live'
+
+/** Bytes at `sig` whose hash is `sig`, from either face of the origin. */
+const verified = async (origin: string, sig: string, limit: number): Promise<unknown | null> => {
+  for (const path of [`/${sig}`, `/content/${sig}`]) {
+    const atom = await fetchJson(`${origin}${path}`, limit)
+    if (!atom || atom === 'missing' || await SignatureService.sign(atom.bytes) !== sig) continue
+    return atom.value
+  }
+  return null
+}
+
+/** The heads an author's `stage:live` claim lists, or null when the claim
+ *  cannot be read. An empty set is a list that names nothing. */
+const readLiveHeads = async (origin: string, root: string): Promise<ReadonlySet<string> | null> => {
+  if (!SIG.test(root)) return null
+  const claim = await verified(origin, root, 65_536) as { kind?: unknown; tags?: unknown } | null
+  if (!claim || Number(claim.kind) !== 30565) return null
+  try { if (!verifyEvent(claim as never)) return null } catch { return null }
+  const tag = (Array.isArray(claim.tags) ? claim.tags : []).find(row => Array.isArray(row) && row[0] === 'h') as unknown[] | undefined
+  const head = String(tag?.[1] ?? '').toLowerCase()
+  if (!SIG.test(head)) return null
+  const list = await verified(origin, head, 262_144) as { succession?: unknown; members?: unknown } | null
+  if (!list || list.succession !== 1 || !Array.isArray(list.members)) return null
+  const members = list.members.map(sig => String(sig).toLowerCase()).filter(sig => SIG.test(sig)).slice(0, 500)
+  const heads = new Set<string>()
+  for (let at = 0; at < members.length; at += 8) {
+    const batch = await Promise.all(members.slice(at, at + 8).map(async sig => {
+      const envelope = await verified(origin, sig, 8_192) as { layer?: unknown } | null
+      const layer = typeof envelope?.layer === 'string' ? envelope.layer.toLowerCase() : ''
+      return SIG.test(layer) ? layer : ''
+    }))
+    for (const layer of batch) if (layer) heads.add(layer)
+  }
+  // A list that names members we could not read is not an empty list.
+  if (members.length && heads.size === 0) return null
+  return heads
+}
 
 /** A record, believed only as far as each field survives its check; null when
  *  it is not this zone's showcase. */
@@ -160,6 +205,8 @@ const fetchJson = async (url: string, limit: number): Promise<{ bytes: ArrayBuff
 export const readZoneOwners = async (zone: string, owners: readonly string[]): Promise<ZoneOwners> => {
   const doors = new Map<string, ReadonlyMap<string, readonly string[]>>()
   let showcase: ShowcaseRecord | null = null
+  let live: ReadonlySet<string> | null = null
+  let liveRead = false
   // `failed`: an owner this read could not see — a network error, a bad answer, a signature that
   // does not verify. One such owner makes the whole read unknown, because what they signed may be
   // the very thing that narrows or widens the rest.
@@ -183,6 +230,11 @@ export const readZoneOwners = async (zone: string, owners: readonly string[]): P
       if (Array.isArray(listed)) opened.set(lineage, listed.filter((door): door is string => typeof door === 'string').map(door => door.toLowerCase()))
     }
     doors.set(pubkey, opened)
+    if (!liveRead) {
+      liveRead = true
+      const root = String(content?.roots?.[LIVE_ROOT] ?? '').toLowerCase()
+      if (SIG.test(root)) live = await readLiveHeads(origin, root)
+    }
     if (decided) continue
     const sig = String(content?.roots?.[showcaseKey(zone)] ?? '').toLowerCase()
     if (!SIG.test(sig)) continue
@@ -195,5 +247,5 @@ export const readZoneOwners = async (zone: string, owners: readonly string[]): P
     }
     if (!showcase) unreadable = true
   }
-  return { showcase, doors, reached: listed.length > 0 && !failed, unreadable }
+  return { showcase, doors, reached: listed.length > 0 && !failed, unreadable, ...(live ? { live } : {}) }
 }

@@ -96,11 +96,47 @@ export const facesOf = (
 }
 
 /**
- * Walking upward spends one unit of radius per ancestor. The remaining radius
- * is then available for sideways/downward expansion from that ancestor.
+ * How deep a walk rooted `levelsUp` above the participant still expands.
+ * The ancestor page is depth 0 of that walk; the tiles on it are depth 1.
+ * A floor of 1 warmed the page and left those tiles for the click back.
+ * Out of radius is 0 — there is no parent to warm.
  */
-export const remainingAncestorPreloadDepth = (radius: number, levelsUp: number): number =>
-  Math.max(1, radius - levelsUp + 1)
+export const remainingAncestorPreloadDepth = (radius: number, levelsUp: number): number => {
+  if (!Number.isInteger(radius) || !Number.isInteger(levelsUp)) return 0
+  if (levelsUp < 1 || levelsUp > radius) return 0
+  return Math.max(2, radius - levelsUp + 1)
+}
+
+export type ReversePreloadStep = {
+  /** Segments to drop from the current path. 1 is the parent. */
+  levelsUp: number
+  /** Queue depth. The parent shares the first step with the page you stand
+   *  on. Each further parent is the next layer phase, one layer at a time. */
+  distance: number
+  /** Downward depth of the walk rooted here. At least 2: the page and its tiles. */
+  expandDepth: number
+}
+
+/**
+ * Parents within the radius, nearest first, one layer per phase.
+ * The immediate parent is the first step. The grandparent waits until that
+ * layer has finished, and so on. `pathLength` is how many parents the
+ * current path has (the root counts, when the path is long enough).
+ * Each parent still expands through the tiles on its page, and those tiles
+ * are the following phase.
+ */
+export const reversePreloadPlan = (radius: number, pathLength: number): ReversePreloadStep[] => {
+  if (!Number.isInteger(radius) || radius < 1) return []
+  if (!Number.isInteger(pathLength) || pathLength < 1) return []
+  const steps: ReversePreloadStep[] = []
+  const limit = Math.min(pathLength, radius)
+  for (let levelsUp = 1; levelsUp <= limit; levelsUp++) {
+    const expandDepth = remainingAncestorPreloadDepth(radius, levelsUp)
+    if (expandDepth < 2) continue
+    steps.push({ levelsUp, distance: levelsUp - 1, expandDepth })
+  }
+  return steps
+}
 
 /**
  * Take work from exactly one depth. Usage orders peers at that depth but can

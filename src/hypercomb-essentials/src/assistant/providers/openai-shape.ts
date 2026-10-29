@@ -33,9 +33,14 @@ type OpenAiTextPart = {
   readonly cache_control?: { readonly type: 'ephemeral' }
 }
 
+type OpenAiImagePart = {
+  readonly type: 'image_url'
+  readonly image_url: { readonly url: string }
+}
+
 type OpenAiMessage = {
   readonly role: string
-  readonly content: string | readonly OpenAiTextPart[] | null
+  readonly content: string | readonly (OpenAiTextPart | OpenAiImagePart)[] | null
   readonly tool_calls?: readonly {
     readonly id: string
     readonly type: 'function'
@@ -77,6 +82,21 @@ export const openAiMessages = (request: LlmRequest, options: OpenAiShapeOptions 
           type: 'function',
           function: { name: call.name, arguments: call.arguments },
         })),
+      }
+    }
+    const attached = message.role === 'user' && 'images' in message ? message.images : undefined
+    const images = attached?.filter(image =>
+      /^image\/[a-z0-9.+-]+$/i.test(image.mime) && /^[a-z0-9+/=\s]+$/i.test(image.base64))
+    if (images?.length) {
+      return {
+        role: 'user',
+        content: [
+          { type: 'text', text: message.content },
+          ...images.map(image => ({
+            type: 'image_url' as const,
+            image_url: { url: `data:${image.mime};base64,${image.base64.replace(/\s/g, '')}` },
+          })),
+        ],
       }
     }
     return { role: message.role, content: message.content }

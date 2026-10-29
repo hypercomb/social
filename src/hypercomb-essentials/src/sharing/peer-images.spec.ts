@@ -12,6 +12,7 @@ import {
   canonicalPeerImageCandidates,
   hasPeerImages,
   imagePropsOf,
+  meaningPoolImageCandidates,
   peerImageCandidates,
   previewSigOf,
 } from './peer-images.js'
@@ -176,6 +177,56 @@ describe('peer image candidates', () => {
     expect(found).toHaveLength(1)
     expect(found[0].previewSig).toBe(POINT)
     expect(found[0].peers.map(peer => peer.label)).toEqual(['one.example', 'two.example'])
+  })
+
+  it('a scan stays quiet until a host has answered a pool', async () => {
+    const RECORD = '1'.repeat(64)
+    const LAYER = '2'.repeat(64)
+    const PROPS = '3'.repeat(64)
+    const jsonBlob = (value: unknown) => ({ text: async () => JSON.stringify(value) })
+    const resources = new Map<string, { text(): Promise<string> }>([
+      [RECORD, jsonBlob({ kind: 'canonical:variant', payload: { layerSig: LAYER } })],
+      [LAYER, jsonBlob({ name: 'tile', properties: [PROPS] })],
+      [PROPS, jsonBlob({ small: { image: POINT } })],
+    ])
+    ;(window as unknown as { ioc: unknown }).ioc = {
+      get: (key: string) => {
+        if (key === '@diamondcoreprocessor.com/ContentBrokerDrone') {
+          return { knownContentHosts: () => ['empty.example', 'full.example', 'hypercomb.com'] }
+        }
+        if (key === '@hypercomb.social/Store') {
+          return { getResource: async (sig: string) => resources.get(sig) ?? null }
+        }
+        return undefined
+      },
+    }
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).startsWith('https://full.example/')) {
+        return { ok: true, status: 200, json: async () => ({ members: [RECORD] }) }
+      }
+      return { ok: false, status: 404, json: async () => ({}) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await Promise.all([
+      meaningPoolImageCandidates('one', 'scan'),
+      meaningPoolImageCandidates('two', 'scan'),
+      meaningPoolImageCandidates('three', 'scan'),
+    ])
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const beforeChoose = fetchMock.mock.calls.length
+    await meaningPoolImageCandidates('four', 'choose')
+    const chosen = fetchMock.mock.calls.slice(beforeChoose).map(([url]) => String(url))
+    expect(chosen.some(url => url.includes('empty.example'))).toBe(true)
+    expect(chosen.some(url => url.startsWith('https://hypercomb.com/'))).toBe(true)
+    expect(chosen.some(url => url.includes('full.example'))).toBe(true)
+
+    const beforeScan = fetchMock.mock.calls.length
+    await meaningPoolImageCandidates('five', 'scan')
+    const scanned = fetchMock.mock.calls.slice(beforeScan).map(([url]) => String(url))
+    expect(scanned.length).toBeGreaterThan(0)
+    expect(scanned.every(url => url.includes('full.example'))).toBe(true)
   })
 
   it('prefers the point-top thumbnail for preview, then flat, then the bare pointer', () => {

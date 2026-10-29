@@ -58,6 +58,15 @@ describe('local shell document policy', () => {
     expect(csp).not.toContain('[::1]')
     expect(csp).toContain('ws://localhost:*')
     expect(csp).toContain('wss://*.localhost:*')
+    expect(csp).toContain('https://hypercomb.io')
+    expect(csp).toContain('wss://hypercomb.io')
+    expect(csp).toContain('https://api.anthropic.com')
+    expect(csp).toContain('https://api.openai.com')
+    expect(csp).toContain('https://api.x.ai')
+    expect(csp).toContain('https://generativelanguage.googleapis.com')
+    expect(csp).toContain('https://api.deepseek.com')
+    expect(csp).toContain('https://api.mistral.ai')
+    expect(csp).toContain('https://openrouter.ai')
     expect(csp).toContain('blob:')
     expect(csp).toContain('data:')
     expect(csp).toContain("script-src 'self' 'unsafe-inline'")
@@ -148,7 +157,7 @@ describe('frozen network primitives', () => {
     await expect(fetch('/tile')).resolves.toBeInstanceOf(Response)
     await expect(fetch('http://127.0.0.1:4291/x')).resolves.toBeInstanceOf(Response)
     await expect(fetch('http://try-page.localhost:4291/x')).resolves.toBeInstanceOf(Response)
-    await expect(fetch('https://openrouter.ai/api')).rejects.toBeInstanceOf(TypeError)
+    await expect(fetch('https://openrouter.ai.evil.example/api')).rejects.toBeInstanceOf(TypeError)
     await expect(fetch(new Request('https://evil.example/secret'))).rejects.toBeInstanceOf(TypeError)
     expect(calls).toEqual(['/tile', 'http://127.0.0.1:4291/x', 'http://try-page.localhost:4291/x'])
   })
@@ -160,6 +169,35 @@ describe('frozen network primitives', () => {
     await expect(fetch('http://hypercomb.com/')).rejects.toBeInstanceOf(TypeError)
     await expect(fetch('https://hypercomb.com.evil.example/')).rejects.toBeInstanceOf(TypeError)
     expect(calls).toEqual(['https://meetings.hypercomb.com/', 'https://jwize.com/x'])
+  })
+
+  it('lets the chat exceptions through over https and refuses a lookalike', async () => {
+    calls.length = 0
+    await expect(fetch('https://hypercomb.io/')).resolves.toBeInstanceOf(Response)
+    await expect(fetch('https://www.hypercomb.io/')).resolves.toBeInstanceOf(Response)
+    await expect(fetch('https://api.x.ai/v1/chat/completions')).resolves.toBeInstanceOf(Response)
+    await expect(fetch('https://api.anthropic.com/v1/messages')).resolves.toBeInstanceOf(Response)
+    await expect(fetch('https://api.openai.com/v1/chat/completions')).resolves.toBeInstanceOf(Response)
+    await expect(fetch('https://generativelanguage.googleapis.com/v1beta/models')).resolves.toBeInstanceOf(Response)
+    await expect(fetch('https://api.deepseek.com/chat/completions')).resolves.toBeInstanceOf(Response)
+    await expect(fetch('https://api.mistral.ai/v1/chat/completions')).resolves.toBeInstanceOf(Response)
+    await expect(fetch('https://openrouter.ai/api/v1/chat/completions')).resolves.toBeInstanceOf(Response)
+    await expect(fetch('http://hypercomb.io/')).rejects.toBeInstanceOf(TypeError)
+    await expect(fetch('https://meetings.hypercomb.io/')).rejects.toBeInstanceOf(TypeError)
+    await expect(fetch('https://hypercomb.io.evil.example/')).rejects.toBeInstanceOf(TypeError)
+    await expect(fetch('https://api.openai.com.evil.example/')).rejects.toBeInstanceOf(TypeError)
+    await expect(fetch('https://www.google.com/search?udm=2&q=hexagon')).rejects.toBeInstanceOf(TypeError)
+    expect(calls).toEqual([
+      'https://hypercomb.io/',
+      'https://www.hypercomb.io/',
+      'https://api.x.ai/v1/chat/completions',
+      'https://api.anthropic.com/v1/messages',
+      'https://api.openai.com/v1/chat/completions',
+      'https://generativelanguage.googleapis.com/v1beta/models',
+      'https://api.deepseek.com/chat/completions',
+      'https://api.mistral.ai/v1/chat/completions',
+      'https://openrouter.ai/api/v1/chat/completions',
+    ])
   })
 
   it('refuses a script, a storage write, and an untrusted click as the way to pause a zone', async () => {
@@ -217,8 +255,16 @@ describe('frozen network primitives', () => {
     expect(() => { navigator.sendBeacon = (() => true) as typeof navigator.sendBeacon }).toThrow(TypeError)
 
     expect(window.open('https://evil.example/out')).toBeNull()
+    expect(window.open('https://www.google.com/')).toBeNull()
+    expect(window.open('https://www.google.com/search?q=hexagon')).toBeNull()
+    expect(window.open('https://www.google.com/search?tbm=isch&q=hexagon')).toEqual({})
+    expect(window.open('https://www.google.com/search?udm=2&q=hexagon')).toEqual({})
     expect(window.open('/stay')).toEqual({})
-    expect(opened).toEqual(['/stay'])
+    expect(opened).toEqual([
+      'https://www.google.com/search?tbm=isch&q=hexagon',
+      'https://www.google.com/search?udm=2&q=hexagon',
+      '/stay',
+    ])
 
     expect(() => new RTCPeerConnection()).toThrow(TypeError)
   })
@@ -247,6 +293,20 @@ describe('frozen network primitives', () => {
       preventDefault: () => { cancelled = true },
     })
     expect(cancelled).toBe(false)
+    cancelled = false
+    navigate!({
+      destination: { url: 'https://www.google.com/search?udm=2&q=hexagon' },
+      cancelable: true,
+      preventDefault: () => { cancelled = true },
+    })
+    expect(cancelled).toBe(false)
+    cancelled = false
+    navigate!({
+      destination: { url: 'https://www.google.com/search?q=hexagon' },
+      cancelable: true,
+      preventDefault: () => { cancelled = true },
+    })
+    expect(cancelled).toBe(true)
   })
 })
 

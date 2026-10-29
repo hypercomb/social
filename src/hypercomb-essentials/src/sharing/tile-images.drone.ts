@@ -2,23 +2,26 @@
 //
 // The IMAGES icon on the tile — "this tile holds more than one picture."
 //
-// One overlay affordance that appears on a tile you HOLD exactly when there is
-// something to choose between: the pictures its own collection keeps
-// (`holdPictures`) PLUS the pictures domains report for its NAME number more
-// than one. The name is the pool — `sign(name)`, asked of every known host — so
-// the same name answers the same anywhere in the hierarchy, and a picture a
-// domain publishes for "howard" lights the icon on every "howard" you hold.
-// One picture, or none, is no choice, so no icon. The icon opens the images
-// wall when it is clicked.
+// One overlay affordance that appears on a tile you HOLD when its collection
+// (`holdPictures`) has something to choose: more than one picture, or a
+// picture it holds that it is not already wearing (a paste while the pointer
+// rests on the tile). The name is the pool — `sign(name)`, asked of every
+// known host — so the same
+// name answers the same anywhere in the hierarchy, and a picture a domain
+// publishes for "howard" lights the icon on every "howard" you hold once
+// there is a real choice. The picture the tile already wears, alone, is no
+// choice, so no icon. The icon opens the images wall when it is clicked.
 //
 // Held tiles only (`private` = your hive, `public-own` = your tile with the
 // mesh open). A peer-only tile is not yours to dress — the verb there is
 // `adopt`, which brings the whole tile over with the publisher's picture.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext } from '../presentation/tiles/tile-overlay.drone.js'
 import { galleryImageSigsAt } from '../commands/lightbox-kind.js'
+import { imagesButtonVisible } from './image-collection.js'
 import { offeredPictures } from './image-updates.js'
+import { wornPictureSig } from './tile-image-intake.js'
 
 // collections — Material Icons Filled. A stack of pictures: several versions
 // of one thing, which is exactly what the room is offering.
@@ -31,30 +34,64 @@ const lineageSegments = (): readonly string[] =>
     ?.explorerSegments?.() ?? []
 
 // Visibility is asked synchronously, the collection is read asynchronously: a
-// tile's count is fetched the first time it is asked about and answers from the
-// next hover on. A save clears the entry so the icon follows the collection.
+// tile's count is fetched the first time it is asked about. The answer emits
+// `images:recounted` so the button can appear without another hover. A save
+// clears the entry so the icon follows the collection.
 const heldCounts = new Map<string, number>()
 const pending = new Set<string>()
 const heldSigs = new Map<string, ReadonlySet<string>>()
+const wornSigs = new Map<string, string>()
+const generation = new Map<string, number>()
 const keyOf = (segments: readonly string[], label: string): string => [...segments, label].join('/')
 
-/** Pictures there are to choose between: held on this tile, plus what domains
- *  offer for its name that the tile does not already hold. */
-const choices = (label: string): number => {
+/** Ask again once the count has landed. The first hover starts the read and
+ *  answers "no" until it does; the recount is what puts the button up without
+ *  waiting for the pointer to move. */
+const recount = (key: string, sigs: readonly string[], worn: string): void => {
+  heldCounts.set(key, sigs.length)
+  heldSigs.set(key, new Set(sigs))
+  wornSigs.set(key, worn)
+}
+
+/** Drop a cached count. A read already in flight must not write the old
+ *  answer back over the drop that just landed. */
+const forget = (key: string): void => {
+  heldCounts.delete(key)
+  heldSigs.delete(key)
+  wornSigs.delete(key)
+  pending.delete(key)
+  generation.set(key, (generation.get(key) ?? 0) + 1)
+}
+
+/** True when the images button should be on this tile. */
+const offerChoice = (label: string): boolean => {
   const segments = lineageSegments()
   const key = keyOf(segments, label)
   const known = heldCounts.get(key)
   if (known === undefined && !pending.has(key)) {
     pending.add(key)
-    void galleryImageSigsAt([...segments, label])
-      .then(sigs => { heldCounts.set(key, sigs.length); heldSigs.set(key, new Set(sigs)) })
-      .catch(() => { heldCounts.set(key, 0); heldSigs.set(key, new Set()) })
-      .finally(() => { pending.delete(key) })
+    const parent = [...segments]
+    const gen = generation.get(key) ?? 0
+    void Promise.all([
+      galleryImageSigsAt([...parent, label]),
+      wornPictureSig(parent, label),
+    ])
+      .then(([sigs, worn]) => { if ((generation.get(key) ?? 0) === gen) recount(key, sigs, worn) })
+      .catch(() => { if ((generation.get(key) ?? 0) === gen) recount(key, [], '') })
+      .finally(() => {
+        if ((generation.get(key) ?? 0) !== gen) return
+        pending.delete(key)
+        EffectBus.emit('images:recounted', {})
+      })
   }
   const held = heldSigs.get(key)
   let extra = 0
   for (const sig of offeredPictures(label)) if (!held?.has(sig)) extra++
-  return (known ?? 0) + extra
+  return imagesButtonVisible({
+    held: [...(held ?? [])],
+    worn: wornSigs.get(key) ?? '',
+    extra,
+  })
 }
 
 const descriptor = (profile: 'private' | 'public-own'): OverlayActionDescriptor => ({
@@ -65,7 +102,7 @@ const descriptor = (profile: 'private' | 'public-own'): OverlayActionDescriptor 
   y: -7,
   hoverTint: 0xa8d8ff,
   profile,
-  visibleWhen: (ctx: OverlayTileContext) => choices(ctx.label) > 1,
+  visibleWhen: (ctx: OverlayTileContext) => offerChoice(ctx.label),
   labelKey: 'action.images',
   descriptionKey: 'action.images.description',
 })
@@ -96,9 +133,7 @@ export class TileImagesDrone extends Drone {
 
     this.onEffect<{ cell?: string; segments?: readonly string[] }>('tile:saved', (payload) => {
       if (payload?.cell) {
-        const key = keyOf(payload.segments ?? [], payload.cell)
-        heldCounts.delete(key)
-        heldSigs.delete(key)
+        forget(keyOf(payload.segments ?? [], payload.cell))
       }
     })
 

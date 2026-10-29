@@ -26,10 +26,15 @@
 import { Drone } from '@hypercomb/core'
 import { comfyFolder } from './comfy-folder.js'
 import { comfyHost, type ComfyFileRef } from './comfy-host.js'
+import { readyRecipes } from './comfy-recipes.js'
 import { COMFY_SERVICE_KEY, comfyService, type ComfyJob } from './comfy.service.js'
+import { weightRoster } from './comfy-weights.js'
+import { listComfyPrompts, saveComfyPrompt, type ComfyPromptDraft, type ComfyPromptSaved } from './comfy-prompts.js'
+import { continuationKeyOfGraph, readComfyDraft, saveComfyDraft, type ComfyDraft } from './comfy-draft.js'
 import { offeredKnobs, readParams, type ComfyParams } from './comfy-workflow.js'
 import {
   activeWorkflow,
+  BUILTIN_WORKFLOW_ID,
   comfyWorkflows,
   importComfyWorkflow,
   setActiveWorkflow,
@@ -46,6 +51,8 @@ interface ComfyPicture {
   type: string
   size: number
   seed: number
+  /** Set once the participant has named this picture onto a tile. */
+  placed?: boolean
 }
 
 /**
@@ -78,14 +85,61 @@ export interface ComfyRenderPayload {
   job: ComfyJob
   results: ComfyPicture[]
   target: string
+  /** Tiles that will receive a picture. Empty means each picture is a new tile. */
+  targets: string[]
+  /** The pictures are waiting for a name before they become tiles. */
+  nameResults?: boolean
   importError: string
+  /** Every model and LoRA the recipes name, and which of them this workflow loads. */
+  weights: ComfyWeightRow[]
+  /** Kept prompts. `text` is the only thing the list draws. */
+  prompts: ComfyPromptSaved[]
+  /** Set on the one render that should load a kept state into the form. */
+  applyPrompt?: ComfyPromptSaved
+  /** Set on the one render that should load a history generation into the form. */
+  generation?: ComfyGenerationRestore
+  /** Set on the one render that should replace the prompt text. */
+  rolled?: string
+  /** The read of this combination's continuation has finished. */
+  draftReady?: boolean
+  /** The form last left on this model and these LoRAs. Absent when none. */
+  resume?: ComfyDraft
+}
+
+/** The knobs a history point carries back into the form. */
+export interface ComfyGenerationRestore {
+  positive?: string
+  negative?: string
+  seed?: number
+  steps?: number
+  cfg?: number
+  width?: number
+  height?: number
+  batch?: number
+  workflow?: string
+  label?: string
+  model?: string
+}
+
+/** One file in the model list. Mirrors WeightRow; shared cannot import it. */
+export interface ComfyWeightRow {
+  file: string
+  kind: string
+  label: string
+  active: boolean
+  ms?: number
+  cached?: boolean
+  loading?: boolean
+  since?: number
 }
 
 /** Where a drag now sits, per TileOverlayDrone's broadcast — the same signal
- *  every file/image drag reads to know which hex it is over. */
+ *  every file/image drag reads to know which hex it is over. `over` is false
+ *  when the pointer has left the hive. */
 interface DropTargetInfo {
   occupied: boolean
   label: string | null
+  over?: boolean
 }
 
 /** The custom drag payload a comfy thumbnail carries — never real `Files`,
@@ -100,8 +154,10 @@ export class ComfyDrone extends Drone {
   protected override listens: string[] = [
     'comfy:open', 'comfy:close', 'comfy:reopen', 'comfy:set-endpoint', 'comfy:discover',
     'comfy:link-folder', 'comfy:browse', 'comfy:set-workflow',
-    'comfy:import-workflow', 'comfy:generate', 'comfy:cancel',
-    'comfy:keep', 'comfy:attach', 'comfy:job', 'comfy:host-changed',
+    'comfy:import-workflow', 'comfy:generate', 'comfy:set-help', 'comfy:cancel',
+    'comfy:library', 'comfy:save-prompt', 'comfy:use-prompt', 'comfy:restore-generation', 'comfy:roll',
+    'comfy:remember',
+    'comfy:keep', 'comfy:attach', 'comfy:place', 'comfy:job', 'comfy:loads', 'comfy:host-changed',
     'comfy:folder-changed', 'comfy:workflows-changed', 'selection:changed', 'drop:target',
   ]
   protected override emits: string[] = ['comfy:render', 'activity:log', 'drop:dragging']
@@ -115,6 +171,17 @@ export class ComfyDrone extends Drone {
    *  (never TheirsFiles) is what put it into drag mode. */
   #dropTarget: DropTargetInfo | null = null
   #dragging = false
+  /** The library, swept when the window opens, when it is asked, and after a keep. */
+  #prompts: ComfyPromptSaved[] = []
+  /** Consumed by the next render, then cleared, so a later paint cannot clobber the form. */
+  #applyPrompt: ComfyPromptSaved | null = null
+  #rolled = ''
+  /** Consumed by the next render, then cleared. */
+  #resume: ComfyDraft | undefined = undefined
+  #draftReady = false
+  #resumeToken = 0
+  /** A history generation, consumed the same way. */
+  #generation: ComfyGenerationRestore | null = null
 
   constructor() {
     super()
@@ -126,6 +193,10 @@ export class ComfyDrone extends Drone {
     document.addEventListener('dragover', this.#onDragOver)
     document.addEventListener('drop', this.#onDrop)
     document.addEventListener('dragend', this.#onDragEnd)
+
+    // Do not probe from the hive boot. ComfyUI is often not running, and
+    // discover() then logs a refused /system_stats for every usual port.
+    // Opening the panel warms it.
 
     this.onEffect<DropTargetInfo>('drop:target', (t) => { this.#dropTarget = t })
 
@@ -164,12 +235,13 @@ export class ComfyDrone extends Drone {
       const next = String(p?.endpoint ?? '').trim()
       if (!next) return
       comfyHost.setEndpoint(next)
-      void comfyHost.probe().then(() => this.#emit())
+      void comfyHost.probe().then(() => readyRecipes()).then(() => this.#emit())
       this.#emit()
     })
 
     this.onEffect('comfy:discover', () => {
-      void comfyHost.discover().then(found => {
+      void comfyHost.discover().then(async found => {
+        if (found) await readyRecipes()
         this.emitEffect('activity:log', {
           message: found ? `found ComfyUI at ${found}` : 'no ComfyUI on the usual ports',
           icon: '◈',
@@ -196,15 +268,23 @@ export class ComfyDrone extends Drone {
     })
 
     this.onEffect<{ id?: string }>('comfy:set-workflow', (p) => {
-      if (setActiveWorkflow(String(p?.id ?? ''))) this.#emit()
+      this.#draftReady = false
+      this.#resume = undefined
+      if (!setActiveWorkflow(String(p?.id ?? ''))) return
+      // The change itself already painted. This second paint brings back the
+      // form that belongs to the model and LoRAs just selected.
+      void this.#loadContinuation().then(() => this.#emit())
     })
 
     this.onEffect<{ json?: string }>('comfy:import-workflow', (p) => {
       void importComfyWorkflow(String(p?.json ?? ''), { label: 'pasted workflow' })
-        .then(spec => {
+        .then(async spec => {
+          this.#draftReady = false
+          this.#resume = undefined
           setActiveWorkflow(spec.id)
           this.#importError = ''
           this.emitEffect('activity:log', { message: `workflow "${spec.label}" added`, icon: '◈' })
+          await this.#loadContinuation()
           this.#emit()
         })
         .catch((err: Error) => {
@@ -213,11 +293,67 @@ export class ComfyDrone extends Drone {
         })
     })
 
-    // THE WINDOW DOES NOT ATTACH ON ITS OWN. You are here to choose, and a
-    // batch that landed itself on a tile would have chosen for you. The
-    // command line does attach, because you typed the prompt at a tile.
-    this.onEffect<ComfyParams>('comfy:generate', (p) => {
-      void comfyService.run({ ...(p ?? {}), attach: false }).then(() => this.#emit())
+    // Each picture is its own tile. A click on a thumbnail still puts that
+    // picture on the selected tile, which is a different gesture.
+    this.onEffect<ComfyParams & { fromTile?: boolean; reviewers?: number }>('comfy:generate', (p) => {
+      void comfyService.run({ ...(p ?? {}), attach: false, tiles: true }).then(() => this.#emit())
+    })
+
+    this.onEffect<{ fromTile?: boolean; reviewers?: number }>('comfy:set-help', (p) => {
+      comfyService.setHelp(p ?? {})
+    })
+
+    // The form, put aside for the model and LoRAs it was written under.
+    // No paint: a save must not put the words back into the box.
+    this.onEffect<{ key?: string; draft?: ComfyDraft }>('comfy:remember', (p) => {
+      const key = String(p?.key ?? '')
+      const draft = p?.draft
+      if (!key || !draft || typeof draft.positive !== 'string') return
+      void saveComfyDraft(key, draft)
+    })
+
+    // A new prompt in the form. The picture waits for Generate.
+    this.onEffect<{ kind?: string }>('comfy:roll', (p) => {
+      void comfyService.rollPrompt(String(p?.kind ?? '')).then(text => {
+        if (text) this.#rolled = text
+        this.#emit()
+      })
+    })
+
+    this.onEffect('comfy:library', () => { void this.#loadPrompts() })
+
+    this.onEffect<ComfyPromptDraft>('comfy:save-prompt', (p) => {
+      const workflow = activeWorkflow()
+      void saveComfyPrompt({
+        ...(p ?? {}),
+        workflow: workflow.id,
+        label: workflow.label,
+      }).then(sig => { if (sig) void this.#loadPrompts() })
+    })
+
+    // Load the state into the form. The picture waits for Generate.
+    // The apply rides the same render as a workflow change, because that
+    // change re-seeds the form from the workflow's own defaults.
+    this.onEffect<{ sig?: string }>('comfy:use-prompt', (p) => {
+      const row = this.#prompts.find(one => one.sig === String(p?.sig ?? ''))
+      if (!row) return
+      this.#applyPrompt = row
+      this.#draftReady = false
+      this.#resume = undefined
+      const moved = !!row.workflow && setActiveWorkflow(row.workflow)
+      if (!moved) this.#emit()
+    })
+
+    // A history point. Open the window on those knobs. Generate stays the
+    // participant's own press.
+    this.onEffect<ComfyGenerationRestore>('comfy:restore-generation', (p) => {
+      if (!p) return
+      this.#generation = p
+      this.#open = true
+      this.#draftReady = false
+      this.#resume = undefined
+      const moved = !!p.workflow && setActiveWorkflow(p.workflow)
+      if (!moved) this.#emit()
     })
 
     this.onEffect('comfy:cancel', () => { void comfyService.cancel() })
@@ -234,9 +370,13 @@ export class ComfyDrone extends Drone {
       this.#emit()
     })
 
+    this.onEffect<{ index?: number; name?: string }>('comfy:place', (p) => {
+      void comfyService.placeNamed(Number(p?.index ?? -1), String(p?.name ?? '')).then(() => this.#emit())
+    })
+
     // The four live sources this window is a pure read of. Re-emit on each
     // rather than polling any of them.
-    for (const effect of ['comfy:job', 'comfy:host-changed', 'comfy:folder-changed', 'comfy:workflows-changed']) {
+    for (const effect of ['comfy:job', 'comfy:loads', 'comfy:host-changed', 'comfy:folder-changed', 'comfy:workflows-changed']) {
       this.onEffect(effect, () => { if (this.#open) this.#emit() })
     }
     // "onto <tile>" has to be true while you look at it.
@@ -266,11 +406,17 @@ export class ComfyDrone extends Drone {
     const folderIndex = e.dataTransfer?.getData(FOLDER_MIME)
     if (!resultIndex && !folderIndex) return
     e.preventDefault()
+    // Remember the hex BEFORE ending the drag. Ending it tells the overlay
+    // the pointer has left, and the overlay answers with a nowhere target
+    // that would hide the tile this picture was dropped on.
+    const target = this.#dropTarget
     this.#onDragEnd()
-    // Dropped on an occupied hex → that tile. Anywhere else (empty hex, off
-    // the hive entirely) → whatever is already selected, same as a click —
-    // `attach`/`keep` arm the command line themselves when that is nothing.
-    const cell = this.#dropTarget?.occupied ? (this.#dropTarget.label ?? undefined) : undefined
+    // Dropped on an occupied hex → that tile wears the picture. The one it
+    // wore stays in its image collection (resource-attach keeps it). Anywhere
+    // else → whatever is already selected, same as a click. `attach`/`keep`
+    // arm the command line themselves when that is nothing.
+    const label = target?.label?.trim()
+    const cell = target && target.over !== false && target.occupied && label ? label : undefined
     if (resultIndex) {
       const result = comfyService.results[Number(resultIndex)]
       if (result) comfyService.attach(result, cell)
@@ -285,9 +431,27 @@ export class ComfyDrone extends Drone {
    *  starts grey and turns green on its own answers the only question this
    *  window opens with. */
   async #warm(): Promise<void> {
-    void comfyHost.probe().then(() => this.#emit())
+    await readyRecipes()
+    await this.#loadContinuation()
+    await this.#loadPrompts()
     const granted = await comfyFolder.restore().catch(() => false)
     if (granted) this.#emit()
+  }
+
+  /** The continuation for whatever is active now. A later move wins. */
+  async #loadContinuation(): Promise<void> {
+    const token = ++this.#resumeToken
+    const key = continuationKeyOfGraph(activeWorkflow().graph)
+    const draft = key ? await readComfyDraft(key) : null
+    if (token !== this.#resumeToken) return
+    this.#resume = draft ?? undefined
+    this.#draftReady = true
+  }
+
+  /** Read the library. Not on every paint — a job tick must not walk the pool. */
+  async #loadPrompts(): Promise<void> {
+    this.#prompts = await listComfyPrompts()
+    if (this.#open) this.#emit()
   }
 
   #refOf(picture: ComfyPicture): ComfyFileRef {
@@ -326,6 +490,16 @@ export class ComfyDrone extends Drone {
 
   #emit(): void {
     const workflow = activeWorkflow()
+    const applyPrompt = this.#applyPrompt ?? undefined
+    this.#applyPrompt = null
+    const generation = this.#generation ?? undefined
+    this.#generation = null
+    const rolled = this.#rolled
+    this.#rolled = ''
+    const resume = this.#resume
+    this.#resume = undefined
+    const draftReady = this.#draftReady
+    this.#draftReady = false
     const reach = comfyHost.reach
     const asking = !reach.ok && reach.kind === 'unknown'
     const payload: ComfyRenderPayload = {
@@ -353,9 +527,23 @@ export class ComfyDrone extends Drone {
         type: result.file.type,
         size: 0,
         seed: result.seed,
+        ...(result.placedAs ? { placed: true } : {}),
       })),
       target: comfyService.targetCell() ?? '',
+      targets: comfyService.selectedCells(),
+      ...(comfyService.awaitingNames ? { nameResults: true } : {}),
       importError: this.#importError,
+      prompts: this.#prompts,
+      ...(applyPrompt ? { applyPrompt } : {}),
+      ...(generation ? { generation } : {}),
+      ...(rolled ? { rolled } : {}),
+      ...(draftReady ? { draftReady: true } : {}),
+      ...(resume ? { resume } : {}),
+      weights: weightRoster(
+        comfyWorkflows().filter(one => one.id !== BUILTIN_WORKFLOW_ID || one.id === workflow.id),
+        workflow.id,
+        comfyService.loadClock,
+      ),
     }
     this.emitEffect('comfy:render', payload)
   }

@@ -14,6 +14,14 @@ import { EffectBus, IconRef, type IconRef as IconRefType } from '@hypercomb/core
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { IconComponent } from '../icon/icon.component'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
+import {
+  addedChildSigs,
+  childSigsOf,
+  generationFromJson,
+  generationLine,
+  generationSigOf,
+  type GenerationView,
+} from './history-generation.js'
 // Full docked-panel chrome — resize grip, width persistence, `--hc-panel-scale`,
 // control-bar pinning and the settings gear — the SAME shared code the Portals
 // entrance (the aggregate index) and its sibling panels ride. The viewer
@@ -95,8 +103,14 @@ type CursorService = {
   refreshForLocation?(locationSig: string): Promise<void>
   onNewLayer?(): Promise<void>
 }
+type PoolDir = {
+  getFileHandle(name: string): Promise<{ getFile(): Promise<Blob> }>
+}
 type Store = {
   getResource(sig: string): Promise<Blob | null>
+  /** The raw bytes, including a Life incidence the resolved read would follow. */
+  getResourceLocal?(sig: string): Promise<Blob | null>
+  getPool?(meaning: string): Promise<PoolDir | null>
 }
 type NavigationService = {
   segmentsRaw(): string[]
@@ -118,6 +132,10 @@ type Slice = {
    *  the user can see the canonical visual primitives without having
    *  to click into the sig manually. */
   properties: string | null
+  /** The generation this revision names, when it names one. */
+  generation: GenerationView | null
+  /** Marker filename, so a generation that arrives after the slice opened can fill it. */
+  key?: string
 }
 
 type Row = {
@@ -221,6 +239,10 @@ export class HistoryViewerComponent implements OnInit, OnDestroy {
   // marker's rawText during reload. Kept separate from the layer content
   // because it lives on the marker record, not the layer.
   #meta = signal<ReadonlyMap<string, { marked: boolean; label: string | null }>>(new Map())
+  /** Marker filename → the generation that revision (or its new child) names. */
+  #generations = signal<ReadonlyMap<string, GenerationView>>(new Map())
+  /** Markers are immutable, so a resolved generation stays resolved. */
+  #generationKnown = new Map<string, GenerationView | null>()
   #position = signal(0)
   #total = signal(0)
   #locationSig = signal('')
@@ -316,12 +338,21 @@ export class HistoryViewerComponent implements OnInit, OnDestroy {
     const nameOf = (sig: string): string | undefined => childNames.get(sig)
 
     const meta = this.#meta()
+    const generations = this.#generations()
     const rows: Row[] = []
     let previousContent: Content | undefined = undefined
     entries.forEach((entry, i) => {
       const content = contents.get(entry.layerSig)
       if (!content) return
-      const { summary, category, isCascade } = summarise(previousContent, content, nameOf)
+      let { summary, category, isCascade } = summarise(previousContent, content, nameOf)
+      // A picture landing on a child is a hidden cascade on the parent.
+      // The prompt is the thing that changed, so the row stays visible.
+      const made = generations.get(entry.filename)
+      if (made) {
+        summary = generationLine(made)
+        isCascade = false
+        if (category === 'none' || category === 'system') category = 'content'
+      }
       previousContent = content
       const m = meta.get(entry.filename)
       rows.push({
@@ -568,6 +599,8 @@ export class HistoryViewerComponent implements OnInit, OnDestroy {
       lines,
       json: nextJson,
       properties: null,
+      generation: this.#generations().get(entry.filename) ?? null,
+      key: entry.filename,
     }])
     this.sliceCopied.set(false)
     // Inflate the layer's `properties[0]` (the canonical 0000 resource)
@@ -739,6 +772,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy {
       lines,
       json: json ?? '',
       properties: null,
+      generation: null,
     }
     this.#sliceStack.update(s => [...s, slice])
     this.sliceCopied.set(false)
@@ -966,6 +1000,38 @@ export class HistoryViewerComponent implements OnInit, OnDestroy {
     return window.ioc.get<NavigationService>('@hypercomb.social/Navigation') ?? null
   }
 
+  /** The words a generation row and its slice both show. */
+  readonly generationWords = (made: GenerationView): string => generationLine(made)
+
+  /** Workflow, size, steps, cfg, seed, model — the knobs beside the prompt. */
+  readonly generationMeta = (made: GenerationView): string => {
+    const parts: string[] = []
+    if (made.label) parts.push(made.label)
+    else if (made.workflow) parts.push(made.workflow)
+    if (made.width !== undefined && made.height !== undefined) parts.push(`${made.width}×${made.height}`)
+    if (made.steps !== undefined) parts.push(`steps ${made.steps}`)
+    if (made.cfg !== undefined) parts.push(`cfg ${made.cfg}`)
+    if (made.seed !== undefined) parts.push(`seed ${made.seed}`)
+    if (made.model) parts.push(made.model)
+    return parts.join(' · ')
+  }
+
+  /** Load this generation into the Comfy window. The picture stays until Generate. */
+  readonly useGeneration = (made: GenerationView): void => {
+    EffectBus.emit('comfy:restore-generation', {
+      ...(made.positive ? { positive: made.positive } : {}),
+      ...(made.negative ? { negative: made.negative } : {}),
+      ...(made.seed !== undefined ? { seed: made.seed } : {}),
+      ...(made.steps !== undefined ? { steps: made.steps } : {}),
+      ...(made.cfg !== undefined ? { cfg: made.cfg } : {}),
+      ...(made.width !== undefined ? { width: made.width } : {}),
+      ...(made.height !== undefined ? { height: made.height } : {}),
+      ...(made.workflow ? { workflow: made.workflow } : {}),
+      ...(made.label ? { label: made.label } : {}),
+      ...(made.model ? { model: made.model } : {}),
+    })
+  }
+
   /**
    * Reflection contract: every reload re-lists the bag's marker
    * filenames fresh from disk (cheap — names only, no bytes read).
@@ -1109,10 +1175,164 @@ export class HistoryViewerComponent implements OnInit, OnDestroy {
         if (nextNames.size !== this.#childNames().size) this.#childNames.set(nextNames)
       }
     }
+
+    // Generations ride after the first paint. A cascade that only swapped a
+    // child's signature still names the picture that landed.
+    void this.#noteGenerations(seq)
+  }
+
+  /** Marker filename → generation, for this bag. Writes nothing. */
+  async #noteGenerations(seq: number): Promise<void> {
+    const entries = this.#entries()
+    const contents = this.#contents()
+    const store = this.#store()
+    const history = this.#history()
+    if (!store) return
+    const locationSig = this.#locationSig()
+    const found = new Map<string, GenerationView>()
+    const layers = new Map<string, Content | null>()
+    let previous: Content | undefined
+    for (const entry of entries) {
+      if (seq !== this.#loadSeq) return
+      const content = contents.get(entry.layerSig)
+      if (!content) { previous = undefined; continue }
+      const cacheKey = `${locationSig}:${entry.filename}`
+      let view: GenerationView | null
+      if (this.#generationKnown.has(cacheKey)) {
+        view = this.#generationKnown.get(cacheKey) ?? null
+      } else {
+        view = await this.#generationOfLayer(content, store)
+        if (!view && previous && history?.getLayerBySig) {
+          for (const sig of addedChildSigs(childSigsOf(previous), childSigsOf(content))) {
+            let child = layers.get(sig)
+            if (child === undefined) {
+              try { child = await history.getLayerBySig(sig) } catch { child = null }
+              layers.set(sig, child ?? null)
+            }
+            if (!child) continue
+            view = await this.#generationOfLayer(child, store)
+            if (view) break
+          }
+        }
+        this.#generationKnown.set(cacheKey, view)
+      }
+      if (view) found.set(entry.filename, view)
+      previous = content
+    }
+    if (seq !== this.#loadSeq) return
+    this.#generations.set(found)
+    this.#sliceStack.update(stack => {
+      if (stack.length === 0) return stack
+      const top = stack[stack.length - 1]
+      if (!top?.key || top.generation) return stack
+      const made = found.get(top.key)
+      if (!made) return stack
+      return [...stack.slice(0, -1), { ...top, generation: made }]
+    })
+  }
+
+  async #generationOfLayer(content: Content, store: Store): Promise<GenerationView | null> {
+    const slot = (content as Record<string, unknown>)['properties']
+    if (!Array.isArray(slot) || slot.length === 0) return null
+    const propSig = slot[0]
+    if (typeof propSig !== 'string' || !SIG_RE.test(propSig)) return null
+    try {
+      const props = await this.#jsonResource(propSig, store)
+      return props ? await this.#generationOfProps(props, store) : null
+    } catch { return null }
+  }
+
+  /** Properties JSON, following one Life incidence when the slot names one. */
+  async #jsonResource(sig: string, store: Store): Promise<unknown> {
+    const blob = await store.getResource(sig)
+    if (!blob) return null
+    const text = await blob.text()
+    const parsed = generationFromJson(text)
+    if (parsed && 'follow' in parsed) {
+      const inner = await store.getResource(parsed.follow)
+      if (!inner) return null
+      return JSON.parse(await inner.text())
+    }
+    return JSON.parse(text)
+  }
+
+  async #generationOfProps(props: unknown, store: Store): Promise<GenerationView | null> {
+    const named = generationSigOf(props)
+    if (named) {
+      try {
+        const view = await this.#viewFromBlob(await store.getResource(named), store)
+        if (view) return view
+      } catch { /* the pool can still name the picture */ }
+    }
+    return this.#generationFromPool(props, store)
+  }
+
+  /** One document, then at most one incidence hop. */
+  async #viewFromBlob(blob: Blob | null, store: Store): Promise<GenerationView | null> {
+    if (!blob) return null
+    const parsed = generationFromJson(await blob.text())
+    if (!parsed) return null
+    if (!('follow' in parsed)) return parsed
+    const inner = await store.getResource(parsed.follow)
+    if (!inner) return null
+    const again = generationFromJson(await inner.text())
+    return again && !('follow' in again) ? again : null
+  }
+
+  /**
+   * Pictures attached before a revision named its generation. The pool
+   * file is the raw image signature. A Life incidence on the picture
+   * unwraps once to that signature.
+   */
+  async #generationFromPool(props: unknown, store: Store): Promise<GenerationView | null> {
+    if (!store.getPool) return null
+    let dir: PoolDir | null = null
+    try { dir = await store.getPool(GENERATIONS_POOL) } catch { return null }
+    if (!dir) return null
+    const bag = props as {
+      large?: { image?: unknown }
+      small?: { image?: unknown }
+      flat?: { small?: { image?: unknown } }
+      imageSig?: unknown
+    }
+    const candidates = [bag?.large?.image, bag?.small?.image, bag?.flat?.small?.image, bag?.imageSig]
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string' || !SIG_RE.test(candidate)) continue
+      const key = await this.#payloadSig(candidate, store)
+      const view = await this.#readPoolMember(dir, key)
+        ?? (key === candidate ? null : await this.#readPoolMember(dir, candidate))
+      if (view) return view
+    }
+    return null
+  }
+
+  /** The signature the pool file is named by. */
+  async #payloadSig(sig: string, store: Store): Promise<string> {
+    if (!store.getResourceLocal) return sig
+    try {
+      const blob = await store.getResourceLocal(sig)
+      if (!blob || blob.size > 64 * 1024) return sig
+      const parsed = generationFromJson(await blob.text())
+      if (parsed && 'follow' in parsed) return parsed.follow
+    } catch { /* the signature itself is the key */ }
+    return sig
+  }
+
+  async #readPoolMember(dir: PoolDir, name: string): Promise<GenerationView | null> {
+    try {
+      const handle = await dir.getFileHandle(name)
+      const file = await handle.getFile()
+      if (!file.size) return null
+      const parsed = generationFromJson(await file.text())
+      return parsed && !('follow' in parsed) ? parsed : null
+    } catch { return null }
   }
 }
 
 const SIG_RE = /^[0-9a-f]{64}$/
+
+/** Personal truth pool. Seeded as `comfy:generations`. Lookup is by image signature. */
+const GENERATIONS_POOL = 'comfy:generations'
 
 // ─────────────────────────────────────────────────────────────────────
 // Line-level diff for the slice inspector.

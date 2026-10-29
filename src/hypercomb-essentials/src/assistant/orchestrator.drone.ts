@@ -20,24 +20,35 @@
 // something to say. Clicking it opens the same panel every other agent uses —
 // its activity log IS the findings list.
 //
-// ── It reports, it never intervenes ────────────────────────────────────
+// ── It reports. It does not retire anyone else's agent ─────────────────
 //
 // A stalled ask is still the participant's request; a slow routine may be
-// slow for a good reason. Retiring or restarting someone else's work on a
+// slow for a good reason. Retiring or restarting someone else's agent on a
 // timer would destroy data to satisfy a heuristic, so the orchestrator does
-// not do it. It makes the state visible and leaves the decision where it
+// not do it. It makes that state visible and leaves the decision where it
 // belongs.
+//
+// A STALLED CHAT IS PICKED BACK UP (Jaime, 2026-10-27: "the chats should
+// never fall idle"). When a conversation has stalled with work still open,
+// or has gone quiet while its workflow still has open steps, this pass
+// re-arms that conversation's own owed record. The window then carries the
+// word for the conversation on screen. The next step says what is still open
+// and asks for a different concrete action, so the same continue word is not
+// replayed. A question, a hold, a model that gave up, an interrupted leg, a
+// spent budget, and a manager's ask stay as they are.
 //
 // The other half of the job — stray log files, code that has drifted from the
 // documentation, mirrors that were never built — lives outside the browser
 // and runs over the bridge: `scripts/bridge/orchestrator-sweep.cjs` reports
 // its findings back through the `agent-progress` op, onto this same bee.
 
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, WORK_BUDGET } from '@hypercomb/core'
 import { AgentRegistry, type Agent } from './agent-registry.service.js'
 import { agentTilesRailFactory } from './agent-tiles-rail.js'
 import { drainBlurbs } from './chat-blurb.js'
-import { drainRouteFlows } from './chat-route.js'
+import { drainRouteFlows, flowMatches, flowOpenSteps, readRouteFlow, type RouteFlowRecord } from './chat-route.js'
+import { listConversations, readTurns, writeOwed, type ConversationOwed, type ConversationSummary } from './chat-thread.js'
+import { STALL_OPEN_PICKUPS_MAX, STALL_PASS_MS, STALL_QUIET_MS, STALL_WAKE_MS, stallPickup, type StallOwed } from './stall-pickup.js'
 
 export type FindingKind = 'waiting' | 'silent' | 'overlap' | 'failed' | 'rogue' | 'sweep' | 'blocked'
 
@@ -161,12 +172,30 @@ const ioc = <T,>(key: string): T | undefined =>
 
 const minutes = (ms: number): string => `${Math.max(1, Math.round(ms / 60_000))}m`
 
+/** How many stalled chats one pass may start. The rest wait for the next pass. */
+const STALL_STARTS = 2
+/** Quiet chats whose workflow is read per pass. The flow lives beside the thread. */
+const STALL_FLOW_READS = 4
+
+const stallOf = (owed: ConversationOwed): StallOwed => ({
+  state: owed.state,
+  why: owed.why,
+  left: owed.left,
+  ...(owed.asker ? { asker: owed.asker } : {}),
+  spent: owed.spent,
+  pickups: owed.pickups,
+  next: owed.next,
+})
+
+const openTitles = (record: RouteFlowRecord): string[] =>
+  record.nodes.flatMap(node => node.state === 'open' && node.title.trim() ? [node.title.trim()] : [])
+
 export class OrchestratorDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'assistant'
 
   public override description =
-    'Watches every agent in the hive and reports work that has stalled, gone silent, overlapped, failed, or run away.'
+    'Watches every agent in the hive and reports work that has stalled, gone silent, overlapped, failed, or run away. Picks a stalled chat back up from what it still owes.'
   public override effects = ['network'] as const
 
   protected override listens = []
@@ -179,6 +208,17 @@ export class OrchestratorDrone extends Drone {
   /** A pass in flight. Model calls outlast the interval, and two drains would
    *  pick the same threads and pay for them twice. */
   #blurbBusy = false
+  /** One stall pass at a time, its clock, and the early wake from a new owed record. */
+  #stallBusy = false
+  #stallTimer: ReturnType<typeof setInterval> | null = null
+  #stallWake: ReturnType<typeof setTimeout> | null = null
+  #stallOff: (() => void) | null = null
+  /** Pickups of one unchanged set of open steps, per conversation. */
+  #openPicked = new Map<string, { sig: string; n: number }>()
+  /** Conversations already told that the same open steps were picked up enough times. */
+  #stallTold = new Set<string>()
+  /** How many times the current unstick record has been handed to the window. */
+  #unstickTries = new Map<string, { at: number; tries: number }>()
   /** The route-flow drain's one timer, when it is due, whether a pass is
    *  running, and whether a wake arrived during it. */
   #flowTimer: ReturnType<typeof setTimeout> | null = null
@@ -227,6 +267,11 @@ export class OrchestratorDrone extends Drone {
     this.#sweep()
     this.#blurbTimer = setInterval(this.#blurbPass, BLURB_MS)
     void this.#blurbPass()
+    // Stalled chats are picked up even when no agent is live: a stall is a
+    // conversation that has already stopped, which is when #sweep stands down.
+    this.#stallTimer = setInterval(() => { void this.#stallPass() }, STALL_PASS_MS)
+    void this.#stallPass()
+    this.#stallOff = EffectBus.on('chat:owed', () => this.#scheduleStall())
     // PAUSED (Jaime, 2026-09-11: "hide the workflow sidebar for now and
     // stop"). With the sidebar hidden nobody reads the flows, so the local
     // model must not spend GPU organizing them. Flip to true to resume.
@@ -322,6 +367,124 @@ export class OrchestratorDrone extends Drone {
       })
     } catch { /* a convenience nobody asked for out loud must never raise */ }
     finally { this.#blurbBusy = false }
+  }
+
+  /** AN EARLY WAKE. A new owed record is a stall that just landed, or a leg
+   *  that just finished. One pass, soon, however many records arrive together. */
+  #scheduleStall = (): void => {
+    if (this.#disposed || !this.#started || this.#stallWake) return
+    this.#stallWake = setTimeout(() => {
+      this.#stallWake = null
+      void this.#stallPass()
+    }, STALL_WAKE_MS)
+  }
+
+  /** Open steps of a flow that already covers this thread, and how many times
+   *  that same set has been picked up. Undefined when there is nothing to carry. */
+  #openWork = async (convoId: string): Promise<{ current: true; titles: string[]; picked: number } | undefined> => {
+    try {
+      const record = await readRouteFlow(convoId)
+      if (!record) return undefined
+      const turns = await readTurns(convoId)
+      if (!flowMatches(record, turns) || flowOpenSteps(record) < 1) return undefined
+      const titles = openTitles(record)
+      const named = titles.length ? titles : ['a step still open']
+      const sig = named.join('\n')
+      const prior = this.#openPicked.get(convoId)
+      if (prior && prior.sig !== sig) {
+        this.#openPicked.delete(convoId)
+        this.#stallTold.delete(convoId)
+      }
+      return { current: true, titles: named, picked: prior && prior.sig === sig ? prior.n : 0 }
+    } catch { return undefined }
+  }
+
+  /** Hand one unstick record to the window, at most twice, so a missed send
+   *  gets one more chance and a record that is sitting off screen does not
+   *  fill every later pass. True when it was handed over this call. */
+  #handUnstick = (convoId: string, at: number): boolean => {
+    const prior = this.#unstickTries.get(convoId)
+    const tries = prior && prior.at === at ? prior.tries : 0
+    if (tries >= 2) return false
+    this.#unstickTries.set(convoId, { at, tries: tries + 1 })
+    EffectBus.emit('chat:unstick', { convoId })
+    return true
+  }
+
+  #notePickup = (left: string): void => {
+    const activity = `picking a stalled chat back up: ${left.replace(/\s+/g, ' ').trim().slice(0, 140)}`
+    if (!this.#raised) this.#raise(0)
+    this.emitEffect('agent:progress', { id: ORCHESTRATOR_ID, status: 'working', activity })
+  }
+
+  #sayStuck = (convoId: string, titles: readonly string[]): void => {
+    if (this.#stallTold.has(convoId)) return
+    this.#stallTold.add(convoId)
+    const what = titles.slice(0, 3).join('; ') || 'open steps'
+    if (!this.#raised) this.#raise(0)
+    this.emitEffect('agent:progress', {
+      id: ORCHESTRATOR_ID, status: 'pending',
+      activity: `the agent still has these open steps: ${what}`,
+    })
+  }
+
+  /** PICK STALLED CHATS BACK UP. A question, a model that gave up, a spent
+   *  budget, and a manager's ask are not stalls. A hold is: the leg ended
+   *  without recording the rest. Two chats at most are started per pass. */
+  #stallPass = async (): Promise<void> => {
+    if (this.#stallBusy || this.#disposed) return
+    this.#stallBusy = true
+    try {
+      const conversations = await listConversations()
+      const now = Date.now()
+      const rank = (convo: ConversationSummary): number =>
+        convo.owed?.state === 'waiting' && (convo.owed.why === 'stalled' || convo.owed.why === 'held') ? 0
+          : convo.owed?.why === 'unstick' ? 1 : 2
+      const ranked = [...conversations].sort((a, b) => rank(a) - rank(b) || (a.owed?.at ?? a.lastAt) - (b.owed?.at ?? b.lastAt))
+      let starts = 0
+      let flowsRead = 0
+      const canReadFlows = typeof readRouteFlow === 'function'
+        && typeof flowMatches === 'function' && typeof flowOpenSteps === 'function'
+      for (const convo of ranked) {
+        if (starts >= STALL_STARTS) break
+        if (convo.archived || convo.asking) continue
+        const owed = convo.owed
+        // A pickup already armed, and due: say so again. The window sends it
+        // when this conversation is the one on screen, and ignores it while a
+        // leg of it is already running.
+        if (owed?.state === 'continue' && owed.why === 'unstick' && owed.next <= now && now - owed.at >= STALL_WAKE_MS && this.#handUnstick(convo.convoId, owed.at)) {
+          starts++
+          continue
+        }
+        const stalled = owed?.state === 'waiting' && (owed.why === 'stalled' || owed.why === 'held')
+        const quiet = now - convo.lastAt >= STALL_QUIET_MS
+        let open: { current: true; titles: string[]; picked: number } | undefined
+        if (!owed && quiet && canReadFlows && flowsRead < STALL_FLOW_READS) {
+          flowsRead++
+          open = await this.#openWork(convo.convoId)
+        }
+        if (!stalled && !open) continue
+        const patch = stallPickup({
+          ...(owed ? { owed: stallOf(owed) } : {}),
+          ...(open ? { open } : {}),
+          asking: false,
+          quiet,
+          budget: WORK_BUDGET,
+        }, now)
+        if (!patch) continue
+        const written = await writeOwed(convo.convoId, patch)
+        if (!written || patch.state !== 'continue') continue
+        if (open) {
+          this.#openPicked.set(convo.convoId, { sig: open.titles.join('\n'), n: open.picked + 1 })
+          if (open.picked < STALL_OPEN_PICKUPS_MAX) this.#stallTold.delete(convo.convoId)
+        }
+        if (open && open.picked >= STALL_OPEN_PICKUPS_MAX) this.#sayStuck(convo.convoId, open.titles)
+        this.#handUnstick(convo.convoId, written.at)
+        this.#notePickup(patch.left)
+        starts++
+      }
+    } catch { /* a pass that cannot read the threads must not raise */ }
+    finally { this.#stallBusy = false }
   }
 
   /** Everything currently wrong, newest first. */
@@ -465,7 +628,8 @@ export class OrchestratorDrone extends Drone {
    *  out of patience destroys their data to satisfy a guess. A participant who
    *  has walked to the tile, read the finding and pressed the button has made
    *  the decision the orchestrator is not entitled to make on its own. The
-   *  automatic path above is unchanged and still only ever describes.
+   *  stall pass is the one automatic act, and it only re-arms a conversation's
+   *  own owed record. Retiring an agent stays this button.
    *
    *  Returns what it did, in words, for the log and the toast. */
   async complete(): Promise<string> {
@@ -719,7 +883,7 @@ export class OrchestratorDrone extends Drone {
       id: ORCHESTRATOR_ID,
       behavior: 'orchestrator',
       kind: 'orchestrator',
-      request: 'Watching every agent in the hive for work that stalls, overlaps, fails, or runs away.',
+      request: 'Watching every agent in the hive for work that stalls, overlaps, fails, or runs away, and picking a stalled chat back up from what it still owes.',
       targets: [],
       segments: [],
     })
@@ -735,6 +899,12 @@ export class OrchestratorDrone extends Drone {
     this.#timer = null
     if (this.#blurbTimer) clearInterval(this.#blurbTimer)
     this.#blurbTimer = null
+    if (this.#stallTimer) clearInterval(this.#stallTimer)
+    this.#stallTimer = null
+    if (this.#stallWake) clearTimeout(this.#stallWake)
+    this.#stallWake = null
+    this.#stallOff?.()
+    this.#stallOff = null
     this.#disposed = true
     if (this.#flowTimer !== null) clearTimeout(this.#flowTimer)
     this.#flowTimer = null

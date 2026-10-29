@@ -282,6 +282,17 @@ const attachImportMap = async (): Promise<void> => {
 
 const bootstrap = async (): Promise<void> => {
   ;(window as any).__hcBoot('bootstrap() started')
+  // PHONE GATEWAY. The head script (hc-phone-gateway) has already started
+  // hypercomb.com's current pin on a phone at hypercomb.io. When that signed
+  // initial is up, the hive does not boot. This stays above the packed-store
+  // gate, which is the first OPFS touch on every other path. A failure falls
+  // through and the hive boots.
+  const phoneGateway = (window as Window & { __hcPhoneGateway?: Promise<boolean> }).__hcPhoneGateway
+  if (phoneGateway && typeof phoneGateway.then === 'function') {
+    const served = await phoneGateway.catch(() => false)
+    ;(window as any).__hcBoot(served ? 'phone gateway served the pinned initial' : 'phone gateway fell through to the hive')
+    if (served) return
+  }
   const readonlyVisitor = (window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true
   // ONE-WAY DOOR GATE. Must be the FIRST thing in ${0,0}main — before any module can
   // acquire OPFS. A hive drained into the packed store is not fully present in

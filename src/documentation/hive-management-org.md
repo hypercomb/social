@@ -165,6 +165,9 @@ Keeps the org thin. Reads every manager's last report and the hive's root,
 and answers three questions: what changed since the last pass, which managers
 should run now and in what order, and what must go up to Claude Code as
 critical. It does no area work itself and writes only in its own conversation.
+The one other write is a stalled chat's owed record (2026-10-27): it re-arms
+that record so the chat picks up what it still owes, and it still does no tile
+work of its own.
 
 ### games
 The games on the hive: Bubble Bobble (`/bubble-bobble-dos-v1`, `/games`),

@@ -216,7 +216,7 @@ export const workInstruction = (powers: WorkPowers): string => {
       'read <signature> also opens whatever else a signature names: a note, an attachment, a module\'s code. Long text comes a page at a time; read <signature> <next> continues from the "next" the last page gave',
       'A module\'s first page lists its "sections" — the source files bundled into it, by path. read <signature> <src/path.ts> opens one section alone, which is how to read one file of a large module',
       'code · code <words> — the code running in this hive: every module and dependency whose name holds the words, with the signature that opens it, AND "hits": every line of code that holds the words — a function, a message, a tile\'s name — each with its module signature, its section and "at"',
-      'FINDING CODE. Search for what the code does or names: `code useDoor`, `code labyrinth-view`, `code solomon-maze-v1`. A hit opens exactly where it is with `read <signature> <section> <at>`. The code behind a tile is found by its name: `read /path` also lists, under "code", the running code that names the tile. A signature you found earlier stays listed under ALREADY READ, so open it again rather than searching again. Do not try `read code core`, `read /code`, or `read /core`. Reading code never runs it and never grants permission to change it.',
+      'FINDING CODE. Search for what the code does or names: `code useDoor`, `code labyrinth-view`, `code solomon-maze-v1`. A hit opens exactly where it is with `read <signature> <section> <at>`. The code behind a tile is found by its name: `read /path` also lists, under "code", the running code that names the tile. A signature you found earlier stays listed under ALREADY READ, so open it again rather than searching again. Do not try `read code core`, `read /code`, or `read /core`. Reading code never runs it and never grants permission to change it. A question about what this hive does now, or where a page is tried, is not answered from a receipt: this turn, `code` the words and `read` the hit, then answer from that. The SANDBOX line is the address. The code is how it is computed.',
       'find <word> · find <word> /path — tiles under the current page, or under that path, whose name contains the word',
       powers.readsRunFreely
         ? 'Reads run straight away, as many as the work needs: read whole modules, follow every lead, and do not stop to ask whether to keep reading.'
@@ -243,7 +243,7 @@ export const workInstruction = (powers: WorkPowers): string => {
   }
   if (powers.canWriteFiles) {
     parts.push([
-      `WRITING FILES — a tile can hold a website page and text files. To create one or change one, reply with ONE block whose info string is \`${WRITE_FENCE_LANG}\`. Its first line is \`page /<route>\` for the tile's website page (a whole HTML document), or \`file /<route> <name.ext>\` for a text file attached to that tile (.md, .txt, .html, .css, .json, .csv and other text). The route is the tile's path from the hive root, and the tile must already exist: make it first with a change block. Every line after the first is the file's complete new text. To change part of a file that already exists, write edits instead, in the same \`<<<<<<< SEARCH\` / \`=======\` / \`>>>>>>> REPLACE\` form, each SEARCH copied exactly from the file as it is now. To see a file as it is now, read the tile: its decorations list records by signature; a visual:website:page record's htmlSig is the page and a files:attachment record's sig is the file, and read <signature> opens either. The participant reviews the block in Execution before it runs, and the text it replaces stays in the tile's history.`,
+      `WRITING FILES — a tile can hold a website page and text files. To create one or change one, reply with ONE block whose info string is \`${WRITE_FENCE_LANG}\`. Its first line is \`page /<route>\` for the tile's website page (a whole HTML document), or \`file /<route> <name.ext>\` for a text file attached to that tile (.md, .txt, .html, .css, .json, .csv and other text). The route is the tile's path from the hive root, and the tile must already exist: make it first with a change block. Every line after the first is the file's complete new text. To change part of a file that already exists, write edits instead, in the same \`<<<<<<< SEARCH\` / \`=======\` / \`>>>>>>> REPLACE\` form, each SEARCH copied exactly from the file as it is now. To see a file as it is now, read the tile: its decorations list records by signature; a visual:website:page record's htmlSig is the page and a files:attachment record's sig is the file, and read <signature> opens either. A change to a page that already exists is refused until this turn has read that page and looked the code up (code trialOrigin). An earlier receipt is neither the page nor the code. The participant reviews the block in Execution before it runs, and the text it replaces stays in the tile's history. A WEBSITE, asked for in ordinary words: make the tile with a change block, then write its page. The page is stored as a resource and tried at try-<tile>.<this host>. The SANDBOX line of the current message names that address. An address in an earlier receipt is not it. It does not run in this hive. Do not publish it, do not grant anything, and do not write a script that calls this hive, its bridge, or localhost. Tell the participant the sandbox address of the tile they named, and the version vector the receipt gives, and stop. Do not name a different tile. Once you have read the page, write it. Do not read the same signatures again. Versions stand down the side as major.minor.patch, and the builds of a line sit across it. Walk the differences, then write the improved page on this same tile. A person brings it into localhost, or into their own domain, from the trial card. You cannot.`,
     ].join('\n'))
   }
   if (powers.canWrite) {
@@ -327,6 +327,20 @@ export const doFailedMessage = (ran: readonly string[], stoppedAt: string, reaso
 
 const fenceLangOf = (kind: WorkKind): string =>
   kind === 'read' ? READ_FENCE_LANG : kind === 'table' ? TABLE_FENCE_LANG : kind === 'write' ? WRITE_FENCE_LANG : DO_FENCE_LANG
+
+/** A change to a page that already exists, before this turn has read that page
+ *  and looked up the code. Null when the write may be offered. */
+export const pageChangeUnready = (route: readonly string[], reads: readonly string[]): string | null => {
+  const path = route.map(part => String(part).trim()).filter(Boolean).join('/')
+  if (!path) return null
+  const lines = reads.map(grammar => grammar.trim().toLowerCase())
+  const sawCode = lines.some(line => /^\/?code(\s|$)/.test(line))
+  const needle = `/${path}`.toLowerCase()
+  const sawPage = lines.some(line => line.includes(needle))
+  if (sawCode && sawPage) return null
+  const missing = [sawPage ? '' : `read ${needle}`, sawCode ? '' : 'code trialOrigin'].filter(Boolean)
+  return `This page already exists. Before changing the trial, look it up this turn: ${missing.join(' and ')}. Read the page as it is now, and look up the code. An earlier receipt is neither.`
+}
 
 export const blockRefusedMessage = (kind: WorkKind, reason: string, request: string): string =>
   `Your ${fenceLangOf(kind)} block was not used: ${reason}. Send a corrected block, or answer.${carry(request)}`
@@ -525,10 +539,35 @@ export const writeFailedMessage = (reason: string, request: string): string =>
 
 const FILE_ECHO_MAX = 48_000
 
-export const fileRanMessage =(file: { label: string; sig: string; created: boolean; unchanged: boolean }, request: string): string =>
-  file.unchanged
-    ? `The participant ran your ${WRITE_FENCE_LANG} block. ${file.label} already held exactly that text, so nothing changed. Continue, or answer.${carry(request)}`
-    : `The participant ran your ${WRITE_FENCE_LANG} block. ${file.label} was ${file.created ? 'created' : 'replaced'}; its bytes are ${file.sig}, which read ${file.sig} opens. The text it replaced is kept in the tile's history, one undo away. Do not write it again unless something is wrong with it.\n\nContinue, or answer.${carry(request)}`
+/** The sandbox address for this message. Computed from the hive the participant
+ *  is on and the tile this conversation is about. A receipt in the history is
+ *  not asked. */
+export const sandboxRule = (here?: string, route?: string): string => {
+  let page: URL
+  try { page = new URL(here || globalThis.location?.href || 'http://localhost/') }
+  catch { page = new URL('http://localhost/') }
+  const host = page.hostname.toLowerCase()
+  const zone = !host || host === 'localhost' || host === '127.0.0.1' || host === '::1' ? 'localhost' : host
+  const port = page.port ? `:${page.port}` : ''
+  const tile = String(route ?? '').split('/').filter(Boolean).pop()?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || ''
+  const door = tile ? `${page.protocol}//try-${tile}.${zone}${port}/` : ''
+  return [
+    `SANDBOX — computed for this message. This hive is ${page.origin}.`,
+    `A website trial is one try- label on this same host and port: ${page.protocol}//try-<name>.${zone}${port}/. That address lists versions down the side. Each line is major.minor.patch. The builds of a line sit across it, each its own origin and its own memory, so agents can work them in parallel. A new page is the next build, 1.0.0.1 then 1.0.0.2, at ${page.protocol}//try-<name>-v1.${zone}${port}/ and v2. A line that is not 1.0.0 is try-<name>-v<major>-<minor>-<patch>-<build>. Say the address from this message, and the vector the receipt names. Do not name a different tile. Once you have read the page, write it. Do not read the same signatures again.`,
+    door ? `The tile this conversation is about is lined up at ${door}. Walk the differences there, then write the improved page on this same tile, with a short summary of the changes.` : '',
+    'This line is the address. An address in an earlier receipt is not. When asked where the page runs, look the code up this turn with `code trialOrigin` and read the hit, then answer with this line.',
+  ].filter(Boolean).join(' ')
+}
+
+export const fileRanMessage = (file: { label: string; sig: string; created: boolean; unchanged: boolean; trial?: string; vector?: string }, request: string): string => {
+  const vector = file.vector ? ` This write is ${file.vector} on that lineup. Say the SANDBOX line and this vector. Do not name a different tile.` : ''
+  const trial = file.trial
+    ? ` It does not run in this hive. It is a resource. Where it is tried is the SANDBOX line of the current message, not an address in this receipt or an earlier one. A person brings it home from the trial card. You cannot. Do not publish it, and do not write a script that calls this hive.${vector}`
+    : ''
+  return file.unchanged
+    ? `The participant ran your ${WRITE_FENCE_LANG} block. ${file.label} already held exactly that text, so nothing changed.${trial} Continue, or answer.${carry(request)}`
+    : `The participant ran your ${WRITE_FENCE_LANG} block. ${file.label} was ${file.created ? 'created' : 'replaced'}; its bytes are ${file.sig}, which read ${file.sig} opens. The text it replaced is kept in the tile's history, one undo away. Do not write it again unless something is wrong with it.${trial}\n\nContinue, or answer.${carry(request)}`
+}
 
 /** A failed write, with the file as it is now when the failure was an edit
  *  that did not match — so the next block can be written against it. */

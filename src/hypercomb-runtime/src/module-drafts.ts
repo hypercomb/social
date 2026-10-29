@@ -41,7 +41,7 @@
 // that reading may hold it too. Only the participant's hand lets held code
 // run, and a commit never folds it.
 
-import { EffectBus, MODULE_DRAFTS_IOC_KEY, SignatureService, flagInBrood, holdInBrood, isSectionPath, mayRunBee, newReaches, reachPhrase, registerPoolMeaning, replaceSection, sectionIndex, sectionOf, type CodeReach, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
+import { EffectBus, MODULE_DRAFTS_IOC_KEY, SignatureService, flagInBrood, isSectionPath, mayRunBee, newReaches, reachPhrase, registerPoolMeaning, replaceSection, sectionIndex, sectionOf, type CodeReach, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
 import { applySelection, installedPackageSig, layersIoFor, unpickRevision, type SelectionOutcome } from './acquire.js'
 import { HOST_PACKAGES_MEANING, formatMember, markerIndices, poolEntryName } from './host-pool.js'
 import { composeDependencies, isOff, namespaceOf, ownerOf, readPicks, sigsOf, walkTree, within, type Picks, type TreeWalk } from './package-tree.js'
@@ -223,12 +223,20 @@ export type DraftAdmission = {
   readonly reaches: readonly CodeReach[]
 }
 
-/** Every draft is your own code; one that newly reaches something is held
- *  for a reason until you accept it. */
+/** WHY AN UNTRIED DRAFT WAITS — the reason every draft carries until a hand rules. */
+export const UNTRIED_REASON = 'a model wrote it and nobody has tried it yet: commit it to a trial, try it there, then accept it here'
+
+/** EVERY DRAFT IS HELD UNTIL YOU ACCEPT IT (jwize, 2026-10-26: "I have to
+ *  decide whether to accept the changes always" · "there is no bot accepting
+ *  going live in the hive" · "it is a human door"). A draft used to run here
+ *  at once unless the scan found it newly reaching something; now it is
+ *  flagged either way, and a flag clears only by a ruling, which only the
+ *  participant's hand makes (`brood accept`, a word no machine may say). It
+ *  still rides into a trial (commitSelection), which is where it is tried. */
 const admitInBrood = async ({ sig, section, path, reaches }: DraftAdmission): Promise<void> => {
   const source = { kind: 'own' as const, how: `a draft of ${section} at ${path}` }
   if (reaches.length) await flagInBrood(sig, { by: 'scan', reason: `it newly reaches ${reachPhrase(reaches)}`, reaches }, source, section)
-  else await holdInBrood(sig, source, section)
+  else await flagInBrood(sig, { by: 'trial', reason: UNTRIED_REASON }, source, section)
 }
 
 /** Record the draft; null when it may be made live, else why not. */
@@ -645,11 +653,12 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
   // WHAT CHANGES: every pick that shapes what runs here — the drafts (picks
   // whose root says it is a draft), a trial taken by hand, a revision picked
   // in Packages — and the paths turned off. A pick that does not apply (a pick
-  // above it hides it) changes nothing and is not folded. A pick whose code
-  // still waits in the brood is not folded either — a draft the audit held
-  // as much as a trial taken by hand: a commit publishes under this hive's
-  // key, and code nobody here has accepted never rides out under it. It stays
-  // a pick, and the outcome names it.
+  // above it hides it) changes nothing and is not folded. Somebody else's
+  // code taken by hand that still waits in the brood is not folded: a commit
+  // publishes under this hive's key, and a stranger's code nobody here has
+  // accepted never rides out under it. It stays a pick, and the outcome names
+  // it. This hive's own drafts are folded held — every draft is held until
+  // accepted (admitInBrood), and the trial is where it is tried.
   const picks = deps.picks()
   const local: ReplicationIo = { ...io, fetch: async () => null }
   const shape = await walkTree(trunk, local, picks)
@@ -667,7 +676,11 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
     const root = await read(pick.root)
     const draft = root?.['draft'] as { section?: unknown; from?: unknown; to?: unknown } | undefined
     const dependencies = sigsOf(root?.['dependencies'])
-    if (await stillHeld(pick.layer, path, dependencies, local, readNamespace, deps.mayRun)) { held.push(path); continue }
+    // A DRAFT RIDES INTO THE TRIAL HELD: a commit opens a trial (`try-…`),
+    // the one place a held draft is tried, and it still runs nowhere in this
+    // hive until the hand accepts it. Somebody else's code taken by hand and
+    // not yet accepted stays out — a trial is signed with this hive's key.
+    if (!draft && await stillHeld(pick.layer, path, dependencies, local, readNamespace, deps.mayRun)) { held.push(path); continue }
     if (draft) {
       drafts.set(path, pick.layer)
       sections.set(path, { section: String(draft.section ?? ''), from: String(draft.from ?? ''), to: String(draft.to ?? '') })

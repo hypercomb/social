@@ -7,8 +7,10 @@
 // the user ever opening the tile editor UI.
 
 import { EffectBus, RESOURCE_URL_PREFIX } from '@hypercomb/core'
-import { writeTilePropertiesAt } from './tile-properties.js'
+import { isSignature, writeTilePropertiesAt } from './tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
+import { holdPictures } from '../commands/lightbox-kind.js'
+import { wornPictureSig } from '../sharing/tile-image-intake.js'
 import { portalEditTarget } from './portal-edit-target.js'
 
 type Store = {
@@ -31,6 +33,9 @@ type AttachPayload = {
    *  tile typed on a holder is made in the group it gathers from
    *  (commands/create-landing.ts), and its picture belongs there. */
   segments?: readonly string[]
+  /** The generation record for this picture. Absent on a picture that was
+   *  not generated here, which clears any record the tile was wearing. */
+  generationSig?: string
 }
 
 type YouTubeMetadataQueue = {
@@ -99,6 +104,10 @@ export class ResourceAttachDrone {
     if (payload.largeSig) {
       ;(props as any).large = { image: payload.largeSig }
     }
+    if (payload.type === 'image') {
+      const sig = payload.generationSig
+      ;(props as any).generation = typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig) ? sig : undefined
+    }
 
     if (payload.url) {
       ;(props as any).link = payload.url
@@ -122,11 +131,27 @@ export class ResourceAttachDrone {
     // viewport, …), commits through the LayerCommitter cascade, and
     // broadcasts cell:0000-changed — which SwarmDrone already listens to,
     // so the swarm republishes with the image inlined automatically.
+    //
+    // The picture the tile wears now is read FIRST. The write replaces it,
+    // and the images button can only offer the previous one if it was kept.
+    const previous = payload.type === 'image' && isSignature(payload.largeSig)
+      ? await wornPictureSig(target.parentSegments, target.cell)
+      : ''
     try {
       // segments bound at handler entry — never re-read after the awaits.
       await writeTilePropertiesAt(target.parentSegments, target.cell, props)
     } catch (err) {
       console.warn('[resource-attach] canonical props write failed', err)
+    }
+
+    if (payload.type === 'image' && isSignature(payload.largeSig)) {
+      const keep = [previous, payload.largeSig].filter((sig, index, all) =>
+        isSignature(sig) && all.indexOf(sig) === index)
+      if (keep.length > 0) {
+        await holdPictures([...target.parentSegments, target.cell], keep).catch(err => {
+          console.warn('[resource-attach] the previous picture could not be kept', err)
+        })
+      }
     }
 
     EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', {

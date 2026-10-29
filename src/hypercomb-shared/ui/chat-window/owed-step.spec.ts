@@ -1,7 +1,7 @@
 // owed-step.spec.ts — WHAT A LEG'S END LEAVES OWED (documentation/conversation-continuity.md).
 
 import { describe, expect, it } from 'vitest'
-import { OWED_BACKOFF_MS, owedAfter, owedCue, type OwedLike } from './owed-step'
+import { OWED_BACKOFF_MS, WORK_QUIET_MS, agentOwnsCue, owedAfter, owedCue, pageChangeStillOwed, workBeaconOf, type OwedLike } from './owed-step'
 
 const spent = { rounds: 6, tokens: 12_000, legs: 1 }
 const record = (over: Partial<OwedLike> = {}): OwedLike => ({
@@ -83,7 +83,12 @@ describe('the cue under the conversation', () => {
 
   it('says when it waits on you, stopped so it does not loop, gave up, or is paused', () => {
     expect(owedCue(record({ state: 'waiting', why: 'question', left: 'your yes' }), 0)?.fallback).toBe('Waiting on you: your yes')
-    expect(owedCue(record({ state: 'waiting', why: 'stalled' }), 0)?.fallback).toContain('Say "continue" to carry it on')
+    expect(owedCue(record({ state: 'waiting', why: 'stalled' }), 0)?.fallback).toContain('Picking it back up from there')
+    expect(agentOwnsCue('Open step for the agent: Update website title instead of tile. Write it.', 180_000))
+      .toBe('Open steps for the agent: Update website title instead of tile. The agent picks them up in 3 min.')
+    expect(owedCue(record({ state: 'continue', why: 'unstick', left: 'Open step for the agent: Update website title instead of tile. Write it.', next: 180_000 }), 0)?.fallback)
+      .toContain('Open steps for the agent: Update website title instead of tile')
+    expect(owedCue(record({ state: 'continue', why: 'unstick' }), 0)?.fallback).toContain('belong to the agent')
     expect(owedCue(record({ state: 'waiting', why: 'gave-up', tried: [{ model: 'm9', at: 0, error: '401' }] }), 0)?.fallback).toContain('(last: m9)')
     expect(owedCue(record({ state: 'paused', why: 'budget' }), 0)).toMatchObject({ kind: 'paused', key: 'chat.owed.paused' })
   })
@@ -109,5 +114,110 @@ describe('a model that falls off', () => {
     const gaveUp = owedAfter(record({ failures: 3 }), { kind: 'failed', model: 'm', error: '401', request: 'r', spent }, 0)
     expect(gaveUp.patch).toMatchObject({ state: 'waiting', why: 'gave-up', failures: 4 })
     expect(gaveUp.say).toContain('Say "continue" to try again')
+  })
+})
+
+describe('a leg that parks', () => {
+  it('records a question and a give-up instead of looking finished', () => {
+    expect(owedAfter(undefined, { kind: 'park', why: 'question', left: 'Which footer?', spent }, 1).patch)
+      .toMatchObject({ state: 'waiting', why: 'question', left: 'Which footer?' })
+    expect(owedAfter(record(), { kind: 'park', why: 'gave-up', left: 'No model switched on can take the rest of this request.', spent }, 1).patch)
+      .toMatchObject({ state: 'waiting', why: 'gave-up' })
+  })
+})
+
+describe('the work beacon', () => {
+  const base = {
+    now: 10_000,
+    waiting: false,
+    unattended: false,
+    activity: '',
+    quietMs: 0,
+    elapsed: '4s',
+    owed: null,
+    rounds: 2,
+    ktokens: 18,
+    budgetRounds: 400,
+    budgetK: 6000,
+  }
+
+  it('names a live turn, and a quiet round that is still open', () => {
+    expect(workBeaconOf({ ...base, waiting: true, activity: 'Round 2 — claude is working' })?.fallback)
+      .toBe('Round 2 — claude is working · 4s · 2 of 400 rounds, 18k of 6000k tokens')
+    const quiet = workBeaconOf({ ...base, waiting: true, quietMs: WORK_QUIET_MS, elapsed: '20s' })
+    expect(quiet?.state).toBe('quiet')
+    expect(quiet?.fallback).toContain('Quiet for 12s')
+    expect(quiet?.fallback).toContain('still open')
+    expect(quiet?.fallback).toContain('18k of 6000k tokens')
+  })
+
+  it('says when nobody is listening', () => {
+    expect(workBeaconOf({ ...base, waiting: true, unattended: true })?.state).toBe('unattended')
+  })
+
+  it('stays up between legs, and names a model that fell off, a budget, and a wait on you', () => {
+    expect(workBeaconOf({
+      ...base,
+      owed: { kind: 'continue', why: 'failed', left: 'the page', next: 40_000, text: 'later' },
+    })?.fallback).toBe('The model fell off. Trying again in 30s. · 2 of 400 rounds, 18k of 6000k tokens')
+    expect(workBeaconOf({
+      ...base,
+      owed: { kind: 'continue', why: 'handover', left: 'write the page', next: 0, text: 'now' },
+    })?.fallback).toContain('Carrying on: write the page')
+    expect(workBeaconOf({
+      ...base,
+      rounds: 400,
+      ktokens: 6000,
+      owed: { kind: 'paused', why: 'budget', left: '', next: 0, text: 'paused' },
+    })?.fallback).toContain('Paused on the request budget')
+    expect(workBeaconOf({
+      ...base,
+      owed: { kind: 'waiting', why: 'question', left: 'your yes', next: 0, text: 'Waiting on you: your yes' },
+    })).toMatchObject({ state: 'you' })
+    expect(workBeaconOf({
+      ...base,
+      owed: { kind: 'waiting', why: 'gave-up', left: 'no model', next: 0, text: 'No model could carry this on.' },
+    })?.state).toBe('gave-up')
+    expect(workBeaconOf(base)).toBeNull()
+  })
+
+  it('keeps a press, a running command, a question, and open steps on the bar', () => {
+    expect(workBeaconOf({
+      ...base, waiting: true, activity: 'Thinking…',
+      pending: { kind: 'exec-you', text: 'Needs a grant in Execution: read /press-kit' },
+    })?.fallback).toBe('Needs a grant in Execution: read /press-kit')
+    expect(workBeaconOf({
+      ...base,
+      pending: { kind: 'exec-run', text: 'Running in Execution: write page /press-kit' },
+    })?.fallback).toBe('Running in Execution: write page /press-kit')
+    expect(workBeaconOf({
+      ...base, waiting: true,
+      pending: { kind: 'question', text: 'Waiting on your answer: Which footer?' },
+    })?.state).toBe('you')
+    expect(workBeaconOf({
+      ...base,
+      pending: { kind: 'steps', text: '2 steps still open: a new viewable link' },
+    })?.fallback).toBe('2 steps still open: a new viewable link')
+    expect(workBeaconOf({
+      ...base, waiting: true,
+      pending: { kind: 'steps', text: '2 steps still open' },
+    })?.state).toBe('live')
+  })
+})
+
+describe('a page change that was only read', () => {
+  const ask = 'Compare the checked revisions and write the next build on this same tile.'
+
+  it('still owes the write', () => {
+    expect(pageChangeStillOwed(ask, 'Here are the signatures.', true, false, false))
+      .toContain('Write the next build')
+  })
+
+  it('is finished once the page is written, skipped, or waiting on the participant', () => {
+    expect(pageChangeStillOwed(ask, 'Done.', true, true, false)).toBeNull()
+    expect(pageChangeStillOwed(ask, 'Done.', true, false, true)).toBeNull()
+    expect(pageChangeStillOwed(ask, 'I will wait for your go-ahead.', true, false, false)).toBeNull()
+    expect(pageChangeStillOwed('What does the page say?', 'Tidy Bench.', true, false, false)).toBeNull()
+    expect(pageChangeStillOwed(ask, 'Here are the signatures.', false, false, false)).toBeNull()
   })
 })

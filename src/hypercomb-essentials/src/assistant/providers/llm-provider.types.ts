@@ -41,10 +41,16 @@ export type LlmTransport =
 /** How heavy a model is within its vendor's line-up. Mirrors ModelTier. */
 export type LlmTier = 'deep' | 'balanced' | 'fast'
 
+/** A picture a vision model can see. Text-only models ignore it. */
+export type LlmImagePart = {
+  readonly mime: string
+  readonly base64: string
+}
+
 /** One turn of a conversation. Function results are first-class turns so a
  *  model can observe, receive the bounded result, and then answer or act. */
 export type LlmChatMessage =
-  | { readonly role: 'user' | 'assistant'; readonly content: string; readonly toolCalls?: undefined }
+  | { readonly role: 'user' | 'assistant'; readonly content: string; readonly toolCalls?: undefined; readonly images?: readonly LlmImagePart[] }
   | {
     readonly role: 'assistant'
     readonly content: string

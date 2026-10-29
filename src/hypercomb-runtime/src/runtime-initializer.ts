@@ -435,9 +435,9 @@ const _runInitializeRuntime = async (
     })
     const warmCurrent = (): void => {
       void (async () => {
-        // The direction as it stands NOW, before the forward warm: the way
-        // back and the declared destinations below are warmed only while it
-        // still holds.
+        // The direction as it stands NOW. Declared destinations below are
+        // warmed only while it still holds. Parents ride inside the
+        // neighbourhood walk, at their distance, not after it.
         let gen = 0
         try {
           await awaitSettledPaint()
@@ -448,17 +448,10 @@ const _runInitializeRuntime = async (
           // the hive root — and every view it prepares for a deeper location is
           // prepared under the wrong address.
           const segs = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+          // The neighbourhood walks down and up, one layer per phase. The
+          // parent is in the first step with the page you stand on. Each
+          // further parent waits until that layer has finished.
           if (sig) await historyService.preloadNeighbourhood!(sig, undefined, segs)
-          // THE WAY BACK IS PART OF THE NEIGHBOURHOOD. Arrive at a deep
-          // location by a route that skipped the ancestors (a reload, a deep
-          // link, a reference portal, an adopt) and going back finds nothing
-          // loaded — the subtree warm only ever pointed downhill. Warm the
-          // ancestors too, nearest first, one level each (a layer's pack
-          // carries every sibling's visual, so one level IS the whole page
-          // back-navigation paints).
-          if (segs.length && (historyService.preloadGeneration?.() ?? gen) === gen) {
-            await historyService.preloadAncestors?.(segs, undefined, gen)
-          }
         } catch { /* non-fatal: a cold render is correct, just slower */ }
         try {
           // Declared destinations warm in the order they were declared — no

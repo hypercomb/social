@@ -203,7 +203,7 @@ How it is built:
   with no scripts. Releasing the address for something else is the host
   operator's act.
 
-## On a phone, you go to the .com
+## On a phone, hypercomb.io is the gateway
 
 *jwize, 2026-10-24:* "we no longer need the mobile view we have essentially
 phased it out with the root host page. It is your domain a opening to your
@@ -213,14 +213,32 @@ context domain." And: "so basically you go to the com when you are on mobile."
 And: "if you go to hypercomb.io on mobile you go to the com. unless we release
 an builder so we can keep the code around for recyclying or reuse."
 
-- **On a phone you open a domain's root page, not the hive.** hypercomb.com,
-  or your own domain. Opening hypercomb.io on a phone takes you to
-  hypercomb.com. The root page is your opening to your internet. On a
-  phone it is one row per domain, and opening a row shows the creations that
-  domain hosts ([domain-claim.md](domain-claim.md), "What the front door
-  shows").
-- **It is a launcher.** Every creation in it can be launched from any host
-  domain, and it opens at its own address.
+*jwize, 2026-10-29:* "Mobile should not redirect, but instead just serve the
+signature that is being served on hypercomb.com now." And: "if the root
+signature is the same as hypercomb.com because they use the diamond core
+processor they run the same way and we just serve the initial as
+hypercomb.com's current." And: "the idea is that we will now get a simplified
+hypercomb.io mobile experience that allows connecting and following hosts, it
+becomes an app installer on your phone for any domain but hypercomb.io is the
+gateway."
+
+The redirect from that earlier day is retired. A phone stays on hypercomb.io.
+
+- **hypercomb.io is the gateway.** On a phone — the same test the hive uses,
+  a coarse pointer and a phone-sized viewport — `hypercomb.io` and
+  `www.hypercomb.io` load the bootstrap signature hypercomb.com currently
+  publishes at `/pin`. Those bytes are checked against the signature before
+  they run. The signature is read at load; it is not written into the page.
+  That signed initial is the simplified installer: you connect and follow
+  hosts here. Desktop, local dev, the development deploy, and any other host
+  keep the hive.
+- **The same root runs the same way.** Both origins carry the diamond core
+  processor, so the phone runs this origin's core and hypercomb.com's current
+  initial. When that initial cannot be read, or its bytes are not the
+  signature, the hive boots.
+- **It is a launcher, and an installer for any domain.** Every creation opens
+  at its own address, on the domain that hosts it. Follows are kept in this
+  browser, on hypercomb.io.
 - **What you keep in a creation stays with that creation's domain.** A
   creation runs on its host's domain, so your browser keeps its data for that
   domain alone. Nothing on another domain can read it, and it can't read your
@@ -237,7 +255,7 @@ an builder so we can keep the code around for recyclying or reuse."
   the tree for reuse, in case a builder for phones is released later. Nothing
   shows it until it is robust and usable (*jwize:* "we don't want to expose
   that until it is robust and usable"). The hive at hypercomb.io is where
-  creations are made. A phone uses them from the .com.
+  creations are made. A phone uses the gateway.
 - **A launched creation never turns phone mode on.** Opened on a phone, it
   shows its hexagons or its page as it would on a desktop. The visitor shell
   already hid the phone view's surfaces; now phone mode itself stays off

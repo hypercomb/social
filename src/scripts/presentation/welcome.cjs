@@ -28,20 +28,16 @@ const OUT = path.join(__dirname, 'dist', 'welcome.json')
 // took the apex. It is the first link because it is the one thing this domain
 // most wants read: nineteen minutes that explain the rest.
 //
-// /downloads/ is documentation/hypercomb.com — the welcome page that carries
-// the desktop release status and the two browser utilities, with their sizes,
-// checksums and install steps. It was written, kept current, and served
-// NOWHERE; the deploy stages that whole directory, so these two links are the
-// first time either file has been downloadable from this domain.
+// /downloads/ stays the page for the desktop release and the browser utilities.
+// It is not a door on this front page. The extensions link opens that page.
 const compose = (doors) => ({
   title: 'hypercomb',
   tagline: 'An open protocol that brings people together. Your work is named by its own content, '
     + 'kept in your hands, and carried by the people who use it.',
+  // /hosts remains the operator console. It is not a door on this front page.
   links: [
     { label: 'Watch the tour', href: '/tour/', note: '≈ 12 minutes · narrated, with captions', icon: 'tour' },
     { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the main app — start a hive of your own', icon: 'app' },
-    { label: 'Minimal host', href: '/hosts', note: 'manage domains and replicate signed packages', icon: 'host' },
-    { label: 'Downloads', href: '/downloads/', note: 'desktop app · Windows, macOS, Linux', icon: 'download' },
     { label: 'Browser extensions', href: '/downloads/#extensions', note: 'Smart Autolinker · No YouTube Shorts', icon: 'extension' },
   ],
   doorsLabel: `live on ${hosts.ZONE} · ${doors.length} ${doors.length === 1 ? 'hive' : 'hives'}`,

@@ -15,6 +15,7 @@ import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-action-icons.
 import { clickNeedsCoordinateHitTest, resolveTilePress, usesTileCloseUp } from './tile-tap-policy.js'
 import { openTileMenu } from './viewer-walk.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
+import { hoverActionsSuppressed } from '../../quickmenu/quick-menu.tile-menu.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; swarmTakeLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[]; flatPaths?: Record<string, string[]>; filterBlocked?: string[] }
 
@@ -466,6 +467,8 @@ export class TileOverlayDrone extends Drone {
   #editDockedLabel = ''
   #switchCursor = false
   #hasSelection = false
+  /** A quick menu is drawn around a tile — the hover icons stay down. */
+  #menuOnTile = false
   /** Sampling mode — every tap picks instead of entering. See `sample:mode`. */
   #sampling = false
   /** General select mode (SelectModeDrone) — the same takeover as sampling,
@@ -598,7 +601,7 @@ export class TileOverlayDrone extends Drone {
     'drop:dragging',
     'overlay:arrange-mode', 'overlay:pool-icons',
     'bee:disposed', 'genotype:set-visible', 'mobile:mode',
-    'substrate:applied', 'cell:removed', 'tile:saved',
+    'substrate:applied', 'cell:removed', 'tile:saved', 'images:recounted',
     'tile:public-changed',
     'behavior:enablement-changed',
     'keymap:invoke',
@@ -1123,10 +1126,23 @@ export class TileOverlayDrone extends Drone {
         }
       })
 
+      // The images button's count arrives after the hover that asked for it.
+      // Recount puts the button up on the tile still under the pointer.
+      this.onEffect('images:recounted', () => {
+        if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
+      })
+
       this.onEffect<{ selected: string[] }>('selection:changed', (payload) => {
         this.#hasSelection = (payload?.selected?.length ?? 0) > 0
         this.#updateVisibility()
         this.#updatePerTileVisibility()
+      })
+
+      // Ctrl over a tile, and any quick menu anchored to a tile, draw their
+      // own options. The hover icons are not that menu.
+      this.onEffect<{ active?: boolean }>('quick-menu:on-tile', (payload) => {
+        this.#menuOnTile = payload?.active === true
+        this.#updateVisibility()
       })
 
       // SAMPLING — picking tiles with a finger. A pointer says "pick this too"
@@ -2752,7 +2768,9 @@ export class TileOverlayDrone extends Drone {
     if (!this.#ctrlIconAt(local)) return false
     const wasHidden = !this.#overlay.visible
     this.#overlay.visible = true
+    const rose = !this.#ctrlBandHeld
     this.#ctrlBandHeld = true
+    if (rose) this.emitEffect('overlay:ctrl-band', { held: true })
     // Shown now: re-announce the band so show-cell's background and the DOM
     // name rise to the icon rows (#layoutIconRow names the band's owner only
     // while the overlay is visible).
@@ -2767,6 +2785,7 @@ export class TileOverlayDrone extends Drone {
     this.#overlay.visible = false
     if (!this.#ctrlBandHeld) return
     this.#ctrlBandHeld = false
+    this.emitEffect('overlay:ctrl-band', { held: false })
     this.#layoutIconRow()
   }
 
@@ -3896,13 +3915,15 @@ export class TileOverlayDrone extends Drone {
     // to onClick / onPointerDown, which still gate on it directly.
     const shouldShow = occupied && !this.#editing && !this.#touchDragging
 
-    // When tiles are selected: overlay visible, hex bg hidden, per-tile icons still active
-    if (this.#hasSelection) {
-      this.#overlay.visible = occupied && !this.#editing
+    // A ctrl-icon is holding the band up on purpose. A later visibility pass
+    // (the select menu standing down) must not take it away.
+    if (this.#ctrlBandHeld) return
+
+    // Click-select does not raise the hover icons. Ctrl over the tile raises
+    // the selection menu around it, and that menu is its own layer.
+    if (hoverActionsSuppressed(this.#hasSelection, this.#menuOnTile)) {
+      this.#overlay.visible = false
       if (this.#hexBg) this.#hexBg.hide()
-      // Individual icon visibility is managed solely by #updatePerTileVisibility —
-      // icons stay active during selection so per-tile actions (edit, note, etc.)
-      // still work. Clicking the tile body (not an icon) falls through to tile:click.
       return
     }
 
@@ -4009,6 +4030,31 @@ export class TileOverlayDrone extends Drone {
     const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
     const axial = detector.pixelToAxial(local.x - this.#meshOffset.x, local.y - this.#meshOffset.y, this.#flat)
     return this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))?.label ?? null
+  }
+
+  /** The occupied tile under a viewport point, including where it sits.
+   *  Empty ground answers null — a menu anchors to a tile, not a hex. */
+  cellAtClient(clientX: number, clientY: number): { q: number; r: number; label: string } | null {
+    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return null
+    const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
+    if (!detector) return null
+    const pixiGlobal = this.#clientToPixiGlobal(clientX, clientY)
+    const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
+    const axial = detector.pixelToAxial(local.x - this.#meshOffset.x, local.y - this.#meshOffset.y, this.#flat)
+    const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
+    if (!entry?.label) return null
+    return { q: axial.q, r: axial.r, label: entry.label }
+  }
+
+  /** Where a label sits in the current render, for a menu that should open
+   *  around the tile a picked set is acting on. */
+  axialForLabel(label: string): { q: number; r: number } | null {
+    for (let i = 0; i < this.#cellCount; i++) {
+      if (this.#cellLabels[i] !== label) continue
+      const coord = this.#cellCoords[i]
+      return coord ? { q: coord.q, r: coord.r } : null
+    }
+    return null
   }
 
   /** Exact hive target at a viewport point. Row drags use this again on

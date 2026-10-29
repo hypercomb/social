@@ -173,6 +173,96 @@ $accent: #7eb6d6;
 // ── the numbers ─────────────────────────────────────────────────────────────
 // One field per seam the workflow offers, wrapping rather than scrolling — a
 // narrow panel gets two rows of three, not a horizontal scrollbar.
+.comfy-help {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75em;
+}
+
+.comfy-rolls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+}
+
+.comfy-check {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.66em;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-quiet);
+
+  input { accent-color: var(--hc-accent, #{$accent}); }
+}
+
+.comfy-help .comfy-number {
+  flex: 0 0 5.2em;
+}
+
+// The library sits on its own row. The list is one line of words; the detail
+// opens under the row that was chosen.
+.comfy-prompts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15em;
+  max-height: 11em;
+  overflow: auto;
+}
+
+.comfy-prompts li {
+  min-width: 0;
+}
+
+.comfy-prompt-row {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.28em 0.4em;
+  text-align: left;
+  font: inherit;
+  font-size: 0.78em;
+  line-height: 1.35;
+  color: var(--hc-window-ink-plain);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: tw.$radius-control;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &:hover { background: rgba(var(--acc), 0.08); }
+  &.on {
+    color: var(--hc-window-ink-loud);
+    border-color: rgba(var(--acc), 0.45);
+    background: rgba(var(--acc), 0.1);
+  }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.comfy-prompt-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2em;
+
+  p {
+    margin: 0;
+    max-width: 100%;
+    font-size: 0.74em;
+    line-height: 1.4;
+    color: var(--hc-window-ink-quiet);
+    overflow-wrap: anywhere;
+  }
+}
+
 .comfy-numbers {
   display: flex;
   flex-wrap: wrap;
@@ -269,7 +359,44 @@ $accent: #7eb6d6;
 .comfy-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3em;
+  gap: 0.45em;
+}
+
+.comfy-made {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  width: 9.5em;
+}
+
+.comfy-made .comfy-thumb {
+  width: 100%;
+  height: 4.5em;
+}
+
+.comfy-name {
+  display: flex;
+  gap: 0.2em;
+}
+
+.comfy-name-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+.comfy-name-go {
+  flex: 0 0 auto;
+  padding: 0.2em 0.4em;
+  font: inherit;
+  font-size: 0.72em;
+  color: var(--hc-window-ink-plain);
+  background: transparent;
+  border: 1px solid rgba(var(--acc), 0.35);
+  border-radius: tw.$radius-control;
+  cursor: pointer;
+
+  &:hover { border-color: rgba(var(--acc), 0.7); color: var(--hc-window-ink-loud); }
 }
 
 .comfy-thumb {
@@ -292,4 +419,106 @@ $accent: #7eb6d6;
     height: 100%;
     object-fit: cover;
   }
+}
+
+// Over the hive, not inside the dock. The host already covers the viewport
+// and ignores pointers; this layer takes them back while a picture is open.
+.comfy-look {
+  pointer-events: auto;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4vh 4vw;
+  background: color-mix(in srgb, black 78%, transparent);
+  cursor: zoom-out;
+
+  img {
+    display: block;
+    max-width: min(92vw, 1200px);
+    max-height: 88vh;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    cursor: grab;
+    box-shadow: 0 1.2em 3em color-mix(in srgb, black 45%, transparent);
+  }
+}
+
+.comfy-look-away {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.comfy-look-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.8rem;
+  border: none;
+  background: none;
+  color: white;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+
+  &:focus-visible { outline: 1px solid white; outline-offset: 2px; }
+}
+
+// ── models and LoRAs ────────────────────────────────────────────────────────
+// The filled mark is the panel accent: it means "this workflow loads it".
+.comfy-weights {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.22em;
+}
+
+.comfy-weight {
+  display: grid;
+  grid-template-columns: 0.7em minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.78em;
+  color: var(--hc-window-ink-quiet);
+
+  &.on { color: var(--hc-window-ink-loud); }
+
+  &.loading .comfy-weight-time { color: var(--hc-window-accent); }
+}
+
+.comfy-weight-mark {
+  width: 0.45em;
+  height: 0.45em;
+  justify-self: center;
+  border-radius: tw.$radius-round;
+  border: 1px solid color-mix(in srgb, var(--hc-panel-text) 35%, transparent);
+
+  .on & {
+    background: #{$accent};
+    border-color: #{$accent};
+  }
+}
+
+.comfy-weight-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comfy-weight-kind {
+  font-size: 0.85em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-quiet);
+}
+
+.comfy-weight-time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--hc-window-ink-plain);
 }

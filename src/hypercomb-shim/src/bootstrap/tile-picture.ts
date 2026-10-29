@@ -13,20 +13,57 @@
 const SIG = /^[a-f0-9]{64}$/
 /** An envelope is a few hundred bytes; anything larger is the thing itself. */
 const ENVELOPE_MAX = 4096
+/** How many signatures one picture walk reads at once. A level used to be one
+ *  round trip after another, and the page only asked four tiles at a time, so
+ *  the pictures arrived long after the tiles. */
+const READ_AT_ONCE = 8
 
 const hex = (bytes: ArrayBuffer): string =>
   [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 
+/** Bytes whose hash is the signature, shared by every tile that names them.
+ *  A miss is not remembered: the next ask may bring a door that has them. */
+const bytesBySig = new Map<string, ArrayBuffer>()
+const readsInFlight = new Map<string, Promise<ArrayBuffer | null>>()
+
 async function readSig(sig: string, origins: readonly string[]): Promise<ArrayBuffer | null> {
-  for (const origin of origins) {
-    try {
-      const response = await fetch(`${origin}/${sig}`, { cache: 'force-cache' })
-      if (!response.ok) continue
-      const bytes = await response.arrayBuffer()
-      if (hex(await crypto.subtle.digest('SHA-256', bytes)) === sig) return bytes
-    } catch { /* the next door may hold it */ }
+  const held = bytesBySig.get(sig)
+  if (held) return held
+  const key = `${sig}\n${origins.join('\n')}`
+  const pending = readsInFlight.get(key)
+  if (pending) return pending
+  const promise = (async (): Promise<ArrayBuffer | null> => {
+    for (const origin of origins) {
+      try {
+        const response = await fetch(`${origin}/${sig}`, { cache: 'force-cache' })
+        if (!response.ok) continue
+        const bytes = await response.arrayBuffer()
+        if (hex(await crypto.subtle.digest('SHA-256', bytes)) === sig) return bytes
+      } catch { /* the next door may hold it */ }
+    }
+    return null
+  })()
+  readsInFlight.set(key, promise)
+  try {
+    const bytes = await promise
+    if (bytes) bytesBySig.set(sig, bytes)
+    return bytes
+  } finally {
+    if (readsInFlight.get(key) === promise) readsInFlight.delete(key)
   }
-  return null
+}
+
+/** `task` over `items`, `limit` at a time, results in item order. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let cursor = 0
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      out[index] = await task(items[index]!)
+    }
+  }))
+  return out
 }
 
 const asJson = (bytes: ArrayBuffer | null): Record<string, unknown> | null => {
@@ -93,15 +130,19 @@ async function inheritedPicture(head: string, origins: readonly string[]): Promi
   let reads = 0
   const seen = new Set<string>(level)
   for (let depth = 0; depth <= INHERIT_DEPTH && level.length; depth++) {
-    const layers: Array<Record<string, unknown> | null> = []
-    for (const sig of level) {
-      if (reads++ >= INHERIT_READS) return null
-      layers.push(asJson(await resolve(sig, origins)))
-    }
-    for (const layer of layers) {
-      const picture = await ownPicture(layer, origins)
-      if (picture) return picture
-    }
+    const room = INHERIT_READS - reads
+    if (room <= 0) return null
+    const slice = level.slice(0, room)
+    reads += slice.length
+    // The whole level is asked together. The first picture in child order
+    // still wins: the fetches overlap, the choice walks the answers in order.
+    const layers = await mapLimit(slice, READ_AT_ONCE, async sig => asJson(await resolve(sig, origins)))
+    const pictures = await mapLimit(layers, READ_AT_ONCE, layer => ownPicture(layer, origins))
+    const found = pictures.find((picture): picture is string => !!picture)
+    if (found) return found
+    // A level the budget cut short is not descended into: the next child
+    // would have been the read the cap refused.
+    if (slice.length < level.length) return null
     const next: string[] = []
     for (const layer of layers) {
       const children = layer?.['children']

@@ -344,8 +344,9 @@ export type OwedState = 'continue' | 'waiting' | 'paused'
 
 export interface ConversationOwed {
   readonly state: OwedState
-  /** Why, in one word: handover, promised, failed (continue); question, held,
-   *  stalled, gave-up (waiting); budget (paused). */
+  /** Why, in one word: handover, promised, failed, unstick (continue); question,
+   *  held, stalled, gave-up (waiting); budget (paused). `unstick` is the
+   *  orchestrator picking a stall back up by a different step. */
   readonly why: string
   /** What is owed now, in the model's or the hive's words. */
   readonly left: string
@@ -357,6 +358,9 @@ export interface ConversationOwed {
   readonly idleLegs: number
   /** Failures in a row; backs off, then gives up. */
   readonly failures: number
+  /** Times the orchestrator has picked a stall in this request back up.
+   *  A leg that did work in the hive sets it back to zero. */
+  readonly pickups: number
   /** What the request has spent so far, across legs and refreshes. */
   readonly spent: { readonly rounds: number; readonly tokens: number; readonly legs: number }
   /** Models that fell off this work, newest last. */
@@ -395,6 +399,7 @@ export const owedOf = (raw: unknown): ConversationOwed | undefined => {
     promises: count(value['promises']),
     idleLegs: count(value['idleLegs']),
     failures: count(value['failures']),
+    pickups: count(value['pickups']),
     spent: { rounds: count(spent['rounds']), tokens: count(spent['tokens']), legs: count(spent['legs']) },
     tried: tried.slice(-OWED_TRIED_MAX).flatMap(entry => {
       const one = entry as Record<string, unknown> | null
@@ -411,7 +416,7 @@ export const owedOf = (raw: unknown): ConversationOwed | undefined => {
 /** The record a patch makes of what stood before. Pure. */
 export const mergeOwed = (before: ConversationOwed | undefined, patch: OwedPatch, at: number): ConversationOwed => {
   const base: ConversationOwed = before ?? {
-    state: 'continue', why: '', left: '', lastLeft: '', promises: 0, idleLegs: 0, failures: 0,
+    state: 'continue', why: '', left: '', lastLeft: '', promises: 0, idleLegs: 0, failures: 0, pickups: 0,
     spent: { rounds: 0, tokens: 0, legs: 0 }, tried: [], next: 0, at,
   }
   const merged = { ...base, ...patch, at } as ConversationOwed

@@ -2,6 +2,8 @@
 
 > **status: design — not built (as of 2026-06-18).** the contribution/graft flow, the pollen-packet manifest, and the stigma admission predicate are a spec; no `PollinationStigma` drone or pollination pipeline ships in the build yet.
 
+The story of this crossing is [the flower](bee-story/the-flower.md): the host is the flower's reproductive system. This page is the design for a contribution packet. It is not what runs today.
+
 **Pollination is how contributions cross between domains in Hypercomb.** It is how **DNA moves between domains** — a contributor carries content (the content-addressed, merkle-versioned [DNA](dna.md) of their own domain) to another domain's module, hosts it themselves, and announces it. The receiving hive decides whether it **grafts**: adopting that foreign DNA into its own merkle tree so it inherits and cascades like any other layer.
 
 ## Related Documents

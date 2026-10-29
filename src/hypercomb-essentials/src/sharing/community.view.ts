@@ -26,12 +26,25 @@ const candidates = async (zone: string, pubkey: string): Promise<ShowcaseItem[]>
   try {
     const response = await fetch(`https://${zone}/publications.json`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
     if (!response.ok) return []
-    const body = await response.json() as { sites?: Array<{ lineage?: unknown; publishers?: Array<{ pubkey?: unknown }> }> }
+    const body = await response.json() as {
+      sites?: Array<{
+        lineage?: unknown
+        host?: unknown
+        hosts?: unknown
+        publishers?: Array<{ pubkey?: unknown; head?: unknown }>
+      }>
+    }
     const names = new Set<string>()
     for (const site of body.sites ?? []) {
       const lineage = typeof site.lineage === 'string' ? site.lineage : ''
-      if (!lineage || lineage.includes('/') || lineage === zone) continue
-      if ((site.publishers ?? []).some(row => String(row.pubkey ?? '').toLowerCase() === pubkey)) names.add(lineage)
+      // A nested lineage (`work/meetings`) is a real hive. One with no verified
+      // head, or that does not answer on this domain, is not a candidate.
+      if (!lineage || lineage.length > 200 || lineage === zone || /[\s:]/.test(lineage)) continue
+      const extra = Array.isArray(site.hosts) ? site.hosts : []
+      const hosts = [site.host, ...extra.map(row => (row && typeof row === 'object' ? (row as { host?: unknown }).host : undefined))]
+      if (!hosts.some(host => typeof host === 'string' && (host.toLowerCase() === zone || host.toLowerCase().endsWith(`.${zone}`)))) continue
+      if ((site.publishers ?? []).some(row => String(row.pubkey ?? '').toLowerCase() === pubkey
+        && /^[a-f0-9]{64}$/.test(String(row.head ?? '')))) names.add(lineage)
     }
     return [...names].sort().map(lineage => ({ pubkey, lineage }))
   } catch { return [] }
@@ -59,9 +72,12 @@ export class CommunityView extends EventTarget {
     if (!target) { say('community takes a domain — community <domain>', 'warning'); return }
     const pubkey = String(await publisherKeyHex().catch(() => '') ?? '').toLowerCase()
     if (!SIG.test(pubkey)) { say('community needs your publishing key, and this hive has none yet', 'warning'); return }
-    const [options, signed] = await Promise.all([candidates(target, pubkey), readSignedShowcase(target)])
+    const [options, signed] = await Promise.all([candidates(target, pubkey), readSignedShowcase(target).catch(() => {
+      say('The showcase could not be read.', 'warning'); return undefined
+    })])
+    if (signed === undefined) return
     this.#options = options
-    this.#draft = new CommunityDraft(signed)
+    this.#draft = new CommunityDraft(signed ?? { zone: target, items: [], domains: [] })
     this.#page = ''
     this.#managing = false
     this.#query = ''

@@ -8,6 +8,7 @@ import {
   preloadStampSatisfies,
   readCodeDepth,
   remainingAncestorPreloadDepth,
+  reversePreloadPlan,
   takePreloadBreadthSlice,
 } from './preload-policy.js'
 
@@ -45,8 +46,20 @@ describe('preload depth completion', () => {
 })
 
 describe('preload radius and queue order', () => {
-  it('spends radius going up, then expands sideways with what remains', () => {
-    expect([1, 2, 3].map(up => remainingAncestorPreloadDepth(3, up))).toEqual([3, 2, 1])
+  it('spends radius going up, and still warms the tiles on every parent page', () => {
+    expect([1, 2, 3].map(up => remainingAncestorPreloadDepth(3, up))).toEqual([3, 2, 2])
+    expect(remainingAncestorPreloadDepth(1, 1)).toBe(2)
+    expect(remainingAncestorPreloadDepth(3, 0)).toBe(0)
+    expect(remainingAncestorPreloadDepth(3, 4)).toBe(0)
+  })
+
+  it('puts the parent in the first step and each further parent in the next layer phase', () => {
+    expect(reversePreloadPlan(3, 0)).toEqual([])
+    const steps = reversePreloadPlan(3, 5)
+    expect(steps.map(step => step.levelsUp)).toEqual([1, 2, 3])
+    expect(steps.map(step => step.distance)).toEqual([0, 1, 2])
+    expect(steps.map(step => step.expandDepth)).toEqual([3, 2, 2])
+    for (const step of steps) expect(step.expandDepth).toBeGreaterThanOrEqual(2)
   })
 
   it('finishes every sibling depth before a hot deeper path', () => {

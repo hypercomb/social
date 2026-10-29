@@ -62,10 +62,19 @@ $jx: calc(#{$pad} + #{$square} / 2);
   // minimum before the thread drops below it. A zero basis: the thread takes
   // what the column leaves, so a dragged column width is honoured exactly
   // (with `auto`, the thread's content width pushed a 503px drag back to 467).
-  > .chat-threadwrap {
+  > .chat-threadcol {
     flex: 1 1 0;
     min-width: 16.25rem;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
+}
+
+.chat-threadcol > .chat-threadwrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
 }
 
 // The tree viewport over the summary pane, one divider for both.
@@ -975,16 +984,32 @@ $jx: calc(#{$pad} + #{$square} / 2);
   }
 }
 
-// The head: the word, the mode named, the three mode icons at the right.
-.chat-exec-col .chat-route-sec {
-  display: flex;
+// One head for Execution and for the workflow. Name at the start, icons in
+// one cluster at the end, the spare words in between on a single line.
+.chat-side-head {
   align-items: center;
-  gap: 0.5rem;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
   min-height: 2.25rem;
-  padding: 0 0.5rem 0 0.75rem;
+  padding: 0 0.35rem 0 0.7rem;
+  border-bottom: 1px solid var(--hc-window-line);
+  gap: 0.3rem;
+
+  .chat-tool {
+    width: 1.5rem;
+    height: 1.5rem;
+
+    .mat-sym { font-size: 1rem; }
+  }
 }
+.chat-side-title { flex: 0 0 auto; }
+.chat-side-head .chat-route-sec-count { margin-inline-start: auto; }
 .chat-exec-now {
-  flex: 1 1 auto;
+  flex: 0 1 5.5rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font: 0.68rem var(--hc-code, monospace);
   letter-spacing: 0;
   text-transform: none;
@@ -994,19 +1019,19 @@ $jx: calc(#{$pad} + #{$square} / 2);
 .chat-exec-kinds {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  flex: 0 0 auto;
+  gap: 0.1rem;
 }
-
-// Under it, always present: this conversation's own switch, and the four
-// kinds — lit where they run by themselves, pressable only in Auto.
-.chat-exec-auto {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0 0.5rem 0.25rem 0.75rem;
-  border-bottom: 1px solid var(--hc-window-line);
+.chat-side-head .chat-exec-trust {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: start;
   font-size: 0.72rem;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .chat-exec-kinds { margin-inline-start: auto; }
 .chat-exec-kind-toggle[aria-disabled='true'] { cursor: default; }
@@ -1321,6 +1346,60 @@ $jx: calc(#{$pad} + #{$square} / 2);
     color: var(--hc-window-accent);
 
     &:hover { background: rgba(var(--acc), 0.14); }
+  }
+}
+
+// The status hint sits IN the empty line. It does not grow the box. A few
+// ideas fade through; one idea only breathes.
+.chat-ask {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+
+  .chat-input {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.chat-ask-ghost {
+  position: absolute;
+  z-index: 1;
+  left: 0.6em;
+  right: 0.6em;
+  top: 0.55em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  user-select: none;
+  color: var(--hc-window-ink-quiet);
+  font-family: var(--hc-read, inherit);
+  font-size: calc(var(--hc-chat-line, 16px) * 0.92);
+  line-height: 1.45;
+  animation: chat-ask-rest 4.8s ease-in-out infinite;
+
+  &[data-many] { animation: chat-ask-drift 6.4s ease-in-out both; }
+}
+
+@keyframes chat-ask-rest {
+  0%, 100% { opacity: 0.28; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes chat-ask-drift {
+  0% { opacity: 0; transform: translateY(0.22em); }
+  10% { opacity: 0.5; transform: translateY(0); }
+  76% { opacity: 0.32; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-0.14em); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-ask-ghost {
+    animation: none;
+    opacity: 0.4;
+    transform: none;
   }
 }
 

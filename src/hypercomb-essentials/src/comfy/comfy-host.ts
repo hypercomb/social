@@ -95,6 +95,8 @@ type ProgressHandlers = {
    *  null node — the one message that means "queue drained for this run"). */
   onDone?: (promptId: string) => void
   onError?: (promptId: string | undefined, message: string) => void
+  /** Nodes ComfyUI skipped because those weights were already loaded. */
+  onCached?: (nodeIds: readonly string[]) => void
 }
 
 const trimSlash = (input: string): string => input.replace(/\/+$/, '')
@@ -439,6 +441,13 @@ export class ComfyHost extends EventTarget {
         const output = data['output'] as { images?: ComfyFileRef[]; gifs?: ComfyFileRef[] } | undefined
         const files = [...(output?.images ?? []), ...(output?.gifs ?? [])]
         if (promptId && files.length) this.#handlers.onExecuted?.(promptId, String(data['node'] ?? ''), files)
+        break
+      }
+      case 'execution_cached': {
+        const nodes = data['nodes']
+        if (!Array.isArray(nodes)) break
+        const ids = nodes.map(node => String(node)).filter(id => id.length > 0)
+        if (ids.length) this.#handlers.onCached?.(ids)
         break
       }
       case 'execution_error': {

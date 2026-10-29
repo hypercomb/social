@@ -88,6 +88,19 @@ describe('the cacheable system turn', () => {
     })
   })
 
+  it('sends a user picture as an image part and leaves a text turn as a string', () => {
+    const seen = body('http://localhost/v1/chat/completions', {
+      messages: [{ role: 'user', content: 'the tile', images: [{ mime: 'image/jpeg', base64: 'aGVsbG8=' }] }],
+    })
+    expect(seen.messages[0]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'the tile' },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,aGVsbG8=' } },
+      ],
+    })
+  })
+
   it('keeps the plain string form for every vendor that did not opt in, whatever the request says', () => {
     expect(body('https://api.deepseek.com/x', { system: 'anatomy', cacheSystem: true }).messages[0])
       .toEqual({ role: 'system', content: 'anatomy' })

@@ -47,6 +47,19 @@ describe('the host directory — the set, apart from the publishing', () => {
     expect(HOSTS_DRONE).toMatch(/onEffect<\{ zone\?: string \}>\('hosts:remove'/)
   })
 
+  // The outgoing firewall moves when the person clicks Block or Resume in this
+  // directory. The button names the zone. The view does not write the list, and
+  // neither does a word that adds a host.
+  it('leaves the outgoing firewall to a click in this directory', () => {
+    expect(VIEW).toMatch(/data-hc-firewall/)
+    expect(VIEW).not.toMatch(/setPaused/)
+    expect(HOSTS_DRONE).not.toMatch(/__hcFirewall|setPaused|hc:sw:paused/)
+    const follow = readFileSync(join(here, 'follow.queen.ts'), 'utf8')
+    const domain = readFileSync(join(here, '..', 'commands', 'domain.queen.ts'), 'utf8')
+    expect(follow).not.toMatch(/__hcFirewall|setPaused|hc:sw:paused|data-hc-firewall/)
+    expect(domain).not.toMatch(/__hcFirewall|setPaused|hc:sw:paused|data-hc-firewall/)
+  })
+
   it('has ONE writer — the publish drone reads the pool and no longer acts on it', () => {
     expect(DRONE).not.toMatch(/publish:community-add/)
     expect(DRONE).not.toMatch(/publish:community-remove/)

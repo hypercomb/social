@@ -43,6 +43,7 @@
 
 import { EffectBus, poolKindOfMeaning, registerPoolMeaning, SignatureService } from '@hypercomb/core'
 import { allows as intakeAllows } from '../pheromones/intake-filter.js'
+import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 
 /** How many members one domain may offer per meaning. A published index is
  *  a curated list, not a database dump; past this something is wrong and we
@@ -346,5 +347,12 @@ export const probeDomain = async (rawOrigin: string, options: { force?: boolean 
 
 EffectBus.on('domain:learned', (payload: unknown) => {
   const host = String((payload as { host?: unknown })?.host ?? '')
-  if (host) void probeDomain(host)
+  if (!host) return
+  // The public byte mirror is a signature heap. Asking it for every claimed
+  // meaning GETs a derived pool address that 404s, and the browser logs each
+  // one on boot (comfy workflows, the harness, providers). A host that
+  // publishes configuration is learned under its own name and still probed.
+  const name = originHost(host)
+  if (name && PUBLIC_CONTENT_HOSTS.includes(name)) return
+  void probeDomain(host)
 })

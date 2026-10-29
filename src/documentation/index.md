@@ -118,8 +118,9 @@ Forward-looking proposals and migration plans — not yet built. Retained so the
 
 ## Narrative
 
-The Bee Story — a nine-part series on the metaphor and meaning behind the architecture.
+The Bee Story. [The flower](bee-story/the-flower.md) is the heart of it: the host is the flower's reproductive system. The rest is the metaphor and meaning behind the architecture.
 
+- [the-flower.md](bee-story/the-flower.md)
 - [the-bee.md](bee-story/the-bee.md)
 - [the-colony.md](bee-story/the-colony.md)
 - [the-dance.md](bee-story/the-dance.md)

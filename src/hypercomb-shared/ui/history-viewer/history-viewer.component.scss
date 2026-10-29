@@ -309,6 +309,47 @@
   min-height: 0;
 }
 
+.slice-modal .slice-generation {
+  padding: 12px 16px 10px;
+  gap: 6px;
+  border-top: 0;
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.08);
+}
+
+.slice-modal .slice-generation-prompt {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--hc-window-ink-loud);
+}
+
+.slice-modal .slice-generation-meta,
+.slice-modal .slice-generation-negative {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--hc-window-ink-quiet);
+}
+
+.slice-modal .slice-generation-use {
+  align-self: flex-start;
+  margin-top: 4px;
+  background: transparent;
+  border: 1px solid rgba(120, 140, 170, 0.35);
+  color: var(--hc-window-ink-plain);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.slice-modal .slice-generation-use:hover {
+  background: rgba(80, 105, 140, 0.5);
+  border-color: rgba(140, 170, 200, 0.6);
+  color: var(--hc-window-ink-loud);
+}
+
 .slice-modal .slice-section-header {
   padding: 8px 16px 4px;
   font-size: 11px;
