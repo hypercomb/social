@@ -796,6 +796,43 @@ EXPERT_LESSONS.push({
   },
 })
 
+// ── 173 · a peer host ─────────────────────────────────────────────────
+// Not a window: the walk that makes another node. Narrated, never fired.
+// Going online and signing a key list are the participant's own acts.
+
+EXPERT_LESSONS.push({
+  id: 'peer-host',
+  level: L,
+  order: 173,
+  title: 'Set up a peer host',
+  summary: 'Your own node: the desktop app serves it, your domain names it, and other people follow that domain.',
+  pheromones: ['tutorial', 'lesson', 'expert', 'swarm'],
+  teaches: ['hosts', 'follow', 'serve', 'keys'],
+  requires: () => hasBehaviour('hosts') && hasBehaviour('follow'),
+  async run(stage) {
+    await stage.flyToRect(stage.commandInput())
+    await stage.say('peer-host', 'Your own node',
+      'A peer host is a node of your own. The computer that serves it makes a signing key there, and the work it publishes is signed by that key. Anyone who wants the work follows your domain. A community grows by adding hosts.')
+    stage.highlight(null)
+
+    await stage.typeAndSubmit('/hosts', false)
+    await stage.wait(1600)
+    await stage.say('peer-host-desktop', 'Three steps, on the desktop app',
+      'The walk sits at the foot of this window, and only in the desktop app, because a browser has no machine to serve from. Try it now serves your hive at a temporary address, with no account. Use my domain types a domain you own, signs you in to Cloudflare, and points the domain at your hive. The tunnel credentials stay on that computer. Check it fetches the address the way a visitor would and says whether the page opens.')
+
+    await stage.say('peer-host-follow', 'How others read you',
+      'When the page opens, someone else types /follow and your domain. That changes only their install. An update from you reaches them only after they turn updates on for your domain. hypercomb.com is one node people already follow. Your domain is the next one.')
+
+    await stage.say('peer-host-device', 'A second device is not a new host',
+      'A second device of the same person publishes for the same account and keeps its own key. On a place that already publishes, type /keys allow and the site the other device will open. They open the link and tap Add this device. Nothing secret is copied. The link works once and lasts ten minutes. /keys off and its label takes it off later.')
+
+    await stage.say('peer-host-done', 'Yours to run',
+      'I am not running any of this. Going online, pointing a domain, and signing a key list are your own acts.')
+    await stage.typeAndSubmit('/hosts', false)
+    await stage.wait(700)
+  },
+})
+
 // ── 175 · the publish window ───────────────────────────────────────────
 // The sharing pair completed. `/host` is the GESTURE; `/publish` is the
 // STATE. Strictly read-only here — course rule 2: nothing is ever published
