@@ -220,6 +220,28 @@ shows that it is a point. Stage two opens a domain. Stage three shows the
 other participants, each with a cube of their own. The stage that used to
 build the cube now returns to it, for the public cube, its faces, and slices.
 
+### Rendered with the hive's own behaviours
+
+The presentation has no private renderer. Everything it shows is added to the
+render as a behaviour of the hive, the same kind of thing as the slides,
+website, and tree views a tile can already turn on. The cube, the primitive
+marker, the same-shape check, the trait picker, and the lift of hexagons into
+pages are each a behaviour, so any tile can use them, not only the
+presentation's. The heart, the origin, and every other trait are read by the
+render the way it reads any mark. And anyone can render the presentation with
+their own behaviours instead, through their own layer stack, the same way
+they would choose any other filler.
+
+There is one thing to guard against: recursion. The presentation is made of
+the tiles it shows, so a behaviour can end up showing a tile that shows that
+same behaviour: the cube drawing the tile that holds the cube, or the
+presentation drawn inside itself. The guard is simple because everything has
+a signature. Each render carries the signatures already open along its path.
+When it meets one of them again, it draws that tile closed, as a hexagon you
+can click into, and never opens it again in place. The hive already walks its
+groups of related tiles this way, keeping track of where it has been so that
+a cycle cannot spin.
+
 ## The first layer: one layer, built in detail
 
 Right after the cube is built, the presentation slows down and shows how a
@@ -1327,7 +1349,9 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** asking for parts with and, or, and not together in
+**Proposed, not built:** the presentation's views as hive behaviours any
+tile can use, with a render that draws an already-open signature closed
+instead of opening it again; asking for parts with and, or, and not together in
 one question, and keeping that question as a tile; today the tag filter
 matches a tile that has any of the chosen words, a reference's required
 words are added to that as an and, and the filter reaches the page, the
