@@ -165,8 +165,9 @@ owning it. The same atom can be a header in one layout, an example under a
 value, and a tagged item in a search, all at once, and it means something in
 each of them because of the word that put it there.
 
-Until that day, the piece stays whole, and it is already finished. Because
-nothing depends on anything, extruding later never breaks what was there.
+Until a piece needs a second look, it stays whole, and it is already
+finished. Because nothing depends on anything, extruding later never breaks
+what was there.
 
 ### Layout and parts meet only at a word
 
@@ -349,6 +350,22 @@ And because you only ever ask about words you hold, nothing arrives that you
 did not ask for. This is how the cubes of the tapestry are searched: one
 question, answered by every domain you follow, each answer still living on
 its owner's host.
+
+## Any organization of the assets
+
+Because every asset carries its own words and depends on nothing, the assets
+can be organized in any way at all, and in many ways at once. An organization
+is just another layout of words, or another saved question, laid over the
+same assets. It holds nothing and moves nothing. Make one that groups by
+value, one that follows the story, one for a single domain, one for a single
+audience; every asset stays exactly where it is, and each organization simply
+reads it.
+
+That is what makes reorganizing free. A new organization is made, not
+migrated. The old one can stay, beside it, for anyone who still uses it, and
+removing one never removes an asset. The structure this presentation starts
+with, the hypercomb tile and its values, is only the first organization, and
+it can be joined by others, or rebuilt, whenever that helps.
 
 ## Every piece of the presentation is a tile
 
