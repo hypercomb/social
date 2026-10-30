@@ -140,6 +140,28 @@ Because every part sits as a child of its target, named by its word, all of a
 layer's web artifacts are stored in one predictable place, and any layer can
 take parts gracefully.
 
+### Shared resources live in your layer data
+
+Items share resources instead of copying them. A style sheet, a font, an
+image, a layout, a script: each is stored once, as a file named by the
+signature of its own bytes. An item that needs one names that signature in
+its layer data. Ten parts that use the same style sheet name the same
+signature, and there is still one file. The resource is not inside any of
+them, so no part depends on another to reach it.
+
+Naming by signature also pins the exact version. A page names the precise
+style sheet it was made with, so nothing can change underneath it. When a
+shared resource changes, it is a new file with a new signature. Each item
+then moves to it on its own, an incremental update, or a full upgrade moves
+them all at once. An item that has not moved keeps working exactly as before.
+And because a layer's data names everything it uses, publishing a layer
+carries its shared resources with it, and replication brings them to every
+host that serves it.
+
+The scene shows this by drawing the shared resources once, below the layer,
+with a thread from every item that names each one. Swapping an item's
+resource redraws one thread. Nothing else moves.
+
 ### Your own layer stack: traits added and removed at every level
 
 A tile's traits come in a stack. First the traits its view declares, then
@@ -936,7 +958,8 @@ the update badge.
 
 The slides should be honest about this.
 
-**Already built:** traits as word interfaces, with the trait and fill words,
+**Already built:** shared resources stored once by signature and named from
+layer data, pinned to their exact version; traits as word interfaces, with the trait and fill words,
 the fixed order for filling them, and silhouettes for empty ones; sealing
 what is visible at publish time; the hive as a private workbench in your
 browser; hosting
