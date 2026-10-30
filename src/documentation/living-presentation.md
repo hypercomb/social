@@ -160,7 +160,11 @@ hold a layer of its own.
 **Move four, the signature gives depth.** One tile changes, and gets a new
 signature. The old one does not vanish. It stays, and the new one sits above
 it. Every tile does the same, and the stack becomes a column. The top of each
-column is the tile's heart: its current layer, the one that answers now.
+column is the tile's heart: its current layer, the one that answers now. The
+heart needs no new functionality. It is the newest marker in the tile's
+history, which is already what every read lands on, what a publish points to,
+and what an update notice compares. Every change adds a new marker on top,
+and the heart simply moves up to it.
 Everything beneath the heart is its history. This is the version direction,
 and it shows that nothing is ever deleted without having to say so. This is
 also where the one honest caveat is said, once: versions are signatures for
