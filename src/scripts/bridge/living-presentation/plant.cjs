@@ -2,7 +2,7 @@
 // publish it so it can be seen. This is the canonical loop, the same for
 // everyone: one layer, one build revision, one publish.
 //
-//   node scripts/bridge/living-presentation/plant.cjs [<route>] [--dry] [--tiles-only]
+//   node scripts/bridge/living-presentation/plant.cjs [<route>] [--dry] [--tiles-only] [--publish-only]
 //                                                     [--publish <domain>]... [--as <label>]
 //                                                     [--revision <name>]
 //
@@ -26,6 +26,10 @@
 //      `--publish hypercomb.com --as presentation` is presentation.hypercomb.com.
 //      Publishing is not joining or sharing; the hive asks for consent in the
 //      browser before each publish.
+// The usual order is two runs with a step by hand between them: plant the
+// layer (steps 1 to 3), give the tiles their pictures in the hive, then run
+// again with --publish-only (steps 3 and 4), so the pictures are sealed into
+// the revision that gets published.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
 
@@ -38,12 +42,14 @@ const valueOf = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i
 const valuesOf = (flag) => args.flatMap((a, i) => a === flag && args[i + 1] && !args[i + 1].startsWith('--') ? [args[i + 1]] : [])
 const DRY = args.includes('--dry')
 const TILES_ONLY = args.includes('--tiles-only')
+const PUBLISH_ONLY = args.includes('--publish-only')
 const DOMAINS = [...new Set(valuesOf('--publish').flatMap(v => v.split(',')).map(d => d.trim().toLowerCase()).filter(Boolean))]
 const LABEL = valueOf('--as')
 const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), LABEL].filter(Boolean))
 const route = (args.find(a => !a.startsWith('--') && !flagValues.has(a)) || tree.name).replace(/^\/+|\/+$/g, '')
 const SAY = path.join(__dirname, '..', 'say.cjs')
 
+if (PUBLISH_ONLY && !DOMAINS.length) { console.error('--publish-only needs --publish <domain>'); process.exit(2) }
 if (args.includes('--publish') && !DOMAINS.length) { console.error('--publish needs a domain, e.g. --publish example.com'); process.exit(2) }
 if (args.includes('--as') && (!LABEL || LABEL.startsWith('--'))) { console.error('--as needs a label, e.g. --as presentation'); process.exit(2) }
 if (LABEL && !DOMAINS.length) { console.error('--as names an address on a domain: add --publish <domain>'); process.exit(2) }
@@ -65,16 +71,19 @@ const REVISION = valueOf('--revision') || `${segments[segments.length - 1]}-laye
 const noteFor = (tile) => tile.note || tile.name
 
 const parent = segments.slice(0, -1)
-const sentences = [`go /${parent.join('/')}`]
-for (const child of children) sentences.push(`create ${node.name}/${child.name}`)
-if (!TILES_ONLY) {
+const sentences = []
+if (!PUBLISH_ONLY) sentences.push(`go /${parent.join('/')}`)
+if (!PUBLISH_ONLY) for (const child of children) sentences.push(`create ${node.name}/${child.name}`)
+if (!TILES_ONLY && !PUBLISH_ONLY) {
   if (segments.length === 1 && node.note) sentences.push(`file on /${route}: ${noteFor(node)}`)
   for (const child of children) if (child.note) sentences.push(`file on /${route}/${child.name}: ${noteFor(child)}`)
 }
 sentences.push(`go /${segments[0]}`, `builds ${REVISION}`)
 for (const domain of DOMAINS) sentences.push(`publish /${segments[0]} on ${domain}${LABEL ? ` as ${LABEL}` : ''}`)
 
-console.log(`${DRY ? '[DRY] ' : ''}planting one layer under /${route}: ${children.map(c => c.name).join(', ')}\n`)
+console.log(PUBLISH_ONLY
+  ? `${DRY ? '[DRY] ' : ''}sealing and publishing /${segments[0]}\n`
+  : `${DRY ? '[DRY] ' : ''}planting one layer under /${route}: ${children.map(c => c.name).join(', ')}\n`)
 for (const sentence of sentences) {
   if (DRY) { console.log(sentence); continue }
   // A publish waits for the participant's consent in the browser, so it listens longer.
@@ -86,4 +95,5 @@ for (const sentence of sentences) {
   }
 }
 const published = DOMAINS.length ? `, published to ${DOMAINS.map(d => `${LABEL || segments[0]}.${d}`).join(', ')}` : ''
-console.log(`\n${DRY ? '[DRY] ' : ''}${children.length} tiles${TILES_ONLY ? '' : ' and their notes'} under /${route}, build ${REVISION}${published}.`)
+const planted = PUBLISH_ONLY ? `/${route}` : `${children.length} tiles${TILES_ONLY ? '' : ' and their notes'} under /${route}`
+console.log(`\n${DRY ? '[DRY] ' : ''}${planted}, build ${REVISION}${published}.`)

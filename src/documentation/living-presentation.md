@@ -1304,7 +1304,8 @@ piece at a time, without planning the whole structure in advance.
 ### The canonical loop: one layer, one revision, one publish
 
 Every layer goes through the same loop, and it is the loop anyone would use.
-First the layer's tiles are created and given their notes. Then the pass is
+First the layer's tiles are created and given their notes. Then the tiles are
+given their pictures, by hand in the hive. Then the pass is
 sealed as one build revision on the top tile, so every step of the work is
 its own revision, and nothing is lost when the next step changes it. Then
 the top tile is published to its own subdomain: its bytes go to the host and
@@ -1314,7 +1315,17 @@ asks for consent in the browser before anything is published. Then the next
 step begins, and the loop runs again.
 
 The first pass publishes the tiles only: hypercomb and its six values, with
-their notes. Pages come in later passes, one at a time.
+their notes and pictures. Pages come in later passes, one layer at a time.
+
+Before a publish, the package is checked. A published site runs the package
+its publisher's install channel names, served from the host in its smaller,
+minified form, so the newest revision of that package is published first.
+A published site is read, never authored: features meant only for
+participants, such as chatting with the assistant, are not loaded for
+readers. Which features count as participant-only is the publisher's own
+list, and the features word shows and changes it. Anyone who wants the AI
+and every other feature opens the presentation in their own hive, where the
+whole package runs.
 
 ### Simple first, then variations on every domain
 
