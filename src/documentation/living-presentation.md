@@ -6,7 +6,12 @@ how Hypercomb works. It is written to be listened to: plain sentences, no
 tables, and every file reference kept in the last section so it can be
 skipped when read aloud.
 
-What this revision settles. Part discovery is a critical part of the design:
+What this revision settles. The presentation opens on hypercomb, then the
+primitive, a word, its signature, a layer, and a meta layer, and then builds
+the cube from that primitive on screen in seven moves, before anything else.
+Lineage is a trait. A layout reaches down until a child defines its own, and
+then collapses to its own layer along that branch. The story is a grammar:
+a tile's children must read as language. Part discovery is a critical part of the design:
 asking for parts by their words with and, or, and not, across every domain
 you follow, answered as one flat list of offers. The presentation is about
 Hypercomb, and its job
@@ -66,10 +71,11 @@ the cube everyone else sees of their domain, and the cube everyone debugs
 against. The root of each public domain is where its public cube is shown,
 and every publicly deployed item has its own place in that cube.
 
-Turning a cube shows the same points divided different ways: by where each
-point came from, by the word of the language it answers, and by version.
-Those are the three axes a screen can draw, but there can be as many
-dimensions as anyone wants to add.
+Turning a cube shows the same points divided different ways: by the word of
+the language each point answers, by version, and by lineage, where it came
+from. Those are the three directions a screen can draw, but every trait a
+tile wears is another direction, and there can be as many as anyone wants.
+
 
 Finally, the cubes are connected. Wherever two cubes hold the same point, a
 thread joins them. Starting from the root and running outward, those threads
@@ -78,15 +84,142 @@ cube has the same shape and is read the same way, and a signature means the
 same thing in every cube that holds it. That symmetry is what lets people
 share in each other's work, and it is what the presentation ends on.
 
-Everything before the cube is there so the viewer understands what each point
-is, where it lives, and how it got there.
+The cube comes first. It is built on screen from the primitive in the
+opening, and everything after it opens one point of the cube and shows what
+it is, where it lives, and how it got there.
+
+## The opening: one primitive, built into the cube
+
+### The story is a grammar
+
+The story is built one layer at a time, one axiom at a time, and it builds a
+grammar as it goes. The children of any tile should read as language: put
+them together and they make sense as words under that word, and the path from
+hypercomb to any tile should read aloud as a phrase. Each layer has one
+relation to the tile above it. If a tile's children cannot be put together as
+language, the naming is off, and the fix is the names.
+
+### Hypercomb first, then the primitive
+
+The presentation opens on one hexagon, named hypercomb. At this point it is
+only a label.
+
+Then the hexagon opens, and shows what it is made of. This is the primitive,
+and there is only one: a **word**, its **signature**, a **layer** of children
+under it, and a **meta** layer that says what it means. No new object is
+introduced. Hypercomb is the first primitive, and nothing in the story will be
+a different kind of thing.
+
+Everything after this is the primitive used again, with only the words
+changing. A server is a tile with a word, a signature, a layer of files, and
+a meta layer. So is a domain, a package, a revision, a participant, a cube, a
+point in the cube, a word of a sentence, and a theme. The presentation's own
+pieces follow the same rule: each stage, each slide, each scene, and the
+transition bee are tiles, so the presentation has no private structure of its
+own. If a plane ever turns up that cannot be described as word, signature,
+layer, and meta, that is a hole in the primitive, and the fix is the
+primitive, never a second kind of thing.
+
+The primitive also has exactly one act: take a word, get its signature, get
+the current version, read its children. A person clicking and an agent
+speaking do the same thing, and the presentation shows that one act on every
+plane, each time with different words:
+
+- on the values layer, take simple, and read what wears its mark;
+- in a server, take a name, and follow it to the root signature and its files;
+- in a layout, take a trait word, and read which part answers it;
+- in the cube, take a word, a lineage, and a version, and read the point;
+- in a sentence, take each word in turn, and the path is the run.
+
+### From one hexagon to the cube, in seven moves
+
+The cube is not saved for later. It is built first, from the primitive, on
+screen, so the viewer watches the primitive become the cube, and every later
+stage is just opening one point of something they have already seen built.
+Each part of the primitive gives a direction, so no axis has to be invented.
+Each move ends on one sentence, said plainly.
+
+**Move one, one hexagon.** Hypercomb sits alone, then opens into its four
+parts: word, signature, layer, and meta. It ends: this is hypercomb, and for
+now it is only a name.
+
+**Move two, the layer gives breadth.** Under the tile, its layer lays out as
+a row: the six values, simple, organized, collaborative, intelligent,
+accessible, and localized, side by side. Each one opens to the same four
+parts, so the same shape, made six more times, proves the shape. This row is
+the word direction: a row of words under one parent. It ends: a layer is the
+words that sit under one word.
+
+**Move three, rows under rows.** Each value opens into a row of its own, and
+there are rows under rows. A tile's layer is made of tiles, and each of those
+has a layer. The plane becomes a stack of planes. It ends: every word can
+hold a layer of its own.
+
+**Move four, the signature gives depth.** One tile changes, and gets a new
+signature. The old one does not vanish. It stays, and the new one sits above
+it. Every tile does the same, and the stack becomes a column. This is the
+version direction, and it shows that nothing is ever deleted without having
+to say so. This is also where the one honest caveat is said, once: versions
+are signatures for each tile, not shared numbered layers, so revision two in
+one place and revision two in another are different things, lined up only so
+the eye can compare them. It ends: nothing is replaced; every change is kept,
+one above the other.
+
+**Move five, lineage gives width.** The same word can be answered by a tile
+from somewhere else: your own, or one replicated from someone you follow.
+Where a tile came from is a trait it wears, like any other mark, and here it
+is called lineage. Tiles from different lineages sit side by side at the same
+word and version, and that is the third direction. Lineage can be a chain: a
+tile replicated from someone who replicated it from someone else carries that
+whole path, drawn as a thread running back through other cubes. That is the
+tapestry appearing early, before it is named. It ends: the same word can come
+from many hands.
+
+**Move six, the cube appears.** Every tile is now a point, and the points
+fill a cube. No cube was drawn. The primitive was repeated in three
+directions, and the cube is what that looks like. It ends: we never drew a
+cube; this is the primitive, repeated.
+
+**Move seven, meta and traits give every other direction.** One point opens
+its meta layer. Whatever it says about the point is another word that can
+divide the points, the same way as the first three. Platform, locale,
+audience, and reviews are traits exactly as lineage is, and lineage was only
+the first one shown. A trait picker lets the viewer choose any three traits
+to draw as the cube's directions. So nothing limits the cube to three, and
+that is no longer a promise: it follows from the structure. The opening ends
+on the one sentence the viewer should keep: everything here is the same
+thing, used again.
+
+### The primitive marker and the same-shape check
+
+Two devices keep the primitive in view for the whole presentation.
+
+**The primitive marker.** A small hexagon is pinned in the corner of every
+scene, with its four parts lit. It pulses as each direction of the cube is
+added, so the viewer connects each part of the primitive to the direction it
+made. Later, whenever the viewer clicks anything, the marker pulses and the
+clicked object snaps open into the same four parts. Over the course of the
+story it becomes the signature of the presentation.
+
+**The same-shape check.** On any plane, one control lays the outline of the
+primitive over whatever is on screen: a server, a domain, a cube, a word. It
+fits every time. That is the proof, in action, of the main point: the
+hexagons are the program.
+
+### After the cube, every stage enters it
+
+Once the cube is built, the stages are ways of entering it. Each one zooms
+into a place the viewer has already seen built. Stage one opens a server and
+shows that it is a point. Stage two opens a domain. Stage three shows the
+other participants, each with a cube of their own. The stage that used to
+build the cube now returns to it, for the public cube, its faces, and slices.
 
 ## The first layer: one layer, built in detail
 
-Before any stage, the presentation shows how a single layer is built. This
-is the part that explains how everything in Hypercomb is organized and how
-it works, so it is shown slowly and in full. Every later layer is built the
-same way.
+Right after the cube is built, the presentation slows down and shows how a
+single layer works, in full: the first layer, the one the cube's first row
+came from. This is the part that explains how everything in Hypercomb is
+organized and how it works. Every later layer works the same way.
 
 ### The hypercomb tile: a label, or a filter
 
@@ -184,6 +317,32 @@ not there yet. At publish time, what is visible is sealed into one signed tree.
 Because every part sits as a child of its target, named by its word, all of a
 layer's web artifacts are stored in one predictable place, and any layer can
 take parts gracefully.
+
+### A layout reaches down until a child defines its own
+
+A layout is defined at one layer, and it reaches down through the layers
+beneath it. A layout can override its parent's. When a child layer defines
+its own layout, the parent layout stops reaching below the layer it was
+defined on. It keeps governing its own layer, and below that the child's
+layout takes over.
+
+Nothing is deleted or rewritten. The parent layout keeps its signature and
+stays exactly as it was; only its reach changes, and since the reach follows a
+choice, it undoes like any other choice. A layer's look is always explained by
+one layout, the nearest one defined at or above it, and that layout is
+complete by itself: it never half-inherits from above. And it fits the fixed
+order for filling a trait, where your own choice comes first: defining a
+layout on the child layer is that choice, so it wins.
+
+The collapse happens along that branch only. The parent keeps reaching down
+every other branch that has not defined its own, because one child's choice
+must never change what a sibling runs. And the whole parent layout collapses,
+not just the one trait that was overridden, so every layout stays complete.
+
+In the scene, the layout is drawn as a shaded region running down through the
+layers. When a child defines its own, the parent's shading retracts upward to
+its own layer along that branch, and the child's shading fills in below. The
+viewer sees the collapse happen.
 
 ### Sharing themes, styles, and code: no dependencies
 
@@ -407,7 +566,9 @@ what they will find:
 4. **The source.** The document and the code it comes from, read by
    signature.
 
-This also answers the question of audience. The slide level is plain
+The four levels are four views of the same primitive, so going deeper never
+brings in new vocabulary: each level is the same word, signature, layer, and
+meta, read more closely. This also answers the question of audience. The slide level is plain
 language for anyone. One level down is for people who want to know how it
 works. The bottom level is for developers.
 
@@ -717,8 +878,8 @@ new walks, join it as they are made. The stages share
 one picture. A strip of servers runs across the top of the
 screen. It starts as a single server in stage one, opens up to show its
 domain and subdomains in stage two, splits into eight participants in stage
-three, and in stage four each participant's domain becomes its own cube. The
-cubes stay for stage five.
+three, and in stage four the cube built in the opening returns, one for each
+participant's domain. The cubes stay for stage five.
 
 ### Stage one: one server, one host, one client
 
@@ -858,15 +1019,17 @@ onto your own hosts, under its original signature, and becomes points in
 your cube. Every package you make becomes points of your own.
 
 A cube is a cloud of points, and **each point is one tile**: a specific
-automaton, one implementation at one version. Every point sits on three
-axes. Across is the **source**: where the point's implementation comes from.
+automaton, one implementation at one version. This is the cube the opening
+built from the primitive, and its three directions are the ones the viewer
+watched appear. Across is **lineage**, a trait: where the point came from.
 The participant's own packages sit at the centre, and the domains they
 replicated from spread out on either side, so the cube grows from its own
-root outward. Into the page is the **language**: the word of the grammar the
-point answers. Down is the **version**, newest at the top.
+root outward. Into the page is the **word**: the word of the grammar the
+point answers, the layer direction. Down is the **version**, the signature
+direction, newest at the top.
 
 Not every position has a point. An empty spot means this domain has no
-implementation of that word at that version from that source. One spot can
+implementation of that word at that version from that lineage. One spot can
 also hold more than one point: the two separate revision twos from stage three
 sit side by side.
 
@@ -893,13 +1056,13 @@ the cube to a face flattens one axis away, and the points slide into the
 groups that face shows. The points never change. Only the way they are
 divided changes.
 
-- **The top face** flattens the versions. It shows sources against words:
+- **The top face** flattens the versions. It shows lineage against words:
   what this domain runs right now, and whose work each piece is. Picking a
-  row draws a line through one word across every source.
-- **The front face** flattens the words. It shows sources against versions:
+  row draws a line through one word across every lineage.
+- **The front face** flattens the words. It shows lineage against versions:
   how the participant's own work, and each piece they replicated, has changed
   over time.
-- **The side face** flattens the sources. It shows words against versions.
+- **The side face** flattens lineage. It shows words against versions.
   This is the language view: every implementation of every word in this
   domain, and how it changed, wherever it came from.
 
@@ -911,15 +1074,16 @@ nothing has to be synchronised. Some dimensions already exist in the hive as
 marks or pools: **platform**, such as web, desktop, or phone; **locale**, the
 community's translations of each word; **audience**, which projection of a
 domain a given group is shown; and **reviews**, the signed reviews and checks
-gathered on each point. A dimension picker on this slide lets the viewer
-choose any three to draw as the cube's axes. The points stay the same. Every
+gathered on each point. These are traits, exactly as lineage is. The trait
+picker from the opening lets the viewer choose any three to draw as the
+cube's directions. The points stay the same. Every
 face is still a flattening of one chosen axis, so the same way of reading
 works however many dimensions there are.
 
 **Slide three, slices.** A slice is one point chosen for each word. Every
 slice whose choices fit together is a working build. A slice is not a flat
 plane through the cube. It is a bent surface that dips to different depths
-and crosses between sources. You can grab a point and drag the slice up or
+and crosses between lineages. You can grab a point and drag the slice up or
 down to a different version, or across to another participant's
 implementation; dependency lines show whether it still fits.
 
@@ -935,7 +1099,7 @@ the third participant's domain, into journal, publish.
 
 A sentence is a path through the points, one point for each word. On the
 language face it reads as a straight line of words. Turn the cube, and the
-same path zigzags across sources and depths, because each word may be
+same path zigzags across lineages and depths, because each word may be
 answered by a point from a different participant at a different version. A
 word can also reach out of this cube, to a point in another participant's
 public cube, served from their own hosts. That path is the call, crossing the
@@ -1182,7 +1346,9 @@ sentence running modules in other participants' cubes and bringing the
 results back, still a hypothesis in the spoken-programs document; a word for
 stepping one point of a slice through its versions; choosing the start-up pin
 from the publisher's signed pointer; keying code trust by publisher as well
-as domain; the transition bee; the dimension picker; and the cube reading
+as domain; the transition bee; the trait picker; the primitive marker and
+the same-shape check; a layout's reach collapsing to its own layer when a
+child defines its own layout, along that branch only; and the cube reading
 real tile history.
 
 **To confirm before the slides say it:** whether the trial host is deployed on
@@ -1223,33 +1389,47 @@ names a whole set of files, but there is no slice object today.
 
 ## Open decisions
 
-1. **The hypercomb tile.** A label by default, with the filter shown as its
+1. **The word lineage.** In the hive's code, lineage already means a tile's
+   path from the root and its history. This plan also uses it for where a
+   tile came from, worn as a trait. Keep one word for both, or give the
+   origin trait its own word?
+2. **The primitive.** Read here as a tile: a word, its signature, a layer of
+   children, and a meta layer. Or something narrower, such as the atom?
+3. **Where the primitive tile sits.** The tree should have a tile named
+   primitive, with word, signature, layer, and meta under it, and its meta
+   layer holding the sentence: everything here is the same thing, used again.
+   Under hypercomb beside the six values, it would give that layer two
+   relations. Where should it go?
+4. **A layout's collapse.** This plan takes the whole parent layout as
+   collapsing, along the overriding child's branch only. Is that the rule,
+   or does only the one overridden trait collapse?
+5. **The hypercomb tile.** A label by default, with the filter shown as its
    other reading?
-2. **How a question is typed.** Words joined by and, or, and not, as spoken,
+6. **How a question is typed.** Words joined by and, or, and not, as spoken,
    or the symbols and, bar, and exclamation mark, or both? The command line
    reads sentences, so the spoken form fits it; the symbols are shorter.
-3. **Participant names.** The hosts already carry six real domains:
+7. **Participant names.** The hosts already carry six real domains:
    hypercomb.com, pluginthematrix.com, realones.online, cafesociety.buzz,
    jwize.com, and pointblanksolutions.ca. Use these six plus two generic
    participants, or keep all eight generic?
-4. **Sentences across cubes.** Label the slides that run one sentence across
+8. **Sentences across cubes.** Label the slides that run one sentence across
    several participants' cubes as where this is going, or present them as
    working?
-5. **Tile names.** Accept the draft tree as it is, or rename first?
-6. **The language axis.** This plan takes each word as one position on the
+9. **Tile names.** Accept the draft tree as it is, or rename first?
+10. **The language axis.** This plan takes each word as one position on the
    axis, with its different implementations as separate points at that
    position. The other reading is one position per dialect, with a word
    spanning several. Which is right?
-7. **Turning the cube.** This plan has the points slide into their groups as
+11. **Turning the cube.** This plan has the points slide into their groups as
    a face comes forward. The alternative keeps the points fixed and shows the
    flattening as a shadow on the face. Which is right?
-8. **The extra dimensions.** Which ones should the dimension picker offer
+12. **The extra dimensions.** Which ones should the trait picker offer
    first: platform, locale, audience, reviews, or others?
-9. **The root view.** Should the public cube become a choice beside the
+13. **The root view.** Should the public cube become a choice beside the
    showcase at the root, or what the root shows by default?
-10. **Order of the slides.** Confirm where playback order is kept once slides
+14. **Order of the slides.** Confirm where playback order is kept once slides
    are joined with the enroll word.
-11. **Links from the slides view.** Confirm whether a page's link can open a
+15. **Links from the slides view.** Confirm whether a page's link can open a
    child tile from inside the slides view, or only from the website view.
 
 ---
