@@ -9,7 +9,8 @@ skipped when read aloud.
 What this revision settles. The presentation opens on hypercomb, then the
 primitive, a word, its signature, a layer, and a meta layer, and then builds
 the cube from that primitive on screen in seven moves, before anything else.
-Lineage is a trait. A layout reaches down until a child defines its own, and
+Where a tile came from is a trait called its heart; lineage keeps its meaning,
+a tile's path from the root and its history. A layout reaches down until a child defines its own, and
 then collapses to its own layer along that branch. The story is a grammar:
 a tile's children must read as language. Part discovery is a critical part of the design:
 asking for parts by their words with and, or, and not, across every domain
@@ -72,7 +73,7 @@ against. The root of each public domain is where its public cube is shown,
 and every publicly deployed item has its own place in that cube.
 
 Turning a cube shows the same points divided different ways: by the word of
-the language each point answers, by version, and by lineage, where it came
+the language each point answers, by version, and by heart, where it came
 from. Those are the three directions a screen can draw, but every trait a
 tile wears is another direction, and there can be as many as anyone wants.
 
@@ -128,7 +129,7 @@ plane, each time with different words:
 - on the values layer, take simple, and read what wears its mark;
 - in a server, take a name, and follow it to the root signature and its files;
 - in a layout, take a trait word, and read which part answers it;
-- in the cube, take a word, a lineage, and a version, and read the point;
+- in the cube, take a word, a heart, and a version, and read the point;
 - in a sentence, take each word in turn, and the path is the run.
 
 ### From one hexagon to the cube, in seven moves
@@ -165,11 +166,13 @@ one place and revision two in another are different things, lined up only so
 the eye can compare them. It ends: nothing is replaced; every change is kept,
 one above the other.
 
-**Move five, lineage gives width.** The same word can be answered by a tile
+**Move five, the heart gives width.** The same word can be answered by a tile
 from somewhere else: your own, or one replicated from someone you follow.
-Where a tile came from is a trait it wears, like any other mark, and here it
-is called lineage. Tiles from different lineages sit side by side at the same
-word and version, and that is the third direction. Lineage can be a chain: a
+Where a tile came from is a trait it wears, like any other mark, and it is
+called its heart. Lineage keeps its own meaning, the tile's path from the
+root and its history; the heart is where the tile came from. Tiles with
+different hearts sit side by side at the same word and version, and that is
+the third direction. A heart can be a chain: a
 tile replicated from someone who replicated it from someone else carries that
 whole path, drawn as a thread running back through other cubes. That is the
 tapestry appearing early, before it is named. It ends: the same word can come
@@ -183,7 +186,7 @@ cube; this is the primitive, repeated.
 **Move seven, meta and traits give every other direction.** One point opens
 its meta layer. Whatever it says about the point is another word that can
 divide the points, the same way as the first three. Platform, locale,
-audience, and reviews are traits exactly as lineage is, and lineage was only
+audience, and reviews are traits exactly as the heart is, and the heart was only
 the first one shown. A trait picker lets the viewer choose any three traits
 to draw as the cube's directions. So nothing limits the cube to three, and
 that is no longer a promise: it follows from the structure. The opening ends
@@ -1021,7 +1024,7 @@ your cube. Every package you make becomes points of your own.
 A cube is a cloud of points, and **each point is one tile**: a specific
 automaton, one implementation at one version. This is the cube the opening
 built from the primitive, and its three directions are the ones the viewer
-watched appear. Across is **lineage**, a trait: where the point came from.
+watched appear. Across is the **heart**, a trait: where the point came from.
 The participant's own packages sit at the centre, and the domains they
 replicated from spread out on either side, so the cube grows from its own
 root outward. Into the page is the **word**: the word of the grammar the
@@ -1029,7 +1032,7 @@ point answers, the layer direction. Down is the **version**, the signature
 direction, newest at the top.
 
 Not every position has a point. An empty spot means this domain has no
-implementation of that word at that version from that lineage. One spot can
+implementation of that word at that version from that heart. One spot can
 also hold more than one point: the two separate revision twos from stage three
 sit side by side.
 
@@ -1056,13 +1059,13 @@ the cube to a face flattens one axis away, and the points slide into the
 groups that face shows. The points never change. Only the way they are
 divided changes.
 
-- **The top face** flattens the versions. It shows lineage against words:
+- **The top face** flattens the versions. It shows hearts against words:
   what this domain runs right now, and whose work each piece is. Picking a
-  row draws a line through one word across every lineage.
-- **The front face** flattens the words. It shows lineage against versions:
+  row draws a line through one word across every heart.
+- **The front face** flattens the words. It shows hearts against versions:
   how the participant's own work, and each piece they replicated, has changed
   over time.
-- **The side face** flattens lineage. It shows words against versions.
+- **The side face** flattens the hearts. It shows words against versions.
   This is the language view: every implementation of every word in this
   domain, and how it changed, wherever it came from.
 
@@ -1074,7 +1077,7 @@ nothing has to be synchronised. Some dimensions already exist in the hive as
 marks or pools: **platform**, such as web, desktop, or phone; **locale**, the
 community's translations of each word; **audience**, which projection of a
 domain a given group is shown; and **reviews**, the signed reviews and checks
-gathered on each point. These are traits, exactly as lineage is. The trait
+gathered on each point. These are traits, exactly as the heart is. The trait
 picker from the opening lets the viewer choose any three to draw as the
 cube's directions. The points stay the same. Every
 face is still a flattening of one chosen axis, so the same way of reading
@@ -1083,7 +1086,7 @@ works however many dimensions there are.
 **Slide three, slices.** A slice is one point chosen for each word. Every
 slice whose choices fit together is a working build. A slice is not a flat
 plane through the cube. It is a bent surface that dips to different depths
-and crosses between lineages. You can grab a point and drag the slice up or
+and crosses between hearts. You can grab a point and drag the slice up or
 down to a different version, or across to another participant's
 implementation; dependency lines show whether it still fits.
 
@@ -1099,7 +1102,7 @@ the third participant's domain, into journal, publish.
 
 A sentence is a path through the points, one point for each word. On the
 language face it reads as a straight line of words. Turn the cube, and the
-same path zigzags across lineages and depths, because each word may be
+same path zigzags across hearts and depths, because each word may be
 answered by a point from a different participant at a different version. A
 word can also reach out of this cube, to a point in another participant's
 public cube, served from their own hosts. That path is the call, crossing the
@@ -1389,47 +1392,43 @@ names a whole set of files, but there is no slice object today.
 
 ## Open decisions
 
-1. **The word lineage.** In the hive's code, lineage already means a tile's
-   path from the root and its history. This plan also uses it for where a
-   tile came from, worn as a trait. Keep one word for both, or give the
-   origin trait its own word?
-2. **The primitive.** Read here as a tile: a word, its signature, a layer of
+1. **The primitive.** Read here as a tile: a word, its signature, a layer of
    children, and a meta layer. Or something narrower, such as the atom?
-3. **Where the primitive tile sits.** The tree should have a tile named
+2. **Where the primitive tile sits.** The tree should have a tile named
    primitive, with word, signature, layer, and meta under it, and its meta
    layer holding the sentence: everything here is the same thing, used again.
    Under hypercomb beside the six values, it would give that layer two
    relations. Where should it go?
-4. **A layout's collapse.** This plan takes the whole parent layout as
+3. **A layout's collapse.** This plan takes the whole parent layout as
    collapsing, along the overriding child's branch only. Is that the rule,
    or does only the one overridden trait collapse?
-5. **The hypercomb tile.** A label by default, with the filter shown as its
+4. **The hypercomb tile.** A label by default, with the filter shown as its
    other reading?
-6. **How a question is typed.** Words joined by and, or, and not, as spoken,
+5. **How a question is typed.** Words joined by and, or, and not, as spoken,
    or the symbols and, bar, and exclamation mark, or both? The command line
    reads sentences, so the spoken form fits it; the symbols are shorter.
-7. **Participant names.** The hosts already carry six real domains:
+6. **Participant names.** The hosts already carry six real domains:
    hypercomb.com, pluginthematrix.com, realones.online, cafesociety.buzz,
    jwize.com, and pointblanksolutions.ca. Use these six plus two generic
    participants, or keep all eight generic?
-8. **Sentences across cubes.** Label the slides that run one sentence across
+7. **Sentences across cubes.** Label the slides that run one sentence across
    several participants' cubes as where this is going, or present them as
    working?
-9. **Tile names.** Accept the draft tree as it is, or rename first?
-10. **The language axis.** This plan takes each word as one position on the
+8. **Tile names.** Accept the draft tree as it is, or rename first?
+9. **The language axis.** This plan takes each word as one position on the
    axis, with its different implementations as separate points at that
    position. The other reading is one position per dialect, with a word
    spanning several. Which is right?
-11. **Turning the cube.** This plan has the points slide into their groups as
+10. **Turning the cube.** This plan has the points slide into their groups as
    a face comes forward. The alternative keeps the points fixed and shows the
    flattening as a shadow on the face. Which is right?
-12. **The extra dimensions.** Which ones should the trait picker offer
+11. **The extra dimensions.** Which ones should the trait picker offer
    first: platform, locale, audience, reviews, or others?
-13. **The root view.** Should the public cube become a choice beside the
+12. **The root view.** Should the public cube become a choice beside the
    showcase at the root, or what the root shows by default?
-14. **Order of the slides.** Confirm where playback order is kept once slides
+13. **Order of the slides.** Confirm where playback order is kept once slides
    are joined with the enroll word.
-15. **Links from the slides view.** Confirm whether a page's link can open a
+14. **Links from the slides view.** Confirm whether a page's link can open a
    child tile from inside the slides view, or only from the website view.
 
 ---
