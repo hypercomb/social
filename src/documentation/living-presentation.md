@@ -398,12 +398,22 @@ layout the layer has had stays there to return to.
 ### The grammar: markers first, then tiles extrude from them
 
 Traits are markers, so working with layouts needs words, and the words come
-first. Place the markers, and the tiles extrude out from them. Almost all of
+first. Place the markers, and the tiles extrude out from them.
+
+A trait is a tile that has not been set yet. It renders natively in the hive
+as a placeholder: a hexagon silhouette, named by its word, sitting exactly
+where its tile will land, so it reminds you it is there. The placeholder
+carries an extrude icon. Press it and the placeholder extrudes into a real
+tile of that name, which is the same act as saying create with the word. Leave
+it, and it stays a placeholder, which is a finished state, not a missing
+piece. Almost all of
 the grammar exists already, in the trait word:
 
 - **trait** says the traits on the tile you stand in, and how each is filled.
-- **trait**, followed by words, places those markers, and each one extrudes
-  the tile that fills it, named by its word, at once.
+- **trait**, followed by words, places those markers. Each one shows as a
+  placeholder with its extrude icon. Today the word also extrudes every tile
+  at once; in this design the tiles extrude when the icon is pressed, or when
+  create is said with the word.
 - **trait own**, followed by words, places markers the tile already fills
   itself, so no tiles are made.
 - **trait ~**, followed by a word, takes a marker away. Its tile stays.
@@ -1459,7 +1469,11 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** the layout word, and the layout behaviour that
+**Proposed, not built:** placing a marker without extruding its tile, so it
+stays a placeholder with an extrude icon until pressed; today the hive
+already draws an unfilled trait as a silhouette and creates the tile when the
+silhouette is pressed, but the trait word makes the tile at once; the layout
+word, and the layout behaviour that
 shows only the children its markers extruded, leaving the rest out without
 deleting them; today the trait word places and takes away markers on a tile,
 and placing one makes its child tile at once; the presentation's views as hive behaviours any
