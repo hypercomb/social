@@ -71,6 +71,15 @@ words, their versions, where they came from, and any other trait, as
 directions you can turn and choose. The presentation is the first grammar it
 shows. After that, it shows anyone's.
 
+In a sense it becomes a tesseract. With a fourth trait, the cube becomes the
+cube of four dimensions, drawn the way a tesseract is usually drawn: a cube
+inside a cube, with every point in the inner cube joined to its twin in the
+outer one. The fourth trait runs along those joins. Turning the tesseract
+through its fourth direction is choosing which traits are drawn, so the points
+flow between the inner and outer cubes as the view turns. Every further trait
+is one more dimension of the same shape, a hypercube, which is close to what
+the name Hypercomb already says.
+
 This is a welcome. It is about Hypercomb, and it invites people into this
 world in a way they can see and touch: tiles that lift, open, and answer when
 you click them. It is not a slide deck in the usual sense. It is an interactive diagram
@@ -226,7 +235,9 @@ divide the points, the same way as the first three. Platform, locale,
 audience, and reviews are traits exactly as origin is, and origin was only
 the first one shown. A trait picker lets the viewer choose any three traits
 to draw as the cube's directions. So nothing limits the cube to three, and
-that is no longer a promise: it follows from the structure. The opening ends
+that is no longer a promise: it follows from the structure. Add a fourth
+trait and the cube becomes a tesseract, a cube inside a cube, and the points
+flow between the two as it turns. The opening ends
 on the one sentence the viewer should keep: everything here is the same
 thing, used again.
 
