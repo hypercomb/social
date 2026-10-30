@@ -9,8 +9,9 @@ skipped when read aloud.
 What this revision settles. The presentation opens on hypercomb, then the
 primitive, a word, its signature, a layer, and a meta layer, and then builds
 the cube from that primitive on screen in seven moves, before anything else.
-Where a tile came from is a trait called its heart; lineage keeps its meaning,
-a tile's path from the root and its history. A layout reaches down until a child defines its own, and
+A tile's current layer is its heart. Where a tile came from is a trait called
+its origin, and lineage keeps its meaning, a tile's path from the root and its
+history. A layout reaches down until a child defines its own, and
 then collapses to its own layer along that branch. The story is a grammar:
 a tile's children must read as language. Part discovery is a critical part of the design:
 asking for parts by their words with and, or, and not, across every domain
@@ -73,7 +74,7 @@ against. The root of each public domain is where its public cube is shown,
 and every publicly deployed item has its own place in that cube.
 
 Turning a cube shows the same points divided different ways: by the word of
-the language each point answers, by version, and by heart, where it came
+the language each point answers, by version, and by origin, where it came
 from. Those are the three directions a screen can draw, but every trait a
 tile wears is another direction, and there can be as many as anyone wants.
 
@@ -122,14 +123,14 @@ layer, and meta, that is a hole in the primitive, and the fix is the
 primitive, never a second kind of thing.
 
 The primitive also has exactly one act: take a word, get its signature, get
-the current version, read its children. A person clicking and an agent
-speaking do the same thing, and the presentation shows that one act on every
-plane, each time with different words:
+its heart, the current layer, and read its children. A person clicking and an
+agent speaking do the same thing, and the presentation shows that one act on
+every plane, each time with different words:
 
 - on the values layer, take simple, and read what wears its mark;
 - in a server, take a name, and follow it to the root signature and its files;
 - in a layout, take a trait word, and read which part answers it;
-- in the cube, take a word, a heart, and a version, and read the point;
+- in the cube, take a word, an origin, and a version, and read the point;
 - in a sentence, take each word in turn, and the path is the run.
 
 ### From one hexagon to the cube, in seven moves
@@ -158,21 +159,23 @@ hold a layer of its own.
 
 **Move four, the signature gives depth.** One tile changes, and gets a new
 signature. The old one does not vanish. It stays, and the new one sits above
-it. Every tile does the same, and the stack becomes a column. This is the
-version direction, and it shows that nothing is ever deleted without having
-to say so. This is also where the one honest caveat is said, once: versions
-are signatures for each tile, not shared numbered layers, so revision two in
-one place and revision two in another are different things, lined up only so
-the eye can compare them. It ends: nothing is replaced; every change is kept,
-one above the other.
+it. Every tile does the same, and the stack becomes a column. The top of each
+column is the tile's heart: its current layer, the one that answers now.
+Everything beneath the heart is its history. This is the version direction,
+and it shows that nothing is ever deleted without having to say so. This is
+also where the one honest caveat is said, once: versions are signatures for
+each tile, not shared numbered layers, so revision two in one place and
+revision two in another are different things, lined up only so the eye can
+compare them. It ends: nothing is replaced; every change is kept, one above
+the other.
 
-**Move five, the heart gives width.** The same word can be answered by a tile
+**Move five, origin gives width.** The same word can be answered by a tile
 from somewhere else: your own, or one replicated from someone you follow.
 Where a tile came from is a trait it wears, like any other mark, and it is
-called its heart. Lineage keeps its own meaning, the tile's path from the
-root and its history; the heart is where the tile came from. Tiles with
-different hearts sit side by side at the same word and version, and that is
-the third direction. A heart can be a chain: a
+called its origin. Three words stay distinct: lineage is the tile's path from
+the root and its history, the heart is its current layer, and the origin is
+where it came from. Tiles with different origins sit side by side at the same
+word and version, and that is the third direction. An origin can be a chain: a
 tile replicated from someone who replicated it from someone else carries that
 whole path, drawn as a thread running back through other cubes. That is the
 tapestry appearing early, before it is named. It ends: the same word can come
@@ -186,7 +189,7 @@ cube; this is the primitive, repeated.
 **Move seven, meta and traits give every other direction.** One point opens
 its meta layer. Whatever it says about the point is another word that can
 divide the points, the same way as the first three. Platform, locale,
-audience, and reviews are traits exactly as the heart is, and the heart was only
+audience, and reviews are traits exactly as origin is, and origin was only
 the first one shown. A trait picker lets the viewer choose any three traits
 to draw as the cube's directions. So nothing limits the cube to three, and
 that is no longer a promise: it follows from the structure. The opening ends
@@ -1024,7 +1027,7 @@ your cube. Every package you make becomes points of your own.
 A cube is a cloud of points, and **each point is one tile**: a specific
 automaton, one implementation at one version. This is the cube the opening
 built from the primitive, and its three directions are the ones the viewer
-watched appear. Across is the **heart**, a trait: where the point came from.
+watched appear. Across is the **origin**, a trait: where the point came from.
 The participant's own packages sit at the centre, and the domains they
 replicated from spread out on either side, so the cube grows from its own
 root outward. Into the page is the **word**: the word of the grammar the
@@ -1032,7 +1035,7 @@ point answers, the layer direction. Down is the **version**, the signature
 direction, newest at the top.
 
 Not every position has a point. An empty spot means this domain has no
-implementation of that word at that version from that heart. One spot can
+implementation of that word at that version from that origin. One spot can
 also hold more than one point: the two separate revision twos from stage three
 sit side by side.
 
@@ -1059,13 +1062,13 @@ the cube to a face flattens one axis away, and the points slide into the
 groups that face shows. The points never change. Only the way they are
 divided changes.
 
-- **The top face** flattens the versions. It shows hearts against words:
+- **The top face** flattens the versions. It shows origins against words:
   what this domain runs right now, and whose work each piece is. Picking a
-  row draws a line through one word across every heart.
-- **The front face** flattens the words. It shows hearts against versions:
+  row draws a line through one word across every origin.
+- **The front face** flattens the words. It shows origins against versions:
   how the participant's own work, and each piece they replicated, has changed
   over time.
-- **The side face** flattens the hearts. It shows words against versions.
+- **The side face** flattens the origins. It shows words against versions.
   This is the language view: every implementation of every word in this
   domain, and how it changed, wherever it came from.
 
@@ -1077,7 +1080,7 @@ nothing has to be synchronised. Some dimensions already exist in the hive as
 marks or pools: **platform**, such as web, desktop, or phone; **locale**, the
 community's translations of each word; **audience**, which projection of a
 domain a given group is shown; and **reviews**, the signed reviews and checks
-gathered on each point. These are traits, exactly as the heart is. The trait
+gathered on each point. These are traits, exactly as origin is. The trait
 picker from the opening lets the viewer choose any three to draw as the
 cube's directions. The points stay the same. Every
 face is still a flattening of one chosen axis, so the same way of reading
@@ -1086,7 +1089,7 @@ works however many dimensions there are.
 **Slide three, slices.** A slice is one point chosen for each word. Every
 slice whose choices fit together is a working build. A slice is not a flat
 plane through the cube. It is a bent surface that dips to different depths
-and crosses between hearts. You can grab a point and drag the slice up or
+and crosses between origins. You can grab a point and drag the slice up or
 down to a different version, or across to another participant's
 implementation; dependency lines show whether it still fits.
 
@@ -1102,7 +1105,7 @@ the third participant's domain, into journal, publish.
 
 A sentence is a path through the points, one point for each word. On the
 language face it reads as a straight line of words. Turn the cube, and the
-same path zigzags across hearts and depths, because each word may be
+same path zigzags across origins and depths, because each word may be
 answered by a point from a different participant at a different version. A
 word can also reach out of this cube, to a point in another participant's
 public cube, served from their own hosts. That path is the call, crossing the
