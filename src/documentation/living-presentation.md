@@ -140,27 +140,61 @@ Because every part sits as a child of its target, named by its word, all of a
 layer's web artifacts are stored in one predictable place, and any layer can
 take parts gracefully.
 
-### Shared resources live in your layer data
+### Sharing themes, styles, and code: no dependencies
 
-Items share resources instead of copying them. A style sheet, a font, an
-image, a layout, a script: each is stored once, as a file named by the
-signature of its own bytes. An item that needs one names that signature in
-its layer data. Ten parts that use the same style sheet name the same
-signature, and there is still one file. The resource is not inside any of
-them, so no part depends on another to reach it.
+This has to be a perfect way to share design themes, styles, and code, and
+everybody must follow the same pattern: no dependencies.
 
-Naming by signature also pins the exact version. A page names the precise
-style sheet it was made with, so nothing can change underneath it. When a
-shared resource changes, it is a new file with a new signature. Each item
-then moves to it on its own, an incremental update, or a full upgrade moves
-them all at once. An item that has not moved keeps working exactly as before.
-And because a layer's data names everything it uses, publishing a layer
-carries its shared resources with it, and replication brings them to every
-host that serves it.
+**The rule.** No item depends on another item. The one thing an item may
+depend on is an interface: a word that belongs to neither side. The test is
+one question: am I naming a shape, or naming a thing? A word is a shape, and
+anything that fits it will do. A particular file is a thing, and it would
+have to exist, be that one, and be in one place. So an item names words,
+never things.
 
-The scene shows this by drawing the shared resources once, below the layer,
-with a thread from every item that names each one. Swapping an item's
-resource redraws one thread. Nothing else moves.
+**Share by signature, connect by word.** Every theme, style sheet, font,
+image, layout, and code file is stored once, as a file named by the signature
+of its own bytes. Everyone who uses it shares that one file. But no item
+names that file. An item names only the words it needs: the theme words it
+styles itself through, such as ink, paper, accent, and type; the traits it
+leaves open; the names of the modules it calls. Which signature answers each
+word is recorded once, in the layer data, as a fill. The items stay free, the
+file stays shared, and the choice lives in one place.
+
+**Every item stands alone.** An item carries its own working defaults, so it
+looks and works correctly with nothing filled at all. A theme only changes
+what the theme words resolve to. Remove the theme and every item still
+renders, in its own defaults. That is what makes an empty slot a finished
+state rather than a missing piece.
+
+**Themes.** A theme is a filler for the theme words. Choosing a theme for a
+layer is one fill in its layer data. Switching themes changes that one fill,
+and nothing inside any part changes. One theme can dress any number of
+layers, and any number of themes can be offered for the same words, side by
+side, from anyone's host.
+
+**Styles.** The same, one size smaller: a style is a filler for the words of
+one part, never a sheet that one part reaches into another to use.
+
+**Code.** Modules already follow this. A module may import only from the core.
+It reaches other modules through their registered names and the effects they
+announce, never by importing them. A shared library is reached by its alias
+name, and the hive maps that name to a signature when it loads. A bee never
+contains another bee, and the build refuses a bee that tries.
+
+**Versions and upgrades.** A fill holds the exact signature that was chosen,
+so nothing changes underneath an item. When a theme, style, or module changes,
+it is a new file with a new signature. A layer moves to it by changing one
+fill, an incremental update, or a full upgrade moves many fills at once. Where
+your own change meets an incoming one, the AI drafts the merge and you accept
+it or keep yours. Because the layer data names every fill, publishing a layer
+carries what it uses, and replication brings it to every host that serves it.
+
+The scene shows the shared files once, below the layer, and the words each
+item needs as small sockets on the item. Threads run from each socket to the
+file that fills it, and every thread passes through the layer's fills. Swap
+the theme and one fill changes: every thread through it moves at once, and no
+item is touched.
 
 ### Your own layer stack: traits added and removed at every level
 
@@ -958,8 +992,11 @@ the update badge.
 
 The slides should be honest about this.
 
-**Already built:** shared resources stored once by signature and named from
-layer data, pinned to their exact version; traits as word interfaces, with the trait and fill words,
+**Already built:** files stored once by signature and shared; a module that
+imports only from the core and reaches others by registered name and by
+effect; shared libraries reached by alias name, mapped to a signature at
+load; a bee never containing another bee, refused at build; traits as word
+interfaces, with the trait and fill words,
 the fixed order for filling them, and silhouettes for empty ones; sealing
 what is visible at publish time; the hive as a private workbench in your
 browser; hosting
@@ -977,7 +1014,11 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** the debug-mode animation of parts into their
+**Proposed, not built:** theme words as the interface that pages and parts
+style themselves through, with the chosen theme recorded as a fill in layer
+data; today a page names a shared style sheet directly by its signature, and
+the hive's own colour theme is a per-person setting that never goes into a
+layer. The debug-mode animation of parts into their
 places; forgetting a trait that a view, rather than the tile, declares, which
 today means making your own version of the layout; the public cube as a view
 at the root domain; one
