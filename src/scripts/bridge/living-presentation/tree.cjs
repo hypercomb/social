@@ -1,7 +1,7 @@
 // The living presentation's tile tree (documentation/living-presentation.md).
 //
 // The whole mesh, planted at once so agents can take tiles in parallel. The
-// first layer is the six values under one tile called hypercomb; under each
+// first layer is the six values under one tile called presentation; under each
 // value sit the pieces of the presentation that show it, so every layer keeps
 // one relation and every path reads aloud. Every piece stands alone, so the
 // arrangement can be rebuilt later without breaking anything.
@@ -12,11 +12,11 @@
 
 const t = (name, note, children) => (children ? { name, note, children } : { name, note })
 
-module.exports = t('hypercomb',
-  'Welcome to Hypercomb, the flagship presentation. It follows its own values and grows into a grammar viewer. Read flat, the six values below are its first view. Everything here is the same thing, used again. Plan: documentation/living-presentation.md',
+module.exports = t('presentation',
+  'Welcome to Hypercomb. This is its flagship presentation. It follows its own values and grows into a grammar viewer. Read flat, the six values below are its first view. Everything here is the same thing, used again. Plan: documentation/living-presentation.md',
   [
     t('simple', 'Everything is a tile, and every tile is a word you can say. One idea, used everywhere.', [
-      t('primitive', 'Show the one primitive: a word, its signature, a layer of children, and a meta layer. Opening the hypercomb tile reveals it. Docs: life-primitive.md, signature-system.md.', [
+      t('primitive', 'Show the one primitive: a word, its signature, a layer of children, and a meta layer. Opening the first hexagon reveals it. Docs: life-primitive.md, signature-system.md.', [
         t('word', 'The tile\'s name. A word is an address: sign(word). Docs: hypergraph-molecule-lineage.md, ontology-is-the-name.md.'),
         t('signature', 'The SHA-256 of the bytes. Same bytes, same signature, stored once. Docs: signature-system.md, signature-algebra.md.'),
         t('layer', 'The children under the word: a row of words under one word. Docs: concepts.md, history-sigbag-as-root.md.'),

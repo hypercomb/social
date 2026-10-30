@@ -1458,6 +1458,10 @@ piece at a time, without planning the whole structure in advance.
 ### The canonical loop: one layer, one revision, one publish
 
 Every layer goes through the same loop, and it is the loop anyone would use.
+Every step is a plain sentence, said in the hive's own natural language: typed
+or pasted into the command line, or handed to the hive's chat, where the model
+proposes the sentences and a person presses Run. No bridge is needed; the
+bridge is only an optional, scripted way to say the same sentences.
 First the layer's tiles are created and given their notes. Then the tiles are
 given their pictures, by hand in the hive. Then the pass is
 sealed as one build revision on the top tile, so every step of the work is
@@ -1694,35 +1698,39 @@ names a whole set of files, but there is no slice object today.
 These are settled. Because nothing depends on anything, any of them can be
 revisited later without breaking what was built.
 
-1. **The primitive is a tile:** a word, its signature, a layer of children,
+1. **The root tile is named presentation**, and the six values sit directly
+   under it. Published on hypercomb.com, it is presentation.hypercomb.com
+   with no extra label. Where this plan speaks of the hypercomb tile, it
+   means this root tile; on screen the opening still names Hypercomb.
+2. **The primitive is a tile:** a word, its signature, a layer of children,
    and a meta layer.
-2. **No separate primitive tile in the first layer.** The primitive is shown
+3. **No separate primitive tile in the first layer.** The primitive is shown
    by opening the hypercomb tile itself, so the values layer keeps one
    relation. The sentence the viewer keeps, everything here is the same
    thing, used again, lives in hypercomb's meta layer.
-3. **A layout's collapse:** the whole parent layout collapses to the layer it
+4. **A layout's collapse:** the whole parent layout collapses to the layer it
    was defined on, along the overriding child's branch only.
-4. **The hypercomb tile** is a label by default; the filter is shown as its
+5. **The hypercomb tile** is a label by default; the filter is shown as its
    other reading.
-5. **Questions are typed as spoken words** joined by and, or, and not, which
+6. **Questions are typed as spoken words** joined by and, or, and not, which
    is how the command line already reads. Symbols can come later.
-6. **The first layer is published at presentation.hypercomb.com.** Our other
+7. **The first layer is published at presentation.hypercomb.com.** Our other
    domains come later, each with its own variations.
-7. **Sentences across cubes are labelled as where this is going**, because
+8. **Sentences across cubes are labelled as where this is going**, because
    they are not built. Running the same sentence on each domain's own hive is
    built, and that is what the variations use.
-8. **Tile names:** hypercomb, then the six values, as planted.
-9. **The word direction** gives each word one position, with its different
+9. **Tile names:** hypercomb, then the six values, as planted.
+10. **The word direction** gives each word one position, with its different
    implementations as separate points at that position.
-10. **Turning the cube** slides the points into the groups each face shows.
-11. **The trait picker** offers origin, platform, and locale first; audience
+11. **Turning the cube** slides the points into the groups each face shows.
+12. **The trait picker** offers origin, platform, and locale first; audience
     and reviews follow.
-12. **The public cube is a choice beside the showcase** at the root, not a
+13. **The public cube is a choice beside the showcase** at the root, not a
     replacement for it.
-13. **The six values keep their words** from hypercomb.io's original title:
+14. **The six values keep their words** from hypercomb.io's original title:
     simple, organized, collaborative, intelligent, accessible, localized.
     Every name beneath them leans towards nouns.
-14. **Names are singular nouns.** A tile is one atom, so its name names one
+15. **Names are singular nouns.** A tile is one atom, so its name names one
     thing: domain, trial, participant, sentence, point. Today the hive folds a
     word only by lowercasing it, so a singular and a plural are two different
     addresses, and the difference is kept on purpose: the plural is a
@@ -1731,14 +1739,14 @@ revisited later without breaking what was built.
     for gathering its examples. Looking up both forms together is a
     convenience for the reader to add later; the fold itself stays as it is,
     because it defines every word's address.
-15. **The presentation's own parts stay under simple** for now: opening,
+16. **The presentation's own parts stay under simple** for now: opening,
     marker, check, and lift, since each shows one primitive used again. They
     can move to an organization of their own later.
-16. **Move five of the opening is named spread**, so all seven moves are
+17. **Move five of the opening is named spread**, so all seven moves are
     shapes: hexagon, row, stack, column, spread, cube, tesseract.
-17. **One cube.** The cube built in the opening and the grammar viewer are
+18. **One cube.** The cube built in the opening and the grammar viewer are
     the same cube, seen being built and then in use, so they share one word.
-18. **Heart and heartbeat.** The heart is a tile's current layer, and moving
+19. **Heart and heartbeat.** The heart is a tile's current layer, and moving
     it is what makes the heartbeat. The two words belong together.
 
 ## To check while building

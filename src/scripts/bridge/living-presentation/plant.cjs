@@ -7,7 +7,7 @@
 //                                                     [--revision <name>]
 //
 // <route> is the tile whose children are planted, as a path in tree.cjs:
-// `hypercomb` (the default) plants the first layer, the values; a deeper
+// `presentation` (the default) plants the first layer, the values; a deeper
 // route plants that tile's children. With --all, every layer under the route
 // is planted in one pass — the whole mesh — so agents can take tiles in
 // parallel, and the pass is still sealed as one build revision.
@@ -25,13 +25,17 @@
 //      host and <top>.<domain> opens on the new head, on every domain at once.
 //      With --as <label>, the tile gets its own address instead:
 //      <label>.<domain> (`publish /<top> on <domain> as <label>`), so
-//      `--publish hypercomb.com --as presentation` is presentation.hypercomb.com.
+//      The top tile is already named presentation, so `--publish hypercomb.com`
+//      alone is presentation.hypercomb.com.
 //      Publishing is not joining or sharing; the hive asks for consent in the
 //      browser before each publish.
 // The usual order is two runs with a step by hand between them: plant the
 // layer (steps 1 to 3), give the tiles their pictures in the hive, then run
 // again with --publish-only (steps 3 and 4), so the pictures are sealed into
 // the revision that gets published.
+// No bridge is needed: --sentences prints only the sentences, one per line, to
+// type or paste into the hive's own command line, or to hand to the hive's
+// chat. Saying them through the bridge is the optional, scripted way.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
 
@@ -42,7 +46,8 @@ const tree = require('./tree.cjs')
 const args = process.argv.slice(2)
 const valueOf = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : undefined }
 const valuesOf = (flag) => args.flatMap((a, i) => a === flag && args[i + 1] && !args[i + 1].startsWith('--') ? [args[i + 1]] : [])
-const DRY = args.includes('--dry')
+const SENTENCES = args.includes('--sentences')
+const DRY = args.includes('--dry') || SENTENCES
 const TILES_ONLY = args.includes('--tiles-only')
 const PUBLISH_ONLY = args.includes('--publish-only')
 const ALL = args.includes('--all')
@@ -95,6 +100,7 @@ if (!TILES_ONLY && !PUBLISH_ONLY) {
 sentences.push(`go /${segments[0]}`, `builds ${REVISION}`)
 for (const domain of DOMAINS) sentences.push(`publish /${segments[0]} on ${domain}${LABEL ? ` as ${LABEL}` : ''}`)
 
+if (SENTENCES) { console.log(sentences.join('\n')); process.exit(0) }
 console.log(PUBLISH_ONLY
   ? `${DRY ? '[DRY] ' : ''}sealing and publishing /${segments[0]}\n`
   : `${DRY ? '[DRY] ' : ''}planting ${ALL ? 'every layer' : 'one layer'} under /${route}: ${children.map(c => c.name).join(', ')}${ALL ? ', and everything beneath them' : ''}\n`)
