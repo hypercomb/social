@@ -35,6 +35,10 @@
     {
       "name": "hypercomb-extensions",
       "path": "hypercomb-extensions"
+    },
+    {
+      "name": "documentation",
+      "path": "documentation"
     }
   ],
   "launch": {
