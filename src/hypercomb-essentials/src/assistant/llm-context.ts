@@ -300,6 +300,9 @@ type StoreLike = {
   getResourceLocal(signature: string): Promise<Blob | null>
   /** The LOCAL read of a layer's bytes — OPFS only, never a host. */
   getLayerLocalBytes(signature: string): Promise<Uint8Array | null>
+  /** Counts a read or mint of a derived record (optimization heat);
+   *  a store from before the ledger simply lacks it. */
+  noteOptimizationUse?(meaning: string, key: string, weight?: number): void
 }
 
 const ioc = <T>(key: string): T | undefined =>
