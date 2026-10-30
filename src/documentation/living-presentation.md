@@ -11,7 +11,10 @@ participant, served from that participant's own hosts. A participant builds
 their cube by replicating other people's packages and creating their own.
 What they have published is the public cube, and the root of their domain is
 where that public cube is shown. Every publicly deployed item is a place in
-that cube. Subdomains are the isolated debugging environments. Natural
+that cube. Your workbench is hypercomb.io, or your own host's root domain: private to
+your machine, and able to share publicly once your host is registered for
+publishing. Trial subdomains are the isolated, public debugging
+environments. Natural
 language is both the scripting language and the debugging language. The cube
 draws three axes, but nothing limits it to three. And the cubes join into one
 tapestry through the signatures they share.
@@ -178,6 +181,19 @@ stepping sideways to the next object at the same level.
 This section is the explanation that stage two's slides, the eight
 participants, and the cubes all draw on. It is told here in full, once.
 
+### Your workbench is your root, private to your machine
+
+Your workbench is hypercomb.io, or the root domain of your own host. When you
+open it, the hive runs in your browser and keeps everything in your browser's
+own storage, on your machine. It is private: nothing you make there leaves
+your machine unless you publish it.
+
+It is also the place you publish from. To share your work publicly, you
+register your host for publishing. Sharing requires hosting: anyone can
+watch and bring things in without a host, but only a registered host can
+make your work available to others. Once it is registered, the same
+workbench can publish to your domain, open trials, and promote them.
+
 ### A domain is yours, served from your own hosts
 
 A participant claims a domain with one sentence: domain claim, followed by the
@@ -191,12 +207,15 @@ their own hosts, and that domain, with all its names and all its versions, is
 one participant's cube. Their subdomains, trials included, are inside their
 cube, not cubes of their own.
 
-### The root domain shows the public cube
+### The root domain: your workbench, and everyone else's view of your public cube
 
-The bare domain, the root, is the participant's front door. In this plan the
-root is also where their public cube is shown. Open the root of any public
-domain and you see the cube made of everything that domain has published,
-every version of it, from every source.
+The bare domain, the root, plays two parts at once. To you, on your own
+machine, it is your workbench, with everything you keep there private to your
+browser. To everyone else it is your front door, and in this plan it is where
+your public cube is shown. Open the root of any public domain from another
+machine and you see the cube made of everything that domain has published,
+every version of it, from every source. The same address gives two views,
+because what a browser stores belongs to that browser alone.
 
 The same holds one level down. **Every publicly deployed item is a place in
 that public cube.** A promoted site, a published package, a deployed page:
@@ -237,8 +256,9 @@ removed. No file is deleted.
 
 ### The trial subdomain is the debugging environment
 
-Every change starts life on a trial subdomain. Its name is the word "try",
-a dash, and the name of the site it will become. A trial for the cards site
+Every change starts on your workbench, privately. When you want others to
+try it, it goes to a trial subdomain. Its name is the word "try", a dash, and
+the name of the site it will become. A trial for the cards site
 lives at try-cards, on the same domain, and when it is promoted it becomes
 the cards site itself.
 
@@ -425,7 +445,11 @@ to answer. It cannot change what you get.
 
 ### Stage two: domains, subdomains, and the workbench
 
-**Slide one, a domain and its names.** The server opens to show one domain,
+**Slide one, your workbench, a domain, and its names.** The stage opens on
+the viewer's own workbench: hypercomb.io, or their own host's root, drawn
+inside their machine with a lock on it, because everything there is private.
+A switch labelled register for publishing connects it to their host. Then
+the server opens to show one domain,
 using the real Plugin the Matrix publications page with its subdomains for
 Revolución, Meetup, Arkanoid, and others. All the names lead to one root
 folder. Click a subdomain and you see that it holds no files, only a pointer
@@ -457,8 +481,9 @@ never changes underneath them. A re-derive button runs the minify step again
 on the readable source and arrives at the same root, which is how anyone can
 check that the minified code is exactly what it claims to be.
 
-Stage two ends with the lifecycle as a loop: say it, draft, trial subdomain,
-review, promote, deployed, visitors pinned, and back to the next sentence.
+Stage two ends with the lifecycle as a loop: say it, draft on your private
+workbench, trial subdomain, review, promote, deployed, visitors pinned, and
+back to the next sentence.
 This loop becomes a small icon that every participant carries from stage
 three on.
 
@@ -694,8 +719,9 @@ sig-named-files, and install-pointers under it; a host tile, with host-api
 under it; a client tile, with core and opfs under it; and a request tile, with
 verify-on-arrival under it.
 
-The second stage is domains-and-subdomains. It holds a domain tile, with
-claim, root-folder, root-shows-the-public-cube, and names-are-pointers under
+The second stage is domains-and-subdomains. It holds a workbench tile, with
+private-to-your-machine and register-for-publishing under it; a domain tile,
+with claim, root-folder, root-shows-the-public-cube, and names-are-pointers under
 it; a publish tile, with bytes-first and pointer-moves under it; a
 trial-subdomain tile, with isolation, what-changed, and reviews under it; a
 promote tile; a minify tile; a visitor-pin tile; and a stable-files tile, with
@@ -747,6 +773,32 @@ other.
 links get their explore and next. The transition bee does the lift and the
 reshaping, and the objects animate into place.
 
+### One layer at a time, and the documentation moves with it
+
+The tree is built one layer at a time, always the first layer under a tile
+that already exists, and each layer is reviewed before the next one goes in.
+The tile at the top is called hypercomb.
+
+The tree also restructures all of the documentation. Every document is
+assigned to exactly one tile, the tile whose part of the story explains it.
+When a tile is planted, it carries a note naming what it is and the documents
+it gathers. When that tile's own children are planted later, its documents
+are divided among them, one level further down. In the first layer, all two
+hundred and forty-two documents are already assigned to one of the stage
+tiles. That first assignment was made from each document's title, so it is
+a starting point to review, not a final placement.
+
+The tree, with each tile's note and documents, lives in one file. A small
+script plants one layer from it by speaking to the hive: it says go, then
+create for each new tile, then files the note on each one. It sends no raw
+operations. A dry run prints the sentences without saying them, and they can
+also be typed by hand on the command line.
+
+There is also an existing narrated video presentation of Hypercomb, built
+from scenes with recorded narration. Its scenes and narration are material
+this presentation can draw on, and its own tile can sit in the tree like any
+other piece.
+
 ### Who does what
 
 This follows the pattern the proposal sites already use: a tree file, the
@@ -767,7 +819,9 @@ the update badge.
 
 The slides should be honest about this.
 
-**Already built:** claiming a domain with one sentence, live once its host
+**Already built:** the hive as a private workbench in your browser; hosting
+your hive from your own computer, from the desktop app; claiming a domain
+with one sentence, live once its host
 pieces are deployed; a domain's showcase at its root; publishing as bytes
 first, then a pointer; trial subdomains with their isolation, the
 what-changed panel, signed reviews, and the rule that every draft waits for a
@@ -802,8 +856,12 @@ names a whole set of files, but there is no slice object today.
 
 ## 12. Where the story and the documents differ
 
-1. **Workbench naming.** The story uses the real naming: a trial lives at try,
-   dash, and the site's name, and promotion makes it the site itself.
+1. **Where the workbench is.** The workbench is hypercomb.io, or your own
+   host's root domain, private to your machine. A trial subdomain is not the
+   workbench: it is the public door where others try and review a change. It
+   lives at try, dash, and the site's name, and promotion makes it the site
+   itself. Earlier drafts of this plan called the trial the workbench; that
+   was wrong.
 2. **Which version is the truth.** For a visitor, the deployment is the
    minified package. But the documents treat the readable package as the
    truth, and the minified one as derived from it. The slides keep that link
@@ -882,5 +940,8 @@ Kept apart so they can be skipped when listening.
   [stepping-into-a-view.md](stepping-into-a-view.md)
 - Three dimensions: [three-js-migration-plan.md](three-js-migration-plan.md)
 - The stamp pattern: [proposal-sites.md](proposal-sites.md)
+- The tree and the planting script: `scripts/bridge/living-presentation/tree.cjs`,
+  `scripts/bridge/living-presentation/plant.cjs`, `npm run living:plant`
+- The narrated video presentation: `scripts/presentation/`
 - Images: `src/01-hive.png`, `src/04-inside.png`, `src/shot-publications.png`,
   `src/documentation/assets/diagrams/`
