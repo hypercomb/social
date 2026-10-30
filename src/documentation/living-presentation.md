@@ -1320,10 +1320,11 @@ their notes. Pages come in later passes, one at a time.
 
 The presentation is a live, virtual one that anybody in the world can use,
 and it starts very simple. The first path is finished once: the hypercomb
-tile and its six values, published to every one of our domains at the same
-time, so the same layer can be seen at hypercomb on each domain.
+tile and its six values, published at presentation.hypercomb.com, where
+anybody can open it.
 
-Then the variations begin. Each domain grows its own small examples, where
+Then the variations begin, on our other domains. Each domain grows its own
+small examples, where
 automatons make new grammars and new sentences. The same sentence, run on
 different domains, gives different results, because each domain answers its
 words with its own implementations. Nothing needs to cross between domains
@@ -1481,8 +1482,8 @@ revisited later without breaking what was built.
    other reading.
 5. **Questions are typed as spoken words** joined by and, or, and not, which
    is how the command line already reads. Symbols can come later.
-6. **Our own domains are used.** The first layer is published on all of them,
-   and each domain later grows its own variations.
+6. **The first layer is published at presentation.hypercomb.com.** Our other
+   domains come later, each with its own variations.
 7. **Sentences across cubes are labelled as where this is going**, because
    they are not built. Running the same sentence on each domain's own hive is
    built, and that is what the variations use.

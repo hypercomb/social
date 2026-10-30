@@ -3,7 +3,8 @@
 // everyone: one layer, one build revision, one publish.
 //
 //   node scripts/bridge/living-presentation/plant.cjs [<route>] [--dry] [--tiles-only]
-//                                                     [--publish <domain>]... [--revision <name>]
+//                                                     [--publish <domain>]... [--as <label>]
+//                                                     [--revision <name>]
 //
 // <route> is the tile whose children are planted, as a path in tree.cjs:
 // `hypercomb` (the default) plants the first layer, the values; a deeper
@@ -20,6 +21,9 @@
 //   4. with --publish, `publish /<top> on <domain>` for each domain named
 //      (repeat the flag, or separate domains with commas): the bytes go to the
 //      host and <top>.<domain> opens on the new head, on every domain at once.
+//      With --as <label>, the tile gets its own address instead:
+//      <label>.<domain> (`publish /<top> on <domain> as <label>`), so
+//      `--publish hypercomb.com --as presentation` is presentation.hypercomb.com.
 //      Publishing is not joining or sharing; the hive asks for consent in the
 //      browser before each publish.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
@@ -35,11 +39,14 @@ const valuesOf = (flag) => args.flatMap((a, i) => a === flag && args[i + 1] && !
 const DRY = args.includes('--dry')
 const TILES_ONLY = args.includes('--tiles-only')
 const DOMAINS = [...new Set(valuesOf('--publish').flatMap(v => v.split(',')).map(d => d.trim().toLowerCase()).filter(Boolean))]
-const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision')].filter(Boolean))
+const LABEL = valueOf('--as')
+const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), LABEL].filter(Boolean))
 const route = (args.find(a => !a.startsWith('--') && !flagValues.has(a)) || tree.name).replace(/^\/+|\/+$/g, '')
 const SAY = path.join(__dirname, '..', 'say.cjs')
 
 if (args.includes('--publish') && !DOMAINS.length) { console.error('--publish needs a domain, e.g. --publish example.com'); process.exit(2) }
+if (args.includes('--as') && (!LABEL || LABEL.startsWith('--'))) { console.error('--as needs a label, e.g. --as presentation'); process.exit(2) }
+if (LABEL && !DOMAINS.length) { console.error('--as names an address on a domain: add --publish <domain>'); process.exit(2) }
 
 const segments = route.split('/')
 if (segments[0] !== tree.name) { console.error(`the route starts at ${tree.name}`); process.exit(2) }
@@ -65,7 +72,7 @@ if (!TILES_ONLY) {
   for (const child of children) if (child.note) sentences.push(`file on /${route}/${child.name}: ${noteFor(child)}`)
 }
 sentences.push(`go /${segments[0]}`, `builds ${REVISION}`)
-for (const domain of DOMAINS) sentences.push(`publish /${segments[0]} on ${domain}`)
+for (const domain of DOMAINS) sentences.push(`publish /${segments[0]} on ${domain}${LABEL ? ` as ${LABEL}` : ''}`)
 
 console.log(`${DRY ? '[DRY] ' : ''}planting one layer under /${route}: ${children.map(c => c.name).join(', ')}\n`)
 for (const sentence of sentences) {
@@ -78,5 +85,5 @@ for (const sentence of sentences) {
     process.exit(1)
   }
 }
-const published = DOMAINS.length ? `, published to ${DOMAINS.map(d => `${segments[0]}.${d}`).join(', ')}` : ''
+const published = DOMAINS.length ? `, published to ${DOMAINS.map(d => `${LABEL || segments[0]}.${d}`).join(', ')}` : ''
 console.log(`\n${DRY ? '[DRY] ' : ''}${children.length} tiles${TILES_ONLY ? '' : ' and their notes'} under /${route}, build ${REVISION}${published}.`)
