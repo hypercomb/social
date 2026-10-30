@@ -33,7 +33,7 @@ tapestry through the signatures they share.
 
 ---
 
-## 1. What this is, and the one point that matters most
+## What this is, and the one point that matters most
 
 This is a welcome. It is about Hypercomb, and it invites people into this
 world in a way they can see and touch: tiles that lift, open, and answer when
@@ -81,7 +81,7 @@ share in each other's work, and it is what the presentation ends on.
 Everything before the cube is there so the viewer understands what each point
 is, where it lives, and how it got there.
 
-## 2. The first layer: one layer, built in detail
+## The first layer: one layer, built in detail
 
 Before any stage, the presentation shows how a single layer is built. This
 is the part that explains how everything in Hypercomb is organized and how
@@ -165,45 +165,8 @@ owning it. The same atom can be a header in one layout, an example under a
 value, and a tagged item in a search, all at once, and it means something in
 each of them because of the word that put it there.
 
-### Part discovery: and, or, not, across domains
-
-This is a critical part of the whole design, so the presentation gives it
-its own scene. It is how anyone finds the parts that already exist, here and
-on every domain they follow, before making anything new.
-
-Because every atom carries its words, the parts can be gathered by them.
-Ask for every part that has these words, or those, and leave out the ones
-with that one: and, or, and not. "Header and dark" narrows to parts that have
-both. "Header or footer" gathers parts that have either. "Not draft" leaves
-out anything marked draft. The answer is a flat list of parts, from this
-page, from the whole branch, or from the whole hive, and it reads just like
-the values layer read flat.
-
-A question like this can itself be kept as a tile. That is the other reading
-of the hypercomb tile from the start of this section: instead of a label, a
-tile can hold a question over the graph and show whatever answers it, kept
-current as atoms gain and lose words. It is the hive's one operation, saying
-a word and narrowing, written down so it can be asked again.
-
-The same question reaches across domains. A word has one address on every
-host, so each host you follow can list what it holds under that word, read
-the way any public website is read: a plain fetch, with no joining and no
-room to enter. Your hive asks each followed host for the words in your
-question, combines the answers with and, or, and not on your own machine, and
-shows one flat list of parts from every domain at once, each marked with the
-domain it came from. Narrow it with another word, and the list narrows across
-all of them.
-
-Nothing in that list runs or moves into your hive by being found. A part from
-another domain is an offer. You open it to look, and you take it, whole or
-as one piece, only by choosing to, with its code held until you accept it.
-And because you only ever ask about words you hold, nothing arrives that you
-did not ask for. This is how the cubes of the tapestry are searched: one
-question, answered by every domain you follow, each answer still living on
-its owner's host.
-
-Until that day, the piece stays whole, and it is already finished. Because nothing depends on anything, extruding later
-never breaks what was there.
+Until that day, the piece stays whole, and it is already finished. Because
+nothing depends on anything, extruding later never breaks what was there.
 
 ### Layout and parts meet only at a word
 
@@ -349,7 +312,45 @@ When several candidates are found, they are offered, never picked on their
 own. You choose with the fill word. That choice is what makes the program
 yours, and changing it later is one more choice, which undoes like any other.
 
-## 3. Every piece of the presentation is a tile
+## Part discovery: and, or, not, across domains
+
+This is a critical part of the whole design, so it has its own section, and
+the presentation gives it its own scene. It is how anyone finds the parts
+that already exist, here and on every domain they follow, before making
+anything new.
+
+Because every atom carries its words, the parts can be gathered by them.
+Ask for every part that has these words, or those, and leave out the ones
+with that one: and, or, and not. "Header and dark" narrows to parts that have
+both. "Header or footer" gathers parts that have either. "Not draft" leaves
+out anything marked draft. The answer is a flat list of parts, from this
+page, from the whole branch, or from the whole hive, and it reads just like
+the values layer read flat.
+
+A question like this can itself be kept as a tile. That is the other reading
+of the hypercomb tile from the first layer: instead of a label, a
+tile can hold a question over the graph and show whatever answers it, kept
+current as atoms gain and lose words. It is the hive's one operation, saying
+a word and narrowing, written down so it can be asked again.
+
+The same question reaches across domains. A word has one address on every
+host, so each host you follow can list what it holds under that word, read
+the way any public website is read: a plain fetch, with no joining and no
+room to enter. Your hive asks each followed host for the words in your
+question, combines the answers with and, or, and not on your own machine, and
+shows one flat list of parts from every domain at once, each marked with the
+domain it came from. Narrow it with another word, and the list narrows across
+all of them.
+
+Nothing in that list runs or moves into your hive by being found. A part from
+another domain is an offer. You open it to look, and you take it, whole or
+as one piece, only by choosing to, with its code held until you accept it.
+And because you only ever ask about words you hold, nothing arrives that you
+did not ask for. This is how the cubes of the tapestry are searched: one
+question, answered by every domain you follow, each answer still living on
+its owner's host.
+
+## Every piece of the presentation is a tile
 
 Every element you see on screen is its own tile in the hive. A server is a
 tile. A domain is a tile. Each subdomain, each package, each revision, each
@@ -393,7 +394,7 @@ This also answers the question of audience. The slide level is plain
 language for anyone. One level down is for people who want to know how it
 works. The bottom level is for developers.
 
-## 4. The opening move: hexagons lift into their pages
+## The opening move: hexagons lift into their pages
 
 Every scene opens the same way, and this is the visual that carries the main
 point.
@@ -436,7 +437,7 @@ A change written by a model never goes live on its own. It waits in the hive
 until a person accepts it. A model may put a change on a trial subdomain for
 review, but promoting it, taking it, and accepting it are human acts.
 
-## 5. Choosing your way through: the octopus
+## Choosing your way through: the octopus
 
 The presentation branches like a many-armed octopus with arms on every
 level. The same rule applies on every page, at every depth.
@@ -457,7 +458,7 @@ These match the three directions the hive's viewers already use. Moving
 within a viewer is next. Moving between viewers is explore. Moving across is
 stepping sideways to the next object at the same level.
 
-## 6. Domains and subdomains: the foundation
+## Domains and subdomains: the foundation
 
 This section is the explanation that stage two's slides, the eight
 participants, and the cubes all draw on. It is told here in full, once.
@@ -631,9 +632,9 @@ The presentation should state these plainly, one level down from the slides.
   where that someone is you. Several hosts, each serving different things,
   keep a breach at one from reaching the rest.
 
-## 7. Natural language: the scripting language and the debugging language
+## Natural language: the scripting language and the debugging language
 
-This section is the explanation that stage five draws on.
+This section is the explanation that the stage on working in the cube draws on.
 
 ### A sentence is the program
 
@@ -690,10 +691,12 @@ sentence calling modules that live in other participants' cubes, on their own
 hosts, and bringing the results back. The spoken-programs document still
 marks that second piece as a hypothesis.
 
-## 8. The five stages
+## The stages
 
-The stages are one saved walk through the structure built in section two:
-next follows the walk, and explore leaves it at any point. The stages share
+The stages are one saved walk through the structure built in the first
+layer: next follows the walk, and explore leaves it at any point. There is no
+fixed number of them. The presentation grows over time, and new stages, or
+new walks, join it as they are made. The stages share
 one picture. A strip of servers runs across the top of the
 screen. It starts as a single server in stage one, opens up to show its
 domain and subdomains in stage two, splits into eight participants in stage
@@ -980,7 +983,7 @@ taking a piece, and share in what everyone else has made. The closing line
 comes from the repository itself: the hive is the sum of what we bring to
 it.
 
-## 9. Images from the hive
+## Images from the hive
 
 The presentation uses real pictures from the hive wherever it can:
 
@@ -996,7 +999,7 @@ what-changed panel, the trial bar, a real update notice, and a domain's
 showcase at its root, would be better than anything drawn, and can replace
 the drawings as they arrive.
 
-## 10. The tile tree
+## The tile tree
 
 This is the draft tree. The names become the routes, so they should be agreed
 before phase one.
@@ -1043,12 +1046,12 @@ The participants, domains, and packages are tiles in their own right. The
 eight-participant strip, the cubes, and the sentence paths all draw from those
 same tiles rather than keeping their own copies.
 
-## 11. The phases
+## The phases
 
 The work starts small and grows. Each phase leaves something usable.
 
 **Phase one: get the tiles into the hive.** Create the whole tree, with names
-only and empty pages. That includes the five stages, the shared objects, and
+only and empty pages. That includes the stages, the shared objects, and
 the transition bee's tile. At the end of this phase the presentation already
 exists as hexagons anyone can walk.
 
@@ -1111,7 +1114,7 @@ drafted on a trial subdomain, debugged in sentences, reviewed, and promoted
 with one pointer move into its publisher's public cube, and its followers get
 the update badge.
 
-## 12. What is built, and what is not
+## What is built, and what is not
 
 The slides should be honest about this.
 
@@ -1177,7 +1180,7 @@ up so the eye can compare them; the first slide of stage four says this once.
 signatures you can hand to someone. It matches how a build record or a commit
 names a whole set of files, but there is no slice object today.
 
-## 13. Where the story and the documents differ
+## Where the story and the documents differ
 
 1. **Where the workbench is.** The workbench is hypercomb.io, or your own
    host's root domain, private to your machine. A trial subdomain is not the
@@ -1201,7 +1204,7 @@ names a whole set of files, but there is no slice object today.
    public cube is a new view of the same published points, not a replacement
    for the showcase.
 
-## 14. Open decisions
+## Open decisions
 
 1. **The hypercomb tile.** A label by default, with the filter shown as its
    other reading?
