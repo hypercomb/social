@@ -473,6 +473,24 @@ crosses between sources. You can grab a point and drag the slice up or down
 to a different version, or across to another participant's implementation;
 dependency lines show whether it still fits.
 
+**More than three dimensions.** The cube shows three axes because a screen can
+show three at once, not because Hypercomb stops at three. Nothing prevents
+adding more. In the hive, a new dimension is just another mark a tile can
+wear, and filtering by a mark is a view, so a new axis costs nothing to keep
+in step: no copy is made and nothing has to be synchronised. Some dimensions
+that already exist in the hive as marks or pools:
+
+- **platform**, such as web, desktop, or phone: the same word implemented for
+  each, as two marks on one tile;
+- **locale**: the community's translations of each word;
+- **audience**: which projection of a domain a given group is shown;
+- **reviews**: the signed reviews and checks gathered on each point.
+
+A dimension picker on this slide lets the viewer choose any three of these to
+draw as the cube's axes. The points stay the same. Only the three directions
+they are spread along change. Every face is still a flattening of one chosen
+axis, so the same way of reading works however many dimensions there are.
+
 The cube is drawn from demo data at first. A later step can draw it from the
 real history of the package tiles, so that changing a tile in the hive adds a
 new point to the cube.
