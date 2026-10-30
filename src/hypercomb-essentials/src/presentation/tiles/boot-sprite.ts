@@ -9,6 +9,7 @@
 // thumbnail, and a miss there paints the letter. Nothing here is load-bearing.
 
 import type { ThumbnailStore } from './thumbnails.js'
+import { noteDerivedMint, noteDerivedUse } from '../../history/optimization-use.js'
 
 /** Pool of meaning. Colon-scoped so it can never be a tile's bag. */
 export const BOOT_SPRITE_MEANING = 'sprites:boot'
@@ -68,7 +69,9 @@ export async function readBootSprite(store: ThumbnailStore, key: string): Promis
     if (!pool) return null
     const handle = await pool.getFileHandle(key, { create: false })
     const file = await handle.getFile()
-    return file.size > 0 ? file : null
+    if (file.size <= 0) return null
+    noteDerivedUse(store, BOOT_SPRITE_MEANING, key)
+    return file
   } catch {
     return null
   }
@@ -86,6 +89,7 @@ export async function writeBootSprite(
     const handle = await pool.getFileHandle(key, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(bytes) } finally { await writable.close() }
+    noteDerivedMint(store, BOOT_SPRITE_MEANING, key)
     return true
   } catch {
     return false

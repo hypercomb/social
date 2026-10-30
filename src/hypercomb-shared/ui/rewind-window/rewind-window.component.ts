@@ -55,6 +55,9 @@ type CursorService = {
 type Store = {
   getResource(sig: string): Promise<Blob | null>
   getPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
+  /** Present on the runtime store. A thumbnail the rewind mosaic actually
+   *  showed is a use, so the reap keeps it out of recycling priority. */
+  noteOptimizationUse?(meaning: string, member: string, weight?: number): void
 }
 type NavigationService = { segmentsRaw(): string[] }
 
@@ -492,7 +495,10 @@ export class RewindWindowComponent implements OnInit, AfterViewInit, OnDestroy {
       if (pool) {
         const handle = await pool.getFileHandle(imageSig, { create: false })
         const file = await handle.getFile()
-        if (file.size > 0) return file
+        if (file.size > 0) {
+          store.noteOptimizationUse?.(THUMBNAIL_MEANING, imageSig)
+          return file
+        }
       }
     } catch { /* miss is normal — fall back */ }
     try { return await store.getResource(imageSig) } catch { return null }

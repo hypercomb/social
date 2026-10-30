@@ -23,6 +23,8 @@
 // The meaning carries a colon so it can never collide with a lineage bag
 // named after a tile slug.
 
+import { noteDerivedMint, noteDerivedUse } from '../../history/optimization-use.js'
+
 /** Pool of meaning holding hex thumbnails, keyed by source image sig. */
 export const THUMBNAIL_MEANING = 'thumbnails:hex'
 
@@ -46,7 +48,9 @@ export async function readThumbnail(
     if (!pool) return null
     const handle = await pool.getFileHandle(imageSig, { create: false })
     const file = await handle.getFile()
-    return file.size > 0 ? file : null
+    if (file.size <= 0) return null
+    noteDerivedUse(store, THUMBNAIL_MEANING, imageSig)
+    return file
   } catch {
     return null
   }
@@ -65,6 +69,7 @@ export async function writeThumbnail(
     const handle = await pool.getFileHandle(imageSig, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(bytes) } finally { await writable.close() }
+    noteDerivedMint(store, THUMBNAIL_MEANING, imageSig)
     return true
   } catch {
     return false

@@ -1,5 +1,5 @@
 // pixi/show-cell.drone.ts
-import { Drone, EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY, OPTIMIZATION_COUNT_MAX, OPTIMIZATION_KEEP_AT } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
@@ -10548,7 +10548,10 @@ export class ShowCellDrone extends Drone {
     // That is the whole point of a per-LAYER optimization: two reads to paint
     // a page, not two plus one per tile.
     const packed = ShowCellDrone.#packVisuals.get(sig)
-    if (packed) return packed
+    if (packed) {
+      ShowCellDrone.#touchPackVisual(sig)
+      return packed
+    }
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
       getResourceLocal: (s: string) => Promise<Blob | null>
       getOptimizedVisual?: (s: string) => Promise<Blob | null>
@@ -10567,10 +10570,48 @@ export class ShowCellDrone extends Drone {
    *  whenever a manifest is read (render path or preloader) and consulted by
    *  every decode. Static because the pack for one layer serves any pass that
    *  paints those tiles, and content-addressed keys make that safe forever —
-   *  a sig is its bytes. Bounded: the entries are ~6KB renditions and the map
-   *  is trimmed oldest-first past the cap. */
+   *  a sig is its bytes. Bounded: past the cap, a picture in recycling
+   *  priority (the lower use counts) leaves before a picture on the keep line. */
   static readonly #packVisuals = new Map<string, Blob>()
+  static readonly #packCounts = new Map<string, number>()
   static readonly #PACK_VISUAL_CAP = 2048
+
+  /** A use raises the count onto the keep line, which moves the picture
+   *  out of recycling priority. */
+  static #touchPackVisual(sig: string): void {
+    const next = Math.min(
+      OPTIMIZATION_COUNT_MAX,
+      Math.max((ShowCellDrone.#packCounts.get(sig) ?? 0) + 1, OPTIMIZATION_KEEP_AT),
+    )
+    ShowCellDrone.#packCounts.set(sig, next)
+  }
+
+  /** Make one seat. Recycling priority goes first, lowest count first.
+   *  When every picture is protected, one decay step moves the least-used
+   *  back into priority. The highest counts stay. */
+  static #evictPackVisual(): void {
+    const lowest = (recyclingOnly: boolean): string | undefined => {
+      let pick: string | undefined
+      let best = Infinity
+      for (const sig of ShowCellDrone.#packVisuals.keys()) {
+        const n = ShowCellDrone.#packCounts.get(sig) ?? 0
+        if (recyclingOnly && n >= OPTIMIZATION_KEEP_AT) continue
+        if (n < best) { best = n; pick = sig }
+      }
+      return pick
+    }
+    let pick = lowest(true)
+    if (!pick) {
+      for (const [sig, n] of ShowCellDrone.#packCounts) {
+        ShowCellDrone.#packCounts.set(sig, Math.max(0, n - 1))
+      }
+      pick = lowest(true)
+    }
+    if (!pick) pick = lowest(false)
+    if (!pick) return
+    ShowCellDrone.#packVisuals.delete(pick)
+    ShowCellDrone.#packCounts.delete(pick)
+  }
 
   /** Take a manifest entry's inlined visual into the pack. No-op for entries
    *  that carry only a sig (source too big to inline, or not local when the
@@ -10583,9 +10624,9 @@ export class ShowCellDrone extends Drone {
       const bytes = new Uint8Array(binary.length)
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
       if (ShowCellDrone.#packVisuals.size >= ShowCellDrone.#PACK_VISUAL_CAP) {
-        const oldest = ShowCellDrone.#packVisuals.keys().next().value
-        if (oldest !== undefined) ShowCellDrone.#packVisuals.delete(oldest)
+        ShowCellDrone.#evictPackVisual()
       }
+      ShowCellDrone.#packCounts.set(v.sig, OPTIMIZATION_KEEP_AT)
       ShowCellDrone.#packVisuals.set(v.sig, new Blob([bytes], { type: v.type || 'image/webp' }))
     } catch { /* malformed inline — the file path still works */ }
   }

@@ -24,7 +24,7 @@
     "hypercomb-runtime/src/acquire.ts": 1,
     "hypercomb-runtime/src/host-zones.ts": 1,
     "hypercomb-runtime/src/packed-store.worker.ts": 10,
-    "hypercomb-runtime/src/store.ts": 15,
+    "hypercomb-runtime/src/store.ts": 14,
     "hypercomb-shared/core/packed-store-scale-probe.ts": 2,
     "hypercomb-shared/core/retired-statistics.ts": 3,
     "hypercomb-shared/ui/file-explorer/opfs-explorer.component.ts": 1,

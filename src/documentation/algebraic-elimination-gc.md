@@ -1,10 +1,12 @@
 # Algebraic elimination GC — roadmap
 
-> **status: idea, not built (logged 2026-08-02).** A design direction for
-> reclaiming space in the hive without a traversal-based collector. Nothing
-> here ships today. It rides the existing optimize phase, pools of meaning,
-> and signature algebra — it must never introduce a new folder, service, or
-> field. Related: [optimize-phase.md](optimize-phase.md),
+> **status: tier 4's local half is built (2026-10-29).** Tiers 1–3 are still
+> an idea, logged 2026-08-02. The built half is the use-count reap in
+> [optimize-phase.md](optimize-phase.md): derived index records move into and
+> out of recycling priority by a count kept in `sign('optimization:heat')`.
+> The count is not a field of the derived bytes. Statistics choose the order;
+> only a derived record may be dropped. Tiers 1–3 still must not introduce a
+> new folder, service, or field. Related: [optimize-phase.md](optimize-phase.md),
 > [signature-algebra.md](signature-algebra.md),
 > [signature-system.md](signature-system.md).
 
@@ -114,6 +116,12 @@ listing what is currently in the derived pools and asking of each: *what would
 make this dead?*
 
 ## Tier 4 — statistical eviction (cold, not dead)
+
+The local half shipped in the optimize phase: a use count, kept outside the
+derived bytes, moves a record into or out of recycling priority, and the
+reap drops the in-priority records of the derived indexes, lowest count
+first. Recoverability is the pool being derived. What remains below — a
+replication gate for truth, a bloom of the live set — is still an idea.
 
 Unreachable is provable; cold is not. A monotone predicate going true is a
 proof of death → delete. A statistical estimate proves nothing, so it can never

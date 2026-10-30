@@ -19,12 +19,22 @@ import {
   noteObsoleteSpelling,
   obsoletePoolSpellings,
   POOL_MENDS,
+  DERIVED_OPTIMIZATION_POOLS,
+  OPTIMIZATION_HEAT_MEANING,
+  OPTIMIZATION_MINT_WEIGHT,
+  OPTIMIZATION_REAP_MS,
+  emptyOptimizationHeat,
+  parseOptimizationHeat,
   poolMeaningOf,
+  runOptimizationHeat,
+  serializeOptimizationHeat,
   registerPoolMeaning,
   resolveMetaArtifact,
   writeLayerMarker,
   type ArtifactResolutionKind,
   type DirectoryEntry,
+  type HeatUse,
+  type OptimizationHeat,
   type I18nProvider,
   type MetaPayloadKind,
   type ResolvedMetaArtifact,
@@ -618,6 +628,13 @@ export class Store extends EventTarget {
     }
   }
 
+  /** The one `removeEntry` for a caller's own directory: document replacement
+   *  (`#keepOnly`) and the derived-cache reap share it, so the storage ratchet
+   *  does not gain a site. Names are already chosen by the caller. */
+  static #dropEntries = async (target: FileSystemDirectoryHandle, names: readonly string[]): Promise<void> => {
+    for (const name of names) await target.removeEntry(name)
+  }
+
   /** Leave `sig` as the only document in `target`, which `#documentSpace` has
    *  just proven to be the caller's own. The markers go first, so a reader
    *  never follows one to a removed atom: until the old atoms are gone a read
@@ -632,8 +649,8 @@ export class Store extends EventTarget {
         if (kind === 'marker') markers.push(name)
         else if (kind === 'member' && name !== sig) atoms.push(name)
       }
-      for (const name of markers) await target.removeEntry(name)
-      for (const name of atoms) await target.removeEntry(name)
+      await Store.#dropEntries(target, markers)
+      await Store.#dropEntries(target, atoms)
       return true
     } catch { return false }
   }
@@ -1694,6 +1711,10 @@ export class Store extends EventTarget {
   // content hash) because the whole point is O(1) lookup FROM the source.
   public static readonly VISUAL_OPTIMIZATION_MEANING = 'visual-optimization'
   #visualOptimPool?: FileSystemDirectoryHandle
+  /** Pending use weights, keyed by `meaning/member`, flushed by the reap. */
+  #optimizationUses = new Map<string, number>()
+  #optimizationReapedAt = 0
+  #optimizationCursor = 0
   // Matches HexImageAtlas's own resize target (cellPx 256 × 2). Storing at
   // this size means the atlas never re-resizes the optimized form.
   static readonly #VISUAL_OPTIM_TARGET = 512
@@ -1712,7 +1733,9 @@ export class Store extends EventTarget {
       if (!dir) return null
       const handle = await dir.getFileHandle(sourceSig, { create: false })
       const file = await handle.getFile()
-      return file.size > 0 ? file : null
+      if (file.size <= 0) return null
+      this.noteOptimizationUse(Store.VISUAL_OPTIMIZATION_MEANING, sourceSig)
+      return file
     } catch { return null }
   }
 
@@ -1723,6 +1746,7 @@ export class Store extends EventTarget {
       const handle = await dir.getFileHandle(sourceSig, { create: true })
       const writable = await handle.createWritable()
       await writeKeepingError(writable, bytes)
+      this.noteOptimizationUse(Store.VISUAL_OPTIMIZATION_MEANING, sourceSig, OPTIMIZATION_MINT_WEIGHT)
     } catch { /* best-effort cache */ }
   }
 
@@ -2728,6 +2752,7 @@ export class Store extends EventTarget {
         const text = await file.text()
         const parsed = JSON.parse(text)
         if (!Array.isArray(parsed)) return null
+        this.noteOptimizationUse(Store.MANIFESTS_MEANING, parentLayerSig)
         return parsed
       } catch { /* miss — try the next source */ }
     }
@@ -2746,6 +2771,7 @@ export class Store extends EventTarget {
       const handle = await this.manifests.getFileHandle(parentLayerSig, { create: true })
       const writable = await handle.createWritable()
       await writeKeepingError(writable, JSON.stringify(manifest))
+      this.noteOptimizationUse(Store.MANIFESTS_MEANING, parentLayerSig, OPTIMIZATION_MINT_WEIGHT)
     } catch { /* cache miss on next read is fine */ }
   }
 
@@ -2775,7 +2801,102 @@ export class Store extends EventTarget {
 
     return signature
   }
-}
+
+  /** Count one use of a derived optimization. The bytes are untouched.
+   *  A weight of `OPTIMIZATION_MINT_WEIGHT` is a write: the new record
+   *  starts out of recycling priority. */
+  public noteOptimizationUse = (meaning: string, member: string, weight = 1): void => {
+    try {
+      const pool = String(meaning ?? '')
+      const key = String(member ?? '').trim().toLowerCase()
+      if (!(DERIVED_OPTIMIZATION_POOLS as readonly string[]).includes(pool)) return
+      if (!/^[0-9a-f]{64}$/.test(key)) return
+      const add = Number.isFinite(weight) && weight > 0 ? Math.floor(weight) : 0
+      if (add <= 0) return
+      const id = `${pool}/${key}`
+      this.#optimizationUses.set(id, (this.#optimizationUses.get(id) ?? 0) + add)
+    } catch { /* a missed count only delays protection */ }
+  }
+
+  /** Move counts, then drop the derived records that landed in recycling
+   *  priority. One pool per pass. A missing or unreadable ledger deletes
+   *  nothing. A directory that holds a lineage marker is left untouched. */
+  public reapDerivedOptimizations = async (): Promise<void> => {
+    const now = Date.now()
+    if (now - this.#optimizationReapedAt < OPTIMIZATION_REAP_MS) return
+    this.#optimizationReapedAt = now
+    const snapshot = new Map(this.#optimizationUses)
+    try {
+      const loaded = await this.#readOptimizationHeat(now)
+      if (!loaded) return
+      const uses: HeatUse[] = []
+      for (const [id, weight] of snapshot) {
+        const slash = id.indexOf('/')
+        if (slash <= 0) continue
+        uses.push({ meaning: id.slice(0, slash), member: id.slice(slash + 1), weight })
+      }
+      const pools = DERIVED_OPTIMIZATION_POOLS
+      const pool = pools[this.#optimizationCursor % pools.length] ?? pools[0]
+      this.#optimizationCursor++
+      const listed = await this.#listDerivedMembers(pool)
+      const pass = runOptimizationHeat({
+        heat: loaded,
+        now,
+        uses,
+        pool: listed.ok ? pool : '',
+        members: listed.ok ? listed.names : [],
+      })
+      if (listed.ok && pass.victims.length > 0) {
+        const dir = await this.openPool(pool)
+        if (!dir) return
+        await Store.#dropEntries(dir, pass.victims)
+      }
+      if (pass.changed) await this.#writeOptimizationHeat(pass.heat)
+      for (const [id, seen] of snapshot) {
+        const current = this.#optimizationUses.get(id)
+        if (current === undefined) continue
+        if (current === seen) this.#optimizationUses.delete(id)
+        else this.#optimizationUses.set(id, current - seen)
+      }
+    } catch { /* the next pass retries; a failed reap deletes nothing new once the write is skipped */ }
+  }
+
+  #readOptimizationHeat = async (now: number): Promise<OptimizationHeat | null> => {
+    const pool = await this.openPool(OPTIMIZATION_HEAT_MEANING)
+    if (!pool) return emptyOptimizationHeat(now)
+    const bytes = await this.getPoolDoc(pool)
+    if (!bytes || bytes.byteLength === 0) return emptyOptimizationHeat(now)
+    return parseOptimizationHeat(new TextDecoder().decode(bytes))
+  }
+
+  #writeOptimizationHeat = async (heat: OptimizationHeat): Promise<void> => {
+    const pool = await this.getPool(OPTIMIZATION_HEAT_MEANING)
+    if (!pool) return
+    const bytes = new TextEncoder().encode(serializeOptimizationHeat(heat))
+    await this.putPoolDoc(pool, bytes.buffer as ArrayBuffer, undefined, { keep: 'current' })
+  }
+
+  /** Member filenames in a derived index. `ok: false` when the directory
+   *  holds a lineage marker or could not be read — the reap then deletes
+   *  nothing from it. */
+  #listDerivedMembers = async (
+    meaning: string,
+  ): Promise<{ ok: true; names: string[] } | { ok: false }> => {
+    try {
+      const pool = await this.openPool(meaning)
+      if (!pool) return { ok: true, names: [] }
+      const names: string[] = []
+      for await (const [name, handle] of (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+        if (handle?.kind === 'directory') continue
+        const kind = classifyDirectoryEntry(name)
+        if (kind === 'marker') return { ok: false }
+        if (kind === 'member' && /^[0-9a-f]{64}$/i.test(name)) names.push(name)
+      }
+      return { ok: true, names }
+    } catch {
+      return { ok: false }
+    }
+  }}
 
 register('@hypercomb.social/Store', new Store())
 console.log('[hypercomb] store: layer-bytes cache active (2026-05-01)')

@@ -613,6 +613,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'search:index',
   'thumbnails:hex',
   'sprites:boot',
+  // Use counts for the derived indexes above. The count is not inside the
+  // derived bytes. A count on the keep line is out of recycling priority;
+  // below it, the reap may drop that derived file. Declared index so a
+  // reference walk does not treat the signatures named in the ledger as roots.
+  'optimization:heat',
   // RESERVED AHEAD OF ITS BUILD, like `pheromones:deposits` above: the hive
   // entry point from documentation/known-location-pools.md, name → sealed
   // head, proved buildable today by history/hives-names-shape.spec.ts. The

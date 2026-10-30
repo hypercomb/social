@@ -54,10 +54,37 @@ append-only; optimization history is a disposable shadow: free to grow, free
 to prune, always regenerable. GC may drop any record; the only cost is one
 cold pass before the phase re-mints it.
 
-How that pruning could become an *evaluation* rather than a traversal —
-self-retiring records, cancellation of identity-net history segments, and
-statistical eviction gated on recoverability — is logged as a roadmap idea in
+How pruning could become an *evaluation* rather than a traversal —
+self-retiring records and cancellation of identity-net history segments —
+is logged as a roadmap idea in
 [algebraic-elimination-gc.md](algebraic-elimination-gc.md). Not built.
+
+## Recycling
+
+The use count is not a field of the derived record. A count inside those
+bytes would stop them being a pure derivation of the source signature. The
+count lives in `sign('optimization:heat')`, one local ledger. A read adds
+one, and a count that is still under 3 is lifted back to 3 — that is the
+move out of recycling priority. A mint starts the record on that line.
+Once a day, a pass subtracts one from every count.
+
+A count of 3 or more is out of recycling priority. A count under 3 is in
+it. The pass drops only records that are in priority, lowest count first,
+and only from the derived indexes: children manifests, cell-sized visuals,
+hex thumbnails, boot sprites, llm-context projections, the search index,
+and the molecule index. One pool is listed per pass, and at most 48
+members of it. A record the ledger has never seen is enrolled at 3 and
+kept for that pass. A missing or unreadable ledger drops nothing. The
+bytes come back on the next miss.
+
+The in-memory picture pack uses the same line. A use raises that picture's
+count and moves it out of recycling priority. Past the cap, a picture in
+priority leaves before a picture on the keep line.
+
+`sign('system:optimization')` is the feedback substrate. It is not in this
+reap. Neither are landing packs (`content:packs`) or transfer packs: a
+host serves those, and dropping one would make the next visit fetch each
+member on its own.
 
 ## First implementation
 

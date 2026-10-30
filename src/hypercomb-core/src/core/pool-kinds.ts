@@ -148,6 +148,12 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // source-image set (presentation/tiles/boot-sprite.ts). Recomputable.
   ['sprites:boot', 'index'],
   ['visual-optimization', 'index'],
+  // Token-compact tile projections, one file per source layer signature
+  // (assistant/llm-context.ts). Index, so the member name is not a root.
+  ['llm:context', 'index'],
+  // Use counts for the derived indexes. One current document whose name is
+  // its own hash; index so the signatures written inside it are not roots.
+  ['optimization:heat', 'index'],
   // SETS — the participant's own members, and they travel.
   ['backgrounds:saved', 'set'],
   ['comfy:generations', 'set'],

@@ -22,6 +22,7 @@
 // pool and every answer is identical, only slower to reach.
 
 import { childSigsOfLayer } from '@hypercomb/core'
+import { noteDerivedMint, noteDerivedUse } from '../history/optimization-use.js'
 import {
   MAX_RECORD_DEPTH, MAX_RECORD_ROWS, SEARCH_INDEX_MEANING, groupHits, rowsOfManifest, searchRecord,
   spliceChildRows, type ManifestEntry, type SearchHit, type SearchReach,
@@ -167,7 +168,10 @@ export class HiveSearchService {
    *  exactly the cost this design refuses to pay. */
   readRecord = async (layerSig: string): Promise<SearchRecord | null> => {
     const memo = this.#memo.get(layerSig)
-    if (memo) return memo
+    if (memo) {
+      noteDerivedUse(this.store, SEARCH_INDEX_MEANING, layerSig)
+      return memo
+    }
     if (this.#pool === undefined) this.#pool = (await this.store?.getPool(SEARCH_INDEX_MEANING)) ?? null
     if (!this.#pool) return null
     try {
@@ -178,6 +182,7 @@ export class HiveSearchService {
       if (parsed.derivation !== HiveSearchService.#DERIVATION) return null
       if (this.#memo.size > 64) this.#memo.clear()
       this.#memo.set(layerSig, parsed)
+      noteDerivedUse(this.store, SEARCH_INDEX_MEANING, layerSig)
       return parsed
     } catch { return null }
   }
@@ -520,6 +525,7 @@ export class HiveSearchService {
       const writable = await handle.createWritable()
       try { await writable.write(JSON.stringify(stamped)) } finally { await writable.close() }
       this.#memo.set(layerSig, stamped)
+      noteDerivedMint(this.store, SEARCH_INDEX_MEANING, layerSig)
     } catch { /* derived cache — a miss next time is the only cost */ }
   }
 }

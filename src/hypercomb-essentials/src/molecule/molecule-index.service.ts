@@ -40,6 +40,7 @@ import {
   MAX_RECORD_DEPTH, MOLECULE_INDEX_MEANING, MoleculeWordSet, addressOfName,
   readableRecord, vocabularyOf, type MoleculeRecord, type MoleculeWord,
 } from './molecule-index.js'
+import { noteDerivedMint, noteDerivedUse } from '../history/optimization-use.js'
 
 const ioc = <T>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: <V>(k: string) => V | undefined } }).ioc?.get?.<T>(key)
@@ -110,7 +111,10 @@ export class MoleculeIndexService {
    *  that can put a walk on the keystroke path by accident. */
   readRecord = async (layerSig: string): Promise<MoleculeRecord | null> => {
     const memo = this.#memo.get(layerSig)
-    if (memo) return memo
+    if (memo) {
+      noteDerivedUse(this.store, MOLECULE_INDEX_MEANING, layerSig)
+      return memo
+    }
     if (this.#pool === undefined) this.#pool = (await this.store?.getPool(MOLECULE_INDEX_MEANING)) ?? null
     if (!this.#pool) return null
     try {
@@ -119,6 +123,7 @@ export class MoleculeIndexService {
       if (!record) return null
       if (this.#memo.size > 64) this.#memo.clear()
       this.#memo.set(layerSig, record)
+      noteDerivedUse(this.store, MOLECULE_INDEX_MEANING, layerSig)
       return record
     } catch { return null }
   }
@@ -133,6 +138,7 @@ export class MoleculeIndexService {
       const writable = await handle.createWritable()
       try { await writable.write(JSON.stringify(record)) } finally { await writable.close() }
       this.#memo.set(layerSig, record)
+      noteDerivedMint(this.store, MOLECULE_INDEX_MEANING, layerSig)
     } catch { /* derived cache — a miss next time is the only cost */ }
   }
 

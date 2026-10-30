@@ -56,6 +56,7 @@
 // happened to ask.
 
 import { CHILD_SLOTS, isSignature } from '@hypercomb/core'
+import { noteDerivedMint, noteDerivedUse } from '../history/optimization-use.js'
 import type { InflateLens } from '../history/inflate.js'
 import { isSliceLayer } from './context-slices.js'
 
@@ -327,7 +328,10 @@ export class LlmContextService {
    *  never opens a directory or a file handle with `create: true`. */
   readRecord = async (layerSig: string): Promise<LlmContextRecord | null> => {
     const memo = this.#memo.get(layerSig)
-    if (memo) return memo
+    if (memo) {
+      noteDerivedUse(this.store, LLM_CONTEXT_MEANING, layerSig)
+      return memo
+    }
     if (this.#pool === undefined) {
       this.#pool = (await this.store?.openPool(LLM_CONTEXT_MEANING).catch(() => null)) ?? null
     }
@@ -338,6 +342,7 @@ export class LlmContextService {
       if (!record) return null
       if (this.#memo.size > 64) this.#memo.clear()
       this.#memo.set(layerSig, record)
+      noteDerivedUse(this.store, LLM_CONTEXT_MEANING, layerSig)
       return record
     } catch { return null }
   }
@@ -408,6 +413,7 @@ export class LlmContextService {
       const writable = await handle.createWritable()
       try { await writable.write(JSON.stringify(record)) } finally { await writable.close() }
       this.#memo.set(layerSig, record)
+      noteDerivedMint(this.store, LLM_CONTEXT_MEANING, layerSig)
       // The directory certainly exists now — let a later readRecord in this
       // instance reuse the handle instead of retrying openPool.
       if (!this.#pool) this.#pool = pool
