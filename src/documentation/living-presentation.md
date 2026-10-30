@@ -1,9 +1,17 @@
 # The living presentation — a plan to review
 
-**Status: plan, for review (2026-10-30). Nothing here is built.** This page
-gathers the whole plan for an interactive presentation of how Hypercomb works.
-It is written to be listened to: plain sentences, no tables, and every file
-reference kept in the last section so it can be skipped when read aloud.
+**Status: plan, for review. Second revision, 2026-10-30. Nothing here is
+built.** This page gathers the whole plan for an interactive presentation of
+how Hypercomb works. It is written to be listened to: plain sentences, no
+tables, and every file reference kept in the last section so it can be
+skipped when read aloud.
+
+What changed in this revision: the cube is now a cloud of points, one point
+for each tile, and each face of the cube is a different view of the same
+points. Domains and subdomains have their own section, and the subdomain is
+now described as the debugging environment: fully isolated, working on
+stable files, with every publisher's path to their running code kept intact.
+Both are tied into the stages where they fit.
 
 ---
 
@@ -22,14 +30,26 @@ proves this by being made of the same tiles it describes.
 
 That is why it is a living document. It is never finished. Anyone can open
 any piece of it, read how it works, copy it, improve it, and publish their
-version. The people who follow it get a small notice and can take the new
-version, or just one piece of it, or nothing at all.
+version. The people who follow it get a small notice, and they can take the
+new version, take just one piece of it, or leave it.
+
+The story builds toward one picture. A cube of points, where every point is a
+tile, and where turning the cube shows the same tiles divided three ways: by
+the server that hosts them, by the words of the language they answer, and by
+version. Everything before the cube is there so the viewer understands what
+each point is, where it lives, and how it got there.
+
+And the cube is shared. The domains connect from the root outward, each one
+reaching the others through the same signatures, and together they weave a
+tapestry. Because a signature means the same thing everywhere, every
+participant is looking at the same cube from their own place in it. That
+symmetry is what the presentation ends on.
 
 ## 2. Every piece of the presentation is a tile
 
 Every element you see on screen is its own tile in the hive. A server is a
-tile. A host is a tile. Each package, each revision, each face of the cube,
-and each word of a sentence is a tile.
+tile. A domain is a tile. Each subdomain, each package, each revision, each
+face of the cube, and each word of a sentence is a tile.
 
 Each tile carries its own page. When you click an element in a diagram, you
 go into its tile, one level down, and its page opens. That page explains the
@@ -64,6 +84,10 @@ what they will find:
    the signed index, the derivation record, or the install pointer.
 4. **The source.** The document and the code it comes from, read by
    signature.
+
+This also answers the question of audience. The slide level is plain
+language for anyone. One level down is for people who want to know how it
+works. The bottom level is for developers.
 
 ## 3. The opening move: hexagons lift into their pages
 
@@ -104,6 +128,10 @@ gets its own signature, and the original is untouched. When you publish your
 version, the people who follow you see the update notice described in stage
 three, and they decide whether to take it.
 
+A change written by a model never goes live on its own. It waits in the hive
+until a person accepts it. A model may put a change on a trial subdomain for
+review, but promoting it, taking it, and accepting it are human acts.
+
 ## 4. Choosing your way through: the octopus
 
 The presentation branches like a many-armed octopus with arms on every
@@ -125,11 +153,144 @@ These match the three directions the hive's viewers already use. Moving
 within a viewer is next. Moving between viewers is explore. Moving across is
 stepping sideways to the next object at the same level.
 
-## 5. The five stages
+## 5. Domains and subdomains: the foundation
+
+This section is the explanation that stage two's slides, the eight servers,
+and the cube all draw on. It is told here in full, once.
+
+### A domain is yours
+
+A participant claims a domain with one sentence: domain claim, followed by the
+domain name. The hive answers with two nameservers. The participant sets them
+at their registrar, and that change is the proof that they control the
+domain. Nothing else is asked.
+
+From then on, the bare domain is their front door, and every name under it,
+every subdomain, is a place they can switch on. Nobody else can publish
+there. The key that claimed the domain is the key that publishes to it.
+
+### One folder, many names
+
+A domain has one folder: its root. Every name under the domain is only a way
+of reaching that folder. No subdomain owns any files. A subdomain is
+resolution, never storage.
+
+The root holds only three kinds of thing. Atoms: the bytes of everything
+published, each file named by the hash of its own bytes. Histories: the
+ordered markers of each branch, where the highest marker is the current
+head. And pools of meaning: the signed indexes, packages, listings, and every
+other grouping. The start-up files for the shell sit in the root too, the same
+for every name, so any name can be opened from cold.
+
+### Publishing is bytes first, then a pointer
+
+Publishing to a name happens in two steps, always in this order. First, the
+bytes go into the root, each file under its own signature. Identical content
+is one file, however many names or people point at it. Then the pointer moves:
+the publisher's signed index is updated so that name now opens on the new
+head.
+
+A new version is a new head. The old heads keep resolving, so older versions
+keep working. Taking a name down is the same act in reverse: the pointer is
+removed. No file is deleted.
+
+### The trial subdomain is the debugging environment
+
+Every change starts life on a trial subdomain. Its name is the word "try",
+a dash, and the name of the site it will become. A trial for the cards site
+lives at try-cards, on the same domain, and when it is promoted it becomes
+the cards site itself.
+
+A trial subdomain is completely isolated:
+
+- **It has its own origin.** The browser gives it its own storage, so nothing
+  it does can touch anyone's hive. The origin is the sandbox.
+- **It writes nothing.** The host refuses every write that comes from a trial
+  address.
+- **It holds no keys.** At a trial address the shell stores no AI key, signs
+  nothing, and keeps any signing extension out of reach. A bar across the top
+  says plainly that you are at a trial.
+- **It cannot reach your machine.** Its page policy blocks it from talking to
+  anything on the visitor's own computer.
+- **It opens in its own tab,** never inside another page.
+
+Inside that bubble, a trial runs readable source that has not been minified.
+Anyone can open it, try it, and read exactly what changed, file by file. The
+host's AI reads it, people read it, and signed reviews gather beside it.
+Auditing a trial from your own hive runs nothing at all: it fetches the
+changed files by signature and compares them with what you run.
+
+The what-changed panel always shows where a change stands, in four steps:
+draft, trial, reviewed, and your choice. At the last step, anyone can take
+the change into their own hive, where it is held until they accept it. Only
+the publisher can promote it or withdraw it.
+
+### Promotion is one pointer move
+
+When a trial is ready, promoting it moves one pointer. The site now opens on
+exactly the files the trial ran. Nothing is rebuilt and nothing is uploaded
+again. Withdrawing a trial removes its pointer; the trial address then says
+there is nothing here, and its files stay in the root under their signatures,
+unreachable but never deleted.
+
+### Why everyone's files stay stable
+
+Put these together and every person can work at their own level on files that
+do not move under them.
+
+**No version is removed.** Bytes are never deleted. A new version is a new
+head, and every old head still resolves. If you stand on revision one, it
+keeps working for as long as any host serves it.
+
+**Nobody else can change what you run.** Updates are taken on the following
+side, only when you have turned updates on, and only when you choose. A
+version you hold stays until you upgrade.
+
+**Trials cannot leak.** Each trial is sealed in its own origin and writes
+nothing, so a broken draft breaks only its own bubble. Ten people can debug
+ten changes to the same package at the same time, and none of them can
+disturb the others or the live site.
+
+**Every publisher's path to their running code stays whole.** Follow the
+chain for any publisher: their domain, then their signed index, then the
+head it names, then every file in that head's tree. Each step is signed or
+hashed, and each file is checked against its own name when it arrives. A
+host cannot change a byte without being caught. Another publisher's broken
+change cannot enter that chain, because it can only arrive by being taken and
+then accepted by hand. So every publisher keeps a clean path from their
+domain to the code that runs.
+
+### The honest limits
+
+The presentation should state these plainly, one level down from the slides.
+
+- **Control is a signed word, not enforcement.** Withdrawing a name is
+  followed by honest hosts and readers, but nothing can make another host
+  forget bytes it already holds. Private content is encrypted before it
+  leaves the device.
+- **Publishing a branch's history is a choice.** The bytes of every published
+  version stay in the root, but sharing the full step-by-step history of a
+  branch is switched on per branch, because it carries every earlier state.
+- **The one mutable file.** The shell's start-up pointer, the pin, is the one
+  file a compromised host could swap. Today the loader checks that the bytes
+  match the pin and falls back to the last pin that worked. Choosing the pin
+  from the publisher's signed pointer, so that a compromised host can cost
+  you at most a missing page, is designed but not built.
+- **A recycled name must start empty.** Today the hive's trust in code is
+  keyed by domain alone. It should be keyed by domain and publisher key
+  together, so a name given to someone new inherits nothing. This is a known
+  gap.
+- **A separate address is not trust in its host.** Whoever runs a host
+  decides what it serves. Your own domain on your own host is the only place
+  where that someone is you. Several hosts, each serving different things,
+  keep a breach at one from reaching the rest.
+
+## 6. The five stages
 
 The stages share one picture. A strip of servers runs across the top of the
-screen. It starts as a single server in stage one, splits into eight in stage
-three, and tips back into a cube in stage four. The cube stays for stage five.
+screen. It starts as a single server in stage one, opens up to show its
+domain and subdomains in stage two, splits into eight in stage three, and
+becomes a cube of points in stage four. The cube stays for stage five.
 
 ### Stage one: one server, one host, one client
 
@@ -145,58 +306,64 @@ holds.
 
 **Slide two, inside a server.** Open the server and you see files named by
 their signatures, the publisher's signed index, which says which version each
-address opens on, and install pointers, which name the current package. A
-server only shares what the current hive reaches; nothing else leaves. Click
-a file and you see that its name is the hash of its own bytes.
+name opens on, and install pointers, which name the current package. A server
+only shares what the current hive reaches; nothing else leaves. Click a file
+and you see that its name is the hash of its own bytes.
 
 **Slide three, one request from start to finish.** A visitor types an
-address. The core reads which publisher and which tile that domain is bound
-to, reads the publisher's signed index, finds the current root signature, and
+address. The core reads which publisher and which tile that name is bound to,
+reads the publisher's signed index, finds the current root signature, and
 then fetches each file by its signature. Every file is checked as it arrives.
 A tamper button corrupts one file on the server, and the visitor refuses it.
 This is why a stranger's server is safe to use: the worst it can do is fail
 to answer. It cannot change what you get.
 
-### Stage two: from workbench to deployment
+### Stage two: domains, subdomains, and the workbench
 
-**Slide one, the subdomain is the workbench.** This slide uses the real
-publications page from Plugin the Matrix, with its subdomains for Revolución,
-Meetup, Arkanoid, and others. A draft lives on its own trial subdomain, a
-name that starts with "try" followed by a dash. It runs readable source that
-has not been minified, and it runs on its own origin, so its storage is its
-own sandbox and nothing it does touches anyone's hive. The host's AI and the
-public can read it there and leave signed reviews beside it. The viewer can
-edit one line of the draft and watch its signature change.
+**Slide one, a domain and its names.** The server opens to show one domain,
+using the real Plugin the Matrix publications page with its subdomains for
+Revolución, Meetup, Arkanoid, and others. All the names lead to one root
+folder. Click a subdomain and you see that it holds no files, only a pointer
+in the signed index. Press publish and the viewer watches the two steps: the
+bytes drop into the root, then the pointer moves. The old pointer's files are
+still there, and the old version still opens.
 
-**Slide two, minify and publish.** The readable package goes through the
-minify step and comes out as a smaller package with its own tree of
-signatures. The minified package still names the readable source it came
-from, one step back. Publishing is then a single pointer move. Nothing is
-rebuilt and nothing is uploaded again; the deployment address simply starts
-opening the same signed files the draft ran. A slider moves between the
-readable and minified versions, and shows the real numbers: the package went
-from about nine megabytes to about six.
+**Slide two, the trial subdomain.** A trial appears beside the cards site,
+drawn inside its own bubble: try-cards. The bubble shows its walls: its own
+storage, no writes, no keys, no reach into your machine. The viewer edits one
+line of the draft and watches its signature change. Then three more trial
+bubbles appear, other people working on the same package at once, and none of
+them touches the others or the live site. The four steps of the what-changed
+panel run along the bottom: draft, trial, reviewed, your choice. Signed
+reviews from the host's AI and from people gather on the bubble.
 
-**Slide three, the visitor gets one exact version.** A visitor to the
-deployed address gets the minified package, pinned to its exact root
-signature. It is faster and smaller, and it never changes underneath them. A
-re-derive button runs the minify step again on the readable source and
-arrives at the same root, which is how anyone can check that the minified
-code is exactly what it claims to be.
+**Slide three, promote, and the visitor's exact version.** The publisher
+promotes. The bubble's pointer slides over to the cards site; no file moves.
+The visitor's copy then goes through the minify step and comes out smaller,
+with its own tree of signatures that still names the readable source it came
+from. A slider moves between the readable and minified versions and shows
+the real numbers: the package went from about nine megabytes to about six. A
+visitor gets that exact version, pinned to its root signature, and it never
+changes underneath them. A re-derive button runs the minify step again on the
+readable source and arrives at the same root, which is how anyone can check
+that the minified code is exactly what it claims to be.
 
-Stage two ends with the lifecycle drawn as a loop: draft, workbench, review,
+Stage two ends with the lifecycle as a loop: draft, trial subdomain, review,
 promote, deployed, visitors pinned, and back to the next draft. This loop
 becomes a small icon that every server carries from stage three on.
 
 ### Stage three: eight servers, revisions, and checking in
 
-**Slide one, the split.** The single server rises and splits into eight. On
-a phone they form two rows of four. Each publisher has its own colour, and
-every colour also has a pattern, so colour is never the only signal. A filled
-chip is a package this server's owner published. A hatched chip, in another
-publisher's colour, is a package this server hosts for someone else. A dashed
-chip is a draft on a workbench, not yet promoted. Stacked rings on a chip are
-the revisions it holds.
+**Slide one, the split.** The single server rises and splits into eight. On a
+phone they form two rows of four. Each server answers for a domain, and each
+shows its live subdomains as solid lanes and its trial subdomains as small
+bubbles at the edge.
+
+Each publisher has its own colour, and every colour also has a pattern, so
+colour is never the only signal. A filled chip is a package this server's
+owner published. A hatched chip, in another publisher's colour, is a package
+this server hosts for someone else. A chip inside a bubble is a trial, not
+yet promoted. Stacked rings on a chip are the revisions it holds.
 
 There are six packages: a shared core, cards, journal, calendar, chat, and
 theme. Each server carries two to four of them, so every package sits on at
@@ -206,119 +373,163 @@ signature lights up. It is stored once on each, and every copy is identical
 and checkable, so it does not matter which server answers.
 
 **Slide two, someone changes a shared package.** The developer on server
-three changes cards on their workbench and promotes it. The new bytes have a
-new signature, so this is revision two. A small notification badge appears on
-the servers that follow server three and have updates turned on. Nothing
+three works on cards in a trial bubble, then promotes it. The new bytes have
+a new signature, so this is revision two. A small notification badge appears
+on the servers that follow server three and have updates turned on. Nothing
 moves on its own; a version you hold stays until you choose. Servers that do
 not follow it stay on revision one, and revision one still works, because
 nothing is ever deleted. A visitor pinned to revision one is not affected at
 all.
 
-At the same time, the developer on server six also starts from revision one
-and makes their own revision two. Both versions exist side by side, with
-different signatures and their own histories. Neither overwrites the other,
-and anyone can build on either one.
+At the same time, the developer on server six also starts from revision one,
+in their own trial bubble, and makes their own revision two. Both versions
+exist side by side, with different signatures and their own histories.
+Neither overwrites the other, and anyone can build on either one. A trace
+line runs from each server's domain through its signed index to its running
+code, and every line stays whole through all of this. That is the picture of
+every publisher keeping a clean path.
 
 **Slide three, take it whole, or take a piece.** Open a badge and you have
 three choices. **Upgrade** takes the revision as it is. **Skip** leaves it.
 **Take a piece** takes only one layer of it into your own hive, at its own
-path, and leaves the rest of your build exactly as it was. When you commit,
-that piece is laid into your build where it belongs. The viewer drags one
-layer from revision two into their own server's build and watches everything
-else stay put.
+path, and leaves the rest of your build exactly as it was. The piece is held
+until you accept it, and when you commit, it is laid into your build where it
+belongs. The viewer drags one layer from revision two into their own server's
+build and watches everything else stay put.
 
 This is what makes so many flavours possible. Everyone can mix the pieces
 that suit their own build or machine, plug them in, and pass their mix on.
 
-### Stage four: the cube
+### Stage four: the cube of points
 
-The strip of eight servers tips back and becomes the top face of a cube. The
-cube has three directions. Across is the servers, all eight. Into the page is
-the packages, all six. Downward is the revisions, newest at the top.
+The eight servers rise and spread into a cube. The cube is a cloud of points,
+and **each point is one tile**: a specific automaton, one implementation at
+one version, hosted on one server.
 
-**Slide one, the top is the present.** The top face is what every server runs
-right now, in the colours from stage three. Each column going down is the
-full revision history of one package on one server, and nothing in it is ever
-deleted. You can turn the cube freely and click a column to read its
-revisions.
+The servers are laid out from the root outward. The root domain sits at the
+centre of the server axis, its own subdomains beside it, and the other
+domains spread out on either side, each with its own subdomains next to it.
+So the cube grows from the middle, and its two halves mirror each other.
 
-**Slide two, shift forward: a line through one package.** Turn the front face
-toward you and one row becomes a single package across all eight servers. You
-can see at a glance who runs revision one, who runs revision two, and who
-took only a piece. You pick which package is the front row.
+Every point sits on three axes. Across is the **server**, where it is hosted.
+Into the page is the **language**, the word of the grammar it answers. Down
+is the **version**, newest at the top.
 
-**Slide three, shift up: the version layers.** Each horizontal layer is one
-level of versions, and a version at one level can connect to versions at any
-other level. A slice is one choice of version for every package and server.
-A slice is not a flat plane. It is a bent surface that dips to different
-depths, and every slice that fits together is a working build. You can grab a
-cell and drag it up or down; the slice bends, and dependency lines show
-whether it still fits.
+Not every position has a point. An empty spot means nobody hosts that word at
+that version on that server. One spot can also hold more than one point: the
+two separate revision twos from stage three sit side by side. Trial points
+float just outside the lattice, each in its own small bubble, because they are
+not part of anything that runs until they are promoted. When one is
+promoted, it drops into place.
 
-The cube's depth is drawn from demo data at first. A later step can draw it
-from the real history of the package tiles, so that changing a package tile
-in the hive adds a new ring to the cube.
+**Slide one, the points.** The cube fills in point by point. Each point
+glows in its publisher's colour. You can turn the cube freely, and clicking a
+point opens its tile.
+
+**Slide two, three faces, three views of the same points.** Turning the cube
+to a face flattens one axis away, and the points slide into the groups that
+face shows. The points never change. Only the way they are divided changes.
+
+- **The top face** flattens the versions. It shows servers against words:
+  what each server hosts right now. Picking a row draws a line through one
+  word across all eight servers.
+- **The front face** flattens the words. It shows servers against versions:
+  how each server's holdings have changed over time.
+- **The side face** flattens the servers. It shows words against versions.
+  This is the language view: every implementation of every word, and how it
+  changed, whichever server it lives on.
+
+**Slide three, slices.** A slice is one point chosen for each word. Every
+slice whose choices fit together is a working build. A slice is not a flat
+plane through the cube. It is a bent surface that dips to different depths and
+crosses between servers. You can grab a point and drag the slice up or down to
+a different version, or across to a different server's implementation;
+dependency lines show whether it still fits.
+
+The cube is drawn from demo data at first. A later step can draw it from the
+real history of the package tiles, so that changing a tile in the hive adds a
+new point to the cube.
 
 ### Stage five: working in the cube
 
-**Slide one, the third face: the sentence.** Turn the cube so its third face
-comes forward. A natural-language sentence runs across it, for example:
+**Slide one, the sentence is a path.** Turn the cube to the side face, the
+language view. A natural-language sentence runs across it, for example:
 module take cards at server three, into journal, publish.
 
 In Hypercomb, natural language is the scripting language. A sentence typed on
 the command line is the program. Each word is declared by the behaviour that
 owns it, and how far a sentence reaches is worked out before it runs.
 
-On the sentence face, a thread drops from each word to the cell that answers
-it: a module, on a server, at a revision. One sentence crosses several
-servers and several depths, and that line is the path of the call through
-the cube.
+A sentence is a path through the points, one point for each word. On the
+language face it reads as a straight line of words. Turn the cube, and the
+same path zigzags across servers and depths, because each word may be
+answered by a point on a different server at a different version. That path
+is the call, crossing the cube to run modules wherever they live.
 
 Then comes the key idea: **the same grammar, run by different automatons.**
-Keep the sentence fixed and change the slice underneath it. The threads move
-to different cells. The same words are now run by different implementations.
-A word means one thing everywhere, and the implementation behind it is just a
-mark on the tile.
+Keep the words and choose different points, and the same sentence runs
+through different implementations. A word means one thing everywhere. The
+implementation behind it is a mark on the tile.
 
-Press run and each word lights up as its module runs, and the results travel
-back along the line. Before anything runs, the line shows which servers the
+Press run and each word lights up as its point runs, and the results travel
+back along the path. Before anything runs, the path shows which servers the
 sentence will touch, and every step that would change something waits for
 your approval.
 
-**Slide two, debugging along the line.** A sentence fails. On the sentence
-face, the break shows on one word's thread, so you know which module, on which
-server, at which revision. You move only that cell up or down its revision
-column, halving the range each time, until the sentence runs again. The
-failing sentence and its slice are just a set of signatures, so you can hand
-them to that module's owner and they get exactly the same run. Reading a
-trial's changes gives the same answer whichever server you read it from.
+**Slide two, debugging across servers and subdomains.** A sentence fails. On
+the language face the break shows on one word's point, so you know which
+implementation, on which server, at which version. You open a trial
+subdomain to work on it. The trial is sealed, so nothing you do there can
+disturb the live site or anyone else's trial, and every other point the
+sentence uses stays exactly where it was, because no version has been
+removed. You step that one point up or down its versions, halving the range
+each time, until the sentence runs again. Other people can open their own
+trials on the same word at the same time.
 
-**Slide three, flavours, plug and play.** Zoom out to many slices through one
-cube. Each slice is a different flavour of the same program, and anyone can
-make a new one by moving a single cell. The viewer can shuffle through
-working slices; each one says how many cells changed and from whose server.
+The failing sentence and its slice are just a set of signatures, so you can
+hand them to the owner of that point and they get exactly the same run.
+Reading a trial's changes gives the same answer whichever server you read it
+from.
+
+**Slide three, flavours, plug and play, and the tapestry.** Zoom out to many
+slices through one cube. Each slice is a different flavour of the same
+program, and anyone can make a new one by moving a single point. The viewer
+can shuffle through working slices; each one says how many points changed and
+from whose server.
+
+Then every thread lights up at once: the sentence paths, the pieces taken
+from one server into another, and the follows between domains. Starting from
+the root and running outward, they weave across the cube into a tapestry of
+connected domains. The cube then turns slowly to show its symmetry, the two
+halves mirroring each other around the root. Finally the view pulls back to
+show that this is not one person's cube. Every participant stands somewhere
+in the same cube, because a signature means the same thing wherever it is
+read. Anyone can share in it, add a thread, and see what everyone else
+added.
 
 The stage closes on the development process in one loop. You say what you
-want in a sentence. It is drafted on a subdomain, reviewed in public, and
-promoted. The people who follow you get a badge, and they take it whole or in
-pieces. The closing line comes from the repository itself: the hive is the
-sum of what we bring to it.
+want in a sentence. It is drafted in a trial subdomain, reviewed in public,
+and promoted with one pointer move. The people who follow you get a badge,
+and they take it whole or in pieces, on their own time, on files that never
+move under them. The closing line comes from the repository itself: the hive
+is the sum of what we bring to it.
 
-## 6. Images from the hive
+## 7. Images from the hive
 
 The presentation uses real pictures from the hive wherever it can:
 
 - the empty hive, for the opening;
 - the hive with the behaviours panel open, showing the slides behaviour;
-- the Plugin the Matrix publications page, with its subdomains;
+- the Plugin the Matrix publications page, with its subdomains, for stage
+  two;
 - the existing diagrams of the runtime lifecycle, the website pipeline, and
   the participant loop.
 
-Screenshots from the live hive, such as real tiles, the packages window, and
-a real update notice, would be better than anything drawn, and can replace
-the drawings as they arrive.
+Screenshots from the live hive, such as real tiles, the packages window, the
+what-changed panel, the trial bar, and a real update notice, would be better
+than anything drawn, and can replace the drawings as they arrive.
 
-## 7. The tile tree
+## 8. The tile tree
 
 This is the draft tree. The names become the routes, so they should be agreed
 before phase one.
@@ -327,19 +538,23 @@ The root tile is called how-hypercomb-works. It is the website artifact, and
 it plays with the present word. It has five stage tiles.
 
 The first stage is one-server. It holds a server tile, with signed-index,
-sig-named-files, and install-pointers under it; a host tile, with host-api and
-domain under it; a client tile, with core and opfs under it; and a request
-tile, with verify-on-arrival under it.
+sig-named-files, and install-pointers under it; a host tile, with host-api
+under it; a client tile, with core and opfs under it; and a request tile, with
+verify-on-arrival under it.
 
-The second stage is workbench-to-deployment. It holds workbench, minify,
-promote, and visitor-pin.
+The second stage is domains-and-subdomains. It holds a domain tile, with
+claim, root-folder, and names-are-pointers under it; a publish tile, with
+bytes-first and pointer-moves under it; a trial-subdomain tile, with
+isolation, what-changed, and reviews under it; a promote tile; a minify tile;
+a visitor-pin tile; and a stable-files tile, with no-version-removed,
+clean-paths, and honest-limits under it.
 
 The third stage is eight-servers. It holds a servers tile with server-1
 through server-8; a packages tile with core, cards, journal, calendar, chat,
 and theme; and the update-notice and take-a-piece tiles.
 
-The fourth stage is the-cube. It holds top-face, front-face, version-layers,
-and slice.
+The fourth stage is the-cube. It holds points; a faces tile with top-face,
+front-face, and side-face under it; and slice.
 
 The fifth stage is the-sentence. It holds a sentence tile with one tile per
 word, each pointing at the behaviour that owns that word; then automatons,
@@ -348,11 +563,11 @@ debugging, and flavours.
 The transition bee also gets its own tile, so its code can be read and copied
 like everything else.
 
-The servers and packages are tiles in their own right. The eight-server strip,
-the cube, and the sentence face all draw from those same tiles rather than
-keeping their own copies.
+The servers, domains, and packages are tiles in their own right. The
+eight-server strip, the cube, and the sentence path all draw from those same
+tiles rather than keeping their own copies.
 
-## 8. The phases
+## 9. The phases
 
 The work starts small and grows. Each phase leaves something usable.
 
@@ -367,10 +582,10 @@ list then lives on the tiles themselves, so anyone, a person or a model, can
 pick up a piece.
 
 **Phase three: build each object.** Each tile gets its own page, and each
-page works on its own. The shared objects come first, the server, the
-package, and the revision, because several stages reuse them. The cube and the
-sentence face are objects too, so they can be worked on in parallel without
-waiting for each other.
+page works on its own. The shared objects come first, the server, the domain,
+the package, and the revision, because several stages reuse them. The trial
+bubble, the cube, and the sentence path are objects too, so they can be
+worked on in parallel without waiting for each other.
 
 **Phase four: tie it together.** The stage pages arrange the objects. The
 links get their explore and next. The transition bee does the lift and the
@@ -388,65 +603,77 @@ module code and is built in phase four, once there are pages for it to hand
 over to.
 
 The presentation then goes through the very lifecycle it describes. It is
-drafted on a trial subdomain, reviewed, and promoted, and its followers get
-the update badge.
+drafted on a trial subdomain, reviewed, and promoted with one pointer move,
+and its followers get the update badge.
 
-## 9. What is built, and what is not
+## 10. What is built, and what is not
 
 The slides should be honest about this.
 
-**Already built:** update notices with upgrade and skip; taking one piece of a
-trial into your own build, and committing it; trials on subdomains with
-public reviews; the minified package and its re-derive check; sentences as the
-command line; working out a sentence's reach and holding changes for approval;
-a tile's own page; the slides behaviour and the enroll relation; and returning
+**Already built:** claiming a domain with one sentence, live once its host
+pieces are deployed; publishing as bytes first, then a pointer; trial
+subdomains with their isolation, the what-changed panel, signed reviews, and
+the rule that every draft waits for a human, all proven on the owner's
+machine; promotion and withdrawal as pointer moves; update notices with
+upgrade and skip; taking one piece of a trial into your own build and
+committing it; the minified package and its re-derive check; sentences as the
+command line, with their reach worked out and changes held for approval; a
+tile's own page; the slides behaviour and the enroll relation; and returning
 to exactly where you came from.
 
 **Proposed, not built:** one sentence running modules on several servers and
-bringing the results back along the line. The spoken-programs document still
-marks this as a hypothesis. The transition bee does not exist yet. The cube
-reading real tile history is a later step.
+bringing the results back along the path. The spoken-programs document still
+marks this as a hypothesis. Choosing the start-up pin from the publisher's
+signed pointer. Keying code trust by publisher as well as domain. The
+transition bee. The cube reading real tile history.
 
-**A picture, not the data model:** the cube's revision layers. Real revisions
-are signatures for each package, not shared numbered layers. Revision two on
-one server and revision two on another are different things. Slide three of
-stage four says this once, and the picture carries the rest.
+**To confirm before the slides say it:** whether the trial host is deployed
+on the public zones today, or still only proven locally.
+
+**A picture, not the data model:** the cube's version axis. Real versions are
+signatures for each tile, not shared numbered layers. Revision two on one
+server and revision two on another are different things. The cube lines them
+up so the eye can compare them; the first slide of stage four says this once.
 
 **A framing to confirm:** a slice as a signature you can hand to someone. It
 matches how a build record or a commit names a whole set of files, but there
 is no slice object today.
 
-## 10. Where the story and the documents differ
+## 11. Where the story and the documents differ
 
-Four points where the spoken story is simpler than the documents. Each needs
-a decision on how the slides say it.
-
-1. **Naming.** The simple story is that the subdomain is the workbench and the
-   root is the deployment. In the documents, a draft lives at a "try" dash
-   subdomain and promotion makes it live at the plain subdomain.
+1. **Workbench naming.** The story now uses the real naming: a trial lives at
+   try, dash, and the site's name, and promotion makes it the site itself. If
+   a simpler phrase is wanted on the top-level slides, the level below should
+   still show the real names.
 2. **Which version is the truth.** For a visitor, the deployment is the
    minified package. But the documents treat the readable package as the
    truth, and the minified one as derived from it. The slides keep that link
    visible, because it is what keeps minified code checkable.
-3. **Keeping every revision.** Nothing is ever deleted. But a server only
-   keeps what it serves. Revisions last because they are copied across
-   servers, which is exactly what the overlap in stage three shows. No single
-   server keeps everything.
+3. **Keeping every version.** Nothing is ever deleted, and old heads keep
+   resolving. But a server only holds what was sent to it, and sharing a
+   branch's full history is a per-branch choice. Versions last because they
+   are copied across servers, which is exactly what the overlap in stage
+   three shows. No single server keeps everything.
 4. **Merging.** Two developers' changes are not merged into one. They exist
    side by side, and anyone can build on either. Taking a piece and laying it
    into your own build is the built way to combine work.
 
-## 11. Open decisions
+## 12. Open decisions
 
-1. **The audience.** Plain language with fewer terms, or developers, with
-   signatures and install pointers on screen? The four levels of depth may
-   answer this: plain at the slide, technical one level down.
-2. **Server names.** Real names, such as jwize.com and the Plugin the Matrix
-   subdomains, or generic publishers?
-3. **Sentences across servers.** Label stage five's first slide as where this
+1. **Server names.** The hosts already carry six real zones: hypercomb.com,
+   pluginthematrix.com, realones.online, cafesociety.buzz, jwize.com, and
+   pointblanksolutions.ca. Use these six plus two generic servers, or keep
+   all eight generic?
+2. **Sentences across servers.** Label stage five's first slide as where this
    is going, or present it as working?
-4. **Tile names.** Accept the draft tree as it is, or rename first?
-5. **Naming of the workbench.** The simple story, or the "try" dash naming?
+3. **Tile names.** Accept the draft tree as it is, or rename first?
+4. **The language axis.** This plan takes each word as one position on the
+   axis, with its different implementations as separate points at that
+   position. The other reading is one position per dialect, with a word
+   spanning several. Which is right?
+5. **Turning the cube.** This plan has the points slide into their groups as
+   a face comes forward. The alternative keeps the points fixed and shows the
+   flattening as a shadow on the face. Which is right?
 6. **Order of the slides.** Confirm where playback order is kept once slides
    are joined with the enroll word.
 7. **Links from the slides view.** Confirm whether a page's link can open a
@@ -458,10 +685,14 @@ a decision on how the slides say it.
 
 Kept apart so they can be skipped when listening.
 
+- Domains and names: [domain-claim.md](domain-claim.md),
+  [domain-folder-sharing.md](domain-folder-sharing.md),
+  [swarm-pools.md](swarm-pools.md), [hosted-tenants.md](hosted-tenants.md)
 - Hosting and hosts: [becoming-a-host.md](becoming-a-host.md),
   [hosting-from-a-machine.md](hosting-from-a-machine.md),
   [read-only-deployment.md](read-only-deployment.md)
-- Workbench, review, promote, take a piece: [module-sandbox.md](module-sandbox.md)
+- Trial subdomains, isolation, review, promote, take a piece:
+  [module-sandbox.md](module-sandbox.md)
 - Minify and re-derive: [derivations.md](derivations.md)
 - Publishing a revision: [publishing-a-revision.md](publishing-a-revision.md)
 - Stages of a creation: [deployment-stages.md](deployment-stages.md)
