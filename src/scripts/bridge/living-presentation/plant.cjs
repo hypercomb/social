@@ -2,14 +2,15 @@
 // publish it so it can be seen. This is the canonical loop, the same for
 // everyone: one layer, one build revision, one publish.
 //
-//   node scripts/bridge/living-presentation/plant.cjs [<route>] [--dry] [--tiles-only] [--publish-only]
+//   node scripts/bridge/living-presentation/plant.cjs [<route>] [--all] [--dry] [--tiles-only] [--publish-only]
 //                                                     [--publish <domain>]... [--as <label>]
 //                                                     [--revision <name>]
 //
 // <route> is the tile whose children are planted, as a path in tree.cjs:
-// `hypercomb` (the default) plants the first layer, the values; a deeper
-// route plants that tile's children once tree.cjs names them — always one
-// layer, never more.
+// `presentation` (the default) plants the first layer, the values; a deeper
+// route plants that tile's children. With --all, every layer under the route
+// is planted in one pass — the whole mesh — so agents can take tiles in
+// parallel, and the pass is still sealed as one build revision.
 //
 // Every act is a sentence said through say.cjs, the way a participant types it
 // (documentation/speak-dont-bridge.md):
@@ -24,13 +25,17 @@
 //      host and <top>.<domain> opens on the new head, on every domain at once.
 //      With --as <label>, the tile gets its own address instead:
 //      <label>.<domain> (`publish /<top> on <domain> as <label>`), so
-//      `--publish hypercomb.com --as presentation` is presentation.hypercomb.com.
+//      The top tile is already named presentation, so `--publish hypercomb.com`
+//      alone is presentation.hypercomb.com.
 //      Publishing is not joining or sharing; the hive asks for consent in the
 //      browser before each publish.
 // The usual order is two runs with a step by hand between them: plant the
 // layer (steps 1 to 3), give the tiles their pictures in the hive, then run
 // again with --publish-only (steps 3 and 4), so the pictures are sealed into
 // the revision that gets published.
+// No bridge is needed: --sentences prints only the sentences, one per line, to
+// type or paste into the hive's own command line, or to hand to the hive's
+// chat. Saying them through the bridge is the optional, scripted way.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
 
@@ -41,9 +46,11 @@ const tree = require('./tree.cjs')
 const args = process.argv.slice(2)
 const valueOf = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : undefined }
 const valuesOf = (flag) => args.flatMap((a, i) => a === flag && args[i + 1] && !args[i + 1].startsWith('--') ? [args[i + 1]] : [])
-const DRY = args.includes('--dry')
+const SENTENCES = args.includes('--sentences')
+const DRY = args.includes('--dry') || SENTENCES
 const TILES_ONLY = args.includes('--tiles-only')
 const PUBLISH_ONLY = args.includes('--publish-only')
+const ALL = args.includes('--all')
 const DOMAINS = [...new Set(valuesOf('--publish').flatMap(v => v.split(',')).map(d => d.trim().toLowerCase()).filter(Boolean))]
 const LABEL = valueOf('--as')
 const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), LABEL].filter(Boolean))
@@ -71,21 +78,32 @@ const REVISION = valueOf('--revision') || `${segments[segments.length - 1]}-laye
 
 const noteFor = (tile) => tile.note || tile.name
 
+// The layers to plant: this tile's, and with --all every layer beneath it,
+// parents before children.
+const layers = []
+const walk = (tile, at) => {
+  if (!(tile.children || []).length) return
+  layers.push({ tile, at })
+  if (ALL) for (const child of tile.children) walk(child, `${at}/${child.name}`)
+}
+walk(node, route)
+
 const sentences = []
 if (!PUBLISH_ONLY) {
   if (segments.length === 1) sentences.push('go /', `create ${node.name}`)
-  sentences.push(`go /${route}`, `trait ${children.map(c => c.name).join(' ')}`)
+  for (const { tile, at } of layers) sentences.push(`go /${at}`, `trait ${tile.children.map(c => c.name).join(' ')}`)
 }
 if (!TILES_ONLY && !PUBLISH_ONLY) {
   if (segments.length === 1 && node.note) sentences.push(`file on /${route}: ${noteFor(node)}`)
-  for (const child of children) if (child.note) sentences.push(`file on /${route}/${child.name}: ${noteFor(child)}`)
+  for (const { tile, at } of layers) for (const child of tile.children) if (child.note) sentences.push(`file on /${at}/${child.name}: ${noteFor(child)}`)
 }
 sentences.push(`go /${segments[0]}`, `builds ${REVISION}`)
 for (const domain of DOMAINS) sentences.push(`publish /${segments[0]} on ${domain}${LABEL ? ` as ${LABEL}` : ''}`)
 
+if (SENTENCES) { console.log(sentences.join('\n')); process.exit(0) }
 console.log(PUBLISH_ONLY
   ? `${DRY ? '[DRY] ' : ''}sealing and publishing /${segments[0]}\n`
-  : `${DRY ? '[DRY] ' : ''}planting one layer under /${route}: ${children.map(c => c.name).join(', ')}\n`)
+  : `${DRY ? '[DRY] ' : ''}planting ${ALL ? 'every layer' : 'one layer'} under /${route}: ${children.map(c => c.name).join(', ')}${ALL ? ', and everything beneath them' : ''}\n`)
 for (const sentence of sentences) {
   if (DRY) { console.log(sentence); continue }
   // A publish waits for the participant's consent in the browser, so it listens longer.
@@ -97,5 +115,6 @@ for (const sentence of sentences) {
   }
 }
 const published = DOMAINS.length ? `, published to ${DOMAINS.map(d => `${LABEL || segments[0]}.${d}`).join(', ')}` : ''
-const planted = PUBLISH_ONLY ? `/${route}` : `${children.length} tiles${TILES_ONLY ? '' : ' and their notes'} under /${route}`
+const tileCount = layers.reduce((n, { tile }) => n + tile.children.length, 0)
+const planted = PUBLISH_ONLY ? `/${route}` : `${tileCount} tiles${TILES_ONLY ? '' : ' and their notes'} in ${layers.length} layer${layers.length === 1 ? '' : 's'} under /${route}`
 console.log(`\n${DRY ? '[DRY] ' : ''}${planted}, build ${REVISION}${published}.`)

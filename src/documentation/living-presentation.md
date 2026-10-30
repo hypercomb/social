@@ -139,6 +139,59 @@ hypercomb to any tile should read aloud as a phrase. Each layer has one
 relation to the tile above it. If a tile's children cannot be put together as
 language, the naming is off, and the fix is the names.
 
+### The parts of speech are roles, not kinds
+
+In the runtime there are only atoms. A tile is a layer atom, a verb is a bee,
+which is a signed bundle, and a mark is a record; every one is a generic
+atom, and every word is the same address whatever it is used for. So a part
+of speech is not a kind of thing stored anywhere. It is the role a word plays
+where it is read, decided by the reader, the way "run" is a noun or a verb in
+English depending on where it stands.
+
+The hive's readers already give these roles:
+
+- **Verb:** a word a loaded behaviour answers to, said to make an act happen.
+- **Noun:** a word read as a place, a tile you can stand in.
+- **Adjective:** a word worn as a mark, describing without holding. When the
+  same word is also a tile, as the values are, that tile gathers everything
+  wearing its mark.
+- **Adverb:** a modifier a verb lists in its own forms, changing how the act
+  is done: own, here, on, off, the tilde that means forget, the tiers fast,
+  balanced, and deep.
+- **Pronoun:** a word that points at where you are: here and this for the tile
+  you stand in or have selected, the slash alone for the root, the at sign
+  alone for the domain itself.
+- **Connective:** a small word that joins: on, as, into, from, at, and the
+  logic words and, or, and not.
+
+The same word can play different roles in different places, and nothing about
+its atom changes. Where the reader cannot tell which role a word plays, the
+hive says so: it draws the word violet with a dashed line.
+
+One limit stands today. The command line runs every behaviour word on a line,
+wherever it appears, which is why a verb's own sub-words must never be
+behaviour words. A reader that gave each word its role by its position would
+lift that limit, and it is the natural next step for the grammar.
+
+This division of meaning can be codified later, and it changes nothing for
+anyone. It is a layer a reader lays over the same words, so whoever wants to
+give words roles, or behaviour by role, adds that layer on their own, and
+everything already named keeps working.
+
+For naming, lean towards nouns. A tile is a thing, and a name should name a
+thing. A word for something running is still a thing, so publishing,
+debugging, and merging make good tile names. An adjective does not: it
+describes without being anything, and it makes a poor descriptor for a place
+you stand in.
+
+For naming, the role still guides the choice. Each layer says its relation
+once, in its meta layer, and the relation decides the role its children play.
+A layer whose relation is "is" holds adjectives: hypercomb is simple,
+organized, collaborative, intelligent, accessible, and localized. A layer
+whose relation is "has" or "is made of" holds nouns: the primitive is made of
+a word, a signature, a layer, and a meta layer. So the path from hypercomb to
+any tile reads aloud.
+
 ### Hypercomb first, then the primitive
 
 The presentation opens on one hexagon, named hypercomb. At this point it is
@@ -1405,6 +1458,10 @@ piece at a time, without planning the whole structure in advance.
 ### The canonical loop: one layer, one revision, one publish
 
 Every layer goes through the same loop, and it is the loop anyone would use.
+Every step is a plain sentence, said in the hive's own natural language: typed
+or pasted into the command line, or handed to the hive's chat, where the model
+proposes the sentences and a person presses Run. No bridge is needed; the
+bridge is only an optional, scripted way to say the same sentences.
 First the layer's tiles are created and given their notes. Then the tiles are
 given their pictures, by hand in the hive. Then the pass is
 sealed as one build revision on the top tile, so every step of the work is
@@ -1467,6 +1524,46 @@ from scenes with recorded narration. Its scenes and narration are material
 this presentation can draw on, and its own tile can sit in the tree like any
 other piece.
 
+### Working in concert: an agent pool for every tile
+
+The whole mesh is planted at once, and every tile's note is its task brief:
+what it must show, and the documents and code it draws on. Then every tile
+is given an agent pool of its own, so many agents can work at the same time,
+each on its own tile.
+
+**The agents.** An agent works in its tile's own conversation, under a
+harness: the hive's agent loop, kept as a signed record that can be swapped
+like a theme. Each tile's pool names the harness it runs under and the
+models it may use. The models are reached two ways, both from localhost:
+through OpenRouter, paid by its key, or through the machine's own
+subscriptions, such as the desktop coding harnesses, by way of the local
+bridge. Either way the agents speak the same sentences a person does, under
+the same rules, and every change they make waits for a person to accept it.
+
+A pool uses the minimum. The smallest, cheapest model that can do the job
+does the everyday work. When a task needs more, a heavier model or more
+thinking, the turn is handed up to a stronger model kept on the list for deep
+work only, and it answers only when handed up to. And when the work keeps
+asking for more than the pool has, that need is recorded as a request, so a
+person can add the stronger model it asked for.
+
+**The iteration.** Each agent gets fifteen minutes to do the simplest job that
+gets its tile done, then five minutes to wrap up and make sure it works.
+Every iteration ends the same way: the work is sealed as a build revision,
+and the revision is published to the domains in the mesh.
+
+**Versions across the mesh.** Because each iteration is published, different
+domains end up running the application at different versions of the same
+mesh. People can open them side by side and watch the application run across
+its versions: the cube, live, with real domains along one direction and real
+revisions along another.
+
+**The exercise.** All of this runs inside Hypercomb's own harness, so the
+presentation is also an exercise of that harness. Each iteration leaves a
+record: which tile, which agent and model, what changed, whether it worked,
+and the revision it produced. Reading those records shows how effective the
+harness is, tile by tile.
+
 ### Who does what
 
 This follows the pattern the proposal sites already use: a tree file, the
@@ -1509,7 +1606,19 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** placing a marker without extruding its tile, so it
+**Proposed, not built:** the plural as a reference to a word's examples,
+and looking up the singular and plural together, in the reader, without
+changing how words are folded into addresses; a command-line reader that gives each word its role
+by its position, so a verb's sub-words could be any word; today every
+behaviour word on a line runs; an agent pool assigned to each tile, naming its
+harness and models, using the minimum and handing up to a heavier model or
+more thinking when a task needs it; the timed iteration and the record of each one, read to
+judge the harness; today a harness is a signed record chosen per
+conversation with the harness word, tiles have their own conversations, model
+lines run through OpenRouter, and desktop harnesses reach the hive through the
+local bridge, while the model list already keeps fast, balanced, and deep
+tiers, hands a turn up to the deep tier only when needed, and records what
+the work asks for; placing a marker without extruding its tile, so it
 stays a placeholder with an extrude icon until pressed; today the hive
 already draws an unfilled trait as a silhouette and creates the tile when the
 silhouette is pressed, but the trait word makes the tile at once; the layout
@@ -1589,32 +1698,55 @@ names a whole set of files, but there is no slice object today.
 These are settled. Because nothing depends on anything, any of them can be
 revisited later without breaking what was built.
 
-1. **The primitive is a tile:** a word, its signature, a layer of children,
+1. **The root tile is named presentation**, and the six values sit directly
+   under it. Published on hypercomb.com, it is presentation.hypercomb.com
+   with no extra label. Where this plan speaks of the hypercomb tile, it
+   means this root tile; on screen the opening still names Hypercomb.
+2. **The primitive is a tile:** a word, its signature, a layer of children,
    and a meta layer.
-2. **No separate primitive tile in the first layer.** The primitive is shown
+3. **No separate primitive tile in the first layer.** The primitive is shown
    by opening the hypercomb tile itself, so the values layer keeps one
    relation. The sentence the viewer keeps, everything here is the same
    thing, used again, lives in hypercomb's meta layer.
-3. **A layout's collapse:** the whole parent layout collapses to the layer it
+4. **A layout's collapse:** the whole parent layout collapses to the layer it
    was defined on, along the overriding child's branch only.
-4. **The hypercomb tile** is a label by default; the filter is shown as its
+5. **The hypercomb tile** is a label by default; the filter is shown as its
    other reading.
-5. **Questions are typed as spoken words** joined by and, or, and not, which
+6. **Questions are typed as spoken words** joined by and, or, and not, which
    is how the command line already reads. Symbols can come later.
-6. **The first layer is published at presentation.hypercomb.com.** Our other
+7. **The first layer is published at presentation.hypercomb.com.** Our other
    domains come later, each with its own variations.
-7. **Sentences across cubes are labelled as where this is going**, because
+8. **Sentences across cubes are labelled as where this is going**, because
    they are not built. Running the same sentence on each domain's own hive is
    built, and that is what the variations use.
-8. **Tile names:** hypercomb, then the six values, as planted.
-9. **The word direction** gives each word one position, with its different
+9. **Tile names:** hypercomb, then the six values, as planted.
+10. **The word direction** gives each word one position, with its different
    implementations as separate points at that position.
-10. **Turning the cube** slides the points into the groups each face shows.
-11. **The trait picker** offers origin, platform, and locale first; audience
+11. **Turning the cube** slides the points into the groups each face shows.
+12. **The trait picker** offers origin, platform, and locale first; audience
     and reviews follow.
-12. **The public cube is a choice beside the showcase** at the root, not a
+13. **The public cube is a choice beside the showcase** at the root, not a
     replacement for it.
-13. **Heart and heartbeat.** The heart is a tile's current layer, and moving
+14. **The six values keep their words** from hypercomb.io's original title:
+    simple, organized, collaborative, intelligent, accessible, localized.
+    Every name beneath them leans towards nouns.
+15. **Names are singular nouns.** A tile is one atom, so its name names one
+    thing: domain, trial, participant, sentence, point. Today the hive folds a
+    word only by lowercasing it, so a singular and a plural are two different
+    addresses, and the difference is kept on purpose: the plural is a
+    reference type for examples. Domain is the thing; domains points at the
+    examples of domain. So a tile takes the singular, and the plural is kept
+    for gathering its examples. Looking up both forms together is a
+    convenience for the reader to add later; the fold itself stays as it is,
+    because it defines every word's address.
+16. **The presentation's own parts stay under simple** for now: opening,
+    marker, check, and lift, since each shows one primitive used again. They
+    can move to an organization of their own later.
+17. **Move five of the opening is named spread**, so all seven moves are
+    shapes: hexagon, row, stack, column, spread, cube, tesseract.
+18. **One cube.** The cube built in the opening and the grammar viewer are
+    the same cube, seen being built and then in use, so they share one word.
+19. **Heart and heartbeat.** The heart is a tile's current layer, and moving
     it is what makes the heartbeat. The two words belong together.
 
 ## To check while building
