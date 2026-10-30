@@ -173,6 +173,12 @@ wherever it appears, which is why a verb's own sub-words must never be
 behaviour words. A reader that gave each word its role by its position would
 lift that limit, and it is the natural next step for the grammar.
 
+For naming, lean towards nouns. A tile is a thing, and a name should name a
+thing. A word for something running is still a thing, so publishing,
+debugging, and merging make good tile names. An adjective does not: it
+describes without being anything, and it makes a poor descriptor for a place
+you stand in.
+
 For naming, the role still guides the choice. Each layer says its relation
 once, in its meta layer, and the relation decides the role its children play.
 A layer whose relation is "is" holds adjectives: hypercomb is simple,

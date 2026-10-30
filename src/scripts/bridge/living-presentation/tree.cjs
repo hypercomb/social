@@ -67,7 +67,7 @@ module.exports = t('hypercomb',
       t('merging', 'Incremental update or full upgrade; where your change meets an incoming one, the AI drafts the merge and you accept it or keep yours. Proposed. Docs: module-sandbox.md, using-a-creation.md.'),
     ]),
     t('accessible', 'Plain words, free and open source, and your work lives on your own device.', [
-      t('public', 'Anyone can open the published presentation; reading needs no account; readers load what readers need. Docs: read-only-deployment.md, no-third-party-requests.md.'),
+      t('readers', 'Anyone can open the published presentation; reading needs no account; readers load what readers need. Docs: read-only-deployment.md, no-third-party-requests.md.'),
       t('listening', 'Written to be listened to: plain sentences, every narration readable aloud. Docs: living-presentation.md.'),
       t('phone', 'Works at phone width: the cube and every scene fit one column. Docs: mobile-one-column.md.'),
       t('motion', 'Respects reduced motion: everything still reads with the animation off.'),
