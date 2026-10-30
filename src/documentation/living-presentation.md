@@ -377,6 +377,24 @@ layers. When a child defines its own, the parent's shading retracts upward to
 its own layer along that branch, and the child's shading fills in below. The
 viewer sees the collapse happen.
 
+### The layout behaviour: the extrude names decide what shows
+
+The layout is a behaviour a layer turns on, and what it holds is a list of
+extrude names: the trait words. The extrusions are already there. They are
+the tiles that are this layer's children, each named by its word, so a layout
+adds nothing new. It only says which of those names this layer shows.
+
+Change the names and the layer changes with them. Leave a name out and the
+child of that name is blocked out: it is still there, untouched, it just is
+not shown. Add a name and one more extruded trait is allowed, and the child
+of that name, or a silhouette waiting for it, appears. Nothing is deleted
+either way, so a name put back brings its child straight back.
+
+A different layout is not a new structure. It is a new version of the
+current layer, recorded in that layer's own history like any other change.
+Going back to an earlier layout is going back in that history, and every
+layout the layer has had stays there to return to.
+
 ### Sharing themes, styles, and code: no dependencies
 
 This has to be a perfect way to share design themes, styles, and code, and
@@ -1408,7 +1426,10 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** the presentation's views as hive behaviours any
+**Proposed, not built:** the layout behaviour that shows only the children
+named by its extrude names, blocking the rest without deleting them; today
+the trait word gives and forgets trait words on a tile, and giving one makes
+its child tile at once; the presentation's views as hive behaviours any
 tile can use, with a render that draws an already-open signature closed
 instead of opening it again; asking for parts with and, or, and not together in
 one question, and keeping that question as a tile; today the tag filter
