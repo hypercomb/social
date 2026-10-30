@@ -139,42 +139,47 @@ hypercomb to any tile should read aloud as a phrase. Each layer has one
 relation to the tile above it. If a tile's children cannot be put together as
 language, the naming is off, and the fix is the names.
 
-### The parts of speech, in Hypercomb
+### The parts of speech are roles, not kinds
 
-If tile names are nouns, the grammar has to say what every other kind of
-word is. Each part of speech already has a place in the hive:
+In the runtime there are only atoms. A tile is a layer atom, a verb is a bee,
+which is a signed bundle, and a mark is a record; every one is a generic
+atom, and every word is the same address whatever it is used for. So a part
+of speech is not a kind of thing stored anywhere. It is the role a word plays
+where it is read, decided by the reader, the way "run" is a noun or a verb in
+English depending on where it stands.
 
-- **Nouns are tiles.** A noun is something you can stand in and point at. Its
-  word is its address. Tile names are nouns.
-- **Verbs are behaviour words.** A verb is something you say to make an act
-  happen: create, trait, fill, publish, take. Every act has a verb, and a verb
-  is never a tile name, so a sentence never has to guess which one is meant.
-- **Adjectives are marks.** An adjective describes; it never holds. It is a
-  mark a tile wears: a value, a trait, a tag. When an adjective is also a
-  tile, as the values are, that tile is the gathering of everything wearing
-  its mark.
-- **Adverbs are the modifiers a verb declares.** They change how the act is
-  done, not what it is done to: own, here, on, off, the tilde that means
-  forget, and the tiers fast, balanced, and deep. A verb lists its adverbs in
-  its own forms, and none of them is a behaviour of its own, because the
-  command line runs every behaviour word on a line.
-- **Pronouns point at where you are:** here and this mean the tile you stand
-  in or have selected, the slash alone means the root, and the at sign alone
-  means the domain itself. They save naming what is already in view.
-- **Connectives are the small words inside a sentence:** on, as, into, from,
-  at, and the logic words and, or, and not. They join the other words and are
-  never tiles or behaviours of their own.
-- **Processes are verbs, not tiles.** A word ending in "ing" names an act in
-  progress, so it belongs to a behaviour. The tile for that idea is its noun:
-  the act is publish, and the tile is publications.
+The hive's readers already give these roles:
 
-And each layer says its relation once, in its meta layer, and the relation
-decides the part of speech of its children. A layer whose relation is "is"
-holds adjectives: hypercomb is simple, organized, collaborative, intelligent,
-accessible, and localized. A layer whose relation is "has" or "is made of"
-holds nouns: the primitive is made of a word, a signature, a layer, and a
-meta layer. So the path from hypercomb to any tile reads aloud, and every
-word in it is the kind of word its place says it should be.
+- **Verb:** a word a loaded behaviour answers to, said to make an act happen.
+- **Noun:** a word read as a place, a tile you can stand in.
+- **Adjective:** a word worn as a mark, describing without holding. When the
+  same word is also a tile, as the values are, that tile gathers everything
+  wearing its mark.
+- **Adverb:** a modifier a verb lists in its own forms, changing how the act
+  is done: own, here, on, off, the tilde that means forget, the tiers fast,
+  balanced, and deep.
+- **Pronoun:** a word that points at where you are: here and this for the tile
+  you stand in or have selected, the slash alone for the root, the at sign
+  alone for the domain itself.
+- **Connective:** a small word that joins: on, as, into, from, at, and the
+  logic words and, or, and not.
+
+The same word can play different roles in different places, and nothing about
+its atom changes. Where the reader cannot tell which role a word plays, the
+hive says so: it draws the word violet with a dashed line.
+
+One limit stands today. The command line runs every behaviour word on a line,
+wherever it appears, which is why a verb's own sub-words must never be
+behaviour words. A reader that gave each word its role by its position would
+lift that limit, and it is the natural next step for the grammar.
+
+For naming, the role still guides the choice. Each layer says its relation
+once, in its meta layer, and the relation decides the role its children play.
+A layer whose relation is "is" holds adjectives: hypercomb is simple,
+organized, collaborative, intelligent, accessible, and localized. A layer
+whose relation is "has" or "is made of" holds nouns: the primitive is made of
+a word, a signature, a layer, and a meta layer. So the path from hypercomb to
+any tile reads aloud.
 
 ### Hypercomb first, then the primitive
 
@@ -1586,7 +1591,9 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** an agent pool assigned to each tile, naming its
+**Proposed, not built:** a command-line reader that gives each word its role
+by its position, so a verb's sub-words could be any word; today every
+behaviour word on a line runs; an agent pool assigned to each tile, naming its
 harness and models, using the minimum and handing up to a heavier model or
 more thinking when a task needs it; the timed iteration and the record of each one, read to
 judge the harness; today a harness is a signed record chosen per
