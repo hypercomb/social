@@ -1,12 +1,17 @@
 # The living presentation — a plan to review
 
-**Status: plan, for review. Third revision, 2026-10-30. Nothing here is
+**Status: plan, for review. Fourth revision, 2026-10-30. Nothing here is
 built.** This page gathers the whole plan for an interactive presentation of
 how Hypercomb works. It is written to be listened to: plain sentences, no
 tables, and every file reference kept in the last section so it can be
 skipped when read aloud.
 
-What this revision settles. There is one cube for each domain of each
+What this revision settles. The first layer is the values layer under one
+tile called hypercomb, and the presentation shows how that single layer is
+built, in detail, before anything else: values as words, the layer read flat
+as the presentation, every step in as a slice by signed name, layouts and
+parts meeting only at a trait word, your own layer stack of traits at every
+level, and the choice of what fills each one. There is one cube for each domain of each
 participant, served from that participant's own hosts. A participant builds
 their cube by replicating other people's packages and creating their own.
 What they have published is the public cube, and the root of their domain is
@@ -68,7 +73,111 @@ share in each other's work, and it is what the presentation ends on.
 Everything before the cube is there so the viewer understands what each point
 is, where it lives, and how it got there.
 
-## 2. Every piece of the presentation is a tile
+## 2. The first layer: one layer, built in detail
+
+Before any stage, the presentation shows how a single layer is built. This
+is the part that explains how everything in Hypercomb is organized and how
+it works, so it is shown slowly and in full. Every later layer is built the
+same way.
+
+### The hypercomb tile: a label, or a filter
+
+The first tile is called hypercomb. Here its name is only a label, the name
+the hive uses for itself. But the same tile could just as easily be a filter
+over the graph: a tile that shows whatever is gathered under a word. In the
+hive, a question like that is a tile of its own. The scene shows both
+readings of the one tile, so the viewer sees that a tile can be a name or a
+question.
+
+### The values layer
+
+Under hypercomb is one layer: the values. Simple, organized, collaborative,
+intelligent, accessible, and localized. These are the same words as the
+original title of hypercomb.io. Each value is a tile, and its word is its
+address.
+
+A value needs no definition to work. Its meaning grows with whatever is
+related to it. A piece, such as a document, a behaviour, or a feature, relates
+to a value by wearing a mark, and it can relate to several values at once.
+That is how generic words keep all their meanings: a word that means several
+things simply gathers several kinds of pieces.
+
+Where a value does need its meaning said, it is described in the value's meta
+layer: the small layer that describes a tile rather than holding its content.
+The description is versioned like everything else, so it can be changed or
+replaced without touching the value or anything related to it. The same holds
+for every tile at every level: if it needs meaning, its meta layer says it.
+
+### Read flat, the layer is the presentation
+
+Read the values layer as a list and you have the presentation's first view.
+There is no separate presentation to keep in step with the hive. The slides
+are this layer, seen flat. The stages that follow are one saved walk through
+the structure: next follows the walk, explore leaves it.
+
+### Every step in is a slice by signed name
+
+Whether a person clicks or an agent speaks, every step into a layer is the
+same act. A name is taken. Its signature gives an address. The address gives
+the current version of the layer. That version names its children. The scene
+draws the walk as a chain of signed names, and shows the slice that comes back
+at the end of it. It is the same walk for a person and for an agent, and the
+same slice for anyone who asks with the same names.
+
+### Layout and parts meet only at a word
+
+Take a website. It needs a layout, and it needs parts. The layout does not
+hold the parts. It declares traits: the words it leaves open, such as header,
+hero, menu, and footer. A trait is a word interface. A part knows nothing
+about the layout. It only answers to a word, by being an immediate child of
+the target tile named that word, or by wearing a fill mark for it.
+
+So the layout stays separate from the parts, and it reflects back which parts
+of the application are visible. A filled trait shows its part. A trait that
+nothing fills yet shows as a hexagon silhouette, the outline of a tile that is
+not there yet. At publish time, what is visible is sealed into one signed tree.
+Because every part sits as a child of its target, named by its word, all of a
+layer's web artifacts are stored in one predictable place, and any layer can
+take parts gracefully.
+
+### Your own layer stack: traits added and removed at every level
+
+A tile's traits come in a stack. First the traits its view declares, then
+the traits its behaviours declare, then the traits opened on the tile itself.
+Anyone can define their own layer in that stack, adding a trait with the
+trait word, or forgetting one given there. A creation with a different set of
+traits is a different creation, with its own signature, and it can still
+reuse every part the old one had.
+
+From any level, the trait word lists what that level can take: every trait,
+and how each is filled. That is the list of parts implementable at that
+layer. And because each trait word is an address, the same word on the hosts
+you follow lists what other people have already built for it. This works the
+same way at every level, from the first layer down.
+
+### Debug mode: the parts are automatons
+
+In tiles view, with debug mode on, the parts lift off their hexagons, animate
+into their places in the layout, and then turn into their working interface.
+The viewer sees that every part of the page is a tile, and that every tile
+runs: they are automatons. This is the main job of the transition bee.
+
+### The container that expects the word, and the choice
+
+Last, the scene builds the container: a tile that declares the trait it
+expects, for example hero. Then it shows the choice. A trait is filled in a
+fixed order. First, your own explicit choice. Then a child named the word.
+Then the behaviour's own working version. If the trait is one that must be
+provided, the search goes on: tiles named the word elsewhere in your hive,
+then the same word on the hosts you follow. If nothing is found anywhere, the
+gap stands as an ask, which a person, an agent, or a community host can
+answer.
+
+When several candidates are found, they are offered, never picked on their
+own. You choose with the fill word. That choice is what makes the program
+yours, and changing it later is one more choice, which undoes like any other.
+
+## 3. Every piece of the presentation is a tile
 
 Every element you see on screen is its own tile in the hive. A server is a
 tile. A domain is a tile. Each subdomain, each package, each revision, each
@@ -112,7 +221,7 @@ This also answers the question of audience. The slide level is plain
 language for anyone. One level down is for people who want to know how it
 works. The bottom level is for developers.
 
-## 3. The opening move: hexagons lift into their pages
+## 4. The opening move: hexagons lift into their pages
 
 Every scene opens the same way, and this is the visual that carries the main
 point.
@@ -155,7 +264,7 @@ A change written by a model never goes live on its own. It waits in the hive
 until a person accepts it. A model may put a change on a trial subdomain for
 review, but promoting it, taking it, and accepting it are human acts.
 
-## 4. Choosing your way through: the octopus
+## 5. Choosing your way through: the octopus
 
 The presentation branches like a many-armed octopus with arms on every
 level. The same rule applies on every page, at every depth.
@@ -176,7 +285,7 @@ These match the three directions the hive's viewers already use. Moving
 within a viewer is next. Moving between viewers is explore. Moving across is
 stepping sideways to the next object at the same level.
 
-## 5. Domains and subdomains: the foundation
+## 6. Domains and subdomains: the foundation
 
 This section is the explanation that stage two's slides, the eight
 participants, and the cubes all draw on. It is told here in full, once.
@@ -350,7 +459,7 @@ The presentation should state these plainly, one level down from the slides.
   where that someone is you. Several hosts, each serving different things,
   keep a breach at one from reaching the rest.
 
-## 6. Natural language: the scripting language and the debugging language
+## 7. Natural language: the scripting language and the debugging language
 
 This section is the explanation that stage five draws on.
 
@@ -409,9 +518,11 @@ sentence calling modules that live in other participants' cubes, on their own
 hosts, and bringing the results back. The spoken-programs document still
 marks that second piece as a hypothesis.
 
-## 7. The five stages
+## 8. The five stages
 
-The stages share one picture. A strip of servers runs across the top of the
+The stages are one saved walk through the structure built in section two:
+next follows the walk, and explore leaves it at any point. The stages share
+one picture. A strip of servers runs across the top of the
 screen. It starts as a single server in stage one, opens up to show its
 domain and subdomains in stage two, splits into eight participants in stage
 three, and in stage four each participant's domain becomes its own cube. The
@@ -690,7 +801,7 @@ taking a piece, and share in what everyone else has made. The closing line
 comes from the repository itself: the hive is the sum of what we bring to
 it.
 
-## 8. Images from the hive
+## 9. Images from the hive
 
 The presentation uses real pictures from the hive wherever it can:
 
@@ -706,13 +817,19 @@ what-changed panel, the trial bar, a real update notice, and a domain's
 showcase at its root, would be better than anything drawn, and can replace
 the drawings as they arrive.
 
-## 9. The tile tree
+## 10. The tile tree
 
 This is the draft tree. The names become the routes, so they should be agreed
 before phase one.
 
-The root tile is called how-hypercomb-works. It is the website artifact, and
-it plays with the present word. It has five stage tiles.
+The root tile is called hypercomb. It is the website artifact, and it plays
+with the present word. Its first layer is the values layer:
+simple, organized, collaborative, intelligent, accessible, and localized.
+Documents and pieces relate to values by wearing marks, and one piece can
+relate to several values. The stage tiles below are the saved walk, and they
+are being reworked to match; the planting script's tree still files each
+document under one stage, and is redone before anything is planted. The
+draft stage tiles follow.
 
 The first stage is one-server. It holds a server tile, with signed-index,
 sig-named-files, and install-pointers under it; a host tile, with host-api
@@ -748,7 +865,7 @@ The participants, domains, and packages are tiles in their own right. The
 eight-participant strip, the cubes, and the sentence paths all draw from those
 same tiles rather than keeping their own copies.
 
-## 10. The phases
+## 11. The phases
 
 The work starts small and grows. Each phase leaves something usable.
 
@@ -815,11 +932,14 @@ drafted on a trial subdomain, debugged in sentences, reviewed, and promoted
 with one pointer move into its publisher's public cube, and its followers get
 the update badge.
 
-## 11. What is built, and what is not
+## 12. What is built, and what is not
 
 The slides should be honest about this.
 
-**Already built:** the hive as a private workbench in your browser; hosting
+**Already built:** traits as word interfaces, with the trait and fill words,
+the fixed order for filling them, and silhouettes for empty ones; sealing
+what is visible at publish time; the hive as a private workbench in your
+browser; hosting
 your hive from your own computer, from the desktop app; claiming a domain
 with one sentence, live once its host
 pieces are deployed; a domain's showcase at its root; publishing as bytes
@@ -834,7 +954,10 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** the public cube as a view at the root domain; one
+**Proposed, not built:** the debug-mode animation of parts into their
+places; forgetting a trait that a view, rather than the tile, declares, which
+today means making your own version of the layout; the public cube as a view
+at the root domain; one
 sentence running modules in other participants' cubes and bringing the
 results back, still a hypothesis in the spoken-programs document; a word for
 stepping one point of a slice through its versions; choosing the start-up pin
@@ -854,7 +977,7 @@ up so the eye can compare them; the first slide of stage four says this once.
 signatures you can hand to someone. It matches how a build record or a commit
 names a whole set of files, but there is no slice object today.
 
-## 12. Where the story and the documents differ
+## 13. Where the story and the documents differ
 
 1. **Where the workbench is.** The workbench is hypercomb.io, or your own
    host's root domain, private to your machine. A trial subdomain is not the
@@ -878,30 +1001,34 @@ names a whole set of files, but there is no slice object today.
    public cube is a new view of the same published points, not a replacement
    for the showcase.
 
-## 13. Open decisions
+## 14. Open decisions
 
-1. **Participant names.** The hosts already carry six real domains:
+1. **The hypercomb tile.** A label by default, with the filter shown as its
+   other reading?
+2. **Where the construction sits.** As the opening before everything else,
+   as written here, or in place of stage one?
+3. **Participant names.** The hosts already carry six real domains:
    hypercomb.com, pluginthematrix.com, realones.online, cafesociety.buzz,
    jwize.com, and pointblanksolutions.ca. Use these six plus two generic
    participants, or keep all eight generic?
-2. **Sentences across cubes.** Label the slides that run one sentence across
+4. **Sentences across cubes.** Label the slides that run one sentence across
    several participants' cubes as where this is going, or present them as
    working?
-3. **Tile names.** Accept the draft tree as it is, or rename first?
-4. **The language axis.** This plan takes each word as one position on the
+5. **Tile names.** Accept the draft tree as it is, or rename first?
+6. **The language axis.** This plan takes each word as one position on the
    axis, with its different implementations as separate points at that
    position. The other reading is one position per dialect, with a word
    spanning several. Which is right?
-5. **Turning the cube.** This plan has the points slide into their groups as
+7. **Turning the cube.** This plan has the points slide into their groups as
    a face comes forward. The alternative keeps the points fixed and shows the
    flattening as a shadow on the face. Which is right?
-6. **The extra dimensions.** Which ones should the dimension picker offer
+8. **The extra dimensions.** Which ones should the dimension picker offer
    first: platform, locale, audience, reviews, or others?
-7. **The root view.** Should the public cube become a choice beside the
+9. **The root view.** Should the public cube become a choice beside the
    showcase at the root, or what the root shows by default?
-8. **Order of the slides.** Confirm where playback order is kept once slides
+10. **Order of the slides.** Confirm where playback order is kept once slides
    are joined with the enroll word.
-9. **Links from the slides view.** Confirm whether a page's link can open a
+11. **Links from the slides view.** Confirm whether a page's link can open a
    child tile from inside the slides view, or only from the website view.
 
 ---
@@ -929,6 +1056,11 @@ Kept apart so they can be skipped when listening.
 - Slides and the enroll relation: [website-artifact-paradigm.md](website-artifact-paradigm.md),
   `hypercomb-essentials/src/commands/present.queen.ts`,
   `hypercomb-essentials/src/presentation/tiles/slides-view.drone.ts`
+- Traits, fill, and silhouettes: [traits.md](traits.md),
+  [template-addressing.md](template-addressing.md),
+  [layout-templates.md](layout-templates.md)
+- Names, layouts, fills, and marks: [ontology-is-the-name.md](ontology-is-the-name.md),
+  [the-algorithm-is-the-application.md](the-algorithm-is-the-application.md)
 - Pieces reused by signature: [piece-protocol.md](piece-protocol.md)
 - One address, many implementations, and marks as views:
   [superimposition.md](superimposition.md)
