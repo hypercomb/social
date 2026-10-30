@@ -11,18 +11,23 @@ export type OptimizationHeatStore = {
   noteOptimizationUse?(meaning: string, key: string, weight?: number): void
 }
 
+// Any store is accepted, and the method is looked up on it: a caller's own
+// narrow store type need not mention the ledger at all.
+const heatOf = (store: object | null | undefined): OptimizationHeatStore | null | undefined =>
+  store as OptimizationHeatStore | null | undefined
+
 export const noteDerivedUse = (
-  store: OptimizationHeatStore | null | undefined,
+  store: object | null | undefined,
   meaning: string,
   key: string,
 ): void => {
-  store?.noteOptimizationUse?.(meaning, key)
+  heatOf(store)?.noteOptimizationUse?.(meaning, key)
 }
 
 export const noteDerivedMint = (
-  store: OptimizationHeatStore | null | undefined,
+  store: object | null | undefined,
   meaning: string,
   key: string,
 ): void => {
-  store?.noteOptimizationUse?.(meaning, key, OPTIMIZATION_MINT_WEIGHT)
+  heatOf(store)?.noteOptimizationUse?.(meaning, key, OPTIMIZATION_MINT_WEIGHT)
 }
