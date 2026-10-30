@@ -167,14 +167,45 @@ what the theme words resolve to. Remove the theme and every item still
 renders, in its own defaults. That is what makes an empty slot a finished
 state rather than a missing piece.
 
-**Themes.** A theme is a filler for the theme words. Choosing a theme for a
-layer is one fill in its layer data. Switching themes changes that one fill,
-and nothing inside any part changes. One theme can dress any number of
-layers, and any number of themes can be offered for the same words, side by
-side, from anyone's host.
+**Themes are a layer of style references that parts pull.** A theme is
+itself a layer. Its children are named by the theme words, ink, paper,
+accent, type, and each one holds a reference to a style by signature. A part
+does not receive a theme. When it renders, it pulls the style for each word it
+uses from whichever theme layer is chosen, and falls back to its own default
+for any word the theme leaves out. Choosing a theme for a layer is one fill in
+its layer data. Switching themes changes that one fill, and nothing inside any
+part changes. One theme can dress any number of layers, and any number of
+themes can be offered for the same words, side by side, from anyone's host.
 
-**Styles.** The same, one size smaller: a style is a filler for the words of
-one part, never a sheet that one part reaches into another to use.
+Themes stack like every other layer. Your own theme layer can name only the
+few words you want to change, and every other word is pulled from the theme
+beneath it. A style for one part works the same way, one size smaller: it is a
+filler for that part's words, never a sheet one part reaches into another to
+use.
+
+**A layout is a hierarchy of trait entrance points.** A layout holds no parts
+and no markup. It is a tree of words. The top of the layout declares its
+traits, such as header, body, and footer. Each trait is the entrance point to
+the next layer: the tile named that word. That tile can declare traits of its
+own, such as menu and search inside header, and so on down. The whole layout is
+the shape of those words, and nothing else. Because each entrance point is
+only a word, any part that answers to it can come in, at any depth.
+
+**The HTML lives in the parts.** Each part carries its own markup, its own
+appearance, and its own behaviour, in its own tile. The page is assembled
+from whichever parts answer the layout's words, and at publish time what is
+visible is sealed into one signed tree. No part's markup is written into the
+layout, and no part's markup is written into another part.
+
+**Parts talk freely, without knowing each other.** Parts must be able to
+communicate, and they do it through words too. A part says something under a
+word, such as cart-changed or theme-switched, and any part listening for that
+word hears it. The hive's modules already talk this way, through named
+effects, and a part that arrives late still hears the last thing said under
+the word, so the order parts load in never matters. No part names another
+part. Remove the part that speaks and the listener still works, in its own
+defaults. Add a second part that speaks the same word and every listener hears
+it, with nothing rewired.
 
 **Code.** Modules already follow this. A module may import only from the core.
 It reaches other modules through their registered names and the effects they
@@ -194,7 +225,11 @@ The scene shows the shared files once, below the layer, and the words each
 item needs as small sockets on the item. Threads run from each socket to the
 file that fills it, and every thread passes through the layer's fills. Swap
 the theme and one fill changes: every thread through it moves at once, and no
-item is touched.
+item is touched. Then the layout is drawn as its tree of words, each word an
+open entrance, and parts drop into the entrances that match them. Finally the
+parts start talking: a word lights up as one part says it, and every part
+listening for it lights up in turn, with no line drawn between the parts
+themselves.
 
 ### Your own layer stack: traits added and removed at every level
 
@@ -1015,8 +1050,10 @@ slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
 **Proposed, not built:** theme words as the interface that pages and parts
-style themselves through, with the chosen theme recorded as a fill in layer
-data; today a page names a shared style sheet directly by its signature, and
+style themselves through, with a theme as a layer of style references that
+parts pull and the chosen theme recorded as a fill in layer data; parts of a
+page talking through named words; today modules talk through named effects,
+but whether a part's own page script can reach them still has to be checked; today a page names a shared style sheet directly by its signature, and
 the hive's own colour theme is a per-person setting that never goes into a
 layer. The debug-mode animation of parts into their
 places; forgetting a trait that a view, rather than the tile, declares, which
