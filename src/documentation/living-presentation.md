@@ -1316,6 +1316,21 @@ step begins, and the loop runs again.
 The first pass publishes the tiles only: hypercomb and its six values, with
 their notes. Pages come in later passes, one at a time.
 
+### Simple first, then variations on every domain
+
+The presentation is a live, virtual one that anybody in the world can use,
+and it starts very simple. The first path is finished once: the hypercomb
+tile and its six values, published to every one of our domains at the same
+time, so the same layer can be seen at hypercomb on each domain.
+
+Then the variations begin. Each domain grows its own small examples, where
+automatons make new grammars and new sentences. The same sentence, run on
+different domains, gives different results, because each domain answers its
+words with its own implementations. Nothing needs to cross between domains
+for this: the sentence is run on each domain's own hive, and the difference
+is the point. This is the moment that brings people in, because they see how
+much one grammar can do when every domain runs it its own way.
+
 ### Pictures for the first tiles
 
 No picture made for any of the six values exists in the repository. The
@@ -1466,10 +1481,11 @@ revisited later without breaking what was built.
    other reading.
 5. **Questions are typed as spoken words** joined by and, or, and not, which
    is how the command line already reads. Symbols can come later.
-6. **Participants are generic** in the demonstration, so nothing presents a
-   real domain's content as its own. Real domains can be swapped in later.
+6. **Our own domains are used.** The first layer is published on all of them,
+   and each domain later grows its own variations.
 7. **Sentences across cubes are labelled as where this is going**, because
-   they are not built.
+   they are not built. Running the same sentence on each domain's own hive is
+   built, and that is what the variations use.
 8. **Tile names:** hypercomb, then the six values, as planted.
 9. **The word direction** gives each word one position, with its different
    implementations as separate points at that position.

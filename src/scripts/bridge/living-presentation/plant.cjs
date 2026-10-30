@@ -3,7 +3,7 @@
 // everyone: one layer, one build revision, one publish.
 //
 //   node scripts/bridge/living-presentation/plant.cjs [<route>] [--dry] [--tiles-only]
-//                                                     [--publish <domain>] [--revision <name>]
+//                                                     [--publish <domain>]... [--revision <name>]
 //
 // <route> is the tile whose children are planted, as a path in tree.cjs:
 // `hypercomb` (the default) plants the first layer, the values; a deeper
@@ -17,9 +17,11 @@
 //   2. `file on` a short note on each new tile saying what it is;
 //   3. `builds <name>` on the top tile: the pass sealed as one build revision
 //      (it changes nothing when nothing changed);
-//   4. with --publish, `publish /<top> on <domain>`: the bytes go to the host
-//      and <top>.<domain> opens on the new head. Publishing is not joining or
-//      sharing; the hive asks for consent in the browser before it publishes.
+//   4. with --publish, `publish /<top> on <domain>` for each domain named
+//      (repeat the flag, or separate domains with commas): the bytes go to the
+//      host and <top>.<domain> opens on the new head, on every domain at once.
+//      Publishing is not joining or sharing; the hive asks for consent in the
+//      browser before each publish.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
 
@@ -29,14 +31,15 @@ const tree = require('./tree.cjs')
 
 const args = process.argv.slice(2)
 const valueOf = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : undefined }
+const valuesOf = (flag) => args.flatMap((a, i) => a === flag && args[i + 1] && !args[i + 1].startsWith('--') ? [args[i + 1]] : [])
 const DRY = args.includes('--dry')
 const TILES_ONLY = args.includes('--tiles-only')
-const DOMAIN = valueOf('--publish')
-const flagValues = new Set([DOMAIN, valueOf('--revision')].filter(Boolean))
+const DOMAINS = [...new Set(valuesOf('--publish').flatMap(v => v.split(',')).map(d => d.trim().toLowerCase()).filter(Boolean))]
+const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision')].filter(Boolean))
 const route = (args.find(a => !a.startsWith('--') && !flagValues.has(a)) || tree.name).replace(/^\/+|\/+$/g, '')
 const SAY = path.join(__dirname, '..', 'say.cjs')
 
-if (args.includes('--publish') && !DOMAIN) { console.error('--publish needs a domain, e.g. --publish example.com'); process.exit(2) }
+if (args.includes('--publish') && !DOMAINS.length) { console.error('--publish needs a domain, e.g. --publish example.com'); process.exit(2) }
 
 const segments = route.split('/')
 if (segments[0] !== tree.name) { console.error(`the route starts at ${tree.name}`); process.exit(2) }
@@ -62,7 +65,7 @@ if (!TILES_ONLY) {
   for (const child of children) if (child.note) sentences.push(`file on /${route}/${child.name}: ${noteFor(child)}`)
 }
 sentences.push(`go /${segments[0]}`, `builds ${REVISION}`)
-if (DOMAIN) sentences.push(`publish /${segments[0]} on ${DOMAIN}`)
+for (const domain of DOMAINS) sentences.push(`publish /${segments[0]} on ${domain}`)
 
 console.log(`${DRY ? '[DRY] ' : ''}planting one layer under /${route}: ${children.map(c => c.name).join(', ')}\n`)
 for (const sentence of sentences) {
@@ -75,5 +78,5 @@ for (const sentence of sentences) {
     process.exit(1)
   }
 }
-const published = DOMAIN ? `, published to ${segments[0]}.${DOMAIN}` : ''
+const published = DOMAINS.length ? `, published to ${DOMAINS.map(d => `${segments[0]}.${d}`).join(', ')}` : ''
 console.log(`\n${DRY ? '[DRY] ' : ''}${children.length} tiles${TILES_ONLY ? '' : ' and their notes'} under /${route}, build ${REVISION}${published}.`)
