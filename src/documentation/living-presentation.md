@@ -134,10 +134,13 @@ same slice for anyone who asks with the same names.
 Every piece starts as one thing: one tile with one page that carries its own
 look and works on its own. Any piece that could have a different
 presentation or visual can be given web parts, but nobody plans them in
-advance. When a piece actually needs a second look, it is broken apart then:
-its part is extruded into its own tile, named by a word, and the piece keeps
-an open slot where the part goes. Until that day, the piece stays whole, and
-it is already finished. Because nothing depends on anything, extruding later
+advance. When a piece actually needs a second look, it is broken apart then,
+and the extruding happens at the layout layer. The layout gains one more
+trait word, a new entrance point, and the part that needs its own look
+becomes the tile named that word, plugged in at that entrance. The piece
+itself is not cut up by hand; the layout simply names one more word, and the
+part answers to it. Until that day, the piece stays whole, and it is already
+finished. Because nothing depends on anything, extruding later
 never breaks what was there.
 
 ### Layout and parts meet only at a word
@@ -987,7 +990,8 @@ pick up a piece.
 
 **Phase three: build each object.** Each tile gets its own page, and each
 page works on its own. A page starts whole; it is broken into web parts only
-when it actually needs a second presentation, never in advance. The shared objects come first, the participant, the
+when it actually needs a second presentation, never in advance, and then by
+adding a trait word at the layout layer. The shared objects come first, the participant, the
 domain, the package, and the revision, because several stages reuse them. The
 trial bubble, the cube, the public cube at the root, and the sentence path are
 objects too, so they can be worked on in parallel without waiting for each
