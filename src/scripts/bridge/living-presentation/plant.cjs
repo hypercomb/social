@@ -1,6 +1,9 @@
-// Plant ONE layer of the living presentation into the hive, by speaking.
+// Plant ONE layer of the living presentation into the hive, by speaking, and
+// publish it so it can be seen. This is the canonical loop, the same for
+// everyone: one layer, one build revision, one publish.
 //
 //   node scripts/bridge/living-presentation/plant.cjs [<route>] [--dry] [--tiles-only]
+//                                                     [--publish <domain>] [--revision <name>]
 //
 // <route> is the tile whose children are planted, as a path in tree.cjs:
 // `hypercomb` (the default) plants the first layer, the values; a deeper
@@ -8,9 +11,15 @@
 // layer, never more.
 //
 // Every act is a sentence said through say.cjs, the way a participant types it
-// (documentation/speak-dont-bridge.md): `go` to the parent, `create` each
-// child (the cascade makes the tile itself if it is missing), then `file on`
-// a short note on each new tile saying what it is.
+// (documentation/speak-dont-bridge.md):
+//   1. `go` to the parent and `create` each child (the cascade makes the tile
+//      itself if it is missing);
+//   2. `file on` a short note on each new tile saying what it is;
+//   3. `builds <name>` on the top tile: the pass sealed as one build revision
+//      (it changes nothing when nothing changed);
+//   4. with --publish, `publish /<top> on <domain>`: the bytes go to the host
+//      and <top>.<domain> opens on the new head. Publishing is not joining or
+//      sharing; the hive asks for consent in the browser before it publishes.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
 
@@ -19,10 +28,15 @@ const { spawnSync } = require('child_process')
 const tree = require('./tree.cjs')
 
 const args = process.argv.slice(2)
+const valueOf = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : undefined }
 const DRY = args.includes('--dry')
 const TILES_ONLY = args.includes('--tiles-only')
-const route = (args.find(a => !a.startsWith('--')) || tree.name).replace(/^\/+|\/+$/g, '')
+const DOMAIN = valueOf('--publish')
+const flagValues = new Set([DOMAIN, valueOf('--revision')].filter(Boolean))
+const route = (args.find(a => !a.startsWith('--') && !flagValues.has(a)) || tree.name).replace(/^\/+|\/+$/g, '')
 const SAY = path.join(__dirname, '..', 'say.cjs')
+
+if (args.includes('--publish') && !DOMAIN) { console.error('--publish needs a domain, e.g. --publish example.com'); process.exit(2) }
 
 const segments = route.split('/')
 if (segments[0] !== tree.name) { console.error(`the route starts at ${tree.name}`); process.exit(2) }
@@ -34,6 +48,10 @@ for (const name of segments.slice(1)) {
 const children = node.children || []
 if (!children.length) { console.error(`/${route} has no planned children yet`); process.exit(2) }
 
+// A build name is a plain word, never a behaviour word: the layer and the minute.
+const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-')
+const REVISION = valueOf('--revision') || `${segments[segments.length - 1]}-layer-${stamp}`
+
 const noteFor = (tile) => tile.note || tile.name
 
 const parent = segments.slice(0, -1)
@@ -43,14 +61,19 @@ if (!TILES_ONLY) {
   if (segments.length === 1 && node.note) sentences.push(`file on /${route}: ${noteFor(node)}`)
   for (const child of children) if (child.note) sentences.push(`file on /${route}/${child.name}: ${noteFor(child)}`)
 }
+sentences.push(`go /${segments[0]}`, `builds ${REVISION}`)
+if (DOMAIN) sentences.push(`publish /${segments[0]} on ${DOMAIN}`)
 
 console.log(`${DRY ? '[DRY] ' : ''}planting one layer under /${route}: ${children.map(c => c.name).join(', ')}\n`)
 for (const sentence of sentences) {
   if (DRY) { console.log(sentence); continue }
-  const said = spawnSync(process.execPath, [SAY, sentence], { stdio: 'inherit' })
+  // A publish waits for the participant's consent in the browser, so it listens longer.
+  const listen = sentence.startsWith('publish ') ? ['--listen', '120000'] : []
+  const said = spawnSync(process.execPath, [SAY, sentence, ...listen], { stdio: 'inherit' })
   if (said.status !== 0) {
     console.error(`\nstopped at: ${sentence}\nThe hive's answer is above. Nothing after this line was said.`)
     process.exit(1)
   }
 }
-console.log(`\n${DRY ? '[DRY] ' : ''}${children.length} tiles${TILES_ONLY ? '' : ' and their notes'} under /${route}.`)
+const published = DOMAIN ? `, published to ${segments[0]}.${DOMAIN}` : ''
+console.log(`\n${DRY ? '[DRY] ' : ''}${children.length} tiles${TILES_ONLY ? '' : ' and their notes'} under /${route}, build ${REVISION}${published}.`)

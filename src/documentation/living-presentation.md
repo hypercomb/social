@@ -1,7 +1,7 @@
 # The living presentation — a plan to review
 
-**Status: plan, for review. Fourth revision, 2026-10-30. Nothing here is
-built.** This page gathers the whole plan for an interactive presentation of
+**Status: final plan, 2026-10-30. Building has started with the first
+layer: the hypercomb tile, its six values, and the opening page.** This page gathers the whole plan for an interactive presentation of
 how Hypercomb works. It is written to be listened to: plain sentences, no
 tables, and every file reference kept in the last section so it can be
 skipped when read aloud.
@@ -160,8 +160,9 @@ hold a layer of its own.
 **Move four, the signature gives depth.** One tile changes, and gets a new
 signature. The old one does not vanish. It stays, and the new one sits above
 it. Every tile does the same, and the stack becomes a column. The top of each
-column is the tile's heart: its current layer, the one that answers now. The
-heart needs no new functionality. It is the newest marker in the tile's
+column is the tile's heart: its current layer, the one that answers now.
+Moving the heart is what makes the heartbeat. The heart needs no new
+functionality. It is the newest marker in the tile's
 history, which is already what every read lands on, what a publish points to,
 and what an update notice compares. Every change adds a new marker on top,
 and the heart simply moves up to it.
@@ -1300,6 +1301,33 @@ The documentation joins the same way: a document relates to the values and
 pieces it explains by wearing marks, and that can be done gradually, one
 piece at a time, without planning the whole structure in advance.
 
+### The canonical loop: one layer, one revision, one publish
+
+Every layer goes through the same loop, and it is the loop anyone would use.
+First the layer's tiles are created and given their notes. Then the pass is
+sealed as one build revision on the top tile, so every step of the work is
+its own revision, and nothing is lost when the next step changes it. Then
+the top tile is published to its own subdomain: its bytes go to the host and
+the subdomain opens on the new head, so the layer can be seen. Publishing is
+not joining or sharing a room; it only makes the bytes readable. The hive
+asks for consent in the browser before anything is published. Then the next
+step begins, and the loop runs again.
+
+The first pass publishes the tiles only: hypercomb and its six values, with
+their notes. Pages come in later passes, one at a time.
+
+### Pictures for the first tiles
+
+No picture made for any of the six values exists in the repository. The
+illustrations from the narrated video only look right inside the video's own
+styling, so they do not work as tile pictures on their own. A tile with no
+picture of its own already shows a picture from the hive's default tile set.
+A tile's pictures are offered by its name from the hosts you follow, and one
+is chosen on the tile's images wall, so pictures for the values can be added
+there, or supplied and offered under each value's name. No spoken word gives
+a tile a picture from a file yet; that is a missing word, to be added if
+pictures are to be set by sentence.
+
 The tree, with each tile's note, lives in one file. A small
 script plants one layer from it by speaking to the hive: it says go, then
 create for each new tile, then files the note on each one. It sends no raw
@@ -1421,46 +1449,46 @@ names a whole set of files, but there is no slice object today.
    public cube is a new view of the same published points, not a replacement
    for the showcase.
 
-## Open decisions
+## Decisions
 
-1. **The primitive.** Read here as a tile: a word, its signature, a layer of
-   children, and a meta layer. Or something narrower, such as the atom?
-2. **Where the primitive tile sits.** The tree should have a tile named
-   primitive, with word, signature, layer, and meta under it, and its meta
-   layer holding the sentence: everything here is the same thing, used again.
-   Under hypercomb beside the six values, it would give that layer two
-   relations. Where should it go?
-3. **A layout's collapse.** This plan takes the whole parent layout as
-   collapsing, along the overriding child's branch only. Is that the rule,
-   or does only the one overridden trait collapse?
-4. **The hypercomb tile.** A label by default, with the filter shown as its
-   other reading?
-5. **How a question is typed.** Words joined by and, or, and not, as spoken,
-   or the symbols and, bar, and exclamation mark, or both? The command line
-   reads sentences, so the spoken form fits it; the symbols are shorter.
-6. **Participant names.** The hosts already carry six real domains:
-   hypercomb.com, pluginthematrix.com, realones.online, cafesociety.buzz,
-   jwize.com, and pointblanksolutions.ca. Use these six plus two generic
-   participants, or keep all eight generic?
-7. **Sentences across cubes.** Label the slides that run one sentence across
-   several participants' cubes as where this is going, or present them as
-   working?
-8. **Tile names.** Accept the draft tree as it is, or rename first?
-9. **The language axis.** This plan takes each word as one position on the
-   axis, with its different implementations as separate points at that
-   position. The other reading is one position per dialect, with a word
-   spanning several. Which is right?
-10. **Turning the cube.** This plan has the points slide into their groups as
-   a face comes forward. The alternative keeps the points fixed and shows the
-   flattening as a shadow on the face. Which is right?
-11. **The extra dimensions.** Which ones should the trait picker offer
-   first: platform, locale, audience, reviews, or others?
-12. **The root view.** Should the public cube become a choice beside the
-   showcase at the root, or what the root shows by default?
-13. **Order of the slides.** Confirm where playback order is kept once slides
-   are joined with the enroll word.
-14. **Links from the slides view.** Confirm whether a page's link can open a
-   child tile from inside the slides view, or only from the website view.
+These are settled. Because nothing depends on anything, any of them can be
+revisited later without breaking what was built.
+
+1. **The primitive is a tile:** a word, its signature, a layer of children,
+   and a meta layer.
+2. **No separate primitive tile in the first layer.** The primitive is shown
+   by opening the hypercomb tile itself, so the values layer keeps one
+   relation. The sentence the viewer keeps, everything here is the same
+   thing, used again, lives in hypercomb's meta layer.
+3. **A layout's collapse:** the whole parent layout collapses to the layer it
+   was defined on, along the overriding child's branch only.
+4. **The hypercomb tile** is a label by default; the filter is shown as its
+   other reading.
+5. **Questions are typed as spoken words** joined by and, or, and not, which
+   is how the command line already reads. Symbols can come later.
+6. **Participants are generic** in the demonstration, so nothing presents a
+   real domain's content as its own. Real domains can be swapped in later.
+7. **Sentences across cubes are labelled as where this is going**, because
+   they are not built.
+8. **Tile names:** hypercomb, then the six values, as planted.
+9. **The word direction** gives each word one position, with its different
+   implementations as separate points at that position.
+10. **Turning the cube** slides the points into the groups each face shows.
+11. **The trait picker** offers origin, platform, and locale first; audience
+    and reviews follow.
+12. **The public cube is a choice beside the showcase** at the root, not a
+    replacement for it.
+13. **Heart and heartbeat.** The heart is a tile's current layer, and moving
+    it is what makes the heartbeat. The two words belong together.
+
+## To check while building
+
+1. Where playback order is kept once slides are joined with the enroll word.
+2. Whether a page's link can open a child tile from inside the slides view,
+   or only from the website view.
+3. Whether a tile page's script can reach the hive's named effects, so parts
+   can talk by word.
+4. Whether the trial host is deployed on the public domains today.
 
 ---
 
