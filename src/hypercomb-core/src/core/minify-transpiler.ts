@@ -53,7 +53,7 @@ const readQuoted = (text: string, at: number): number => {
     if (c === quote) return i + 1
     i++
   }
-  fail('an open string')
+  return fail('an open string')
 }
 
 const readTemplate = (text: string, at: number): number => {
@@ -83,7 +83,7 @@ const readTemplate = (text: string, at: number): number => {
     if (c === '}') expr--
     i++
   }
-  fail('an open template')
+  return fail('an open template')
 }
 
 const readRegex = (text: string, at: number): number => {
@@ -106,7 +106,7 @@ const readRegex = (text: string, at: number): number => {
     }
     i++
   }
-  fail('an open regex')
+  return fail('an open regex')
 }
 
 const canRegex = (prev: string | null): boolean => {
