@@ -176,6 +176,23 @@ tile can hold a question over the graph and show whatever answers it, kept
 current as atoms gain and lose words. It is the hive's one operation, saying
 a word and narrowing, written down so it can be asked again.
 
+The same question reaches across domains. A word has one address on every
+host, so each host you follow can list what it holds under that word, read
+the way any public website is read: a plain fetch, with no joining and no
+room to enter. Your hive asks each followed host for the words in your
+question, combines the answers with and, or, and not on your own machine, and
+shows one flat list of parts from every domain at once, each marked with the
+domain it came from. Narrow it with another word, and the list narrows across
+all of them.
+
+Nothing in that list runs or moves into your hive by being found. A part from
+another domain is an offer. You open it to look, and you take it, whole or
+as one piece, only by choosing to, with its code held until you accept it.
+And because you only ever ask about words you hold, nothing arrives that you
+did not ask for. This is how the cubes of the tapestry are searched: one
+question, answered by every domain you follow, each answer still living on
+its owner's host.
+
 Until that day, the piece stays whole, and it is already finished. Because nothing depends on anything, extruding later
 never breaks what was there.
 
@@ -1109,7 +1126,10 @@ one question, and keeping that question as a tile; today the tag filter
 matches a tile that has any of the chosen words, a reference's required
 words are added to that as an and, and the filter reaches the page, the
 branch, or the whole hive, showing the matches as one flat list; how the
-question is typed is still to be decided. A tag offering an atom for the trait of the same
+question is typed is still to be decided. Each followed host already lists
+what it holds under a word for a plain fetch, which is what a trait uses to
+find offers; gathering a whole and, or, not question across every followed
+domain into one list is not built. A tag offering an atom for the trait of the same
 word; today a trait looks for tiles named the word and for the word's pool on
 the hosts you follow, and tags are recorded on tiles but their shared index is
 still worked out by walking the tree; theme words as the interface that pages and parts
