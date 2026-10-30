@@ -1483,6 +1483,13 @@ subscriptions, such as the desktop coding harnesses, by way of the local
 bridge. Either way the agents speak the same sentences a person does, under
 the same rules, and every change they make waits for a person to accept it.
 
+A pool uses the minimum. The smallest, cheapest model that can do the job
+does the everyday work. When a task needs more, a heavier model or more
+thinking, the turn is handed up to a stronger model kept on the list for deep
+work only, and it answers only when handed up to. And when the work keeps
+asking for more than the pool has, that need is recorded as a request, so a
+person can add the stronger model it asked for.
+
 **The iteration.** Each agent gets fifteen minutes to do the simplest job that
 gets its tile done, then five minutes to wrap up and make sure it works.
 Every iteration ends the same way: the work is sealed as a build revision,
@@ -1543,11 +1550,14 @@ slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
 **Proposed, not built:** an agent pool assigned to each tile, naming its
-harness and models; the timed iteration and the record of each one, read to
+harness and models, using the minimum and handing up to a heavier model or
+more thinking when a task needs it; the timed iteration and the record of each one, read to
 judge the harness; today a harness is a signed record chosen per
 conversation with the harness word, tiles have their own conversations, model
 lines run through OpenRouter, and desktop harnesses reach the hive through the
-local bridge; placing a marker without extruding its tile, so it
+local bridge, while the model list already keeps fast, balanced, and deep
+tiers, hands a turn up to the deep tier only when needed, and records what
+the work asks for; placing a marker without extruding its tile, so it
 stays a placeholder with an extrude icon until pressed; today the hive
 already draws an unfilled trait as a silhouette and creates the tile when the
 silhouette is pressed, but the trait word makes the tile at once; the layout
