@@ -395,6 +395,39 @@ current layer, recorded in that layer's own history like any other change.
 Going back to an earlier layout is going back in that history, and every
 layout the layer has had stays there to return to.
 
+### The grammar: markers first, then tiles extrude from them
+
+Traits are markers, so working with layouts needs words, and the words come
+first. Place the markers, and the tiles extrude out from them. Almost all of
+the grammar exists already, in the trait word:
+
+- **trait** says the traits on the tile you stand in, and how each is filled.
+- **trait**, followed by words, places those markers, and each one extrudes
+  the tile that fills it, named by its word, at once.
+- **trait own**, followed by words, places markers the tile already fills
+  itself, so no tiles are made.
+- **trait ~**, followed by a word, takes a marker away. Its tile stays.
+- **fill**, followed by a word, chooses what fills a marker when there is
+  more than one candidate.
+
+Only one new word is needed, for the layout behaviour itself:
+
+- **layout** says whether the layer shows only its markers' tiles, and which
+  children are left out.
+- **layout on** makes the layer show only the tiles its markers extruded, in
+  the markers' order, and leave every other child out.
+- **layout off** shows every child again.
+
+So the order of markers is the layout, placing a marker is allowing one more
+extruded trait, and taking one away blocks it out. The new names are few:
+a **marker** is a trait placed on a layer, an **extrusion** is the tile a
+marker makes, and a child **left out** is one no marker names while the
+layout is on.
+
+The first layer is planted this way: the hypercomb tile is made, and then its
+six values are placed on it as markers, so the six value tiles extrude out of
+it.
+
 ### Sharing themes, styles, and code: no dependencies
 
 This has to be a perfect way to share design themes, styles, and code, and
@@ -1426,10 +1459,10 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** the layout behaviour that shows only the children
-named by its extrude names, blocking the rest without deleting them; today
-the trait word gives and forgets trait words on a tile, and giving one makes
-its child tile at once; the presentation's views as hive behaviours any
+**Proposed, not built:** the layout word, and the layout behaviour that
+shows only the children its markers extruded, leaving the rest out without
+deleting them; today the trait word places and takes away markers on a tile,
+and placing one makes its child tile at once; the presentation's views as hive behaviours any
 tile can use, with a render that draws an already-open signature closed
 instead of opening it again; asking for parts with and, or, and not together in
 one question, and keeping that question as a tile; today the tag filter

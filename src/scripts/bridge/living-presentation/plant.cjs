@@ -13,8 +13,9 @@
 //
 // Every act is a sentence said through say.cjs, the way a participant types it
 // (documentation/speak-dont-bridge.md):
-//   1. `go` to the parent and `create` each child (the cascade makes the tile
-//      itself if it is missing);
+//   1. the tile itself is made if it is missing (`create`), then, standing in
+//      it, `trait` gives it its children's words as traits: traits are markers,
+//      and each one extrudes the tile that fills it;
 //   2. `file on` a short note on each new tile saying what it is;
 //   3. `builds <name>` on the top tile: the pass sealed as one build revision
 //      (it changes nothing when nothing changed);
@@ -70,10 +71,11 @@ const REVISION = valueOf('--revision') || `${segments[segments.length - 1]}-laye
 
 const noteFor = (tile) => tile.note || tile.name
 
-const parent = segments.slice(0, -1)
 const sentences = []
-if (!PUBLISH_ONLY) sentences.push(`go /${parent.join('/')}`)
-if (!PUBLISH_ONLY) for (const child of children) sentences.push(`create ${node.name}/${child.name}`)
+if (!PUBLISH_ONLY) {
+  if (segments.length === 1) sentences.push('go /', `create ${node.name}`)
+  sentences.push(`go /${route}`, `trait ${children.map(c => c.name).join(' ')}`)
+}
 if (!TILES_ONLY && !PUBLISH_ONLY) {
   if (segments.length === 1 && node.note) sentences.push(`file on /${route}: ${noteFor(node)}`)
   for (const child of children) if (child.note) sentences.push(`file on /${route}/${child.name}: ${noteFor(child)}`)
