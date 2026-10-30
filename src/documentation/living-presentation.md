@@ -153,6 +153,14 @@ word is. Each part of speech already has a place in the hive:
   mark a tile wears: a value, a trait, a tag. When an adjective is also a
   tile, as the values are, that tile is the gathering of everything wearing
   its mark.
+- **Adverbs are the modifiers a verb declares.** They change how the act is
+  done, not what it is done to: own, here, on, off, the tilde that means
+  forget, and the tiers fast, balanced, and deep. A verb lists its adverbs in
+  its own forms, and none of them is a behaviour of its own, because the
+  command line runs every behaviour word on a line.
+- **Pronouns point at where you are:** here and this mean the tile you stand
+  in or have selected, the slash alone means the root, and the at sign alone
+  means the domain itself. They save naming what is already in view.
 - **Connectives are the small words inside a sentence:** on, as, into, from,
   at, and the logic words and, or, and not. They join the other words and are
   never tiles or behaviours of their own.
