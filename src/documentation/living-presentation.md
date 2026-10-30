@@ -1467,6 +1467,39 @@ from scenes with recorded narration. Its scenes and narration are material
 this presentation can draw on, and its own tile can sit in the tree like any
 other piece.
 
+### Working in concert: an agent pool for every tile
+
+The whole mesh is planted at once, and every tile's note is its task brief:
+what it must show, and the documents and code it draws on. Then every tile
+is given an agent pool of its own, so many agents can work at the same time,
+each on its own tile.
+
+**The agents.** An agent works in its tile's own conversation, under a
+harness: the hive's agent loop, kept as a signed record that can be swapped
+like a theme. Each tile's pool names the harness it runs under and the
+models it may use. The models are reached two ways, both from localhost:
+through OpenRouter, paid by its key, or through the machine's own
+subscriptions, such as the desktop coding harnesses, by way of the local
+bridge. Either way the agents speak the same sentences a person does, under
+the same rules, and every change they make waits for a person to accept it.
+
+**The iteration.** Each agent gets fifteen minutes to do the simplest job that
+gets its tile done, then five minutes to wrap up and make sure it works.
+Every iteration ends the same way: the work is sealed as a build revision,
+and the revision is published to the domains in the mesh.
+
+**Versions across the mesh.** Because each iteration is published, different
+domains end up running the application at different versions of the same
+mesh. People can open them side by side and watch the application run across
+its versions: the cube, live, with real domains along one direction and real
+revisions along another.
+
+**The exercise.** All of this runs inside Hypercomb's own harness, so the
+presentation is also an exercise of that harness. Each iteration leaves a
+record: which tile, which agent and model, what changed, whether it worked,
+and the revision it produced. Reading those records shows how effective the
+harness is, tile by tile.
+
 ### Who does what
 
 This follows the pattern the proposal sites already use: a tree file, the
@@ -1509,7 +1542,12 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** placing a marker without extruding its tile, so it
+**Proposed, not built:** an agent pool assigned to each tile, naming its
+harness and models; the timed iteration and the record of each one, read to
+judge the harness; today a harness is a signed record chosen per
+conversation with the harness word, tiles have their own conversations, model
+lines run through OpenRouter, and desktop harnesses reach the hive through the
+local bridge; placing a marker without extruding its tile, so it
 stays a placeholder with an extrude icon until pressed; today the hive
 already draws an unfilled trait as a silhouette and creates the tile when the
 silhouette is pressed, but the trait word makes the tile at once; the layout
