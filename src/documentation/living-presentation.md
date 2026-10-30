@@ -1,6 +1,6 @@
 # The living presentation — a plan to review
 
-**Status: final plan, 2026-10-30. Building has started with the first
+**Status: final plan, 2026-10-30. The flagship presentation. Building has started with the first
 layer: the hypercomb tile, its six values, and the opening page.** This page gathers the whole plan for an interactive presentation of
 how Hypercomb works. It is written to be listened to: plain sentences, no
 tables, and every file reference kept in the last section so it can be
@@ -41,6 +41,35 @@ tapestry through the signatures they share.
 ---
 
 ## What this is, and the one point that matters most
+
+This is Hypercomb's flagship presentation. It follows its own values, in how
+it is made and in how it is shown, and it grows into an interactive way to
+view any grammar along any dimension, with an interactive cube that can carry
+as many dimensions as there are traits.
+
+### It follows its own values
+
+- **Simple.** It starts from one primitive and one act, and grows one layer
+  at a time, never more.
+- **Organized.** Every step is its own build revision, nothing is ever
+  deleted, and any number of organizations can be laid over the same pieces.
+- **Collaborative.** It is published where anyone can open it, every piece
+  can be copied and changed, and each domain grows its own variations.
+- **Intelligent.** People and AI use the same words under the same rules,
+  automatons answer the grammar, and every change waits for a person.
+- **Accessible.** It is written in plain words that can be listened to, it
+  works on a phone, it respects reduced motion, and reading it needs no
+  account.
+- **Localized.** Every word can be translated by the community, and locale
+  is one of the cube's own dimensions.
+
+### Where it ends up: a grammar viewer
+
+The cube built in the opening does not stay a picture of this presentation.
+It becomes a tool. Point it at any tile, and it shows that tile's grammar: its
+words, their versions, where they came from, and any other trait, as
+directions you can turn and choose. The presentation is the first grammar it
+shows. After that, it shows anyone's.
 
 This is a welcome. It is about Hypercomb, and it invites people into this
 world in a way they can see and touch: tiles that lift, open, and answer when
