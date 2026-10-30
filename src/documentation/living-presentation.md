@@ -1602,9 +1602,9 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** looking up a word's singular and plural forms
-together, in the reader, without changing how words are folded into
-addresses; a command-line reader that gives each word its role
+**Proposed, not built:** the plural as a reference to a word's examples,
+and looking up the singular and plural together, in the reader, without
+changing how words are folded into addresses; a command-line reader that gives each word its role
 by its position, so a verb's sub-words could be any word; today every
 behaviour word on a line runs; an agent pool assigned to each tile, naming its
 harness and models, using the minimum and handing up to a heavier model or
@@ -1725,7 +1725,10 @@ revisited later without breaking what was built.
 14. **Names are singular nouns.** A tile is one atom, so its name names one
     thing: domain, trial, participant, sentence, point. Today the hive folds a
     word only by lowercasing it, so a singular and a plural are two different
-    addresses, which is why one standard matters. Looking up both forms is a
+    addresses, and the difference is kept on purpose: the plural is a
+    reference type for examples. Domain is the thing; domains points at the
+    examples of domain. So a tile takes the singular, and the plural is kept
+    for gathering its examples. Looking up both forms together is a
     convenience for the reader to add later; the fold itself stays as it is,
     because it defines every word's address.
 15. **The presentation's own parts stay under simple** for now: opening,
