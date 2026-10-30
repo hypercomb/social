@@ -149,6 +149,12 @@ for the same word, side by side. So every extrusion adds to a shared stock of
 primitive atoms, each named by the traits it has, and the next layout that
 needs one of those words finds it already there.
 
+A trait can also be a tag. Both are words, and a word has one address, so a
+tag and a trait spelled the same are the same place. Tagging an atom with a
+word lists it where a layout asking for that trait will look, and the traits
+an atom has are words you can search by, like any tag. One word does both
+jobs: it says what a layout wants, and it says what an atom is for.
+
 Until that day, the piece stays whole, and it is already finished. Because nothing depends on anything, extruding later
 never breaks what was there.
 
@@ -1077,7 +1083,10 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** theme words as the interface that pages and parts
+**Proposed, not built:** a tag offering an atom for the trait of the same
+word; today a trait looks for tiles named the word and for the word's pool on
+the hosts you follow, and tags are recorded on tiles but their shared index is
+still worked out by walking the tree; theme words as the interface that pages and parts
 style themselves through, with a theme as a layer of style references that
 parts pull and the chosen theme recorded as a fill in layer data; parts of a
 page talking through named words; today modules talk through named effects,
