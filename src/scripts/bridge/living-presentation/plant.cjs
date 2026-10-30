@@ -2,7 +2,8 @@
 // publish it so it can be seen. This is the canonical loop, the same for
 // everyone: one layer, one build revision, one publish.
 //
-//   node scripts/bridge/living-presentation/plant.cjs [<route>] [--all] [--dry] [--tiles-only] [--publish-only]
+//   node scripts/bridge/living-presentation/plant.cjs [<route>] [--all] [--dry] [--sentences] [--console]
+//                                                     [--tiles-only] [--publish-only]
 //                                                     [--publish <domain>]... [--as <label>]
 //                                                     [--revision <name>]
 //
@@ -33,9 +34,14 @@
 // layer (steps 1 to 3), give the tiles their pictures in the hive, then run
 // again with --publish-only (steps 3 and 4), so the pictures are sealed into
 // the revision that gets published.
-// No bridge is needed: --sentences prints only the sentences, one per line, to
-// type or paste into the hive's own command line, or to hand to the hive's
-// chat. Saying them through the bridge is the optional, scripted way.
+// No bridge is needed: --sentences prints only the sentences, one per line,
+// each with its leading slash, to type into the hive's own command line or
+// hand to the hive's chat. --console prints one snippet to paste into the
+// hive tab's browser console: it says every sentence through the same door
+// Enter uses (`command:submit`), one at a time, as the participant. Saying
+// them through the bridge is the optional, scripted way.
+// The slash matters: on the command line a bare line is read as prose first,
+// and in the tiles stance plain text lays a tile of that name.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
 
@@ -47,7 +53,8 @@ const args = process.argv.slice(2)
 const valueOf = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : undefined }
 const valuesOf = (flag) => args.flatMap((a, i) => a === flag && args[i + 1] && !args[i + 1].startsWith('--') ? [args[i + 1]] : [])
 const SENTENCES = args.includes('--sentences')
-const DRY = args.includes('--dry') || SENTENCES
+const CONSOLE = args.includes('--console')
+const DRY = args.includes('--dry') || SENTENCES || CONSOLE
 const TILES_ONLY = args.includes('--tiles-only')
 const PUBLISH_ONLY = args.includes('--publish-only')
 const ALL = args.includes('--all')
@@ -100,7 +107,26 @@ if (!TILES_ONLY && !PUBLISH_ONLY) {
 sentences.push(`go /${segments[0]}`, `builds ${REVISION}`)
 for (const domain of DOMAINS) sentences.push(`publish /${segments[0]} on ${domain}${LABEL ? ` as ${LABEL}` : ''}`)
 
-if (SENTENCES) { console.log(sentences.join('\n')); process.exit(0) }
+// The participant's door reads a line as a behaviour only with its slash.
+const slashed = sentences.map(line => (line.startsWith('/') ? line : `/${line}`))
+if (SENTENCES) { console.log(slashed.join('\n')); process.exit(0) }
+if (CONSOLE) {
+  // Paste into the hive tab's console. Each line goes through the door Enter
+  // uses; a pause lets each commit land before the next line. A publish asks
+  // for consent in the page, so it is said last.
+  console.log(`(async () => {
+  const bus = globalThis.__hypercombEffectBus
+  if (!bus) { console.error('Open this in the hive tab: no command line here.'); return }
+  const lines = ${JSON.stringify(slashed, null, 2)}
+  for (const [i, text] of lines.entries()) {
+    console.log(\`\${i + 1}/\${lines.length} \${text}\`)
+    bus.emit('command:submit', { text })
+    await new Promise(r => setTimeout(r, text.startsWith('/go ') ? 1200 : 900))
+  }
+  console.log('Done. If a publish was said, answer its consent in the page.')
+})()`)
+  process.exit(0)
+}
 console.log(PUBLISH_ONLY
   ? `${DRY ? '[DRY] ' : ''}sealing and publishing /${segments[0]}\n`
   : `${DRY ? '[DRY] ' : ''}planting ${ALL ? 'every layer' : 'one layer'} under /${route}: ${children.map(c => c.name).join(', ')}${ALL ? ', and everything beneath them' : ''}\n`)

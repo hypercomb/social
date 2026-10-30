@@ -35,10 +35,10 @@
 // rendezvous private, NOT the payload. Anything relayed is still visible to
 // whoever carries it, so a channel that leaves the machine needs the records
 // encrypted to a key derived from the same secret — the channel id being only
-// the public half. That is deliberately NOT implemented here: this file
-// addresses changes, and a local channel never leaves the device. Do not
-// enable a remote transport on top of this until the payload half exists,
-// or "private" will mean "obscure".
+// the public half. This file addresses changes; the payload half is
+// change-seal.ts, and the remote transport that uses both is
+// change-channel.drone.ts. Nothing leaves the device unsealed, and nothing
+// is sent at all until the participant sets a shared secret.
 //
 // The secret is read from localStorage and never travels. This code neither
 // prompts for it nor transmits it; setting it is the participant's act.

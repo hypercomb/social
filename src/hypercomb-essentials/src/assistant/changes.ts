@@ -68,6 +68,12 @@ export interface ChangeRecord {
   /** Set when this change exists to reverse another. */
   readonly compensates?: string
   readonly note?: string
+  /** A change asked for from elsewhere carries its act as sentences, said on
+   *  this hive's command line only when the participant accepts it. */
+  readonly sentences?: readonly string[]
+  /** 'remote' when the record arrived over the channel rather than being made
+   *  here. Absent on everything made locally. */
+  readonly from?: 'remote'
 }
 
 type StoreLike = {
@@ -135,28 +141,43 @@ export class ChangeSet {
       ...(note ? { note } : {}),
     }
 
-    const store = get<StoreLike>('@hypercomb.social/Store')
-    const pool = await store?.getPool?.(CHANGES_POOL)
-    if (!pool) {
-      console.warn('[changes] pool unavailable — change not recorded:', record.id.slice(0, 12))
-      return null
-    }
+    const written = await appendChangeRecord(record)
+    if (!written) return null
+    console.log(`[changes] ${this.task} ${status} — ${this.#touched.length} touched [${record.id.slice(0, 12)}…]`)
+    return record.id
+  }
+}
 
-    try {
-      const bytes = encode(record)
-      // APPEND, never replace: one sig-named file per change. `putPoolDoc`
-      // would be wrong here — it keeps a single current member and drops the
-      // rest, which for a log means every entry erases its history.
-      const name = await signBytes(bytes)
-      const handle = await pool.getFileHandle(name, { create: true })
-      const writable = await handle.createWritable()
-      try { await writable.write(new Blob([bytes as BlobPart])) } finally { await writable.close() }
-      console.log(`[changes] ${this.task} ${status} — ${this.#touched.length} touched [${record.id.slice(0, 12)}…]`)
-      return record.id
-    } catch (err) {
-      console.warn('[changes] could not write the record:', err)
-      return null
-    }
+/**
+ * Append one record to the log — the ONE writer, for changes made here and
+ * for records that arrive over the channel alike. Returns the record's file
+ * name and whether it is new, or null when the pool is unavailable or the
+ * write failed. A record already on file (the same bytes, heard twice) is not
+ * written again.
+ */
+export const appendChangeRecord = async (record: ChangeRecord): Promise<{ sig: string; added: boolean } | null> => {
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(CHANGES_POOL)
+  if (!pool) {
+    console.warn('[changes] pool unavailable — change not recorded:', record.id.slice(0, 12))
+    return null
+  }
+
+  try {
+    const bytes = encode(record)
+    // APPEND, never replace: one sig-named file per change. `putPoolDoc`
+    // would be wrong here — it keeps a single current member and drops the
+    // rest, which for a log means every entry erases its history.
+    const name = await signBytes(bytes)
+    const known = await pool.getFileHandle(name).then(() => true, () => false)
+    if (known) return { sig: name, added: false }
+    const handle = await pool.getFileHandle(name, { create: true })
+    const writable = await handle.createWritable()
+    try { await writable.write(new Blob([bytes as BlobPart])) } finally { await writable.close() }
+    return { sig: name, added: true }
+  } catch (err) {
+    console.warn('[changes] could not write the record:', err)
+    return null
   }
 }
 

@@ -2564,7 +2564,9 @@ export class SwarmDrone extends Drone {
     // 30214 the per-recipient reply; both drones retired with the feedback
     // window on 2026-09-04 - documentation/annotate-the-screen.md. A kind
     // nobody publishes and nobody handles has no business in the filter.)
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, 20400, 20402, 30401, 30207, 30213, 30215, 30216, 30217], true)
+    // 30219 = the remote change channel item (ChangeChannelDrone): a change
+    // asked for on another machine, and the answer sent back, both sealed.
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, 20400, 20402, 30401, 30207, 30213, 30215, 30216, 30217, 30219], true)
   }
 
   /**
