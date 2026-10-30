@@ -65,6 +65,21 @@ export const parseHive = (raw: unknown): Hive | null => {
   }
 }
 
+/** The hive this visit entered through, if its shell found one: a hive
+ *  document, read before the runtime exists (the same hand-off as the arrival
+ *  plan, `__hcArrival`). Bounded — a slow or absent hive is no hive. */
+export const selectedHive = async (ms = 4000): Promise<Hive | null> => {
+  const pending = (globalThis as { __hcHive?: Promise<unknown> | unknown }).__hcHive
+  if (pending === undefined || pending === null) return null
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const value = await Promise.race([
+    Promise.resolve(pending).catch(() => null),
+    new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), ms) }),
+  ])
+  clearTimeout(timer)
+  return parseHive(value)
+}
+
 export type HiveResolution = {
   /** Loaded before first paint. */
   readonly now: Set<string>
@@ -116,4 +131,19 @@ export const resolveHive = (
     else passive.add(sig)
   }
   return { now, idle, passive, missing: [...new Set(missing)] }
+}
+
+/** PHASE 2 — the arrival a hive makes, in the loader's terms: the bees that
+ *  load now (the rest stay passive and wake as any arrival's do). Idle loading
+ *  is not built yet, so every tier above 0 waits passive here. Depth 2 is
+ *  today's behaviour — everything loads — so it makes no arrival. */
+export const hiveArrival = (
+  hive: Hive,
+  classes: ReadonlyMap<string, BeeClass>,
+  packageBees: ReadonlySet<string>,
+  critical: ReadonlySet<string> = new Set(),
+): { bees: Set<string>; missing: string[] } | null => {
+  if (hive.depth >= 2) return null
+  const { now, missing } = resolveHive({ ...hive, depth: 0 }, classes, packageBees, new Set(), critical)
+  return { bees: now, missing }
 }

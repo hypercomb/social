@@ -7,6 +7,7 @@ import { Bee, type BeeResolver, EffectBus, hypercomb, mayRunBee } from '@hyperco
 import { Store } from './store'
 import { installedPackageSig } from './installed-package.js'
 import { arrivalNames, beeClassesOfDocs, guardArrival, quietFeatureNames, resolveArrival, type BeeClass } from './arrival-plan.js'
+import { hiveArrival, selectedHive } from './hive.js'
 import { activeInstallIndex } from './install-index.js'
 import {
   learnedCriticalBeeSigs,
@@ -538,9 +539,14 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   #decideArrival = async (walked: { bees: readonly string[]; criticalBees: readonly string[]; classes: ReadonlyMap<string, BeeClass> }): Promise<void> => {
     if (this.#arrivalDecided) return
     this.#arrivalDecided = true
-    const names = await arrivalNames()
+    // A HIVE (hive.ts) outranks a published arrival plan: the entrance chose it.
+    const hive = await selectedHive()
+    if (hive && hive.depth >= 2) return
+    const names = hive ? hive.arrival : await arrivalNames()
     if (!names) return
-    const { bees, missing } = resolveArrival(names, walked.classes, new Set(walked.bees))
+    const { bees, missing } = hive
+      ? hiveArrival(hive, walked.classes, new Set(walked.bees), new Set(walked.criticalBees))!
+      : resolveArrival(names, walked.classes, new Set(walked.bees))
     if (missing.length) console.warn(`[script-preloader] arrival plan names what this package does not carry: ${missing.join(', ')}`)
     // What the arrival came to — the shell's arrival trial reports it.
     EffectBus.emit('loader:arrival', { now: bees.size, passive: bees.size ? walked.bees.length - bees.size : 0, missing })

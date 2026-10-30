@@ -1,9 +1,9 @@
 // hive.spec.ts — a hive loads what its faces name and what those read, in the
 // tier it says; the rest waits, and depth decides how much waits.
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { beeClassesOfDocs } from './arrival-plan'
-import { parseHive, resolveHive } from './hive'
+import { hiveArrival, parseHive, resolveHive, selectedHive } from './hive'
 
 const sig = (c: string): string => c.repeat(64)
 
@@ -85,5 +85,46 @@ describe('resolveHive', () => {
     const r = resolveHive(hive({ arrival: ['SiteViewDrone', 'ArcadeDrone'] }), classes, all)
     expect(r.missing).toEqual(['ArcadeDrone'])
     expect(r.now.has(sig('a'))).toBe(true)
+  })
+})
+
+describe('hiveArrival (phase 2)', () => {
+  it('makes no arrival at depth 2: everything loads, as today', () => {
+    expect(hiveArrival(hive({ depth: 2 }), classes, all)).toBeNull()
+  })
+
+  it('at depth 0 or 1 loads the face and what it reads now; tiers above 0 wait passive', () => {
+    for (const depth of [0, 1]) {
+      const r = hiveArrival(hive({ depth, arrival: ['SiteViewDrone', 'ChatDrone'], tiers: { ChatDrone: 1 } }), classes, all)!
+      expect([...r.bees].sort()).toEqual([sig('a'), sig('b')])
+    }
+  })
+
+  it('keeps critical bees in the arrival', () => {
+    const r = hiveArrival(hive({ depth: 0 }), classes, all, new Set([sig('e')]))!
+    expect(r.bees.has(sig('e'))).toBe(true)
+  })
+})
+
+describe('selectedHive', () => {
+  afterEach(() => { delete (globalThis as { __hcHive?: unknown }).__hcHive })
+
+  it('is null when the shell found none', async () => {
+    expect(await selectedHive()).toBeNull()
+  })
+
+  it('reads the hive the shell handed over, as a promise or a value', async () => {
+    const doc = { package: sig('1'), core: sig('2'), arrival: ['SiteViewDrone'] }
+    ;(globalThis as { __hcHive?: unknown }).__hcHive = Promise.resolve(doc)
+    expect((await selectedHive())?.arrival).toEqual(['SiteViewDrone'])
+    ;(globalThis as { __hcHive?: unknown }).__hcHive = doc
+    expect((await selectedHive())?.arrival).toEqual(['SiteViewDrone'])
+  })
+
+  it('is no hive when slow or malformed', async () => {
+    ;(globalThis as { __hcHive?: unknown }).__hcHive = new Promise(() => {})
+    expect(await selectedHive(20)).toBeNull()
+    ;(globalThis as { __hcHive?: unknown }).__hcHive = { arrival: [] }
+    expect(await selectedHive()).toBeNull()
   })
 })
