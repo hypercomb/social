@@ -23,6 +23,7 @@ import '@hypercomb/shared/core/mesh-session'
 // prompt stays the last guard, and the door bar says to refuse prompts here.
 import { isSandboxDoor } from '@hypercomb/core'
 import { showDoorBar } from './setup/door-bar'
+import { handOffHive } from './setup/hive-entrance'
 if (isSandboxDoor()) {
   try {
     Object.defineProperty(window, 'nostr', { value: undefined, writable: false, configurable: false, enumerable: false })
@@ -118,6 +119,10 @@ import { watchPackageFloor } from './setup/package-floor'
 
 // Ensure side-effect registration
 const _deps = [DependencyLoader]
+
+// A HIVE the entrance chose (`?hive=<sig>`, setup/hive-entrance.ts): the
+// runtime reads it before deciding which bees load.
+handOffHive()
 
 // THE WELCOME CARD'S "Copy meeting link" (app.html, where storage is blocked —
 // CC-2): a plain button carrying the link, answered here so the card needs no

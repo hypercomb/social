@@ -3,6 +3,7 @@ import { installReadonlyNetwork } from './setup/readonly-network'
 import { readArrivalTrial, startArrivalTrial } from './setup/arrival-trial'
 import { holdCoverUntilArrival } from './setup/arrival-cover'
 import { fetchContentPack } from './setup/content-pack'
+import { handOffHive } from './setup/hive-entrance'
 import type { EarlyInstall } from './setup/ensure-install'
 
 /** What this door is: the newest marker of its own bag, sign(<hostname>)
@@ -176,6 +177,8 @@ const earlyInstall = async (): Promise<EarlyInstall | null> => {
 // A TRIAL (`?arrival=`, setup/arrival-trial.ts) replaces the signed plan for
 // this one visit — the Publish window's Optimize section tries a plan with it.
 const arrivalTrial = readArrivalTrial()
+// A HIVE the entrance chose (`?hive=`, setup/hive-entrance.ts) outranks both.
+handOffHive()
 ;(globalThis as { __hcArrival?: Promise<string[] | null> }).__hcArrival = arrivalTrial ? Promise.resolve(arrivalTrial) : siteRead.then(async site => {
   const plan = String(site?.plan ?? '').toLowerCase()
   if (!SIG_RE.test(plan)) return null
