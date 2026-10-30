@@ -139,6 +139,35 @@ hypercomb to any tile should read aloud as a phrase. Each layer has one
 relation to the tile above it. If a tile's children cannot be put together as
 language, the naming is off, and the fix is the names.
 
+### The parts of speech, in Hypercomb
+
+If tile names are nouns, the grammar has to say what every other kind of
+word is. Each part of speech already has a place in the hive:
+
+- **Nouns are tiles.** A noun is something you can stand in and point at. Its
+  word is its address. Tile names are nouns.
+- **Verbs are behaviour words.** A verb is something you say to make an act
+  happen: create, trait, fill, publish, take. Every act has a verb, and a verb
+  is never a tile name, so a sentence never has to guess which one is meant.
+- **Adjectives are marks.** An adjective describes; it never holds. It is a
+  mark a tile wears: a value, a trait, a tag. When an adjective is also a
+  tile, as the values are, that tile is the gathering of everything wearing
+  its mark.
+- **Connectives are the small words inside a sentence:** on, as, into, from,
+  at, and the logic words and, or, and not. They join the other words and are
+  never tiles or behaviours of their own.
+- **Processes are verbs, not tiles.** A word ending in "ing" names an act in
+  progress, so it belongs to a behaviour. The tile for that idea is its noun:
+  the act is publish, and the tile is publications.
+
+And each layer says its relation once, in its meta layer, and the relation
+decides the part of speech of its children. A layer whose relation is "is"
+holds adjectives: hypercomb is simple, organized, collaborative, intelligent,
+accessible, and localized. A layer whose relation is "has" or "is made of"
+holds nouns: the primitive is made of a word, a signature, a layer, and a
+meta layer. So the path from hypercomb to any tile reads aloud, and every
+word in it is the kind of word its place says it should be.
+
 ### Hypercomb first, then the primitive
 
 The presentation opens on one hexagon, named hypercomb. At this point it is
