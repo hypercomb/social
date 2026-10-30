@@ -139,8 +139,17 @@ and the extruding happens at the layout layer. The layout gains one more
 trait word, a new entrance point, and the part that needs its own look
 becomes the tile named that word, plugged in at that entrance. The piece
 itself is not cut up by hand; the layout simply names one more word, and the
-part answers to it. Until that day, the piece stays whole, and it is already
-finished. Because nothing depends on anything, extruding later
+part answers to it.
+
+What answers is a new primitive atom: the smallest piece that stands on its
+own, with one job and its own look, that has that trait. Because it answers to
+a word rather than to a particular layout, the same atom can fill that word
+in any layout that asks for it, and other people can offer their own atoms
+for the same word, side by side. So every extrusion adds to a shared stock of
+primitive atoms, each named by the traits it has, and the next layout that
+needs one of those words finds it already there.
+
+Until that day, the piece stays whole, and it is already finished. Because nothing depends on anything, extruding later
 never breaks what was there.
 
 ### Layout and parts meet only at a word
@@ -991,7 +1000,8 @@ pick up a piece.
 **Phase three: build each object.** Each tile gets its own page, and each
 page works on its own. A page starts whole; it is broken into web parts only
 when it actually needs a second presentation, never in advance, and then by
-adding a trait word at the layout layer. The shared objects come first, the participant, the
+adding a trait word at the layout layer and providing a new primitive atom
+that has that trait. The shared objects come first, the participant, the
 domain, the package, and the revision, because several stages reuse them. The
 trial bubble, the cube, the public cube at the root, and the sentence path are
 objects too, so they can be worked on in parallel without waiting for each
