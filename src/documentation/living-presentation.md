@@ -6,7 +6,10 @@ how Hypercomb works. It is written to be listened to: plain sentences, no
 tables, and every file reference kept in the last section so it can be
 skipped when read aloud.
 
-What this revision settles. The presentation is about Hypercomb, and its job
+What this revision settles. Part discovery is a critical part of the design:
+asking for parts by their words with and, or, and not, across every domain
+you follow, answered as one flat list of offers. The presentation is about
+Hypercomb, and its job
 is to welcome people into this world in a visual and interactive way.
 Because every piece follows the doctrine and depends on nothing, the
 arrangement can be rebuilt later without breaking anything, so it does not
@@ -162,7 +165,13 @@ owning it. The same atom can be a header in one layout, an example under a
 value, and a tagged item in a search, all at once, and it means something in
 each of them because of the word that put it there.
 
-And because every atom carries its words, the parts can be gathered by them.
+### Part discovery: and, or, not, across domains
+
+This is a critical part of the whole design, so the presentation gives it
+its own scene. It is how anyone finds the parts that already exist, here and
+on every domain they follow, before making anything new.
+
+Because every atom carries its words, the parts can be gathered by them.
 Ask for every part that has these words, or those, and leave out the ones
 with that one: and, or, and not. "Header and dark" narrows to parts that have
 both. "Header or footer" gathers parts that have either. "Not draft" leaves
@@ -799,7 +808,14 @@ from each participant's domain through their signed index to their running
 code, and every line stays whole through all of this. That is the picture of
 every publisher keeping a clean path.
 
-**Slide three, take it whole, or take a piece.** Open a badge and you have
+**Slide three, find it, then take it whole or take a piece.** It starts with
+finding. The viewer types a question over words, such as header and dark, not
+draft, and it goes out to every participant's domain at once. Matching parts
+light up across all eight, each marked with its owner's colour, and the flat
+list of answers gathers at the bottom. Adding a word narrows every domain
+together; removing one widens them. Nothing found has moved anywhere yet.
+
+Then the choice. Open a badge, or a part from the list, and you have
 three choices. **Upgrade** takes the revision as it is. **Skip** leaves it.
 **Take a piece** takes only one layer of it into your own hive, at its own
 path, and leaves the rest of your build exactly as it was. The piece is held
@@ -1189,28 +1205,31 @@ names a whole set of files, but there is no slice object today.
 
 1. **The hypercomb tile.** A label by default, with the filter shown as its
    other reading?
-2. **Participant names.** The hosts already carry six real domains:
+2. **How a question is typed.** Words joined by and, or, and not, as spoken,
+   or the symbols and, bar, and exclamation mark, or both? The command line
+   reads sentences, so the spoken form fits it; the symbols are shorter.
+3. **Participant names.** The hosts already carry six real domains:
    hypercomb.com, pluginthematrix.com, realones.online, cafesociety.buzz,
    jwize.com, and pointblanksolutions.ca. Use these six plus two generic
    participants, or keep all eight generic?
-3. **Sentences across cubes.** Label the slides that run one sentence across
+4. **Sentences across cubes.** Label the slides that run one sentence across
    several participants' cubes as where this is going, or present them as
    working?
-4. **Tile names.** Accept the draft tree as it is, or rename first?
-5. **The language axis.** This plan takes each word as one position on the
+5. **Tile names.** Accept the draft tree as it is, or rename first?
+6. **The language axis.** This plan takes each word as one position on the
    axis, with its different implementations as separate points at that
    position. The other reading is one position per dialect, with a word
    spanning several. Which is right?
-6. **Turning the cube.** This plan has the points slide into their groups as
+7. **Turning the cube.** This plan has the points slide into their groups as
    a face comes forward. The alternative keeps the points fixed and shows the
    flattening as a shadow on the face. Which is right?
-7. **The extra dimensions.** Which ones should the dimension picker offer
+8. **The extra dimensions.** Which ones should the dimension picker offer
    first: platform, locale, audience, reviews, or others?
-8. **The root view.** Should the public cube become a choice beside the
+9. **The root view.** Should the public cube become a choice beside the
    showcase at the root, or what the root shows by default?
-9. **Order of the slides.** Confirm where playback order is kept once slides
+10. **Order of the slides.** Confirm where playback order is kept once slides
    are joined with the enroll word.
-10. **Links from the slides view.** Confirm whether a page's link can open a
+11. **Links from the slides view.** Confirm whether a page's link can open a
    child tile from inside the slides view, or only from the website view.
 
 ---
