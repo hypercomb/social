@@ -173,6 +173,11 @@ wherever it appears, which is why a verb's own sub-words must never be
 behaviour words. A reader that gave each word its role by its position would
 lift that limit, and it is the natural next step for the grammar.
 
+This division of meaning can be codified later, and it changes nothing for
+anyone. It is a layer a reader lays over the same words, so whoever wants to
+give words roles, or behaviour by role, adds that layer on their own, and
+everything already named keeps working.
+
 For naming, lean towards nouns. A tile is a thing, and a name should name a
 thing. A word for something running is still a thing, so publishing,
 debugging, and merging make good tile names. An adjective does not: it
@@ -1712,7 +1717,17 @@ revisited later without breaking what was built.
     and reviews follow.
 12. **The public cube is a choice beside the showcase** at the root, not a
     replacement for it.
-13. **Heart and heartbeat.** The heart is a tile's current layer, and moving
+13. **The six values keep their words** from hypercomb.io's original title:
+    simple, organized, collaborative, intelligent, accessible, localized.
+    Every name beneath them leans towards nouns.
+14. **The presentation's own parts stay under simple** for now: opening,
+    marker, check, and lift, since each shows one primitive used again. They
+    can move to an organization of their own later.
+15. **Move five of the opening is named spread**, so all seven moves are
+    shapes: hexagon, row, stack, column, spread, cube, tesseract.
+16. **One cube.** The cube built in the opening and the grammar viewer are
+    the same cube, seen being built and then in use, so they share one word.
+17. **Heart and heartbeat.** The heart is a tile's current layer, and moving
     it is what makes the heartbeat. The two words belong together.
 
 ## To check while building
