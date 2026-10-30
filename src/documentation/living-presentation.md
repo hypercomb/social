@@ -162,6 +162,20 @@ owning it. The same atom can be a header in one layout, an example under a
 value, and a tagged item in a search, all at once, and it means something in
 each of them because of the word that put it there.
 
+And because every atom carries its words, the parts can be gathered by them.
+Ask for every part that has these words, or those, and leave out the ones
+with that one: and, or, and not. "Header and dark" narrows to parts that have
+both. "Header or footer" gathers parts that have either. "Not draft" leaves
+out anything marked draft. The answer is a flat list of parts, from this
+page, from the whole branch, or from the whole hive, and it reads just like
+the values layer read flat.
+
+A question like this can itself be kept as a tile. That is the other reading
+of the hypercomb tile from the start of this section: instead of a label, a
+tile can hold a question over the graph and show whatever answers it, kept
+current as atoms gain and lose words. It is the hive's one operation, saying
+a word and narrowing, written down so it can be asked again.
+
 Until that day, the piece stays whole, and it is already finished. Because nothing depends on anything, extruding later
 never breaks what was there.
 
@@ -1090,7 +1104,12 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** a tag offering an atom for the trait of the same
+**Proposed, not built:** asking for parts with and, or, and not together in
+one question, and keeping that question as a tile; today the tag filter
+matches a tile that has any of the chosen words, a reference's required
+words are added to that as an and, and the filter reaches the page, the
+branch, or the whole hive, showing the matches as one flat list; how the
+question is typed is still to be decided. A tag offering an atom for the trait of the same
 word; today a trait looks for tiles named the word and for the word's pool on
 the hosts you follow, and tags are recorded on tiles but their shared index is
 still worked out by walking the tree; theme words as the interface that pages and parts
