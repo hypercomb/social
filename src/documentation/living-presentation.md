@@ -155,6 +155,13 @@ word lists it where a layout asking for that trait will look, and the traits
 an atom has are words you can search by, like any tag. One word does both
 jobs: it says what a layout wants, and it says what an atom is for.
 
+This is how data that belongs to several things gets its meaning. An atom
+can carry as many traits and tags as it has uses, and each word places it
+somewhere it belongs, without copying it and without any of those places
+owning it. The same atom can be a header in one layout, an example under a
+value, and a tagged item in a search, all at once, and it means something in
+each of them because of the word that put it there.
+
 Until that day, the piece stays whole, and it is already finished. Because nothing depends on anything, extruding later
 never breaks what was there.
 
