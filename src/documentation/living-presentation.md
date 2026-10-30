@@ -1602,7 +1602,9 @@ their reach worked out and changes held for approval; a tile's own page; the
 slides behaviour and the enroll relation; and returning to exactly where you
 came from.
 
-**Proposed, not built:** a command-line reader that gives each word its role
+**Proposed, not built:** looking up a word's singular and plural forms
+together, in the reader, without changing how words are folded into
+addresses; a command-line reader that gives each word its role
 by its position, so a verb's sub-words could be any word; today every
 behaviour word on a line runs; an agent pool assigned to each tile, naming its
 harness and models, using the minimum and handing up to a heavier model or
@@ -1720,14 +1722,20 @@ revisited later without breaking what was built.
 13. **The six values keep their words** from hypercomb.io's original title:
     simple, organized, collaborative, intelligent, accessible, localized.
     Every name beneath them leans towards nouns.
-14. **The presentation's own parts stay under simple** for now: opening,
+14. **Names are singular nouns.** A tile is one atom, so its name names one
+    thing: domain, trial, participant, sentence, point. Today the hive folds a
+    word only by lowercasing it, so a singular and a plural are two different
+    addresses, which is why one standard matters. Looking up both forms is a
+    convenience for the reader to add later; the fold itself stays as it is,
+    because it defines every word's address.
+15. **The presentation's own parts stay under simple** for now: opening,
     marker, check, and lift, since each shows one primitive used again. They
     can move to an organization of their own later.
-15. **Move five of the opening is named spread**, so all seven moves are
+16. **Move five of the opening is named spread**, so all seven moves are
     shapes: hexagon, row, stack, column, spread, cube, tesseract.
-16. **One cube.** The cube built in the opening and the grammar viewer are
+17. **One cube.** The cube built in the opening and the grammar viewer are
     the same cube, seen being built and then in use, so they share one word.
-17. **Heart and heartbeat.** The heart is a tile's current layer, and moving
+18. **Heart and heartbeat.** The heart is a tile's current layer, and moving
     it is what makes the heartbeat. The two words belong together.
 
 ## To check while building
