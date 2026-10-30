@@ -11,7 +11,12 @@ for each tile, and each face of the cube is a different view of the same
 points. Domains and subdomains have their own section, and the subdomain is
 now described as the debugging environment: fully isolated, working on
 stable files, with every publisher's path to their running code kept intact.
-Both are tied into the stages where they fit.
+There is one cube for each domain of each participant, served from their own
+hosts. Each participant builds their cube by replicating other people's
+packages and creating their own, and the cubes join into a tapestry through
+the signatures they share.
+The published points of a domain make up the public cube that everyone
+debugs against. All of this is tied into the stages where it fits.
 
 ---
 
@@ -39,11 +44,15 @@ the server that hosts them, by the words of the language they answer, and by
 version. Everything before the cube is there so the viewer understands what
 each point is, where it lives, and how it got there.
 
-And the cube is shared. The domains connect from the root outward, each one
-reaching the others through the same signatures, and together they weave a
-tapestry. Because a signature means the same thing everywhere, every
-participant is looking at the same cube from their own place in it. That
-symmetry is what the presentation ends on.
+There is a cube for each domain of each participant. A participant's domain
+is served from their own hosts, and it is their cube. No one else's cube
+contains it. The cubes connect through the signatures they share: when two
+cubes hold the same point, a thread joins them. Starting from the root and
+running outward, those threads weave the cubes into a tapestry of connected
+domains. Every cube has the same shape and is read the same way, and a
+signature means the same thing in every cube that holds it. That symmetry is
+what lets people share in each other's work, and it is what the presentation
+ends on.
 
 ## 2. Every piece of the presentation is a tile
 
@@ -168,6 +177,11 @@ domain. Nothing else is asked.
 From then on, the bare domain is their front door, and every name under it,
 every subdomain, is a place they can switch on. Nobody else can publish
 there. The key that claimed the domain is the key that publishes to it.
+
+Each participant's domain is served from their own hosts. That domain, with
+all its names and all its versions, is one participant's cube in the
+pictures that follow. Their subdomains, trials included, are inside their
+cube, not cubes of their own.
 
 ### One folder, many names
 
@@ -355,15 +369,16 @@ becomes a small icon that every server carries from stage three on.
 ### Stage three: eight servers, revisions, and checking in
 
 **Slide one, the split.** The single server rises and splits into eight. On a
-phone they form two rows of four. Each server answers for a domain, and each
-shows its live subdomains as solid lanes and its trial subdomains as small
-bubbles at the edge.
+phone they form two rows of four. Each one is a participant serving their own
+domain from their own hosts, and each shows its live subdomains as solid
+lanes and its trial subdomains as small bubbles at the edge.
 
-Each publisher has its own colour, and every colour also has a pattern, so
-colour is never the only signal. A filled chip is a package this server's
-owner published. A hatched chip, in another publisher's colour, is a package
-this server hosts for someone else. A chip inside a bubble is a trial, not
-yet promoted. Stacked rings on a chip are the revisions it holds.
+Each participant has their own colour, and every colour also has a pattern,
+so colour is never the only signal. A filled chip is a package this
+participant published. A hatched chip, in another participant's colour, is a
+package this participant replicated from someone they follow; it keeps its
+original signature and colour. A chip inside a bubble is a trial, not yet
+promoted. Stacked rings on a chip are the revisions it holds.
 
 There are six packages: a shared core, cards, journal, calendar, chat, and
 theme. Each server carries two to four of them, so every package sits on at
@@ -402,48 +417,60 @@ that suit their own build or machine, plug them in, and pass their mix on.
 
 ### Stage four: the cube of points
 
-The eight servers rise and spread into a cube. The cube is a cloud of points,
-and **each point is one tile**: a specific automaton, one implementation at
-one version, hosted on one server.
+Each of the eight participants' domains rises into its own cube, and the view
+moves into one of them. **There is one cube per domain per participant.** A
+cube is a cloud of points, and **each point is one tile**: a specific
+automaton, one implementation at one version.
 
-The servers are laid out from the root outward. The root domain sits at the
-centre of the server axis, its own subdomains beside it, and the other
-domains spread out on either side, each with its own subdomains next to it.
-So the cube grows from the middle, and its two halves mirror each other.
+**You build your cube by replicating other people's work and creating your
+own packages.** Every package you take from someone you follow is replicated
+onto your own hosts, under its original signature, and becomes points in your
+cube. Every package you make becomes points of your own.
 
-Every point sits on three axes. Across is the **server**, where it is hosted.
-Into the page is the **language**, the word of the grammar it answers. Down
-is the **version**, newest at the top.
+Every point sits on three axes. Across is the **source**: where the point's
+implementation comes from. The participant's own packages sit at the centre,
+and the domains they replicated from spread out on either side, so the cube
+grows from its own root outward. Into the page is the **language**, the word
+of the grammar the point answers. Down is the **version**, newest at the top.
 
-Not every position has a point. An empty spot means nobody hosts that word at
-that version on that server. One spot can also hold more than one point: the
+Not every position has a point. An empty spot means this domain has no
+implementation of that word at that version from that source. One spot can also hold more than one point: the
 two separate revision twos from stage three sit side by side. Trial points
 float just outside the lattice, each in its own small bubble, because they are
 not part of anything that runs until they are promoted. When one is
 promoted, it drops into place.
 
+**The published points are the public's cube.** What a participant has
+published, every version of it, is the cube everyone else sees of their
+domain. It is the cube the public debugs against. Their drafts and trials are
+not in it: those stay in bubbles at the edge until they are promoted, and
+then they join the public cube for good, because a published version is never
+removed. So the public always debugs against a cube that only grows and never
+shifts under them.
+
 **Slide one, the points.** The cube fills in point by point. Each point
-glows in its publisher's colour. You can turn the cube freely, and clicking a
+glows in the colour of the participant it came from. You can turn the cube freely, and clicking a
 point opens its tile.
 
 **Slide two, three faces, three views of the same points.** Turning the cube
 to a face flattens one axis away, and the points slide into the groups that
 face shows. The points never change. Only the way they are divided changes.
 
-- **The top face** flattens the versions. It shows servers against words:
-  what each server hosts right now. Picking a row draws a line through one
-  word across all eight servers.
-- **The front face** flattens the words. It shows servers against versions:
-  how each server's holdings have changed over time.
-- **The side face** flattens the servers. It shows words against versions.
-  This is the language view: every implementation of every word, and how it
-  changed, whichever server it lives on.
+- **The top face** flattens the versions. It shows sources against words:
+  what this domain runs right now, and whose work each piece is. Picking a
+  row draws a line through one word across every source.
+- **The front face** flattens the words. It shows sources against versions:
+  how the participant's own work, and each piece they took, has changed over
+  time.
+- **The side face** flattens the sources. It shows words against versions.
+  This is the language view: every implementation of every word in this
+  domain, and how it changed, wherever it came from.
 
 **Slide three, slices.** A slice is one point chosen for each word. Every
 slice whose choices fit together is a working build. A slice is not a flat
 plane through the cube. It is a bent surface that dips to different depths and
-crosses between servers. You can grab a point and drag the slice up or down to
-a different version, or across to a different server's implementation;
+crosses between sources. You can grab a point and drag the slice up or down
+to a different version, or across to another participant's implementation;
 dependency lines show whether it still fits.
 
 The cube is drawn from demo data at first. A later step can draw it from the
@@ -454,7 +481,8 @@ new point to the cube.
 
 **Slide one, the sentence is a path.** Turn the cube to the side face, the
 language view. A natural-language sentence runs across it, for example:
-module take cards at server three, into journal, publish.
+module take cards from the third participant's domain, into journal,
+publish.
 
 In Hypercomb, natural language is the scripting language. A sentence typed on
 the command line is the program. Each word is declared by the behaviour that
@@ -462,9 +490,11 @@ owns it, and how far a sentence reaches is worked out before it runs.
 
 A sentence is a path through the points, one point for each word. On the
 language face it reads as a straight line of words. Turn the cube, and the
-same path zigzags across servers and depths, because each word may be
-answered by a point on a different server at a different version. That path
-is the call, crossing the cube to run modules wherever they live.
+same path zigzags across sources and depths, because each word may be
+answered by a point from a different participant at a different version. A
+word can also reach out of this cube, to a point in another participant's
+cube, served from their own hosts. That path is the call, crossing the cube,
+and across cubes, to run modules wherever they live.
 
 Then comes the key idea: **the same grammar, run by different automatons.**
 Keep the words and choose different points, and the same sentence runs
@@ -472,40 +502,48 @@ through different implementations. A word means one thing everywhere. The
 implementation behind it is a mark on the tile.
 
 Press run and each word lights up as its point runs, and the results travel
-back along the path. Before anything runs, the path shows which servers the
+back along the path. Before anything runs, the path shows which domains the
 sentence will touch, and every step that would change something waits for
 your approval.
 
-**Slide two, debugging across servers and subdomains.** A sentence fails. On
+**Slide two, debugging across domains and subdomains.** A sentence fails. On
 the language face the break shows on one word's point, so you know which
-implementation, on which server, at which version. You open a trial
-subdomain to work on it. The trial is sealed, so nothing you do there can
+implementation, from whose domain, at which version. You open a trial
+subdomain of your own domain to work on it. The trial is sealed, so nothing you do there can
 disturb the live site or anyone else's trial, and every other point the
 sentence uses stays exactly where it was, because no version has been
 removed. You step that one point up or down its versions, halving the range
 each time, until the sentence runs again. Other people can open their own
 trials on the same word at the same time.
 
+Everyone debugs against the same thing: the published cubes. A stranger
+debugging your word sees exactly the points you published, at every version,
+served from your own hosts. Once your fix is promoted, it becomes a new point
+in your public cube, and every person debugging against it can now choose
+it.
+
 The failing sentence and its slice are just a set of signatures, so you can
 hand them to the owner of that point and they get exactly the same run.
-Reading a trial's changes gives the same answer whichever server you read it
+Reading a trial's changes gives the same answer whichever host you read it
 from.
 
 **Slide three, flavours, plug and play, and the tapestry.** Zoom out to many
 slices through one cube. Each slice is a different flavour of the same
 program, and anyone can make a new one by moving a single point. The viewer
 can shuffle through working slices; each one says how many points changed and
-from whose server.
+from whose domain.
 
-Then every thread lights up at once: the sentence paths, the pieces taken
-from one server into another, and the follows between domains. Starting from
-the root and running outward, they weave across the cube into a tapestry of
-connected domains. The cube then turns slowly to show its symmetry, the two
-halves mirroring each other around the root. Finally the view pulls back to
-show that this is not one person's cube. Every participant stands somewhere
-in the same cube, because a signature means the same thing wherever it is
-read. Anyone can share in it, add a thread, and see what everyone else
-added.
+Then the view pulls back out of the one cube, and all eight participants'
+cubes come into sight, each served from its owner's own hosts. Every thread
+lights up at once: wherever two cubes hold the same point, a line joins them.
+These are the pieces taken from one domain into another, the follows between
+domains, and the sentence paths that cross from cube to cube. Starting from
+the root and running outward, the threads weave the cubes into a tapestry of
+connected domains. The cubes turn together to show their symmetry: every
+cube has the same shape and is read the same way, and the same signature sits
+at the same word in every cube that holds it. Anyone can add a cube of their
+own, join it to the others by taking a piece, and share in what everyone else
+has made.
 
 The stage closes on the development process in one loop. You say what you
 want in a sentence. It is drafted in a trial subdomain, reviewed in public,
@@ -553,12 +591,12 @@ The third stage is eight-servers. It holds a servers tile with server-1
 through server-8; a packages tile with core, cards, journal, calendar, chat,
 and theme; and the update-notice and take-a-piece tiles.
 
-The fourth stage is the-cube. It holds points; a faces tile with top-face,
-front-face, and side-face under it; and slice.
+The fourth stage is the-cube. It holds points; public-cube; a faces tile with
+top-face, front-face, and side-face under it; and slice.
 
 The fifth stage is the-sentence. It holds a sentence tile with one tile per
 word, each pointing at the behaviour that owns that word; then automatons,
-debugging, and flavours.
+debugging, flavours, and tapestry.
 
 The transition bee also gets its own tile, so its code can be read and copied
 like everything else.
@@ -631,8 +669,8 @@ transition bee. The cube reading real tile history.
 on the public zones today, or still only proven locally.
 
 **A picture, not the data model:** the cube's version axis. Real versions are
-signatures for each tile, not shared numbered layers. Revision two on one
-server and revision two on another are different things. The cube lines them
+signatures for each tile, not shared numbered layers. Revision two in one
+domain and revision two in another are different things. The cube lines them
 up so the eye can compare them; the first slide of stage four says this once.
 
 **A framing to confirm:** a slice as a signature you can hand to someone. It
@@ -664,7 +702,7 @@ is no slice object today.
    pluginthematrix.com, realones.online, cafesociety.buzz, jwize.com, and
    pointblanksolutions.ca. Use these six plus two generic servers, or keep
    all eight generic?
-2. **Sentences across servers.** Label stage five's first slide as where this
+2. **Sentences across domains.** Label stage five's first slide as where this
    is going, or present it as working?
 3. **Tile names.** Accept the draft tree as it is, or rename first?
 4. **The language axis.** This plan takes each word as one position on the
