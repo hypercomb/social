@@ -3,13 +3,14 @@
 //   node scripts/bridge/living-presentation/plant.cjs [<route>] [--dry] [--tiles-only]
 //
 // <route> is the tile whose children are planted, as a path in tree.cjs:
-// `hypercomb` (the default) plants the first layer; `hypercomb/one-server`
-// plants that stage's children, and so on — always one layer, never more.
+// `hypercomb` (the default) plants the first layer, the values; a deeper
+// route plants that tile's children once tree.cjs names them — always one
+// layer, never more.
 //
 // Every act is a sentence said through say.cjs, the way a participant types it
 // (documentation/speak-dont-bridge.md): `go` to the parent, `create` each
 // child (the cascade makes the tile itself if it is missing), then `file on`
-// a note on each new tile naming what it is and the documents it gathers.
+// a short note on each new tile saying what it is.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
 
@@ -33,18 +34,14 @@ for (const name of segments.slice(1)) {
 const children = node.children || []
 if (!children.length) { console.error(`/${route} has no planned children yet`); process.exit(2) }
 
-const noteFor = (tile) => {
-  const docs = tile.docs || []
-  const listed = docs.length ? ` Documents: ${docs.join(', ')}.` : ''
-  return `${tile.note || tile.name}${listed}`
-}
+const noteFor = (tile) => tile.note || tile.name
 
 const parent = segments.slice(0, -1)
 const sentences = [`go /${parent.join('/')}`]
 for (const child of children) sentences.push(`create ${node.name}/${child.name}`)
 if (!TILES_ONLY) {
   if (segments.length === 1 && node.note) sentences.push(`file on /${route}: ${noteFor(node)}`)
-  for (const child of children) if (child.note || child.docs) sentences.push(`file on /${route}/${child.name}: ${noteFor(child)}`)
+  for (const child of children) if (child.note) sentences.push(`file on /${route}/${child.name}: ${noteFor(child)}`)
 }
 
 console.log(`${DRY ? '[DRY] ' : ''}planting one layer under /${route}: ${children.map(c => c.name).join(', ')}\n`)

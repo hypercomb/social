@@ -1,164 +1,41 @@
 // The living presentation's tile tree (documentation/living-presentation.md).
 //
-// The tree is planted ONE LAYER AT A TIME: plant.cjs takes a route and creates
-// only that tile's children, so each layer is reviewed before the next goes in.
-// Every tile names the documents it gathers, so the tree restructures the
-// documentation as it grows: a document belongs to the tile whose layer
-// explains it, and moves one level down when that tile's children are planted.
+// The presentation welcomes people into Hypercomb. Its first layer is the
+// values layer under one tile called hypercomb. The tree is planted ONE LAYER
+// AT A TIME: plant.cjs takes a route and creates only that tile's children, so
+// each layer is looked at before the next goes in. Every piece stands alone,
+// so the arrangement can be rebuilt later without breaking anything.
 //
-// `docs` are file names under src/documentation/. `children` below the first
-// layer are the plan's draft; they are planted later, by their parent's route.
+// `note` is the working note filed on a tile when it is planted. Where a tile
+// needs its meaning stated for good, that belongs in its meta layer.
 
 module.exports = {
   name: 'hypercomb',
-  note: 'How Hypercomb works, as a living presentation. Each tile is a piece of the presentation and gathers the documents that explain it. Plan: documentation/living-presentation.md',
-  docs: ['index.md', 'living-presentation.md'],
+  note: 'Welcome to Hypercomb. This tile opens the living presentation: a visual, interactive welcome into this world. Read flat, the values below are its first view. Plan: documentation/living-presentation.md',
   children: [
     {
-      name: 'one-server',
-      note: 'Stage one: one server, one host, one client. The machine that answers, the browser that runs the core, and what a request does from start to finish. Gathers the core, the client and everything you see on screen.',
-      docs: [
-        'concepts.md', 'core-processor-architecture.md', 'tree-of-life-core.md', 'life-primitive.md',
-        'llm-primitive.md', 'genome-primitive.md', 'dna.md', 'byte-protocol.md', 'protocol-spec.md',
-        'network-architecture.md', 'infrastructure.md', 'native-client.md', 'file-transit.md',
-        'sync-paired-channel.md', 'collapsed-compute.md', 'instant-computing.md',
-        'deterministic-computation.md', 'sealed-runner.md', 'drone-installer-contract.md',
-        'shim-extraction-scope.md', 'microsoft-store-submission.md', 'windows-installer-pool.md',
-        'shell-surfaces.md', 'emergence.md', 'tile-overlay-architecture.md', 'tile-render-performance.md',
-        'performance-plan.md', 'three-js-migration-plan.md', 'background-themes.md', 'back-gesture.md',
-        'orthogonal-viewer-navigation.md', 'stepping-into-a-view.md', 'zoomable-widgets.md',
-        'tool-window-chrome.md', 'tool-window-colour-roles.md', 'tool-window-restore-audit-2026-10-18.md',
-        'selection-tool-windows.md', 'hyper-window-design.md', 'tile-editor.md',
-        'mobile-experience-plan.md', 'mobile-grand-master-plan.md', 'mobile-one-column.md',
-        'mobile-rails-projection.md', 'mobile-usable-first-plan.md', 'annotate-the-screen.md',
-        'summary-gutter.md', 'notes-reader.md', 'organism-view.md', 'wave-view.md', 'view-library.md',
-        'tile-arrangements.md', 'layout-templates.md', 'frames-and-patterns.md', 'uniform-decoration.md',
-        'quiet-landing.md', 'content-health.md', 'global-text-search.md', 'object-intellisense.md',
-        'icon-pick-protocol.md', 'image-updates.md', 'clipboard-sig-native.md',
-        'hide-first-delete-second.md', 'cell-localization.md', 'example-hives-first-boot.md',
-        'getting-started.md', 'how-to-bee-onboarding.md', 'tutorial-courses.md', 'walk.md',
-        'did-you-know.md', 'web-clip-extension.md', 'reference-designer.md', 'root-entries.md',
-        'native-bee-pool-and-duplicate-registration-audit.md', 'streamline-audit-2026-07.md',
-        'primitive-conformance-audit.md', 'write-conformance.md', 'layer-pattern-audit.md',
-      ],
-      children: [
-        { name: 'server', children: [{ name: 'signed-index' }, { name: 'sig-named-files' }, { name: 'install-pointers' }] },
-        { name: 'host', children: [{ name: 'host-api' }] },
-        { name: 'client', children: [{ name: 'core' }, { name: 'opfs' }] },
-        { name: 'request', children: [{ name: 'verify-on-arrival' }] },
-      ],
+      name: 'simple',
+      note: 'Everything is a tile, and every tile is a word you can say. One idea, used everywhere.',
     },
     {
-      name: 'domains-and-subdomains',
-      note: 'Stage two: domains, subdomains and the workbench. Your workbench is hypercomb.io or your own host\'s root domain, private to your machine, and able to share publicly once your host is registered for publishing. A domain is yours and served from your own hosts; to everyone else its root shows the public cube; a trial subdomain is the isolated, public debugging environment; promotion is one pointer move. Gathers hosting, publishing, installing, and trust.',
-      docs: [
-        'becoming-a-host.md', 'hosting-from-a-machine.md', 'hosting-pages.md', 'hosted-tenants.md',
-        'domain-claim.md', 'domain-folder-sharing.md', 'domain-links.md', 'signed-site-bindings.md',
-        'showcase.md', 'read-only-deployment.md', 'embedded-sites.md', 'website-artifact-paradigm.md',
-        'proposal-sites.md', 'publishing.md', 'publishing-a-revision.md', 'publish-differential.md',
-        'publish-groups.md', 'deployment-stages.md', 'build-debug-isolation.md', 'module-sandbox.md',
-        'install-by-replication.md', 'install-push-only.md', 'dcp-single-door.md',
-        'dcp-installer-visual-spec.md', 'feature-tuning-garage.md', 'host-packages-pool.md',
-        'packages-window.md', 'public-content-endpoint.md', 'resource-offload-relays.md',
-        'consent-hosting.md', 'remove-from-my-hosts.md', 'mesh-domain-resolver-audit.md',
-        'pure-host-install-port-audit.md', 'saved-pure-host-branch-audit.md',
-        'minimal-host-claude-handoff.md', 'host-ai.md', 'security.md',
-        'trust-boundary-and-the-extension-question.md', 'code-admission.md',
-        'no-third-party-requests.md', 'dependency-signing.md', 'sealed-audiences.md',
-        'access-groups.md', 'permission-groups.md',
-      ],
-      children: [
-        { name: 'workbench', children: [{ name: 'private-to-your-machine' }, { name: 'register-for-publishing' }] },
-        { name: 'domain', children: [{ name: 'claim' }, { name: 'root-folder' }, { name: 'root-shows-the-public-cube' }, { name: 'names-are-pointers' }] },
-        { name: 'publish', children: [{ name: 'bytes-first' }, { name: 'pointer-moves' }] },
-        { name: 'trial-subdomain', children: [{ name: 'isolation' }, { name: 'what-changed' }, { name: 'reviews' }] },
-        { name: 'promote' },
-        { name: 'minify' },
-        { name: 'visitor-pin' },
-        { name: 'stable-files', children: [{ name: 'no-version-removed' }, { name: 'clean-paths' }, { name: 'honest-limits' }] },
-      ],
+      name: 'organized',
+      note: 'Everything has its place by its name, and every version is kept by its signature. Nothing is ever lost.',
     },
     {
-      name: 'eight-participants',
-      note: 'Stage three: eight participants, revisions, and checking in. Each serves their own domain; a shared package changes; followers see a badge and take it whole or take a piece. Gathers sharing, following, swarms, community, and the creations people make.',
-      docs: [
-        'using-a-creation.md', 'collections-sharing.md', 'swarm-host.md', 'swarm-link.md',
-        'swarm-notes.md', 'swarm-participant-filter.md', 'swarm-pools.md', 'swarm-resource-streaming.md',
-        'swarm-room-identity.md', 'swarm-scale-and-host-delegation.md', 'pheromones.md',
-        'pheromone-protocol.md', 'pollination-protocol.md', 'intake-filter.md', 'participant-aliases.md',
-        'vocabulary-claim.md', 'group-signatures.md', 'social-governance.md', 'code-of-conduct.md',
-        'contributing.md', 'contributor-agreement.md', 'licensing.md', 'trademarks.md',
-        'meetings-and-quorum.md', 'calendar-events.md', 'hypercomb-q-and-a.md', 'business-card.md',
-        'el-mercado.md', 'solomon-island.md', 'solomon-story-addons.md', 'solomons-clips.md',
-        'arkanoid-theme-authoring.md', 'moose-miro-import.md', 'google-docs-bridge.md',
-        'lets-discover-meadowverse-pipeline.md', 'feedback-channel.md', 'trail-capsule.md',
-        'learn-and-leave.md', 'insights.md',
-      ],
-      children: [
-        { name: 'participants', children: [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ name: `participant-${n}` })) },
-        { name: 'packages', children: ['core', 'cards', 'journal', 'calendar', 'chat', 'theme'].map(name => ({ name })) },
-        { name: 'update-notice' },
-        { name: 'take-a-piece' },
-      ],
+      name: 'collaborative',
+      note: 'Share what you make from your own domain. Take what others make, whole or one piece at a time.',
     },
     {
-      name: 'the-cube',
-      note: 'Stage four: the cube. One cube per domain per participant, built by replicating others and creating your own; each point a tile; faces are views by source, language and version, and more dimensions can be added; the published points are the public cube. Gathers signatures, molecules, pools, history, and views.',
-      docs: [
-        'signature-system.md', 'signature-algebra.md', 'signature-node-pattern.md',
-        'signature-primitive-audit-2026-07.md', 'hypergraph-molecule-lineage.md',
-        'hypergraph-molecule-contention-register.md', 'hypergraph-molecule-prototype-report.md',
-        'molecule-index.md', 'known-location-pools.md', 'pools-across-hosts.md',
-        'sign-meaning-pool-migration-plan.md', 'tag-pools.md', 'entrances-and-sets.md',
-        'address-syntax.md', 'alias-properties.md', 'ontology-is-the-name.md',
-        'the-algorithm-is-the-application.md', 'superimposition.md', 'piece-protocol.md', 'traits.md',
-        'template-addressing.md', 'aggregation-layer-model.md', 'resource-promotion.md',
-        'derivations.md', 'optimize-phase.md', 'algebraic-elimination-gc.md', 'build-revisions.md',
-        'revision-mode.md', 'universal-history-plan.md', 'history-sigbag-as-root.md',
-        'hive-snapshots.md', 'save-as.md', 'visuals-across-lineages.md',
-        'visuals-pool-of-meaning-plan.md', 'capability-tags.md', 'atomic-modules-plan.md',
-      ],
-      children: [
-        { name: 'points' },
-        { name: 'replicate-and-create' },
-        { name: 'public-cube' },
-        { name: 'deployed-items' },
-        { name: 'faces', children: [{ name: 'top-face' }, { name: 'front-face' }, { name: 'side-face' }] },
-        { name: 'more-dimensions' },
-        { name: 'slice' },
-      ],
+      name: 'intelligent',
+      note: 'People and AI use the same words under the same rules, and every change waits for a person to accept it.',
     },
     {
-      name: 'the-sentence',
-      note: 'Stage five: working in the cube. Natural language is the scripting language and the debugging language; a sentence is a path through the points; the same grammar runs on different automatons; the cubes weave into a tapestry. Gathers the language, behaviours, AI, workflows, and debugging.',
-      docs: [
-        'every-act-has-a-word.md', 'hive-sentence.md', 'hypercomb-communication-layer.md',
-        'spoken-programs.md', 'speak-dont-bridge.md', 'natural-language-surface-audit.md',
-        'command-line-reference.md', 'slash-behaviour-reference.md', 'slash-command-authoring.md',
-        'how-to-pages.md', 'behavior-usage-docs.md', 'behavior-binding.md',
-        'behaviors-view-simplification.md', 'everything-is-a-beehavior.md', 'context-behaviors.md',
-        'community-translations.md', 'glossary.md', 'simple-naming-initiative.md',
-        'features-experience-overhaul.md', 'agents.md', 'agent-harness.md', 'hermes-harness.md',
-        'ai-first-class-plan.md', 'anatomy-context-need.md', 'hive-read-fence.md',
-        'model-mediation-and-the-training-prompt.md', 'replayable-agent-loop.md',
-        'conversation-continuity.md', 'chat-route.md', 'contract-fulfillment.md', 'meaning-loop.md',
-        'jev-audit-2026-09-21.md', 'jev-creative-plan.md', 'jev-decisions.md',
-        'hive-management-org.md', 'workflow-designer.md', 'workflow-inputs.md', 'workflow-pulses.md',
-        'claude-bridge-setup.md', 'claude-skills.md', 'bridge-ask-transport-streamlining.md',
-        'break-repair-loop.md', 'comfyui-behavior.md', 'production-console.md',
-      ],
-      children: [
-        { name: 'sentence' },
-        { name: 'automatons' },
-        { name: 'debugging' },
-        { name: 'flavours' },
-        { name: 'tapestry' },
-      ],
+      name: 'accessible',
+      note: 'Plain words, free and open source, and your work lives on your own device.',
     },
     {
-      name: 'transition-bee',
-      note: 'The module that lifts hexagons off the grid into their pages and folds them back. Not built yet; its code will be readable and copyable here like any other tile.',
-      docs: [],
+      name: 'localized',
+      note: 'The hive speaks your language: the community translates it, and anyone can add their own.',
     },
   ],
 }

@@ -6,8 +6,12 @@ how Hypercomb works. It is written to be listened to: plain sentences, no
 tables, and every file reference kept in the last section so it can be
 skipped when read aloud.
 
-What this revision settles. The first layer is the values layer under one
-tile called hypercomb, and the presentation shows how that single layer is
+What this revision settles. The presentation is about Hypercomb, and its job
+is to welcome people into this world in a visual and interactive way.
+Because every piece follows the doctrine and depends on nothing, the
+arrangement can be rebuilt later without breaking anything, so it does not
+have to be perfect before it starts. The first layer is the values layer
+under one tile called hypercomb, and the presentation shows how that single layer is
 built, in detail, before anything else: values as words, the layer read flat
 as the presentation, every step in as a slice by signed name, layouts and
 parts meeting only at a trait word, your own layer stack of traits at every
@@ -28,8 +32,9 @@ tapestry through the signatures they share.
 
 ## 1. What this is, and the one point that matters most
 
-This is a presentation in five stages, three slides each, fifteen slides in
-all. It is not a slide deck in the usual sense. It is an interactive diagram
+This is a welcome. It is about Hypercomb, and it invites people into this
+world in a way they can see and touch: tiles that lift, open, and answer when
+you click them. It is not a slide deck in the usual sense. It is an interactive diagram
 you can move through in more than one direction, and every piece of it lives
 in the hive.
 
@@ -917,10 +922,9 @@ The root tile is called hypercomb. It is the website artifact, and it plays
 with the present word. Its first layer is the values layer:
 simple, organized, collaborative, intelligent, accessible, and localized.
 Documents and pieces relate to values by wearing marks, and one piece can
-relate to several values. The stage tiles below are the saved walk, and they
-are being reworked to match; the planting script's tree still files each
-document under one stage, and is redone before anything is planted. The
-draft stage tiles follow.
+relate to several values. The planting script's tree holds this first layer
+and nothing deeper yet; the stage tiles below are the draft of later layers,
+which form the saved walk.
 
 The first stage is one-server. It holds a server tile, with signed-index,
 sig-named-files, and install-pointers under it; a host tile, with host-api
@@ -981,22 +985,20 @@ other.
 links get their explore and next. The transition bee does the lift and the
 reshaping, and the objects animate into place.
 
-### One layer at a time, and the documentation moves with it
+### One layer at a time, rebuilt whenever we like
 
 The tree is built one layer at a time, always the first layer under a tile
-that already exists, and each layer is reviewed before the next one goes in.
-The tile at the top is called hypercomb.
+that already exists, and each layer is looked at before the next one goes in.
+The tile at the top is called hypercomb, and its first layer is the six
+values, each with a short welcoming note.
 
-The tree also restructures all of the documentation. Every document is
-assigned to exactly one tile, the tile whose part of the story explains it.
-When a tile is planted, it carries a note naming what it is and the documents
-it gathers. When that tile's own children are planted later, its documents
-are divided among them, one level further down. In the first layer, all two
-hundred and forty-two documents are already assigned to one of the stage
-tiles. That first assignment was made from each document's title, so it is
-a starting point to review, not a final placement.
+Because nothing depends on anything, the arrangement is never final. Pieces
+can be moved, regrouped, or rebuilt later, and every piece keeps working.
+The documentation joins the same way: a document relates to the values and
+pieces it explains by wearing marks, and that can be done gradually, one
+piece at a time, without planning the whole structure in advance.
 
-The tree, with each tile's note and documents, lives in one file. A small
+The tree, with each tile's note, lives in one file. A small
 script plants one layer from it by speaking to the hive: it says go, then
 create for each new tile, then files the note on each one. It sends no raw
 operations. A dry run prints the sentences without saying them, and they can
@@ -1106,30 +1108,28 @@ names a whole set of files, but there is no slice object today.
 
 1. **The hypercomb tile.** A label by default, with the filter shown as its
    other reading?
-2. **Where the construction sits.** As the opening before everything else,
-   as written here, or in place of stage one?
-3. **Participant names.** The hosts already carry six real domains:
+2. **Participant names.** The hosts already carry six real domains:
    hypercomb.com, pluginthematrix.com, realones.online, cafesociety.buzz,
    jwize.com, and pointblanksolutions.ca. Use these six plus two generic
    participants, or keep all eight generic?
-4. **Sentences across cubes.** Label the slides that run one sentence across
+3. **Sentences across cubes.** Label the slides that run one sentence across
    several participants' cubes as where this is going, or present them as
    working?
-5. **Tile names.** Accept the draft tree as it is, or rename first?
-6. **The language axis.** This plan takes each word as one position on the
+4. **Tile names.** Accept the draft tree as it is, or rename first?
+5. **The language axis.** This plan takes each word as one position on the
    axis, with its different implementations as separate points at that
    position. The other reading is one position per dialect, with a word
    spanning several. Which is right?
-7. **Turning the cube.** This plan has the points slide into their groups as
+6. **Turning the cube.** This plan has the points slide into their groups as
    a face comes forward. The alternative keeps the points fixed and shows the
    flattening as a shadow on the face. Which is right?
-8. **The extra dimensions.** Which ones should the dimension picker offer
+7. **The extra dimensions.** Which ones should the dimension picker offer
    first: platform, locale, audience, reviews, or others?
-9. **The root view.** Should the public cube become a choice beside the
+8. **The root view.** Should the public cube become a choice beside the
    showcase at the root, or what the root shows by default?
-10. **Order of the slides.** Confirm where playback order is kept once slides
+9. **Order of the slides.** Confirm where playback order is kept once slides
    are joined with the enroll word.
-11. **Links from the slides view.** Confirm whether a page's link can open a
+10. **Links from the slides view.** Confirm whether a page's link can open a
    child tile from inside the slides view, or only from the website view.
 
 ---
