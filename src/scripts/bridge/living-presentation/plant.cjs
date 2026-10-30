@@ -2,7 +2,7 @@
 // publish it so it can be seen. This is the canonical loop, the same for
 // everyone: one layer, one build revision, one publish.
 //
-//   node scripts/bridge/living-presentation/plant.cjs [<route>] [--all] [--dry] [--sentences] [--console]
+//   node scripts/bridge/living-presentation/plant.cjs [<route>] [--all] [--dry] [--sentences] [--console] [--say [<url>]]
 //                                                     [--tiles-only] [--publish-only]
 //                                                     [--publish <domain>]... [--as <label>]
 //                                                     [--revision <name>]
@@ -40,6 +40,9 @@
 // hive tab's browser console: it says every sentence through the same door
 // Enter uses (`command:submit`), one at a time, as the participant. Saying
 // them through the bridge is the optional, scripted way.
+// --say posts the sentences to the hive's HTTP door (scripts/hive-say.cjs,
+// http://127.0.0.1:4262/say unless a URL follows) and prints what the hive
+// said back to each one: the hive's own language, over HTTP, with no file.
 // The slash matters: on the command line a bare line is read as prose first,
 // and in the tiles stance plain text lays a tile of that name.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
@@ -54,13 +57,15 @@ const valueOf = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i
 const valuesOf = (flag) => args.flatMap((a, i) => a === flag && args[i + 1] && !args[i + 1].startsWith('--') ? [args[i + 1]] : [])
 const SENTENCES = args.includes('--sentences')
 const CONSOLE = args.includes('--console')
+const HTTP_SAY = args.includes('--say')
+const SAY_URL = (() => { const i = args.indexOf('--say'); const v = args[i + 1]; return i >= 0 && v && /^https?:/.test(v) ? v : 'http://127.0.0.1:4262/say' })()
 const DRY = args.includes('--dry') || SENTENCES || CONSOLE
 const TILES_ONLY = args.includes('--tiles-only')
 const PUBLISH_ONLY = args.includes('--publish-only')
 const ALL = args.includes('--all')
 const DOMAINS = [...new Set(valuesOf('--publish').flatMap(v => v.split(',')).map(d => d.trim().toLowerCase()).filter(Boolean))]
 const LABEL = valueOf('--as')
-const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), LABEL].filter(Boolean))
+const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), LABEL, SAY_URL].filter(Boolean))
 const route = (args.find(a => !a.startsWith('--') && !flagValues.has(a)) || tree.name).replace(/^\/+|\/+$/g, '')
 const SAY = path.join(__dirname, '..', 'say.cjs')
 
@@ -110,6 +115,22 @@ for (const domain of DOMAINS) sentences.push(`publish /${segments[0]} on ${domai
 // The participant's door reads a line as a behaviour only with its slash.
 const slashed = sentences.map(line => (line.startsWith('/') ? line : `/${line}`))
 if (SENTENCES) { console.log(slashed.join('\n')); process.exit(0) }
+if (HTTP_SAY) {
+  ;(async () => {
+    for (const text of slashed) {
+      const response = await fetch(SAY_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) { console.error(`${text}\n  refused: ${body.error ?? response.status}`); process.exit(1) }
+      for (const said of body.said ?? []) {
+        console.log(said.text)
+        for (const line of said.heard ?? []) console.log(`  hive: ${line}`)
+      }
+    }
+  })().catch(error => { console.error(`Could not reach the hive at ${SAY_URL}: ${error?.cause?.message ?? error?.message ?? error}`); process.exit(1) })
+  // Said over HTTP; nothing goes through the bridge below. (A CommonJS
+  // module may return from its top level.)
+  return
+}
 if (CONSOLE) {
   // Paste into the hive tab's console. Each line goes through the door Enter
   // uses; a pause lets each commit land before the next line. A publish asks

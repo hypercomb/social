@@ -1460,8 +1460,10 @@ piece at a time, without planning the whole structure in advance.
 Every layer goes through the same loop, and it is the loop anyone would use.
 Every step is a plain sentence, said in the hive's own natural language: typed
 or pasted into the command line, or handed to the hive's chat, where the model
-proposes the sentences and a person presses Run. No bridge is needed; the
-bridge is only an optional, scripted way to say the same sentences.
+proposes the sentences and a person presses Run, or sent over HTTP to the
+hive's say door, which says them on the command line the same way. No bridge
+is needed; the bridge is only an optional, scripted way to say the same
+sentences.
 First the layer's tiles are created and given their notes. Then the tiles are
 given their pictures, by hand in the hive. Then the pass is
 sealed as one build revision on the top tile, so every step of the work is
@@ -1802,5 +1804,6 @@ Kept apart so they can be skipped when listening.
 - The tree and the planting script: `scripts/bridge/living-presentation/tree.cjs`,
   `scripts/bridge/living-presentation/plant.cjs`, `npm run living:plant`
 - The narrated video presentation: `scripts/presentation/`
+- Saying sentences over HTTP: [hive-say.md](hive-say.md), `scripts/hive-say.cjs`
 - Images: `src/01-hive.png`, `src/04-inside.png`, `src/shot-publications.png`,
   `src/documentation/assets/diagrams/`
