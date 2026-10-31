@@ -4,22 +4,35 @@
 //                             [--attach [http://127.0.0.1:9222]]
 //                             [--browser msedge|chrome|chromium] [--profile <dir>]
 //                             [--headless] [--chrome <browser path>]
+//                             [--participant]
 //
 // Opens the hive in a browser this script drives (Playwright) — Microsoft
 // Edge unless --browser names another — and answers HTTP on this machine
 // only:
 //
 //   POST /say   a sentence as plain text, or JSON { "text": "…" } or
-//               { "sentences": ["…", "…"] }; each is said on the hive's
-//               command line, one at a time, and the reply is JSON of what
-//               the hive said back while it ran: { said: [{ text, heard }] }
+//               { "sentences": ["…", "…"], "from": "…" }
 //   GET  /      { ready, url } — whether the hive is open and listening
 //
-// Each sentence goes through the same door Enter uses (`command:submit`), so
-// it is the participant speaking: the same admission, undo and consent as
-// typing it, and a publish still asks in the page. That is also why this
-// listens on 127.0.0.1 only and refuses a request that names a web origin
-// other than localhost: no web page may drive it (the bridge's rule).
+// A REQUEST IS A CALL FROM OUTSIDE, AND THE PARTICIPANT ANSWERS IT. All the
+// sentences of one request are one call (`external:call`), named by `from`
+// or the X-Hive-Caller header. The hive's command line shows it in its `$`
+// stance with who sent it, and nothing runs until the participant presses
+// Enter there; Escape declines. On Enter a new conversation opens on the
+// layer they stand in, and every sentence is said through the machine door
+// (`command-line:remote-submit`), judged against their grants as any
+// machine's line is, with each verdict written into that conversation. The
+// reply waits for all of that: { outcome: { kind: "ran", convoId, results:
+// [{ text, verdict }] } }, or kind "declined", or "refused" with a reason.
+//
+// --participant speaks as the participant instead, through the door Enter
+// uses (`command:submit`), with no gate: for a hive you drive alone. The
+// reply is then what the hive showed while each sentence ran:
+// { said: [{ text, heard }] }.
+//
+// Because it can reach the participant's own door, this listens on 127.0.0.1
+// only and refuses a request that names a web origin other than localhost:
+// no web page may drive it (the bridge's rule).
 //
 // Two ways to reach the hive:
 //   • --attach joins a browser you started yourself with remote debugging
@@ -51,6 +64,8 @@ const CHROME = valueOf('--chrome', '')
 // How long the hive is listened to after a sentence before the next one: a
 // commit lands well inside this, and `go` waits for the page to settle.
 const SETTLE_MS = Number(valueOf('--settle', '900'))
+// Speak as the participant, ungated, instead of as a call from outside.
+const PARTICIPANT = args.includes('--participant')
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -76,6 +91,16 @@ const sayInPage = text => {
 }
 
 const readHeard = () => window.__hiveSayHeard.splice(0)
+
+/** In the page: hand the lines to the hive as one call from outside, and wait
+ *  for the participant's answer and the run it starts. */
+const callInPage = ({ from, lines }) => new Promise(resolve => {
+  let taken = false
+  let settled = false
+  const complete = outcome => { if (!settled) { settled = true; resolve(outcome) } }
+  globalThis.__hypercombEffectBus.emitTransient('external:call', { from, lines, accept: () => { taken = true }, complete })
+  if (!taken && !settled) complete({ kind: 'refused', reason: 'this hive does not take calls from outside: its modules are older than the say door' })
+})
 
 ;(async () => {
   const { chromium } = require('playwright')
@@ -132,13 +157,25 @@ const readHeard = () => window.__hiveSayHeard.splice(0)
     req.setEncoding('utf8')
     req.on('data', chunk => { body += chunk; if (body.length > 1_000_000) req.destroy() })
     req.on('end', () => {
-      let sentences
+      let sentences, from
       try {
         const json = body.trim().startsWith('{') ? JSON.parse(body) : null
         sentences = json ? (Array.isArray(json.sentences) ? json.sentences : [json.text]) : body.split(/\r?\n/)
+        from = String(json?.from ?? req.headers['x-hive-caller'] ?? '').trim() || 'an agent'
       } catch { reply(400, { error: 'send a sentence as text, or JSON { text } or { sentences }' }); return }
       sentences = sentences.map(s => String(s ?? '').trim()).filter(Boolean)
       if (!sentences.length) { reply(400, { error: 'no sentence to say' }); return }
+      if (!PARTICIPANT) {
+        // The hive queues calls itself, and each waits for the participant:
+        // nothing here holds one request behind another.
+        // Said as given: a plain line the hive's reader understands reports
+        // each action it ran; a canonical /line can only answer unknown.
+        void ready()
+          .then(() => page.evaluate(callInPage, { from, lines: sentences }))
+          .then(outcome => reply(200, { outcome }))
+          .catch(error => reply(500, { error: String(error?.message ?? error) }))
+        return
+      }
       queue = queue.then(async () => {
         const said = []
         for (const sentence of sentences) said.push(await say(sentence))
@@ -147,7 +184,7 @@ const readHeard = () => window.__hiveSayHeard.splice(0)
     })
   })
   server.listen(PORT, '127.0.0.1', () => {
-    console.log(`The hive at ${URL_} is listening on http://127.0.0.1:${PORT}/say`)
+    console.log(`The hive at ${URL_} is listening on http://127.0.0.1:${PORT}/say${PARTICIPANT ? ', speaking as the participant' : ', every call waiting for your Enter'}`)
     console.log(`Try: curl -s -X POST http://127.0.0.1:${PORT}/say --data "read /"`)
   })
 

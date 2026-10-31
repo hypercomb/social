@@ -178,6 +178,22 @@ $bp-phone-max: 599px;
   .prompt-question { color: var(--cmd-accent, var(--md-primary)); }
 }
 
+// External stance: a call from outside waits for an answer. It wears the
+// warning hue because what is on the line was not typed here, and Enter will
+// let it run.
+.prompt-dollar {
+  font-family: var(--terminal-font);
+  font-size: 1.15em;
+  font-weight: 600;
+  color: var(--cmd-accent-command);
+}
+
+.command-shell.stance-external {
+  background: color-mix(in srgb, var(--cmd-accent-command) 14%, transparent);
+
+  .command-input { caret-color: var(--cmd-accent-command); }
+}
+
 // Command stance: the whole box shifts hue so the standing meaning of plain
 // text is readable before a character is typed — the mode is worn, not menu'd.
 // The TEXT is not blanket-colored: filler stays plain and only the words the

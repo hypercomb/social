@@ -117,14 +117,27 @@ const slashed = sentences.map(line => (line.startsWith('/') ? line : `/${line}`)
 if (SENTENCES) { console.log(slashed.join('\n')); process.exit(0) }
 if (HTTP_SAY) {
   ;(async () => {
-    for (const text of slashed) {
-      const response = await fetch(SAY_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) })
-      const body = await response.json().catch(() => ({}))
-      if (!response.ok) { console.error(`${text}\n  refused: ${body.error ?? response.status}`); process.exit(1) }
-      for (const said of body.said ?? []) {
-        console.log(said.text)
-        for (const line of said.heard ?? []) console.log(`  hive: ${line}`)
-      }
+    // One call for the whole planting: the hive shows it on its command line
+    // and one Enter there runs every sentence (Escape declines them all).
+    console.log(`Asking the hive at ${SAY_URL}; answer on its command line (Enter runs, Esc declines).`)
+    const response = await fetch(SAY_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-hive-caller': 'living-plant' },
+      body: JSON.stringify({ sentences: slashed, from: 'living-plant' }),
+    })
+    const body = await response.json().catch(() => ({}))
+    if (!response.ok) { console.error(`refused: ${body.error ?? response.status}`); process.exit(1) }
+    const outcome = body.outcome
+    if (outcome) {
+      if (outcome.kind === 'declined') { console.log('Declined in the hive. Nothing ran.'); process.exit(3) }
+      if (outcome.kind === 'refused') { console.error(`refused: ${outcome.reason}`); process.exit(1) }
+      for (const result of outcome.results ?? []) console.log(`${result.text}\n  hive: ${result.verdict}`)
+      return
+    }
+    // A door started with --participant answers what the hive showed instead.
+    for (const said of body.said ?? []) {
+      console.log(said.text)
+      for (const line of said.heard ?? []) console.log(`  hive: ${line}`)
     }
   })().catch(error => { console.error(`Could not reach the hive at ${SAY_URL}: ${error?.cause?.message ?? error?.message ?? error}`); process.exit(1) })
   // Said over HTTP; nothing goes through the bridge below. (A CommonJS

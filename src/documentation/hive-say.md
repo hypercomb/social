@@ -1,41 +1,77 @@
 # Saying the hive's language over HTTP
 
-**Status: built 2026-10-30.**
+**Status: built 2026-10-30; calls from outside wait for the participant since
+2026-10-31.**
 
 The hive's language is sentences said on its command line. A browser tab cannot
 answer an HTTP request, so something has to hold the hive open and say the
 sentences into it. `scripts/hive-say.cjs` does that: it is a small web service
 on this machine. It reaches the hive's tab in Microsoft Edge through Playwright,
-answers HTTP, says each sentence it receives through the same door Enter uses,
-and replies with what the hive said back. Anything that speaks HTTP can use
-it: curl, a script, an agent.
+answers HTTP, hands what it receives to the hive as a call from outside, and
+replies with what came of it once you have answered. Anything that speaks HTTP
+can use it: curl, a script, an agent.
 
 ```
 npm run hive:say                      # the hive at http://localhost:4250, HTTP on 127.0.0.1:4262
-curl -s -X POST http://127.0.0.1:4262/say --data "read /"
+curl -s -X POST http://127.0.0.1:4262/say -H "X-Hive-Caller: me" --data "read /"
 ```
 
 ## The door
 
-- **`POST /say`** takes one sentence as plain text, or JSON `{ "text": "…" }`,
-  or `{ "sentences": ["…", "…"] }`. Each sentence gets its leading slash if it
-  has none, is said on the command line, and the hive is listened to while it
-  runs. The reply is `{ "said": [{ "text": "/read /", "heard": ["…"] }] }`:
-  every toast and activity line the hive showed for that sentence.
+- **`POST /say`** takes one sentence as plain text (one per line), or JSON
+  `{ "text": "…" }`, or `{ "sentences": ["…", "…"], "from": "…" }`. The
+  caller is named by `from`, or the `X-Hive-Caller` header, or else "an
+  agent". Sentences are said as given.
 - **`GET /`** replies `{ "ready": true, "url": "…" }` once the hive's command
   line answers.
 
-Sentences are said one at a time, in the order they arrive, whoever sends them.
+## Marked as external, and gated
 
-## The same as typing
+One request is one call. It is not said when it arrives: the hive's command
+line stands up its fourth stance, `$`, showing who sent it and its lines, and
+a toast says a call is waiting. You answer on the command line
+([command-line-reference.md](command-line-reference.md#external-stance--a-call-from-outside-answered-here)):
 
-Each sentence goes through `command:submit`, the participant's own door, so it
-is admitted, undone and consented to exactly as if it had been typed: a
-publish still asks in the page. Nothing new is allowed by speaking over HTTP.
+- **Enter** opens a new conversation on the layer you stand in, starting with
+  the request, and says each sentence through the machine door
+  (`command-line:remote-submit`). Every word is judged against your grants
+  (`grant`) exactly as any machine's line is, so pressing Enter lets the call
+  be said; it does not let it say more than a machine may. Each sentence's
+  verdict is written into the conversation as it is said.
+- **Esc** declines. Nothing is said, and the request and the decline are
+  written into a new conversation on this layer.
 
-Because that door has the participant's authority, the HTTP side listens on
-`127.0.0.1` only, and refuses any request that names a web origin other than
-localhost, so no web page can drive it. This is the bridge's rule, kept.
+The reply waits for your answer and the run, however long that takes:
+
+```json
+{ "outcome": { "kind": "ran", "convoId": "chat:tile:/::external-me-…",
+  "results": [{ "text": "create word", "verdict": "ran /create" },
+              { "text": "remove word", "verdict": "refused: /remove is destructive, and this hive grants a machine no further than editing" }] } }
+```
+
+or `{ "outcome": { "kind": "declined", "convoId": "…" } }`, or
+`{ "outcome": { "kind": "refused", "reason": "…" } }` for a call the hive
+would not queue (no lines, too many, too long, or a hive whose modules are
+older than this door). A verdict is the machine door's own: `ran …`,
+`refused: …`, `"word" is claimed by …` (ambiguous; nothing ran), or
+`unknown: …`. A plain line the hive reads (`create word`) reports each
+action it ran; a canonical slash line (`/create word`) answers unknown,
+because its pipeline does not report what it did.
+
+Calls queue in the hive, in the order they arrive, whoever sends them; the
+door holds none back itself.
+
+## Speaking as yourself
+
+`--participant` turns the gate off for a hive you drive alone: each sentence
+goes through `command:submit`, your own door, one at a time, with its leading
+slash added if it has none, exactly as if you
+had typed it (a publish still asks in the page), and the reply is what the
+hive showed while it ran, `{ "said": [{ "text": "/read /", "heard": ["…"] }] }`.
+
+Because the door can reach yours, the HTTP side listens on `127.0.0.1` only,
+and refuses any request that names a web origin other than localhost, so no
+web page can drive it. This is the bridge's rule, kept.
 
 ## Your Edge, or its own hive
 
@@ -69,8 +105,9 @@ publish from it to your domains, allow its key with the keys word.
 --browser <name>        msedge (default), chrome, or chromium, when it launches the browser
 --profile <folder>      default ~/.hive-profile, when it launches the browser
 --chrome <path>         a browser executable of your own
---settle <ms>           how long each sentence is listened to, default 900
+--settle <ms>           with --participant, how long each sentence is listened to, default 900
 --headless              no window
+--participant           speak as you, ungated, through command:submit
 ```
 
 ## Planting over HTTP
@@ -81,12 +118,16 @@ The living presentation's planting script says its sentences through this door:
 npm run living:plant -- --all --say --publish hypercomb.com
 ```
 
-It prints each sentence and what the hive said back. A URL after `--say`
-points it at another door.
+The whole planting is one call: the command line shows it as from
+`living-plant`, one Enter runs every sentence, and it prints each sentence's
+verdict. Esc declines it all. A URL after `--say` points it at another door.
 
 ## Related
 
 - [speak-dont-bridge.md](speak-dont-bridge.md): why every act is a sentence
 - [change-channel.md](change-channel.md): asking another machine's hive for a
   change, which its participant accepts
+- `hypercomb-core/src/external-call.types.ts`: the contract
+- `hypercomb-essentials/src/assistant/external-call.drone.ts`: the queue, the
+  run, and the record
 - `scripts/hive-harness.cjs`: the test harness that says words the same way
