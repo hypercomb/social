@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { standardName } from './lineage-key.js'
 import {
   BARE_WORD_POOL_MEANINGS, SCOPED_POOL_MEANINGS,
-  canonicalPoolMeaning, obsoletePoolSpellings, spellPoolMeaning,
+  funneledFrom, rememberFunnel, spellPoolMeaning,
 } from './pool-registry.js'
 
 describe('standardName', () => {
@@ -29,7 +29,7 @@ describe('spellPoolMeaning', () => {
   it('leaves every live pool meaning where it is', () => {
     for (const meaning of [...BARE_WORD_POOL_MEANINGS, ...SCOPED_POOL_MEANINGS]) {
       expect(spellPoolMeaning(meaning), meaning).toBe(meaning)
-      expect(canonicalPoolMeaning(meaning), meaning).toBe(meaning)
+      expect(spellPoolMeaning(spellPoolMeaning(meaning)), meaning).toBe(meaning)
     }
   })
 
@@ -46,12 +46,18 @@ describe('spellPoolMeaning', () => {
     expect(spellPoolMeaning(`Members:${sig}`)).toBe(`members:${sig}`)
   })
 
-  it('a rename ref answers with the current name and still names the obsolete spelling', () => {
-    expect(canonicalPoolMeaning('games:solomon:talk')).toBe('games:solomon-talk')
-    expect(canonicalPoolMeaning('games:solomon-talk')).toBe('games:solomon-talk')
-    expect(obsoletePoolSpellings('games:solomon-talk')).toContain('games:solomon:talk')
-    expect(obsoletePoolSpellings('games:solomon:talk')).toEqual(
-      obsoletePoolSpellings('games:solomon-talk'),
-    )
+  it('funnels an old spelling into the standard name, and a second pass stays there', () => {
+    expect(spellPoolMeaning('games:solomon:talk')).toBe('games:solomon-talk')
+    expect(spellPoolMeaning(spellPoolMeaning('games:solomon:talk'))).toBe('games:solomon-talk')
+    expect(funneledFrom('games:solomon-talk')).toEqual(['games:solomon:talk'])
+    expect(funneledFrom('games:solomon:talk')).toEqual(funneledFrom('games:solomon-talk'))
+    expect(funneledFrom('system:clipboard')).toEqual([])
+  })
+
+  it('a spelling that was never retired still funnels once it has been passed', () => {
+    expect(rememberFunnel('Hello, World!')).toBe('hello-world')
+    expect(rememberFunnel('hello-world')).toBe('hello-world')
+    expect(funneledFrom('hello-world')).toContain('Hello, World!')
+    expect(funneledFrom('Hello, World!')).toEqual(funneledFrom('hello-world'))
   })
 })

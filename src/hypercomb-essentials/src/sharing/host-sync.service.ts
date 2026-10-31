@@ -104,7 +104,7 @@
 // statement about that sig, not a bare 200 — so that answer skips the
 // read-back GET. Every other answer keeps the read-back.
 
-import { CHILD_SLOTS, EffectBus, SignatureService, registerPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, SignatureService, registerPoolMeaning, spellPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 import { isJoinedHere, ownZone } from './membership.js'
 import { foldContentLabel, HOST_DOMAIN_RE, isLoopbackHost, isPublishNode, legacyContentFace } from './zone-door.js'
@@ -3901,7 +3901,8 @@ export class HostSyncService extends EventTarget {
     const root = await this.#getOpfsRoot()
     if (!root) return null
     try {
-      return await root.getDirectoryHandle(await HostSyncService.#poolSignature(meaning), { create })
+      const name = spellPoolMeaning(meaning) || meaning
+      return await root.getDirectoryHandle(await HostSyncService.#poolSignature(name), { create })
     } catch { return null }
   }
 

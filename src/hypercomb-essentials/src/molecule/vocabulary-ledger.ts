@@ -26,7 +26,7 @@
 // one write per member, complete-or-absent, and a malformed member is skipped
 // rather than thrown on — one bad file must never blind the reader to the rest.
 
-import { declarePoolKind, get, registerPoolMeaning } from '@hypercomb/core'
+import { declarePoolKind, get, registerPoolMeaning, spellPoolMeaning } from '@hypercomb/core'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -82,7 +82,8 @@ export interface VocabularySeenRecord {
   seq: number
 }
 
-const poolAddress = (meaning: string): Promise<string> => registerPoolMeaning(meaning)
+const poolAddress = (meaning: string): Promise<string> =>
+  registerPoolMeaning(spellPoolMeaning(meaning) || meaning)
 
 const getPool = async (meaning: string, create: boolean): Promise<FileSystemDirectoryHandle | null> => {
   const store = get<{ opfsRoot?: FileSystemDirectoryHandle }>(STORE_KEY)

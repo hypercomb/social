@@ -762,54 +762,21 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
 ])
 
 /**
- * A RENAME LEAVES A REF.
+ * SPELLINGS THAT WERE ONCE WRITTEN AND ARE NO LONGER THE NAME.
  *
- * A pool's address is the hash of its spelling, so a new name is a new
- * directory. `from` is the obsolete connection: still seeded, so a root walk
- * never prunes it as a lineage bag, and still readable, so the bytes are not
- * stranded. `to` is the current name — the only directory writes open.
- * `poolSignature` hashes the spelling it is given (the ref has to stay
- * addressable). `getPool` / `openPool` resolve through `canonicalPoolMeaning`
- * first, and a read of `to` that misses falls through to each `from`.
+ * There is no rename table. `spellPoolMeaning` is the funnel: the old text
+ * and the standard text are one name, and spelling either one produces the
+ * standard text again. These stay seeded so a root walk still knows the old
+ * directory is a pool. Where the funnel sends it is `spellPoolMeaning(old)`,
+ * not a second column.
  *
- * The boot absorb copies members across. A colon-scoped `from` can give up
- * its directory once it is empty. A bare-word `from` is also a tile's lineage
- * bag, so its `000x` markers stay and the directory stays with them.
- *
- * A row stays while any replica may still hold `from`. Dropping it early
- * makes the old directory look like a lineage bag.
+ * A row stays while any replica may still hold that directory. Dropping it
+ * early makes the directory look like a lineage bag.
  */
-export const POOL_MENDS: readonly { readonly from: string; readonly to: string }[] = Object.freeze([
-  // Two colons (2026-09-20). A pool never contains a pool, so the tail is
-  // one hyphenated word. The old directory is the ref.
-  { from: 'games:solomon:talk', to: 'games:solomon-talk' },
+export const RETIRED_POOL_MEANINGS: readonly string[] = Object.freeze([
+  // Two colons (2026-09-20). Spelling it produces `games:solomon-talk`.
+  'games:solomon:talk',
 ])
-
-/** Obsolete spellings. Derived from `POOL_MENDS` — never a second list.
- *  Seeded, and not part of `SCOPED_POOL_MEANINGS`: history, not a live scope. */
-export const RETIRED_POOL_MEANINGS: readonly string[] = Object.freeze(
-  POOL_MENDS.map(mend => mend.from),
-)
-
-/** obsolete spelling → current name. Built once. */
-const MEND_TO = new Map<string, string>(POOL_MENDS.map(mend => [mend.from, mend.to]))
-
-/** Spellings seen this session that are not yet a durable row. A caller that
- *  still passes the old text keeps the old directory reachable until reboot;
- *  a rename that must survive reboot is a row in `POOL_MENDS`. */
-const learnedObsolete = new Map<string, Set<string>>()
-
-/** Follow refs to the current name. A cycle returns the spelling we started
- *  from — a loop must not walk a write onto itself forever. */
-export const mendTarget = (meaning: string): string => {
-  let current = String(meaning ?? '').trim()
-  const seen = new Set<string>()
-  while (MEND_TO.has(current) && !seen.has(current)) {
-    seen.add(current)
-    current = MEND_TO.get(current) ?? current
-  }
-  return seen.has(current) ? String(meaning ?? '').trim() : current
-}
 
 /** Every meaning known at build time. Retired spellings included: their
  *  directories are still pools until the ref is gone. */
@@ -833,11 +800,11 @@ const derive = async (meaning: string): Promise<string> => {
     new TextEncoder().encode(meaning).buffer as ArrayBuffer,
   )
   addressByMeaning.set(meaning, sig)
-  // An obsolete spelling announces the current name. The directory is still
-  // a pool — the ref — and the text a walker shows is the name it mends to.
-  const label = mendTarget(meaning)
-  const labeled = meaningByAddress.get(sig)
-  if (!labeled || labeled === meaning) meaningByAddress.set(sig, label)
+  // The label is the text that was hashed. The funnel runs before a call
+  // chooses a directory; it does not rename a directory that already exists.
+  // A colon pool must keep its colon here, or the document-space check treats
+  // it as a bare word and refuses to mark it.
+  meaningByAddress.set(sig, meaning)
   return sig
 }
 
@@ -912,8 +879,8 @@ const SIGNATURE_TAIL = /^[0-9a-f]{64}$/i
  * name. A user colon (`cigar:brand`) is punctuation too, so the name is
  * `cigar-brand`.
  *
- * Idempotent on every live seeded meaning. It does not hash and it does not
- * follow a rename ref — `canonicalPoolMeaning` does that.
+ * Idempotent. Spelling the result again changes nothing, and every live
+ * seeded meaning is already a fixed point.
  */
 export const spellPoolMeaning = (raw: unknown): string => {
   const text = String(raw ?? '').trim()
@@ -931,34 +898,34 @@ export const spellPoolMeaning = (raw: unknown): string => {
   return standardName(parts.join('-'))
 }
 
-/** The directory a call writes: the standard spelling, then any rename ref. */
-export const canonicalPoolMeaning = (meaning: string): string => {
-  const raw = String(meaning ?? '').trim()
-  if (!raw) return ''
-  return mendTarget(spellPoolMeaning(raw) || raw)
+/** Spellings passed this session that were not already standard. The retired
+ *  list survives a reboot. This map is how a caller who still has the old
+ *  text carries that directory into the spelled name without a rename table. */
+const passedThrough = new Map<string, Set<string>>()
+
+/** Spell `raw` and, when the text was not already that spelling, remember
+ *  it as a previous mouth of the same pool. Returns the spelled name. */
+export const rememberFunnel = (raw: unknown): string => {
+  const text = String(raw ?? '').trim()
+  const name = spellPoolMeaning(text)
+  if (name && text && text !== name) {
+    let set = passedThrough.get(name)
+    if (!set) { set = new Set(); passedThrough.set(name, set) }
+    set.add(text)
+  }
+  return name
 }
 
-/** Remember an obsolete spelling for the rest of this session. A reboot only
- *  remembers rows in `POOL_MENDS`. */
-export const noteObsoleteSpelling = (canonical: string, raw: string): void => {
-  const name = mendTarget(canonical)
-  const from = String(raw ?? '').trim()
-  if (!name || !from || from === name) return
-  let set = learnedObsolete.get(name)
-  if (!set) { set = new Set(); learnedObsolete.set(name, set) }
-  set.add(from)
-}
-
-/** Obsolete spellings whose bytes still belong to `meaning`. Durable rows
- *  plus anything `noteObsoleteSpelling` saw this session. */
-export const obsoletePoolSpellings = (meaning: string): readonly string[] => {
-  const name = canonicalPoolMeaning(meaning)
+/** Every earlier spelling that normalizes to `meaning`: the retired list,
+ *  plus anything `rememberFunnel` saw this session. */
+export const funneledFrom = (meaning: string): readonly string[] => {
+  const name = spellPoolMeaning(meaning)
   if (!name) return []
   const found = new Set<string>()
-  for (const mend of POOL_MENDS) {
-    if (mendTarget(mend.to) === name) found.add(mend.from)
+  for (const old of RETIRED_POOL_MEANINGS) {
+    if (old !== name && spellPoolMeaning(old) === name) found.add(old)
   }
-  for (const extra of learnedObsolete.get(name) ?? []) found.add(extra)
+  for (const extra of passedThrough.get(name) ?? []) found.add(extra)
   found.delete(name)
   return [...found]
 }

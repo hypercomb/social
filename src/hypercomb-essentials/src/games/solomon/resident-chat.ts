@@ -52,10 +52,9 @@ const dispatch = (): Promise<LlmDispatch> => (dispatchPromise ??= import('../../
 
 export const RESIDENT_TALK_POOL = 'games:solomon-talk'
 
-/** Where these conversations lived until 2026-09-20, when the meaning was
- *  respelled to one colon. The ref lives in `POOL_MENDS` (`games:solomon:talk`
- *  → `games:solomon-talk`): the store reads it and copies it forward. This
- *  constant stays so a store that does not mend still opens the old
+/** Where these conversations lived until 2026-09-20. Spelling this text
+ *  produces `games:solomon-talk`, so the store treats the two as one pool.
+ *  This constant stays so a store that does not spell still opens the old
  *  directory. NEVER written. */
 export const RETIRED_RESIDENT_TALK_POOL = 'games:solomon:talk'
 

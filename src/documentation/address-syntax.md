@@ -55,10 +55,11 @@ are one name. Digits stay, because `chapter-1` and `chapter-2` are different
 names. `spellPoolMeaning` applies that to a pool meaning and keeps at most
 one system colon (`games:solomon-talk`).
 
-A rename does not rewrite the old directory in place. The old spelling is a
-ref (`POOL_MENDS` in `pool-registry.ts`): still a real address, still seeded
-so a root walk does not prune it, and read when the current directory misses.
-Writes open the current name only. The boot absorb copies the members across.
+The function is the whole funnel. Spelling a name, and spelling that result,
+produce the same text, so `games:solomon:talk` and `games:solomon-talk` are
+one pool. Writes open that directory. A retired spelling that normalizes to
+it is still seeded, so a root walk does not prune the old directory, and a
+read of the standard directory still sees what was written there.
 
 **3. After a colon: a reserved system word, or a 64-hex signature. Never a user
 word.** This is what keeps the two namespaces apart.

@@ -73,8 +73,8 @@ export const canonicalizeLineageSegment = (raw: unknown): string =>
  *
  * This is NOT the lineage preimage. `canonicalizeLineageSegment` keeps case
  * because history bags and swarm channels already hash that string. Folding
- * case there would move every bag. A pool meaning's words pass through here;
- * a rename leaves the old spelling as a ref (`POOL_MENDS`).
+ * case there would move every bag. A pool meaning's words pass through here,
+ * and spelling the result again is the same name.
  *
  * Idempotent — spelling an already-standard name changes nothing.
  */
