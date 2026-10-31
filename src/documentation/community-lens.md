@@ -80,6 +80,66 @@ Order: prove route 1 with `readLens` against one real host, then decide route 2
 once the host-write question is answered. Route 2 is a protocol change and
 belongs to its own design note before any code.
 
+## Portals: fixed groups of domains (jwize, 2026-10-31)
+
+"Portals become variations where we join many public domains to create a fixed
+group. We should create the domain groups ahead of time, so we can look at
+portals through filtered lenses when we are working together."
+
+Built as `community-portal.ts` (`defineDomainGroup`, `readPortal`):
+
+- **The group is made ahead of time and is fixed.** Hosts are folded (scheme and
+  trailing slash dropped, lowercased), deduplicated, sorted and frozen, so the
+  same domains are the same group however they were typed. A nameless group or
+  one with no domain is refused.
+- **Identity is the group signature** (`group:portal:<name>`, the existing
+  group-signature primitive). Renaming a portal is a different group over the
+  same domains.
+- **A variation is a filtered read through the group.** Filters: `only` /
+  `except` (a subset of the group's own hosts; a host outside the group is never
+  asked, whatever the filter names), `verifiedOnly`, `minWords`. They narrow what
+  is shown and report how many points they held back (`hidden`). They never
+  change the group.
+- **Where a portal is kept is not decided here.** Defining one stores nothing.
+  The expected home is a layer in the hive, so undo is native; that is a
+  separate act and not built.
+
+### The checking, run against variations (2026-10-31)
+
+`community-lens.demo.spec.ts` starts nine real local HTTP servers named as
+subdomains (`honest.localhost:<port>` and so on). Node cannot resolve
+`*.localhost` on this machine, so the spec maps the name to loopback and keeps
+the port; the lens code sees only the subdomain names. Each host serves a
+ledger and, where it has one, a REAL kind-30564 index signed with a throwaway
+key, so the shipped `fetchHiveIndex` check is what runs.
+
+| host | what it does | what the lens concludes |
+|---|---|---|
+| honest | ledger and signed index agree | every row verified |
+| noindex | ledger only | rows kept, unverified |
+| liar | ledger names a head the index does not | that row unverified |
+| invented | ledger has a row the index lacks | only that row unverified |
+| forged | index content altered after signing | nothing verified |
+| impostor | index signed by another key | nothing verified |
+| spa | app page for every path | gap |
+| silent | never answers | gap (timeout) |
+| quiet | ledger omits a row the index holds | row not seen (named limit) |
+
+Read through one portal of all nine, the words `music` + `jazz` gave 4 points;
+`verifiedOnly` kept 2 (holding back 2), requiring both words as well kept 1,
+leaving out `honest` asked 8 hosts, and `only` `honest` returned its 2 points.
+These are local hosts, not the live network.
+
+**Named limit:** a lens can mark a row the host shows as unbacked, but it cannot
+see a row the host leaves out. Omission is only caught by asking a second host.
+
+### Keeping in step with the tile-data-loss swarm
+
+Another swarm is working on tile data loss. This work is read-only and does not
+touch `commitLayer`, history, the store or OPFS. Every checkpoint in this note
+carries that reminder, and each session that continues it should pass the
+reminder to the next.
+
 ## The idea
 
 A **community** (a named group of domains, `community:hosts` plus a name) is
