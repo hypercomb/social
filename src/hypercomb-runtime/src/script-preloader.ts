@@ -8,6 +8,8 @@ import { Store } from './store'
 import { installedPackageSig } from './installed-package.js'
 import { arrivalNames, beeClassesOfDocs, guardArrival, quietFeatureNames, resolveArrival, type BeeClass } from './arrival-plan.js'
 import { hiveArrival, selectedHive } from './hive.js'
+import { cutHive, mintHive, saveHive, validateHive, type HiveProblem } from './hive-author.js'
+import { exportSurfaceSignature, liveCoreExports } from './core-surface.js'
 import { activeInstallIndex } from './install-index.js'
 import {
   learnedCriticalBeeSigs,
@@ -226,6 +228,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         if (quiet.size) walked = { ...walked, bees: walked.bees.filter(sig => !quiet.has(sig)) }
       }
       const walkMs = performance.now() - tWalk
+      this.#package = { classes: walked.classes, bees: new Set(walked.bees) }
 
       // Cache warming, AT IDLE AND IN SMALL BATCHES.
       //
@@ -538,6 +541,40 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   #arrivalCritical: readonly string[] = ScriptPreloader.#EMPTY_SIGS
   /** A hive's tier 1: loaded in idle batches after the arrival is up. */
   #idleHive: Set<string> = new Set()
+  /** What the last walk found: the class index and the package's bees — what a
+   *  hive is cut and checked against. Null before the first walk. */
+  #package: { classes: ReadonlyMap<string, BeeClass>; bees: ReadonlySet<string> } | null = null
+
+  /** CUT A HIVE FROM THIS SESSION (hive-author.ts): the bees that ran become the
+   *  faces, the hive is checked against the package, minted under its own
+   *  signature and kept in the store. Nothing is published. The word `hive`
+   *  asks for this over IoC; a module never imports the runtime. */
+  authorHive = async (options: { name: string; depth?: 0 | 1 | 2 }): Promise<
+    | { ok: true; sig: string; faces: string[]; notes: HiveProblem[] }
+    | { ok: false; error: string; problems?: HiveProblem[] }
+  > => {
+    const walked = this.#package
+    if (!walked) return { ok: false, error: 'No package has been walked yet.' }
+    const packageSig = installedPackageSig()
+    if (!packageSig) return { ok: false, error: 'No installed package here (a dev shell imports modules directly).' }
+    const live = await liveCoreExports()
+    if (!live) return { ok: false, error: 'The core surface cannot be read here.' }
+    const draft = cutHive({
+      observed: this.#beeCache.keys(),
+      classes: walked.classes,
+      packageBees: walked.bees,
+      name: options.name,
+      package: packageSig,
+      core: await exportSurfaceSignature([...live]),
+      depth: options.depth,
+    })
+    const minted = await mintHive(draft, walked.classes, walked.bees)
+    if (!minted) return { ok: false, error: 'The hive does not hold up against the package.', problems: validateHive(draft, walked.classes, walked.bees) }
+    try { await saveHive(this.store, minted) } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+    return { ok: true, sig: minted.sig, faces: [...draft.arrival], notes: minted.problems }
+  }
 
   static readonly #IDLE_HIVE_BATCH = 3
 
