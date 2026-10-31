@@ -19,6 +19,7 @@ import {
   parseBehaviourCall, behaviourCallCursor, BehaviourCallError,
   type BehaviourCall, type CallValue,
   REMOTE_SUBMIT,
+  EXTERNAL_ASK, EXTERNAL_ANSWER, type ExternalAsk, type ExternalAnswer,
   type RemoteSubmitRequest, type RemoteSubmitOutcome, type RemoteSubmitAction,
   admitMachineCall, spokenEntry, currentMachineGrant, type AdmissionEntry,
   isReservedPoolWord, CANONICAL_REFERENCE_SERVICE_KEY,
@@ -1564,6 +1565,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public readonly suggestions = computed<readonly string[]>(() => {
+    if (this.#external()) return []
     if (this.shell?.suppressed()) return []
 
     // A pending utterance choice OWNS the dropdown: the claimants of an
@@ -2288,6 +2290,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // behaviour. Everything else falls through, where canonical slash grammar
     // still works and unmatched prose is simply refused — EXCEPT a destructive
     // verb, which is refused in either form, before the fork.
+    // ── external stance ($) ─────────────────────────────────────────────
+    // Lines sent from outside (an agent over the say door) wait for the
+    // participant here. The module that holds them (essentials
+    // external-call.drone.ts) puts the one at the head of its queue on this
+    // line, marked with `$` and who sent it; Enter runs it, Escape declines
+    // it, and nothing else the participant types reaches it. Replayed on
+    // mount, so a call that arrived before the line was drawn still shows.
+    this.#externalUnsub = EffectBus.on<ExternalAsk | null>(EXTERNAL_ASK, ask => {
+      this.#showExternal(ask && typeof ask.id === 'string' ? ask : null)
+    })
+
     this.#remoteSubmitUnsub = EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {
       accept?.()
       // ALWAYS SETTLE, EXACTLY ONCE. A caller that is never answered hangs,
@@ -2698,6 +2711,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #voiceSubmitUnsub?: () => void
   #commandSubmitUnsub?: () => void
   #remoteSubmitUnsub?: () => void
+  #externalUnsub?: () => void
   #historyForgetUnsub?: () => void
   // Location segments (bracket stripped) at the last navigate event.
   #lastNavKey = ''
@@ -2814,6 +2828,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#voiceSubmitUnsub?.()
     this.#commandSubmitUnsub?.()
     this.#remoteSubmitUnsub?.()
+    this.#externalUnsub?.()
     this.#historyForgetUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#pushToTalkUnsub?.()
@@ -2893,7 +2908,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** The sigil the prompt slot wears: the line's own register when it
    *  literally carries one (a recalled '/x' line), else the standing stance. */
-  public readonly stanceSigil = computed<'chevron' | 'slash' | 'question'>(() => {
+  public readonly stanceSigil = computed<'chevron' | 'slash' | 'question' | 'dollar'>(() => {
+    // A call from outside outranks every standing stance while it waits.
+    if (this.#external()) return 'dollar'
     // The stance wears the sigil of the register it stands for, exactly as
     // command stance wears the slash: '?' has always been the filter's own
     // character, so find stance is just that register standing up.
@@ -2908,9 +2925,49 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    *  clicks from any other. The line's text survives every flip; only its
    *  meaning changes. */
   public onStanceToggle = (): void => {
+    if (this.#external()) return
     const next: Record<Stance, Stance> = { tiles: 'command', command: 'find', find: 'tiles' }
     this.#setStance(next[this.#stance()])
     this.shell?.focus()
+  }
+
+  // ── external stance: a call from outside, waiting for an answer ─────────
+
+  /** The call on the line, or null. Never persisted and never in the ring:
+   *  the stance exists only while something from outside waits. */
+  readonly #external = signal<ExternalAsk | null>(null)
+  /** What the participant had on the line when a call took it over, given
+   *  back when nothing waits any more. */
+  #heldLine: string | null = null
+
+  #externalLine(ask: ExternalAsk): string {
+    const t = this.#i18n
+    const lines = ask.lines.join(' · ')
+    const head = t?.t('command-line.external.ask', { from: ask.from, lines })
+      ?? `${ask.from}: ${lines}  (Enter runs, Esc declines)`
+    return ask.waiting > 0
+      ? `${head} ${t?.t('command-line.external.more', { count: ask.waiting }) ?? `+${ask.waiting} waiting`}`
+      : head
+  }
+
+  #showExternal(ask: ExternalAsk | null): void {
+    const before = this.#external()
+    if (!ask && !before) return
+    if (ask && !before) this.#heldLine = this.value()
+    this.#external.set(ask)
+    if (ask) {
+      this.#setShellValue(this.#externalLine(ask), true)
+      return
+    }
+    const held = this.#heldLine ?? ''
+    this.#heldLine = null
+    this.#setShellValue(held, false)
+  }
+
+  #answerExternal(decision: ExternalAnswer['decision']): void {
+    const ask = this.#external()
+    if (!ask) return
+    EffectBus.emitTransient<ExternalAnswer>(EXTERNAL_ANSWER, { id: ask.id, decision })
   }
 
   // ── find stance: the hive answers a question ────────────────────────────
@@ -3282,6 +3339,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   public onShellValueChange = (v: string): void => {
+    // A call from outside is answered, never edited: the line keeps showing it.
+    const external = this.#external()
+    if (external) {
+      this.shell?.setValue(this.#externalLine(external))
+      return
+    }
     // Stance sigils come first — they are switches, not text. Capture modes
     // own their line outright: nothing here runs while one is active.
     if (this.#captureMode()) {
@@ -3402,6 +3465,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** Bridge: shell forwarded a keydown it didn't consume (not Escape/Up/Down/Tab/Enter). */
   public onShellKeydown = (e: KeyboardEvent): void => {
+    // While a call from outside waits, Escape declines it and nothing else
+    // the line knows how to do runs (Enter, which runs it, is a commit).
+    if (this.#external()) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        this.#answerExternal('decline')
+      }
+      return
+    }
     const v = this.value()
 
     // Ctrl+Space — SHOW ME WHAT THERE IS. The one deliberate way past the
@@ -3603,6 +3675,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * the line and never sends.
    */
   public onShellCommit = (v: string): void => {
+    if (this.#external()) {
+      this.#answerExternal('run')
+      return
+    }
     const capture = this.#captureMode()
     if (capture) {
       this.#commitCapture(capture, v)
@@ -5333,6 +5409,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    *  icon carries that slash, so it comes off before the line is shown. */
   #setShellValue(v: string, suppress: boolean): void {
     if (!this.shell) return
+    // While a call from outside waits, the line is the call's. Anything else
+    // that would write it (a view handover, a prefill, voice) is kept for the
+    // participant and given back when the call is answered.
+    const external = this.#external()
+    if (external) {
+      const shown = this.#externalLine(external)
+      if (v !== shown) { this.#heldLine = v; v = shown }
+      suppress = true
+    }
     // A programmatic line replacement dissolves any pending utterance choice —
     // the question was about text that is no longer there (typed edits clear
     // it in onShellValueChange; this covers recall, peel, and completions).
@@ -5398,6 +5483,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.navigation.replaceRaw(this.#selectOriginalSegments)
       this.#selectOriginalSegments = null
     }
+    // A call from outside is still waiting: the line goes on showing it.
+    const external = this.#external()
+    if (external) this.#setShellValue(this.#externalLine(external), true)
   }
 
   private readonly requestSynchronize = (): void => {
