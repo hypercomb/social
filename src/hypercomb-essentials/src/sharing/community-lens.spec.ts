@@ -9,7 +9,7 @@
 //   6. words are capped, deduplicated by address, and an empty word is dropped.
 
 import { describe, expect, it } from 'vitest'
-import { LENS_MAX_WORDS, listingMembers, readLens, type LensDeps } from './community-lens.js'
+import { LENS_MAX_WORDS, ledgerRows, listingMembers, readLedgerLens, readLens, type LedgerDeps, type LensDeps } from './community-lens.js'
 
 const SIG = (seed: string): string => seed.repeat(64).slice(0, 64)
 
@@ -94,5 +94,63 @@ describe('readLens', () => {
   it('returns nothing for no hosts', async () => {
     const result = await readLens({ hosts: [], words: ['jazz'], deps: fake({}) })
     expect(result).toEqual({ points: [], answers: [] })
+  })
+})
+
+const ledger = (hosts: Record<string, unknown>, seen: string[] = []): LedgerDeps => ({
+  ledger: async url => {
+    seen.push(url)
+    const host = /^https?:\/\/([^/]+)\//.exec(url)?.[1] ?? ''
+    if (!(host in hosts)) throw new Error('down')
+    return hosts[host]
+  },
+})
+
+const site = (lineage: string, ...heads: (string | null)[]) => ({
+  host: 'x.example', lineage, publishers: heads.map(head => ({ pubkey: SIG('f'), head })),
+})
+
+describe('ledgerRows', () => {
+  it('keeps rows with a signature head and skips the rest', () => {
+    expect(ledgerRows({ sites: [site('a/b', SIG('1'), null, 'nope'), { lineage: '', publishers: [] }, 7] }))
+      .toEqual([{ lineage: 'a/b', head: SIG('1') }])
+  })
+  it('is empty for anything that is not a ledger', () => {
+    expect(ledgerRows(null)).toEqual([])
+    expect(ledgerRows({ sites: 'x' })).toEqual([])
+  })
+})
+
+describe('readLedgerLens', () => {
+  it('matches a word against any segment of a published path', async () => {
+    const result = await readLedgerLens({
+      hosts: ['one.example'],
+      words: ['Music', 'jazz'],
+      deps: ledger({ 'one.example': { sites: [site('music/jazz', SIG('1')), site('music', SIG('2')), site('other', SIG('3'))] } }),
+    })
+    expect(result.points.map(p => p.sig)).toEqual([SIG('1'), SIG('2')])
+    expect(result.points[0]).toEqual({ sig: SIG('1'), words: ['Music', 'jazz'], origins: ['one.example'], paths: ['music/jazz'] })
+  })
+
+  it('merges one head carried by two hosts into one point', async () => {
+    const body = { sites: [site('jazz', SIG('1'))] }
+    const result = await readLedgerLens({ hosts: ['a.example', 'b.example'], words: ['jazz'], deps: ledger({ 'a.example': body, 'b.example': body }) })
+    expect(result.points).toEqual([{ sig: SIG('1'), words: ['jazz'], origins: ['a.example', 'b.example'], paths: ['jazz'] }])
+  })
+
+  it('treats a down host and a non-ledger answer as gaps', async () => {
+    const result = await readLedgerLens({
+      hosts: ['up.example', 'down.example', 'page.example'],
+      words: ['jazz'],
+      deps: ledger({ 'up.example': { sites: [site('jazz', SIG('1'))] }, 'page.example': null }),
+    })
+    expect(result.answers.map(a => `${a.host}:${a.status}`)).toEqual(['down.example:gap', 'page.example:gap', 'up.example:listed'])
+    expect(result.points).toHaveLength(1)
+  })
+
+  it('asks only for /publications.json and drops empty or repeated words', async () => {
+    const seen: string[] = []
+    await readLedgerLens({ hosts: ['one.example'], words: ['jazz', 'Jazz', '  '], deps: ledger({ 'one.example': { sites: [] } }, seen) })
+    expect(seen).toEqual(['https://one.example/publications.json'])
   })
 })

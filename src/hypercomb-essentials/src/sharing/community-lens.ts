@@ -18,7 +18,7 @@
 // Entries that are not signatures (the `0000` markers of a lineage bag, an
 // `index.html`) are not members and are left out.
 
-import { moleculeAddress } from '@hypercomb/core'
+import { moleculeAddress, moleculeKey } from '@hypercomb/core'
 import { isLoopbackHost } from './zone-door.js'
 
 /** Words asked per gesture: N words x M hosts is N x M listings. */
@@ -35,6 +35,9 @@ export interface LensPoint {
   readonly words: readonly string[]
   /** The hosts that listed it under any of those words. */
   readonly origins: readonly string[]
+  /** The published paths whose segments named those words (the ledger read
+   *  only; a molecule listing carries no path). */
+  readonly paths?: readonly string[]
 }
 
 /** What one host said about one word. */
@@ -102,7 +105,7 @@ export const readLens = async (options: LensOptions): Promise<LensResult> => {
   }
 
   const answers: LensAnswer[] = []
-  const found = new Map<string, { words: Set<string>; origins: Set<string> }>()
+  const found: Found = new Map()
 
   await Promise.all(hosts.flatMap(host => [...asked].map(async ([address, word]) => {
     const controller = new AbortController()
@@ -113,19 +116,122 @@ export const readLens = async (options: LensOptions): Promise<LensResult> => {
     finally { clearTimeout(timer) }
 
     answers.push({ host, word, status: members === null ? 'gap' : 'listed' })
-    for (const sig of members ?? []) {
-      const point = found.get(sig) ?? { words: new Set<string>(), origins: new Set<string>() }
-      point.words.add(word)
-      point.origins.add(host)
-      found.set(sig, point)
-    }
+    for (const sig of members ?? []) gather(found, sig, word, host)
   })))
 
-  const points = [...found].map(([sig, point]): LensPoint => ({
-    sig, words: [...point.words].sort(), origins: [...point.origins].sort(),
-  })).sort((a, b) =>
-    b.words.length - a.words.length || b.origins.length - a.origins.length || (a.sig < b.sig ? -1 : 1))
+  answers.sort(byAnswer)
+  return { points: pointsOf(found), answers }
+}
 
-  answers.sort((a, b) => (a.host < b.host ? -1 : a.host > b.host ? 1 : a.word < b.word ? -1 : a.word > b.word ? 1 : 0))
-  return { points, answers }
+type Found = Map<string, { words: Set<string>; origins: Set<string>; paths: Set<string> }>
+
+const byAnswer = (a: LensAnswer, b: LensAnswer): number =>
+  a.host < b.host ? -1 : a.host > b.host ? 1 : a.word < b.word ? -1 : a.word > b.word ? 1 : 0
+
+const gather = (found: Found, sig: string, word: string, origin: string, path?: string): void => {
+  const point = found.get(sig) ?? { words: new Set<string>(), origins: new Set<string>(), paths: new Set<string>() }
+  point.words.add(word)
+  point.origins.add(origin)
+  if (path) point.paths.add(path)
+  found.set(sig, point)
+}
+
+const pointsOf = (found: Found): LensPoint[] => [...found].map(([sig, point]): LensPoint => ({
+  sig,
+  words: [...point.words].sort(),
+  origins: [...point.origins].sort(),
+  ...(point.paths.size ? { paths: [...point.paths].sort() } : {}),
+})).sort((a, b) =>
+  b.words.length - a.words.length || b.origins.length - a.origins.length || (a.sig < b.sig ? -1 : 1))
+
+// ── ROUTE 1: the ledger a host already serves ─────────────────────────────
+//
+// Until a host lists a word at `sign(word)/` (the molecule write path does not
+// exist yet), what it DOES publish is its ledger, `GET /publications.json`:
+// each site's lineage path and each publisher's current head. A word matches a
+// site when it names any SEGMENT of that path, so `music/jazz` answers both
+// `music` and `jazz`. The head is the signature the point stands for.
+//
+// The ledger is the HOST'S assertion, not a signed record: a host can omit or
+// invent a row. The head itself is content-addressed, so a reader who fetches
+// it can check the bytes against it; the signed hive index is the stronger
+// check and is left to a later step.
+
+export interface LedgerDeps {
+  /** The parsed ledger body, or null for anything that is not one. */
+  ledger(url: string, signal: AbortSignal): Promise<unknown | null>
+}
+
+export const liveLedgerDeps: LedgerDeps = {
+  ledger: async (url, signal) => {
+    try {
+      const response = await fetch(url, { cache: 'no-store', signal })
+      if (!response.ok || (response.headers.get('content-type') ?? '').includes('text/html')) return null
+      const text = await response.text()
+      return text.length > 1_000_000 ? null : JSON.parse(text)
+    } catch { return null }
+  },
+}
+
+export interface LedgerRow { readonly lineage: string; readonly head: string }
+
+/** The (lineage, head) pairs a ledger body carries; anything malformed is skipped. */
+export const ledgerRows = (raw: unknown): LedgerRow[] => {
+  const sites = (raw as { sites?: unknown } | null)?.sites
+  if (!Array.isArray(sites)) return []
+  const rows: LedgerRow[] = []
+  for (const site of sites) {
+    const lineage = typeof site?.lineage === 'string' ? site.lineage.trim() : ''
+    if (!lineage || !Array.isArray(site?.publishers)) continue
+    for (const publisher of site.publishers) {
+      const head = typeof publisher?.head === 'string' ? publisher.head.trim().toLowerCase() : ''
+      if (SIG_RE.test(head)) rows.push({ lineage, head })
+    }
+  }
+  return rows
+}
+
+export interface LedgerLensOptions {
+  readonly hosts: readonly string[]
+  readonly words: readonly string[]
+  readonly deps?: LedgerDeps
+  readonly timeoutMs?: number
+}
+
+/** Read each host's ledger and match the words against the segments of every
+ *  published path. Never throws for a host. */
+export const readLedgerLens = async (options: LedgerLensOptions): Promise<LensResult> => {
+  const deps = options.deps ?? liveLedgerDeps
+  const timeoutMs = options.timeoutMs ?? LENS_TIMEOUT_MS
+  const hosts = [...new Set(options.hosts.map(host => host.trim().toLowerCase()).filter(Boolean))]
+
+  const asked = new Map<string, string>()
+  for (const word of options.words) {
+    const key = moleculeKey(word)
+    if (key && !asked.has(key) && asked.size < LENS_MAX_WORDS) asked.set(key, word)
+  }
+
+  const answers: LensAnswer[] = []
+  const found: Found = new Map()
+
+  await Promise.all(hosts.map(async host => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    let body: unknown | null = null
+    try { body = await deps.ledger(`${lensOrigin(host)}/publications.json`, controller.signal) }
+    catch { body = null }
+    finally { clearTimeout(timer) }
+
+    const rows = body === null ? null : ledgerRows(body)
+    for (const word of asked.values()) answers.push({ host, word, status: rows === null ? 'gap' : 'listed' })
+    for (const row of rows ?? []) {
+      for (const segment of row.lineage.split('/')) {
+        const word = asked.get(moleculeKey(segment))
+        if (word) gather(found, row.head, word, host, row.lineage)
+      }
+    }
+  }))
+
+  answers.sort(byAnswer)
+  return { points: pointsOf(found), answers }
 }

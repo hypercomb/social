@@ -41,12 +41,19 @@ and the signed hive index (`lineageKey -> head`, one replaceable record per
 publisher). A host therefore knows a published branch by its lineage key, not
 by a word. Two routes get a word to a listing; they can be built in order.
 
-1. **Read the index the host already holds (no new write path).** The lens
-   asks each community host for the publisher index and matches words against
-   the keys. Cost: `lineageKey` folds punctuation and is a whole path, so only
-   a word that is a tile's full top-level name matches. A word deeper in a path
-   (`/music/jazz`) does not. Good enough to prove the lens live and to make the
-   triangulate gesture work on top-level tiles; it is not the final shape.
+1. **Read the ledger the host already serves (no new write path). BUILT
+   2026-10-31** as `readLedgerLens` in `community-lens.ts`. A host's
+   `GET /publications.json` lists each site's lineage path and each
+   publisher's current head. A word matches a site when it names ANY SEGMENT of
+   that path (`music/jazz` answers both `music` and `jazz`), folded the way
+   molecule names fold. Tried live on `hypercomb.com`, `realones.online` and
+   `revolucionstyle.com`: `revolucion` + `meetup` returned the head of
+   `revolucion/meetup` as a point carrying both words and both hosts that
+   publish it; `revolucionstyle.com` (no ledger) is a gap. Limits: the ledger
+   is the host's own assertion, not a signed record, so a host can omit or
+   invent a row. The signed hive index (`fetchHiveIndex`, verified against the
+   publisher's key) is the stronger check and is the next step for this route.
+   It only finds what a host has published as a site, not every tile.
 2. **Enrol each published name in its word's pool (the real shape).** At
    publish, for every segment of a branch, add the branch's head signature as a
    member of the pool at `sign(word)`, so a host lists it at `sign(word)/`. This
