@@ -6,9 +6,9 @@ For slash commands (`/help`, `/docs`, `/chat`, etc.), see [slash-behaviour-refer
 
 ---
 
-## Stances — three modes, three characters
+## Stances — four modes, four characters
 
-The line stands in one of three stances, and the prompt icon wears the sigil of
+The line stands in one of four stances, and the prompt icon wears the sigil of
 the one it is in. **You enter a stance by typing what it means, from wherever
 you are — the character never lands in the line, because the icon is already
 wearing it.**
@@ -18,11 +18,16 @@ wearing it.**
 | `chevron_right` | **tiles** | a name — Enter creates, Shift+Enter navigates |
 | `/` | **command** | a command — typed bare (`tree`), the icon is the slash |
 | `?` | **find** | a question — the hive answers, nothing is changed |
+| `$` | **external** | a call from outside, waiting — Enter runs it, Esc declines |
 
 Typing `/` stands the command register up, `?` stands find up, and `>` walks
 back out to tiles. The stance is sticky across lines and sessions (a
 participant preference, never hive truth), and clicking the prompt glyph walks
 the same ring: tiles → command → find → tiles.
+
+The fourth stance is not in the ring and nothing you type enters it: it stands
+up on its own when a call arrives from outside, and steps down when it is
+answered (see below).
 
 ### Find stance — the term, and its reach
 
@@ -42,6 +47,29 @@ The older per-line filter register (`?keyword`, `>?keyword`) still parses — it
 is what the tutorial text spells, and what the "filter" pathway option writes
 back — but a typed `?` now stands find up instead, which is the same register
 standing rather than borrowed for one line.
+
+### External stance — a call from outside, answered here
+
+An agent, a script or another machine can ask the hive to say lines (through
+the say door, [hive-say.md](hive-say.md)). Such a line is **marked as external
+before it runs**: the line takes the `$` sigil and shows who sent it and the
+lines, as `claude-code: /go presentation · /create word  (Enter runs, Esc
+declines)`, and a toast says a call is waiting in case a window covers the
+line. Nothing runs until you answer:
+
+- **Enter** opens a new conversation on the layer you stand in, with the
+  request as its first turn, and says each line through the machine door,
+  checked against your grants (`grant`) exactly as any machine's line is. Each
+  line's verdict (ran, refused, ambiguous or unknown) is written into the
+  conversation as it happens, and the caller hears the same verdicts.
+- **Esc** declines. Nothing is said; the request and the decline are written
+  into a new conversation on this layer, which stays closed.
+
+While a call waits the line is the call's: typing does not change it, and
+anything that would write the line is kept and given back when the call is
+answered. Further calls queue behind it (`+1 waiting`), and the stance you
+were in returns when none is left. The chat stays a conversation: it records
+the run, it is not the gate.
 
 ---
 
