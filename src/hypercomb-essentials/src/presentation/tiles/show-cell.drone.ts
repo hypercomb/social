@@ -5970,6 +5970,20 @@ export class ShowCellDrone extends Drone {
       this.#viewModeSource = viewMode
     }
 
+    // A COVER THAT IS NOT A VIEW MODE. The chat window (and anything else that
+    // only claims the owner-counted `view:active`) hides the canvas without
+    // ever changing ViewMode, so the return above never hears it: close the
+    // chat deep in a layer and the field could stay empty. The aggregate going
+    // false is the same "back on the hexagons" — same repair, only once
+    // something has painted (a boot replay has nothing to repair) and only
+    // while the hexagons are the surface.
+    this.onEffect<{ active?: boolean }>('view:active', payload => {
+      if (payload?.active !== false || !this.renderedLocationKey) return
+      const vm = get<{ is?(name: string): boolean }>('@hypercomb.social/ViewMode')
+      if (vm?.is && !vm.is(HEXAGONS_SURFACE)) return
+      this.#onViewModeChange(new CustomEvent('change', { detail: { mode: HEXAGONS_SURFACE } }))
+    })
+
     // Initial-load kick. When the page boots at a non-root URL (e.g.
     // /dolphin), the Lineage has already settled to that path before
     // ensureListeners runs, so the 'change' event we just hooked never
