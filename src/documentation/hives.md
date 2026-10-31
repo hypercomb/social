@@ -1,6 +1,11 @@
 # hives: an entrance decides which beehaviors are available
 
-> **status: design — not built (2026-10-30).** Written from a read of the
+> **status: phases 1–4 built as libraries (2026-10-31); no word, no depth
+> setting, no swarm listing, never run in a browser.** Resolver `hive.ts`,
+> loader filter + idle tier in `script-preloader.ts`, entrance hand-off
+> `?hive=` in `hypercomb-web/src/setup/hive-entrance.ts`, authoring
+> (`cutHive` / `validateHive` / `mintHive` / `saveHive`) in `hive-author.ts`.
+> Written (2026-10-30) from a read of the
 > loader (`hypercomb-runtime/src/script-preloader.ts`, `arrival-plan.ts`,
 > `acquire.ts`) and the install port (`hypercomb-core/src/install.types.ts`).
 > Nothing here ships yet. jwize's premise: enter through different hive
