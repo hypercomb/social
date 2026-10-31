@@ -18,7 +18,7 @@
 // Entries that are not signatures (the `0000` markers of a lineage bag, an
 // `index.html`) are not members and are left out.
 
-import { moleculeAddress, moleculeKey } from '@hypercomb/core'
+import { lineageKey, moleculeAddress, moleculeKey } from '@hypercomb/core'
 import { isLoopbackHost } from './zone-door.js'
 
 /** Words asked per gesture: N words x M hosts is N x M listings. */
@@ -38,6 +38,10 @@ export interface LensPoint {
   /** The published paths whose segments named those words (the ledger read
    *  only; a molecule listing carries no path). */
   readonly paths?: readonly string[]
+  /** Set only when the read was asked to verify: true when a publisher's SIGNED
+   *  index names this head at that path on at least one host; false when no
+   *  signed index backed it. Absent when verification was not asked for. */
+  readonly verified?: boolean
 }
 
 /** What one host said about one word. */
@@ -123,13 +127,14 @@ export const readLens = async (options: LensOptions): Promise<LensResult> => {
   return { points: pointsOf(found), answers }
 }
 
-type Found = Map<string, { words: Set<string>; origins: Set<string>; paths: Set<string> }>
+type Found = Map<string, { words: Set<string>; origins: Set<string>; paths: Set<string>; verified?: boolean }>
 
 const byAnswer = (a: LensAnswer, b: LensAnswer): number =>
   a.host < b.host ? -1 : a.host > b.host ? 1 : a.word < b.word ? -1 : a.word > b.word ? 1 : 0
 
-const gather = (found: Found, sig: string, word: string, origin: string, path?: string): void => {
+const gather = (found: Found, sig: string, word: string, origin: string, path?: string, verified?: boolean): void => {
   const point = found.get(sig) ?? { words: new Set<string>(), origins: new Set<string>(), paths: new Set<string>() }
+  if (verified !== undefined) point.verified = (point.verified ?? false) || verified
   point.words.add(word)
   point.origins.add(origin)
   if (path) point.paths.add(path)
@@ -141,6 +146,7 @@ const pointsOf = (found: Found): LensPoint[] => [...found].map(([sig, point]): L
   words: [...point.words].sort(),
   origins: [...point.origins].sort(),
   ...(point.paths.size ? { paths: [...point.paths].sort() } : {}),
+  ...(point.verified === undefined ? {} : { verified: point.verified }),
 })).sort((a, b) =>
   b.words.length - a.words.length || b.origins.length - a.origins.length || (a.sig < b.sig ? -1 : 1))
 
@@ -153,13 +159,19 @@ const pointsOf = (found: Found): LensPoint[] => [...found].map(([sig, point]): L
 // `music` and `jazz`. The head is the signature the point stands for.
 //
 // The ledger is the HOST'S assertion, not a signed record: a host can omit or
-// invent a row. The head itself is content-addressed, so a reader who fetches
-// it can check the bytes against it; the signed hive index is the stronger
-// check and is left to a later step.
+// invent a row. With `verify` on, each matched row is checked against the
+// publisher's SIGNED hive index (hive-pointer.ts `fetchHiveIndex`: the schnorr
+// signature is verified against the publisher's key, so a host can withhold an
+// index but never substitute one). A row stands as `verified` only when that
+// index names the same head at the same path. An unverified row is kept and
+// marked, never dropped: the host may simply not serve the index.
 
 export interface LedgerDeps {
   /** The parsed ledger body, or null for anything that is not one. */
   ledger(url: string, signal: AbortSignal): Promise<unknown | null>
+  /** A publisher's verified index roots on a host (lineageKey -> head), or null
+   *  when the host serves none or it does not verify. */
+  index?(host: string, pubkey: string): Promise<Record<string, string> | null>
 }
 
 export const liveLedgerDeps: LedgerDeps = {
@@ -171,11 +183,19 @@ export const liveLedgerDeps: LedgerDeps = {
       return text.length > 1_000_000 ? null : JSON.parse(text)
     } catch { return null }
   },
+  // Lazy: hive-pointer pulls in the signing stack, which a plain read never needs.
+  index: async (host, pubkey) => {
+    try {
+      const { fetchHiveIndex } = await import('./hive-pointer.js')
+      const result = await fetchHiveIndex(host, pubkey)
+      return result.ok ? result.manifest.roots : null
+    } catch { return null }
+  },
 }
 
-export interface LedgerRow { readonly lineage: string; readonly head: string }
+export interface LedgerRow { readonly lineage: string; readonly head: string; readonly pubkey: string }
 
-/** The (lineage, head) pairs a ledger body carries; anything malformed is skipped. */
+/** The (lineage, head, publisher) rows a ledger body carries; anything malformed is skipped. */
 export const ledgerRows = (raw: unknown): LedgerRow[] => {
   const sites = (raw as { sites?: unknown } | null)?.sites
   if (!Array.isArray(sites)) return []
@@ -185,7 +205,8 @@ export const ledgerRows = (raw: unknown): LedgerRow[] => {
     if (!lineage || !Array.isArray(site?.publishers)) continue
     for (const publisher of site.publishers) {
       const head = typeof publisher?.head === 'string' ? publisher.head.trim().toLowerCase() : ''
-      if (SIG_RE.test(head)) rows.push({ lineage, head })
+      const pubkey = typeof publisher?.pubkey === 'string' ? publisher.pubkey.trim().toLowerCase() : ''
+      if (SIG_RE.test(head)) rows.push({ lineage, head, pubkey: SIG_RE.test(pubkey) ? pubkey : '' })
     }
   }
   return rows
@@ -196,6 +217,8 @@ export interface LedgerLensOptions {
   readonly words: readonly string[]
   readonly deps?: LedgerDeps
   readonly timeoutMs?: number
+  /** Check each matched row against the publisher's signed index. */
+  readonly verify?: boolean
 }
 
 /** Read each host's ledger and match the words against the segments of every
@@ -224,11 +247,28 @@ export const readLedgerLens = async (options: LedgerLensOptions): Promise<LensRe
 
     const rows = body === null ? null : ledgerRows(body)
     for (const word of asked.values()) answers.push({ host, word, status: rows === null ? 'gap' : 'listed' })
-    for (const row of rows ?? []) {
-      for (const segment of row.lineage.split('/')) {
-        const word = asked.get(moleculeKey(segment))
-        if (word) gather(found, row.head, word, host, row.lineage)
-      }
+
+    const matched = (rows ?? []).map(row => ({
+      row, words: row.lineage.split('/').map(segment => asked.get(moleculeKey(segment))).filter((word): word is string => !!word),
+    })).filter(entry => entry.words.length > 0)
+
+    // One signed-index read per publisher on this host, and only for rows that matched.
+    const roots = new Map<string, Record<string, string> | null>()
+    if (options.verify && deps.index) {
+      const read = deps.index.bind(deps)
+      await Promise.all([...new Set(matched.map(entry => entry.row.pubkey).filter(Boolean))].map(async pubkey => {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const silence = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), timeoutMs) })
+        roots.set(pubkey, await Promise.race([read(host, pubkey).catch(() => null), silence]))
+        clearTimeout(timer)
+      }))
+    }
+
+    for (const { row, words } of matched) {
+      const verified = options.verify
+        ? !!row.pubkey && roots.get(row.pubkey)?.[lineageKey(row.lineage.split('/'))] === row.head
+        : undefined
+      for (const word of words) gather(found, row.head, word, host, row.lineage, verified)
     }
   }))
 

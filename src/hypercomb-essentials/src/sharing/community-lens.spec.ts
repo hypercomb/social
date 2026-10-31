@@ -113,7 +113,7 @@ const site = (lineage: string, ...heads: (string | null)[]) => ({
 describe('ledgerRows', () => {
   it('keeps rows with a signature head and skips the rest', () => {
     expect(ledgerRows({ sites: [site('a/b', SIG('1'), null, 'nope'), { lineage: '', publishers: [] }, 7] }))
-      .toEqual([{ lineage: 'a/b', head: SIG('1') }])
+      .toEqual([{ lineage: 'a/b', head: SIG('1'), pubkey: SIG('f') }])
   })
   it('is empty for anything that is not a ledger', () => {
     expect(ledgerRows(null)).toEqual([])
@@ -152,5 +152,45 @@ describe('readLedgerLens', () => {
     const seen: string[] = []
     await readLedgerLens({ hosts: ['one.example'], words: ['jazz', 'Jazz', '  '], deps: ledger({ 'one.example': { sites: [] } }, seen) })
     expect(seen).toEqual(['https://one.example/publications.json'])
+  })
+})
+
+describe('readLedgerLens verify', () => {
+  const body = { sites: [site('music/jazz', SIG('1')), site('music', SIG('2'))] }
+  const withIndex = (roots: Record<string, string> | null, asked: string[] = []): LedgerDeps => ({
+    ledger: async () => body,
+    index: async (host, pubkey) => { asked.push(`${host}:${pubkey.slice(0, 2)}`); return roots },
+  })
+
+  it('marks a head the signed index names at that path, and only that one', async () => {
+    const result = await readLedgerLens({
+      hosts: ['one.example'], words: ['music', 'jazz'], verify: true,
+      deps: withIndex({ 'music/jazz': SIG('1'), music: SIG('9') }),
+    })
+    const bySig = Object.fromEntries(result.points.map(p => [p.sig, p.verified]))
+    expect(bySig).toEqual({ [SIG('1')]: true, [SIG('2')]: false })
+  })
+
+  it('keeps rows but marks them unverified when the host serves no signed index', async () => {
+    const result = await readLedgerLens({ hosts: ['one.example'], words: ['music'], verify: true, deps: withIndex(null) })
+    expect(result.points).toHaveLength(2)
+    expect(result.points.every(p => p.verified === false)).toBe(true)
+  })
+
+  it('reads one index per publisher, and only when asked to verify', async () => {
+    const asked: string[] = []
+    await readLedgerLens({ hosts: ['one.example'], words: ['music', 'jazz'], verify: true, deps: withIndex({}, asked) })
+    expect(asked).toEqual(['one.example:ff'])
+
+    const none: string[] = []
+    const plain = await readLedgerLens({ hosts: ['one.example'], words: ['music'], deps: withIndex({}, none) })
+    expect(none).toEqual([])
+    expect(plain.points.every(p => !('verified' in p))).toBe(true)
+  })
+
+  it('treats a silent index as unverified instead of waiting forever', async () => {
+    const deps: LedgerDeps = { ledger: async () => body, index: () => new Promise(() => {}) }
+    const result = await readLedgerLens({ hosts: ['one.example'], words: ['music'], verify: true, timeoutMs: 20, deps })
+    expect(result.points.every(p => p.verified === false)).toBe(true)
   })
 })

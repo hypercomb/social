@@ -51,9 +51,17 @@ by a word. Two routes get a word to a listing; they can be built in order.
    `revolucion/meetup` as a point carrying both words and both hosts that
    publish it; `revolucionstyle.com` (no ledger) is a gap. Limits: the ledger
    is the host's own assertion, not a signed record, so a host can omit or
-   invent a row. The signed hive index (`fetchHiveIndex`, verified against the
-   publisher's key) is the stronger check and is the next step for this route.
-   It only finds what a host has published as a site, not every tile.
+   invent a row. **Verification BUILT 2026-10-31:** with `verify: true`, each
+   matched row is checked against the publisher's signed hive index
+   (`fetchHiveIndex`, the schnorr signature verified against the publisher's
+   key): a point is `verified` only when that index names the same head at the
+   same path on some host. An unverified row is kept and marked, never dropped
+   (a host may simply not serve the index). One index read per publisher per
+   host, and only for rows that matched. Live, both `revolucion` points came
+   back verified. It only finds what a host has published as a site, not every
+   tile. Live reads are sometimes silent: one run saw a host's ledger time out
+   and report a gap, and the next run listed it, so a gap means "no answer
+   this time", never "nothing there".
 2. **Enrol each published name in its word's pool (the real shape).** At
    publish, for every segment of a branch, add the branch's head signature as a
    member of the pool at `sign(word)`, so a host lists it at `sign(word)/`. This
