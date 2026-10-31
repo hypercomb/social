@@ -93,11 +93,17 @@ describe('hiveArrival (phase 2)', () => {
     expect(hiveArrival(hive({ depth: 2 }), classes, all)).toBeNull()
   })
 
-  it('at depth 0 or 1 loads the face and what it reads now; tiers above 0 wait passive', () => {
+  it('loads the face and what it reads now at every depth below 2', () => {
     for (const depth of [0, 1]) {
       const r = hiveArrival(hive({ depth, arrival: ['SiteViewDrone', 'ChatDrone'], tiers: { ChatDrone: 1 } }), classes, all)!
       expect([...r.bees].sort()).toEqual([sig('a'), sig('b')])
     }
+  })
+
+  it('gives tier 1 to idle at depth 1, and leaves it passive at depth 0', () => {
+    const plan = { arrival: ['SiteViewDrone', 'ChatDrone'], tiers: { ChatDrone: 1 } }
+    expect([...hiveArrival(hive({ ...plan, depth: 1 }), classes, all)!.idle]).toEqual([sig('c')])
+    expect(hiveArrival(hive({ ...plan, depth: 0 }), classes, all)!.idle.size).toBe(0)
   })
 
   it('keeps critical bees in the arrival', () => {

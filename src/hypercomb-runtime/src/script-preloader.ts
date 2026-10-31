@@ -256,7 +256,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       let deferredBeeLoads: DeferredBeeLoads | null = null
       if (walked.bees.length) {
         deferredBeeLoads = passive
-          ? await this.#loadArrival(walked.bees.filter(sig => !passive.has(sig) && !sleeping.has(sig)))
+          ? await this.#loadArrival(walked.bees.filter(sig => !passive.has(sig) && !this.#idleHive.has(sig) && !sleeping.has(sig)))
           : await this.#loadBeesPrioritized(walked.bees.filter(sig => !sleeping.has(sig)), walked.criticalBees)
       }
       const beesMs = performance.now() - tBees
@@ -308,6 +308,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       if (deferredBeeLoads) {
         this.#finishBeeLoadsInBackground(deferredBeeLoads.pending, deferredBeeLoads.loads)
       }
+      if (this.#idleHive.size) this.#loadIdleHive()
 
       // Pulse-less module products (EventTarget UI drones, constructor-wired
       // services) are legitimate cache residents but never reach the loop.
@@ -535,6 +536,32 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   #arrivalBees: ReadonlySet<string> = new Set()
   #arrivalDecided = false
   #arrivalCritical: readonly string[] = ScriptPreloader.#EMPTY_SIGS
+  /** A hive's tier 1: loaded in idle batches after the arrival is up. */
+  #idleHive: Set<string> = new Set()
+
+  static readonly #IDLE_HIVE_BATCH = 3
+
+  /** Load the hive's idle tier a few bees at a time, only when the main thread
+   *  has nothing better to do, each batch finished (and pulsed) before the next
+   *  is asked for. Whatever the wake-all has already taken is skipped. */
+  #loadIdleHive = (): void => {
+    const asleep = this.#asleep()
+    const queue = [...this.#idleHive].filter(sig => !this.#beeCache.has(sig) && !asleep.has(sig))
+    this.#idleHive = new Set()
+    if (!queue.length) return
+    const whenIdle: (run: () => void) => void =
+      typeof (globalThis as any).requestIdleCallback === 'function'
+        ? run => (globalThis as any).requestIdleCallback(() => run())
+        : run => { setTimeout(run, ScriptPreloader.#PREHEAT_FALLBACK_MS) }
+    const pump = (): void => {
+      const batch = queue.splice(0, ScriptPreloader.#IDLE_HIVE_BATCH).filter(sig => !this.#beeCache.has(sig))
+      if (!batch.length) { if (queue.length) whenIdle(pump); return }
+      const loads = batch.map(sig => this.#loadBeeBySignature(sig))
+      this.#finishBeeLoadsInBackground(batch, loads)
+      void Promise.allSettled(loads).then(() => { if (queue.length) whenIdle(pump) })
+    }
+    whenIdle(pump)
+  }
 
   #decideArrival = async (walked: { bees: readonly string[]; criticalBees: readonly string[]; classes: ReadonlyMap<string, BeeClass> }): Promise<void> => {
     if (this.#arrivalDecided) return
@@ -544,17 +571,21 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     if (hive && hive.depth >= 2) return
     const names = hive ? hive.arrival : await arrivalNames()
     if (!names) return
-    const { bees, missing } = hive
+    const planned = hive
       ? hiveArrival(hive, walked.classes, new Set(walked.bees), new Set(walked.criticalBees))!
-      : resolveArrival(names, walked.classes, new Set(walked.bees))
+      : { ...resolveArrival(names, walked.classes, new Set(walked.bees)), idle: new Set<string>() }
+    const { bees, idle, missing } = planned
     if (missing.length) console.warn(`[script-preloader] arrival plan names what this package does not carry: ${missing.join(', ')}`)
     // What the arrival came to — the shell's arrival trial reports it.
     EffectBus.emit('loader:arrival', { now: bees.size, passive: bees.size ? walked.bees.length - bees.size : 0, missing })
     if (!bees.size) return
     this.#arrivalBees = bees
-    this.#passive = new Set(walked.bees.filter(sig => !bees.has(sig) && !this.#beeCache.has(sig)))
+    // A hive's tier 1 is neither now nor passive: it loads at idle once the
+    // arrival is up (#loadIdleHive), and joins the wake if the arrival stalls.
+    this.#idleHive = new Set(walked.bees.filter(sig => idle.has(sig) && !bees.has(sig) && !this.#beeCache.has(sig)))
+    this.#passive = new Set(walked.bees.filter(sig => !bees.has(sig) && !this.#idleHive.has(sig) && !this.#beeCache.has(sig)))
     this.#arrivalCritical = walked.criticalBees
-    console.log(`[script-preloader] arrival: ${bees.size} bees now, ${this.#passive.size} passive until approached`)
+    console.log(`[script-preloader] arrival: ${bees.size} bees now, ${this.#idleHive.size} at idle, ${this.#passive.size} passive until approached`)
     // Late-value replay: an approach that happened before this line still
     // wakes them.
     EffectBus.on('loader:activate', () => { this.#activatePassive() })
@@ -684,8 +715,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   #activatePassive = (): void => {
     // The approach outranks the preload: stop feeding it.
     this.#preloadStopped = true
-    const passive = this.#passive
-    if (!passive?.size) return
+    // A hive's idle tier not yet loaded joins the wake: the approach cannot
+    // wait on a queue meant for spare time.
+    const passive = new Set([...(this.#passive ?? []), ...this.#idleHive])
+    this.#idleHive = new Set()
+    if (!passive.size) return
     this.#passive = new Set()
     // A queen asleep until her word stays asleep: stepping into the hive is
     // not asking for her.

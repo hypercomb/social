@@ -133,17 +133,18 @@ export const resolveHive = (
   return { now, idle, passive, missing: [...new Set(missing)] }
 }
 
-/** PHASE 2 — the arrival a hive makes, in the loader's terms: the bees that
- *  load now (the rest stay passive and wake as any arrival's do). Idle loading
- *  is not built yet, so every tier above 0 waits passive here. Depth 2 is
- *  today's behaviour — everything loads — so it makes no arrival. */
+/** The arrival a hive makes, in the loader's terms: the bees that load now,
+ *  the bees that load after first paint in idle batches (tier 1, only at depth
+ *  1), and — by omission — the rest, which stay passive and wake as any
+ *  arrival's do. Depth 2 is today's behaviour — everything loads — so it makes
+ *  no arrival. */
 export const hiveArrival = (
   hive: Hive,
   classes: ReadonlyMap<string, BeeClass>,
   packageBees: ReadonlySet<string>,
   critical: ReadonlySet<string> = new Set(),
-): { bees: Set<string>; missing: string[] } | null => {
+): { bees: Set<string>; idle: Set<string>; missing: string[] } | null => {
   if (hive.depth >= 2) return null
-  const { now, missing } = resolveHive({ ...hive, depth: 0 }, classes, packageBees, new Set(), critical)
-  return { bees: now, missing }
+  const { now, idle, missing } = resolveHive(hive, classes, packageBees, new Set(), critical)
+  return { bees: now, idle, missing }
 }
