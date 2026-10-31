@@ -33,6 +33,38 @@ carries (`host:packages`). The next dependency is therefore the publish side:
 which pool a published tile's name is enrolled in, so a host lists it at
 `sign(word)/`.
 
+## Plan: getting words onto hosts
+
+What publish writes to a host today (from `publish-heads.ts` and
+`host-sync.service.ts`, read 2026-10-31): sig-named bytes by signed HTTP PUT,
+and the signed hive index (`lineageKey -> head`, one replaceable record per
+publisher). A host therefore knows a published branch by its lineage key, not
+by a word. Two routes get a word to a listing; they can be built in order.
+
+1. **Read the index the host already holds (no new write path).** The lens
+   asks each community host for the publisher index and matches words against
+   the keys. Cost: `lineageKey` folds punctuation and is a whole path, so only
+   a word that is a tile's full top-level name matches. A word deeper in a path
+   (`/music/jazz`) does not. Good enough to prove the lens live and to make the
+   triangulate gesture work on top-level tiles; it is not the final shape.
+2. **Enrol each published name in its word's pool (the real shape).** At
+   publish, for every segment of a branch, add the branch's head signature as a
+   member of the pool at `sign(word)`, so a host lists it at `sign(word)/`. This
+   is a forward commit with a dual pointer; nothing is deleted. It needs three
+   things, none of which I have verified:
+   - a host write that creates a member inside a signature-named directory
+     (today's PUT path is `/<sig>` files; check `hypercomb-shim/host/serve.mjs`
+     and protocol-spec §21.12 for whether a directory member can be written);
+   - the signed list of members under a word, since an unsigned directory could
+     be filled by anyone (`pheromones.md` rules out a spam amplifier), so the
+     host admits a member only on the publisher's signature;
+   - the reserved-word rule (`isReservedPoolWord`), so a word that collides
+     with a system pool is never enrolled.
+
+Order: prove route 1 with `readLens` against one real host, then decide route 2
+once the host-write question is answered. Route 2 is a protocol change and
+belongs to its own design note before any code.
+
 ## The idea
 
 A **community** (a named group of domains, `community:hosts` plus a name) is
