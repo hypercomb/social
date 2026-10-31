@@ -1,10 +1,13 @@
 // hive-say.cjs — say the hive's language over HTTP.
 //
 //   node scripts/hive-say.cjs [--url http://localhost:4250] [--port 4262]
-//                             [--profile <dir>] [--headless] [--chrome <browser path>]
+//                             [--attach [http://127.0.0.1:9222]]
+//                             [--browser msedge|chrome|chromium] [--profile <dir>]
+//                             [--headless] [--chrome <browser path>]
 //
-// Opens the hive in a browser this script drives (Playwright), and answers
-// HTTP on this machine only:
+// Opens the hive in a browser this script drives (Playwright) — Microsoft
+// Edge unless --browser names another — and answers HTTP on this machine
+// only:
 //
 //   POST /say   a sentence as plain text, or JSON { "text": "…" } or
 //               { "sentences": ["…", "…"] }; each is said on the hive's
@@ -18,11 +21,16 @@
 // listens on 127.0.0.1 only and refuses a request that names a web origin
 // other than localhost: no web page may drive it (the bridge's rule).
 //
-// The browser keeps its own profile (--profile, by default .hive-profile in
-// your home folder), so the hive it opens is a hive of its own and stays
-// between runs. Chrome no longer lets a script drive your everyday profile,
-// so this is a separate hive; it is visible, and you can use it like any
-// other. See documentation/hive-say.md.
+// Two ways to reach the hive:
+//   • --attach joins a browser you started yourself with remote debugging
+//     (msedge --remote-debugging-port=9222) and speaks into its tab at --url,
+//     opening one if none is there. Your browser is never closed by this.
+//   • otherwise the browser is launched with its own profile (--profile, by
+//     default .hive-profile in your home folder), a hive of its own that stays
+//     between runs.
+// Chromium-based browsers (Chrome since 136, and Edge on the same engine)
+// may refuse remote debugging on your everyday profile; then --attach cannot
+// connect, and it says so. See documentation/hive-say.md.
 
 const http = require('http')
 const os = require('os')
@@ -34,6 +42,10 @@ const URL_ = valueOf('--url', 'http://localhost:4250')
 const PORT = Number(valueOf('--port', '4262'))
 const PROFILE = valueOf('--profile', path.join(os.homedir(), '.hive-profile'))
 const HEADLESS = args.includes('--headless')
+const BROWSER = valueOf('--browser', 'msedge')
+const ATTACH = args.includes('--attach')
+  ? (() => { const v = valueOf('--attach', ''); return /^https?:/.test(v) ? v : 'http://127.0.0.1:9222' })()
+  : ''
 // A browser of your own (Chrome, Edge), when Playwright's is not installed.
 const CHROME = valueOf('--chrome', '')
 // How long the hive is listened to after a sentence before the next one: a
@@ -67,13 +79,24 @@ const readHeard = () => window.__hiveSayHeard.splice(0)
 
 ;(async () => {
   const { chromium } = require('playwright')
-  const context = await chromium.launchPersistentContext(PROFILE, {
-    headless: HEADLESS,
-    viewport: null,
-    ...(CHROME ? { executablePath: CHROME } : {}),
-  })
-  const page = context.pages()[0] ?? await context.newPage()
-  await page.goto(URL_, { waitUntil: 'domcontentloaded' })
+  let context, page
+  if (ATTACH) {
+    const browser = await chromium.connectOverCDP(ATTACH).catch(error => {
+      throw new Error(`Could not attach to ${ATTACH}. Start the browser with --remote-debugging-port=9222 first; if it is already running that way and still refuses, it does not allow remote debugging on that profile. (${error?.message ?? error})`)
+    })
+    context = browser.contexts()[0] ?? await browser.newContext()
+    page = context.pages().find(p => p.url().startsWith(URL_))
+    if (!page) { page = await context.newPage(); await page.goto(URL_, { waitUntil: 'domcontentloaded' }) }
+    console.log(`Attached to ${ATTACH}, speaking into ${page.url()}`)
+  } else {
+    context = await chromium.launchPersistentContext(PROFILE, {
+      headless: HEADLESS,
+      viewport: null,
+      ...(CHROME ? { executablePath: CHROME } : BROWSER === 'chromium' ? {} : { channel: BROWSER }),
+    })
+    page = context.pages()[0] ?? await context.newPage()
+    await page.goto(URL_, { waitUntil: 'domcontentloaded' })
+  }
 
   const ready = async () => {
     try { return await page.evaluate(listen) } catch { return false }
@@ -128,7 +151,8 @@ const readHeard = () => window.__hiveSayHeard.splice(0)
     console.log(`Try: curl -s -X POST http://127.0.0.1:${PORT}/say --data "read /"`)
   })
 
-  const close = async () => { server.close(); await context.close().catch(() => {}); process.exit(0) }
+  // An attached browser is yours: leave it open, only stop speaking into it.
+  const close = async () => { server.close(); if (!ATTACH) await context.close().catch(() => {}); process.exit(0) }
   process.on('SIGINT', close)
   process.on('SIGTERM', close)
   context.on('close', () => process.exit(0))

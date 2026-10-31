@@ -4,10 +4,11 @@
 
 The hive's language is sentences said on its command line. A browser tab cannot
 answer an HTTP request, so something has to hold the hive open and say the
-sentences into it. `scripts/hive-say.cjs` does that: it opens the hive in a
-browser it drives (Playwright) and answers HTTP on this machine, saying each
-sentence it receives through the same door Enter uses, and replying with what
-the hive said back.
+sentences into it. `scripts/hive-say.cjs` does that: it is a small web service
+on this machine. It reaches the hive's tab in Microsoft Edge through Playwright,
+answers HTTP, says each sentence it receives through the same door Enter uses,
+and replies with what the hive said back. Anything that speaks HTTP can use
+it: curl, a script, an agent.
 
 ```
 npm run hive:say                      # the hive at http://localhost:4250, HTTP on 127.0.0.1:4262
@@ -36,21 +37,38 @@ Because that door has the participant's authority, the HTTP side listens on
 `127.0.0.1` only, and refuses any request that names a web origin other than
 localhost, so no web page can drive it. This is the bridge's rule, kept.
 
-## Its own hive
+## Your Edge, or its own hive
 
-The browser keeps its own profile, `.hive-profile` in your home folder unless
-`--profile` names another, so the hive it opens stays between runs and is a
-hive of its own. Chrome no longer lets a script drive your everyday profile,
-so this cannot be the hive in your usual browser; it is a separate, visible
-window you can use like any other. `--headless` hides it.
+**Attach to the Edge you use.** Close every Edge window, start Edge with remote
+debugging, open your hive at `localhost:4250`, then attach:
+
+```
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222
+npm run hive:say -- --attach
+```
+
+It speaks into the tab at `--url` (opening one if none is there) and never
+closes your browser. Chromium, which Edge is built on, stopped honouring remote
+debugging on the everyday profile in version 136, and Edge may do the same; if
+attaching is refused, start Edge with its own profile instead, adding
+`--user-data-dir=<folder>`, or use the next way.
+
+**Or let it open Edge with a profile of its own.** Without `--attach`, it
+launches Edge (`--browser chrome` or `chromium` for another) with the profile
+`.hive-profile` in your home folder unless `--profile` names another. That hive
+stays between runs and is a hive of its own, with its own signing key: to
+publish from it to your domains, allow its key with the keys word.
+`--headless` hides it.
 
 ## Options
 
 ```
 --url <hive url>        default http://localhost:4250
 --port <port>           default 4262
---profile <folder>      default ~/.hive-profile
---chrome <path>         a browser of your own (Chrome, Edge) instead of Playwright's
+--attach [<url>]        join a browser started with remote debugging, default http://127.0.0.1:9222
+--browser <name>        msedge (default), chrome, or chromium, when it launches the browser
+--profile <folder>      default ~/.hive-profile, when it launches the browser
+--chrome <path>         a browser executable of your own
 --settle <ms>           how long each sentence is listened to, default 900
 --headless              no window
 ```
