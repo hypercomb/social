@@ -12,6 +12,27 @@ hosts, not yet against a live host). Nothing else here is built. It extends `sho
 as a named group of domains) and `pools-across-hosts.md` (a pool at the same
 address on every host).
 
+## What a live host serves today (probed 2026-10-31)
+
+- Hosts that run the relay or shim answer `GET /<sign(meaning)>/` with a real
+  listing: `localhost:7777` listed `host:packages`; `realones.online` answered
+  with a valid, empty listing.
+- Front doors on Pages (`hypercomb.com`) answer every path with the app page,
+  and `revolucionstyle.com` answers 404, so the lens reads both as gaps.
+- **No word molecule is published anywhere yet.** The local content root holds
+  648 signature directories; none is the address of a word from the
+  documentation (23,026 candidate words hashed, no hit). They are pools in the
+  host-pool format (eight-digit markers), not tile molecules. This matches
+  `hypergraph-molecule-lineage.md`: the molecule write path does not exist and
+  `commitLayer` is still path-keyed, so a published tile does not appear at
+  `sign(word)/` on a host.
+
+So the word read is correct but has nothing to find until words are published
+as pools. Until then the lens can only be proven live on a pool a host already
+carries (`host:packages`). The next dependency is therefore the publish side:
+which pool a published tile's name is enrolled in, so a host lists it at
+`sign(word)/`.
+
 ## The idea
 
 A **community** (a named group of domains, `community:hosts` plus a name) is
