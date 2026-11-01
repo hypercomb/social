@@ -51,7 +51,9 @@ beforeEach(() => {
 EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {
   said.push(text)
   accept?.()
-  complete?.(text.includes('remove')
+  complete?.(text.startsWith('go ')
+    ? { kind: 'unknown', reason: 'the legacy pipeline' }
+    : text.includes('remove')
     ? { kind: 'refused', reason: 'a person must say this' }
     : { kind: 'ran', actions: [{ command: text.slice(1).split(' ')[0], args: '', ok: true }] })
 })
@@ -128,6 +130,20 @@ describe('external calls', () => {
     await flush(); await flush()
     expect(second.outcome()?.kind).toBe('declined')
     expect(lastAsk()).toBeNull()
+  })
+
+  it('lets a go arrive before the next line is said', async () => {
+    const c = call('walker', ['go deeper', '/create inside'])
+    EffectBus.emitTransient(EXTERNAL_ANSWER, { id: lastAsk()!.id, decision: 'run' })
+    await flush(); await flush()
+    expect(said).toEqual(['go deeper'])
+
+    EffectBus.emit('activity:log', { message: 'Go: now at /presentation/deeper' })
+    await flush()
+    window.dispatchEvent(new Event('synchronize'))
+    await flush(); await flush()
+    expect(said).toEqual(['go deeper', '/create inside'])
+    expect(c.outcome()?.kind).toBe('ran')
   })
 
   it('refuses a call with no lines', () => {

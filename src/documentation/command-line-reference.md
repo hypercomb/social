@@ -51,14 +51,16 @@ standing rather than borrowed for one line.
 ### External stance — a call from outside, answered here
 
 An agent, a script or another machine can ask the hive to say lines (through
-the say door, [hive-say.md](hive-say.md)). Such a line is **marked as external
+the say door, [hive-say.md](hive-say.md), or the bridge's `submit`, which by
+default carries nothing else, [claude-bridge-setup.md](claude-bridge-setup.md)). Such a line is **marked as external
 before it runs**: the line takes the `$` sigil and shows who sent it and the
 lines, as `claude-code: /go presentation · /create word  (Enter runs, Esc
 declines)`, and a toast says a call is waiting in case a window covers the
 line. Nothing runs until you answer:
 
-- **Enter** opens a new conversation on the layer you stand in, with the
-  request as its first turn, and says each line through the machine door,
+- **Enter**, once the call has been on the line for a second (so an Enter
+  meant for your own line cannot run it), opens a new conversation on the
+  layer you stand in, with the request as its first turn, and says each line through the machine door,
   checked against your grants (`grant`) exactly as any machine's line is. Each
   line's verdict (ran, refused, ambiguous or unknown) is written into the
   conversation as it happens, and the caller hears the same verdicts.

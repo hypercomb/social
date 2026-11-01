@@ -17,6 +17,10 @@ import { EffectBus } from '@hypercomb/core'
 import { MUTATING_OPS } from './bridge-ops.js'
 import { publicStorageKey } from '../presentation/tiles/tile-public.js'
 
+// These exercise the whole bridge, which a participant opens by hand; by
+// default it carries command-line lines only (claude-bridge.worker.ts).
+localStorage.setItem('hc:bridge:open', 'all')
+
 class FakeSocket {
   static readonly OPEN = 1
   static made: FakeSocket[] = []

@@ -62,6 +62,9 @@ const timer = setTimeout(() => { console.error('the hive did not answer'); proce
 ws.on('error', e => { console.error('cannot reach the hive:', e.message); process.exit(1) })
 ws.on('open', () => ws.send(JSON.stringify({
   id, op: 'submit', text: sentence, listen,
+  // Who is asking: shown on the command line before anything runs while the
+  // bridge carries lines only (documentation/claude-bridge-setup.md).
+  from: process.env.HIVE_CALLER || 'say.cjs',
   files: riding.map(({ name, sig, base64 }) => ({ name, sig, base64 })),
 })))
 ws.on('message', raw => {

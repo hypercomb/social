@@ -21,11 +21,12 @@
 // never that the hive changed. Overclaiming here would be the original defect
 // with better wording.
 //
-// UNKNOWN IS NOT FAILURE, AND NOT SUCCESS. Only the Common Tongue path can
-// report per-action outcomes: `#executeReading` awaits each action and knows
-// its name. The legacy tag/slash pipeline resolves through fire-and-forget
-// branches, so awaiting it proves delivery, not completion — it answers
-// `unknown` rather than minting a fake `ran`. This is the same law the pool
+// UNKNOWN IS NOT FAILURE, AND NOT SUCCESS. Only an awaited behaviour can
+// report its outcome: `#executeReading` awaits each action and knows its
+// name, for a prose reading and for a plain `/word args` call alike. The
+// legacy tag/selection pipeline resolves through fire-and-forget branches, so
+// awaiting it proves delivery, not completion — it answers `unknown` rather
+// than minting a fake `ran`. This is the same law the pool
 // reader is owed (documentation/hypercomb-communication-layer.md): refuse to
 // mint an answer from anything but a positive, complete one.
 //

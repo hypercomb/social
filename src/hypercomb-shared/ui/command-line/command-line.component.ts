@@ -206,6 +206,10 @@ const SUMMON_STANCES = new Map<string, Stance>([
  */
 export type Stance = 'tiles' | 'command' | 'find'
 
+/** How long a call from outside must have been on the line before Enter
+ *  runs it. */
+const EXTERNAL_ARM_MS = 1000
+
 /** How long the line must settle before the hive is asked. A read, not a
  *  keystroke, is what deserves one. */
 const FIND_DEBOUNCE_MS = 120
@@ -2441,8 +2445,32 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         return
       }
 
-      // The legacy tag/slash pipeline resolves through fire-and-forget
-      // branches, so awaiting it would prove delivery and not completion.
+      // A PLAIN BEHAVIOUR CALL IS AWAITED. `/trait a b`, `/go /x`: one word a
+      // behaviour claims, with the arguments its executor is handed. Run it
+      // as a reading's action is run, through the behaviour drone's own
+      // `execute`, so the answer comes when the behaviour has finished, not
+      // when it was handed on. A caller saying lines in order needs exactly
+      // that: measured 2026-11-01, a six-word `/trait` answered unknown at
+      // once and the next line's `/go` walked away while it was still making
+      // its tiles, so they landed in the wrong layer or not at all.
+      const only = !prose && named.length === 1 ? named[0] : undefined
+      const behaviours = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as { has?(name: string): boolean } | undefined
+      if (only?.verb && only.args !== undefined && behaviours?.has?.(only.verb)) {
+        void this.#executeReading({
+          text: line, spans: [], ambiguous: false, hasAction: true,
+          actions: [{ command: only.verb, args: only.args }],
+        })
+          .then(actions => settle({ kind: 'ran', actions }))
+          .catch(error => settle({
+            kind: 'unknown',
+            reason: error instanceof Error ? error.message : String(error),
+          }))
+        return
+      }
+
+      // Anything else (tags, selections, paths, views) takes the legacy
+      // pipeline, which resolves through fire-and-forget branches, so
+      // awaiting it would prove delivery and not completion.
       // Rather than mint a fake receipt it answers UNKNOWN — the same law the
       // pool reader is owed: never answer from anything but a positive,
       // complete result.
@@ -2939,6 +2967,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** What the participant had on the line when a call took it over, given
    *  back when nothing waits any more. */
   #heldLine: string | null = null
+  /** When the call on the line was put there. Enter is not taken for a call
+   *  younger than {@link EXTERNAL_ARM_MS}: an Enter meant for the line the
+   *  participant was typing must not run something that arrived under it. */
+  #externalShownAt = 0
 
   #externalLine(ask: ExternalAsk): string {
     const t = this.#i18n
@@ -2954,6 +2986,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const before = this.#external()
     if (!ask && !before) return
     if (ask && !before) this.#heldLine = this.value()
+    if (ask && ask.id !== before?.id) this.#externalShownAt = Date.now()
     this.#external.set(ask)
     if (ask) {
       this.#setShellValue(this.#externalLine(ask), true)
@@ -3676,7 +3709,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    */
   public onShellCommit = (v: string): void => {
     if (this.#external()) {
-      this.#answerExternal('run')
+      if (Date.now() - this.#externalShownAt >= EXTERNAL_ARM_MS) this.#answerExternal('run')
       return
     }
     const capture = this.#captureMode()
