@@ -46,17 +46,17 @@ The user-facing entry point is the `/meeting` slash behaviour, handled by [`Meet
 Select a tile and type `/meeting`. The slash behaviour:
 
 1. Resolves the current selection via `@diamondcoreprocessor.com/SelectionService`.
-2. Writes the tag `cascade` into the tile's `0000` props file under OPFS.
+2. Writes the tag `cascade` into the tile's properties (`writeTilePropertiesAt`), if it is not already there.
 3. Emits `tags:changed` on the effect bus so listeners react immediately.
-4. Emits a `tile:action` of action `meeting` to toggle the join.
-5. Pulses the processor (`new hypercomb().act()`) to coalesce visual updates.
+4. Pulses the processor (`new hypercomb().act()`) to coalesce visual updates.
+5. Opens the **lobby** (`meeting:lobby-open`) for the first selected tile. You join from there: see [meeting-lobby.md](meeting-lobby.md). The tile's meeting icon opens the same lobby.
 
 The tag is the ground truth. Anyone with a tile tagged `cascade` is hosting a meeting room that can be joined.
 
 Aliases:
 
-- `/meeting` — toggle (tag + join if absent, join if already tagged)
-- `/meeting join` — explicit join
+- `/meeting` — tag the tile if it is not yet a meeting, then open the lobby
+- `/meeting join` — the same
 - `/meeting leave` — leave the active room
 - `/meeting cascade:19` — use a 2-ring template for a larger room (1+6+12)
 
@@ -190,7 +190,10 @@ A simpler design would let any two people with cameras on start talking the mome
 
 | File | Role |
 |---|---|
-| [meeting.queen.ts](../hypercomb-essentials/src/meeting/meeting.queen.ts) | `/meeting` slash behaviour — tags tile, triggers join |
+| [meeting.queen.ts](../hypercomb-essentials/src/meeting/meeting.queen.ts) | `/meeting` slash behaviour — tags tile, opens the lobby |
+| [meeting-lobby.drone.ts](../hypercomb-essentials/src/meeting/meeting-lobby.drone.ts) | The way in: opens the lobby, loads its view ([meeting-lobby.md](meeting-lobby.md)) |
+| [lobby/meeting-lobby.view.ts](../hypercomb-essentials/src/meeting/lobby/meeting-lobby.view.ts) | The lobby: camera preview, devices, picture, presence, join |
+| [meeting-quality.ts](../hypercomb-essentials/src/meeting/meeting-quality.ts) | Saver, Auto, Sharp: resolution, frame rate, bitrates |
 | [meeting.drone.ts](../hypercomb-essentials/src/meeting/meeting.drone.ts) | Per-cell room management, slot assignment, room sig derivation |
 | [hive-meeting.drone.ts](../hypercomb-essentials/src/meeting/hive-meeting.drone.ts) | Availability heartbeats, quorum state machine, WebRTC orchestration |
 | [meeting-signaling.ts](../hypercomb-essentials/src/meeting/meeting-signaling.ts) | Signal parsing, Nostr tag helpers, peer id generation |
@@ -203,6 +206,7 @@ A simpler design would let any two people with cameras on start talking the mome
 
 ## Related documentation
 
+- [meeting-lobby.md](meeting-lobby.md) — How to join: the lobby, devices, picture, presence
 - [network-architecture.md](network-architecture.md) — How participants, presence, and content flow through the network
 - [security.md](security.md) — Presence-first security: why meetings leave no persistent trace
 - [protocol-spec.md](protocol-spec.md) — Nostr relay transport used by the mesh
