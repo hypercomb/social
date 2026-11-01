@@ -78,6 +78,8 @@ import '@hypercomb/shared/core/invite-capture'
 // Restore the persisted header-size preset before first paint + register the
 // `/header` slash command (auto-wires via ioc.onRegister).
 import '@hypercomb/shared/core/header-size'
+// dev-only: self-registers the OPFS tree logger; never imported by web/shim
+import '@hypercomb/shared/core/tree-logger'
 import { bootstrapApplication } from '@angular/platform-browser'
 import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
