@@ -3122,12 +3122,25 @@ export class HistoryService {
     }
     const stamp = this.#headStamp.get(lineageSig)
     if (stamp && stamp === latest.name && this.#latestSigByLineage.has(lineageSig)) {
-      // The stamped marker is still the bag's max — the restored head IS
-      // current. Promote to session-owned without reading a byte.
-      this.#headUnvalidated.delete(lineageSig)
-      this.#headOwned.add(lineageSig)
-      this.#headDropped.delete(lineageSig)
-      return
+      // The stamped marker is still the bag's max. A filename match alone is
+      // not enough: the same marker number can name different content when
+      // the index and the store diverge (a restored OPFS folder under a
+      // surviving localStorage, a second store with the same markers). Read
+      // the one small pointer and compare the sig it names; any doubt
+      // re-derives from the bag, never serves or commits the hint.
+      let agrees = false
+      try {
+        const handle = await latest.bag.getFileHandle(latest.name, { create: false })
+        const bytes = await (await handle.getFile()).arrayBuffer()
+        const { layerSig } = await extractLayerSigFromMarker(bytes)
+        agrees = layerSig === this.#latestSigByLineage.get(lineageSig)
+      } catch { /* unreadable pointer — not confirmed, re-derive below */ }
+      if (agrees) {
+        this.#headUnvalidated.delete(lineageSig)
+        this.#headOwned.add(lineageSig)
+        this.#headDropped.delete(lineageSig)
+        return
+      }
     }
     // Stale (a newer marker landed after the last flush) or unstamped
     // legacy entry — never trust it. Re-derive from the max marker.
