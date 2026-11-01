@@ -28,13 +28,14 @@ import {
   Drone,
   I18N_IOC_KEY,
   RESOURCE_URL_PREFIX,
+  requestConfirm,
   type I18nProvider,
 } from '@hypercomb/core'
 import { Container, Graphics, Point, Sprite, Text, Texture } from 'pixi.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
-import { galleryImageSigsAt, holdPictures } from '../commands/lightbox-kind.js'
+import { forgetPicture, forgetPreview, galleryImageSigsAt, holdPictures } from '../commands/lightbox-kind.js'
 import { imageWallHasChoice } from './image-collection.js'
 import { fetchThroughContentHop, terminalContentSig } from '../presentation/tiles/artifact-content.js'
 import { canonicalPeerImageCandidates, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
@@ -114,6 +115,8 @@ export class ImageChoiceDrone extends Drone {
   #layer: Container | null = null
   #choices: Choice[] = []
   #hoverKey: string | null = null
+  #hoverChoice: Choice | null = null
+  #forgetting = false
   #hiveHidden = false
   #buildToken = 0
   #applying = false
@@ -223,6 +226,9 @@ export class ImageChoiceDrone extends Drone {
     if (e.button !== 0 && e.pointerType === 'mouse') return
     const choice = this.#choiceUnderCursor(e.clientX, e.clientY)
     this.#suppressTrailingClick = true
+    // The small x on a latent picture of this tile forgets it, never picks it.
+    const forgettable = this.#nearestChoice(e.clientX, e.clientY)
+    if (forgettable && this.#canForget(forgettable) && this.#onForgetBadge(forgettable, e.clientX, e.clientY)) { void this.#forget(forgettable); return }
     // Empty space backs out; the picture already worn has nothing to write.
     if (!choice || choice.mine) { this.#dismiss(); return }
     void this.#apply(choice)
@@ -238,9 +244,63 @@ export class ImageChoiceDrone extends Drone {
   }
 
   #onKeyDown = (e: KeyboardEvent): void => {
-    if (!this.#layer || e.key !== 'Escape') return
+    if (!this.#layer) return
+    if ((e.key === 'Delete' || e.key === 'Backspace') && this.#hoverChoice && this.#canForget(this.#hoverChoice)) {
+      e.preventDefault()
+      e.stopPropagation()
+      void this.#forget(this.#hoverChoice)
+      return
+    }
+    if (e.key !== 'Escape') return
     e.stopPropagation()
     this.#dismiss()
+  }
+
+  // ── forgetting a latent picture (local gallery only; peers get none) ──
+
+  #canForget(c: Choice): boolean { return c.held && !c.mine }
+
+  #onForgetBadge(c: Choice, clientX: number, clientY: number): boolean {
+    if (!this.#layer) return false
+    const global = this.#toGlobal(clientX, clientY)
+    if (!global) return false
+    const p = this.#layer.toLocal(new Point(global.x, global.y))
+    const r = this.#circumRadius
+    return Math.hypot(p.x - (c.pos.x + r * 0.62), p.y - (c.pos.y - r * 0.62)) < r * 0.3
+  }
+
+  async #forget(c: Choice): Promise<void> {
+    if (this.#forgetting) return
+    this.#forgetting = true
+    const label = this.#label
+    const segments = [...this.#segments]
+    try {
+      const address = [...segments, label]
+      const preview = await forgetPreview(address, c.props.imageSig ?? '')
+      if (preview.worn) { this.emitEffect('toast:show', { type: 'info', message: this.#t('images.forget-worn', 'That is the picture this tile wears — it cannot be removed.') }); return }
+      if (!preview.held) return
+      // ONE confirmation, stating the outcome. Keys: the dialog runs them through t.
+      const confirmed = await requestConfirm({
+        title: 'images.forget-title',
+        message: preview.bytesGo ? 'images.forget-bytes' : 'images.forget-shared',
+        messageParams: { size: formatBytes(preview.size) },
+        warning: 'images.forget-warning',
+        confirmLabel: 'images.forget-label',
+        danger: true,
+      })
+      if (!confirmed) return
+      const result = await forgetPicture(address, c.props.imageSig ?? '')
+      if (result.reason === 'worn') { this.emitEffect('toast:show', { type: 'info', message: this.#t('images.forget-worn', 'That is the picture this tile wears — it cannot be removed.') }); return }
+      if (!result.removed) return
+      this.#textures.get(c.previewSig)?.destroy(true)
+      this.#textures.delete(c.previewSig)
+      this.emitEffect('toast:show', { type: 'info', message: result.bytesRemoved ? this.#t('images.forgot', 'Picture removed') : this.#t('images.forgot-kept', 'Picture removed from this tile; the file stays because another tile uses it.') })
+      await this.#open(label, segments)         // repaint the wall without it
+    } catch (err) {
+      console.warn('[image-choice] forget failed', err)
+    } finally {
+      this.#forgetting = false
+    }
   }
 
   #onWindowBlur = (): void => { this.#close() }
@@ -372,6 +432,7 @@ export class ImageChoiceDrone extends Drone {
     }
     this.#choices = []
     this.#hoverKey = null
+    this.#hoverChoice = null
     this.#label = ''
     this.#segments = []
     if (this.#hiveHidden) {
@@ -606,6 +667,23 @@ export class ImageChoiceDrone extends Drone {
     ring.label = 'hover-ring'
     node.addChild(ring)
 
+    // The forget affordance: a small x, shown only while a latent picture of this
+    // tile is hovered (Delete does the same). Peer pictures never get one.
+    if (this.#canForget(c)) {
+      const badge = new Container()
+      badge.label = 'forget-badge'
+      badge.visible = false
+      const disc = new Graphics()
+      disc.circle(0, 0, tileR * 0.22)
+      disc.fill({ color: 0x000000, alpha: 0.75 })
+      const mark = new Text({ text: '×', style: { fontFamily: 'system-ui, sans-serif', fontSize: tileR * 0.34, fontWeight: '700', fill: 0xffb4a8 } })
+      mark.anchor.set(0.5)
+      badge.addChild(disc)
+      badge.addChild(mark)
+      badge.position.set(tileR * 0.62, -tileR * 0.62)
+      node.addChild(badge)
+    }
+
     return node
   }
 
@@ -618,6 +696,7 @@ export class ImageChoiceDrone extends Drone {
       ? `${choice.slot.q},${choice.slot.r}` : null
     if (hit === this.#hoverKey) return
     this.#hoverKey = hit
+    this.#hoverChoice = choice && hit ? choice : null
     // Who offers the picture under the pointer — the caption says it, so the
     // tile itself stays a picture. Back to the wall's own words when none is hovered.
     if (choice && hit) this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: choice.who, text: choice.held ? this.#t('images.held', 'held on this tile') : choice.fresh ? this.#t('images.fresh', 'new — not seen before') : this.#t('images.offered', 'offered by another host') })
@@ -628,6 +707,9 @@ export class ImageChoiceDrone extends Drone {
       const ring = (this.#layer.children[i] as Container | undefined)
         ?.children.find(child => (child as { label?: string }).label === 'hover-ring')
       if (ring) ring.visible = hit === `${c.slot.q},${c.slot.r}`
+      const badge = (this.#layer.children[i] as Container | undefined)
+        ?.children.find(child => (child as { label?: string }).label === 'forget-badge')
+      if (badge) badge.visible = hit === `${c.slot.q},${c.slot.r}`
     }
   }
 
@@ -787,6 +869,13 @@ export class ImageChoiceDrone extends Drone {
     }
     return verts
   }
+}
+
+const formatBytes = (n: number | null): string => {
+  if (n === null) return '?'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
 const _imageChoice = new ImageChoiceDrone()
