@@ -43,7 +43,7 @@
 //                                           main page is the centre, under its own
 //                                           name. It stands in no part
 // A card's price of "Read" is a page to read: no price and no live slot.
-// Inline: **x** a control; x in curly double quotes, what the app says; <x> the
+// Inline: `x` a command, as typed; **x** a control; x in curly double quotes, what the app says; <x> the
 // part that changes; [text](/hosting/x) a link; {from:words} the live lowest
 // price, the words shown until the host answers.
 //
@@ -263,11 +263,14 @@ function sentences(text) {
   let start = 0
   let quoted = false
   let bracket = 0
+  let ticked = false
   const s = String(text)
   for (let i = 0; i < s.length; i++) {
     const c = s[i]
     const next = s[i + 1]
     const ends = next === undefined || /\s/.test(next)
+    if (c === '`') { ticked = !ticked; continue }
+    if (ticked) continue
     if (c === '\u201c') quoted = true
     else if (c === '\u201d') {
       quoted = false
@@ -306,7 +309,7 @@ function plain(text, ctx) {
 
 /** The inline marks of a note, rendered. */
 function inline(text, ctx) {
-  const marks = /\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|\u201c([^\u201d]*)\u201d|<([a-z][a-z .-]*)>|\{from:([^}]*)\}/gi
+  const marks = /\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|\u201c([^\u201d]*)\u201d|<([a-z][a-z .-]*)>|\{from:([^}]*)\}|`([^`]+)`/gi
   let html = ''
   let at = 0
   for (const m of String(text).matchAll(marks)) {
@@ -316,6 +319,7 @@ function inline(text, ctx) {
     else if (m[3] !== undefined) html += `<strong>${esc(m[3])}</strong>`
     else if (m[4] !== undefined) html += `<samp>${m[4].split(/(<[a-z][a-z .-]*>)/i).map((part) => /^<[a-z][a-z .-]*>$/i.test(part) ? `<var>${esc(part)}</var>` : esc(part)).join('')}</samp>`
     else if (m[5] !== undefined) html += `<var>${esc(`<${m[5]}>`)}</var>`
+    else if (m[7] !== undefined) html += `<code>${esc(m[7])}</code>`
     else {
       ctx.live = true
       html += `<span data-hp-plans="from">${esc(m[6])}</span>`
@@ -378,7 +382,7 @@ function readCard(route, text) {
 function price(amount, ctx) {
   const from = /^\{from:([^}]*)\}$/.exec(amount)
   if (from) { ctx.live = true; return { amount: esc(from[1]), live: true } }
-  if (/^(free|read)\b/i.test(amount)) return { amount: ctx.text(amount), live: false }
+  if (/^(free|read|paid)\b/i.test(amount)) return { amount: ctx.text(amount), live: false }
   ctx.live = true
   return { amount: esc(amount), live: true }
 }

@@ -111,9 +111,25 @@ const bringOnline = async (
   }
 }
 
-/** THE BLOCK — drawn at the foot of the hosts window, on the desktop only. */
+/** The way to the how-to, from wherever hosting is read about. */
+const HOSTING_PAGES = 'https://hosting.hypercomb.com/'
+
+const howToLink = (helpers: Helpers): HTMLAnchorElement => {
+  const link = helpers.make('a', 'hd-online-link', helpers.t('host-online.how', 'How hosting works'))
+  link.href = HOSTING_PAGES
+  link.target = '_blank'
+  link.rel = 'noopener noreferrer'
+  return link
+}
+
+/** THE BLOCK — drawn at the foot of the hosts window. On the web there is no
+ *  machine to serve from, so all it holds is the way to the how-to. */
 export const hostOnlineBlock = (helpers: Helpers): HTMLElement | null => {
-  if (!canHostHere()) return null
+  if (!canHostHere()) {
+    const elsewhere = helpers.make('section', 'hd-online')
+    elsewhere.append(helpers.make('p', 'hd-note', helpers.t('host-online.elsewhere', 'To host your hive, use your device, your own server or the cloud.')), howToLink(helpers))
+    return elsewhere
+  }
   const { t, make, button, repaint } = helpers
   if (state.status === null && !state.busy) void refresh(repaint)
 
@@ -195,6 +211,7 @@ export const hostOnlineBlock = (helpers: Helpers): HTMLElement | null => {
     block.append(steps)
   }
   if (state.said) block.append(make('p', `hd-note hd-online-said${state.checked?.ok ? ' ok' : ''}`, state.said))
+  block.append(howToLink(helpers))
   return block
 }
 

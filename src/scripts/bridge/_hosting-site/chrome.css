@@ -46,7 +46,7 @@
          <p class="hp-up"><a href="/hosting"><span aria-hidden="true">&uarr;</span> Host your hive</a></p>
                                            a path page's last line: the way up
        </main>
-     Inline: <strong> a control the reader presses; <samp> what the app says;
+     Inline: <code> a command, as typed; <strong> a control the reader presses; <samp> what the app says;
      <var> the part of it that changes.
 
    FOUR COMPONENTS, AND ONLY FOUR (one markup function each in generate.cjs)
@@ -228,6 +228,16 @@ html:has(> body.hp-root) {
   font-size: inherit;
   font-weight: 500;
   color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.hp code {
+  padding-inline: 0.25rem;
+  border-radius: var(--hc-radius-control, 2px);
+  background-color: var(--md-surface-c-high);
+  color: var(--md-on-surface-strong);
+  font-family: var(--md-font-mono, ui-monospace, Consolas, monospace);
+  font-size: 0.875em;
   overflow-wrap: anywhere;
 }
 

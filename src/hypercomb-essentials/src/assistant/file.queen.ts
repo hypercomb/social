@@ -93,7 +93,9 @@ export class FileQueenBee extends QueenBee {
         const parent = route.slice(0, -1)
         let found: string | undefined
         try {
-          const listed = tile ? await reader?.readNode?.(parent, { maxBytes: 8_000, withContent: false }) : undefined
+          // The whole page: a place past the first few kilobytes of a long
+          // root is still a place.
+          const listed = tile ? await reader?.readNode?.(parent, { maxBytes: 1_000_000, withContent: false }) : undefined
           if (listed?.ok) found = listed.children.map(child => child.name).find(name => name.toLowerCase() === tile.toLowerCase())
         } catch { /* unreadable: no place */ }
         if (!found || !text) {

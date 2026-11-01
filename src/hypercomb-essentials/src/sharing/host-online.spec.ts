@@ -30,9 +30,11 @@ afterEach(() => {
 })
 
 describe('host your hive from this computer', () => {
-  it('is not drawn on the web, where nothing can serve', () => {
+  it('on the web, where nothing can serve, it holds only the way to the how-to', () => {
     expect(canHostHere()).toBe(false)
-    expect(hostOnlineBlock({ t, make, button, repaint: () => {} })).toBeNull()
+    const block = hostOnlineBlock({ t, make, button, repaint: () => {} })
+    expect(block?.querySelector('a')?.getAttribute('href')).toBe('https://hosting.hypercomb.com/')
+    expect(block?.querySelector('button')).toBeNull()
   })
 
   it('a visitor check passes only when the address carries the door to a page', async () => {

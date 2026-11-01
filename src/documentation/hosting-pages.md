@@ -39,16 +39,19 @@ price, linked only by a page that carries a price.
 
 ```
 /hosting                      Host your hive            hosting.hypercomb.com
+  /hosting/device             Host it on your device          device.hosting, free, 2 minutes
+  /hosting/self               Run it on your own server       self.hosting, free, 60 minutes
+  /hosting/cloud              Run it in the cloud             cloud.hosting, free, 60 minutes
   /hosting/basics             The basics                      read, 1 minute
-  /hosting/try-it             Try it from this computer       free, 2 minutes
-  /hosting/hosted             Hosted on Hypercomb             paid, 5 minutes
-  /hosting/your-own           Your own domain or server       free, 20 minutes
-  /hosting/moving             Moving between them             (from any page)
   /hosting/safety             Stay in control                 (from any page)
   /hosting/fix-it             Fix it                          (from any page)
+  /hosting/hosted             Hosted for you                  closed, left out of the mesh
 ```
 
-A reader lands on the main page, picks one path, and stays on that page
+**One page per path** (jwize, 2026-10-31: "one page for each of the types, pick
+your own path"). The older tiles try-it, your-own, moving and server keep their
+addresses but carry no card and no cell. A reader lands on the main page,
+picks one path, and stays on that page
 until they are done. Nothing in a page's reading points sideways except its
 last line. The pages are the walkthrough the app already does in the hosts
 window (`becoming-a-host.md`, `host-online.ts`), written for someone who has
@@ -79,7 +82,9 @@ one in it. Inconsistent = every page invents its own shape. So:
 4. **You need** — a short list; every item is something they can check now.
 5. **The steps** — numbered. Each step is three short lines: *what you do*,
    *what happens*, *how you know it worked*. Never a terminal command. Never
-   "configure". If the app does it, the step says the app does it.
+   "configure". If the app does it, the step says the app does it. (One
+   exception, jwize 2026-10-31: */hosting/server*, whose reader chose a
+   terminal, and says so on the page.)
 6. **What it costs** — one line, even when the answer is nothing.
 7. **When you are done** — what they can now do, and the one next page.
 

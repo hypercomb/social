@@ -4044,6 +4044,8 @@
   "host-online.serving-page": "Online at {host}. Serving the page you are on there…",
   "host-online.checked": "{host} opens your page. Anyone can visit it now.",
   "host-online.not-yet": "{host} does not open your page yet — a new domain can take a few minutes to answer. Check again soon.",
+  "host-online.how": "How hosting works",
+  "host-online.elsewhere": "To host your hive, use your device, your own server or the cloud.",
   "host-online.title": "Host your hive from this computer",
   "host-online.lead": "Your hive is served from this computer while the app is open — free, through Cloudflare\\",
   "host-online.live": "Online at ",

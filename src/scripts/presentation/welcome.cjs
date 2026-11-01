@@ -38,6 +38,7 @@ const compose = (doors) => ({
   links: [
     { label: 'Watch the tour', href: '/tour/', note: '≈ 12 minutes · narrated, with captions', icon: 'tour' },
     { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the main app — start a hive of your own', icon: 'app' },
+    { label: 'Host your hive', href: 'https://hosting.hypercomb.com/', note: 'on your device, your own server, or in the cloud', icon: 'app' },
     { label: 'Browser extensions', href: '/downloads/#extensions', note: 'Smart Autolinker · No YouTube Shorts', icon: 'extension' },
   ],
   doorsLabel: `live on ${hosts.ZONE} · ${doors.length} ${doors.length === 1 ? 'hive' : 'hives'}`,
