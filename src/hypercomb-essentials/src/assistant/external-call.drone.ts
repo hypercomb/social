@@ -80,6 +80,30 @@ const sayLine = (text: string): Promise<RemoteSubmitOutcome> => new Promise(reso
 const GO_DEADLINE_MS = 5_000
 const SETTLE_MS = 900
 
+const ROUTE_IN_TEXT = /\/[^\s,;:()"'“”]+/g
+
+/** The hive's own words while a line runs: activity lines and toasts, with a
+ *  tile withheld from outside models masked as `/(withheld)` wherever said.
+ *  The bus replays its last value to a new listener — that is an old line. */
+const hearing = (): { stop: () => string[] } => {
+  const withheld = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+    ?.get<{ covers?: (s: readonly string[]) => boolean }>('@hypercomb.social/AiWithheld')
+  const masked = (said: string): string => said.replace(
+    ROUTE_IN_TEXT, route => withheld?.covers?.(route.split('/').filter(Boolean)) ? '/(withheld)' : route)
+  const heard: string[] = []
+  let live = false
+  const offActivity = EffectBus.on<{ message?: unknown }>('activity:log', p => {
+    if (live && typeof p?.message === 'string' && p.message) heard.push(masked(p.message))
+  })
+  const offToast = EffectBus.on<{ message?: unknown; title?: unknown }>('toast:show', p => {
+    if (!live) return
+    const said = [p?.title, p?.message].filter(x => typeof x === 'string' && x).join(': ')
+    if (said) heard.push(masked(said))
+  })
+  live = true
+  return { stop: () => { offActivity(); offToast(); return heard } }
+}
+
 const verbOf = (text: string): string =>
   canonicalVerbOf(text) || (text.trim().split(/\s+/)[0] ?? '').toLowerCase()
 
@@ -204,6 +228,11 @@ export class ExternalCallDrone extends Drone {
     const results: ExternalLineResult[] = []
     for (const text of call.lines) {
       const walking = verbOf(text) === 'go' ? goReported() : null
+      // WHAT THE HIVE SAYS WHILE THE LINE RUNS — a word that answers (`read`,
+      // `find`) answers in the activity log and toasts, not in its verdict.
+      // Heard for this line only, so nothing the participant does between
+      // lines reaches the caller.
+      const listening = hearing()
       const outcome = await sayLine(text)
       if (walking) {
         if (outcome.kind === 'refused' || outcome.kind === 'ambiguous') walking.stop()
@@ -213,8 +242,9 @@ export class ExternalCallDrone extends Drone {
         await settled()
       }
       const verdict = formatRemoteSubmitOutcome(outcome)
-      results.push({ text, verdict })
-      await deliverTurn(convoId, 'assistant', `${text}\n→ ${verdict}`)
+      const heard = listening.stop()
+      results.push(heard.length ? { text, verdict, heard } : { text, verdict })
+      await deliverTurn(convoId, 'assistant', [`${text}\n→ ${verdict}`, ...heard].join('\n'))
     }
     // A line may have walked the hive elsewhere, and the chat follows the
     // layer: bring the run's own conversation back in front of the participant.

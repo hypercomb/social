@@ -45,3 +45,6 @@ hypercomb-client/app/frontend/
 .claude/skill-library/
 .scratch/
 test-results/
+
+# Planting sentences written by `living:plant -- --sentences > sentences.txt` (documentation/change-channel.md)
+/sentences.txt

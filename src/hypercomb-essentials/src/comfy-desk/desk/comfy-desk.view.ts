@@ -23,8 +23,11 @@ import { installDiagramStyles } from '../../editor/diagram/diagram.styles.js'
 import { GAP, MARGIN } from '../../editor/diagram/layout.js'
 import { assetsPart } from '../assets/assets.js'
 import { calloutsPart, TAB_WIDTH } from '../callouts/callouts.js'
+import { chunksPart } from '../chunks/chunks.js'
+import { directionPart } from '../direction/direction.js'
 import { formPart } from '../form/form.js'
 import { fitBox, framePart } from '../frame/frame.js'
+import { ideasPart } from '../ideas/ideas.js'
 import { libraryPart } from '../library/library.js'
 import { machinePart } from '../machine/machine.js'
 import { negativePart } from '../negative/negative.js'
@@ -36,8 +39,9 @@ import { shelfPart } from '../shelf/shelf.js'
 import { workflowPart } from '../workflow/workflow.js'
 import {
   fillParts, make,
-  type Asset, type CalloutsHandle, type CardContext, type CardHandle, type CardPart, type DeskParts,
-  type DeskState, type FormHandle, type FrameHandle, type FrameShown, type Lit, type RecipeRow, type Say, type ShelfHandle,
+  type Asset, type CalloutsHandle, type CardContext, type CardHandle, type CardPart, type ChunksHandle, type DeskParts,
+  type DeskState, type FormHandle, type FrameHandle, type FrameShown, type Idea, type IdeaAction, type IdeasHandle,
+  type Lit, type RecipeRow, type Say, type ShelfHandle,
 } from '../parts.js'
 import { installComfyDeskStyles } from './comfy-desk.styles.js'
 
@@ -100,6 +104,20 @@ const OWN: DeskParts = {
   machine: machinePart,
   library: libraryPart,
   place: placePart,
+  chunks: chunksPart,
+  ideas: ideasPart,
+  direction: directionPart,
+}
+
+/** The prompt grows a chunk at a time while the ideas are open. */
+interface Suggesting {
+  chunks: string[]
+  ideas: readonly Idea[]
+  source: 'agents' | 'words' | ''
+  open: string | null
+  reading: string | null
+  busy: boolean
+  abort: AbortController
 }
 
 const cardWord = (id: string): keyof DeskParts | null =>
@@ -138,6 +156,9 @@ export class ComfyDeskElement extends HTMLElement {
   #rail: RailShape | null = null
   #parked = false
   #frameId = 0
+  #suggesting: Suggesting | null = null
+  #chunksUi: ChunksHandle | null = null
+  #ideasUi: IdeasHandle | null = null
 
   readonly #session: WindowSession = {
     park: () => { this.#parked = true; EffectBus.emit('comfy:close', {}) },
@@ -172,6 +193,8 @@ export class ComfyDeskElement extends HTMLElement {
   dismissInner(): boolean {
     if (this.#looking) { this.#look(false); return true }
     if (this.#choosing) { this.#choose(null); return true }
+    if (this.#suggesting?.open) { this.#suggesting.open = null; this.#paintIdeas(); return true }
+    if (this.#suggesting) { this.#stopSuggesting(); return true }
     return this.#callouts?.dismiss() ?? false
   }
 
@@ -234,8 +257,23 @@ export class ComfyDeskElement extends HTMLElement {
       onLeave: part => this.#callouts?.leave(part),
       onPick: part => this.#callouts?.open(part),
       onLook: () => this.#look(true),
+      onSize: (width, height) => {
+        this.#form?.setNumber('width', String(width))
+        this.#form?.setNumber('height', String(height))
+        this.#paint()
+      },
     }, t)
     this.#frame = frame
+    const chunks = parts.chunks.create({ onRemove: index => this.#removeChunk(index) }, t)
+    chunks.el.hidden = true
+    this.#chunksUi = chunks
+    const ideas = parts.ideas.create({
+      onHover: id => { if (this.#suggesting && this.#suggesting.reading !== id) { this.#suggesting.reading = id; this.#paintIdeas() } },
+      onOpen: id => { if (this.#suggesting) { this.#suggesting.open = id; this.#paintIdeas() } },
+      onAct: (id, action) => { void this.#act(id, action) },
+    }, t)
+    ideas.el.hidden = true
+    this.#ideasUi = ideas
     const callouts = parts.callouts.create({
       onLit: lit => this.#light(lit),
       onOpen: id => { if (id) this.#cards.get(id)?.card.focus?.() },
@@ -249,7 +287,7 @@ export class ComfyDeskElement extends HTMLElement {
     this.#refs.set('notices', notices)
     const vp = make('div', 'cd-vp')
     vp.setAttribute('data-consumes-wheel', '')
-    vp.append(tag, notices, frame.el, callouts.el)
+    vp.append(tag, notices, chunks.el, frame.el, callouts.el, ideas.el)
     this.#vp = vp
 
     const body = make('div', 'cd-body')
@@ -319,6 +357,12 @@ export class ComfyDeskElement extends HTMLElement {
     const state = make('span', 'cd-state')
     this.#refs.set('state', state)
 
+    const suggest = make('button', 'cd-btn', t('comfy.suggest', 'Suggest'))
+    suggest.type = 'button'
+    suggest.title = t('comfy.suggest-hint', 'Ideas for where the prompt could go, as tiles')
+    suggest.addEventListener('click', () => { if (this.#suggesting) this.#stopSuggesting(); else this.#startSuggesting() })
+    this.#refs.set('suggest', suggest)
+
     const run = make('button', 'cd-btn cd-btn-primary', t('comfy.generate', 'Generate'))
     run.type = 'button'
     run.addEventListener('click', () => {
@@ -337,7 +381,7 @@ export class ComfyDeskElement extends HTMLElement {
     close.append(glyph)
     close.addEventListener('click', () => this.#close())
 
-    head.append(reading, address, make('span', 'cd-grow'), state, run, close)
+    head.append(reading, address, make('span', 'cd-grow'), state, suggest, run, close)
     return head
   }
 
@@ -361,6 +405,11 @@ export class ComfyDeskElement extends HTMLElement {
     for (const off of this.#openCleanup.splice(0)) attempt(() => off?.())
     attempt(() => this.#rail?.dispose())
     this.#rail = null
+    attempt(() => this.#suggesting?.abort.abort())
+    this.#suggesting = null
+    attempt(() => this.#ideasUi?.dispose())
+    this.#ideasUi = null
+    this.#chunksUi = null
     attempt(() => this.#callouts?.dispose())
     attempt(() => this.#shelf?.dispose())
     attempt(() => this.#dock?.dispose?.())
@@ -505,7 +554,112 @@ export class ComfyDeskElement extends HTMLElement {
       form: this.#form!,
       changed: () => this.#paint(),
       chooseTile: chosen => this.#choose(chosen),
+      suggest: () => this.#startSuggesting(),
     }
+  }
+
+  // ── suggesting ────────────────────────────────────────────────
+
+  /** The words so far become pieces, and the ideas open where the picture is. */
+  #startSuggesting(): void {
+    if (!this.#form || this.#suggesting) return
+    this.#callouts?.open(null)
+    this.#suggesting = {
+      chunks: [...this.#parts.chunks.split(this.#form.values.positive)],
+      ideas: [], source: '', open: null, reading: null, busy: false,
+      abort: new AbortController(),
+    }
+    this.#paint()
+    void this.#refreshIdeas()
+  }
+
+  #stopSuggesting(): void {
+    const held = this.#suggesting
+    if (!held) return
+    held.abort.abort()
+    this.#suggesting = null
+    this.#paint()
+    this.#panel?.focus({ preventScroll: true })
+  }
+
+  /** Speculative on the prompt so far: every change to the pieces asks again. */
+  async #refreshIdeas(): Promise<void> {
+    const held = this.#suggesting
+    if (!held) return
+    held.abort.abort()
+    held.abort = new AbortController()
+    const { signal } = held.abort
+    held.busy = true
+    held.open = null
+    held.reading = null
+    this.#paintIdeas()
+    try {
+      const found = await this.#parts.direction.ideas(this.#parts.chunks.join(held.chunks), signal)
+      if (signal.aborted || this.#suggesting !== held) return
+      held.ideas = found.ideas
+      held.source = found.source
+    } catch {
+      if (signal.aborted || this.#suggesting !== held) return
+    } finally {
+      if (this.#suggesting === held && !signal.aborted) { held.busy = false; this.#paintIdeas() }
+    }
+  }
+
+  /** A seat of the quick menu. Taking a direction adds one piece and asks again. */
+  async #act(id: string, action: IdeaAction): Promise<void> {
+    const held = this.#suggesting
+    const idea = held?.ideas.find(one => one.id === id)
+    if (!held || !idea) return
+    switch (action) {
+      case 'back': held.open = null; this.#paintIdeas(); return
+      case 'read': held.reading = id; this.#paintIdeas(); return
+      case 'shuffle': void this.#refreshIdeas(); return
+      default: break
+    }
+    held.busy = true
+    this.#paintIdeas()
+    const { signal } = held.abort
+    let chunk = ''
+    try {
+      chunk = await this.#parts.direction.unfold(
+        this.#parts.chunks.join(held.chunks), idea, action, this.#form?.values.reviewers ?? 3, signal,
+      )
+    } catch { chunk = '' }
+    if (signal.aborted || this.#suggesting !== held) return
+    if (chunk && !held.chunks.some(piece => piece.toLowerCase() === chunk.toLowerCase())) held.chunks.push(chunk)
+    this.#syncChunks()
+    void this.#refreshIdeas()
+  }
+
+  #removeChunk(index: number): void {
+    const held = this.#suggesting
+    if (!held || index < 0 || index >= held.chunks.length) return
+    held.chunks.splice(index, 1)
+    this.#syncChunks()
+    void this.#refreshIdeas()
+  }
+
+  /** The pieces ARE the prompt: the form follows them. */
+  #syncChunks(): void {
+    const held = this.#suggesting
+    if (!held || !this.#form) return
+    this.#form.set({ positive: this.#parts.chunks.join(held.chunks) })
+    this.#paint()
+  }
+
+  #paintIdeas(): void {
+    const held = this.#suggesting
+    const ideas = this.#ideasUi
+    const chunks = this.#chunksUi
+    if (!ideas || !chunks) return
+    ideas.el.hidden = chunks.el.hidden = !held
+    if (!held) return
+    chunks.show(held.chunks, held.busy)
+    const subject = held.chunks[0] ?? t('comfy.prompt-tab', 'prompt')
+    ideas.show({
+      subject: subject.length > 28 ? `${subject.slice(0, 26).trim()}…` : subject,
+      ideas: held.ideas, open: held.open, reading: held.reading, busy: held.busy, source: held.source,
+    })
   }
 
   #cardOf(id: string): HTMLElement | null {
@@ -556,6 +710,13 @@ export class ComfyDeskElement extends HTMLElement {
     this.#schedule()
     this.#paintTag()
     this.#paintFolder(p)
+    // While the ideas are open they stand where the picture does.
+    const suggesting = !!this.#suggesting
+    if (this.#frame) this.#frame.el.hidden = suggesting
+    if (this.#callouts) this.#callouts.el.hidden = suggesting
+    this.#refs.get('suggest')?.setAttribute('aria-pressed', String(suggesting))
+    this.#panel?.toggleAttribute('data-suggesting', suggesting)
+    this.#paintIdeas()
   }
 
   #paintFolder(p: ComfyRenderPayload): void {
@@ -576,6 +737,7 @@ export class ComfyDeskElement extends HTMLElement {
     const tag = this.#refs.get('tag')
     if (!tag) return
     if (this.#choosing) { tag.textContent = t('comfy.place-pick', 'Choose the tile this picture goes on'); return }
+    if (this.#suggesting) { tag.textContent = t('comfy.suggesting', 'Where the prompt could go. Take a piece out with ×. Generate when it is complete.'); return }
     const record = this.#asset?.record
     tag.textContent = record
       ? [record.label, record.model, record.seed !== undefined ? `${t('comfy.seed', 'seed')} ${record.seed}` : ''].filter(Boolean).join(' · ')

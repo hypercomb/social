@@ -8,6 +8,7 @@
 //
 //   doctrine              the viewer: choose which rules the anatomy carries
 //   doctrine list         the sections the anatomy carries now, numbered
+//   doctrine tiles        the codex laid out as tiles on this page, to browse
 //   doctrine back         the doctrine the last change replaced, again
 //   doctrine drop <n>     the doctrine without section n
 //   doctrine seed         the doctrine this build ships, as the head
@@ -25,16 +26,17 @@ export class DoctrineQueenBee extends QueenBee {
   readonly command = 'doctrine'
   override description = 'See, step back, drop or reseed the rules every model is sent'
   override descriptionKey = 'slash.doctrine'
-  override options = ['list', 'back', 'drop <n>', 'seed']
+  override options = ['list', 'tiles', 'back', 'drop <n>', 'seed']
   override examples = [
     { input: '/doctrine', result: 'Opens the doctrine viewer: choose which rules every model is sent' },
     { input: '/doctrine list', result: 'Lists the doctrine sections, numbered' },
+    { input: '/doctrine tiles', result: 'Lays the rules out as tiles on this page, one tile per tier and per rule' },
     { input: '/doctrine back', result: 'Puts back the doctrine the last change replaced' },
   ]
 
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    return ['list', 'back', 'drop ', 'seed'].filter(word => word.startsWith(typed) && word.trim() !== typed)
+    return ['list', 'tiles', 'back', 'drop ', 'seed'].filter(word => word.startsWith(typed) && word.trim() !== typed)
   }
 
   protected async execute(args: string): Promise<void> {
@@ -61,13 +63,58 @@ export class DoctrineQueenBee extends QueenBee {
       toast(`${t('doctrine.list', 'Doctrine:')} ${listed}${pending}`)
       return
     }
+    if (word === 'tiles') {
+      const [{ makeDoctrineTiles }, { ANATOMY_CODEX }, { parseCodex }] = await Promise.all([
+        import('./doctrine-tiles.js'), import('./anatomy/anatomy.generated.js'), import('./anatomy/codex.js'),
+      ])
+      toast(t('doctrine.tiling', 'Laying the doctrine out as tiles…'))
+      const outcome = await makeDoctrineTiles(parseCodex(ANATOMY_CODEX))
+      if (!outcome.ok) { toast(outcome.error, 'error'); return }
+      toast(t('doctrine.tiled', 'The doctrine is on this page as the tile doctrine: {made} rules added, {kept} already there.', { made: outcome.made, kept: outcome.kept }), 'success')
+      return
+    }
     if (word === 'back') return done(await doctrine.back(), t('doctrine.backed', 'Stepped back.'))
     if (word === 'seed') return done(await doctrine.seed(), t('doctrine.seeded', 'Took the build\'s doctrine.'))
     if (word === 'drop') {
       const index = Number(rest[0])
       return done(await doctrine.drop(index), t('doctrine.dropped', 'Dropped section {index}; doctrine back puts it back.', { index: rest[0] ?? '' }))
     }
-    toast(t('doctrine.usage', '/doctrine takes list, back, drop <n> or seed; alone it opens the viewer.'), 'warning')
+    toast(t('doctrine.usage', '/doctrine takes list, tiles, back, drop <n> or seed; alone it opens the viewer.'), 'warning')
   }
 }
 
+
+// THE VIEWER ARRIVES WITH ITS FIRST OPEN, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"): nothing needs its code until `/doctrine` asks, so it
+// loads then, once. The view subscribes to `doctrine:open` as it is made and the
+// bus replays the press that loaded it, so the first press opens it like every
+// later one. The key is spelled here: importing even a constant from the view
+// would keep it on boot.
+const DOCTRINE_WINDOW_KEY = '@diamondcoreprocessor.com/DoctrineWindowView'
+let doctrineWindow: Promise<void> | null = null
+let doctrineBuilt = false
+/** Presses heard while the viewer loads. The replay plays only the last, and
+ *  every press toggles — so an even count ends closed. */
+let doctrinePresses = 0
+
+EffectBus.on('doctrine:open', () => {
+  if (doctrineBuilt) return
+  doctrinePresses++
+  doctrineWindow ??= import('./doctrine-window.view.js').then(({ DoctrineWindowView }) => {
+    // BUILT ONCE, even when making it throws: it subscribes before its replay
+    // opens it, so a second one would answer every later press twice.
+    doctrineBuilt = true
+    try {
+      const view = new DoctrineWindowView()
+      window.ioc.register(DOCTRINE_WINDOW_KEY, view)
+      if (doctrinePresses % 2 === 0) view.close()
+    } catch (error) {
+      console.error('[doctrine] the viewer could not be made', error)
+    }
+  }, (error: unknown) => {
+    // A failed load says so, and the next press tries again.
+    doctrineWindow = null
+    doctrinePresses = 0
+    EffectBus.emit('activity:log', { message: `Could not load the doctrine viewer: ${error instanceof Error ? error.message : String(error)}` })
+  })
+})

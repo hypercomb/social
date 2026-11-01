@@ -2,7 +2,7 @@
 //
 // WHAT CROSSES BETWEEN THE PARTS, and nothing else (documentation/comfy-desk.md).
 //
-// The desk is one behaviour and thirteen parts. Each part is a folder holding one
+// The desk is one behaviour and sixteen parts. Each part is a folder holding one
 // trait word's OWN version, so each is its own layer with its own signature and
 // each is an extension point: something registered at `partKey(word)` replaces
 // it, and with nothing there the part's own version runs. This file is the only
@@ -16,6 +16,7 @@ import type { ComfyParams } from '../comfy/comfy-workflow.js'
 export const PART_WORDS = [
   'form', 'assets', 'recipe', 'frame', 'callouts', 'shelf',
   'prompt', 'negative', 'knobs', 'workflow', 'machine', 'library', 'place',
+  'chunks', 'ideas', 'direction',
 ] as const
 export type PartWord = (typeof PART_WORDS)[number]
 
@@ -118,6 +119,8 @@ export interface CardContext {
   changed(): void
   /** The list on the left turns to the tiles until one is chosen. */
   chooseTile(chosen: (tile: { name: string; parent: readonly string[] }) => void): void
+  /** The ideas board opens where the picture is. */
+  suggest(): void
 }
 
 export interface CardHandle {
@@ -166,6 +169,8 @@ export interface FramePart {
     onLeave(part: string): void
     onPick(part: string): void
     onLook(): void
+    /** The size mark was edited in place to a valid `width x height`. */
+    onSize(width: number, height: number): void
   }, say: Say): FrameHandle
 }
 
@@ -222,7 +227,72 @@ export interface ShelfPart {
   }, say: Say): ShelfHandle
 }
 
+// ── suggesting: the prompt grows a chunk at a time ────────────────────
+
+/** The prompt, broken into the pieces it was written in. Each accepted
+ *  direction is one more piece, and any piece can be taken out. */
+export interface ChunksHandle {
+  readonly el: HTMLElement
+  show(chunks: readonly string[], busy: boolean): void
+}
+
+export interface ChunksPart {
+  /** The typed words as pieces: one per clause. */
+  split(text: string): readonly string[]
+  join(chunks: readonly string[]): string
+  create(events: { onRemove(index: number): void }, say: Say): ChunksHandle
+}
+
+/** One way the prompt could unfold. Speculative: made from the prompt so far. */
+export interface Idea {
+  readonly id: string
+  /** Two or three words, on the tile. */
+  readonly title: string
+  /** One sentence, read on rollover. */
+  readonly text: string
+}
+
+/** What the quick menu offers on an idea. */
+export type IdeaAction = 'take' | 'describe' | 'visual' | 'shuffle' | 'read' | 'back'
+
+export interface IdeasShown {
+  /** What the ideas grow from, for the centre tile. */
+  readonly subject: string
+  readonly ideas: readonly Idea[]
+  /** The idea whose quick menu is open, flown to the centre. */
+  readonly open: string | null
+  /** The idea under the pointer, read below the board. */
+  readonly reading: string | null
+  readonly busy: boolean
+  /** Where the ideas come from, said once: agents, or common words. */
+  readonly source: 'agents' | 'words' | ''
+}
+
+export interface IdeasHandle {
+  readonly el: HTMLElement
+  show(shown: IdeasShown): void
+  dispose(): void
+}
+
+export interface IdeasPart {
+  create(events: {
+    onHover(id: string | null): void
+    onOpen(id: string): void
+    onAct(id: string, action: IdeaAction): void
+  }, say: Say): IdeasHandle
+}
+
+export interface DirectionPart {
+  /** Directions the prompt could take. `source` says who wrote them. */
+  ideas(prompt: string, signal?: AbortSignal): Promise<{ ideas: readonly Idea[]; source: 'agents' | 'words' }>
+  /** The chunk that takes this idea the way asked. Agents write, Jev picks. */
+  unfold(prompt: string, idea: Idea, action: 'take' | 'describe' | 'visual', reviewers: number, signal?: AbortSignal): Promise<string>
+}
+
 export interface DeskParts {
+  readonly chunks: ChunksPart
+  readonly ideas: IdeasPart
+  readonly direction: DirectionPart
   readonly form: FormPart
   readonly assets: AssetsPart
   readonly recipe: RecipePart

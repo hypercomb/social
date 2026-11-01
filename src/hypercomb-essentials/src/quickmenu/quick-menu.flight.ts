@@ -16,6 +16,7 @@
 // zoom are the same after a flight as before it.
 
 import { EffectBus } from '@hypercomb/core'
+import { visibleArea, type SafeArea } from '../navigation/zoom/safe-area.js'
 import { viewportIsFramed } from '../sequence/frame-lock.js'
 import type { QuickMenuLayer } from './quick-menu.layer.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
@@ -300,24 +301,30 @@ export class QuickMenuFlight {
    *  and no bigger than leaves room for the whole flower. */
   #menuScale(): number {
     const host = this.#host!
-    const { width, height } = host.renderer.screen
+    const area = this.#area()
     const stage = host.app.stage.scale.x || 1
     const { tileRadius, radius, reach } = this.#layer.metrics
     const wanted = TILE_RADIUS_PX / tileRadius
-    const room = (Math.min(width, height) / 2 - EDGE_MARGIN) / (reach * STEPS_OUT + radius)
+    const room = (Math.min(area.right - area.left, area.bottom - area.top) / 2 - EDGE_MARGIN) / (reach * STEPS_OUT + radius)
     return Math.min(wanted, room) / stage
   }
 
-  /** Where the container must sit for `local` to land on the screen centre. */
+  /** The canvas the participant can see, beside the rail and under the header. */
+  #area(): SafeArea {
+    const host = this.#host!
+    return visibleArea(host.renderer.screen, host.canvas.getBoundingClientRect())
+  }
+
+  /** Where the container must sit for `local` to land in the middle of the area. */
   #cameraFor(local: Pt, scale: number): Camera {
     const host = this.#host!
     const stage = host.app.stage
     const ss = stage.scale.x || 1
-    const { width, height } = host.renderer.screen
+    const area = this.#area()
     return {
       scale,
-      x: (width / 2 - stage.position.x) / ss - scale * local.x,
-      y: (height / 2 - stage.position.y) / ss - scale * local.y,
+      x: ((area.left + area.right) / 2 - stage.position.x) / ss - scale * local.x,
+      y: ((area.top + area.bottom) / 2 - stage.position.y) / ss - scale * local.y,
     }
   }
 
@@ -346,12 +353,13 @@ export class QuickMenuFlight {
     this.#anim = requestAnimationFrame(tick)
   }
 
-  /** The middle of the canvas, in client coordinates. */
+  /** The middle of the available area, in client coordinates. */
   #screenCentreClient(): Pt {
     const host = this.#host
     if (!host) return { x: window.innerWidth / 2, y: window.innerHeight / 2 }
     const rect = host.canvas.getBoundingClientRect()
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    const area = this.#area()
+    return { x: rect.left + (area.left + area.right) / 2, y: rect.top + (area.top + area.bottom) / 2 }
   }
 
   // ── faux cursor ─────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import { readViewportAt, writeViewportAt } from '../../editor/viewport-store.js'
 import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 import { expandToFrame, viewportIsFramed } from '../../sequence/frame-lock.js'
 import { shouldRefit } from '../../presentation/tiles/stage-centering.js'
+import { safeArea } from './safe-area.js'
 
 type Pt = { x: number; y: number }
 
@@ -776,25 +777,7 @@ export class ZoomDrone extends Drone {
     // publish zero and therefore reserve nothing.
     const screen = this.renderer.screen
     const canvasRect = this.canvas?.getBoundingClientRect() ?? null
-    const headerEl = document.querySelector('.header-bar') as HTMLElement | null
-    const rootStyle = getComputedStyle(document.documentElement)
-    const controlsLeft = Number.parseFloat(rootStyle.getPropertyValue('--hc-controls-left')) || 0
-    const controlsRight = Number.parseFloat(rootStyle.getPropertyValue('--hc-controls-right')) || 0
-    // Header bottom in canvas-local Y: the header lives in viewport space, the
-    // safe area in canvas space, so subtract the canvas's own top offset
-    // (0 normally; non-zero only if the host is inset from the viewport top).
-    const headerBottom = headerEl ? headerEl.getBoundingClientRect().bottom : 0
-    const headerBottomLocal = Math.max(0, canvasRect ? headerBottom - canvasRect.top : headerBottom)
-    // With the command line on demand (command-line.component.ts
-    // `line-on-demand`) the bar paints no strip, so the hive centres on the
-    // whole canvas: the header's height is reserved half above, half below.
-    // The scale is the one the normal mode fits — only the centre rises, by
-    // half the header — and a summoned line may overlap the top of the content.
-    const headerReserve = headerEl?.classList.contains('line-on-demand') ? headerBottomLocal / 2 : 0
-    const safeTop = headerBottomLocal - headerReserve + padding
-    const safeBottom = screen.height - headerReserve - padding
-    const safeLeft = controlsLeft + padding
-    const safeRight = screen.width - controlsRight - padding
+    const { left: safeLeft, top: safeTop, right: safeRight, bottom: safeBottom } = safeArea(screen, canvasRect, padding)
     const availW = safeRight - safeLeft
     const availH = safeBottom - safeTop
 

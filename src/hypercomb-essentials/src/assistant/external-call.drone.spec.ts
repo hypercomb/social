@@ -51,6 +51,10 @@ beforeEach(() => {
 EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {
   said.push(text)
   accept?.()
+  if (text.startsWith('read ')) {
+    EffectBus.emit('activity:log', { message: `/games/bubble: ${text}` })
+    EffectBus.emit('toast:show', { title: 'read', message: 'two tiles' })
+  }
   complete?.(text.startsWith('go ')
     ? { kind: 'unknown', reason: 'the legacy pipeline' }
     : text.includes('remove')
@@ -98,6 +102,22 @@ describe('external calls', () => {
     expect(turns[2].text).toBe('/remove word\n→ refused: a person must say this')
     expect(opened).toContain(outcome.convoId)
     expect(lastAsk()).toBeNull()
+  })
+
+  it('returns and records what the hive said while a line ran', async () => {
+    const c = call('claude-code', ['read /games', '/create after'])
+    EffectBus.emitTransient(EXTERNAL_ANSWER, { id: lastAsk()!.id, decision: 'run' })
+    await flush(); await flush()
+
+    const outcome = c.outcome()
+    expect(outcome?.kind).toBe('ran')
+    if (outcome?.kind !== 'ran') return
+    expect(outcome.results[0]).toEqual({
+      text: 'read /games', verdict: 'ran /ead', heard: ['/games/bubble: read /games', 'read: two tiles'],
+    })
+    // a line that said nothing carries no `heard`, and the heard words are written to the conversation
+    expect(outcome.results[1]).toEqual({ text: '/create after', verdict: 'ran /create' })
+    expect(turns[1].text).toBe('read /games\n→ ran /ead\n/games/bubble: read /games\nread: two tiles')
   })
 
   it('declines without saying anything or opening the chat', async () => {

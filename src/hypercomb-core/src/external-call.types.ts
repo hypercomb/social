@@ -63,6 +63,10 @@ export type ExternalAnswer = {
 export type ExternalLineResult = {
   readonly text: string
   readonly verdict: string
+  /** What the hive said while the line ran (activity lines and toasts), as a
+   *  participant reads it. A tile withheld from outside models is masked.
+   *  Absent when the line said nothing. */
+  readonly heard?: readonly string[]
 }
 
 export type ExternalCallOutcome =
