@@ -50,6 +50,8 @@ export type FlowerCell = {
   /** This is the tile being worked on, wearing its own look. */
   subject?: boolean
   lit?: boolean
+  /** A Material Symbols glyph worn in place of the name. */
+  icon?: string
 }
 
 type SlotView = {
@@ -75,7 +77,7 @@ function hexPoints(r: number, flat: boolean): number[] {
   return out
 }
 
-function axialToPixel(q: number, r: number, spacing: number, flat: boolean): { x: number; y: number } {
+export function axialToPixel(q: number, r: number, spacing: number, flat: boolean): { x: number; y: number } {
   return flat
     ? { x: 1.5 * spacing * q, y: Math.sqrt(3) * spacing * (r + q / 2) }
     : { x: Math.sqrt(3) * spacing * (q + r / 2), y: spacing * 1.5 * r }

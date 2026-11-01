@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GUIDE_SURFACE, GuideOverlayElement } from './guide-overlay.view.js'
-import { beeDirections, placeFromElement, placeFromTile, tileSuggestions, type GuideTile } from './guide-place.js'
+import { GUIDE_SURFACE, GuideOverlayElement, type GuideBoard } from './guide-overlay.view.js'
+import type { GuideIdea } from './guide-place.js'
 
 if (!customElements.get(GUIDE_SURFACE)) customElements.define(GUIDE_SURFACE, GuideOverlayElement)
 
@@ -11,68 +11,125 @@ const mount = (): GuideOverlayElement => {
   return overlay
 }
 
+const ideas: readonly GuideIdea[] = [
+  { id: 'a', icon: 'description', word: 'purpose', label: 'Say what this tile is for' },
+  { id: 'b', icon: 'lightbulb', word: 'next', label: 'Suggest one next change' },
+]
+
+const board = (over: Partial<GuideBoard> = {}): GuideBoard => ({
+  route: '/press-kit',
+  name: 'Press kit',
+  reading: '',
+  ideas,
+  chosen: new Set(),
+  mode: 'tiles',
+  box: { left: 900, width: 320, middle: 400 },
+  ...over,
+})
+
+const q = (overlay: GuideOverlayElement, selector: string): HTMLElement =>
+  overlay.shadowRoot!.querySelector<HTMLElement>(selector)!
+
 afterEach(() => {
   document.querySelector(GUIDE_SURFACE)?.remove()
 })
 
 describe('guide overlay', () => {
-  it('drops a dialog of directions at the click and reports the one that is chosen', () => {
+  it('beside the tiles the board lists only what is chosen and cannot accept nothing', () => {
     const overlay = mount()
-    const picked = vi.fn()
-    overlay.onPick = picked
-    const heading = document.createElement('h1')
-    heading.textContent = 'Press kit'
-    const place = placeFromElement(heading, { x: 40, y: 50 }, '/press-kit')
-    const directions = beeDirections(place)
-    overlay.show({ place, ...directions, from: 'bee', status: 'Asking the agent for directions.' })
+    overlay.board(board())
+    expect(q(overlay, '.route').textContent).toBe('/press-kit')
+    expect(q(overlay, '.name').textContent).toBe('Press kit')
+    expect(q(overlay, '.empty').textContent).toBe('Pick what you want done.')
+    expect((q(overlay, '.accept') as HTMLButtonElement).disabled).toBe(true)
 
-    const buttons = [...overlay.shadowRoot!.querySelectorAll<HTMLButtonElement>('.options button')]
-    expect(buttons.map(button => button.textContent)).toEqual([...directions.options])
-    expect(overlay.shadowRoot!.querySelector('.chip')!.textContent).toBe('/press-kit')
-    buttons[0]!.click()
-    expect(picked).toHaveBeenCalledWith(directions.options[0])
+    overlay.board(board({ chosen: new Set(['b']) }))
+    const rows = [...overlay.shadowRoot!.querySelectorAll('.item')]
+    expect(rows.map(row => row.textContent)).toEqual(['checkSuggest one next change'])
+    expect(q(overlay, '.accept').textContent).toBe('Accept 1')
   })
 
-  it('dismiss puts the dialog away', () => {
+  it('stands beside the middle: tiles centre on the tile, a list fills the free height', () => {
     const overlay = mount()
-    const dismissed = vi.fn()
-    overlay.onDismiss = dismissed
-    const heading = document.createElement('h1')
-    heading.textContent = 'Press kit'
-    const place = placeFromElement(heading, { x: 10, y: 10 }, '/')
-    overlay.show({ place, ...beeDirections(place), from: 'bee', status: 'Asking.' })
-    overlay.shadowRoot!.querySelector<HTMLButtonElement>('.dismiss')!.click()
-    expect(overlay.dialogOpen).toBe(false)
-    expect(dismissed).toHaveBeenCalledOnce()
+    overlay.board(board())
+    expect(q(overlay, '.board').style.left).toBe('900px')
+    expect(q(overlay, '.board').style.transform).toBe('translateY(-50%)')
+    overlay.board(board({ mode: 'list', box: { left: 760, width: 560, top: 72, height: 700 } }))
+    expect(q(overlay, '.board').style.height).toBe('700px')
+    expect(q(overlay, '.board').style.transform).toBe('')
   })
 
-  it('names the beehaviors of a clicked tile', () => {
+  it('as a list it holds every idea, and a row reports its own toggle', () => {
     const overlay = mount()
-    const tile: GuideTile = {
-      x: 20, y: 30, route: '/press-kit', label: 'press-kit', name: 'Press kit', behaviors: ['website', 'files'],
-    }
-    const suggestions = tileSuggestions(tile)
-    overlay.show({ place: placeFromTile(tile), ...suggestions, from: 'bee', status: 'Asking the agent for a suggestion.' })
-    expect(overlay.shadowRoot!.querySelector('.place')!.textContent).toBe('website · files')
-    expect(overlay.shadowRoot!.querySelector('.chip')!.textContent).toBe('/press-kit')
-    overlay.hint('Press kit\nwebsite · files\nPress and hold.')
-    expect(overlay.shadowRoot!.querySelector('.hint')!.textContent).toContain('website · files')
-    expect(overlay.shadowRoot!.querySelector('.hint')!.textContent).toContain('Press and hold.')
-    overlay.ringChoices(200, 180, ['Change the page', 'Leave it as it is'], 80)
-    const placed = [...overlay.shadowRoot!.querySelectorAll<HTMLButtonElement>('.choices button')]
-    expect(placed.map(button => button.textContent)).toEqual(['Change the page', 'Leave it as it is'])
-    expect(placed[0]!.style.left).toBe('280px')
-    overlay.aimChoice(1)
-    expect(placed[1]!.classList.contains('on')).toBe(true)
-    overlay.aimChoice(-1)
-    expect(placed[1]!.classList.contains('on')).toBe(false)
-    expect(overlay.shadowRoot!.querySelector('.prompt')!.textContent).toBe('Some choices')
-    const order = [...overlay.shadowRoot!.querySelector('.dialog')!.children].map(node => node.className)
-    expect(order.indexOf('options')).toBeLessThan(order.indexOf('status'))
-    overlay.show({ place: placeFromTile(tile), ...suggestions, from: 'bee', status: '' })
-    expect((overlay.shadowRoot!.querySelector('.status') as HTMLElement).hidden).toBe(true)
-    overlay.status('The agent offered these choices.')
-    expect((overlay.shadowRoot!.querySelector('.status') as HTMLElement).hidden).toBe(false)
+    const toggled = vi.fn()
+    overlay.onToggle = toggled
+    overlay.board(board({ mode: 'list' }))
+    const rows = [...overlay.shadowRoot!.querySelectorAll<HTMLButtonElement>('.item')]
+    expect(rows).toHaveLength(2)
+    rows[1]!.click()
+    expect(toggled).toHaveBeenCalledWith('b')
+  })
+
+  it('reports the mode words, accept and close', () => {
+    const overlay = mount()
+    const mode = vi.fn()
+    const accept = vi.fn()
+    const close = vi.fn()
+    overlay.onMode = mode
+    overlay.onAccept = accept
+    overlay.onClose = close
+    overlay.board(board({ chosen: new Set(['a']) }))
+    const words = [...overlay.shadowRoot!.querySelectorAll<HTMLButtonElement>('.word')]
+    expect(words.map(word => word.textContent)).toEqual(['Tiles', 'List', 'Close'])
+    expect(words[0]!.classList.contains('on')).toBe(true)
+    words[1]!.click()
+    expect(mode).toHaveBeenCalledWith('list')
+    words[2]!.click()
+    expect(close).toHaveBeenCalledOnce()
+    q(overlay, '.accept').click()
+    expect(accept).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the list where it was scrolled when a pick redraws it', () => {
+    const overlay = mount()
+    overlay.board(board({ mode: 'list' }))
+    q(overlay, '.items').scrollTop = 40
+    const before = q(overlay, '.items').scrollTop
+    overlay.board(board({ mode: 'list', chosen: new Set(['a']) }))
+    expect(q(overlay, '.items').scrollTop).toBe(before)
+  })
+
+  it('the shield takes the pointer, and seating gives the real cursor back', () => {
+    const overlay = mount()
+    const aimed = vi.fn()
+    const pressed = vi.fn()
+    overlay.onAim = aimed
+    overlay.onPress = pressed
+    expect(q(overlay, '.shield').hidden).toBe(true)
+    overlay.shield()
+    expect(q(overlay, '.shield').hidden).toBe(false)
+    q(overlay, '.shield').dispatchEvent(new MouseEvent('click', { clientX: 12, clientY: 34, bubbles: true }))
+    expect(pressed).toHaveBeenCalledWith(12, 34)
+    overlay.seat()
+    expect(overlay.classList.contains('seated')).toBe(true)
+    overlay.board(board())
+    expect(overlay.boardOpen).toBe(true)
+    overlay.unseat()
+    expect(overlay.classList.contains('seated')).toBe(false)
+    expect(overlay.boardOpen).toBe(false)
+    expect(q(overlay, '.shield').hidden).toBe(true)
+  })
+
+  it('rollover shows a label over the tile, and empty text takes it away', () => {
+    const overlay = mount()
+    overlay.shield()
+    overlay.label('Say what this tile is for', 300, 200)
+    expect(q(overlay, '.label').textContent).toBe('Say what this tile is for')
+    expect(q(overlay, '.label').classList.contains('show')).toBe(true)
+    expect(q(overlay, '.shield').classList.contains('over')).toBe(true)
+    overlay.label('', 0, 0)
+    expect(q(overlay, '.label').classList.contains('show')).toBe(false)
+    expect(q(overlay, '.shield').classList.contains('over')).toBe(false)
   })
 
   it('waggles in place when motion is allowed, and disarm stops the dance', () => {
