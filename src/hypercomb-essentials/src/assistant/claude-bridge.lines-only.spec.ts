@@ -120,10 +120,24 @@ describe('the bridge carries lines only', () => {
     expect(res.data?.['summary']).toBe('declined by the participant; nothing ran')
   })
 
+  it('gates a submit of several lines even when the bridge is open', async () => {
+    localStorage.setItem('hc:bridge:open', 'all')
+    try {
+      const id = send({ op: 'submit', from: 'living-plant', text: 'go /\ncreate presentation' })
+      await vi.waitFor(() => expect(calls).toHaveLength(3))
+      expect(calls[2]!.lines).toEqual(['go /', 'create presentation'])
+      expect(direct).toEqual([])
+      calls[2]!.complete?.({ kind: 'declined', convoId: 'c' })
+      expect((await reply(id)).ok).toBe(true)
+    } finally {
+      localStorage.removeItem('hc:bridge:open')
+    }
+  })
+
   it('refuses files, which would be written before anyone answered', async () => {
     const res = await reply(send({ op: 'submit', text: 'website page x', files: [{ name: 'a.txt', text: 'hello' }] }))
     expect(res.ok).toBe(false)
     expect(res.error).toContain('files are shut off')
-    expect(calls).toHaveLength(2)
+    expect(calls).toHaveLength(3)
   })
 })
