@@ -15,11 +15,11 @@ const LABELS: Record<NumberKnob, readonly [string, string]> = {
 }
 
 export const knobsPart: CardPart = {
-  value(state, say): string {
+  /** Short enough to sit on a tab: `512×768 · 20 · #42`. */
+  value(state): string {
     const { numbers, seed } = state.form.values
-    const size = numbers['width'] && numbers['height'] ? `${numbers['width']} × ${numbers['height']}` : ''
-    const steps = numbers['steps'] ? `${numbers['steps']} ${say('comfy.steps', 'steps')}` : ''
-    return [size, steps, seed.trim() ? `${say('comfy.seed', 'seed')} ${seed.trim()}` : ''].filter(Boolean).join(' · ')
+    const size = numbers['width'] && numbers['height'] ? `${numbers['width']}×${numbers['height']}` : ''
+    return [size, numbers['steps'] ?? '', seed.trim() ? `#${seed.trim()}` : ''].filter(Boolean).join(' · ')
   },
   create(context): CardHandle {
     const { say, form } = context

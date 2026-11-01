@@ -98,19 +98,23 @@ ${S} .cd-list-title{font-size:0.72em;letter-spacing:0.12em;text-transform:upperc
 ${S} .cd-find{flex:0 0 auto;margin:0 0.6em 0.4em;height:2em;box-sizing:border-box;padding:0 0.6em;border:0;
   outline:1px solid var(--cd-rule);border-radius:var(--hc-radius-control,2px);background:transparent;color:var(--cd-ink);font:inherit;font-size:0.8em;}
 ${S} .cd-find:focus{outline-color:var(--hc-window-edge-firm);}
-${S} .cd-rows{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 0.4em 0.6em;display:flex;flex-direction:column;gap:0.1em;}
-${S} .cd-row-line{position:relative;display:flex;align-items:center;}
-${S} .cd-row{appearance:none;border:0;margin:0;background:transparent;font:inherit;color:var(--cd-ink-plain);cursor:pointer;text-align:left;
-  display:flex;align-items:center;gap:0.6em;width:100%;min-width:0;min-height:2.9em;padding:0.2em 0.45em;box-sizing:border-box;
-  border-radius:var(--hc-radius-control,2px);outline:1px solid transparent;outline-offset:-1px;transition:background-color 150ms ease, outline-color 150ms ease;}
-${S} .cd-row:hover{background:var(--cd-raise);}
-${S} .cd-row[data-chosen]{background:var(--hc-window-wash);outline-color:var(--hc-window-edge-firm);color:var(--cd-ink);}
-${S} .cd-row-fresh{flex:0 0 auto;width:auto;margin:0 0.4em 0.2em;}
-${S} .cd-row-face{flex:0 0 auto;display:grid;place-items:center;width:2.2em;height:2.2em;object-fit:cover;font-size:0.9em;
-  color:var(--hc-window-accent);background:var(--cd-raise-strong);border-radius:var(--hc-radius-control,2px);}
-${S} .cd-row-name{flex:1 1 auto;min-width:0;font-size:0.8em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-${S} .cd-row-hide{position:absolute;right:0.15em;visibility:hidden;background:var(--cd-ground);}
-${S} .cd-row-line:hover .cd-row-hide,${S} .cd-row-hide:focus-visible{visibility:visible;}
+/* A contact sheet: two faces across, the name under each. */
+${S} .cd-rows{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0.2em 0.6em 0.8em;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.6em 0.5em;align-content:start;}
+${S} .cd-cell-wrap{position:relative;min-width:0;}
+${S} .cd-cell{appearance:none;border:0;margin:0;padding:0;background:transparent;font:inherit;color:var(--cd-ink-quiet);cursor:pointer;text-align:left;
+  display:flex;flex-direction:column;gap:0.3em;width:100%;min-width:0;border-radius:var(--hc-radius-control,2px);}
+${S} .cd-face{display:grid;place-items:center;width:100%;aspect-ratio:1;object-fit:cover;box-sizing:border-box;
+  background:var(--cd-raise);outline:1px solid var(--cd-rule);outline-offset:-1px;border-radius:var(--hc-radius-card,3px);
+  transition:outline-color 150ms ease, background-color 150ms ease;}
+${S} .cd-face-fresh{color:var(--cd-ink-quiet);font-size:1.4em;outline-style:dashed;}
+${S} .cd-cell:hover .cd-face{outline-color:var(--hc-window-edge-firm);}
+${S} .cd-cell:hover{color:var(--cd-ink-plain);}
+${S} .cd-cell[data-chosen] .cd-face{outline:2px solid var(--hc-window-accent);outline-offset:-2px;}
+${S} .cd-cell[data-chosen]{color:var(--cd-ink);}
+${S} .cd-cell-fresh[data-chosen] .cd-face{background:var(--hc-window-wash);color:var(--hc-window-accent);}
+${S} .cd-cell-name{display:block;width:100%;min-width:0;padding:0 0.1em;font-size:0.72em;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+${S} .cd-row-hide{position:absolute;right:0.25em;top:0.25em;visibility:hidden;background:var(--cd-ground);color:var(--cd-ink-plain);}
+${S} .cd-cell-wrap:hover .cd-row-hide,${S} .cd-row-hide:focus-visible{visibility:visible;}
 ${S} .cd-folder-strip{flex:0 0 auto;max-height:30%;overflow-y:auto;display:grid;grid-template-columns:repeat(4,1fr);gap:0.2em;padding:0 0.5em;}
 ${S} .cd-folder-strip:empty{display:none;}
 ${S} .cd-thumb{appearance:none;aspect-ratio:1;padding:0;overflow:hidden;background:var(--cd-raise);border:1px solid var(--hc-window-edge);
@@ -121,22 +125,30 @@ ${S} .cd-hidden{flex:0 0 auto;max-height:30%;overflow-y:auto;padding:0.4em 0.9em
 ${S} .cd-hidden summary{cursor:pointer;}
 ${S} .cd-hidden-row{display:flex;align-items:center;gap:0.4em;}
 
-/* ── THE DRAWING ───────────────────────────────────────────────────────── */
-${S} .cd-figure{position:absolute;left:0;top:0;z-index:1;}
-${S} .cd-picture{position:absolute;box-sizing:border-box;overflow:hidden;background:var(--cd-raise);
-  outline:1px solid var(--cd-rule);border-radius:var(--hc-radius-card,3px);transition:outline-color 150ms ease;}
+/* ── THE DRAWING: the picture, in its own shape ────────────────────────── */
+/* The editor's dimension mark reads its roles from the drawing it sits in; this figure supplies them. */
+${S} .cd-figure{position:absolute;left:0;top:0;z-index:1;--dg-iq:var(--cd-ink-quiet);--dg-ip:var(--cd-ink-plain);--dg-ground:var(--cd-ground);}
+${S} .cd-picture{position:absolute;inset:0;box-sizing:border-box;overflow:hidden;background:var(--cd-raise);container-type:inline-size;
+  outline:1px solid var(--cd-rule);outline-offset:-1px;border-radius:var(--hc-radius-card,3px);transition:outline-color 150ms ease, background-color 150ms ease;}
+${S} .cd-picture[data-empty]{cursor:text;}
+${S} .cd-picture[data-empty]:hover{background:var(--cd-raise-strong);}
 ${S} .cd-picture[data-lit="soft"]{outline-color:var(--hc-window-edge-firm);}
-${S} .cd-picture[data-lit="strong"]{outline:2px solid var(--hc-window-accent);}
-${S} .cd-picture:not(:has(.cd-image[src])){background-image:repeating-linear-gradient(135deg,transparent 0 11px,var(--cd-raise) 11px 12px);}
+${S} .cd-picture[data-lit="strong"]{outline:2px solid var(--hc-window-accent);outline-offset:-2px;}
 ${S} .cd-image{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;}
-${S} .cd-blank{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);margin:0;text-align:center;
-  font-family:var(--cd-read);font-size:0.86em;color:var(--cd-ink-quiet);pointer-events:none;}
-${S} .cd-look-btn{position:absolute;right:0.4em;top:0.4em;z-index:2;background:var(--cd-ground);}
+/* The words in hand, read where the picture will be. */
+${S} .cd-words-preview{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(78%, 30em);max-height:80%;overflow:hidden;margin:0;
+  text-align:center;font-family:var(--cd-read);font-size:clamp(0.95em, 2.4cqw, 1.3em);line-height:1.5;color:var(--cd-ink-plain);pointer-events:none;overflow-wrap:anywhere;}
+${S} .cd-words-preview[data-ghost]{color:var(--cd-ink-quiet);}
+${S} .cd-picture[data-busy] .cd-words-preview{color:var(--cd-ink-quiet);}
+${S} .cd-look-btn{position:absolute;right:0.4em;top:0.4em;z-index:2;background:color-mix(in srgb, var(--cd-ground) 82%, transparent);}
 ${S} .cd-picture .te-dg-lit{inset:0;pointer-events:none;}
 ${S} .cd-progress{position:absolute;left:0;right:0;bottom:0;height:3px;overflow:hidden;background:var(--cd-raise-strong);}
 ${S} .cd-fill{height:100%;background:var(--hc-window-accent);transition:width 150ms linear;}
 ${S} .cd-progress[data-unknown] .cd-fill{width:100%;opacity:0.45;}
-${S} .cd-size{position:absolute;margin-top:0.5em;text-align:center;font-size:0.72em;color:var(--cd-ink-quiet);font-variant-numeric:tabular-nums;pointer-events:none;}
+/* The bracket opens toward the picture it measures, and the size reads under it. */
+${S} .cd-dim{left:0;width:100%;top:calc(100% + 0.5em);}
+${S} .cd-dim::after{order:1;border-top:0;border-bottom:1px solid var(--dg-iq);}
+${S} .cd-dim span{order:2;background:transparent;padding-top:0.2em;}
 
 /* ── THE CARDS' OWN FIELDS ─────────────────────────────────────────────── */
 ${S} .cd-words{width:100%;box-sizing:border-box;resize:vertical;min-height:3.4em;border:0;border-bottom:1px solid transparent;border-radius:var(--hc-radius-control,2px);
@@ -177,9 +189,13 @@ ${S} .cd-live{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:i
 
 /* ── NARROW: the same nodes, rearranged ────────────────────────────────── */
 ${S} .cd-panel[data-layout="narrow"] .cd-body{flex-direction:column;}
-${S} .cd-panel[data-layout="narrow"] .cd-list{width:auto;max-height:30%;box-shadow:inset 0 -1px 0 var(--cd-rule);}
+${S} .cd-panel[data-layout="narrow"] .cd-list{width:auto;max-height:none;box-shadow:inset 0 -1px 0 var(--cd-rule);}
 ${S} .cd-panel[data-layout="narrow"] .cd-vp{overflow-y:auto;padding:2em 16px 1em;}
-${S} .cd-panel[data-layout="narrow"] .cd-figure{position:relative;margin:0 auto 1.6em;}
+${S} .cd-panel[data-layout="narrow"] .cd-figure{position:relative;margin:0 auto 2.4em;}
+/* Narrow: the sheet becomes one strip of faces that scrolls sideways. */
+${S} .cd-panel[data-layout="narrow"] .cd-rows{display:flex;overflow-x:auto;overflow-y:hidden;gap:0.5em;padding:0.2em 0.6em 0.6em;}
+${S} .cd-panel[data-layout="narrow"] .cd-rows > :is(.cd-cell-wrap,.cd-cell-fresh){flex:0 0 5.5em;width:5.5em;}
+${S} .cd-panel[data-layout="narrow"] .cd-list-head{height:2.2em;}
 
 @media (pointer:coarse){
   ${S} .cd-panel .cd-icon-btn{min-width:44px;min-height:44px;}

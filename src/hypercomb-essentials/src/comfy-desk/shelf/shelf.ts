@@ -1,10 +1,12 @@
 // comfy-desk/shelf/shelf.ts
 //
-// THE LIST ON THE LEFT: what has been made. It stands where the tile editor's
-// tile list stands and reads the same way. A row shows that picture on the
-// stage. Nothing here lands on a tile, and hiding is the only way off the list
-// (documentation/hide-first-delete-second.md); what was hidden waits in the fold
-// at the foot. Faces load as they scroll in, because a face is the whole picture.
+// THE LIST ON THE LEFT: what has been made, as a contact sheet. It stands where
+// the tile editor's tile list stands; its rows are faces, because a picture is
+// its own best name. A face shows that picture on the stage. Nothing here lands
+// on a tile, and hiding is the only way off the sheet
+// (documentation/hide-first-delete-second.md); what was hidden waits in the
+// fold at the foot. Faces load as they scroll in, because a face is the whole
+// picture.
 
 import { make, type Asset, type Say, type ShelfHandle, type ShelfPart, type ShelfRow } from '../parts.js'
 
@@ -12,7 +14,7 @@ class Shelf implements ShelfHandle {
   readonly el = make('div', 'cd-shelf')
   readonly #events: Parameters<ShelfPart['create']>[0]
   readonly #rows = make('div', 'cd-rows')
-  readonly #fresh = make('button', 'cd-row cd-row-fresh')
+  readonly #fresh = make('button', 'cd-cell cd-cell-fresh')
   readonly #find = make('input', 'cd-find')
   readonly #folder = make('div', 'cd-folder-strip')
   readonly #hidden = make('details', 'cd-hidden')
@@ -33,9 +35,12 @@ class Shelf implements ShelfHandle {
     this.#find.addEventListener('input', () => this.#paint())
 
     this.#fresh.type = 'button'
-    const face = make('span', 'cd-row-face mat-sym', 'add')
-    face.setAttribute('aria-hidden', 'true')
-    this.#fresh.append(face, make('span', 'cd-row-name', say('comfy.new-picture', 'new picture')))
+    this.#fresh.title = say('comfy.new-picture', 'new picture')
+    const face = make('span', 'cd-face cd-face-fresh')
+    const plus = make('span', 'mat-sym', 'add')
+    plus.setAttribute('aria-hidden', 'true')
+    face.append(plus)
+    this.#fresh.append(face, make('span', 'cd-cell-name', say('comfy.new-picture', 'new picture')))
     this.#fresh.addEventListener('click', () => events.onPick(null))
 
     this.#hidden.hidden = true
@@ -48,7 +53,7 @@ class Shelf implements ShelfHandle {
         }
       }, { root: this.#rows })
     }
-    this.el.append(head, this.#find, this.#fresh, this.#rows, this.#folder, this.#hidden)
+    this.el.append(head, this.#find, this.#rows, this.#folder, this.#hidden)
   }
 
   show(rows: readonly ShelfRow[], fresh: boolean): void {
@@ -79,7 +84,7 @@ class Shelf implements ShelfHandle {
       const back = make('button', 'te-dg-word', this.#say('comfy.bring-back', 'bring back'))
       back.type = 'button'
       back.addEventListener('click', () => this.#events.onReveal(row.sig))
-      line.append(make('span', 'cd-row-name', row.label), back)
+      line.append(make('span', 'cd-cell-name', row.label), back)
       return line
     }))
   }
@@ -97,29 +102,27 @@ class Shelf implements ShelfHandle {
       ? this.#last.filter(({ asset }) => [this.#events.nameOf(asset), asset.record.positive ?? ''].join(' ').toLowerCase().includes(query))
       : this.#last
     this.#observer?.disconnect()
-    this.#rows.replaceChildren(...rows.map(row => this.#row(row)))
+    this.#rows.replaceChildren(this.#fresh, ...rows.map(row => this.#cell(row)))
   }
 
-  #row({ asset, chosen }: ShelfRow): HTMLElement {
+  #cell({ asset, chosen }: ShelfRow): HTMLElement {
     const name = this.#events.nameOf(asset)
-    const line = make('div', 'cd-row-line')
-    const row = make('button', 'cd-row')
-    row.type = 'button'
-    row.title = asset.record.positive ?? name
-    if (chosen) row.dataset['chosen'] = ''
-    row.addEventListener('click', () => this.#events.onPick(asset))
-    const face = make('img', 'cd-row-face')
+    const cell = make('div', 'cd-cell-wrap')
+    const button = make('button', 'cd-cell cd-row')
+    button.type = 'button'
+    button.title = asset.record.positive ?? name
+    if (chosen) button.dataset['chosen'] = ''
+    button.addEventListener('click', () => this.#events.onPick(asset))
+    const face = make('img', 'cd-face cd-row-face')
     face.alt = ''
     face.dataset['sig'] = asset.sig
     const held = this.#urls.get(asset.sig)
     if (held) face.src = held
     else if (this.#observer) this.#observer.observe(face)
     else void this.#face(face)
-    row.append(face, make('span', 'cd-row-name', name))
-
-    const hide = this.#hide(asset)
-    line.append(row, hide)
-    return line
+    button.append(face, make('span', 'cd-cell-name', name))
+    cell.append(button, this.#hide(asset))
+    return cell
   }
 
   #hide(asset: Asset): HTMLButtonElement {

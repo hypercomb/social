@@ -31,7 +31,7 @@ export const placePart: CardPart = {
 
     const name = make('input', 'te-dg-input')
     name.type = 'text'
-    name.placeholder = say('comfy.name-hint', 'Name this picture')
+    name.placeholder = say('comfy.name-hint', 'tile name')
     name.setAttribute('aria-label', say('comfy.name-picture', 'Name'))
     const named = make('form', 'te-dg-rowf')
     const go = make('button', 'te-dg-word', say('comfy.name-picture', 'Name'))

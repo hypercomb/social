@@ -22,9 +22,9 @@ import type { ComfyRenderPayload } from '../../comfy/comfy.drone.js'
 import { installDiagramStyles } from '../../editor/diagram/diagram.styles.js'
 import { GAP, MARGIN } from '../../editor/diagram/layout.js'
 import { assetsPart } from '../assets/assets.js'
-import { calloutsPart, CARD_WIDTH, TAB_WIDTH } from '../callouts/callouts.js'
+import { calloutsPart, TAB_WIDTH } from '../callouts/callouts.js'
 import { formPart } from '../form/form.js'
-import { framePart } from '../frame/frame.js'
+import { fitBox, framePart } from '../frame/frame.js'
 import { libraryPart } from '../library/library.js'
 import { machinePart } from '../machine/machine.js'
 import { negativePart } from '../negative/negative.js'
@@ -52,12 +52,12 @@ const KEYS = {
 
 /** The concealment scope: this list's rows and no other's. */
 const ASSET_SCOPE = 'comfy-asset'
-/** The drawing never grows past this: a larger desk gets margin. */
-const MAX_STAGE = 760
-const MIN_STAGE = 280
-const NARROW_STAGE = 340
-/** Room kept above the picture for the tag, and below it for the size. */
-const KEEP_EM = 3.4
+/** The drawing never grows past this on a side: a larger desk gets margin. */
+const MAX_STAGE = 820
+const MIN_STAGE = 260
+const NARROW_STAGE = 360
+/** Room kept above the picture for the tag, and below it for the size mark. */
+const KEEP_EM = 3.2
 const NARROW_EM = 56.25
 
 type ModesShape = { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void; releaseOwner?(owner: string): void }
@@ -594,6 +594,8 @@ export class ComfyDeskElement extends HTMLElement {
       height: held.height > 0 ? held.height : 1024,
       progress: typeof job?.fraction === 'number' ? job.fraction : null,
       busy: job?.state === 'queued' || job?.state === 'running',
+      words: this.#form?.values.positive ?? '',
+      placeholder: t('comfy.prompt', 'What should the picture be?'),
     }
   }
 
@@ -605,7 +607,9 @@ export class ComfyDeskElement extends HTMLElement {
     })
   }
 
-  /** One number for the stage, from the viewport. An open card never changes it. */
+  /** The picture's box, from the viewport and the picture's own shape. The
+   *  tabs keep a column each side; an open card takes the gutter it finds,
+   *  so opening one never moves the picture. */
   #layout(): void {
     const vp = this.#vp
     const frame = this.#frame
@@ -615,24 +619,27 @@ export class ComfyDeskElement extends HTMLElement {
     const U = em / 16
     const width = vp.clientWidth
     const height = vp.clientHeight
-    const tall = height - 2 * KEEP_EM * em
-    const edge = (GAP + MARGIN) * U
-    const roomFor = (column: number): number => Math.round(Math.min(width - 2 * (column * U + edge), tall, MAX_STAGE * U))
-    // A card's room on each side when there is enough; a tab's when there is not.
-    const roomy = roomFor(CARD_WIDTH)
-    const size = roomy >= MIN_STAGE * U ? roomy : roomFor(TAB_WIDTH)
-    const narrow = window.innerWidth / em < NARROW_EM || size < MIN_STAGE * U
-    const stage = narrow ? Math.round(Math.min(width - 32, NARROW_STAGE * U)) : size
-    const figure = narrow ? { left: 0, top: 0 } : { left: Math.round((width - stage) / 2), top: Math.round((height - stage) / 2) }
-    this.#panel?.setAttribute('data-layout', narrow ? 'narrow' : 'wide')
-    frame.el.style.left = narrow ? '' : `${figure.left}px`
-    frame.el.style.top = narrow ? '' : `${figure.top}px`
     const shown = this.#shown()
-    frame.show(stage, shown, this.#rows())
-    callouts.place({
-      figure, size: stage, picture: frame.box(stage, shown),
-      viewport: { width, height }, unit: U, narrow,
-    })
+    const column = (TAB_WIDTH + GAP + MARGIN) * U
+    const room = {
+      w: Math.min(width - 2 * column, MAX_STAGE * U),
+      h: Math.min(height - 2 * KEEP_EM * em, MAX_STAGE * U),
+    }
+    const narrow = window.innerWidth / em < NARROW_EM || Math.min(room.w, room.h) < MIN_STAGE * U
+    const fit = narrow
+      ? fitBox({ w: Math.min(width - 32, NARROW_STAGE * U), h: NARROW_STAGE * U }, shown.width, shown.height)
+      : fitBox(room, shown.width, shown.height)
+    const box = {
+      x: narrow ? 0 : Math.round((width - fit.w) / 2),
+      y: narrow ? 0 : Math.round((height - fit.h) / 2),
+      w: fit.w,
+      h: fit.h,
+    }
+    this.#panel?.setAttribute('data-layout', narrow ? 'narrow' : 'wide')
+    frame.el.style.left = narrow ? '' : `${box.x}px`
+    frame.el.style.top = narrow ? '' : `${box.y}px`
+    frame.show(box, shown, this.#rows())
+    callouts.place({ picture: box, viewport: { width, height }, unit: U, narrow })
   }
 
   #light(lit: ReadonlyMap<string, Lit>): void {

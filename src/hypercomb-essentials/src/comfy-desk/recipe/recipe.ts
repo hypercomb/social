@@ -20,7 +20,7 @@ const WORKFLOW: RecipeRow = {
   anchor: { x: 1, y: 0.12 },
 }
 const KNOBS: RecipeRow = {
-  id: 'knobs', labelKey: 'comfy.knobs-tab', label: 'size and steps', side: 'right',
+  id: 'knobs', labelKey: 'comfy.knobs-tab', label: 'size', side: 'right',
   anchor: { x: 1, y: 0.5 }, edge: true,
 }
 const PLACE: RecipeRow = {

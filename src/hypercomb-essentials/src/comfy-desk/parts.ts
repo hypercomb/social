@@ -147,14 +147,16 @@ export interface FrameShown {
   /** 0..1 while a run reports steps. */
   readonly progress: number | null
   readonly busy: boolean
+  /** The words in hand, read in the empty frame as the picture to come. */
+  readonly words: string
+  readonly placeholder: string
 }
 
 export interface FrameHandle {
   /** Stands inside the viewport; the callouts place themselves around it. */
   readonly el: HTMLElement
-  /** The picture's box in the square stage, in px. */
-  box(size: number, shown: FrameShown): Box
-  show(size: number, shown: FrameShown, rows: readonly RecipeRow[]): void
+  /** The picture's box in the viewport, px. The frame takes exactly that box. */
+  show(box: Box, shown: FrameShown, rows: readonly RecipeRow[]): void
   light(lit: ReadonlyMap<string, Lit>): void
 }
 
@@ -168,9 +170,7 @@ export interface FramePart {
 }
 
 export interface CalloutPlace {
-  /** The square stage in the viewport. */
-  readonly figure: { readonly left: number; readonly top: number }
-  readonly size: number
+  /** The picture's box in the viewport, px. Leaders land on it. */
   readonly picture: Box
   readonly viewport: { readonly width: number; readonly height: number }
   readonly unit: number

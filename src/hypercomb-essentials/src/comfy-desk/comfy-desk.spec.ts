@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComfyRenderPayload } from '../comfy/comfy.drone.js'
 import { listAssets, nameOfAsset, recordOf } from './assets/assets.js'
 import { formPart } from './form/form.js'
-import { frameBox, rowAt } from './frame/frame.js'
+import { fitBox, rowAt } from './frame/frame.js'
 import { fillParts, PART_WORDS, partKey, type DeskParts, type FormHandle } from './parts.js'
 import { recipeRows } from './recipe/recipe.js'
 
@@ -168,10 +168,10 @@ describe('the recipe', () => {
 })
 
 describe('the frame', () => {
-  it('fits the long edge and centres the short one', () => {
-    expect(frameBox(400, 1024, 512)).toEqual({ x: 0, y: 100, w: 400, h: 200 })
-    expect(frameBox(400, 512, 1024)).toEqual({ x: 100, y: 0, w: 200, h: 400 })
-    expect(frameBox(400, 0, 0)).toEqual({ x: 0, y: 0, w: 400, h: 400 })
+  it('takes the picture\'s own shape, as large as the room allows', () => {
+    expect(fitBox({ w: 600, h: 400 }, 1024, 512)).toEqual({ w: 600, h: 300 })
+    expect(fitBox({ w: 600, h: 400 }, 512, 1024)).toEqual({ w: 200, h: 400 })
+    expect(fitBox({ w: 600, h: 400 }, 0, 0)).toEqual({ w: 400, h: 400 })
   })
 
   it('answers the pointer from the rows, and lights nothing outside them', () => {

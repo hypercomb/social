@@ -195,8 +195,10 @@ class Callouts implements CalloutsHandle {
       return
     }
     const U = place.unit
+    const picture = place.picture
+    // Anchors are the picture's own: the placement pass adds the figure.
     const anchorOf = (row: RecipeRow) => row.anchor
-      ? { x: place.picture.x + row.anchor.x * place.picture.w, y: place.picture.y + row.anchor.y * place.picture.h }
+      ? { x: row.anchor.x * picture.w, y: row.anchor.y * picture.h }
       : null
     const tabs: TabIn[] = [...this.#records.values()].map(record => ({
       id: record.row.id,
@@ -206,12 +208,12 @@ class Callouts implements CalloutsHandle {
       ...(this.#state.open === record.row.id ? { open: { bodyHeight: record.body.offsetHeight } } : {}),
     }))
     // An open card keeps to the gutter it has, so it never leaves the desk.
-    const gutter = place.figure.left - (GAP + MARGIN) * U
+    const gutter = picture.x - (GAP + MARGIN) * U
     const placed = placeTabs({
       tabs,
-      extent: { min: 0, max: place.size },
-      figure: place.figure,
-      size: place.size,
+      extent: { min: 0, max: picture.w },
+      figure: { left: picture.x, top: picture.y },
+      size: picture.h,
       viewport: place.viewport,
       unit: U,
       tab: TAB_WIDTH * U,
