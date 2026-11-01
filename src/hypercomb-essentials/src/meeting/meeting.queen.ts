@@ -8,8 +8,8 @@ import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-prop
  * or join/leave an existing meeting.
  *
  * Syntax:
- *   /meeting              — toggle meeting on selected tile (tags `cascade` if untagged, joins if tagged)
- *   /meeting join         — explicitly join the meeting on the selected tile
+ *   /meeting              — tag the selected tile `cascade` if untagged, then open the lobby to join
+ *   /meeting join         — the same
  *   /meeting leave        — leave the active meeting
  *   /meeting cascade      — use the default Hypercomb template (1+6)
  *   /meeting cascade:19   — use a 2-ring template (1+6+12)
@@ -35,10 +35,8 @@ export class MeetingQueenBee extends QueenBee {
     const selectedLabels = selection ? Array.from(selection.selected) : []
 
     if (trimmed === 'leave') {
-      // leave meeting on all selected tiles
-      for (const label of selectedLabels) {
-        EffectBus.emit('tile:action', { action: 'meeting', label, q: 0, r: 0, index: 0 })
-      }
+      // You are in one meeting at a time, so leaving needs no tile.
+      EffectBus.emitTransient('meeting:leave', {})
       return
     }
 
@@ -62,20 +60,24 @@ export class MeetingQueenBee extends QueenBee {
       const tags: string[] = Array.isArray(props['tags']) ? [...props['tags'] as string[]] : []
 
       // check if already has a meeting tag
-      const hasMeetingTag = tags.some(t => t === template || t.startsWith(template + ':'))
+      const existing = tags.find(t => t === template || t.startsWith(template + ':'))
 
-      if (!hasMeetingTag) {
+      if (!existing) {
         tags.push(template)
         await writeTilePropertiesAt(parentSegments, label, { tags })
-        EffectBus.emit('tags:changed', { updates: [{ cell: label, tag: template }] })
       }
-
-      // trigger the meeting action (join/toggle)
-      EffectBus.emit('tile:action', { action: 'meeting', label, q: 0, r: 0, index: 0 })
+      // Said either way: the room's subscription is made when a tag is HEARD,
+      // and a tile tagged in an earlier session is not heard again by itself.
+      // Hearing it twice is a no-op.
+      EffectBus.emit('tags:changed', { updates: [{ cell: label, tag: existing ?? template }] })
     }
 
     // pulse processor to pick up changes
     void new hypercomb().act()
+
+    // Joining is the lobby's: it opens the camera, lets you check it, and hands
+    // it to the meeting. One lobby, for the first tile when several are selected.
+    EffectBus.emitTransient('meeting:lobby-open', { cell: selectedLabels[0] })
   }
 }
 

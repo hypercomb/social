@@ -5004,7 +5004,34 @@ export class ShowCellDrone extends Drone {
     await ensureDecorationsIndexed(cells.map(c => c.label), segs).catch(() => { /* best effort */ })
   }
 
+  // A stream that THROWS (image load, launch-shape index, applyGeometry) used to
+  // leave `streamActive` true and never send `navigation:guard-end`: the render
+  // dedup then swallowed every follow-up pass for the location and the overlay
+  // sat on its navigation guard until the backstop, after which tile entry
+  // stayed refused — the page was dead until a refresh. Every normal exit
+  // already drops the flag (and a superseded one hands the guard to its
+  // successor), so only a stream that is still OURS and still marked active
+  // got here by a throw: release it, then let the error surface as before.
   private readonly streamCells = async (
+    dir: FileSystemDirectoryHandle,
+    cellNames: string[],
+    localCellSet: Set<string>,
+    axial: any,
+    branchSet: Set<string> | undefined,
+    myToken: number,
+    myLocationKey: string,
+  ): Promise<void> => {
+    try {
+      await this.#streamCellsBody(dir, cellNames, localCellSet, axial, branchSet, myToken, myLocationKey)
+    } finally {
+      if (this.streamActive && myToken === this.#streamToken) {
+        this.streamActive = false
+        this.emitEffect('navigation:guard-end', {})
+      }
+    }
+  }
+
+  readonly #streamCellsBody = async (
     dir: FileSystemDirectoryHandle,
     cellNames: string[],
     localCellSet: Set<string>,

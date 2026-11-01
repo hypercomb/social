@@ -77,13 +77,13 @@ import { EffectBus } from '../../effect-bus.js'
 // The GROUP model — membership text and shared attributes — lives in
 // panel-groups.ts. This file is the chrome that drives it.
 import {
-  type GroupAttrs, type GroupMember, STEEL, TEXT_SIZES,
+  type GroupAttrs, type GroupMember, type SpacingKind, STEEL, TEXT_RANGE, LEADING_RANGE, TRACKING_RANGE, clampToRange,
   CODE_FONTS, DEFAULT_CODE_FONT, codeFont,
   READ_FONTS, DEFAULT_READ_FONT, readFont,
   textThemes, textTheme, createTextTheme, canCreateTextTheme, textThemeChanges,
   type TextTheme,
   members, normalizeGroup, publishAttrs, readGroupAttrs, readMembership, writeMembership,
-  readPairing, writePairing, readTextScale, writeTextScale,
+  readPairing, writePairing, readTextScale, writeTextScale, readSpacing, writeSpacing,
   readCodeFont, writeCodeFont, readLigatures, writeLigatures,
   readReadFont, writeReadFont, readChosenTextTheme, writeChosenTextTheme,
 } from './panel-groups.js'
@@ -361,6 +361,10 @@ export class DockedPanel implements GroupMember, LaneMember {
   #group = ''
   /** The picked text scale, or `null` for auto (derive it from the width). */
   #text: number | null = null
+  /** Line and letter spacing. `undefined` is never chosen, 0 is handed back to
+   *  the window's own stylesheet. */
+  #leading: number | undefined = undefined
+  #tracking: number | undefined = undefined
 
   /** The CODE_FONTS key this window reads code in, or `undefined` for "never
    *  chose" — which inherits :root's --hc-code rather than pinning a copy of
@@ -426,6 +430,8 @@ export class DockedPanel implements GroupMember, LaneMember {
       ...(this.#readFace !== undefined ? { read: this.#readFace } : {}),
       ...(this.#selectedTextTheme !== undefined ? { theme: this.#selectedTextTheme } : {}),
       ligatures: this.#ligatures,
+      ...(this.#leading !== undefined ? { leading: this.#leading } : {}),
+      ...(this.#tracking !== undefined ? { tracking: this.#tracking } : {}),
     }
     if (this.ownsSize) return { width: this.#width, text, ...faces }
     return { width: this.sizeOwner?.panelWidth() || this.#width || this.#el.offsetWidth, text, ...faces }
@@ -550,6 +556,8 @@ export class DockedPanel implements GroupMember, LaneMember {
     this.#text = ('text' in groupAttrs)
       ? (groupAttrs.text ?? null)
       : (ownText === undefined ? this.defaultText : ownText)
+    this.#leading = ('leading' in groupAttrs) ? groupAttrs.leading : readSpacing('leading', this.id)
+    this.#tracking = ('tracking' in groupAttrs) ? groupAttrs.tracking : readSpacing('tracking', this.id)
 
     // The faces read the same way — the group's word if the group has one, the
     // window's own record otherwise, and "no record anywhere" left as
@@ -635,6 +643,8 @@ export class DockedPanel implements GroupMember, LaneMember {
     // The width and the scale were ours to set, so they are ours to give back;
     // the window's own stylesheet decides again from here.
     this.#el.style.removeProperty('--hc-panel-scale')
+    this.#leading = this.#tracking = undefined
+    this.#applySpacing()
     this.#clearLanePlacement()
   }
 
@@ -835,9 +845,25 @@ export class DockedPanel implements GroupMember, LaneMember {
    *  picking one. Either way it lands on `--hc-panel-scale`, so no panel needs
    *  to know which of the two it is getting. */
   #applyScale(): void {
+    this.#el.style.setProperty('--hc-panel-scale', String(this.#scale()))
+  }
+
+  #scale(): number {
+    if (this.#text !== null) return clampToRange(this.#text, TEXT_RANGE)
     const auto = this.#measuredWidth() / this.defaultWidth
-    const scale = Math.min(this.maxScale, Math.max(this.minScale, this.#text ?? auto))
-    this.#el.style.setProperty('--hc-panel-scale', String(scale))
+    return Math.min(this.maxScale, Math.max(this.minScale, auto))
+  }
+
+  /** Spacing a window holds lands on the host, and the attribute is what lets the
+   *  rule through (panel-settings.ts). No value leaves the stylesheet alone. */
+  #applySpacing(): void {
+    const put = (kind: SpacingKind, value: string | null): void => {
+      if (value === null) this.#el.style.removeProperty(`--hc-panel-${kind}`)
+      else this.#el.style.setProperty(`--hc-panel-${kind}`, value)
+      this.#el.toggleAttribute(`data-hc-${kind}`, value !== null)
+    }
+    put('leading', this.#leading ? String(this.#leading) : null)
+    put('tracking', this.#tracking ? `${this.#tracking}em` : null)
   }
 
   /** Put the chosen faces on the host, where everything the window renders
@@ -857,6 +883,7 @@ export class DockedPanel implements GroupMember, LaneMember {
     else this.#el.style.removeProperty('--hc-read')
     if (this.#ligatures) this.#el.style.setProperty('--hc-code-ligatures', 'normal')
     else this.#el.style.removeProperty('--hc-code-ligatures')
+    this.#applySpacing()
   }
 
   /** The width the auto scale reads. A self-sizing window may not have been
@@ -1178,18 +1205,47 @@ export class DockedPanel implements GroupMember, LaneMember {
     // the answer, not withholding the control, and a flag no window sets is
     // one more thing to keep true. Every tool window sizes off the var now.
     const shared: SettingRow[] = [{
-      kind: 'choice', key: 'text',
+      kind: 'slider', key: 'text',
       label: this.#t('panel.text.label', 'Text size'),
-      value: this.#text === null ? 'auto' : String(this.#text),
-      options: TEXT_SIZES.map(size => ({
-        value: size.scale === null ? 'auto' : String(size.scale),
-        label: this.#t(`panel.text.${size.key}`, size.label),
-      })),
-      hint: this.#text === null
-        ? this.#t('panel.text.hint', 'Auto sizes the text with the window\'s width.')
-        : this.#t('panel.text.hint.pinned', 'Held at this size, whatever the window\'s width.'),
-      pick: (value) => { this.#setText(value === 'auto' ? null : parseFloat(value)) },
+      value: this.#scale(),
+      min: TEXT_RANGE.min, max: TEXT_RANGE.max, step: TEXT_RANGE.step,
+      set: this.#text !== null,
+      read: value => `${Math.round(value * 100)}%`,
+      unsetLabel: this.#t('panel.text.auto', 'Auto'),
+      resetLabel: this.#t('panel.text.auto', 'Auto'),
+      hint: this.#t('panel.text.hint', 'Auto sizes the text with the window\'s width.'),
+      setHint: this.#t('panel.text.hint.pinned', 'Held at this size, whatever the window\'s width.'),
+      change: value => { this.#setText(value) },
+      reset: () => { this.#setText(null); this.#refreshPopover() },
     }]
+
+    // The spacing of running text. Only a window with a reading surface has
+    // any: on the others these could not change what you are looking at.
+    if (this.hasReadingSurface) {
+      shared.push({
+        kind: 'slider', key: 'leading',
+        label: this.#t('panel.text.leading', 'Line spacing'),
+        value: this.#leading || LEADING_RANGE.resting,
+        min: LEADING_RANGE.min, max: LEADING_RANGE.max, step: LEADING_RANGE.step,
+        set: !!this.#leading,
+        read: value => value.toFixed(2),
+        unsetLabel: this.#t('panel.text.default', 'Default'),
+        resetLabel: this.#t('panel.text.default', 'Default'),
+        change: value => { this.#setSpacing('leading', value) },
+        reset: () => { this.#setSpacing('leading', 0); this.#refreshPopover() },
+      }, {
+        kind: 'slider', key: 'tracking',
+        label: this.#t('panel.text.tracking', 'Letter spacing'),
+        value: this.#tracking || TRACKING_RANGE.resting,
+        min: TRACKING_RANGE.min, max: TRACKING_RANGE.max, step: TRACKING_RANGE.step,
+        set: !!this.#tracking,
+        read: value => `${value > 0 ? '+' : ''}${(value * 100).toFixed(1)}%`,
+        unsetLabel: this.#t('panel.text.default', 'Default'),
+        resetLabel: this.#t('panel.text.default', 'Default'),
+        change: value => { this.#setSpacing('tracking', value) },
+        reset: () => { this.#setSpacing('tracking', 0); this.#refreshPopover() },
+      })
+    }
 
     // The face PROSE is read in — the window's normal text: answers, notes,
     // setup paragraphs. First of the two faces because it is most of what a
@@ -1413,6 +1469,8 @@ export class DockedPanel implements GroupMember, LaneMember {
       case 'switch': return { ...row, toggle: after(row.toggle) }
       case 'text': return { ...row, commit: after(row.commit) }
       case 'action': return { ...row, run: () => { row.run(); this.#refreshPopover() } }
+      // Only the reset redraws: a drag keeps its own row, and a rebuild would drop the thumb.
+      case 'slider': return { ...row, reset: () => { row.reset(); this.#refreshPopover() } }
     }
   }
 
@@ -1425,7 +1483,15 @@ export class DockedPanel implements GroupMember, LaneMember {
     writeTextScale(this.id, next)
     this.#applyScale()
     if (this.#group) publishAttrs(this)
-    this.#refreshPopover()
+  }
+
+  /** The same, for a spacing. */
+  #setSpacing(kind: SpacingKind, next: number): void {
+    if (kind === 'leading') this.#leading = next
+    else this.#tracking = next
+    writeSpacing(kind, this.id, next)
+    this.#applySpacing()
+    if (this.#group) publishAttrs(this)
   }
 
   /** Pick the face code reads in. Same shape as the text size, and for the same
@@ -1650,6 +1716,15 @@ export class DockedPanel implements GroupMember, LaneMember {
         this.#applyFont()
         this.#refreshPopover()
       }
+    }
+    for (const kind of ['leading', 'tracking'] as const) {
+      const value = attrs[kind]
+      if (value === undefined || value === (kind === 'leading' ? this.#leading : this.#tracking)) continue
+      if (kind === 'leading') this.#leading = value
+      else this.#tracking = value
+      writeSpacing(kind, this.id, value)
+      this.#applySpacing()
+      this.#refreshPopover()
     }
     if (attrs.width === undefined) return
     const next = this.#clamp(attrs.width)

@@ -37,16 +37,22 @@
  *  `read` is a READ_FONTS key — the face PROSE renders in, the second half of
  *  a window's typography. Same rules as `font`: key not stack, absent means
  *  inherit :root's --hc-read. */
-export type GroupAttrs = { width?: number; text?: number; font?: string; ligatures?: boolean; read?: string; theme?: string }
+export type GroupAttrs = { width?: number; text?: number; font?: string; ligatures?: boolean; read?: string; theme?: string; leading?: number; tracking?: number }
 
-/** The text sizes a window (or a group) can be set to. AUTO — `null` — is the
- *  old behaviour: the content scales with the window's width. The rest hold it
- *  steady, which is the point: a window widened to read a long note should not
- *  also shout it.
- *
- *  A short fixed ladder rather than a slider or a px field: the number is a
- *  MULTIPLIER over each panel's own base size, so panels stay in proportion to
- *  each other, and there is nothing to type. */
+/** The text sizes a window (or a group) can be set to, on a slider. AUTO — `null`
+ *  — is the old behaviour: the content scales with the window's width. A held
+ *  size stays put, which is the point: a window widened to read a long note
+ *  should not also shout it. The number is a MULTIPLIER over each panel's own
+ *  base size, so panels stay in proportion to each other. */
+export const TEXT_RANGE = { min: 0.7, max: 1.7, step: 0.01 } as const
+
+/** The spacing a reading window can hold, in line heights and em. `resting` is
+ *  where the slider sits while the window keeps its own stylesheet's spacing. */
+export const LEADING_RANGE = { min: 1.1, max: 2.2, step: 0.01, resting: 1.5 } as const
+export const TRACKING_RANGE = { min: -0.02, max: 0.12, step: 0.002, resting: 0 } as const
+
+/** The ladder the slider replaced. Nothing here reads it; an installed package
+ *  may, so it stays on the export surface. */
 export const TEXT_SIZES: readonly { key: string; label: string; scale: number | null }[] = [
   { key: 'auto', label: 'Auto', scale: null },
   { key: 'small', label: 'Small', scale: 0.85 },
@@ -54,6 +60,9 @@ export const TEXT_SIZES: readonly { key: string; label: string; scale: number | 
   { key: 'large', label: 'Large', scale: 1.15 },
   { key: 'larger', label: 'Larger', scale: 1.32 },
 ]
+
+export const clampToRange = (value: number, range: { readonly min: number; readonly max: number }): number =>
+  Math.min(range.max, Math.max(range.min, value))
 
 // ── the code font ────────────────────────────────────────────────────
 //
@@ -318,9 +327,36 @@ export const readTextScale = (window: string): number | null | undefined => {
  *  "never chosen" and hand it its default again on the next open. */
 const AUTO_TEXT = 'auto'
 
-export const writeTextScale = (window: string, scale: number | null): void => {
-  try { localStorage.setItem(textKey(window), scale === null ? AUTO_TEXT : String(scale)) }
+const keepRecord = (key: string, value: string): void => {
+  try { localStorage.setItem(key, value) }
   catch { /* ignore */ }
+}
+
+export const writeTextScale = (window: string, scale: number | null): void => {
+  keepRecord(textKey(window), scale === null ? AUTO_TEXT : String(scale))
+}
+
+// ── spacing ─────────────────────────────────────────────────────────
+//
+// A reading window's line and letter spacing, on the same terms as its size.
+// `undefined` is never chosen; 0 is a window handed back to its own stylesheet,
+// which has to be a value so a group can take a spacing back off its members.
+
+export type SpacingKind = 'leading' | 'tracking'
+
+export const spacingKey = (kind: SpacingKind, window: string): string => `hc:panel-${kind}:${window}`
+
+export const readSpacing = (kind: SpacingKind, window: string): number | undefined => {
+  try {
+    const raw = localStorage.getItem(spacingKey(kind, window))
+    if (raw === null) return undefined
+    const n = parseFloat(raw)
+    return Number.isFinite(n) ? n : undefined
+  } catch { return undefined }
+}
+
+export const writeSpacing = (kind: SpacingKind, window: string, value: number): void => {
+  keepRecord(spacingKey(kind, window), String(value))
 }
 
 // ── pairing ──────────────────────────────────────────────────────────
