@@ -931,9 +931,10 @@ $jx: calc(#{$pad} + #{$square} / 2);
   --hc-read: 'Source Sans 3', var(--hc-font);
   // THE ONE COLUMN. The masthead, the thread and the composer all stand on this
   // measure, so their left edges are one line. A percentage is resolved by the
-  // element using it, and all three span the thread's column. The measure
-  // follows the text size, so larger text keeps the same line length.
-  --chat-measure: calc(46rem * var(--hc-panel-scale, 1));
+  // element using it, and all three span the thread's column. In rem, never
+  // scaled: the column is the same width at every text size (jwize, 2026-11-01),
+  // so a smaller size is more on screen rather than a narrower column.
+  --chat-measure: 46rem;
   --chat-gutter: max(1.25rem, calc((100% - var(--chat-measure)) / 2));
   --chat-route-done: #{tw.ink(#70d59a)};
   --chat-route-open: #{tw.ink(#e8b04a)};

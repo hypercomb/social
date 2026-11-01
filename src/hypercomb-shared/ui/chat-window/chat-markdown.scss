@@ -278,7 +278,8 @@ $accent: #7eb6d6;
   }
 }
 
-.chat-msg.user .chat-acts { left: auto; right: -0.3em; }
+// Inboard of the bubble's tail, so the two never sit on each other.
+.chat-msg.user .chat-acts { left: auto; right: 1.8em; }
 
 .chat-msg:hover .chat-acts,
 .chat-acts:focus-within { opacity: 1; }

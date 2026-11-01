@@ -1253,9 +1253,22 @@ $accent: #7eb6d6;
   &.user {
     align-self: flex-end;
     max-width: 85%;
-    padding: 0.4em 0.8em;
+    padding: 0.4em 1.6em;
     background: var(--hc-window-tint-strong);
-    @include tw.card;
+    border-radius: tw.$radius-floating;
+
+    // THE CALLOUT. The bubble's own tint, cut to a small tail under its end,
+    // so what you said points back at your side of the conversation.
+    &::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      right: 0.85em;
+      width: 0.7em;
+      height: 0.5em;
+      background: var(--hc-window-tint-strong);
+      clip-path: polygon(0 0, 100% 0, 100% 100%);
+    }
   }
 
   &.ai {
