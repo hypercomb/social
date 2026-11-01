@@ -1569,7 +1569,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public readonly suggestions = computed<readonly string[]>(() => {
-    if (this.#external()) return []
+    // A call from outside lists its own lines, numbered, to be read. Nothing
+    // in the list can be accepted: Enter answers the whole call.
+    const external = this.#external()
+    if (external) return external.lines.map((line, i) => `${i + 1}. ${line}`)
     if (this.shell?.suppressed()) return []
 
     // A pending utterance choice OWNS the dropdown: the claimants of an
@@ -2313,6 +2316,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const settle = (outcome: RemoteSubmitOutcome): void => {
         if (settled) return
         settled = true
+        // A LINE THAT DID NOT RUN NEVER STAYS IN THE PARTICIPANT'S HANDS. The
+        // remote line is put on the input while it is said; one that was
+        // refused or left ambiguous used to stay there, one Enter away from
+        // running with the participant's authority — measured 2026-11-01, a
+        // `remove` the grant had just refused sat on the line after the run.
+        const shown = this.value().trim()
+        if ((outcome.kind === 'refused' || outcome.kind === 'ambiguous') && shown && text.trim().replace(/^\//, '') === shown.replace(/^\//, '')) {
+          this.#setShellValue('', false)
+        }
         try { complete?.(outcome) }
         catch (e) { console.warn('[remote-submit] receipt handler threw:', e) }
       }
@@ -2974,9 +2986,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   #externalLine(ask: ExternalAsk): string {
     const t = this.#i18n
-    const lines = ask.lines.join(' · ')
-    const head = t?.t('command-line.external.ask', { from: ask.from, lines })
-      ?? `${ask.from}: ${lines}  (Enter runs, Esc declines)`
+    // One line is shown whole. A batch is named by its count and every line
+    // is listed under the line, numbered, so it can be read before Enter.
+    const head = ask.lines.length === 1
+      ? t?.t('command-line.external.ask', { from: ask.from, lines: ask.lines[0] })
+        ?? `${ask.from}: ${ask.lines[0]}  (Enter runs, Esc declines)`
+      : t?.t('command-line.external.batch', { from: ask.from, count: ask.lines.length })
+        ?? `${ask.from} asks to say these ${ask.lines.length} lines  (Enter runs, Esc declines)`
     return ask.waiting > 0
       ? `${head} ${t?.t('command-line.external.more', { count: ask.waiting }) ?? `+${ask.waiting} waiting`}`
       : head
@@ -2989,7 +3005,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (ask && ask.id !== before?.id) this.#externalShownAt = Date.now()
     this.#external.set(ask)
     if (ask) {
-      this.#setShellValue(this.#externalLine(ask), true)
+      this.#setShellValue(this.#externalLine(ask), false)
+      // The list under the line is the call's lines: always open, so a batch
+      // is read before it is answered.
+      this.shell?.unsuppress()
       return
     }
     const held = this.#heldLine ?? ''
@@ -5263,6 +5282,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * trusted, since it too was chosen against the previous list.
    */
   public onShellAcceptRequested = (index: number): void => {
+    if (this.#external()) return
     const list = this.suggestions()
     if (!list.length) return
     const best = list[index] ?? list[0]
@@ -5271,6 +5291,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** Bridge: shell accepted a suggestion (keyboard resolution above, or click). */
   public onShellCompletionAccepted = (best: string): void => {
+    if (this.#external()) return
     // A pending utterance choice: the accepted row IS the answer.
     const pendingUtterance = this.#pendingChoice()
     if (pendingUtterance) {
@@ -5449,7 +5470,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (external) {
       const shown = this.#externalLine(external)
       if (v !== shown) { this.#heldLine = v; v = shown }
-      suppress = true
+      suppress = false
     }
     // A programmatic line replacement dissolves any pending utterance choice —
     // the question was about text that is no longer there (typed edits clear
