@@ -51,6 +51,7 @@ export const sleepers: readonly Sleeper[] = [
   { command: "consolidate-history", description: "Relocate leftover legacy history bags to the root and remove the drained folder", load: () => import('./history/consolidate-history.queen') },
   { wakesOn: ["history:promoted"], load: () => import('./history/rewound-commit.drone') },
   { command: "howto", description: "Lay the how-to site: one tile, how, with a page for every word the hive understands, made from what each word declares. Publish it once to give the whole language a front door", load: () => import('./howto/howto.queen') },
+  { command: "keyboard", description: "Open the keyboard: see what every key does and choose your own chords", load: () => import('./keyboard-desk/keyboard.queen') },
   { command: "meeting", description: "Start or join a video meeting on the selected tile", load: () => import('./meeting/meeting.queen') },
   { command: "fit", description: "Zoom to fit all visible content", load: () => import('./navigation/zoom/fit.queen') },
   { command: "screensaver", description: "Idle screensaver: toggle on/off, pick the look (hexagon, circle, thought…) and the motion (bounce, shooting-stars…)", load: () => import('./presentation/screensaver/screensaver.queen') },
