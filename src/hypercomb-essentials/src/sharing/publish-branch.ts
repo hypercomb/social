@@ -47,7 +47,7 @@ import {
 import { isReservedRootKey } from './hive-link.js'
 import {
   ENTRANCES_MAX, ENTRANCE_POWERS, boundLineage, creationUrl, entranceHost, foldContentLabel, isPoweredEntrance, isPublishNode, ownAddressHost,
-  ownAddressRefusal, ownLabelOn, readEntrance, topOpenIn, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
+  addressHolder, ownAddressRefusal, ownLabelOn, readEntrance, topOpenIn, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
 } from './zone-door.js'
 import type { ModuleAssessmentRecord } from '../assistant/module-review.js'
 
@@ -880,7 +880,7 @@ function recordMovedDoor(
 }
 
 /** Why an own address could not be set. */
-export type OwnAddressFailure = PublishFailure | 'not-a-label' | 'reserved' | 'not-published'
+export type OwnAddressFailure = PublishFailure | 'not-a-label' | 'reserved' | 'not-published' | 'taken'
 
 /** GIVE A CREATION ITS OWN ADDRESS on one zone — `https://<label>.<zone>` —
  *  or, with `label` null, take it away so the creation lives at its root path
@@ -889,11 +889,16 @@ export type OwnAddressFailure = PublishFailure | 'not-a-label' | 'reserved' | 'n
  *  roots and doors, and every other field is carried through. A label that is
  *  not a DNS label, or is reserved (`content`, `try-*`), is refused before
  *  anything is signed. A branch the index does not name has nothing to
- *  address yet — the caller publishes it first. */
+ *  address yet — the caller publishes it first.
+ *
+ *  One address names one tree. When another tree already answers at the
+ *  address, this refuses with `taken` (the holder's lineage key is the
+ *  `reason`) unless `replace` says the participant chose this tree over it. */
 async function setBranchAddressNow(
   segments: readonly string[],
   zone: string,
   label: string | null,
+  options: { replace?: boolean } = {},
 ): Promise<{ ok: true; host: string } | { ok: false; failure: OwnAddressFailure; reason?: string }> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
   if (!signer?.getPublicKeyHex) return { ok: false, failure: 'services' }
@@ -915,6 +920,10 @@ async function setBranchAddressNow(
   if (!read.ok) return { ok: false, failure: 'index-unsafe', reason: read.reason }
   if (!(key in read.manifest.roots)) return { ok: false, failure: 'not-published' }
 
+  if (label !== null && !options.replace) {
+    const holder = addressHolder(read.manifest.addresses, z, label)
+    if (holder && holder !== key) return { ok: false, failure: 'taken', reason: holder }
+  }
   const addresses = withOwnAddress(read.manifest.addresses, z, key, label)
   const put = await putHiveManifest(indexHost, read.manifest.roots, read.manifest.doors ?? {},
     read.manifest.createdAt, { ...read.manifest.signedContent, addresses })

@@ -12,8 +12,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const hostCurrentBranch = vi.fn(async (_segments: readonly string[], _own?: Record<string, string>) => true)
 let named: string[] = []
 const setBranchHosts = vi.fn(async (_segments: readonly string[], zones: string[]) => { named = zones })
-const setBranchAddress = vi.fn(async (_segments: readonly string[], zone: string, label: string) => ({ ok: true, host: `${label}.${zone}` }))
+type AddressResult = { ok: true; host: string } | { ok: false; failure: string; reason?: string }
+const setBranchAddress = vi.fn(async (_segments: readonly string[], zone: string, label: string, _options?: { replace?: boolean }): Promise<AddressResult> => ({ ok: true, host: `${label}.${zone}` }))
+const requestConfirm = vi.fn(async (_opts: { message: string }) => true)
+const listPublishRecords = vi.fn(async () => [] as Array<{ record: { lineageKey: string; segments: string[] } }>)
 
+vi.mock('@hypercomb/core', async (original) => ({ ...(await original<Record<string, unknown>>()), requestConfirm }))
 vi.mock('./host-gesture.js', () => ({ hostCurrentBranch }))
 vi.mock('../commands/publish-history.js', () => ({ publicHistoryAt: vi.fn(), writePublicHistory: vi.fn(), clearPublicHistory: vi.fn() }))
 vi.mock('./community-hosts.js', () => ({
@@ -22,7 +26,7 @@ vi.mock('./community-hosts.js', () => ({
   setBranchHosts,
 }))
 vi.mock('./publish-branch.js', () => ({ setBranchAddress, setBranchDoors: vi.fn(), unpublishBranch: vi.fn() }))
-vi.mock('./publish-heads.js', () => ({ latestByLineageKey: vi.fn(async () => new Map()) }))
+vi.mock('./publish-heads.js', () => ({ latestByLineageKey: vi.fn(async () => new Map()), listPublishRecords }))
 
 ;(window as unknown as { ioc: unknown }).ioc = {
   register: () => undefined,
@@ -38,6 +42,8 @@ beforeEach(() => {
   hostCurrentBranch.mockClear(); hostCurrentBranch.mockResolvedValue(true)
   setBranchHosts.mockClear()
   setBranchAddress.mockClear()
+  requestConfirm.mockClear(); requestConfirm.mockResolvedValue(true)
+  listPublishRecords.mockClear(); listPublishRecords.mockResolvedValue([])
 })
 
 describe('publish … on <domain> as <label>', () => {
@@ -48,10 +54,34 @@ describe('publish … on <domain> as <label>', () => {
     expect(setBranchAddress).toHaveBeenCalledWith(['work', 'meetups'], 'hypercomb.com', 'meet-ups')
   })
 
-  it('without as, publishes and sets no address', async () => {
-    await bee.invoke('/work/meetups on hypercomb.com')
-    expect(hostCurrentBranch).toHaveBeenCalledWith(['work', 'meetups'], {})
+  it('without as, the tree answers at its own name, at any depth', async () => {
+    await bee.invoke('/work/Meet_Ups on hypercomb.com')
+    expect(hostCurrentBranch).toHaveBeenCalledWith(['work', 'Meet_Ups'], {})
+    expect(setBranchAddress).toHaveBeenCalledWith(['work', 'Meet_Ups'], 'hypercomb.com', 'meet-ups')
+    expect(requestConfirm).not.toHaveBeenCalled()
+  })
+
+  it('a name that cannot be an address leaves the tile at the host door', async () => {
+    await bee.invoke('/work/☕ on hypercomb.com')
     expect(setBranchAddress).not.toHaveBeenCalled()
+    await bee.invoke('/work/host on hypercomb.com')
+    expect(setBranchAddress).not.toHaveBeenCalled()
+  })
+
+  it('when another tree holds the name, you choose: taking it moves the address', async () => {
+    listPublishRecords.mockResolvedValue([{ record: { lineageKey: 'other-key', segments: ['people', 'meetups'] } }])
+    setBranchAddress.mockResolvedValueOnce({ ok: false, failure: 'taken', reason: 'other-key' })
+    await bee.invoke('/work/meetups on hypercomb.com')
+    expect(requestConfirm).toHaveBeenCalledTimes(1)
+    expect(requestConfirm.mock.calls[0][0].message).toContain('/people/meetups')
+    expect(setBranchAddress).toHaveBeenLastCalledWith(['work', 'meetups'], 'hypercomb.com', 'meetups', { replace: true })
+  })
+
+  it('declining leaves the other tree answering and this one published', async () => {
+    setBranchAddress.mockResolvedValueOnce({ ok: false, failure: 'taken', reason: 'other-key' })
+    requestConfirm.mockResolvedValueOnce(false)
+    await bee.invoke('/work/meetups on hypercomb.com')
+    expect(setBranchAddress).toHaveBeenCalledTimes(1)
   })
 
   it('refuses a name that is not an address before anything is published', async () => {
@@ -65,6 +95,9 @@ describe('publish … on <domain> as <label>', () => {
   it('a declined consent leaves the address alone', async () => {
     hostCurrentBranch.mockResolvedValueOnce(false)
     await bee.invoke('/work/meetups on hypercomb.com as meet-ups')
+    expect(setBranchAddress).not.toHaveBeenCalled()
+    hostCurrentBranch.mockResolvedValueOnce(false)
+    await bee.invoke('/work/meetups on hypercomb.com')
     expect(setBranchAddress).not.toHaveBeenCalled()
   })
 

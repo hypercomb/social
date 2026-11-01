@@ -161,6 +161,14 @@ export const ownAddressHost = (label: unknown, zone: unknown): string => {
   return label === APEX_LABEL ? z : `${String(label)}.${z}`
 }
 
+/** The lineage key already holding `<label>.<zone>` in a signed `addresses`
+ *  map, or '' when the address is free. Two trees can share a name; only one
+ *  can answer at an address, and this is how the publish finds the one that does. */
+export const addressHolder = (addresses: Record<string, string> | undefined, zone: unknown, label: unknown): string => {
+  const host = ownAddressHost(label, zone)
+  return host ? String(addresses?.[host] ?? '') : ''
+}
+
 /** The signed `addresses` map, leniently: a host that is not `<label>.<zone>`
  *  with a usable label, or a lineage key the roots do not name, drops that
  *  entry — never the whole index. */

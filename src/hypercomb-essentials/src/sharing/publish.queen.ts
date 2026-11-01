@@ -48,13 +48,13 @@
 // said in words — the same marks and the same signed index, no second
 // mechanism.
 
-import { EffectBus, I18N_IOC_KEY, get, lineageKey, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, get, lineageKey, requestConfirm, type I18nProvider } from '@hypercomb/core'
 import { clearPublicHistory, publicHistoryAt, writePublicHistory } from '../commands/publish-history.js'
 import { hostCurrentBranch } from './host-gesture.js'
 import { hostZone, hostsOfBranch, setBranchHosts } from './community-hosts.js'
 import { setBranchAddress, setBranchDoors, unpublishBranch } from './publish-branch.js'
-import { latestByLineageKey } from './publish-heads.js'
-import { APEX_LABEL, ownAddressRefusal } from './zone-door.js'
+import { latestByLineageKey, listPublishRecords } from './publish-heads.js'
+import { APEX_LABEL, foldDnsLabel, ownAddressRefusal } from './zone-door.js'
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
 
@@ -90,14 +90,12 @@ export class PublishQueenBee {
    *  Tongue read `publish /revolucion/lounge …` as `revolucion/lounge …`. */
   readonly rawArgs = true
   readonly description =
-    'Show what your published hive is serving right now, next to what has changed here since — one row per branch, with publish, re-check and unpublish per row. `publish here` publishes the layer you stand on to its hosts; `publish on <domain>` and `publish off <domain>` switch one domain for it; `publish on <domain> as <label>` publishes it there at its own address, <label>.<domain>; `publish history` says whether it publishes its history or its head only, and `publish history on` / `publish history off` switch that. Say a route first (`publish /a/b on <domain>`) to name the tile instead of standing on it.'
+    'Show what your published hive is serving right now, next to what has changed here since — one row per branch, with publish, re-check and unpublish per row. `publish here` publishes the layer you stand on to its hosts; `publish on <domain>` and `publish off <domain>` switch one domain for it, and the tree answers at its own name, <name>.<domain> (when another tree holds that name you choose which answers); `publish history` says whether it publishes its history or its head only, and `publish history on` / `publish history off` switch that. Say a route first (`publish /a/b on <domain>`) to name the tile instead of standing on it.'
   readonly descriptionKey = 'slash.publish'
-  readonly options = ['here', 'on <domain>', 'on <domain> as <label>', 'off <domain>', 'as <label> on <domain>', 'history [on|off]']
+  readonly options = ['here', 'on <domain>', 'off <domain>', 'history [on|off]']
   readonly examples = [
     { input: '/publish', result: 'Opens the publish panel, or closes it if it is open: what your hive is serving now, beside what has changed here since' },
-    { input: '/publish /room-host on hypercomb.com', result: 'Switches hypercomb.com on for that tile and publishes it there, asking your consent first; its address becomes room-host.hypercomb.com' },
-    { input: '/publish /work/meetups on hypercomb.com as meetups', result: 'Publishes the tile on hypercomb.com at its own address, meetups.hypercomb.com, asking your consent first; the consent names that address' },
-    { input: '/publish /room-host as room-host1 on hypercomb.com', result: 'Gives the tile its own address, room-host1.hypercomb.com, instead of room-host.hypercomb.com. The tile has to be published on hypercomb.com already' },
+    { input: '/publish /room-host on hypercomb.com', result: 'Switches hypercomb.com on for that tile and publishes it there, asking your consent first; its address becomes room-host.hypercomb.com, whatever depth it sits at; if another tree already answers there you choose which one does' },
     { input: '/publish /room-host off hypercomb.com', result: 'Switches that domain off for the tile; when the last domain goes off, the tile is withdrawn' },
   ]
 
@@ -189,6 +187,8 @@ export class PublishQueenBee {
       const own = label ? { [zone]: label === APEX_LABEL ? zone : `${label}.${zone}` } : {}
       const published = await hostCurrentBranch(segments, own)
       if (published && label) await this.#address(segments, label, zone)
+      // No label said: the address is the tree's own name, wherever it sits.
+      else if (published) await this.#nameAddress(segments, zone)
       return
     }
 
@@ -199,6 +199,37 @@ export class PublishQueenBee {
     const result = next.length === 0 ? await unpublishBranch(segments) : await setBranchDoors(segments, next)
     if (!result.ok) fail(`"${name}" could not be taken off ${zone} (${result.failure}).`)
     say(next.length === 0 ? `"${name}" is withdrawn — ${zone} was its last door` : `"${name}" is off ${zone}`, 'success')
+  }
+
+  /** THE TREE'S OWN NAME is its address: `<name>.<zone>`, at the root or any
+   *  depth. Two trees can share a name and only one can answer there, so when
+   *  another already holds the address the participant picks: keep that one
+   *  (this tree stays published, at its path) or let this tree take it. A name
+   *  that is not an address (no usable letters, reserved) leaves the host's
+   *  own door for the tile as it was. */
+  async #nameAddress(segments: readonly string[], zone: string): Promise<void> {
+    const name = segments[segments.length - 1]
+    const label = foldDnsLabel(name)
+    if (!label || ownAddressRefusal(label)) return
+    const path = `/${segments.join('/')}`
+    const result = await setBranchAddress(segments, zone, label)
+    if (result.ok) { say(`"${name}" answers at https://${result.host}/`, 'success'); return }
+    if (result.failure !== 'taken') {
+      say(`"${name}" is published, but ${label}.${zone} could not be set (${result.failure}${result.reason ? `: ${result.reason}` : ''}).`, 'warning')
+      return
+    }
+    const other = (await listPublishRecords()).find(e => e.record.lineageKey === result.reason)
+    const otherPath = other ? `/${other.record.segments.join('/')}` : 'another tree'
+    const take = await requestConfirm({
+      title: 'publish.pick.title',
+      message: `${label}.${zone} is answered by ${otherPath}. Let ${path} answer there instead?`,
+      confirmLabel: 'publish.pick.take',
+      cancelLabel: 'publish.pick.keep',
+    })
+    if (!take) { say(`"${name}" is published; ${label}.${zone} stays with ${otherPath}.`, 'info'); return }
+    const taken = await setBranchAddress(segments, zone, label, { replace: true })
+    say(taken.ok ? `"${name}" now answers at https://${taken.host}/` : `${label}.${zone} could not move to "${name}" (${taken.failure}).`,
+      taken.ok ? 'success' : 'warning')
   }
 
   /** PUBLIC HISTORY — `turn` null asks (never changes anything); true / false
