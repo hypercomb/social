@@ -54,12 +54,21 @@ or `{ "outcome": { "kind": "declined", "convoId": "…" } }`, or
 would not queue (no lines, too many, too long, or a hive whose modules are
 older than this door). A verdict is the machine door's own: `ran …`,
 `refused: …`, `"word" is claimed by …` (ambiguous; nothing ran), or
-`unknown: …`. A plain line the hive reads (`create word`) reports each
-action it ran; a canonical slash line (`/create word`) answers unknown,
-because its pipeline does not report what it did.
+`unknown: …`. A line is answered when its behaviour has finished, so the
+next line runs where the last one left the hive: a plain line the hive reads
+(`create word`) and a single `/word args` call both report what they ran. A
+line in the structural grammar (selections, paths, tags, views) answers
+unknown, because its pipeline does not report what it did.
 
 Calls queue in the hive, in the order they arrive, whoever sends them; the
 door holds none back itself.
+
+The bridge's `submit` is the same call: while the bridge carries lines only
+(the default, [claude-bridge-setup.md](claude-bridge-setup.md#lines-only-the-bridge-is-shut-off-by-default-2026-11-01)),
+a line sent over it waits for your Enter in exactly this way.
+
+Enter is taken only once a call has been on the line for a second, so an Enter
+you meant for your own line cannot run something that arrived under it.
 
 ## Speaking as yourself
 

@@ -13,6 +13,53 @@ at the end.
 
 ---
 
+## Lines only: the bridge is shut off by default (2026-11-01)
+
+**To prove that a subscription agent needs nothing but the hive's language,
+the bridge now carries command-line lines and nothing else.** Whatever
+connects to it (Claude Code, an OpenAI tool, any agent) may send `submit`;
+every other op is refused with `"<op>" is shut off`. Most of this tutorial
+(reading the hive, answering chats, writing tiles from the responder) needs the
+whole bridge, and works again only once you open it.
+
+A `submit` is a call from outside, exactly as the say door's is
+([hive-say.md](hive-say.md)):
+
+- Each line of its `text` is one line of the call, and `from` names the caller
+  (`say.cjs` sends `HIVE_CALLER`, or `say.cjs`).
+- The command line shows it in its `$` stance, with who sent it; a toast says
+  it is waiting. Nothing runs yet.
+- **Enter** (after the call has been on the line for a second, so an Enter
+  meant for your own line cannot run it) opens a new conversation on the
+  layer you stand in and says each line through the machine door, judged
+  against your `grant`. **Esc** declines.
+- The reply comes when you have answered: `data.outcome` (`ran` with each
+  line's verdict, `declined`, or `refused`) and `data.summary`.
+- Files may not ride with a line while it is shut: they would be written
+  before you answered.
+
+Why every other op is shut: they read, wrote or emitted around the gate.
+`effect-emit` could press Enter for you; `put-resource`, `bag-set`,
+`hive-root-set` and `update` wrote straight to the hive; the reads handed your
+tiles out without asking.
+
+**What stops working while it is shut:** a parked Claude Code session
+answering chats (`chat-reply`, `thread-read`), the responder's tile writes,
+`publish:revision`'s stamp of `install:essentials` (it uses `hive-root-set`),
+`hive-harness.cjs`, and the `_*.cjs` scripts that use any op but `submit`.
+
+**Opening it again** is yours alone, in the hive tab's console:
+
+```js
+localStorage.setItem('hc:bridge:open', 'all')     // the whole bridge
+localStorage.removeItem('hc:bridge:open')         // lines only again
+```
+
+No op writes that key, and it is read on every request, so it takes effect at
+once.
+
+---
+
 ## How it works (one diagram, three pieces)
 
 ```

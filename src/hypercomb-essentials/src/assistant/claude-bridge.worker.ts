@@ -2,7 +2,8 @@
 import {
   Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService,
   isLocalClaudeBridgeConfigured, holdAwake,
-  REMOTE_SUBMIT, formatRemoteSubmitOutcome,
+  REMOTE_SUBMIT, formatRemoteSubmitOutcome, EXTERNAL_CALL,
+  type ExternalCallOutcome, type ExternalCallRequest,
   BRIDGE_CODE_STORE_IOC_KEY, bridgeCodeStore,
   type RemoteSubmitRequest, type RemoteSubmitOutcome, type BridgeCodeStore,
 } from '@hypercomb/core'
@@ -44,9 +45,19 @@ const BRIDGE_PORT_QUERY_KEY = 'claudeBridgePort'
  *  `bag-add`/`bag-remove` are the writers. */
 const CONTEXT_SLOT = 'context'
 
+/** Whether the participant has opened the whole bridge again. Read only:
+ *  the key is the participant's to set, by hand, and no op writes it. */
+const BRIDGE_OPEN_KEY = 'hc:bridge:open'
+const bridgeOpenToAll = (): boolean => {
+  try { return window.localStorage.getItem(BRIDGE_OPEN_KEY) === 'all' } catch { return false }
+}
+
 type BridgeRequest = {
   id: string
   op: string
+  /** `submit`, while the bridge carries lines only: who is asking, as the
+   *  caller names itself. Shown on the command line before anything runs. */
+  from?: string
   cells?: string[]
   all?: boolean
   cell?: string
@@ -548,6 +559,21 @@ export class ClaudeBridgeWorker extends Worker {
   }
 
   async #dispatch(req: BridgeRequest): Promise<BridgeResponse> {
+    // LINES ONLY (jwize, 2026-11-01: "shut off so we can prove our concept").
+    // Whatever connects to the bridge (Claude Code, an OpenAI tool, any
+    // subscription agent) speaks the hive's language and nothing else: a
+    // `submit` is a call from outside, marked as external and answered by the
+    // participant on the command line, its lines judged against their grants.
+    // Every other op wrote, read or emitted around that gate (`effect-emit`
+    // could even answer the gate itself), so it is refused. The participant
+    // alone can open the whole bridge again, in this tab's console:
+    // localStorage.setItem('hc:bridge:open', 'all'). No op writes that key.
+    if (!bridgeOpenToAll()) {
+      if (req.op !== 'submit') {
+        return { id: req.id, ok: false, error: `the bridge carries command-line lines only; "${req.op}" is shut off. Say it as a line with op "submit": the participant answers it on the command line.` }
+      }
+      return this.#submitExternal(req)
+    }
     this.#noteVisit(req)
     // The run is resolved BEFORE the op routes, so that the retire's own
     // step — `optimization-remove` of the ask — is addressed while the ask
@@ -2336,6 +2362,46 @@ export class ClaudeBridgeWorker extends Worker {
       unhearActivity()
       unhearToast()
     }
+  }
+
+  /** A `submit` while the bridge carries lines only: one call from outside,
+   *  one line per line of `text`, waiting for the participant's Enter or Esc
+   *  on the command line (external-call.drone.ts). Answered when they have
+   *  answered and, on Enter, every line has been said. */
+  async #submitExternal(req: BridgeRequest): Promise<BridgeResponse> {
+    const text = typeof req.text === 'string' ? req.text : ''
+    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+    if (!lines.length) return { id: req.id, ok: false, error: 'no text provided' }
+    // Files would be written before anyone answered: not while it is shut.
+    if (Array.isArray(req.files) && req.files.length > 0) {
+      return { id: req.id, ok: false, error: 'files are shut off while the bridge carries lines only; nothing ran' }
+    }
+    // The withheld rule holds here too: a line naming a tile withheld from
+    // outside models is refused before it is even shown.
+    const withheld = get<{ covers?: (s: readonly string[]) => boolean }>('@hypercomb.social/AiWithheld')
+    const covered = (route: string): boolean => !!withheld?.covers?.(route.split('/').filter(Boolean))
+    if (lines.some(line => (line.match(ROUTE_IN_TEXT) ?? []).some(covered))) {
+      return { id: req.id, ok: false, error: 'the line names a tile withheld from outside models; nothing ran' }
+    }
+    const from = typeof req.from === 'string' && req.from.trim() ? req.from.trim() : 'the bridge'
+    // Taken into the queue, or refused, synchronously; neither means nothing
+    // in this hive takes calls (its modules are older than the gate).
+    let heard = false
+    let settle!: (outcome: ExternalCallOutcome) => void
+    const answered = new Promise<ExternalCallOutcome>(resolve => { settle = resolve })
+    const call: ExternalCallRequest = {
+      from, lines,
+      accept: () => { heard = true },
+      complete: outcome => { heard = true; settle(outcome) },
+    }
+    EffectBus.emitTransient(EXTERNAL_CALL, call)
+    if (!heard) return { id: req.id, ok: false, error: 'this hive does not take calls from outside' }
+    const outcome = await answered
+    const summary = outcome.kind === 'ran'
+      ? outcome.results.map(r => `${r.text} → ${r.verdict}`).join('\n')
+      : outcome.kind === 'declined' ? 'declined by the participant; nothing ran'
+      : `refused: ${outcome.reason}`
+    return { id: req.id, ok: outcome.kind !== 'refused', data: { outcome, summary }, ...(outcome.kind === 'refused' ? { error: summary } : {}) }
   }
 
   async #submitLine(req: BridgeRequest, text: string, deadlineMs = SUBMIT_DEADLINE_MS): Promise<BridgeResponse> {
