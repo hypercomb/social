@@ -119,6 +119,27 @@ publish from it to your domains, allow its key with the keys word.
 --participant           speak as you, ungated, through command:submit
 ```
 
+## Planting your own hive: use the bridge
+
+`--attach` needs your browser started with remote debugging, and on Windows
+that usually fails for the everyday hive: Edge keeps running in the background,
+so starting `msedge.exe --remote-debugging-port=9222` hands over to the running
+Edge and the flag is ignored, and Chromium-based browsers since 136 refuse
+remote debugging on the everyday profile anyway. A separate profile works, but
+it is a separate, empty hive.
+
+The bridge reaches the tab you already use, with no debugging, and since it
+carries lines only it gates the call the same way:
+
+```
+npm run bridge                                  # terminal 1: the broker
+# open http://localhost:4250/?claudeBridge=1 in your usual Edge (once; it remembers)
+npm run living:plant -- --all                   # terminal 2: one call, one Enter
+```
+
+The command line shows `living-plant: /go / · /create presentation · …`; after
+a second, Enter runs every sentence and the terminal prints each verdict.
+
 ## Planting over HTTP
 
 The living presentation's planting script says its sentences through this door:

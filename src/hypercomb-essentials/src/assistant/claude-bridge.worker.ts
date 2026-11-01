@@ -568,6 +568,12 @@ export class ClaudeBridgeWorker extends Worker {
     // could even answer the gate itself), so it is refused. The participant
     // alone can open the whole bridge again, in this tab's console:
     // localStorage.setItem('hc:bridge:open', 'all'). No op writes that key.
+    // A submit of several lines is a batch from outside however open the
+    // bridge is, and always waits for the participant: said as one line it
+    // would only have been nonsense.
+    if (req.op === 'submit' && typeof req.text === 'string' && req.text.trim().includes('\n')) {
+      return this.#submitExternal(req)
+    }
     if (!bridgeOpenToAll()) {
       if (req.op !== 'submit') {
         return { id: req.id, ok: false, error: `the bridge carries command-line lines only; "${req.op}" is shut off. Say it as a line with op "submit": the participant answers it on the command line.` }
