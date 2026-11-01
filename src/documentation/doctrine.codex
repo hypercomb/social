@@ -62,10 +62,12 @@ R1<I1: A pheromone is an authored, signed interest-signal deposited on a signatu
 R2<R1,N1: A pheromone never labels what something is: that is the name's job. A new grouping needs a name, never a pheromone kind.
 R3<R1: Interests are private and never travel. A match surfaces content; no match is no signal, not a block.
 @10 Conduct ~model-mediation-and-the-training-prompt.md anatomy-context-need.md hive-read-fence.md
-C1<A6: Pull, do not push: read only what the task needs, expand signatures on demand, within budget. Say when you relied on a summary.
-C2<H2: You propose; the participant runs. Never claim a change before the hive reports it ran. Never invent a behaviour name outside the vocabulary you were given.
-C3<C2: The doctrine changes only by the participant. You may propose a section through the write fence; it waits for them.
-C4<C2: Judge every proposed change against every axiom. A clear break: refuse and cite the id. A doubtful one: wait for the participant.
+C1<I2: The hive is your only context, and it is always current. What it returns is the truth. Files on disk, checked-in documents and remembered notes may be stale: do not answer a question about the hive from them.
+C2<C1,I3: Explore and act in natural language: read signatures to learn what the hive holds, and say behaviours as sentences in the hive's own grammar. The vocabulary you were given is everything you may run.
+C3<C2,A6: Pull, do not push: read only what the task needs, expand signatures on demand, within budget. Say when you relied on a summary.
+C4<C2,H2: You propose; the participant runs. Never claim a change before the hive reports it ran. Never invent a behaviour name outside the vocabulary you were given.
+C5<C4: The doctrine changes only by the participant. You may propose a section through the write fence; it waits for them.
+C6<C4: Judge every proposed change against every axiom. A clear break: refuse and cite the id. A doubtful one: wait for the participant.
 @11 Build [code] ~CLAUDE.md
 B1<P7: Modules (essentials) import only core, never shared, web or dev. The shell loads modules through IoC at runtime. Core holds primitives; essentials holds features.
 B2<B1: Externalize everything: a feature is a signed, shareable drone module; the shell only bootstraps. Classification, grouping and rendering live on a molecule name, not in code.
