@@ -2,9 +2,9 @@
   "zone": "hypercomb.com",
   "doors": [
     {
-      "host": "behaviors.hypercomb.com",
-      "label": "behaviors",
-      "title": "behaviors"
+      "host": "agenda.hypercomb.com",
+      "label": "agenda",
+      "title": "agenda"
     },
     {
       "host": "business-card.hypercomb.com",
@@ -22,14 +22,9 @@
       "title": "colony"
     },
     {
-      "host": "dylan.hypercomb.com",
-      "label": "dylan",
-      "title": "dylan"
-    },
-    {
-      "host": "favorites.hypercomb.com",
-      "label": "favorites",
-      "title": "favorites"
+      "host": "hosting.hypercomb.com",
+      "label": "hosting",
+      "title": "Host your hive"
     },
     {
       "host": "hyperdex.hypercomb.com",
@@ -52,14 +47,9 @@
       "title": "meetups"
     },
     {
-      "host": "minutes.hypercomb.com",
-      "label": "minutes",
-      "title": "minutes"
-    },
-    {
-      "host": "pluginthematrix.hypercomb.com",
-      "label": "pluginthematrix",
-      "title": "pluginthematrix"
+      "host": "questions.hypercomb.com",
+      "label": "questions",
+      "title": "questions"
     },
     {
       "host": "replication.hypercomb.com",
@@ -70,11 +60,6 @@
       "host": "revolucion.hypercomb.com",
       "label": "revolucion",
       "title": "Revolución"
-    },
-    {
-      "host": "susan.hypercomb.com",
-      "label": "susan",
-      "title": "susan"
     }
   ]
 }
