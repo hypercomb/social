@@ -204,8 +204,12 @@ export interface QuickMenuSlot {
    *
    * This belongs to the slot definition so the behaviour that owns the leaf,
    * rather than the input system, decides whether arrival is sufficient.
+   *
+   * The flower adds two (quick-menu.traits.ts): `hold` fires after resting on
+   * the leaf, and `click` waits for Enter or a click, so releasing alt on it
+   * only closes the flower.
    */
-  readonly activation?: 'release' | 'arrive'
+  readonly activation?: 'release' | 'arrive' | 'hold' | 'click'
 }
 
 export interface QuickMenuDefinition {

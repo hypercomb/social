@@ -1146,6 +1146,7 @@ export class TileOverlayDrone extends Drone {
       // own options. The hover icons are not that menu.
       this.onEffect<{ active?: boolean }>('quick-menu:on-tile', (payload) => {
         this.#menuOnTile = payload?.active === true
+        if (this.#menuOnTile) this.#clearHint()
         this.#updateVisibility()
       })
 
@@ -2847,6 +2848,7 @@ export class TileOverlayDrone extends Drone {
   /** The icon's explanation goes to the CAPTION (top-centre, under the command
    *  line) — one quiet place, never a dropdown drawn over the tiles it explains. */
   #showHint(actionName: string): void {
+    if (this.#menuOnTile) return
     const action = this.#actions.find(a => a.name === actionName && a.button.hovered)
     if (!action?.labelKey) return
     const i18n = this.#resolveI18n()
