@@ -1,6 +1,6 @@
 # The keyboard desk
 
-**Status: built 2026-11-01. The desk, chosen chords and lineups work on the dev shell. Moving a saved keymap between hosts is not built.**
+**Status: built 2026-11-01. The desk, chosen chords and lineups work on the dev shell, and on the web shell from a real install at `try-keyboard.localhost`. Moving a saved keymap between hosts is not built.**
 
 jwize, 2026-11-01: "we need to show our virtual keyboard to help us set our chorded commands try to mimic the tile editor look when going to look at the keybindings not a list stle experience ... lets build the hypercomb way where the code lives in the automatons and they piece together properly so the subdomain lattice can have swarm coding sessions."
 
