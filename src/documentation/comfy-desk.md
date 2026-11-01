@@ -13,7 +13,20 @@ jwize, 2026-11-01: "the comfy interface is very DRY I think we need a full scree
 - **The shelf** is a contact sheet: two faces across, newest first, the name under each, a find box above, and *new picture* as the first cell. A face shows that picture on the stage. Double-click the picture, or its corner button, to see it up close. In the narrow arrangement the sheet is one strip of faces across the top that scrolls sideways.
 - **Putting it on the screen, later.** With a picture on the stage, *put on a tile* offers the tiles selected in the hive, *choose a tile* (the list turns into the hive's tile list, on any level, until a row is chosen), or a typed name for a new tile. *use this recipe* puts what made the picture back into the form.
 
-Escape unwinds one level: up close, then choosing a tile, then an open card, then the desk. In a field, Escape leaves the field.
+- **The size mark.** Hold the `width × height` under the picture and it becomes a field. Enter, or leaving it, keeps a valid `640x480` (any of `x`, `×`, `X`); anything else puts the old value back.
+
+### Suggest: the prompt grows a piece at a time
+
+jwize, 2026-11-01: "present a story with options … the tile view opens up inside where the editor is and you can hover and read the ideas and each time you choose the agents work with jev to create direction until the prompt is complete … tokenize the chunks so you can delete items from the always visible chat text while you are selecting from tiles … click the tile which brings up the quick menu … shuffle … adding description and visual objectives in the quick menu for each potential path."
+
+Type words, then **Suggest** (the header, or the prompt card). Where the picture stood, a comb opens: the prompt so far at the centre and six directions it could take around it, each a tile. The directions are speculative on the prompt as it is now, and nothing else.
+
+- **The pieces.** The typed words are split at their clauses and stand above the comb as pieces, each with a ×. The strip stays while the ideas are chosen; taking a piece out changes the prompt and asks for new ideas. The prompt the form holds is always the pieces joined.
+- **Reading.** Rest on an idea and its sentence reads under the comb.
+- **The quick menu.** Click an idea and it flies to the centre with the hive's six seats around it: *go this way* (east), *add a description* (south-east), *new ideas* (south-west, shuffle), *back* (west), *read it* (north-west), *add visual objectives* (north-east). Each of the three unfolding seats asks the agents for the next piece in that direction: reviewers (the prompt card's count) each write one, Jev picks when switched on, else the first reviewer's words. The piece is added, and new ideas are asked for on the longer prompt. This goes on until the prompt is complete; Generate is still the participant's own press.
+- **No agent.** When no model answers, the ideas are common picture words (`rollDirections` in `comfy/comfy-roll.ts`), the comb says so under itself, and *go this way* adds the idea's words as they are.
+
+Escape unwinds one level: up close, then choosing a tile, then the quick menu, then the ideas, then an open card, then the desk. In a field, Escape leaves the field.
 
 The hive is covered while the desk is open, so nothing drags from the desk onto the hive. That gesture went with the sidebar.
 
@@ -29,7 +42,7 @@ Hiding is the only way off the shelf: a row goes into the one `hidden:items` poo
 
 ## The parts
 
-The desk is one behaviour and thirteen parts (`atomic-modules-plan.md`). Every piece that used to be a section of the sidebar was broken out into a folder holding one trait word's own version, and each break is an extension point: anything registered at `@diamondcoreprocessor.com/ComfyDesk/<word>` replaces that part and the rest never move.
+The desk is one behaviour and sixteen parts (`atomic-modules-plan.md`). Every piece that used to be a section of the sidebar was broken out into a folder holding one trait word's own version, and each break is an extension point: anything registered at `@diamondcoreprocessor.com/ComfyDesk/<word>` replaces that part and the rest never move.
 
 | Trait | Folder | What a filler replaces |
 |---|---|---|
@@ -46,6 +59,9 @@ The desk is one behaviour and thirteen parts (`atomic-modules-plan.md`). Every p
 | `machine` | `machine/` | The host and ComfyUI's folder. |
 | `library` | `library/` | Kept prompts. |
 | `place` | `place/` | How a picture goes on the screen. |
+| `chunks` | `chunks/` | The prompt in pieces: how words split, and the strip they stand in. |
+| `ideas` | `ideas/` | The directions as tiles, and the quick menu round one. |
+| `direction` | `direction/` | Who writes the ideas and the next piece: the agents and Jev, or the common words. |
 
 `comfy-desk.drone.ts` is the bee. It contributes the surface and brings the view with the first open. `desk/` pieces the parts together. The run, the host and the `comfy:render` payload stay with `comfy/comfy.drone.ts`, so the desk is one reading of them.
 

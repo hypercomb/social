@@ -181,6 +181,48 @@ ${S} .cd-prompt-row[data-on]{background:var(--hc-window-wash-strong);color:var(-
 ${S} .cd-prompt-detail{display:flex;flex-direction:column;align-items:flex-start;gap:0.15em;}
 ${S} .cd-prompt-detail p{margin:0;font-size:0.72em;line-height:1.4;color:var(--cd-ink-quiet);overflow-wrap:anywhere;}
 
+/* The editor's dimension mark ignores the pointer; this one is held to be typed in. */
+${S} .cd-size-mark{pointer-events:auto;cursor:text;user-select:none;-webkit-user-select:none;touch-action:none;}
+${S} .cd-size-field{pointer-events:auto;}
+${S} .cd-size-field{order:2;margin-top:0.2em;width:7.5em;box-sizing:border-box;text-align:center;font:inherit;font-size:1em;color:var(--cd-ink);
+  background:var(--cd-raise-strong);border:0;border-bottom:1px solid rgb(var(--acc));border-radius:var(--hc-radius-control,2px);outline:none;padding:0.1em 0.3em;}
+
+/* ── SUGGESTING: the prompt in pieces, and the ideas as tiles ──────────── */
+${S} .cd-chunks{position:absolute;left:1em;right:1em;top:2.3em;z-index:3;display:flex;flex-wrap:wrap;align-items:center;gap:0.35em;
+  padding:0.4em 0.5em;box-sizing:border-box;background:var(--cd-ground);outline:1px solid var(--cd-rule);border-radius:var(--hc-radius-card,3px);}
+${S} .cd-chunks[data-busy]{outline-color:var(--hc-window-edge);}
+${S} .cd-chunk{display:inline-flex;align-items:center;gap:0.2em;max-width:100%;padding:0.15em 0.2em 0.15em 0.55em;
+  font-family:var(--cd-read);font-size:0.86em;line-height:1.35;color:var(--cd-ink);background:var(--hc-window-wash);
+  outline:1px solid var(--hc-window-edge);border-radius:var(--hc-radius-control,2px);}
+${S} .cd-chunk-words{min-width:0;overflow-wrap:anywhere;}
+${S} .cd-chunk-out{appearance:none;border:0;margin:0;padding:0 0.35em;background:transparent;font:inherit;font-size:1.1em;line-height:1;color:var(--cd-ink-quiet);cursor:pointer;border-radius:var(--hc-radius-control,2px);}
+${S} .cd-chunk-out:hover{color:var(--cd-ink);background:var(--cd-raise-strong);}
+${S} .cd-chunk-empty{font-size:0.78em;color:var(--cd-ink-quiet);font-family:var(--cd-read);}
+${S} .cd-ideas{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.9em;padding:6em 1em 2em;box-sizing:border-box;}
+${S} .cd-comb{position:relative;flex:0 0 auto;max-width:100%;}
+${S} .cd-comb[data-busy]{opacity:0.55;}
+${S} .cd-hex{appearance:none;position:absolute;border:0;margin:0;padding:0 0.7em;background:transparent;cursor:pointer;color:var(--cd-ink-plain);font:inherit;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.15em;text-align:center;box-sizing:border-box;}
+${S} .cd-hex svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;}
+${S} .cd-hex polygon{fill:var(--cd-raise);stroke:var(--hc-window-edge);stroke-width:1px;vector-effect:non-scaling-stroke;transition:fill 150ms ease, stroke 150ms ease;}
+${S} .cd-hex:hover:not(:disabled) polygon,${S} .cd-hex:focus-visible polygon{fill:var(--hc-window-wash);stroke:var(--hc-window-edge-firm);}
+${S} .cd-hex:focus-visible{outline:none!important;}
+${S} .cd-hex:focus-visible polygon{stroke:var(--te-focus);stroke-width:2px;}
+${S} .cd-hex[data-kind="subject"]{cursor:default;}
+${S} .cd-hex[data-kind="subject"] polygon{fill:var(--hc-window-wash-strong);stroke:var(--hc-window-accent);}
+${S} .cd-comb[data-flower] .cd-hex[data-kind="idea"] polygon{fill:var(--hc-window-wash-strong);stroke:var(--hc-window-accent);stroke-width:2px;}
+${S} .cd-hex[data-kind="seat"] polygon{fill:var(--cd-ground);stroke:var(--hc-window-edge-firm);}
+${S} .cd-hex[data-kind="seat"]:hover polygon{fill:var(--hc-window-wash);stroke:var(--hc-window-accent);}
+${S} .cd-hex-name{position:relative;font-size:0.72em;line-height:1.15;max-width:100%;overflow-wrap:anywhere;color:var(--cd-ink);
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+${S} .cd-hex[data-kind="seat"] .cd-hex-name{font-size:0.62em;color:var(--cd-ink-plain);}
+${S} .cd-hex-icon{position:relative;font-size:1.3em;color:var(--hc-window-accent);}
+${S} .cd-idea-reading{margin:0;max-width:36em;min-height:2.8em;text-align:center;font-family:var(--cd-read);font-size:0.92em;line-height:1.45;color:var(--cd-ink-plain);}
+${S} .cd-idea-source{margin:0;font-size:0.72em;color:var(--cd-ink-quiet);}
+${S} .cd-idea-source:empty{display:none;}
+${S} .cd-panel[data-layout="narrow"] .cd-chunks{position:static;margin:0 0 1em;}
+${S} .cd-panel[data-layout="narrow"] .cd-ideas{position:static;padding:0 0 1em;}
+
 /* ── UP CLOSE ──────────────────────────────────────────────────────────── */
 ${S} .cd-look{position:absolute;inset:0;z-index:8;display:grid;place-items:center;padding:1em;box-sizing:border-box;background:var(--cd-ground);cursor:zoom-out;}
 ${S} .cd-look img{display:block;max-width:100%;max-height:100%;object-fit:contain;}

@@ -381,6 +381,35 @@ $accent: #7eb6d6;
   animation: chat-beacon-pulse 1.4s ease-in-out infinite;
 }
 
+// A call from outside, waiting on a person: words and two small buttons over
+// the composer, the same quiet line as the beacon.
+.chat-external {
+  margin: 0 0 0.45em;
+  padding-inline: 0.15em;
+  color: var(--hc-window-ink-plain);
+  font-family: var(--hc-read, inherit);
+  font-size: var(--chat-type-meta);
+  line-height: 1.45;
+}
+
+.chat-external-lines {
+  margin: 0.25em 0 0;
+  padding-inline-start: 1.4em;
+}
+
+.chat-external-actions {
+  display: flex;
+  gap: 0.5em;
+  margin-top: 0.3em;
+
+  button {
+    cursor: pointer;
+    border: 0;
+    background: transparent;
+    color: inherit;
+  }
+}
+
 .chat-beacon-text {
   min-width: 0;
 }
