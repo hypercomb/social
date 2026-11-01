@@ -2,7 +2,8 @@
 
 <div class="command-bar">
   <div class="command-shell" [class.collapsed]="collapsed()" [class.stance-command]="promptSigil() === 'slash'"
-       [class.stance-find]="promptSigil() === 'question'" (mousedown)="onShellMouseDown($event)">
+       [class.stance-find]="promptSigil() === 'question'"
+       [class.stance-external]="promptSigil() === 'dollar'" (mousedown)="onShellMouseDown($event)">
     <div class="command-row">
 
       <!-- ONE slot, three states, in priority order: an armed resource (cargo
@@ -45,6 +46,8 @@
           <span class="prompt-slash" aria-hidden="true">/</span>
         } @else if (promptSigil() === 'question') {
           <span class="prompt-question" aria-hidden="true">?</span>
+        } @else if (promptSigil() === 'dollar') {
+          <span class="prompt-dollar" aria-hidden="true">$</span>
         } @else {
           <span class="prompt-chevron mat-sym" aria-hidden="true">chevron_right</span>
         }
