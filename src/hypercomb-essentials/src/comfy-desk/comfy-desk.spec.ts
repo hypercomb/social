@@ -191,3 +191,87 @@ describe('a part is an extension point', () => {
     expect(parts.prompt).toBe(own.prompt)
   })
 })
+
+describe('the prompt in pieces', () => {
+  it('splits at clauses and joins them back with commas', async () => {
+    const { splitChunks, joinChunks } = await import('./chunks/chunks.js')
+    expect(splitChunks('a paper lantern in fog, soft side light. painted illustration\nquiet ground')).toEqual([
+      'a paper lantern in fog', 'soft side light', 'painted illustration', 'quiet ground',
+    ])
+    expect(splitChunks('   ')).toEqual([])
+    expect(joinChunks(['a lantern', ' ', 'in fog'])).toBe('a lantern, in fog')
+  })
+})
+
+describe('the directions', () => {
+  it('reads "title: sentence" lines and nothing else', async () => {
+    const { parseIdeas } = await import('./direction/direction.js')
+    const ideas = parseIdeas([
+      'Here are some ideas:',
+      '1. **Evening light**: the lantern lit from within at dusk.',
+      '- Rain: wet stones around it, reflections.',
+      'no colon on this line',
+      'Evening Light: said twice, dropped.',
+      '"Fog thicker": the far shore is gone.',
+    ].join('\n'))
+    expect(ideas.map(idea => idea.title)).toEqual(['Evening light', 'Rain', 'Fog thicker'])
+    expect(ideas[0]!.text).toBe('the lantern lit from within at dusk.')
+    expect(new Set(ideas.map(idea => idea.id)).size).toBe(3)
+  })
+
+  it('falls back to common words, each a different kind of thing', async () => {
+    const { rollDirections } = await import('../comfy/comfy-roll.js')
+    const rolled = rollDirections(6, () => 0.3)
+    expect(rolled.length).toBeGreaterThanOrEqual(4)
+    expect(new Set(rolled.map(idea => idea.title)).size).toBe(rolled.length)
+    expect(rolled.slice(0, 4).map(idea => idea.text.split(':')[0])).toEqual(['the light', 'the manner', 'the ground', 'the place'])
+    for (const idea of rolled) expect(idea.text.endsWith(idea.title)).toBe(true)
+  })
+
+  it('keeps a chunk to a clause', async () => {
+    const { cleanChunk } = await import('./direction/direction.js')
+    expect(cleanChunk('Prompt: "lit from within at dusk."')).toBe('lit from within at dusk')
+    expect(cleanChunk('```\nwet stones, reflections\n```')).toBe('wet stones, reflections')
+  })
+})
+
+describe('the ideas as tiles', () => {
+  it('seats the ideas ring by ring round the centre, none on top of another', async () => {
+    const { boardLayout, TILE_R } = await import('./ideas/ideas.js')
+    const { cells, reach } = boardLayout(7)
+    expect(cells).toHaveLength(7)
+    const apart = Math.sqrt(3) * TILE_R
+    for (let a = 0; a < cells.length; a++) {
+      expect(Math.hypot(cells[a]!.x, cells[a]!.y)).toBeGreaterThan(TILE_R)
+      for (let b = a + 1; b < cells.length; b++) {
+        expect(Math.hypot(cells[a]!.x - cells[b]!.x, cells[a]!.y - cells[b]!.y)).toBeGreaterThanOrEqual(apart - 0.01)
+      }
+    }
+    expect(reach).toBeGreaterThan(apart)
+  })
+
+  it('puts shuffle down left and go-this-way due east', async () => {
+    const { SEATS, seatCentre } = await import('./ideas/ideas.js')
+    const shuffle = SEATS.find(seat => seat.action === 'shuffle')!
+    const take = SEATS.find(seat => seat.action === 'take')!
+    expect(shuffle.direction).toBe('southwest')
+    const at = seatCentre(shuffle.direction)
+    expect(at.x).toBeLessThan(0)
+    expect(at.y).toBeGreaterThan(0)
+    expect(seatCentre(take.direction)).toMatchObject({ y: 0 })
+    expect(new Set(SEATS.map(seat => seat.direction)).size).toBe(6)
+  })
+})
+
+describe('the size mark', () => {
+  it('takes width x height in any of its spellings and refuses the rest', async () => {
+    const { parseSize } = await import('./frame/frame.js')
+    expect(parseSize('640x480')).toEqual({ width: 640, height: 480 })
+    expect(parseSize(' 512 × 768 ')).toEqual({ width: 512, height: 768 })
+    expect(parseSize('1024 X 1024')).toEqual({ width: 1024, height: 1024 })
+    expect(parseSize('big')).toBeNull()
+    expect(parseSize('640')).toBeNull()
+    expect(parseSize('640x')).toBeNull()
+    expect(parseSize('0x0')).toBeNull()
+  })
+})

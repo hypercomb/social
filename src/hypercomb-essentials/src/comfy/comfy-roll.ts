@@ -123,3 +123,27 @@ export const promptFromTile = (name: string, props: unknown, rng: () => number =
 /** A new picture prompt from common words alone. */
 export const promptFromWords = (rng: () => number = Math.random): string =>
   [pick(SUBJECTS, rng), pick(PLACES, rng), ...dress(rng)].join(', ')
+
+/** Directions a prompt could take, from the same common words, when no agent
+ *  is there to write them. Each is a different kind of thing to add, and no
+ *  two are the same phrase. */
+export const rollDirections = (count: number, rng: () => number = Math.random): { title: string; text: string }[] => {
+  const banks: readonly { title: string; words: readonly string[] }[] = [
+    { title: 'the light', words: LIGHT },
+    { title: 'the manner', words: MANNER },
+    { title: 'the ground', words: GROUND },
+    { title: 'the place', words: PLACES },
+  ]
+  const out: { title: string; text: string }[] = []
+  const seen = new Set<string>()
+  for (let i = 0; out.length < count && i < count * 4; i++) {
+    const bank = banks[i % banks.length] as (typeof banks)[number]
+    const words = pick(bank.words, rng)
+    if (seen.has(words)) continue
+    seen.add(words)
+    // The words are the tile; what kind of thing they change is the reading.
+    out.push({ title: words, text: `${bank.title}: ${words}` })
+  }
+  return out
+}
+

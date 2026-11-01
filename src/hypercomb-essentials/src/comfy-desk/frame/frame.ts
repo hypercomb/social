@@ -29,6 +29,18 @@ export const fitBox = (room: { readonly w: number; readonly h: number }, width: 
   return { w, h }
 }
 
+/** How long the size mark is held before it can be typed in, ms. */
+export const HOLD_MS = 450
+
+/** `512x768`, `512 × 768`, `512 X 768`: a width and a height, else null. */
+export const parseSize = (text: string): { width: number; height: number } | null => {
+  const found = /^\s*(\d{2,5})\s*[x×X*]\s*(\d{2,5})\s*$/.exec(text)
+  if (!found) return null
+  const width = Number(found[1])
+  const height = Number(found[2])
+  return width >= 16 && height >= 16 ? { width, height } : null
+}
+
 /** The row whose region holds this point, in fractions of the frame. */
 export const rowAt = (rows: readonly RecipeRow[], x: number, y: number): RecipeRow | null =>
   rows.find(row => row.region
@@ -57,11 +69,49 @@ export const framePart: FramePart = {
     const lit = svg('svg', { class: 'te-dg-lit', 'aria-hidden': 'true', focusable: 'false' })
     // The editor's own dimension mark: a bracket under the picture with its size.
     const dim = make('div', 'te-dg-dim cd-dim')
-    dim.setAttribute('aria-hidden', 'true')
-    const size = make('span')
+    const size = make('span', 'cd-size-mark')
+    size.title = say('comfy.size-hold', 'Hold to type a size')
     dim.append(size)
     picture.append(image, words, lit, look, bar)
     el.append(picture, dim)
+
+    // HOLD THE SIZE MARK AND IT BECOMES A FIELD. Enter or leaving keeps a
+    // valid `width x height`; anything else puts the old value back.
+    let hold = 0
+    let held = ''
+    const endHold = (): void => { window.clearTimeout(hold); hold = 0 }
+    const edit = (): void => {
+      if (dim.querySelector('input')) return
+      const field = make('input', 'cd-size-field')
+      field.type = 'text'
+      field.value = held
+      field.setAttribute('aria-label', say('comfy.size-type', 'width x height'))
+      field.dataset['escapeLocal'] = ''
+      size.hidden = true
+      dim.append(field)
+      let done = false
+      const finish = (keep: boolean): void => {
+        if (done) return
+        done = true
+        const parsed = keep ? parseSize(field.value) : null
+        field.remove()
+        size.hidden = false
+        if (parsed) events.onSize(parsed.width, parsed.height)
+      }
+      field.addEventListener('keydown', event => {
+        if (event.key === 'Enter') { event.preventDefault(); finish(true) }
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(false) }
+      })
+      field.addEventListener('blur', () => finish(true))
+      field.focus()
+      field.select()
+    }
+    size.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return
+      endHold()
+      hold = window.setTimeout(() => { hold = 0; edit() }, HOLD_MS)
+    })
+    for (const leave of ['pointerup', 'pointerleave', 'pointercancel'] as const) size.addEventListener(leave, endHold)
 
     let rows: readonly RecipeRow[] = []
     let over: string | null = null
@@ -106,7 +156,8 @@ export const framePart: FramePart = {
         bar.hidden = !shown.busy
         bar.toggleAttribute('data-unknown', shown.progress === null)
         fill.style.width = shown.progress === null ? '' : `${Math.round(Math.min(1, Math.max(0, shown.progress)) * 100)}%`
-        size.textContent = `${shown.width} × ${shown.height}`
+        held = `${shown.width} × ${shown.height}`
+        size.textContent = held
 
         lit.setAttribute('width', String(box.w))
         lit.setAttribute('height', String(box.h))

@@ -113,6 +113,7 @@ import {
   type AgentHandoverEvent, type AgentRoundEvent, type AgentSpent, type AgentStageEffect,
   AGENT_STEPS_IOC_KEY, shippedFoldStep, shippedFrontStep, shippedHandoverStep, shippedReceiptStep, shippedRouteStep, shippedStretchStep, shippedVerifyStep,
   isSandboxLabel,
+  EXTERNAL_ASK, EXTERNAL_ANSWER, type ExternalAsk, type ExternalAnswer,
   type AgentStepRegistry, type FrontDecisionLike, type HandoverStep, type VerifyDecisionLike, type WorkMessage,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -1687,6 +1688,34 @@ export class ChatWindowComponent implements OnDestroy {
    *  icon is the door. */
   readonly visible = signal(rememberedChatVisibility(false))
 
+  /** A CALL FROM OUTSIDE, ANSWERED WHERE THE PARTICIPANT ALREADY IS. An agent
+   *  that asks the hive to say lines waits on the command line; with the chat
+   *  showing, the same ask is put over the composer and Enter runs it, Escape
+   *  declines it — no switching views to answer. The command line still shows
+   *  it and either answer settles it (one id, one answer). The gate is the
+   *  same: nothing runs until a person answers. */
+  readonly externalCall = signal<ExternalAsk | null>(null)
+  #externalShownAt = 0
+
+  /** The ask over the composer, worded as the command line words it. */
+  readonly externalCallText = computed(() => {
+    const ask = this.externalCall()
+    if (!ask) return ''
+    const head = ask.lines.length === 1
+      ? this.#t('command-line.external.ask', { from: ask.from, lines: ask.lines[0] })
+      : this.#t('command-line.external.batch', { from: ask.from, count: ask.lines.length })
+    return ask.waiting > 0 ? `${head} ${this.#t('command-line.external.more', { count: ask.waiting })}` : head
+  })
+
+  answerExternal(decision: ExternalAnswer['decision']): void {
+    const ask = this.externalCall()
+    if (!ask) return
+    // An Enter meant for the message being typed must not run a call that
+    // arrived under it (the command line holds the same second).
+    if (decision === 'run' && Date.now() - this.#externalShownAt < 1000) return
+    EffectBus.emitTransient<ExternalAnswer>(EXTERNAL_ANSWER, { id: ask.id, decision })
+  }
+
   /** Parked while the hive is covered and brought back intact — the thread is
    *  durable, but the scroll position and the half-typed message are not.
    *
@@ -1735,6 +1764,8 @@ export class ChatWindowComponent implements OnDestroy {
    *  not about anything inside the window, and the cascade takes the window
    *  itself away (parked, so the next press can bring it back). */
   #dismissOne(): boolean {
+    // A call from outside is the topmost thing asking: Escape declines it.
+    if (this.externalCall()) { this.answerExternal('decline'); return true }
     // A full-bleed picture is the innermost surface standing.
     if (this.viewing()) { this.closePicture(); return true }
     // The flyout is the smallest thing open over the transcript.
@@ -5147,6 +5178,12 @@ export class ChatWindowComponent implements OnDestroy {
           sig: String(payload.sig ?? ''),
         })
       }))
+
+    this.#cleanups.push(EffectBus.on<ExternalAsk | null>(EXTERNAL_ASK, ask => {
+      const next = ask && typeof ask.id === 'string' ? ask : null
+      if (next && next.id !== this.externalCall()?.id) this.#externalShownAt = Date.now()
+      this.externalCall.set(next)
+    }))
 
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
       'chat:open', payload => { void this.open(payload) }))
@@ -8984,6 +9021,17 @@ export class ChatWindowComponent implements OnDestroy {
    */
   onInputKey(event: KeyboardEvent): void {
     event.stopPropagation()
+    // A call from outside is waiting over the composer: Enter answers it while
+    // the composer is empty (a message being typed keeps its Enter), Escape
+    // declines it.
+    if (this.externalCall()) {
+      if (event.key === 'Enter' && !event.shiftKey && this.#composerEmpty()) {
+        event.preventDefault()
+        this.answerExternal('run')
+        return
+      }
+      if (event.key === 'Escape') { event.preventDefault(); this.answerExternal('decline'); return }
+    }
     if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && this.#composerEmpty()) {
       const view = this.askView()
       if (view.ideas.length > 1) {

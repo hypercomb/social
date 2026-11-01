@@ -22,6 +22,7 @@ export const promptPart: CardPart = {
 
     const rolls = make('div', 'te-dg-rowf')
     rolls.append(
+      word(say('comfy.suggest', 'Suggest'), () => context.suggest()),
       word(say('comfy.roll-words', 'Common words'), () => intent('comfy:roll', { kind: 'words' })),
       word(say('comfy.roll-tile', 'New from tile'), () => intent('comfy:roll', { kind: 'tile' })),
     )

@@ -2404,7 +2404,7 @@ export class ClaudeBridgeWorker extends Worker {
     if (!heard) return { id: req.id, ok: false, error: 'this hive does not take calls from outside' }
     const outcome = await answered
     const summary = outcome.kind === 'ran'
-      ? outcome.results.map(r => `${r.text} → ${r.verdict}`).join('\n')
+      ? outcome.results.map(r => [`${r.text} → ${r.verdict}`, ...(r.heard ?? []).map(said => `  ${said}`)].join('\n')).join('\n')
       : outcome.kind === 'declined' ? 'declined by the participant; nothing ran'
       : `refused: ${outcome.reason}`
     return { id: req.id, ok: outcome.kind !== 'refused', data: { outcome, summary }, ...(outcome.kind === 'refused' ? { error: summary } : {}) }

@@ -696,6 +696,27 @@
       <!-- WHAT IS HAPPENING, pinned above the composer so a quiet stretch, a
            retry, a token budget, and a wait on you each stay visible. The
            transcript used to say "Thinking…" and then go blank between rounds. -->
+      <!-- A CALL FROM OUTSIDE, answered here when the chat is the view in front.
+           The same ask the command line shows: Enter runs it (composer empty),
+           Escape declines it, and the lines are listed so they are read first. -->
+      @if (externalCall(); as call) {
+        <div class="chat-external" role="alertdialog" aria-live="assertive">
+          <div class="chat-external-head">{{ externalCallText() }}</div>
+          @if (call.lines.length > 1) {
+            <ol class="chat-external-lines">
+              @for (line of call.lines; track $index) { <li>{{ line }}</li> }
+            </ol>
+          }
+          <div class="chat-external-actions">
+            <button type="button" class="chat-external-run" (click)="answerExternal('run')">
+              <span class="mat-sym" aria-hidden="true">check</span>
+            </button>
+            <button type="button" class="chat-external-decline" (click)="answerExternal('decline')">
+              <span class="mat-sym" aria-hidden="true">close</span>
+            </button>
+          </div>
+        </div>
+      }
       @if (workBeacon(); as beacon) {
         <div class="chat-beacon" role="status" aria-live="polite" [attr.data-state]="beacon.state">
           <span class="chat-beacon-dot" aria-hidden="true"></span>
