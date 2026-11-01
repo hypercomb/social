@@ -8,6 +8,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'
+import { visibleArea, type SafeArea } from '../navigation/zoom/safe-area.js'
 import { axialToPixel, QuickMenuLayer, type FlowerCell } from '../quickmenu/quick-menu.layer.js'
 import { viewportIsFramed } from '../sequence/frame-lock.js'
 import { ringCells, ringsFor, type Axial, type GuideFrame } from './guide-place.js'
@@ -64,23 +65,27 @@ export class GuideStage {
     return !!this.#host && !viewportIsFramed()
   }
 
-  /** The space the board may use: the canvas, which already gives way to docked panels. */
+  /** The space the board may use: the canvas, which already gives way to docked panels, beside the rail. */
   get free(): GuideFrame {
-    const rect = this.#host?.canvas.getBoundingClientRect()
-    if (!rect) return { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
+    const host = this.#host
+    if (!host) return { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
+    const rect = host.canvas.getBoundingClientRect()
+    const area = this.#area(host)
     return {
-      left: rect.left + FRAME_SIDE,
+      left: rect.left + area.left + FRAME_SIDE,
       top: rect.top + FRAME_TOP,
-      right: rect.right - FRAME_SIDE,
+      right: rect.left + area.right - FRAME_SIDE,
       bottom: rect.bottom - FRAME_BOTTOM,
     }
   }
 
-  /** The middle of the canvas, in client coordinates. */
+  /** The middle of the available area, in client coordinates. */
   get middle(): Pt {
-    const rect = this.#host?.canvas.getBoundingClientRect()
-    if (!rect) return { x: window.innerWidth / 2, y: window.innerHeight / 2 }
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    const host = this.#host
+    if (!host) return { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+    const rect = host.canvas.getBoundingClientRect()
+    const area = this.#area(host)
+    return { x: rect.left + (area.left + area.right) / 2, y: rect.top + (area.top + area.bottom) / 2 }
   }
 
   /** How far one tile reaches from its centre at the current camera, in client px. */
@@ -177,19 +182,23 @@ export class GuideStage {
   /** The tile in the middle, at the size that leaves its rings and the board on screen. */
   #framed(): Camera {
     const host = this.#host!
-    const { width, height } = host.renderer.screen
+    const area = this.#area(host)
     const stage = host.app.stage
     const ss = stage.scale.x || 1
     const wanted = TILE_PX / this.#geo.spacing
-    const tall = (height / 2 - EDGE_MARGIN) / this.#extentY(this.#rings)
-    const wide = (width / 2 - BOARD_ROOM) / this.#extentX(this.#rings)
+    const tall = ((area.bottom - area.top) / 2 - EDGE_MARGIN) / this.#extentY(this.#rings)
+    const wide = ((area.right - area.left) / 2 - BOARD_ROOM) / this.#extentX(this.#rings)
     const scale = Math.min(wanted, tall, Math.max(wide, tall / 2)) / ss
     const at = axialToPixel(this.#centre.q, this.#centre.r, this.#geo.spacing, this.#flat)
     return {
       scale,
-      x: (width / 2 - stage.position.x) / ss - scale * (at.x + this.#offset.x),
-      y: (height / 2 - stage.position.y) / ss - scale * (at.y + this.#offset.y),
+      x: ((area.left + area.right) / 2 - stage.position.x) / ss - scale * (at.x + this.#offset.x),
+      y: ((area.top + area.bottom) / 2 - stage.position.y) / ss - scale * (at.y + this.#offset.y),
     }
+  }
+
+  #area(host: Host): SafeArea {
+    return visibleArea(host.renderer.screen, host.canvas.getBoundingClientRect())
   }
 
   #tween(to: Camera, ms: number, onFrame: () => void, done: () => void): void {
