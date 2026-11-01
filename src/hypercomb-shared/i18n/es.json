@@ -757,6 +757,7 @@
   "domain.claim.pending": "Para reclamar {domain}, configura en tu registrador sus servidores de nombres como {nameservers}. La colmena sigue comprobando y te avisa cuando sea tuyo.",
   "domain.claim.copied": "Los servidores de nombres están en tu portapapeles.",
   "domain.claim.active": "{domain} es tuyo. Cualquier mosaico puede activarse allí en el panel Publicar.",
+  "domain.claim.requested": "Has pedido {domain}. El operador de {host} decide, y la colmena te dirá los servidores de nombres cuando acepte.",
   "domain.claim.contested": "{domain} está en disputa: otra clave también lo reclamó. Ninguna queda vinculada hasta que decida el operador de {host}.",
   "domain.claim.refused": "{domain} no se reclamó: {reason}",
   "domain.claim.unconfigured": "{host} no acepta reclamaciones de dominio.",

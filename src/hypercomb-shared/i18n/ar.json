@@ -757,6 +757,7 @@
   "domain.claim.pending": "للمطالبة بـ {domain}، اضبط خوادم أسمائه لدى مسجّل النطاق على {nameservers}. تواصل الخلية التحقق وتخبرك عندما يصبح لك.",
   "domain.claim.copied": "خوادم الأسماء موجودة في الحافظة.",
   "domain.claim.active": "{domain} أصبح لك. يمكن تشغيل أي بلاطة هناك من لوحة النشر.",
+  "domain.claim.requested": "تم طلب {domain}. يقرر مشغّل {host}، وستخبرك الخلية بخوادم الأسماء عند الموافقة.",
   "domain.claim.contested": "{domain} متنازع عليه: طالب به مفتاح آخر أيضًا. لن يُربط بأيٍّ منهما حتى يقرر مشغّل {host}.",
   "domain.claim.refused": "لم تتم المطالبة بـ {domain}: {reason}",
   "domain.claim.unconfigured": "{host} لا يقبل المطالبة بالنطاقات.",

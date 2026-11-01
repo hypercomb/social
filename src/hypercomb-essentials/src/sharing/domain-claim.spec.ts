@@ -547,7 +547,7 @@ describe('the domain word', () => {
     const census = ioc.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as Census
 
     it('offers claim — and `cl` is claim before clear', () => {
-      expect(census.complete('domain', '')).toEqual(['claim ', 'list', 'remove ', 'clear'])
+      expect(census.complete('domain', '')).toEqual(['claim ', 'requests', 'approve ', 'refuse ', 'list', 'remove ', 'clear'])
       expect(census.complete('domain', 'cl')).toEqual(['claim ', 'clear'])
       const row = census.all().find(behaviour => behaviour.name === 'domain')
       expect(row?.options).toContain('claim <domain> [@<host>]')

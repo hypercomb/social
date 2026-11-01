@@ -757,6 +757,7 @@
   "domain.claim.pending": "{domain} alan adını talep etmek için kayıt kuruluşunuzda ad sunucularını {nameservers} olarak ayarlayın. Kovan denetlemeyi sürdürür ve sizin olduğunda haber verir.",
   "domain.claim.copied": "Ad sunucuları panonuza kopyalandı.",
   "domain.claim.active": "{domain} artık sizin. Yayınla panelinde herhangi bir döşeme orada açılabilir.",
+  "domain.claim.requested": "{domain} istendi. Kararı {host} operatörü verir; onaylandığında kovan size ad sunucularını bildirir.",
   "domain.claim.contested": "{domain} tartışmalı: başka bir anahtar da talep etti. {host} işletmecisi karar verene kadar hiçbirine bağlanmaz.",
   "domain.claim.refused": "{domain} talep edilemedi: {reason}",
   "domain.claim.unconfigured": "{host} alan adı talebi kabul etmiyor.",

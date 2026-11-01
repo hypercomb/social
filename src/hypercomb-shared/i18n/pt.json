@@ -757,6 +757,7 @@
   "domain.claim.pending": "Para reivindicar {domain}, configure no seu registrador os servidores de nomes como {nameservers}. A colmeia continua verificando e avisa quando ele for seu.",
   "domain.claim.copied": "Os servidores de nomes estão na sua área de transferência.",
   "domain.claim.active": "{domain} é seu. Qualquer bloco pode ser ativado lá no painel Publicar.",
+  "domain.claim.requested": "Você pediu {domain}. O operador de {host} decide, e a colmeia informa os servidores de nomes quando ele aceitar.",
   "domain.claim.contested": "{domain} está em disputa: outra chave também o reivindicou. Nenhuma fica vinculada até que o operador de {host} decida.",
   "domain.claim.refused": "{domain} não foi reivindicado: {reason}",
   "domain.claim.unconfigured": "{host} não aceita reivindicações de domínio.",

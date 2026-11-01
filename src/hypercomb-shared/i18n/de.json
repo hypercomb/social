@@ -757,6 +757,7 @@
   "domain.claim.pending": "Um {domain} zu beanspruchen, trage bei deinem Registrar die Nameserver {nameservers} ein. Der Bienenstock prüft weiter und sagt dir Bescheid, sobald sie dir gehört.",
   "domain.claim.copied": "Die Nameserver sind in deiner Zwischenablage.",
   "domain.claim.active": "{domain} gehört dir. Jede Kachel kann dort im Veröffentlichen-Panel eingeschaltet werden.",
+  "domain.claim.requested": "{domain} wurde angefragt. Der Betreiber von {host} entscheidet, und der Hive nennt dir die Nameserver, sobald er zustimmt.",
   "domain.claim.contested": "{domain} ist umstritten: Ein anderer Schlüssel hat sie ebenfalls beansprucht. Keiner wird gebunden, bis der Betreiber von {host} entscheidet.",
   "domain.claim.refused": "{domain} wurde nicht beansprucht: {reason}",
   "domain.claim.unconfigured": "{host} nimmt keine Domain-Ansprüche an.",

@@ -58,6 +58,21 @@ main worker keeps deploying as it always has. The request URL survives the
 binding, so the main worker resolves the claimed hostname exactly as if it
 were routed there itself.
 
+### The operator approves
+
+jwize, 2026-10-31: *"I should be able to approve."* A claim starts as a
+**request**: its record with status `requested`, no zone, no Cloudflare call.
+An operator of the host (a `SITE_OPERATORS` key) says `domain requests` to see
+what waits, then `domain approve <domain>` or `domain refuse <domain>`. A yes
+makes the zone under the REQUESTER's key and the claim goes on as below; the
+requester's hive tells them the nameservers within a minute. A no deletes the
+request. Nothing else changes: the nameservers remain the proof, so a yes never
+hands anyone a domain they do not control. A request unanswered for seven days
+frees its name. `CLAIM_OPEN=1` lifts the review and makes zones at once.
+
+Routes: `GET /claim/requests` (NIP-98, operators only) and `POST
+/claim/decide` (`{domain, approve}`, NIP-98 with `payload`, operators only).
+
 ### The worker
 
 **`POST /claim`** — NIP-98 signed (method `POST`, `u` = the URL, and a
@@ -122,8 +137,8 @@ operator would have written it:
   "publishers": [{ "pubkey": "<claimant>", "primary": true }], "frontDoor": true } }
 ```
 
-so the apex is the front door (the shim host card), every first-level
-`<name>.<domain>` is an implicit site whose only publisher is the claimant,
+so the apex is the front door (the shim host card), every
+`<name>.<domain>`, at any depth, is an implicit site whose only publisher is the claimant,
 and the apex itself is the domain's write face (`content.<domain>` still
 accepts, as a legacy face). Claims are merged into the bindings
 the router reads (beside the operators' signed records) and held for a

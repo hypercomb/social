@@ -2461,7 +2461,7 @@ function fakeCloudflare({ zones = [] } = {}) {
 
 const claimEnv = (extra = {}) => ({
   SITE_BINDINGS: JSON.stringify(ONE_ZONE),
-  CF_ACCOUNT_ID: 'acct', CLAIM_API_TOKEN: 'cf-token', CLAIM_SCRIPT: 'hypercomb-hosts',
+  CF_ACCOUNT_ID: 'acct', CLAIM_API_TOKEN: 'cf-token', CLAIM_SCRIPT: 'hypercomb-hosts', CLAIM_OPEN: '1',
   CONTENT: contentBag(),
   ...extra,
 })
@@ -2481,6 +2481,17 @@ async function claim(env, domain, key = sk, { method = 'POST', body, signed, ctx
   return worker.fetch(new Request(CLAIM_URL, { method: 'POST',
     headers: { authorization: await signedAuth(CLAIM_URL, method, key, signed === undefined ? sent : signed), 'content-type': 'application/json' },
     body: sent }), env, ctx)
+}
+/** An operator's decision on a request, or anyone's attempt at one. */
+async function decide(env, domain, approve, key = sk) {
+  const url = 'https://content.pluginthematrix.com/claim/decide'
+  const body = JSON.stringify({ domain, approve })
+  return worker.fetch(new Request(url, { method: 'POST',
+    headers: { authorization: await signedAuth(url, 'POST', key, body), 'content-type': 'application/json' }, body }), env)
+}
+async function requests(env, key = sk) {
+  const url = 'https://content.pluginthematrix.com/claim/requests'
+  return worker.fetch(new Request(url, { headers: { authorization: await signedAuth(url, 'GET', key) } }), env)
 }
 /** A claim's public reading — signed (NIP-98, GET) when a key is given. */
 async function lookAt(env, domain, key) {
@@ -6791,4 +6802,62 @@ test('tenants: the record is private — the pool is not listed and the member i
   assert.notEqual((await worker.fetch(new Request(`https://content.hypercomb.com/${pool}/`), env)).status, 200)
   const member = await worker.fetch(new Request(`https://content.hypercomb.com/${pool}/${tenantKey}`), env)
   assert.notEqual(await member.text(), content.objects.get(`${pool}/${tenantKey}`))
+})
+
+// ── the operator approves ───────────────────────────────────────────────────
+const stranger = '7'.repeat(64)
+const reviewed = () => claimEnv({ CLAIM_OPEN: '', SITE_OPERATORS: JSON.stringify({ 'pluginthematrix.com': pubOf(sk) }) })
+
+test('a claim is a request until an operator approves, and calls nothing', async () => {
+  const env = reviewed()
+  const cf = fakeCloudflare()
+  await onCloudflare(cf, async () => {
+    const asked = await claim(env, 'example.org', stranger)
+    assert.equal(asked.status, 200)
+    assert.deepEqual(await asked.json(), { domain: 'example.org', status: 'requested', nameservers: [] })
+    assert.equal(cf.calls.length, 0, 'a request costs the account nothing')
+    assert.equal(await statusOf(await lookAt(env, 'example.org')), 'requested')
+    assert.equal(cf.calls.length, 0)
+  })
+})
+
+test('only an operator reads or decides a request', async () => {
+  const env = reviewed()
+  const cf = fakeCloudflare()
+  await onCloudflare(cf, async () => {
+    await claim(env, 'example.org', stranger)
+    assert.equal((await requests(env, stranger)).status, 403)
+    assert.equal((await decide(env, 'example.org', true, stranger)).status, 403)
+    assert.equal(cf.calls.length, 0)
+    const listed = await (await requests(env)).json()
+    assert.deepEqual(listed.requests.map((r) => [r.domain, r.pubkey]), [['example.org', pubOf(stranger)]])
+  })
+})
+
+test('a yes makes the zone under the requester, and a no forgets the request', async () => {
+  const env = reviewed()
+  const cf = fakeCloudflare()
+  await onCloudflare(cf, async () => {
+    await claim(env, 'example.org', stranger)
+    const yes = await decide(env, 'example.org', true)
+    assert.equal(await statusOf(yes), 'pending')
+    assert.equal((await claimRecordOf(env, 'example.org')).pubkey, pubOf(stranger))
+    assert.equal((await decide(env, 'example.org', true)).status, 409, 'a yes is said once')
+
+    await claim(env, 'example.net', '8'.repeat(64))
+    assert.equal((await (await decide(env, 'example.net', false)).json()).status, 'refused')
+    assert.equal(await claimRecordOf(env, 'example.net'), null)
+  })
+})
+
+test('a request holds its name against another key until it lapses', async () => {
+  const env = reviewed()
+  const cf = fakeCloudflare()
+  await onCloudflare(cf, async () => {
+    await claim(env, 'example.org', stranger)
+    assert.equal((await claim(env, 'example.org', '8'.repeat(64))).status, 409)
+    await later(8 * 86_400_000, async () => {
+      assert.equal(await statusOf(await claim(env, 'example.org', '8'.repeat(64))), 'requested')
+    })
+  })
 })

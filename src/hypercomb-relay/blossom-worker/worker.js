@@ -5845,6 +5845,15 @@ async function getRoomMember(request, env, pool, member) {
 // claim never TAKES a route: a zone holding a route to any other script is run
 // by hand and is never wired, and a domain served here is never activated.
 //
+// THE OPERATOR APPROVES (jwize 2026-10-31: "I should be able to approve"). A
+// claim on a host that has not set CLAIM_OPEN=1 starts as a REQUEST: the record
+// alone, status `requested`, no zone and no Cloudflare call, so a refused or
+// forgotten request costs the account nothing. An operator of this host reads
+// them (GET /claim/requests, signed) and decides (POST /claim/decide, signed
+// over its body). Approving makes the zone and the claim goes on as ever:
+// the nameservers remain the proof, so a yes never hands anyone a domain they
+// do not control. A request names no zone, so refusing one deletes the record.
+//
 // The nameserver proof names the account, not the key: every zone here gets
 // the same pair. So a lapsed claim is taken from its holder only while the
 // public DNS shows the domain not yet delegated here.
@@ -5865,7 +5874,7 @@ const CLAIM_CONTESTERS_MAX = 8        // a contest has to be on record, not ever
 const CLAIM_PRUNE_LOOKS = 2           // lapsed claims one new claim may look at to make room
 const CLAIM_BODY_MAX = 1_024
 const CLAIM_RECORD_MAX = 16_384
-const CLAIM_STATUSES = new Set(['pending', 'active', 'contested'])
+const CLAIM_STATUSES = new Set(['requested', 'pending', 'active', 'contested'])
 const ZONE_ID_RE = /^[0-9a-f]{32}$/
 // A top-level label is letters (or an IDN's xn--): an address like 10.0.0.1
 // is four DNS labels and still no domain anyone can claim.
@@ -5877,6 +5886,7 @@ const CF_API = 'https://api.cloudflare.com/client/v4'
 const DNS_JSON = 'https://cloudflare-dns.com/dns-query'
 
 const claimsConfigured = (env) => takesClaims(env) && !!String(env.CLAIM_API_TOKEN || '').trim()
+const claimsOpen = (env) => String(env.CLAIM_OPEN || '').trim() === '1'
 const claimScript = (env) => String(env.CLAIM_SCRIPT || '').trim() || 'hypercomb-hosts'
 const nowSecs = () => Math.floor(Date.now() / 1000)
 
@@ -6153,6 +6163,10 @@ async function pruneLapsed(env, waiting, now) {
     .sort((a, b) => waitingSince(a) - waitingSince(b))
     .slice(0, CLAIM_PRUNE_LOOKS)
   for (const record of candidates) {
+    if (record.status === 'requested') {
+      try { await env.CONTENT.delete(await claimKey(record.domain)) } catch { continue }
+      return true
+    }
     if (!await writeClaim(env, { ...record, lookedAt: now })) continue
     const zoneId = encodeURIComponent(record.zoneId)
     const zone = await cloudflare(env, 'GET', `/zones/${zoneId}`)
@@ -6168,31 +6182,71 @@ async function pruneLapsed(env, waiting, now) {
   return false
 }
 
-// POST /claim — see the table in documentation/domain-claim.md.
-async function postClaim(request, env, ctx) {
-  if (!claimsConfigured(env)) return text(503, 'this host takes no claims')
+/** A signed claim body: `{ pubkey, body, domain }`, or `{ failed }` to answer. */
+async function signedClaimBody(request, env, mayAct = () => true) {
+  if (!claimsConfigured(env)) return { failed: text(503, 'this host takes no claims') }
   const evt = parseAuthEvent(request)
   const auth = await verifyNip98(request, evt, 'POST', env)
-  if (!auth.ok) return text(401, auth.reason)
-  if (!env.CONTENT?.put || !env.CONTENT?.list) return text(503, 'this host holds no pools')
+  if (!auth.ok) return { failed: text(401, auth.reason) }
+  if (!mayAct(auth.pubkey)) return { failed: text(403, "only this host's operators decide claims") }
+  if (!env.CONTENT?.put || !env.CONTENT?.list) return { failed: text(503, 'this host holds no pools') }
   const raw = await request.arrayBuffer()
-  if (raw.byteLength > CLAIM_BODY_MAX) return text(413, 'claim body too large')
+  if (raw.byteLength > CLAIM_BODY_MAX) return { failed: text(413, 'claim body too large') }
   // NIP-98's payload tag: the signature covers THIS body, so a header lifted
   // from one claim — or coaxed out of an extension — never names another domain.
   if (String(tagValue(evt, 'payload') || '').toLowerCase() !== await sha256Hex(raw)) {
-    return text(401, 'auth payload tag does not match the body')
+    return { failed: text(401, 'auth payload tag does not match the body') }
   }
   let body
-  try { body = JSON.parse(new TextDecoder().decode(raw)) } catch { return text(400, 'body is not JSON') }
+  try { body = JSON.parse(new TextDecoder().decode(raw)) } catch { return { failed: text(400, 'body is not JSON') } }
   const domain = claimDomain(body?.domain)
-  if (!domain) return text(400, 'not a domain name')
-  if (servedHere(env, domain)) return servedAnswer()
+  if (!domain) return { failed: text(400, 'not a domain name') }
+  if (servedHere(env, domain)) return { failed: servedAnswer() }
+  return { pubkey: auth.pubkey, body, domain }
+}
 
-  const pubkey = auth.pubkey
+// GET /claim/requests — an operator reads what waits on their yes.
+async function readClaimRequests(request, env) {
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'GET', env)
+  if (!auth.ok) return text(401, auth.reason)
+  if (!isOperator(env, auth.pubkey)) return text(403, "only this host's operators read requests")
+  let claims
+  try { claims = await claimRecords(env) } catch { return text(502, 'this host could not read its claims — ask again') }
+  const now = nowSecs()
+  const requests = claims.filter((record) => record.status === 'requested' && !lapsed(record, now))
+    .sort((a, b) => waitingSince(a) - waitingSince(b))
+    .map(({ domain, pubkey, claimedAt }) => ({ domain, pubkey, claimedAt }))
+  return json(200, { requests }, { 'Cache-Control': 'no-store' })
+}
+
+// POST /claim/decide — an operator's yes makes the zone, their no forgets the request.
+async function decideClaim(request, env, ctx) {
+  const signed = await signedClaimBody(request, env, (pubkey) => isOperator(env, pubkey))
+  if (signed.failed) return signed.failed
+  const { body, domain } = signed
+  if (typeof body?.approve !== 'boolean') return text(400, 'say approve: true or false')
+  const record = await claimRecord(env, domain)
+  if (record?.status !== 'requested') return text(409, 'no request waits for this domain')
+  if (!body.approve) {
+    try { await env.CONTENT.delete(await claimKey(domain)) } catch { return unrecorded() }
+    return json(200, { domain, status: 'refused' }, { 'Cache-Control': 'no-store' })
+  }
+  const making = makeClaim(env, domain, record.pubkey, nowSecs(), false)
+  ctx?.waitUntil?.(making.catch(() => null))
+  return making
+}
+
+// POST /claim — see the table in documentation/domain-claim.md.
+async function postClaim(request, env, ctx) {
+  const signed = await signedClaimBody(request, env)
+  if (signed.failed) return signed.failed
+  const { pubkey, domain } = signed
   const now = nowSecs()
   let claims
   try { claims = await claimRecords(env) } catch { return text(502, 'this host could not read its claims — ask again') }
-  const held = claims.find((record) => record.domain === domain) ?? null
+  // A request nobody answered in a week frees its name, for its own key too.
+  const found = claims.find((record) => record.domain === domain) ?? null
+  const held = found?.status === 'requested' && lapsed(found, now) ? null : found
   const elsewhere = claims.filter((record) => record.domain !== domain)
   const onePending = () => elsewhere.some((record) => unsettledBy(record, pubkey, now))
     ? text(409, 'this key already has a claim pending — settle it first') : null
@@ -6200,6 +6254,7 @@ async function postClaim(request, env, ctx) {
   if (held) {
     if (held.pubkey === pubkey || (held.contested ?? []).includes(pubkey)) return claimAnswer(held)
     if (held.status === 'active') return text(409, 'this domain is claimed')
+    if (held.status === 'requested') return text(409, "this domain is waiting on this host's operator")
     const refused = onePending()
     if (refused) return refused
     const contested = held.status === 'contested'
@@ -6250,7 +6305,10 @@ async function postClaim(request, env, ctx) {
     return text(429, 'too many claims are pending here — try later')
   }
 
-  const making = makeClaim(env, domain, pubkey, now, !held)
+  if (!claimsOpen(env)) {
+    return recorded(env, { v: 1, domain, pubkey, zoneId: '', nameservers: [], status: 'requested', claimedAt: now })
+  }
+  const making = makeClaim(env, domain, pubkey, now, !found)
   ctx?.waitUntil?.(making.catch(() => null))
   return making
 }
@@ -6275,7 +6333,7 @@ async function readClaim(request, env, rawDomain) {
   if (servedHere(env, domain)) return servedAnswer()
   // A host that takes no claims any more still answers what it holds; a
   // contested claim waits on the operator.
-  if (!claimsConfigured(env) || record.status === 'contested') return answer(record)
+  if (!claimsConfigured(env) || record.status === 'contested' || record.status === 'requested') return answer(record)
 
   const now = nowSecs()
   const every = record.status === 'active' ? CLAIM_WIRE_SECS : CLAIM_LOOK_SECS
@@ -7034,6 +7092,8 @@ const router = {
       if (method === 'POST') return postClaim(request, env, ctx)
       return text(405, 'method not allowed')
     }
+    if (writeFace && pathname === '/claim/requests' && method === 'GET') return readClaimRequests(request, env)
+    if (writeFace && pathname === '/claim/decide' && method === 'POST') return decideClaim(request, env, ctx)
     const claimPath = pathname.match(/^\/claim\/([^/]+)$/)
     if (writeFace && claimPath) {
       if (method === 'GET') return readClaim(request, env, claimPath[1])

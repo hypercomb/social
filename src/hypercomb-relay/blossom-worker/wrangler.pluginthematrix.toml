@@ -288,6 +288,7 @@ AI_WRITERS = ""
 # replace every route it has. The API token is a SECRET, never a var:
 #   npx wrangler secret put CLAIM_API_TOKEN --config wrangler.pluginthematrix.toml
 # Until that secret exists POST /claim answers 503 and calls nothing.
+# Every claim waits on an operator's `domain approve` unless CLAIM_OPEN = "1".
 # CLAIM_PENDING_MAX (default 25) caps the claims waiting on nameservers —
 # pending or contested, lapsed or not: each holds a zone in this account. A new
 # claim makes room by deleting a lapsed claim's zone that never went live, so

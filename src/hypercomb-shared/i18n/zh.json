@@ -757,6 +757,7 @@
   "domain.claim.pending": "要认领 {domain}，请在域名注册商处将其域名服务器设为 {nameservers}。蜂巢会持续检查，归你所有时会通知你。",
   "domain.claim.copied": "域名服务器已复制到剪贴板。",
   "domain.claim.active": "{domain} 已归你所有。在发布面板中，任何磁贴都可以在那里开启。",
+  "domain.claim.requested": "已申请 {domain}。由 {host} 的运营者决定，批准后蜂巢会告诉你域名服务器。",
   "domain.claim.contested": "{domain} 存在争议：另一个密钥也认领了它。在 {host} 的运营者作出决定之前，两者都不会被绑定。",
   "domain.claim.refused": "{domain} 未被认领：{reason}",
   "domain.claim.unconfigured": "{host} 不接受域名认领。",

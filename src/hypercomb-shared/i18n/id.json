@@ -757,6 +757,7 @@
   "domain.claim.pending": "Untuk mengklaim {domain}, atur nameserver-nya di registrar Anda ke {nameservers}. Sarang terus memeriksa dan memberi tahu Anda saat domain itu menjadi milik Anda.",
   "domain.claim.copied": "Nameserver sudah ada di papan klip Anda.",
   "domain.claim.active": "{domain} milik Anda. Ubin apa pun dapat dinyalakan di sana lewat panel Terbitkan.",
+  "domain.claim.requested": "{domain} sudah diminta. Operator {host} yang memutuskan, dan hive memberi tahu nameserver saat disetujui.",
   "domain.claim.contested": "{domain} sedang diperebutkan: kunci lain juga mengklaimnya. Tidak ada yang terikat sampai operator {host} memutuskan.",
   "domain.claim.refused": "{domain} tidak diklaim: {reason}",
   "domain.claim.unconfigured": "{host} tidak menerima klaim domain.",

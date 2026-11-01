@@ -757,6 +757,7 @@
   "domain.claim.pending": "Per rivendicare {domain}, imposta presso il tuo registrar i nameserver {nameservers}. L'alveare continua a controllare e ti avvisa quando sarà tuo.",
   "domain.claim.copied": "I nameserver sono negli appunti.",
   "domain.claim.active": "{domain} è tuo. Qualsiasi tessera può essere attivata lì dal pannello Pubblica.",
+  "domain.claim.requested": "Hai chiesto {domain}. Decide l’operatore di {host}, e l’alveare ti indicherà i nameserver quando accetta.",
   "domain.claim.contested": "{domain} è conteso: anche un'altra chiave lo ha rivendicato. Nessuna viene associata finché l'operatore di {host} non decide.",
   "domain.claim.refused": "{domain} non è stato rivendicato: {reason}",
   "domain.claim.unconfigured": "{host} non accetta rivendicazioni di domini.",

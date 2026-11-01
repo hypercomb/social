@@ -63,8 +63,8 @@ const TLD_RE = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/
 /** Special-use names (RFC 2606 / 6761) no registrar sells. */
 const SPECIAL_TLDS = new Set(['localhost', 'local', 'test', 'invalid', 'example'])
 
-export type ClaimStatus = 'pending' | 'active' | 'contested'
-const STATUSES: readonly ClaimStatus[] = ['pending', 'active', 'contested']
+export type ClaimStatus = 'requested' | 'pending' | 'active' | 'contested'
+const STATUSES: readonly ClaimStatus[] = ['requested', 'pending', 'active', 'contested']
 
 /** The host's answer about one domain — never the key that holds it. */
 export interface ClaimState {
@@ -83,7 +83,7 @@ export interface KeptClaim {
   /** When this hive first heard the claim was pending (ms). */
   since: number
   /** The last status read: `contested` is reported once, not every minute. */
-  status: 'pending' | 'contested'
+  status: 'requested' | 'pending' | 'contested'
 }
 
 /** Everything the word can come back with. The caller decides how it is said. */
@@ -91,6 +91,7 @@ export type ClaimReport =
   | { kind: 'usage' }
   | { kind: 'invalid'; text: string }
   | { kind: 'badhost'; host: string }
+  | { kind: 'requested'; domain: string; host: string }
   | { kind: 'pending'; domain: string; host: string; nameservers: string[]; again: boolean; copied: boolean }
   | { kind: 'active'; domain: string; host: string }
   | { kind: 'contested'; domain: string; host: string }
@@ -207,7 +208,7 @@ const parseClaims = (raw: string | null): Record<string, KeptClaim> => {
       host,
       nameservers: nameserversOf(entry['nameservers']),
       since,
-      status: entry['status'] === 'contested' ? 'contested' : 'pending',
+      status: entry['status'] === 'contested' || entry['status'] === 'requested' ? entry['status'] : 'pending',
     }
   }
   return kept
@@ -483,7 +484,9 @@ export class DomainClaims {
     if (state.status === 'contested') {
       return asked || kept?.status !== 'contested' ? this.#say({ kind: 'contested', domain, host }) : null
     }
-    if (!asked) return null
+    if (state.status === 'requested') return asked ? this.#say({ kind: 'requested', domain, host }) : null
+    // The operator's yes is the news a watching hive waits for: the nameservers.
+    if (!asked && kept?.status !== 'requested') return null
     const copied = nameservers.length ? await this.#copy(nameservers.join('\n')) : false
     return this.#say({ kind: 'pending', domain, host, nameservers, again: kept !== null, copied })
   }
@@ -535,6 +538,40 @@ export class DomainClaims {
     try { this.#report(report) } catch { /* a listener's failure is not the claim's */ }
     return report
   }
+}
+
+// ── the operator's side ─────────────────────────────────────────────
+
+export interface ClaimRequest { domain: string; pubkey: string; claimedAt: number }
+
+/** What waits on this operator's yes, or why it could not be read. */
+export const readRequests = async (io: ClaimIo, host: string): Promise<{ requests: ClaimRequest[] } | { reason: string }> => {
+  const url = `${baseOf(host)}/claim/requests`
+  const auth = await io.authorize(url, 'GET').catch(() => null)
+  if (!auth) return { reason: 'there is no key here' }
+  try {
+    const res = await io.fetch(url, { headers: { Authorization: auth }, cache: 'no-store' })
+    if (!res.ok) return { reason: reasonOf(res, await res.text()) }
+    const raw = (await res.json() as { requests?: unknown }).requests
+    const requests = (Array.isArray(raw) ? raw : []).flatMap((entry): ClaimRequest[] => {
+      const item = entry as Partial<ClaimRequest> | null
+      const domain = claimDomain(item?.domain)
+      return domain ? [{ domain, pubkey: String(item?.pubkey ?? ''), claimedAt: Number(item?.claimedAt) || 0 }] : []
+    })
+    return { requests }
+  } catch { return { reason: 'the host could not be reached' } }
+}
+
+/** An operator's yes or no. Null when it landed, else the host's reason. */
+export const decideRequest = async (io: ClaimIo, host: string, domain: string, approve: boolean): Promise<string | null> => {
+  const url = `${baseOf(host)}/claim/decide`
+  const body = JSON.stringify({ domain, approve })
+  const auth = await io.authorize(url, 'POST', body).catch(() => null)
+  if (!auth) return 'there is no key here'
+  try {
+    const res = await io.fetch(url, { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body, cache: 'no-store' })
+    return res.ok ? null : reasonOf(res, await res.text())
+  } catch { return 'the host could not be reached' }
 }
 
 // ── the browser's world ────────────────────────────────────────────

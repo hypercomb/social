@@ -986,6 +986,7 @@
   "domain.claim.pending": "{domain} を取得するには、レジストラでネームサーバーを {nameservers} に設定してください。ハイブは確認を続け、あなたのものになったらお知らせします。",
   "domain.claim.copied": "ネームサーバーはクリップボードにコピーされています。",
   "domain.claim.active": "{domain} はあなたのものです。公開パネルで、どのタイルもそこでオンにできます。",
+  "domain.claim.requested": "{domain} をリクエストしました。{host} の運営者が判断し、承認されるとハイブがネームサーバーをお知らせします。",
   "domain.claim.contested": "{domain} は競合中です。別のキーも取得を申請しました。{host} の運営者が決めるまで、どちらにも割り当てられません。",
   "domain.claim.refused": "{domain} は取得されませんでした: {reason}",
   "domain.claim.unconfigured": "{host} はドメインの取得申請を受け付けていません。",

@@ -757,6 +757,7 @@
   "domain.claim.pending": "Pour revendiquer {domain}, définissez ses serveurs de noms chez votre registraire sur {nameservers}. La ruche continue de vérifier et vous prévient quand il est à vous.",
   "domain.claim.copied": "Les serveurs de noms sont dans votre presse-papiers.",
   "domain.claim.active": "{domain} est à vous. N'importe quelle tuile peut y être activée dans le panneau Publier.",
+  "domain.claim.requested": "{domain} est demandé. L’opérateur de {host} décide, et la ruche vous indiquera les serveurs de noms dès son accord.",
   "domain.claim.contested": "{domain} est contesté : une autre clé l'a aussi revendiqué. Aucune n'est liée tant que l'opérateur de {host} n'a pas décidé.",
   "domain.claim.refused": "{domain} n'a pas été revendiqué : {reason}",
   "domain.claim.unconfigured": "{host} n'accepte pas de revendication de domaine.",

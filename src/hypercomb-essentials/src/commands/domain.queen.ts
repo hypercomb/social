@@ -2,7 +2,7 @@
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
-import { DomainClaims, liveClaimIo, type ClaimReport } from '../sharing/domain-claim.js'
+import { DomainClaims, claimDomain, claimHost, decideRequest, liveClaimIo, readRequests, type ClaimReport } from '../sharing/domain-claim.js'
 
 /**
  * /domain — claim a domain, and manage mesh relay domains.
@@ -10,6 +10,9 @@ import { DomainClaims, liveClaimIo, type ClaimReport } from '../sharing/domain-c
  * Syntax:
  *   /domain claim example.org            — claim a domain under your key
  *   /domain claim example.org @<host>    — claim it on another host
+ *   /domain requests                     — the claims waiting on your yes
+ *   /domain approve example.org          — yes: the zone is made, they get nameservers
+ *   /domain refuse example.org           — no: the request is forgotten
  *   /domain wss://relay.example.com     — add a relay domain
  *   /domain ws://localhost:7777          — add a local relay
  *   /domain remove wss://relay.example.com — remove a relay domain
@@ -49,7 +52,7 @@ export class DomainQueenBee extends QueenBee {
   readonly command = 'domain'
   override description = 'Claim a domain with one word, or add, remove, or list mesh relay domains'
   override descriptionKey = 'slash.domain'
-  override options = ['claim <domain> [@<host>]', '<ws:// or wss:// url>', 'remove <url>', 'list', 'clear']
+  override options = ['claim <domain> [@<host>]', 'requests', 'approve <domain>', 'refuse <domain>', '<ws:// or wss:// url>', 'remove <url>', 'list', 'clear']
   override examples = [
     { input: '/domain claim example.org', result: 'Claims the domain: set the two nameservers it names at your registrar' },
     { input: '/domain wss://relay.example.com', result: 'Adds the relay to the mesh' },
@@ -58,7 +61,7 @@ export class DomainQueenBee extends QueenBee {
 
   override slashComplete(args: string): readonly string[] {
     const q = args.toLowerCase().trim()
-    const all = ['claim ', 'list', 'remove ', 'clear']
+    const all = ['claim ', 'requests', 'approve ', 'refuse ', 'list', 'remove ', 'clear']
     if (!q) return all
     return all.filter(word => word.startsWith(q) && word.trim() !== q)
   }
@@ -74,6 +77,11 @@ export class DomainQueenBee extends QueenBee {
       await claims.claim(parts.find(part => !part.startsWith('@')) ?? '', at)
       return
     }
+
+    // The operator's side: what waits, and the yes or no. The host checks the key.
+    if (/^requests$/i.test(trimmed)) { await hearRequests(); return }
+    const decided = trimmed.match(/^(approve|refuse)\s+(\S+)$/i)
+    if (decided) { await decide(decided[2]!, decided[1]!.toLowerCase() === 'approve'); return }
 
     const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
     if (!mesh) {
@@ -188,6 +196,9 @@ const tell = (report: ClaimReport): void => {
     case 'badhost':
       toast(say('domain.claim.badhost', '{host} is not a host. Say domain claim <domain> @<host>, or leave the host out.', { host: report.host }), 'warning')
       return
+    case 'requested':
+      toast(say('domain.claim.requested', 'Asked for {domain}. {host}\'s operator decides, and the hive tells you the nameservers when they say yes.', { domain: report.domain, host: report.host }), 'info', 10_000)
+      return
     case 'pending': {
       const named = say('domain.claim.pending', 'To claim {domain}, set its nameservers at your registrar to {nameservers}. The hive keeps checking and tells you when it is yours.', { domain: report.domain, nameservers: report.nameservers.join(', ') })
       const copied = report.copied ? ` ${say('domain.claim.copied', 'The nameservers are on your clipboard.')}` : ''
@@ -237,6 +248,26 @@ const tell = (report: ClaimReport): void => {
 }
 
 const claims = new DomainClaims(liveClaimIo(), tell, PUBLIC_CONTENT_HOSTS[0] ?? '')
+
+const operatorHost = (): string => claimHost(PUBLIC_CONTENT_HOSTS[0] ?? '')
+
+const hearRequests = async (): Promise<void> => {
+  const read = await readRequests(liveClaimIo(), operatorHost())
+  if ('reason' in read) { toast(say('domain.requests.failed', 'Could not read the requests: {reason}', { reason: read.reason }), 'warning'); return }
+  if (!read.requests.length) { toast(say('domain.requests.none', 'No domain is waiting on you.'), 'info'); return }
+  const named = read.requests.map(request => `${request.domain} (${request.pubkey.slice(0, 8)})`).join(', ')
+  toast(say('domain.requests.list', 'Waiting on you: {named}. Say domain approve <domain> or domain refuse <domain>.', { named }), 'info', 0)
+}
+
+const decide = async (raw: string, approve: boolean): Promise<void> => {
+  const domain = claimDomain(raw)
+  if (!domain) { toast(say('domain.claim.invalid', '{text} is not a domain name. Say domain claim example.org.', { text: raw }), 'warning'); return }
+  const refused = await decideRequest(liveClaimIo(), operatorHost(), domain, approve)
+  if (refused) { toast(say('domain.decide.failed', '{domain} was not decided: {reason}', { domain, reason: refused }), 'warning'); return }
+  toast(approve
+    ? say('domain.decide.approved', '{domain} is approved. They get the nameservers next.', { domain })
+    : say('domain.decide.refused', '{domain} is refused.', { domain }), 'success')
+}
 
 const _domain = new DomainQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/DomainQueenBee', _domain)
