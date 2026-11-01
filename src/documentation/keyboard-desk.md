@@ -73,7 +73,7 @@ If a part needs something `parts.ts` does not carry, that is a change to the sha
 
 - `keyboard/chord-match.ts` holds the press rule, which used to be private to the service, so the drawing and the keymap cannot disagree.
 - A layer with the id `user-overrides` is the participant's. A record there needs only `cmd` and `sequence`, and takes the rest from the layer beneath it. An empty sequence takes a default off.
-- **A chosen press belongs to the participant alone.** `{ key: 'h' }` does not look at Ctrl, so without this Ctrl+H would run their binding and the default together.
+- **The press that finishes a chosen chord belongs to the participant alone.** `{ key: 'h' }` does not look at Ctrl, so without this Ctrl+H would run their binding and the default together. An earlier step only advances, beside everything else, as sequences always have: binding `D then U` leaves plain D doing what it did, so D fires its default on the way through, and a step never cancels another chord under way.
 - `keymap:hold` and `keymap:release` are stronger than suppression: nothing fires.
 - A chosen chord with Ctrl, Alt or Win reaches past a text field, as the shipped modifier bindings do. A plain key stays typing, so a chord on a bare letter fires only when no field has focus.
 

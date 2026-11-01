@@ -70,6 +70,66 @@ describe('a chosen press', () => {
   })
 })
 
+describe('a chord of several steps', () => {
+  const plain = (key: string) => ({ key, ctrl: false, shift: false, alt: false, meta: false })
+
+  it('fires on its last step, in order, and not before', () => {
+    chosen({ cmd: 'mine', sequence: [[plain('g')], [plain('y')]] })
+    press('g')
+    expect(fired()).toEqual([])
+    press('y')
+    expect(fired()).toEqual(['mine'])
+  })
+
+  it('does nothing out of order, and a wrong second key starts it over', () => {
+    chosen({ cmd: 'mine', sequence: [[plain('g')], [plain('y')]] })
+    press('y')
+    press('g')
+    press('z')
+    press('y')
+    expect(fired()).toEqual([])
+  })
+
+  it('leaves the key its first step shares doing what it did', () => {
+    chosen({ cmd: 'mine', sequence: [[plain('q')], [plain('y')]] })
+    press('q')
+    expect(fired()).toEqual(['test.loose'])
+    press('y')
+    expect(fired()).toEqual(['test.loose', 'mine'])
+  })
+
+  it('a first step does not cancel another chord under way', () => {
+    service.addLayer({ id: 'context', priority: 30, bindings: [{ cmd: 'shipped', sequence: [[{ key: 'f1' }], [{ key: 'f2' }]] }] })
+    chosen({ cmd: 'mine', sequence: [[plain('f2')], [plain('f3')]] })
+    press('F1')
+    press('F2')
+    expect(fired()).toEqual(['shipped'])
+  })
+
+  it('the last step of a chosen chord is still theirs alone', () => {
+    chosen({ cmd: 'mine', sequence: [[plain('g')], [plain('q')]] })
+    press('g')
+    press('q')
+    expect(fired()).toEqual(['mine'])
+  })
+
+  it('a step made of alternatives takes either key', () => {
+    service.addLayer({ id: 'context', priority: 30, bindings: [{ cmd: 'either', sequence: [[{ key: 'f4' }, { key: 'f6' }]] }] })
+    press('F6')
+    press('F4')
+    expect(fired()).toEqual(['either', 'either'])
+  })
+
+  it('holding the modifier across the steps works, and so does lifting it', () => {
+    const ctrl = (key: string) => ({ ...plain(key), ctrl: true })
+    chosen({ cmd: 'mine', sequence: [[ctrl('g')], [ctrl('y')]], pierce: true })
+    press('g', { ctrlKey: true })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true, bubbles: true }))
+    press('y', { ctrlKey: true })
+    expect(fired()).toEqual(['mine'])
+  })
+})
+
 describe('the hold', () => {
   it('fires nothing, pierce bindings included, until it is let go', () => {
     EffectBus.emit('keymap:hold', { reason: 'desk' })

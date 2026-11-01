@@ -178,8 +178,11 @@ export class KeyMapService extends EventTarget {
     let anyAdvanced = false
     let matched = false
 
-    // A press a participant chose is theirs alone. `{ key: 'h' }` does not look
-    // at Ctrl, so without this Ctrl+H would fire their binding and the default.
+    // A press that finishes a chord a participant chose is theirs alone. `{ key:
+    // 'h' }` does not look at Ctrl, so without this Ctrl+H would fire their binding
+    // and the default. Any earlier step only advances, beside everything else, as
+    // sequences always have: a chord must not take its first key away from what
+    // that key already does.
     const chosen = this.#chosenFor(e, isSuppressed)
 
     for (const binding of bindings) {
@@ -235,15 +238,16 @@ export class KeyMapService extends EventTarget {
     }
   }
 
-  /** The chosen commands this press would move, or null when it is nobody's. */
+  /** The chosen commands this press would finish, or null when it is nobody's. */
   #chosenFor(e: KeyboardEvent, isSuppressed: boolean): Set<string> | null {
     const layer = this.#layers.find(l => l.id === USER_KEYMAP_LAYER)
     if (!layer) return null
     const chosen = new Set<string>()
     for (const binding of layer.bindings) {
       if (isSuppressed && !binding.pierce) continue
-      const chord = binding.sequence[this.#sequenceState.get(binding.cmd) ?? 0]
-      if (chord && this.#matchesChord(e, chord)) chosen.add(binding.cmd)
+      const step = this.#sequenceState.get(binding.cmd) ?? 0
+      const chord = binding.sequence[step]
+      if (chord && step + 1 >= binding.sequence.length && this.#matchesChord(e, chord)) chosen.add(binding.cmd)
     }
     return chosen.size ? chosen : null
   }
