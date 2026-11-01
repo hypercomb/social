@@ -164,17 +164,40 @@ if (CONSOLE) {
 console.log(PUBLISH_ONLY
   ? `${DRY ? '[DRY] ' : ''}sealing and publishing /${segments[0]}\n`
   : `${DRY ? '[DRY] ' : ''}planting ${ALL ? 'every layer' : 'one layer'} under /${route}: ${children.map(c => c.name).join(', ')}${ALL ? ', and everything beneath them' : ''}\n`)
-for (const sentence of sentences) {
-  if (DRY) { console.log(sentence); continue }
-  // A publish waits for the participant's consent in the browser, so it listens longer.
-  const listen = sentence.startsWith('publish ') ? ['--listen', '120000'] : []
-  const said = spawnSync(process.execPath, [SAY, sentence, ...listen], { stdio: 'inherit' })
-  if (said.status !== 0) {
-    console.error(`\nstopped at: ${sentence}\nThe hive's answer is above. Nothing after this line was said.`)
-    process.exit(1)
-  }
+;(async () => {
+if (DRY) {
+  for (const sentence of sentences) console.log(sentence)
+} else {
+  // ONE CALL FOR THE WHOLE PLANTING over the bridge: the hive tab shows it on
+  // its command line as from living-plant, and one Enter there runs every
+  // sentence (Esc declines them all). The bridge carries lines only, and a
+  // call of several lines always waits for the participant.
+  const WebSocket = require('ws')
+  const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
+  const outcome = await new Promise((resolve, reject) => {
+    const ws = new WebSocket(BRIDGE, { maxPayload: 128 * 1024 * 1024 })
+    const id = `plant-${Date.now()}`
+    ws.on('error', error => reject(new Error(`cannot reach the hive over the bridge at ${BRIDGE} (npm run bridge, and the hive tab open with ?claudeBridge=1): ${error.message}`)))
+    ws.on('open', () => {
+      console.log('Asked the hive. Answer on its command line: Enter runs every sentence, Esc declines.')
+      ws.send(JSON.stringify({ id, op: 'submit', from: 'living-plant', text: slashed.join('\n') }))
+    })
+    ws.on('message', raw => {
+      let m; try { m = JSON.parse(String(raw)) } catch { return }
+      if (m.id !== id) return
+      ws.close()
+      if (!m.ok) reject(new Error(/renderer/i.test(String(m.error))
+        ? `${m.error}: open the hive at http://localhost:4250/?claudeBridge=1 in your browser (once is enough; it remembers), wait for it to load, and run this again`
+        : m.error || 'refused'))
+      else resolve(m.data && m.data.outcome)
+    })
+  }).catch(error => { console.error(error.message); process.exit(1) })
+  if (!outcome || outcome.kind === 'refused') { console.error(`refused: ${outcome ? outcome.reason : 'no answer'}`); process.exit(1) }
+  if (outcome.kind === 'declined') { console.log('Declined in the hive. Nothing ran.'); process.exit(3) }
+  for (const result of outcome.results || []) console.log(`${result.text}\n  hive: ${result.verdict}`)
 }
 const published = DOMAINS.length ? `, published to ${DOMAINS.map(d => `${LABEL || segments[0]}.${d}`).join(', ')}` : ''
 const tileCount = layers.reduce((n, { tile }) => n + tile.children.length, 0)
 const planted = PUBLISH_ONLY ? `/${route}` : `${tileCount} tiles${TILES_ONLY ? '' : ' and their notes'} in ${layers.length} layer${layers.length === 1 ? '' : 's'} under /${route}`
 console.log(`\n${DRY ? '[DRY] ' : ''}${planted}, build ${REVISION}${published}.`)
+})()
