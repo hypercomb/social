@@ -634,6 +634,19 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   // first handful. Eight matches what one HTTP/2 connection can carry while
   // the pictures are still arriving one chain at a time inside each tile.
   const PICTURE_READERS = 8
+  // THE PAGE ARRIVES WHOLE (jwize 2026-10-31: "they should all show together").
+  // The comb stays back while the first pictures are read, and shows at once
+  // when the last lands or the wait runs out, whichever is first: a picture
+  // that misses it fades in on its own.
+  const GATHER_MS = 1_200
+  let gathered = false
+  let gatherTimer = 0
+  const gather = (): void => {
+    if (gathered) return
+    gathered = true
+    window.clearTimeout(gatherTimer)
+    bandsHost.classList.remove('gathering')
+  }
   const drainPictures = (): void => {
     while (readers < PICTURE_READERS && waiting.length) {
       const head = waiting.shift()!
@@ -645,6 +658,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
           for (const art of wearers.get(head) ?? []) wearPicture(art, url, 'hex-picture')
         }
         drainPictures()
+        if (!readers && !waiting.length) gather()
       })
     }
   }
@@ -652,6 +666,10 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     if (!route || pictures.has(head) || routes.has(head)) return
     routes.set(head, route)
     waiting.push(head)
+    if (!gathered && !gatherTimer) {
+      bandsHost.classList.add('gathering')
+      gatherTimer = window.setTimeout(gather, GATHER_MS)
+    }
     drainPictures()
   }
   const wear = (art: HTMLElement, head: string, route?: string): void => {
@@ -1325,7 +1343,8 @@ ${entry.key}`
       const own = zone === options.self
       const items = own ? everything : rowItems(all, zone).slice().sort(byTitle)
       const shown = items.filter(entry => aggregateMatches(entry, terms))
-      const doors = own ? links.filter(link => linkMatches(link, terms)) : []
+      // The doors wait for the ledger: the row draws once, not the doors and then the hives.
+      const doors = own && ledgerRead && !unread ? links.filter(link => linkMatches(link, terms)) : []
       const total = shown.length + doors.length
       visible += !managing && !own ? 0 : terms.length ? total : 1
       // While a search runs every row holding a match is open; otherwise one is.
@@ -1557,6 +1576,7 @@ export const SHOWCASE_STYLE = `
 .hex-art > svg:not(.hex-motif) { position: relative; z-index: 1; width: 42%; height: 42%; margin: 29%; opacity: .8; }
 .hex-picture { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: cover; opacity: 0;
   animation: sc-in .5s ease forwards; transition: transform .6s cubic-bezier(.2, 0, 0, 1); }
+.bands.gathering .comb { opacity: 0; }
 .hex-art.has-picture::before, .hex-art.has-picture > .hex-motif { display: none; }
 @keyframes sc-in { to { opacity: 1; } }
 

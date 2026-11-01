@@ -1106,6 +1106,44 @@ async function platesInOrder(jobs, limit) {
   return out
 }
 
+// THE LEDGER ANSWERS FROM THE EDGE (jwize 2026-10-31: "It literally takes 5
+// second for the dynamic tiles to show up"). Building it walks every plate's
+// bag, 5s measured on hypercomb.com, and the front door's tiles wait on it. It
+// is a derivation of signed indexes, so a copy is never wrong for long: a
+// request is answered from the edge at once, and one older than the window is
+// rebuilt behind the answer. Only the stale answer is the price, one window at
+// most on a busy door. The reader still gets no-store: the edge keeps it.
+const LEDGER_FRESH_MS = 30_000
+const LEDGER_KEEP_S = 86_400
+const LEDGER_AT = 'X-Ledger-At'
+const ledgerRefreshing = new Set()
+
+async function ledgerAnswer(request, scoped, ctx) {
+  const cache = globalThis.caches?.default
+  if (!cache || !ctx?.waitUntil || request.method !== 'GET') return servePublications(request, scoped)
+  const { protocol, hostname } = new URL(request.url)
+  const key = new Request(`${protocol}//${hostname}/publications.json`)
+  const keep = async () => {
+    const built = await servePublications(request, scoped)
+    if (!built.ok) return built
+    const held = new Response(built.clone().body, built)
+    held.headers.set('Cache-Control', `public, s-maxage=${LEDGER_KEEP_S}`)
+    held.headers.set(LEDGER_AT, String(Date.now()))
+    ctx.waitUntil(cache.put(key, held))
+    return built
+  }
+  const hit = await cache.match(key)
+  if (!hit) return keep()
+  if (Date.now() - Number(hit.headers.get(LEDGER_AT)) > LEDGER_FRESH_MS && !ledgerRefreshing.has(key.url)) {
+    ledgerRefreshing.add(key.url)
+    ctx.waitUntil(keep().catch(() => null).finally(() => ledgerRefreshing.delete(key.url)))
+  }
+  const answer = new Response(hit.body, hit)
+  answer.headers.set('Cache-Control', 'no-store')
+  answer.headers.delete(LEDGER_AT)
+  return answer
+}
+
 async function servePublications(request, scoped) {
   const { protocol, hostname } = new URL(request.url)
   const directory = directoryEnv(scoped, hostname.toLowerCase())
@@ -6703,7 +6741,7 @@ const router = {
       return text(405, 'method not allowed')
     }
     if (method === 'GET' || method === 'HEAD') {
-      if (pathname === '/publications.json') return servePublications(request, (await route()).env)
+      if (pathname === '/publications.json') return ledgerAnswer(request, (await route()).env, ctx)
       if (pathname === '/trials.json') {
         const routed = await route()
         return serveTrials(request, routed.env, routed.implicit ? routed.zone : requestUrl.hostname)
@@ -6853,7 +6891,7 @@ const router = {
         if (heap.status === 404 && !isAlias && !named) {
           const locale = await localeAtAddress(env, sigMatch[2])
           if (locale) return serveTranslations(request, env, locale)
-          if (sigMatch[2] === await poolAddress(HOST_PUBLICATIONS_MEANING)) return servePublications(request, (await route()).env)
+          if (sigMatch[2] === await poolAddress(HOST_PUBLICATIONS_MEANING)) return ledgerAnswer(request, (await route()).env, ctx)
           if (sigMatch[2] === await poolAddress(HOST_TRIALS_MEANING)) {
             const routed = await route()
             return serveTrials(request, routed.env, routed.implicit ? routed.zone : requestUrl.hostname)

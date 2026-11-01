@@ -463,6 +463,46 @@ test('publications.json exposes the verified Core host registry', async () => {
   })
 })
 
+test('the ledger answers from the edge and rebuilds behind a stale answer', async () => {
+  const held = new Map()
+  const edge = {
+    match: async (key) => held.get(key.url)?.clone(),
+    put: async (key, response) => { held.set(key.url, response) },
+  }
+  const before = globalThis.caches
+  globalThis.caches = { default: edge }
+  try {
+    const { env } = await fixture()
+    const waits = []
+    const ctx = { waitUntil: (work) => waits.push(work) }
+    const ask = async () => {
+      const answer = await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env, ctx)
+      await Promise.all(waits.splice(0))
+      return answer
+    }
+    const first = await ask()
+    assert.equal(first.status, 200)
+    assert.equal(first.headers.get('Cache-Control'), 'no-store')
+    const kept = held.get('https://pluginthematrix.com/publications.json')
+    assert.ok(kept, 'the edge keeps the ledger')
+    assert.match(kept.headers.get('Cache-Control'), /s-maxage/)
+
+    const stamp = kept.headers.get('X-Ledger-At')
+    const second = await ask()
+    assert.equal(second.headers.get('Cache-Control'), 'no-store')
+    assert.equal(second.headers.get('X-Ledger-At'), null)
+    assert.equal(held.get('https://pluginthematrix.com/publications.json').headers.get('X-Ledger-At'), stamp, 'a fresh copy is not rebuilt')
+
+    const stale = new Response(await kept.clone().text(), kept)
+    stale.headers.set('X-Ledger-At', '1')
+    held.set('https://pluginthematrix.com/publications.json', stale)
+    assert.deepEqual(await (await ask()).json(), await first.clone().json())
+    assert.notEqual(held.get('https://pluginthematrix.com/publications.json').headers.get('X-Ledger-At'), '1', 'a stale copy is rebuilt behind the answer')
+  } finally {
+    globalThis.caches = before
+  }
+})
+
 test('publications.json lists the names publishing brought to life', async () => {
   // The index carries more than the operator bound: two new top-level
   // creations (live at <label>.<zone> by the wildcard rule), one nested
