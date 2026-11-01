@@ -133,6 +133,7 @@ import { hiveSentenceHtml, hiveSentenceParts, sentenceAccent, type SentencePart,
 import { isHostRunLive, liveHostConvos, liveHostRun, startHostRun, stopHostRun, type HostAsk } from './host-stream'
 import { askIdeasOf } from './ask-ideas'
 import { hiveConversationMove } from './hive-conversation'
+import { resourceVersion, versionsIn, type ChatVersion } from './chat-versions'
 import { owedAfter, owedCue, pageChangeStillOwed, workBeaconOf, type LegEnd, type OwedLike, type OwedPatchLike, type WorkBeaconOwed, type WorkBeaconState, type WorkPending } from './owed-step'
 import {
   callableBehaviours,
@@ -2090,6 +2091,33 @@ export class ChatWindowComponent implements OnDestroy {
     this.viewing.set({ key: pick.key, name: pick.name })
   }
 
+  /** The resource's own signature, as a link on its shelf chip. */
+  versionOf(pick: RailPickLike): ChatVersion | null {
+    return resourceVersion(pick.sig)
+  }
+
+  /** Trial origins named by a finished step's own turns. */
+  stepVersions(rows: readonly number[] | undefined, outcome?: string): ChatVersion[] {
+    const turns = this.turns()
+    const text = [outcome ?? '', ...(rows ?? []).map(index => turns[index]?.text ?? '')].join('\n')
+    return versionsIn(text).slice(0, 4)
+  }
+
+  /** Open a version. The link names it; this is the deploy. */
+  deployVersion(event: Event, href: string): void {
+    event.stopPropagation()
+    event.preventDefault()
+    if (!href) return
+    try { window.open(href, '_blank', 'noopener') } catch { /* a blocked popup leaves the link */ }
+  }
+
+  /** A view of the layer the header is naming, through that view's own door. */
+  openLayerView(view: string): void {
+    const label = this.layerName()
+    if (!label || !view) return
+    EffectBus.emit('tile:action', { action: `view-enter:${view}`, label })
+  }
+
   closePicture(): void { this.viewing.set(null) }
 
   /** ← and → walk the shelf WITHIN the viewer — the same axis the rest of the
@@ -2441,6 +2469,8 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** The layer the rail is standing on. Empty is the hive, the root. */
   readonly layerHere = signal<readonly string[]>([])
+  /** Views and behaviors of the layer the header is naming. */
+  readonly layerFace = signal<{ views: readonly string[]; behaviors: readonly string[] }>({ views: [], behaviors: [] })
 
   /** The place the header names, as a path. `/` at the root. */
   readonly layerPath = computed(() => '/' + this.layerHere().join('/'))
@@ -5113,6 +5143,7 @@ export class ChatWindowComponent implements OnDestroy {
 
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
       'chat:open', payload => { void this.open(payload) }))
+    this.#cleanups.push(EffectBus.on('behavior:enablement-changed', () => this.#readFace(this.layerHere())))
 
     // A click on the hive opens that tile's conversation and leaves the
     // reading pane where it is. Going into the tile does the same. Coming
@@ -6641,6 +6672,21 @@ export class ChatWindowComponent implements OnDestroy {
   #noteLayer(): void {
     const here = this.#rail?.here?.()
     if (here) this.layerHere.set([...here])
+    this.#readFace(here ?? this.layerHere())
+  }
+
+  /** Views and behaviors for the layer named in the header. */
+  #readFace(segments: readonly string[]): void {
+    try {
+      const face = ioc()?.get('@hypercomb.social/ChatLayerFace') as {
+        of?: (path: readonly string[]) => { views?: readonly string[]; behaviors?: readonly string[] }
+      } | undefined
+      const next = face?.of?.(segments)
+      this.layerFace.set({
+        views: [...(next?.views ?? [])],
+        behaviors: [...(next?.behaviors ?? [])],
+      })
+    } catch { this.layerFace.set({ views: [], behaviors: [] }) }
   }
 
   /** Where we are and what is selected. Read live from the hive, never stored

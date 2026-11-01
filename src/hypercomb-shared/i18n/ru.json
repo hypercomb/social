@@ -2918,5 +2918,9 @@
   "serve.failed": "Не удалось открыть {page}: {reason}",
   "serve.not-serving": "{domain} здесь ничего не открывает",
   "serve.off": "{domain} больше не открывает страницу",
-  "serve.on": "{domain} теперь открывает {page}, запечатанную в текущем виде — повторите после изменений"
+  "serve.on": "{domain} теперь открывает {page}, запечатанную в текущем виде — повторите после изменений",
+  "chat.version.open": "Open this version",
+  "chat.version.deploy": "Deploy this version",
+  "chat.header.view": "Open the {name} view",
+  "chat.header.behavior": "Behavior on this layer: {name}"
 }

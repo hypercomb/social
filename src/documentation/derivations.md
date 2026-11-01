@@ -129,6 +129,12 @@ A package is a branch. A layer anywhere in it is a package of its own. Minifying
 
 The host file view does this for the folder that is open. The minified signature can be the folder a later mint chooses, which rewrites the layers above it. The bytes of the minified layer are the pack from that view. Writing them into the origin's store happens when that store is already open. Nothing here moves a published head, and a visitor runs the minified layer when a publisher names that root.
 
+A changed package registration reminifies that new root into `derived:<that root>`. A mint on the host file view, a commit into `host:packages`, and an activation each do it. The readable root stays the registration, the trunk, and the `host:packages` head.
+
+Picking a code behavior from the hosts window composes that registration: the trunk, the behavior chosen at its path, and the paths that are off. That composed root is what is reminified into `derived:<that registration>`. The installed package stays the readable trunk.
+
+Publish to head names the working build as this origin's instance head. The file is one line, the package, and a second line when that package is a minified derivation. The file signatures of that build stay beside it. Minting, minifying, and a hosts pick leave a published head where it is. This browser answers GET `/head` from that publish. Saving the head file is how a host serves those lines.
+
 ## The first dialect: `minify` (built)
 
 The visitor of a published site runs a minified derivation of the readable

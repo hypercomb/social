@@ -1,6 +1,10 @@
 // presentation/tiles/wave-view.drone.ts
 //
-// WAVE VIEW — hold Alt to DIVE into the layers under a tile.
+// WAVE VIEW — DIVE into the layers under a tile.
+//
+// ALT IS NOT THE DOOR ANY MORE (jwize, 2026-10-31): holding Alt raises the quick
+// menu, so nothing opens a dive until it is given a new way in. Everything below
+// that says "hold Alt" describes the gesture as it stood; set ALT_DIVES to see it.
 //
 // Hold Alt over a tile and the page is REPLACED by what is inside it: its
 // children take over the grid, at full size, in the same slots a real layer
@@ -84,12 +88,14 @@ type LayerNode = { name: string; childSigs: string[] }
 const SIG = /^[a-f0-9]{64}$/i
 const MAX_DEPTH = 5                 // wheel-reachable generations
 const MAX_TILES = 120               // a very wide generation stops here
+/** Alt belongs to the quick menu; see the note at the top of this file. */
+const ALT_DIVES: boolean = false
 
 export class WaveViewDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'navigation'
   override description =
-    'Hold Alt to dive: the tile under the cursor is replaced by the tiles inside it, painted by the page renderer itself; alt+wheel goes deeper, clicking a dived tile executes it as if it stood in front of you and comes back here when done, releasing Alt restores the page untouched.'
+    'A dive: the tile under the cursor is replaced by the tiles inside it, painted by the page renderer itself. It has no gesture at present; Alt raises the quick menu.'
 
   // ── hit-testing plumbing (the renderer's own transforms) ─────────
   #renderContainer: HostReadyPayload['container'] | null = null
@@ -163,6 +169,7 @@ export class WaveViewDrone extends Drone {
       if (this.#active && (payload?.count ?? 0) === 0) this.#endDive()
     })
 
+    if (!ALT_DIVES) return
     window.addEventListener('pointermove', this.#onPointerMove, true)
     window.addEventListener('keydown', this.#onKeyDown, true)
     window.addEventListener('keyup', this.#onKeyUp, true)

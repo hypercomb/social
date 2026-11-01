@@ -47,6 +47,7 @@ import { HOST_PACKAGES_MEANING, formatMember, markerIndices, poolEntryName } fro
 import { composeDependencies, isOff, namespaceOf, ownerOf, readPicks, sigsOf, walkTree, within, type Picks, type TreeWalk } from './package-tree.js'
 import { readOffUnits, writeOffUnits } from './package-units.js'
 import type { ReplicationIo } from './replication-walker.js'
+import { reminifyRegistered } from './reminify.js'
 import { encodeTransferPack, gzipBytes } from './transfer-pack.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -790,7 +791,14 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
   if (!pool) return fail(`the package runs here now, but this shell holds no ${HOST_PACKAGES_MEANING} pool to publish it into`)
   const index = (markerIndices(await pool.names()).pop() ?? -1) + 1
   await pool.write(poolEntryName(index), formatMember(rootSig, label))
-  return { ok: true, rootSig, index, atoms: await newAtoms(trunk, rootSig, io), files: await packageFiles(rootSig, io), drafts: [...drafts.keys()].sort(), off: [...off].sort(),
+  const minified = await reminifyRegistered(rootSig, {
+    read: async sig => (await io.read(sig)) ?? (await store.getBeeBytes?.(sig).catch(() => null)) ?? (await store.getDependencyBytes?.(sig).catch(() => null)) ?? null,
+    write: async (sig, bytes) => {
+      const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+      await writeLayer(sig, copy)
+    },
+  })
+  return { ok: true, rootSig, index, ...(minified?.root ? { minified: minified.root } : {}), atoms: await newAtoms(trunk, rootSig, io), files: await packageFiles(rootSig, io), drafts: [...drafts.keys()].sort(), off: [...off].sort(),
     taken: taken.sort((a, b) => a.path.localeCompare(b.path)), held: held.sort(),
     // WHAT CHANGED, file by file: the section each draft wrote, the module it
     // was written into, and the module that replaced it — what a reviewer reads.

@@ -16,6 +16,11 @@
 // - correct content-type + head support
 
 const CACHE_NAME = 'hypercomb-modules-v2'
+// A published instance head. The host file view writes the head file here.
+// Activation keeps this cache, so a later worker update leaves the build
+// that was published. GET and HEAD /head answer it. A miss continues to
+// the network, where a build-time head file still answers.
+const HEAD_CACHE = 'hc-instance-head'
 // Module/layer requests all live under /opfs/. The dir token after it is
 // either a POOL OF MEANING signature (sign('bees') / sign('dependencies'),
 // derived below — never hardcoded) or a legacy `__x__` URL token kept
@@ -74,7 +79,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then(names => Promise.all(
-        names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n))
+        names.filter(n => n !== CACHE_NAME && n !== HEAD_CACHE).map(n => caches.delete(n))
       ))
       .then(() => loadDomains())
       .then(domains => { if (domains.length) KNOWN_DOMAINS = domains })
@@ -104,6 +109,22 @@ self.addEventListener('message', (event) => {
 // — each retained by DevTools. Flip to true only when debugging the SW.
 const SW_DEBUG = false
 
+async function publishedHeadResponse(request) {
+  try {
+    const cache = await caches.open(HEAD_CACHE)
+    const hit = await cache.match('/head')
+    if (hit) {
+      const headers = {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-store',
+      }
+      if ((request.method || 'GET').toUpperCase() === 'HEAD') return new Response(null, { status: 200, headers })
+      return new Response(await hit.arrayBuffer(), { status: 200, headers })
+    }
+  } catch { /* the network copy, when this host has one */ }
+  return fetch(request)
+}
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
   if (SW_DEBUG) console.log('[SW] fetch', event.request.method, url.pathname)
@@ -112,6 +133,11 @@ self.addEventListener('fetch', (event) => {
 
   const method = (event.request.method || 'GET').toUpperCase()
   if (method !== 'GET' && method !== 'HEAD') return
+
+  if (url.pathname === '/head') {
+    event.respondWith(publishedHeadResponse(event.request))
+    return
+  }
 
   if (url.pathname === '/house.png' || url.pathname === '/spw.png') {
     event.respondWith(fetchUncachedAsset(event.request))

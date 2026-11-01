@@ -39,11 +39,13 @@ $accent: #7eb6d6;
   // The rail is hidden, so its gutter goes with it.
   padding-left: 0;
 
-  // The reading half. Hidden, not removed. The route split holds the thread
-  // and the workflow sidebar beside it; both fold with it.
+  // The reading half. Hidden, not removed. The composer lives in the thread's
+  // column, so the split stays and only what is read inside it folds: the
+  // thread and the side column beside it.
   .chat-rail,
   .chat-list,
-  .chat-route-split,
+  .chat-route-col,
+  .chat-exec-col,
   .chat-threadwrap,
   .chat-setup {
     display: none;

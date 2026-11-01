@@ -2918,5 +2918,9 @@
   "serve.failed": "{page} को परोसा नहीं जा सका: {reason}",
   "serve.not-serving": "{domain} यहाँ कुछ नहीं खोलता",
   "serve.off": "{domain} अब कोई पेज नहीं खोलता",
-  "serve.on": "{domain} अब {page} खोलता है, अभी की स्थिति में सील किया हुआ — बदलावों के बाद फिर से कहें"
+  "serve.on": "{domain} अब {page} खोलता है, अभी की स्थिति में सील किया हुआ — बदलावों के बाद फिर से कहें",
+  "chat.version.open": "Open this version",
+  "chat.version.deploy": "Deploy this version",
+  "chat.header.view": "Open the {name} view",
+  "chat.header.behavior": "Behavior on this layer: {name}"
 }

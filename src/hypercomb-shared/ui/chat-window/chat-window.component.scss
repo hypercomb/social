@@ -208,6 +208,33 @@ $accent: #7eb6d6;
   &:hover .chat-subject-hive { @include unfurl; }
 }
 
+.chat-face {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 28%;
+  overflow: hidden;
+}
+
+.chat-face-chip {
+  flex: 0 0 auto;
+  border: 1px solid rgba(var(--acc), 0.35);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.72em;
+  letter-spacing: 0.04em;
+  padding: 0.05em 0.4em;
+  border-radius: var(--hc-radius-control, 2px);
+  cursor: pointer;
+}
+
+.chat-face-behavior {
+  cursor: default;
+  opacity: 0.7;
+}
+
 // THE DROP AREA — one long rectangle, always there. It takes the width the
 // header has to spare, so it reads as a place things go rather than as a
 // control you press, and it never has to be conjured by starting a drag.
@@ -529,6 +556,23 @@ $accent: #7eb6d6;
   // WHERE IT HANGS FROM. Dimmer and smaller than the name, because the name
   // is what you are looking for and the branch is what tells you which of
   // two same-named tiles you are looking at.
+  .chat-box-version,
+  .chat-box-deploy {
+    flex: 0 0 auto;
+    font-family: var(--hc-mono, monospace);
+    font-size: 0.78em;
+    color: inherit;
+    opacity: 0.8;
+  }
+
+  .chat-box-deploy {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+
   .chat-box-branch {
     flex: 0 1 auto;
     flex-shrink: 6;
@@ -1172,8 +1216,8 @@ $accent: #7eb6d6;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.5em;
-  padding: 0.85em 0.85em;
+  gap: 1.75em;
+  padding: 1.5rem var(--chat-gutter) 2.5rem;
   // The transcript is a READING surface: prose renders in the reading face,
   // and everything that is code inside it (blocks, inline spans, paths, the
   // wait clock) already pins itself back to --hc-code. This is the line that
@@ -1192,40 +1236,32 @@ $accent: #7eb6d6;
 .chat-empty {
   margin: auto 0;
   padding: 1em 0.4em;
-  font-size: 0.75em;
+  font-size: 0.9em;
   line-height: 1.6;
   color: var(--hc-window-ink-quiet);
   text-align: center;
 }
 
+// AN ANSWER IS A PAGE, NOT A CARD. It lies on the ground with nothing around
+// it, so code and tables are the only frames in the column. What you said sits
+// to the end on a quiet tint; that tint alone tells the two voices apart.
 .chat-msg {
-  max-width: 92%;
-  padding: 0.5em 0.65em;
-  font-size: 0.8em;
-  line-height: 1.55;
+  font-size: 0.9375em;
+  line-height: 1.65;
   color: var(--hc-window-ink-loud);
-  @include tw.card;
 
   &.user {
     align-self: flex-end;
-    background: rgba(var(--acc), 0.17);
-    border: 1px solid rgba(var(--acc), 0.3);
+    max-width: 85%;
+    padding: 0.4em 0.8em;
+    background: var(--hc-window-tint-strong);
+    @include tw.card;
   }
 
   &.ai {
-    align-self: flex-start;
-    background: rgba(var(--hc-panel-ink), 0.045);
-    border: 1px solid rgba(var(--hc-panel-ink), 0.09);
-    // The steel hairline is the assistant's voice — a scannable edge that
-    // separates its cards from the participant's without loud color.
-    border-left: 2px solid rgba(var(--acc), 0.55);
+    align-self: stretch;
+    min-width: 0;
   }
-}
-
-// The wide panel earns its cards a comfortable measure, not a line that runs
-// the full 60rem.
-.chat-panel .chat-msg {
-  max-width: min(92%, 44em);
 }
 
 // The message body is styled in chat-markdown.scss — turns are rendered
@@ -1251,12 +1287,8 @@ $accent: #7eb6d6;
 
 .chat-foot {
   flex: 0 0 auto;
-  padding: 0.55em 0.75em 0.7em;
-  // NO RULE ACROSS THE TOP. The footer already separates itself with its own
-  // ground, and a hairline right above the availability line read as a stray
-  // mark tucked into the corner. The one rule in here is the one that does
-  // work: between the standing fact and the choices under it.
-  background: rgba(var(--hc-panel-ink), 0.015);
+  // The thread's own column: the composer lines up with what it answers.
+  padding: 0.35rem var(--chat-gutter) 0.8rem;
   // THE CONSOLE IS RESERVED ONCE, BY THE COLUMN — never again here.
   //
   // The composer lives INSIDE `.chat-reading`, which is the flex sibling of
@@ -1430,7 +1462,6 @@ $accent: #7eb6d6;
   display: flex;
   align-items: flex-end;
   gap: 0.4em;
-  margin-top: 0.45em;
   // ONE HEIGHT FOR THE ROW. The line the composer is typed in, and the
   // square beside it, are the same measure said once — a send button a
   // few pixels short of the box it belongs to is the kind of thing you
@@ -1448,7 +1479,7 @@ $accent: #7eb6d6;
   resize: none;
   min-height: var(--hc-chat-box);
   max-height: 160px;
-  padding: 0.5em 0.6em;
+  padding: 0.45em 0.6em;
   font: inherit;
   // You WRITE prose here — same reading face the transcript answers in.
   font-family: var(--hc-read, inherit);

@@ -6,8 +6,8 @@
 
 import { deriveMinifiedLayer, minifyModuleBody, ownedMinifyTool } from '@hypercomb/core'
 import {
-  broadcastFace, diffBranches, loadAi, mintBranch, missionOrigin, packFiles, readBranch,
-  type Branch, type BranchEdits, type BranchFile, type BranchRead, type LayerNode,
+  broadcastFace, diffBranches, loadAi, mintBranch, missionOrigin, packFiles, publishInstanceHead, readBranch,
+  type Branch, type BranchEdits, type BranchFile, type BranchRead, type LayerNode, type PublishedHead,
 } from './branch-files.js'
 
 export type BranchViewOptions = {
@@ -33,6 +33,10 @@ const STYLE = `
 .branch-view iframe.mission-ai { width: 100%; height: 24rem; margin-top: .8rem; border: 1px solid var(--md-outline-variant); border-radius: .7rem; background: var(--md-surface); }
 .branch-view .beside { margin: .6rem 0; padding-left: 1rem; }
 .branch-view .beside li { display: block; padding: .25rem 0; }
+.branch-view .published-head { margin: 0 0 .8rem; }
+.branch-view .head-lines { margin: .3rem 0; white-space: pre-wrap; }
+.branch-view .mind { margin: .3rem 0; padding-left: 1rem; }
+.branch-view .mind code { display: block; }
 `
 
 const short = (sig: string): string => `${sig.slice(0, 12)}…`
@@ -97,7 +101,10 @@ export const branchView = (options: BranchViewOptions): HTMLElement => {
   const beside = document.createElement('div')
   const minted = document.createElement('div')
   minted.className = 'minted'
-  view.append(style, heading, note, status, tree, beside, minted)
+  const publishedHead = document.createElement('div')
+  publishedHead.className = 'published-head'
+  publishedHead.hidden = true
+  view.append(style, heading, note, publishedHead, status, tree, beside, minted)
 
   const offPaths = new Set<string>()
   const offSigs = new Set<string>()
@@ -109,6 +116,120 @@ export const branchView = (options: BranchViewOptions): HTMLElement => {
   let selected = ''
   let current: Branch | null = null
   let aiRelease = (): void => {}
+  let headUrl = ''
+  let working: { package: string; derivation: string | null; face: readonly string[] } = {
+    package: options.rootSig,
+    derivation: null,
+    face: [],
+  }
+
+  const faceOf = (files: readonly { sig: string }[]): string[] =>
+    [...new Set(files.map(file => file.sig.toLowerCase()).filter(sig => /^[a-f0-9]{64}$/.test(sig)))].sort()
+
+  const renderPublished = (published: PublishedHead): void => {
+    if (headUrl) URL.revokeObjectURL(headUrl)
+    publishedHead.hidden = false
+    publishedHead.replaceChildren()
+    const line = document.createElement('p')
+    const pkg = document.createElement('code')
+    pkg.className = 'package'
+    pkg.textContent = published.package
+    line.append(
+      document.createTextNode('Published to the head. Further builds leave these signatures in place. Package '),
+      pkg,
+    )
+    const lines = document.createElement('pre')
+    lines.className = 'head-lines'
+    lines.textContent = published.head
+    const count = document.createElement('p')
+    count.textContent = `${published.face.length} signatures to mind.`
+    const list = document.createElement('ul')
+    list.className = 'mind'
+    for (const sig of published.face) {
+      const item = document.createElement('li')
+      const code = document.createElement('code')
+      code.textContent = sig
+      item.append(code)
+      list.append(item)
+    }
+    const file = document.createElement('a')
+    headUrl = URL.createObjectURL(new Blob([published.head], { type: 'text/plain' }))
+    file.href = headUrl
+    file.download = 'head'
+    file.textContent = 'Save the head file'
+    publishedHead.append(line, lines, count, list, file)
+    if (published.derivation) {
+      const derived = document.createElement('p')
+      const code = document.createElement('code')
+      code.className = 'derivation'
+      code.textContent = published.derivation
+      derived.append(document.createTextNode('Derivation '), code)
+      line.after(derived)
+    }
+    if (published.served) {
+      const here = document.createElement('p')
+      here.textContent = 'This browser answers GET /head with this build.'
+      file.before(here)
+    }
+  }
+
+  /** Minify one layer into `derived:<that layer>`. A failure stays on the page
+   *  and leaves the registration that asked for it as it is. */
+  const landMinified = async (node: { path: string; sig: string }, where = node.path || 'the root'): Promise<void> => {
+    const tool = await ownedMinifyTool()
+    let tree: Awaited<ReturnType<typeof deriveMinifiedLayer>>
+    try {
+      tree = await deriveMinifiedLayer(node.sig, read, async body => minifyModuleBody(body), tool)
+    } catch (err) {
+      const fail = document.createElement('p')
+      fail.textContent = err instanceof Error ? err.message : 'This folder could not be minified.'
+      minted.append(fail)
+      return
+    }
+    for (const [sig, bytes] of tree.files) held.set(sig, bytes)
+    derived.set(tree.root, tree.files)
+    if (node.path === '') {
+      const named = new Set<string>([tree.root, tree.derivation.sig])
+      for (const sig of tree.files.keys()) named.add(sig)
+      for (const sig of tree.readable.bees) if (!tree.modules.has(sig)) named.add(sig)
+      for (const sig of tree.readable.dependencies) if (!tree.modules.has(sig)) named.add(sig)
+      working = { package: tree.root, derivation: tree.derivation.sig, face: [...named].sort() }
+    }
+    if (node.path) {
+      const at = choices.findIndex(choice => choice.path === node.path)
+      const choice = { path: node.path, sig: tree.root, source: 'minify' }
+      if (at >= 0) choices[at] = choice
+      else choices.push(choice)
+    }
+    const kept = await keepDerived(tree.membership, tree.files)
+    const line = document.createElement('p')
+    const code = document.createElement('code')
+    code.textContent = tree.root
+    const follow = node.path
+      ? 'Choosing it rewrites the layers above it.'
+      : 'This signature is the minified package.'
+    line.append(
+      document.createTextNode(`Minified ${where}. `),
+      code,
+      document.createTextNode(
+        ` Its record is a member of ${tree.membership.pool}. ${kept ? 'This origin holds the bytes.' : `Pack the layer to keep the bytes. ${follow}`}`,
+      ),
+    )
+    const packLayer = document.createElement('button')
+    packLayer.type = 'button'
+    packLayer.textContent = 'Pack minified layer'
+    packLayer.addEventListener('click', () => {
+      void packFiles(tree.files).then(bytes => {
+        const blob = new Blob([bytes], { type: 'application/gzip' })
+        const link = document.createElement('a')
+        link.href = URL.createObjectURL(blob)
+        link.download = `${tree.root.slice(0, 12)}.pack.gz`
+        link.textContent = 'Download the minified layer'
+        minted.append(link)
+      })
+    })
+    minted.append(line, packLayer)
+  }
 
   const fileRow = (file: BranchFile): HTMLElement => {
     const label = document.createElement('label')
@@ -317,6 +438,11 @@ export const branchView = (options: BranchViewOptions): HTMLElement => {
         minted.append(told)
       })
       minted.append(line, face, pack, cast)
+      working = { package: result.rootSig, derivation: null, face: result.face }
+      if (result.rootSig !== options.rootSig) {
+        for (const [sig, bytes] of result.layers) held.set(sig, bytes)
+        await landMinified({ path: '', sig: result.rootSig }, 'the new registration')
+      }
     })()
   })
 
@@ -352,57 +478,23 @@ export const branchView = (options: BranchViewOptions): HTMLElement => {
     if (!current) return
     const node = current.nodes.find(item => item.path === selected)
     if (!node) return
-    void (async () => {
-      const tool = await ownedMinifyTool()
-      let tree: Awaited<ReturnType<typeof deriveMinifiedLayer>>
-      try {
-        tree = await deriveMinifiedLayer(node.sig, read, async body => minifyModuleBody(body), tool)
-      } catch (err) {
-        const fail = document.createElement('p')
-        fail.textContent = err instanceof Error ? err.message : 'This folder could not be minified.'
-        minted.append(fail)
-        return
-      }
-      for (const [sig, bytes] of tree.files) held.set(sig, bytes)
-      derived.set(tree.root, tree.files)
-      if (node.path) {
-        const at = choices.findIndex(choice => choice.path === node.path)
-        const choice = { path: node.path, sig: tree.root, source: 'minify' }
-        if (at >= 0) choices[at] = choice
-        else choices.push(choice)
-      }
-      const kept = await keepDerived(tree.membership, tree.files)
-      const line = document.createElement('p')
-      const code = document.createElement('code')
-      code.textContent = tree.root
-      const where = node.path || 'the root'
-      const follow = node.path
-        ? 'Choosing it rewrites the layers above it.'
-        : 'This signature is the minified package.'
-      line.append(
-        document.createTextNode(`Minified ${where}. `),
-        code,
-        document.createTextNode(
-          ` Its record is a member of ${tree.membership.pool}. ${kept ? 'This origin holds the bytes.' : `Pack the layer to keep the bytes. ${follow}`}`,
-        ),
-      )
-      const packLayer = document.createElement('button')
-      packLayer.type = 'button'
-      packLayer.textContent = 'Pack minified layer'
-      packLayer.addEventListener('click', () => {
-        void packFiles(tree.files).then(bytes => {
-          const blob = new Blob([bytes], { type: 'application/gzip' })
-          const link = document.createElement('a')
-          link.href = URL.createObjectURL(blob)
-          link.download = `${tree.root.slice(0, 12)}.pack.gz`
-          link.textContent = 'Download the minified layer'
-          minted.append(link)
-        })
-      })
-      minted.append(line, packLayer)
-    })()
+    void landMinified(node)
   })
-  actRow.append(mint, minify, mission, load)
+  const publish = document.createElement('button')
+  publish.type = 'button'
+  publish.textContent = 'Publish to head'
+  publish.addEventListener('click', () => {
+    const snapshot = { package: working.package, derivation: working.derivation, face: [...working.face] }
+    void publishInstanceHead(snapshot).then(published => {
+      if (published) { renderPublished(published); return }
+      publishedHead.hidden = false
+      publishedHead.replaceChildren()
+      const fail = document.createElement('p')
+      fail.textContent = 'The working build has no package signature to publish.'
+      publishedHead.append(fail)
+    })
+  })
+  actRow.append(mint, minify, publish, mission, load)
   controls.append(traitRow, compareRow, actRow)
   view.append(controls)
 
@@ -411,6 +503,9 @@ export const branchView = (options: BranchViewOptions): HTMLElement => {
     if (!branch.nodes.length) {
       status.textContent = 'That signature did not open as a branch.'
       return
+    }
+    if (working.package === options.rootSig && working.derivation === null) {
+      working = { package: branch.root, derivation: null, face: faceOf(branch.files) }
     }
     paint()
   })

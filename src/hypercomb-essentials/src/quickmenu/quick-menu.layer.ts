@@ -12,12 +12,12 @@ import { Container, Graphics, Point, Text, TextStyle, type Application } from 'p
 import { containerScreenScale, screenTextResolution } from '../presentation/grid/screen-text-resolution.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'
 import {
+  cellUnit,
   menuMetrics,
   slotUnder,
   type MenuMetrics,
 } from './quick-menu.tile-menu.js'
 import {
-  DIRECTION_UNIT,
   QUICK_MENU_RING,
   slotsByDirection,
   type QuickMenuDefinition,
@@ -27,10 +27,30 @@ import {
 
 const FILL = 0x0b0f14
 const STROKE = 0x7eb6d6
+/** How much the rest of the hive is veiled while the flower is up. */
+const VEIL_ALPHA = 0.5
+const VEIL_EXTENT = 100000
 const TEXT_ON = '#d8e6ee'
 const TEXT_OFF = '#8aa0ac'
 
 type LabelOf = (slot: { label: string; labelKey?: string }) => string
+
+type PendingMenu = {
+  definition: QuickMenuDefinition
+  labelOf: LabelOf
+  back: QuickMenuDirection | null
+  backLabel: string
+}
+
+/** One tile of the flower, in the hive's own axial cells (`render:flower`). */
+export type FlowerCell = {
+  q: number
+  r: number
+  label: string
+  /** This is the tile being worked on, wearing its own look. */
+  subject?: boolean
+  lit?: boolean
+}
 
 type SlotView = {
   readonly direction: QuickMenuDirection
@@ -61,6 +81,15 @@ function axialToPixel(q: number, r: number, spacing: number, flat: boolean): { x
     : { x: Math.sqrt(3) * spacing * (q + r / 2), y: spacing * 1.5 * r }
 }
 
+function pixelToAxial(x: number, y: number, spacing: number, flat: boolean): { q: number; r: number } {
+  if (flat) {
+    const q = x / (1.5 * spacing)
+    return { q: Math.round(q), r: Math.round(y / (Math.sqrt(3) * spacing) - q / 2) }
+  }
+  const r = y / (1.5 * spacing)
+  return { q: Math.round(x / (Math.sqrt(3) * spacing) - r / 2), r: Math.round(r) }
+}
+
 export class QuickMenuLayer {
   #root: Container | null = null
   #render: Container | null = null
@@ -70,17 +99,18 @@ export class QuickMenuLayer {
   #geo: HexGeometry = DEFAULT_HEX_GEOMETRY
   #flat = false
   #at: { q: number; r: number } | null = null
+  #local: { x: number; y: number } | null = null
+  #veil: Graphics | null = null
+  /** The tile a flight's flower is about; null for the ring drawn in place. */
+  #subject: string | null = null
+  /** The flight has landed: the hive itself draws the flower (`render:flower`). */
+  #bloomed = false
   #slots = new Map<QuickMenuDirection, SlotView>()
   #byDirection = new Map<QuickMenuDirection, QuickMenuSlot>()
   #showing = false
   #lit: QuickMenuDirection | null = null
   /** The last show(), kept so a host that arrives afterwards can still draw. */
-  #pending: {
-    definition: QuickMenuDefinition
-    labelOf: LabelOf
-    back: QuickMenuDirection | null
-    backLabel: string
-  } | null = null
+  #pending: PendingMenu | null = null
 
   constructor() {
     EffectBus.on<HostReady>('render:host-ready', (payload) => {
@@ -115,7 +145,106 @@ export class QuickMenuLayer {
 
   place(q: number, r: number): void {
     this.#at = { q, r }
+    this.#local = null
     this.#place()
+  }
+
+  /** Centre the menu on a point in the render container's own space — the
+   *  place a chosen pathway sits, which is no tile's axial cell. */
+  placeLocal(x: number, y: number): void {
+    this.#local = { x, y }
+    this.#place()
+  }
+
+  /** Fade the rest of the hive back (or restore it). The hex mesh's shader has
+   *  no global alpha, so the fade is a veil in the page's own background colour
+   *  laid between the hive and the flower. */
+  dim(on: boolean): void {
+    if (!on || !this.#render) {
+      if (this.#veil) this.#veil.visible = false
+      return
+    }
+    if (!this.#veil) {
+      const veil = new Graphics()
+      veil.eventMode = 'none'
+      veil.zIndex = 10040
+      this.#veil = veil
+    }
+    const veil = this.#veil
+    if (veil.parent !== this.#render) this.#render.addChild(veil)
+    this.#render.sortableChildren = true
+    const colour = getComputedStyle(document.body).backgroundColor
+    const rgb = colour.match(/\d+(\.\d+)?/g)?.slice(0, 3).map(Number)
+    const hex = rgb && rgb.length === 3 ? (rgb[0] << 16) | (rgb[1] << 8) | rgb[2] : 0xffffff
+    veil.clear()
+    veil.rect(-VEIL_EXTENT, -VEIL_EXTENT, VEIL_EXTENT * 2, VEIL_EXTENT * 2)
+    veil.fill({ color: hex, alpha: VEIL_ALPHA })
+    veil.visible = true
+  }
+
+  /** The tile a flight is about. A flower is held back until it blooms. */
+  setSubject(label: string | null): void {
+    this.#subject = label
+  }
+
+  /** The flight has landed. From here the options are hive tiles in hive cells,
+   *  drawn by the hive's own renderer, and this layer only says which. */
+  bloom(): void {
+    this.#bloomed = true
+    this.#paintSlots()
+  }
+
+  #paintFlower(pending: PendingMenu): void {
+    const at = this.centreLocal()
+    if (!at) return
+    const cellAt = (x: number, y: number) =>
+      pixelToAxial(x - this.#offset.x, y - this.#offset.y, this.#geo.spacing, this.#flat)
+    const cells: FlowerCell[] = []
+    if (this.#subject) cells.push({ ...cellAt(at.x, at.y), label: this.#subject, subject: true })
+    const { reach, flat } = this.#metrics()
+    for (const direction of QUICK_MENU_RING) {
+      const slot = this.#byDirection.get(direction)
+      const isBack = direction === pending.back
+      if (!slot && !isBack) continue
+      const unit = cellUnit(direction, flat)
+      cells.push({
+        ...cellAt(at.x + unit.x * reach, at.y + unit.y * reach),
+        label: isBack ? pending.backLabel : pending.labelOf(slot!),
+        lit: direction === this.#lit,
+      })
+    }
+    EffectBus.emit('render:flower', { cells })
+  }
+
+  /** A point in the render container's space, in client coordinates. */
+  clientAtLocal(x: number, y: number): { x: number; y: number } | null {
+    if (!this.#render || !this.#canvas || !this.#renderer) return null
+    const global = this.#render.toGlobal(new Point(x, y))
+    const rect = this.#canvas.getBoundingClientRect()
+    const screen = this.#renderer.screen
+    return {
+      x: rect.left + global.x * (rect.width / screen.width),
+      y: rect.top + global.y * (rect.height / screen.height),
+    }
+  }
+
+  /** Where the menu is centred, in the render container's space. */
+  centreLocal(): { x: number; y: number } | null {
+    return this.#root ? { x: this.#root.position.x, y: this.#root.position.y } : null
+  }
+
+  /** Where one option sits, in the render container's space. */
+  slotLocal(direction: QuickMenuDirection): { x: number; y: number } | null {
+    const at = this.centreLocal()
+    if (!at) return null
+    const { reach, flat } = this.#metrics()
+    const unit = cellUnit(direction, flat)
+    return { x: at.x + unit.x * reach, y: at.y + unit.y * reach }
+  }
+
+  /** The menu's size in the render container's space. */
+  get metrics(): MenuMetrics {
+    return this.#metrics()
   }
 
   show(
@@ -140,6 +269,14 @@ export class QuickMenuLayer {
     if (!this.#showing || !pending || !root) return
     root.removeChildren()
     this.#slots.clear()
+    if (this.#subject !== null) {
+      // A flight: nothing is drawn here. Until it lands the real tile flies in
+      // on its own; once it has, the hive draws the flower.
+      root.visible = false
+      this.#place()
+      if (this.#bloomed) this.#paintFlower(pending)
+      return
+    }
     root.visible = true
 
     const metrics = this.#metrics()
@@ -149,10 +286,11 @@ export class QuickMenuLayer {
     // so the centre slot is not drawn on top of it.
     for (const direction of QUICK_MENU_RING) {
       const slot = this.#byDirection.get(direction)
-      if (!slot) continue
       const isBack = direction === pending.back
-      const word = isBack ? pending.backLabel : pending.labelOf(slot)
-      const unit = DIRECTION_UNIT[direction]
+      // The way back is drawn even when the ring has no verb there.
+      if (!slot && !isBack) continue
+      const word = isBack ? pending.backLabel : pending.labelOf(slot!)
+      const unit = cellUnit(direction, metrics.flat)
       const hex = this.#hex(metrics.radius, false, isBack)
       const text = new Text({
         text: word,
@@ -181,12 +319,19 @@ export class QuickMenuLayer {
     this.#lit = direction
     if (previous) this.#style(previous, false)
     if (direction) this.#style(direction, true)
+    if (this.#bloomed && this.#pending) this.#paintFlower(this.#pending)
   }
 
   hide(): void {
     this.#showing = false
     this.#lit = null
     this.#pending = null
+    this.#local = null
+    this.#subject = null
+    if (this.#bloomed) EffectBus.emit('render:flower', { cells: null })
+    this.#bloomed = false
+    this.dim(false)
+    this.#root?.removeChildren()
     if (this.#root) this.#root.visible = false
   }
 
@@ -204,7 +349,7 @@ export class QuickMenuLayer {
   }
 
   #metrics(): MenuMetrics {
-    return menuMetrics(this.#geo.circumRadiusPx)
+    return menuMetrics(this.#geo.circumRadiusPx, this.#geo.spacing, this.#flat)
   }
 
   #ensureRoot(): void {
@@ -221,6 +366,7 @@ export class QuickMenuLayer {
   #place(): void {
     const root = this.#root
     const at = this.#at
+    if (root && this.#local) { root.position.set(this.#local.x, this.#local.y); return }
     if (!root || !at) return
     const px = axialToPixel(at.q, at.r, this.#geo.spacing, this.#flat)
     root.position.set(px.x + this.#offset.x, px.y + this.#offset.y)
@@ -236,7 +382,7 @@ export class QuickMenuLayer {
     const pts = hexPoints(radius, this.#flat)
     g.clear()
     g.poly(pts, true)
-    g.fill({ color: FILL, alpha: on ? 0.94 : 0.88 })
+    g.fill({ color: FILL, alpha: 1 })
     g.poly(pts, true)
     g.stroke({ color: STROKE, width: on ? 1.6 : 1, alpha: on ? 0.75 : back ? 0.28 : 0.4 })
   }

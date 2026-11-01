@@ -4,22 +4,13 @@
 //
 // ── The shape of it ───────────────────────────────────────────────────
 //
-//   summon   middle-mouse press, or a long-press on touch
+//   summon   hold alt over a tile, or a long-press on touch
 //   aim      the pointer is HIDDEN; rolling over a neighbour focuses it
 //   descend  a pathway eases into becoming the next ring's centre
 //   activate a leaf either fires on arrival or waits for release/click,
 //            as declared by the behaviour that owns it
 //   cancel   come back to the centre and release; the centre relabels
 //            itself the moment you leave, so the way out is visible
-//
-// ── Two speeds, one motion ────────────────────────────────────────────
-//
-// Direction tracking starts on POINTERDOWN, but the ring is not painted
-// until BLOOM_MS has passed. Flick faster than that and the menu never
-// draws — yet the same press-direction-release still fires the same slot.
-// The novice reads the ring; the expert has the ring's geometry in their
-// hand and never sees it. Neither learns a different gesture, which is the
-// property that makes this worth building instead of another palette.
 //
 // ── Never awaits anything ─────────────────────────────────────────────
 //
@@ -32,7 +23,7 @@
 //
 // When the menu belongs to a tile on the hive, it is drawn in that tile's
 // render layer, around the tile, and the cursor stays where it is. Holding
-// ctrl over a tile raises the selection menu the same way. The cursor-hiding
+// alt over a tile raises the selection menu the same way. The cursor-hiding
 // DOM ring remains for every surface that is not the hive.
 //
 // ── One exception: a phone, on a tile ─────────────────────────────────
@@ -53,8 +44,7 @@
 // and empty hive under it painted the ring. Either way the hexagons came up
 // in the middle of another view. A touch summon now starts only when the
 // finger landed on the hive canvas itself — the same test every other touch
-// gesture on the hive makes. Middle mouse and the keyboard are deliberate
-// and keep working everywhere.
+// gesture on the hive makes.
 //
 // ── Why it takes the input stack AND the gate ─────────────────────────
 //
@@ -67,9 +57,10 @@ import type { InputMode } from '../navigation/input-mode-stack.service.js'
 import { QuickMenuOverlay } from './quick-menu.overlay.js'
 import { QuickMenuLayer } from './quick-menu.layer.js'
 import { fireQuickMenuSlot } from './quick-menu.fire.js'
+import { QuickMenuFlight } from './quick-menu.flight.js'
 import { isLongPressMenu } from '../navigation/browser-menu.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
-import { isTypingTarget, selectionMenuWanted } from './quick-menu.tile-menu.js'
+import { selectionMenuWanted } from './quick-menu.tile-menu.js'
 import {
   HEX_RADIUS,
   OPPOSITE_DIRECTION,
@@ -84,10 +75,6 @@ import {
 const get = <T,>(key: string): T | undefined =>
   (globalThis as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
 
-/** How long a press waits before the ring is drawn. Below this, the gesture
- *  still works — it is simply invisible. */
-const BLOOM_MS = 130
-
 /** Touch summon: the press must be held this long before the menu claims
  *  the finger, so a swipe is still a pan. */
 const HOLD_MS = 380
@@ -96,6 +83,10 @@ const HOLD_MS = 380
 const JITTER_PX = 12
 
 const OWNER = 'quick-menu'
+
+/** Alt held this long over a tile flies it to the middle for the flower, so a
+ *  tap of the key passes without moving the hive. Ctrl is selection's alone. */
+const ALT_HOLD_MS = 220
 
 /**
  * Drag-to-move's gate source. It CLAIMS the gate when its own hold matures at
@@ -147,15 +138,17 @@ const SELECTION_MENU = 'selection'
 export class QuickMenuInput {
   #overlay = new QuickMenuOverlay()
   #layer: QuickMenuLayer | null = null
+  #flight: QuickMenuFlight | null = null
+  #altTimer: ReturnType<typeof setTimeout> | null = null
   #cursorStyle: HTMLStyleElement | null = null
   /** Tile the on-screen menu is drawn around, when it is a layer. */
   #anchor: { q: number; r: number } | null = null
   /** The quick-menu gesture took the gate. A tile layer does not. */
   #gateHeld = false
-  #ctrlDown = false
-  /** Escape dismissed the ctrl menu; it stays down until ctrl is released. */
-  #ctrlLatchedOff = false
-  #ctrlShown = false
+  #altDown = false
+  /** Escape dismissed the alt menu; it stays down until alt is released. */
+  #altLatchedOff = false
+  #altShown = false
   #pointerDown = false
   /** The pointer that set #pointerDown. A lost pointerup matches this id. */
   #buttonPointer: number | null = null
@@ -179,12 +172,9 @@ export class QuickMenuInput {
   /** Focus just moved through a pathway; releasing now parks on the new ring. */
   #justFocused = false
 
-  #bloomTimer: ReturnType<typeof setTimeout> | null = null
   #holdTimer: ReturnType<typeof setTimeout> | null = null
   #warmed = false
 
-  /** Key currently holding the ring open, when summoned from the keyboard. */
-  #heldKey: string | null = null
   /** Where a touch landed, while the long-press is still deciding. */
   #touchDown: { x: number; y: number } | null = null
   /**
@@ -257,10 +247,13 @@ export class QuickMenuInput {
     window.addEventListener(POINTER_GESTURE_END, this.#onGestureEnd as EventListener)
     window.addEventListener('keydown', this.#onKeyDown, { capture: true })
     window.addEventListener('keyup', this.#onKeyUp, { capture: true })
+    // The camera is set in stone while the flower is up, and alt+wheel would
+    // otherwise cycle the spotlight behind it.
+    window.addEventListener('wheel', this.#onWheel, { capture: true, passive: false })
 
     EffectBus.on<{ canvas?: HTMLCanvasElement }>('render:host-ready', payload => {
       this.#canvas = payload?.canvas ?? null
-      this.#syncCtrlMenu()
+      this.#syncAltMenu()
     })
 
     EffectBus.on<{ q?: number; r?: number; label?: string | null }>('tile:hover', (payload) => {
@@ -268,7 +261,7 @@ export class QuickMenuInput {
       this.#hoverCell = label && typeof payload?.q === 'number' && typeof payload?.r === 'number'
         ? { q: payload.q, r: payload.r, label }
         : null
-      this.#syncCtrlMenu()
+      this.#syncAltMenu()
     })
 
     EffectBus.on<{ selected?: unknown; active?: unknown }>('selection:changed', (payload) => {
@@ -280,32 +273,30 @@ export class QuickMenuInput {
 
     EffectBus.on<{ active?: boolean }>('wand:armed', (payload) => {
       this.#wand = payload?.active === true
-      this.#syncCtrlMenu()
+      this.#syncAltMenu()
     })
 
     EffectBus.on<{ open?: boolean }>('clipboard:open', (payload) => {
       this.#clipboard = payload?.open === true
-      this.#syncCtrlMenu()
+      this.#syncAltMenu()
     })
 
     EffectBus.on<{ held?: boolean }>('overlay:ctrl-band', (payload) => {
       this.#onCtrlIcon = payload?.held === true
-      this.#syncCtrlMenu()
+      this.#syncAltMenu()
     })
 
     window.addEventListener('blur', () => {
-      this.#ctrlDown = false
-      this.#ctrlLatchedOff = false
+      this.#flight?.end(false)
+      this.#altDown = false
+      this.#altLatchedOff = false
       this.#pointerDown = false
       this.#buttonPointer = null
       this.#slotPress = null
       this.#slotPointer = null
-      this.#syncCtrlMenu()
+      this.#syncAltMenu()
     })
 
-    // The keyboard trigger. KeymapService owns the keydown — it already knows
-    // about focus suppression and user overrides — and hands us the raw event
-    // so we can watch for the matching keyup and finish the gesture.
     EffectBus.on<{ active?: boolean }>('touch:dragging', payload => {
       this.#touchDragging = !!payload?.active
       // The pull won. The screen this hold would have opened is not what the
@@ -313,10 +304,6 @@ export class QuickMenuInput {
       if (this.#touchDragging) this.#pendingView = null
     })
 
-    EffectBus.on<{ cmd?: string; event?: KeyboardEvent }>('keymap:invoke', payload => {
-      if (payload?.cmd !== 'ui.quickMenu') return
-      this.#summonFromKey(payload.event)
-    })
     // Chrome opens autoscroll on a middle mousedown; only preventDefault on
     // the mouse event itself reliably suppresses it.
     window.addEventListener('mousedown', this.#suppressMiddleMouse, { capture: true })
@@ -405,10 +392,17 @@ export class QuickMenuInput {
   }
 
   #onPointerDown = (e: PointerEvent): void => {
+    // Flying to the middle: a press is the click that answers the flower.
+    if (this.#flight?.active) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.button === 0) this.#flight.confirm()
+      return
+    }
     // A click on a selection-menu option. The tile body is not one, so a
-    // ctrl+click there still selects. Stopping the event keeps the paint
+    // click there is still a click on the tile. Stopping the event keeps the paint
     // and the tile click from also reading this press.
-    if (this.#ctrlShown && !this.#armed && !this.#sticky && e.button === 0) {
+    if (this.#altShown && !this.#armed && !this.#sticky && e.button === 0) {
       const slot = this.#tiles().slotAtClient(e.clientX, e.clientY, 'pick')
       if (slot) {
         e.preventDefault()
@@ -421,7 +415,7 @@ export class QuickMenuInput {
     if (e.button === 0 || e.button === 1) {
       this.#pointerDown = true
       this.#buttonPointer = e.pointerId
-      if (this.#ctrlShown) this.#syncCtrlMenu()
+      if (this.#altShown) this.#syncAltMenu()
     }
     // Sticky ring up: any press commits what is lit (or cancels on centre).
     if (this.#sticky) {
@@ -514,22 +508,7 @@ export class QuickMenuInput {
         this.#tileLabel = overlay
         this.#paint()
       }, HOLD_MS)
-      return
     }
-
-    // Middle mouse — unambiguous, and free of any existing binding.
-    if (e.button !== 1) return
-    if (this.#isChrome(e.target)) return
-    e.preventDefault()
-    e.stopPropagation()
-    const cell = e.target === this.#canvas
-      ? get<OverlayLike>('@diamondcoreprocessor.com/TileOverlayDrone')?.cellAtClient?.(e.clientX, e.clientY) ?? null
-      : null
-    this.#begin(e.pointerId, cell?.label ? { q: cell.q, r: cell.r } : null)
-    this.#bloomTimer = setTimeout(() => {
-      this.#bloomTimer = null
-      this.#paint()
-    }, BLOOM_MS)
   }
 
   /** The ring's anchor: always the middle of the screen. */
@@ -553,7 +532,7 @@ export class QuickMenuInput {
     this.#leftDeadZone = false
     this.#justFocused = false
     this.#virtual = focus
-    this.#ctrlShown = false
+    this.#altShown = false
     this.#anchor = this.#usableAnchor(anchor)
     this.#layer?.hide()
 
@@ -663,7 +642,12 @@ export class QuickMenuInput {
   // ── aim ─────────────────────────────────────────────────────────────
 
   #onPointerMove = (e: PointerEvent): void => {
-    if (this.#ctrlShown && !this.#armed && !this.#sticky) {
+    if (this.#flight?.active) {
+      e.preventDefault()
+      this.#flight.move(e)
+      return
+    }
+    if (this.#altShown && !this.#armed && !this.#sticky) {
       this.#tiles().highlight(this.#tiles().slotAtClient(e.clientX, e.clientY, 'pick'))
     }
     if (this.#sticky) {
@@ -690,8 +674,6 @@ export class QuickMenuInput {
       }
       return
     }
-    // A key-summoned ring has no pointer of its own (#pointerId stays null),
-    // so it aims with whatever pointer is moving.
     if (this.#pointerId !== null && e.pointerId !== this.#pointerId) return
     e.preventDefault()
     this.#advance(e)
@@ -848,6 +830,11 @@ export class QuickMenuInput {
   // ── commit ──────────────────────────────────────────────────────────
 
   #onPointerUp = (e: PointerEvent): void => {
+    if (this.#flight?.active) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
     if (this.#slotPress && (this.#slotPointer === null || e.pointerId === this.#slotPointer)) {
       const pressed = this.#slotPress
       this.#slotPress = null
@@ -856,13 +843,13 @@ export class QuickMenuInput {
       const still = this.#layer?.slotAtClient(e.clientX, e.clientY, 'pick') ?? null
       if (still === pressed) {
         const slot = this.#layer?.slotFor(pressed)
-        if (slot) fireQuickMenuSlot(slot)
+        if (slot) fireQuickMenuSlot(slot, this.#hoverCell?.label)
       }
-      this.#syncCtrlMenu()
+      this.#syncAltMenu()
       return
     }
     this.#noteButtons(e)
-    this.#syncCtrlMenu()
+    this.#syncAltMenu()
     if (e.pointerType === 'touch') {
       this.#touches.delete(e.pointerId)
       // HELD A TILE, NEVER MOVED, LET GO — the tile's own screen. Nothing was
@@ -877,15 +864,13 @@ export class QuickMenuInput {
       }
       // Last finger up while armed on some OTHER pointer: the gesture has no
       // way left to end itself. Close it here rather than strand the lock.
-      if (this.#touches.size === 0 && this.#armed && !this.#sticky && !this.#heldKey
+      if (this.#touches.size === 0 && this.#armed && !this.#sticky
         && e.pointerId !== this.#pointerId) {
         this.#end()
         return
       }
     }
     if (this.#sticky) return
-    // A key is holding this open — lifting a mouse button is not the release.
-    if (this.#heldKey) return
     if (!this.#armed) {
       if (e.pointerId === this.#pointerId) { this.#clearTimers(); this.#pointerId = null }
       return
@@ -907,11 +892,11 @@ export class QuickMenuInput {
     if (this.#pendingView?.pointerId === pointerId) this.#pendingView = null
     const dropped = this.#dropButton(pointerId, 0)
     if (pointerId === this.#pointerId) { this.#clearTimers(); this.#pointerId = null }
-    if (this.#touches.size === 0 && this.#armed && !this.#sticky && !this.#heldKey) {
+    if (this.#touches.size === 0 && this.#armed && !this.#sticky) {
       this.#end()
       return
     }
-    if (dropped) this.#syncCtrlMenu()
+    if (dropped) this.#syncAltMenu()
   }
 
   #onPointerCancel = (e: PointerEvent): void => {
@@ -919,13 +904,13 @@ export class QuickMenuInput {
     if (this.#pendingView?.pointerId === e.pointerId) this.#pendingView = null
     if (e.pointerType === 'touch') {
       this.#touches.delete(e.pointerId)
-      if (this.#touches.size === 0 && this.#armed && !this.#sticky && !this.#heldKey) {
+      if (this.#touches.size === 0 && this.#armed && !this.#sticky) {
         this.#end()
         return
       }
     }
     if (e.pointerId !== this.#pointerId) {
-      if (dropped) this.#syncCtrlMenu()
+      if (dropped) this.#syncAltMenu()
       return
     }
     this.#end()
@@ -1005,65 +990,51 @@ export class QuickMenuInput {
 
   // ── end ─────────────────────────────────────────────────────────────
 
-  /**
-   * Summon from the keyboard. Same as every other summon: the ring appears in
-   * the middle of the screen and the gesture is the one the mouse makes — aim
-   * by moving, release the key to choose.
-   *
-   * One deliberate difference from the mouse trigger. Middle-press and
-   * release without moving fires the centre, because that is an unambiguous
-   * click. A key TAP is not — the pointer never moved, and someone pressing a
-   * key to see what it does should get a menu, not a command. So a tap leaves
-   * the ring up sticky, and only a hold-then-flick commits.
-   */
-  #summonFromKey(event?: KeyboardEvent): void {
-    if (this.#armed || this.#sticky) return
-    const key = event?.key
-    if (!key || event?.repeat) return
-
-    const cell = this.#hoverCell
-    this.#begin(-1, cell ? { q: cell.q, r: cell.r } : null)
-    this.#pointerId = null
-    this.#heldKey = key
-    this.#bloomTimer = setTimeout(() => {
-      this.#bloomTimer = null
-      this.#paint()
-    }, BLOOM_MS)
+  #onWheel = (e: WheelEvent): void => {
+    if (!this.#flight?.active) return
+    e.preventDefault()
+    e.stopPropagation()
   }
 
   #onKeyUp = (e: KeyboardEvent): void => {
-    if (e.key === 'Control' || e.key === 'Meta') {
-      this.#ctrlDown = e.ctrlKey || e.metaKey
-      if (!this.#ctrlDown) this.#ctrlLatchedOff = false
-      this.#syncCtrlMenu()
+    if (e.key === 'Alt') {
+      // Firefox focuses its menu on the release of a bare Alt.
+      if (this.#altDown && (this.#hoverCell || this.#flight?.active)) e.preventDefault()
+      this.#altDown = false
+      this.#altLatchedOff = false
+      this.#syncAltMenu()
     }
-    if (!this.#heldKey || e.key !== this.#heldKey) return
-    this.#heldKey = null
-    if (!this.#armed) return
-
-    // Never left the centre — this was a tap. Show the ring and let go of it.
-    if (!this.#leftDeadZone) {
-      this.#clearTimers()
-      this.#sticky = true
-      if (!this.#painted) this.#paint()
-      return
-    }
-    this.#release()
   }
 
   #onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === 'Control' || e.key === 'Meta') {
+    if (e.key === 'Alt') {
+      // Over a tile the bare Alt is the menu's, never the browser's. Where the
+      // pointer is says what Alt is for: the command line holds focus by
+      // default, so a focus test would refuse it on a fresh page.
+      if (this.#hoverCell || this.#flight?.active) e.preventDefault()
       if (!e.repeat) {
-        this.#ctrlDown = true
-        this.#syncCtrlMenu()
+        this.#altDown = true
+        this.#syncAltMenu()
+      }
+      return
+    }
+    if (this.#flight?.active) {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        e.stopPropagation()
+        this.#flight.confirm()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        this.#flight.end(false)
       }
       return
     }
     if (e.key !== 'Escape') return
-    if (!this.#armed && !this.#sticky && !this.#ctrlShown) return
+    if (!this.#armed && !this.#sticky && !this.#altShown) return
     e.preventDefault()
     e.stopPropagation()
-    this.#ctrlLatchedOff = this.#ctrlDown
+    this.#altLatchedOff = this.#altDown
     this.#end()
   }
 
@@ -1104,7 +1075,6 @@ export class QuickMenuInput {
   }
 
   #clearTimers(): void {
-    if (this.#bloomTimer) { clearTimeout(this.#bloomTimer); this.#bloomTimer = null }
     if (this.#holdTimer) { clearTimeout(this.#holdTimer); this.#holdTimer = null }
   }
 
@@ -1115,7 +1085,6 @@ export class QuickMenuInput {
     this.#sticky = false
     this.#painted = false
     this.#pointerId = null
-    this.#heldKey = null
     this.#touchDown = null
     this.#tileLabel = null
     this.#pendingView = null
@@ -1138,7 +1107,7 @@ export class QuickMenuInput {
       get<StackLike>('@diamondcoreprocessor.com/InputModeStack')?.pop(OWNER)
       get<GateLike>('@diamondcoreprocessor.com/InputGate')?.unlock(OWNER)
     }
-    this.#syncCtrlMenu()
+    this.#syncAltMenu()
   }
 
   // ── external summon ─────────────────────────────────────────────────
@@ -1155,7 +1124,7 @@ export class QuickMenuInput {
     if (!definition) return false
 
     this.#end()
-    this.#ctrlShown = false
+    this.#altShown = false
     this.warmup()
     const focus = this.#centre()
     this.#levels = [{ definition, back: null, focus }]
@@ -1205,21 +1174,34 @@ export class QuickMenuInput {
     return this.#usableAnchor(this.#hoverCell ? { q: this.#hoverCell.q, r: this.#hoverCell.r } : null)
   }
 
-  #syncCtrlMenu(): void {
+  #syncAltMenu(): void {
     const want = selectionMenuWanted({
-      ctrl: this.#ctrlDown,
+      alt: this.#altDown,
       overTile: !!this.#hoverCell,
       buttonDown: this.#pointerDown && !this.#slotPress,
-      typing: isTypingTarget(document.activeElement),
       wand: this.#wand,
       clipboard: this.#clipboard,
       gesture: this.#armed || this.#sticky,
       onCtrlIcon: this.#onCtrlIcon,
-      latchedOff: this.#ctrlLatchedOff,
+      latchedOff: this.#altLatchedOff,
     })
+    // Flying to the middle: the flower lives there until alt is let go. The
+    // real pointer is put away, so hover is stale — only alt decides.
+    if (this.#flight?.active) {
+      if (!this.#altDown) this.#flight.end(true)
+      this.#publishOnTile()
+      return
+    }
+    if (want && this.#hoverCell && this.#flightWanted()) {
+      if (!this.#altTimer) {
+        this.#altTimer = setTimeout(() => { this.#altTimer = null; this.#startFlight() }, ALT_HOLD_MS)
+      }
+      return
+    }
+    if (this.#altTimer) { clearTimeout(this.#altTimer); this.#altTimer = null }
     if (!want || !this.#hoverCell) {
-      if (this.#ctrlShown) {
-        this.#ctrlShown = false
+      if (this.#altShown) {
+        this.#altShown = false
         if (!(this.#anchor && (this.#armed || this.#sticky))) this.#layer?.hide()
       }
       this.#publishOnTile()
@@ -1228,15 +1210,47 @@ export class QuickMenuInput {
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
     const definition = registry?.byName(SELECTION_MENU)
     if (!registry || !definition) return
-    this.#ctrlShown = true
+    this.#altShown = true
     const layer = this.#tiles()
     layer.place(this.#hoverCell.q, this.#hoverCell.r)
     layer.show(definition, registry.label, null, '')
     this.#publishOnTile()
   }
 
+  /** A held alt flies the tile to the middle wherever the hive is a desktop
+   *  hex view with a camera to move; anywhere else the menu stays in place. */
+  #flightWanted(): boolean {
+    if (this.#isMobile()) return false
+    const mode = get<{ mode?: string }>('@hypercomb.social/ViewMode')?.mode
+    if (mode && mode !== 'hexagons') return false
+    return this.#flightFor().available
+  }
+
+  #flightFor(): QuickMenuFlight {
+    if (!this.#flight) {
+      this.#flight = new QuickMenuFlight(this.#tiles())
+      this.#flight.onEnd = () => {
+        // Alt is still down after an arrival fired or Escape: a second flight
+        // must wait for a fresh press.
+        if (this.#altDown) this.#altLatchedOff = true
+        this.#syncAltMenu()
+      }
+    }
+    return this.#flight
+  }
+
+  #startFlight(): void {
+    const cell = this.#hoverCell
+    const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
+    const definition = registry?.byName(SELECTION_MENU)
+    if (!cell || !definition || !this.#altDown || this.#pointerDown) return
+    if (this.#armed || this.#sticky) return
+    this.#flightFor().begin({ q: cell.q, r: cell.r }, definition, cell.label)
+    this.#publishOnTile()
+  }
+
   #publishOnTile(): void {
-    const active = this.#ctrlShown || (!!this.#anchor && this.#painted)
+    const active = this.#altShown || (!!this.#anchor && this.#painted) || !!this.#flight?.active
     if (active === this.#onTile) return
     this.#onTile = active
     EffectBus.emit('quick-menu:on-tile', { active })

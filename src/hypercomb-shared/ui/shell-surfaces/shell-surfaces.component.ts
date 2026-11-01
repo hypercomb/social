@@ -22,18 +22,24 @@
 // were direct children of app-root.
 
 import { Component, ElementRef, ViewContainerRef, inject, type ComponentRef, type OnDestroy } from '@angular/core'
+import { EffectBus } from '@hypercomb/core'
 import {
   SHELL_SURFACE_REGISTRY_KEY,
   type ShellSurfaceRegistry,
 } from '../../core'
+import { isWorkbenchMode, WORKBENCH_SURFACE } from '@hypercomb/runtime/workbench-page'
 
 // The barrel contains every shell-owned tool window. Loading it synchronously
 // makes unopened authoring panels part of the first-frame bundle. The registry
 // already reconciles late registrations, so begin loading when the host exists
 // and let each module mount itself as it arrives.
 let shellSurfacesReady: Promise<unknown> | undefined
+const workbenchDocument = (): boolean =>
+  typeof document !== 'undefined' && isWorkbenchMode(document.documentElement.dataset['hypercombMode'])
 const loadShellSurfaces = (): Promise<unknown> =>
-  shellSurfacesReady ??= import('./shell-surfaces.barrel')
+  shellSurfacesReady ??= workbenchDocument()
+    ? import('./shell-surfaces.workbench.barrel')
+    : import('./shell-surfaces.barrel')
 
 type Mounted = { node: HTMLElement; ref?: ComponentRef<unknown> }
 
@@ -52,9 +58,11 @@ export class ShellSurfacesComponent implements OnDestroy {
   // rest from mounting: the surface that offers the upgrade is often the one
   // needed when an older installed package breaks some other panel.
   readonly #failed = new Set<string>()
+  #chatOpened = false
 
   readonly #sync = (): void => {
-    const surfaces = this.#registry?.all() ?? []
+    const workbench = workbenchDocument()
+    const surfaces = (this.#registry?.all() ?? []).filter(s => !workbench || s.name === WORKBENCH_SURFACE)
     const want = new Set(surfaces.map(s => s.name))
     for (const [name, m] of this.#mounted) {
       if (want.has(name)) continue
@@ -87,6 +95,10 @@ export class ShellSurfacesComponent implements OnDestroy {
       const next: ChildNode | null = cursor ? cursor.nextSibling : this.#host.firstChild
       if (m.node !== next) this.#host.insertBefore(m.node, next)
       cursor = m.node
+    }
+    if (workbench && this.#mounted.has(WORKBENCH_SURFACE) && !this.#chatOpened) {
+      this.#chatOpened = true
+      EffectBus.emit('chat:open', {})
     }
   }
 

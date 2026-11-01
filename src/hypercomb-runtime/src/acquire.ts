@@ -66,6 +66,7 @@ import { deriveBeeDeps } from './bee-deps.js'
 import { TRANSFER_PACKS_MEANING, decodeTransferPack, gunzipBytes } from './transfer-pack.js'
 import { checkCoreCompatibility, describeCoreMismatch } from './core-surface.js'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from './bags.js'
+import { reminifyLiveRegistration } from './reminify.js'
 // WHICH PARTS OF THE TREE RUN. The trunk with the participant's picks laid
 // over it, minus the paths they turned off (package-tree.ts).
 import { changedUnits, dependencyUnits, packageUnits, readOffUnits, writeOffUnits } from './package-units.js'
@@ -787,6 +788,7 @@ export const installPackage = async (
   }
 
   await activate(pkg.packageSig, inventory, beeDeps, held.held, await enabledOf(pkg.packageSig, inventory.bees, layersIo))
+  await reminifyLiveRegistration(pkg.packageSig, { picks, off: readOffUnits(), dependencies: inventory.dependencies })
   // Every pick was released by Update all: the trunk alone runs now, so the
   // picks record goes — only after the activation it describes is written.
   if (releaseAll) writePicks({})
@@ -942,6 +944,9 @@ export const applySelection = async (
   await writeBags(store, inventory)
   writePicks(live)
   await activate(trunk, inventory, beeDeps, [...admitted, ...walk.layers, ...bees, ...dependencies], enabled)
+  // The hosts pick composed this registration. The readable trunk stays what
+  // runs. The minified tree is the behaviors that pick left on.
+  await reminifyLiveRegistration(trunk, { picks: live, off, dependencies })
   return { ok: true }
 }
 

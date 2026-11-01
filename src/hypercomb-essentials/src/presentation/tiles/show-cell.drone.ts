@@ -146,6 +146,23 @@ export type DiveCell = {
   /** A reference. Paint ignores this: the moving border is hasBranch, on hover. */
   portal: boolean
 }
+/** One tile of the quick menu's FLOWER (`render:flower`). The option tiles are
+ *  tiles: the page's packer, on the page's shader, in the page's cells. */
+type FlowerCell = {
+  q: number
+  r: number
+  label: string
+  /** The tile being worked on: it keeps its own picture, rim and name. */
+  subject?: boolean
+  lit?: boolean
+}
+
+/** Above the veil the quick menu lays over the hive. */
+const FLOWER_Z = 10045
+/** Flower tiles are counted from here, so the page's hover index, which the
+ *  shader is shared with, can never land on one. */
+const FLOWER_INDEX_BASE = 1000000
+
 type ReferenceDraftPreview = {
   name: string
   imageSig?: string
@@ -737,7 +754,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'render:names-on-hover', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'tile:preview']
+  protected override listens = ['render:host-ready', 'render:names-on-hover', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'render:flower', 'tile:preview']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'thumbnail:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -1103,6 +1120,8 @@ export class ShowCellDrone extends Drone {
   #diveActive = false
   #diveHidMain = false
   #diveMesh: any | null = null
+  #flowerMesh: any | null = null
+  #flowerGeom: Geometry | null = null
   #diveGeom: Geometry | null = null
   #diveCells: Cell[] = []
   readonly #diveLabelToIndex = new Map<string, number>()
@@ -6065,6 +6084,9 @@ export class ShowCellDrone extends Drone {
     // separately so a pointer move never re-resolves a generation.
     this.onEffect<{ cells?: readonly DiveCell[] | null }>('render:dive', (payload) => {
       void this.#paintDive(payload?.cells ?? null)
+    })
+    this.onEffect<{ cells?: readonly FlowerCell[] | null }>('render:flower', (payload) => {
+      this.#paintFlower(payload?.cells ?? null)
     })
     this.onEffect<{ label?: string | null }>('render:dive-hover', (payload) => {
       this.#hoverDive(payload?.label ?? null)
@@ -11417,7 +11439,7 @@ export class ShowCellDrone extends Drone {
    *  buffer bookkeeping; the hover-reveal comes from the caller. */
   private buildFillQuadGeometry(
     cells: Cell[], r: number, gap: number, hw: number, hh: number,
-    foreign?: { reveal: string | null },
+    foreign?: { reveal: string | null; indexBase?: number },
   ): Geometry {
     const spacing = r + gap
 
@@ -11547,7 +11569,8 @@ export class ShowCellDrone extends Drone {
       borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
       bcp += 12
 
-      cellIndex.set([ci, ci, ci, ci], cip)
+      const ix = ci + (foreign?.indexBase ?? 0)
+      cellIndex.set([ix, ix, ix, ix], cip)
       cip += 4
       ci++
 
@@ -11606,6 +11629,72 @@ export class ShowCellDrone extends Drone {
     }
 
     return g
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // FLOWER — the quick menu's tiles, in the page's own cells
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** Paint the flower (or, with nothing to paint, take it away). Never awaits:
+   *  a gesture tool that can stall is not a gesture tool, and the one picture
+   *  it shows is the subject's, which is on screen already. The page's mesh
+   *  stays up underneath: the mesh here sits above the quick menu's veil. */
+  #paintFlower(input: readonly FlowerCell[] | null): void {
+    if (!input || input.length === 0) { this.#clearFlower(); return }
+    const atlas = this.atlas
+    const parent = this.pixiContainer
+    if (!atlas || !parent || !this.layer || !this.hexMesh || !this.shader) return
+
+    const cells: Cell[] = input.map((f) => {
+      const own = f.subject ? this.renderedCells.get(f.label) : undefined
+      return {
+        q: f.q, r: f.r, label: f.label, external: false, imageSig: own?.imageSig,
+        hasBranch: own?.hasBranch ?? false, hideText: own?.hideText ?? false, heat: 0,
+        borderColor: f.lit ? this.#accentColor : own?.borderColor,
+      }
+    })
+    atlas.setPinned([...this.renderedCells.keys(), ...cells.map(c => c.label), PENDING_CELL_LABEL])
+    for (const c of cells) atlas.getLabelUV(c.label)
+
+    const { circumRadiusPx, gapPx, padPx } = this.#hexGeo
+    const pointReachPx = circumRadiusPx / 0.8660254
+    const hexHalfW = this.#flat ? pointReachPx : circumRadiusPx
+    const hexHalfH = this.#flat ? circumRadiusPx : pointReachPx
+    const geom = this.buildFillQuadGeometry(
+      cells, circumRadiusPx, gapPx, hexHalfW + padPx, hexHalfH + padPx,
+      { reveal: null, indexBase: FLOWER_INDEX_BASE },
+    )
+    if (!this.#flowerMesh) {
+      this.#flowerMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
+      ;(this.#flowerMesh as any).blendMode = 'pre-multiply'
+      this.#flowerMesh.zIndex = FLOWER_Z
+      parent.sortableChildren = true
+      parent.addChild(this.#flowerMesh as any)
+    } else {
+      this.#flowerMesh.geometry = geom
+    }
+    if (this.#flowerGeom) { try { this.#flowerGeom.destroy(true) } catch { /* gone */ } }
+    this.#flowerGeom = geom
+    // The flower hangs off the render container, past the layer the mesh is in.
+    const layer = this.layer
+    this.#flowerMesh.scale.set(layer.scale.x, layer.scale.y)
+    this.#flowerMesh.position.set(
+      layer.position.x + this.hexMesh.position.x * layer.scale.x,
+      layer.position.y + this.hexMesh.position.y * layer.scale.y,
+    )
+  }
+
+  #clearFlower(): void {
+    if (this.#flowerMesh) {
+      try { this.#flowerMesh.parent?.removeChild(this.#flowerMesh) } catch { /* gone */ }
+      try { this.#flowerMesh.destroy?.() } catch { /* gone */ }
+      this.#flowerMesh = null
+    }
+    if (this.#flowerGeom) {
+      try { this.#flowerGeom.destroy(true) } catch { /* gone */ }
+      this.#flowerGeom = null
+    }
+    this.atlas?.setPinned([...this.renderedCells.keys(), PENDING_CELL_LABEL])
   }
 
   // ─────────────────────────────────────────────────────────────────────

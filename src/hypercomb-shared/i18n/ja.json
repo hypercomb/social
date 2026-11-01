@@ -3362,5 +3362,9 @@
   "serve.failed": "{page} を公開できませんでした: {reason}",
   "serve.not-serving": "{domain} はここでは何も開きません",
   "serve.off": "{domain} はもうページを開きません",
-  "serve.on": "{domain} は {page} を開くようになりました（今の状態で封印）— 変更後はもう一度実行してください"
+  "serve.on": "{domain} は {page} を開くようになりました（今の状態で封印）— 変更後はもう一度実行してください",
+  "chat.version.open": "Open this version",
+  "chat.version.deploy": "Deploy this version",
+  "chat.header.view": "Open the {name} view",
+  "chat.header.behavior": "Behavior on this layer: {name}"
 }

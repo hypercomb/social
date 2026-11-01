@@ -2918,5 +2918,9 @@
   "serve.failed": "تعذّر تقديم {page}: {reason}",
   "serve.not-serving": "{domain} لا يفتح شيئًا هنا",
   "serve.off": "{domain} لم يعد يفتح صفحة",
-  "serve.on": "{domain} يفتح الآن {page}، مختومة كما هي الآن — أعد الأمر بعد التغييرات"
+  "serve.on": "{domain} يفتح الآن {page}، مختومة كما هي الآن — أعد الأمر بعد التغييرات",
+  "chat.version.open": "Open this version",
+  "chat.version.deploy": "Deploy this version",
+  "chat.header.view": "Open the {name} view",
+  "chat.header.behavior": "Behavior on this layer: {name}"
 }

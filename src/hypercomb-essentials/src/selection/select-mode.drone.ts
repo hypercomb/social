@@ -86,6 +86,7 @@ const PILL_Z = 59992
 type SelectionShape = {
   selected: ReadonlySet<string>
   add(label: string): void
+  toggle(label: string): void
   clear(): void
 }
 type QuickMenuLike = { open(name?: string): boolean }
@@ -196,6 +197,10 @@ export class SelectModeDrone extends Drone {
     this.onEffect('select:done', () => {
       this.#selection()?.clear()
       this.disarm()
+    })
+    // The ctrl menu's select: add or lift the tile the menu was raised over.
+    this.onEffect<{ subject?: string }>('select:toggle', (payload) => {
+      if (typeof payload?.subject === 'string' && payload.subject) this.#selection()?.toggle(payload.subject)
     })
     this.onEffect('select:all', () => {
       const selection = this.#selection()

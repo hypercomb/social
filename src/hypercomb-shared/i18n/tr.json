@@ -2918,5 +2918,9 @@
   "serve.failed": "{page} sunulamadı: {reason}",
   "serve.not-serving": "{domain} burada hiçbir şey açmıyor",
   "serve.off": "{domain} artık bir sayfa açmıyor",
-  "serve.on": "{domain} artık {page} sayfasını açıyor, şu anki haliyle mühürlendi — değişikliklerden sonra yeniden söyle"
+  "serve.on": "{domain} artık {page} sayfasını açıyor, şu anki haliyle mühürlendi — değişikliklerden sonra yeniden söyle",
+  "chat.version.open": "Open this version",
+  "chat.version.deploy": "Deploy this version",
+  "chat.header.view": "Open the {name} view",
+  "chat.header.behavior": "Behavior on this layer: {name}"
 }

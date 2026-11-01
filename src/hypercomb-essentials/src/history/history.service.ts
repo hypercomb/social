@@ -4505,7 +4505,13 @@ export class HistoryService {
     if (!HistoryService.#SIG_RE.test(layerSig)) return null
     const layer = await this.getLayerBySig(layerSig)
     if (!layer) return null
-    return await this.commitLayer(locationSig, layer)
+    const head = await this.commitLayer(locationSig, layer)
+    // The promoted layer can list tiles the live page dropped since. commitLayer
+    // announces no membership delta, and the tile view's per-page cell cache and
+    // slot state were built from the old head — without this the restored tiles
+    // stay missing until a refresh or a navigation re-seeds them.
+    if (head) EffectBus.emit('fs:changed', { segments: [] })
+    return head
   }
 
   /**

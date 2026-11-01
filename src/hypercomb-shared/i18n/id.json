@@ -2918,5 +2918,9 @@
   "serve.failed": "Tidak dapat menyajikan {page}: {reason}",
   "serve.not-serving": "{domain} tidak membuka apa pun di sini",
   "serve.off": "{domain} tidak lagi membuka halaman",
-  "serve.on": "{domain} sekarang membuka {page}, disegel seperti sekarang — ucapkan lagi setelah ada perubahan"
+  "serve.on": "{domain} sekarang membuka {page}, disegel seperti sekarang — ucapkan lagi setelah ada perubahan",
+  "chat.version.open": "Open this version",
+  "chat.version.deploy": "Deploy this version",
+  "chat.header.view": "Open the {name} view",
+  "chat.header.behavior": "Behavior on this layer: {name}"
 }

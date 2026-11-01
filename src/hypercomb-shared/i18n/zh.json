@@ -2918,5 +2918,9 @@
   "serve.failed": "无法提供 {page}：{reason}",
   "serve.not-serving": "{domain} 在这里不打开任何内容",
   "serve.off": "{domain} 不再打开任何页面",
-  "serve.on": "{domain} 现在打开 {page}，已按当前状态封存 — 修改后请再说一次"
+  "serve.on": "{domain} 现在打开 {page}，已按当前状态封存 — 修改后请再说一次",
+  "chat.version.open": "Open this version",
+  "chat.version.deploy": "Deploy this version",
+  "chat.header.view": "Open the {name} view",
+  "chat.header.behavior": "Behavior on this layer: {name}"
 }

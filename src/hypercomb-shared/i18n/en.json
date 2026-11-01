@@ -4069,5 +4069,9 @@
   "host-online.domain-placeholder": "your domain, e.g. example.org",
   "host-online.domain": "Your domain",
   "host-online.use-domain": "Use my domain",
-  "host-online.domain-what": "Needs a free Cloudflare account with your domain in it. Your browser opens to sign in; the app does the rest."
+  "host-online.domain-what": "Needs a free Cloudflare account with your domain in it. Your browser opens to sign in; the app does the rest.",
+  "chat.version.open": "Open this version",
+  "chat.version.deploy": "Deploy this version",
+  "chat.header.view": "Open the {name} view",
+  "chat.header.behavior": "Behavior on this layer: {name}"
 }

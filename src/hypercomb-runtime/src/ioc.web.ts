@@ -128,4 +128,24 @@ if (!window.ioc) {
   ;(window as any).list = window.ioc.list
 
   console.log('[hypercomb] ioc installed')
+
+  // Diagnostic: open the app with ?ioc in the URL to see a live on-page list of
+  // everything registered (no console needed). Click the panel to copy the list.
+  if (new URLSearchParams(location.search).has('ioc')) {
+    const panel = document.createElement('pre')
+    panel.style.cssText = 'position:fixed;top:0;right:0;z-index:2147483647;max-height:100vh;max-width:50vw;overflow:auto;margin:0;padding:8px;background:#000c;color:#9f9;font:11px/1.3 monospace;cursor:copy'
+    const render = () => {
+      const keys = window.ioc.list()
+      panel.textContent = `ioc: ${keys.length} registered (click to copy)\n` + keys.join('\n')
+    }
+    let queued = false
+    window.ioc.onRegister(() => {
+      if (queued) return
+      queued = true
+      setTimeout(() => { queued = false; render() }, 250)
+    })
+    panel.onclick = () => navigator.clipboard?.writeText(panel.textContent ?? '')
+    document.addEventListener('DOMContentLoaded', () => { document.body.appendChild(panel); render() })
+    if (document.readyState !== 'loading') { document.body.appendChild(panel); render() }
+  }
 }

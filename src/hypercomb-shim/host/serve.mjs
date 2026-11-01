@@ -21,8 +21,8 @@
 //   2. Fall back to index.html with 200 for anything genuinely missing —
 //      a hive location is not a file.
 //   3. Access-Control-Allow-Origin — a host exists to be pulled FROM.
-//   4. Never hard-cache /pin, the service worker, or main.js; a signature
-//      path may be cached forever, because its name IS its hash.
+//   4. Never hard-cache /pin, /head, the service worker, or main.js; a
+//      signature path may be cached forever, because its name IS its hash.
 //   5. Never serve outside the root.
 
 import { createServer } from 'node:http'
@@ -48,7 +48,7 @@ const TYPES = {
  *  a stale pointer is the one failure with no way out. */
 const cacheFor = (urlPath, name) => {
   if (SIG_RE.test(name)) return 'public, max-age=31536000, immutable'
-  if (urlPath === '/pin' || name === 'hypercomb.worker.js' || name === 'main.js' || name === 'env.js') {
+  if (urlPath === '/pin' || urlPath === '/head' || name === 'hypercomb.worker.js' || name === 'main.js' || name === 'env.js') {
     return 'no-cache, no-store, must-revalidate'
   }
   return 'public, max-age=0, must-revalidate'
@@ -85,7 +85,9 @@ createServer(async (req, res) => {
   // (1) A real file wins, always — before any rewrite is considered.
   const held = await fileAt(target)
   if (held) {
-    const type = TYPES[extname(target).toLowerCase()]
+    const type = urlPath === '/head'
+      ? 'text/plain; charset=utf-8'
+      : TYPES[extname(target).toLowerCase()]
       // No extension and a 64-hex name: content-addressed bytes. Opaque on
       // purpose — the client hashes them and decides what they are. The
       // service worker, not the host, gives modules their JavaScript type.

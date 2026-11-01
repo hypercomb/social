@@ -28,7 +28,6 @@ export const sleepers: readonly Sleeper[] = [
   { command: "genome", description: "Measure the active hive genome: current markers plus every reachable byte", load: () => import('./commands/genome.queen') },
   { command: "grant", description: "Set how far a machine may go in this hive", load: () => import('./commands/grant.queen') },
   { command: "history", description: "Toggle the history panel", load: () => import('./commands/history.queen') },
-  { command: "hive", description: "Give a lineage path or signature a named handle that other slash commands autocomplete against.", load: () => import('./commands/hive.queen') },
   { command: "interest", description: "Say which pheromones you watch for or never want, and see what\\", load: () => import('./commands/interest.queen') },
   { command: "lanes", description: "Toggle three centered lanes for this viewport", load: () => import('./commands/lanes.queen') },
   { command: "requires", description: "Manage the pheromones a reference demands of what it shows", load: () => import('./commands/requires.queen') },

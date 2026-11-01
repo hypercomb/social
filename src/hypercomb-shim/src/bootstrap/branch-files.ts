@@ -15,6 +15,7 @@
 import { SignatureService, canonicalLayerJson, isSandboxLabel, type CanonicalLayerContent } from '@hypercomb/core'
 import { isPath, parentOf } from '@hypercomb/runtime/package-tree'
 import { hostBases } from '@hypercomb/runtime/host-packages'
+import { formatInstanceHead, INSTANCE_HEAD_PATH, parseInstanceHead } from '@hypercomb/runtime/instance-head'
 import { decodeTransferPack, encodeTransferPack, gunzipBytes, gzipBytes } from '@hypercomb/runtime/transfer-pack'
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -430,4 +431,58 @@ export const broadcastFace = (face: readonly string[]): boolean => {
   const channel = new BroadcastChannel(PUBLIC_FACE)
   try { channel.postMessage({ face: [...face] }) } finally { channel.close() }
   return true
+}
+
+/** Same-device notice of the build a publish named. The file itself is the head. */
+export const INSTANCE_HEAD_CHANNEL = 'hc:instance-head'
+
+/**
+ * The shim service worker answers GET /head from this cache and keeps the
+ * cache when it activates. The name matches `HEAD_CACHE` in the shim worker.
+ */
+export const INSTANCE_HEAD_CACHE = 'hc-instance-head'
+
+export type PublishedHead = {
+  /** The head file: the package, and the derivation record on a second line. */
+  readonly head: string
+  readonly package: string
+  readonly derivation: string | null
+  /** File signatures of this build, for people to mind. */
+  readonly face: readonly string[]
+  /** This browser stored the head file, so GET /head answers it here. */
+  readonly served: boolean
+}
+
+/** Name one build as the instance head. A later mint leaves that naming where it is. */
+export const publishInstanceHead = async (build: {
+  package: string
+  derivation?: string | null
+  face?: readonly string[]
+}): Promise<PublishedHead | null> => {
+  let head: string
+  try { head = formatInstanceHead(build.package, build.derivation ?? null) } catch { return null }
+  const parsed = parseInstanceHead(head)
+  if (!parsed) return null
+  const face = [...new Set((build.face ?? []).map(sig => sig.trim().toLowerCase()).filter(sig => SIG_RE.test(sig)))].sort()
+  const served = await rememberHead(head)
+  if (typeof BroadcastChannel !== 'undefined') {
+    const channel = new BroadcastChannel(INSTANCE_HEAD_CHANNEL)
+    try { channel.postMessage({ head, face }) } finally { channel.close() }
+  }
+  return { head, package: parsed.package, derivation: parsed.derivation, face, served }
+}
+
+const rememberHead = async (head: string): Promise<boolean> => {
+  const cachesApi = (globalThis as { caches?: CacheStorage }).caches
+  if (!cachesApi?.open) return false
+  try {
+    const cache = await cachesApi.open(INSTANCE_HEAD_CACHE)
+    await cache.put(INSTANCE_HEAD_PATH, new Response(head, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    }))
+    return true
+  } catch { return false }
 }

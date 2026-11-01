@@ -1,7 +1,7 @@
 import { canonicalLayerJson, SignatureService } from '@hypercomb/core'
 import { describe, expect, it } from 'vitest'
 import {
-  broadcastFace, diffBranches, loadAi, mintBranch, missionOrigin, packMint, readBranch, unpackMint,
+  broadcastFace, diffBranches, loadAi, mintBranch, missionOrigin, packMint, publishInstanceHead, readBranch, unpackMint,
   type BranchRead,
 } from './branch-files'
 
@@ -175,6 +175,28 @@ describe('the mission the AI loads into', () => {
     expect(broadcastFace(['b'.repeat(64), 'a'.repeat(64)])).toBe(true)
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(heard).toEqual([{ face: ['b'.repeat(64), 'a'.repeat(64)] }])
+    channel.close()
+  })
+
+  it('publishes one build as the head file and leaves later work alone', async () => {
+    const pkg = 'a'.repeat(64)
+    const derived = 'b'.repeat(64)
+    const heard: unknown[] = []
+    const channel = new BroadcastChannel('hc:instance-head')
+    channel.addEventListener('message', event => { heard.push(event.data) })
+    const published = await publishInstanceHead({ package: pkg, derivation: derived, face: [derived, 'nope', pkg] })
+    expect(published?.head).toBe(`${pkg}\n${derived}\n`)
+    expect(published?.head.split(/\n/).filter(Boolean)).toHaveLength(2)
+    expect(published?.package).toBe(pkg)
+    expect(published?.derivation).toBe(derived)
+    expect(published?.face).toEqual([pkg, derived])
+    const plain = await publishInstanceHead({ package: pkg.toUpperCase() })
+    expect(plain?.head).toBe(`${pkg}\n`)
+    expect(plain?.derivation).toBeNull()
+    expect(await publishInstanceHead({ package: 'nope' })).toBeNull()
+    expect(await publishInstanceHead({ package: pkg, derivation: 'nope' })).toBeNull()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(heard[0]).toEqual({ head: `${pkg}\n${derived}\n`, face: [pkg, derived] })
     channel.close()
   })
 })

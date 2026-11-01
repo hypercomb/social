@@ -1,5 +1,6 @@
 import { AfterViewInit, Component, computed, effect, HostBinding, inject, signal } from '@angular/core'
 import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
+import { isWorkbenchMode } from '@hypercomb/runtime/workbench-page'
 import { type BootStatus } from '../setup/ensure-install'
 import { acquire, installedPackageSig, listHostPackages } from '@hypercomb/runtime/acquire'
 import { addHostZone, listHostZones } from '@hypercomb/runtime/host-zones'
@@ -41,7 +42,8 @@ export class App implements AfterViewInit {
    *  building them (measured 2026-09-27). They mount the moment the visitor
    *  is in the hexagons: a site whose arrival is the hexagons, or a step off
    *  the page (main.visitor.ts `loader:activate`). */
-  protected readonly chrome = signal((window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ !== true)
+  readonly #workbench = isWorkbenchMode(document.documentElement.dataset['hypercombMode'])
+  protected readonly chrome = signal(!this.#workbench && (window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ !== true)
   /** A canvas-taking view can deliberately preserve the controls rail when it
    *  has reserved that rail's edge, as the chat window does. */
   readonly moveMode = signal(false)
@@ -116,7 +118,7 @@ export class App implements AfterViewInit {
   }
 
   constructor() {
-    if (!this.chrome()) {
+    if (!this.chrome() && !this.#workbench) {
       EffectBus.on<{ view?: string }>('view:arrival', p => { if (!p?.view) this.chrome.set(true) })
       EffectBus.on<{ reason?: string }>('loader:activate', p => { if (p?.reason === 'hive') this.chrome.set(true) })
     }

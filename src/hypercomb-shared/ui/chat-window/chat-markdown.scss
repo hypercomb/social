@@ -39,55 +39,55 @@ $accent: #7eb6d6;
   > :first-child { margin-top: 0; }
   > :last-child { margin-bottom: 0; }
 
-  p { margin: 0 0 0.7em; }
+  p { margin: 0 0 0.9em; }
 
+  // Size and air carry the hierarchy; a heading is the page's ink, not a colour.
   h1, h2, h3, h4, h5, h6 {
-    margin: 1.1em 0 0.45em;
+    margin: 1.6em 0 0.5em;
     font-weight: 600;
     line-height: 1.3;
-    color: var(--hc-window-accent);
+    color: var(--hc-panel-text);
   }
 
-  h1 { font-size: 1.15em; }
-  h2 { font-size: 1.08em; }
-  h3 { font-size: 1em; }
-  h4, h5, h6 { font-size: 0.95em; color: var(--hc-window-ink-loud); }
+  h1 { font-size: 1.35em; }
+  h2 { font-size: 1.18em; }
+  h3 { font-size: 1.04em; }
+  h4, h5, h6 { font-size: 1em; }
 
   ul, ol {
-    margin: 0 0 0.7em;
-    padding-left: 1.35em;
+    margin: 0 0 0.9em;
+    padding-left: 1.4em;
   }
 
-  li { margin: 0.15em 0; }
+  li { margin: 0.3em 0; }
+  li::marker { color: var(--hc-window-ink-quiet); }
   // A nested list belongs to the item above it, not to the gap after it.
   li > ul, li > ol, > ul ul, > ul ol, > ol ul, > ol ol { margin-bottom: 0; }
 
   blockquote {
-    margin: 0 0 0.7em;
-    padding: 0.1em 0 0.1em 0.8em;
-    border-left: 2px solid rgba(var(--acc), 0.4);
-    color: var(--hc-window-ink-quiet);
-    font-style: italic;
+    margin: 0 0 0.9em;
+    padding: 0.1em 0 0.1em 0.9em;
+    border-left: 2px solid var(--hc-window-line-firm);
+    color: var(--hc-window-ink-plain);
   }
 
   hr {
-    margin: 1em 0;
+    margin: 1.5em 0;
     border: none;
-    border-top: 1px solid rgba(var(--hc-panel-ink), 0.12);
+    border-top: 1px solid var(--hc-window-line);
   }
 
-  strong { font-weight: 650; color: var(--hc-panel-text); }
+  strong { font-weight: 600; color: var(--hc-panel-text); }
   del { opacity: 0.6; }
 
   // An inline code span, not a block: no scroller, just a tint.
   code {
-    padding: 0.1em 0.32em;
+    padding: 0.12em 0.34em;
     font-family: var(--hc-code);
     font-variant-ligatures: var(--hc-code-ligatures);
-    font-size: 0.9em;
-    background: rgba(var(--hc-panel-pane), 0.6);
-    border: 1px solid rgba(var(--hc-panel-ink), 0.08);
-    border-radius: var(--md-shape-xs, 4px);
+    font-size: 0.87em;
+    background: var(--hc-window-tint-strong);
+    border-radius: var(--hc-radius-control, 2px);
   }
 }
 
@@ -115,8 +115,8 @@ $accent: #7eb6d6;
   font-size: 0.88em;
   color: tw.ink(rgba(224, 180, 92, 0.95));
   background: rgba(224, 180, 92, 0.1);
-  border: 1px solid rgba(224, 180, 92, 0.35);
-  border-radius: tw.$radius-pill;
+  border: 0;
+  border-radius: var(--hc-radius-control, 2px);
   cursor: pointer;
   vertical-align: baseline;
 
@@ -131,9 +131,9 @@ $accent: #7eb6d6;
 // ── fenced code ───────────────────────────────────────────────────────────
 
 :host ::ng-deep .chat-code {
-  margin: 0 0 0.7em;
-  border: 1px solid rgba(var(--hc-panel-ink), 0.1);
-  border-radius: var(--md-shape-xs, 4px);
+  margin: 0.2em 0 1em;
+  border: 1px solid var(--hc-window-line);
+  border-radius: var(--hc-radius-card, 3px);
   background: rgba(var(--hc-panel-pane), 0.78);
   overflow: hidden;
 
@@ -141,7 +141,7 @@ $accent: #7eb6d6;
     // The block scrolls itself. Without this a single long line widens the
     // whole panel and the conversation loses its measure to one paste.
     margin: 0;
-    padding: 0.6em 0.7em;
+    padding: 0.2em 0.95em 0.8em;
     overflow-x: auto;
     scrollbar-width: thin;
     scrollbar-color: rgba(var(--acc), 0.3) transparent;
@@ -152,45 +152,45 @@ $accent: #7eb6d6;
     padding: 0;
     font-family: var(--hc-code);
     font-variant-ligatures: var(--hc-code-ligatures);
-    font-size: 0.88em;
-    line-height: 1.5;
+    font-size: 0.86em;
+    line-height: 1.6;
     color: var(--hc-window-ink-loud);
     background: none;
     border: none;
+    border-radius: 0;
     white-space: pre;
   }
 
+  // The language and Copy ride the block's top edge with no band of their own,
+  // so the code stays the only thing the frame holds.
   .chat-code-bar {
     display: flex;
     align-items: center;
     gap: 0.5em;
-    padding: 0.2em 0.4em 0.2em 0.6em;
-    background: rgba(var(--hc-panel-ink), 0.035);
-    border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.07);
+    padding: 0.35em 0.5em 0 0.95em;
   }
 
   .chat-code-lang {
     flex: 1 1 auto;
     min-width: 0;
-    font-size: 0.7em;
-    letter-spacing: 0.06em;
+    font-family: var(--hc-mono, monospace);
+    font-size: 0.72em;
     text-transform: lowercase;
     color: var(--hc-window-ink-quiet);
   }
 
   .chat-code-copy {
     flex: 0 0 auto;
-    padding: 0.15em 0.5em;
+    padding: 0.2em 0.5em;
     font: inherit;
-    font-size: 0.68em;
-    letter-spacing: 0.04em;
-    color: var(--hc-window-accent);
+    font-size: 0.72em;
+    color: var(--hc-window-ink-quiet);
     background: none;
-    border: 1px solid rgba(var(--acc), 0.28);
-    border-radius: var(--md-shape-xs, 4px);
+    border: 0;
+    border-radius: var(--hc-radius-control, 2px);
     cursor: pointer;
 
-    &:hover { background: rgba(var(--acc), 0.15); color: var(--hc-panel-text); }
+    &:hover { background: var(--hc-window-tint-strong); color: var(--hc-panel-text); }
   }
 
   // highlight.js tokens, in the panel's own palette rather than an imported
@@ -211,7 +211,7 @@ $accent: #7eb6d6;
 // ── tables ────────────────────────────────────────────────────────────────
 
 :host ::ng-deep .chat-table {
-  margin: 0 0 0.7em;
+  margin: 0.2em 0 1em;
   // Its own horizontal scroller. A four-column table in a 300px panel is the
   // normal case, not the pathological one.
   overflow-x: auto;
@@ -226,18 +226,21 @@ $accent: #7eb6d6;
     min-width: 100%;
   }
 
+  // Rows only: a grid of cell boxes is what made a table read as a spreadsheet.
   th, td {
-    padding: 0.32em 0.6em;
+    padding: 0.45em 1.2em 0.45em 0;
     text-align: left;
     white-space: nowrap;
-    border: 1px solid rgba(var(--hc-panel-ink), 0.1);
+    border-bottom: 1px solid var(--hc-window-line);
   }
 
   th {
     font-weight: 600;
-    color: var(--hc-window-accent);
-    background: rgba(var(--hc-panel-ink), 0.04);
+    color: var(--hc-window-ink-plain);
+    border-bottom-color: var(--hc-window-line-firm);
   }
+
+  tr:last-child td { border-bottom: 0; }
 }
 
 // ── per-message actions ───────────────────────────────────────────────────
@@ -248,32 +251,34 @@ $accent: #7eb6d6;
 
 .chat-msg { position: relative; }
 
+// They hang in the gap under the message, on the side it sits on, so nothing
+// floats over what you are reading. The hit area starts at the message's edge:
+// the pointer never crosses a dead strip on its way down to them.
 .chat-acts {
   position: absolute;
-  top: -0.55em;
-  right: 0.35em;
+  top: 100%;
+  left: -0.3em;
   display: flex;
   gap: 0.1em;
-  padding: 0.1em;
-  border-radius: var(--md-shape-xs, 4px);
-  background: rgba(var(--hc-panel-pane), 0.92);
-  border: 1px solid rgba(var(--hc-panel-ink), 0.1);
+  padding-top: 0.15em;
   opacity: 0;
   transition: opacity 120ms ease;
 
   button {
-    padding: 0.15em 0.25em;
+    padding: 0.2em 0.3em;
     background: none;
     border: none;
     color: var(--hc-window-ink-quiet);
     cursor: pointer;
-    border-radius: var(--md-shape-xs, 4px);
+    border-radius: var(--hc-radius-control, 2px);
 
-    .mat-sym { font-size: 0.95em; display: block; }
-    &:hover { color: var(--hc-window-accent); background: rgba(var(--acc), 0.14); }
+    .mat-sym { font-size: 1em; display: block; }
+    &:hover { color: var(--hc-window-ink-loud); background: var(--hc-window-tint-strong); }
     &:disabled { opacity: 0.35; cursor: default; background: none; }
   }
 }
+
+.chat-msg.user .chat-acts { left: auto; right: -0.3em; }
 
 .chat-msg:hover .chat-acts,
 .chat-acts:focus-within { opacity: 1; }
@@ -333,18 +338,17 @@ $accent: #7eb6d6;
 // THE BEACON. Pinned above the composer. A live turn pulses. A quiet round
 // stays honey and says how long it has been since the last word. A retry, a
 // budget stop, a give-up, and a wait on you each wear their own mark, and
-// none of them pulse like work that is still arriving.
+// none of them pulse like work that is still arriving. A line of words over
+// the composer, never a box of its own: the dot is what carries the state.
 .chat-beacon {
   display: flex;
   align-items: flex-start;
   gap: 0.55em;
-  margin: 0 0 0.55em;
-  padding: 0.45em 0.7em;
-  border: 1px solid rgba(var(--acc), 0.4);
-  border-radius: var(--hc-radius-card, 3px);
-  background: rgba(var(--acc), 0.1);
-  color: var(--hc-window-ink-loud);
-  font-size: 0.78em;
+  margin: 0 0 0.45em;
+  padding-inline: 0.15em;
+  color: var(--hc-window-ink-plain);
+  font-family: var(--hc-read, inherit);
+  font-size: 0.82em;
   line-height: 1.45;
 }
 
@@ -366,9 +370,6 @@ $accent: #7eb6d6;
 .chat-beacon[data-state='retry'],
 .chat-beacon[data-state='carry'],
 .chat-beacon[data-state='steps'] {
-  border-color: rgba(224, 180, 92, 0.55);
-  background: rgba(224, 180, 92, 0.12);
-
   .chat-beacon-dot {
     background: #e0b45c;
     animation-duration: 2.2s;
@@ -379,8 +380,7 @@ $accent: #7eb6d6;
 .chat-beacon[data-state='gave-up'],
 .chat-beacon[data-state='you'],
 .chat-beacon[data-state='unattended'] {
-  border-color: rgba(224, 180, 92, 0.7);
-  background: rgba(224, 180, 92, 0.14);
+  color: tw.ink(rgba(224, 180, 92, 0.95));
 
   .chat-beacon-dot {
     background: #e0b45c;
@@ -445,14 +445,14 @@ $accent: #7eb6d6;
   gap: 0.3em;
   padding: 0.3em 0.75em;
   font: inherit;
-  font-size: 0.7em;
-  color: var(--hc-window-on-accent);
-  background: rgba(var(--acc), 0.94);
-  border: none;
-  border-radius: tw.$radius-pill;
+  font-size: 0.76em;
+  color: var(--hc-window-ink-plain);
+  background: rgb(var(--hc-panel-pane));
+  border: 1px solid var(--hc-window-line-firm);
+  border-radius: var(--hc-radius-floating, 4px);
   box-shadow: 0 4px 14px rgba(var(--hc-panel-shadow), 0.45);
   cursor: pointer;
 
   .mat-sym { font-size: 1.15em; }
-  &:hover { background: rgb(var(--acc)); }
+  &:hover { color: var(--hc-panel-text); }
 }

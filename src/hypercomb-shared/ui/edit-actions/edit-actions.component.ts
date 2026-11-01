@@ -242,6 +242,9 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
       await history.promoteToHead(locationSig, layerSig)
       await cursor.load?.(locationSig)
       cursor.jumpToLatest?.()
+      // The page's cached cell list and slot state predate the promotion; drop
+      // them AFTER the cursor is live so the render that follows reads the new head.
+      EffectBus.emit('fs:changed', { segments: [] })
 
       // If a sentinel bridge is ever there, also freeze the promoted head as
       // a named branch. Nothing has assigned `__sentinelBridge` since the

@@ -197,6 +197,9 @@ export type ModuleCommitOutcome =
      *  commit publishes under this hive's key, and unaccepted code never rides
      *  out under it. They stay picks. */
     readonly held?: readonly string[]
+    /** The minified derivation of the new root, when this commit could make it.
+     *  The readable root stays what runs. */
+    readonly minified?: string
   }
   | { readonly ok: false; readonly error: string }
 

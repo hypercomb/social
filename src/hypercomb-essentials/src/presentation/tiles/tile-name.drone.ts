@@ -45,6 +45,7 @@ type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
 type BandRowsPayload = { rows: number; label: string | null }
 type HoverPayload = { label: string | null }
+type FlowerCell = Axial & { label: string; subject?: boolean }
 type ShowCellLike = {
   nameHidden(label: string): boolean
   displayNameFor(label: string): string
@@ -116,6 +117,8 @@ const STYLE = `
 .hc-tile-name-holders{flex:none;margin-left:.45em;font-size:.5em;letter-spacing:0;color:var(--hc-tile-name-holders-color,${HOLDERS_INK})}
 .hc-tile-name-holders[hidden]{display:none}
 .hc-tile-names.hc-big-head .hc-tile-names-world>span{letter-spacing:${BIG_HEAD_TRACKING}em;text-transform:uppercase}
+.hc-tile-names.hc-flower-up .hc-tile-names-world>span{opacity:.5}
+.hc-tile-names.hc-flower-up .hc-tile-names-world>span.hc-flower-name{opacity:1}
 `
 
 export class TileNameDrone extends Drone {
@@ -128,7 +131,7 @@ export class TileNameDrone extends Drone {
   protected override listens: string[] = [
     'render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'render:set-pivot', 'render:set-text-only', 'tile:toggle-text',
-    'tile:hover', 'overlay:band-rows', 'render:big-head-mode', 'render:name-visibility', 'render:set-hive-visible', 'render:dive-painted',
+    'tile:hover', 'overlay:band-rows', 'render:big-head-mode', 'render:name-visibility', 'render:set-hive-visible', 'render:dive-painted', 'render:flower',
     TILE_STACK_DEPTHS, 'location:changed',
   ]
   protected override emits: string[] = ['tile-names:dom']
@@ -144,6 +147,9 @@ export class TileNameDrone extends Drone {
   #spans = new Map<string, HTMLSpanElement>()
   /** What each name's span was last placed with (#place) — its styles as set. */
   #placedAs = new WeakMap<HTMLSpanElement, string>()
+  /** The quick menu's flower: its tiles' names, and the cells they cover. */
+  #flower: FlowerCell[] = []
+  #flowerSpans: HTMLSpanElement[] = []
   #cells = new Map<string, Axial>()
   #meshOffset = { x: 0, y: 0 }
   #geo: HexGeometry = DEFAULT_HEX_GEOMETRY
@@ -195,6 +201,7 @@ export class TileNameDrone extends Drone {
       this.#diving = (p?.count ?? 0) > 0
       this.#syncRoot()
     })
+    this.onEffect<{ cells?: FlowerCell[] | null }>('render:flower', (p) => this.#setFlower(p?.cells ?? []))
     this.onEffect<HoverPayload>('tile:hover', (p) => { this.#hovered = p?.label ?? null; this.#refreshAll() })
     // Depths belong to a page: arriving somewhere else drops them, so a count
     // from the last page never lands on a same-named tile of this one.
@@ -299,6 +306,33 @@ export class TileNameDrone extends Drone {
     this.#placeAll()
   }
 
+  /** The flower's tiles are tiles, so their names are names: the same text in
+   *  the same place, over the cells they cover. The rest of the hive's names
+   *  fall back with the rest of the hive. */
+  #setFlower(cells: FlowerCell[]): void {
+    this.#flower = cells
+    for (const span of this.#flowerSpans) span.remove()
+    this.#flowerSpans = []
+    this.#root?.classList.toggle('hc-flower-up', cells.length > 0)
+    const sc = this.#showCell()
+    for (const cell of cells) {
+      if (cell.subject && sc?.nameHidden(cell.label)) continue
+      const span = document.createElement('span')
+      span.className = 'hc-flower-name'
+      const name = document.createElement('span')
+      name.className = 'hc-tile-name-text'
+      name.textContent = cell.subject ? sc?.displayNameFor(cell.label) ?? cell.label : cell.label
+      span.appendChild(name)
+      const px = this.#axialToPixel(cell.q, cell.r)
+      const at = this.#placement(px.x + this.#meshOffset.x, px.y + this.#meshOffset.y)
+      span.style.maxWidth = at.maxWidth
+      span.style.transform = at.transform
+      this.#world?.appendChild(span)
+      this.#flowerSpans.push(span)
+    }
+    this.#placeAll()
+  }
+
   #spanFor(label: string): HTMLSpanElement | null {
     if (!this.#world) return null
     let span = this.#spans.get(label)
@@ -359,7 +393,8 @@ export class TileNameDrone extends Drone {
     if (holders.textContent !== count) holders.textContent = count
     if (holders.hidden !== !count) holders.hidden = !count
 
-    const hidden = !!sc && (sc.shaderDrawsName(label) || sc.nameHidden(label))
+    const covered = this.#flower.some(c => c.q === axial.q && c.r === axial.r)
+    const hidden = covered || (!!sc && (sc.shaderDrawsName(label) || sc.nameHidden(label)))
     if (span.hidden !== hidden) span.hidden = hidden
     if (hidden) return
 
@@ -368,6 +403,20 @@ export class TileNameDrone extends Drone {
     const x = px.x + this.#meshOffset.x
     const rows = this.#band.label === label ? Math.max(1, this.#band.rows) : 1
     const y = px.y + this.#meshOffset.y - (rows - 1) * ROW_H_R * R
+    const { maxWidth, transform } = this.#placement(x, y)
+    // A name that has not moved is not written again: every render pass places
+    // every name, and at a meeting of a thousand tiles re-setting two styles
+    // per name (each parsed again by the browser) was a cost of every pass —
+    // the participant's own create among them (SCALE-1).
+    const placed = `${maxWidth}|${transform}`
+    if (this.#placedAs.get(span) === placed) return
+    this.#placedAs.set(span, placed)
+    span.style.maxWidth = maxWidth
+    span.style.transform = transform
+  }
+
+  #placement(x: number, y: number): { maxWidth: string; transform: string } {
+    const R = this.#geo.circumRadiusPx
 
     // ONE SIZE, ONE LINE, ALWAYS. A name is never shrunk to fit and never
     // wrapped (Jaime, 2026-09-09: "no wrapping") — both are ways of letting the
@@ -381,15 +430,7 @@ export class TileNameDrone extends Drone {
     const maxWidth = `${(MAX_WIDTH_R * R) / scale}px`
     const rotate = this.#pivot ? ' rotate(90deg)' : ''
     const transform = `translate(${x}px,${y}px)${rotate} scale(${scale}) translate(-50%,-50%)`
-    // A name that has not moved is not written again: every render pass places
-    // every name, and at a meeting of a thousand tiles re-setting two styles
-    // per name (each parsed again by the browser) was a cost of every pass —
-    // the participant's own create among them (SCALE-1).
-    const placed = `${maxWidth}|${transform}`
-    if (this.#placedAs.get(span) === placed) return
-    this.#placedAs.set(span, placed)
-    span.style.maxWidth = maxWidth
-    span.style.transform = transform
+    return { maxWidth, transform }
   }
 
   #axialToPixel(q: number, r: number): { x: number; y: number } {

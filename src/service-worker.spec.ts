@@ -94,6 +94,16 @@ describe('service worker copies', () => {
       expect(code, worker).toMatch(/cache\.match\(cacheKeyOf\(request\)\)/)
     }
   })
+
+  it('keeps a published head in the shim worker', () => {
+    const shim = readFileSync(at('./hypercomb-shim/public/hypercomb.worker.js'), 'utf8')
+    const web = readFileSync(WEB, 'utf8')
+    expect(shim).toContain("const HEAD_CACHE = 'hc-instance-head'")
+    expect(shim).toContain('n !== HEAD_CACHE')
+    expect(shim).toContain("url.pathname === '/head'")
+    expect(web).not.toContain('hc-instance-head')
+    expect(readFileSync(DEV, 'utf8')).not.toContain('hc-instance-head')
+  })
 })
 
 describe('sniffBinaryContentType', () => {

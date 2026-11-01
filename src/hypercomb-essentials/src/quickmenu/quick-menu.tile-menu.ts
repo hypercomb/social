@@ -3,32 +3,36 @@
 // Where a quick menu sits when its subject is a tile, and when the selection
 // menu should be the thing on screen.
 //
-// The ring is drawn in the tile's own layer, just outside the hex. The six
-// directions are the options. The tile is not one of them: nothing is written
-// on it, and a click there is still a click on the tile.
+// The six directions are the options, each on a neighbouring cell of the hive's
+// own grid. The tile is not one of them: nothing is written on it, and a click
+// there is still a click on the tile.
 
 import { DIRECTION_UNIT, QUICK_MENU_RING, type QuickMenuDirection } from './quick-menu.types.js'
 
-/** Menu hex circumradius, as a fraction of the hive tile's. */
-export const MENU_RADIUS_RATIO = 0.56
-
-/** Centre-to-centre distance from the tile to an option, as a fraction of
- *  the hive tile's circumradius. The inner edge of an option lands just
- *  outside the tile, so the two do not share a click. */
-export const MENU_REACH_RATIO = 1.62
-
 export type MenuMetrics = {
+  /** The hive's tile size: its centre-to-flat distance (see show-cell). */
   readonly tileRadius: number
+  /** Centre-to-point of a drawn tile. */
   readonly radius: number
+  /** Centre-to-centre of two neighbouring cells. */
   readonly reach: number
+  readonly flat: boolean
 }
 
-export function menuMetrics(tileRadius: number): MenuMetrics {
-  return {
-    tileRadius,
-    radius: tileRadius * MENU_RADIUS_RATIO,
-    reach: tileRadius * MENU_REACH_RATIO,
-  }
+/** The hive's own grid, so every option lands exactly on a neighbouring cell
+ *  at exactly a tile's size. The shader draws `circumRadiusPx` as the apothem,
+ *  and axial neighbours sit √3 × spacing apart. */
+export function menuMetrics(tileRadius: number, spacing: number, flat = false): MenuMetrics {
+  return { tileRadius, radius: tileRadius / (Math.sqrt(3) / 2), reach: Math.sqrt(3) * spacing, flat }
+}
+
+/** Direction of a neighbouring cell. Flat-top cells sit 30° round from the
+ *  point-top angles the directions are named for. */
+export function cellUnit(direction: QuickMenuDirection, flat: boolean): { x: number; y: number } {
+  const unit = DIRECTION_UNIT[direction]
+  if (!flat) return unit
+  const cos = Math.sqrt(3) / 2
+  return { x: unit.x * cos - unit.y * 0.5, y: unit.x * 0.5 + unit.y * cos }
 }
 
 /**
@@ -43,9 +47,9 @@ export function slotUnder(
   _mode: 'gesture' | 'pick',
 ): QuickMenuDirection | null {
   let best: QuickMenuDirection | null = null
-  let bestDist = metrics.radius
+  let bestDist = metrics.reach / Math.sqrt(3)
   for (const direction of QUICK_MENU_RING) {
-    const unit = DIRECTION_UNIT[direction]
+    const unit = cellUnit(direction, metrics.flat)
     const d = Math.hypot(dx - unit.x * metrics.reach, dy - unit.y * metrics.reach)
     if (d <= bestDist) {
       best = direction
@@ -55,24 +59,22 @@ export function slotUnder(
   return best
 }
 
-/** Ctrl held over a tile raises the selection menu. A drag, a text field,
- *  the wand, the clipboard, a ctrl-icon, or a quick-menu gesture already
- *  in progress all mean something else. */
+/** Alt held over a tile raises the selection menu. A drag, the wand, the
+ *  clipboard, a ctrl-icon, or a quick-menu gesture already in progress all
+ *  mean something else. */
 export function selectionMenuWanted(input: {
-  ctrl: boolean
+  alt: boolean
   overTile: boolean
   buttonDown: boolean
-  typing: boolean
   wand: boolean
   clipboard: boolean
   gesture: boolean
   onCtrlIcon: boolean
   latchedOff: boolean
 }): boolean {
-  return input.ctrl
+  return input.alt
     && input.overTile
     && !input.buttonDown
-    && !input.typing
     && !input.wand
     && !input.clipboard
     && !input.gesture
@@ -84,15 +86,4 @@ export function selectionMenuWanted(input: {
  *  the hover action icons. */
 export function hoverActionsSuppressed(hasSelection: boolean, menuOnTile: boolean): boolean {
   return hasSelection || menuOnTile
-}
-
-export function isTypingTarget(target: EventTarget | null): boolean {
-  const node = target as HTMLElement | null
-  if (!node?.tagName) return false
-  const tag = node.tagName
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
-  // isContentEditable is true for a child of an editable region once it is in
-  // the document. contentEditable is the attribute on the region itself, and
-  // it is set even before the node is inserted.
-  return node.isContentEditable === true || node.contentEditable === 'true'
 }

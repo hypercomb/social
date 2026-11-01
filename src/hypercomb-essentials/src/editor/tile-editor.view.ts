@@ -1197,7 +1197,10 @@ export class TileEditorElement extends HTMLElement {
     const primary = this.#ref<HTMLButtonElement>('primary')
     if (primary) {
       const saving = service.saving || this.#title.saving || this.#busy
-      primary.disabled = saving
+      // Not disabled by the NAME writing: pressing Save blurs the name field, the blur
+      // starts that write, and a button that went disabled between press and release
+      // swallows the click — so Save took two. #save awaits the write (flush) itself.
+      primary.disabled = service.saving || this.#busy
       primary.textContent = saving ? t('editor.saving', 'saving…') : dirty ? t('editor.save', 'save') : t('editor.done', 'done')
     }
     this.#panel?.setAttribute('aria-busy', String(service.saving))

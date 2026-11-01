@@ -53,6 +53,20 @@
           <span class="chat-subject-hive">{{ 'agent.rail-root' | t }}</span>
         }
       </span>
+      @if (layerFace().views.length || layerFace().behaviors.length) {
+        <span class="chat-face">
+          @for (view of layerFace().views; track view) {
+            <button class="chat-face-chip" type="button"
+              (click)="openLayerView(view)"
+              [title]="'chat.header.view' | t: { name: view }"
+              [attr.aria-label]="'chat.header.view' | t: { name: view }">{{ view }}</button>
+          }
+          @for (behavior of layerFace().behaviors; track behavior) {
+            <span class="chat-face-chip chat-face-behavior"
+              [title]="'chat.header.behavior' | t: { name: behavior }">{{ behavior }}</span>
+          }
+        </span>
+      }
 
       <span class="chat-header-space"></span>
       <div class="chat-head-actions">
@@ -668,6 +682,175 @@
       </button>
     }
     </div>
+    <!-- THE COMPOSER STANDS UNDER THE THREAD IT ANSWERS, not under the whole
+         row: the workflow and Execution columns run the full height beside it. -->
+    <footer class="chat-foot"
+      hcDockInset="bottom" [hcDockInsetActive]="peeking()">
+
+      <!-- WHAT IS HAPPENING, pinned above the composer so a quiet stretch, a
+           retry, a token budget, and a wait on you each stay visible. The
+           transcript used to say "Thinking…" and then go blank between rounds. -->
+      @if (workBeacon(); as beacon) {
+        <div class="chat-beacon" role="status" aria-live="polite" [attr.data-state]="beacon.state">
+          <span class="chat-beacon-dot" aria-hidden="true"></span>
+          <span class="chat-beacon-text">{{ beacon.text }}</span>
+        </div>
+      }
+      <div class="chat-inputrow">
+        <div class="chat-ask">
+        <textarea #input class="chat-input" rows="1"
+          placeholder=""
+          [attr.aria-label]="askView().text"
+          [attr.title]="askView().ideas.length > 1 ? 'Up or down for another idea' : null"
+          (keydown)="onInputKey($event)"
+          (paste)="onComposerPaste($event)"
+          (input)="onInput($event)"></textarea>
+        @if (composerBlank()) {
+          @for (hint of askHint(); track hint.id) {
+            <span class="chat-ask-ghost" aria-hidden="true"
+              [attr.data-many]="hint.many ? '' : null">{{ hint.text }}</span>
+          }
+        }
+        </div>
+        <!-- STOP means two different acts, because the tiers fail differently:
+             a live host stream is aborted, a queued bridge ask is withdrawn
+             from the pool. The label says which one this press would be. -->
+        @if (canStop()) {
+          <button class="chat-send chat-stop" type="button" (click)="stop()"
+            [title]="(hostStreaming() ? 'chat.stop' : 'chat.withdraw') | t"
+            [attr.aria-label]="(hostStreaming() ? 'chat.stop' : 'chat.withdraw') | t">
+            <span class="mat-sym" aria-hidden="true">stop</span>
+          </button>
+        } @else {
+          <button class="chat-send" type="button" (click)="send()"
+            [class.chat-send-idle]="composerBlank()"
+            [title]="'chat.send' | t" [attr.aria-label]="'chat.send' | t">
+            <span class="mat-sym" aria-hidden="true">arrow_upward</span>
+          </button>
+        }
+      </div>
+      <div class="chat-under">
+        <!-- ONE DROP AREA, always open. A long rectangle holding a single list
+             of signature-related tiles: everything the request should READ.
+             What it may CHANGE is not in here and never was a choice — it is
+             the tile whose conversation this is.
+
+             The rectangle is present whether or not it holds anything, because
+             a drop target that only appears once you are already dragging is a
+             target nobody discovers. -->
+        <div class="chat-payload" role="group" [attr.aria-label]="'chat.payload' | t"
+          [class.over]="dragOverReference()"
+          (dragover)="onDragOver($event)"
+          (dragleave)="onDragLeave()"
+          (drop)="onDropReference($event)">
+          <!-- THE WAY IN. The clipboard is where things are gathered from
+               anywhere in the hive; this icon is how you reach it without
+               crossing the screen to its panel. One click on an item in the
+               flyout pastes it onto the shelf. -->
+          <button class="chat-clip" type="button"
+            [class.on]="clipboardOpen()"
+            [class.holding]="clipboardHeld().length"
+            (click)="toggleClipboardShelf()"
+            [title]="'chat.clipboard.show' | t: { count: clipboardHeld().length }"
+            [attr.aria-expanded]="clipboardOpen()"
+            [attr.aria-label]="'chat.clipboard.show' | t: { count: clipboardHeld().length }">
+            <span class="mat-sym" aria-hidden="true">content_paste</span>
+            @if (clipboardHeld().length) {
+              <span class="chat-clip-count">{{ clipboardHeld().length }}</span>
+            }
+          </button>
+
+          <!-- THE REFERENCES — supporting layers and meta contexts, there to
+               be READ, never changed. Each reads as a small sentence: the
+               tile's picture shrunk to a MARK, its name, then the branch it
+               hangs off. A wall of squares answered "how many" and never
+               "which", and the whole point of putting references side by side
+               is seeing WHAT is being related to what.
+               Draggable: pulling one off the shelf sends it back to the
+               clipboard, and the × drops it from the request outright. -->
+          @for (pick of references(); track pick.key; let i = $index) {
+            <span class="chat-box chat-box-context filled"
+              draggable="true"
+              (dragstart)="onReferenceDragStart($event, i)"
+              (dragend)="onReferenceDragEnd()"
+              [title]="'chat.context.one' | t: { tile: pick.name }">
+              <!-- THE PICTURE IS THE WAY TO SEE THE PICTURE. A mark this small
+                   answers WHICH and never WHAT, so pressing it opens the thing
+                   full size where it already is. The rest of the box is
+                   unchanged: the name still reads, the × still drops it, and
+                   dragging it off still sends it back to the clipboard —
+                   nothing that already meant something means something else. -->
+              @if (contextThumbs()[pick.key]; as url) {
+                <button class="chat-box-look" type="button"
+                  (click)="openPicture(pick, $event)"
+                  [title]="'chat.reference.look' | t: { tile: pick.name }"
+                  [attr.aria-label]="'chat.reference.look' | t: { tile: pick.name }">
+                  <img class="chat-box-img" [src]="url" alt="">
+                </button>
+              } @else {
+                <span class="mat-sym chat-box-glyph" aria-hidden="true">hexagon</span>
+              }
+              <span class="chat-box-name">{{ pick.name }}</span>
+              @if (isPicture(pick)) {
+                <!-- A picture has no branch to come from; what it has is a
+                     weight, and that is what belongs in the same slot. -->
+                <span class="chat-box-branch">{{ 'chat.reference.picture' | t: { size: sizeOf(pick) } }}</span>
+              } @else if (branchOf(pick); as branch) {
+                <span class="chat-box-branch" [title]="pathOf(pick)">{{ branch }}</span>
+              }
+              @if (versionOf(pick); as version) {
+                <a class="chat-box-version" [href]="version.href" target="_blank" rel="noopener"
+                  (click)="$event.stopPropagation()"
+                  [title]="'chat.version.open' | t">{{ version.label }}</a>
+                <button class="chat-box-deploy" type="button"
+                  (click)="deployVersion($event, version.href)"
+                  [title]="'chat.version.deploy' | t"
+                  [attr.aria-label]="'chat.version.deploy' | t">
+                  <span class="mat-sym" aria-hidden="true">rocket_launch</span>
+                </button>
+              }
+              <button class="chat-box-off" type="button"
+                (click)="removeContext(i)"
+                [title]="'chat.reference.off' | t: { tile: pick.name }"
+                [attr.aria-label]="'chat.reference.off' | t: { tile: pick.name }">×</button>
+            </span>
+          }
+
+          @if (!references().length) {
+            <span class="chat-payload-hint">{{ 'chat.reference.empty' | t }}</span>
+          }
+        </div>
+
+        <!-- THE CLIPBOARD, WHERE THE COMPOSER IS. Not a second clipboard: the
+             same entries the panel lists, shown here so a reference is one
+             click away. Clicking one moves it onto the shelf. -->
+        @if (clipboardOpen()) {
+          <div class="chat-clip-shelf" role="listbox" [attr.aria-label]="'chat.clipboard.title' | t">
+            @for (pick of clipboardHeld(); track pick.key) {
+              <button class="chat-clip-item" type="button" role="option"
+                [attr.aria-selected]="false"
+                (click)="pasteReference(pick)"
+                [title]="'chat.clipboard.paste' | t: { tile: pick.name }">
+                @if (contextThumbs()[pick.key]; as url) {
+                  <img class="chat-clip-img" [src]="url" alt="">
+                } @else {
+                  <span class="mat-sym chat-clip-glyph" aria-hidden="true">hexagon</span>
+                }
+                <span class="chat-clip-text">
+                  <span class="chat-clip-name">{{ pick.name }}</span>
+                  @if (branchOf(pick); as branch) {
+                    <span class="chat-clip-branch" [title]="pathOf(pick)">{{ branch }}</span>
+                  }
+                </span>
+              </button>
+            } @empty {
+              <span class="chat-clip-empty">{{ 'chat.clipboard.empty' | t }}</span>
+            }
+          </div>
+        }
+        <span class="chat-under-keys">{{ 'chat.compose.keys' | t }}</span>
+      </div>
+    </footer>
     </div>
 
     <!-- THE SIDEBAR — the conversation's workflow, working its way down
@@ -841,6 +1024,21 @@
                 }
                 @if (item.kind === 'node' && item.rows.length) {
                   <span class="chat-route-meta">{{ 'chat.route.card.messages' | t: { range: routeTurnRange(item.rows) } }}</span>
+                }
+                @if (item.kind === 'node' && item.node?.state === 'done' && stepVersions(item.rows, item.node?.card?.outcome).length) {
+                  <span class="chat-route-versions">
+                    @for (version of stepVersions(item.rows, item.node?.card?.outcome); track version.href) {
+                      <a class="chat-version" [href]="version.href" target="_blank" rel="noopener"
+                        (click)="$event.stopPropagation()"
+                        [title]="'chat.version.open' | t">{{ version.label }}</a>
+                      <button class="chat-version-deploy" type="button"
+                        (click)="deployVersion($event, version.href)"
+                        [title]="'chat.version.deploy' | t"
+                        [attr.aria-label]="'chat.version.deploy' | t">
+                        <span class="mat-sym" aria-hidden="true">rocket_launch</span>
+                      </button>
+                    }
+                  </span>
                 }
                 <!-- The exchange's pieces as marks, in the order work → replied
                      → question: ONE work mark with every attempt counted, a
@@ -1188,162 +1386,6 @@
       </aside>
     }
     </div>
-
-    <footer class="chat-foot"
-      hcDockInset="bottom" [hcDockInsetActive]="peeking()">
-
-      <!-- WHAT IS HAPPENING, pinned above the composer so a quiet stretch, a
-           retry, a token budget, and a wait on you each stay visible. The
-           transcript used to say "Thinking…" and then go blank between rounds. -->
-      @if (workBeacon(); as beacon) {
-        <div class="chat-beacon" role="status" aria-live="polite" [attr.data-state]="beacon.state">
-          <span class="chat-beacon-dot" aria-hidden="true"></span>
-          <span class="chat-beacon-text">{{ beacon.text }}</span>
-        </div>
-      }
-      <div class="chat-inputrow">
-        <div class="chat-ask">
-        <textarea #input class="chat-input" rows="1"
-          placeholder=""
-          [attr.aria-label]="askView().text"
-          [attr.title]="askView().ideas.length > 1 ? 'Up or down for another idea' : null"
-          (keydown)="onInputKey($event)"
-          (paste)="onComposerPaste($event)"
-          (input)="onInput($event)"></textarea>
-        @if (composerBlank()) {
-          @for (hint of askHint(); track hint.id) {
-            <span class="chat-ask-ghost" aria-hidden="true"
-              [attr.data-many]="hint.many ? '' : null">{{ hint.text }}</span>
-          }
-        }
-        </div>
-        <!-- STOP means two different acts, because the tiers fail differently:
-             a live host stream is aborted, a queued bridge ask is withdrawn
-             from the pool. The label says which one this press would be. -->
-        @if (canStop()) {
-          <button class="chat-send chat-stop" type="button" (click)="stop()"
-            [title]="(hostStreaming() ? 'chat.stop' : 'chat.withdraw') | t"
-            [attr.aria-label]="(hostStreaming() ? 'chat.stop' : 'chat.withdraw') | t">
-            <span class="mat-sym" aria-hidden="true">stop</span>
-          </button>
-        } @else {
-          <button class="chat-send" type="button" (click)="send()"
-            [title]="'chat.send' | t" [attr.aria-label]="'chat.send' | t">
-            <span class="mat-sym" aria-hidden="true">arrow_upward</span>
-          </button>
-        }
-      </div>
-      <div class="chat-under">
-        <!-- ONE DROP AREA, always open. A long rectangle holding a single list
-             of signature-related tiles: everything the request should READ.
-             What it may CHANGE is not in here and never was a choice — it is
-             the tile whose conversation this is.
-
-             The rectangle is present whether or not it holds anything, because
-             a drop target that only appears once you are already dragging is a
-             target nobody discovers. -->
-        <div class="chat-payload" role="group" [attr.aria-label]="'chat.payload' | t"
-          [class.over]="dragOverReference()"
-          (dragover)="onDragOver($event)"
-          (dragleave)="onDragLeave()"
-          (drop)="onDropReference($event)">
-          <!-- THE WAY IN. The clipboard is where things are gathered from
-               anywhere in the hive; this icon is how you reach it without
-               crossing the screen to its panel. One click on an item in the
-               flyout pastes it onto the shelf. -->
-          <button class="chat-clip" type="button"
-            [class.on]="clipboardOpen()"
-            [class.holding]="clipboardHeld().length"
-            (click)="toggleClipboardShelf()"
-            [title]="'chat.clipboard.show' | t: { count: clipboardHeld().length }"
-            [attr.aria-expanded]="clipboardOpen()"
-            [attr.aria-label]="'chat.clipboard.show' | t: { count: clipboardHeld().length }">
-            <span class="mat-sym" aria-hidden="true">content_paste</span>
-            @if (clipboardHeld().length) {
-              <span class="chat-clip-count">{{ clipboardHeld().length }}</span>
-            }
-          </button>
-
-          <!-- THE REFERENCES — supporting layers and meta contexts, there to
-               be READ, never changed. Each reads as a small sentence: the
-               tile's picture shrunk to a MARK, its name, then the branch it
-               hangs off. A wall of squares answered "how many" and never
-               "which", and the whole point of putting references side by side
-               is seeing WHAT is being related to what.
-               Draggable: pulling one off the shelf sends it back to the
-               clipboard, and the × drops it from the request outright. -->
-          @for (pick of references(); track pick.key; let i = $index) {
-            <span class="chat-box chat-box-context filled"
-              draggable="true"
-              (dragstart)="onReferenceDragStart($event, i)"
-              (dragend)="onReferenceDragEnd()"
-              [title]="'chat.context.one' | t: { tile: pick.name }">
-              <!-- THE PICTURE IS THE WAY TO SEE THE PICTURE. A mark this small
-                   answers WHICH and never WHAT, so pressing it opens the thing
-                   full size where it already is. The rest of the box is
-                   unchanged: the name still reads, the × still drops it, and
-                   dragging it off still sends it back to the clipboard —
-                   nothing that already meant something means something else. -->
-              @if (contextThumbs()[pick.key]; as url) {
-                <button class="chat-box-look" type="button"
-                  (click)="openPicture(pick, $event)"
-                  [title]="'chat.reference.look' | t: { tile: pick.name }"
-                  [attr.aria-label]="'chat.reference.look' | t: { tile: pick.name }">
-                  <img class="chat-box-img" [src]="url" alt="">
-                </button>
-              } @else {
-                <span class="mat-sym chat-box-glyph" aria-hidden="true">hexagon</span>
-              }
-              <span class="chat-box-name">{{ pick.name }}</span>
-              @if (isPicture(pick)) {
-                <!-- A picture has no branch to come from; what it has is a
-                     weight, and that is what belongs in the same slot. -->
-                <span class="chat-box-branch">{{ 'chat.reference.picture' | t: { size: sizeOf(pick) } }}</span>
-              } @else if (branchOf(pick); as branch) {
-                <span class="chat-box-branch" [title]="pathOf(pick)">{{ branch }}</span>
-              }
-              <button class="chat-box-off" type="button"
-                (click)="removeContext(i)"
-                [title]="'chat.reference.off' | t: { tile: pick.name }"
-                [attr.aria-label]="'chat.reference.off' | t: { tile: pick.name }">×</button>
-            </span>
-          }
-
-          @if (!references().length) {
-            <span class="chat-payload-hint">{{ 'chat.reference.empty' | t }}</span>
-          }
-        </div>
-
-        <!-- THE CLIPBOARD, WHERE THE COMPOSER IS. Not a second clipboard: the
-             same entries the panel lists, shown here so a reference is one
-             click away. Clicking one moves it onto the shelf. -->
-        @if (clipboardOpen()) {
-          <div class="chat-clip-shelf" role="listbox" [attr.aria-label]="'chat.clipboard.title' | t">
-            @for (pick of clipboardHeld(); track pick.key) {
-              <button class="chat-clip-item" type="button" role="option"
-                [attr.aria-selected]="false"
-                (click)="pasteReference(pick)"
-                [title]="'chat.clipboard.paste' | t: { tile: pick.name }">
-                @if (contextThumbs()[pick.key]; as url) {
-                  <img class="chat-clip-img" [src]="url" alt="">
-                } @else {
-                  <span class="mat-sym chat-clip-glyph" aria-hidden="true">hexagon</span>
-                }
-                <span class="chat-clip-text">
-                  <span class="chat-clip-name">{{ pick.name }}</span>
-                  @if (branchOf(pick); as branch) {
-                    <span class="chat-clip-branch" [title]="pathOf(pick)">{{ branch }}</span>
-                  }
-                </span>
-              </button>
-            } @empty {
-              <span class="chat-clip-empty">{{ 'chat.clipboard.empty' | t }}</span>
-            }
-          </div>
-        }
-        <span class="chat-under-keys">{{ 'chat.compose.keys' | t }}</span>
-      </div>
-    </footer>
     </div>
     <!-- WHERE THE PROVIDERS CONSOLE STANDS. It is the reading column's sibling,
          so it spans the complete remaining height while the composer remains

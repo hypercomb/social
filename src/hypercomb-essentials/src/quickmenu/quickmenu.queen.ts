@@ -2,10 +2,10 @@
 //
 // `/menu` — summon the seven-hexagon quick menu without the gesture.
 //
-// The gesture (middle-mouse hold, or long-press on touch) is the real
-// interface; this exists so the ring is discoverable from the command line,
-// reachable on hardware with no middle button, and inspectable — `/menu
-// list` prints the registered vocabularies and which surface each claims.
+// The gesture (hold alt over a tile, or long-press on touch) is the real
+// interface; this exists so the ring is discoverable from the command line
+// and inspectable — `/menu list` prints the registered vocabularies and which
+// surface each claims.
 //
 // Opened this way the ring is STICKY: the pointer is free, aiming still
 // works by direction from the ring's centre, a click fires what is lit, and

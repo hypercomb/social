@@ -13,7 +13,7 @@ const get = <T,>(key: string): T | undefined =>
 
 /** A pathway (`menu`) is not a verb — the caller changes rings instead.
  *  Everything else runs here. */
-export function fireQuickMenuSlot(slot: QuickMenuSlot): void {
+export function fireQuickMenuSlot(slot: QuickMenuSlot, subject?: string): void {
   const action = slot.action
   if (action.kind === 'menu') return
   if (action.kind === 'command') {
@@ -28,7 +28,9 @@ export function fireQuickMenuSlot(slot: QuickMenuSlot): void {
     return
   }
   if (action.kind === 'effect') {
-    EffectBus.emit(action.effect, action.payload ?? {})
+    // The tile an alt menu was raised over rides along, for verbs that act on it.
+    const payload = (action.payload ?? {}) as Record<string, unknown>
+    EffectBus.emit(action.effect, subject ? { ...payload, subject } : payload)
     return
   }
   if (action.kind === 'key') {

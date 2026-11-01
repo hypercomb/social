@@ -1,5 +1,7 @@
 # Wave view — hold Alt to dive into the layers under a tile
 
+> **Alt is no longer the dive's door (jwize, 2026-10-31).** Holding Alt over a tile raises the quick menu; ctrl stays selection. The dive and its painting remain, with no gesture until it is given a new way in (`ALT_DIVES` in `wave-view.drone.ts`). What follows describes the gesture as it stood, and `scripts/drive-wave-dive.cjs` no longer applies.
+
 Hold **Alt** with the pointer over a tile and the page is replaced by what is
 inside it: the tile's children take over the grid, at full size, in the same
 slots a real layer would put them in. **Alt + wheel** goes a generation deeper

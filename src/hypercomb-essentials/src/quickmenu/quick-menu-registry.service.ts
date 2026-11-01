@@ -28,7 +28,7 @@
 // IoC key: @diamondcoreprocessor.com/QuickMenuRegistry
 
 import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import type { QuickMenuDefinition } from './quick-menu.types.js'
+import type { QuickMenuDefinition, QuickMenuSlot } from './quick-menu.types.js'
 
 const get = <T,>(key: string): T | undefined =>
   (globalThis as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
@@ -45,6 +45,15 @@ type ViewModeLike = { mode?: string }
 //
 // Every action below names a slash behaviour that ships with the hive, so
 // the seeded menus work on a cold install with nothing adopted.
+
+const cmd = (direction: QuickMenuSlot['direction'], label: string, command: string, labelKey?: string): QuickMenuSlot =>
+  ({ direction, label, ...(labelKey ? { labelKey } : {}), action: { kind: 'command', command } })
+
+const key = (direction: QuickMenuSlot['direction'], label: string, command: string, labelKey: string): QuickMenuSlot =>
+  ({ direction, label, labelKey, action: { kind: 'effect', effect: 'keymap:invoke', payload: { cmd: command } } })
+
+const group = (direction: QuickMenuSlot['direction'], label: string, menu: string): QuickMenuSlot =>
+  ({ direction, label, action: { kind: 'menu', menu } })
 
 const ROOT: QuickMenuDefinition = {
   name: ROOT_MENU,
@@ -159,12 +168,81 @@ const SELECTION: QuickMenuDefinition = {
   contexts: [],
   slots: [
     { direction: 'centre', label: 'done', labelKey: 'quickmenu.done', action: { kind: 'effect', effect: 'select:done', payload: {} } },
-    { direction: 'east', label: 'tags', labelKey: 'quickmenu.tags', action: { kind: 'command', command: 'tags' } },
-    { direction: 'southeast', label: 'copy', labelKey: 'quickmenu.copy', action: { kind: 'effect', effect: 'keymap:invoke', payload: { cmd: 'clipboard.copy' } } },
-    { direction: 'southwest', label: 'cut', labelKey: 'quickmenu.cut', action: { kind: 'effect', effect: 'keymap:invoke', payload: { cmd: 'clipboard.cut' } } },
-    { direction: 'west', label: 'remove', labelKey: 'quickmenu.remove', action: { kind: 'command', command: 'remove' } },
-    { direction: 'northwest', label: 'paste', labelKey: 'quickmenu.paste', action: { kind: 'effect', effect: 'keymap:invoke', payload: { cmd: 'clipboard.paste' } } },
-    { direction: 'northeast', label: 'all', labelKey: 'quickmenu.all', action: { kind: 'effect', effect: 'select:all', payload: {} } },
+    // The alt menu belongs to the tile under the pointer, so NORTHEAST is
+    // select — the one verb every tile has — and the other five are GROUPS of
+    // the common behaviours. A group's way back is the direction opposite the
+    // one that led in, so each group holds five verbs.
+    { direction: 'northeast', label: 'select', action: { kind: 'effect', effect: 'select:toggle', payload: {} } },
+    group('east', 'edit', 'selection:edit'),
+    group('southeast', 'organize', 'selection:organize'),
+    group('southwest', 'view', 'selection:view'),
+    group('west', 'go', 'selection:go'),
+    group('northwest', 'share', 'selection:share'),
+  ],
+}
+
+const SELECTION_EDIT: QuickMenuDefinition = {
+  name: 'selection:edit',
+  title: 'Edit',
+  contexts: [],
+  slots: [
+    key('east', 'copy', 'clipboard.copy', 'quickmenu.copy'),
+    key('southeast', 'cut', 'clipboard.cut', 'quickmenu.cut'),
+    key('southwest', 'paste', 'clipboard.paste', 'quickmenu.paste'),
+    cmd('northwest', 'remove', 'remove', 'quickmenu.remove'),
+    cmd('northeast', 'hide', 'hide'),
+  ],
+}
+
+const SELECTION_ORGANIZE: QuickMenuDefinition = {
+  name: 'selection:organize',
+  title: 'Organize',
+  contexts: [],
+  slots: [
+    cmd('east', 'tags', 'tags', 'quickmenu.tags'),
+    cmd('southeast', 'arrange', 'arrange'),
+    cmd('southwest', 'groups', 'groups'),
+    { direction: 'west', label: 'all', labelKey: 'quickmenu.all', action: { kind: 'effect', effect: 'select:all', payload: {} } },
+    { direction: 'northeast', label: 'done', labelKey: 'quickmenu.done', action: { kind: 'effect', effect: 'select:done', payload: {} } },
+  ],
+}
+
+const SELECTION_VIEW: QuickMenuDefinition = {
+  name: 'selection:view',
+  title: 'View',
+  contexts: [],
+  slots: [
+    cmd('east', 'fit', 'fit', 'quickmenu.fit'),
+    cmd('southeast', 'theme', 'theme', 'quickmenu.theme'),
+    cmd('southwest', 'layout', 'layout', 'quickmenu.layout'),
+    cmd('west', 'present', 'present', 'quickmenu.present'),
+    cmd('northwest', 'website', 'website', 'quickmenu.website'),
+  ],
+}
+
+const SELECTION_GO: QuickMenuDefinition = {
+  name: 'selection:go',
+  title: 'Go',
+  contexts: [],
+  slots: [
+    cmd('southeast', 'history', 'history', 'quickmenu.history'),
+    cmd('southwest', 'collections', 'collections', 'quickmenu.collections'),
+    cmd('west', 'tree', 'tree', 'quickmenu.tree'),
+    cmd('northwest', 'help', 'help', 'quickmenu.help'),
+    cmd('northeast', 'find', 'find'),
+  ],
+}
+
+const SELECTION_SHARE: QuickMenuDefinition = {
+  name: 'selection:share',
+  title: 'Share',
+  contexts: [],
+  slots: [
+    cmd('east', 'publish', 'publish'),
+    cmd('southwest', 'keys', 'keys'),
+    cmd('west', 'invite', 'invite'),
+    cmd('northwest', 'follow', 'follow'),
+    cmd('northeast', 'republish', 'republish'),
   ],
 }
 
@@ -173,7 +251,7 @@ export class QuickMenuRegistry extends EventTarget {
 
   constructor() {
     super()
-    for (const definition of [ROOT, ROOT_VIEW, WORKFLOW, WEBSITE, SLIDES, SELECTION]) {
+    for (const definition of [ROOT, ROOT_VIEW, WORKFLOW, WEBSITE, SLIDES, SELECTION, SELECTION_EDIT, SELECTION_ORGANIZE, SELECTION_VIEW, SELECTION_GO, SELECTION_SHARE]) {
       this.#definitions.set(definition.name, definition)
     }
   }

@@ -88,6 +88,12 @@ describe('commitSelection', () => {
     const last = w.applied[w.applied.length - 1]!
     expect(last).toMatchObject({ trunk: outcome.rootSig, picks: {} })
     expect(w.read(w.trunk)['cells']).toEqual([w.games, w.notes])
+    expect(outcome.minified).toMatch(/^[a-f0-9]{64}$/)
+    expect(outcome.minified).not.toBe(outcome.rootSig)
+    expect(w.entries.get('00000001')).toBe(formatMember(outcome.rootSig, 'essentials'))
+    const derived = w.read(outcome.minified!)
+    expect(derived['derivedFrom']).toBe(outcome.rootSig)
+    expect(derived['derivation']).toMatch(/^[a-f0-9]{64}$/)
   })
 
   it('leaves a turned-off path out of the new root — unreachable, not deleted — and takes it off the off list', async () => {

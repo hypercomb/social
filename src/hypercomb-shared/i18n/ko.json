@@ -2918,5 +2918,9 @@
   "serve.failed": "{page}을(를) 제공할 수 없습니다: {reason}",
   "serve.not-serving": "{domain}은(는) 여기에서 아무것도 열지 않습니다",
   "serve.off": "{domain}은(는) 더 이상 페이지를 열지 않습니다",
-  "serve.on": "{domain}이(가) 이제 {page}을(를) 엽니다. 지금 상태로 봉인되었습니다 — 변경 후 다시 실행하세요"
+  "serve.on": "{domain}이(가) 이제 {page}을(를) 엽니다. 지금 상태로 봉인되었습니다 — 변경 후 다시 실행하세요",
+  "chat.version.open": "Open this version",
+  "chat.version.deploy": "Deploy this version",
+  "chat.header.view": "Open the {name} view",
+  "chat.header.behavior": "Behavior on this layer: {name}"
 }
