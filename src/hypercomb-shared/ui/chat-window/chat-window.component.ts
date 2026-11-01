@@ -133,6 +133,7 @@ import { hiveSentenceHtml, hiveSentenceParts, sentenceAccent, type SentencePart,
 import { isHostRunLive, liveHostConvos, liveHostRun, startHostRun, stopHostRun, type HostAsk } from './host-stream'
 import { askIdeasOf } from './ask-ideas'
 import { hiveConversationMove } from './hive-conversation'
+import { groupRuns } from './chat-runs'
 import { resourceVersion, versionsIn, type ChatVersion } from './chat-versions'
 import { owedAfter, owedCue, pageChangeStillOwed, workBeaconOf, type LegEnd, type OwedLike, type OwedPatchLike, type WorkBeaconOwed, type WorkBeaconState, type WorkPending } from './owed-step'
 import {
@@ -2941,6 +2942,12 @@ export class ChatWindowComponent implements OnDestroy {
         question: settled[index],
       }
     })
+  })
+
+  /** The thread as it is drawn: runs of participant messages, each reply alone. */
+  readonly threadRuns = computed(() => {
+    const rules = this.stepRules()
+    return groupRuns(this.rendered(), index => rules.has(index))
   })
 
   // ── THE RESPONSE WIZARD — a question asked inside a reply ───────────────
