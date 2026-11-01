@@ -21,10 +21,9 @@ type HistoryLike = {
   getLayerBySig: (sig: string) => Promise<LayerLike | null>
 }
 type CommitterLike = {
-  update: (
+  commitChildrenDeltas: (
     segments: readonly string[],
-    layer: { [slot: string]: unknown },
-    nameSlots?: ReadonlySet<string>,
+    changes: { removes?: readonly { sig?: string; label?: string }[] },
   ) => Promise<string>
 }
 
@@ -159,22 +158,13 @@ export class RemoveCellBehavior implements CommandLineBehavior {
     for (const { segments, names } of removalsByParent.values()) {
       const parent = await resolveParentLayer(history, segments, cursor?.currentLayerSig, baseSegments)
       if (!parent) continue
-      const childSigs = Array.isArray(parent.children) ? parent.children : []
-      const targetSet = new Set(names)
-      const survivorSigs: string[] = []
-      for (const sig of childSigs) {
-        const child = await history.getLayerBySig(String(sig))
-        // Drop only sigs we can positively identify as a target; keep everything
-        // else (incl. an unreadable sibling) so a cold miss never wipes a tile.
-        if (child && typeof child.name === 'string' && targetSet.has(child.name)) continue
-        survivorSigs.push(String(sig))
-      }
       // Eager visual unmount BEFORE awaiting the commit; `viaUpdate` so the
       // committer's own cell:removed listener doesn't queue a second marker.
       for (const name of names) EffectBus.emit('cell:removed', { cell: name, segments, viaUpdate: true })
-      // Empty nameSlots → SET `children` to these exact sigs (no re-resolution,
-      // no auto-mint); other slots hydrate from the previous layer.
-      await committer.update(segments, { children: survivorSigs }, new Set<string>())
+      // Delta, not a SET: the removes are resolved by name against the LIVE head
+      // inside the commit queue, so a child appended concurrently is never
+      // dropped by a stale survivor snapshot, and no survivor is re-resolved.
+      await committer.commitChildrenDeltas(segments, { removes: names.map(label => ({ label })) })
     }
 
     await new hypercomb().act()

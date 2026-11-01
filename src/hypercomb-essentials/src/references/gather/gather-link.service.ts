@@ -67,7 +67,7 @@ export type OwnTile = {
 export type OwnReview = { readonly group: readonly string[]; readonly tiles: readonly OwnTile[] }
 
 type CommitterLike = {
-  importTree?(updates: { segments: readonly string[]; layer: { name?: string; [slot: string]: unknown } }[]): Promise<void>
+  importTree?(updates: { segments: readonly string[]; layer: { name?: string; [slot: string]: unknown } }[], nameSlots?: ReadonlySet<string>, opts?: { replace?: boolean }): Promise<void>
   commitChildrenDeltas?(segments: readonly string[], changes: { removes?: readonly { sig?: string; label?: string }[]; appends?: readonly string[] }): Promise<string>
   settled?(): Promise<void>
 }
@@ -385,27 +385,34 @@ export class GatherLinkService {
           console.warn(`[gather] "${tile.name}" left in place — ${report.dropped} of its tiles could not be read here`)
           continue
         }
-        await committer.importTree(await replacingWhatWasThere(history, lineage?.domain, moved))
+        await committer.importTree(await replacingWhatWasThere(history, lineage?.domain, moved), undefined, { replace: true })
       }
       // The page stops listing its own copy, then gathers the group's. Its
       // copy is remembered so a refused reference puts it straight back — a
       // gather never leaves a tile listed nowhere.
       const own = await childLayerOf(history, pageLayer, tile.name)
       await committer.commitChildrenDeltas(pageRoute, { removes: [{ label: tile.name }] })
-      await committer.settled?.()
-      const placed = await refs.place({
-        name: tile.name, sourceSegments: memberRoute, parentSegments: pageRoute,
-      }).catch((error: unknown) => {
-        // A throw is a refusal too, and says so — never a silent put-back.
-        EffectBus.emit('reference:refused', { name: tile.name, source: memberRoute, parent: pageRoute, reason: `it failed: ${error instanceof Error ? error.message : String(error)}` })
-        return null
-      })
-      if (placed) {
-        // The reference now stands where the page's copy was: give it exactly
-        // the overrides that keep it looking as that copy did.
-        if (pageOverrides) {
+      // Whatever throws between the remove and the reference standing, the
+      // page's copy goes straight back (below) — never a tile listed nowhere.
+      let placed: string | null = null
+      try {
+        await committer.settled?.()
+        placed = await refs.place({
+          name: tile.name, sourceSegments: memberRoute, parentSegments: pageRoute,
+        }).catch((error: unknown) => {
+          // A throw is a refusal too, and says so — never a silent put-back.
+          EffectBus.emit('reference:refused', { name: tile.name, source: memberRoute, parent: pageRoute, reason: `it failed: ${error instanceof Error ? error.message : String(error)}` })
+          return null
+        })
+        if (placed && pageOverrides) {
+          // The reference now stands where the page's copy was: give it exactly
+          // the overrides that keep it looking as that copy did.
           await writeTilePropertiesAt(pageRoute, tile.name, pageOverrides, { onlyHere: true, replace: true })
         }
+      } catch (error) {
+        console.warn(`[gather] "${tile.name}" failed after leaving the page`, error)
+      }
+      if (placed) {
         gathered.push(tile.name)
         continue
       }

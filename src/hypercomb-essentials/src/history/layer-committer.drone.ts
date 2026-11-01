@@ -13,7 +13,7 @@
 // of truth; folders on disk are incidental. Deduplication is automatic
 // — commitLayer short-circuits when assembled bytes match the bag's
 // current head.
-import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, combineBags, type I18nProvider } from '@hypercomb/core'
 import type { HistoryService } from './history.service.js'
 import { ROOT_NAME } from './history.service.js'
 import type { HistoryCursorService } from './history-cursor.service.js'
@@ -161,6 +161,15 @@ export class RewoundCommitError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'RewoundCommitError'
+  }
+}
+
+/** A write refused because the head it would build on cannot be read yet
+ *  (cold adopted/swarm content). Retryable: the layer heals from the host. */
+export class ColdHeadError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ColdHeadError'
   }
 }
 
@@ -756,6 +765,55 @@ export class LayerCommitter {
     machine.apply({ slot: ORDER_SLOT, op: 'set', sigs: next === null ? [] : [next] })
   }
 
+  /** Read a location's head STRICTLY. A head sig whose bytes are not local
+   *  (adopted / swarm content not yet arrived) is awaited from the host once;
+   *  if it still cannot be read the commit is REFUSED (ColdHeadError) — an
+   *  empty machine committed over it would unlink every adopted child. */
+  async #readHead(history: HistoryService, locSig: string, name: string) {
+    const prevSig = await history.latestMarkerSigFor(locSig, name)
+    const baseMarker = history.headMarkerOf?.(locSig) ?? null
+    let prevLayer = prevSig ? await history.getLayerBySig(prevSig) : null
+    if (!prevLayer && prevSig) {
+      const store = get<{ fetchLayerFromHost?: (sig: string, o?: { bypassMissWindow?: boolean }) => Promise<Uint8Array | null> }>('@hypercomb.social/Store')
+      try { await store?.fetchLayerFromHost?.(prevSig, { bypassMissWindow: true }) } catch { /* refused below */ }
+      prevLayer = await history.getLayerBySig(prevSig)
+      if (!prevLayer) throw new ColdHeadError(`head ${prevSig.slice(0, 8)} of "${name}" is not readable yet; nothing was committed`)
+    }
+    return { prevSig, baseMarker, prevLayer }
+  }
+
+  /** Fold `incoming` into the machine's hydrated head without losing anything
+   *  the owner has (core combineLayers). The properties blob is merged at the
+   *  BLOB level (own keys win, incoming fills absent keys, one sig written);
+   *  an unreadable blob leaves the owner's standing. */
+  async #combineInto(history: HistoryService, machine: LayerMachine, incoming: Record<string, unknown>): Promise<void> {
+    const names = new Map<string, string>()
+    const sigs = new Set<string>()
+    for (const s of machine.getSlot('children')) sigs.add(String(s))
+    const inKids = incoming['children']
+    if (Array.isArray(inKids)) for (const s of inKids) sigs.add(String(s))
+    await Promise.all([...sigs].map(async sig => {
+      const n = (await history.getLayerBySig(sig))?.name
+      if (typeof n === 'string' && n) names.set(sig, n)
+    }))
+    const res = machine.combine(incoming as Parameters<LayerMachine['combine']>[0], { nameOf: s => names.get(s) })
+    const store = get<{ getResource(sig: string): Promise<Blob | null>; putResource(blob: Blob): Promise<string> }>('@hypercomb.social/Store')
+    if (!store?.getResource || !store.putResource) return
+    for (const b of res.blobs) {
+      if (b.slot !== 'properties') continue
+      try {
+        const [ownBlob, inBlob] = await Promise.all([store.getResource(b.own), store.getResource(b.incoming)])
+        if (!ownBlob || !inBlob) continue
+        const own = JSON.parse(await ownBlob.text()) as Record<string, unknown>
+        const inc = JSON.parse(await inBlob.text()) as Record<string, unknown>
+        const merged = combineBags(own, inc, { skip: ['index'] })
+        if (!merged.changed) continue
+        const sig = await store.putResource(new Blob([JSON.stringify(merged.bag)], { type: 'application/json' }))
+        machine.setSlot('properties', [sig])
+      } catch { /* owner's blob stands */ }
+    }
+  }
+
   /**
    * Layer-as-primitive update. Pass the full new layer state at this position
    * — `{ name, ...slots }` — and the committer applies every slot in one
@@ -833,7 +891,12 @@ export class LayerCommitter {
   public importTree = (
     updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
     nameSlots: ReadonlySet<string> = new Set(['children']),
-  ): Promise<void> => this.#machine.enqueue(() => this.#importTree(updates, nameSlots))
+    /** `replace` is the ONE deliberate overwrite: a MOVE lands a tile over a
+     *  stale head the participant already put away (gather). Every other caller
+     *  COMBINES. Nothing is lost either way — the replaced head stays one
+     *  marker back — but only a move may ask for it. */
+    opts: { replace?: boolean } = {},
+  ): Promise<void> => this.#machine.enqueue(() => this.#importTree(updates, nameSlots, opts.replace === true))
 
   /** COMMIT ACKNOWLEDGEMENT. Resolves once every commit enqueued before this
    *  call has actually run — the difference between "asked for" and "landed".
@@ -851,6 +914,7 @@ export class LayerCommitter {
   readonly #importTree = async (
     updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
     nameSlots: ReadonlySet<string> = new Set(['children']),
+    replace = false,
   ): Promise<void> => {
     if (updates.length === 0) return
 
@@ -940,6 +1004,18 @@ export class LayerCommitter {
     // transitions: pathKey → { prevSig, newSig, name } produced by this commit.
     const transitions = new Map<string, { prevSig: string; newSig: string; name: string }>()
 
+    // PREFLIGHT: refuse the whole import before any commit lands if a head
+    // cannot be read — a child committed while its parent refuses is unlinked.
+    for (const pathKey of ordered) {
+      const segs = decode(pathKey)
+      const name = segs.length === 0 ? ROOT_NAME : segs[segs.length - 1]
+      const locSig = await history.sign({
+        domain: lineage.domain,
+        explorerSegments: () => segs,
+      } as Lineage)
+      await this.#readHead(history, locSig, name)
+    }
+
     for (const pathKey of ordered) {
       const segments = decode(pathKey)
       const ancestorName = segments.length === 0 ? ROOT_NAME : segments[segments.length - 1]
@@ -948,11 +1024,11 @@ export class LayerCommitter {
         explorerSegments: () => segments,
       } as Lineage)
 
-      const prevSig = await history.latestMarkerSigFor(ancestorLocSig, ancestorName)
       // The marker this head came from — commitLayer refuses (and the
       // FIFO re-runs this import) if another tab moves it meanwhile.
-      const baseMarker = history.headMarkerOf?.(ancestorLocSig) ?? null
-      const prevLayer = await history.getLayerBySig(prevSig)
+      // A head whose bytes cannot be read is REFUSED (ColdHeadError), never
+      // hydrated empty and committed over.
+      const { prevSig, baseMarker, prevLayer } = await this.#readHead(history, ancestorLocSig, ancestorName)
 
       const update = updateByPath.get(pathKey)
 
@@ -966,14 +1042,19 @@ export class LayerCommitter {
       // participant wants gone for good goes through the delete area.
       const machine = LayerMachine.fromLayer(prevLayer, ancestorName, segments)
       if (update) {
+        // COMBINE, never overwrite: the incoming layer is folded into the
+        // hydrated head — own wins, incoming fills what is absent, nothing
+        // is removed (core/layer-combine.ts). Name slots resolve to sigs
+        // first; scalars ride through as incoming candidates.
+        const incoming: Record<string, unknown> = { name: ancestorName }
         for (const [slot, raw] of Object.entries(update.layer)) {
           if (slot === 'name') continue
-          // A non-array value is a SCALAR slot — the installed `cells: <sig>`
-          // pointer, inline metadata — and rides through verbatim (`null`
-          // drops it). This loop used to skip it, so a pasted or adopted layer
-          // at a fresh location committed without its child pointer: the
-          // third coercion site the check-5 fix left behind (adjudication).
-          if (!Array.isArray(raw)) { if (raw !== undefined) machine.setScalar(slot, raw); continue }
+          if (!Array.isArray(raw)) {
+            if (raw === undefined) continue
+            if (replace) machine.setScalar(slot, raw) // null drops it
+            else if (raw !== null) incoming[slot] = raw
+            continue
+          }
           let sigs: string[]
           if (nameSlots.has(slot)) {
             // Snapshot prior (name→live sig) before the set so a paste / adopt
@@ -991,8 +1072,10 @@ export class LayerCommitter {
           } else {
             sigs = (raw as unknown[]).map(v => String(v)).filter(Boolean)
           }
-          machine.apply({ slot, op: 'set', sigs })
+          if (replace) machine.apply({ slot, op: 'set', sigs })
+          else incoming[slot] = sigs
         }
+        if (!replace) await this.#combineInto(history, machine, incoming)
       }
 
       // Apply child sig swaps for any direct children that just transitioned.
@@ -1257,9 +1340,7 @@ export class LayerCommitter {
         explorerSegments: () => sub,
       } as Lineage)
 
-      const prevSig = await history.latestMarkerSigFor(ancestorLocSig, ancestorName)
-      const baseMarker = history.headMarkerOf?.(ancestorLocSig) ?? null
-      const prevLayer = await history.getLayerBySig(prevSig)
+      const { baseMarker, prevLayer } = await this.#readHead(history, ancestorLocSig, ancestorName)
       const machine = LayerMachine.fromLayer(prevLayer, ancestorName, sub)
 
       if (req.delta) {
@@ -1319,7 +1400,16 @@ export class LayerCommitter {
             // the name (see the delta type above) — the one deliberate
             // less-detail-over-live publish on the commit path. Gone.
             const cellSig = await history.latestMarkerSigFor(cellLocSig, d.cell)
-            const linked = machine.apply({ slot: 'children', op: 'append', sig: cellSig }).changed
+            // Union by NAME, not sig: a stale sibling of the same name is
+            // re-pointed at the owner's head instead of listed twice.
+            const sameNameSig = (await this.#priorChildSigByName(history, machine.getSlot('children'))).get(d.cell)
+            let linked = false
+            if (sameNameSig && sameNameSig !== cellSig) {
+              // Already seated under this name — a re-point, not a new tile.
+              machine.apply({ slot: 'children', op: 'swap', from: sameNameSig, to: cellSig })
+            } else {
+              linked = machine.apply({ slot: 'children', op: 'append', sig: cellSig }).changed
+            }
             // A NEW tile takes its seat in the marker that adds it, so it is
             // one undo step (tile-order.ts, "the seat of a tile about to be
             // linked"). No seat when the page is not on screen.
@@ -1369,8 +1459,8 @@ export class LayerCommitter {
             }
             machine.apply({ slot, op: 'set', sigs })
           }
-          // Scalar slots ride through untouched — the machine holds them
-          // beside the lists and writes them back as they came.
+          // An update is the OWNER's own edit: it sets. (Combining, where own
+          // wins, is for what arrives from elsewhere: importTree.)
           for (const [slot, value] of Object.entries(d.scalars ?? {})) {
             machine.setScalar(slot, value)
           }

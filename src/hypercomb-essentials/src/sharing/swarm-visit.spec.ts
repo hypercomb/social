@@ -263,7 +263,7 @@ describe('the wand is the keep', () => {
     // until the participant walks in and wands it there too.
     expect(child?.layer.children).toEqual([])
     const rootUpdate = updates.find(u => u.segments.length === 0)
-    expect(rootUpdate?.layer.children).toContain('garden')
+    expect(rootUpdate).toBeUndefined()   // parent linked in the commit queue, never re-listed
     expect(child?.layer.properties).toEqual([PROPS_SIG])
     expect(committer.commitSlotSet).not.toHaveBeenCalled()
 
@@ -320,7 +320,7 @@ describe('the wand is the keep', () => {
     // publisher's real props — not at the page the click travelled to.
     expect(committer.importTree).toHaveBeenCalled()
     const updates = committer.importTree.mock.calls[0][0] as { segments: string[]; layer: Layer }[]
-    expect(updates.find(u => u.segments.length === 0)?.layer.children).toContain('garden')
+    expect(updates.find(u => u.segments.length === 0)).toBeUndefined()   // parent linked in-queue, not re-listed
     expect(updates.find(u => u.segments.join('/') === 'garden')?.layer.properties).toEqual([PROPS_SIG])
     const rec = visitRecordAt(['garden'])
     expect(rec).toBeTruthy()

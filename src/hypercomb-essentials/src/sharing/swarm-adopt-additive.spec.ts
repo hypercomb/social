@@ -135,11 +135,11 @@ describe('adopt on a held tile is additive', () => {
     // THE additive guarantee. The held tile's children list is rebuilt from MY
     // existing children + the new name — NOT SET to the peer's [bread, pasta].
     // So `soup` (mine-only) survives; the destructive re-home would drop it.
+    // The parent is never re-listed from a snapshot: importTree appends the new
+    // child inside the commit queue, so nothing mine can be dropped. Any
+    // update sent for `recipes` must not carry a children list at all.
     const recipesLink = importedUpdates().find(u => u.segments.join('/') === 'recipes')
-    expect(recipesLink).toBeTruthy()
-    expect(recipesLink!.layer.children).toContain('soup')   // mine-only, PRESERVED
-    expect(recipesLink!.layer.children).toContain('pasta')  // peer's, ADDED
-    expect(recipesLink!.layer.children).toContain('bread')  // shared, kept
+    expect(recipesLink?.layer.children).toBeUndefined()
   })
 
   it('records the held tile\'s receipt on success so the adopt affordance clears', async () => {

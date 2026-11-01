@@ -240,6 +240,9 @@ export async function distributeVisual(opts: {
     }
 
     try {
+      // Re-check immediately before the write: the participant may have dropped
+      // their own picture during the crop/store window. Theirs wins.
+      if (isParticipantImage(await readOwnTilePropertiesAt(wholeSegments, part))) { kept++; continue }
       // A part's picture is a piece of THIS whole — never the name's picture.
       await writeTilePropertiesAt(wholeSegments, part, updates, { onlyHere: true })
       if (opts.place !== false) seats[part] = k
@@ -304,6 +307,8 @@ export async function dressParts(opts: {
       if (!bytes) continue
       const sig = await store.putResource(bytes)
       const small = await storeSmallPictures(store, bytes)
+      // Re-check right before the write: a picture dropped meanwhile is theirs.
+      if (isParticipantImage(await readOwnTilePropertiesAt(segments, part))) { kept++; continue }
       await writeTilePropertiesAt(segments, part, {
         large: { image: sig, x: 0, y: 0, scale: 1 },
         small: { image: small.point },

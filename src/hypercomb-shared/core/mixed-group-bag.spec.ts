@@ -40,6 +40,18 @@ const committer = {
     const prior = await history.currentLayerAt(locSig)
     await history.commitLayer(locSig, { ...prior, name: segments.at(-1), [slot]: [...values] })
   },
+  async commitChildrenDeltas(
+    segments: readonly string[],
+    ch: { removes?: readonly { sig?: string; label?: string }[]; appends?: readonly string[]; swaps?: readonly { from: string; to: string }[] },
+  ) {
+    const locSig = await history.sign({ explorerSegments: () => segments })
+    const prior = await history.currentLayerAt(locSig)
+    let children = [...(prior?.children ?? [])]
+    for (const r of ch.removes ?? []) children = children.filter(c => c !== r.sig)
+    for (const s of ch.swaps ?? []) children = children.map(c => (c === s.from ? s.to : c))
+    for (const a of ch.appends ?? []) if (!children.includes(a)) children.push(a)
+    return history.commitLayer(locSig, { ...prior, name: segments.at(-1), children })
+  },
 }
 let putCount = 0
 const lineage = { segments: ['games'], explorerSegments(): string[] { return this.segments } }

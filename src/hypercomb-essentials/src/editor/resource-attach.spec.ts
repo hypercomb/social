@@ -9,6 +9,7 @@ const kept = vi.hoisted(() => ({
 
 vi.mock('./tile-properties.js', () => ({
   isSignature: (value: unknown) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value),
+  readOwnTilePropertiesAt: vi.fn(async () => ({})),
   writeTilePropertiesAt: vi.fn(async () => { kept.written = true }),
 }))
 

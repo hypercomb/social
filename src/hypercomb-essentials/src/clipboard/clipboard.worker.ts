@@ -1,7 +1,7 @@
 // core/clipboard/clipboard.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import { ClipboardService, type ClipboardEntry, type ClipboardOp } from './clipboard.service.js'
-import { childNamesOf, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig, alignPlacedHeads } from '../history/layer-placement.js'
+import { childNamesOf, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig, alignPlacedHeads, combineLayerTree, advanceRoute } from '../history/layer-placement.js'
 import { seedLayerKeyedEntries } from '../editor/tile-properties.js'
 import { isPeerContentAt, markCarriedRoot } from '../sharing/adopted-roots.js'
 
@@ -45,6 +45,7 @@ interface LayerCommitterLike {
     changes: {
       removes?: readonly { sig?: string; label?: string }[]
       appends?: readonly string[]
+      swaps?: readonly { from: string; to: string }[]
       order?: { set?: Record<string, number>; remove?: readonly string[] }
     },
   ): Promise<void | string>
@@ -646,9 +647,18 @@ export class ClipboardWorker extends Worker {
     // cold sibling, so the strict-read refusals ("paste deferred — cold
     // sibling") are structurally unnecessary; a cold miss at worst lets a
     // duplicate name through, and the head is the final word on membership.
-    const { entries: existingEntries } = await childEntriesOf(history, parent)
+    // A name already here is a COMBINE, never a skip: the owner's tile wins
+    // every conflict and the incoming one only fills what is absent. `missing`
+    // children are names we cannot see, so a name not found is resolved by
+    // name through the parent before it is appended as new.
+    const { entries: existingEntries, missing } = await childEntriesOf(history, parent)
     tParent = performance.now() - tStart
-    const taken = new Set(existingEntries.map(e => e.name))
+    const existingByName = new Map(existingEntries.map(e => [e.name, e.sig] as const))
+    const swaps: { from: string; to: string }[] = []
+    const combined: string[] = []
+    // Same-named children combined one level down, by path: their ROUTES may hold a head.
+    const merges: { segments: string[]; layer: LayerLike }[] = []
+    const pending = new Map<string, number>() // label -> index in appends
 
     // Participant-local nested-discard exclusions (absolute source paths).
     const excluded = readExclusions()
@@ -661,11 +671,6 @@ export class ClipboardWorker extends Worker {
     // A peer's tile landing outside any peer branch: marked once it commits.
     const carried: string[][] = []
     for (const entry of items) {
-      if (taken.has(entry.label)) {
-        console.warn(`[clipboard] target already has '${entry.label}'; skipping`)
-        failed.push(entry.label)
-        continue
-      }
       // Self / descendant guard: never place a cell into its own subtree
       // (e.g. dropping `/a/X` at `/a/X/sub`) — pure path check; location
       // sigs are path-derived so equal paths ⇔ equal locations. Paste
@@ -720,9 +725,42 @@ export class ClipboardWorker extends Worker {
       if (typeof target === 'number' && Number.isFinite(target) && target >= 0) seats[entry.label] = Math.trunc(target)
       tPrep += performance.now() - tPrep0
 
+      // Collision: fold the incoming tile INTO the one already here.
+      let ownSig: string | undefined = pending.has(entry.label) ? appends[pending.get(entry.label)!] : existingByName.get(entry.label)
+      if (!ownSig && missing > 0) ownSig = (await childLayerOf(history, parent, entry.label))?.sig
+      if (ownSig && ownSig !== sig) {
+        const inPending = pending.has(entry.label)
+        // The route's own head outranks the parent's listed sig — it is the owner.
+        let ownLayer = await history.getLayerBySig(ownSig)
+        if (!inPending) {
+          const locSig = await history.sign({ domain: lineage.domain, explorerSegments: () => [...targetSegments, entry.label] }).catch(() => '')
+          const head = locSig ? await history.currentLayerAt(locSig).catch(() => null) : null
+          if (head) ownLayer = head
+        }
+        // Own wins, incoming fills what is absent, nothing own is dropped; same-named
+        // children combine one level down (the shared seam, layer-placement.ts).
+        const merged = ownLayer ? (await combineLayerTree(history, ownLayer, layer, [...targetSegments, entry.label], merges)).layer : null
+        const mergedSig = merged ? await history.materializeLayer?.(merged) : undefined
+        if (!mergedSig) {
+          // Cannot combine: keep it on the clipboard rather than drop or duplicate it.
+          console.warn(`[clipboard] could not combine '${entry.label}' into the existing tile; kept on the clipboard`)
+          failed.push(entry.label)
+          continue
+        }
+        if (inPending) appends[pending.get(entry.label)!] = mergedSig
+        else if (mergedSig !== ownSig) { swaps.push({ from: ownSig, to: mergedSig }); existingByName.set(entry.label, mergedSig) }
+        combined.push(mergedSig)
+        placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
+        continue
+      }
+      if (ownSig === sig) {
+        placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
+        continue
+      }
+
+      pending.set(entry.label, appends.length)
       appends.push(sig)
       placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
-      taken.add(entry.label)
       if ((entry.fromPeer === true || isPeerContentAt(srcPath)) && !isPeerContentAt(dstPath)) carried.push(dstPath)
     }
 
@@ -743,7 +781,7 @@ export class ClipboardWorker extends Worker {
     // so this is a warm-up, not a requirement.
     const tSeed0 = performance.now()
     try {
-      await this.#seedPropsIndex(history, appends, targetSegments)
+      await this.#seedPropsIndex(history, [...appends, ...combined], targetSegments)
     } catch (err) {
       console.warn('[clipboard] props-index seed skipped', err)
     }
@@ -754,10 +792,22 @@ export class ClipboardWorker extends Worker {
     const tCommit0 = performance.now()
     await committer.commitChildrenDeltas(targetSegments, {
       appends,
+      ...(swaps.length > 0 ? { swaps } : {}),
       ...(Object.keys(seats).length > 0 ? { order: { set: seats } } : {}),
     })
     // A route that already has a head of that name would open the OLD tile.
-    await alignPlacedHeads(history, lineage.domain, targetSegments, appends)
+    // The append has already landed: a stale head here (another tab moved it)
+    // must not abort placement bookkeeping (consume, paste-done, act).
+    try {
+      await alignPlacedHeads(history, lineage.domain, targetSegments, [...appends, ...combined])
+    } catch (err) {
+      console.warn('[clipboard] head alignment skipped after append landed', err)
+    }
+    // A child combined one level down whose own route has a head would still open it.
+    for (const m of merges) {
+      try { await advanceRoute(history, lineage.domain, m.segments, m.layer) }
+      catch (err) { console.warn('[clipboard] child head alignment skipped', err) }
+    }
     tCommit = performance.now() - tCommit0
     // THE WORDS STAY THEIRS where they land (adopted-roots.ts, carried roots).
     for (const path of carried) markCarriedRoot(path)

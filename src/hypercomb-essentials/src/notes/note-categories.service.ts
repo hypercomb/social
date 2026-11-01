@@ -375,16 +375,18 @@ export class NoteCategories extends EventTarget {
   }
 
   async #write(segments: readonly string[], doc: CategoryDoc): Promise<void> {
-    const history = get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
     const committer = get<CommitterShape>('@diamondcoreprocessor.com/LayerCommitter')
     const store = get<StoreShape>('@hypercomb.social/Store')
-    if (!history || !committer || !store) throw new Error('[categories] history, committer or store missing')
-    const prior = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
-    const base: { name?: string; [slot: string]: unknown } = prior ? { ...prior } : { name: segments[segments.length - 1] ?? '' }
-    if (doc.categories.length === 0) delete base[CATEGORIES_SLOT]
-    else base[CATEGORIES_SLOT] = await store.putResource(new Blob([categoryDocJson(doc)], { type: 'application/json' }))
+    if (!committer || !store) throw new Error('[categories] history, committer or store missing')
+    // Send ONLY the slot this service owns. update() hydrates from the live
+    // head inside the commit queue and sets just the keys it is given, so a
+    // child, property or decoration landed since our read is never re-set
+    // from a stale snapshot. `null` drops the slot (an omitted key would not).
+    const sig = doc.categories.length === 0
+      ? null
+      : await store.putResource(new Blob([categoryDocJson(doc)], { type: 'application/json' }))
     // Sigs, never names: see the same call in notes.drone.ts.
-    await committer.update(segments, base, new Set())
+    await committer.update(segments, { name: segments[segments.length - 1] ?? '', [CATEGORIES_SLOT]: sig }, new Set())
     // A shared tile's word is re-announced on `notes:changed` (the swarm
     // listens for it), so peers see the tree move as they see notes move.
     EffectBus.emit('notes:changed', { segments: [...segments] })

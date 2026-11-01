@@ -1,6 +1,8 @@
 import { EffectBus } from '@hypercomb/core'
 import { storeImageResources } from '../editor/arm-resource.js'
+import { holdPictures } from '../commands/lightbox-kind.js'
 import {
+  isParticipantImage,
   readTilePropertiesAt,
   writeTilePropertiesAt,
 } from '../editor/tile-properties.js'
@@ -188,6 +190,14 @@ export class YouTubeMetadataQueue extends EventTarget {
     if (!resources) throw new Error('Resource storage is not ready')
     try {
       const existing = await readTilePropertiesAt(entry.segments, entry.cell)
+      // The participant's own artwork wins: the suggestion is HELD in the
+      // tile's picture collection (the images button offers it) and the
+      // worn picture is left exactly as it is.
+      if (isParticipantImage(existing)) {
+        await holdPictures([...entry.segments, entry.cell], [resources.largeSig])
+        EffectBus.emit('tile:saved', { cell: entry.cell, segments: entry.segments })
+        return
+      }
       const oldFlat = existing['flat'] && typeof existing['flat'] === 'object'
         ? existing['flat'] as Record<string, unknown>
         : {}

@@ -142,11 +142,10 @@ export class RoomQueenBee extends QueenBee {
     if (!history || !committer) return
     const prior = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
     const next = applyAsks(readAsks(prior), args)
-    const base: { name?: string; [slot: string]: unknown } = prior ? { ...prior } : { name: tile }
-    if (next.length) base[ROOM_ASKS_SLOT] = next
-    else delete base[ROOM_ASKS_SLOT]
-    // Sigs, never names (the same call notes.drone.ts makes).
-    await committer.update(segments, base, new Set())
+    // Only the asks slot travels: the commit hydrates the LIVE head, so a
+    // concurrent write to the room tile is kept, and an empty list ([])
+    // clears the slot (a deleted key was "not mentioned" and did nothing).
+    await committer.update(segments, { name: tile, [ROOM_ASKS_SLOT]: next }, new Set())
     // A shared tile's word is re-announced on `notes:changed`, so the room
     // sees what it asks as soon as it sees anything else of the tile.
     EffectBus.emit('notes:changed', { segments: [...segments] })

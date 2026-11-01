@@ -93,6 +93,8 @@ export type ToggleOutcome =
   | { state: 'none' }
   | { state: 'switched-off' }
 
+type Standing = { state: 'here'; name: string } | { state: 'absent' } | { state: 'unknown' }
+
 export class DidYouKnow extends EventTarget {
   /** The ledger, one per LAYER (its game's word as the key): note id → its
    *  words and the first participant seen holding it. Insertion order is the
@@ -135,8 +137,9 @@ export class DidYouKnow extends EventTarget {
     const here = this.#segments()
     if (this.#switchedOff()) return { outcome: 'resumed', where: here.join('/'), refused: 'switched-off' }
     await this.toggle('on')
-    const held = await this.#tileHere(here)
-    const name = held ?? await this.#mint(here)
+    const standing = await this.#standing(here)
+    const held = standing.state !== 'absent'
+    const name = await this.#tileOrMint(here, standing)
     if (name) this.open(name)
     return { outcome: held ? 'resumed' : 'started', where: [...here, name ?? gameTileName(here)].join('/') }
   }
@@ -204,7 +207,7 @@ export class DidYouKnow extends EventTarget {
     const here = this.#segments()
     const unavailable = await this.availability(here)
     if (unavailable !== 'ok') return unavailable
-    const name = (await this.#tileHere(here)) ?? (await this.#mint(here))
+    const name = await this.#tileOrMint(here)
     if (!name) return 'failed'
     const own = await notes.getNotesAtSegments([...here, name])
     if (own.some(n => cleanIdea(n.text) === idea)) return 'exists'
@@ -249,7 +252,7 @@ export class DidYouKnow extends EventTarget {
     const labelOf = (pubkey: string): string =>
       (pubkey === this.#me ? swarm?.myLabel?.() : swarmNotes?.labelOf(pubkey) || swarm?.labelFor?.(pubkey)) || pubkey.slice(0, 8) || 'host'
     // The tile the reveal lands on is this hive's own: make it here first.
-    const mine = await this.#tileHere(here) ?? await this.#mint(here)
+    const mine = await this.#tileOrMint(here)
     if (!mine) return 'none'
     await notes.addAtSegments(here, mine, revealText(ideas, labelOf))
     await this.#settled()
@@ -295,7 +298,7 @@ export class DidYouKnow extends EventTarget {
     if (unavailable !== 'ok') return unavailable
     if (!(await this.#tileHere(here)) && !this.#peerTile(here)) return 'none'
     // The ideas land on a tile of yours: make it before taking.
-    const mine = await this.#tileHere(here) ?? await this.#mint(here)
+    const mine = await this.#tileOrMint(here)
     if (!mine) return 'none'
     await swarmNotes.refresh(mine)
     // The take reads the page you stand on now: moved on, it would write to a
@@ -368,13 +371,32 @@ export class DidYouKnow extends EventTarget {
 
   /** The name of the game's tile ON THIS LAYER on this hive's page, or null. */
   async #tileHere(page: readonly string[]): Promise<string | null> {
+    const st = await this.#standing(page)
+    return st.state === 'here' ? st.name : null
+  }
+
+  /** Absent is not unknown: a cold or unreadable layer (the strict read
+   *  aborts) says nothing about whether the tile is there, so it is never
+   *  treated as absent and never minted over. */
+  async #standing(page: readonly string[]): Promise<Standing> {
     const history = get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
     const lineage = get<LineageShape>('@hypercomb.social/Lineage')
-    if (!history || !lineage) return null
+    if (!history || !lineage) return { state: 'unknown' }
     try {
       const rows = await readChildrenStrict(history, lineage.domain, page)
-      return rows?.find(r => isGameTile(r.name, page))?.name ?? null
-    } catch { return null }
+      if (!rows) return { state: 'unknown' }
+      const name = rows.find(r => isGameTile(r.name, page))?.name
+      return name ? { state: 'here', name } : { state: 'absent' }
+    } catch { return { state: 'unknown' } }
+  }
+
+  /** The game's tile here, made only when the layer was read and it is
+   *  absent. Unknown makes nothing: null, and the word can be said again. */
+  async #tileOrMint(page: readonly string[], standing?: Standing): Promise<string | null> {
+    const st = standing ?? await this.#standing(page)
+    if (st.state === 'here') return st.name
+    if (st.state === 'unknown') return null
+    return this.#mint(page)
   }
 
   /** The layer's game tile as a peer holds it on the page in front of you. A

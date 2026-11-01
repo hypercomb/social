@@ -1126,7 +1126,20 @@ export const writeTilePropertiesAt = async (
     // Writes merge only with this appearance's OWN sparse overrides. Reading
     // the inherited composition here would materialize every root default in
     // the outer layer and freeze it against future root changes.
-    const existing = await readOwnTilePropertiesAt(parentSegments, cellName)
+    // A COLD read is a transient miss, never "no properties": merging it as
+    // `{}` would replace the slot with only `updates` and orphan the real
+    // blob (link, tags, index...). Retry briefly, then abort the write.
+    // `replace` supplies the whole bag, so it does not depend on the read.
+    const ownStats = { cold: false }
+    let existing = await readOwnTilePropertiesAt(parentSegments, cellName, ownStats)
+    for (let attempt = 0; ownStats.cold && !options.replace && attempt < 5; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)))
+      ownStats.cold = false
+      existing = await readOwnTilePropertiesAt(parentSegments, cellName, ownStats)
+    }
+    if (ownStats.cold && !options.replace) {
+      throw new Error(`[tile-properties] properties of "${cellName}" not readable yet; write aborted to avoid orphaning them`)
+    }
     const rootStats = { cold: false }
     const inheritedDefaults = parentSegments.length > 0
       ? await readOwnTilePropertiesAt([], cellName, rootStats)

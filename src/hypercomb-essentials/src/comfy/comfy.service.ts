@@ -849,7 +849,10 @@ export class ComfyService extends EventTarget {
       ...(params.checkpoint ? { model: params.checkpoint } : {}),
       at: Date.now(),
     }
-    return this.#persistGeneration(result.largeSig, record)
+    // the same bytes made again: the record already held (its name, its first
+    // provenance) stands; nothing is overwritten, only a resource sig returned
+    const existing = await this.generationOf(result.largeSig)
+    return this.#persistGeneration(result.largeSig, existing ?? record, !existing)
   }
 
   /** The name they typed, on the same record the tile revision will name. */
@@ -857,15 +860,15 @@ export class ComfyService extends EventTarget {
     const existing = await this.generationOf(result.largeSig)
       ?? (result.generationSig ? await this.#generationNamed({ generation: result.generationSig }) : null)
     if (!existing) return
-    const sig = await this.#persistGeneration(result.largeSig, { ...existing, name })
+    const sig = await this.#persistGeneration(result.largeSig, { ...existing, name }, true)
     if (sig) result.generationSig = sig
   }
 
   /** One writer for the pool file and the resource. The pool member stays
    *  keyed by the image signature; the resource signature is what a tile names. */
-  async #persistGeneration(imageSig: string, record: ComfyGenerationRecord): Promise<string | null> {
+  async #persistGeneration(imageSig: string, record: ComfyGenerationRecord, writePool = true): Promise<string | null> {
     const bytes = new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer
-    const dir = await this.#pool()
+    const dir = writePool ? await this.#pool() : null
     if (dir) {
       try {
         const handle = await dir.getFileHandle(imageSig, { create: true })

@@ -75,12 +75,13 @@
 // layer-byte signature, both ride the same marker pipeline → both get
 // undo / redo / time-travel / cross-browser sync for free.
 
+import { combineLayers, type CombineOptions, type CombineResult } from '@hypercomb/core'
 import type { HistoryService, LayerContent } from './history.service.js'
 
 type LineageLike = { domain?: () => string; explorerSegments?: () => readonly string[] }
 
 export type SlotDelta =
-  | { slot: string; op: 'append';    sig: string }
+  | { slot: string; op: 'append';    sig: string; nameOf?: (sig: string) => string | undefined }
   | { slot: string; op: 'removeSig'; sig: string }
   | { slot: string; op: 'swap';      from: string; to: string }
   | { slot: string; op: 'set';       sigs: readonly unknown[] }
@@ -197,6 +198,13 @@ export class LayerMachine {
     if (delta.op === 'append') {
       if (typeof delta.sig !== 'string' || delta.sig.length === 0) return { changed: false }
       if (arr.includes(delta.sig)) return { changed: false }
+      // Same NAME under a different sig is the same child: keep the owner's
+      // entry rather than list the name twice (opt-in: the machine holds sigs,
+      // only the caller can name them).
+      if (delta.nameOf && delta.slot !== 'name') {
+        const n = delta.nameOf(delta.sig)
+        if (n !== undefined && arr.some(x => typeof x === 'string' && delta.nameOf!(x) === n)) return { changed: false }
+      }
       this.#slots.set(delta.slot, [...arr, delta.sig])
       { yieldScalar(); return { changed: true } }
     }
@@ -240,6 +248,31 @@ export class LayerMachine {
     }
 
     return { changed: false }
+  }
+
+  /**
+   * COMBINE an incoming layer into this machine's (hydrated, own) state —
+   * the non-destructive counterpart of `set`. Own wins, incoming fills what
+   * is absent, no entry is ever removed (see core/layer-combine.ts). Call it
+   * on a machine hydrated INSIDE the commit queue, so the own side is the
+   * live head, never a stale snapshot. Returns the CombineResult so the
+   * caller can resolve `sameName` children and `blobs` conflicts.
+   */
+  combine(incoming: LayerContent, opts?: CombineOptions): CombineResult {
+    const res = combineLayers(this.output(), incoming, opts)
+    if (res.changed) {
+      for (const [slot, v] of Object.entries(res.layer)) {
+        if (slot === 'name') continue
+        if (Array.isArray(v)) {
+          this.#scalars.delete(slot)
+          if (v.length > 0) this.#slots.set(slot, v.slice())
+        } else if (v !== undefined && v !== null) {
+          this.#slots.delete(slot)
+          this.#scalars.set(slot, v)
+        }
+      }
+    }
+    return res
   }
 
   /**

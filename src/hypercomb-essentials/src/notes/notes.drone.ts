@@ -1080,9 +1080,13 @@ export class NotesService {
     // between two tiles' lists.
     const priorNotes = unionNoteSigs(await this.#noteSigsOf(await readNotesFacet(segments[segments.length - 1] ?? '')), slotNotes)
     const nextNotes = transform(priorNotes)
-    const base: { name?: string; [k: string]: unknown } = priorLayer
-      ? { ...priorLayer }
-      : { name: segments[segments.length - 1] ?? '' }
+    // ONLY the notes slot is named. update() sets exactly the slots it is
+    // given and hydrates from the live head inside the commit queue, so a
+    // stale whole-layer snapshot is never re-committed (children, properties,
+    // decorations committed during the awaits below survive untouched).
+    const base: { name?: string; [k: string]: unknown } = {
+      name: segments[segments.length - 1] ?? '',
+    }
     // ARRIVAL TIME RIDES THE ENVELOPE, never the note: a note that was already
     // on this list keeps the very entry it had (and with it the time it
     // arrived); a note new to the list is filed under a fresh incidence
@@ -1109,16 +1113,8 @@ export class NotesService {
         return entry
       } catch { return sig }
     }))
-    // `nameSlots: new Set()` is critical. The default `new Set(['children'])`
-    // is for callers passing children as NAMES (e.g. the `#add` path which
-    // emits `cell:added` events that the committer translates to a name
-    // delta). Here, `priorLayer.children` are already SIGS read from the
-    // current head — feeding them through name→sig resolution treats each
-    // sig as a phantom cell name, mints empty markers at fake lineages,
-    // and replaces every child with the phantom-bag sig. The render then
-    // shows the original sigs as tile labels (because the phantom layer's
-    // `name` is the sig string). Passing an empty nameSlots set leaves
-    // every value verbatim.
+    // `nameSlots: new Set()` keeps the notes values verbatim (they are sigs,
+    // never cell names to resolve).
     await committer.update(segments, base, new Set())
     EffectBus.emit(NOTES_TRIGGER, {
       segments: [...segments],

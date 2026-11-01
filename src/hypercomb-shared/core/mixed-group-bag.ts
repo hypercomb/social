@@ -53,12 +53,22 @@ type HistoryLike = {
 }
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void; replaceRaw?: (segments: readonly string[]) => void }
 type ViewModeLike = EventTarget & { mode?: string }
-type StoreLike = { putResource(blob: Blob): Promise<string> }
-type CommitterLike = { commitSlotSet(segments: readonly string[], slot: string, sigs: readonly string[]): Promise<void> }
+type StoreLike = { putResource(blob: Blob): Promise<string>; getResource?(sig: string): Promise<Blob | null> }
+type CommitterLike = {
+  commitSlotAppend?(segments: readonly string[], slot: string, sig: string): Promise<void>
+  commitSlotRemove?(segments: readonly string[], slot: string, sig: string): Promise<void>
+  commitSlotSet(segments: readonly string[], slot: string, sigs: readonly string[]): Promise<void>
+  commitChildrenDeltas(
+    segments: readonly string[],
+    changes: { removes?: readonly { sig?: string; label?: string }[]; appends?: readonly string[]; swaps?: readonly { from: string; to: string }[] },
+  ): Promise<string>
+}
 type IocLike = { whenReady?: (key: string, cb: (v: unknown) => void) => void }
 
 export class MixedGroupBag {
   #registry: GroupRegistry
+  /** Labels this bag itself wrote per group page — the only ones it may remove. */
+  #owned = new Map<string, Set<string>>()
   #returnSegments: string[] = []
   /** The group last shown via show() — a session-local hint for prewarm and
    *  the enter() retry; the CURRENT group always derives from the location
@@ -490,7 +500,34 @@ export class MixedGroupBag {
           // Only clustered rewrites can hit an existing cell; read its prior head
           // so an unchanged decoration doesn't re-fire the index walk.
           const prior = ordered ? await history.latestMarkerSigFor(childLocSig, name).catch(() => '') : ''
-          const marker = await history.commitLayer(childLocSig, { name, decorations: [decoSig] })
+          // Through the committer FIFO, which hydrates from the cell's head:
+          // an append keeps every other slot the participant put on the tile
+          // (properties, picture, notes, seat, their own decorations). Only
+          // an earlier launch:target record is replaced, and only when its
+          // payload moved.
+          const cm = get<CommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+          const head = await history.currentLayerAt(childLocSig).catch(() => null) as { decorations?: unknown } | null
+          if (!cm?.commitSlotAppend) {
+            // No FIFO to append through: a cell with NO head is a fresh launcher
+            // cell and is minted; a cell that already has one is never rewritten.
+            if (head) continue
+            const fresh = await history.commitLayer(childLocSig, { name, decorations: [decoSig] })
+            if (fresh && SIG.test(fresh)) writtenMarker.set(name, fresh)
+            continue
+          }
+          const stale: string[] = []
+          for (const d of Array.isArray(head?.decorations) ? head!.decorations as unknown[] : []) {
+            const s = String(d ?? '')
+            if (!SIG.test(s) || s === decoSig || !store.getResource) continue
+            try {
+              const blob = await store.getResource(s)
+              const kind = blob ? (JSON.parse(await blob.text()) as { kind?: unknown })?.kind : undefined
+              if (kind === LAUNCH_KIND) stale.push(s)
+            } catch { /* unreadable: leave it, never drop on a miss */ }
+          }
+          await cm.commitSlotAppend(childSegs, 'decorations', decoSig)
+          if (cm.commitSlotRemove) for (const s of stale) await cm.commitSlotRemove(childSegs, 'decorations', s)
+          const marker = await history.latestMarkerSigFor(childLocSig, name).catch(() => '')
           if (marker && SIG.test(marker)) writtenMarker.set(name, marker)
           if (marker !== prior) EffectBus.emit('decorations:changed', { segments: childSegs, op: 'append', sig: decoSig })
         } catch { /* fall through to the marker read below */ }
@@ -507,7 +544,6 @@ export class MixedGroupBag {
       const childSig = await history.latestMarkerSigFor(childLocSig, name).catch(() => '')
       return childSig && SIG.test(childSig) ? childSig : ''
     }))
-    const childSigs = resolved.filter(s => s !== '')
 
     // The bag's children write rides the LayerCommitter FIFO (commitSlotSet:
     // full-replace of the children slot with the sigs resolved above; name and
@@ -520,7 +556,64 @@ export class MixedGroupBag {
       console.warn('[mixed-group-bag] LayerCommitter unavailable — children not committed for', id)
       return
     }
-    await committer.commitSlotSet(segs, 'children', childSigs)
+    // The LIVE head, read after every await above: a tile the participant
+    // pasted or created into this page meanwhile must be seen as a stray, not
+    // dropped by the stale `layer` snapshot read at the top.
+    const liveLayer = await history.currentLayerAt(bagLocSig).catch(() => layer)
+    const rawChildren = Array.isArray(liveLayer?.children) ? (liveLayer!.children as unknown[]).map(c => String(c ?? '').trim()).filter(Boolean) : []
+    const rawByName = new Map<string, string>()
+    for (const raw of rawChildren) {
+      if (!SIG.test(raw)) { rawByName.set(raw, raw); continue }
+      const n = (await history.getLayerBySig(raw).catch(() => null))?.name
+      if (typeof n === 'string' && n) rawByName.set(n, raw)
+    }
+    if (ordered && settled) {
+      // Clustered pages (help) demand a fixed order, which only a full
+      // replace can express. A replace must never lose a member, though: a
+      // cold or failed marker read keeps the member's existing sig, and a
+      // child this bag never wrote (the participant's own tile) rides along
+      // after the wanted ones. Only labels this bag wrote and no longer
+      // wants are dropped.
+      const owned = this.#owned.get(id) ?? new Set<string>()
+      const keep = order.map((name, i) => resolved[i] || (SIG.test(rawByName.get(name) ?? '') ? rawByName.get(name)! : '')).filter(s => s !== '')
+      const placed = new Set(order)
+      const strays: string[] = []
+      for (const [n, raw] of rawByName) {
+        if (placed.has(n) || owned.has(n) || !SIG.test(raw)) continue
+        strays.push(raw)
+      }
+      for (const n of wanted) owned.add(n)
+      this.#owned.set(id, owned)
+      await committer.commitSlotSet(segs, 'children', [...new Set([...keep, ...strays])])
+    } else {
+      // Deltas, never a wholesale SET: a tile the participant created or
+      // pasted into this page while we awaited above is not ours to drop.
+      // Appends are new launcher cells, swaps re-point a cell whose marker
+      // moved, removes are ONLY labels this bag itself wrote earlier.
+      const appends: string[] = []
+      const swaps: { from: string; to: string }[] = []
+      order.forEach((name, i) => {
+        const sig = resolved[i]
+        if (!sig) return
+        const raw = rawByName.get(name)
+        if (raw === sig) return
+        if (raw && SIG.test(raw)) swaps.push({ from: raw, to: sig })
+        else appends.push(sig)
+      })
+      const owned = this.#owned.get(id) ?? new Set<string>()
+      const removes = settled
+        ? [...owned].filter(n => !wantedSet.has(n) && rawByName.has(n)).map(n => {
+            const raw = rawByName.get(n)!
+            return SIG.test(raw) ? { sig: raw } : { label: n }
+          })
+        : []
+      for (const n of wanted) owned.add(n)
+      for (const n of [...owned]) if (!wantedSet.has(n) && settled) owned.delete(n)
+      this.#owned.set(id, owned)
+      if (appends.length || swaps.length || removes.length) {
+        await committer.commitChildrenDeltas(segs, { appends, swaps, removes })
+      }
+    }
 
     // Even through the committer, force the cursor to head for THIS bag: the
     // history cursor and the lineage layer memo may still lag the new head.

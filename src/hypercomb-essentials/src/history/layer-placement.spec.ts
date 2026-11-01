@@ -5,7 +5,7 @@
 // cold miss so writers can refuse instead of wiping the sibling.
 
 import { describe, expect, it } from 'vitest'
-import { captureCollectionSig, childEntriesOf, childNamesOf, childNamesOfStrict, flattenLayerTree, type PlacementHistory, type PlacementLayer } from './layer-placement.js'
+import { alignPlacedHeads, captureCollectionSig, childEntriesOf, childNamesOf, childNamesOfStrict, flattenLayerTree, type PlacementHistory, type PlacementLayer } from './layer-placement.js'
 
 const SIG_A = 'a'.repeat(64)
 const SIG_B = 'b'.repeat(64)
@@ -257,5 +257,58 @@ describe('captureCollectionSig', () => {
     const history = historyWith({})
     history.sealSubtree = async () => null
     expect(await captureCollectionSig(history, ['page', 'payload'])).toBeNull()
+  })
+})
+
+describe('alignPlacedHeads', () => {
+  const make = (head: PlacementLayer | null, placed: PlacementLayer) => {
+    const commits: PlacementLayer[] = []
+    const history = {
+      sign: async (l: { explorerSegments: () => readonly string[] }) => l.explorerSegments().join('/'),
+      currentLayerAt: async () => head,
+      commitLayer: async (_s: string, layer: PlacementLayer) => { commits.push(layer); return 'new' },
+      // Only the placed sig is the placed layer; any other sig is a child named after itself.
+      getLayerBySig: async (sig: string) => (sig === 'pasted' || sig === 's' ? placed : { name: sig }),
+    } as unknown as PlacementHistory
+    return { history, commits }
+  }
+
+  it('combines into the owner head: own children kept, own scalars win', async () => {
+    const { history, commits } = make(
+      { name: 'x', children: ['own'], note: 'mine' },
+      { name: 'x', children: ['theirs'], note: 'theirs', extra: 'e' },
+    )
+    const out = await alignPlacedHeads(history, undefined, ['p'], ['pasted'])
+    expect(commits).toHaveLength(1)
+    expect(commits[0].children).toEqual(['own', 'theirs'])
+    expect(commits[0].note).toBe('mine')
+    expect(commits[0].extra).toBe('e')
+    expect(out.get('pasted')).toBe('new')
+  })
+
+  it('commits against the head marker and re-combines after a StaleHeadError', async () => {
+    let calls = 0
+    const bases: unknown[] = []
+    const history = {
+      sign: async (l: { explorerSegments: () => readonly string[] }) => l.explorerSegments().join('/'),
+      currentLayerAt: async () => ({ name: 'x', children: ['own'] }),
+      headMarkerOf: () => 'm1',
+      commitLayer: async (_s: string, _l: PlacementLayer, base?: unknown) => {
+        bases.push(base)
+        if (++calls === 1) throw Object.assign(new Error('stale'), { name: 'StaleHeadError' })
+        return 'new'
+      },
+      getLayerBySig: async (sig: string) => (sig === 's' ? { name: 'x', children: ['theirs'] } : { name: sig }),
+    } as unknown as PlacementHistory
+    const out = await alignPlacedHeads(history, undefined, ['p'], ['s'])
+    expect(bases).toEqual([{ marker: 'm1' }, { marker: 'm1' }])
+    expect(out.get('s')).toBe('new')
+  })
+
+  it('commits nothing when the owner already holds everything', async () => {
+    const same = { name: 'x', children: ['a'] }
+    const { history, commits } = make(same, { ...same })
+    await alignPlacedHeads(history, undefined, ['p'], ['s'])
+    expect(commits).toHaveLength(0)
   })
 })

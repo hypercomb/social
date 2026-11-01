@@ -10,7 +10,7 @@ import { deliverTurnSig, newTileConvoId, readTurns, setConversationGoalReached }
 import { appendStep, nextSeq as ledgerNextSeq, readSteps, runForAsk } from './chat-steps.js'
 import { MUTATING_OPS, STEP_SILENT_OPS } from './bridge-ops.js'
 import { ParkedLease, monotonicNow } from './bridge-parked.js'
-import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, writeTilePropertiesAt, readOwnTilePropertiesAt, isParticipantImage, PARTICIPANT_MARK, SUBSTRATE_MARK } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { inflate } from '../history/inflate.js'
@@ -77,6 +77,10 @@ type BridgeRequest = {
   sig?: string
   /** Bag manipulation. */
   slot?: string
+  /** Explicit, deliberate replace. Without it `update` COMBINES (the owner's
+   *  values stand, incoming only fills what is absent, children append) and
+   *  `bag-set` refuses the `children` slot; `stamp` fills only absent keys. */
+  replace?: boolean
   /** Optimization filter — `optimization-list` returns only entries
    *  whose top-level `kind` matches (e.g. `'qa'`). Layer slots are
    *  unrelated to this filter. Also used by `decoration-add` as the
@@ -1351,6 +1355,8 @@ export class ClaudeBridgeWorker extends Worker {
 
     const committer = get<{
       commitSlotSet?: (segments: readonly string[], slot: string, sigs: readonly string[]) => Promise<void>
+      commitSlotAppend?: (segments: readonly string[], slot: string, sig: string) => Promise<void>
+      commitSlotRemove?: (segments: readonly string[], slot: string, sig: string) => Promise<void>
     }>('@diamondcoreprocessor.com/LayerCommitter')
     if (!committer?.commitSlotSet) {
       return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotSet not available' }
@@ -1447,7 +1453,15 @@ export class ClaudeBridgeWorker extends Worker {
     if (!committer.commitSlotSet) {
       return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotSet not available' }
     }
-    await committer.commitSlotSet(segments, 'decorations', next)
+    // Deltas, not a whole-slot set: append/remove apply to the LIVE head
+    // inside the commit FIFO, so a concurrent decoration or note landing
+    // between the read above and this write is kept, never replaced.
+    if (committer.commitSlotAppend && committer.commitSlotRemove) {
+      for (const removedSig of dropped) await committer.commitSlotRemove(segments, 'decorations', removedSig)
+      if (!prior.includes(newSig)) await committer.commitSlotAppend(segments, 'decorations', newSig)
+    } else {
+      await committer.commitSlotSet(segments, 'decorations', next)
+    }
 
     // 6. Notify downstream observers. The cascade is already complete;
     //    LayerCommitter's `onTrigger` handler dedups against the
@@ -1500,6 +1514,8 @@ export class ClaudeBridgeWorker extends Worker {
     const committer = get<{
       update?: (segments: readonly string[], layer: object) => Promise<string>
       commitSlotSet?: (segments: readonly string[], slot: string, sigs: readonly string[]) => Promise<void>
+      commitSlotAppend?: (segments: readonly string[], slot: string, sig: string) => Promise<void>
+      commitSlotRemove?: (segments: readonly string[], slot: string, sig: string) => Promise<void>
     }>('@diamondcoreprocessor.com/LayerCommitter')
     if (!committer?.update) return { id: req.id, ok: false, error: 'LayerCommitter.update not available' }
 
@@ -1515,7 +1531,11 @@ export class ClaudeBridgeWorker extends Worker {
     if (!committer.commitSlotSet) {
       return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotSet not available' }
     }
-    await committer.commitSlotSet(segments, slot, next)
+    // add/remove are deltas applied to the live head inside the FIFO, so a
+    // concurrent writer's entry between the read above and this write survives.
+    if (mode === 'add' && committer.commitSlotAppend) await committer.commitSlotAppend(segments, slot, sig)
+    else if (mode === 'remove' && committer.commitSlotRemove) await committer.commitSlotRemove(segments, slot, sig)
+    else await committer.commitSlotSet(segments, slot, next)
     return { id: req.id, ok: true, data: { slot, count: next.length, mode } }
   }
 
@@ -1537,6 +1557,12 @@ export class ClaudeBridgeWorker extends Worker {
     }
 
     const slot = (typeof req.slot === 'string' && req.slot.trim()) || CONTEXT_SLOT
+
+    // A SET OF `children` IS A MEMBERSHIP REPLACE: every sibling the caller did
+    // not list becomes unreferenced. Only a deliberate `replace: true` may do it.
+    if (slot === 'children' && req.replace !== true) {
+      return { id: req.id, ok: false, error: 'bag-set on `children` replaces membership and orphans every sibling not listed; use bag-add to append, or pass replace:true to replace deliberately' }
+    }
 
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
@@ -1673,10 +1699,26 @@ export class ClaudeBridgeWorker extends Worker {
     // The props index follows via writeTilePropertiesAt's central
     // layer-keyed seed, and the render derives from canonical on a miss —
     // no location write needed (Phase C sweep, visuals-across-lineages.md).
-    await writeTilePropertiesAt(parentSegments, cellName, updates)
-    EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', { cell: cellName, segments: parentSegments })
+    // YOUR PROPERTIES WIN. The tile's own values stand; the stamp only fills
+    // what is absent. The picture keys travel as one unit: if the tile already
+    // wears any picture (or a participant image), none of the stamp's are taken.
+    // `replace:true` is the explicit, deliberate edit.
+    const skipped: string[] = []
+    if (req.replace !== true) {
+      const own = await readOwnTilePropertiesAt(parentSegments, cellName)
+      const pictureKeys = ['small', 'flat', 'large', 'imageSig', PARTICIPANT_MARK, SUBSTRATE_MARK]
+      const ownsPicture = isParticipantImage(own) || pictureKeys.some(k => k in own)
+      for (const k of Object.keys(updates)) {
+        const owned = k in own && own[k] !== undefined && own[k] !== null && own[k] !== ''
+        if (owned || (ownsPicture && pictureKeys.includes(k))) { skipped.push(k); delete updates[k] }
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      await writeTilePropertiesAt(parentSegments, cellName, updates)
+      EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', { cell: cellName, segments: parentSegments })
+    }
 
-    return { id: req.id, ok: true, data: { keys: Object.keys(updates) } }
+    return { id: req.id, ok: true, data: { keys: Object.keys(updates), skipped } }
   }
 
   // Recursive sig → JSON inflater. Caller hands a 64-hex sig (or a
@@ -2107,8 +2149,50 @@ export class ClaudeBridgeWorker extends Worker {
     // treats them as the participant's own — the generic-update coverage the
     // decoration / bag-set paths would otherwise miss.
     markLayerAuthoredPageSigs(layer)
-    await committer.update(parentSegments, layer)
-    return { id: req.id, ok: true, data: { count: children.length, segments: parentSegments } }
+    if (req.replace === true) {
+      await committer.update(parentSegments, layer)
+      return { id: req.id, ok: true, data: { count: children.length, segments: parentSegments } }
+    }
+
+    // COMBINE, NEVER REPLACE. Without an explicit `replace:true` the owner's
+    // layer stands and the incoming one only adds: children APPEND by name
+    // (existing siblings stay listed), list slots append their absent entries
+    // in the commit queue, scalars fill only where the owner has none. Empty
+    // arrays wipe nothing. (Same rules as combineLayers in core; the committer
+    // has no combine delta yet, so the union is expressed as in-queue appends.)
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    const head = history
+      ? await history.currentLayerAt(await history.sign({ explorerSegments: () => parentSegments }))
+      : null
+    const own = (head ?? {}) as Record<string, unknown>
+    const slotCommitter = committer as {
+      commitSlotAppend?: (segments: readonly string[], slot: string, sig: string) => Promise<void>
+    }
+    const scalars: Record<string, unknown> = {}
+    let appended = 0
+    for (const [slot, value] of Object.entries(layer)) {
+      if (slot === 'name' || slot === 'children') continue
+      if (Array.isArray(value)) {
+        const have = new Set(Array.isArray(own[slot]) ? (own[slot] as unknown[]).map(v => String(v)) : [])
+        for (const v of value) {
+          const entry = String(v ?? '').trim()
+          if (!entry || have.has(entry)) continue
+          if (!slotCommitter.commitSlotAppend) return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotAppend not available' }
+          have.add(entry)
+          await slotCommitter.commitSlotAppend(parentSegments, slot, entry)
+          appended++
+        }
+      } else if (value !== undefined && value !== null && value !== '') {
+        const mine = own[slot]
+        if (mine === undefined || mine === null || mine === '') scalars[slot] = value
+      }
+    }
+    if (Object.keys(scalars).length > 0) await committer.update(parentSegments, { ...(layer.name ? { name: layer.name } : {}), ...scalars })
+    if (children.length > 0) {
+      for (const name of children) EffectBus.emit('cell:added', { cell: name, segments: parentSegments.slice() })
+      await new hypercomb().act()
+    }
+    return { id: req.id, ok: true, data: { count: children.length, appended, segments: parentSegments } }
   }
 
   // Mirrors a human keystroke into the in-app command line. Emits the same

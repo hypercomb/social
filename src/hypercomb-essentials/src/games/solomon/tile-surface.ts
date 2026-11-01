@@ -68,6 +68,11 @@ export interface LoadedTileRoom {
 }
 
 const copy = <T>(value: T): T => structuredClone(value)
+const digest8 = async (value: unknown): Promise<string> => {
+  const bytes = new TextEncoder().encode(JSON.stringify(value) ?? 'null')
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return Array.from(hash.slice(0, 4), b => b.toString(16).padStart(2, '0')).join('')
+}
 const object = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value)
 const safeName = (value: string): string => {
@@ -209,8 +214,9 @@ export class SolomonTileSurface {
     return await this.readStories() ?? defaults.map(seed => seed.bundle)
   }
 
-  /** Writes one story add-on's tile — `stories/<id>` — over any tile of
-   *  that name; the layer is seeded first (with `seeds`) if it is not
+  /** Writes one story add-on's tile — `stories/<id>` — beside any tile the
+   *  participant already holds under that id (a differing bundle lands as
+   *  `<id>-<sig8>`, never over theirs); the layer is seeded first (with `seeds`) if it is not
    *  there yet, so a participant's first add-on never displaces the worked
    *  example. The game reads it the next time it opens. */
   plugStory(id: string, bundle: unknown, seeds: readonly StorySeedTile[] = []): Promise<void> {
@@ -221,9 +227,21 @@ export class SolomonTileSurface {
 
   async #plugStory(id: string, bundle: unknown, seeds: readonly StorySeedTile[]): Promise<void> {
     await this.#ensureStories(seeds)
+    // The owner's tile wins: a different bundle under an id the participant
+    // already holds is plugged beside it as `<id>-<sig8>`, never over it.
+    let name = safeName(id)
+    const storiesSegments = [...this.baseSegments, SOLOMON_STORIES]
+    const held = await this.#resolveAt([...storiesSegments, name])
+    const heldData = held?.['solomonStory']
+    if (held && object(heldData) && 'bundle' in heldData) {
+      if (JSON.stringify(heldData['bundle']) === JSON.stringify(bundle)) return
+      name = safeName(`${name}-${await digest8(bundle)}`)
+      const twin = await this.#resolveAt([...storiesSegments, name])
+      if (twin) return
+    }
     await this.#committer.importTree([{
-      segments: [...this.baseSegments, SOLOMON_STORIES, safeName(id)],
-      layer: { name: id, solomonStory: { version: VERSION, bundle } },
+      segments: [...storiesSegments, name],
+      layer: { name, solomonStory: { version: VERSION, bundle } },
     }])
   }
 

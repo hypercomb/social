@@ -33,7 +33,7 @@ describe('the divergence scan and a static offer', () => {
 
   it('a dim held static tile refreshes one level and never the whole branch', () => {
     const sync = between('#syncStaticTile = async', 'public syncResolvedBranch = async')
-    expect(sync.includes('writeTilePropertiesAt(')).toBe(true)
+    expect(sync.includes('writeFillOnlyProps(')).toBe(true)   // fill-only: the owner's props win
     expect(sync.includes('#recordSyncReceipt(')).toBe(true)
     expect(sync.includes('#commitBranch(')).toBe(false)
     expect(sync.includes('syncResolvedBranch(')).toBe(false)

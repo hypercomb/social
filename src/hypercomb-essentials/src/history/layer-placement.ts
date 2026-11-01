@@ -21,7 +21,9 @@
 export interface PlacementHistory {
   sign(lineage: { domain?: unknown; explorerSegments: () => readonly string[] }): Promise<string>
   currentLayerAt(locationSig: string): Promise<PlacementLayer | null>
-  commitLayer(locationSig: string, layer: PlacementLayer): Promise<string>
+  commitLayer(locationSig: string, layer: PlacementLayer, base?: { marker?: string | null }): Promise<string>
+  /** Marker the current head was read from (HistoryService.headMarkerOf). */
+  headMarkerOf?(locationSig: string): string | null
   getLayerBySig(sig: string): Promise<PlacementLayer | null>
   /** Children manifest for a layer object (HistoryService.childrenManifestFor)
    *  — the cold-name fallback childNamesOfStrict uses before reporting a miss. */
@@ -67,7 +69,7 @@ const UNSAFE_CELL_NAME = /[\\/\x00-\x1f]/
  *  module — and re-exported here so placement (adopt/paste), code-detection,
  *  the ContentBroker's own walk and host-sync / website-archive can't drift
  *  from it. */
-import { CHILD_SLOTS } from '@hypercomb/core'
+import { CHILD_SLOTS, combineBags, combineLayers } from '@hypercomb/core'
 export { CHILD_SLOTS }
 
 /** The child-layer sigs of a layer, from whichever canonical child slot it uses
@@ -252,6 +254,77 @@ export async function captureCollectionSig(
   return found?.sig ?? null
 }
 
+/** Merge the `properties` blob two layers both hold into ONE new blob sig (own
+ *  keys win, incoming fills only what is absent). Null when there is nothing to
+ *  add or either blob cannot be read - the owner's blob then stands. */
+async function mergePropertiesBlob(blobs: readonly { slot: string; own: string; incoming: string }[]): Promise<string | null> {
+  const conflict = blobs.find(b => b.slot === 'properties')
+  if (!conflict) return null
+  const store = (typeof window === 'undefined' ? undefined : (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/Store')) as
+    | { getResource?: (sig: string) => Promise<Blob | null>; putResource?: (blob: Blob) => Promise<string> }
+    | undefined
+  if (!store?.getResource || !store.putResource) return null
+  try {
+    const [ownBlob, inBlob] = await Promise.all([store.getResource(conflict.own), store.getResource(conflict.incoming)])
+    if (!ownBlob || !inBlob) return null
+    const bag = combineBags(JSON.parse(await ownBlob.text()), JSON.parse(await inBlob.text()), { skip: ['index'] })
+    if (!bag.changed) return null
+    return await store.putResource(new Blob([JSON.stringify(bag.bag)], { type: 'application/json' }))
+  } catch { return null }
+}
+
+/** COMBINE two layers all the way down: `own` wins every conflict, `incoming`
+ *  only fills what is absent, no entry of `own` is ever dropped (core
+ *  combineLayers), the properties bag is merged at the blob level, and a child
+ *  both sides list under the same NAME is combined one level down and
+ *  re-minted (pool write, no marker). `merges` collects every such combined
+ *  child with its path, so a
+ *  caller can advance a child ROUTE that already has a head of its own - that
+ *  head outranks the parent's listing and would otherwise hide the addition. */
+export async function combineLayerTree(
+  history: PlacementHistory,
+  own: PlacementLayer,
+  incoming: PlacementLayer,
+  at: readonly string[] = [],
+  merges: { segments: string[]; layer: PlacementLayer }[] = [],
+  depth = 0,
+): Promise<{ layer: PlacementLayer; changed: boolean }> {
+  const names = new Map<string, string>()
+  for (const l of [own, incoming]) {
+    for (const c of Array.isArray(l.children) ? l.children : []) {
+      const sig = String(c)
+      if (names.has(sig)) continue
+      const child = await history.getLayerBySig(sig)
+      if (typeof child?.name === 'string' && child.name) names.set(sig, child.name)
+    }
+  }
+  const res = combineLayers(own, incoming, { nameOf: sig => names.get(sig) })
+  const layer: PlacementLayer = { ...res.layer }
+  let changed = res.changed
+  // A properties bag both sides hold is merged at the BLOB level (own keys win,
+  // incoming fills what is absent): the sig union cannot. The order blob names
+  // SEATS - taking a peer's beside the owner's would seat two tiles in one slot,
+  // so the owner's order stands.
+  const bag = await mergePropertiesBlob(res.blobs)
+  if (bag) { layer['properties'] = [bag]; changed = true }
+  if (depth < 32 && history.materializeLayer) {
+    for (const same of res.sameName) {
+      const [a, b] = await Promise.all([history.getLayerBySig(same.own), history.getLayerBySig(same.incoming)])
+      if (!a || !b) continue
+      const path = [...at, same.name]
+      const child = await combineLayerTree(history, a, b, path, merges, depth + 1)
+      if (!child.changed) continue
+      const sig = await history.materializeLayer(child.layer)
+      const list = layer[same.slot]
+      if (!sig || !Array.isArray(list)) continue
+      layer[same.slot] = list.map(x => (x === same.own ? sig : x))
+      merges.push({ segments: path, layer: child.layer })
+      changed = true
+    }
+  }
+  return { layer, changed }
+}
+
 /** After layers are placed under `target` by sig, make each one's OWN route
  *  agree with it.
  *
@@ -264,21 +337,75 @@ export async function captureCollectionSig(
  *  copied (commitLayer dedups when they already match). A route with no head
  *  needs nothing — it resolves through the parent. Descendant routes are not
  *  walked; identity by name (hypergraph-molecule-lineage.md) is the whole fix. */
+export async function advanceRoute(
+  history: PlacementHistory,
+  domain: unknown,
+  segments: readonly string[],
+  layer: PlacementLayer,
+): Promise<void> {
+  const locSig = await history.sign({ domain, explorerSegments: () => segments }).catch(() => '')
+  if (!locSig) return
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const head = await history.currentLayerAt(locSig).catch(() => null)
+    if (!head) return // no head of its own: it opens through its parent's listing
+    const marker = history.headMarkerOf?.(locSig) ?? null
+    const res = await combineLayerTree(history, head, layer, segments)
+    if (!res.changed) return
+    try {
+      await history.commitLayer(locSig, res.layer, marker ? { marker } : undefined)
+      return
+    } catch (err) {
+      if ((err as { name?: unknown } | null)?.name !== 'StaleHeadError' || attempt === 2) throw err
+    }
+  }
+}
+
 export async function alignPlacedHeads(
   history: PlacementHistory,
   domain: unknown,
   target: readonly string[],
   sigs: readonly string[],
-): Promise<void> {
+  /** The committer's FIFO (run a task inside the commit queue). Optional;
+   *  without it the base-marker stale-head guard still applies. */
+  serialize?: <T>(task: () => Promise<T>) => Promise<T>,
+): Promise<Map<string, string>> {
+  // placed sig -> sig the route now heads at, only where a combine happened,
+  // so a caller may swap the parent's listing to it.
+  const combinedSigs = new Map<string, string>()
   for (const sig of sigs) {
     const layer = await history.getLayerBySig(sig)
     if (!layer || typeof layer.name !== 'string' || !layer.name) continue
     const name = layer.name
     const locSig = await history.sign({ domain, explorerSegments: () => [...target, name] }).catch(() => '')
     if (!locSig) continue
-    const head = await history.currentLayerAt(locSig).catch(() => null)
-    if (head) await history.commitLayer(locSig, layer)
+    // Read -> combine -> commit as ONE task: run inside the caller's commit
+    // FIFO when given, and commit against the marker the head was read from
+    // so a head that moved meanwhile refuses (StaleHeadError) and is
+    // re-read + re-combined instead of overwritten.
+    const task = async (): Promise<void> => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const head = await history.currentLayerAt(locSig).catch(() => null)
+        if (!head) return
+        const marker = history.headMarkerOf?.(locSig) ?? null
+        // The owner's head is never replaced: COMBINE (own wins, lists unioned,
+        // incoming fills only what is absent). Nothing to add -> no commit.
+        const merges: { segments: string[]; layer: PlacementLayer }[] = []
+        const res = await combineLayerTree(history, head, layer, [...target, name], merges)
+        if (!res.changed) return
+        try {
+          combinedSigs.set(sig, await history.commitLayer(locSig, res.layer, marker ? { marker } : undefined))
+          // A child combined one level down whose OWN route already has a head
+          // would still open that head: advance it by the same combine.
+          for (const m of merges) await advanceRoute(history, domain, m.segments, m.layer)
+          return
+        } catch (err) {
+          if ((err as { name?: unknown } | null)?.name !== 'StaleHeadError' || attempt === 2) throw err
+        }
+      }
+    }
+    await (serialize ? serialize(task) : task())
   }
+  return combinedSigs
 }
 
 /** Resolve a single child cell's layer (and its sig) via its PARENT's

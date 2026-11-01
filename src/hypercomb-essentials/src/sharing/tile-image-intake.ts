@@ -15,7 +15,7 @@
 import { EffectBus, I18N_IOC_KEY, RESOURCE_URL_PREFIX, type I18nProvider } from '@hypercomb/core'
 import { largeImage } from '../editor/arm-resource.js'
 import { generateHexThumbnails } from '../editor/resource-thumbnail.js'
-import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, recoverableTileImageSig, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { galleryImageSigsAt, holdPictures } from '../commands/lightbox-kind.js'
 import { terminalContentSig } from '../presentation/tiles/artifact-content.js'
 
@@ -43,7 +43,12 @@ const say = (key: string, fallback: string, params: Record<string, string | numb
 export async function wornPictureSig(parent: readonly string[], label: string): Promise<string> {
   try {
     const props = await readTilePropertiesAt(parent, label)
-    const large = (props['large'] as { image?: unknown } | undefined)?.image
+    const own = (props['large'] as { image?: unknown } | undefined)?.image
+    // No original: the tile may wear an adopted peer picture or a link/choice
+    // pick held as a small only. A substrate default is never held.
+    const large = typeof own === 'string' && SIG.test(own)
+      ? own
+      : props['substrate'] ? undefined : recoverableTileImageSig(props)
     if (typeof large !== 'string' || !SIG.test(large)) return ''
     const store = window.ioc?.get?.<Store>('@hypercomb.social/Store')
     if (!store?.getResourceLocal) return large
@@ -118,9 +123,6 @@ export async function replaceWornPicture(
   if (!store?.putResource) throw new Error('storage unavailable')
 
   const segments = parent.map(segment => String(segment ?? '').trim()).filter(Boolean)
-  const existing = await readTilePropertiesAt(segments, cell)
-  const oldLarge = (existing['large'] as { image?: unknown } | undefined)?.image
-  const previous = typeof oldLarge === 'string' ? oldLarge : ''
   const worn = await wornPictureSig(segments, cell)
   const large = await largeImage(blob)
   const sig = await store.putResource(large.blob)
@@ -131,6 +133,16 @@ export async function replaceWornPicture(
   const hex = await generateHexThumbnails(large.blob)
   const pointSig = hex.pointBlob ? await store.putResource(hex.pointBlob) : ''
   const flatSig = hex.flatBlob ? await store.putResource(hex.flatBlob) : ''
+
+  // Read the tile's properties only now, after every slow await (capture,
+  // thumbnails), so `flat` is rebuilt from the freshest head and a framing
+  // nudge made while the thumbnails were generating is not overwritten with a
+  // pre-nudge copy. (writeTilePropertiesAt takes no function-valued update, so
+  // the read cannot move inside its lock from this file; nothing slow remains
+  // between this read and the write.)
+  const existing = await readTilePropertiesAt(segments, cell)
+  const oldLarge = (existing['large'] as { image?: unknown } | undefined)?.image
+  const previous = typeof oldLarge === 'string' ? oldLarge : ''
 
   const updates: Record<string, unknown> = {
     large: { image: sig },
@@ -157,7 +169,16 @@ export async function replaceWornPicture(
     updates['link'] = `${RESOURCE_URL_PREFIX}${sig}`
   }
   await writeTilePropertiesAt(segments, cell, updates)
-  const keep = [worn, sig].filter(item => item.length > 0)
+  // A tile with no original wore only its smalls (adopted or chosen picture):
+  // hold those too. With an original the smalls are crops of it. A substrate
+  // default is never held.
+  const wore = existing['substrate'] || previous
+    ? []
+    : [
+        (existing['small'] as { image?: unknown } | undefined)?.image,
+        (isRecord(existing['flat']) ? (existing['flat']['small'] as { image?: unknown } | undefined)?.image : undefined),
+      ].filter((item): item is string => typeof item === 'string' && SIG.test(item))
+  const keep = [...new Set([worn, ...wore, sig].filter(item => item.length > 0))]
   if (keep.length > 0) {
     await holdPictures([...segments, cell], keep).catch(err => {
       console.warn('[image-paste] the replaced picture could not be held', err)

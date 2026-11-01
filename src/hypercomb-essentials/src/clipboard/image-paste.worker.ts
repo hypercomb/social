@@ -12,6 +12,10 @@ import type { ImageEditorService } from '../editor/image-editor.service.js'
 import type { SelectionService } from '../selection/selection.service.js'
 import { announceHeldImages, announceReplacedPicture, holdImagesOnTile, replaceWornPicture } from '../sharing/tile-image-intake.js'
 
+/** `<segments>\0<name>` of image tiles chosen but whose cell:added commit may
+ *  not have settled; keeps back-to-back pastes on distinct names. */
+const pendingImageNames = new Set<string>()
+
 const t = (key: string, fallback: string): string => {
   try {
     const text = window.ioc?.get<I18nProvider>(I18N_IOC_KEY)?.t?.(key)
@@ -173,26 +177,45 @@ export class ImagePasteWorker extends Worker {
     // truth for "what tiles are here") — only to choose a free name. The
     // read never becomes a write, so a sibling it could not resolve costs
     // at worst a name chosen twice, never the tile.
+    const segments = (lineage.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const where = segments.join('/')
+
     const existing = new Set<string>()
+    // An unreadable head (no services, a throw, or an unresolved child) is
+    // NOT an empty page: a bare name could land on the owner's own tile.
+    let known = false
     if (typeof lineage.currentLayer === 'function' && history?.getLayerBySig) {
       try {
         const raw = await lineage.currentLayer()
         const parentLayer = (raw && typeof raw === 'object') ? raw : null
         const strict = await childNamesOfStrict(history as unknown as PlacementHistory, parentLayer as unknown as Parameters<typeof childNamesOfStrict>[1])
         for (const n of strict.names) existing.add(n)
-      } catch { /* no names known — 'image' is tried as is */ }
+        known = !strict.coldMiss
+      } catch { /* known stays false */ }
+    }
+
+    // Names chosen by a paste whose commit has not settled — the read cannot
+    // see them yet. Checked after the await so concurrent pastes see each other.
+    for (const key of pendingImageNames) {
+      const at = key.indexOf('\u0000')
+      if (key.slice(0, at) === where) existing.add(key.slice(at + 1))
     }
 
     let finalName = 'image'
-    if (existing.has(finalName)) {
+    if (!known) {
+      finalName = `image-${Date.now().toString(36)}`
+      while (existing.has(finalName)) finalName += 'x'
+    } else if (existing.has(finalName)) {
       let counter = 2
       while (existing.has(`image-${counter}`)) counter++
       finalName = `image-${counter}`
     }
 
-    const segments = (lineage.explorerSegments?.() ?? [])
-      .map(s => String(s ?? '').trim())
-      .filter(Boolean)
+    const reserved = `${where}\u0000${finalName}`
+    pendingImageNames.add(reserved)
+    setTimeout(() => pendingImageNames.delete(reserved), 15000)
 
     // ONE APPEND, THROUGH THE COMMITTER'S OWN QUEUE. The committer adds the
     // name to the page's head — it merges, it never re-lists — so every

@@ -376,6 +376,21 @@ export class ReferencesWindowComponent implements OnDestroy {
         // the draft holds it, and the link that adds the tile seats it there
         // in the same marker, with no current-location place-at race while
         // the item picker is showing the Portal source layer.
+        // The owner wins: re-check the LIVE head now (the open-time label
+        // snapshot misses hidden tiles and tiles made since). A tile that
+        // already has a head keeps its whole properties list — importTree's
+        // `properties` set would replace it — so nothing is written to it.
+        const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as
+          { sign?(l: { explorerSegments: () => readonly string[] }): Promise<string>; currentLayerAt?(s: string): Promise<unknown> } | undefined
+        if (!history?.sign || !history.currentLayerAt) throw new Error('History unavailable')
+        const headSig = await history.sign({ explorerSegments: () => parent })
+        if (await history.currentLayerAt(headSig)) {
+          for (const entry of chosen) await dropReferenceTile({ key: entry.label, label: entry.label, segments: entry.segments }, parent)
+          await gatherLink()?.feed?.(c.portal.segments, chosen.map(entry => entry.label)).catch(() => [])
+          await new hypercomb().act()
+          this.finish(parent)
+          return
+        }
         const properties: Record<string, unknown> = {}
         if (typeof c.portal.imageSig === 'string' && c.portal.imageSig) properties['imageSig'] = c.portal.imageSig
         const propertiesSig = await store.putResource(new Blob(

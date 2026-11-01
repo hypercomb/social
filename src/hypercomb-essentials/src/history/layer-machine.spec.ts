@@ -102,10 +102,32 @@ describe('LayerMachine scalar slots — check 5 on the canonical write surface',
     // the delta must carry it. The machine test above proves the rest.
     const src = readFileSync(join(process.cwd(), 'hypercomb-essentials', 'src', 'history', 'layer-committer.drone.ts'), 'utf8')
     expect(src.includes("delta: { kind: 'layer', layer: slots, scalars, nameSlots }")).toBe(true)
-    expect(src.includes('machine.setScalar(slot, value)')).toBe(true)
+    expect(src.includes('machine.setScalar(slot, value)')).toBe(true) // an update is the owner's own edit: it sets
     expect(src.includes('drop non-array values')).toBe(false)
     // and the IMPORT path — paste / adopt — carries them too
-    expect(src.includes('if (!Array.isArray(raw)) { if (raw !== undefined) machine.setScalar(slot, raw); continue }')).toBe(true)
+    expect(src.includes('if (replace) machine.setScalar(slot, raw)')).toBe(true)
+    expect(src.includes('else if (raw !== null) incoming[slot] = raw')).toBe(true)
     expect(src.includes('if (!Array.isArray(raw)) continue')).toBe(false)
+  })
+})
+
+describe('LayerMachine.combine', () => {
+  it('keeps own children and scalars, fills the rest, loses nothing', () => {
+    const m = LayerMachine.fromLayer({ name: 'p', children: [A, B], mood: 'mine' } as never, 'p')
+    const res = m.combine({ name: 'p', children: [C], mood: 'theirs', extra: 'x' } as never)
+    expect(res.changed).toBe(true)
+    expect(m.getSlot('children')).toEqual([A, B, C])
+    expect(m.getScalar('mood')).toBe('mine')
+    expect(m.getScalar('extra')).toBe('x')
+  })
+})
+
+describe('LayerMachine append with nameOf', () => {
+  it('refuses a second sig for a name the slot already lists', () => {
+    const a = 'a'.repeat(64), b = 'b'.repeat(64)
+    const m = LayerMachine.fromLayer({ name: 'p', children: [a] } as never, 'p', [])
+    const nameOf = (s: string) => 'X'
+    expect(m.apply({ slot: 'children', op: 'append', sig: b, nameOf }).changed).toBe(false)
+    expect(m.output().children).toEqual([a])
   })
 })

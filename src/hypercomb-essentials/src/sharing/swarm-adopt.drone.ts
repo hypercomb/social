@@ -24,7 +24,7 @@
 // programmatic action a future auto-sync can ride. Nothing enters your tree
 // without a participant action.
 
-import { Drone, EffectBus, hypercomb, requestConfirm, revisionName, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb, requestConfirm, revisionName, combineLayers, combineBags, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
   childLayerOf,
   childNamesOfStrict,
@@ -38,6 +38,8 @@ import {
 } from '../history/layer-placement.js'
 import {
   cellLocationSig,
+  isParticipantImage,
+  readOwnTilePropertiesAt,
   seedLayerKeyedTileProps,
   writeTilePropertiesAt,
 } from '../editor/tile-properties.js'
@@ -98,6 +100,47 @@ const SYNC_RECEIPTS_KEY = 'hc:synced-publisher-roots'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
+/** The picture keys travel as ONE unit — a half-taken picture is a mixed one. */
+const PICTURE_UNIT_KEYS = ['small', 'flat', 'large', 'imageSig', 'point'] as const
+
+/** Fill-only: what `incoming` may add to a tile that already wears `own`. The
+ *  owner's keys win; the picture unit is skipped whole when the owner has a
+ *  picture (a substrate stock filler yields to a real one); the wire `index` is
+ *  never written (the seat is the page order slot). */
+const fillAbsentProps = (
+  own: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> => {
+  const present = (v: unknown) => v !== undefined && v !== null && v !== ''
+  const ownPicture = isParticipantImage(own)
+    || (own['substrate'] !== true && PICTURE_UNIT_KEYS.some(k => present(own[k])))
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(incoming)) {
+    if (k === 'index' || !present(v)) continue
+    if ((PICTURE_UNIT_KEYS as readonly string[]).includes(k)) {
+      if (!ownPicture) out[k] = v
+      continue
+    }
+    if (!present(own[k])) out[k] = v
+  }
+  return out
+}
+
+/** Write wire props onto a tile HERE without ever overwriting what it owns. A
+ *  cold read is unresolved, not empty — skip rather than guess. */
+const writeFillOnlyProps = async (
+  parentSegments: readonly string[],
+  name: string,
+  props: Record<string, unknown>,
+): Promise<void> => {
+  const stats = { cold: false }
+  const own = await readOwnTilePropertiesAt(parentSegments, name, stats)
+  if (stats.cold) return
+  const fill = fillAbsentProps(own, props)
+  if (Object.keys(fill).length === 0) return
+  await writeTilePropertiesAt([...parentSegments], name, fill, { onlyHere: true })
+}
+
 // A DIVERGENCE PASS IS BOUNDED (SCALE-5). Rules 3 and 4 each cost a mesh ask
 // for a held tile a peer also offers — a cached-visuals probe one level in, a
 // layers-only walk of the publisher's branch — and a hive sharing a hundred
@@ -121,7 +164,7 @@ interface AdoptQueueLike {
   ) => unknown
   entries?: readonly { sig: string; label: string; at: string[]; pubkey?: string }[]
   touchSeen?: (sig: string, at: readonly string[]) => void
-  next: () => { sig: string; label: string; at: string[]; domain?: string; page?: boolean } | null
+  next: () => { sig: string; label: string; at: string[]; domain?: string; page?: boolean; egg?: boolean } | null
   isQueued?: (label: string, at: readonly string[]) => boolean
   setActive?: (sig: string | null, at?: readonly string[]) => void
   markEgg?: (sig: string, at: readonly string[]) => void
@@ -180,6 +223,10 @@ interface CommitterLike {
     updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
     nameSlots?: ReadonlySet<string>,
   ) => Promise<void>
+  commitChildrenDeltas?: (
+    segments: readonly string[],
+    changes: { removes?: readonly { sig?: string; label?: string }[]; appends?: readonly string[] },
+  ) => Promise<string>
 }
 
 /** A branch this hive has folded in — the recoverable receipt persisted at
@@ -712,18 +759,30 @@ export class SwarmAdoptDrone extends Drone {
       // cold-sibling wipe guard every fold honours.
       if (coldMiss) { this.#visitStage('cold-parent', { name }); return false }
       if (!existing.includes(name)) {
-        const childLayer: Record<string, unknown> = { name, children: [] }
-        if (propSig) childLayer['properties'] = [propSig]
-        await committer.importTree([
-          { segments: parentSegments, layer: { ...(parent ?? {}), children: [...existing, name] } },
-          { segments: [...segments], layer: childLayer },
-        ])
+        // The parent is NOT re-listed: importTree links the child into the
+        // head hydrated inside the commit queue, so a commit that landed
+        // since the read above (a paste, a note) is never reverted nor a
+        // sibling orphaned.
+        // A name with a SURVIVING head (removed/hidden, bag kept) is revealed,
+        // not rebuilt: send {name} only so its subtree and picture stand, and
+        // let the wire props fill only what is absent.
+        const surviving = await resolveLayerAt(history, lineage?.domain, [...segments])
+        if (surviving) {
+          await committer.importTree([{ segments: [...segments], layer: { name } }])
+          if (propSig) {
+            try { await writeFillOnlyProps(parentSegments, name, props) } catch { /* best-effort */ }
+          }
+        } else {
+          const childLayer: Record<string, unknown> = { name, children: [] }
+          if (propSig) childLayer['properties'] = [propSig]
+          await committer.importTree([{ segments: [...segments], layer: childLayer }])
+        }
       } else if (propSig) {
-        // Already linked (a racing create) — carry the wire props onto it
-        // through the canonical writer instead.
+        // Already linked (a racing create) — the owner's keys win; the wire
+        // only fills what is absent.
         // A peer's properties are this place's copy — never sunk into the
         // name's repo, where they would reach every same-named tile here.
-        try { await writeTilePropertiesAt(parentSegments, name, props, { onlyHere: true }) } catch { /* best-effort */ }
+        try { await writeFillOnlyProps(parentSegments, name, props) } catch { /* best-effort */ }
       }
     } catch (err) { this.#visitStage('import-threw', { name, err: String(err).slice(0, 120) }); return false }
 
@@ -938,6 +997,64 @@ export class SwarmAdoptDrone extends Drone {
       ?? null) as Record<string, unknown> | null
   }
 
+  /** Combine a flattened incoming subtree with what this hive already owns at
+   *  each node (core combineLayers: own wins, incoming only fills, nothing the
+   *  owner lists is dropped). A node with no own head passes through verbatim.
+   *  Only the CHANGED slots are sent, and never a children list — importTree
+   *  links/swaps children inside the commit queue, so a stale own snapshot can
+   *  neither revert a concurrent commit nor drop a sibling. Returns null when
+   *  an owned node (or one of its children) is not readable yet: the caller
+   *  defers rather than overwrite. */
+  #combineTreeWithOwn = async (
+    history: PlacementHistory,
+    domain: unknown,
+    updates: { segments: string[]; layer: { name?: string; [slot: string]: unknown } }[],
+    mustResolve: readonly string[] | null,
+  ): Promise<{ segments: string[]; layer: { name?: string; [slot: string]: unknown } }[] | null> => {
+    const CHILD_SLOT_NAMES = ['children', 'cells', 'layers']
+    const out: { segments: string[]; layer: { name?: string; [slot: string]: unknown } }[] = []
+    const store = this.#ioc()?.get?.(STORE_KEY_LOCAL) as
+      | { getResource?: (sig: string) => Promise<Blob | null>; putResource?: (b: Blob) => Promise<string> }
+      | undefined
+    for (const u of updates) {
+      const own = await resolveLayerAt(history, domain, u.segments)
+      if (!own) {
+        if (mustResolve && u.segments.join('\u0000') === mustResolve.join('\u0000')) return null
+        out.push(u)
+        continue
+      }
+      const { coldMiss } = await childNamesOfStrict(history, own)
+      if (coldMiss) return null
+      const ownRest: Record<string, unknown> = {}
+      const incRest: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(own)) if (!CHILD_SLOT_NAMES.includes(k)) ownRest[k] = v
+      for (const [k, v] of Object.entries(u.layer)) if (!CHILD_SLOT_NAMES.includes(k)) incRest[k] = v
+      const res = combineLayers(ownRest, incRest)
+      const layer: { name?: string; [slot: string]: unknown } = { name: (own.name as string | undefined) ?? u.layer.name }
+      for (const k of Object.keys(res.layer)) {
+        if (k === 'name') continue
+        if (JSON.stringify(res.layer[k]) !== JSON.stringify(ownRest[k])) layer[k] = res.layer[k]
+      }
+      // A properties-like blob both sides hold: merge at the blob level (own
+      // keys win, picture unit whole, no seat from a peer), write ONE sig.
+      for (const b of res.blobs) {
+        if (b.slot !== 'properties' || !store?.getResource || !store?.putResource) continue
+        try {
+          const [ob, ib] = await Promise.all([store.getResource(b.own), store.getResource(b.incoming)])
+          if (!ob || !ib) continue
+          const merged = combineBags(JSON.parse(await ob.text()), JSON.parse(await ib.text()), { skip: ['index'] })
+          if (!merged.changed) continue
+          const canonical: Record<string, unknown> = {}
+          for (const key of Object.keys(merged.bag).sort()) canonical[key] = merged.bag[key]
+          const sig = await store.putResource(new Blob([JSON.stringify(canonical)], { type: 'application/json' }))
+          if (sig && sig !== b.own) layer[b.slot] = [sig]
+        } catch { /* the owner's blob stands */ }
+      }
+      out.push({ segments: u.segments, layer })
+    }
+    return out
+  }
+
   #applyWireTitles = async (
     segments: readonly string[],
     entry: Readonly<Record<string, unknown>>,
@@ -945,11 +1062,16 @@ export class SwarmAdoptDrone extends Drone {
     const raw = entry['titles']
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return
     const decorations = this.#ioc()?.get?.('@diamondcoreprocessor.com/DecorationService') as
-      | { setTitle?: (at: readonly string[], text: string, locale?: string) => Promise<unknown> }
+      | {
+        setTitle?: (at: readonly string[], text: string, locale?: string) => Promise<unknown>
+        titleOf?: (at: readonly string[], locale?: string) => Promise<string>
+      }
       | undefined
     if (!decorations?.setTitle) return
     for (const [locale, text] of Object.entries(raw as Record<string, unknown>)) {
       if (typeof text !== 'string' || !text.trim()) continue
+      // The owner's title for a locale stands; the wire only fills a gap.
+      try { if (decorations.titleOf && await decorations.titleOf(segments, locale)) continue } catch { /* unknown: fall through to fill */ }
       try { await decorations.setTitle(segments, text, locale) } catch { /* title never blocks content adoption */ }
     }
   }
@@ -1121,8 +1243,16 @@ export class SwarmAdoptDrone extends Drone {
           // publishes that we lack, never re-home (a shared tile stays one
           // tile). Anything else folds whole through the normal gates.
           if (await this.#isHeldHere(entry.at, entry.label)) {
-            await this.#additiveAdoptHeld(branch)
-            landed = true
+            if (entry.egg) {
+              // An EGG is held but empty: hatch it. The branch fold combines
+              // (the egg is a subset of the real tile — nothing is lost), and
+              // the debt is paid only when it truly landed.
+              const res = await this.adoptResolvedBranch(branch, { silent: true })
+              landed = res === 'committed' || res === 'exists'
+            } else {
+              await this.#additiveAdoptHeld(branch)
+              landed = true
+            }
           } else if (entry.page && entry.at.join('/') === this.#currentSegments().join('/')
             && this.#peerEntryFor(entry.label)) {
             // The offer is still live where it was asked: fold it as the ONE
@@ -1181,9 +1311,12 @@ export class SwarmAdoptDrone extends Drone {
       // Never SET a children list we couldn't fully read — the same
       // cold-sibling wipe guard the fold honours.
       if (coldMiss || existing.includes(branch.label)) return
+      // Only the child rides; the parent links it inside the commit queue
+      // (no stale parent snapshot). A name with a surviving head is revealed
+      // as it stands — never reset to a childless egg.
+      const surviving = await resolveLayerAt(history, lineage.domain, [...branch.at, branch.label])
       await committer.importTree([
-        { segments: branch.at, layer: { ...(parent ?? {}), children: [...existing, branch.label] } },
-        { segments: [...branch.at, branch.label], layer: { name: branch.label, children: [] } },
+        { segments: [...branch.at, branch.label], layer: surviving ? { name: branch.label } : { name: branch.label, children: [] } },
       ])
       EffectBus.emit('fs:changed', { segments: branch.at })
       EffectBus.emit('activity:log', {
@@ -1551,7 +1684,7 @@ export class SwarmAdoptDrone extends Drone {
     const props: Record<string, unknown> = {}
     for (const key of VISIT_PROP_KEYS) if (entry[key] !== undefined) props[key] = entry[key]
     if (Object.keys(props).length > 0) {
-      try { await writeTilePropertiesAt([...at], label, props, { onlyHere: true }) } catch { /* the receipt still moves; props catch up on the next refresh */ }
+      try { await writeFillOnlyProps([...at], label, props) } catch { /* the receipt still moves; props catch up on the next refresh */ }
     }
     if (SIG_RE.test(layerSig)) this.#recordSyncReceipt([...at, label], layerSig)
     forgetDecorationLabel(label)
@@ -2142,7 +2275,17 @@ export class SwarmAdoptDrone extends Drone {
       // flattenLayerTree re-expresses the branch subtree as importTree updates
       // (children by name, other slots verbatim); the parent update folds in the
       // new top.
-      const treeUpdates = await flattenLayerTree(history, branchLayer, [...at, name])
+      const incomingTree = await flattenLayerTree(history, branchLayer, [...at, name])
+      // COMBINE, never replace: wherever a node already resolves here (a held
+      // tile on sync, or a removed tile whose head survives) the participant's
+      // own values win and the publisher only fills what is absent; own
+      // children are never dropped. A cold own node defers, never overwrites.
+      const treeUpdates = await this.#combineTreeWithOwn(history, lineage.domain, incomingTree, alreadyChild ? [...at, name] : null)
+      if (!treeUpdates) {
+        console.warn('[swarm-adopt] fold deferred — an owned node is not fully readable; refusing to overwrite', { at })
+        this.#scheduleFoldRetry(sig, atSegments, domain, mode)
+        return 'unavailable'
+      }
 
       // Layer-sig-keyed props seeds ONLY (visuals-across-lineages.md,
       // Phase B — the location-keyed fill-if-empty/sync SEED-DANCE IS
@@ -2173,13 +2316,10 @@ export class SwarmAdoptDrone extends Drone {
         console.warn('[swarm-adopt] props seed prep skipped', err)
       }
 
-      await committer.importTree([
-        // De-dupe on sync replace: the name is already in `existing`, so don't
-        // append a second copy — re-homing treeUpdates over [...at, name]
-        // replaces the child's layer in place. Fold appends the new top.
-        { segments: at, layer: { ...(parent ?? {}), children: alreadyChild ? [...existing] : [...existing, name] } },
-        ...treeUpdates,
-      ])
+      // The parent is not re-listed: importTree links (or swaps) the new top
+      // into the head hydrated inside the commit queue, so nothing that
+      // landed since the read above is reverted or orphaned.
+      await committer.importTree([...treeUpdates])
 
       // Post-commit so the warm head cache already points at the folded
       // layers (commitLayer keeps it in sync); each seed is a map lookup
@@ -2396,7 +2536,14 @@ export class SwarmAdoptDrone extends Drone {
       // Removal = a NEW marker without this child. The prior marker (with it)
       // and the content bytes persist (append-only + content-addressed), so a
       // later re-enable re-folds it — "a path back to recovery, always".
-      await committer.update(at, { ...parent, children: existing.filter(c => c !== n) })
+      // A removal delta inside the commit queue — never a stale parent
+      // snapshot re-set (which would revert whatever landed since the read).
+      const target = await childLayerOf(history, parent, n)
+      if (committer.commitChildrenDeltas && target?.sig) {
+        await committer.commitChildrenDeltas(at, { removes: [{ sig: target.sig, label: n }] })
+      } else {
+        await committer.update(at, { ...parent, children: existing.filter(c => c !== n) })
+      }
       EffectBus.emit('fs:changed', { segments: at })
       await new hypercomb().act()
       return true

@@ -90,20 +90,37 @@ export async function holdPictures(
   }
   if (added.length === 0) return []
 
-  const existing = await listDecorations<{ images?: unknown }>({ kind: GALLERY_KIND, segments })
-  const kept: string[] = []
-  for (const { record } of existing) {
-    const imgs = record.payload?.images
-    if (!Array.isArray(imgs)) continue
-    for (const value of imgs) {
-      const ref = String(value)
-      if (SIG.test(ref) && !kept.includes(ref)) kept.push(ref)
+  // Serialise the read-merge-write per tile, so overlapping holds see each
+  // other's record and the old ones are removed only after the new one lands.
+  return withGalleryLock(segments.join('\u0000'), async () => {
+    const existing = await listDecorations<{ images?: unknown }>({ kind: GALLERY_KIND, segments })
+    const kept: string[] = []
+    for (const { record } of existing) {
+      const imgs = record.payload?.images
+      if (!Array.isArray(imgs)) continue
+      for (const value of imgs) {
+        const ref = String(value)
+        if (SIG.test(ref) && !kept.includes(ref)) kept.push(ref)
+      }
     }
-  }
-  const images = [...kept, ...added.filter(ref => !kept.includes(ref))]
-  if (images.length === kept.length) return images        // already held — no new revision
+    const images = [...kept, ...added.filter(ref => !kept.includes(ref))]
+    if (images.length === kept.length) return images        // already held — no new revision
 
-  await writeDecoration({ kind: GALLERY_KIND, appliesTo: segments, segments, payload: { images }, mark: 'persistent' })
-  for (const e of existing) removeDecoration({ sig: e.sig, segments })
-  return images
+    await writeDecoration({ kind: GALLERY_KIND, appliesTo: segments, segments, payload: { images }, mark: 'persistent' })
+    for (const e of existing) removeDecoration({ sig: e.sig, segments })
+    return images
+  })
+}
+
+// One chain per tile; the entry is dropped once it is the tail, so the map
+// stays bounded. A failed hold never wedges the tile.
+const galleryChains = new Map<string, Promise<unknown>>()
+
+const withGalleryLock = <T,>(key: string, task: () => Promise<T>): Promise<T> => {
+  const prior = galleryChains.get(key) ?? Promise.resolve()
+  const result = prior.then(task, task)
+  const tail = result.catch(() => {})
+  galleryChains.set(key, tail)
+  void tail.then(() => { if (galleryChains.get(key) === tail) galleryChains.delete(key) })
+  return result
 }

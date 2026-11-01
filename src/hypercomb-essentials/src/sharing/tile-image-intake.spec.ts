@@ -17,6 +17,9 @@ vi.mock('../commands/lightbox-kind.js', () => ({
 }))
 
 vi.mock('../editor/tile-properties.js', () => ({
+  recoverableTileImageSig: (props: any) =>
+    [props?.small?.image, props?.flat?.small?.image, props?.large?.image, props?.imageSig]
+      .find(v => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)),
   readTilePropertiesAt: vi.fn(async () => gallery.props),
   writeTilePropertiesAt: vi.fn(async (
     segments: readonly string[],

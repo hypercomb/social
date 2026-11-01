@@ -211,6 +211,27 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     const parent = await resolveLayerAt(history, lineage?.domain, parentSegments)
     if (await childLayerOf(history, parent, name)) return refused('the page already lists a tile by that name')
 
+    // A REMOVED OR HIDDEN TILE STILL HAS A HEAD at this location (removal only
+    // unlinks it). The doorway is committed over the head wholesale below, so a
+    // head that holds the owner's content and is not itself a doorway would be
+    // blanked — the owner's data lost to the incoming reference. The owner's
+    // tile wins: refuse, as the listed-name case does. A bare head, or one that
+    // already wears a reference mark, is safe to replace. (A cold read is
+    // treated as absent, as before; the commit queue offers no atomic
+    // check-and-commit, so this remains a read-then-act.)
+    const childLocationSig = await history.sign({
+      domain: lineage?.domain,
+      explorerSegments: () => childSegments,
+    })
+    const head = await history.currentLayerAt(childLocationSig).catch(() => null)
+    if (head) {
+      const holdsContent = Object.entries(head).some(([slot, value]) =>
+        slot !== 'name' && (Array.isArray(value) ? value.length > 0 : value !== null && value !== undefined && value !== ''))
+      if (holdsContent && (await referenceMarksOf(head, store)).sigs.size === 0) {
+        return refused('the name is held by a tile that was removed or hidden')
+      }
+    }
+
     // IDENTITY = the target's molecule, `sign(fold(canon(name)))`. Not the
     // path-keyed bag of a root child — the route is the fallback, not the name.
     const targetName = sourceSegments[sourceSegments.length - 1] ?? name
@@ -227,10 +248,6 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
       new Blob([JSON.stringify(record)], { type: 'application/json' }),
     )
 
-    const childLocationSig = await history.sign({
-      domain: lineage?.domain,
-      explorerSegments: () => childSegments,
-    })
     // An ordinary activation takes a SNAPSHOT OF THE TARGET'S DETAILS. It
     // shares the exact same resource/decorations/notes signatures — no bytes
     // are copied — but its appearance head is independent: creating or editing
@@ -284,7 +301,6 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     // empty: the doorway is exactly `childLayer`, as a direct commit made it.
     let childMarkerSig: string
     if (committer.update) {
-      const head = await history.currentLayerAt(childLocationSig).catch(() => null)
       const exact: PlacementLayer = { ...childLayer }
       for (const [slot, value] of Object.entries(head ?? {})) {
         if (slot === 'name' || slot in exact) continue

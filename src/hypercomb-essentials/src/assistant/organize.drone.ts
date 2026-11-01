@@ -478,6 +478,16 @@ export class OrganizeDrone extends Drone {
       groups.push({ name, members })
     }
 
+    // A group name that is also a member would be minted (or reused) and then
+    // refused by the move ("into itself"), leaving empty groups behind. Refuse
+    // the plan before anything is minted.
+    for (const g of groups) {
+      if (claimed.has(g.name)) {
+        this.#reject(`the plan named a group "${g.name}" that is also a tile being moved`)
+        return null
+      }
+    }
+
     return groups
   }
 

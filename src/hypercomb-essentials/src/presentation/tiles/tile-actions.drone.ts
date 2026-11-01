@@ -766,10 +766,9 @@ export class TileActionsDrone extends Drone {
       getLayerBySig(s: string): Promise<{ name?: string; children?: readonly string[] } | null>
     }
     type LayerCommitterLike = {
-      update(
+      commitChildrenDeltas(
         segments: readonly string[],
-        layer: { name?: string; [slot: string]: unknown },
-        nameSlots?: ReadonlySet<string>,
+        changes: { removes?: readonly { sig?: string; label?: string }[] },
       ): Promise<string>
     }
 
@@ -800,21 +799,11 @@ export class TileActionsDrone extends Drone {
     // always confirm direct remove-icon clicks; nested tiles add a count warning.
     if (!(await confirmRemoval(history, parent, [label], { always: true }))) return
 
-    // SIG-PRESERVING drop — keep every survivor's EXACT stored sig, remove only
-    // the target. Rebuilding `children` from survivor NAMES makes committer.update
-    // re-resolve each survivor via latestMarkerSigFor on its own bag, AUTO-MINTING
-    // an empty {name} layer for any survivor whose bag is cold (freshly-installed
-    // content). That swaps the survivor's real sig for an empty one and the
-    // renderer paints it as a no-image tile. Keep the sigs verbatim instead.
-    const childSigs = Array.isArray(parent.children) ? parent.children : []
-    const survivorSigs: string[] = []
-    for (const sig of childSigs) {
-      const child = await history.getLayerBySig(sig)
-      // Drop only the sig we can confirm IS the target; keep everything else
-      // (incl. an unreadable sibling) so a cold miss never wipes a tile.
-      if (child && child.name === label) continue
-      survivorSigs.push(String(sig))
-    }
+    // Remove ONLY the target, as a delta applied inside the commit FIFO against
+    // the LIVE head. The parent read above predates the confirm dialog (open for
+    // seconds); writing a survivor list from it would drop a tile a swarm adopt,
+    // paste or chat-create appended meanwhile and revert advanced sibling sigs.
+    // Every other child rides through untouched (same path as remove-tiles.ts).
 
     // Emit BEFORE awaiting the commit so the visual unmount (ShowCellDrone's
     // sync incremental path) runs immediately. The OPFS cascade in
@@ -824,9 +813,7 @@ export class TileActionsDrone extends Drone {
     // emit is safe; if the background commit throws, the cell will reappear
     // on the next layer re-read (no worse than today's failure mode).
     EffectBus.emit('cell:removed', { cell: label, segments })
-    // Empty nameSlots → SET `children` to these exact sigs (no re-resolve, no
-    // auto-mint); other slots hydrate from the previous layer.
-    await committer.update(segments, { children: survivorSigs }, new Set<string>())
+    await committer.commitChildrenDeltas(segments, { removes: [{ label }] })
   }
 
   #bulkRerollSelected(): void {

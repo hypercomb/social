@@ -11,8 +11,8 @@ import { BUBBLE_DOS_BRANCH, BubbleTileSurface } from './tile-surface.js'
 
 // canonical-layer.js re-exports core's byte form, so that half stays real.
 vi.mock('@hypercomb/core', async importOriginal => {
-  const { canonicalizeLayer, canonicalLayerJson } = await importOriginal<typeof import('@hypercomb/core')>()
-  return { canonicalizeLayer, canonicalLayerJson, EffectBus: { on: vi.fn(), emit: vi.fn() } }
+  const { canonicalizeLayer, canonicalLayerJson, combineLayers, combineBags } = await importOriginal<typeof import('@hypercomb/core')>()
+  return { canonicalizeLayer, canonicalLayerJson, combineLayers, combineBags, EffectBus: { on: vi.fn(), emit: vi.fn() } }
 })
 vi.mock('../../history/history.service.js', () => ({ ROOT_NAME: '/' }))
 afterEach(() => { vi.unstubAllGlobals() })

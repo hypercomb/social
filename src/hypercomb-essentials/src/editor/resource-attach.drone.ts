@@ -7,7 +7,7 @@
 // the user ever opening the tile editor UI.
 
 import { EffectBus, RESOURCE_URL_PREFIX } from '@hypercomb/core'
-import { isSignature, writeTilePropertiesAt } from './tile-properties.js'
+import { isSignature, readOwnTilePropertiesAt, writeTilePropertiesAt } from './tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
 import { holdPictures } from '../commands/lightbox-kind.js'
 import { wornPictureSig } from '../sharing/tile-image-intake.js'
@@ -104,21 +104,37 @@ export class ResourceAttachDrone {
     if (payload.largeSig) {
       ;(props as any).large = { image: payload.largeSig }
     }
+    // The owner's properties are read FIRST (cold-guarded): the owner's link
+    // and generation record win, the armed image only fills what is absent.
+    const ownStats = { cold: false }
+    const own = await readOwnTilePropertiesAt(target.parentSegments, target.cell, ownStats)
+    const ownLink = typeof own['link'] === 'string' ? own['link'] as string : ''
+    const ownLarge = (own['large'] as { image?: unknown } | undefined)?.image
+    // the link is the owner's unless it is only the previous picture's own resource link
+    const linkPinned = Array.isArray(own['propertyPins']) && (own['propertyPins'] as unknown[]).includes('link')
+    const linkIsFree = !ownStats.cold && !linkPinned && (
+      ownLink === '' || (typeof ownLarge === 'string' && ownLink === `${RESOURCE_URL_PREFIX}${ownLarge}`))
+    const hadGeneration = typeof own['generation'] === 'string' && own['generation'] !== ''
+
     if (payload.type === 'image') {
       const sig = payload.generationSig
-      ;(props as any).generation = typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig) ? sig : undefined
+      const valid = typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig)
+      if (valid) (props as any).generation = sig
+      else if (!ownStats.cold && !hadGeneration) (props as any).generation = undefined
     }
 
     if (payload.url) {
-      ;(props as any).link = payload.url
-    } else if (payload.type === 'image' && payload.largeSig) {
+      // an armed link/youtube drop supplies its own url; it only fills a free link
+      if (linkIsFree || ownStats.cold) (props as any).link = payload.url
+    } else if (payload.type === 'image' && payload.largeSig && linkIsFree) {
+      // (cold: own unknown, so the owner's link is never risked)
       // A dropped image IS the tile's content, so it is also its LINK — the
       // picture at full size is what "open this tile" should mean. That makes
       // the drop flow whole with nothing else to type: clicking a leaf image
       // tile shows the picture, `name@lightbox` turns it (or its container)
       // into a lightbox, and the lightbox view reads exactly this link.
-      // Only when the arming flow supplied no url of its own (a dropped
-      // youtube/link arms with one and keeps it).
+      // Only when the arming flow supplied no url of its own and the tile has
+      // no link of its own (a dropped youtube/link arms with one).
       ;(props as any).link = `${RESOURCE_URL_PREFIX}${payload.largeSig}`
     }
 

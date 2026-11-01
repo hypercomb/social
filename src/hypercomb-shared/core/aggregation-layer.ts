@@ -45,6 +45,7 @@ type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
 }
 type CommitterLike = {
+  commitSlotAppend?(segments: readonly string[], slot: string, sig: string): Promise<void>
   commitChildrenDeltas(
     segments: readonly string[],
     changes: { removes?: readonly { sig?: string }[]; appends?: readonly string[] },
@@ -232,7 +233,19 @@ export async function enableAggregation(
   const record = { kind: LAUNCH_KIND, appliesTo: [], payload: { segments: segs, icon, label, key: JSON.stringify(segs) } }
   const decoSig = await store.putResource(new Blob([JSON.stringify(record)], { type: 'application/json' }))
   const childLocSig = await history.sign({ domain: domainOf(), explorerSegments: () => [groupId, label] })
-  const childMarker = await history.commitLayer(childLocSig, { name: label, decorations: [decoSig] })
+  // A head already at [g,label] that is NOT a launcher cell is a participant's
+  // tile: combine, never overwrite — append only the launch decoration through
+  // the committer FIFO so every property it carries survives. A prior launcher
+  // cell (or no head) is system-owned and is (re)committed as before.
+  let childMarker = ''
+  const prior = await history.currentLayerAt(childLocSig).catch(() => null)
+  if (prior && !(await decodeFromLayer(store, prior, ''))) {
+    if (!committer.commitSlotAppend) return null
+    await committer.commitSlotAppend([groupId, label], 'decorations', decoSig)
+    childMarker = await history.latestMarkerSigFor(childLocSig, label).catch(() => '')
+  } else {
+    childMarker = await history.commitLayer(childLocSig, { name: label, decorations: [decoSig] })
+  }
   if (!childMarker || !SIG.test(childMarker)) return null
 
   // 2. ONE children delta at [g]: drop any prior cell for THIS path (dedupe/

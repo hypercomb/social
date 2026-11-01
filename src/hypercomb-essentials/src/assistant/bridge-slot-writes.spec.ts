@@ -38,6 +38,7 @@ describe('bridge slot writes are slot-scoped', () => {
 
   it('every slot writer reaches commitSlotSet', () => {
     for (const writer of SLOT_WRITERS) {
+      // in-queue appends/removes are slot-scoped too (the union writers)
       const at = source.indexOf(`async ${writer}(`)
       expect(at, `${writer} not found — rename it here too`).toBeGreaterThan(-1)
       // The body runs to the next method at the same indentation.

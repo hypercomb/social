@@ -106,6 +106,20 @@ const normalise = (value: unknown): unknown => {
 const sameProps = (a: unknown, b: unknown): boolean =>
   JSON.stringify(normalise(a)) === JSON.stringify(normalise(b))
 
+/** The keys the form changed against what it opened with. A key the form
+ *  cleared (present at open, empty now) is `undefined` — the merge's removal. */
+const diffFromBaseline = (form: Record<string, unknown>, baseline: Record<string, unknown>): Record<string, unknown> => {
+  const updates: Record<string, unknown> = {}
+  for (const key of Object.keys(form)) {
+    if (form[key] === undefined) { if (baseline[key] !== undefined) updates[key] = undefined; continue }
+    if (!sameProps(form[key], baseline[key])) updates[key] = form[key]
+  }
+  for (const key of Object.keys(baseline)) {
+    if (!(key in form) && baseline[key] !== undefined) updates[key] = undefined
+  }
+  return updates
+}
+
 /** The orientation the hive is showing right now. The bus replays its last
  *  value to a new subscriber, so subscribing and letting go reads it. */
 const hiveOrientation = (): 'point-top' | 'flat-top' => {
@@ -596,7 +610,10 @@ export class TileEditorDrone {
             await writeTilePropertiesAt(segmentsForSave, savedCell, ownAfterInherit(own, writes.inherit), { onlyHere: true, replace: true })
           }
         } else {
-          await writeTilePropertiesAt(segmentsForSave, savedCell, props)
+          // Write the DIFF only: the form is a snapshot from when the editor
+          // opened, and writing every key would revert whatever another writer
+          // committed meanwhile. The merge applies these over the fresh head.
+          await writeTilePropertiesAt(segmentsForSave, savedCell, baseline ? diffFromBaseline(props, baseline) : props)
         }
         wrote = true
       }
