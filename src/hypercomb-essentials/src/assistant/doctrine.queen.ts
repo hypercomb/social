@@ -6,7 +6,8 @@
 // words are the participant's own and no model can say them — this queen
 // declares no machine grammar on purpose:
 //
-//   doctrine              the sections the anatomy carries now, numbered
+//   doctrine              the viewer: choose which rules the anatomy carries
+//   doctrine list         the sections the anatomy carries now, numbered
 //   doctrine back         the doctrine the last change replaced, again
 //   doctrine drop <n>     the doctrine without section n
 //   doctrine seed         the doctrine this build ships, as the head
@@ -24,15 +25,16 @@ export class DoctrineQueenBee extends QueenBee {
   readonly command = 'doctrine'
   override description = 'See, step back, drop or reseed the rules every model is sent'
   override descriptionKey = 'slash.doctrine'
-  override options = ['back', 'drop <n>', 'seed']
+  override options = ['list', 'back', 'drop <n>', 'seed']
   override examples = [
-    { input: '/doctrine', result: 'Lists the doctrine sections, numbered' },
+    { input: '/doctrine', result: 'Opens the doctrine viewer: choose which rules every model is sent' },
+    { input: '/doctrine list', result: 'Lists the doctrine sections, numbered' },
     { input: '/doctrine back', result: 'Puts back the doctrine the last change replaced' },
   ]
 
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    return ['back', 'drop ', 'seed'].filter(word => word.startsWith(typed) && word.trim() !== typed)
+    return ['list', 'back', 'drop ', 'seed'].filter(word => word.startsWith(typed) && word.trim() !== typed)
   }
 
   protected async execute(args: string): Promise<void> {
@@ -52,7 +54,8 @@ export class DoctrineQueenBee extends QueenBee {
     }
 
     const [word = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)
-    if (!word || word === 'list') {
+    if (!word) { EffectBus.emit('doctrine:open', {}); return }
+    if (word === 'list') {
       const listed = doctrine.sections().map(section => `${section.index} ${section.heading || '(no heading)'}`).join(' · ')
       const pending = doctrine.seedPending() ? ` ${t('doctrine.pending', 'This build ships newer doctrine: say doctrine seed to take it.')}` : ''
       toast(`${t('doctrine.list', 'Doctrine:')} ${listed}${pending}`)
@@ -64,7 +67,7 @@ export class DoctrineQueenBee extends QueenBee {
       const index = Number(rest[0])
       return done(await doctrine.drop(index), t('doctrine.dropped', 'Dropped section {index}; doctrine back puts it back.', { index: rest[0] ?? '' }))
     }
-    toast(t('doctrine.usage', '/doctrine takes back, drop <n> or seed; alone it lists the sections.'), 'warning')
+    toast(t('doctrine.usage', '/doctrine takes list, back, drop <n> or seed; alone it opens the viewer.'), 'warning')
   }
 }
 

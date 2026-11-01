@@ -100,6 +100,10 @@ export const ANATOMY_MECHANICS: string = ${JSON.stringify(MECHANICS)}
 /** The seed doctrine, one section per entry, each opening with its heading. */
 export const ANATOMY_SECTIONS: readonly string[] = ${JSON.stringify(sections, null, 2)}
 
+/** The whole codex, builders' tier included: the catalogue the doctrine viewer
+ *  lets a participant choose from. */
+export const ANATOMY_CODEX: string = ${JSON.stringify(readFileSync(CODEX, 'utf8'))}
+
 /** The seed anatomy: ANATOMY_MECHANICS composed with ANATOMY_SECTIONS. */
 export const ANATOMY_TEXT: string = ${JSON.stringify(text)}
 `

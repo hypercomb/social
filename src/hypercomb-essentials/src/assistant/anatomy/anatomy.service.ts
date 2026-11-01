@@ -29,8 +29,12 @@ export type DoctrineLike = {
   readonly ready: Promise<void>
   /** The sections the anatomy carries now, 1-based. */
   sections(): readonly DoctrineSectionInfo[]
+  /** The sections' full text, in order — what the viewer reads its choices from. */
+  texts(): readonly string[]
   /** The build carries doctrine this hive has never taken. */
   seedPending(): boolean
+  /** Commit exactly these sections as the doctrine. The participant's act. */
+  replace(sections: readonly string[]): Promise<DoctrineOutcome>
   /** Replace the section with this heading, or add it. The participant's act. */
   write(heading: string, body: string): Promise<DoctrineOutcome>
   /** Commit the doctrine without section `index` (1-based). */
@@ -195,7 +199,12 @@ const act = async (sections: readonly string[] | { error: string }): Promise<Doc
 const doctrine: DoctrineLike = {
   ready,
   sections: () => state.sections.map((section, i) => ({ index: i + 1, heading: headingOf(section), source: sourceOf(section) })),
+  texts: () => state.sections,
   seedPending: () => state.seedPending,
+  replace: async sections => {
+    await ready
+    return act(sections.length ? [...sections] : { error: 'the doctrine would have no sections' })
+  },
   write: async (heading, body) => {
     await ready
     if (!isHeading(heading)) return { ok: false, error: 'a doctrine heading is one line of at most 80 characters, without backticks or #' }

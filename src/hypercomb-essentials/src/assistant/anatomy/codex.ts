@@ -68,10 +68,82 @@ export const validateCodex = (tiers: readonly CodexTier[], documentExists: (doc:
   return problems
 }
 
+/** One tier as the doctrine bag holds it: a heading, a source line, then the
+ *  axiom lines. Any subset of a tier's axioms composes the same way. */
+export const sectionOf = (tier: CodexTier, axioms: readonly CodexAxiom[] = tier.axioms): string =>
+  `### ${tier.title}\n(source: doctrine.codex${tier.sources.length ? ` ~ ${tier.sources.join(', ')}` : ''})\n\n${axioms.map(axiom => axiom.line).join('\n')}`
+
 /** The tiers a reader of the hive is taught, as doctrine sections in the shape
- *  the doctrine bag stores: heading, source line, then the axiom lines. Tiers
- *  scoped to builders are left to the agents that change code. */
+ *  the doctrine bag stores. Tiers scoped to builders are left to the agents
+ *  that change code. */
 export const codexSections = (tiers: readonly CodexTier[], scope = 'all'): string[] =>
-  tiers
-    .filter(tier => tier.scope === 'all' || tier.scope === scope)
-    .map(tier => `### ${tier.title}\n(source: doctrine.codex${tier.sources.length ? ` ~ ${tier.sources.join(', ')}` : ''})\n\n${tier.axioms.map(axiom => axiom.line).join('\n')}`)
+  tiers.filter(tier => tier.scope === 'all' || tier.scope === scope).map(tier => sectionOf(tier))
+
+// ── choosing parts ──────────────────────────────────────────────────────────
+//
+// Every axiom stands alone, so any set of them is a doctrine. Nothing here
+// refuses a choice: a set that leaves out something a chosen axiom rests on is
+// reported, never blocked. Selections are sets of ids; the catalog is the
+// codex; the composed sections are what the doctrine bag stores.
+
+const LINE_ID = /^([A-Z]\d+)(?:<[A-Z0-9,]+)?: /
+
+const axiomsIn = (tiers: readonly CodexTier[]): CodexAxiom[] => tiers.flatMap(tier => [...tier.axioms])
+
+/** The axiom ids a doctrine's sections carry, by the ids their lines open with. */
+export const selectedIds = (sections: readonly string[], tiers: readonly CodexTier[]): Set<string> => {
+  const known = new Set(axiomsIn(tiers).map(axiom => axiom.id))
+  const ids = new Set<string>()
+  for (const section of sections) {
+    for (const line of section.split('\n')) {
+      const id = LINE_ID.exec(line)?.[1]
+      if (id && known.has(id)) ids.add(id)
+    }
+  }
+  return ids
+}
+
+/** Sections the codex does not own — written in the hive — kept as they are. */
+export const foreignSections = (sections: readonly string[], tiers: readonly CodexTier[]): string[] => {
+  const titles = new Set(tiers.map(tier => tier.title))
+  return sections.filter(section => !titles.has((section.split('\n', 1)[0] ?? '').replace(/^### /, '').trim()))
+}
+
+/** The doctrine for a chosen set: each tier with the axioms chosen, base to
+ *  leaf, a tier with none left out, then the hive's own sections untouched. */
+export const composeSelection = (tiers: readonly CodexTier[], ids: ReadonlySet<string>, foreign: readonly string[] = []): string[] => [
+  ...tiers
+    .map(tier => ({ tier, chosen: tier.axioms.filter(axiom => ids.has(axiom.id)) }))
+    .filter(({ chosen }) => chosen.length)
+    .map(({ tier, chosen }) => sectionOf(tier, chosen)),
+  ...foreign,
+]
+
+/** Everything an axiom rests on, nearest first, transitively. */
+export const groundOf = (tiers: readonly CodexTier[], id: string): string[] => {
+  const byId = new Map(axiomsIn(tiers).map(axiom => [axiom.id, axiom]))
+  const out: string[] = []
+  const walk = (at: string): void => {
+    for (const need of byId.get(at)?.needs ?? []) if (!out.includes(need)) { out.push(need); walk(need) }
+  }
+  walk(id)
+  return out
+}
+
+/** Everything that rests on an axiom, transitively. */
+export const restingOn = (tiers: readonly CodexTier[], id: string): string[] =>
+  axiomsIn(tiers).filter(axiom => groundOf(tiers, axiom.id).includes(id)).map(axiom => axiom.id)
+
+/** Chosen axioms that rest on axioms left out: advice, never a refusal. */
+export const looseGround = (tiers: readonly CodexTier[], ids: ReadonlySet<string>): { id: string; missing: string[] }[] =>
+  axiomsIn(tiers)
+    .filter(axiom => ids.has(axiom.id))
+    .map(axiom => ({ id: axiom.id, missing: groundOf(tiers, axiom.id).filter(need => !ids.has(need)) }))
+    .filter(entry => entry.missing.length)
+
+/** The set with everything its members rest on added. */
+export const withGround = (tiers: readonly CodexTier[], ids: ReadonlySet<string>): Set<string> => {
+  const out = new Set(ids)
+  for (const id of ids) for (const need of groundOf(tiers, id)) out.add(need)
+  return out
+}
