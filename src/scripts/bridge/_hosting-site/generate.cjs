@@ -38,9 +38,18 @@
 //   on a path page: Card: <sentence>. <price> . <time>
 //                                           that page's PLAN CARD on /hosting, quickest first
 //   the last unlabelled note on /hosting    the main page's last line
+//   Mesh <n> -- <label>                     this page's cell in the MESH: 1-6 the
+//                                           ring, clockwise from the top left; the
+//                                           main page is the centre, under its own
+//                                           name. It stands in no part
+// A card's price of "Read" is a page to read: no price and no live slot.
 // Inline: **x** a control; x in curly double quotes, what the app says; <x> the
 // part that changes; [text](/hosting/x) a link; {from:words} the live lowest
 // price, the words shown until the host answers.
+//
+// THE MESH. Every page ends in the same seven cells, drawn from the Mesh notes
+// and met only after the page is read, so it is the one thing that may point
+// anywhere: the rule below keeps the reading straight, and the mesh is the foot.
 //
 // LINKS, ONLY IN THE LAST LINE. Nothing on a path page points sideways except
 // its last part (brief: "Nothing on a path page points sideways except its
@@ -155,6 +164,11 @@ async function read(request) {
     await new Promise((r) => setTimeout(r, 3000))
   }
   throw new Error('no renderer connected: open the hive with ?claudeBridge=1 (one tab)')
+}
+/** A Mesh note, or null: it names a cell and is no part of the page. */
+const meshNote = (note) => {
+  const m = /^Mesh\s+(\d+)\s*[\u2014\u2013-]+\s*(\S.*)$/i.exec(String(note).trim())
+  return m ? { n: Number(m[1]), label: m[2].trim() } : null
 }
 const noteText = (n) => typeof n === 'string' ? n : String(n?.text ?? '')
 
@@ -364,7 +378,7 @@ function readCard(route, text) {
 function price(amount, ctx) {
   const from = /^\{from:([^}]*)\}$/.exec(amount)
   if (from) { ctx.live = true; return { amount: esc(from[1]), live: true } }
-  if (/^free\b/i.test(amount)) return { amount: ctx.text(amount), live: false }
+  if (/^(free|read)\b/i.test(amount)) return { amount: ctx.text(amount), live: false }
   ctx.live = true
   return { amount: esc(amount), live: true }
 }
@@ -414,6 +428,11 @@ function planList() {
   const card = planCard({ name: '', what: '', amount: '', level: 'h3' }, '').replace(/\n\s*/g, '')
   return `<ol class="hp-plans" role="list" data-hp-plans="list"><template>${card}</template></ol>`
 }
+/** The MESH: every open page, one cell each, the page you are on marked. */
+function mesh(cells, route, name) {
+  const items = cells.map((p) => `      <li class="hp-cell"><a href="${esc(p.route)}"${p.route === route ? ' aria-current="page"' : ''}><span>${esc(p.mesh.label)}</span></a></li>`)
+  return `  <nav class="hp-mesh" aria-label="${esc(name)}">\n    <ol class="hp-mesh__cells" role="list">\n${items.join('\n')}\n    </ol>\n  </nav>`
+}
 const planCards = (html) => `  <ol class="hp-plans" role="list">\n${html.join('\n')}\n  </ol>`
 
 // -- a page ----------------------------------------------------------------
@@ -452,6 +471,7 @@ function render(route, notes, pass) {
     last = rank
   }
   const closed = items.some((i) => i.kind === 'closed')
+  if (closed && pass.pages.get(route).mesh) refuse(route, 'is not open yet but holds a cell in the mesh')
   if (closed && items.some((i) => ['step', 'part', 'cost', 'card'].includes(i.kind))) {
     refuse(route, 'is not open yet but still carries steps, a cost or a card: move those notes off this tile before it is published')
   }
@@ -559,7 +579,9 @@ function render(route, notes, pass) {
   }
 
   const rootPage = pass.pages.get(ROOT_ROUTE)
-  const up = isRoot ? '' : `\n\n  <p class="hp-up"><a href="${ROOT_ROUTE}"><span aria-hidden="true">&uarr;</span> ${esc(rootPage.name)}</a></p>`
+  const cells = [...pass.pages.values()].filter((p) => p.mesh).sort((a, b) => a.mesh.n - b.mesh.n)
+  const up = cells.length ? `\n\n${mesh(cells, route, rootPage.name)}`
+    : isRoot ? '' : `\n\n  <p class="hp-up"><a href="${ROOT_ROUTE}"><span aria-hidden="true">&uarr;</span> ${esc(rootPage.name)}</a></p>`
   const tab = isRoot ? esc(bare(h1)) : `${esc(bare(h1))} &middot; ${esc(rootPage.name)}`
   const body = blocks.map((b) => Array.isArray(b) ? planCards(b) : b).join('\n\n')
   const html = `<!doctype html>
@@ -594,7 +616,9 @@ function buildPages(notes) {
   for (const [route, list] of Object.entries(notes)) {
     if (route !== ROOT_ROUTE && path.posix.dirname(route) !== ROOT_ROUTE) continue
     const isRoot = route === ROOT_ROUTE
-    const own = list ?? []
+    const meshes = (list ?? []).map(meshNote).filter(Boolean)
+    if (meshes.length > 1) refuse(route, 'more than one Mesh note')
+    const own = (list ?? []).filter((note) => !meshNote(note))
     const items = own.map((note, i) => classify(note, i, { isRoot, last: i === own.length - 1, pass: null }))
     const cards = items.filter((i) => i.kind === 'card')
     if (cards.length > 1) refuse(route, 'more than one Card note')
@@ -604,7 +628,14 @@ function buildPages(notes) {
       file: isRoot ? `${path.posix.basename(ROOT_ROUTE)}.html` : `${path.posix.basename(route)}.html`,
       closed: items.some((i) => i.kind === 'closed'),
       card: cards.length ? readCard(route, cards[0].text) : null,
+      mesh: meshes[0] ?? null,
     })
+  }
+  const cells = [...pass.pages.values()].filter((p) => p.mesh)
+  // the centre is the main page, under its own name: it needs no note
+  if (cells.length) { const root = pass.pages.get(ROOT_ROUTE); root.mesh = { n: 0, label: root.name }; cells.push(root) }
+  if (cells.length && (cells.some((p) => p.mesh.n > 6) || new Set(cells.map((p) => p.mesh.n)).size !== cells.length)) {
+    throw new Refusal(`${ROOT_ROUTE}: the mesh is at most seven cells, each with its own number from 0 to 6`)
   }
   const chromeSig = sha256(fs.readFileSync(SHARED.chrome))
   const plansSig = sha256(fs.readFileSync(SHARED.plans))
@@ -612,7 +643,7 @@ function buildPages(notes) {
   const refusals = []
   for (const page of pass.pages.values()) {
     try {
-      const out = render(page.route, notes[page.route], pass)
+      const out = render(page.route, notes[page.route].filter((note) => !meshNote(note)), pass)
       const html = out.html
         .replace(/resource:\{chrome\.css\}/g, `resource:${chromeSig}`)
         .replace(/resource:\{plans\.js\}/g, `resource:${plansSig}`)

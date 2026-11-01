@@ -39,17 +39,30 @@ price, linked only by a page that carries a price.
 
 ```
 /hosting                      Host your hive            hosting.hypercomb.com
+  /hosting/basics             The basics                      read, 1 minute
   /hosting/try-it             Try it from this computer       free, 2 minutes
   /hosting/hosted             Hosted on Hypercomb             paid, 5 minutes
   /hosting/your-own           Your own domain or server       free, 20 minutes
   /hosting/moving             Moving between them             (from any page)
+  /hosting/safety             Stay in control                 (from any page)
+  /hosting/fix-it             Fix it                          (from any page)
 ```
 
 A reader lands on the main page, picks one path, and stays on that page
-until they are done. Nothing on a path page points sideways except its last
-line. The pages are the walkthrough the app already does in the hosts window
-(`becoming-a-host.md`, `host-online.ts`), written for someone who has not
-opened the app yet.
+until they are done. Nothing in a page's reading points sideways except its
+last line. The pages are the walkthrough the app already does in the hosts
+window (`becoming-a-host.md`, `host-online.ts`), written for someone who has
+not opened the app yet.
+
+**The mesh** (jwize, 2026-10-31: *"an incredible refined and elegant hosting
+instructions mesh. You can start with the basics page and then extrude out if
+needed."*). Every page ends in the same seven pointy-top cells: the main page
+at the centre, the six open pages in a ring, the page you are on filled. It
+is the one thing that may point anywhere, because a reader meets it after the
+page is read. A cell is a note on its tile, `Mesh <n> — <label>`, 1-6 the
+ring clockwise from the top left; the centre is the main page under its own
+name, and a closed page holds no
+cell. To extrude, add a tile and give it a free number.
 
 ## The standard every page meets
 
@@ -75,12 +88,12 @@ reader is "you"; the app is "the app"; Hypercomb never speaks of itself in
 the third person. No "simply", no "just", no "easy" — the steps prove it.
 
 **One look.** The pages use the house theme's tokens (`project_theme_system`,
-`--md-*`), not their own colours. Three components, reused on every page,
+`--md-*`), not their own colours. Four components, reused on every page,
 each one an artifact in the hive the pages share (never copied): the **step**
 (number, three lines, a check when it is done), the **callout** (one
-sentence that must not be missed), and the **plan card** (name, what it
-allows, price). A page with other components is a page that broke the
-standard.
+sentence that must not be missed), the **plan card** (name, what it
+allows, price), and the **mesh** (every open page, one cell each). A page
+with other components is a page that broke the standard.
 
 **One test.** A reader finishes a path without leaving the page, and when
 they are done the thing the promise named is true. Each path is walked by
@@ -248,7 +261,9 @@ working.*
   label (*meetups*); a title the publisher signs is the general fix, and
   hosted tenants will need it.
 - **A download address for the desktop app.** *Try it* and *Your own domain*
-  need the app; no public page says where to get it.
+  need the app; no public page says where to get it, and no host lists
+  `sign('hypercomb:windows')` (checked 2026-10-31). The basics page says so in
+  a sentence; change that note the day the pool is listed.
 - **The three components as hive artifacts on tiles.** Today they are one
   shared stylesheet and one markup function each in the generator, shared by
   signature but belonging to no tile. Filing a shared artifact on a tile has

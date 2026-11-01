@@ -49,7 +49,7 @@
      Inline: <strong> a control the reader presses; <samp> what the app says;
      <var> the part of it that changes.
 
-   THREE COMPONENTS, AND ONLY THREE (one markup function each in generate.cjs)
+   FOUR COMPONENTS, AND ONLY FOUR (one markup function each in generate.cjs)
 
    STEP -- a number, three lines, a check when it is done. The number is a CSS
    counter on the list, drawn in the house's pointy-top cell; ticking the box
@@ -88,7 +88,16 @@
          <template> -- that card, cloned once per plan; the page wrote it, so
          a card drawn by the reader and a card written on the page are one
          shape (sentence, then price line)
-     Until the host answers with a plan list, the words in the slot stay. */
+     Until the host answers with a plan list, the words in the slot stay.
+
+   MESH -- every open page, one pointy-top cell each, at the foot of every
+   page: the centre, then a ring clockwise from the top left. Cells fill in
+   that order, so a mesh of fewer pages is a smaller flower. No script.
+     <nav class="hp-mesh" aria-label="Host your hive">
+       <ol class="hp-mesh__cells" role="list">
+         <li class="hp-cell"><a href="/hosting" aria-current="page"><span>Start</span></a></li>
+       </ol>
+     </nav> */
 
 
 /* -- the ground: the body on its own, the site host in a hive or on a door */
@@ -644,6 +653,94 @@ html:has(> body.hp-root) {
 }
 
 
+/* -- MESH ----------------------------------------------------------------- */
+
+.hp-mesh {
+  /* three cells across the page, never wider than its labels want; the rows
+     overlap by a quarter of a cell, as a hive does */
+  --hp-cell: min(8rem, calc((100cqi - 2 * var(--hp-gutter)) / 3));
+  --hp-cell-h: calc(var(--hp-cell) * 1.1547);
+  --hp-hex: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+
+  margin-block-start: var(--hp-space-7);
+  padding-block-start: var(--hp-space-6);
+  border-block-start: var(--hp-divider);
+}
+
+.hp-mesh__cells {
+  display: grid;
+  grid-template-columns: repeat(6, calc(var(--hp-cell) / 2));
+  grid-auto-rows: calc(var(--hp-cell-h) / 4);
+  justify-content: center;
+}
+
+/* the edge: the cell's own shape, one pixel proud of its face */
+.hp .hp-cell {
+  grid-column: 3 / span 2;
+  grid-row: 4 / span 4;
+  margin: 1.5px;
+  padding: 1px;
+  clip-path: var(--hp-hex);
+  background-color: var(--md-outline-variant);
+  transition: background-color var(--hp-motion);
+}
+
+.hp .hp-cell:nth-child(2) { grid-column: 2 / span 2; grid-row: 1 / span 4; }
+.hp .hp-cell:nth-child(3) { grid-column: 4 / span 2; grid-row: 1 / span 4; }
+.hp .hp-cell:nth-child(4) { grid-column: 5 / span 2; grid-row: 4 / span 4; }
+.hp .hp-cell:nth-child(5) { grid-column: 4 / span 2; grid-row: 7 / span 4; }
+.hp .hp-cell:nth-child(6) { grid-column: 2 / span 2; grid-row: 7 / span 4; }
+.hp .hp-cell:nth-child(7) { grid-column: 1 / span 2; grid-row: 4 / span 4; }
+
+.hp .hp-cell a {
+  display: grid;
+  place-items: center;
+  block-size: 100%;
+  padding-inline: var(--hp-space-3);
+  clip-path: var(--hp-hex);
+  background-color: var(--md-surface-c-low);
+  color: var(--md-on-surface);
+  font-family: var(--md-font-ui);
+  font-size: var(--hp-text-label);
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  transition: background-color var(--hp-motion), color var(--hp-motion);
+}
+
+.hp .hp-cell:hover {
+  background-color: var(--md-primary);
+}
+
+.hp .hp-cell a:hover {
+  background-color: var(--md-surface-c-high);
+  color: var(--md-on-surface-strong);
+}
+
+/* a clip takes an outline with it, so focus is the cell's own edge and face */
+.hp .hp-cell:has(a:focus-visible) {
+  background-color: var(--md-primary);
+}
+
+.hp .hp-cell a:focus-visible {
+  outline: none;
+  background-color: var(--md-primary-container);
+  color: var(--md-on-primary-c);
+}
+
+/* where you are */
+.hp .hp-cell:has(a[aria-current]) {
+  background-color: var(--md-primary);
+}
+
+.hp .hp-cell a[aria-current] {
+  background-color: var(--md-primary);
+  color: var(--md-on-primary);
+  font-weight: 600;
+}
+
+
 /* -- wider than a phone, measured on the page's own box: labels take a
       column, so the one shape shows at a glance */
 
@@ -728,6 +825,26 @@ html:has(> body.hp-root) {
   .hp .hp-callout {
     border-color: CanvasText;
   }
+
+  .hp .hp-cell {
+    forced-color-adjust: none;
+    background-color: CanvasText;
+  }
+
+  .hp .hp-cell a {
+    forced-color-adjust: none;
+    background-color: Canvas;
+    color: CanvasText;
+  }
+
+  .hp .hp-cell:has(a:is([aria-current], :focus-visible)) {
+    background-color: Highlight;
+  }
+
+  .hp .hp-cell a:is([aria-current], :focus-visible) {
+    background-color: Highlight;
+    color: HighlightText;
+  }
 }
 
 /* paper: dark ink on the page's own sheet, every step and card whole, the
@@ -755,7 +872,8 @@ html:has(> body.hp-root) {
     padding-bottom: 0;
   }
 
-  .hp-up {
+  .hp-up,
+  .hp-mesh {
     display: none;
   }
 
