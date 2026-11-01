@@ -25,6 +25,7 @@
   "external-call.arrived.one": "{from} asks to say 1 line. Answer on the command line: Enter runs, Esc declines.",
   "external-call.arrived.other": "{from} asks to say {count} lines. Answer on the command line: Enter runs, Esc declines.",
   "command-line.external.ask": "{from}: {lines}  (Enter runs, Esc declines)",
+  "command-line.external.batch.other": "{from} asks to say these {count} lines  (Enter runs, Esc declines)",
   "command-line.external.more": "+{count} waiting",
   "command-line.placeholder.locked": "enter cell name...",
   "command-line.placeholder.filter": "filter tiles...",

@@ -42,6 +42,7 @@
   "controls.edit-actions": "元に戻す・やり直す・保存",
   "external-call.arrived.other": "{from} が {count} 行の実行を求めています。コマンドラインで答えてください：Enterで実行、Escで断る。",
   "command-line.external.ask": "{from}: {lines}  (Enterで実行、Escで断る)",
+  "command-line.external.batch.other": "{from} が次の {count} 行の実行を求めています  (Enterで実行、Escで断る)",
   "command-line.external.more": "ほか{count}件待機中",
   "command-line.placeholder.locked": "セル名を入力...",
   "command-line.placeholder.filter": "タイルを絞り込み...",

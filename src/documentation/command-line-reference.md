@@ -54,9 +54,12 @@ An agent, a script or another machine can ask the hive to say lines (through
 the say door, [hive-say.md](hive-say.md), or the bridge's `submit`, which by
 default carries nothing else, [claude-bridge-setup.md](claude-bridge-setup.md)). Such a line is **marked as external
 before it runs**: the line takes the `$` sigil and shows who sent it and the
-lines, as `claude-code: /go presentation · /create word  (Enter runs, Esc
-declines)`, and a toast says a call is waiting in case a window covers the
-line. Nothing runs until you answer:
+line, as `claude-code: create word  (Enter runs, Esc declines)`. A call of
+several lines is named by its count on the line (`claude-code asks to say
+these 3 lines`) and every line is listed under it, numbered, so you read what
+you are answering before you answer it; nothing in that list can be picked,
+Enter answers the whole call. A toast says a call is waiting in case a window
+covers the line. Nothing runs until you answer:
 
 - **Enter**, once the call has been on the line for a second (so an Enter
   meant for your own line cannot run it), opens a new conversation on the
@@ -66,6 +69,10 @@ line. Nothing runs until you answer:
   conversation as it happens, and the caller hears the same verdicts.
 - **Esc** declines. Nothing is said; the request and the decline are written
   into a new conversation on this layer, which stays closed.
+
+A line the hive refused or found ambiguous is cleared from the line once it
+is answered, so a line a machine was not allowed to run is never left one
+Enter away from running as yours.
 
 While a call waits the line is the call's: typing does not change it, and
 anything that would write the line is kept and given back when the call is
