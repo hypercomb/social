@@ -19,8 +19,8 @@ describe('a picture needs a name', () => {
       if (effect === 'command:create-cells') created.push(String((payload as { name?: string }).name ?? ''))
     })
     try {
-      expect(await comfyService.placeNamed(0, '   ')).toBe(false)
-      expect(await comfyService.placeNamed(0, 'bees')).toBe(false)
+      expect(await comfyService.placeNamed('a'.repeat(64), '   ')).toBe(false)
+      expect(await comfyService.placeNamed('a'.repeat(64), 'bees')).toBe(false)
       expect(created).toEqual([])
     } finally {
       spy.mockRestore()
@@ -33,7 +33,7 @@ describe('cellsToPaint', () => {
     expect(cellsToPaint(true, ['lantern', 'fog'])).toEqual(['lantern', 'fog'])
   })
 
-  it('makes new tiles when nothing is selected', () => {
+  it('paints nothing when nothing is selected: the pictures wait as assets', () => {
     expect(cellsToPaint(true, [])).toEqual([])
     expect(cellsToPaint(true, ['', '  '])).toEqual([])
   })

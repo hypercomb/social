@@ -2,25 +2,15 @@
 //
 // THE COMFYUI SURFACE'S DATA SIDE.
 //
-// The panel is a shared Angular component and must not import essentials, so
-// everything it shows crosses as one `comfy:render` payload and everything it
-// does comes back as an intent — the same contract hosts.drone keeps with the
-// hosts panel. Nothing in the panel knows what a seam is; nothing here knows
-// what a dock lane is.
+// Everything a surface shows crosses as one `comfy:render` payload and everything
+// it does comes back as an intent. The desk (comfy-desk/) reads this and is one
+// reading of it, so another surface can stand in its place. Nothing on a surface
+// knows what a seam is; nothing here knows what a desk is.
 //
-// WHY THE PANEL AND NOT THE FLOATING CARD IT WAS. The first pass built this
-// window the way skills and providers are built: a DOM singleton pinned to
-// the bottom-right corner. That is a different KIND of window from the docked
-// column — it does not take a dock lane, does not answer `--hc-panel-scale`,
-// does not sit under the header anchor, and does not resize with its
-// neighbours. Beside the Backgrounds, Publish and Hosts windows it read as a
-// stray. A tool window is not a free object, and this one is now what the
-// rest of them are.
-//
-// THE PARAMS ARE THE PANEL'S, NOT THIS DRONE'S. A form whose values round-trip
+// THE PARAMS ARE THE SURFACE'S, NOT THIS DRONE'S. A form whose values round-trip
 // through a bus on every keystroke fights the typist. What crosses is the
 // SEED — what the active workflow's seams currently hold — plus which knobs
-// exist at all; the panel holds the edit and hands the whole set back with
+// exist at all; the surface holds the edit and hands the whole set back with
 // `comfy:generate`.
 
 import { Drone } from '@hypercomb/core'
@@ -40,7 +30,7 @@ import {
   setActiveWorkflow,
 } from './comfy-workflows.js'
 
-/** One picture the panel can show without anything being copied: an object
+/** One picture a surface can show without anything being copied: an object
  *  URL over a file that already exists on disk or on the host. */
 interface ComfyPicture {
   url: string
@@ -51,15 +41,8 @@ interface ComfyPicture {
   type: string
   size: number
   seed: number
-  /** Set once the participant has named this picture onto a tile. */
-  placed?: boolean
 }
 
-/**
- * Mirrors ComfyPanelPayload in `hypercomb-shared/ui/comfy-panel` — shared
- * cannot import essentials, so the shape is kept field-for-field by hand
- * (the same arrangement hosts.drone has with the hosts panel).
- */
 export interface ComfyRenderPayload {
   open: boolean
   /** Which section to reveal on the way in, when a command asked for one. */
@@ -83,12 +66,11 @@ export interface ComfyRenderPayload {
   knobs: string[]
   seeds: ComfyParams
   job: ComfyJob
-  results: ComfyPicture[]
+  /** What the last run made, by signature. The pictures are the pool's. */
+  results: { sig: string; seed: number }[]
   target: string
-  /** Tiles that will receive a picture. Empty means each picture is a new tile. */
+  /** Tiles selected in the hive: the near door for putting a picture down. */
   targets: string[]
-  /** The pictures are waiting for a name before they become tiles. */
-  nameResults?: boolean
   importError: string
   /** Every model and LoRA the recipes name, and which of them this workflow loads. */
   weights: ComfyWeightRow[]
@@ -121,7 +103,7 @@ export interface ComfyGenerationRestore {
   model?: string
 }
 
-/** One file in the model list. Mirrors WeightRow; shared cannot import it. */
+/** One file in the model list. */
 export interface ComfyWeightRow {
   file: string
   kind: string
@@ -133,20 +115,6 @@ export interface ComfyWeightRow {
   since?: number
 }
 
-/** Where a drag now sits, per TileOverlayDrone's broadcast — the same signal
- *  every file/image drag reads to know which hex it is over. `over` is false
- *  when the pointer has left the hive. */
-interface DropTargetInfo {
-  occupied: boolean
-  label: string | null
-  over?: boolean
-}
-
-/** The custom drag payload a comfy thumbnail carries — never real `Files`,
- *  so it never collides with an OS file drag over the same canvas. */
-const RESULT_MIME = 'application/x-hc-comfy-result'
-const FOLDER_MIME = 'application/x-hc-comfy-folder-picture'
-
 export class ComfyDrone extends Drone {
 
   readonly namespace = 'diamondcoreprocessor.com'
@@ -157,20 +125,16 @@ export class ComfyDrone extends Drone {
     'comfy:import-workflow', 'comfy:generate', 'comfy:set-help', 'comfy:cancel',
     'comfy:library', 'comfy:save-prompt', 'comfy:use-prompt', 'comfy:restore-generation', 'comfy:roll',
     'comfy:remember',
-    'comfy:keep', 'comfy:attach', 'comfy:place', 'comfy:job', 'comfy:loads', 'comfy:host-changed',
-    'comfy:folder-changed', 'comfy:workflows-changed', 'selection:changed', 'drop:target',
+    'comfy:keep', 'comfy:place-asset', 'comfy:job', 'comfy:loads', 'comfy:host-changed',
+    'comfy:folder-changed', 'comfy:workflows-changed', 'selection:changed',
   ]
-  protected override emits: string[] = ['comfy:render', 'activity:log', 'drop:dragging']
+  protected override emits: string[] = ['comfy:render', 'activity:log']
 
   #open = false
   #reveal = ''
   #browsing = false
   #importError = ''
   #folderPictures: ComfyPicture[] = []
-  /** Where TileOverlayDrone says the pointer currently is, while OUR drag
-   *  (never TheirsFiles) is what put it into drag mode. */
-  #dropTarget: DropTargetInfo | null = null
-  #dragging = false
   /** The library, swept when the window opens, when it is asked, and after a keep. */
   #prompts: ComfyPromptSaved[] = []
   /** Consumed by the next render, then cleared, so a later paint cannot clobber the form. */
@@ -186,19 +150,9 @@ export class ComfyDrone extends Drone {
   constructor() {
     super()
 
-    // A comfy thumbnail dragged onto the canvas — same landing logic as a
-    // click, just with a where attached. Never claims a real file drag
-    // (`dataTransfer.types` never carries our custom MIME for one), so this
-    // sits beside ImageDropDrone/FileDropDrone without contending.
-    document.addEventListener('dragover', this.#onDragOver)
-    document.addEventListener('drop', this.#onDrop)
-    document.addEventListener('dragend', this.#onDragEnd)
-
     // Do not probe from the hive boot. ComfyUI is often not running, and
     // discover() then logs a refused /system_stats for every usual port.
-    // Opening the panel warms it.
-
-    this.onEffect<DropTargetInfo>('drop:target', (t) => { this.#dropTarget = t })
+    // Opening the desk warms it.
 
     this.onEffect<{ section?: string }>('comfy:open', (p) => {
       const section = String(p?.section ?? '')
@@ -293,10 +247,9 @@ export class ComfyDrone extends Drone {
         })
     })
 
-    // Each picture is its own tile. A click on a thumbnail still puts that
-    // picture on the selected tile, which is a different gesture.
+    // Generate makes assets. Nothing lands until it is asked for by signature.
     this.onEffect<ComfyParams & { fromTile?: boolean; reviewers?: number }>('comfy:generate', (p) => {
-      void comfyService.run({ ...(p ?? {}), attach: false, tiles: true }).then(() => this.#emit())
+      void comfyService.run({ ...(p ?? {}), attach: false, assets: true }).then(() => this.#emit())
     })
 
     this.onEffect<{ fromTile?: boolean; reviewers?: number }>('comfy:set-help', (p) => {
@@ -364,14 +317,12 @@ export class ComfyDrone extends Drone {
       void comfyService.keep(this.#refOf(picture)).then(() => this.#emit())
     })
 
-    this.onEffect<{ index?: number }>('comfy:attach', (p) => {
-      const result = comfyService.results[Number(p?.index ?? -1)]
-      if (result) comfyService.attach(result)
-      this.#emit()
-    })
-
-    this.onEffect<{ index?: number; name?: string }>('comfy:place', (p) => {
-      void comfyService.placeNamed(Number(p?.index ?? -1), String(p?.name ?? '')).then(() => this.#emit())
+    // An asset, asked for. A tile that exists, or a new one under a typed name.
+    this.onEffect<{ sig?: string; cell?: string; name?: string; segments?: string[] }>('comfy:place-asset', (p) => {
+      const sig = String(p?.sig ?? '')
+      if (!sig) return
+      void (p?.cell ? comfyService.placeOn(sig, p.cell, p.segments) : comfyService.placeNamed(sig, String(p?.name ?? '')))
+        .then(() => this.#emit())
     })
 
     // The four live sources this window is a pure read of. Re-emit on each
@@ -381,50 +332,6 @@ export class ComfyDrone extends Drone {
     }
     // "onto <tile>" has to be true while you look at it.
     this.onEffect('selection:changed', () => { if (this.#open) this.#emit() })
-  }
-
-  // ── dragging a thumbnail onto the canvas ────────────────────────────────
-
-  #onDragOver = (e: DragEvent): void => {
-    const types = e.dataTransfer?.types ?? []
-    if (!types.includes(RESULT_MIME) && !types.includes(FOLDER_MIME)) return
-    e.preventDefault()
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
-    // Arms TileOverlayDrone's own hex-tracking — the same broadcast an image
-    // or file drag sends, so `drop:target` starts following the pointer.
-    if (!this.#dragging) { this.#dragging = true; this.emitEffect('drop:dragging', { active: true }) }
-  }
-
-  #onDragEnd = (): void => {
-    if (!this.#dragging) return
-    this.#dragging = false
-    this.emitEffect('drop:dragging', { active: false })
-  }
-
-  #onDrop = (e: DragEvent): void => {
-    const resultIndex = e.dataTransfer?.getData(RESULT_MIME)
-    const folderIndex = e.dataTransfer?.getData(FOLDER_MIME)
-    if (!resultIndex && !folderIndex) return
-    e.preventDefault()
-    // Remember the hex BEFORE ending the drag. Ending it tells the overlay
-    // the pointer has left, and the overlay answers with a nowhere target
-    // that would hide the tile this picture was dropped on.
-    const target = this.#dropTarget
-    this.#onDragEnd()
-    // Dropped on an occupied hex → that tile wears the picture. The one it
-    // wore stays in its image collection (resource-attach keeps it). Anywhere
-    // else → whatever is already selected, same as a click. `attach`/`keep`
-    // arm the command line themselves when that is nothing.
-    const label = target?.label?.trim()
-    const cell = target && target.over !== false && target.occupied && label ? label : undefined
-    if (resultIndex) {
-      const result = comfyService.results[Number(resultIndex)]
-      if (result) comfyService.attach(result, cell)
-    } else if (folderIndex) {
-      const picture = this.#folderPictures[Number(folderIndex)]
-      if (picture) void comfyService.keep(this.#refOf(picture), cell).then(() => this.#emit())
-    }
-    this.#emit()
   }
 
   /** Ask the machine and re-open the folder on the way in — a status dot that
@@ -520,18 +427,9 @@ export class ComfyDrone extends Drone {
       knobs: [...offeredKnobs(workflow.seams)] as string[],
       seeds: readParams(workflow.graph, workflow.seams),
       job: comfyService.job,
-      results: comfyService.results.map(result => ({
-        url: result.previewUrl,
-        filename: result.file.filename,
-        subfolder: result.file.subfolder,
-        type: result.file.type,
-        size: 0,
-        seed: result.seed,
-        ...(result.placedAs ? { placed: true } : {}),
-      })),
+      results: comfyService.results.map(result => ({ sig: result.largeSig, seed: result.seed })),
       target: comfyService.targetCell() ?? '',
       targets: comfyService.selectedCells(),
-      ...(comfyService.awaitingNames ? { nameResults: true } : {}),
       importError: this.#importError,
       prompts: this.#prompts,
       ...(applyPrompt ? { applyPrompt } : {}),
