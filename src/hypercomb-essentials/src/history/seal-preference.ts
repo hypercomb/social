@@ -26,6 +26,12 @@
 // The discriminator is BAG MEMBERSHIP of the hint. In the normal case the
 // hint was a marker by construction; in the divergence case it never was.
 //
+// ONE EXCEPTION: A BARE HINT (2026-10-31, /hosting). A tile born with a name
+// and nothing else can be named by its parent before its own bag holds any
+// marker, so it reads off-lineage forever, and every later edit to the tile
+// was invisible to publish: four pages shipped as bare names. A hint holding
+// nothing but a name is no subtree to preserve, so the location's seal wins.
+//
 // Known limits, accepted deliberately:
 //   - A flattened bag drops old markers, so a very stale hint under a
 //     never-recommitted parent can misread as off-lineage. The parent's
@@ -52,9 +58,11 @@ export function chooseSealChildHandle(input: {
   readonly sealSig: string
   /** Every marker layerSig in the child location's bag, any order. */
   readonly bagSigs: readonly string[]
+  /** The hint's layer holds a name and nothing else. */
+  readonly hintBare?: boolean
 }): SealChildDecision {
-  const { hintSig, sealSig, bagSigs } = input
+  const { hintSig, sealSig, bagSigs, hintBare } = input
   if (sealSig === hintSig) return { handle: sealSig, reason: 'coherent' }
-  if (bagSigs.includes(hintSig)) return { handle: sealSig, reason: 'freshened' }
+  if (hintBare || bagSigs.includes(hintSig)) return { handle: sealSig, reason: 'freshened' }
   return { handle: hintSig, reason: 'hint-off-lineage' }
 }

@@ -2892,6 +2892,7 @@ export class HistoryService {
         hintSig: terminalHint,
         sealSig: sealed,
         bagSigs: bag.map(e => e.layerSig),
+        hintBare: Object.entries(child).every(([slot, value]) => slot === 'name' || (Array.isArray(value) && value.length === 0)),
       })
       if (decision.reason === 'hint-off-lineage') {
         console.info(

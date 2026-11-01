@@ -36,6 +36,11 @@ describe('chooseSealChildHandle', () => {
     expect(d).toEqual({ handle: 'gen-NEW', reason: 'hint-off-lineage' })
   })
 
+  it('a bare hint is no subtree: the location seal wins even off-lineage', () => {
+    const decision = chooseSealChildHandle({ hintSig: 'bare', sealSig: 'page', bagSigs: ['page'], hintBare: true })
+    expect(decision).toEqual({ handle: 'page', reason: 'freshened' })
+  })
+
   it('empty bag: divergent hint wins (nothing committed at the location contradicts the parent)', () => {
     const d = chooseSealChildHandle({ hintSig: 'gen-NEW', sealSig: 'derived-elsewhere', bagSigs: [] })
     expect(d).toEqual({ handle: 'gen-NEW', reason: 'hint-off-lineage' })
