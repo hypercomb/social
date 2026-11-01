@@ -34,10 +34,6 @@ import '../tutorials-window/tutorials-window.component'
 // What is behind the hive and what fills a blank tile, in one window — and the
 // only surface from which a picture of your own can be either.
 import '../backgrounds-window/backgrounds-window.component'
-// Makes the pictures the window above puts behind things. ComfyUI runs on the
-// participant's own machine; this panel is the prompt, the workflow and where
-// the picture lands — the data lives in essentials and crosses on comfy:render.
-import '../comfy-panel/comfy-panel.component'
 // The names the participant gave the behaviours — code declares none (the
 // doctrine ratchet), so this window is where an alias enters the language.
 // The ledger lives in essentials and crosses on aliases:render.

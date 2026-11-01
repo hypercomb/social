@@ -4,14 +4,19 @@ import {
   beeDirections,
   guideAsk,
   guideTileAsk,
-  choiceAt,
+  boardBox,
   hoverLine,
+  ideaTask,
   kindOf,
+  nearestPoint,
   optionsFromAnswer,
   payloadDetail,
   placeFromElement,
+  ringCells,
+  ringsFor,
+  tileIdeas,
   tileReading,
-  tileSuggestions,
+  type GuideBehavior,
   type GuideTile,
 } from './guide-place.js'
 
@@ -101,16 +106,29 @@ describe('guide place', () => {
     expect(hoverLine({ ...tile, behaviors: [] })).toContain('It could take one beehavior.')
   })
 
-  it('offers suggestions after the bee dances and asks without writing', () => {
+  it('opens the ideas for a tile, its own first, what the hive could add last', () => {
     const tile: GuideTile = {
       x: 4, y: 8, route: '/press-kit', label: 'press-kit', name: 'Press kit', behaviors: ['website'],
     }
-    const suggestions = tileSuggestions(tile)
-    expect(suggestions.prompt).toBe('Some choices')
-    expect(suggestions.options[0]).toBe('Change the page')
-    expect(suggestions.options.at(-1)).toBe('Leave it as it is')
-    expect(suggestions.options.length).toBeGreaterThanOrEqual(2)
-    expect(suggestions.options.length).toBeLessThanOrEqual(4)
+    const offered: GuideBehavior[] = [
+      { word: 'website', icon: 'web', about: '' },
+      { word: 'slides', icon: 'slideshow', about: '' },
+    ]
+    const ideas = tileIdeas(tile, offered)
+    expect(ideas[0]).toEqual({ id: 'own:website', icon: 'web', word: 'website', label: 'Change the page' })
+    expect(ideas.map(idea => idea.label)).toContain('Say what this tile is for')
+    expect(ideas.at(-1)).toEqual({ id: 'add:slides', icon: 'slideshow', word: 'slides', label: 'Add slides' })
+    expect(ideas.map(idea => idea.label)).not.toContain('Add website')
+    expect(new Set(ideas.map(idea => idea.id)).size).toBe(ideas.length)
+
+    const many = Array.from({ length: 60 }, (_, index) => ({ word: `view ${index}`, icon: 'web', about: '' }))
+    expect(tileIdeas(tile, many)).toHaveLength(36)
+
+    const task = ideaTask(tile, ideas[0]!)
+    expect(task).toContain('Task: Change the page.')
+    expect(task).toContain('Press kit, at /press-kit')
+    expect(task).toContain('Beehaviors: website.')
+
     const ask = guideTileAsk(tile)
     expect(ask).toContain('hypercomb-question')
     expect(ask).toContain('Do not write a page')
@@ -153,22 +171,55 @@ describe('guide place', () => {
       ],
       kin: [{ name: 'square tile view', where: '/susan', domain: '' }],
     })).toBe('Carries square tile view, website: Revolución. square tile view also sits at /susan.')
-    const suggestions = tileSuggestions(tile)
-    expect(suggestions.prompt).toContain('Carries square tile view, website: The bench.')
-    expect(suggestions.prompt).toContain('also shows on revolucionstyle.com.')
-    expect(suggestions.options[0]).toBe('Use square tile view here')
-    expect(suggestions.options).toContain('See website on revolucionstyle.com')
-    expect(suggestions.options).toContain('Change the page')
-    expect(suggestions.options.at(-1)).toBe('Leave it as it is')
-    expect(suggestions.options.length).toBeLessThanOrEqual(4)
+    const labels = tileIdeas(tile, []).map(idea => idea.label)
+    expect(labels[0]).toBe('Use square tile view here')
+    expect(labels).toContain('Change the page')
+    expect(labels).toContain('See website on revolucionstyle.com')
   })
 
-  it('picks a choice by the direction of a drag, and nothing inside the dead zone', () => {
-    expect(choiceAt(0, 0, 4)).toBe(-1)
-    expect(choiceAt(20, 0, 4)).toBe(-1)
-    expect(choiceAt(120, 0, 4)).toBe(0)
-    expect(choiceAt(0, 120, 4)).toBe(1)
-    expect(choiceAt(-120, 0, 4)).toBe(2)
-    expect(choiceAt(0, -120, 4)).toBe(3)
+  it('fills rings outward from the tile, every cell distinct and none on the tile', () => {
+    expect(ringsFor(0)).toBe(0)
+    expect(ringsFor(1)).toBe(1)
+    expect(ringsFor(6)).toBe(1)
+    expect(ringsFor(7)).toBe(2)
+    expect(ringsFor(18)).toBe(2)
+    expect(ringsFor(19)).toBe(3)
+    expect(ringsFor(36)).toBe(3)
+
+    const cells = ringCells(18)
+    expect(cells).toHaveLength(18)
+    expect(new Set(cells.map(cell => `${cell.q},${cell.r}`)).size).toBe(18)
+    const distance = (cell: { q: number; r: number }): number =>
+      (Math.abs(cell.q) + Math.abs(cell.r) + Math.abs(cell.q + cell.r)) / 2
+    expect(cells.slice(0, 6).every(cell => distance(cell) === 1)).toBe(true)
+    expect(cells.slice(6).every(cell => distance(cell) === 2)).toBe(true)
+  })
+
+  it('finds the tile under the pointer, and none outside its reach', () => {
+    const points = [{ x: 100, y: 100 }, { x: 200, y: 100 }]
+    expect(nearestPoint(points, 110, 100, 50)).toBe(0)
+    expect(nearestPoint(points, 170, 100, 50)).toBe(1)
+    expect(nearestPoint(points, 150, 300, 50)).toBe(-1)
+  })
+
+  it('stands the board beside the middle, on the side with room', () => {
+    const free = { left: 20, top: 72, right: 1420, bottom: 836 }
+    const middle = { x: 720, y: 450 }
+    const beside = boardBox(free, middle, 300, 'tiles')
+    expect(beside.left).toBe(1048)
+    expect(beside.width).toBe(320)
+    expect(beside.middle).toBe(450)
+    expect(beside.height).toBeUndefined()
+
+    const list = boardBox(free, middle, 60, 'list')
+    expect(list.left).toBe(808)
+    expect(list.width).toBe(560)
+    expect(list.top).toBe(72)
+    expect(list.height).toBe(764)
+
+    const crowded = boardBox({ ...free, right: 900 }, middle, 300, 'tiles')
+    expect(crowded.left + crowded.width).toBeLessThanOrEqual(392)
+
+    expect(beside.left).toBeGreaterThan(middle.x + 300)
   })
 })

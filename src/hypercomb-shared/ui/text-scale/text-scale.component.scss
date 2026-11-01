@@ -2,7 +2,7 @@
 //
 // Chrome, so it does NOT scale with the thing it scales — sized in rem off the
 // root, never in em off the host. A control that grew with its own setting
-// would walk off the edge of the surface it is sitting on at Larger.
+// would walk off the edge of the surface it is sitting on at the top of the range.
 
 :host { display: block; }
 
@@ -11,7 +11,6 @@
 
 .text-scale {
   display: flex;
-  flex-wrap: wrap;   // in a narrow pane the last step wraps; it never clips
   align-items: center;
   gap: 0.15rem;
   font-family: var(--hc-mono);
@@ -49,27 +48,53 @@
   white-space: nowrap;
 }
 
-.text-scale-step {
-  padding: 0.12rem 0.4rem;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  color: var(--hc-chrome-ink-quiet);
-  font: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+// A hairline and a tick. The tall box is the hit area; the ink is 1px.
+.text-scale-track {
+  position: relative;
+  flex: 1 1 8rem;
+  min-width: 4rem;
+  max-width: 12rem;
+  height: 1rem;
+  margin: 0 0.5rem;
+  cursor: ew-resize;
+  touch-action: none;
+  outline: none;
 
-  &:hover {
-    color: var(--hc-chrome-ink-plain);
-    background: rgba(var(--glow-color-rgb, var(--hc-chrome-accent)), 0.08);
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 50% 0 auto;
+    height: 1px;
+    background: var(--hc-chrome-ink-faint, var(--hc-chrome-ink-quiet));
   }
 
-  // The step you are on wears the outline the alias chips wear — one chip
-  // vocabulary across the command surfaces.
-  &.on {
-    border-color: rgba(var(--hc-chrome-ink), 0.22);
-    color: var(--hc-chrome-text);
-    background: rgba(var(--glow-color-rgb, var(--hc-chrome-accent)), 0.12);
+  &:focus-visible .text-scale-thumb {
+    box-shadow: 0 0 0 1px var(--cmd-accent-command, var(--hc-chrome-text));
   }
+}
+
+.text-scale-fill {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: 1px;
+  background: var(--cmd-accent-command, var(--hc-chrome-text));
+}
+
+.text-scale-thumb {
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 0.8rem;
+  border-radius: 1px;
+  background: var(--cmd-accent-command, var(--hc-chrome-text));
+  transform: translate(-50%, -50%);
+}
+
+.text-scale-readout {
+  flex: 0 0 auto;
+  min-width: 2.2rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--hc-chrome-ink-plain);
 }

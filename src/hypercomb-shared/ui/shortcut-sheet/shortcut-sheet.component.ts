@@ -20,7 +20,7 @@ import {
   type OnInit,
   type OnDestroy,
 } from '@angular/core'
-import { EffectBus, formatChord, type KeyBinding } from '@hypercomb/core'
+import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 
@@ -108,8 +108,10 @@ export class ShortcutSheetComponent implements OnInit, OnDestroy {
     this.query.set((e.target as HTMLInputElement).value)
   }
 
-  readonly formatSequence = (binding: KeyBinding): string[][] => {
-    return binding.sequence.map(chord => formatChord(chord))
+  /** The keys are a place of their own: a drawn keyboard, never a list here. */
+  readonly openKeyboard = (): void => {
+    this.close()
+    EffectBus.emit('keyboard:open', {})
   }
 
   constructor() {

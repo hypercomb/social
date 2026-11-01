@@ -24,6 +24,14 @@ export const globalKeyMap: KeyMapLayer = {
       category: 'Navigation',
     },
     {
+      cmd: 'ui.keyboard',
+      sequence: [[{ key: '?', code: 'slash', primary: true, shift: true }]],
+      description: 'Open the keyboard',
+      descriptionKey: 'keymap.keyboard',
+      category: 'Navigation',
+      pierce: true,
+    },
+    {
       cmd: 'ui.commandPalette',
       sequence: [[{ key: 'k', primary: true }]],
       description: 'Open command palette',

@@ -4,6 +4,7 @@
 // and peer-to-peer video connections are established via the Nostr mesh.
 
 import { Drone } from '@hypercomb/core'
+import { bitrateOf, frameRateOf, isQuality, qualityConstraints, videoConstraints, type Quality } from './meeting-quality.js'
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
 type MeshSub = { close: () => void }
@@ -52,9 +53,14 @@ export class HiveMeetingDrone extends Drone {
 
   protected override listens = [
     'render:cell-count', 'mesh:ensure-started',
-    'meeting:toggle-camera', 'meeting:toggle-available',
+    'meeting:toggle-camera', 'meeting:toggle-available', 'meeting:join', 'meeting:leave',
   ]
-  protected override emits = ['meeting:state', 'meeting:streams', 'meeting:local-camera']
+  protected override emits = ['meeting:state', 'meeting:streams', 'meeting:local-camera', 'meeting:presence']
+
+  /** The picture the lobby chose; the camera and every sender follow it. */
+  #quality: Quality = 'auto'
+  /** Last presence announced, so the lobby hears a change and not every beat. */
+  #lastHere = -1
 
   #state: MeetingState = 'idle'
   #threshold = DEFAULT_THRESHOLD
@@ -94,6 +100,16 @@ export class HiveMeetingDrone extends Drone {
     this.#pruneExpiredAvailability()
     this.#publishAvailability()
     this.#evaluateState()
+    this.#announcePresence()
+  }
+
+  /** Who is here, for the lobby: those heard from recently, and yourself once
+   *  you have joined. Said only when it changes. */
+  #announcePresence = (): void => {
+    const here = this.#availability.size + (this.#localAvailable ? 1 : 0)
+    if (here === this.#lastHere) return
+    this.#lastHere = here
+    this.emitEffect('meeting:presence', { here, needed: this.#threshold })
   }
 
   // ─── effect subscriptions ────────────────────────────────────
@@ -141,6 +157,17 @@ export class HiveMeetingDrone extends Drone {
     this.onEffect('meeting:toggle-available', handleToggleAvailable)
     this.onEffect('meeting:toggle-camera', handleToggleCamera)
 
+    // The lobby's way in and out. A toggle cannot say "join" twice or "leave"
+    // when not here, so these are idempotent: the lobby never has to know which
+    // side of the toggle the meeting is on.
+    this.onEffect<{ stream?: unknown; quality?: unknown }>('meeting:join', payload => {
+      if (isQuality(payload?.quality)) this.#quality = payload.quality
+      if (!this.#localAvailable) handleToggleAvailable(payload?.stream)
+    })
+    this.onEffect('meeting:leave', () => {
+      if (this.#localAvailable) handleToggleAvailable()
+    })
+
     // bridge: listen for window custom events from Angular controls bar
     window.addEventListener('meeting:toggle-available', ((e: CustomEvent) => {
       handleToggleAvailable(e.detail?.stream as MediaStream | undefined)
@@ -167,6 +194,7 @@ export class HiveMeetingDrone extends Drone {
     this.#availability.clear()
     this.#localAvailable = false
     this.#currentSig = sig
+    this.#announcePresence()
 
     const mesh = this.resolve<MeshApi>('mesh')
     if (!mesh || typeof mesh.subscribe !== 'function') return
@@ -200,6 +228,7 @@ export class HiveMeetingDrone extends Drone {
       lastSeenMs: Date.now(),
       cell: p.cell ?? p.seed ?? '',
     })
+    this.#announcePresence()
   }
 
   #publishAvailability = (): void => {
@@ -335,6 +364,10 @@ export class HiveMeetingDrone extends Drone {
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
         this.#removePeer(remoteId)
+      } else if (pc.connectionState === 'connected') {
+        // the encodings only exist once negotiated, and the share each peer
+        // gets depends on how many are open — retune them all
+        this.#tuneSenders()
       }
     }
 
@@ -440,7 +473,25 @@ export class HiveMeetingDrone extends Drone {
     if (!peer) return
     try { peer.pc.close() } catch { /* ignore */ }
     this.#peers.delete(id)
+    this.#tuneSenders() // one fewer peer: the rest can take a bigger share
     this.#emitStreams()
+  }
+
+  /** Give every open connection its share of the uplink budget. Best effort —
+   *  a browser that refuses `setParameters` just keeps its own rate control. */
+  #tuneSenders = (): void => {
+    const maxBitrate = bitrateOf(this.#quality, this.#peers.size)
+    const maxFramerate = frameRateOf(this.#quality)
+    for (const [, peer] of this.#peers) {
+      for (const sender of peer.pc.getSenders()) {
+        if (sender.track?.kind !== 'video') continue
+        const params = sender.getParameters()
+        if (!params.encodings?.length) continue // not negotiated yet
+        params.encodings[0].maxBitrate = maxBitrate
+        params.encodings[0].maxFramerate = maxFramerate
+        sender.setParameters(params).catch(() => { /* best effort */ })
+      }
+    }
   }
 
   // ─── camera ──────────────────────────────────────────────────
@@ -452,6 +503,11 @@ export class HiveMeetingDrone extends Drone {
     }
     this.#localStream = stream
     this.#cameraOn = true
+
+    // a stream opened elsewhere may be at the browser's default size — ask its
+    // camera for the picture that was chosen (a no-op when the lobby opened it)
+    const video = videoConstraints(this.#quality)
+    for (const track of stream.getVideoTracks()) void track.applyConstraints(video).catch(() => { /* keep what it has */ })
 
     // add tracks to all existing peer connections
     for (const [, peer] of this.#peers) {
@@ -489,10 +545,7 @@ export class HiveMeetingDrone extends Drone {
     } else {
       // turn on
       try {
-        this.#localStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        })
+        this.#localStream = await navigator.mediaDevices.getUserMedia(qualityConstraints(this.#quality))
       } catch (e) {
         console.warn('[hive-meeting] camera access denied:', e)
         this.#cameraOn = false

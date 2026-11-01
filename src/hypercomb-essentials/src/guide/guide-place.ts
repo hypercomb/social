@@ -291,60 +291,165 @@ const suggestionFor = (behavior: string): string => {
   return line.length <= OPTION_LIMIT ? line : 'Use this beehavior'
 }
 
-/** On-screen circumradius the held tile settles at, so every gesture is the same size. */
-export const COMMON_HEX_RADIUS = 96
+/** One thing that could happen on this tile. */
+export type GuideIdea = {
+  readonly id: string
+  /** The Material Symbols glyph its tile wears. */
+  readonly icon: string
+  /** The short word its tile shows when the font cannot draw the glyph. */
+  readonly word: string
+  /** What rollover and the list say. */
+  readonly label: string
+}
 
-/** How far a choice sits from the screen centre. Outside the neighbour ring. */
-export const CHOICE_REACH = 250
+/** A beehavior this hive could put on the tile. */
+export type GuideBehavior = {
+  readonly word: string
+  readonly icon: string
+  readonly about: string
+}
 
-/** Travel below this, from the centre, chooses nothing. */
-const CHOICE_DEAD = 36
+/** Three rings of tiles, which is the most a screen can hold at a readable size. */
+const IDEA_LIMIT = 36
+
+/** What any tile could have done, once its own beehaviors have spoken. */
+const GENERAL_IDEAS: readonly Omit<GuideIdea, 'id'>[] = [
+  { icon: 'description', word: 'purpose', label: 'Say what this tile is for' },
+  { icon: 'lightbulb', word: 'next', label: 'Suggest one next change' },
+  { icon: 'category', word: 'parts', label: 'Break this tile into parts' },
+  { icon: 'travel_explore', word: 'missing', label: 'Find what is missing here' },
+]
 
 /**
- * Which choice a drag from the centre reaches. -1 inside the dead zone.
- * Angle 0 is east. Choices sit evenly from there, clockwise, because
- * screen y grows downward.
+ * Everything the bee can offer on one tile: the beehaviors it carries, where
+ * the same beehavior sits, what any tile could do, then what this hive could
+ * add. The most specific come first, so they take the inner ring.
  */
-export const choiceAt = (dx: number, dy: number, count: number): number => {
-  if (count <= 0) return -1
-  if (Math.hypot(dx, dy) < CHOICE_DEAD) return -1
-  const turn = Math.atan2(dy, dx)
-  const angle = turn < 0 ? turn + Math.PI * 2 : turn
-  const sector = (Math.PI * 2) / count
-  return Math.round(angle / sector) % count
-}
-
-/** Choices the bee gives once the tile is in the centre. */
-export const tileSuggestions = (tile: GuideTile): GuideDirections => {
-  const options: string[] = []
-  const add = (line: string): void => {
-    if (options.length >= 3 || !line || line.length > OPTION_LIMIT) return
-    if (options.some(held => held.toLowerCase() === line.toLowerCase())) return
-    options.push(line)
+export const tileIdeas = (tile: GuideTile, offered: readonly GuideBehavior[]): readonly GuideIdea[] => {
+  const ideas: GuideIdea[] = []
+  const add = (idea: GuideIdea): void => {
+    if (ideas.length >= IDEA_LIMIT || !idea.label || idea.label.length > OPTION_LIMIT) return
+    if (ideas.some(held => held.label.toLowerCase() === idea.label.toLowerCase())) return
+    ideas.push(idea)
   }
-  const [first, ...rest] = tile.behaviors
-  if (first) add(suggestionFor(first))
+  const carried = new Set(tile.behaviors.map(spoken))
+  for (const behavior of tile.behaviors) {
+    const word = spoken(behavior)
+    const known = offered.find(item => spoken(item.word) === word)
+    add({ id: `own:${word}`, icon: known?.icon ?? 'edit', word, label: suggestionFor(behavior) })
+  }
   const kin = firstKin(tile)
-  if (kin) add(kinLine(kin))
-  for (const behavior of rest) add(suggestionFor(behavior))
-  add('Say what this tile is for')
-  const leave = 'Leave it as it is'
-  if (!options.some(held => held.toLowerCase() === leave.toLowerCase())) options.push(leave)
-  return { prompt: tileReading(tile), options }
+  if (kin) add({ id: 'kin', icon: 'travel_explore', word: kin.name, label: kinLine(kin) })
+  for (const idea of GENERAL_IDEAS) add({ id: `general:${idea.word}`, ...idea })
+  for (const item of offered) {
+    const word = spoken(item.word)
+    if (carried.has(word)) continue
+    add({ id: `add:${word}`, icon: item.icon, word, label: `Add ${word}` })
+  }
+  return ideas
 }
 
-/** A tile as the dialog's place, so the same card can show it. */
-export const placeFromTile = (tile: GuideTile): GuidePlace => ({
-  x: tile.x,
-  y: tile.y,
-  route: tile.route.trim() || '/',
-  kind: 'tile',
-  name: called(tile),
-  heading: '',
-  text: '',
-  tag: 'tile',
-  behaviors: tile.behaviors,
-})
+/** What one agent is told to do with the idea the participant accepted. */
+export const ideaTask = (tile: GuideTile, idea: GuideIdea): string => [
+  `Task: ${idea.label}.`,
+  `Tile: ${called(tile)}, at ${tile.route || '/'}.`,
+  `Beehaviors: ${tile.behaviors.length ? tile.behaviors.join(', ') : '(none)'}.`,
+  'The participant chose this. Read the tile, do the task on it, and end with one line saying what changed.',
+].join('\n')
+
+export type Axial = { readonly q: number; readonly r: number }
+
+/** The neighbour walked to next, going round a ring. */
+const RING_WALK: readonly Axial[] = [
+  { q: -1, r: 1 }, { q: -1, r: 0 }, { q: 0, r: -1 }, { q: 1, r: -1 }, { q: 1, r: 0 }, { q: 0, r: 1 },
+]
+
+/** How many rings `count` tiles fill round the centre. */
+export const ringsFor = (count: number): number => {
+  let rings = 0
+  for (let held = 0; held < count; held += ++rings * 6) { /* the next ring holds six more */ }
+  return rings
+}
+
+/** The first `count` cells round a centre, ring by ring, as offsets from it. */
+export const ringCells = (count: number): readonly Axial[] => {
+  const cells: Axial[] = []
+  for (let ring = 1; cells.length < count; ring++) {
+    let at = { q: ring, r: 0 }
+    for (const step of RING_WALK) {
+      for (let walked = 0; walked < ring && cells.length < count; walked++) {
+        cells.push(at)
+        at = { q: at.q + step.q, r: at.r + step.r }
+      }
+    }
+  }
+  return cells
+}
+
+/** The index of the point within `reach` of the pointer, nearest first. -1 is none. */
+export const nearestPoint = (
+  points: readonly { readonly x: number; readonly y: number }[],
+  x: number,
+  y: number,
+  reach: number,
+): number => {
+  let best = -1
+  let bestDistance = reach
+  points.forEach((point, index) => {
+    const distance = Math.hypot(point.x - x, point.y - y)
+    if (distance < bestDistance) { best = index; bestDistance = distance }
+  })
+  return best
+}
+
+export type GuideFrame = {
+  readonly left: number
+  readonly top: number
+  readonly right: number
+  readonly bottom: number
+}
+
+export type GuideBoardBox = {
+  readonly left: number
+  readonly width: number
+  /** The middle of the board, for a board as tall as what it holds. */
+  readonly middle?: number
+  /** The top and height, for a board that fills the free height. */
+  readonly top?: number
+  readonly height?: number
+}
+
+/** How far the board stands off the tiles, and its widths. */
+const BOARD_GAP = 28
+const BOARD_WIDTH = 320
+const BOARD_LIST_WIDTH = 560
+/** The list keeps at least this much before it would rather cross over the tile. */
+const BOARD_MIN_WIDTH = 240
+
+/**
+ * The bordered board stands beside what is in the middle, never on it. It
+ * takes the side with room, the right when both have it. As a list it fills
+ * the free height and scrolls; beside the tiles it is only as tall as it holds.
+ */
+export const boardBox = (
+  free: GuideFrame,
+  centre: { readonly x: number; readonly y: number },
+  extent: number,
+  mode: 'tiles' | 'list',
+): GuideBoardBox => {
+  const near = extent + BOARD_GAP
+  const rightRoom = free.right - (centre.x + near)
+  const leftRoom = centre.x - near - free.left
+  const onRight = rightRoom >= BOARD_MIN_WIDTH || rightRoom >= leftRoom
+  const room = Math.max(BOARD_MIN_WIDTH, onRight ? rightRoom : leftRoom)
+  const width = Math.min(mode === 'list' ? BOARD_LIST_WIDTH : BOARD_WIDTH, room)
+  const left = onRight
+    ? Math.min(centre.x + near, free.right - width)
+    : Math.max(centre.x - near - width, free.left)
+  return mode === 'list'
+    ? { left, width, top: free.top, height: free.bottom - free.top }
+    : { left, width, middle: centre.y }
+}
 
 /** The question sent after the bee dances on a tile. It asks for suggestions and refuses a write. */
 export const guideTileAsk = (tile: GuideTile): string => [

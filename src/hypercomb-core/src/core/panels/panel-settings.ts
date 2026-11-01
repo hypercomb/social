@@ -33,6 +33,12 @@ export type SettingRow =
   /** A short ladder, rendered as one segmented strip. Values are strings so the
    *  row stays plain data; the caller parses what it put in. */
   | { kind: 'choice'; key: string; label: string; value: string; options: readonly { value: string; label: string }[]; hint?: string; pick: (value: string) => void }
+  /** A number you judge by watching it change. `change` runs on every step of
+   *  the drag, so the window moves under the hand, and the row keeps itself: a
+   *  rebuild mid-drag would drop the thumb. `set` says a value is held; while it
+   *  is not, `unsetLabel` stands in the readout, and `reset` gives the value
+   *  back. `setHint` replaces `hint` once a value is held. */
+  | { kind: 'slider'; key: string; label: string; value: number; min: number; max: number; step: number; set: boolean; read: (value: number) => string; unsetLabel: string; resetLabel: string; hint?: string; setHint?: string; change: (value: number) => void; reset: () => void }
   /** A habit you keep or drop. Label left, toggle right. */
   | { kind: 'switch'; key: string; label: string; checked: boolean; hint?: string; toggle: (on: boolean) => void }
   /** Something that happens when you press it. `on` lights it when the thing it
@@ -114,6 +120,7 @@ const SETTINGS_CSS = `
   border-radius: var(--hc-radius-floating, 4px);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
   font: 400 11.5px/1.45 system-ui, sans-serif;
+  letter-spacing: normal;
   color: #c8d6de;
   -webkit-font-smoothing: antialiased;
 }
@@ -261,6 +268,47 @@ const SETTINGS_CSS = `
   transition: background 0.12s ease, color 0.12s ease;
 }
 .hc-settings button.hc-settings-action:hover { background: rgba(255, 255, 255, 0.06); color: #dcecf5; }
+
+/* A slider: a hairline, a tick for a thumb, and the number at the end of the
+   line. The filled part is the only ink. */
+.hc-settings-slider-head { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.2rem; }
+.hc-settings-slider-head > .hc-settings-label { flex: 1 1 auto; min-width: 0; margin: 0; }
+.hc-settings-readout { flex: 0 0 auto; font-size: 10.5px; font-variant-numeric: tabular-nums; color: #dcecf5; }
+.hc-settings-readout[data-unset] { color: #93a8b6; }
+.hc-settings button.hc-settings-reset {
+  flex: 0 0 auto; padding: 0; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: 10.5px; color: #728896; transition: color 0.12s ease;
+}
+.hc-settings button.hc-settings-reset:hover { color: #dcecf5; }
+.hc-settings input.hc-settings-slider {
+  --fill: 0%;
+  appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 16px; margin: 0; padding: 0;
+  background: transparent; cursor: ew-resize;
+}
+.hc-settings input.hc-settings-slider:focus-visible { outline: 1px solid rgba(${STEEL}, 0.72); outline-offset: 1px; }
+.hc-settings input.hc-settings-slider::-webkit-slider-runnable-track {
+  height: 1px;
+  background: linear-gradient(to right, #cfe3ef var(--fill), rgba(${STEEL}, 0.3) var(--fill));
+}
+.hc-settings input.hc-settings-slider::-moz-range-track { height: 1px; background: rgba(${STEEL}, 0.3); }
+.hc-settings input.hc-settings-slider::-moz-range-progress { height: 1px; background: #cfe3ef; }
+.hc-settings input.hc-settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 3px; height: 13px; margin-top: -6px; border: 0; border-radius: 1px;
+  background: #cfe3ef; transition: background 0.12s ease, transform 0.12s ease;
+}
+.hc-settings input.hc-settings-slider::-moz-range-thumb {
+  width: 3px; height: 13px; border: 0; border-radius: 1px; background: #cfe3ef;
+}
+.hc-settings input.hc-settings-slider:hover::-webkit-slider-thumb,
+.hc-settings input.hc-settings-slider:focus-visible::-webkit-slider-thumb { background: #fff; transform: scaleY(1.15); }
+.hc-settings input.hc-settings-slider[data-unset]::-webkit-slider-thumb { background: #93a8b6; }
+
+/* Spacing a window chose. Reaches the elements that hold running text, which
+   each set their own, and only on a window that holds a value. */
+[data-hc-leading] :is(p, li, dd, blockquote, td, th, pre, textarea) { line-height: var(--hc-panel-leading) !important; }
+[data-hc-tracking] { letter-spacing: var(--hc-panel-tracking); }
+[data-hc-tracking] :is(p, li, dd, blockquote, td, th, h1, h2, h3, h4, h5, h6, textarea) { letter-spacing: var(--hc-panel-tracking) !important; }
+
 .hc-settings button.hc-settings-action[data-on='true'] { background: rgba(${STEEL}, 0.18); border-color: rgba(${STEEL}, 0.5); color: #eaf5fb; }
 `
 
@@ -292,6 +340,46 @@ const hintOf = (row: SettingRow): HTMLElement | null =>
 const renderRow = (row: SettingRow): HTMLElement => {
   const wrap = el('div', 'hc-settings-row')
   wrap.setAttribute('data-hc-setting', row.key)
+
+  if (row.kind === 'slider') {
+    const readout = el('span', 'hc-settings-readout')
+    const reset = el('button', 'hc-settings-reset', row.resetLabel)
+    reset.type = 'button'
+    reset.addEventListener('click', () => { row.reset() })
+    const input = document.createElement('input')
+    input.type = 'range'
+    input.className = 'hc-settings-slider'
+    input.min = String(row.min)
+    input.max = String(row.max)
+    input.step = String(row.step)
+    input.value = String(row.value)
+    input.dataset['hcRow'] = row.key
+    input.setAttribute('aria-label', row.label)
+    const head = el('div', 'hc-settings-slider-head')
+    head.append(el('span', 'hc-settings-label', row.label), reset, readout)
+    wrap.append(head, input)
+    const hint = el('div', 'hc-settings-hint')
+    wrap.appendChild(hint)
+
+    const show = (held: boolean): void => {
+      const value = parseFloat(input.value)
+      input.style.setProperty('--fill', `${((value - row.min) / (row.max - row.min)) * 100}%`)
+      readout.textContent = held ? row.read(value) : row.unsetLabel
+      input.setAttribute('aria-valuetext', readout.textContent)
+      readout.toggleAttribute('data-unset', !held)
+      input.toggleAttribute('data-unset', !held)
+      reset.hidden = !held
+      const said = held ? row.setHint ?? row.hint : row.hint
+      hint.textContent = said ?? ''
+      hint.hidden = !said
+    }
+    input.addEventListener('input', () => {
+      show(true)
+      row.change(parseFloat(input.value))
+    })
+    show(row.set)
+    return wrap
+  }
 
   if (row.kind === 'switch') {
     // Label and toggle on one line — a habit is a yes/no, and stacking it

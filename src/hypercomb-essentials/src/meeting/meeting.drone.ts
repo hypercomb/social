@@ -90,7 +90,7 @@ export class HypercombMeetingDrone extends Drone {
 
   protected override deps = { mesh: '@diamondcoreprocessor.com/NostrMeshDrone' }
   protected override listens = ['tags:changed', 'render:host-ready', 'overlay:request-register', 'tile:action']
-  protected override emits = ['overlay:register-action', 'meeting:stream-ready', 'meeting:slot-assigned', 'mesh:publish', 'mesh:subscribe']
+  protected override emits = ['overlay:register-action', 'meeting:stream-ready', 'meeting:slot-assigned', 'meeting:lobby-open', 'mesh:publish', 'mesh:subscribe']
 
   #localPeerId = meetingPeerId()
   #rooms: Map<string, MeetingRoom> = new Map()  // cell → room
@@ -145,9 +145,13 @@ export class HypercombMeetingDrone extends Drone {
     })
 
     // 3. handle meeting icon click
+    // The meeting icon on a tile. Joining is the lobby's now: it opens the
+    // camera, lets the participant check it, and hands it to the hive drone
+    // that draws the meeting. Only a room this drone itself joined is left here.
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
       if (payload.action !== 'meeting') return
-      void this.#toggleMeeting(payload.label)
+      if (this.#rooms.get(payload.label)?.active) { void this.#toggleMeeting(payload.label); return }
+      this.emitEffect('meeting:lobby-open', { cell: payload.label })
     })
   }
 

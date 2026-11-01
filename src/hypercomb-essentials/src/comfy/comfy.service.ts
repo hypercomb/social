@@ -32,6 +32,7 @@
 import { EffectBus, isReservedPoolWord } from '@hypercomb/core'
 import { createTile } from '../commands/trait-read.js'
 import { storeImageResources } from '../editor/arm-resource.js'
+import { generateHexThumbnails } from '../editor/resource-thumbnail.js'
 import { readTilePropertiesAt, tilePictureCandidates } from '../editor/tile-properties.js'
 import { promptFromTile, promptFromWords } from './comfy-roll.js'
 import { comfyFolder, importable, tooLargeMessage } from './comfy-folder.js'
@@ -86,8 +87,6 @@ export interface ComfyResult {
   workflowId: string
   /** The generation record, when it was stored. The tile revision names it. */
   generationSig?: string
-  /** The name the participant gave this picture, once it is a tile. */
-  placedAs?: string
 }
 
 /** What a picture was made from. Content, keyed by the picture's signature. */
@@ -115,10 +114,12 @@ export interface ComfyRunRequest extends ComfyParams {
   cell?: string
   /** Put the first result on `cell` (or the selection) when `tiles` is not set. */
   attach?: boolean
-  /** Each picture becomes its own hive tile. The window and `/comfy <prompt>` do.
-   *  A caller that only wants the bytes (a substrate candidate) leaves this unset.
-   *  When tiles are selected, those tiles receive the pictures instead. */
+  /** Selected tiles each receive a picture; `/comfy <prompt>` does this. With
+   *  nothing selected the pictures wait as assets. A caller that only wants the
+   *  bytes (a substrate candidate) leaves this unset. */
   tiles?: boolean
+  /** The pictures are assets and land nowhere. The desk's Generate. */
+  assets?: boolean
   /** Read each selected tile's picture and properties before the prompt is set. */
   fromTile?: boolean
   /** How many reviewers write a prompt. Jev picks one. */
@@ -130,6 +131,9 @@ export interface ComfyRunRequest extends ComfyParams {
  *  a substrate candidate) does not paint the selection. */
 export const cellsToPaint = (makeTiles: boolean, selected: readonly string[]): string[] =>
   makeTiles ? selected.filter(name => name.trim().length > 0) : []
+
+const assetsMessage = (count: number): string =>
+  count === 1 ? '1 picture in your assets' : `${count} pictures in your assets`
 
 type DirLike = {
   getFileHandle(name: string, options?: { create?: boolean }): Promise<{
@@ -158,8 +162,6 @@ const POLL_MS = 1500
 export class ComfyService extends EventTarget {
   #job: ComfyJob = { state: 'idle' }
   #results: ComfyResult[] = []
-  /** The last run made pictures that are not on a tile until they are named. */
-  #awaitingNames = false
   /** endpoint → the checkpoints that host actually has. */
   #checkpoints = new Map<string, string[]>()
   #listening = false
@@ -189,7 +191,6 @@ export class ComfyService extends EventTarget {
   get loadClock(): LoadClock { return this.#clock }
   /** The pictures from the last run, newest run only. */
   get results(): readonly ComfyResult[] { return this.#results }
-  get awaitingNames(): boolean { return this.#awaitingNames }
 
   #setJob(job: ComfyJob): void {
     this.#job = job
@@ -329,22 +330,18 @@ export class ComfyService extends EventTarget {
     }
 
     // A selection means those tiles. One picture each, on the tile itself.
-    // Nothing selected keeps the pictures until the participant names them.
-    this.#awaitingNames = false
-    const painting = cellsToPaint(request.tiles === true, this.selectedCells())
+    // An asset run still reads them when the tile is helping, and lands nowhere.
+    const selected = this.selectedCells()
+    const painting = cellsToPaint(request.tiles === true, selected)
     if (painting.length) return this.#paintEach(request, painting)
+    if (request.assets && request.fromTile && selected.length) return this.#paintEach(request, selected, false)
 
     const results = await this.#produce(request)
     if (!results.length) return []
 
-    if (request.tiles) {
-      this.#awaitingNames = true
-      this.#setJob({
-        state: 'done',
-        message: results.length === 1
-          ? 'Name the picture to put it on the hive.'
-          : 'Name each picture to put it on the hive.',
-      })
+    // Every picture is already in the pool. Nothing asked for it yet.
+    if (request.tiles || request.assets) {
+      this.#setJob({ state: 'done', message: assetsMessage(results.length) })
       EffectBus.emit('comfy:results', { count: results.length, workflow: workflow.id })
       return results
     }
@@ -364,8 +361,9 @@ export class ComfyService extends EventTarget {
 
   /** One picture for each selected tile. A tile leaves the selection when
    *  its picture lands. The ones still waiting stay selected. The list was
-   *  taken before the first picture, so dropping one does not skip the rest. */
-  async #paintEach(request: ComfyRunRequest, cells: readonly string[]): Promise<readonly ComfyResult[]> {
+   *  taken before the first picture, so dropping one does not skip the rest.
+   *  `land` false reads each tile for its picture and keeps it as an asset. */
+  async #paintEach(request: ComfyRunRequest, cells: readonly string[], land = true): Promise<readonly ComfyResult[]> {
     this.#releaseResults()
     const gathered: ComfyResult[] = []
     const painted: string[] = []
@@ -393,21 +391,21 @@ export class ComfyService extends EventTarget {
         if (painted.length) this.#finishPainted(painted, gathered, request.workflowId)
         return gathered
       }
-      this.attach(picture, cell)
+      if (land) this.attach(picture, cell)
       gathered.push(picture)
       painted.push(cell)
       this.#results = gathered.slice()
       this.#setJob({ state: 'running', message: `"${cell}"` })
     }
-    this.#finishPainted(painted, gathered, request.workflowId)
+    this.#finishPainted(painted, gathered, request.workflowId, land)
     return gathered
   }
 
-  #finishPainted(painted: readonly string[], gathered: readonly ComfyResult[], workflowId?: string): void {
+  #finishPainted(painted: readonly string[], gathered: readonly ComfyResult[], workflowId?: string, land = true): void {
     this.#results = gathered.slice()
     this.#setJob({
       state: 'done',
-      message: painted.map(name => `"${name}"`).join(', '),
+      message: land ? painted.map(name => `"${name}"`).join(', ') : assetsMessage(gathered.length),
     })
     EffectBus.emit('comfy:results', { count: gathered.length, workflow: workflowId ?? activeWorkflow().id })
   }
@@ -685,11 +683,12 @@ export class ComfyService extends EventTarget {
    * creates the tile. Silently no-op'ing here read as "clicking does
    * nothing", because most of the time nothing is selected yet.
    */
-  attach(result: ComfyResult, cell?: string): boolean {
+  attach(result: ComfyResult, cell?: string, segments?: readonly string[]): boolean {
     const target = cell ?? this.targetCell()
     if (!target) { this.#arm(result); return false }
     EffectBus.emit('cell:attach-resource', {
       cell: target,
+      ...(segments ? { segments } : {}),
       largeSig: result.largeSig,
       smallPointSig: result.smallPointSig,
       smallFlatSig: result.smallFlatSig,
@@ -732,11 +731,48 @@ export class ComfyService extends EventTarget {
   }
 
   /**
-   * Put one finished picture on a new tile under the name the participant
-   * typed. A blank name and a reserved word make nothing. The command line
-   * is the create door, so a name it refuses leaves the picture unnamed.
+   * An asset, ready to land. The signature IS the large picture, so it is read
+   * as it stands and never stored again: `storeImageResources` re-encodes, and
+   * a re-encode would make a second picture of the same thing. Only the two
+   * small pictures are derived, and the same source reaches the same signatures.
    */
-  async placeNamed(index: number, raw: string): Promise<boolean> {
+  async #asset(sig: string): Promise<ComfyResult | null> {
+    const held = store()
+    const blob = await held?.getResource?.(sig)
+    if (!held?.putResource || !blob?.size) {
+      this.#setJob({ state: 'error', message: 'that picture is not in this hive' })
+      return null
+    }
+    const hex = await generateHexThumbnails(blob)
+    const record = await this.generationOf(sig)
+    const generationSig = record ? await this.#persistGeneration(sig, record, false) : null
+    return {
+      largeSig: sig,
+      smallPointSig: hex.pointBlob ? await held.putResource(hex.pointBlob) : null,
+      smallFlatSig: hex.flatBlob ? await held.putResource(hex.flatBlob) : null,
+      previewUrl: '',
+      file: { filename: '', subfolder: '', type: 'output' },
+      seed: record?.seed ?? 0,
+      workflowId: record?.workflow ?? '',
+      ...(generationSig ? { generationSig } : {}),
+    }
+  }
+
+  /** Put an asset on a tile that exists. The picture is named by its signature. */
+  async placeOn(sig: string, cell: string, segments?: readonly string[]): Promise<boolean> {
+    const result = await this.#asset(sig)
+    if (!result) return false
+    this.attach(result, cell, segments)
+    this.#setJob({ state: 'done', message: `picture on "${cell}"` })
+    return true
+  }
+
+  /**
+   * Put an asset on a new tile under the name the participant typed. A blank
+   * name and a reserved word make nothing. The command line is the create door,
+   * so a name it refuses leaves the picture as it was.
+   */
+  async placeNamed(sig: string, raw: string): Promise<boolean> {
     const name = raw.trim()
     const parts = name.split('/').map(part => part.trim()).filter(Boolean)
     if (!parts.length) {
@@ -748,8 +784,8 @@ export class ComfyService extends EventTarget {
       this.#setJob({ state: 'error', message: `"${reserved}" is a reserved word. Choose another name.` })
       return false
     }
-    const result = this.#results[index]
-    if (!result || result.placedAs) return false
+    const result = await this.#asset(sig)
+    if (!result) return false
     await this.#stampName(result, name)
     this.#arm(result, false)
     const ok = await Promise.race([
@@ -757,29 +793,12 @@ export class ComfyService extends EventTarget {
       new Promise<boolean>(resolve => setTimeout(() => resolve(false), 20_000)),
     ])
     if (!ok) {
-      this.#arm(result, true)
       this.#setJob({ state: 'error', message: 'That name was not accepted.' })
       return false
     }
-    result.placedAs = name
-    this.#awaitingNames = this.#results.some(one => !one.placedAs)
     this.#setJob({ state: 'done', message: `"${name}" is on the hive` })
     EffectBus.emit('activity:log', { message: `"${name}" is a tile`, icon: '◈' })
-    this.#selectTiles(this.#results.flatMap(one => one.placedAs ? [one.placedAs] : []))
     return true
-  }
-
-  #selectTiles(names: readonly string[]): void {
-    const selection = ioc<{
-      clear: () => void
-      add: (label: string) => void
-      setActive: (label: string) => void
-    }>('@diamondcoreprocessor.com/SelectionService')
-    if (!selection) return
-    selection.clear()
-    for (const name of names) selection.add(name)
-    const last = names[names.length - 1]
-    if (last) selection.setActive(last)
   }
 
   /**
@@ -801,11 +820,11 @@ export class ComfyService extends EventTarget {
   /**
    * KEEP ONE PICTURE FROM THE FOLDER. The browse path: a participant looking
    * through what ComfyUI has already made picks one, and only that one is
-   * copied into the store and put on a tile. Everything else they looked at
-   * stays a preview URL over a file on disk, and is forgotten when the strip
-   * closes.
+   * copied into the store, where it is an asset like any other. Everything
+   * else they looked at stays a preview URL over a file on disk, and is
+   * forgotten when the strip closes.
    */
-  async keep(file: ComfyFileRef, cell?: string): Promise<ComfyResult | null> {
+  async keep(file: ComfyFileRef): Promise<string | null> {
     const blob = await this.#readFile(file)
     if (!blob || !blob.size) {
       this.#setJob({ state: 'error', message: 'that picture could not be read' })
@@ -817,9 +836,17 @@ export class ComfyService extends EventTarget {
     }
     const stored = await storeImageResources(blob)
     if (!stored) return null
-    const result: ComfyResult = { ...stored, file, seed: 0, workflowId: '' }
-    this.attach(result, cell)
-    return result
+    try { URL.revokeObjectURL(stored.previewUrl) } catch { /* already gone */ }
+    if (!await this.generationOf(stored.largeSig)) {
+      await this.#persistGeneration(stored.largeSig, {
+        kind: 'comfy-generation@1',
+        workflow: '',
+        label: file.filename,
+        at: Date.now(),
+      })
+    }
+    this.#setJob({ state: 'done', message: assetsMessage(1) })
+    return stored.largeSig
   }
 
   // ── provenance ────────────────────────────────────────────────────────────

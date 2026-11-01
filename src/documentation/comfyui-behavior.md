@@ -1,8 +1,9 @@
 # ComfyUI — the behavior
 
-`/comfy` makes a picture on the participant's own machine and puts it on a
-tile. ComfyUI does the generating; Hypercomb holds the workflow, chooses the
-tile, and keeps the record of what made the bytes.
+`/comfy` makes pictures on the participant's own machine and keeps them as
+assets, to be put on the screen later. ComfyUI does the generating; Hypercomb
+holds the workflow and keeps the record of what made the bytes. The surface is
+a full-screen desk: `comfy-desk.md`.
 
 Nothing about the integration copies a model, a LoRA or an output folder. One
 picture crosses at a time, and only when a participant keeps it.
@@ -22,7 +23,7 @@ picture crosses at a time, and only when a participant keeps it.
 | `essentials/comfy/comfy-prompts.ts` | The `comfy:prompts` pool: one kept state per member. |
 | `essentials/comfy/comfy-draft.ts` | The `comfy:drafts` pool: the form last left on each model and LoRA set. |
 | `essentials/comfy/comfy.drone.ts` | The surface's data side: one `comfy:render` payload out, intents in. |
-| `shared/ui/comfy-panel/` | The docked tool window. Angular, registry-fed, `hcDockedPanel`. |
+| `essentials/comfy-desk/` | The surface: one behaviour and its trait parts (`comfy-desk.md`). |
 
 ---
 
@@ -227,106 +228,24 @@ The dropdown still teaches the verbs: they are the members at depth 0.
 
 ---
 
-## The window
+## The desk
 
-`/comfy` opens a **right-docked tool window** — the same shell every other
-docked panel takes, not a floating card:
+The window is gone. The surface, its parts and how a picture lands are in
+`comfy-desk.md`. What a run does with its surface is unchanged in one way and
+changed in another:
 
-- registry-fed (`registerShellSurface`, order 157, one line in
-  `shell-surfaces.barrel.ts`) — never a tag in `app.html`;
-- `hcDockedPanel` + `hcDockInset="right"`, so it takes a dock lane, resizes by
-  drag, persists its width, reports its inset to the controls bar, and answers
-  `--hc-panel-scale` with its body text;
-- `@include tw.panel($accent, right)` and `@include tw.header`, so its title
-  bar is the shared 46px band and lines up with Backgrounds, Publish and
-  Hosts. Measured: top/right/bottom/header identical to the Backgrounds
-  window, only the width differs (it is per-panel and drag-persisted);
-- `signalSession`, so the one-window-at-a-time rule parks and restores it.
-
-**The session announces in both directions.** The drone holds the open state
-(`/comfy` toggles it), so a park that only set `visible` would leave the two
-disagreeing — panel gone, drone still believing it is up, and the next
-`/comfy` toggling it *closed*. The gesture would do nothing, twice. Park emits
-`comfy:close`, unpark emits `comfy:reopen`, and both are idempotent on the
-drone's side — neither is a toggle.
-
-**No colour is named in the SCSS** beyond the panel's authored accent.
-Everything asks for a role — the ink ladder for weight, `--acc` for identity —
-so the panel reads on honey and sherbet as well as on dark. The two exceptions
-earn it and go through `tw.ink()`: the green host dot (it *means* answering)
-and the amber caution.
-
-Four stacked sections, in the order a person needs them:
-
-1. **Host** — status dot, address, `find`. The named failure sits under it.
-2. **ComfyUI folder** — link / change / browse, and the sentence that says
-   nothing is copied until you keep something.
-3. **Workflow** — picker plus a paste box for `Save (API Format)` JSON.
-4. **The form** — **one control per seam**. A workflow with no negative prompt
-   shows no negative field; a participant is never given a knob that turns
-   nothing.
-
-Then Generate, a progress bar, and the results strip. With tiles selected,
-Generate makes one picture for each of them and puts it on that tile. A tile
-leaves the selection when its picture lands. Tiles still waiting stay
-selected. With nothing selected, each picture waits for a name. The name field under
-the picture is the prompt. Enter puts that picture on the hive under the
-name they typed. A blank name makes nothing. Click a picture and it opens
-large in the middle of the screen. Escape closes that picture and leaves the
-window open.
-`/comfy <prompt>` does the same.
-
-**From the tile.** A switch under the prompt, and a reviewer count from 1 to
-8. When it is on and tiles are selected, each tile's picture and its
-properties are read first. That many reviewers each write a prompt that keeps
-the participant's own words. Jev picks one. When Jev is not switched on, the
-first reviewer's prompt is the one that runs, and the participant's words
-still stay in it. When Jev declines, the participant's own words run as
-written. Nothing selected keeps the ordinary prompt: there is no tile to
-read. The switch lasts for the visit. Reroll does not ask the reviewers
-again.
-
-**A new prompt.** Two buttons under the prompt fill the box and do not start
-a picture. New from tile writes a prompt from the selected tile's name and
-properties, plus a random light, manner, and ground. Nothing selected says
-to select a tile and leaves the words as they are. Common words writes a
-prompt from common picture words and does not need a tile. Each press is a
-new roll.
-
-**Continuing.** The words and the knobs stay with the model and the LoRAs
-that were loaded. Moving to another model, or another set of LoRAs, puts
-this form aside and brings back the one last used there. The first visit
-uses that workflow's own defaults. Klein tile and Klein background share
-one continuation: they load the same model and no LoRA. The two SDXL rich
-workflows share, because they load the same checkpoint and the same LoRAs.
-SDXL icon is its own, because its LoRA is different. That record lives in
-`comfy:drafts`, one current copy per combination. Keep is still the library.
-
-**The prompt library.** Library and Keep are in the window whenever it is
-open. Keep writes the words and the knobs — workflow, size, steps, cfg, seed,
-negative, and whether the tile is helping — into `comfy:prompts`. One state
-is one member, named by its own bytes, so keeping the same state again does
-not add a second row. The list shows only the words. A row opens the rest.
-Use puts that state back into the form, including its workflow, and does not
-start a picture. Generate is still the participant's own press.
-
-Under the workflow, the window lists every model and LoRA these recipes use.
-The selected workflow's files are marked active, and that mark moves as soon
-as the workflow changes. The next Generate times each loader: the row shows
-how many seconds ComfyUI spent loading it, or cached when it did not reload.
-
-**Icons.** SDXL icon is its own workflow for a square interface mark. It
-loads SDXL base and Icons Redmond at strength 0.8, and it samples a 1024
-square in 24 steps. The words `icredm, icons, app icon` stay on their own
-text node and combine with the subject, so a new prompt keeps the trigger.
-A visit starts on Klein tile when those files are present.
-
-**The form is local to the panel.** A textarea whose value round-trips through
-the bus on every keystroke fights the typist and loses the caret. What crosses
-is the *seed* — what the active workflow's seams currently hold, plus which
-knobs exist at all. The panel uses that seed the first time a model and its
-LoRAs are on screen, and after that it continues from the form it kept for
-them. The whole set goes back once, with `comfy:generate`.
+- The words and knobs stay with the model and the LoRAs that were loaded
+  (`comfy:drafts`), and Keep is still the library (`comfy:prompts`).
+- **From the tile** reads each selected tile, reviewers write, Jev picks. On the
+  desk that picture becomes an asset and lands nowhere.
+- `/comfy <prompt>` with tiles selected paints each of them, one picture each.
+  With nothing selected the pictures are assets.
+- A history row's Use opens the desk on those knobs. Generate stays a separate
+  press.
+- **Icons.** SDXL icon is its own workflow for a square interface mark. It loads
+  SDXL base and Icons Redmond at strength 0.8, and it samples a 1024 square in
+  24 steps. The words `icredm, icons, app icon` stay on their own text node, so
+  a new prompt keeps the trigger.
 
 ---
 

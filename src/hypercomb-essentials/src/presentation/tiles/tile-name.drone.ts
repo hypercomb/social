@@ -45,7 +45,7 @@ type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
 type BandRowsPayload = { rows: number; label: string | null }
 type HoverPayload = { label: string | null }
-type FlowerCell = Axial & { label: string; subject?: boolean }
+type FlowerCell = Axial & { label: string; subject?: boolean; icon?: string; lit?: boolean }
 type ShowCellLike = {
   nameHidden(label: string): boolean
   displayNameFor(label: string): string
@@ -119,6 +119,8 @@ const STYLE = `
 .hc-tile-names.hc-big-head .hc-tile-names-world>span{letter-spacing:${BIG_HEAD_TRACKING}em;text-transform:uppercase}
 .hc-tile-names.hc-flower-up .hc-tile-names-world>span{opacity:.5}
 .hc-tile-names.hc-flower-up .hc-tile-names-world>span.hc-flower-name{opacity:1}
+.hc-flower-icon{font-size:2.4em;line-height:1;opacity:.82}
+.hc-flower-icon.lit{opacity:1;color:var(--hc-accent,#d9a441)}
 `
 
 export class TileNameDrone extends Drone {
@@ -321,7 +323,8 @@ export class TileNameDrone extends Drone {
       span.className = 'hc-flower-name'
       const name = document.createElement('span')
       name.className = 'hc-tile-name-text'
-      name.textContent = cell.subject ? sc?.displayNameFor(cell.label) ?? cell.label : cell.label
+      name.textContent = cell.icon ?? (cell.subject ? sc?.displayNameFor(cell.label) ?? cell.label : cell.label)
+      if (cell.icon) name.className = cell.lit ? 'hc-flower-icon mat-sym lit' : 'hc-flower-icon mat-sym'
       span.appendChild(name)
       const px = this.#axialToPixel(cell.q, cell.r)
       const at = this.#placement(px.x + this.#meshOffset.x, px.y + this.#meshOffset.y)

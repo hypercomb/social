@@ -24,6 +24,17 @@ type VideoSlot = {
 
 const FADE_SPEED = 0.04 // per frame
 
+// Side of the square each face is painted into before it becomes a texture. It
+// is the ceiling on sharpness whatever the stream's own size: at 256 a face is
+// 65k pixels and goes soft the moment the hive is zoomed. Play with it —
+// localStorage.setItem('hc:meeting:face-px', '768') — then rejoin.
+const faceSide = (): number => {
+  try {
+    const n = Number(localStorage.getItem('hc:meeting:face-px'))
+    return Number.isFinite(n) && n >= 64 && n <= 2048 ? Math.round(n) : 512
+  } catch { return 512 }
+}
+
 export class MeetingVideoDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'meeting'
@@ -158,8 +169,7 @@ export class MeetingVideoDrone extends Drone {
 
     // video sprite — use canvas as intermediate (safe for Pixi v8)
     const canvas = document.createElement('canvas')
-    canvas.width = 256
-    canvas.height = 256
+    canvas.width = canvas.height = faceSide()
     const sprite = new Sprite(Texture.from(canvas))
     sprite.anchor.set(0.5, 0.5)
     sprite.width = this.#hexGeo.circumRadiusPx * 2
@@ -217,8 +227,8 @@ export class MeetingVideoDrone extends Drone {
     if (!ctx) return
 
     // draw video frame to canvas (center-crop to square)
-    const vw = slot.video.videoWidth || 256
-    const vh = slot.video.videoHeight || 256
+    const vw = slot.video.videoWidth || canvas.width
+    const vh = slot.video.videoHeight || canvas.height
     const side = Math.min(vw, vh)
     const sx = (vw - side) / 2
     const sy = (vh - side) / 2

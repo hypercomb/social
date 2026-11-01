@@ -154,23 +154,6 @@
   border-bottom: 1px solid var(--hc-window-edge);
 }
 
-.shortcut-subgroup {
-  margin-top: 0.5rem;
-
-  &:first-of-type {
-    margin-top: 0.15rem;
-  }
-}
-
-.subgroup-title {
-  font-size: 0.54rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--hc-window-ink-quiet);
-  margin: 0 0 0.22rem;
-}
-
 .section-list {
   display: flex;
   flex-direction: column;
@@ -276,38 +259,26 @@
   letter-spacing: 0.03em;
 }
 
-// ── key badges ──────────────────────────────────────────
+// ── the door to the keyboard ────────────────────────────
 
-.shortcut-keys {
-  display: flex;
-  align-items: center;
-  gap: 0.2rem;
-  flex-shrink: 0;
-}
-
-.key-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.12rem 0.38rem;
-  min-width: 1.3rem;
-  height: 1.3rem;
-
+.keyboard-door {
+  appearance: none;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
   background: var(--hc-window-tint);
   border: 1px solid var(--hc-window-line);
   border-radius: 3px;
+  color: var(--hc-window-ink-plain);
+  font: inherit;
+  font-size: 0.72rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
 
-  font-size: 0.62rem;
-  font-weight: 600;
-  font-family: inherit;
-  color: var(--hc-window-ink-quiet);
-}
-
-.chord-sep {
-  font-size: 0.55rem;
-  color: var(--hc-window-ink-quiet);
-  margin: 0 0.15rem;
-  font-style: italic;
+  &:hover {
+    background: var(--hc-window-tint-strong);
+    border-color: var(--hc-window-edge);
+  }
 }
 
 // ── empty state ─────────────────────────────────────────
@@ -424,12 +395,6 @@
 
   .row-primary {
     flex-wrap: wrap;
-  }
-
-  .key-badge {
-    font-size: 0.65rem;
-    min-width: 1.4rem;
-    height: 1.4rem;
   }
 
   .section-title {

@@ -7,7 +7,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  type GroupAttrs, type GroupMember, TEXT_SIZES,
+  type GroupAttrs, type GroupMember, TEXT_RANGE, LEADING_RANGE, clampToRange, readSpacing, writeSpacing,
   members, publishAttrs, readGroupAttrs, readMembership, readTextScale, writeMembership, writeTextScale,
 } from './panel-groups.js'
 
@@ -158,11 +158,21 @@ describe('tool window groups', () => {
     expect(tags.text).toBe(1.32)               // keeps its size — the group has none
   })
 
-  it('offers auto plus a ladder of sizes, auto first', () => {
-    expect(TEXT_SIZES[0]).toMatchObject({ key: 'auto', scale: null })
-    const scales = TEXT_SIZES.slice(1).map(s => s.scale as number)
-    expect(scales).toEqual([...scales].sort((a, b) => a - b))
-    expect(scales).toContain(1)                // a plain, unscaled size is reachable
+  it('holds a size anywhere on the range, and keeps a plain unscaled size inside it', () => {
+    expect(TEXT_RANGE.min).toBeLessThan(1)
+    expect(TEXT_RANGE.max).toBeGreaterThan(1)
+    expect(clampToRange(9, TEXT_RANGE)).toBe(TEXT_RANGE.max)
+    expect(clampToRange(0.1, TEXT_RANGE)).toBe(TEXT_RANGE.min)
+    expect(clampToRange(1.07, TEXT_RANGE)).toBe(1.07)
+  })
+
+  it('tells a spacing never chosen from one handed back', () => {
+    expect(readSpacing('leading', 'notes-strip')).toBeUndefined()
+    writeSpacing('leading', 'notes-strip', LEADING_RANGE.resting)
+    expect(readSpacing('leading', 'notes-strip')).toBe(LEADING_RANGE.resting)
+    writeSpacing('leading', 'notes-strip', 0)
+    expect(readSpacing('leading', 'notes-strip')).toBe(0)
+    expect(readSpacing('tracking', 'notes-strip')).toBeUndefined()
   })
 
   it('remembers the text, trimmed, and clears it when blank', () => {

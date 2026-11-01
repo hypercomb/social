@@ -1,17 +1,35 @@
 // guide/guide-overlay.view.ts
 //
-// <hc-guide-bee> — the guide bee as the cursor, and the dialog it drops after a waggle.
-// The layer does not take the page's clicks. Only the dialog does. The drone
-// defines this element when the guide starts; a dependency registers nothing.
+// <hc-guide-bee> — the guide bee as the cursor, and the board that stands
+// beside the tile once the bee has danced. The layer does not take the page's
+// clicks until the tile is on its way to the middle: from then the shield
+// takes them, so nothing reaches the hive behind the ideas. The drone defines
+// this element when the guide starts; a dependency registers nothing.
 
-import { kindLabel, type GuideDirections, type GuidePlace } from './guide-place.js'
+import { drawsAsGlyph } from '../commands/material-glyph.js'
+import type { GuideBoardBox, GuideIdea } from './guide-place.js'
 
 export const GUIDE_SURFACE = 'hc-guide-bee'
 
-export type GuideDialog = GuideDirections & {
-  readonly place: GuidePlace
-  readonly status: string
-  readonly from: 'bee' | 'agent'
+export type GuideBoardMode = 'tiles' | 'list'
+
+export type GuideBoard = {
+  readonly route: string
+  readonly name: string
+  readonly reading: string
+  readonly ideas: readonly GuideIdea[]
+  readonly chosen: ReadonlySet<string>
+  readonly mode: GuideBoardMode
+  readonly box: GuideBoardBox
+}
+
+type I18nLike = { t?: (key: string, params?: Record<string, string | number>) => string }
+
+const say = (key: string, fallback: string, params?: Record<string, string | number>): string => {
+  let value: string | undefined
+  try { value = window.ioc.get<I18nLike>('@hypercomb.social/I18n')?.t?.(key, params) }
+  catch { /* no catalog here */ }
+  return value && value !== key ? value : fallback.replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name] ?? ''))
 }
 
 const BEE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" aria-hidden="true">
@@ -58,6 +76,7 @@ const STYLE = `
   filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35));
   will-change: transform;
 }
+:host(.seated) .bee { display: none; }
 .bee .sprite { display: block; width: 52px; height: 52px; transform-origin: 50% 62%; }
 :host(.motion) .bee .sprite { animation: hc-guide-bob 0.7s ease-in-out infinite; }
 :host(.motion.waggle) .bee .sprite { animation: hc-guide-waggle 0.42s ease-in-out infinite; }
@@ -91,97 +110,157 @@ const STYLE = `
   opacity: 0;
 }
 .hint.show { opacity: 1; }
-.ring {
+.shield { position: absolute; inset: 0; pointer-events: auto; cursor: default; }
+.shield[hidden] { display: none; }
+.shield.over { cursor: pointer; }
+.label {
   position: absolute;
-  border: 1px solid var(--g-accent);
-  border-radius: var(--hc-radius-card, 3px);
-  box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.25);
-  display: none;
-}
-.ring.show { display: block; }
-.dialog {
-  position: absolute;
-  width: min(22rem, calc(100vw - 24px));
-  max-height: min(24rem, calc(100vh - 24px));
-  overflow: auto;
-  box-sizing: border-box;
-  padding: 0.75rem 0.9rem 0.8rem;
+  left: 0;
+  top: 0;
+  max-width: 16rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--g-edge);
+  border-radius: var(--hc-radius-control, 2px);
   background: var(--g-panel);
   color: var(--g-ink);
-  border: 1px solid var(--g-edge);
-  border-left: 2px solid var(--g-accent);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+}
+.label.show { opacity: 1; }
+.board {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(100vh - 136px);
+  padding: 1.1rem 1.25rem 1rem;
+  color: var(--g-ink);
+  background: linear-gradient(180deg, rgba(217, 164, 65, 0.05), transparent 5rem), var(--g-panel);
+  border: 1px solid rgba(217, 164, 65, 0.42);
   border-radius: var(--hc-radius-floating, 4px);
+  outline: 1px solid rgba(255, 255, 255, 0.07);
+  outline-offset: 3px;
   box-shadow: 0 18px 54px rgba(0, 0, 0, 0.55);
   pointer-events: auto;
 }
-.chip {
+.board[hidden] { display: none; }
+.board::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  pointer-events: none;
+  --tick: linear-gradient(var(--g-accent), var(--g-accent));
+  background:
+    var(--tick) 0 0 / 16px 1px no-repeat, var(--tick) 0 0 / 1px 16px no-repeat,
+    var(--tick) 100% 0 / 16px 1px no-repeat, var(--tick) 100% 0 / 1px 16px no-repeat,
+    var(--tick) 0 100% / 16px 1px no-repeat, var(--tick) 0 100% / 1px 16px no-repeat,
+    var(--tick) 100% 100% / 16px 1px no-repeat, var(--tick) 100% 100% / 1px 16px no-repeat;
+}
+.top { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.route {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--hc-mono, ui-monospace, monospace);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--g-dim);
 }
-.place { margin: 0.35rem 0 0; font-size: 15px; line-height: 1.35; }
-.prompt { margin: 0.45rem 0 0; font-size: 13.5px; line-height: 1.5; }
-.status { margin: 0.4rem 0 0; color: var(--g-dim); font-size: 12px; line-height: 1.4; }
-.options { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.7rem; }
-.options button, .dismiss {
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  border-radius: var(--hc-radius-control, 2px);
-}
-.options button {
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--g-edge);
-  background: transparent;
-  color: var(--g-ink);
-}
-.options button:hover, .options button:focus-visible { border-color: var(--g-accent); outline: none; }
-.dismiss {
-  margin-top: 0.7rem;
+.modes { display: flex; flex: none; gap: 0.6rem; }
+.word {
   padding: 0;
   border: 0;
   background: none;
   color: var(--g-dim);
-  font-family: var(--hc-mono, ui-monospace, monospace);
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
 }
-.choices { position: absolute; inset: 0; pointer-events: none; }
-.choices button {
-  position: absolute;
-  max-width: 11rem;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--g-edge);
-  border-radius: var(--hc-radius-control, 2px);
-  background: var(--g-panel);
+.word:hover, .word:focus-visible { color: var(--g-ink); outline: none; text-decoration: underline; }
+.word.on { color: var(--g-accent); }
+.name { margin: 0.5rem 0 0; font-size: 1.0625rem; font-weight: 600; line-height: 1.3; }
+.reading { margin: 0.35rem 0 0; color: var(--g-dim); font-size: 0.8125rem; line-height: 1.45; }
+.rule {
+  flex: none;
+  height: 1px;
+  margin: 0.8rem 0 0.35rem;
+  background: linear-gradient(90deg, rgba(217, 164, 65, 0.5), rgba(255, 255, 255, 0.06));
+}
+.items {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.42rem 0.25rem;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
   color: var(--g-ink);
   font: inherit;
-  font-size: 13px;
+  font-size: 0.875rem;
   line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+.item:hover, .item:focus-visible { background: rgba(255, 255, 255, 0.05); outline: none; }
+.item.on { border-left-color: var(--g-accent); color: var(--g-accent); }
+.glyph {
+  flex: none;
+  width: 1.25rem;
+  overflow: hidden;
+  font-family: 'Material Symbols Outlined';
+  font-size: 1.125rem;
+  line-height: 1;
   text-align: center;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
+  color: var(--g-dim);
 }
-.choices button.on {
-  border-color: var(--g-accent);
-  box-shadow: 0 0 0 1px var(--g-accent);
+.item.on .glyph { color: var(--g-accent); }
+.empty { padding: 0.42rem 0.25rem; color: var(--g-dim); font-size: 0.8125rem; }
+.foot { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 0.8rem; }
+.accept {
+  padding: 0.4rem 1rem;
+  border: 1px solid var(--g-accent);
+  border-radius: var(--hc-radius-control, 2px);
+  background: rgba(217, 164, 65, 0.14);
+  color: var(--g-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
 }
+.accept:hover:not(:disabled), .accept:focus-visible { background: rgba(217, 164, 65, 0.26); outline: none; }
+.accept:disabled { border-color: var(--g-edge); background: none; color: var(--g-dim); cursor: default; }
 `
 
 export class GuideOverlayElement extends HTMLElement {
-  onPick: ((option: string) => void) | null = null
-  onDismiss: (() => void) | null = null
+  onAim: ((x: number, y: number) => void) | null = null
+  onPress: ((x: number, y: number) => void) | null = null
+  onToggle: ((id: string) => void) | null = null
+  onMode: ((mode: GuideBoardMode) => void) | null = null
+  onAccept: (() => void) | null = null
+  onClose: (() => void) | null = null
 
   readonly #bee = document.createElement('div')
   readonly #hint = document.createElement('div')
-  readonly #ring = document.createElement('div')
-  readonly #dialog = document.createElement('div')
-  readonly #choices = document.createElement('div')
-  #open = false
-  #anchor = { x: 0, y: 0 }
+  readonly #shield = document.createElement('div')
+  readonly #label = document.createElement('div')
+  readonly #board = document.createElement('div')
 
   constructor() {
     super()
@@ -191,14 +270,20 @@ export class GuideOverlayElement extends HTMLElement {
     this.#bee.className = 'bee'
     this.#bee.innerHTML = `<div class="sprite">${BEE}</div>`
     this.#hint.className = 'hint'
-    this.#ring.className = 'ring'
-    this.#dialog.className = 'dialog'
-    this.#dialog.setAttribute('role', 'dialog')
-    this.#dialog.setAttribute('aria-label', 'Choices for this place')
-    this.#dialog.hidden = true
-    this.#choices.className = 'choices'
-    this.#choices.hidden = true
-    root.append(style, this.#ring, this.#bee, this.#hint, this.#choices, this.#dialog)
+    this.#shield.className = 'shield'
+    this.#shield.hidden = true
+    this.#shield.addEventListener('pointermove', event => this.onAim?.(event.clientX, event.clientY))
+    this.#shield.addEventListener('pointerleave', () => this.onAim?.(-1, -1))
+    this.#shield.addEventListener('click', event => {
+      event.preventDefault()
+      event.stopPropagation()
+      this.onPress?.(event.clientX, event.clientY)
+    })
+    this.#label.className = 'label'
+    this.#board.className = 'board'
+    this.#board.hidden = true
+    this.#board.setAttribute('role', 'dialog')
+    root.append(style, this.#shield, this.#bee, this.#hint, this.#label, this.#board)
   }
 
   connectedCallback(): void {
@@ -206,46 +291,41 @@ export class GuideOverlayElement extends HTMLElement {
     this.classList.toggle('motion', !reduced)
   }
 
-  get dialogOpen(): boolean { return this.#open }
+  get boardOpen(): boolean { return !this.#board.hidden }
 
   arm(): void { this.classList.add('on') }
 
   disarm(): void {
     this.classList.remove('on')
-    this.#open = false
-    this.#dialog.hidden = true
-    this.#dialog.replaceChildren()
-    this.#ring.classList.remove('show')
     this.#hint.classList.remove('show')
     this.classList.remove('waggle')
-    this.clearChoices()
+    this.unseat()
   }
 
-  /** Choices around the screen centre. The drag aims them; they do not take the pointer. */
-  ringChoices(cx: number, cy: number, options: readonly string[], reach: number): void {
-    this.#choices.replaceChildren()
-    this.#choices.hidden = options.length === 0
-    options.forEach((option, index) => {
-      const angle = (index / options.length) * Math.PI * 2
-      const button = document.createElement('button')
-      button.type = 'button'
-      button.textContent = option
-      button.style.left = `${Math.round(cx + Math.cos(angle) * reach)}px`
-      button.style.top = `${Math.round(cy + Math.sin(angle) * reach)}px`
-      this.#choices.appendChild(button)
-    })
+  /** The tile is leaving for the middle: the shield takes the hive's pointer. */
+  shield(): void {
+    this.#hint.classList.remove('show')
+    this.#shield.hidden = false
   }
 
-  /** Light the choice a drag is on. -1 lights none. */
-  aimChoice(index: number): void {
-    this.#choices.querySelectorAll('button').forEach((button, i) => {
-      button.classList.toggle('on', i === index)
-    })
+  /** The tile has landed. Placement is not asked for here, so the real cursor comes back. */
+  seat(): void {
+    this.classList.add('seated')
+    this.waggle(false)
   }
 
-  clearChoices(): void {
-    this.#choices.hidden = true
-    this.#choices.replaceChildren()
+  /** The board and label go; the shield holds until the flight home has landed. */
+  leave(): void {
+    this.#board.hidden = true
+    this.#board.replaceChildren()
+    this.label('', 0, 0)
+  }
+
+  /** Back to the bee over the hive. */
+  unseat(): void {
+    this.leave()
+    this.classList.remove('seated')
+    this.#shield.hidden = true
   }
 
   /** Figure-8 in place. The drone starts it after the bee has waited on a tile. */
@@ -262,108 +342,134 @@ export class GuideOverlayElement extends HTMLElement {
   hint(text: string): void {
     const shown = text.trim()
     this.#hint.textContent = shown
-    this.#hint.classList.toggle('show', shown.length > 0 && !this.#open)
+    this.#hint.classList.toggle('show', shown.length > 0)
   }
 
-  ring(rect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'> | null): void {
-    if (!rect || this.#open) {
-      this.#ring.classList.remove('show')
-      return
-    }
-    const pad = 4
-    this.#ring.style.left = `${Math.round(rect.left - pad)}px`
-    this.#ring.style.top = `${Math.round(rect.top - pad)}px`
-    this.#ring.style.width = `${Math.round(rect.width + pad * 2)}px`
-    this.#ring.style.height = `${Math.round(rect.height + pad * 2)}px`
-    this.#ring.classList.add('show')
-  }
-
-  /** Drop the dialog where the bee waited. Later calls with the same anchor refresh the words. */
-  show(dialog: GuideDialog): void {
-    const moved = !this.#open || this.#anchor.x !== dialog.place.x || this.#anchor.y !== dialog.place.y
-    this.#anchor = { x: dialog.place.x, y: dialog.place.y }
-    this.#open = true
-    this.#hint.classList.remove('show')
-    this.#ring.classList.remove('show')
-    this.#dialog.hidden = false
-    this.#render(dialog)
-    this.#place()
-    if (moved) this.#dialog.querySelector('button')?.focus()
-  }
-
-  status(text: string): void {
-    const node = this.#dialog.querySelector('.status')
-    if (!(node instanceof HTMLElement)) return
+  /** Name the tile under the pointer, just above it. Empty text takes it away. */
+  label(text: string, x: number, y: number): void {
     const shown = text.trim()
-    node.textContent = shown
-    node.hidden = shown.length === 0
+    this.#label.textContent = shown
+    this.#label.classList.toggle('show', shown.length > 0)
+    this.#shield.classList.toggle('over', shown.length > 0)
+    if (!shown) return
+    const width = this.#label.offsetWidth
+    const height = this.#label.offsetHeight
+    const left = Math.max(8, Math.min(x - width / 2, window.innerWidth - width - 8))
+    this.#label.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(Math.max(8, y - height - 6))}px, 0)`
   }
 
-  #render(dialog: GuideDialog): void {
-    this.#dialog.replaceChildren()
-    const chip = document.createElement('div')
-    chip.className = 'chip'
-    chip.textContent = dialog.place.route
-    const place = document.createElement('p')
-    place.className = 'place'
-    const called = dialog.place.name || dialog.place.heading || 'This place'
-    const behaviors = dialog.place.behaviors ?? []
-    place.textContent = dialog.place.kind === 'tile'
-      ? (behaviors.length ? behaviors.join(' · ') : 'No beehavior yet')
-      : `${kindLabel(dialog.place.kind)} · ${called}`
-    const prompt = document.createElement('p')
-    prompt.className = 'prompt'
-    prompt.textContent = dialog.prompt
-    const status = document.createElement('p')
-    status.className = 'status'
-    const shown = dialog.status.trim()
-    status.textContent = shown
-    status.hidden = shown.length === 0
-    const options = document.createElement('div')
-    options.className = 'options'
-    for (const option of dialog.options) {
+  /** Draw the board. Beside the tiles it lists what is chosen; as a list it holds every idea. */
+  board(view: GuideBoard): void {
+    const scrolled = this.#board.querySelector('.items')?.scrollTop ?? 0
+    this.#board.replaceChildren(this.#top(view), ...this.#heading(view), this.#list(view), this.#foot(view))
+    this.#board.hidden = false
+    this.#board.setAttribute('aria-label', view.name)
+    const box = view.box
+    this.#board.style.left = `${Math.round(box.left)}px`
+    this.#board.style.width = `${Math.round(box.width)}px`
+    this.#board.style.top = `${Math.round(box.top ?? box.middle ?? 0)}px`
+    this.#board.style.height = box.height === undefined ? '' : `${Math.round(box.height)}px`
+    this.#board.style.transform = box.height === undefined ? 'translateY(-50%)' : ''
+    const items = this.#board.querySelector('.items')
+    if (items) items.scrollTop = scrolled
+  }
+
+  #top(view: GuideBoard): HTMLElement {
+    const top = document.createElement('div')
+    top.className = 'top'
+    const route = document.createElement('span')
+    route.className = 'route'
+    route.textContent = view.route
+    const modes = document.createElement('span')
+    modes.className = 'modes'
+    const mode = (value: GuideBoardMode, text: string): HTMLButtonElement => {
+      const word = this.#word(text, () => this.onMode?.(value))
+      word.classList.toggle('on', view.mode === value)
+      word.setAttribute('aria-pressed', String(view.mode === value))
+      return word
+    }
+    modes.append(mode('tiles', say('guide.tiles', 'Tiles')), mode('list', say('guide.list', 'List')))
+    top.append(route, modes)
+    return top
+  }
+
+  #heading(view: GuideBoard): HTMLElement[] {
+    const name = document.createElement('p')
+    name.className = 'name'
+    name.textContent = view.name
+    const rule = document.createElement('div')
+    rule.className = 'rule'
+    if (!view.reading) return [name, rule]
+    const reading = document.createElement('p')
+    reading.className = 'reading'
+    reading.textContent = view.reading
+    return [name, reading, rule]
+  }
+
+  #list(view: GuideBoard): HTMLElement {
+    const list = document.createElement('ul')
+    list.className = 'items'
+    const shown = view.mode === 'list' ? view.ideas : view.ideas.filter(idea => view.chosen.has(idea.id))
+    if (shown.length === 0) {
+      const empty = document.createElement('li')
+      empty.className = 'empty'
+      empty.textContent = say('guide.pick', 'Pick what you want done.')
+      list.appendChild(empty)
+      return list
+    }
+    for (const idea of shown) {
+      const on = view.chosen.has(idea.id)
+      const row = document.createElement('li')
       const button = document.createElement('button')
       button.type = 'button'
-      button.textContent = option
+      button.className = on ? 'item on' : 'item'
+      button.setAttribute('aria-pressed', String(on))
+      const glyph = document.createElement('span')
+      glyph.className = 'glyph'
+      glyph.setAttribute('aria-hidden', 'true')
+      glyph.textContent = on ? 'check' : drawsAsGlyph(idea.icon) === false ? '' : idea.icon
+      const text = document.createElement('span')
+      text.textContent = idea.label
+      button.append(glyph, text)
       button.addEventListener('click', event => {
         event.preventDefault()
         event.stopPropagation()
-        this.onPick?.(option)
+        this.onToggle?.(idea.id)
       })
-      options.appendChild(button)
+      row.appendChild(button)
+      list.appendChild(row)
     }
-    const dismiss = document.createElement('button')
-    dismiss.type = 'button'
-    dismiss.className = 'dismiss'
-    dismiss.textContent = 'Dismiss'
-    dismiss.addEventListener('click', event => {
+    return list
+  }
+
+  #foot(view: GuideBoard): HTMLElement {
+    const foot = document.createElement('div')
+    foot.className = 'foot'
+    const count = view.chosen.size
+    const accept = document.createElement('button')
+    accept.type = 'button'
+    accept.className = 'accept'
+    accept.disabled = count === 0
+    accept.textContent = count > 0 ? say('guide.acceptCount', 'Accept {count}', { count }) : say('guide.accept', 'Accept')
+    accept.addEventListener('click', event => {
       event.preventDefault()
       event.stopPropagation()
-      this.dismiss()
+      this.onAccept?.()
     })
-    this.#dialog.append(chip, place, prompt, options, status, dismiss)
+    foot.append(accept, this.#word(say('guide.close', 'Close'), () => this.onClose?.()))
+    return foot
   }
 
-  dismiss(): void {
-    this.#open = false
-    this.#dialog.hidden = true
-    this.#dialog.replaceChildren()
-    this.onDismiss?.()
-  }
-
-  #place(): void {
-    const box = this.#dialog
-    box.style.left = '0px'
-    box.style.top = '0px'
-    const width = Math.min(352, box.offsetWidth || 320)
-    const height = box.offsetHeight || 180
-    const margin = 12
-    let x = this.#anchor.x + 36
-    if (x + width + margin > window.innerWidth) x = this.#anchor.x - 36 - width
-    x = Math.max(margin, Math.min(x, window.innerWidth - width - margin))
-    let y = this.#anchor.y - 12
-    y = Math.max(margin, Math.min(y, window.innerHeight - height - margin))
-    box.style.left = `${Math.round(x)}px`
-    box.style.top = `${Math.round(y)}px`
+  #word(text: string, act: () => void): HTMLButtonElement {
+    const word = document.createElement('button')
+    word.type = 'button'
+    word.className = 'word'
+    word.textContent = text
+    word.addEventListener('click', event => {
+      event.preventDefault()
+      event.stopPropagation()
+      act()
+    })
+    return word
   }
 }

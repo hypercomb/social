@@ -130,7 +130,8 @@ $jx: calc(#{$pad} + #{$square} / 2);
   overflow-anchor: auto;
   padding-block: 0.85rem 1rem;
   padding-inline: 0.7rem 0.75rem;
-  font-size: 0.78rem;
+  font-family: var(--hc-read, inherit);
+  font-size: var(--chat-type-meta);
   line-height: 1.3;
   cursor: grab;
   user-select: none;
@@ -448,8 +449,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
 
 .chat-route-stage {
   .chat-route-caption {
-    font-family: var(--hc-code, inherit);
-    font-size: 0.7rem;
+    font-size: var(--chat-type-label);
     color: var(--hc-window-ink-quiet);
   }
   .chat-route-node-pieces { grid-row: 2; }
@@ -532,7 +532,8 @@ $jx: calc(#{$pad} + #{$square} / 2);
   overscroll-behavior: contain;
   border-top: 1px solid var(--hc-window-edge);
   padding: 0.6rem 0.75rem 0.8rem;
-  font-size: 0.8rem;
+  font-family: var(--hc-read, inherit);
+  font-size: var(--chat-type-meta);
   line-height: 1.45;
   color: var(--hc-window-ink-plain);
   scrollbar-width: thin;
@@ -552,7 +553,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
   gap: 0.4rem;
   margin: 0;
   font-family: var(--hc-read, inherit);
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   line-height: 1.35;
   font-weight: 600;
   color: var(--hc-window-ink-loud);
@@ -646,7 +647,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
 
 .chat-route-summary-label {
   display: block;
-  font-size: 0.7rem;
+  font-size: var(--chat-type-label);
   font-weight: 600;
 }
 
@@ -875,8 +876,8 @@ $jx: calc(#{$pad} + #{$square} / 2);
 // The digit that picks it: a quiet figure at the row's start, no disc around it.
 .chat-question-n {
   flex: 0 0 auto;
-  font-family: var(--hc-mono, monospace);
-  font-size: 0.8em;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
   color: var(--hc-window-ink-quiet);
 }
 
@@ -887,7 +888,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
 
 .chat-question-hint {
   margin: 0.15em 0 0;
-  font-size: 0.85em;
+  font-size: 0.8em;
   color: var(--hc-window-ink-quiet);
 }
 
@@ -929,11 +930,16 @@ $jx: calc(#{$pad} + #{$square} / 2);
   // family with real weights. The panel gear writes --hc-read inline on this
   // element, so a window that chose a face keeps it.
   --hc-read: 'Source Sans 3', var(--hc-font);
+  // THE TYPE SCALE. Transcript text is em, so it follows the text size; these
+  // two are chrome, in rem: 12 for labels, 13 for lines beside the reading.
+  --chat-type-label: 0.75rem;
+  --chat-type-meta: 0.8125rem;
   // THE ONE COLUMN. The masthead, the thread and the composer all stand on this
   // measure, so their left edges are one line. A percentage is resolved by the
-  // element using it, and all three span the thread's column. The measure
-  // follows the text size, so larger text keeps the same line length.
-  --chat-measure: calc(46rem * var(--hc-panel-scale, 1));
+  // element using it, and all three span the thread's column. In rem, never
+  // scaled: the column is the same width at every text size (jwize, 2026-11-01),
+  // so a smaller size is more on screen rather than a narrower column.
+  --chat-measure: 46rem;
   --chat-gutter: max(1.25rem, calc((100% - var(--chat-measure)) / 2));
   --chat-route-done: #{tw.ink(#70d59a)};
   --chat-route-open: #{tw.ink(#e8b04a)};
@@ -1173,7 +1179,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
     color: var(--hc-panel-text);
   }
   .chat-current-name {
-    font: 600 0.95rem/1.3 var(--hc-read, inherit);
+    font: 600 1.0625rem/1.3 var(--hc-read, inherit);
   }
 }
 
@@ -1259,7 +1265,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem 0.7rem;
-  font: 0.72rem/1.2 var(--hc-read, inherit);
+  font: var(--chat-type-label)/1.2 var(--hc-read, inherit);
   color: var(--hc-window-ink-quiet);
 
   .chat-link {
@@ -1304,9 +1310,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
   align-items: center;
   gap: 0.55em;
   margin-top: 0.6em;
-  font: 500 0.66em/1.2 var(--hc-mono, monospace);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font: 500 var(--chat-type-meta)/1.3 var(--hc-read, inherit);
   color: var(--hc-window-ink-quiet);
 
   .mat-sym {
@@ -1453,7 +1457,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font: 0.7rem/1.2 var(--hc-read, inherit);
+  font: var(--chat-type-label)/1.2 var(--hc-read, inherit);
   color: var(--hc-window-ink-quiet);
   white-space: nowrap;
 
@@ -1486,16 +1490,14 @@ $jx: calc(#{$pad} + #{$square} / 2);
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.6rem 0.75rem 0.35rem;
-  font-family: var(--hc-code, inherit);
-  font-size: 0.64rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--hc-window-ink-quiet);
+  font-family: var(--hc-read, inherit);
+  font-size: var(--chat-type-meta);
+  font-weight: 600;
+  color: var(--hc-window-ink-plain);
 }
 .chat-route-sec-count {
-  letter-spacing: 0.04em;
-  text-transform: none;
-  color: var(--hc-window-ink-plain);
+  font-weight: 400;
+  color: var(--hc-window-ink-quiet);
 }
 
 .chat-route-node .chat-route-title { font-family: var(--hc-read, inherit); }
@@ -1518,8 +1520,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
 .chat-route-meta {
   grid-column: 2;
   grid-row: 3;
-  font-family: var(--hc-code, inherit);
-  font-size: 0.64rem;
+  font-size: var(--chat-type-label);
   color: var(--hc-window-ink-quiet);
 }
 .chat-route-versions {

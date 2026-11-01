@@ -87,6 +87,8 @@ $accent: #7eb6d6;
   flex-direction: column;
   border-right: 1px solid rgba(var(--acc), 0.18);
   background: rgba(var(--hc-panel-pane), 0.55);
+  // Names and sentences. The rail's own labels pin the mono where they want it.
+  font-family: var(--hc-read, inherit);
 }
 
 .chat-rail-grip {
@@ -274,7 +276,7 @@ $accent: #7eb6d6;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--hc-window-accent-quiet);
-  font-size: 0.78em;
+  font-size: var(--chat-type-meta);
 
   &:hover { @include unfurl; }
 }
@@ -1245,23 +1247,51 @@ $accent: #7eb6d6;
 // AN ANSWER IS A PAGE, NOT A CARD. It lies on the ground with nothing around
 // it, so code and tables are the only frames in the column. What you said sits
 // to the end on a quiet tint; that tint alone tells the two voices apart.
-.chat-msg {
-  font-size: 0.9375em;
-  line-height: 1.65;
-  color: var(--hc-window-ink-loud);
+//
+// A RUN IS THE THREAD'S ROW. Messages you sent in a row share one, so the block
+// takes the width of the longest and there is one callout, not a stack. Never
+// positioned: the route measures a message's offsetTop against the scroller.
+.chat-run {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 
   &.user {
     align-self: flex-end;
-    max-width: 85%;
-    padding: 0.4em 0.8em;
+    // At least the width of a message's actions stays free beside the block.
+    max-width: min(85%, 100% - 5rem);
     background: var(--hc-window-tint-strong);
-    @include tw.card;
+    border-radius: tw.$radius-floating;
+  }
+}
+
+.chat-msg {
+  // Source Sans draws small for its size, so 17px reads as a plain 16.
+  font-size: 1.0625em;
+  line-height: 1.6;
+  font-kerning: normal;
+  color: var(--hc-window-ink-loud);
+
+  &.user {
+    padding: 0.4em 1.6em;
+
+    & + .chat-msg.user { border-top: 1px solid var(--hc-window-line); }
+
+    // THE CALLOUT. The block's own tint, cut to a small tail under its end, so
+    // what you said points back at your side of the conversation.
+    &:last-child::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      right: 0.85em;
+      width: 0.7em;
+      height: 0.5em;
+      background: var(--hc-window-tint-strong);
+      clip-path: polygon(0 0, 100% 0, 100% 100%);
+    }
   }
 
-  &.ai {
-    align-self: stretch;
-    min-width: 0;
-  }
+  &.ai { min-width: 0; }
 }
 
 // The message body is styled in chat-markdown.scss — turns are rendered
@@ -1322,7 +1352,7 @@ $accent: #7eb6d6;
   white-space: nowrap;
   padding: 0.15em 0.35em;
   font: inherit;
-  font-family: var(--hc-mono, monospace);
+  font-family: var(--hc-code, monospace);
   color: var(--hc-window-accent);
   background: rgba(var(--acc), 0.1);
   border: 1px solid rgba(var(--acc), 0.3);
@@ -1466,7 +1496,7 @@ $accent: #7eb6d6;
   // square beside it, are the same measure said once — a send button a
   // few pixels short of the box it belongs to is the kind of thing you
   // cannot un-see.
-  --hc-chat-line: max(0.8em, 16px);
+  --hc-chat-line: max(1.0625em, 16px);
   // 2.45 lines: one line of text in the box, plus its padding and border.
   // Measured, not guessed — the send button is exactly the height of the
   // composer at rest.

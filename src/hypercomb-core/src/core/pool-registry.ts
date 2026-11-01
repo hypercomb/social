@@ -698,6 +698,9 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // with no pack installs the same package from loose files.
   'transfer:packs',
   'tutorial:artifacts',
+  // A participant's own chords, one document with every version kept (essentials
+  // keyboard-desk/bindings). The signature of a version names that whole keymap.
+  'keymap:bindings',
   'usage:dwell',
   // Default tile art, keyed by the tile's NAME and holding a SIGNATURE (not
   // bytes) that points at an ordinary content-root resource. This is how a

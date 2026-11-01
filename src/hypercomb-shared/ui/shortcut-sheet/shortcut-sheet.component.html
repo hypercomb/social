@@ -62,28 +62,7 @@
       @if (shortcutGroups().length) {
         <section class="sheet-section">
           <h4 class="section-title">{{ 'shortcuts.section.keyboard' | t }}</h4>
-          @for (group of shortcutGroups(); track group.category) {
-            <div class="shortcut-subgroup">
-              <h5 class="subgroup-title">{{ group.category }}</h5>
-              <div class="section-list">
-                @for (binding of group.bindings; track binding.cmd) {
-                  <div class="sheet-row kbd-row">
-                    <span class="row-desc">{{ binding.descriptionKey ? (binding.descriptionKey | t) : binding.description }}</span>
-                    <span class="shortcut-keys">
-                      @for (step of formatSequence(binding); track $index) {
-                        @if ($index > 0) {
-                          <span class="chord-sep">{{ 'shortcuts.chord-sep' | t }}</span>
-                        }
-                        @for (part of step; track $index) {
-                          <kbd class="key-badge">{{ part }}</kbd>
-                        }
-                      }
-                    </span>
-                  </div>
-                }
-              </div>
-            </div>
-          }
+          <button type="button" class="keyboard-door" (click)="openKeyboard()">{{ 'shortcuts.open-keyboard' | t }}</button>
         </section>
       }
 

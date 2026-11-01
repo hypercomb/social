@@ -1,5 +1,6 @@
 // input/keymap/keymap.service.ts
-import { EffectBus, isMac, type KeyBinding, type KeyChord, type KeyMapLayer } from '@hypercomb/core'
+import { EffectBus, type KeyBinding, type KeyChord, type KeyMapLayer } from '@hypercomb/core'
+import { USER_KEYMAP_LAYER, chordFits, pressOfEvent } from './chord-match.js'
 import { globalKeyMap, defaultKeyMap } from './default-keymap.js'
 
 const SEQUENCE_TIMEOUT_MS = 500
@@ -38,11 +39,30 @@ export class KeyMapService extends EventTarget {
     const byCmd = new Map<string, KeyBinding>()
     for (const layer of this.#layers) {
       for (const b of layer.bindings) {
-        byCmd.set(b.cmd, b)
+        const under = layer.id === USER_KEYMAP_LAYER ? byCmd.get(b.cmd) : undefined
+        byCmd.set(b.cmd, under ? { ...under, ...b } : b)
       }
     }
     this.#effectiveCache = [...byCmd.values()]
     return this.#effectiveCache
+  }
+
+  // -------------------------------------------------
+  // the hold (a surface reading keys as data)
+  // -------------------------------------------------
+
+  // Stronger than suppression: nothing fires, pierce bindings included. The
+  // keyboard desk holds the map while it is open, so pressing Ctrl+K there names
+  // the chord instead of opening the palette.
+  #holds = new Set<string>()
+
+  hold(reason: string): void {
+    this.#holds.add(reason)
+    this.#resetSequences()
+  }
+
+  release(reason: string): void {
+    this.#holds.delete(reason)
   }
 
   // -------------------------------------------------
@@ -118,6 +138,14 @@ export class KeyMapService extends EventTarget {
       this.unsuppress(reason)
     })
 
+    EffectBus.on<{ reason: string }>('keymap:hold', ({ reason }) => {
+      this.hold(reason)
+    })
+
+    EffectBus.on<{ reason: string }>('keymap:release', ({ reason }) => {
+      this.release(reason)
+    })
+
     // navigation guard bridge (same pattern as TileOverlayDrone)
     EffectBus.on('navigation:guard-start', () => {
       this.suppress('navigation-transition')
@@ -143,15 +171,28 @@ export class KeyMapService extends EventTarget {
   #onKeyDown = (e: KeyboardEvent): void => {
     // pure modifier keys are not shortcut triggers
     if (this.#isModifierOnly(e)) return
+    if (this.#holds.size) return
 
     const isSuppressed = this.suppressed || this.#isInteractiveFocus()
     const bindings = this.getEffective()
     let anyAdvanced = false
     let matched = false
 
+    // A press that finishes a chord a participant chose is theirs alone. `{ key:
+    // 'h' }` does not look at Ctrl, so without this Ctrl+H would fire their binding
+    // and the default. Any earlier step only advances, beside everything else, as
+    // sequences always have: a chord must not take its first key away from what
+    // that key already does.
+    const chosen = this.#chosenFor(e, isSuppressed)
+
     for (const binding of bindings) {
       // when suppressed, only pierce bindings fire
       if (isSuppressed && !binding.pierce) {
+        this.#sequenceState.delete(binding.cmd)
+        continue
+      }
+
+      if (chosen && !chosen.has(binding.cmd)) {
         this.#sequenceState.delete(binding.cmd)
         continue
       }
@@ -197,6 +238,20 @@ export class KeyMapService extends EventTarget {
     }
   }
 
+  /** The chosen commands this press would finish, or null when it is nobody's. */
+  #chosenFor(e: KeyboardEvent, isSuppressed: boolean): Set<string> | null {
+    const layer = this.#layers.find(l => l.id === USER_KEYMAP_LAYER)
+    if (!layer) return null
+    const chosen = new Set<string>()
+    for (const binding of layer.bindings) {
+      if (isSuppressed && !binding.pierce) continue
+      const step = this.#sequenceState.get(binding.cmd) ?? 0
+      const chord = binding.sequence[step]
+      if (chord && step + 1 >= binding.sequence.length && this.#matchesChord(e, chord)) chosen.add(binding.cmd)
+    }
+    return chosen.size ? chosen : null
+  }
+
   // -------------------------------------------------
   // chord matching
   // -------------------------------------------------
@@ -214,42 +269,12 @@ export class KeyMapService extends EventTarget {
   }
 
   #matchesSingleKey(e: KeyboardEvent, k: KeyChord): boolean {
-    if (k.code) {
-      // Defensive: synthetic events (IME, mobile soft-keyboards, autofill
-      // chips — see #isModifierOnly) can deliver an event with `code`
-      // undefined. Guard before .toLowerCase() so the keymap pipeline
-      // doesn't throw on every keystroke and abort the surrounding listeners.
-      if (typeof e.code !== 'string' || e.code.toLowerCase() !== k.code) return false
-    } else {
-      if (this.#normalize(e.key) !== k.key) return false
-    }
-
-    if (k.ctrl !== undefined && e.ctrlKey !== k.ctrl) return false
-    if (k.shift !== undefined && e.shiftKey !== k.shift) return false
-    if (k.alt !== undefined && e.altKey !== k.alt) return false
-    if (k.meta !== undefined && e.metaKey !== k.meta) return false
-
-    if (k.primary !== undefined) {
-      const actual = isMac ? e.metaKey : e.ctrlKey
-      if (actual !== k.primary) return false
-    }
-
-    return true
+    return chordFits(pressOfEvent(e), k)
   }
 
   // -------------------------------------------------
   // helpers
   // -------------------------------------------------
-
-  #normalize(key: string): string {
-    // Defensive: synthetic events can deliver undefined key. Returning
-    // an empty string is harmless — it just won't match any binding.
-    if (typeof key !== 'string' || !key) return ''
-    const k = key.toLowerCase()
-    if (k === 'control') return 'ctrl'
-    if (k === ' ') return 'space'
-    return k
-  }
 
   #isModifierOnly(e: KeyboardEvent): boolean {
     // Some keyboard events (synthetic IME, certain mobile soft-keyboards,

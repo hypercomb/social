@@ -1221,6 +1221,8 @@ export class QuickMenuInput {
    *  hex view with a camera to move; anywhere else the menu stays in place. */
   #flightWanted(): boolean {
     if (this.#isMobile()) return false
+    // Something else holds the camera: an editor, or the guide's ideas.
+    if (get<GateLike>('@diamondcoreprocessor.com/InputGate')?.locked) return false
     const mode = get<{ mode?: string }>('@hypercomb.social/ViewMode')?.mode
     if (mode && mode !== 'hexagons') return false
     return this.#flightFor().available

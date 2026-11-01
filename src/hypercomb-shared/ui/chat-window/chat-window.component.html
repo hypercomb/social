@@ -545,90 +545,96 @@
       @if (empty()) {
         <p class="chat-empty">{{ 'chat.empty' | t }}</p>
       }
-      @for (entry of rendered(); track entry.key) {
-        @if (stepRules().get(entry.index); as rule) {
+      <!-- ONE BLOCK PER RUN (chat-runs.ts): participant messages that follow one
+           another share a single callout, a reply stands alone. Drawn from the
+           turns, so every conversation groups the same way. -->
+      @for (run of threadRuns(); track run.key) {
+        @if (stepRules().get(run.entries[0].index); as rule) {
           <div class="chat-stepmark" role="separator" [attr.data-state]="rule.state" [attr.aria-label]="rule.title">
             <span class="mat-sym" aria-hidden="true">{{ rule.icon }}</span><span class="chat-stepmark-title">{{ rule.title }}</span>
           </div>
         }
-        <div class="chat-msg"
-          [class.user]="entry.turn.role === 'user'"
-          [class.ai]="entry.turn.role === 'assistant'"
-          [class.chat-route-lit]="routeLitRows().has(entry.index)"
-          [attr.data-route-row]="entry.index">
-          <div class="chat-msg-text" [innerHTML]="entry.html"></div>
+        <div class="chat-run" [class.user]="run.user">
+          @for (entry of run.entries; track entry.key) {
+            <div class="chat-msg"
+              [class.user]="entry.turn.role === 'user'"
+              [class.ai]="entry.turn.role === 'assistant'"
+              [class.chat-route-lit]="routeLitRows().has(entry.index)"
+              [attr.data-route-row]="entry.index">
+              <div class="chat-msg-text" [innerHTML]="entry.html"></div>
 
-          <!-- THE QUESTION THE REPLY ASKED, drawn where its fence was — by
-               the template, so every string is interpolated and none is
-               innerHTML (§2.2). Open: a radiogroup with roving focus, the
-               composer always the other answer. Settled: one line, the
-               other outlets in its title. Superseded: one line. -->
-          @if (entry.question; as question) {
-            @if (question.state === 'open') {
-              <div class="chat-question" role="radiogroup" aria-live="polite"
-                [attr.aria-labelledby]="'chat-question-' + entry.index"
-                (focusin)="onQuestionFocusIn()"
-                (focusout)="onQuestionFocusOut($event)"
-                (keydown)="onQuestionKey($event, entry.index, question.options)">
-                <p class="chat-question-prompt" [id]="'chat-question-' + entry.index">
-                  <span class="chat-question-mark" aria-hidden="true">◆</span>{{ question.prompt }}
-                </p>
-                @for (option of question.options; track $index) {
-                  <button type="button" class="chat-question-option" role="radio" aria-checked="false"
-                    [tabindex]="questionCursor() === $index ? 0 : -1"
-                    [disabled]="waiting()"
-                    (click)="pickOption(entry.index, $index, question.options)">
-                    <span class="chat-question-n" aria-hidden="true">{{ $index + 1 }}</span>
-                    <span class="chat-question-label">@if (optionParts(option); as parts) {<span class="hc-sentence" [style.--hc-sentence-accent]="sentenceAccent(parts)">@for (part of parts; track $index) {<span
-                      [class]="'hc-sentence-' + part.role"
-                      [style.color]="part.color || null"
-                    >{{ part.text }}</span>}</span>} @else {{{ option }}}</span>
+              <!-- THE QUESTION THE REPLY ASKED, drawn where its fence was — by
+                   the template, so every string is interpolated and none is
+                   innerHTML (§2.2). Open: a radiogroup with roving focus, the
+                   composer always the other answer. Settled: one line, the
+                   other outlets in its title. Superseded: one line. -->
+              @if (entry.question; as question) {
+                @if (question.state === 'open') {
+                  <div class="chat-question" role="radiogroup" aria-live="polite"
+                    [attr.aria-labelledby]="'chat-question-' + entry.index"
+                    (focusin)="onQuestionFocusIn()"
+                    (focusout)="onQuestionFocusOut($event)"
+                    (keydown)="onQuestionKey($event, entry.index, question.options)">
+                    <p class="chat-question-prompt" [id]="'chat-question-' + entry.index">
+                      <span class="chat-question-mark" aria-hidden="true">◆</span>{{ question.prompt }}
+                    </p>
+                    @for (option of question.options; track $index) {
+                      <button type="button" class="chat-question-option" role="radio" aria-checked="false"
+                        [tabindex]="questionCursor() === $index ? 0 : -1"
+                        [disabled]="waiting()"
+                        (click)="pickOption(entry.index, $index, question.options)">
+                        <span class="chat-question-n" aria-hidden="true">{{ $index + 1 }}</span>
+                        <span class="chat-question-label">@if (optionParts(option); as parts) {<span class="hc-sentence" [style.--hc-sentence-accent]="sentenceAccent(parts)">@for (part of parts; track $index) {<span
+                          [class]="'hc-sentence-' + part.role"
+                          [style.color]="part.color || null"
+                        >{{ part.text }}</span>}</span>} @else {{{ option }}}</span>
+                      </button>
+                    }
+                    <p class="chat-question-hint">{{ 'chat.question.hint' | t }}</p>
+                  </div>
+                } @else if (question.state === 'settled') {
+                  <p class="chat-question-line"
+                    [title]="'chat.question.others' | t: { options: otherOutlets(question) }">
+                    <span class="chat-question-mark" aria-hidden="true">◆</span>{{ 'chat.question.answered' | t: { prompt: question.prompt, answer: answerOf(question) } }}
+                  </p>
+                } @else {
+                  <p class="chat-question-line chat-question-superseded">
+                    <span class="chat-question-mark" aria-hidden="true">◆</span>{{ 'chat.question.superseded' | t: { prompt: question.prompt } }}
+                  </p>
+                }
+              }
+
+              <!-- What you can DO with an answer. Quiet until the message is
+                   hovered or focused; always reachable by keyboard. They act on
+                   the PROSE — the question fence is machinery, not what was said.
+                   Retry is hidden on a reply holding an open question: re-asking
+                   a question is not a thing. -->
+              <div class="chat-acts">
+                <button type="button" (click)="copyTurn(entry.prose, entry.key)"
+                  [title]="'chat.act.copy' | t" [attr.aria-label]="'chat.act.copy' | t">
+                  <span class="mat-sym" aria-hidden="true">{{ copiedTurn() === entry.key ? 'check' : 'content_copy' }}</span>
+                </button>
+                @if (entry.turn.role === 'assistant') {
+                  <button type="button" (click)="noteTurn(entry.prose)"
+                    [title]="'chat.act.note' | t" [attr.aria-label]="'chat.act.note' | t">
+                    <span class="mat-sym" aria-hidden="true">sticky_note_2</span>
+                  </button>
+                } @else {
+                  <button type="button" (click)="editTurn(entry.prose)"
+                    [title]="'chat.act.edit' | t" [attr.aria-label]="'chat.act.edit' | t">
+                    <span class="mat-sym" aria-hidden="true">edit</span>
                   </button>
                 }
-                <p class="chat-question-hint">{{ 'chat.question.hint' | t }}</p>
+                @if (entry.question?.state !== 'open') {
+                  <button type="button" (click)="retryTurn(entry.turn)" [disabled]="waiting()"
+                    [title]="'chat.act.retry' | t" [attr.aria-label]="'chat.act.retry' | t">
+                    <span class="mat-sym" aria-hidden="true">refresh</span>
+                  </button>
+                }
               </div>
-            } @else if (question.state === 'settled') {
-              <p class="chat-question-line"
-                [title]="'chat.question.others' | t: { options: otherOutlets(question) }">
-                <span class="chat-question-mark" aria-hidden="true">◆</span>{{ 'chat.question.answered' | t: { prompt: question.prompt, answer: answerOf(question) } }}
-              </p>
-            } @else {
-              <p class="chat-question-line chat-question-superseded">
-                <span class="chat-question-mark" aria-hidden="true">◆</span>{{ 'chat.question.superseded' | t: { prompt: question.prompt } }}
-              </p>
-            }
+            </div>
           }
-
-          <!-- What you can DO with an answer. Quiet until the message is
-               hovered or focused; always reachable by keyboard. They act on
-               the PROSE — the question fence is machinery, not what was said.
-               Retry is hidden on a reply holding an open question: re-asking
-               a question is not a thing. -->
-          <div class="chat-acts">
-            <button type="button" (click)="copyTurn(entry.prose, entry.key)"
-              [title]="'chat.act.copy' | t" [attr.aria-label]="'chat.act.copy' | t">
-              <span class="mat-sym" aria-hidden="true">{{ copiedTurn() === entry.key ? 'check' : 'content_copy' }}</span>
-            </button>
-            @if (entry.turn.role === 'assistant') {
-              <button type="button" (click)="noteTurn(entry.prose)"
-                [title]="'chat.act.note' | t" [attr.aria-label]="'chat.act.note' | t">
-                <span class="mat-sym" aria-hidden="true">sticky_note_2</span>
-              </button>
-            } @else {
-              <button type="button" (click)="editTurn(entry.prose)"
-                [title]="'chat.act.edit' | t" [attr.aria-label]="'chat.act.edit' | t">
-                <span class="mat-sym" aria-hidden="true">edit</span>
-              </button>
-            }
-            @if (entry.question?.state !== 'open') {
-              <button type="button" (click)="retryTurn(entry.turn)" [disabled]="waiting()"
-                [title]="'chat.act.retry' | t" [attr.aria-label]="'chat.act.retry' | t">
-                <span class="mat-sym" aria-hidden="true">refresh</span>
-              </button>
-            }
-          </div>
         </div>
-
       }
       <!-- An answer arriving from the host tier, a chunk at a time. Not a turn
            until the stream closes and the text is on disk. `data-streaming`

@@ -1,75 +1,75 @@
 // guide/guide.drone.ts
 //
-// /guide — the cursor is the bee. Passing over a tile names the beehaviors
-// it carries and offers one idea. Staying there waggles, then drops the
-// recommendations. A press hides the cursor and slides that
-// tile to the middle of the screen at one common size, the bee riding it.
-// Drag toward a choice. Letting go sends the choice and flies the view
-// back to where the press began. When that flight lands, the real cursor
-// returns and the next press belongs to the hive. Escape puts the bee down.
+// /guide — the cursor is the bee. Passing over a tile names the beehaviors it
+// carries and offers one idea. Staying there waggles, and when the dance ends
+// the tile flies to the middle the way a held alt brings it, the hive falls
+// back, and every idea for that tile opens round it as a tile. The real cursor
+// returns: nothing here needs placing. Rollover names a tile, a click picks it,
+// and the bordered board beside them turns the same ideas into a list that
+// scrolls. Accept sends one agent per pick, flies the view home, and the next
+// press belongs to the hive. Escape puts the bee down.
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import { newTileConvoId } from '../assistant/chat-thread.js'
 import { kindsForLabel, placesWithKind } from '../commands/decoration-kind-index.js'
 import { listDecorations } from '../commands/decoration-manifest.js'
-import { bindingsFor } from '../sharing/behavior-enablement.js'
+import { bindingsFor, isBehaviorDormant } from '../sharing/behavior-enablement.js'
 import { hostZone } from '../sharing/community-hosts.js'
 import { publishedDoors } from '../sharing/publish-results.js'
+import { drawsAsGlyph } from '../commands/material-glyph.js'
 import {
-  CHOICE_REACH,
-  COMMON_HEX_RADIUS,
-  choiceAt,
+  boardBox,
   hoverLine,
+  ideaTask,
+  nearestPoint,
   payloadDetail,
-  placeFromTile,
-  tileSuggestions,
+  ringsFor,
+  tileIdeas,
+  tileReading,
   type GuideAttachment,
+  type GuideBehavior,
+  type GuideIdea,
   type GuideKin,
   type GuideTile,
 } from './guide-place.js'
-import { GUIDE_SURFACE, GuideOverlayElement } from './guide-overlay.view.js'
+import { GUIDE_SURFACE, GuideOverlayElement, type GuideBoardMode } from './guide-overlay.view.js'
+import { GuideStage } from './guide-stage.js'
 
 type LineageApi = { explorerSegments?: () => readonly string[] }
 type Hover = { label?: string | null }
 type OverlayApi = {
   actionsForTile?: (label: string) => readonly { name?: string; featureRow?: boolean; dangerRow?: boolean }[]
   labelAtClient?: (x: number, y: number) => string | null
+  axialForLabel?: (label: string) => { q: number; r: number } | null
   clientAnchorForLabel?: (label: string) => { x: number; y: number; radius: number } | null
 }
-type Point = { x: number; y: number }
-type Xform = { scale: number; x: number; y: number }
-type PixiPoint = { x: number; y: number }
-type Host = {
-  app?: { stage?: { scale?: { x?: number } } }
-  container?: {
-    scale: { x: number; set: (scale: number) => void }
-    position: { x: number; y: number; set: (x: number, y: number) => void }
-    parent?: { toLocal: (point: PixiPoint) => PixiPoint } | null
-    toLocal: (point: PixiPoint) => PixiPoint
-    toGlobal: (point: PixiPoint) => PixiPoint
-  }
-  canvas?: HTMLCanvasElement
-  renderer?: { screen: { width: number; height: number } }
-}
+type Host = { canvas?: HTMLCanvasElement }
 type Gate = { lock: (owner: string) => void; unlock: (owner: string) => void }
-type Hold = {
-  pointerId: number
-  label: string
-  options: readonly string[]
-  from: Xform
-  to: Xform
-  started: number
-  phase: 'in' | 'aim' | 'out'
-  dx: number
-  dy: number
-  chosen: string | null
-  frame: number
+type RegistryBee = {
+  view?: string
+  toggleIcon?: string
+  iconName?: string
+  decorationKind?: string
+  behavior?: string
+  fallbackDescription?: string
+  offersFor?: unknown
 }
 type RegistryApi = {
-  byDecorationKind?: (kind: string) => { view?: string; fallbackDescription?: string } | undefined
+  byDecorationKind?: (kind: string) => RegistryBee | undefined
+  forPlatform?: (platform: 'mobile' | 'desktop') => readonly RegistryBee[]
 }
 type Found = { details: ReadonlyMap<string, string>; kin: readonly GuideKin[] }
 type NamesApi = { displayNameFor?: (label: string) => string }
+type Asked = { askId?: string; ok?: boolean; outcome?: string; error?: string }
+/** The tile in the middle and what has been picked for it. */
+type Seat = {
+  readonly tile: GuideTile
+  readonly ideas: readonly GuideIdea[]
+  readonly chosen: Set<string>
+  mode: GuideBoardMode
+  landed: boolean
+  leaving: boolean
+}
 
 /** How long the bee rests on a tile before it dances, and how long the dance lasts. */
 const DWELL_MS = 800
@@ -87,38 +87,35 @@ const within = <T>(work: Promise<T>, fallback: T, ms: number): Promise<T> =>
     )
   })
 
-/** How long the tile and the bee take to reach the centre, and then to come home. */
-const FLIGHT_MS = 480
-const RETURN_MS = 420
 const CURSOR_STYLE = 'html.hc-guide, html.hc-guide * { cursor: none !important; }'
 
 export class GuideDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   public override description =
-    'The cursor becomes a bee. Over a tile it names the beehaviors. Stay and it reads what is attached and where the same beehavior shows. Press and the tile comes to center for a choice. Letting go flies the view home and the cursor returns.'
+    'The cursor becomes a bee. Over a tile it names the beehaviors. Stay and it dances, the tile flies to the middle, and every idea for it opens round it. Pick the ones you want and accept, and an agent goes out for each.'
 
   protected override sense = (): boolean => false
-  protected override listens = ['guide:toggle', 'guide:stop', 'tile:hover']
-  protected override emits = ['guide:toggle', 'guide:stop', 'chat:open', 'toast:show', 'activity:log']
+  protected override listens = ['guide:toggle', 'guide:stop', 'tile:hover', 'chat:asked']
+  protected override emits = ['guide:toggle', 'guide:stop', 'chat:ask', 'toast:show', 'activity:log', 'quick-menu:on-tile', 'tile:hover']
 
   #on = false
   #overlay: GuideOverlayElement | null = null
   /** The tile under the pointer. Empty when the pointer is not on one. */
   #label = ''
-  #tile: GuideTile | null = null
   #point = { x: 0, y: 0 }
-  #host: Host | null = null
-  #hold: Hold | null = null
-  /** The rest before a recommendation, then the dance. */
+  #canvas: HTMLCanvasElement | null = null
+  #stage: GuideStage | null = null
+  #seat: Seat | null = null
+  /** The rest before the fly-in, then the dance. */
   #wait = 0
-  /** A programmatic close must not arm another rest. */
-  #quiet = false
-  /** Bumps when the tile changes, so a late lookup cannot rewrite the card. */
+  /** Bumps when the tile changes, so a late lookup cannot rewrite the hint. */
   #ticket = 0
   /** Attached payload text and cross-domain places for the tile under the bee. */
   #found: { label: string; value: Found } | null = null
   /** The press took the pointer, so the click that follows must not walk in. */
   #ate = false
+  /** Agents out from the board, by ask, so a failed one can be told apart from the chat's own. */
+  readonly #sent = new Map<string, string>()
   readonly #offs: (() => void)[] = []
 
   constructor() {
@@ -126,7 +123,8 @@ export class GuideDrone extends Drone {
     this.onEffect('guide:toggle', () => { if (this.#on) this.#stop(); else this.#start() })
     this.onEffect('guide:stop', () => this.#stop())
     this.onEffect<Hover>('tile:hover', payload => this.#hover(payload?.label ?? null))
-    this.onEffect<Host>('render:host-ready', payload => { this.#host = payload ?? null })
+    this.onEffect<Host>('render:host-ready', payload => { this.#canvas = payload?.canvas ?? null })
+    this.onEffect<Asked>('chat:asked', result => this.#asked(result))
   }
 
   #start(): void {
@@ -138,27 +136,25 @@ export class GuideDrone extends Drone {
     this.#cursorStyle()
     const move = (event: PointerEvent): void => this.#move(event)
     const down = (event: PointerEvent): void => this.#down(event)
-    const up = (event: PointerEvent): void => this.#up(event)
     const click = (event: MouseEvent): void => this.#click(event)
     const key = (event: KeyboardEvent): void => this.#key(event)
+    const resize = (): void => this.#resized()
     window.addEventListener('pointermove', move, true)
     window.addEventListener('pointerdown', down, true)
-    window.addEventListener('pointerup', up, true)
-    window.addEventListener('pointercancel', up, true)
     window.addEventListener('click', click, true)
     window.addEventListener('keydown', key, true)
+    window.addEventListener('resize', resize)
     this.#offs.push(
       () => window.removeEventListener('pointermove', move, true),
       () => window.removeEventListener('pointerdown', down, true),
-      () => window.removeEventListener('pointerup', up, true),
-      () => window.removeEventListener('pointercancel', up, true),
       () => window.removeEventListener('click', click, true),
       () => window.removeEventListener('keydown', key, true),
+      () => window.removeEventListener('resize', resize),
     )
     EffectBus.emit('toast:show', {
       type: 'info',
       title: 'Guide',
-      message: 'The bee is your cursor. Over a tile it names the beehaviors. Stay and it reads what is attached and where the same beehavior shows. Press and the tile comes to center. Drag to a choice and let go. The view flies home and the cursor returns.',
+      message: 'The bee is your cursor. Stay on a tile and it dances, then the tile comes to the middle with every idea for it. Pick what you want and accept, and an agent goes out for each.',
     })
     EffectBus.emit('activity:log', { message: 'Guide — the bee is the cursor', icon: '🐝' })
     // The command line keeps the caret after the word runs, and a caret in
@@ -174,14 +170,12 @@ export class GuideDrone extends Drone {
 
   #stop(): void {
     if (!this.#on) return
+    // The camera is away: it comes home first, and that landing stops the guide.
+    if (this.#seat && !this.#seat.leaving) { this.#leave(); return }
     this.#on = false
     this.#cancelWait()
     this.#label = ''
-    this.#tile = null
-    if (this.#hold) {
-      this.#hold.chosen = null
-      this.#finish()
-    }
+    if (this.#seat) this.#release()
     for (const off of this.#offs.splice(0)) off()
     this.#overlay?.disarm()
     document.documentElement.classList.remove('hc-guide')
@@ -192,11 +186,12 @@ export class GuideDrone extends Drone {
     const existing = document.querySelector(GUIDE_SURFACE)
     const overlay = existing instanceof GuideOverlayElement ? existing : new GuideOverlayElement()
     if (!overlay.isConnected) document.body.appendChild(overlay)
-    overlay.onPick = option => this.#pick(option)
-    overlay.onDismiss = () => {
-      if (this.#quiet || !this.#on || this.#hold || !this.#label) return
-      this.#arm(this.#label)
-    }
+    overlay.onAim = (x, y) => this.#aim(x, y)
+    overlay.onPress = (x, y) => this.#press(x, y)
+    overlay.onToggle = id => this.#toggle(id)
+    overlay.onMode = mode => this.#setMode(mode)
+    overlay.onAccept = () => this.#accept()
+    overlay.onClose = () => this.#leave()
     this.#overlay = overlay
     return overlay
   }
@@ -210,40 +205,31 @@ export class GuideDrone extends Drone {
   }
 
   #key(event: KeyboardEvent): void {
-    if (event.key !== 'Escape' || event.repeat) return
-    if (this.#hold && this.#hold.phase !== 'out') {
+    const seat = this.#seat
+    if (event.repeat) return
+    if (event.key === 'Enter' && seat?.landed && seat.chosen.size > 0) {
+      // A focused row's own Enter picks it; only the page's Enter accepts.
+      if (event.composedPath()[0] instanceof HTMLButtonElement) return
       event.preventDefault()
       event.stopPropagation()
-      this.#hold.chosen = null
-      if (this.#hold.phase === 'in') {
-        const now = this.#currentXform()
-        if (now) this.#hold.to = now
-      }
-      this.#beginOut()
+      this.#accept()
       return
     }
-    if (this.#overlay?.dialogOpen) {
-      event.preventDefault()
-      event.stopPropagation()
-      this.#overlay.dismiss()
-      return
-    }
+    if (event.key !== 'Escape') return
     event.preventDefault()
     event.stopPropagation()
-    this.#stop()
+    if (seat) this.#leave()
+    else this.#stop()
   }
 
   #hover(label: string | null): void {
-    if (!this.#on || this.#hold) return
+    if (!this.#on || this.#seat) return
     const next = String(label ?? '').trim()
-    // Moving onto the recommendation leaves the canvas, so the hive reports
-    // no tile. The card stays while the pointer is on it.
-    if (!next && this.#onCard()) return
     if (next === this.#label) return
     this.#ticket++
     this.#found = null
     this.#label = next
-    this.#closeCard()
+    this.#cancelWait()
     this.#overlay?.waggle(false)
     if (!next) {
       this.#overlay?.hint('')
@@ -253,33 +239,17 @@ export class GuideDrone extends Drone {
     this.#arm(next)
   }
 
-  /** Rest, dance, then drop the recommendations for this tile. */
+  /** Rest, dance, then bring this tile to the middle. */
   #arm(label: string): void {
     this.#cancelWait()
     this.#enrich(label)
     const dwell = this.#reduced() ? 0 : DWELL_MS
     this.#wait = window.setTimeout(() => {
-      if (!this.#on || this.#hold || this.#label !== label) return
+      if (!this.#on || this.#seat || this.#label !== label) return
       this.#overlay?.waggle(true)
       const dance = this.#reduced() ? 0 : DANCE_MS
-      this.#wait = window.setTimeout(() => this.#offer(label), dance)
+      this.#wait = window.setTimeout(() => this.#land(label), dance)
     }, dwell)
-  }
-
-  #offer(label: string): void {
-    this.#wait = 0
-    if (!this.#on || this.#hold || this.#label !== label) return
-    const tile = this.#read(label, this.#point.x, this.#point.y)
-    this.#tile = tile
-    this.#overlay?.waggle(false)
-    const suggestions = tileSuggestions(tile)
-    this.#overlay?.show({
-      prompt: suggestions.prompt,
-      options: suggestions.options,
-      place: placeFromTile(tile),
-      status: '',
-      from: 'bee',
-    })
   }
 
   #cancelWait(): void {
@@ -288,103 +258,23 @@ export class GuideDrone extends Drone {
     this.#wait = 0
   }
 
-  #closeCard(): void {
-    this.#cancelWait()
-    if (!this.#overlay?.dialogOpen) return
-    this.#quiet = true
-    this.#overlay.dismiss()
-    this.#quiet = false
-  }
-
-  /** The pointer is on the recommendation, which sits above the canvas. */
-  #onCard(): boolean {
-    const overlay = this.#overlay
-    if (!overlay?.dialogOpen) return false
-    const hit = document.elementFromPoint(this.#point.x, this.#point.y)
-    if (!hit) return false
-    if (hit === overlay) return true
-    const root = overlay.shadowRoot
-    return !!root && (root.contains(hit) || hit.getRootNode() === root)
-  }
-
   #move(event: PointerEvent): void {
-    if (this.#hold && event.pointerId === this.#hold.pointerId) {
-      this.#drag(event)
-      return
-    }
     this.#point = { x: event.clientX, y: event.clientY }
-    this.#overlay?.follow(event.clientX, event.clientY)
+    if (!this.#seat) this.#overlay?.follow(event.clientX, event.clientY)
   }
 
+  /** A press does not wait out the dance. */
   #down(event: PointerEvent): void {
-    if (!this.#on || this.#hold || event.button !== 0) return
+    if (!this.#on || this.#seat || event.button !== 0) return
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
-    const canvas = this.#host?.canvas
-    if (!canvas || event.target !== canvas) return
+    if (!this.#canvas || event.target !== this.#canvas) return
     const label = this.#tiles()?.labelAtClient?.(event.clientX, event.clientY) || this.#label
     if (!label) return
-    const framed = this.#frame(label)
-    if (!framed) return
-    this.#closeCard()
     event.preventDefault()
     event.stopPropagation()
     this.#ate = true
     this.#point = { x: event.clientX, y: event.clientY }
-    const tile = this.#read(label, event.clientX, event.clientY)
-    this.#tile = tile
-    const hold: Hold = {
-      pointerId: event.pointerId,
-      label,
-      options: tileSuggestions(tile).options,
-      from: framed.from,
-      to: framed.to,
-      started: performance.now(),
-      phase: 'in',
-      dx: 0,
-      dy: 0,
-      chosen: null,
-      frame: 0,
-    }
-    this.#hold = hold
-    this.#overlay?.hint('')
-    this.#overlay?.waggle(true)
-    this.#gate()?.lock('guide')
-    const lock = canvas.requestPointerLock?.bind(canvas)
-    if (lock && event.pointerType !== 'touch') void Promise.resolve(lock()).catch(() => undefined)
-    hold.frame = requestAnimationFrame(() => this.#tick())
-  }
-
-  #drag(event: PointerEvent): void {
-    const hold = this.#hold
-    if (!hold) return
-    event.preventDefault()
-    event.stopPropagation()
-    if (document.pointerLockElement) {
-      hold.dx += event.movementX || 0
-      hold.dy += event.movementY || 0
-    } else {
-      hold.dx += event.clientX - this.#point.x
-      hold.dy += event.clientY - this.#point.y
-      this.#point = { x: event.clientX, y: event.clientY }
-    }
-    if (hold.phase === 'aim') this.#placeBee()
-  }
-
-  #up(event: PointerEvent): void {
-    const hold = this.#hold
-    if (!hold || event.pointerId !== hold.pointerId || hold.phase === 'out') return
-    event.preventDefault()
-    event.stopPropagation()
-    if (event.type === 'pointercancel') hold.chosen = null
-    else {
-      const index = choiceAt(hold.dx, hold.dy, hold.options.length)
-      hold.chosen = index >= 0 ? (hold.options[index] ?? null) : null
-    }
-    if (hold.phase === 'in') {
-      const now = this.#currentXform()
-      if (now) hold.to = now
-    }
-    this.#beginOut()
+    this.#land(label)
   }
 
   #click(event: MouseEvent): void {
@@ -394,136 +284,169 @@ export class GuideDrone extends Drone {
     event.stopPropagation()
   }
 
-  /** Slide the view. The bee stays on the tile until the centre, then aims. */
-  #tick(): void {
-    const hold = this.#hold
-    if (!hold || hold.phase === 'aim') return
-    const dur = this.#reduced() ? 0 : (hold.phase === 'in' ? FLIGHT_MS : RETURN_MS)
-    const t = dur <= 0 ? 1 : Math.min(1, (performance.now() - hold.started) / dur)
-    const ease = 1 - (1 - t) ** 3
-    const start = hold.phase === 'in' ? hold.from : hold.to
-    const end = hold.phase === 'in' ? hold.to : hold.from
-    this.#apply({
-      scale: start.scale + (end.scale - start.scale) * ease,
-      x: start.x + (end.x - start.x) * ease,
-      y: start.y + (end.y - start.y) * ease,
-    })
-    const anchor = this.#anchor(hold.label)
-    if (anchor) this.#overlay?.follow(anchor.x, anchor.y)
-    if (t < 1) {
-      hold.frame = requestAnimationFrame(() => this.#tick())
+  // ── in the middle ─────────────────────────────────────────────────
+
+  #land(label: string): void {
+    this.#wait = 0
+    const stage = this.#stage ??= new GuideStage()
+    const overlay = this.#overlay
+    const cell = this.#tiles()?.axialForLabel?.(label)
+    if (!this.#on || this.#seat || !overlay || !cell || !stage.available) {
+      overlay?.waggle(false)
       return
     }
-    if (hold.phase === 'in') {
-      hold.phase = 'aim'
-      this.#overlay?.waggle(false)
-      const center = this.#center()
-      this.#overlay?.ringChoices(center.x, center.y, hold.options, CHOICE_REACH)
-      this.#placeBee()
-      return
-    }
-    this.#finish()
+    const tile = this.#read(label, this.#point.x, this.#point.y)
+    const ideas = tileIdeas(tile, this.#offered(tile))
+    const seat: Seat = { tile, ideas, chosen: new Set(), mode: 'tiles', landed: false, leaving: false }
+    this.#seat = seat
+    overlay.hint('')
+    overlay.shield()
+    overlay.waggle(true)
+    this.#gate()?.lock('guide')
+    // The hover icons and caption belong to the hive; the shield now holds the
+    // pointer, so the last hover would otherwise stay up over the ideas.
+    EffectBus.emit('quick-menu:on-tile', { active: true })
+    EffectBus.emit('tile:hover', { label: null })
+    stage.fly(cell, ideas.length, () => this.#ride(label), () => this.#landed(seat), this.#reduced() ? 0 : undefined)
   }
 
-  #beginOut(): void {
-    const hold = this.#hold
-    if (!hold || hold.phase === 'out') return
-    if (hold.frame) cancelAnimationFrame(hold.frame)
-    hold.phase = 'out'
-    hold.started = performance.now()
-    this.#overlay?.clearChoices()
-    this.#overlay?.waggle(false)
-    hold.frame = requestAnimationFrame(() => this.#tick())
-  }
-
-  #finish(): void {
-    const hold = this.#hold
-    if (!hold) return
-    if (hold.frame) cancelAnimationFrame(hold.frame)
-    this.#apply(hold.from)
-    this.#overlay?.clearChoices()
-    this.#overlay?.waggle(false)
-    const anchor = this.#anchor(hold.label)
-    if (anchor) this.#overlay?.follow(anchor.x, anchor.y)
-    try { this.#gate()?.unlock('guide') } catch { /* the gate may already be gone */ }
-    if (document.pointerLockElement) document.exitPointerLock()
-    const chosen = hold.chosen
-    this.#hold = null
-    if (chosen) this.#pick(chosen)
-    // The flight is over. The real cursor is back at the press, and a later
-    // click walks, pans, and hovers the way it did before the guide.
-    this.#stop()
-  }
-
-  #placeBee(): void {
-    const hold = this.#hold
-    if (!hold) return
-    let dx = hold.dx
-    let dy = hold.dy
-    const distance = Math.hypot(dx, dy)
-    if (distance > CHOICE_REACH) {
-      dx *= CHOICE_REACH / distance
-      dy *= CHOICE_REACH / distance
-    }
-    const center = this.#center()
-    this.#overlay?.follow(center.x + dx, center.y + dy)
-    this.#overlay?.aimChoice(choiceAt(hold.dx, hold.dy, hold.options.length))
-  }
-
-  /** Where the container must sit so this tile's centre is the screen's, at one size. */
-  #frame(label: string): { from: Xform; to: Xform } | null {
-    const container = this.#host?.container
-    const canvas = this.#host?.canvas
-    const renderer = this.#host?.renderer
+  /** The bee rides the tile in. */
+  #ride(label: string): void {
     const anchor = this.#anchor(label)
-    if (!container || !canvas || !renderer || !anchor || anchor.radius < 2) return null
-    const from = { scale: container.scale.x || 1, x: container.position.x, y: container.position.y }
-    const factor = COMMON_HEX_RADIUS / anchor.radius
-    const next = Math.min(8, Math.max(0.15, from.scale * factor))
-    if (!Number.isFinite(next) || next <= 0) return null
-    const rect = canvas.getBoundingClientRect()
-    if (rect.width < 1 || rect.height < 1) return null
-    const screen = renderer.screen
-    const toGlobal = (clientX: number, clientY: number): PixiPoint => ({
-      x: (clientX - rect.left) * (screen.width / rect.width),
-      y: (clientY - rect.top) * (screen.height / rect.height),
+    if (anchor) this.#overlay?.follow(anchor.x, anchor.y)
+  }
+
+  #landed(seat: Seat): void {
+    if (this.#seat !== seat || seat.leaving) return
+    seat.landed = true
+    document.documentElement.classList.remove('hc-guide')
+    this.#overlay?.seat()
+    this.#stage?.dim(true)
+    this.#paint()
+  }
+
+  #paint(): void {
+    const seat = this.#seat
+    const stage = this.#stage
+    const overlay = this.#overlay
+    if (!seat?.landed || !stage || !overlay) return
+    const asTiles = seat.mode === 'tiles'
+    stage.paint(seat.tile.label, asTiles ? seat.ideas.map(idea => ({
+      label: idea.word,
+      icon: drawsAsGlyph(idea.icon) === false ? undefined : idea.icon,
+      lit: seat.chosen.has(idea.id),
+    })) : [])
+    const rings = asTiles ? ringsFor(seat.ideas.length) : 0
+    overlay.board({
+      route: seat.tile.route,
+      name: seat.tile.name || seat.tile.label,
+      reading: seat.tile.attached?.length || seat.tile.kin?.length ? tileReading(seat.tile) : '',
+      ideas: seat.ideas,
+      chosen: seat.chosen,
+      mode: seat.mode,
+      box: boardBox(stage.free, stage.middle, stage.extent(rings), seat.mode),
     })
-    try {
-      const local = container.toLocal(toGlobal(anchor.x, anchor.y))
-      container.scale.set(next)
-      const landed = container.toGlobal(local)
-      const want = toGlobal(window.innerWidth / 2, window.innerHeight / 2)
-      const parent = container.parent
-      if (parent?.toLocal) {
-        const wanted = parent.toLocal(want)
-        const got = parent.toLocal(landed)
-        container.position.x += wanted.x - got.x
-        container.position.y += wanted.y - got.y
-      } else {
-        container.position.x += want.x - landed.x
-        container.position.y += want.y - landed.y
-      }
-      const to = { scale: container.scale.x || next, x: container.position.x, y: container.position.y }
-      return { from, to }
-    } catch {
-      return null
-    } finally {
-      container.scale.set(from.scale)
-      container.position.set(from.x, from.y)
+  }
+
+  /** Which idea tile is under a client point. */
+  #ideaAt(x: number, y: number): { idea: GuideIdea; x: number; y: number } | null {
+    const seat = this.#seat
+    const stage = this.#stage
+    if (!seat?.landed || !stage || seat.mode !== 'tiles') return null
+    const points = stage.points(seat.ideas.length)
+    const index = nearestPoint(points, x, y, stage.tileReach * 0.92)
+    const idea = seat.ideas[index]
+    const point = points[index]
+    return idea && point ? { idea, x: point.x, y: point.y - stage.tileReach } : null
+  }
+
+  #aim(x: number, y: number): void {
+    const hit = this.#ideaAt(x, y)
+    this.#overlay?.label(hit?.idea.label ?? '', hit?.x ?? 0, hit?.y ?? 0)
+  }
+
+  #press(x: number, y: number): void {
+    const hit = this.#ideaAt(x, y)
+    this.#aim(x, y)
+    if (hit) this.#toggle(hit.idea.id)
+  }
+
+  #toggle(id: string): void {
+    const seat = this.#seat
+    if (!seat?.landed || seat.leaving) return
+    if (!seat.chosen.delete(id)) seat.chosen.add(id)
+    this.#paint()
+  }
+
+  #setMode(mode: GuideBoardMode): void {
+    const seat = this.#seat
+    if (!seat?.landed || seat.leaving || seat.mode === mode) return
+    seat.mode = mode
+    this.#overlay?.label('', 0, 0)
+    this.#paint()
+  }
+
+  #resized(): void {
+    if (!this.#seat?.landed) return
+    this.#stage?.settle()
+    this.#paint()
+  }
+
+  /** One agent per pick: its own conversation on this tile, its own bee over it. */
+  #accept(): void {
+    const seat = this.#seat
+    if (!seat?.landed || seat.leaving || seat.chosen.size === 0) return
+    const picked = seat.ideas.filter(idea => seat.chosen.has(idea.id))
+    const segments = [...this.#segments(), seat.tile.label].filter(Boolean)
+    for (const idea of picked) {
+      const askId = `guide-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      this.#sent.set(askId, idea.label)
+      EffectBus.emit('chat:ask', {
+        askId,
+        convoId: newTileConvoId(segments),
+        text: ideaTask(seat.tile, idea),
+        // Accept is the go-ahead for these conversations and no others.
+        trust: true,
+      })
     }
+    const count = picked.length
+    EffectBus.emit('activity:log', { message: `Guide — ${count} agent${count === 1 ? '' : 's'} sent to ${seat.tile.name || seat.tile.label}`, icon: '🐝' })
+    this.#leave()
   }
 
-  #apply(xform: Xform): void {
-    const container = this.#host?.container
-    if (!container) return
-    container.scale.set(xform.scale)
-    container.position.set(xform.x, xform.y)
+  #asked(result: Asked | undefined): void {
+    const askId = String(result?.askId ?? '')
+    const idea = this.#sent.get(askId)
+    if (idea === undefined) return
+    this.#sent.delete(askId)
+    if (result?.ok || result?.outcome === 'held') return
+    EffectBus.emit('toast:show', {
+      type: 'warning',
+      title: 'Guide',
+      message: result?.error ? `${idea}: ${result.error}` : `${idea}: no model answered. Check the providers console.`,
+    })
   }
 
-  #currentXform(): Xform | null {
-    const container = this.#host?.container
-    if (!container) return null
-    return { scale: container.scale.x || 1, x: container.position.x, y: container.position.y }
+  /** Fly home. When the flight lands the real cursor is the hive's again. */
+  #leave(): void {
+    const seat = this.#seat
+    const stage = this.#stage
+    if (!seat || seat.leaving) return
+    seat.leaving = true
+    this.#overlay?.leave()
+    this.#overlay?.waggle(false)
+    stage?.clear()
+    document.documentElement.classList.remove('hc-guide')
+    if (!stage) { this.#stop(); return }
+    stage.home(() => undefined, () => this.#stop(), this.#reduced() ? 0 : undefined)
+  }
+
+  /** Hand everything the seat took back, whatever ended it. */
+  #release(): void {
+    this.#seat = null
+    this.#stage?.clear()
+    try { this.#gate()?.unlock('guide') } catch { /* the gate may already be gone */ }
+    EffectBus.emit('quick-menu:on-tile', { active: false })
   }
 
   #anchor(label: string): { x: number; y: number; radius: number } | null {
@@ -541,25 +464,27 @@ export class GuideDrone extends Drone {
     catch { return undefined }
   }
 
-  #center(): Point {
-    return { x: window.innerWidth / 2, y: window.innerHeight / 2 }
-  }
-
   #reduced(): boolean {
     return this.#overlay?.classList.contains('motion') !== true
   }
 
-  #pick(option: string): void {
-    const tile = this.#tile
-    const chosen = option.trim()
-    if (!tile || !chosen) return
-    const name = tile.name || tile.label
-    EffectBus.emit('chat:open', {
-      convoId: this.#convo(tile.label),
-      prefill: `On ${tile.route}, the tile ${name}, the participant chose this suggestion: ${chosen}.`,
-    })
-    this.#overlay?.status('Sent that choice to the conversation.')
-    this.#tile = null
+  /** The beehaviors lit in this hive that could go on this tile. A view that
+   *  decides by the tile's shape answers on the tile, not here. */
+  #offered(tile: GuideTile): GuideBehavior[] {
+    const segments = [...this.#segments(), tile.label].filter(Boolean)
+    try {
+      const registry = window.ioc.get<RegistryApi>('@diamondcoreprocessor.com/VisualBeeRegistry')
+      return (registry?.forPlatform?.('desktop') ?? [])
+        .filter(bee => bee.view && bee.behavior !== 'navigation' && !bee.offersFor)
+        .filter(bee => !bee.decorationKind || !isBehaviorDormant(bee.decorationKind, segments))
+        .map(bee => ({
+          word: bee.view ?? '',
+          icon: bee.toggleIcon || bee.iconName || 'extension',
+          about: (bee.fallbackDescription ?? '').trim(),
+        }))
+    } catch {
+      return []
+    }
   }
 
   #read(label: string, x: number, y: number): GuideTile {
@@ -630,11 +555,9 @@ export class GuideDrone extends Drone {
     const ticket = this.#ticket
     const segments = [...this.#segments(), label].filter(Boolean)
     void this.#gather(label, segments).then(found => {
-      if (ticket !== this.#ticket || this.#label !== label || !this.#on || this.#hold || !found) return
+      if (ticket !== this.#ticket || this.#label !== label || !this.#on || this.#seat || !found) return
       this.#found = { label, value: found }
-      const tile = this.#read(label, this.#point.x, this.#point.y)
-      if (this.#overlay?.dialogOpen) this.#offer(label)
-      else this.#overlay?.hint(hoverLine(tile))
+      this.#overlay?.hint(hoverLine(this.#read(label, this.#point.x, this.#point.y)))
     }).catch(() => undefined)
   }
 
@@ -726,11 +649,6 @@ export class GuideDrone extends Drone {
   #route(label: string): string {
     const segments = [...this.#segments(), label].filter(Boolean)
     return segments.length ? `/${segments.join('/')}` : '/'
-  }
-
-  #convo(label: string): string {
-    const segments = [...this.#segments(), label].filter(Boolean)
-    return newTileConvoId(segments.length ? segments : ['guide'], 'guide')
   }
 
   #segments(): string[] {

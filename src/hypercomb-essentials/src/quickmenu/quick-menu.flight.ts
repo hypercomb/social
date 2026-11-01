@@ -20,6 +20,7 @@ import { viewportIsFramed } from '../sequence/frame-lock.js'
 import type { QuickMenuLayer } from './quick-menu.layer.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { fireQuickMenuSlot } from './quick-menu.fire.js'
+import { NO_SEATS, applyTileSeats, readTileSeats, seatMenu, type TileSeats } from './quick-menu.traits.js'
 import {
   OPPOSITE_DIRECTION,
   slotsByDirection,
@@ -33,6 +34,8 @@ const get = <T,>(key: string): T | undefined =>
 
 /** Fly in / out of the centre. */
 const FLY_MS = 240
+/** Rest on a hold leaf this long and it fires. */
+const HOLD_FIRE_MS = 600
 /** On-screen circumradius of the context tile (and so every option), in px. */
 const TILE_RADIUS_PX = 72
 
@@ -79,6 +82,11 @@ export class QuickMenuFlight {
   #cursor: HTMLElement | null = null
   /** The tile the flower was raised over; verbs that act on a tile get it. */
   #subject: string | null = null
+  /** What this tile has made of its seats. Empty until the read lands. */
+  #seats: TileSeats = NO_SEATS
+  /** Which flight the seats being read belong to. */
+  #seatRead = 0
+  #holdTimer: ReturnType<typeof setTimeout> | null = null
 
   /** Called once a flight has ended, however it ended. */
   onEnd: (() => void) | null = null
@@ -126,6 +134,7 @@ export class QuickMenuFlight {
     const at = this.#layer.centreLocal()
     if (!at) { this.#active = false; return false }
     this.#levels = [{ definition, back: null, at }]
+    this.#readSeats(definition, subject)
 
     this.#virtual = this.#screenCentreClient()
     this.#showCursor()
@@ -142,10 +151,15 @@ export class QuickMenuFlight {
     return true
   }
 
-  /** Finish. `fire` runs the leaf that is lit; either way the camera goes home. */
-  end(fire: boolean): void {
+  /** Finish. `fire` runs the leaf that is lit, except a click leaf, which only
+   *  `confirmed` runs; either way the camera goes home. */
+  end(fire: boolean, confirmed = false): void {
     if (!this.#active) return
-    const slot = fire && this.#ready ? this.#leaf(this.#lit) : undefined
+    const leaf = fire && this.#ready ? this.#leaf(this.#lit) : undefined
+    const slot = leaf?.activation === 'click' && !confirmed ? undefined : leaf
+    this.#clearHold()
+    this.#seatRead++
+    this.#seats = NO_SEATS
     this.#active = false
     this.#ready = false
     this.#lit = null
@@ -174,7 +188,7 @@ export class QuickMenuFlight {
    *  is not an answer, so the flower stays. */
   confirm(): boolean {
     if (!this.#active || !this.#ready || !this.#leaf(this.#lit)) return false
-    this.end(true)
+    this.end(true, true)
     return true
   }
 
@@ -207,6 +221,7 @@ export class QuickMenuFlight {
   #aim(slot: QuickMenuDirection | null): void {
     const level = this.#levels[this.#levels.length - 1]
     if (!level || slot === this.#lit) return
+    this.#clearHold()
     this.#lit = slot
     this.#layer.highlight(slot)
     if (!slot) return
@@ -214,6 +229,30 @@ export class QuickMenuFlight {
     const found = slotsByDirection(level.definition).get(slot)
     if (found?.action.kind === 'menu') { this.#descend(found, slot); return }
     if (found?.activation === 'arrive') this.end(true)
+    if (found?.activation === 'hold') this.#holdTimer = setTimeout(() => this.end(true), HOLD_FIRE_MS)
+  }
+
+  #clearHold(): void {
+    if (this.#holdTimer) clearTimeout(this.#holdTimer)
+    this.#holdTimer = null
+  }
+
+  /** Read the tile's own seats while the camera flies. The shipped flower stands
+   *  until they land, so a slow read never holds the gesture up. */
+  #readSeats(definition: QuickMenuDefinition, subject: string | undefined): void {
+    if (!subject) return
+    const flight = ++this.#seatRead
+    const segments = get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []
+    void readTileSeats([...segments, subject]).then(seats => {
+      if (flight !== this.#seatRead) return
+      this.#seats = seats
+      const root = this.#levels[0]
+      const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
+      if (!root || !registry) return
+      const mine = applyTileSeats(definition, seats)
+      this.#levels[0] = { ...root, definition: mine }
+      if (this.#levels.length === 1) this.#layer.show(mine, registry.label, null, '')
+    })
   }
 
   /** The lit option, when it is a verb rather than a pathway or the way back. */
@@ -227,10 +266,11 @@ export class QuickMenuFlight {
   #descend(via: QuickMenuSlot, direction: QuickMenuDirection): void {
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
     if (via.action.kind !== 'menu' || !registry) return
-    const definition = registry.byName(via.action.menu)
+    const back = OPPOSITE_DIRECTION[direction]
+    const definition = registry.byName(via.action.menu) ?? seatMenu(via.action.menu, this.#seats, back)
     const at = this.#layer.slotLocal(direction)
     if (!definition || !at) return
-    this.#levels.push({ definition, back: OPPOSITE_DIRECTION[direction], at })
+    this.#levels.push({ definition: applyTileSeats(definition, this.#seats), back, at })
     this.#step(this.#levels[this.#levels.length - 1])
   }
 

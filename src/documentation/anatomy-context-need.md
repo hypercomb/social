@@ -87,6 +87,18 @@ instruction becomes "static anatomy + live roster"; the bridge-listen
 bridge; the doctrine docs are the *source* the generator reads, not a fourth
 copy.
 
+## 2b. The codex is the seed (2026-11-01)
+
+The doctrine seed is no longer lifted section by section from eight documents.
+`documentation/doctrine.codex` is the one artifact: tiers ordered base to leaf,
+one line per axiom (`H2<H1: rule`), every axiom citing only earlier ones.
+`build-anatomy.ts` parses it (`anatomy/codex.ts`), refuses a codex whose
+citations point forward or whose tiers name a missing document, and emits one
+doctrine section per tier (a tier scoped `[code]` is for agents that change
+code and stays out of the chat). A tier's title is the name Jev reports a rule
+by. The mechanics keep only the working protocol; every definition lives in the
+codex, once. Guarded by `anatomy/codex.spec.ts`.
+
 ## 2a. The doctrine is a hive artifact (2026-09-21)
 
 jwize: "the real goal is to create only hive artifacts that hold everything."

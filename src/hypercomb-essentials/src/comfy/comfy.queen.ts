@@ -2,12 +2,12 @@
 //
 // /comfy — make a picture with your own machine.
 //
-//   /comfy                          — open the ComfyUI window
-//   /comfy a lantern in fog         — make that, as its own tile
+//   /comfy                          — open the ComfyUI desk
+//   /comfy a lantern in fog         — make that: on the selected tiles, else an asset
 //   /comfy host                     — where ComfyUI is, and whether it answers
 //   /comfy host discover            — try the usual addresses
 //   /comfy host 127.0.0.1:8188      — point somewhere else
-//   /comfy folder                   — link ComfyUI's own folder (in the window)
+//   /comfy folder                   — link ComfyUI's own folder (on the desk)
 //   /comfy workflow                 — the workflows this hive holds
 //   /comfy workflow portrait        — work with that one
 //   /comfy models                   — the checkpoints the host actually has
@@ -28,8 +28,8 @@
 // else is a prompt. A member list that also had to hold every possible
 // sentence would be no list at all.
 //
-// WHY THE BARE WORD OPENS THE WINDOW rather than generating something: with
-// no prompt there is nothing to make, and the window is where the prompt, the
+// WHY THE BARE WORD OPENS THE DESK rather than generating something: with no
+// prompt there is nothing to make, and the desk is where the prompt, the
 // workflow, the size and the results all are. Same door, said twice.
 
 import {
@@ -95,15 +95,15 @@ registerCommandRoot('comfy', comfyObject)
 export class ComfyQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'comfy'
-  override description = 'Make a picture with ComfyUI and put it on a tile'
+  override description = 'Make pictures with ComfyUI and keep them as assets'
   override descriptionKey = 'slash.comfy'
   override options = [
     '<prompt>', 'host', 'host discover', 'host <address>', 'folder',
     'workflow', 'workflow <name>', 'models', 'reroll', 'cancel',
   ]
   override examples = [
-    { input: '/comfy', result: 'Opens the ComfyUI window' },
-    { input: '/comfy a paper lantern in fog', result: 'Generates that and puts it on the selected tile' },
+    { input: '/comfy', result: 'Opens the ComfyUI desk' },
+    { input: '/comfy a paper lantern in fog', result: 'Generates that: on the selected tiles, else an asset on the desk' },
     { input: '/comfy reroll', result: 'Makes this tile’s picture again with a new seed' },
   ]
 
@@ -141,11 +141,11 @@ export class ComfyQueenBee extends QueenBee {
       case 'folder': {
         // A folder has to be CHOSEN, and a command line cannot open a file
         // picker — the browser requires the click to be the same gesture.
-        // The window has the button, so the word lands you there.
+        // The desk has the button, so the word lands you there.
         EffectBus.emit('comfy:open', { section: 'folder' })
         this.#log(comfyFolder.linked
           ? `ComfyUI folder linked${comfyFolder.label ? ` — ${comfyFolder.label}` : ''}`
-          : 'pick ComfyUI’s folder in the window')
+          : 'pick ComfyUI’s folder on the desk')
         return
       }
       case 'workflow':

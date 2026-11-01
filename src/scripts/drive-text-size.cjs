@@ -98,31 +98,35 @@ async function main() {
     const base = await page.evaluate(fontPx, '.command-intel')
     check('completion panel renders at a measurable size', base > 0, `${base}px`)
 
-    // The ladder lives behind a gear now — closed, the pane shows one glyph.
-    check('the ladder is CLOSED until the gear is used',
-      await page.locator('.command-intel .text-scale-step').count() === 0)
+    // The slider lives behind a gear — closed, the pane shows one glyph.
+    check('the slider is CLOSED until the gear is used',
+      await page.locator('.command-intel .text-scale-track').count() === 0)
     const gear = page.locator('.command-intel .text-scale-gear').first()
     check('the detail pane carries a gear', await gear.count() > 0)
     await gear.click(); await page.waitForTimeout(350)
 
-    const large = page.locator('.command-intel .text-scale-step', { hasText: 'Large' }).first()
-    check('the gear opens the ladder', await large.count() > 0)
-    await large.click()
+    const track = page.locator('.command-intel .text-scale-track').first()
+    check('the gear opens the slider', await track.count() > 0)
+    const box = await track.boundingBox()
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width * 0.45, box.y + box.height / 2, { steps: 6 })
+    await page.mouse.up()
     await page.waitForTimeout(500)
     const grown = await page.evaluate(fontPx, '.command-intel')
-    check('picking Large actually grows the panel', grown > base + 0.5,
+    check('dragging the slider actually grows the panel', grown > base + 0.5,
       `${base}px → ${grown}px (expected ×1.15)`)
 
     const stored = await page.evaluate(() => localStorage.getItem('hc:panel-text:command-intel'))
-    check('the pick lands on the docked-panel key', stored === '1.15',
+    check('the drag lands on the docked-panel key', stored === '1.15',
       `hc:panel-text:command-intel = ${stored}`)
 
-    // Ctrl+= steps one more rung, from the keyboard, without leaving the input.
+    // Ctrl+= steps once more, from the keyboard, without leaving the input.
     await page.keyboard.press('Control+Equal')
     await page.waitForTimeout(500)
     const stepped = await page.evaluate(() => localStorage.getItem('hc:panel-text:command-intel'))
     const steppedPx = await page.evaluate(fontPx, '.command-intel')
-    check('Ctrl+= steps up the ladder', stepped === '1.32' && steppedPx > grown,
+    check('Ctrl+= steps up', stepped === '1.2' && steppedPx > grown,
       `${stored} → ${stepped}, ${grown}px → ${steppedPx}px`)
 
     await page.keyboard.press('Control+Minus')
@@ -173,12 +177,12 @@ async function main() {
       const eBase = await page.evaluate(fontPx, EDITOR)
       await page.locator(`${EDITOR} [data-hc-panel-settings]`).first().click()
       await page.waitForTimeout(350)
-      const eLarger = page.locator('[data-hc-panel-settings-pop]').getByText('Larger', { exact: true }).first()
-      check('the editor offers the same gear and ladder', await eLarger.count() > 0)
-      await eLarger.click()
+      const eSlider = page.locator('[data-hc-panel-settings-pop] input[data-hc-row="text"]').first()
+      check('the editor offers the same gear and slider', await eSlider.count() > 0)
+      await eSlider.fill('1.32')
       await page.waitForTimeout(500)
       const eGrown = await page.evaluate(fontPx, EDITOR)
-      check('picking Larger grows the editor', eGrown > eBase + 0.5, `${eBase}px → ${eGrown}px`)
+      check('the slider grows the editor', eGrown > eBase + 0.5, `${eBase}px → ${eGrown}px`)
       check('the editor writes its own record',
         await page.evaluate(() => localStorage.getItem('hc:panel-text:tile-editor')) === '1.32')
       await dropOverlay()
