@@ -63,6 +63,13 @@ unknown, because its pipeline does not report what it did.
 Calls queue in the hive, in the order they arrive, whoever sends them; the
 door holds none back itself.
 
+The bridge's `submit` is the same call: while the bridge carries lines only
+(the default, [claude-bridge-setup.md](claude-bridge-setup.md#lines-only-the-bridge-is-shut-off-by-default-2026-11-01)),
+a line sent over it waits for your Enter in exactly this way.
+
+Enter is taken only once a call has been on the line for a second, so an Enter
+you meant for your own line cannot run something that arrived under it.
+
 ## Speaking as yourself
 
 `--participant` turns the gate off for a hive you drive alone: each sentence

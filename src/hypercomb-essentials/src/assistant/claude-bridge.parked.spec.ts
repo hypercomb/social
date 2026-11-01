@@ -14,6 +14,10 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 
+// These exercise the whole bridge, which a participant opens by hand; by
+// default it carries command-line lines only (claude-bridge.worker.ts).
+localStorage.setItem('hc:bridge:open', 'all')
+
 class FakeSocket {
   static readonly OPEN = 1
   static made: FakeSocket[] = []

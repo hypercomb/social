@@ -206,6 +206,10 @@ const SUMMON_STANCES = new Map<string, Stance>([
  */
 export type Stance = 'tiles' | 'command' | 'find'
 
+/** How long a call from outside must have been on the line before Enter
+ *  runs it. */
+const EXTERNAL_ARM_MS = 1000
+
 /** How long the line must settle before the hive is asked. A read, not a
  *  keystroke, is what deserves one. */
 const FIND_DEBOUNCE_MS = 120
@@ -2963,6 +2967,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** What the participant had on the line when a call took it over, given
    *  back when nothing waits any more. */
   #heldLine: string | null = null
+  /** When the call on the line was put there. Enter is not taken for a call
+   *  younger than {@link EXTERNAL_ARM_MS}: an Enter meant for the line the
+   *  participant was typing must not run something that arrived under it. */
+  #externalShownAt = 0
 
   #externalLine(ask: ExternalAsk): string {
     const t = this.#i18n
@@ -2978,6 +2986,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const before = this.#external()
     if (!ask && !before) return
     if (ask && !before) this.#heldLine = this.value()
+    if (ask && ask.id !== before?.id) this.#externalShownAt = Date.now()
     this.#external.set(ask)
     if (ask) {
       this.#setShellValue(this.#externalLine(ask), true)
@@ -3700,7 +3709,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    */
   public onShellCommit = (v: string): void => {
     if (this.#external()) {
-      this.#answerExternal('run')
+      if (Date.now() - this.#externalShownAt >= EXTERNAL_ARM_MS) this.#answerExternal('run')
       return
     }
     const capture = this.#captureMode()
