@@ -46,6 +46,7 @@ import { HOST_LISTING_FLOOR, listedMeanings } from '../host-listing.js'
 import { nostrJson } from '../nip05-names.js'
 import { decodeTransferPack, encodeTransferPack, gunzipBytes, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.ts'
 import { INSTANCE_HEAD_KEY, INSTANCE_HEAD_PATH, formatInstanceHead, parseInstanceHead } from '../../hypercomb-runtime/src/instance-head.ts'
+import { markWorkbenchPage } from '../../hypercomb-runtime/src/workbench-page.ts'
 import { KEY_LIST_MEANING } from '../../hypercomb-core/src/core/key-list.ts'
 import { keyLists } from './key-lists.js'
 
@@ -241,11 +242,16 @@ function resolveSite(env, hostname) {
   if (!zone || host === `content.${zone}`) return { site: null, implicit: false, zone: zone ?? null }
   const label = host.slice(0, -(zone.length + 1))
   if (label === HOST_DOOR_LABEL && bindings[zone].frontDoor === true) return { site: null, implicit: false, zone, hostDoor: true }
-  if (!DNS_LABEL_RE.test(label)) return { site: null, implicit: false, zone }
+  // THE HOST NAME IS THE WORKSPACE LOCATION, AT ANY DEPTH (jwize 2026-10-31):
+  // `child.parent` reads leaf-first like DNS, so `child.parent.<zone>` is the
+  // lineage `parent/child`. One label is the old top-level rule, unchanged.
+  const labels = label.split('.')
+  if (!labels.every((l) => DNS_LABEL_RE.test(l))) return { site: null, implicit: false, zone }
   const addressed = env?.[ADDRESS_SITES]?.get(host)
   if (addressed) return { site: addressed, implicit: false, zone, address: true }
+  const lineage = [...labels].reverse().join('/')
   return {
-    site: { title: label, lineage: label, publishers: bindings[zone].publishers },
+    site: { title: labels[0], lineage, publishers: bindings[zone].publishers },
     implicit: true,
     zone,
   }
@@ -1063,9 +1069,11 @@ async function hostsOfLineage(env, read, lineage) {
   for (const [host, bound] of Object.entries(bindings)) {
     if (bound.lineage === lineage && bound.routed) accept(await consider(host))
   }
-  if (lineage && !lineage.includes('/') && DNS_LABEL_RE.test(lineage)) {
+  const segments = String(lineage || '').split('/')
+  if (lineage && segments.every((l) => DNS_LABEL_RE.test(l))) {
     const rest = []
-    for (const zone of zones) if (!claimed.has(zone)) rest.push(`${lineage}.${zone}`)
+    const name = [...segments].reverse().join('.')
+    for (const zone of zones) if (!claimed.has(zone)) rest.push(`${name}.${zone}`)
     for (const door of await Promise.all(rest.map(consider))) accept(door)
   }
   return doors
@@ -3340,7 +3348,7 @@ async function serveSandboxShell(request, env, zone) {
     // this document. The signer is pinned here, while the page is still the
     // shell's, so the package cannot put window.nostr back. A swarm door
     // signs; it is not pinned.
-    if (SANDBOX_LABEL_RE.test(url.hostname.split('.')[0])) page = pinNostrOff(page)
+    if (SANDBOX_LABEL_RE.test(url.hostname.split('.')[0])) page = pinNostrOff(markWorkbenchPage(page, url.hostname))
     return new Response(page, { status: upstream.status, headers })
   }
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })

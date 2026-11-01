@@ -554,10 +554,10 @@ test('a nested lineage reports exactly its bound host', async () => {
   const registry = await (await worker.fetch(
     new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
 
-  // The wildcard maps ONE label, never a path — `meetup.hypercomb.com` is not
-  // a door and inventing one would advertise a 404.
+  // The host name is the location, leaf first — `meetup.revolucion` is
+  // `revolucion/meetup`.
   const meetup = registry.sites.find((s) => s.lineage === 'revolucion/meetup')
-  assert.deepEqual(meetup.hosts.map((h) => h.host), ['meetup.pluginthematrix.com'])
+  assert.deepEqual(meetup.hosts.map((h) => h.host), ['meetup.pluginthematrix.com', 'meetup.revolucion.hypercomb.com'])
 })
 
 test('a route that is not deployed is not a door', async () => {
@@ -3239,8 +3239,9 @@ test('the relay face and an unbound host vouch for nobody', async () => {
   const { env } = await fixture()
   assert.deepEqual(await namesAt(env, 'content.pluginthematrix.com'), {})
   assert.deepEqual(await namesAt(env, 'unbound.example'), {})
-  // A name the wildcard cannot bring to life is no site either.
-  assert.deepEqual(await namesAt(env, 'a.b.pluginthematrix.com'), {})
+  // A name the wildcard cannot bring to life is no site either (any depth of
+  // valid labels is a location now; a bad label anywhere is not).
+  assert.deepEqual(await namesAt(env, 'a.b_c.pluginthematrix.com'), {})
 })
 
 test('a label two keys share on one host names neither; one key may hold several labels', async () => {
