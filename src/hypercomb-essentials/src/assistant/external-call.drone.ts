@@ -24,7 +24,7 @@
 
 import {
   Drone, EffectBus, EXTERNAL_ANSWER, EXTERNAL_ASK, EXTERNAL_CALL, REMOTE_SUBMIT,
-  formatRemoteSubmitOutcome, I18N_IOC_KEY, type I18nProvider,
+  formatRemoteSubmitOutcome, canonicalVerbOf, I18N_IOC_KEY, type I18nProvider,
   type ExternalAnswer, type ExternalAsk, type ExternalCallOutcome, type ExternalCallRequest,
   type ExternalLineResult, type RemoteSubmitOutcome, type RemoteSubmitRequest,
 } from '@hypercomb/core'
@@ -71,6 +71,41 @@ const sayLine = (text: string): Promise<RemoteSubmitOutcome> => new Promise(reso
   const request: RemoteSubmitRequest = { text, accept: () => { heard = true }, complete: settle }
   EffectBus.emitTransient(REMOTE_SUBMIT, request)
   if (!heard) settle({ kind: 'unknown', reason: 'no command line is open to say it' })
+})
+
+// A line the remote door answers `unknown` was handed to a pipeline that does
+// not wait for it, and `go` walks the hive after it answers. Before the next
+// line, let the hive arrive: the next line must run where the last one left
+// it, or a planting's children all land in the layer it started from.
+const GO_DEADLINE_MS = 5_000
+const SETTLE_MS = 900
+
+const verbOf = (text: string): string =>
+  canonicalVerbOf(text) || (text.trim().split(/\s+/)[0] ?? '').toLowerCase()
+
+/** Resolves when `go` says where it went (it reports every outcome in the
+ *  activity log), or at the deadline. Subscribed before the line is said. */
+const goReported = (): { done: Promise<void>; stop: () => void } => {
+  let live = false
+  let stop = (): void => { /* replaced below */ }
+  const done = new Promise<void>(resolve => {
+    const timer = setTimeout(() => finish(), GO_DEADLINE_MS)
+    // The bus replays its last value to a new listener: that is an old line.
+    const off = EffectBus.on<{ message?: string }>('activity:log', entry => {
+      if (live && String(entry?.message ?? '').startsWith('Go:')) finish()
+    })
+    live = true
+    function finish(): void { clearTimeout(timer); off(); resolve() }
+    stop = finish
+  })
+  return { done, stop }
+}
+
+/** The processor's next settled pass, or a short wait if none comes. */
+const settled = (): Promise<void> => new Promise(resolve => {
+  const finish = (): void => { clearTimeout(timer); window.removeEventListener('synchronize', finish); resolve() }
+  const timer = setTimeout(finish, SETTLE_MS)
+  window.addEventListener('synchronize', finish)
 })
 
 export class ExternalCallDrone extends Drone {
@@ -168,7 +203,16 @@ export class ExternalCallDrone extends Drone {
     EffectBus.emit('chat:open', { convoId })
     const results: ExternalLineResult[] = []
     for (const text of call.lines) {
-      const verdict = formatRemoteSubmitOutcome(await sayLine(text))
+      const walking = verbOf(text) === 'go' ? goReported() : null
+      const outcome = await sayLine(text)
+      if (walking) {
+        if (outcome.kind === 'refused' || outcome.kind === 'ambiguous') walking.stop()
+        await walking.done
+        await settled()
+      } else if (outcome.kind === 'unknown') {
+        await settled()
+      }
+      const verdict = formatRemoteSubmitOutcome(outcome)
       results.push({ text, verdict })
       await deliverTurn(convoId, 'assistant', `${text}\n→ ${verdict}`)
     }

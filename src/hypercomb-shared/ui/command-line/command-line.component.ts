@@ -2441,8 +2441,32 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         return
       }
 
-      // The legacy tag/slash pipeline resolves through fire-and-forget
-      // branches, so awaiting it would prove delivery and not completion.
+      // A PLAIN BEHAVIOUR CALL IS AWAITED. `/trait a b`, `/go /x`: one word a
+      // behaviour claims, with the arguments its executor is handed. Run it
+      // as a reading's action is run, through the behaviour drone's own
+      // `execute`, so the answer comes when the behaviour has finished, not
+      // when it was handed on. A caller saying lines in order needs exactly
+      // that: measured 2026-11-01, a six-word `/trait` answered unknown at
+      // once and the next line's `/go` walked away while it was still making
+      // its tiles, so they landed in the wrong layer or not at all.
+      const only = !prose && named.length === 1 ? named[0] : undefined
+      const behaviours = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as { has?(name: string): boolean } | undefined
+      if (only?.verb && only.args !== undefined && behaviours?.has?.(only.verb)) {
+        void this.#executeReading({
+          text: line, spans: [], ambiguous: false, hasAction: true,
+          actions: [{ command: only.verb, args: only.args }],
+        })
+          .then(actions => settle({ kind: 'ran', actions }))
+          .catch(error => settle({
+            kind: 'unknown',
+            reason: error instanceof Error ? error.message : String(error),
+          }))
+        return
+      }
+
+      // Anything else (tags, selections, paths, views) takes the legacy
+      // pipeline, which resolves through fire-and-forget branches, so
+      // awaiting it would prove delivery and not completion.
       // Rather than mint a fake receipt it answers UNKNOWN — the same law the
       // pool reader is owed: never answer from anything but a positive,
       // complete result.
