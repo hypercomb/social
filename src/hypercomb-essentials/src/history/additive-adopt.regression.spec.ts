@@ -179,9 +179,21 @@ let brokerFailed = 0
 /** The page the participant is standing on (the lineage's explorer segments). */
 let standingAt: string[] = []
 
+/** The root of the world under test - what settleLong watches go quiet. */
+let liveRoot: MemoryDirectory | null = null
+
 const world = async (): Promise<World> => {
+  // Every HistoryService ever built in this file still holds a 1.5s debounced
+  // head-index write and a pagehide listener. Flush them NOW (pagehide), then
+  // clear: otherwise a previous world's timer fires mid-test and plants ITS
+  // lineage->sig entries (same lineage, same marker number, different content)
+  // in this world's localStorage, where a fresh HistoryService restores and
+  // trusts them (the validation is filename-only) - the source of the
+  // 'cold head committed over' flake.
+  window.dispatchEvent(new Event('pagehide'))
   localStorage.clear()
   const root = new MemoryDirectory()
+  liveRoot = root
   const clipboardDir = new MemoryDirectory()
   const store: Record<string, unknown> = {
     hypercombRoot: root, opfsRoot: root, clipboard: clipboardDir,
@@ -455,7 +467,25 @@ const assertHers = async (c: Ctx, label: string, opts: { expectAdds: boolean }):
 }
 
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(r => setTimeout(r, 0)) }
-const settleLong = async () => { await settle(); await new Promise(r => setTimeout(r, 60)); await settle() }
+// Detached work (a mesh adopt's fold, a paste's commit cascade) takes a load-
+// dependent time, so a fixed sleep is a coin flip on a busy worker. Wait until the
+// store has stopped changing (markers + files) for several consecutive ticks.
+const storeShape = (): string => {
+  const root = liveRoot
+  return root ? `${root.files.size}|${bagsFingerprint(root)}` : ''
+}
+const settleLong = async () => {
+  await settle()
+  await new Promise(r => setTimeout(r, 60))
+  let last = storeShape()
+  for (let calm = 0, spent = 0; calm < 4 && spent < 8_000; spent += 50) {
+    await new Promise(r => setTimeout(r, 50))
+    const now = storeShape()
+    calm = now === last ? calm + 1 : 0
+    last = now
+  }
+  await settle()
+}
 
 const branchOf = (c: Ctx) => ({ layerSig: c.bSig, at: [...c.at], label: 'susan' })
 
@@ -509,8 +539,13 @@ describe.each(SCENARIOS)('the susan incident - $name', (sc) => {
     const resumed = new SwarmAdoptDrone()
     await vi.advanceTimersByTimeAsync(21_000)
     vi.useRealTimers()
+    // A drone subscribes to the global EffectBus for good. Left alive it would
+    // answer every later tile:action in this file too, racing the shared drone
+    // (and each other) over the same commits - the source of this spec's
+    // run-to-run flakes. Retire it and its pending-fold record.
+    resumed.markDisposed()
+    localStorage.removeItem('hc:pending-folds')
     await settle()
-    void resumed
     // FOLD is documented idempotent: a tile already here is left untouched.
     // Her content must be intact; his additions are NOT required of fold.
     await assertHers(c, 'fold', { expectAdds: false })
@@ -551,9 +586,18 @@ describe.each(SCENARIOS)('the susan incident - $name', (sc) => {
     const svc = services.get('@diamondcoreprocessor.com/ClipboardService') as InstanceType<typeof ClipboardService>
     const paste = async () => {
       svc.captureEntries([{ label: 'susan', sourceSegments: ['elsewhere'], sig: c.bSig }])
-      const done = new Promise<void>(resolve => EffectBus.on('clipboard:paste-done', () => resolve()))
+      // EffectBus replays the last value to a late subscriber, so a paste-done from
+      // an earlier paste/test would resolve this wait before THIS paste ran. Ignore
+      // the synchronous replay and unsubscribe when done.
+      let live = false
+      let off = () => {}
+      const done = new Promise<void>(resolve => {
+        off = EffectBus.on('clipboard:paste-done', () => { if (live) resolve() })
+      })
+      live = true
       EffectBus.emit('controls:action', { action: 'paste', targetSegments: [...c.at] })
       await done
+      off()
       await settleLong()
     }
     await paste()
@@ -597,6 +641,8 @@ describe('the susan incident - a head that cannot be read yet is never overwritt
     const file = c.w.root.files.get(head)!
     c.w.root.files.delete(head)
     // A fresh session: nothing parsed in memory, so the missing bytes are really missing.
+    // A fresh session restores the head index the old one persisted when it went away.
+    window.dispatchEvent(new Event('pagehide'))
     c.w.history = withMute(() => new HistoryService())
     services.set('@diamondcoreprocessor.com/HistoryService', c.w.history)
     const res = await adoptDrone.adoptResolvedBranch(branchOf(c), { silent: true })
