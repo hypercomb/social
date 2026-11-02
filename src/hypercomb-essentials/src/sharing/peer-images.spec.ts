@@ -236,6 +236,13 @@ describe('peer image candidates', () => {
     expect(previewSigOf({})).toBe('')
   })
 
+  it('offers the large picture only when it is the one pointer the publisher sent', () => {
+    expect(imagePropsOf({ large: { image: OTHER, x: 3, y: 4, scale: 2 } })).toEqual({ large: { image: OTHER } })
+    // With a thumbnail present the thumbnail is the candidate; large stays theirs.
+    expect(imagePropsOf({ small: { image: POINT }, large: { image: OTHER } })).toEqual({ small: { image: POINT } })
+    expect(previewSigOf({ large: { image: OTHER } })).toBe(OTHER)
+  })
+
   it('reads image pointers off a visual without copying anything else', () => {
     const props = imagePropsOf({ small: { image: POINT }, tags: ['x'], link: 'https://e.com', index: 2 })
     expect(props).toEqual({ small: { image: POINT } })

@@ -462,7 +462,7 @@ export class ImageChoiceDrone extends Drone {
     try {
       const sigs = choice.held
         ? [choice.props.imageSig]
-        : [choice.props.small?.image, choice.props.flat?.small.image, choice.props.point?.image, choice.props.imageSig]
+        : [choice.props.small?.image, choice.props.flat?.small.image, choice.props.point?.image, choice.props.imageSig, choice.props.large?.image]
       const blobs = await Promise.all(sigs.filter((s): s is string => typeof s === 'string').map(s => this.#bytes(s)))
       if (blobs.some(b => !b)) {
         this.emitEffect('toast:show', { type: 'warning', message: this.#t('images.failed', 'That picture could not be fetched — nothing changed.') })
@@ -485,7 +485,9 @@ export class ImageChoiceDrone extends Drone {
               flat: choice.props.flat,
               point: choice.props.point,
               imageSig: choice.props.imageSig,
-              large: undefined,
+              // A publisher whose tile wears `large` alone: so does this one,
+              // at the default framing the held path uses.
+              large: choice.props.large ? { image: choice.props.large.image, x: 0, y: 0, scale: 1 } : undefined,
               substrate: undefined,
             }
         if (oldLarge && existing['link'] === `${RESOURCE_URL_PREFIX}${oldLarge}`) {

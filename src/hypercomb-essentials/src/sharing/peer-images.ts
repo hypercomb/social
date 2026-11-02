@@ -35,6 +35,10 @@ export type PeerImageProps = {
   small?: { image: string }
   flat?: { small: { image: string } }
   point?: { image: string }
+  /** The publisher's full picture, carried ONLY when it is the one pointer they
+   *  sent — a tile that wears a picture straight from the wall, or one dropped
+   *  before its thumbnails were cut, has `large` alone. */
+  large?: { image: string }
 }
 
 export type PeerImageCandidate = {
@@ -199,19 +203,21 @@ export const imagePropsOf = (visual: Record<string, unknown>): PeerImageProps | 
   if (flatSmall) props.flat = { small: { image: flatSmall } }
   const point = nested(visual['point'], 'image')
   if (point) props.point = { image: point }
-  return props.imageSig || props.small || props.flat || props.point ? props : undefined
+  if (props.imageSig || props.small || props.flat || props.point) return props
+  const large = nested(visual['large'], 'image')
+  return large ? { large: { image: large } } : undefined
 }
 
 /** The signature a picker should paint for these pointers: the point-top
  *  thumbnail the app draws by default, then the flat-top variant, then the
  *  bare pointer. */
 export const previewSigOf = (props: PeerImageProps): string =>
-  props.small?.image ?? props.point?.image ?? props.flat?.small.image ?? props.imageSig ?? ''
+  props.small?.image ?? props.point?.image ?? props.flat?.small.image ?? props.imageSig ?? props.large?.image ?? ''
 
 /** Identity of a candidate — two peers who carry the same picture are ONE
  *  choice with two names on it, not two identical hexagons. */
 const candidateKey = (props: PeerImageProps): string =>
-  [props.small?.image ?? '', props.flat?.small.image ?? '', props.point?.image ?? '', props.imageSig ?? ''].join('|')
+  [props.small?.image ?? '', props.flat?.small.image ?? '', props.point?.image ?? '', props.imageSig ?? '', props.large?.image ?? ''].join('|')
 
 const candidatesFrom = (
   name: string,
