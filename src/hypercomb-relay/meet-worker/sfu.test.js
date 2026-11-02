@@ -19,6 +19,11 @@ function fakeCloudflare() {
     const body = init.body ? JSON.parse(init.body) : undefined
     calls.push({ url, method: init.method, auth: init.headers.Authorization, body })
     let data = {}
+    // As Cloudflare does: a body on sessions/new is read as a session
+    // description, and one without it is refused.
+    if (url.endsWith('/sessions/new') && body !== undefined && !body.sessionDescription) {
+      return new Response(JSON.stringify({ errorCode: 'decoding_error', errorDescription: 'Body JSON validation error: sessionDescription' }), { status: 400 })
+    }
     if (url.endsWith('/sessions/new')) data = { sessionId: `session-${++n}-xxxxxxxx` }
     else if (url.endsWith('/tracks/new')) data = { tracks: body.tracks.map((t, i) => ({ mid: String(i + 1), trackName: t.trackName })), sessionDescription: ANSWER }
     else data = { ok: true }
@@ -99,6 +104,7 @@ test('the token goes to Cloudflare, never back to the browser', async () => {
   assert.match(id, /^session-1/)
   assert.equal(cf.calls[0].url, 'https://rtc.live.cloudflare.com/v1/apps/app/sessions/new')
   assert.equal(cf.calls[0].auth, 'Bearer secret-token')
+  assert.equal(cf.calls[0].body, undefined, 'sessions/new is sent no body')
 })
 
 test('a session must name its meeting; seven publishers fill it', async () => {
