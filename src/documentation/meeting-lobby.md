@@ -98,14 +98,10 @@ six.
 
 1. Cloudflare dashboard → Realtime → SFU: create an app; note its App ID and
    App token.
-2. On each meet worker:
-   ```
-   wrangler secret put SFU_APP_ID    --config wrangler.meet.toml
-   wrangler secret put SFU_APP_TOKEN --config wrangler.meet.toml
-   wrangler secret put SFU_APP_ID    --config wrangler.meet-open.toml
-   wrangler secret put SFU_APP_TOKEN --config wrangler.meet-open.toml
-   ```
-   then deploy both (`npm run deploy`, `npm run deploy:open` in meet-worker).
+2. In `hypercomb-relay/meet-worker`: `npm run video:setup`. It asks for the
+   App ID and the App token (not shown), puts both on each meet worker
+   (`wrangler.meet.toml`, `wrangler.meet-open.toml`) and deploys both.
+   `--no-deploy` sets the secrets only.
 3. The shell's outgoing firewall must let a peer connection name Cloudflare's
    STUN — see below.
 
@@ -171,6 +167,8 @@ the mesh or a camera, by design. Proposal:
   video — one request at a time
 - `hypercomb-relay/meet-worker/sfu.js`: the meeting point's half — the
   routes, the app token, the month's budget
+- `hypercomb-relay/meet-worker/scripts/video-setup.mjs`: `npm run
+  video:setup`, turning video on for both meet workers
 - `hypercomb-essentials/src/meeting/meeting-hive.drone.ts` and
   `meeting/hive/meeting-hive.view.ts`: the participants' hive, opened on join
   and toggled by the meeting icon (`meeting:view-toggle`, `meeting:view`)
