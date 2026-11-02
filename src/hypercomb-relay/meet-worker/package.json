@@ -5,14 +5,15 @@
   "type": "module",
   "main": "worker.js",
   "scripts": {
-    "check": "node --check worker.js && node --check access.js && node --check meeting.js && node --check scripts/recycle-code.mjs",
-    "test": "node --test meeting.test.js worker.test.js",
+    "check": "node --check worker.js && node --check access.js && node --check meeting.js && node --check sfu.js && node --check scripts/recycle-code.mjs && node --check scripts/video-setup.mjs",
+    "test": "node --test meeting.test.js worker.test.js sfu.test.js",
     "test:dev": "node --test meet.dev.test.js",
     "dev": "wrangler dev --local --config wrangler.meet.toml",
     "dev:open": "wrangler dev --local --config wrangler.meet-open.toml",
     "deploy": "wrangler deploy --config wrangler.meet.toml",
     "deploy:open": "wrangler deploy --config wrangler.meet-open.toml",
-    "recycle": "node scripts/recycle-code.mjs"
+    "recycle": "node scripts/recycle-code.mjs",
+    "video:setup": "node scripts/video-setup.mjs"
   },
   "dependencies": {
     "@noble/curves": "^1.9.0",
