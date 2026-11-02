@@ -434,7 +434,7 @@ export class MeetingLobbyElement extends HTMLElement {
     const copy = make('button', 'ml-btn', t('meeting.lobby-copy-link', 'copy link'))
     copy.type = 'button'
     copy.addEventListener('click', () => {
-      void ioc<{ meetingLink?: () => Promise<void> }>(KEYS.invite)?.meetingLink?.()
+      void ioc<{ meetingLink?: (how?: 'copy' | 'share') => Promise<void> }>(KEYS.invite)?.meetingLink?.('copy')
     })
 
     const cancel = make('button', 'ml-btn', t('meeting.lobby-cancel', 'cancel'))

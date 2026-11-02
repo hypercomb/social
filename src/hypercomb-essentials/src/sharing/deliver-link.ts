@@ -23,6 +23,10 @@ import { EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core
 
 export type LinkDelivery = 'shared' | 'copied' | 'offered'
 
+/** The copy-only twin of SHARE_DELIVER_EFFECT: its toast button copies, and
+ *  never opens the share sheet. */
+export const COPY_DELIVER_EFFECT = 'share:copy'
+
 /** The effect the sticky toast's button emits — its handler below re-runs
  *  the ladder INSIDE that click. Exported so a mint site that already holds a
  *  URL (a panel's own Share button) can ride the same fresh-tap path. */
@@ -45,6 +49,32 @@ EffectBus.on<{ url?: unknown; title?: unknown }>(SHARE_DELIVER_EFFECT, payload =
   }
   void navigator.clipboard?.writeText?.(url).catch(() => { /* the toast already carried the URL */ })
 })
+
+EffectBus.on<{ url?: unknown }>(COPY_DELIVER_EFFECT, payload => {
+  const url = typeof payload?.url === 'string' ? payload.url : ''
+  if (url) void navigator.clipboard?.writeText?.(url).catch(() => { /* the toast already carried the URL */ })
+})
+
+/** Copy `url`, and nothing else: no share sheet ever opens from here (jwize,
+ *  2026-11-02: "don't popup the share interface without warning"). Where the
+ *  clipboard refuses (a stale tap), the URL is put on screen behind a Copy
+ *  button — a fresh tap. */
+export async function copyLink(url: string): Promise<'copied' | 'offered'> {
+  try {
+    await navigator.clipboard.writeText(url)
+    return 'copied'
+  } catch { /* stale activation or no permission — offer a fresh tap */ }
+  const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+  EffectBus.emit('toast:show', {
+    type: 'info',
+    message: url,
+    duration: 0,
+    actionLabel: i18n?.t('share.copy') ?? 'Copy',
+    actionEffect: COPY_DELIVER_EFFECT,
+    actionPayload: { url },
+  })
+  return 'offered'
+}
 
 /** Hand `url` to the participant: sheet, clipboard, or a fresh-tap offer.
  *  Returns what actually happened so the caller's own message can say it. */

@@ -2138,6 +2138,7 @@
   "invite.link.title": "Invite link",
   "invite.title": "Invite",
   "share.offer": "Share",
+  "share.copy": "Copy",
   "slash.snapshot": "Freeze the whole hive under a name you can come back to",
   "slash.save": "Save as <name> — file this root under a name and start on an empty root",
   "slash.use": "Use <name> — turn a saved root back on as your root",
