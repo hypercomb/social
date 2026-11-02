@@ -87,7 +87,7 @@ const json = (status, body) =>
 // A browser asks first before a JSON POST or a PUT with our headers.
 const SFU_PREFLIGHT = {
   ...CORS,
-  'Access-Control-Allow-Methods': 'POST, PUT, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, X-Hc-Meeting, X-Hc-Access',
   'Access-Control-Max-Age': '600',
 }

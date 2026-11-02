@@ -21,6 +21,13 @@ import { showsPicture, watchPicture } from '../meeting-picture.js'
 
 type Seat = { seat: number; id: string; you: boolean; leads: boolean; originator?: boolean }
 type Presence = { joined?: boolean; here?: number; seats?: readonly Seat[]; following?: string }
+/** What the meeting's video has cost, from the meeting point's one ledger —
+ *  every client in the meeting reads the same figures (hive-meeting.drone.ts). */
+type Spend = { monthGb: number; capGb: number; meetingGb: number; byMember: Readonly<Record<string, number>>; leftGb: number }
+
+/** GB as a person reads it: megabytes below a gigabyte. */
+export const gbText = (gb: number): string =>
+  gb < 0.001 ? '0 MB' : gb < 1 ? `${Math.round(gb * 1000)} MB` : `${gb < 10 ? gb.toFixed(2) : gb.toFixed(1)} GB`
 
 const TAG = 'hc-meeting-hive'
 
@@ -83,6 +90,7 @@ export class MeetingHiveElement extends HTMLElement {
   #camera!: HTMLButtonElement
   #shared = false
   #presence: Presence = {}
+  #spend: Spend | null = null
   #streams = new Map<string, MediaStream>()
   #videos = new Map<string, HTMLVideoElement>()
   #off: (() => void)[] = []
@@ -125,6 +133,7 @@ export class MeetingHiveElement extends HTMLElement {
         this.#streams = p?.streams instanceof Map ? p.streams : new Map()
         this.#paint()
       }),
+      EffectBus.on<Spend | null>('meeting:spend', p => { this.#spend = p ?? null; this.#paint() }),
     )
     window.addEventListener('resize', this.#resize)
     this.#paint()
@@ -190,7 +199,9 @@ export class MeetingHiveElement extends HTMLElement {
       const who = seat.you ? t('meeting.you', 'you') : seat.id.slice(0, 6)
       // Your own face is a preview until you share it: say so on it.
       const unseen = seat.you && !this.#shared ? ` · ${t('meeting.only-you', 'only you see this')}` : ''
-      hex.querySelector('.mh-name')!.textContent = `${seat.seat} · ${who}${seat.leads ? ` · ${t('meeting.leads', 'leads')}` : ''}${unseen}`
+      const used = this.#spend?.byMember[seat.id]
+      hex.querySelector('.mh-name')!.textContent =
+        `${seat.seat} · ${who}${seat.leads ? ` · ${t('meeting.leads', 'leads')}` : ''}${used === undefined ? '' : ` · ${gbText(used)}`}${unseen}`
       const stream = this.#streams.get(seat.id)
       let video = this.#videos.get(seat.id)
       // A face only where a picture is: a camera that is off still sends a
@@ -226,6 +237,12 @@ export class MeetingHiveElement extends HTMLElement {
       : n <= 1
         ? t('meeting.hive-alone', 'Only you so far. Copy the link to bring someone in.')
         : t('meeting.hive-count', `${n} in the meeting. Whoever is in the middle leads; the rest follow.`)
+    const spend = this.#spend
+    if (spend && this.#presence.joined) {
+      const left = spend.leftGb > 0.001 ? ` (${gbText(spend.leftGb)} ${t('meeting.spend-left', 'from people who left')})` : ''
+      this.#note.textContent += ` ${t('meeting.spend-meeting', 'Video this meeting')}: ${gbText(spend.meetingGb)}${left} · ` +
+        `${t('meeting.spend-month', 'this month')}: ${gbText(spend.monthGb)} / ${gbText(spend.capGb)}.`
+    }
   }
 }
 

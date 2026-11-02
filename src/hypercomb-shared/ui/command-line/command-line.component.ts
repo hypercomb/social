@@ -3244,11 +3244,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     const ambiguousSpan = reading.spans.find(s => s.role === 'ambiguity')
     if (ambiguousSpan) {
-      this.#pendingChoice.set({
-        kind: 'ambiguity', spanStart: ambiguousSpan.start, text,
+      const pending = {
+        kind: 'ambiguity' as const, spanStart: ambiguousSpan.start, text,
         options: (ambiguousSpan.candidates ?? []).map(c => ({ label: c.name, description: c.description })),
-      })
+      }
+      this.#pendingChoice.set(pending)
       this.shell?.unsuppress()
+      void this.#clearAmbiguity(pending, ambiguousSpan.text)
       return true
     }
 
@@ -3351,6 +3353,26 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
     this.requestSynchronize()
     return outcomes
+  }
+
+  /** Jev re-orders the claimants, best first, while the list is already up —
+   *  the participant is never kept waiting and nothing is hidden or run. An
+   *  answer for a list that has since changed is dropped. */
+  async #clearAmbiguity(pending: { options: readonly { label: string; description: string }[]; text: string }, word: string): Promise<void> {
+    const jev = get('@hypercomb.social/JevDecision') as
+      { readyForHive?(): boolean; clarify?(i: unknown): Promise<{ order: readonly string[] }> } | undefined
+    if (!jev?.clarify || !jev.readyForHive?.() || pending.options.length < 2) return
+    try {
+      const { order } = await jev.clarify({
+        line: pending.text, word,
+        options: pending.options.map(o => ({ name: o.label, description: o.description })),
+      })
+      const now = this.#pendingChoice()
+      if (now !== pending) return
+      const by = new Map(pending.options.map(o => [o.label, o]))
+      const sorted = order.map(name => by.get(name)).filter((o): o is { label: string; description: string } => !!o)
+      if (sorted.length === pending.options.length) this.#pendingChoice.set({ ...(pending as typeof now), options: sorted })
+    } catch { /* Jev is not there: the list stays as the census gave it */ }
   }
 
   /** Resolve the pending choice with the option at `index` (highlighted row

@@ -252,6 +252,16 @@ Both the direct path and `file` list the page with the single-tile read
 made the walk refuse the whole root, which left the direct path with no
 tiles to choose from until this was found.
 
+## 5e. Jev clears an ambiguous word
+
+Built 2026-11-01. A word two or more behaviours claim still stops the
+command line, and the participant still picks. While the list is up, one Jev
+choice (`assistant/jev-clarify.ts`, over up to 48 claimants, ≥ .60) reads
+the whole line and moves its pick to the top of the same list. Nothing is
+hidden, pinned or run on Jev's word; unsure, or with Jev off, the list keeps
+census order. A first version narrowed in tournament rounds of six; one
+choice does the same job, so the rounds were dropped.
+
 ## 5d. The front door: Jev is used where it helps, and picks the weight
 
 Built 2026-09-21 (jwize: "automatically do what it does best and ignore

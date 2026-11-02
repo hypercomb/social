@@ -242,6 +242,15 @@ export const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike |
   return [...new Set([...branchZones.map(zoneDoor), ...standing])].filter(Boolean)
 }
 
+/** THE DOORS A TURN-OFF READS THE INDEX THROUGH: the branch's nodes, then the
+ *  domains it is leaving. The switch moves off the host marks before the write,
+ *  so `nodesFor` no longer names a domain being turned off, and when that
+ *  domain is the one holding the index every remaining door missed it: the
+ *  write was refused as index-unsafe while visitors went on reading the same
+ *  verified index there, and a retry could never recover, the mark being gone. */
+export const indexDoors = (nodes: readonly string[], left: readonly string[] | undefined): string[] =>
+  [...new Set([...nodes, ...(left ?? []).map(z => zoneDoor(normalizeHost(z))).filter(door => door && isPublishNode(door))])]
+
 /** Walk the doors for the index. A verified index at ANY door wins: a door that
  *  answers 404 may simply be one that keeps no index (jwize.com's apex), and
  *  stopping there refused every door switch on a branch it led, while a first
@@ -669,8 +678,9 @@ async function unpublishBranchNow(
 
   const key = lineageKey(segs)
   // Withdraw through the first of the branch's nodes that answers — the same
-  // set publishing uses, against the same shared index.
-  const nodes = await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY))
+  // set publishing uses, against the same shared index — or, failing those,
+  // through a domain it is leaving.
+  const nodes = indexDoors(await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY)), left)
   if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
   const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
   // The same guard as publishing, for the same reason: a rewrite we cannot
@@ -841,7 +851,7 @@ async function setBranchDoorsNow(
   const pubkey = await publisherKeyHex()
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
   const key = lineageKey(segs)
-  const nodes = await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY))
+  const nodes = indexDoors(await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY)), left)
   if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
   const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
   if (!read.ok) return { ok: false, failure: 'index-unsafe', reason: read.reason }

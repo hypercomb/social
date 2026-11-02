@@ -42,7 +42,10 @@ const open = async (d, meeting = MEETING, ip = '1.1.1.1') => {
   return (await res.json()).sessionId
 }
 
-test('routes: only the five, only with their methods', () => {
+test('routes: only the six, only with their methods', () => {
+  assert.deepEqual(sfuRoute('GET', `${P}/spend`), { op: 'spend' })
+  assert.equal(sfuRoute('POST', `${P}/spend`), null)
+  assert.equal(sfuRoute('GET', `${P}/spend/more`), null)
   assert.deepEqual(sfuRoute('POST', `${P}/session`), { op: 'session' })
   assert.deepEqual(sfuRoute('POST', `${P}/session/abcdefgh12/tracks`), { op: 'tracks', sessionId: 'abcdefgh12' })
   assert.deepEqual(sfuRoute('PUT', `${P}/session/abcdefgh12/renegotiate`), { op: 'renegotiate', sessionId: 'abcdefgh12' })
@@ -128,6 +131,62 @@ test('a session that goes quiet has its subscriptions closed and stops costing',
   advance(10 * 60_000)
   await d.sweep()
   assert.equal(d.usage.gb, charged)
+})
+
+test('spend: the month, and the meeting split by what each session was sent', async () => {
+  const { d, advance } = desk()
+  const ask = async (meeting) => (await d.handle(request('GET', `${P}/spend`), { meeting })).json()
+  const a = await open(d, MEETING, '1.1.1.1')
+  const b = await open(d, MEETING, '2.2.2.2')
+  const c = await open(d, OTHER, '3.3.3.3')
+  const other = await open(d, OTHER, '4.4.4.4')
+  // b watches a (video); c watches another meeting's person
+  await d.handle(request('POST', `${P}/session/${b}/tracks`, { tracks: [{ location: 'remote', sessionId: a, trackName: 'a-video' }, { location: 'remote', sessionId: a, trackName: 'a-audio' }] }), {})
+  await d.handle(request('POST', `${P}/session/${c}/tracks`, { tracks: [{ location: 'remote', sessionId: other, trackName: 'o-video' }] }), {})
+  advance(60_000)
+  for (const id of [a, b, c, other]) await d.handle(request('POST', `${P}/session/${id}/beat`), {})
+  const minute = 60_000 * GB_PER_MS_PER_VIDEO
+  const mine = await ask(MEETING)
+  assert.equal(mine.capGb, 500)
+  assert.deepEqual(Object.keys(mine.meeting.sessions), [b], 'only the session that was sent video has a share')
+  assert.ok(Math.abs(mine.meeting.sessions[b] - minute) < 1e-3)
+  assert.ok(Math.abs(mine.meeting.gb - minute) < 1e-3)
+  assert.ok(Math.abs(mine.gb - 2 * minute) < 1e-3, 'the month counts both meetings')
+  const theirs = await ask(OTHER)
+  assert.deepEqual(Object.keys(theirs.meeting.sessions), [c], 'a meeting sees only its own sessions')
+  assert.equal(mine.month, '2026-11')
+})
+
+test('spend: a person who left still counts in the meeting; an empty meeting is forgotten', async () => {
+  const { d, advance } = desk()
+  const ask = async (meeting) => (await d.handle(request('GET', `${P}/spend`), { meeting })).json()
+  const a = await open(d, MEETING, '1.1.1.1')
+  const b = await open(d, MEETING, '2.2.2.2')
+  await d.handle(request('POST', `${P}/session/${b}/tracks`, { tracks: [{ location: 'remote', sessionId: a, trackName: 'a-video' }] }), {})
+  advance(30_000)
+  await d.handle(request('POST', `${P}/session/${a}/beat`), {})
+  await d.handle(request('POST', `${P}/session/${b}/beat`), {})
+  await d.sweep()
+  const before = (await ask(MEETING)).meeting.gb
+  assert.ok(before > 0)
+  // b stops beating and is closed; a stays
+  for (let i = 0; i < 4; i++) { advance(30_000); await d.handle(request('POST', `${P}/session/${a}/beat`), {}) }
+  await d.sweep()
+  const after = await ask(MEETING)
+  assert.ok(after.meeting.sessions[b] >= before - 1e-3, 'the one who left is still in the meeting\'s split')
+  // everyone gone: the split goes with the meeting, the month stays
+  advance(10 * 60_000)
+  await d.sweep()
+  const empty = await ask(MEETING)
+  assert.deepEqual(empty.meeting, { gb: 0, sessions: {} })
+  assert.ok(empty.gb > 0)
+})
+
+test('spend needs the meeting named, and video set up', async () => {
+  const { d } = desk()
+  assert.equal((await d.handle(request('GET', `${P}/spend`), { meeting: 'nope' })).status, 400)
+  const off = new SfuDesk({ appId: '', token: '', monthlyGb: 500 })
+  assert.equal((await off.handle(request('GET', `${P}/spend`), { meeting: MEETING })).status, 501)
 })
 
 test('a new month starts the ledger again', async () => {

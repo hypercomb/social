@@ -10,6 +10,7 @@ import { jevFrontInput, jevFrontQuestions, jevFrontResult, jevFrontState, type J
 import { corroborate, jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type JevVerifyInput, type JevVerifyResult } from './jev-verify.js'
 import { jevEvidenceText } from './jev-evidence.js'
 import { jevFileInput, jevFileQuestions, jevFileResult, type JevFileResult } from './jev-file.js'
+import { jevClarifyInput, jevClarifyQuestions, jevClarifyResult, type JevClarifyResult } from './jev-clarify.js'
 import { jevSortInput, jevSortQuestions, jevSortResult, type JevSortResult } from './jev-sort.js'
 import { jevComfyInput, jevComfyQuestions, jevComfyResult, jevComfyState, type JevComfyResult } from './jev-comfy.js'
 
@@ -187,6 +188,18 @@ export class JevDecisionService {
     if (!this.readyForHive()) throw new Error('Filing needs Jev switched on and OpenRouter allowed to read the hive')
     const input = jevFileInput(raw)
     const result = await this.#post({ state: input, questions: jevFileQuestions(input) }, body => jevFileResult(body, input), signal)
+    if (!this.readyForHive()) throw new Error('OpenRouter access changed during the decision')
+    return result
+  }
+
+  /** JEV CLEARS AN AMBIGUOUS WORD (jev-clarify.ts): the line and the
+   *  claimants' names and descriptions travel; the answer only re-orders the
+   *  list the participant picks from. */
+  async clarify(raw: unknown, signal?: AbortSignal): Promise<JevClarifyResult> {
+    signal?.throwIfAborted()
+    if (!this.readyForHive()) throw new Error('Clearing a word needs Jev switched on and OpenRouter allowed to read the hive')
+    const input = jevClarifyInput(raw)
+    const result = await this.#post({ state: { line: input.line, word: input.word }, questions: jevClarifyQuestions(input) }, body => jevClarifyResult(body, input), signal)
     if (!this.readyForHive()) throw new Error('OpenRouter access changed during the decision')
     return result
   }

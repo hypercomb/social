@@ -30,6 +30,18 @@ export type SubscribeAnswer = {
   readonly tracks: readonly SfuTrack[]
 }
 
+/** What the meeting point counts the month to have cost, in GB (an estimate of
+ *  what Cloudflare sends out), and this meeting's share split by session —
+ *  what each session was sent. The same answer to everyone in the meeting. */
+export type SfuSpend = {
+  readonly month: string
+  readonly gb: number
+  readonly capGb: number
+  readonly meeting: { readonly gb: number; readonly sessions: Readonly<Record<string, number>> }
+}
+
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0)
+
 export class SfuError extends Error {
   constructor(readonly status: number, message: string) { super(message) }
 }
@@ -108,5 +120,19 @@ export class SfuClient {
   async beat(): Promise<void> {
     if (!this.sessionId) return
     await this.#send('POST', `/session/${this.sessionId}/beat`)
+  }
+
+  /** The month's spend and this meeting's split. A read: it does not wait for
+   *  the negotiation queue, and it asks nothing of Cloudflare. */
+  async spend(): Promise<SfuSpend> {
+    const headers: Record<string, string> = { 'X-Hc-Meeting': this.#meeting }
+    if (this.#access) headers['X-Hc-Access'] = this.#access
+    const res = await this.#fetch(`${this.#base}/spend`, { method: 'GET', headers })
+    let data: any = {}
+    try { data = await res.json() } catch { /* no body */ }
+    if (!res.ok) throw new SfuError(res.status, String(data?.error ?? `video: ${res.status}`))
+    const sessions: Record<string, number> = {}
+    for (const [id, gb] of Object.entries(data?.meeting?.sessions ?? {})) if (SESSION_ID.test(id)) sessions[id] = num(gb)
+    return { month: String(data?.month ?? ''), gb: num(data?.gb), capGb: num(data?.capGb), meeting: { gb: num(data?.meeting?.gb), sessions } }
   }
 }
