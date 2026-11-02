@@ -1164,6 +1164,17 @@ $jx: calc(#{$pad} + #{$square} / 2);
   border-bottom: 1px solid var(--hc-window-line);
 }
 
+.chat-mast-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  // The mast is top-aligned (title, then the meter beneath), so the actions
+  // centre themselves on the whole two-line row rather than hugging its top.
+  align-self: center;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+}
+
 .chat-mast-main {
   flex: 1 1 auto;
   min-width: 0;

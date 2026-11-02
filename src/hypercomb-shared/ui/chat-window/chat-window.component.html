@@ -99,22 +99,6 @@
              column toggles. The gear and close stay the window's own pair,
              pinned at the end. -->
         <ng-container *ngTemplateOutlet="chatTools"></ng-container>
-        @if (canArchive() && activeId()) {
-          <span class="chat-head-split" aria-hidden="true"></span>
-          @if (activeGoal()) {
-            <button class="chat-tool chat-goal" type="button" (click)="toggleGoal()"
-              [class.on]="goalOpen()" [attr.aria-expanded]="goalOpen()"
-              [title]="'chat.goal.open' | t" [attr.aria-label]="'chat.goal.open' | t">
-              <span class="mat-sym" aria-hidden="true">verified</span>
-            </button>
-          }
-          <button class="chat-tool chat-put" type="button"
-            (click)="archiveCurrent()"
-            [title]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t"
-            [attr.aria-label]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t">
-            <span class="mat-sym" aria-hidden="true">{{ activeArchived() ? 'unarchive' : 'archive' }}</span>
-          </button>
-        }
       </div>
       <button class="chat-close" type="button" (click)="close()"
         [title]="'chat.close' | t"
@@ -410,6 +394,27 @@
         </div>
       </div>
       </div>
+      <!-- THE CONVERSATION'S OWN ACTIONS, at the right end of its masthead —
+           just above the transcript, with the thing they act on. The window's
+           header up top keeps the window's tools; filing this conversation
+           away is about the conversation, not the window. -->
+      @if (canArchive() && activeId()) {
+        <div class="chat-mast-actions">
+          @if (activeGoal()) {
+            <button class="chat-tool chat-goal" type="button" (click)="toggleGoal()"
+              [class.on]="goalOpen()" [attr.aria-expanded]="goalOpen()"
+              [title]="'chat.goal.open' | t" [attr.aria-label]="'chat.goal.open' | t">
+              <span class="mat-sym" aria-hidden="true">verified</span>
+            </button>
+          }
+          <button class="chat-tool chat-put" type="button"
+            (click)="archiveCurrent()"
+            [title]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t"
+            [attr.aria-label]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t">
+            <span class="mat-sym" aria-hidden="true">{{ activeArchived() ? 'unarchive' : 'archive' }}</span>
+          </button>
+        </div>
+      }
     </div>
 
     @if (goalOpen() && activeGoal(); as goal) {

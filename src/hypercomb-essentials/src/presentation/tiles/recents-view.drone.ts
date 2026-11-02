@@ -34,7 +34,8 @@ import { RECENTS_CENSUS_KEY, type RecentsCensusReader } from '../../history/rece
 import type { RecentAtom } from '../../history/recents-census.js'
 import type { DiveCell } from './show-cell.drone.js'
 import { takePayload } from './portal-carry.plan.js'
-import { clampPage, filterAtoms, layoutPage, recentsClickPlan, type Axial } from './recents-layout.js'
+import { clampPage, filterAtoms, layoutPage, recentsClickPlan } from './recents-layout.js'
+import type { Axial } from './wave-layout.js'
 
 type ZoomLike = { zoomToFit?(snap?: boolean, source?: 'auto', fitAxis?: 'both', hold?: 'none'): boolean }
 type ViewportLike = { lastPan?: { dx?: number; dy?: number } | null; setPan?(dx: number, dy: number, source?: 'auto'): void }

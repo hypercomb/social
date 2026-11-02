@@ -283,7 +283,7 @@ const RAIL_CSS = `
    one divider line: [home or back] [where you are] [search]. Searching puts
    the field in the title's place. */
 .hc-rail-head{display:flex;align-items:center;gap:0.25rem;flex:0 0 auto;
-  height:2.875rem;padding:0 0.5rem;
+  box-sizing:border-box;height:2.875rem;padding:0 0.5rem;
   border-bottom:1px solid var(--hc-window-edge, rgba(${STEEL},0.28));}
 .hc-rail-back,.hc-rail-find-toggle{display:inline-grid;place-items:center;flex:0 0 auto;
   width:1.75rem;height:1.75rem;padding:0;border:0;background:none;cursor:pointer;
@@ -616,16 +616,30 @@ const RAIL_CSS = `
    one line each, so the list scans and never grows under your hand. */
 .hc-rail-convos-block{display:flex;flex-direction:column;}
 .hc-rail-convos{display:flex;flex-direction:column;gap:1px;max-height:45vh;overflow-y:auto;}
-.hc-rail-convos-head{display:flex;align-items:baseline;justify-content:space-between;gap:0.5rem;
-  padding:0.45rem 0.45rem 0.2rem;font-family:var(--hc-mono,monospace);font-size:0.64rem;
-  letter-spacing:0.12em;text-transform:uppercase;color:var(--hc-window-ink-quiet);}
-.hc-rail-convos-count{letter-spacing:0.04em;text-transform:none;color:var(--hc-window-ink-plain);}
-/* THE WAY TO BEGIN sits in the head, a word in the accent ink — the same
-   quiet "+ New conversation" a tile's fold wears, not a button box. */
-.hc-rail-convos-new{margin-left:auto;padding:0;border:0;background:none;font:inherit;
-  letter-spacing:0.04em;text-transform:none;cursor:pointer;
+/* THE HEAD IS A BAR, one line that never wraps: the title takes what is left
+   and gives way first (ellipsis), the count is a small chip, and the way to
+   begin is a bordered button that keeps its own width. It used to be three
+   loose words on a space-between row, so a narrow rail broke each of them
+   onto a second line. */
+.hc-rail-convos-head{display:flex;align-items:center;gap:0.5rem;white-space:nowrap;
+  margin-bottom:0.25rem;padding:0.5rem 0.55rem;background:rgba(255,255,255,0.03);
+  border-bottom:1px solid rgba(${STEEL},0.22);font-family:var(--hc-mono,monospace);
+  font-size:0.7rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;
+  color:var(--hc-window-ink-plain);}
+.hc-rail-convos-head > span:first-child{flex:1 1 auto;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;}
+.hc-rail-convos-count{flex:none;padding:0.12rem 0.45rem;letter-spacing:0.04em;
+  text-transform:none;font-weight:500;background:rgba(${STEEL},0.14);
+  border-radius:var(--hc-radius-control, 2px);color:var(--hc-window-ink-plain);}
+.hc-rail-convos-count:empty{display:none;}
+/* THE WAY TO BEGIN sits in the head as a real control: a bordered button in
+   the accent ink, so it reads as pressable at a glance. */
+.hc-rail-convos-new{flex:none;padding:0.3rem 0.65rem;border:1px solid rgba(${STEEL},0.5);
+  border-radius:var(--hc-radius-control, 2px);background:rgba(${STEEL},0.1);font:inherit;
+  font-weight:600;letter-spacing:0.04em;text-transform:none;cursor:pointer;
   color:var(--hc-window-accent, rgb(${STEEL}));}
-.hc-rail-convos-new:hover,.hc-rail-convos-new:focus-visible{text-decoration:underline;outline:none;}
+.hc-rail-convos-new:hover,.hc-rail-convos-new:focus-visible{background:rgba(${STEEL},0.22);
+  border-color:rgba(${STEEL},0.8);outline:none;}
 .hc-rail-convos-group{padding:0.45rem 0.45rem 0.15rem;font-family:var(--hc-mono,monospace);
   font-size:0.66rem;color:var(--hc-window-ink-quiet);}
 .hc-rail-convo{display:grid;grid-template-columns:1.3rem minmax(0,1fr) auto;gap:0.45rem;

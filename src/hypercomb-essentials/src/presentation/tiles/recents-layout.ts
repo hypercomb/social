@@ -10,7 +10,9 @@
 // reachable by paging out, so "always able to view every tile" survives the
 // screen being finite. A filter narrows what is shown; it never edits the set.
 
-export type Axial = { q: number; r: number }
+// The tiles barrel re-exports every file's names, so a second `Axial` here
+// would collide with wave-layout's; the view takes it from there.
+import type { Axial } from './wave-layout.js'
 
 /** The one atom shape this view reads (the census reader's RecentAtom). */
 export type LaidOutAtom = {

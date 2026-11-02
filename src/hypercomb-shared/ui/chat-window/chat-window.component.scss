@@ -149,7 +149,8 @@ $accent: #7eb6d6;
 // The hive's mark beside its name, at the header's one glyph size.
 .chat-subject-mark {
   font-size: 1.0625rem;
-  color: var(--hc-window-accent-quiet);
+  // The amber the rail's hive mark wears, the same as the word beside it.
+  color: tw.ink(rgba(226, 196, 140, 0.92));
 }
 
 // ── HOVER OPENS WHAT THE ROW CLIPPED ─────────────────────────────────
@@ -193,6 +194,10 @@ $accent: #7eb6d6;
   white-space: nowrap;
   color: tw.ink(rgba(226, 196, 140, 0.92));
   font-family: var(--hc-mono, monospace);
+  // The rail's title is 0.72rem at weight 600; the hive's name over the chat
+  // is the same word and wears the same size.
+  font-size: 0.72rem;
+  font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
