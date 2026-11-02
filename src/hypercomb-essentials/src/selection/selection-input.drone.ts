@@ -74,14 +74,6 @@ class SelectionInputDrone extends Drone {
   #sampleArmed = false
   #selectModeArmed = false
 
-  // ── THE SWAP ────────────────────────────────────────────────────────
-  // The clipboard window is open. On a pointer, a click on a tile TAKES it
-  // into the window and ctrl+click WALKS in — neither is a selection, so
-  // select stands down for the whole mode exactly as it does for the wand.
-  // Without this the ctrl press would still start a paint or wand stroke
-  // underneath a gesture that means something else entirely.
-  #clipboardArmed = false
-
   // ── BESIDE THE DOCKED EDITOR ────────────────────────────────────────
   // The open editor locks the gate (`editor`, ZoomDrone) so pan and zoom
   // stand down beside it, but the hive there stays live for selecting: what
@@ -118,7 +110,7 @@ class SelectionInputDrone extends Drone {
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode', 'move:drag-end', 'sample:mode', 'select:mode', 'clipboard:open', 'editor:mode']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode', 'move:drag-end', 'sample:mode', 'select:mode', 'editor:mode']
   protected override emits: string[] = ['selection:painted', 'swarm:wand', 'wand:armed']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -150,10 +142,6 @@ class SelectionInputDrone extends Drone {
     // picks; the keep verb they offer is the acquisition path there.
     this.onEffect<{ active?: boolean }>('sample:mode', (p) => { this.#sampleArmed = !!p?.active })
     this.onEffect<{ active?: boolean }>('select:mode', (p) => { this.#selectModeArmed = !!p?.active })
-
-    // Swap mode on/off — announced by the clipboard window itself
-    // (last-value replayed, so a late drone is current at once).
-    this.onEffect<{ open?: boolean }>('clipboard:open', (p) => { this.#clipboardArmed = p?.open === true })
 
     this.onEffect<{ active?: boolean; surface?: string }>('editor:mode', (p) => {
       this.#editorDocked = p?.active === true && p.surface === 'dock'
@@ -254,10 +242,6 @@ class SelectionInputDrone extends Drone {
 
   #onPointerDown = (e: PointerEvent): void => {
     if (e.pointerType === 'touch') return
-    // Swap mode owns every pointer gesture on a tile while the clipboard
-    // window is open (take on click, walk on ctrl+click). Standing down here
-    // keeps the wand and the paint out of its way — one press, one meaning.
-    if (this.#clipboardArmed) return
     if (this.#navigationBlocked) return
     if (this.#dragActive || this.#reorderDragActive || this.#pendingDrag) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
@@ -396,7 +380,7 @@ class SelectionInputDrone extends Drone {
   #onKeyDown = (e: KeyboardEvent): void => {
     if (e.key !== 'Control' && e.key !== 'Meta') return
     if (e.repeat || this.#wandAnnounced) return
-    if (this.#clipboardArmed || this.#sampleArmed || this.#selectModeArmed) return
+    if (this.#sampleArmed || this.#selectModeArmed) return
     if (this.#externalLabels.size === 0) return
     const adopt = window.ioc?.get?.(SWARM_ADOPT_KEY) as WandOracle | undefined
     if (!adopt?.wandEligible) return

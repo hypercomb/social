@@ -27,16 +27,9 @@ const registrations = new Map<string, unknown>()
   },
 }
 
-const { CutQueenBee } = await import('../clipboard/clipboard.queen.js')
 const { HideQueenBee } = await import('../presentation/tiles/hide.queen.js')
 
 describe('the declarations a remote refusal keys on', () => {
-  it('/cut declares itself destructive — the name set never had it', () => {
-    // It calls commitChildrenDeltas with `removes`: the parent stops holding
-    // the tile. Same shape as /remove, and the four-name list missed it.
-    expect(new CutQueenBee().machine?.reach).toBe('destructive')
-  })
-
   it('/hide stays editing, so the gentle verb is not refused with the harsh one', () => {
     // HIDE FIRST, DELETE SECOND. If hiding were labelled destructive, a remote
     // caller would be refused the reversible verb and left nothing safer.

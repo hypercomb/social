@@ -1,20 +1,24 @@
 // presentation/tiles/portal-carry.drone.ts
 //
-// PortalCarryDrone — the TO-THE-TRAY icon on tiles, the way onto the QUICK TRAY
+// PortalCarryDrone — the SHELF icon on tiles, the way onto the shelf
 // (documentation/recents-and-the-quick-tray.md, codex A9). It stands in the
 // band's always-visible icon row with the others. A click sends a REFERENCE to
-// the tray at the top of the screen: the tile's name, the page it stands on,
+// the shelf at the top of the screen: the tile's name, the page it stands on,
 // and the sig that page lists it by. Nothing is written — no cut, no marker; the
 // source page is untouched until the tray's own drop says otherwise.
 //
 // It was a drag handle once, and the name stays because the name is an address
 // (saved icon arrangements and i18n keys hold it). There is no drag now: a tile
-// reaches a portal from the tray, whose rows drop onto Portals rows.
+// reaches a portal from the shelf, whose rows drop onto Portals rows.
+//
+// It also answers `shelf:take-selection`, the bottom-right "to shelf" button:
+// every selected tile goes onto the shelf from the page it stands on, and the
+// selection clears, because the gesture is done.
 //
 // Essentials never imports shared: the contract with the tray is the EffectBus
 // payload.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 import { childEntriesOf, type PlacementHistory } from '../../history/layer-placement.js'
 import { takePayload } from './portal-carry.plan.js'
 
@@ -51,10 +55,10 @@ export class PortalCarryDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'presentation'
   public override description =
-    'To-the-tray icon on tiles: a click sends a reference to the quick tray at the top of the screen.'
+    'Shelf icon on tiles: a click sends a reference to the shelf at the top of the screen; the to-shelf button sends the selection.'
 
   protected override deps = {}
-  protected override listens: string[] = ['tile:action']
+  protected override listens: string[] = ['tile:action', 'shelf:take-selection']
   protected override emits: string[] = ['quick-tray:take']
 
   #initialized = false
@@ -72,6 +76,17 @@ export class PortalCarryDrone extends Drone {
     this.onEffect<{ action?: string; label?: string }>('tile:action', (p) => {
       if (p?.action === ACTION_NAME && p?.label) void this.#take(p.label, this.#here())
     })
+    EffectBus.on('shelf:take-selection', () => { void this.#takeSelection() })
+  }
+
+  /** The selection, onto the shelf, in the order it reads on the page. */
+  async #takeSelection(): Promise<void> {
+    const selection = window.ioc.get<{ selected?: ReadonlySet<string>; clear?: () => void }>('@diamondcoreprocessor.com/SelectionService')
+    const labels = [...(selection?.selected ?? [])]
+    if (labels.length === 0) return
+    const here = this.#here()
+    for (const label of labels) await this.#take(label, here)
+    selection?.clear?.()
   }
 
   protected override dispose(): void {

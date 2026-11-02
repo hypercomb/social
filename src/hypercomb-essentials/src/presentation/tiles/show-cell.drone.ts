@@ -757,7 +757,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'render:names-on-hover', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'render:flower', 'tile:preview']
+  protected override listens = ['render:host-ready', 'render:names-on-hover', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'overlay:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:committed', 'cell:added','cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'render:flower', 'tile:preview']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'thumbnail:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -1186,8 +1186,6 @@ export class ShowCellDrone extends Drone {
   // stale handle simply goes unreferenced.
   #layerDirCache = new Map<string, FileSystemDirectoryHandle>()
   #heatByLabel = new Map<string, number>()
-  #flashLabels = new Set<string>()
-  #flashTimer: ReturnType<typeof setTimeout> | null = null
   // newly created tiles glow briefly so the user can spot them, then fade
   #newCellFadeStart = new Map<string, number>()
   #newCellFadeRaf = 0
@@ -5599,11 +5597,12 @@ export class ShowCellDrone extends Drone {
     this.#emitRenderTags(cells)
   }
 
-  /** 0 = not swapping · 1 = the click takes the hovered tile · 2 = copies it
-   *  · 3 = the hexagon walk (the click enters, landing on the grid).
-   *  Pushed by `clipboard:verb` (TileOverlayDrone's cue is the one resolver). */
+  /** 0 = no verb · 3 = the hexagon walk (the click enters, landing on the
+   *  grid). 1 and 2 were the clipboard's take and copy; the shader keeps the
+   *  slots. Pushed by `overlay:verb` (TileOverlayDrone's cue is the one
+   *  resolver). */
   #swapMode = 0
-  /** The verb's colour, normalised — amber for take, near-white for copy. */
+  /** The verb's colour, normalised. */
   #swapColor: [number, number, number] = [1, 0.77, 0.5]
 
   #applySwapMode = (): void => {
@@ -7052,50 +7051,19 @@ export class ShowCellDrone extends Drone {
       }
     })
 
-    // clipboard:view page-replacement REMOVED — the clipboard is now a
-    // non-navigating side panel (hc-clipboard-panel) that never takes over
-    // the page render. The old listener, the `#clipboardView` field, and all
-    // its render-path guards are gone.
-
-    // ── THE SWAP HOVER ────────────────────────────────────────────────
-    // While the clipboard window is open a click MOVES the hovered tile, so
-    // its hover ring must not go on promising navigation. The verb is
-    // resolved in exactly one place — TileOverlayDrone's cue, which also
-    // draws the pill above the hex — and pushed here, so the pill and the
-    // rim can never disagree about what the click is about to do.
-    this.onEffect<{ verb: 'take' | 'copy' | 'enter' | null; color?: number }>('clipboard:verb', (payload) => {
+    // ── THE VERB HOVER ────────────────────────────────────────────────
+    // While the hexagon walk is armed the click lands on the grid, so the
+    // hovered tile's rim says so. The verb is resolved in exactly one place —
+    // TileOverlayDrone's cue, which also draws the pill above the hex — and
+    // pushed here, so the pill and the rim can never disagree.
+    this.onEffect<{ verb: 'enter' | null; color?: number }>('overlay:verb', (payload) => {
       const verb = payload?.verb ?? null
-      this.#swapMode = verb === 'enter' ? 3 : verb === 'copy' ? 2 : verb === 'take' ? 1 : 0
+      this.#swapMode = verb === 'enter' ? 3 : 0
       if (payload?.color !== undefined) {
         const c = payload.color
         this.#swapColor = [((c >> 16) & 0xff) / 255, ((c >> 8) & 0xff) / 255, (c & 0xff) / 255]
       }
       this.#applySwapMode()
-    })
-
-    // clipboard:captured — brief visual flash on copied tiles. Heat-only
-    // change → in-place buffer update, no full re-render.
-    this.onEffect<{ labels: string[]; op: string }>('clipboard:captured', (payload) => {
-      if (!payload?.labels?.length) return
-
-      if (payload.op === 'copy') {
-        if (this.#flashTimer) clearTimeout(this.#flashTimer)
-        this.#flashLabels = new Set(payload.labels)
-        for (const label of payload.labels) {
-          this.#heatByLabel.set(label, 1.0)
-          this.#updateCellHeat(label, 1.0)
-        }
-
-        this.#flashTimer = setTimeout(() => {
-          for (const label of this.#flashLabels) {
-            this.#heatByLabel.delete(label)
-            this.#updateCellHeat(label, 0)
-          }
-          this.#flashLabels.clear()
-          this.#flashTimer = null
-        }, 600)
-      }
-      // cut: tiles disappear via history remove ops + synchronize (handled by ClipboardWorker)
     })
 
     // translation:tile-start — sustained heat glow while translating.
@@ -7363,6 +7331,23 @@ export class ShowCellDrone extends Drone {
         if (!done && this.#slots.seeded) {
           this.cellImageCache.delete(payload.cell)
           void this.renderIncremental({ changedContent: [payload.cell] })
+        }
+      })
+    })
+
+    // cell:committed — a typed create has landed in the layer. The picture
+    // fill that follows `cell:added` runs BEFORE that commit, so a name that
+    // already has a picture (made before, or on another page) read as a miss
+    // and painted blank until a reload. Re-resolve it now, from the layer that
+    // exists, forcing past the cached miss.
+    this.onEffect<{ cell: string; segments?: readonly string[] }>('cell:committed', (payload) => {
+      const cell = payload?.cell
+      if (!cell) return
+      if (payload.segments && !this.#segmentsAreCurrent(payload.segments)) return
+      void this.#tryInPlaceCellUpdate(cell, { dir: null }).then(done => {
+        if (!done && this.#slots.seeded) {
+          this.cellImageCache.delete(cell)
+          void this.renderIncremental({ changedContent: [cell] })
         }
       })
     })

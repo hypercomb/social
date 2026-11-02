@@ -5,9 +5,8 @@
 // that registers them. Importing the cascade attaches its listeners.
 
 import { Drone } from '@hypercomb/core'
-import type { BackGesture } from '../navigation/back-gesture.service.js'
+import './escape-cascade.js'
 import { KeyMapService } from './keymap.service.js'
-import { CLIPBOARD_MODE_BACK_ENTRY } from './escape-cascade.js'
 
 export class KeyboardDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -19,6 +18,5 @@ export class KeyboardDrone extends Drone {
 }
 
 window.ioc.register('@diamondcoreprocessor.com/KeyMapService', new KeyMapService())
-window.ioc.whenReady<BackGesture>('@diamondcoreprocessor.com/BackGesture', gesture => gesture.register(CLIPBOARD_MODE_BACK_ENTRY))
 
 window.ioc.register('@diamondcoreprocessor.com/KeyboardDrone', new KeyboardDrone())

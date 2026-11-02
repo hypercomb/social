@@ -136,29 +136,6 @@ export const defaultKeyMap: KeyMapLayer = {
       category: 'Navigation',
     },
 
-    // Clipboard
-    {
-      cmd: 'clipboard.copy',
-      sequence: [[{ key: 'c', primary: true }]],
-      description: 'Copy selected tiles',
-      descriptionKey: 'keymap.copy',
-      category: 'Clipboard',
-    },
-    {
-      cmd: 'clipboard.paste',
-      sequence: [[{ key: 'enter' }]],
-      description: 'Paste from clipboard',
-      descriptionKey: 'keymap.paste',
-      category: 'Clipboard',
-    },
-    {
-      cmd: 'layout.cutCells',
-      sequence: [[{ key: 'x' }]],
-      description: 'Cut selected tiles',
-      descriptionKey: 'keymap.cut',
-      category: 'Clipboard',
-    },
-
     // Chat — a bare c opens or closes the companion. Copy keeps the platform
     // convention above (Ctrl/Cmd+C), and primary:false makes the two bindings
     // mutually exclusive in the keymap matcher.

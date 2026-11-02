@@ -1,21 +1,30 @@
 // presentation/tiles/quick-tray.element.ts
 //
-// <hc-quick-tray> — THE HAND. A strip across the top of the viewport holding
-// the references you are carrying: a tile's drag handle sends one here
-// (`quick-tray:take`, PortalCarryDrone), and a row dragged off it onto the
-// hive places it (documentation/recents-and-the-quick-tray.md, codex A9).
+// <hc-quick-tray> — THE SHELF. A full-width shelf under the header, always in
+// view, holding the references you are carrying: a tile's shelf icon sends one
+// here (`quick-tray:take`, PortalCarryDrone), the bottom-right "to shelf"
+// button sends the selection, and a row dragged off it onto the hive places it
+// (documentation/recents-and-the-quick-tray.md, codex A9). The clipboard it
+// replaces is gone: nothing is cut or copied, only referenced.
 //
 // A framework-free custom element contributed through the ShellSurfaceRegistry
 // by QuickTrayDrone (`element:` shape via IoC — never an app.html tag, never an
 // Angular class), so the shim mounts it too. It takes the shell's vocabulary
 // through custom properties that inherit across the shadow boundary (the
-// radius ladder, the window inks, the pane) with local fallbacks.
+// radius ladder, the window inks, the pane, the edge reservations) with local
+// fallbacks. Its look is the clipboard window's swap stage: the cyan wash and
+// the drawn cut line, set on the shelf instead of on the whole viewport.
 //
-// Nothing is written at the take. The strip holds {label, source page, the
-// sig the page lists it by} — a selection that survives navigation: walk
-// through a portal, into another hive, down a branch, and it is still here.
-// Session-only, no pool, no localStorage: it is what you are holding, not a
-// record.
+// THE SHELF HOLDS ITS OWN BAND. It reserves the top of the canvas
+// (`viewport:inset`, pixi-host shrinks its box and refits), so fitted tiles
+// are framed below it, never under it. Folded, it gives the band back.
+//
+// Nothing is written at the take. The shelf holds {label, source page, the sig
+// the page lists it by} — a selection that survives navigation: walk through a
+// portal, into another hive, down a branch, and it is still here. Session-only,
+// no pool, no localStorage: it is what you are holding, not a record. It
+// announces what it holds on `shelf:changed` (last-value), which the chat reads
+// as the set it is talking about, and lets go on `shelf:let-go`.
 //
 // THE DROP is the only moment anything is written, and it decides:
 //   • appearance — a plain release adds an incidence on the page under the
@@ -23,19 +32,18 @@
 //     seat. The source page is untouched.
 //   • custody    — Shift held at the release MOVES it: the same append, then
 //     the source stops listing it.
-// Both ride the clipboard worker's `clipboard:place-entries` path, which
-// seals the LIVE subtree at the drop and commits ONE delta on the target
-// (clipboard-sig-native.md). The worker answers `clipboard:placed-entries`
-// and the rows that landed leave the strip; a row that failed stays.
+// Both ride `shelf:place` (shelf-placement.worker.ts), which seals the LIVE
+// subtree at the drop and commits ONE delta on the target. The worker answers
+// `shelf:placed` and the rows that landed leave the shelf; a row that failed
+// stays.
 //
 // A row let go on a Portals-window row adds the tile to that portal through
-// the index's own `portal-carry:drop` — the gesture the handle used to carry
-// is still here, one step later. A release back on the strip is a cancelled
-// drag, never a write.
+// the index's own `portal-carry:drop`. A release back on the shelf is a
+// cancelled drag, never a write.
 //
-// Hideable: the title folds the strip down to a small chip that keeps the count,
-// and the chip brings it back. Folding lets go of nothing. Like the rest of the
-// tray it lasts the session.
+// Hideable: the chevron folds the shelf to a chip at its right end that keeps
+// the count, and the chip brings it back. Folding lets go of nothing. Like the
+// rest of the shelf it lasts the session.
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { dropEntries, entryKey, takeEntries, type TrayEntry } from './quick-tray.entries.js'
@@ -54,7 +62,7 @@ type OverlayLike = {
   dropTargetAtClient?(x: number, y: number): { label: string | null; occupied: boolean; index: number } | null
 }
 type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
-type WorkerLike = { propsSigAt?: (segments: readonly string[]) => Promise<string | null> }
+type PlacementLike = { propsSigAt?: (segments: readonly string[]) => Promise<string | null> }
 
 const ioc = (): { get?: (k: string) => unknown } | undefined =>
   (globalThis as { ioc?: { get?: (k: string) => unknown } }).ioc
@@ -65,15 +73,14 @@ const t = (key: string, fallback: string): string =>
 const esc = (s: string): string =>
   s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 
-/** The thumbnail is the hex capture every face of a gathered entry shows —
- *  the same picture the clipboard panel resolves, read-only: the worker's warm
- *  props lookup, then the picture it names. A miss shows the ⬢ glyph. */
+/** The thumbnail is the hex capture the hive draws, read-only: the placement
+ *  worker's warm props lookup, then the picture it names. A miss shows ⬢. */
 const resolveThumb = async (entry: TrayEntry): Promise<string | null> => {
   const store = ioc()?.get?.('@hypercomb.social/Store') as StoreLike | undefined
-  const worker = ioc()?.get?.('@diamondcoreprocessor.com/ClipboardWorker') as WorkerLike | undefined
-  if (!store?.getResource || !worker?.propsSigAt) return null
+  const placement = ioc()?.get?.('@diamondcoreprocessor.com/ShelfPlacementWorker') as PlacementLike | undefined
+  if (!store?.getResource || !placement?.propsSigAt) return null
   try {
-    const propsSig = await worker.propsSigAt([...entry.sourceSegments, entry.label])
+    const propsSig = await placement.propsSigAt([...entry.sourceSegments, entry.label])
     if (!propsSig) return null
     const propsBlob = await store.getResource(propsSig)
     if (!propsBlob) return null
@@ -88,42 +95,86 @@ const resolveThumb = async (entry: TrayEntry): Promise<string | null> => {
 }
 
 const STYLE = `
-:host{position:fixed;inset:0;z-index:100003;pointer-events:none;}
-.tray{pointer-events:auto;position:absolute;top:calc(var(--hc-header-anchor,0px) + 0.5rem);left:50%;transform:translateX(-50%);
-  max-width:min(72vw,56rem);display:flex;align-items:center;gap:0.6rem;padding:0.3rem 0.6rem 0.3rem 0.8rem;
-  border-radius:var(--hc-radius-floating,4px);background:rgba(var(--hc-panel-pane,12,28,46),0.92);
+:host{position:fixed;inset:0;z-index:100003;pointer-events:none;
+  --shelf:73,214,208;
+  --shelf-top:calc(var(--hc-header-anchor,0px) + 0.375rem);
+  --shelf-left:calc(max(var(--hc-controls-left,0px),var(--hc-inset-left,0px)) + 0.5rem);
+  --shelf-right:calc(var(--hc-inset-right,0px) + 0.5rem);}
+.shelf{pointer-events:auto;position:absolute;top:var(--shelf-top);left:var(--shelf-left);right:var(--shelf-right);
+  height:2.75rem;box-sizing:border-box;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;
+  gap:0.75rem;padding:0 0.45rem 0 0.95rem;border-radius:var(--hc-radius-floating,4px);
+  background:rgba(var(--hc-panel-pane,12,28,46),0.9);
   backdrop-filter:blur(10px) saturate(1.1);-webkit-backdrop-filter:blur(10px) saturate(1.1);
-  border:1px solid var(--hc-window-accent-quiet,rgba(126,182,214,0.45));box-shadow:0 10px 40px rgba(var(--hc-panel-shadow,0,0,0),0.5);
+  box-shadow:inset 0 0 2.75rem -1.25rem rgba(var(--shelf),0.55),0 8px 28px rgba(var(--hc-panel-shadow,0,0,0),0.28);
   font-family:var(--hc-mono,system-ui);font-size:0.8rem;color:var(--hc-window-ink-loud,currentColor);user-select:none;}
-.tray.dragging{cursor:grabbing;}
-.fold{appearance:none;border:0;background:transparent;padding:0;font:inherit;cursor:pointer;
-  display:inline-flex;align-items:center;gap:0.35rem;letter-spacing:0.08em;text-transform:uppercase;font-size:0.7rem;
-  color:var(--hc-window-accent,rgb(126,182,214));white-space:nowrap;}
-.fold:hover,.fold:focus-visible{color:var(--hc-window-ink-loud,currentColor);}
-.tray.folded{padding:0.25rem 0.5rem;}
-.count{min-width:1.2em;padding:0 0.3em;border-radius:var(--hc-radius-control,2px);background:var(--hc-window-tint,rgba(126,182,214,0.18));text-align:center;}
-.rows{display:flex;align-items:center;gap:0.3rem;margin:0;padding:0;list-style:none;overflow-x:auto;scrollbar-width:thin;}
-.row{display:inline-flex;align-items:center;gap:0.35rem;padding:0.2rem 0.3rem;border-radius:var(--hc-radius-control,2px);
-  border:1px solid transparent;cursor:grab;white-space:nowrap;touch-action:none;}
-.row:hover{border-color:var(--hc-window-accent-quiet,rgba(126,182,214,0.45));background:var(--hc-window-wash,rgba(126,182,214,0.08));}
-.row.lifted{opacity:0.45;}
-@keyframes hc-tray-taken{from{background:var(--hc-window-tint-strong,rgba(126,182,214,0.45));}to{background:transparent;}}
-.taken{animation:hc-tray-taken 700ms ease-out;}
-.thumb{width:1.6rem;height:1.6rem;display:inline-grid;place-items:center;overflow:hidden;}
+.shelf::before{content:'';position:absolute;inset:0.25rem;pointer-events:none;border-radius:var(--hc-radius-control,2px);
+  --cut:rgba(var(--shelf),0.6);
+  background-image:repeating-linear-gradient(90deg,var(--cut) 0 7px,transparent 7px 14px),
+    repeating-linear-gradient(90deg,var(--cut) 0 7px,transparent 7px 14px),
+    repeating-linear-gradient(180deg,var(--cut) 0 7px,transparent 7px 14px),
+    repeating-linear-gradient(180deg,var(--cut) 0 7px,transparent 7px 14px);
+  background-size:100% 1px,100% 1px,1px 100%,1px 100%;background-position:0 0,0 100%,0 0,100% 0;background-repeat:no-repeat;}
+.shelf.dragging{cursor:grabbing;}
+.legend{position:relative;display:inline-flex;align-items:center;gap:0.45rem;letter-spacing:0.12em;text-transform:uppercase;
+  font-size:0.68rem;font-weight:600;color:rgb(var(--shelf));white-space:nowrap;}
+.count{min-width:1.5em;height:1.4em;box-sizing:border-box;display:inline-grid;place-items:center;padding:0 0.35em;
+  border-radius:var(--hc-radius-control,2px);background:rgba(var(--shelf),0.16);color:var(--hc-window-ink-loud,currentColor);
+  font-variant-numeric:tabular-nums;letter-spacing:0;}
+.rows{position:relative;display:flex;align-items:center;gap:0.3rem;margin:0;padding:0;list-style:none;min-width:0;height:100%;
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
+  mask-image:linear-gradient(90deg,#000 calc(100% - 1.5rem),transparent);-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 1.5rem),transparent);}
+.rows::-webkit-scrollbar{display:none;}
+.empty{position:relative;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--hc-window-ink-quiet,currentColor);font-size:0.74rem;}
+.row{flex:0 0 auto;position:relative;display:inline-flex;align-items:center;gap:0.4rem;height:1.9rem;box-sizing:border-box;
+  padding:0 0.2rem 0 0.25rem;border-radius:var(--hc-radius-control,2px);border:1px solid rgba(var(--shelf),0.22);
+  background:rgba(var(--shelf),0.06);cursor:grab;white-space:nowrap;touch-action:none;outline:none;
+  transition:border-color 120ms ease,background-color 120ms ease;}
+.row:hover,.row:focus-visible{border-color:rgba(var(--shelf),0.6);background:rgba(var(--shelf),0.12);}
+.row:focus-visible{box-shadow:0 0 0 1px rgba(var(--shelf),0.6);}
+.row.lifted{opacity:0.4;}
+.thumb,.glyph{width:1.4rem;height:1.4rem;flex:0 0 auto;display:inline-grid;place-items:center;overflow:hidden;}
 .thumb img{width:100%;height:100%;object-fit:contain;display:block;}
-.glyph{width:1.6rem;text-align:center;color:var(--hc-window-accent,rgb(126,182,214));}
-.label{max-width:10rem;overflow:hidden;text-overflow:ellipsis;}
-.remove{appearance:none;border:0;background:transparent;color:var(--hc-window-ink-plain,currentColor);font:inherit;line-height:1;
-  padding:0 0.2rem;opacity:0;cursor:pointer;}
-.row:hover .remove,.remove:focus-visible{opacity:1;}
+.glyph{color:rgb(var(--shelf));font-size:0.95rem;line-height:1;}
+.label{max-width:11rem;overflow:hidden;text-overflow:ellipsis;}
+.remove{appearance:none;width:1.25rem;height:1.25rem;display:inline-grid;place-items:center;border:0;padding:0;
+  border-radius:var(--hc-radius-control,2px);background:transparent;color:var(--hc-window-ink-plain,currentColor);
+  font:inherit;font-size:0.95rem;line-height:1;cursor:pointer;opacity:0;transition:opacity 120ms ease;}
+.row:hover .remove,.row:focus-within .remove{opacity:0.75;}
+.remove:hover,.remove:focus-visible{opacity:1;background:rgba(var(--shelf),0.2);outline:none;}
+.fold{position:relative;appearance:none;width:1.75rem;height:1.75rem;display:inline-grid;place-items:center;border:0;padding:0;
+  border-radius:var(--hc-radius-control,2px);background:transparent;color:var(--hc-window-ink-plain,currentColor);cursor:pointer;}
+.fold:hover,.fold:focus-visible{background:rgba(var(--shelf),0.16);color:var(--hc-window-ink-loud,currentColor);outline:none;}
+.fold svg{width:1rem;height:1rem;display:block;}
+.chip{pointer-events:auto;position:absolute;top:var(--shelf-top);right:var(--shelf-right);appearance:none;
+  display:inline-flex;align-items:center;gap:0.45rem;height:1.75rem;padding:0 0.45rem 0 0.6rem;border:0;cursor:pointer;
+  border-radius:var(--hc-radius-floating,4px);background:rgba(var(--hc-panel-pane,12,28,46),0.9);
+  box-shadow:inset 0 0 1.25rem -0.5rem rgba(var(--shelf),0.6),0 0 0 1px rgba(var(--shelf),0.35),0 4px 16px rgba(var(--hc-panel-shadow,0,0,0),0.25);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  font-family:var(--hc-mono,system-ui);font-size:0.68rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:rgb(var(--shelf));}
+.chip svg{width:0.95rem;height:0.95rem;display:block;color:var(--hc-window-ink-plain,currentColor);}
+.chip:focus-visible{outline:none;box-shadow:inset 0 0 1.25rem -0.5rem rgba(var(--shelf),0.6),0 0 0 2px rgba(var(--shelf),0.7);}
+@keyframes hc-shelf-taken{from{background:rgba(var(--shelf),0.45);border-color:rgba(var(--shelf),0.9);}}
+.taken{animation:hc-shelf-taken 700ms ease-out;}
+@media (prefers-reduced-motion:reduce){.taken{animation:none;}.row,.remove{transition:none;}}
+@media (max-width:640px){.shelf{gap:0.5rem;padding-left:0.75rem;}.label{max-width:7rem;}.legend .word{display:none;}}
 .ghost{position:fixed;z-index:2147483600;pointer-events:none;margin-left:0.8rem;margin-top:-0.9rem;max-width:14rem;
   padding:0.3rem 0.6rem;display:flex;align-items:center;gap:0.4rem;border-radius:var(--hc-radius-floating,4px);
-  background:rgba(var(--hc-panel-pane,12,28,46),0.92);border:1px solid var(--hc-window-accent-quiet,rgba(126,182,214,0.55));
+  background:rgba(var(--hc-panel-pane,12,28,46),0.94);box-shadow:0 0 0 1px rgba(var(--shelf),0.55),0 6px 20px rgba(var(--hc-panel-shadow,0,0,0),0.3);
   color:var(--hc-window-ink-loud,currentColor);font-family:var(--hc-mono,system-ui);font-size:0.8rem;line-height:1.2;white-space:nowrap;}
-.ghost .verb{font-size:0.65rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--hc-window-accent,rgb(126,182,214));}
+.ghost .verb{font-size:0.65rem;letter-spacing:0.08em;text-transform:uppercase;color:rgb(var(--shelf));}
 .ghost.custody .verb{color:var(--hc-window-warn,#ffc46b);}
 .ghost .name{overflow:hidden;text-overflow:ellipsis;}
 `
+
+/** Chevrons drawn inline: an icon font does not reach into a shadow root. */
+const CHEVRON_UP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7.41 15.41 12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>'
+const CHEVRON_DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>'
+
+/** Owner of the shelf's reservation on the canvas (viewport:inset). */
+const INSET_OWNER = 'quick-tray'
+/** Clear air under the shelf before the hive starts, in px. */
+const INSET_GAP = 6
 
 export class QuickTrayElement extends HTMLElement {
   #root: ShadowRoot
@@ -138,13 +189,16 @@ export class QuickTrayElement extends HTMLElement {
   #trailingClickCleanup: (() => void) | null = null
   /** Folded down to the chip. The rows are still held. */
   #folded = false
+  /** The top band last reserved on the canvas, in px. */
+  #reserved = -1
+  #measureFrame = 0
 
   constructor() {
     super()
     this.#root = this.attachShadow({ mode: 'open' })
   }
 
-  /** What the strip holds — read by specs and the bee, never written from outside. */
+  /** What the shelf holds — read by specs and the bee, never written from outside. */
   get entries(): readonly TrayEntry[] { return this.#entries }
 
   connectedCallback(): void {
@@ -157,19 +211,29 @@ export class QuickTrayElement extends HTMLElement {
         ...(p.loose ? { loose: true as const } : {}),
       }])
     }))
-    // The worker's answer to a drop: what landed leaves the strip, what failed
-    // stays — a partial drop loses nothing you were carrying.
-    this.#offs.push(EffectBus.on<{ placed?: { label?: string; sourceSegments?: string[] }[] }>('clipboard:placed-entries', (p) => {
-      const landed = (p?.placed ?? [])
+    // The worker's answer to a drop: what landed leaves the shelf, what failed
+    // stays — a partial drop loses nothing you were carrying. The chat lets go
+    // the same way when a row is removed from its context.
+    const letGoOf = (p: { placed?: { label?: string; sourceSegments?: string[] }[]; entries?: { label?: string; sourceSegments?: string[] }[] } | undefined): void => {
+      const keys = (p?.placed ?? p?.entries ?? [])
         .filter((e): e is { label: string; sourceSegments: string[] } => typeof e?.label === 'string')
         .map(e => entryKey({ label: e.label, sourceSegments: e.sourceSegments ?? [] }))
-      if (landed.length > 0) this.letGo(new Set(landed))
-    }))
+      if (keys.length > 0) this.letGo(new Set(keys))
+    }
+    this.#offs.push(EffectBus.on('shelf:placed', letGoOf))
+    this.#offs.push(EffectBus.on('shelf:let-go', letGoOf))
+    // A canvas owner that started late asks for every reservation again.
+    this.#offs.push(EffectBus.on('viewport:inset-poll', () => { this.#reserved = -1; this.#reserve() }))
+    window.addEventListener('resize', this.#onResize)
     this.#render()
+    this.#announce()
   }
 
   disconnectedCallback(): void {
     for (const off of this.#offs.splice(0)) off()
+    window.removeEventListener('resize', this.#onResize)
+    cancelAnimationFrame(this.#measureFrame)
+    EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'top', size: 0 })
     this.#trailingClickCleanup?.()
     this.#detachDrag()
     this.#ghost?.remove()
@@ -184,6 +248,20 @@ export class QuickTrayElement extends HTMLElement {
     for (const entry of this.#entries) void this.#loadThumb(entry)
     this.#render()
     this.#answer(incoming)
+    this.#announce()
+  }
+
+  /** What the shelf holds, for every reader (last-value replayed, so a chat
+   *  that opens later still sees it). */
+  #announce(): void {
+    EffectBus.emit('shelf:changed', {
+      entries: this.#entries.map(e => ({
+        label: e.label,
+        sourceSegments: [...e.sourceSegments],
+        ...(e.sig ? { sig: e.sig } : {}),
+        ...(e.loose ? { loose: true } : {}),
+      })),
+    })
   }
 
   /** A take must answer where it landed. A tile already held changes no row and
@@ -204,6 +282,7 @@ export class QuickTrayElement extends HTMLElement {
       if (url) { URL.revokeObjectURL(url); this.#thumbs.delete(key) }
     }
     this.#render()
+    this.#announce()
   }
 
   async #loadThumb(entry: TrayEntry): Promise<void> {
@@ -220,36 +299,48 @@ export class QuickTrayElement extends HTMLElement {
   // ── paint ────────────────────────────────────────────────────────────────
 
   #render(): void {
-    if (this.#entries.length === 0) {
-      this.#root.innerHTML = `<style>${STYLE}</style>`
-      return
-    }
     if (this.#folded) {
+      const show = esc(t('quick-tray.show', 'Show the shelf'))
       this.#root.innerHTML = `<style>${STYLE}</style>
-        <div class="tray folded"><button class="fold" type="button" aria-expanded="false" title="${esc(t('quick-tray.show', 'Show the tray'))}" aria-label="${esc(t('quick-tray.show', 'Show the tray'))}">${esc(t('quick-tray.title', 'Tray'))}<span class="count">${this.#entries.length}</span></button></div>`
+        <button class="chip fold" type="button" aria-expanded="false" title="${show}" aria-label="${show}">${esc(t('quick-tray.title', 'Shelf'))}<span class="count">${this.#entries.length}</span>${CHEVRON_DOWN}</button>`
       this.#wireFold()
+      this.#reserve()
       return
     }
     // Rows are addressed by POSITION, never by key: a key holds a NUL, which an
     // HTML parser rewrites, so a key read back from an attribute matches nothing.
+    const drag = esc(t('quick-tray.drag', 'Drag onto the hive to place it · hold Shift to move it'))
+    const remove = esc(t('quick-tray.remove', 'Take it off the shelf'))
     const rows = this.#entries.map((entry, index) => {
       const key = entryKey(entry)
       const thumb = this.#thumbs.get(key)
       const face = thumb
-        ? `<span class="thumb"><img src="${thumb}" alt="${esc(entry.label)}" draggable="false"></span>`
+        ? `<span class="thumb"><img src="${thumb}" alt="" draggable="false"></span>`
         : `<span class="glyph" aria-hidden="true">⬢</span>`
-      return `<li class="row${this.#dragging === entry ? ' lifted' : ''}" data-index="${index}" title="${esc(t('quick-tray.drag', 'Drag onto the hive to place · Shift to move · onto a Portals row to add it there'))}">
+      return `<li class="row${this.#dragging === entry ? ' lifted' : ''}" data-index="${index}" tabindex="0" title="${drag}">
         ${face}<span class="label">${esc(entry.label)}</span>
-        <button class="remove" type="button" data-index="${index}" aria-label="${esc(t('quick-tray.remove', 'Let go of this one'))}" title="${esc(t('quick-tray.remove', 'Let go of this one'))}">×</button>
+        <button class="remove" type="button" data-index="${index}" tabindex="-1" aria-label="${remove}: ${esc(entry.label)}" title="${remove}">×</button>
       </li>`
     }).join('')
+    const body = this.#entries.length
+      ? `<ul class="rows" aria-label="${esc(t('quick-tray.title', 'Shelf'))}">${rows}</ul>`
+      : `<span class="empty">${esc(t('quick-tray.empty', 'Nothing on the shelf yet. A tile\u2019s shelf icon, or To shelf on a selection, puts it here.'))}</span>`
+    const hide = esc(t('quick-tray.hide', 'Hide the shelf'))
     this.#root.innerHTML = `<style>${STYLE}</style>
-      <div class="tray${this.#dragging ? ' dragging' : ''}" role="toolbar" aria-label="${esc(t('quick-tray.title', 'Tray'))}" data-consumes-wheel>
-        <button class="fold title" type="button" aria-expanded="true" title="${esc(t('quick-tray.hide', 'Hide the tray'))}" aria-label="${esc(t('quick-tray.hide', 'Hide the tray'))}">${esc(t('quick-tray.title', 'Tray'))}<span class="count">${this.#entries.length}</span></button>
-        <ul class="rows">${rows}</ul>
-      </div>`
+      <section class="shelf${this.#dragging ? ' dragging' : ''}" aria-label="${esc(t('quick-tray.title', 'Shelf'))}" data-consumes-wheel>
+        <span class="legend"><span class="word">${esc(t('quick-tray.title', 'Shelf'))}</span><span class="count">${this.#entries.length}</span></span>
+        ${body}
+        <button class="fold" type="button" aria-expanded="true" title="${hide}" aria-label="${hide}">${CHEVRON_UP}</button>
+      </section>`
     for (const row of this.#root.querySelectorAll<HTMLLIElement>('.row')) {
       row.addEventListener('pointerdown', (e) => this.#onRowPointerDown(e, this.#entries[Number(row.dataset['index'])]))
+      // Delete or Backspace takes a focused row off, as its × does.
+      row.addEventListener('keydown', (e) => {
+        if (e.key !== 'Delete' && e.key !== 'Backspace') return
+        e.preventDefault()
+        const entry = this.#entries[Number(row.dataset['index'])]
+        if (entry) this.letGo(new Set([entryKey(entry)]))
+      })
     }
     for (const button of this.#root.querySelectorAll<HTMLButtonElement>('.remove')) {
       button.addEventListener('pointerdown', (e) => e.stopPropagation())
@@ -259,8 +350,32 @@ export class QuickTrayElement extends HTMLElement {
         if (entry) this.letGo(new Set([entryKey(entry)]))
       })
     }
+    // A wheel over the rows scrolls them sideways, so a long shelf reads with a mouse.
+    this.#root.querySelector('.rows')?.addEventListener('wheel', (e) => {
+      const rowsEl = e.currentTarget as HTMLElement
+      const ev = e as WheelEvent
+      if (Math.abs(ev.deltaY) <= Math.abs(ev.deltaX)) return
+      rowsEl.scrollLeft += ev.deltaY
+      ev.preventDefault()
+    }, { passive: false })
     this.#wireFold()
+    this.#reserve()
   }
+
+  /** Hold the band under the shelf on the canvas, measured after layout. A
+   *  folded shelf floats as a chip and holds nothing. */
+  #reserve(): void {
+    cancelAnimationFrame(this.#measureFrame)
+    this.#measureFrame = requestAnimationFrame(() => {
+      const shelf = this.#folded ? null : this.#root.querySelector('.shelf')
+      const size = shelf ? Math.round(shelf.getBoundingClientRect().bottom + INSET_GAP) : 0
+      if (size === this.#reserved) return
+      this.#reserved = size
+      EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'top', size })
+    })
+  }
+
+  #onResize = (): void => { this.#reserve() }
 
   #wireFold(): void {
     this.#root.querySelector('.fold')?.addEventListener('click', () => {
@@ -346,7 +461,7 @@ export class QuickTrayElement extends HTMLElement {
     // Release point, never a remembered hover: crossing chrome makes the
     // overlay broadcast a null hover at exactly the moment it is needed.
     const under = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
-    // Letting go back on the strip is a cancelled drag, not a drop.
+    // Letting go back on the shelf is a cancelled drag, not a drop.
     if (under?.closest?.(QUICK_TRAY_SURFACE)) return
 
     // A Portals row: add the tile to that portal through the index's own
@@ -384,7 +499,7 @@ export class QuickTrayElement extends HTMLElement {
     }
 
     // A loose atom has no page to release, so Shift cannot make it a move.
-    EffectBus.emit('clipboard:place-entries', {
+    EffectBus.emit('shelf:place', {
       entries: [{
         label: entry.label,
         sourceSegments: [...entry.sourceSegments],
@@ -398,7 +513,7 @@ export class QuickTrayElement extends HTMLElement {
 
   /** A drag may synthesize a click after pointerup, which must not land as a
    *  press on whatever is under the release. It may also synthesize none: the
-   *  strip re-renders during a drag, and a pressed row that is gone produces no
+   *  shelf re-renders during a drag, and a pressed row that is gone produces no
    *  click. So the participant's next press disarms the guard, or their own
    *  next click would be swallowed. Same guard as the aggregate index. */
   #suppressTrailingClick(): void {

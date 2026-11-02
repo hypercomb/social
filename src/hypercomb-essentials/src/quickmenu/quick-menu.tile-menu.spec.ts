@@ -3,8 +3,10 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  aimLive,
   hoverActionsSuppressed,
   menuMetrics,
+  onMiddle,
   selectionMenuWanted,
   slotUnder,
 } from './quick-menu.tile-menu.js'
@@ -15,7 +17,6 @@ const wanted = {
   overTile: true,
   buttonDown: false,
   wand: false,
-  clipboard: false,
   gesture: false,
   onCtrlIcon: false,
   latchedOff: false,
@@ -50,16 +51,28 @@ describe('the selection menu around a tile', () => {
     expect(slotUnder(metrics.reach * 2, metrics.reach * 2, metrics, 'pick')).toBeNull()
   })
 
+  it('the middle is the cell the options surround, and no option is in it', () => {
+    expect(onMiddle(0, 0, metrics)).toBe(true)
+    expect(onMiddle(20, 0, metrics)).toBe(true)
+    expect(onMiddle(metrics.reach, 0, metrics)).toBe(false)
+    expect(slotUnder(20, 0, metrics, 'gesture')).toBeNull()
+  })
+
+  it('after a way back the options sleep until the middle, unless a button is held', () => {
+    expect(aimLive(true, false)).toBe(true)
+    expect(aimLive(false, false)).toBe(false)
+    expect(aimLive(false, true)).toBe(true)
+  })
+
   it('alt over a tile wants the selection menu', () => {
     expect(selectionMenuWanted(wanted)).toBe(true)
   })
 
-  it('a drag, the wand, the clipboard, a gesture, or Escape keeps it down', () => {
+  it('a drag, the wand, a gesture, or Escape keeps it down', () => {
     expect(selectionMenuWanted({ ...wanted, alt: false })).toBe(false)
     expect(selectionMenuWanted({ ...wanted, overTile: false })).toBe(false)
     expect(selectionMenuWanted({ ...wanted, buttonDown: true })).toBe(false)
     expect(selectionMenuWanted({ ...wanted, wand: true })).toBe(false)
-    expect(selectionMenuWanted({ ...wanted, clipboard: true })).toBe(false)
     expect(selectionMenuWanted({ ...wanted, gesture: true })).toBe(false)
     expect(selectionMenuWanted({ ...wanted, onCtrlIcon: true })).toBe(false)
     expect(selectionMenuWanted({ ...wanted, latchedOff: true })).toBe(false)
