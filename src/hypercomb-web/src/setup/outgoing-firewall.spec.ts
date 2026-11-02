@@ -266,7 +266,11 @@ describe('frozen network primitives', () => {
       '/stay',
     ])
 
-    expect(() => new RTCPeerConnection()).toThrow(TypeError)
+    expect(new RTCPeerConnection()).toEqual({ ice: true })
+    expect(new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }] })).toEqual({ ice: true })
+    expect(() => new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })).toThrow(TypeError)
+    expect(() => new RTCPeerConnection({ iceServers: [{ urls: 'turn:turn.cloudflare.com:3478', username: 'u', credential: 'c' }] })).toThrow(TypeError)
+    expect(() => new RTCPeerConnection({ iceServers: [{ urls: ['stun:stun.cloudflare.com', 'stun:evil.example'] }] })).toThrow(TypeError)
   })
 
   it('registers only this origin\'s own worker', async () => {
