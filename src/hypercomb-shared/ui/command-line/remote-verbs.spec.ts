@@ -610,8 +610,12 @@ describe('a behaviour that could not act, at the keyboard', () => {
   // break-repair loop as a crash, for a dialog the participant cancelled.
   it('both places the command line hands a word to the registry catch, and say why', () => {
     const slash = component.slice(component.indexOf('readonly #executeSlashBehaviour = async'), component.indexOf('// /select[...] command execution'))
-    expect(slash).toContain('try { await drone.execute(commandName, args) }')
-    expect(slash).toContain('catch (error) { this.#behaviourDidNotRun(commandName, error) }')
+    expect(slash).toContain('await drone.execute(commandName, args)')
+    expect(slash).toContain('this.#behaviourDidNotRun(commandName, error)')
+    // The line goes when the command starts, and comes back when it fails.
+    expect(slash.indexOf('this.#beginRun(true)')).toBeGreaterThan(-1)
+    expect(slash.indexOf('this.#beginRun(true)')).toBeLessThan(slash.indexOf('await drone.execute(commandName, args)'))
+    expect(slash).toContain('this.#restoreLine(typed)')
     const select = component.slice(component.indexOf('readonly #executeSelectCommand = async'), component.indexOf('// per-item bracket operators'))
     expect(select).toContain('try { await slash.execute(op, args) }')
     expect(select).toContain('catch (error) { this.#behaviourDidNotRun(op, error) }')
