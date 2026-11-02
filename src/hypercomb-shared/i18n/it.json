@@ -2981,5 +2981,8 @@
   "meeting.lobby-error": "Impossibile avviare la fotocamera.",
   "meeting.lobby-saver": "Risparmio",
   "meeting.lobby-auto": "Auto",
-  "meeting.lobby-sharp": "Nitida"
+  "meeting.lobby-sharp": "Nitida",
+  "meeting.icon-start": "Avvia una riunione",
+  "meeting.icon-live": "C'è una riunione nel tuo sciame: partecipa",
+  "meeting.icon-in": "Mostra o nascondi la riunione"
 }

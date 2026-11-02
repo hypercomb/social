@@ -1087,6 +1087,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // replayed, so a late header mount reads the boot-open correctly).
   readonly #chatPanelOpen = signal(false)
   readonly chatPanelOpen = this.#chatPanelOpen.asReadonly()
+  /** The meeting icon's state, read from the meeting (hive-meeting.drone.ts). */
+  readonly #meetingState = signal<'none' | 'live' | 'in'>('none')
+  readonly meetingState = this.#meetingState.asReadonly()
+  readonly #meetingOpen = signal(false)
+  readonly meetingOpen = this.#meetingOpen.asReadonly()
 
   // (The feedback toggle left this rail for the bottom-right document cluster,
   //  and then the feedback window itself was retired — 2026-09-04. That corner
@@ -1173,6 +1178,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }),
       EffectBus.on<{ open?: boolean }>('chat:window-state', ({ open }) => {
         this.#chatPanelOpen.set(!!open)
+      }),
+      EffectBus.on<{ joined?: boolean; here?: number }>('meeting:presence', p => {
+        this.#meetingState.set(p?.joined ? 'in' : (p?.here ?? 0) > 0 ? 'live' : 'none')
+      }),
+      EffectBus.on<{ open?: boolean }>('meeting:view', ({ open }) => {
+        this.#meetingOpen.set(!!open)
       }),
       // Pheromone panel open/closed — lights the pheromones toggle.
       EffectBus.on<{ open?: boolean }>('tags:view-state', ({ open }) => {
@@ -1296,6 +1307,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   onChatToggle(): void {
     EffectBus.emit('chat:toggle', {})
+  }
+
+  onMeetingToggle(): void {
+    EffectBus.emitTransient('meeting:view-toggle', {})
   }
 
 

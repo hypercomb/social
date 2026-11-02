@@ -2981,5 +2981,8 @@
   "meeting.lobby-error": "कैमरा शुरू नहीं हो सका।",
   "meeting.lobby-saver": "बचत",
   "meeting.lobby-auto": "ऑटो",
-  "meeting.lobby-sharp": "तेज़"
+  "meeting.lobby-sharp": "तेज़",
+  "meeting.icon-start": "मीटिंग शुरू करें",
+  "meeting.icon-live": "आपके झुंड में मीटिंग चल रही है: जुड़ें",
+  "meeting.icon-in": "मीटिंग दिखाएँ या छिपाएँ"
 }

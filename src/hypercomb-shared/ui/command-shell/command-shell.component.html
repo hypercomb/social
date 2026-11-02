@@ -305,6 +305,24 @@
            box is for, so the control belongs on the box. `c` opens it from
            anywhere (keyboard/default-keymap.ts), landing in the same act as
            the press. -->
+      <!-- THE MEETING. Quiet with no meeting, a very slight pulse when one is
+           live in your swarm and you are not in it, coloured when you are.
+           A press starts or joins it; in it, the press shows or hides the
+           participants' hive (meeting/meeting-hive.drone.ts). -->
+      <button
+        class="rail-btn meeting-toggle-btn"
+        [class.on]="meetingOpen()"
+        [class.live]="meetingState() === 'live'"
+        [class.in]="meetingState() === 'in'"
+        type="button"
+        (mousedown)="$event.preventDefault(); meetingToggle.emit()"
+        [attr.aria-label]="meetingState() === 'in' ? ('meeting.icon-in' | t) : meetingState() === 'live' ? ('meeting.icon-live' | t) : ('meeting.icon-start' | t)"
+        [attr.aria-pressed]="meetingOpen()"
+        [title]="meetingState() === 'in' ? ('meeting.icon-in' | t) : meetingState() === 'live' ? ('meeting.icon-live' | t) : ('meeting.icon-start' | t)"
+      >
+        <span class="mat-sym" aria-hidden="true">videocam</span>
+      </button>
+
       <button
         class="rail-btn chat-toggle-btn"
         [class.on]="chatPanelOpen()"

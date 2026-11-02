@@ -2981,5 +2981,8 @@
   "meeting.lobby-error": "La caméra n’a pas pu démarrer.",
   "meeting.lobby-saver": "Économie",
   "meeting.lobby-auto": "Auto",
-  "meeting.lobby-sharp": "Nette"
+  "meeting.lobby-sharp": "Nette",
+  "meeting.icon-start": "Démarrer une réunion",
+  "meeting.icon-live": "Une réunion a lieu dans votre essaim : la rejoindre",
+  "meeting.icon-in": "Afficher ou masquer la réunion"
 }

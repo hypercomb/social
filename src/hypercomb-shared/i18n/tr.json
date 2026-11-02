@@ -2981,5 +2981,8 @@
   "meeting.lobby-error": "Kamera başlatılamadı.",
   "meeting.lobby-saver": "Tasarruf",
   "meeting.lobby-auto": "Otomatik",
-  "meeting.lobby-sharp": "Net"
+  "meeting.lobby-sharp": "Net",
+  "meeting.icon-start": "Toplantı başlat",
+  "meeting.icon-live": "Sürünüzde bir toplantı var: katılın",
+  "meeting.icon-in": "Toplantıyı göster veya gizle"
 }

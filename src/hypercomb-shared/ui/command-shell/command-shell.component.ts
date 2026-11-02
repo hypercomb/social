@@ -335,6 +335,12 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    *  control bar's copy is gone, so there is one opener and it sits on the
    *  box the question is typed into. */
   readonly chatPanelOpen = input<boolean>(false)
+  /** How the meeting button shows: quiet with no meeting ("none"), a very
+   *  slight pulse while one is live in your swarm and you are not in it
+   *  ("live"), coloured while you are in it ("in"). `meetingOpen` lights it
+   *  while the participants' hive shows. */
+  readonly meetingState = input<'none' | 'live' | 'in'>('none')
+  readonly meetingOpen = input<boolean>(false)
   readonly chatLabel = input<string>('chat')
 
   /** The Beehaviors window's open state — lights the toggle that sits
@@ -561,6 +567,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
 
   readonly chatToggle = output<void>()
+  readonly meetingToggle = output<void>()
 
   readonly featuresToggle = output<void>()
 
