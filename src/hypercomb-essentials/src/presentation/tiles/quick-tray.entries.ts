@@ -14,12 +14,17 @@ export interface TrayEntry {
    *  Identity for de-duplication and the thumbnail; the DROP re-seals the live
    *  subtree, so a sig that went stale here never places stale bytes. */
   readonly sig?: string
+  /** An atom no page lists (recents-census.ts). It has no source to seal from
+   *  or release, so the drop places this exact sig, and only as an appearance. */
+  readonly loose?: true
 }
 
 const SIG = /^[0-9a-f]{64}$/
 
 /** Identity of a row: label + source path, never the bare label. The same tile
- *  taken twice is one row; two same-named tiles from different pages are two. */
+ *  taken twice is one row; two same-named tiles from different pages are two.
+ *  Loose atoms have no source path, so two of one name share a key: the later
+ *  take replaces the earlier row. */
 export const entryKey = (e: Pick<TrayEntry, 'label' | 'sourceSegments'>): string =>
   e.label + '\u0000' + e.sourceSegments.join('/')
 
@@ -38,7 +43,7 @@ export const takeEntries = (held: readonly TrayEntry[], incoming: readonly TrayE
     const key = entryKey({ label, sourceSegments })
     const prior = byKey.get(key)
     const sig = (typeof raw.sig === 'string' && SIG.test(raw.sig)) ? raw.sig : prior?.sig
-    byKey.set(key, { label, sourceSegments, ...(sig ? { sig } : {}) })
+    byKey.set(key, { label, sourceSegments, ...(sig ? { sig } : {}), ...(raw.loose ? { loose: true as const } : {}) })
   }
   return [...byKey.values()]
 }

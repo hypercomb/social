@@ -1900,6 +1900,11 @@ export class HistoryService {
    */
   readonly #latestSigByLineage = new Map<string, string>()
 
+  /** Every lineage this session knows a head for, as a snapshot. No disk I/O
+   *  and never a scan: `preloadAllBags` fills it once per boot, so it can be
+   *  empty early on. The recents census reads it to find bags no page lists. */
+  public readonly knownHeads = (): ReadonlyMap<string, string> => new Map(this.#latestSigByLineage)
+
   // ── head provenance (restored vs session-derived) ────────────────────
   //
   // The persisted head index is a DERIVED CACHE whose key (lineageSig)

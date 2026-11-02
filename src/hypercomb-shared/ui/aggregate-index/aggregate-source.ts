@@ -45,6 +45,9 @@ export interface AggregateItem {
   /** Drawn dimmed — a hidden tile in the recents census, which is shaded and
    *  further out but never absent (codex H7). Never a filter. */
   shaded?: boolean
+  /** Points at nothing a reference could name — an atom no page lists. The row
+   *  does not drag; opening it is the source's own answer. */
+  loose?: boolean
 }
 
 /** One selectable VERSION of a row.

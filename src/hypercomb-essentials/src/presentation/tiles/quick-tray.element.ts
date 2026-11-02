@@ -137,9 +137,14 @@ export class QuickTrayElement extends HTMLElement {
   get entries(): readonly TrayEntry[] { return this.#entries }
 
   connectedCallback(): void {
-    this.#offs.push(EffectBus.on<{ label?: string; segments?: string[]; sig?: string }>('quick-tray:take', (p) => {
+    this.#offs.push(EffectBus.on<{ label?: string; segments?: string[]; sig?: string; loose?: true }>('quick-tray:take', (p) => {
       if (!p?.label) return
-      this.take([{ label: p.label, sourceSegments: Array.isArray(p.segments) ? p.segments : [], sig: p.sig }])
+      this.take([{
+        label: p.label,
+        sourceSegments: Array.isArray(p.segments) ? p.segments : [],
+        sig: p.sig,
+        ...(p.loose ? { loose: true as const } : {}),
+      }])
     }))
     // The worker's answer to a drop: what landed leaves the strip, what failed
     // stays — a partial drop loses nothing you were carrying.
@@ -304,13 +309,15 @@ export class QuickTrayElement extends HTMLElement {
     // A Portals row: add the tile to that portal through the index's own
     // handler — the same write every other way into a portal uses.
     const portalKey = under?.closest?.('[data-portal-drop]')?.getAttribute('data-portal-drop')
+    // A reference needs a place to point at, and a loose atom has none, so it
+    // lands on a page first.
     const ownPath = [...entry.sourceSegments, entry.label]
     if (portalKey) {
-      EffectBus.emit('portal-carry:drop', { label: entry.label, segments: ownPath, targetKey: portalKey })
+      if (!entry.loose) EffectBus.emit('portal-carry:drop', { label: entry.label, segments: ownPath, targetKey: portalKey })
       return
     }
     if (under?.closest?.('hc-aggregate-index')) {
-      EffectBus.emit('portal-carry:drop', { label: entry.label, segments: ownPath })
+      if (!entry.loose) EffectBus.emit('portal-carry:drop', { label: entry.label, segments: ownPath })
       return
     }
 
@@ -333,11 +340,16 @@ export class QuickTrayElement extends HTMLElement {
       return   // not over the hive — nothing happens
     }
 
+    // A loose atom has no page to release, so Shift cannot make it a move.
     EffectBus.emit('clipboard:place-entries', {
-      entries: [{ label: entry.label, sourceSegments: [...entry.sourceSegments] }],
+      entries: [{
+        label: entry.label,
+        sourceSegments: [...entry.sourceSegments],
+        ...(entry.loose && entry.sig ? { sig: entry.sig } : {}),
+      }],
       targetSegments,
       ...(targets ? { targets } : {}),
-      custody: event.shiftKey,
+      custody: event.shiftKey && !entry.loose,
     })
   }
 

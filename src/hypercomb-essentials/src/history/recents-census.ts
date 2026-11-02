@@ -129,10 +129,49 @@ export const readableCensus = (parsed: unknown): CensusRecord | null => {
   return { v: RECENTS_DERIVATION, entries }
 }
 
-/** The census as the view reads it: newest first; an unknown date sorts
- *  oldest; ties keep the shallower, then the earlier-named, atom first. */
+/** Newest first; an unknown date sorts oldest; ties keep the shallower, then
+ *  the earlier-named, atom first. */
+const byNewest = (a: CensusEntry, b: CensusEntry): number =>
+  (b.at - a.at)
+  || (a.path.length - b.path.length)
+  || a.label.localeCompare(b.label)
+
+/** The census as the view reads it. */
 export const newestFirst = (record: CensusRecord | null): CensusEntry[] =>
-  [...(record?.entries ?? [])].sort((a, b) =>
-    (b.at - a.at)
-    || (a.path.length - b.path.length)
-    || a.label.localeCompare(b.label))
+  [...(record?.entries ?? [])].sort(byNewest)
+
+/** One atom as the recents view shows it. `placed` is false for an atom no page
+ *  lists: it has no path, and it is still here at its date. */
+export interface RecentAtom extends CensusEntry {
+  readonly placed: boolean
+  readonly hidden: boolean
+}
+
+/** The bag census's test for a husk: an auto-minted bare `{ name }` layer as a
+ *  bag's only marker is never truth, so it is nothing anybody made. A bare head
+ *  with real history IS truth: the participant emptied that tile. */
+export const isHusk = (layer: Record<string, unknown>, markers: number): boolean =>
+  markers <= 1 && Object.keys(layer).every(key => key === 'name')
+
+/**
+ * Everything the view shows: the tree census and the unlisted atoms, once per
+ * atom, newest first. The root is left out, because it is where you stand and
+ * not something you made. `hiddenPaths` holds `a/b/c` strings, the shape of the
+ * session's `hc:hidden-lineages` list. A hide is read here at answer time and
+ * never stored in a record, because no layer carries it (D3).
+ */
+export const gatherAtoms = (
+  record: CensusRecord | null,
+  unlisted: readonly CensusEntry[],
+  hiddenPaths: ReadonlySet<string>,
+): RecentAtom[] => {
+  const atoms = new Map<string, RecentAtom>()
+  for (const entry of record?.entries ?? []) {
+    if (entry.path.length === 0) continue
+    atoms.set(entry.sig, { ...entry, placed: true, hidden: hiddenPaths.has(entry.path.join('/')) })
+  }
+  for (const entry of unlisted) {
+    if (!atoms.has(entry.sig)) atoms.set(entry.sig, { ...entry, placed: false, hidden: false })
+  }
+  return [...atoms.values()].sort(byNewest)
+}

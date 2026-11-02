@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  MAX_CENSUS_ENTRIES, RECENTS_DERIVATION, composeCensus, newestFirst, readableCensus,
+  MAX_CENSUS_ENTRIES, RECENTS_DERIVATION, composeCensus, gatherAtoms, isHusk, newestFirst, readableCensus,
   type CensusRecord,
 } from './recents-census'
 
@@ -94,5 +94,41 @@ describe('newestFirst', () => {
     }
     expect(newestFirst(record).map(e => e.label)).toEqual(['alpha', 'beta', 'new', 'old', 'cold'])
     expect(newestFirst(null)).toEqual([])
+  })
+})
+
+describe('gatherAtoms', () => {
+  const record: CensusRecord = {
+    v: RECENTS_DERIVATION,
+    entries: [
+      { sig: sig('a'), label: '/', path: [], at: 1 },
+      { sig: sig('b'), label: 'ann', path: ['people', 'ann'], at: 5 },
+    ],
+  }
+
+  it('leaves the root out and marks a hidden path, reading the session list shape', () => {
+    const atoms = gatherAtoms(record, [], new Set(['people/ann']))
+    expect(atoms).toHaveLength(1)
+    expect(atoms[0]).toMatchObject({ label: 'ann', placed: true, hidden: true })
+  })
+
+  it('keeps an atom no page lists, at its date, unplaced', () => {
+    const atoms = gatherAtoms(record, [{ sig: sig('c'), label: 'cut', path: [], at: 9 }], new Set())
+    expect(atoms.map(a => a.label)).toEqual(['cut', 'ann'])
+    expect(atoms[0]).toMatchObject({ placed: false, hidden: false })
+  })
+
+  it('counts an atom once when the tree and a bag both name it', () => {
+    const atoms = gatherAtoms(record, [{ sig: sig('b'), label: 'ann', path: [], at: 9 }], new Set())
+    expect(atoms).toHaveLength(1)
+    expect(atoms[0]!.placed).toBe(true)
+  })
+})
+
+describe('isHusk', () => {
+  it('is a bare name on a single marker, and nothing else', () => {
+    expect(isHusk({ name: 'x' }, 1)).toBe(true)
+    expect(isHusk({ name: 'x' }, 2)).toBe(false)
+    expect(isHusk({ name: 'x', children: [] }, 1)).toBe(false)
   })
 })

@@ -21,13 +21,16 @@ export const planHandleRelease = (at: { portalKey?: string | null; overIndex?: b
 
 /** What a take carries: the tile's name, the page it stands on (its SOURCE —
  *  the parent, never the tile's own path), and the signature that page lists
- *  it by when it is known. */
+ *  it by when it is known. `loose` is an atom no page lists: it has no source
+ *  to seal from, so its sig is the only handle on it. */
 export const takePayload = (
   label: string,
   segments: readonly string[],
   sig?: string | null,
-): { label: string; segments: string[]; sig?: string } => ({
+  loose = false,
+): { label: string; segments: string[]; sig?: string; loose?: true } => ({
   label,
   segments: [...segments],
   ...(sig ? { sig } : {}),
+  ...(loose ? { loose: true as const } : {}),
 })

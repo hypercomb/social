@@ -29,6 +29,10 @@ describe('take payload', () => {
     expect(takePayload('ann', here, null)).toEqual({ label: 'ann', segments: here })
   })
 
+  it('marks an atom no page lists as loose: its sig is the only handle on it', () => {
+    expect(takePayload('cut', [], SIG, true)).toEqual({ label: 'cut', segments: [], sig: SIG, loose: true })
+  })
+
   it('copies the segments so a later navigation cannot rewrite a sent take', () => {
     const here = ['page']
     const sent = takePayload('tile', here)

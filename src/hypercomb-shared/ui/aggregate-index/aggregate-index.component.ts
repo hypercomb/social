@@ -1015,6 +1015,7 @@ export class AggregateIndexComponent implements OnDestroy {
   onRowPointerDown(event: PointerEvent, item: AggregateItem): void {
     if (event.button !== 0) return
     if (this.renaming() === item.key) return
+    if (item.loose) return
     this.#pending = { item, x: event.clientX, y: event.clientY }
     document.addEventListener('pointermove', this.#onDragMove)
     document.addEventListener('pointerup', this.#onDragUp)

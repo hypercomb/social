@@ -187,13 +187,18 @@ export class ClipboardWorker extends Worker {
     // full source path; the live subtree is sealed here, at the drop. Placing
     // never consumes anything from the clipboard. `custody` is the drop that
     // MOVES: the same append, then the source page stops listing the tile.
-    EffectBus.on<{ entries?: { label?: string; sourceSegments?: string[] }[]; targets?: Record<string, number>; targetSegments?: string[]; custody?: boolean }>(
+    // A `sig` is an atom no page lists: nothing to seal from, so it places as given.
+    EffectBus.on<{ entries?: { label?: string; sourceSegments?: string[]; sig?: string }[]; targets?: Record<string, number>; targetSegments?: string[]; custody?: boolean }>(
       'clipboard:place-entries',
       (payload) => {
         const raw = Array.isArray(payload?.entries) ? payload!.entries! : []
         const entries: ClipboardEntry[] = raw
-          .filter((e): e is { label: string; sourceSegments?: string[] } => !!e && typeof e.label === 'string')
-          .map(e => ({ label: e.label, sourceSegments: Array.isArray(e.sourceSegments) ? [...e.sourceSegments] : [] }))
+          .filter((e): e is { label: string; sourceSegments?: string[]; sig?: string } => !!e && typeof e.label === 'string')
+          .map(e => ({
+            label: e.label,
+            sourceSegments: Array.isArray(e.sourceSegments) ? [...e.sourceSegments] : [],
+            ...(typeof e.sig === 'string' && /^[0-9a-f]{64}$/.test(e.sig) ? { sig: e.sig } : {}),
+          }))
         const targets = (payload?.targets && typeof payload.targets === 'object') ? payload.targets : undefined
         if (entries.length > 0) void this.#placeEntries(entries, targets, this.#boundTarget(payload?.targetSegments), payload?.custody === true)
       },
