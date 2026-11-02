@@ -137,3 +137,56 @@ describe('hiding the shelf', () => {
     expect(shown(tray)).toEqual([])
   })
 })
+
+// The fold is sticky: a press keeps one current record in the shelf:state pool,
+// and a shelf that mounts reads it back.
+describe('the fold is sticky', () => {
+  const pool = {} as FileSystemDirectoryHandle
+  let saved: ArrayBuffer | null = null
+  const store = {
+    getPool: async () => pool,
+    getPoolDoc: async () => saved,
+    putPoolDoc: async (_: unknown, bytes: ArrayBuffer) => { saved = bytes; return true },
+  }
+  const folded = (): unknown => saved && JSON.parse(new TextDecoder().decode(saved)).folded
+  const settle = () => new Promise(r => setTimeout(r, 0))
+  const mount = (): QuickTrayElement => {
+    document.body.innerHTML = ''
+    const fresh = document.createElement('hc-quick-tray') as QuickTrayElement
+    document.body.appendChild(fresh)
+    fresh.take([{ label: 'first', sourceSegments: [] }])
+    return fresh
+  }
+
+  beforeEach(() => {
+    saved = null
+    ;(globalThis as { ioc?: unknown }).ioc = { get: (k: string) => (k === '@hypercomb.social/Store' ? store : undefined) }
+  })
+
+  it('a press keeps the fold, and the next shelf comes up folded', async () => {
+    click(mount(), '.fold')
+    await settle()
+    expect(folded()).toBe(true)
+    const next = mount()
+    await settle()
+    expect(shown(next)).toEqual([])
+    expect(said()).toMatchObject({ folded: true })
+  })
+
+  it('opening it again is kept too', async () => {
+    click(mount(), '.fold')
+    await settle()
+    EffectBus.emitTransient('shelf:toggle', {})
+    await settle()
+    expect(folded()).toBe(false)
+    expect(shown(mount())).toEqual(['first'])
+  })
+
+  it('a press made before the saved fold is read wins', async () => {
+    saved = new TextEncoder().encode(JSON.stringify({ folded: true })).buffer as ArrayBuffer
+    const next = mount()
+    EffectBus.emitTransient('shelf:toggle', { open: true })
+    await settle()
+    expect(shown(next)).toEqual(['first'])
+  })
+})

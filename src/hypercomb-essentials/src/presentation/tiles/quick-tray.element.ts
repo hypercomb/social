@@ -44,8 +44,9 @@
 // Hideable: the chevron folds the shelf away, and `shelf:toggle` (the shell's
 // shelf button, beside show / hide agents) folds it or brings it back. Folding
 // lets go of nothing; `shelf:changed` carries `folded` with the rows, so the
-// button can say the shelf still holds something. Like the rest of the shelf
-// it lasts the session.
+// button can say the shelf still holds something. The rows last the session;
+// the fold is sticky — one current record in the `shelf:state` pool, read
+// back on boot (a press that lands before the read wins).
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { dropEntries, entryKey, takeEntries, type TrayEntry } from './quick-tray.entries.js'
@@ -63,11 +64,19 @@ type OverlayLike = {
   labelAtClient(x: number, y: number): string | null
   dropTargetAtClient?(x: number, y: number): { label: string | null; occupied: boolean; index: number } | null
 }
-type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
+type StoreLike = {
+  getResource?: (sig: string) => Promise<Blob | null>
+  getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
+  getPoolDoc?: (pool: FileSystemDirectoryHandle) => Promise<ArrayBuffer | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey: undefined, options: { keep: 'current' }) => Promise<unknown>
+}
 type PlacementLike = { propsSigAt?: (segments: readonly string[]) => Promise<string | null> }
 
-const ioc = (): { get?: (k: string) => unknown } | undefined =>
-  (globalThis as { ioc?: { get?: (k: string) => unknown } }).ioc
+type IocLike = { get?: (k: string) => unknown; whenReady?: (k: string, cb: (v: unknown) => void) => void }
+const ioc = (): IocLike | undefined => (globalThis as { ioc?: IocLike }).ioc
+const STORE_KEY = '@hypercomb.social/Store'
+/** Where the fold is kept: one current record, written only by a press. */
+const STATE_POOL = 'shelf:state'
 
 const t = (key: string, fallback: string): string =>
   (ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.t?.(key) ?? fallback
@@ -187,6 +196,8 @@ export class QuickTrayElement extends HTMLElement {
   #trailingClickCleanup: (() => void) | null = null
   /** Folded away. The rows are still held. */
   #folded = false
+  /** A press landed this session, so the saved fold no longer speaks. */
+  #pressed = false
   /** The top band last reserved on the canvas, in px. */
   #reserved = -1
   #measureFrame = 0
@@ -225,11 +236,12 @@ export class QuickTrayElement extends HTMLElement {
     // Transient on the sender's side: a shelf that mounts later must not
     // replay an old press and fold itself.
     this.#offs.push(EffectBus.on<{ open?: boolean } | undefined>('shelf:toggle', (p) => {
-      this.#setFolded(typeof p?.open === 'boolean' ? !p.open : !this.#folded)
+      this.#press(typeof p?.open === 'boolean' ? !p.open : !this.#folded)
     }))
     window.addEventListener('resize', this.#onResize)
     this.#render()
     this.#announce()
+    this.#recallFold()
   }
 
   disconnectedCallback(): void {
@@ -378,7 +390,42 @@ export class QuickTrayElement extends HTMLElement {
   #onResize = (): void => { this.#reserve() }
 
   #wireFold(): void {
-    this.#root.querySelector('.fold')?.addEventListener('click', () => { this.#setFolded(!this.#folded) })
+    this.#root.querySelector('.fold')?.addEventListener('click', () => { this.#press(!this.#folded) })
+  }
+
+  /** A participant's fold: applied, and kept for the next boot. */
+  #press(folded: boolean): void {
+    this.#pressed = true
+    if (folded === this.#folded) return
+    this.#setFolded(folded)
+    void this.#keepFold(folded)
+  }
+
+  async #keepFold(folded: boolean): Promise<void> {
+    const store = ioc()?.get?.(STORE_KEY) as StoreLike | undefined
+    const pool = await store?.getPool?.(STATE_POOL)
+    if (!pool || !store?.putPoolDoc) return
+    const bytes = new TextEncoder().encode(JSON.stringify({ folded, at: Date.now() })).buffer as ArrayBuffer
+    await store.putPoolDoc(pool, bytes, undefined, { keep: 'current' }).catch(() => undefined)
+  }
+
+  /** The fold the participant left it in. The store may register after the
+   *  shelf mounts, so this waits for it; a press made meanwhile wins. */
+  #recallFold(): void {
+    const read = async (store: StoreLike | undefined): Promise<void> => {
+      const pool = await store?.getPool?.(STATE_POOL)
+      if (!pool || !store?.getPoolDoc) return
+      try {
+        const bytes = await store.getPoolDoc(pool)
+        if (!bytes || this.#pressed) return
+        const record = JSON.parse(new TextDecoder().decode(bytes)) as { folded?: unknown }
+        if (record?.folded === true) this.#setFolded(true)
+      } catch { /* no record, or not ours: the shelf stays open */ }
+    }
+    const container = ioc()
+    const store = container?.get?.(STORE_KEY) as StoreLike | undefined
+    if (store) void read(store)
+    else container?.whenReady?.(STORE_KEY, v => { void read(v as StoreLike) })
   }
 
   #setFolded(folded: boolean): void {

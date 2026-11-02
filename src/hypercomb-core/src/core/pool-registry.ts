@@ -486,6 +486,9 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // so neither can collide with a tile slugged 'context' or 'changes'.
   'context:basket',
   'context:draft',
+  // The shelf's fold, sticky across boots: one current record, written only
+  // when the participant folds or opens it (presentation/tiles/quick-tray.element.ts).
+  'shelf:state',
   // Named handfuls of tiles asked about together (assistant/context-groups.ts).
   // A group is IDENTITY over a set of signatures — two groups may hold the
   // same tiles and stay two groups — and it is participant-local working
