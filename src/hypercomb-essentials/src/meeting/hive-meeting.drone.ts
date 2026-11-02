@@ -98,7 +98,7 @@ export class HiveMeetingDrone extends Drone {
     'render:host-ready', 'overlay:request-register', 'tile:action',
   ]
   protected override emits = [
-    'meeting:state', 'meeting:streams', 'meeting:local-camera', 'meeting:presence',
+    'meeting:state', 'meeting:streams', 'meeting:local-camera', 'meeting:presence', 'meeting:spend',
     'indicator:set', 'indicator:clear', 'activity:log', 'toast:show', 'mesh:open-modal', 'overlay:register-action',
     EXTERNAL_CALL, REMOTE_SUBMIT,
   ]
@@ -700,7 +700,11 @@ export class HiveMeetingDrone extends Drone {
       this.#pc = pc
       this.#published = local
       this.#tuneSenders()
-      this.#videoBeat = setInterval(() => { void this.#sfu?.beat().catch(() => { /* the next beat tries again */ }) }, VIDEO_BEAT_MS)
+      this.#videoBeat = setInterval(() => {
+        void this.#sfu?.beat().catch(() => { /* the next beat tries again */ })
+        void this.#pollSpend()
+      }, VIDEO_BEAT_MS)
+      void this.#pollSpend()
       this.#lastAvailPublishMs = 0
       this.#publishAvailability()
       for (const id of this.#heard.keys()) void this.#subscribeTo(id)
@@ -715,6 +719,33 @@ export class HiveMeetingDrone extends Drone {
     } finally {
       this.#videoStarting = false
     }
+  }
+
+  /** What the meeting's video has cost, for everyone in it: the meeting point
+   *  keeps one ledger, so every client reads the same figures. Each session is
+   *  charged what it was sent, so a person's share is read off the session
+   *  they published under; a session whose person has left is "left". */
+  async #pollSpend(): Promise<void> {
+    const client = this.#sfu
+    if (!client) return
+    try {
+      const spend = await client.spend()
+      if (this.#sfu !== client) return // left while it was asked
+      const byMember: Record<string, number> = {}
+      let named = 0
+      const credit = (id: string, session: string): void => {
+        const gb = spend.meeting.sessions[session]
+        if (gb === undefined) return
+        byMember[id] = gb
+        named += gb
+      }
+      credit(this.#publisherId, client.sessionId)
+      for (const [id, member] of this.#heard) if (member.sfu) credit(id, member.sfu.session)
+      this.emitEffect('meeting:spend', {
+        month: spend.month, monthGb: spend.gb, capGb: spend.capGb,
+        meetingGb: spend.meeting.gb, byMember, leftGb: Math.max(0, spend.meeting.gb - named),
+      })
+    } catch { /* the next beat asks again */ }
   }
 
   /** Subscribe to one person's published tracks, once. */
@@ -773,6 +804,7 @@ export class HiveMeetingDrone extends Drone {
     this.#cameraOn = false
 
     this.emitEffect('meeting:streams', { streams: new Map<string, MediaStream>() })
+    this.emitEffect('meeting:spend', null)
     this.emitEffect('meeting:local-camera', { on: false })
     window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: false } }))
   }

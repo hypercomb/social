@@ -15,6 +15,8 @@
 //   PUT  session/:id/renegotiate     → sessions/:id/renegotiate
 //   PUT  session/:id/tracks/close    → sessions/:id/tracks/close
 //   POST session/:id/beat            → (here only) the session is still in use
+//   GET  spend                       → (here only) the month's spend, and the meeting's
+//                                      split by session (what each one was sent)
 //
 // NOT A PASS-THROUGH. Every body is size-capped and shape-checked before it is
 // forwarded: only local and remote track requests, offers and answers, mids.
@@ -58,6 +60,7 @@ export const monthOf = (ms) => new Date(ms).toISOString().slice(0, 7)
 export function sfuRoute(method, pathname) {
   if (!pathname.startsWith(SFU_PREFIX)) return null
   const parts = pathname.slice(SFU_PREFIX.length).split('/')
+  if (parts[0] === 'spend' && parts.length === 1) return method === 'GET' ? { op: 'spend' } : null
   if (parts[0] !== 'session') return null
   if (parts.length === 1) return method === 'POST' ? { op: 'session' } : null
   const sessionId = parts[1]
@@ -76,7 +79,7 @@ const isDescription = (d, type) =>
 /** The body each route accepts, or the reason it is refused. Only what the
  *  route needs is kept: anything else is dropped before Cloudflare sees it. */
 export function checkSfuBody(op, body) {
-  if (op === 'session' || op === 'beat') return { ok: true, body: {} }
+  if (op === 'session' || op === 'beat' || op === 'spend') return { ok: true, body: {} }
   if (!body || typeof body !== 'object') return { ok: false, reason: 'a JSON body is required' }
   if (op === 'renegotiate') {
     return isDescription(body.sessionDescription, 'answer')
@@ -118,6 +121,9 @@ export function checkSfuBody(op, body) {
 
 const isVideoName = (name) => /-video$/.test(String(name))
 
+/** GB to the thousandth: a megabyte. */
+const round = (gb) => Math.round(gb * 1000) / 1000
+
 const reply = (status, body, cors) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...cors } })
 
@@ -132,6 +138,7 @@ export class SfuDesk {
   #cors
   #sessions = new Map()   // sessionId → { meeting, ip, beatAt, chargedAt, remote: Map<mid, isVideo> }
   #opened = new Map()     // ip → recent session-creation times
+  #spend = new Map()      // meeting → Map<sessionId, GB sent to it>, kept after a session ends while the meeting lives
   usage                   // { month, gb }
   dirty = false
 
@@ -180,6 +187,11 @@ export class SfuDesk {
     const checked = checkSfuBody(route.op, parsed)
     if (!checked.ok) return reply(400, { error: checked.reason }, this.#cors)
     const now = this.#now()
+
+    if (route.op === 'spend') {
+      if (!MEETING.test(meeting)) return reply(400, { error: 'name the meeting (X-Hc-Meeting)' }, this.#cors)
+      return reply(200, this.spendOf(meeting), this.#cors)
+    }
 
     if (route.op === 'session') {
       if (!MEETING.test(meeting)) return reply(400, { error: 'name the meeting (X-Hc-Meeting)' }, this.#cors)
@@ -236,12 +248,32 @@ export class SfuDesk {
   /** Add what every live session has been sent since it was last charged. */
   #charge(now) {
     this.#spent()
-    for (const s of this.#sessions.values()) {
+    for (const [id, s] of this.#sessions) {
       const videos = [...s.remote.values()].filter(Boolean).length
       const elapsed = Math.max(0, Math.min(now, s.beatAt + SESSION_IDLE_MS) - s.chargedAt)
-      if (videos && elapsed) { this.usage.gb += videos * elapsed * GB_PER_MS_PER_VIDEO; this.dirty = true }
+      if (videos && elapsed) {
+        const gb = videos * elapsed * GB_PER_MS_PER_VIDEO
+        this.usage.gb += gb
+        this.dirty = true
+        let split = this.#spend.get(s.meeting)
+        if (!split) this.#spend.set(s.meeting, split = new Map())
+        split.set(id, (split.get(id) ?? 0) + gb)
+      }
       s.chargedAt = Math.max(s.chargedAt, now)
     }
+  }
+
+  /** The month's spend as the meeting point counts it, and the share of this
+   *  meeting that each of its sessions was sent. Estimates, in GB: what
+   *  Cloudflare bills is what it sends out, and a session is sent what it
+   *  subscribes to. The same answer to everyone in the meeting. */
+  spendOf(meeting) {
+    this.#charge(this.#now())
+    const split = this.#spend.get(meeting)
+    const sessions = {}
+    let gb = 0
+    if (split) for (const [id, used] of split) { sessions[id] = round(used); gb += used }
+    return { month: this.usage.month, gb: round(this.usage.gb), capGb: this.#capGb, meeting: { gb: round(gb), sessions } }
   }
 
   /** Charge, then close what has gone quiet. Returns the closes it sent. */
@@ -261,6 +293,9 @@ export class SfuDesk {
       if (recent.length) this.#opened.set(ip, recent)
       else this.#opened.delete(ip)
     }
+    // A meeting nobody is in any more takes its split with it.
+    const live = new Set([...this.#sessions.values()].map((s) => s.meeting))
+    for (const meeting of this.#spend.keys()) if (!live.has(meeting)) this.#spend.delete(meeting)
     await Promise.all(closing)
     return closing.length
   }

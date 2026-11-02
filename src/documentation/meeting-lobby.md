@@ -126,6 +126,19 @@ inside the free 1,000 GB. A session that stops beating for 90 s has its
 subscriptions closed. A 7-person meeting on Auto is ~29 GB an hour; Saver
 ~10 GB.
 
+**The spend, shown to everyone** (jwize, 2026-11-02: "show our spend shared
+between clients on the hive ... and if possible spend per participant").
+`GET /.well-known/hc-meet/sfu/spend` (X-Hc-Meeting) answers the same figures
+to everyone in the meeting: the month's estimate against its ceiling, this
+meeting's total, and its split **by session** — a session is charged what it
+was sent, so a person's share is what *their* screen received. Each client
+reads it on its video beat (30 s) and maps sessions to people through the
+session each one publishes under (`meeting:spend`); the participants' hive
+shows each person's share on their hexagon and the meeting's and month's totals
+in its foot. A session whose person has left stays in the meeting's total as
+"from people who left"; an empty meeting's split is forgotten, the month's
+figure is kept. Estimates, in GB: Cloudflare's own bill is the truth.
+
 **The firewall (decision owed).** `hypercomb-dev/src/index.html` pins
 `RTCPeerConnection` to a function that always throws, so the browser cannot
 open the SFU connection yet. The change: allow a peer connection only when the

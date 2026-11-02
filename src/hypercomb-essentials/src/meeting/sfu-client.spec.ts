@@ -80,6 +80,29 @@ describe('the SFU client', () => {
     expect(new SfuError(429, 'x')).toBeInstanceOf(Error)
   })
 
+  it('reads the spend with a GET naming the meeting, keeping only what it understands', async () => {
+    const f = fakeFetch([() => ({ body: {
+      month: '2026-11', gb: 12.5, capGb: 500,
+      meeting: { gb: 1.25, sessions: { 'session-ann-0000': 0.75, 'session-bob-0000': 0.5, 'x': 9, 'session-bad-0000': 'lots' } },
+    } })])
+    const c = new SfuClient({ base: 'https://h/.well-known/hc-meet/sfu', meeting: MEETING, access: 'code-1', fetchImpl: f.fetchImpl })
+    const spend = await c.spend()
+    expect(spend).toEqual({
+      month: '2026-11', gb: 12.5, capGb: 500,
+      meeting: { gb: 1.25, sessions: { 'session-ann-0000': 0.75, 'session-bob-0000': 0.5, 'session-bad-0000': 0 } },
+    })
+    expect(f.calls[0]!.method).toBe('GET')
+    expect(f.calls[0]!.url).toBe('https://h/.well-known/hc-meet/sfu/spend')
+    expect(f.calls[0]!.headers['X-Hc-Meeting']).toBe(MEETING)
+    expect(f.calls[0]!.headers['X-Hc-Access']).toBe('code-1')
+  })
+
+  it('says why the spend cannot be read', async () => {
+    const f = fakeFetch([() => ({ status: 501, body: { error: 'video is not set up on this meeting point' } })])
+    const c = new SfuClient({ base: 'https://h', meeting: MEETING, fetchImpl: f.fetchImpl })
+    await expect(c.spend()).rejects.toMatchObject({ status: 501 })
+  })
+
   it('closes tracks by mid, forced, and does nothing with none', async () => {
     const f = fakeFetch([() => ({ body: {} })])
     const c = new SfuClient({ base: 'https://h', meeting: MEETING, fetchImpl: f.fetchImpl })
