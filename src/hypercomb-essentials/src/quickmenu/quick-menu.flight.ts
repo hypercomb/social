@@ -229,9 +229,15 @@ export class QuickMenuFlight {
     const buttonDown = (e.buttons & 1) !== 0
     // Asleep after a way back: only the middle wakes it, or a held button.
     // Outside the flower is simply no option, and costs nothing.
-    if (!this.#armed && this.#layer.onMiddleAtClient(this.#virtual.x, this.#virtual.y)) this.#wake()
+    const slot = this.#layer.slotAtClient(this.#virtual.x, this.#virtual.y, 'gesture')
+    // The middle and its neighbours overlap at the rim; only the heart of the
+    // middle counts, and the move that wakes the flower aims at nothing.
+    if (!this.#armed && !slot && this.#layer.onMiddleAtClient(this.#virtual.x, this.#virtual.y)) {
+      this.#wake()
+      return
+    }
     if (!aimLive(this.#armed, buttonDown)) return
-    this.#aim(this.#layer.slotAtClient(this.#virtual.x, this.#virtual.y, 'gesture'))
+    this.#aim(slot)
   }
 
   /** Right-click: one ring back, wherever the pointer is. The pointer is not

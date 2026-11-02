@@ -422,48 +422,6 @@ EXPERT_LESSONS.push({
   },
 })
 
-// ── 100 · the clipboard window ─────────────────────────────────────────
-
-EXPERT_LESSONS.push({
-  id: 'window-clipboard',
-  level: L,
-  order: 100,
-  title: 'The clipboard window',
-  summary: 'Everything you have picked up, held on this machine, and a swap while the window is open.',
-  pheromones: ['tutorial', 'lesson', 'expert', 'editing'],
-  requires: () => hasWindow('hc-clipboard-panel'),
-  async run(stage) {
-    const two = await subjects(stage, 2, names(stage), 25)
-
-    await stage.flyToCell(two[0])
-    // The clipboard holds TILE entries only. Pasted images are intercepted long
-    // before this and routed into the tile editor; there is no text entry type
-    // at all, and never was one.
-    await stage.say('clipboard-window', 'What you are carrying',
-      'Copy is not a one-slot pocket here. The clipboard window shows every tile you have picked up — each one carrying its whole branch — and it stays yours, on this machine, until you place it.')
-    stage.highlight(null)
-
-    stage.select([two[0]])
-    await stage.wait(300)
-    stage.invoke('clipboard.copy')
-    await stage.wait(700)
-    stage.emit('clipboard:panel', { visible: true })
-    await stage.wait(1400)
-
-    // THE SWAP. The per-row slot field and the place (+) button this beat used
-    // to describe were removed with the swap rework — a placed tile lands in the
-    // next free slot like any paste, and "where" is chosen by walking there.
-    await stage.say('clipboard-window-swap', 'One gesture, both directions',
-      'While the window is open it is a swap. Click a tile out on the hive and it moves INTO the window; click a row and it comes back OUT, onto the page you are standing on. Ctrl+click is the walk on both sides — into a tile on the hive, into a row’s children in here.')
-
-    await stage.say('clipboard-window-done', 'Walk there, then place',
-      'A placed tile lands in the next free slot, the way any paste does — so choosing where means walking there first, which is exactly what the ctrl+click is for. It brings its whole branch with it: pictures, notes and all. Nothing here ever leaves your machine.')
-    stage.emit('clipboard:panel', { visible: false })
-    stage.clearSelection()
-    await stage.wait(500)
-  },
-})
-
 // ── 110 · the arrangements window ──────────────────────────────────────
 
 EXPERT_LESSONS.push({

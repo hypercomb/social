@@ -2,9 +2,10 @@
 
 > **Direction, jwize 2026-11-01. Landed the same day: the quick tray and the
 > handle that feeds it, the recents census, the recents source, the
-> full-screen view (the word `recents`) and the bag census. The trait-group
-> pick at the drop and the retirements below are not built.** This supersedes
-> the model in
+> full-screen view (the word `recents`) and the bag census. On 2026-11-02 the
+> tray became **the shelf** (full width, always in view) and the clipboard was
+> removed outright — see the retirements below. The trait-group pick at the
+> drop is not built.** This supersedes the model in
 > `clipboard-sig-native.md` (cut / copy / paste as verbs, the clipboard window
 > as the holding area). The codex carries the rules (`H7`–`H8`, `A7`–`A9`);
 > this document carries the argument.
@@ -100,14 +101,31 @@ and it already has one.
 A full-screen view covers the destination. You can pick *from* it, but you
 cannot walk to where you are going while it is open. Gathering five tiles
 from three pages and placing them together needs something that stays visible
-while you walk. That is the **quick tray**: a strip at the top of the
-viewport that holds the signatures you are carrying.
+while you walk. That is the **quick tray**, which the participant sees as
+**the shelf**: a full-width strip at the top of the viewport that holds the
+signatures you are carrying (`presentation/tiles/quick-tray.element.ts`).
 
-- **Entered by the to-the-tray icon.** The tile's icon band carries it in the
+- **Always in view.** The shelf is there even when it holds nothing — an
+  empty shelf says how to fill it. It reserves its own height off the top of
+  the canvas (`viewport:inset`, owner `quick-tray`), so it never covers a
+  tile. It starts after the seam tools under the header (`--hc-seam-right`),
+  where the **shelf button** stands to the left of show / hide agents: an
+  icon only, lit while the shelf is folded, with a dot when it is folded over
+  something still held. The button (`shelf:toggle`, sent transient) and the
+  shelf's own chevron fold it away entirely, giving the band back to the
+  canvas; folding lets go of nothing.
+- **Entered by three doors, one act.** The tile's shelf icon, in the
   always-visible row with the others (`presentation/tiles/portal-carry.drone.ts`,
-  which began as a drag handle). Click it and the tile's signature lands in the
-  tray. Nothing is dragged to get there; a tile reaches a portal from the tray,
-  whose rows drop onto Portals rows.
+  which began as a drag handle). The **To shelf** button at the bottom right,
+  where cut and copy used to sit, which puts the whole selection on the shelf
+  (`shelf:take-selection`). And the bracket op `[a, b]/shelf` on the command
+  line, which emits the same effect. Nothing is dragged to get there; a tile
+  reaches a portal from the shelf, whose rows drop onto Portals rows.
+- **Placed by a drop.** A row dragged onto the hive emits `shelf:place`;
+  `presentation/tiles/shelf-placement.worker.ts` writes it (appearance, or
+  custody with Shift) and answers `shelf:place-done`, which the activity log
+  reports. The shelf announces what it holds as `shelf:changed`, which the
+  chat window reads to add a held tile to a request.
 - **A reference, never a cut.** What travels is the signature. The source
   page is untouched. Nothing is written at pick-up — no `removeSig`, no
   `cut` flag, no marker. A tray full of signatures is a selection, not a
@@ -163,21 +181,23 @@ it looks *there*.
 - Recents shows the atom once, whatever it wears. Which groups it has can be
   read off the tile; the census is of atoms.
 
-## What this retires (future work, not done)
+## What this retired (done 2026-11-02)
 
 | Retired | Replaced by |
 |---|---|
-| `ui/clipboard-panel/` (the clipboard window) | the quick tray (strip) + the recents view |
-| `clipboard/clipboard.queen.ts` and the words `cut`, `copy`, `paste` | nothing at pick-up; *appearance* / *custody* at the drop |
-| `ClipboardEntry.cut` and the "only handle" rule | recents, which never drops an atom |
-| `PortalCarryDrone`'s meaning "drop on a Portals row" — **done** | the same handle sends the reference to the tray; a Portals row still takes a drop, and the tray's rows drop onto Portals rows as onto any page |
-| the clipboard worker's exclusions and index-override re-mints | reconsidered once the tray exists; a prune is a derived collection either way |
+| `ui/clipboard-panel/` (the clipboard window) and the control bar's clipboard button | the shelf + the recents view |
+| `clipboard/clipboard.queen.ts`, the words `cut`, `copy`, `paste`, and Ctrl+C / Ctrl+X / the paste key | nothing at pick-up; *appearance* / *custody* at the drop; `[a, b]/shelf` |
+| the bottom-right cut / copy buttons | the bottom-right **To shelf** button |
+| `ClipboardEntry.cut`, `clipboard.service.ts` and the "only handle" rule | recents, which never drops an atom |
+| `clipboard.worker.ts` | `shelf-placement.worker.ts` — the placement half only (`shelf:place`); the exclusions and index-override re-mints went with the worker |
+| the overlay's Ctrl swap cue and the Escape cascade's clipboard rung | nothing; the swap cue keeps only *enter* |
+| `PortalCarryDrone`'s meaning "drop on a Portals row" | the same handle sends the reference to the shelf; a Portals row still takes a drop, and the shelf's rows drop onto Portals rows as onto any page |
 
-The doctrine ratchets' allowlists shrink as each lands; none grows. Order of
-work: the tray first (smallest change, and it is what lets the panel go), then
-recents as a source of the aggregate index, then its full-screen layout, then
-the retirements, then the trait-group pick at the drop — which only matters
-once the tray carries more than one group.
+`clipboard/image-paste.worker.ts` stays: pasting an image from the operating
+system is not the hive's clipboard. The doctrine ratchets' entries for the
+deleted files were removed, so the allowlists clicked tight. What is left is
+the trait-group pick at the drop — which only matters once the shelf carries
+more than one group.
 
 ## Open question — answered (2026-11-01)
 

@@ -46,7 +46,7 @@ type CensusRow = AdmissionEntry & { machine?: AdmissionEntry['machine'] & { refu
  *  `/postit` a view's word an operator may say, `/lounge` a view still a prototype. */
 const census: readonly CensusRow[] = [
   { name: 'create', machine: { reach: 'additive', scope: 'page' } },
-  { name: 'copy' },
+  { name: 'shelf' },
   { name: 'move' },
   { name: 'cut', machine: { reach: 'destructive', scope: 'page' } },
   { name: 'remove', aliases: ['rm'], machine: { reach: 'destructive', scope: 'page' } },
@@ -231,7 +231,7 @@ describe('the op after a bracket is a verb, and is judged as one', () => {
   })
 
   it('still admits the ops an operator may say, and a word no behaviour answers to is only a word', () => {
-    expect(door('[a, b]/copy')).toBeNull()
+    expect(door('[a, b]/shelf')).toBeNull()
     expect(door('[a]/move(3)')).toBeNull()
     expect(door('[a, b]:focus')).toBeNull()
     expect(door('[a]/break-apart')).toBeNull()
@@ -262,7 +262,7 @@ describe('a `~` removal is `remove`', () => {
   })
 
   it('except a tag coming off, which takes no tile away', () => {
-    for (const line of ['~drafts:stale', '~drafts:stale(#ff0)', '  ~drafts:stale', '[a, ~b:stale]', '[~b:stale]/copy']) {
+    for (const line of ['~drafts:stale', '~drafts:stale(#ff0)', '  ~drafts:stale', '[a, ~b:stale]', '[~b:stale]/shelf']) {
       expect(dispatchedVerbsOf(line), line).not.toContain('remove')
       expect(door(line), line).toBeNull()
     }
@@ -349,7 +349,7 @@ describe('`/grant none` refuses every line the door is sent', () => {
   const runs = (command: string) => (): FeatureReading => ({ remove: false, command })
 
   it('the verbs, as it always did', () => {
-    for (const line of ['/create roadmap', '[a]/copy', '~drafts', '/remove drafts']) {
+    for (const line of ['/create roadmap', '[a]/shelf', '~drafts', '/remove drafts']) {
       expect(door(line, undefined, closed)?.admit, line).toBe(false)
     }
     expect(door('meetup@postit', runs('postit'), closed)?.admit).toBe(false)
@@ -459,7 +459,7 @@ describe("each call carries what its behaviour will be handed, so the door can r
 
   it('a bracket op handed to the registry carries the words after it; a built-in carries none', () => {
     expect(dispatchedCallsOf('[x]/module commit fresh')).toEqual([{ verb: 'module', args: 'commit fresh' }])
-    expect(dispatchedCallsOf('[a, b]/copy')).toEqual([{ verb: 'copy' }])
+    expect(dispatchedCallsOf('[a, b]/shelf')).toEqual([{ verb: 'shelf' }])
     expect(dispatchedCallsOf('[a]/keyword work')).toEqual([{ verb: 'keyword' }])
   })
 
@@ -488,7 +488,7 @@ describe("the door runs the behaviour's own refuse, after the gate admits", () =
   })
 
   it('a built-in bracket op names its targets in the bracket, so no argument rule is asked', () => {
-    expect(door('[a, b]/copy')).toBeNull()
+    expect(door('[a, b]/shelf')).toBeNull()
   })
 })
 

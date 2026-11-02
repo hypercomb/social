@@ -325,14 +325,13 @@ describe('doctrine ratchets', () => {
     // fragments like '/content/__bees__/' are legacy fetch aliases, a
     // separate drain). Files below carry legacy names as read-fallback
     // drain constants (or known write debt: layout.service
-    // `__layout__`, clipboard `__meta__`); they may only leave this
+    // `__layout__`); they may only leave this
     // list as drains complete.
     const actual = filesMatching(/['"`]__[a-z][a-z0-9_-]*__['"`]/)
     assertRatchet(actual, [
       'hypercomb-shared/core/initializers/location-parser.ts',
       'hypercomb-runtime/src/store.ts',
       'hypercomb-essentials/scripts/copy-content.ts',
-      'hypercomb-essentials/src/clipboard/clipboard.worker.ts',
       'hypercomb-essentials/src/commands/website-archive.queen.ts',
       'hypercomb-essentials/src/editor/viewport-store.ts',
       'hypercomb-essentials/src/history/history.service.ts',
@@ -422,7 +421,6 @@ describe('doctrine ratchets', () => {
       "backgrounds-window/backgrounds-window.component",
       "camera-capture/camera-capture.component",
       "chat-window/chat-window.component",
-      "clipboard-panel/clipboard-panel.component",
       "command-palette/command-palette.component",
       "confirm-dialog/confirm-dialog.component",
       "contact-card/contact-form.component",

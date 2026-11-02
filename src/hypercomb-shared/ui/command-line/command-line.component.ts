@@ -1703,7 +1703,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // op lands in `normalized` with the slash already in `head`/value.
       if (phase === 'operation') {
         if (!ctx.head.endsWith('/') && !ctx.normalized) return []
-        const ops = ['/cut', '/copy', '/move', '/keyword', '/remove', '/delete', '/format', '/accent', '/opus', '/sonnet', '/haiku']
+        const ops = ['/shelf', '/move', '/keyword', '/remove', '/delete', '/format', '/accent', '/opus', '/sonnet', '/haiku']
         if (!ctx.normalized) return ops
         return ops.filter(o => o.startsWith('/' + ctx.normalized) || o.slice(1).startsWith(ctx.normalized))
       }
@@ -2776,7 +2776,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // 'navigate' so SelectionService can sync from the URL; clearing on
     // those wiped the selection the same action had just made (clear()
     // calls selection.clear() while the bar is in select mode), which
-    // broke every keyboard cut/copy after a `[name]` select.
+    // broke every keyboard verb after a `[name]` select.
     const key = this.navigation.segments().join('/')
     if (key === this.#lastNavKey) return
     this.#lastNavKey = key
@@ -4497,7 +4497,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     const afterBracket = v.slice(bracketClose + 1)
 
-    // Parse operation: /cut, /copy, /move...
+    // Parse operation: /shelf, /move...
     const opMatch = afterBracket.match(/^\/([\w-]+)/)
     const op = opMatch ? opMatch[1].toLowerCase() : ''
 
@@ -4525,16 +4525,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    if (op === 'cut') {
-      // Use existing ClipboardWorker via controls:action effect
-      EffectBus.emit('controls:action', { action: 'cut' })
+    if (op === 'shelf') {
+      // The selection onto the shelf at the top, as references — the same act
+      // as the bottom-right To shelf button (PortalCarryDrone answers).
+      EffectBus.emit('shelf:take-selection', {})
       this.clear()
-      return
-    }
-
-    if (op === 'copy') {
-      EffectBus.emit('controls:action', { action: 'copy' })
-      this.#collapseToSelect(labels)
       return
     }
 
@@ -5284,7 +5279,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#selectOriginalSegments = null
     }
 
-    // If there's an operation after ] (e.g. /select[tiles]/cut), collapse to /select[tiles]
+    // If there's an operation after ] (e.g. /select[tiles]/shelf), collapse to /select[tiles]
     // Otherwise (selection phase or bare /select[tiles]), clear everything
     const v = this.value()
     const bracketClose = v.indexOf(']')
@@ -5672,7 +5667,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const opKeyword = nextSlash === -1 ? opAndRest : opAndRest.slice(0, nextSlash)
       const opLower = opKeyword.toLowerCase().trim()
 
-      if (opLower === 'cut' || opLower === 'copy' || opLower === 'remove' || opLower === 'rm' || opLower === 'format' || opLower === 'fmt' || opLower === 'fp' || opLower === 'opus' || opLower === 'sonnet' || opLower === 'haiku' || opLower === 'o' || opLower === 's' || opLower === 'h') return 'operation'
+      if (opLower === 'shelf' || opLower === 'remove' || opLower === 'rm' || opLower === 'format' || opLower === 'fmt' || opLower === 'fp' || opLower === 'opus' || opLower === 'sonnet' || opLower === 'haiku' || opLower === 'o' || opLower === 's' || opLower === 'h') return 'operation'
 
       if (opLower === 'move' || opLower.startsWith('move')) {
         // Check for (index) — note: the first [ is at bracketOpen
@@ -5752,7 +5747,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         const opKeyword = nextSlash === -1 ? opAndRest : opAndRest.slice(0, nextSlash)
         const opLower = opKeyword.toLowerCase().trim()
 
-        if (opLower === 'cut' || opLower === 'copy' || opLower === 'move' || opLower === 'format' || opLower === 'fmt' || opLower === 'fp' || opLower === 'opus' || opLower === 'sonnet' || opLower === 'haiku' || opLower === 'o' || opLower === 's' || opLower === 'h') {
+        if (opLower === 'shelf' || opLower === 'move' || opLower === 'format' || opLower === 'fmt' || opLower === 'fp' || opLower === 'opus' || opLower === 'sonnet' || opLower === 'haiku' || opLower === 'o' || opLower === 's' || opLower === 'h') {
           return { active: true, mode: 'select', head: v, raw: '', normalized: opLower, style: 'space' }
         }
         return {

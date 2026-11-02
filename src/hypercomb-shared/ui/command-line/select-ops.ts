@@ -18,7 +18,7 @@
  * those migrate; it should never grow to cover a behaviour.
  */
 const BUILTIN_SELECT_OPS = new Set([
-  'select', 'cut', 'copy', 'move', 'fp',
+  'select', 'shelf', 'move', 'fp',
 ])
 
 type SlashRegistry = { has?: (name: string) => boolean }
@@ -34,7 +34,7 @@ export const isSelectOp = (op: string): boolean => {
 
 /**
  * Brackets `[…]` are THE selection grouping primitive — the one canonical form.
- * `[a,b]` selects; `[a,b]/cut` selects then cuts; `~[a,b]` removes; `[a,b]:tag`
+ * `[a,b]` selects; `[a,b]/shelf` selects then shelves; `~[a,b]` removes; `[a,b]:tag`
  * tags. Legacy `/select[…]`, `/format[…]`, `/fmt[…]`, `/fp[…]` are still accepted
  * as INPUT (old URLs, muscle memory) but are rewritten to the bare bracket and
  * are never echoed or suggested back.

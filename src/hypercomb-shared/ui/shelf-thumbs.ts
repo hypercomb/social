@@ -1,9 +1,9 @@
-// hypercomb-shared/ui/clipboard-thumbs.ts
+// hypercomb-shared/ui/shelf-thumbs.ts
 //
-// ONE RESOLVER for "what does this clipboard entry look like". Both faces of
-// the gathered set — the clipboard panel's rows and the chat header's context
-// squares — turn a {label, sourceSegments} entry into a blob: URL through
-// this one path, so the two can never show different pictures for one entry.
+// ONE RESOLVER for "what does this shelf entry look like" on the shell side.
+// The chat's flyout and its request squares turn a {label, sourceSegments}
+// entry into a blob: URL through this one path, so the two can never show
+// different pictures for one entry.
 // Shared UI reaches essentials services only at runtime via window.ioc.
 //
 // `prefer` picks WHICH picture: 'small' is the hex capture (gold rim baked
@@ -23,7 +23,7 @@ const SIG_RE = /^[0-9a-f]{64}$/i
 
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const STORE_KEY = '@hypercomb.social/Store'
-const CLIPBOARD_WORKER_KEY = '@diamondcoreprocessor.com/ClipboardWorker'
+const PLACEMENT_KEY = '@diamondcoreprocessor.com/ShelfPlacementWorker'
 
 type HistoryLike = {
   sign?: (ctx: { explorerSegments: () => string[] }) => Promise<string>
@@ -49,7 +49,7 @@ const lookupPropsSig = (history: HistoryLike | undefined, locSig: string): strin
 /** Canonical props sig from the tile's LAYER (via the worker's warm path),
  *  used only when the localStorage render-index has no entry. Best-effort. */
 const canonicalPropsSig = async (segments: readonly string[]): Promise<string | undefined> => {
-  const worker = ioc()?.get?.(CLIPBOARD_WORKER_KEY) as
+  const worker = ioc()?.get?.(PLACEMENT_KEY) as
     { propsSigAt?: (s: readonly string[]) => Promise<string | null> } | undefined
   if (!worker?.propsSigAt) return undefined
   try { return (await worker.propsSigAt(segments)) ?? undefined } catch { return undefined }

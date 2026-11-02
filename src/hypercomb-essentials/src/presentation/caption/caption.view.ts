@@ -37,7 +37,8 @@ function ensureStyles(): void {
     ${CAPTION_SURFACE} { display: contents; }
     .hc-caption {
       position: fixed;
-      top: calc(var(--hc-header-anchor, 2.3rem) + 0.6rem);
+      /* under the header, and under the shelf when it reserves the top */
+      top: calc(max(var(--hc-inset-top, 0px), var(--hc-header-anchor, 2.3rem)) + 0.6rem);
       left: 50%; transform: translateX(-50%);
       display: flex; align-items: center; gap: 1rem;
       max-width: min(52rem, calc(100vw - 2rem));

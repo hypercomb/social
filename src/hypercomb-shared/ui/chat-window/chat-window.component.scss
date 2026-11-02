@@ -142,7 +142,7 @@ $accent: #7eb6d6;
 // about them, so this header is every tool window's header.
 .chat-header {
   @include tw.header;
-  // The clipboard shelf hangs from the header's bottom edge.
+  // The shelf flyout hangs from the header's bottom edge.
   position: relative;
 }
 
@@ -274,7 +274,7 @@ $accent: #7eb6d6;
 
 // What the empty rectangle says. It names the gesture that fills it from
 // ANYWHERE in the hive, not just from the list beside it: copying a tile is
-// what puts it here, because this list and the clipboard are one thing.
+// what puts it here, because this list and the shelf are one thing.
 .chat-payload-hint {
   min-width: 0;
   overflow: hidden;
@@ -371,7 +371,7 @@ $accent: #7eb6d6;
 
 // The × is a real button now — it drops the reference from the request while
 // the square it sits on is a drag handle for sending it back to the
-// clipboard. Two gestures, two meanings, one square.
+// shelf. Two gestures, two meanings, one square.
 .chat-box-off {
   padding: 0;
   border: 0;
@@ -392,7 +392,7 @@ $accent: #7eb6d6;
   color: var(--hc-window-accent-quiet);
 }
 
-// THE WAY IN — the clipboard, one press from the composer. Quiet until it
+// THE WAY IN — the shelf, one press from the composer. Quiet until it
 // is holding something, lit while its shelf is open.
 .chat-clip {
   flex: 0 0 auto;

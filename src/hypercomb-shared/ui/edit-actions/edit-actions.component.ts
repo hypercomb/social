@@ -8,12 +8,12 @@
 //                       there's nothing to redo and nothing to merge.
 //
 // While tiles are SELECTED (and the cursor is at head) the cluster also
-// grows the selection verbs — cut · copy · remove — to the left of undo.
-// They emit the same `controls:action` bus the controls-bar pills and the
-// retired floating selection menu used, so the essentials drones that
-// answer (ClipboardWorker, RemoveQueenBee) are unchanged. Hidden while
-// rewound: scrub-back is view-only — cut/remove commits are refused there,
-// and the cluster should read as the merge decision alone.
+// grows the selection verbs — to shelf · remove — to the left of undo. To
+// shelf puts the selection on the shelf at the top (`shelf:take-selection`,
+// answered by PortalCarryDrone): a reference, never a cut. Remove rides the
+// same `controls:action` bus the retired floating selection menu used, so
+// RemoveQueenBee answers it unchanged. Hidden while rewound: scrub-back is
+// view-only, and the cluster should read as the merge decision alone.
 //
 // Undo/redo reuse the EXACT keyboard path: they emit the same
 // `keymap:invoke` command the Ctrl+Z / Ctrl+Y bindings fire (the same call
@@ -73,7 +73,7 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
   readonly rewound = signal(false)
   // saving: guards re-entry while the merge (promote + optional branch) runs.
   readonly saving = signal(false)
-  // selected tiles — gates the cut/copy/remove verbs.
+  // selected tiles — gates the to-shelf and remove verbs.
   readonly selectionCount = signal(0)
   // Current hive orientation, used to describe the rotate button's destination.
   // The actual toggle remains owned by runtime-initializer.
@@ -207,16 +207,12 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
   }
 
   // ── selection verbs (shown only while tiles are selected) ─
-  // Same `controls:action` bus as the controls-bar pills — ClipboardWorker
-  // answers cut/copy (capturing the selection), RemoveQueenBee answers
-  // remove (with its own nested-children confirm).
+  // To shelf: the selection onto the shelf, as references (PortalCarryDrone
+  // answers). Remove: RemoveQueenBee answers, with its own nested-children
+  // confirm.
 
-  readonly cut = (): void => {
-    EffectBus.emit('controls:action', { action: 'cut' })
-  }
-
-  readonly copy = (): void => {
-    EffectBus.emit('controls:action', { action: 'copy' })
+  readonly toShelf = (): void => {
+    EffectBus.emit('shelf:take-selection', {})
   }
 
   readonly remove = (): void => {

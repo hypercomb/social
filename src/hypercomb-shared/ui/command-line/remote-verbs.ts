@@ -96,7 +96,7 @@ const takesTagOff = (item: string): boolean => {
  *  names the bracket already gives — so it is judged for reach and scope only.
  *  Mirrors that method's branches; remote-verbs.spec.ts holds the two together. */
 export const SELECT_BUILTIN_OPS: ReadonlySet<string> = new Set([
-  'cut', 'copy', 'move', 'keyword', 'kw', 'tag', 'remove', 'rm', 'delete', 'del',
+  'shelf', 'move', 'keyword', 'kw', 'tag', 'remove', 'rm', 'delete', 'del',
   'format', 'fmt', 'fp', 'opus', 'sonnet', 'haiku', 'o', 's', 'h',
 ])
 
