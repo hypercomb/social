@@ -20,11 +20,16 @@
 
 import { moleculeKey } from '@hypercomb/core'
 
+/** The participant who holds this document, when a group names them. */
+export const SELF_PERSON = 'self'
+
 /** One category: its name, the notes filed directly in it (note sigs, in the
- *  order they were filed), and the categories beneath it. */
+ *  order they were filed), the participants added to it, and the categories
+ *  beneath it. A note sits in one category. A participant may be in many. */
 export interface NoteCategory {
   readonly name: string
   readonly notes: readonly string[]
+  readonly people?: readonly string[]
   readonly children: readonly NoteCategory[]
 }
 
@@ -59,6 +64,13 @@ export const categoryKey = (name: string): string => moleculeKey(String(name ?? 
 const cleanName = (name: unknown): string =>
   String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME)
 
+/** A participant id this document will keep: `self`, or a pubkey. */
+const personId = (raw: unknown): string => {
+  const id = String(raw ?? '').trim().toLowerCase()
+  if (id === SELF_PERSON) return SELF_PERSON
+  return SIG.test(id) ? id : ''
+}
+
 /** Read any value as a category document, or null. Tolerant: unknown fields
  *  are dropped, bad notes are dropped, a duplicate name on one level merges,
  *  and a note filed twice keeps its first place. */
@@ -77,15 +89,22 @@ export function readCategoryDoc(raw: unknown): CategoryDoc | null {
       const notes = (Array.isArray((node as { notes?: unknown }).notes) ? (node as { notes: unknown[] }).notes : [])
         .map(s => String(s ?? '').toLowerCase())
         .filter(s => SIG.test(s) && !seen.has(s) && (seen.add(s), true))
+      const peopleSeen = new Set<string>()
+      const people = (Array.isArray((node as { people?: unknown }).people) ? (node as { people: unknown[] }).people : [])
+        .map(personId)
+        .filter(id => id.length > 0 && !peopleSeen.has(id) && (peopleSeen.add(id), true))
       const kids = depth < MAX_DEPTH && Array.isArray((node as { children?: unknown }).children)
         ? level((node as { children: unknown[] }).children, depth + 1)
         : []
       const twin = out.findIndex(c => categoryKey(c.name) === categoryKey(name))
       if (twin >= 0) {
         const held = out[twin]
-        out[twin] = { name: held.name, notes: [...held.notes, ...notes], children: [...held.children, ...kids] }
+        const joined = [...(held.people ?? []), ...people].filter((id, i, all) => all.indexOf(id) === i)
+        out[twin] = joined.length
+          ? { name: held.name, notes: [...held.notes, ...notes], people: joined, children: [...held.children, ...kids] }
+          : { name: held.name, notes: [...held.notes, ...notes], children: [...held.children, ...kids] }
       } else {
-        out.push({ name, notes, children: kids })
+        out.push(people.length ? { name, notes, people, children: kids } : { name, notes, children: kids })
       }
     }
     return out
@@ -96,7 +115,13 @@ export function readCategoryDoc(raw: unknown): CategoryDoc | null {
 /** The canonical bytes of a document — keys in a fixed order, so the same
  *  tree always signs the same. */
 export function categoryDocJson(doc: CategoryDoc): string {
-  const node = (c: NoteCategory): unknown => ({ children: c.children.map(node), name: c.name, notes: [...c.notes] })
+  const node = (c: NoteCategory): unknown => {
+    const out: { children: unknown; name: string; notes: string[]; people?: string[] } = {
+      children: c.children.map(node), name: c.name, notes: [...c.notes],
+    }
+    if (c.people?.length) out.people = [...c.people]
+    return out
+  }
   return JSON.stringify({ categories: doc.categories.map(node) })
 }
 
@@ -155,6 +180,49 @@ export function unfileNote(doc: CategoryDoc, noteSig: string): CategoryDoc {
   return { categories: strip(doc.categories) }
 }
 
+/** A category with `people` only when the list still has someone. */
+const withPeople = (c: NoteCategory, people: readonly string[], children: readonly NoteCategory[]): NoteCategory =>
+  people.length
+    ? { name: c.name, notes: c.notes, people, children }
+    : { name: c.name, notes: c.notes, children }
+
+/** Add a participant to the category at `path`. They stay in every other
+ *  group they were already in. Adding them again changes nothing. */
+export function addPerson(doc: CategoryDoc, path: CategoryPath, person: string): CategoryDoc {
+  const id = personId(person)
+  const cat = categoryAt(doc, path)
+  if (!id || !cat || (cat.people ?? []).includes(id)) return doc
+  return updateAt(doc, path, c => ({ ...c, people: [...(c.people ?? []), id] }))
+}
+
+/** Take a participant out of the one category at `path`. */
+export function removePerson(doc: CategoryDoc, path: CategoryPath, person: string): CategoryDoc {
+  const id = personId(person)
+  const cat = categoryAt(doc, path)
+  if (!id || !cat || !(cat.people ?? []).includes(id)) return doc
+  const people = (cat.people ?? []).filter(p => p !== id)
+  return updateAt(doc, path, c => withPeople(c, people, c.children))
+}
+
+/** Take a participant out of every category. */
+export function clearPerson(doc: CategoryDoc, person: string): CategoryDoc {
+  const id = personId(person)
+  if (!id) return doc
+  const strip = (level: readonly NoteCategory[]): { level: NoteCategory[]; changed: boolean } => {
+    let changed = false
+    const next = level.map(c => {
+      const kids = strip(c.children)
+      const people = (c.people ?? []).filter(p => p !== id)
+      if (!kids.changed && people.length === (c.people ?? []).length) return c
+      changed = true
+      return withPeople(c, people, kids.level)
+    })
+    return { level: changed ? next : level as NoteCategory[], changed }
+  }
+  const out = strip(doc.categories)
+  return out.changed ? { categories: out.level } : doc
+}
+
 /** File a note in the category at `path` — out of any other first, because a
  *  note sits in one place in the hierarchy. */
 export function fileNote(doc: CategoryDoc, path: CategoryPath, noteSig: string): CategoryDoc {
@@ -176,6 +244,80 @@ export function addCategory(doc: CategoryDoc, parent: CategoryPath, name: string
   const made: NoteCategory = { name: clean, notes: [], children: [] }
   if (parent.length === 0) return { doc: { categories: [...doc.categories, made] }, path: [doc.categories.length] }
   return { doc: updateAt(doc, parent, c => ({ ...c, children: [...c.children, made] })), path: [...parent, level.length] }
+}
+
+/** Add each name under the last, starting at `parent`. A name already on
+ *  that level is that category. When a level is full, or the tree is as deep
+ *  as it goes, the rest of the names are left off and the path is the last
+ *  category that worked. */
+export function placeNames(doc: CategoryDoc, parent: CategoryPath, names: readonly string[]): { doc: CategoryDoc; path: CategoryPath } {
+  let next = doc
+  let path: CategoryPath = [...parent]
+  for (const name of names) {
+    const made = addCategory(next, path, name)
+    next = made.doc
+    if (!made.path) break
+    path = made.path
+  }
+  return { doc: next, path }
+}
+
+/** One line of the note-tree command. `/` separates categories. A leading
+ *  `/` starts at the top, and a line that is only `/` is the top itself.
+ *  A line that ends on `/` steps into that category and files nothing.
+ *  Anything else files its last segment as a note. `//` is a slash in the
+ *  text, so a line that ends in `//` is a note, not a step. */
+export type PlaceLine = {
+  readonly absolute: boolean
+  readonly root: boolean
+  readonly categories: readonly string[]
+  readonly note: string | null
+}
+
+export function readPlaceLine(raw: string): PlaceLine | null {
+  const line = String(raw ?? '').trim()
+  if (!line) return null
+  if (line === '/') return { absolute: true, root: true, categories: [], note: null }
+  let absolute = false
+  let i = 0
+  if (line.startsWith('/') && !line.startsWith('//')) {
+    absolute = true
+    i = 1
+  }
+  const parts: string[] = []
+  let current = ''
+  let ended = false
+  while (i < line.length) {
+    if (line[i] === '/' && line[i + 1] === '/') {
+      current += '/'
+      i += 2
+      ended = false
+      continue
+    }
+    if (line[i] === '/') {
+      parts.push(current.trim())
+      current = ''
+      ended = true
+      i += 1
+      continue
+    }
+    current += line[i]
+    ended = false
+    i += 1
+  }
+  if (!ended) parts.push(current.trim())
+  const names = parts.filter(name => name.length > 0)
+  if (!names.length) return absolute ? { absolute: true, root: true, categories: [], note: null } : null
+  if (ended) return { absolute, root: false, categories: names, note: null }
+  const note = names[names.length - 1]
+  const categories = names.slice(0, -1)
+  return { absolute, root: absolute && categories.length === 0, categories, note }
+}
+
+/** The same line, finished as a place: what was the note is the last category. */
+export function placeToGo(line: PlaceLine): PlaceLine {
+  if (line.note == null) return line
+  return { absolute: line.absolute, root: false, categories: [...line.categories, line.note], note: null }
 }
 
 /** Remove the category at `path`. Its notes — and those of everything under
@@ -208,6 +350,39 @@ export function mergeOutline(doc: CategoryDoc, outline: readonly OutlineNode[]):
   }
   lay(outline, [])
   return next
+}
+
+/** One group an agent can look at: a category, or the notes no category holds.
+ *  `notes` are the words filed directly in that category (a child is its own
+ *  group), so a walk never reads the same line twice. */
+export type ExploreGroup = {
+  readonly key: string
+  readonly name: string
+  readonly notes: readonly string[]
+}
+
+/** The groups of a tile, in the order the tree paints them, with Unsorted
+ *  last when anything is still unfiled. `notes` are `{ id, text }` as the
+ *  desk holds them; a note the tree names that is not in that list is skipped. */
+export function exploreGroups(
+  doc: CategoryDoc,
+  notes: readonly { id: string; text: string }[],
+): ExploreGroup[] {
+  const byId = new Map(notes.map(n => [n.id, n.text]))
+  const filed = filedNotes(doc)
+  const out: ExploreGroup[] = []
+  const walk = (level: readonly NoteCategory[], at: number[]): void => {
+    level.forEach((c, i) => {
+      const path = [...at, i]
+      const words = c.notes.map(id => (byId.get(id) ?? '').trim()).filter(Boolean)
+      out.push({ key: path.join('.'), name: c.name, notes: words })
+      walk(c.children, path)
+    })
+  }
+  walk(doc.categories, [])
+  const loose = notes.filter(n => !filed.has(n.id)).map(n => n.text.trim()).filter(Boolean)
+  if (loose.length) out.push({ key: 'unsorted', name: 'Unsorted', notes: loose })
+  return out
 }
 
 /** Every category as one row of a flat list, depth-first — the options Jev

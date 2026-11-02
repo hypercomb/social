@@ -175,7 +175,9 @@ type CategoryRow = { key: string; path: readonly number[]; name: string; depth: 
 type RoomOnlyCategory = { name: string; holders: number; children: readonly string[]; settled?: boolean }
 type CategoryOutcome = { ok: true; count: number; by?: 'jev' | 'ai' } | { ok: false; reason: string; detail?: string }
 type NoteCategoriesService = EventTarget & {
-  busy(): 'suggest' | 'sort' | null
+  busy(): 'suggest' | 'sort' | 'explore' | null
+  exploring?(): string | null
+  finding?(key: string): string
   load(cell: string): Promise<unknown>
   rows(cell: string, present: ReadonlySet<string>): CategoryRow[]
   roomOnly(cell: string): RoomOnlyCategory[]
@@ -186,13 +188,20 @@ type NoteCategoriesService = EventTarget & {
   rename(cell: string, path: readonly number[], name: string): Promise<void>
   file(cell: string, path: readonly number[], noteId: string): Promise<void>
   unfile(cell: string, noteId: string): Promise<void>
+  people?(cell: string, key: string): readonly string[]
+  addPerson?(cell: string, path: readonly number[], person: string): Promise<void>
+  removePerson?(cell: string, path: readonly number[], person: string): Promise<void>
+  clearPerson?(cell: string, person: string): Promise<void>
   adopt(cell: string, outline: readonly { name: string; children?: readonly { name: string }[] }[]): Promise<void>
+  readPlace?(raw: string): { absolute: boolean; root: boolean; categories: readonly string[]; note: string | null } | null
+  place?(cell: string, parent: readonly number[], names: readonly string[]): Promise<readonly number[]>
   aiReady(): boolean
   jevReady(): boolean
   missingSettled?(cell: string): number
   takeSettled?(cell: string): Promise<void>
   suggest(cell: string, notes: readonly { id: string; text: string }[]): Promise<CategoryOutcome>
   sort(cell: string, notes: readonly { id: string; text: string }[]): Promise<CategoryOutcome>
+  explore?(cell: string, notes: readonly { id: string; text: string }[], question: string): Promise<CategoryOutcome>
 }
 
 /** A note another participant in the swarm holds on this tile — read from
@@ -214,6 +223,7 @@ type SwarmNotesService = EventTarget & {
   inSwarm(): boolean
   labelOf(pubkey: string): string
   colorOf(pubkey: string): string
+  peopleFor?(cell: string): readonly { pubkey: string; on: boolean }[]
   authorsHidden?(cell: string, own: readonly string[]): boolean
   refresh(cell: string): Promise<void>
   take(cell: string, ids: readonly string[]): Promise<string[]>
@@ -304,6 +314,7 @@ type InputModeStackLike = {
     './notes-strip.desk.scss',
     './notes-strip.swarm.scss',
     './notes-strip.cats.scss',
+    './notes-strip.tree-mode.scss',
   ],
 })
 export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
@@ -369,6 +380,12 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   readonly mode = signal<'chips' | 'rows'>(
     (localStorage.getItem('hc:notes-strip-mode') as 'chips' | 'rows' | null) ?? 'rows'
   )
+
+  /** The note tree, and nothing else. Session-only: a viewing posture, like
+   *  whose notes are showing, and a reload returns to the full desk. */
+  readonly treeMode = signal(false)
+
+  toggleTreeMode(): void { this.treeMode.update(on => !on) }
 
   /**
    * Which tab of the ANNOTATIONS WINDOW is showing — `notes` is the editor
@@ -1946,6 +1963,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   readonly catRenaming = signal<string | null>(null)
   readonly #catCollapsed = signal<ReadonlySet<string>>(new Set())
   readonly catMessage = signal('')
+  /** What the participant asked the agent. Kept while they walk the groups. */
+  readonly askText = signal('')
+  #askSeq = 0
 
   /** The tree shows wherever a tile's notes do. */
   readonly catOpen = computed(() => !!this.cell() && !!this.#categories())
@@ -2008,7 +2028,35 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     if (!branch || !svc || !cell) return notes
     this.#catVersion()
     const set = svc.branch(cell, branch)
-    return branch === 'unsorted' ? notes.filter(n => !set.has(n.id)) : notes.filter(n => set.has(n.id))
+    const waiting = new Set(
+      this.#fileQueue().filter(q => q.cell === cell && q.path.join('.') === branch).map(q => q.text),
+    )
+    const filed = branch === this.UNSORTED ? set : svc.branch(cell, this.UNSORTED)
+    const held = (n: Note): boolean => waiting.has(n.text.trim()) && !filed.has(n.id)
+    return branch === this.UNSORTED ? notes.filter(n => !set.has(n.id)) : notes.filter(n => set.has(n.id) || held(n))
+  }
+
+  /** Show one category, opening any folded parent above it. `null` is every note. */
+  #openBranch(key: string | null): void {
+    if (key?.includes('.')) {
+      const next = new Set(this.#catCollapsed())
+      const parts = key.split('.')
+      for (let i = 1; i < parts.length; i++) next.delete(parts.slice(0, i).join('.'))
+      this.#catCollapsed.set(next)
+    }
+    this.catBranch.set(key)
+    this.readingIndex.set(0)
+    if (key && key !== this.UNSORTED) this.#revealCat(key)
+  }
+
+  /** The category a line is relative to. The top, Unsorted, and anything that
+   *  is not a category index all start at the root. */
+  #branchPath(): number[] {
+    const key = this.catBranch()
+    if (!key || key === this.UNSORTED) return []
+    const parts = key.split('.')
+    if (!parts.every(part => /^\d+$/.test(part))) return []
+    return parts.map(Number)
   }
 
   pickBranch(key: string | null): void {
@@ -2066,7 +2114,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   #focusCatInput(select: boolean): void {
     let tries = 0
     const attempt = (): void => {
-      const input = this.#host.nativeElement.querySelector('.cv2-cats .cv2-cat-input') as HTMLInputElement | null
+      const sel = this.treeMode() ? '.cv2-groups .cv2-group-rename' : '.cv2-cats .cv2-cat-input'
+      const input = this.#host.nativeElement.querySelector(sel) as HTMLInputElement | null
       if (input) { input.focus(); if (select) input.select(); return }
       if (++tries < 20) requestAnimationFrame(attempt)
     }
@@ -2158,6 +2207,75 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     if (!svc || !cell) return
     this.catMessage.set('')
     this.#catSay(await svc.sort(cell, this.#catNotes()), 'sort')
+  }
+
+  /** The group the agent is looking at, or null. */
+  readonly exploringKey = computed<string | null>(() => {
+    this.#catVersion()
+    return this.#categories()?.exploring?.() ?? null
+  })
+
+  /** The name under the agent's eye, for the status line. */
+  readonly exploringName = computed(() => {
+    const key = this.exploringKey()
+    if (!key) return ''
+    if (key === this.UNSORTED) return this.#t('notes.cats.unsorted', 'Unsorted')
+    return this.catRows().find(r => r.key === key)?.name ?? ''
+  })
+
+  /** What the agent said about a group, once it has looked. */
+  groupFinding(key: string): string {
+    this.#catVersion()
+    return this.#categories()?.finding?.(key) ?? ''
+  }
+
+  setAskText(event: Event): void {
+    this.askText.set((event.target as HTMLInputElement).value)
+  }
+
+  /** Ask the agent that is already allowed to read these notes. It walks the
+   *  groups that hold notes, one at a time, and the tree follows it. */
+  async askAgent(event?: Event): Promise<void> {
+    event?.preventDefault()
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!svc?.explore || !cell || this.catBusy()) return
+    const seq = ++this.#askSeq
+    const prev = this.catBranch()
+    this.catMessage.set('')
+    const outcome = await svc.explore(cell, this.#catNotes(), this.askText().trim())
+    if (seq !== this.#askSeq) return
+    if (!outcome.ok && outcome.detail === 'stopped') return
+    this.catBranch.set(prev)
+    if (outcome.ok) this.catMessage.set(this.#t('notes.tree.explored', '', { count: outcome.count }))
+    else this.#catSay(outcome, 'suggest')
+  }
+
+  /** While an agent is walking, the column shows the group it is in, and a
+   *  folded parent opens so that group is on screen. */
+  readonly #followExplore = effect(() => {
+    const key = this.exploringKey()
+    if (!key) return
+    untracked(() => {
+      if (key.includes('.')) {
+        const next = new Set(this.#catCollapsed())
+        const parts = key.split('.')
+        for (let i = 1; i < parts.length; i++) next.delete(parts.slice(0, i).join('.'))
+        this.#catCollapsed.set(next)
+      }
+      this.catBranch.set(key)
+      this.#revealCat(key)
+    })
+  })
+
+  #revealCat(key: string): void {
+    let tries = 0
+    const attempt = (): void => {
+      const row = this.#host.nativeElement.querySelector(`[data-cat-key="${key}"]`) as HTMLElement | null
+      if (row) { row.scrollIntoView({ block: 'nearest' }); return }
+      if (++tries < 8) requestAnimationFrame(attempt)
+    }
+    requestAnimationFrame(attempt)
   }
 
   #catSay(outcome: CategoryOutcome, act: 'suggest' | 'sort'): void {
@@ -2258,6 +2376,196 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   readonly roomHidden = computed(() => { this.#swarmVersion(); return this.#swarmNotes()?.roomHidden() ?? false })
 
+  /** Other people whose notes can show on this tile. You are not a switch. */
+  readonly roomPeople = computed(() => {
+    this.#swarmVersion()
+    const svc = this.#swarmNotes()
+    const cell = this.cell()
+    if (!svc?.peopleFor || !cell || !svc.inSwarm()) return []
+    return svc.peopleFor(cell)
+      .map(p => ({ ...p, label: svc.labelOf(p.pubkey), color: svc.colorOf(p.pubkey) }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  })
+
+  /** Turn one person's notes on or off. Turning the only one back on while
+   *  the whole room is hidden brings the room back and leaves the others off. */
+  togglePerson(pubkey: string): void {
+    const svc = this.#swarmNotes()
+    const cell = this.cell()
+    if (!svc?.peopleFor || !cell) return
+    const people = svc.peopleFor(cell)
+    const who = people.find(p => p.pubkey === pubkey)
+    if (!who) return
+    if (who.on) { svc.ignore(pubkey); return }
+    if (svc.roomHidden()) {
+      svc.setRoomHidden(false)
+      for (const person of people) if (person.pubkey !== pubkey) svc.ignore(person.pubkey)
+    }
+    svc.unignore(pubkey)
+  }
+
+  /** Empty at the top, on Unsorted, and on a top-level group. Inside a
+   *  group, the dotted key of its parent — the row lists that parent's children. */
+  readonly groupParent = computed(() => {
+    const key = this.catBranch()
+    if (!key || key === this.UNSORTED || !key.includes('.')) return ''
+    return key.slice(0, key.lastIndexOf('.'))
+  })
+
+  /** The groups named across this level. A folded branch in the side column
+   *  still shows here: this level is where the command line is, not a switch. */
+  readonly groupSwitch = computed<readonly CategoryRow[]>(() => {
+    this.#catVersion()
+    this.#swarmVersion()
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!svc || !cell) return []
+    const parent = this.groupParent()
+    return svc.rows(cell, this.#presentIds()).filter(row => {
+      const cut = row.key.lastIndexOf('.')
+      return (cut < 0 ? '' : row.key.slice(0, cut)) === parent
+    })
+  })
+
+  /** What the agent said about the group on show. */
+  readonly groupSaid = computed(() => {
+    const key = this.catBranch()
+    return key ? this.groupFinding(key) : ''
+  })
+
+  /** The group chip a person is hovering, so the chip can light before the drop. */
+  readonly groupOver = signal<string | null>(null)
+  /** '' is you. null means nobody is being dragged. Kept here because a
+   *  dragover cannot read what dragstart stored on the dataTransfer. */
+  #personDrag: string | null = null
+
+  groupNameLabel(): string { return this.#t('notes.groups.name', 'name a group') }
+  groupDropTitle(): string { return this.#t('notes.groups.drop', 'Drop to add them to this group. Drop again to take them out. They can be in many.') }
+  groupOutTitle(): string { return this.#t('notes.groups.out', 'Drop here to take them out of every group') }
+  youDragTitle(): string { return this.#t('notes.tree.youHint', 'Drag into a group to add yourself. You can be in many.') }
+
+  /** Initials of the people added to this group. The same person can be in several. */
+  peopleInGroup(key: string): { id: string; mark: string }[] {
+    if (!key || key === this.UNSORTED) return []
+    this.#catVersion()
+    this.#swarmVersion()
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!svc?.people || !cell) return []
+    const members = svc.people(cell, key)
+    if (!members.length) return []
+    const markOf = (id: string, label: string): { id: string; mark: string } =>
+      ({ id, mark: label.trim().charAt(0).toUpperCase() || '·' })
+    const out: { id: string; mark: string }[] = []
+    if (members.includes('self')) out.push(markOf('self', this.#t('notes.tree.you', 'You')))
+    if (this.authorsHidden()) return out
+    const seen = new Set(out.map(m => m.id))
+    for (const who of this.roomPeople()) {
+      const id = who.pubkey.toLowerCase()
+      if (!members.includes(id) || seen.has(id)) continue
+      seen.add(id)
+      out.push(markOf(id, who.label))
+    }
+    const labels = this.#swarmNotes()
+    for (const id of members) {
+      if (seen.has(id)) continue
+      const label = labels?.labelOf(id) ?? ''
+      if (!label) continue
+      seen.add(id)
+      out.push(markOf(id, label))
+    }
+    return out
+  }
+
+  personDragStart(event: DragEvent, pubkey: string | null): void {
+    event.stopPropagation()
+    this.#personDrag = pubkey ?? ''
+    if (event.dataTransfer) {
+      event.dataTransfer.setData('text/plain', this.#personDrag)
+      event.dataTransfer.effectAllowed = 'move'
+    }
+  }
+
+  personDragEnd(): void {
+    this.#personDrag = null
+    if (this.groupOver() !== null) this.groupOver.set(null)
+  }
+
+  allowPersonDrop(event: DragEvent, key: string): void {
+    if (this.#personDrag == null) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+    if (this.groupOver() !== key) this.groupOver.set(key)
+  }
+
+  clearGroupOver(event: DragEvent, key: string): void {
+    const next = event.relatedTarget
+    const host = event.currentTarget
+    if (host instanceof Node && next instanceof Node && host.contains(next)) return
+    if (this.groupOver() === key) this.groupOver.set(null)
+  }
+
+  dropPersonOnGroup(event: DragEvent, row: CategoryRow): void {
+    event.preventDefault()
+    event.stopPropagation()
+    const who = this.#personDrag
+    this.personDragEnd()
+    if (who == null) return
+    void this.#addPerson(who === '' ? 'self' : who, row)
+  }
+
+  dropPersonUnsorted(event: DragEvent): void {
+    event.preventDefault()
+    event.stopPropagation()
+    const who = this.#personDrag
+    this.personDragEnd()
+    if (who == null) return
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (svc?.clearPerson && cell) void svc.clearPerson(cell, who === '' ? 'self' : who)
+  }
+
+  /** Enter names a group beside the ones on show. Escape clears the field. */
+  onNameGroup(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      const input = event.target as HTMLInputElement
+      input.value = ''
+      input.blur()
+      return
+    }
+    if (event.key !== 'Enter' || event.isComposing) return
+    event.preventDefault()
+    const input = event.target as HTMLInputElement
+    const name = input.value.trim()
+    input.value = ''
+    if (name) void this.#nameGroup(name)
+  }
+
+  #groupParentPath(): number[] {
+    return this.#branchPath().slice(0, -1)
+  }
+
+  async #nameGroup(name: string): Promise<void> {
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!svc || !cell) return
+    await svc.add(cell, this.#groupParentPath(), name)
+  }
+
+  /** Add the person to this group, or take them out of it if they are already
+   *  in it. Every other group they belong to stays, and the notes stay put. */
+  async #addPerson(person: string, row: CategoryRow): Promise<void> {
+    const svc = this.#categories()
+    const cell = this.cell()
+    if (!svc?.addPerson || !svc.removePerson || !cell) return
+    const id = person.toLowerCase()
+    const members = svc.people?.(cell, row.key) ?? []
+    if (members.includes(id)) await svc.removePerson(cell, row.path, id)
+    else await svc.addPerson(cell, row.path, id)
+  }
+
   unignorePeer(pubkey: string): void { this.#swarmNotes()?.unignore(pubkey) }
 
   /** ✓'s other half: wave the line off for this session. */
@@ -2326,7 +2634,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  a list's prose children belong to their list, not to the other tab. */
   readonly visibleNotes = computed<readonly Note[]>(() => {
     const q = this.noteQuery().trim().toLowerCase()
-    const wantLists = this.tab() === 'lists'
+    // Tree mode is the notes tree. The lists tab is still selected underneath,
+    // and comes back when the mode closes.
+    const wantLists = this.tab() === 'lists' && !this.treeMode()
     const all = this.#inBranch(this.notes()).filter(n => this.#isListRoot(n) === wantLists)
     if (!q) return all
     const prune = (nodes: readonly Note[]): Note[] => {
@@ -3318,6 +3628,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     })
 
     this.#cleanups.push(EffectBus.on<{ segments?: readonly string[] }>('notes:changed', async (p) => {
+      // Captured before the re-read, so a line queued while this read is in
+      // flight is not judged against notes that cannot contain it yet.
+      const fileEpochSeen = this.#fileEpoch
       // HiveParticipant emits with `segments` only — derive the cell
       // label from the last segment. Refresh both notes AND qa caches
       // so a freshly-committed `[A:<qId>] …` answer note immediately
@@ -3358,6 +3671,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       // …and so does a composer line whose parent was still optimistic. This
       // reconcile is what just gave that parent its real id.
       this.#drainComposer()
+      if (cellLabel) this.#drainFileQueue(cellLabel, fileEpochSeen)
     }))
 
     // Track command-line capture state so the strip pops in for the target
@@ -3916,6 +4230,19 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   // as a prefix every line. Escape on an empty line walks it back out; at the
   // top it is not ours and falls through to the shell's own cascade.
   //
+  // THE NOTE TREE uses the same line, with places instead of hyphens. A line
+  // is relative to the category on show. `/` separates categories, a leading
+  // `/` starts at the top, and `//` is a slash in the text.
+  //
+  //     atp                  → a note filed here
+  //     energy/atp           → category energy, the note atp, and you are there
+  //     energy/              → add energy (or open it) and step in
+  //     /                    → back to every note
+  //     cost 1//2/           → the category "cost 1/2"
+  //     <Escape>             → a path finishes as categories; an empty line
+  //                            steps out one category. At the top, Escape
+  //                            still puts the desk away.
+  //
   // WHY A QUEUE. A nested line needs its parent's SIGNATURE-BACKED id, and a
   // line committed a moment ago is still an optimistic `pending-…` row until
   // the write, the layer cascade and the `notes:changed` re-read have landed.
@@ -3933,6 +4260,12 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   /** Lines accepted but not yet written, oldest first. */
   readonly #composerQueue = signal<readonly { text: string; depth: number; mark: string | null }[]>([])
+
+  /** Notes accepted in the tree, waiting for a real signature before they can
+   *  be filed. `epoch` is how many had been queued when the line was accepted,
+   *  so a re-read that started earlier does not decide the line is missing. */
+  readonly #fileQueue = signal<readonly { cell: string; text: string; path: readonly number[]; epoch: number; misses: number; sig: string | null }[]>([])
+  #fileEpoch = 0
 
   /** True while a line is waiting on its parent to become real. */
   readonly composerPending = computed<boolean>(() => this.#composerQueue().length > 0)
@@ -3955,6 +4288,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   /** Enter in the composer. */
   commitComposer(raw: string): void {
+    if (this.treeMode()) { this.#commitPlace(raw); return }
     const cell = this.cell()
     if (!cell) { this.#startFirstTile(raw); return }
     const line = this.#readComposerLine(raw)
@@ -3995,18 +4329,119 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   readonly pageHasTiles = computed(() => this.#navigatorCellLabels().length > 0)
 
   /** The composer's prompt: a note on the tile in hand, or — on a page with
-   *  no tile yet — the name of the first one. */
-  readonly composerPlaceholder = computed(() => this.cell()
-    ? this.#t('notes.composerPlaceholder', 'write a note')
-    : this.#t('notes.composerFirstTile', 'name a tile to write on'))
+   *  no tile yet — the name of the first one. The note tree says how a
+   *  slash moves. */
+  readonly composerPlaceholder = computed(() => {
+    if (!this.cell()) return this.#t('notes.composerFirstTile', 'name a tile to start writing on')
+    if (this.treeMode()) return this.#t('notes.place.placeholder', 'a note, or energy/ to step in')
+    return this.#t('notes.composerPlaceholder', 'write a note')
+  })
+
+  /** Where the next line lands, while the note tree is up. */
+  readonly placeLabel = computed(() => {
+    if (!this.treeMode()) return ''
+    const branch = this.catBranch()
+    if (!branch) return ''
+    if (branch === this.UNSORTED) return this.#t('notes.cats.unsorted', 'Unsorted')
+    const cell = this.cell()
+    const svc = this.#categories()
+    if (!cell || !svc) return ''
+    this.#catVersion()
+    const rows = svc.rows(cell, this.#presentIds())
+    const parts = branch.split('.')
+    const names: string[] = []
+    for (let i = 1; i <= parts.length; i++) {
+      const name = rows.find(row => row.key === parts.slice(0, i).join('.'))?.name
+      if (name) names.push(name)
+    }
+    return names.join(' / ')
+  })
+
+  /** The one-line grammar, on the band while the note tree is up. */
+  readonly placeHint = computed(() => this.treeMode()
+    ? this.#t('notes.place.hint', 'Return files a note here. End with / to add a category and step in. Escape steps out, or finishes a path. // is a slash in the text.')
+    : '')
 
   /** Escape in the composer — one level back out. Answers whether it was
    *  ours to take, so the caller can let the shell have it otherwise. */
   composerEscape(): boolean {
+    if (this.treeMode()) return this.#placeEscape()
     if (this.composerText().trim()) return false
     if (this.composerDepth() === 0) return false
     this.composerDepth.update(d => Math.max(0, d - 1))
     return true
+  }
+
+  /** Escape in the note tree. A typed line finishes as categories. An empty
+   *  line steps out one category. At the top it is not ours. */
+  #placeEscape(): boolean {
+    const raw = this.composerText().trim()
+    if (raw) {
+      this.#commitPlace(this.#asPlace(raw))
+      return true
+    }
+    const path = this.#branchPath()
+    if (path.length === 0) return false
+    this.#openBranch(path.length === 1 ? null : path.slice(0, -1).join('.'))
+    return true
+  }
+
+  /** A line that already ends on a real `/` is a place. An even run of
+   *  slashes is text (`//`), so it still needs a separator. */
+  #asPlace(raw: string): string {
+    let slashes = 0
+    for (let i = raw.length - 1; i >= 0 && raw[i] === '/'; i--) slashes++
+    return slashes % 2 === 1 ? raw : `${raw}/`
+  }
+
+  #readPlace(raw: string): { absolute: boolean; root: boolean; categories: readonly string[]; note: string | null } | null {
+    const read = this.#categories()?.readPlace
+    if (read) return read(raw)
+    const text = String(raw ?? '').trim()
+    return text ? { absolute: false, root: false, categories: [], note: text } : null
+  }
+
+  /** Enter in the note tree: file a note here, or step into the categories
+   *  the line names. The line clears before the write, so the next one can
+   *  be typed at once. */
+  #commitPlace(raw: string): void {
+    const line = this.#readPlace(raw)
+    if (!line) return
+    const cell = this.cell()
+    if (!cell) {
+      const name = line.categories[0] || line.note || ''
+      if (name) this.#startFirstTile(name)
+      return
+    }
+    this.composerText.set('')
+    this.composerShell()?.clear()
+    void this.#land(cell, line)
+  }
+
+  async #land(
+    cell: string,
+    line: { absolute: boolean; root: boolean; categories: readonly string[]; note: string | null },
+  ): Promise<void> {
+    const start = line.absolute || line.root ? [] : this.#branchPath()
+    let made: readonly number[] = start
+    if (line.categories.length) {
+      const svc = this.#categories()
+      if (svc?.place) {
+        try { made = await svc.place(cell, start, line.categories) } catch { made = start }
+      }
+    }
+    if (this.cell() === cell) {
+      if (line.root && line.categories.length === 0) this.#openBranch(null)
+      else if (line.categories.length) this.#openBranch(made.length ? made.join('.') : null)
+    }
+    const text = line.note
+    if (!text) return
+    const mark = this.draftMark()
+    EffectBus.emit('note:commit', { cellLabel: cell, text, mark })
+    this.#paintOptimistic(cell, text, null, mark)
+    if (!made.length) return
+    const epoch = ++this.#fileEpoch
+    this.#fileQueue.update(q => [...q, { cell, text, path: made, epoch, misses: 0, sig: null }])
   }
 
   /** How deep the tile's tree actually goes right now (-1 = no notes). */
@@ -4057,6 +4492,49 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     EffectBus.emit('note:add-child', { cellLabel: cell, parentId: parent.id, text: head.text, mark: head.mark })
     this.#paintChildOptimistic(cell, parent.id, head.text)
     this.#composerQueue.update(q => q.slice(1))
+  }
+
+  /** File queued notes once this reconcile has given them a signature. A read
+   *  that started before the line was queued cannot say it is missing. Two
+   *  later reads with no matching note drop it. A matched note stays queued
+   *  until the tree shows it filed, so a slow write is not filed twice. */
+  #drainFileQueue(cell: string, seenEpoch: number): void {
+    const live = this.#fileQueue()
+    if (!live.some(job => job.cell === cell)) return
+    const svc = this.#categories()
+    const roots = this.#notesByCell().get(cell) ?? []
+    const filed = svc?.branch(cell, this.UNSORTED) ?? new Set<string>()
+    const taken = new Set<string>()
+    const claimed = new Map<(typeof live)[number], string>()
+    const ready = live.filter(job => job.cell === cell && job.epoch <= seenEpoch && !job.sig)
+    for (let i = ready.length - 1; i >= 0; i--) {
+      const job = ready[i]
+      if (!svc) continue
+      let hit: Note | undefined
+      for (let r = roots.length - 1; r >= 0; r--) {
+        const note = roots[r]
+        if (note.text.trim() !== job.text) continue
+        if (!/^[0-9a-f]{64}$/.test(note.id) || filed.has(note.id) || taken.has(note.id)) continue
+        hit = note
+        break
+      }
+      if (!hit) continue
+      taken.add(hit.id)
+      claimed.set(job, hit.id)
+      void svc.file(cell, job.path, hit.id)
+    }
+    this.#fileQueue.set(live.flatMap(job => {
+      if (job.cell !== cell) return [job]
+      if (!svc) return []
+      const sig = claimed.get(job) ?? job.sig
+      if (sig) {
+        if (filed.has(sig) || !roots.some(note => note.id === sig)) return []
+        return [{ ...job, sig, misses: 0 }]
+      }
+      if (job.epoch > seenEpoch) return [job]
+      const misses = job.misses + 1
+      return misses >= 2 ? [] : [{ ...job, misses }]
+    }))
   }
 
   /** Drop out of edit mode back to a blank add form — and, in the pane,

@@ -43,6 +43,31 @@ describe('authors are shown unless a game asks to hide them', () => {
     expect(notes.authorsHidden('the-game', [])).toBe(false)
   })
 
+  it('lists the room and turns a person off without turning the others', () => {
+    const ana = 'a'.repeat(64)
+    const ben = 'b'.repeat(64)
+    ;(window as unknown as { ioc: { get: (key: string) => unknown } }).ioc = {
+      get: (key: string) => key.endsWith('SwarmDrone')
+        ? { participantsInZone: () => [ana, ben] }
+        : undefined,
+      whenReady: () => undefined,
+      register: () => undefined,
+    }
+    const notes = new SwarmNotes()
+    expect(notes.peopleFor('lecture')).toEqual([
+      { pubkey: ana, on: true },
+      { pubkey: ben, on: true },
+    ])
+    notes.ignore(ana)
+    expect(notes.peopleFor('lecture').find(p => p.pubkey === ana)?.on).toBe(false)
+    expect(notes.peopleFor('lecture').find(p => p.pubkey === ben)?.on).toBe(true)
+    notes.setRoomHidden(true)
+    expect(notes.peopleFor('lecture').every(p => !p.on)).toBe(true)
+    notes.setRoomHidden(false)
+    notes.unignore(ana)
+    expect(notes.peopleFor('lecture').every(p => p.on)).toBe(true)
+  })
+
   it('registering the same rule twice is one rule, and registering tells the desk to repaint', () => {
     const notes = new SwarmNotes()
     // A rule that answers no is asked every time it is in the list: once, if it was kept once.
