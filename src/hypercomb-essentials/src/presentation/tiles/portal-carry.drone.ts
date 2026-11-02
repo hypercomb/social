@@ -1,39 +1,41 @@
 // presentation/tiles/portal-carry.drone.ts
 //
-// PortalCarryDrone — a DRAG HANDLE on tiles: pull it and drop the tile onto a
-// row of the Portals window to add the tile to that portal. The direct gesture
-// for "this belongs in there" — no selection, no staging, no walking into the
-// collection first.
+// PortalCarryDrone — the DRAG HANDLE on tiles, and the way onto the QUICK
+// TRAY (documentation/recents-and-the-quick-tray.md, codex A9). A plain click
+// on the handle, or a drag let go anywhere, sends a REFERENCE to the tray at
+// the top of the screen: the tile's name, the page it stands on, and the sig
+// that page lists it by. Nothing is written — no cut, no marker; the source
+// page is untouched until the tray's own drop says otherwise.
 //
-// The handle shows ONLY while the Portals window is up (aggregate-index with
-// the 'collections' view): its provider is added/removed on the window's
-// `aggregate:view-state` announcements. On the band it is pinned to the LABEL
-// row's left edge (`labelRow`) — beside the name, not in the icon flow.
+// The gesture it carried before is still here, one step later: a drag let go
+// over a row of the Portals window adds the tile to that portal
+// (`portal-carry:drop`, the aggregate index owns the write), and over the
+// window itself stages it there. The tray's rows do the same, so the handle
+// no longer has to be the only way into a portal — which is why it shows on
+// every tile now, not only while the Portals window is up.
 //
 // Same choreography as EntrancePinDrone (the proven press-to-drag seam): the
 // overlay emits `overlay:feature-press` when a pointer goes down on a visible
-// feature icon. For our handle we arm a drag; past the threshold a small DOM
-// ghost rides the pointer, the Portals window is opened so there is something
-// to drop on, and its rows light up as drop zones (`portal-carry:drag-start`).
-// Releasing over a `[data-portal-drop]` row emits `portal-carry:drop` — the
-// aggregate index (shared) owns the write, through the same collections-source
-// add() every other way into a portal uses. A plain release is untouched: the
-// overlay's click path runs the icon's action, which simply opens the Portals
-// window.
+// feature icon; past the threshold a small DOM ghost rides the pointer. What
+// a release MEANS is the pure `planHandleRelease` (portal-carry.plan.ts). On
+// the band the handle is pinned to the LABEL row's left edge (`labelRow`) —
+// beside the name, not in the icon flow.
 //
-// The DROP side deliberately lives in shared (aggregate-index.component): this
-// drone knows nothing about rows, sources or reference minting — it only says
-// "this tile was let go at this element". Essentials never imports shared;
-// the contract is the EffectBus payload + the data attribute.
+// Essentials never imports shared: the contract with the tray and the index
+// is the EffectBus payload + the `[data-portal-drop]` attribute.
 
 import { Drone, EffectBus } from '@hypercomb/core'
+import { childEntriesOf, type PlacementHistory } from '../../history/layer-placement.js'
+import { planHandleRelease, takePayload } from './portal-carry.plan.js'
 
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
+const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const ACTION_NAME = 'portal-carry'
-/** The Portals view's aggregate id (PORTALS_SOURCE_ID in shared). */
-const PORTALS_VIEW_ID = 'collections'
+/** The icon registry mounts with the shell; a module that loads before it
+ *  asks again shortly rather than never showing the handle. */
+const REGISTRY_RETRY_MS = 200
 
-type LineageLike = { explorerSegments?: () => readonly string[] }
+type LineageLike = { explorerSegments?: () => readonly string[]; readonly domain?: unknown }
 
 type FeaturePressPayload = {
   action?: string
@@ -86,11 +88,11 @@ export class PortalCarryDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'presentation'
   public override description =
-    'Drag handle on tiles: pull it onto a Portals-window row to add the tile to that portal; a plain click opens the Portals window.'
+    'Drag handle on tiles: a click or a drag sends a reference to the quick tray at the top; let go on a Portals-window row to add the tile to that portal.'
 
   protected override deps = {}
-  protected override listens: string[] = ['overlay:feature-press', 'tile:action', 'aggregate:view-state']
-  protected override emits: string[] = ['portal-carry:drag-start', 'portal-carry:drop', 'portal-carry:drag-end', 'aggregate:view-open']
+  protected override listens: string[] = ['overlay:feature-press', 'tile:action']
+  protected override emits: string[] = ['quick-tray:take', 'portal-carry:drag-start', 'portal-carry:drop', 'portal-carry:drag-end']
 
   #initialized = false
   /** pointerId whose trailing click must be swallowed (a drag happened —
@@ -98,9 +100,9 @@ export class PortalCarryDrone extends Drone {
   #consumedPointerId: number | null = null
 
   #press: PressState | null = null
-  /** Whether the handle's icon provider is currently registered — it follows
-   *  the Portals window (see the view-state subscription in heartbeat). */
+  /** Whether the handle's icon provider is currently registered. */
   #handleShown = false
+  #registryRetry: ReturnType<typeof setTimeout> | null = null
 
   protected override sense = () => true
 
@@ -108,32 +110,59 @@ export class PortalCarryDrone extends Drone {
     if (this.#initialized) return
     this.#initialized = true
 
-    // The handle RIDES the Portals window: it shows on tiles only while the
-    // aggregate index has the portals view up — a grab affordance without a
-    // drop surface is just noise. The window announces its shown view
-    // (`aggregate:view-state`, last-value replayed so a late-loading drone
-    // still learns the current state), and the provider is added/removed to
-    // follow it: the registry dispatches 'change' on both, which re-registers
-    // the whole icon set and repaints the band. Before the first announcement
-    // the window has never been opened — no handle.
-    this.onEffect<{ id?: string | null; open?: boolean }>('aggregate:view-state', (p) => {
-      this.#setHandleShown(p?.open === true && p?.id === PORTALS_VIEW_ID)
-    })
+    // The tray is always there to drop into, so the handle shows on every
+    // tile from the start — a grab affordance with a surface to land on.
+    this.#showHandle()
 
     this.onEffect<FeaturePressPayload>('overlay:feature-press', (p) => this.#onFeaturePress(p))
-    // Plain click (no drag): open the Portals window — the same place the drop
-    // lands, so the handle teaches where the portals live.
-    this.onEffect<{ action?: string }>('tile:action', (p) => {
-      if (p?.action === ACTION_NAME) this.emitEffect('aggregate:view-open', { id: PORTALS_VIEW_ID })
+    // Plain click (no drag): the take. The overlay runs the icon's action on
+    // the release; the same reference a drag would send goes to the tray.
+    this.onEffect<{ action?: string; label?: string }>('tile:action', (p) => {
+      if (p?.action === ACTION_NAME && p?.label) void this.#take(p.label, this.#here())
     })
     document.addEventListener('click', this.#onClickCapture, true)
   }
 
   protected override dispose(): void {
     document.removeEventListener('click', this.#onClickCapture, true)
+    if (this.#registryRetry) { clearTimeout(this.#registryRetry); this.#registryRetry = null }
     this.#press?.ghost?.remove()
     this.#endPress()
     this.#setHandleShown(false)
+  }
+
+  /** The page the participant is standing on — a take's SOURCE. */
+  #here(): string[] {
+    const lineage = window.ioc.get<LineageLike>(LINEAGE_KEY)
+    return (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+  }
+
+  #showHandle(): void {
+    this.#setHandleShown(true)
+    if (this.#handleShown) return
+    this.#registryRetry = setTimeout(() => { this.#registryRetry = null; this.#showHandle() }, REGISTRY_RETRY_MS)
+  }
+
+  /** THE TAKE. Sends the reference to the tray: the label, the source page,
+   *  and — read, never written — the sig the source page lists the tile by,
+   *  manifest-first through the parent's head. A cold parent sends the
+   *  reference without a sig; the tray's drop seals the live subtree anyway,
+   *  so nothing is lost but a thumbnail until then. */
+  async #take(label: string, source: readonly string[]): Promise<void> {
+    let sig: string | null = null
+    try {
+      const history = window.ioc.get<PlacementHistory>(HISTORY_KEY)
+      const lineage = window.ioc.get<LineageLike>(LINEAGE_KEY)
+      if (history) {
+        const locSig = await history.sign({ domain: lineage?.domain, explorerSegments: () => source })
+        const parent = locSig ? await history.currentLayerAt(locSig) : null
+        if (parent) {
+          const { entries } = await childEntriesOf(history, parent)
+          sig = entries.find(e => e.name === label)?.sig ?? null
+        }
+      }
+    } catch { /* cold — the reference still goes */ }
+    this.emitEffect('quick-tray:take', takePayload(label, source, sig))
   }
 
   /** Add/remove the handle's icon provider through the ONE declarative
@@ -167,8 +196,7 @@ export class PortalCarryDrone extends Drone {
 
   #onFeaturePress(p: FeaturePressPayload): void {
     if (p?.action !== ACTION_NAME || !p?.label || typeof p.pointerId !== 'number') return
-    const lineage = window.ioc.get<LineageLike>(LINEAGE_KEY)
-    const here = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const here = this.#here()
     this.#press?.ghost?.remove()
     this.#endPress()
     this.#press = {
@@ -195,9 +223,8 @@ export class PortalCarryDrone extends Drone {
       // the icon's action (or land as a tile press) when the pointer lets go.
       this.#consumedPointerId = p.pointerId
       p.ghost = this.#createGhost(p.label)
-      // Something to drop on: surface the Portals window (idempotent while
-      // already up — openPanel never navigates), then light its rows.
-      this.emitEffect('aggregate:view-open', { id: PORTALS_VIEW_ID })
+      // If the Portals window happens to be up, its rows light as drop zones;
+      // the tray needs no opening — it is always there to land in.
       this.emitEffect('portal-carry:drag-start', { label: p.label, segments: [...p.segments] })
     }
     if (p.ghost) {
@@ -214,21 +241,22 @@ export class PortalCarryDrone extends Drone {
     p.ghost?.remove()
     // Ghost is pointer-events:none, so elementFromPoint sees through it.
     const under = document.elementFromPoint(e.clientX, e.clientY)
-    const row = under?.closest('[data-portal-drop]')
-    const targetKey = row?.getAttribute('data-portal-drop')
-    if (targetKey) {
-      this.emitEffect('portal-carry:drop', {
-        label: p.label, segments: [...p.segments], targetKey,
-      })
-    } else if (under?.closest('hc-aggregate-index')) {
-      // The panel surface is a valid first half of the gesture. Stage the
-      // carried tile in the references window; its + buttons now name the
-      // target pool explicitly. This avoids requiring pixel-perfect row drops
-      // and, more importantly, lets the participant inspect the pool before
-      // committing the reference.
-      this.emitEffect('portal-carry:drop', {
-        label: p.label, segments: [...p.segments],
-      })
+    const plan = planHandleRelease({
+      portalKey: under?.closest('[data-portal-drop]')?.getAttribute('data-portal-drop'),
+      overIndex: !!under?.closest('hc-aggregate-index'),
+    })
+    if (plan.kind === 'portal') {
+      this.emitEffect('portal-carry:drop', { label: p.label, segments: [...p.segments], targetKey: plan.targetKey })
+    } else if (plan.kind === 'stage') {
+      // The panel surface is a valid first half of the gesture: stage the
+      // carried tile in the references window, whose + buttons name the
+      // target pool explicitly, so the pool can be inspected before the
+      // reference commits.
+      this.emitEffect('portal-carry:drop', { label: p.label, segments: [...p.segments] })
+    } else {
+      // Let go anywhere else: the reference goes to the tray. `p.segments` is
+      // the tile's own path; its SOURCE is the page above it.
+      void this.#take(p.label, p.segments.slice(0, -1))
     }
     this.emitEffect('portal-carry:drag-end', {})
   }

@@ -1,6 +1,9 @@
 # Recents and the quick tray — every tile you made, and the hand that carries one
 
-> **Direction, jwize 2026-11-01. Not yet built.** This supersedes the model in
+> **Direction, jwize 2026-11-01. Step one — the quick tray and the handle
+> that feeds it — landed the same day (`quick-tray.element.ts`,
+> `quick-tray.drone.ts`, `portal-carry.drone.ts`); the rest is not yet
+> built.** This supersedes the model in
 > `clipboard-sig-native.md` (cut / copy / paste as verbs, the clipboard window
 > as the holding area). The codex carries the rules (`H7`–`H8`, `A7`–`A9`);
 > this document carries the argument.
@@ -166,7 +169,7 @@ it looks *there*.
 | `ui/clipboard-panel/` (the clipboard window) | the quick tray (strip) + the recents view |
 | `clipboard/clipboard.queen.ts` and the words `cut`, `copy`, `paste` | nothing at pick-up; *appearance* / *custody* at the drop |
 | `ClipboardEntry.cut` and the "only handle" rule | recents, which never drops an atom |
-| `PortalCarryDrone`'s meaning "drop on a Portals row" | the same handle sends the signature to the tray; the tray drops onto Portals rows as onto any page |
+| `PortalCarryDrone`'s meaning "drop on a Portals row" — **done** | the same handle sends the reference to the tray; a Portals row still takes a drop, and the tray's rows drop onto Portals rows as onto any page |
 | the clipboard worker's exclusions and index-override re-mints | reconsidered once the tray exists; a prune is a derived collection either way |
 
 The doctrine ratchets' allowlists shrink as each lands; none grows. Order of

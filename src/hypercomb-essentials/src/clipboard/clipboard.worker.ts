@@ -75,6 +75,7 @@ export class ClipboardWorker extends Worker {
     'clipboard:captured',
     'clipboard:paste-start',
     'clipboard:paste-done',
+    'clipboard:placed-entries',
     'cell:added',
     'cell:removed',
   ]
@@ -178,13 +179,15 @@ export class ClipboardWorker extends Worker {
       if (entries.length > 0) void this.#takeEntries(entries)
     })
 
-    // Place explicit (label + sourceSegments) entries at the current location —
-    // the side panel's per-item place from a DRILLED level, where each row is a
-    // child of a clipboard tile (a live source-tree pointer), not a top-level
-    // clipboard entry. The label alone can't be matched against the clipboard,
-    // so the panel hands the full source path. Placing a drilled child never
-    // consumes anything from the clipboard.
-    EffectBus.on<{ entries?: { label?: string; sourceSegments?: string[] }[]; targets?: Record<string, number>; targetSegments?: string[] }>(
+    // Place explicit (label + sourceSegments) entries at a bound location —
+    // the side panel's per-item place from a DRILLED level (each row a child
+    // of a clipboard tile, a live source-tree pointer, not a top-level entry),
+    // and the QUICK TRAY's drop (recents-and-the-quick-tray.md). The label
+    // alone can't be matched against the clipboard, so the caller hands the
+    // full source path; the live subtree is sealed here, at the drop. Placing
+    // never consumes anything from the clipboard. `custody` is the drop that
+    // MOVES: the same append, then the source page stops listing the tile.
+    EffectBus.on<{ entries?: { label?: string; sourceSegments?: string[] }[]; targets?: Record<string, number>; targetSegments?: string[]; custody?: boolean }>(
       'clipboard:place-entries',
       (payload) => {
         const raw = Array.isArray(payload?.entries) ? payload!.entries! : []
@@ -192,7 +195,7 @@ export class ClipboardWorker extends Worker {
           .filter((e): e is { label: string; sourceSegments?: string[] } => !!e && typeof e.label === 'string')
           .map(e => ({ label: e.label, sourceSegments: Array.isArray(e.sourceSegments) ? [...e.sourceSegments] : [] }))
         const targets = (payload?.targets && typeof payload.targets === 'object') ? payload.targets : undefined
-        if (entries.length > 0) void this.#placeEntries(entries, targets, this.#boundTarget(payload?.targetSegments))
+        if (entries.length > 0) void this.#placeEntries(entries, targets, this.#boundTarget(payload?.targetSegments), payload?.custody === true)
       },
     )
 
@@ -556,7 +559,7 @@ export class ClipboardWorker extends Worker {
   // same: clone each source subtree to the target lineage and fold the placed
   // names into the target's children in one cascade. Nested-discard exclusions
   // inside each placed subtree are honoured there.
-  async #placeEntries(entries: readonly ClipboardEntry[], targets?: Record<string, number>, boundTarget?: readonly string[]): Promise<void> {
+  async #placeEntries(entries: readonly ClipboardEntry[], targets?: Record<string, number>, boundTarget?: readonly string[], custody = false): Promise<void> {
     const lineage = this.#lineage
     const store = this.#store
     const history = this.#history
@@ -568,7 +571,56 @@ export class ClipboardWorker extends Worker {
     const targetSegments = boundTarget ? [...boundTarget] : [...lineage.explorerSegments()]
     EffectBus.emit('clipboard:paste-start', { count: entries.length })
     const { placed, failed } = await this.#placeItems(history, lineage, committer, entries, targetSegments, targets)
+    // CUSTODY releases the source only AFTER the append landed, so a tile is
+    // never unlisted everywhere at once.
+    if (custody && placed.length > 0) await this.#releaseSource(history, committer, placed, targetSegments)
     EffectBus.emit('clipboard:paste-done', { count: placed.length, failed })
+    EffectBus.emit('clipboard:placed-entries', {
+      placed: placed.map(e => ({ label: e.label, sourceSegments: [...e.sourceSegments] })),
+      failed,
+      custody,
+    })
+  }
+
+  /** The drop that MOVES (codex A9: custody). The incidence has landed at the
+   *  target; now each source page stops listing it — one surgical commit per
+   *  source parent, exactly the cut's commit, made after the append. A tile
+   *  dropped back on its own page is an appearance and is never released. */
+  async #releaseSource(
+    history: HistoryServiceLike,
+    committer: LayerCommitterLike,
+    placed: readonly ClipboardEntry[],
+    targetSegments: readonly string[],
+  ): Promise<void> {
+    const groups = new Map<string, { parentSegs: string[]; leaves: string[] }>()
+    for (const entry of placed) {
+      const samePlace = entry.sourceSegments.length === targetSegments.length
+        && entry.sourceSegments.every((s, i) => s === targetSegments[i])
+      if (samePlace) continue
+      const key = entry.sourceSegments.join('/')
+      const group = groups.get(key) ?? { parentSegs: [...entry.sourceSegments], leaves: [] }
+      group.leaves.push(entry.label)
+      groups.set(key, group)
+    }
+    const liveCurrent = [...(this.#lineage?.explorerSegments() ?? [])]
+    for (const { parentSegs, leaves } of groups.values()) {
+      const parent = await this.#resolveParentLayer(history, parentSegs, liveCurrent)
+      if (!parent) {
+        console.warn(`[clipboard] custody release skipped — parent layer unresolved at /${parentSegs.join('/')}`)
+        continue
+      }
+      const { entries } = await childEntriesOf(history, parent)
+      const sigByName = new Map(entries.map(e => [e.name, e.sig]))
+      const removes = leaves.map(leaf => {
+        const stored = sigByName.get(leaf)
+        return { ...(stored ? { sig: stored } : {}), label: leaf }
+      })
+      for (const leaf of leaves) {
+        EffectBus.emit('cell:removed', { cell: leaf, segments: [...parentSegs], viaUpdate: true })
+      }
+      await committer.commitChildrenDeltas(parentSegs, { removes })
+      EffectBus.emit('fs:changed', { segments: [...parentSegs] })
+    }
   }
 
   // Place the named clipboard tiles at the current location. Shared by
