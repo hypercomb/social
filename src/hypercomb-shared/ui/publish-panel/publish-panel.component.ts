@@ -46,7 +46,7 @@
 // The answers are pure, in publish-apps.ts.
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
-import { Component, computed, inject, signal, type OnDestroy } from '@angular/core'
+import { Component, computed, effect, inject, signal, type OnDestroy } from '@angular/core'
 import { DomSanitizer, type SafeHtml, type SafeResourceUrl } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -652,16 +652,45 @@ export class PublishPanelComponent implements OnDestroy {
    *  names it — and, when its entry lists doors, only on those. An entry with
    *  no doors opens everywhere (every index written before doors). */
   doorOn(row: PublishRow | null, zone: string): boolean {
-    if (!row?.live) return false
+    if (!row) return false
+    const pressed = this.#pressed().get(`${row.key}\n${zone}`)
+    if (pressed !== undefined) return pressed
+    if (!row.live) return false
     return row.doors === null || row.doors.includes(zone)
+  }
+
+  /** Switches shown the moment they are pressed. The first domain is a full
+   *  publish and the last is a withdrawal; the signed index says so only when
+   *  that lands, so the press answers for the switch until the drone has
+   *  finished (see the settle effect) and the real state takes over. */
+  readonly #pressed = signal<ReadonlyMap<string, boolean>>(new Map())
+  /** Presses whose row has been seen mid-act, so the end of that act settles them. */
+  readonly #pressedBusy = new Set<string>()
+
+  #press(key: string, on: boolean): void {
+    this.#pressed.update(m => new Map(m).set(key, on))
+    // Never held longer than a drone can take: a press the drone refused falls back to the truth.
+    const dropped = setTimeout(() => this.#release(key), 60_000)
+    this.#cleanups.push(() => clearTimeout(dropped))
+    // A press whose act never shows as busy was a paint alone (or refused).
+    const unseen = setTimeout(() => { if (!this.#pressedBusy.has(key)) this.#release(key) }, 2_000)
+    this.#cleanups.push(() => clearTimeout(unseen))
+  }
+
+  #release(key: string): void {
+    this.#pressedBusy.delete(key)
+    if (!this.#pressed().has(key)) return
+    this.#pressed.update(m => { const next = new Map(m); next.delete(key); return next })
   }
 
   /** One domain's switch. The drone decides what the flip costs: a signed
    *  doors rewrite for a published branch, a full publish for the first
-   *  domain, a withdrawal for the last. */
+   *  domain, a withdrawal for the last. The switch itself answers at once. */
   flipDoor(row: PublishRow | null, zone: string): void {
     if (!row || !this.canSwitch(row)) return
-    EffectBus.emit('publish:door', { key: row.key, zone, on: !this.doorOn(row, zone) })
+    const on = !this.doorOn(row, zone)
+    this.#press(`${row.key}\n${zone}`, on)
+    EffectBus.emit('publish:door', { key: row.key, zone, on })
   }
 
   /** The address as a person reads it — the link without its scheme. */
@@ -864,6 +893,16 @@ export class PublishPanelComponent implements OnDestroy {
   constructor() {
     const ageTimer = setInterval(() => this.renderedAt.set(Date.now()), 15_000)
     this.#cleanups.push(() => clearInterval(ageTimer))
+
+    // A press settles when the act it started has ended: seen busy, then idle.
+    effect(() => {
+      const rows = this.rows()
+      for (const press of this.#pressed().keys()) {
+        const row = rows.find(r => r.key === press.split('\n')[0])
+        if (row?.busyPhase) this.#pressedBusy.add(press)
+        else if (this.#pressedBusy.has(press)) this.#release(press)
+      }
+    })
 
     const viewMode = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
       ?.get<EventTarget & { mode?: string }>('@hypercomb.social/ViewMode')
