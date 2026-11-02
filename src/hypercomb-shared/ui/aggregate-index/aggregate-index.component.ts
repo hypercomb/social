@@ -377,8 +377,8 @@ export class AggregateIndexComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ labels?: readonly string[] }>('render:cell-count', payload => {
       this.#renderedLabels = new Set((payload?.labels ?? []).map(String).filter(Boolean))
     }))
-    // A tile is riding the pointer (the drag handle PortalCarryDrone owns) —
-    // light the portal rows as drop zones while it does, and land the drop.
+    // A tray row is riding the pointer (quick-tray.element.ts) — light the
+    // portal rows as drop zones while it does, and land the drop.
     this.#cleanups.push(EffectBus.on('portal-carry:drag-start', () => {
       this.portalCarryActive.set(true)
       this.#cdr.detectChanges()

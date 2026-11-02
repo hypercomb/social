@@ -103,11 +103,11 @@ from three pages and placing them together needs something that stays visible
 while you walk. That is the **quick tray**: a strip at the top of the
 viewport that holds the signatures you are carrying.
 
-- **Entered by the tile's drag handle.** Today the handle
-  (`presentation/tiles/portal-carry.drone.ts`) carries a tile onto a row of
-  the Portals window. It becomes the way *onto the tray*: use it and the
-  tile's signature lands in the tray. The gesture is unchanged; only where it
-  lands changes.
+- **Entered by the to-the-tray icon.** The tile's icon band carries it in the
+  always-visible row with the others (`presentation/tiles/portal-carry.drone.ts`,
+  which began as a drag handle). Click it and the tile's signature lands in the
+  tray. Nothing is dragged to get there; a tile reaches a portal from the tray,
+  whose rows drop onto Portals rows.
 - **A reference, never a cut.** What travels is the signature. The source
   page is untouched. Nothing is written at pick-up — no `removeSig`, no
   `cut` flag, no marker. A tray full of signatures is a selection, not a

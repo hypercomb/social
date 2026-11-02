@@ -82,6 +82,16 @@ $quiet: #8ea2b0;
   @include tw.header;
 }
 
+// The tab content scrolls under the fixed header, status line and tabs.
+.publish-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--acc), 0.2) transparent;
+}
+
 .publish-title {
   flex: 1;
   min-width: 0;
@@ -684,9 +694,10 @@ $quiet: #8ea2b0;
     max-width: none;
     max-height: min(62vh, 30rem);
     border-left: none;
-    border-top: 1px solid rgba(var(--acc), 0.45);
+    // Very subtle on a phone: the sheet's own shadow carries the edge.
+    border-top: 1px solid rgba(var(--acc), 0.12);
     border-radius: tw.$radius-floating tw.$radius-floating 0 0;
-    box-shadow: 0 -10px 40px rgba(var(--hc-panel-shadow), 0.55), 0 0 0 1px rgba(var(--acc), 0.06) inset;
+    box-shadow: 0 -10px 40px rgba(var(--hc-panel-shadow), 0.55);
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
