@@ -129,7 +129,7 @@ export type IconRegistryEntry = {
    *  never the always-visible top row. */
   featureRow?: boolean
   /** PIN to the label row's left edge, beside the name — outside the wrapping
-   *  icon flow. Placement only (the portal-carry drag handle). */
+   *  icon flow. Placement only. */
   labelRow?: boolean
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn

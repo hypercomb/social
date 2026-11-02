@@ -32,6 +32,10 @@
 // the index's own `portal-carry:drop` — the gesture the handle used to carry
 // is still here, one step later. A release back on the strip is a cancelled
 // drag, never a write.
+//
+// Hideable: the title folds the strip down to a small chip that keeps the count,
+// and the chip brings it back. Folding lets go of nothing. Like the rest of the
+// tray it lasts the session.
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { dropEntries, entryKey, takeEntries, type TrayEntry } from './quick-tray.entries.js'
@@ -92,8 +96,11 @@ const STYLE = `
   border:1px solid var(--hc-window-accent-quiet,rgba(126,182,214,0.45));box-shadow:0 10px 40px rgba(var(--hc-panel-shadow,0,0,0),0.5);
   font-family:var(--hc-mono,system-ui);font-size:0.8rem;color:var(--hc-window-ink-loud,currentColor);user-select:none;}
 .tray.dragging{cursor:grabbing;}
-.title{display:inline-flex;align-items:center;gap:0.35rem;letter-spacing:0.08em;text-transform:uppercase;font-size:0.7rem;
+.fold{appearance:none;border:0;background:transparent;padding:0;font:inherit;cursor:pointer;
+  display:inline-flex;align-items:center;gap:0.35rem;letter-spacing:0.08em;text-transform:uppercase;font-size:0.7rem;
   color:var(--hc-window-accent,rgb(126,182,214));white-space:nowrap;}
+.fold:hover,.fold:focus-visible{color:var(--hc-window-ink-loud,currentColor);}
+.tray.folded{padding:0.25rem 0.5rem;}
 .count{min-width:1.2em;padding:0 0.3em;border-radius:var(--hc-radius-control,2px);background:var(--hc-window-tint,rgba(126,182,214,0.18));text-align:center;}
 .rows{display:flex;align-items:center;gap:0.3rem;margin:0;padding:0;list-style:none;overflow-x:auto;scrollbar-width:thin;}
 .row{display:inline-flex;align-items:center;gap:0.35rem;padding:0.2rem 0.3rem;border-radius:var(--hc-radius-control,2px);
@@ -107,7 +114,6 @@ const STYLE = `
 .remove{appearance:none;border:0;background:transparent;color:var(--hc-window-ink-plain,currentColor);font:inherit;line-height:1;
   padding:0 0.2rem;opacity:0;cursor:pointer;}
 .row:hover .remove,.remove:focus-visible{opacity:1;}
-.hint{font-size:0.65rem;color:var(--hc-window-ink-quiet,currentColor);white-space:nowrap;}
 .ghost{position:fixed;z-index:2147483600;pointer-events:none;margin-left:0.8rem;margin-top:-0.9rem;max-width:14rem;
   padding:0.3rem 0.6rem;display:flex;align-items:center;gap:0.4rem;border-radius:var(--hc-radius-floating,4px);
   background:rgba(var(--hc-panel-pane,12,28,46),0.92);border:1px solid var(--hc-window-accent-quiet,rgba(126,182,214,0.55));
@@ -127,6 +133,8 @@ export class QuickTrayElement extends HTMLElement {
   #custody = false
   #ghost: HTMLDivElement | null = null
   #swallowClick = false
+  /** Folded down to the chip. The rows are still held. */
+  #folded = false
 
   constructor() {
     super()
@@ -202,30 +210,49 @@ export class QuickTrayElement extends HTMLElement {
       this.#root.innerHTML = `<style>${STYLE}</style>`
       return
     }
-    const rows = this.#entries.map(entry => {
+    if (this.#folded) {
+      this.#root.innerHTML = `<style>${STYLE}</style>
+        <div class="tray folded"><button class="fold" type="button" aria-expanded="false" title="${esc(t('quick-tray.show', 'Show the tray'))}" aria-label="${esc(t('quick-tray.show', 'Show the tray'))}">${esc(t('quick-tray.title', 'Tray'))}<span class="count">${this.#entries.length}</span></button></div>`
+      this.#wireFold()
+      return
+    }
+    // Rows are addressed by POSITION, never by key: a key holds a NUL, which an
+    // HTML parser rewrites, so a key read back from an attribute matches nothing.
+    const rows = this.#entries.map((entry, index) => {
       const key = entryKey(entry)
       const thumb = this.#thumbs.get(key)
       const face = thumb
         ? `<span class="thumb"><img src="${thumb}" alt="${esc(entry.label)}" draggable="false"></span>`
         : `<span class="glyph" aria-hidden="true">⬢</span>`
-      return `<li class="row${this.#dragging === entry ? ' lifted' : ''}" data-key="${esc(key)}" title="${esc(t('quick-tray.drag', 'Drag onto the hive to place · Shift to move · onto a Portals row to add it there'))}">
+      return `<li class="row${this.#dragging === entry ? ' lifted' : ''}" data-index="${index}" title="${esc(t('quick-tray.drag', 'Drag onto the hive to place · Shift to move · onto a Portals row to add it there'))}">
         ${face}<span class="label">${esc(entry.label)}</span>
-        <button class="remove" type="button" data-remove="${esc(key)}" aria-label="${esc(t('quick-tray.remove', 'Let go of this one'))}" title="${esc(t('quick-tray.remove', 'Let go of this one'))}">×</button>
+        <button class="remove" type="button" data-index="${index}" aria-label="${esc(t('quick-tray.remove', 'Let go of this one'))}" title="${esc(t('quick-tray.remove', 'Let go of this one'))}">×</button>
       </li>`
     }).join('')
     this.#root.innerHTML = `<style>${STYLE}</style>
       <div class="tray${this.#dragging ? ' dragging' : ''}" role="toolbar" aria-label="${esc(t('quick-tray.title', 'Tray'))}" data-consumes-wheel>
-        <span class="title">${esc(t('quick-tray.title', 'Tray'))}<span class="count">${this.#entries.length}</span></span>
+        <button class="fold title" type="button" aria-expanded="true" title="${esc(t('quick-tray.hide', 'Hide the tray'))}" aria-label="${esc(t('quick-tray.hide', 'Hide the tray'))}">${esc(t('quick-tray.title', 'Tray'))}<span class="count">${this.#entries.length}</span></button>
         <ul class="rows">${rows}</ul>
-        <span class="hint">${esc(t('quick-tray.hint', 'Drag onto the hive to place it · hold Shift to move it'))}</span>
       </div>`
     for (const row of this.#root.querySelectorAll<HTMLLIElement>('.row')) {
-      row.addEventListener('pointerdown', (e) => this.#onRowPointerDown(e, row.dataset['key'] ?? ''))
+      row.addEventListener('pointerdown', (e) => this.#onRowPointerDown(e, this.#entries[Number(row.dataset['index'])]))
     }
     for (const button of this.#root.querySelectorAll<HTMLButtonElement>('.remove')) {
       button.addEventListener('pointerdown', (e) => e.stopPropagation())
-      button.addEventListener('click', (e) => { e.stopPropagation(); this.letGo(new Set([button.dataset['remove'] ?? ''])) })
+      button.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const entry = this.#entries[Number(button.dataset['index'])]
+        if (entry) this.letGo(new Set([entryKey(entry)]))
+      })
     }
+    this.#wireFold()
+  }
+
+  #wireFold(): void {
+    this.#root.querySelector('.fold')?.addEventListener('click', () => {
+      this.#folded = !this.#folded
+      this.#render()
+    })
   }
 
   #paintGhost(x: number, y: number): void {
@@ -245,10 +272,8 @@ export class QuickTrayElement extends HTMLElement {
 
   // ── the drop ─────────────────────────────────────────────────────────────
 
-  #onRowPointerDown(event: PointerEvent, key: string): void {
-    if (event.button !== 0) return
-    const entry = this.#entries.find(e => entryKey(e) === key)
-    if (!entry) return
+  #onRowPointerDown(event: PointerEvent, entry: TrayEntry | undefined): void {
+    if (event.button !== 0 || !entry) return
     this.#pending = { entry, x: event.clientX, y: event.clientY }
     document.addEventListener('pointermove', this.#onDragMove)
     document.addEventListener('pointerup', this.#onDragUp)
@@ -269,6 +294,7 @@ export class QuickTrayElement extends HTMLElement {
     if (this.#dragging) {
       this.#dragging = null
       EffectBus.emit('drop:dragging', { active: false })
+      EffectBus.emit('portal-carry:drag-end', {})
       this.#render()
     }
   }
@@ -284,6 +310,9 @@ export class QuickTrayElement extends HTMLElement {
       // The overlay becomes a bare drop surface (icons hidden) and previews
       // the carried tile under the pointer — the contract a Portals row drag uses.
       EffectBus.emit('drop:dragging', { active: true, targetTile: { label: p.entry.label } })
+      // Portals rows light as drop zones while a row rides the pointer. A loose
+      // atom has nothing a portal could point at, so they stay dark for it.
+      if (!p.entry.loose) EffectBus.emit('portal-carry:drag-start', { label: p.entry.label })
       this.#render()
     }
     this.#custody = event.shiftKey
