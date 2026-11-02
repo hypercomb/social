@@ -178,9 +178,40 @@ recents as a source of the aggregate index, then its full-screen layout, then
 the retirements, then the trait-group pick at the drop — which only matters
 once the tray carries more than one group.
 
-## Open question
+## Open question — answered (2026-11-01)
 
-Whether the first-marker date can be read cheaply enough for a hive of tens
-of thousands of atoms, or whether the census needs an incremental derivation
-(each commit extending the previous census record under a new key). Either
-way it stays derived (`D2`): the answer changes cost, not doctrine.
+*Can the first-marker date be read cheaply enough for a hive of tens of
+thousands of atoms, or does the census need an incremental derivation?*
+
+A marker's date is its OPFS file date (`HistoryService.listLayers` returns
+`at` per marker), and the earliest marker in a location's bag is the atom's
+creation there — immutable, since markers are append-only and nothing is
+deleted. Reading it costs one directory enumeration per location. That is the
+cost `preloadAllBags` pays once per boot for the *latest* marker (measured
+5 s over ~300 bags on real data), and it caches only the latest, so the
+earliest is never warm from boot. A one-shot census of a large hive is
+therefore the whole-hive walk the tree epoch was built to kill.
+
+So the census is **incremental**: `history/recents-census.*` keys a record by
+LAYER SIG and composes it from its children's records — an unchanged child
+has an unchanged sig, so its record is spliced in whole with its name
+prefixed to every path, and only the changed spine pays. The root is derived
+when a commit moved it (never on boot), budgeted at 300 nodes per idle pass,
+and continued across passes — every complete child written persists, so each
+pass strictly shrinks the work — until the root record lands. A truncated
+record is never written. The reader (`@diamondcoreprocessor.com/RecentsCensus`)
+answers null on a miss and the view renders empty: never load-bearing.
+
+Two consequences, recorded:
+
+1. `at` is the date a sig was *first derived with*. The same sig placed on a
+   second page is a cache hit and keeps its first appearance — which is the
+   doctrine's "once per atom", not a compromise of it.
+2. A hide is session state, not a fact in any layer, so the census carries no
+   `hidden` (the litmus forbids it). The recents source follows the hive's
+   own `tile:hidden` / `tile:unhidden` announcements and shades those rows.
+
+What this census does **not** yet see: an atom no page lists. It is not
+under the root, so a tree walk never meets it. Those are found by the *bag
+census* — every lineage bag that ever existed (`enumerateBags`), whose head
+is not reachable from the root — the second half of the view, not built.

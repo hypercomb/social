@@ -142,6 +142,9 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // is never OFFERED as a published pool (published-pools.ts refuses `index`).
   ['transfer:packs', 'index'],
   ['molecule:index', 'index'],
+  // Every atom under a layer with its first-marker date, keyed by the layer
+  // sig it derives from (history/recents-census.ts). Recomputable.
+  ['recents:census', 'index'],
   ['search:index', 'index'],
   ['thumbnails:hex', 'index'],
   // One screen of tile pictures, keyed by the signature of the sorted

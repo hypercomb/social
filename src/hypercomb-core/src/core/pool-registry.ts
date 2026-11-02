@@ -607,9 +607,14 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   //                        only shrink, and the index's whole subject IS
   //                        bare-word molecule addresses, so a bare `molecule`
   //                        would land the index on top of a bag it indexes.
+  //   recents:census     — every atom under a layer with its first-marker
+  //                        date, keyed by the layer sig it derives from and
+  //                        composed from its children's records
+  //                        (history/recents-census.ts, codex H7)
   'computed:genome',
   'insights:catalog',
   'molecule:index',
+  'recents:census',
   'search:index',
   'thumbnails:hex',
   'sprites:boot',
