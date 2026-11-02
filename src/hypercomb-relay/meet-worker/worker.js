@@ -356,6 +356,14 @@ export default {
     if (open && !isUpgrade(request) && url.pathname === CODE_PATH) return text(404, 'not found: an open meeting point has no access code')
     const hint = String(env.LOCATION_HINT || '').trim()
     const stub = env.MEETING.get(env.MEETING.idFromName(open ? OPEN_OBJECT : CODED_OBJECT), hint ? { locationHint: hint } : undefined)
+    // A video request the object could not answer (it was restarting, say,
+    // right after a deploy) is said in words, with CORS — never error 1101,
+    // which a browser can only report as "blocked by CORS policy".
+    if (url.pathname.startsWith(SFU_PREFIX)) {
+      try { return await stub.fetch(request) } catch (error) {
+        return json(503, { error: `video: the meeting point could not answer (${String(error?.message ?? error).slice(0, 160)}); try again` })
+      }
+    }
     if (open) return stub.fetch(request)
     if (isUpgrade(request)) {
       const offered = offeredAccess(request.headers.get('sec-websocket-protocol'))
