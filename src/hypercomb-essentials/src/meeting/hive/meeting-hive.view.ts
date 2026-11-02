@@ -91,6 +91,12 @@ export class MeetingHiveElement extends HTMLElement {
   #stage!: HTMLElement
   #note!: HTMLElement
   #camera!: HTMLButtonElement
+  #full!: HTMLButtonElement
+  #onFullscreen = (): void => {
+    const on = !!document.fullscreenElement
+    this.#full.textContent = on ? t('meeting.exit-full-screen', 'exit full screen') : t('meeting.full-screen', 'full screen')
+    this.#full.setAttribute('aria-pressed', String(on))
+  }
   #shared = false
   #presence: Presence = {}
   #spend: Spend | null = null
@@ -122,7 +128,16 @@ export class MeetingHiveElement extends HTMLElement {
     const share = this.#button(t('meeting.share-link', 'share link'), () => EffectBus.emitTransient('meeting:copy-link', { how: 'share' }))
     const leave = this.#button(t('meeting.leave', 'leave'), () => EffectBus.emitTransient('meeting:leave', {}))
     const close = this.#button(t('meeting.hive-close', 'back to the hive'), () => EffectBus.emitTransient('meeting:view-toggle', { open: false }))
-    foot.append(this.#note, this.#camera, copy, share, leave, close)
+    // FULL SCREEN, NOT SCREEN SHARE (jwize, 2026-11-02: "we need full screen
+    // … but no screen share — our screen share instead is totally
+    // interactive"): following the leader IS the shared screen. The whole
+    // page goes full screen, so the command line stays on top and following
+    // goes on.
+    this.#full = this.#button(t('meeting.full-screen', 'full screen'), () => {
+      if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => { /* not ours to leave */ })
+      else void document.documentElement.requestFullscreen?.().catch(() => { /* refused: stays windowed */ })
+    })
+    foot.append(this.#note, this.#camera, this.#full, copy, share, leave, close)
     this.replaceChildren(this.#stage, foot)
 
     this.#off.push(
@@ -141,12 +156,15 @@ export class MeetingHiveElement extends HTMLElement {
       EffectBus.on<Spend | null>('meeting:spend', p => { this.#spend = p ?? null; this.#paint() }),
     )
     window.addEventListener('resize', this.#resize)
+    document.addEventListener('fullscreenchange', this.#onFullscreen)
+    this.#onFullscreen()
     this.#paint()
   }
 
   disconnectedCallback(): void {
     for (const off of this.#off.splice(0)) off()
     window.removeEventListener('resize', this.#resize)
+    document.removeEventListener('fullscreenchange', this.#onFullscreen)
     for (const video of this.#videos.values()) video.srcObject = null
     this.#videos.clear()
     this.#holdBand(false)
