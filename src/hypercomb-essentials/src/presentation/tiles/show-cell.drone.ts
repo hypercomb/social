@@ -7344,11 +7344,13 @@ export class ShowCellDrone extends Drone {
       const cell = payload?.cell
       if (!cell) return
       if (payload.segments && !this.#segmentsAreCurrent(payload.segments)) return
+      // A tile already showing its picture has nothing to repair; touching it
+      // again only repaints (the flicker). Act only on a missing/unloaded one,
+      // and never clear what is on screen while the real answer loads.
+      const shown = this.cellImageCache.get(cell)
+      if (shown && this.imageAtlas?.hasImage(shown)) return
       void this.#tryInPlaceCellUpdate(cell, { dir: null }).then(done => {
-        if (!done && this.#slots.seeded) {
-          this.cellImageCache.delete(cell)
-          void this.renderIncremental({ changedContent: [cell] })
-        }
+        if (!done && this.#slots.seeded) void this.renderIncremental({ changedContent: [cell] })
       })
     })
 
