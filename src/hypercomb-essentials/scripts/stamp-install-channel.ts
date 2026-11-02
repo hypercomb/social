@@ -82,6 +82,8 @@ export function packageSigFromDist(explicit?: string, distDir: string = DIST): s
   } catch { return null }
 }
 
+const STAMP_WAIT_MS = 15 * 60_000
+
 function stamp(sig: string, channel: string, host?: string): Promise<Record<string, unknown>> {
   return new Promise((resolvePromise, reject) => {
     const ws = new WebSocket(BRIDGE, {
@@ -89,15 +91,22 @@ function stamp(sig: string, channel: string, host?: string): Promise<Record<stri
         ? { headers: { Authorization: `Bearer ${String(process.env.HYPERCOMB_BRIDGE_TOKEN).trim()}` } }
         : {}),
     })
-    const timer = setTimeout(() => { try { ws.close() } catch { /* closing */ } reject(new Error('bridge timeout')) }, 30_000)
+    // While the bridge carries lines only, the stamp waits on the hive's
+    // command line for the participant's Enter (claude-bridge-setup.md), so a
+    // person has to have time to answer it.
+    const timer = setTimeout(() => { try { ws.close() } catch { /* closing */ } reject(new Error('bridge timeout: nobody answered the stamp on the hive\'s command line')) }, STAMP_WAIT_MS)
     const id = `stamp-${Date.now()}`
-    ws.on('open', () => ws.send(JSON.stringify({
+    ws.on('open', () => {
+      console.log(`[stamp] asking the hive to stamp install:${channel} → ${sig.slice(0, 12)}… — answer it on the hive's command line ($): Enter stamps, Esc declines`)
+      ws.send(JSON.stringify({
       op: 'hive-root-set',
+      from: 'publish:revision',
       id,
       key: `install:${channel}`,
       sig,
       ...(host ? { host } : {}),
-    })))
+    }))
+    })
     ws.on('message', (raw: Buffer) => {
       let res: { id?: string; ok?: boolean; data?: Record<string, unknown>; error?: string }
       try { res = JSON.parse(String(raw)) } catch { return }

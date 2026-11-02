@@ -13,6 +13,17 @@
 //   4. Files, which would be written before anyone answered, are refused.
 
 import { beforeAll, describe, expect, it, vi } from 'vitest'
+
+// The signed write itself is the hive pointer's; faked, so these tests are
+// about the gate in front of it and never about a host or a key.
+const stamps = vi.hoisted(() => [] as Array<{ host: string; key: string; sig: string }>)
+vi.mock('../sharing/hive-pointer.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  setHiveRoot: async (host: string, key: string, sig: string) => {
+    stamps.push({ host, key, sig })
+    return { ok: true, key, sig, host, pubkey: 'a'.repeat(64), createdAt: 1 }
+  },
+}))
 import {
   EffectBus, EXTERNAL_CALL, REMOTE_SUBMIT,
   type ExternalCallOutcome, type ExternalCallRequest, type RemoteSubmitRequest,
@@ -75,7 +86,7 @@ beforeAll(async () => {
 
 describe('the bridge carries lines only', () => {
   it('refuses every other op and says how to say it', async () => {
-    for (const op of ['list', 'put-resource', 'bag-set', 'stamp', 'chat-reply', 'swarm-debug']) {
+    for (const op of ['list', 'put-resource', 'bag-set', 'stamp', 'chat-reply', 'swarm-debug', 'update']) {
       const res = await reply(send({ op, text: 'x' }))
       expect(res.ok).toBe(false)
       expect(res.error).toContain(`"${op}" is shut off`)
@@ -134,10 +145,47 @@ describe('the bridge carries lines only', () => {
     }
   })
 
+  it('asks for an install stamp on the command line and performs it only on Enter', async () => {
+    const sig = 'f'.repeat(64)
+    const id = send({ op: 'hive-root-set', key: 'install:essentials', sig, host: 'hypercomb.com' })
+    await vi.waitFor(() => expect(calls).toHaveLength(4))
+    const call = calls[3]!
+    expect(call.from).toBe('publish:revision')
+    expect(call.lines).toEqual(['stamp install:essentials → ffffffffffff… on hypercomb.com'])
+    expect(typeof call.perform).toBe('function')
+    expect(stamps).toEqual([])
+
+    // Enter: the drone performs the act, then settles the call.
+    const verdict = await call.perform!()
+    expect(verdict).toBe('stamped install:essentials → ffffffffffff… on hypercomb.com')
+    expect(stamps).toEqual([{ host: 'hypercomb.com', key: 'install:essentials', sig }])
+    call.complete?.({ kind: 'ran', convoId: 'c', results: [{ text: call.lines[0]!, verdict }] })
+    const res = await reply(id)
+    expect(res.ok).toBe(true)
+    expect(res.data?.['pubkey']).toBe('a'.repeat(64))
+  })
+
+  it('answers a declined stamp as not stamped, and stamps nothing', async () => {
+    const id = send({ op: 'hive-root-set', key: 'install:essentials', sig: 'e'.repeat(64) })
+    await vi.waitFor(() => expect(calls).toHaveLength(5))
+    calls[4]!.complete?.({ kind: 'declined', convoId: 'c' })
+    const res = await reply(id)
+    expect(res.ok).toBe(false)
+    expect(res.error).toContain('declined')
+    expect(stamps).toHaveLength(1)
+  })
+
+  it('still refuses any root key that is not an install stamp', async () => {
+    const res = await reply(send({ op: 'hive-root-set', key: 'vocabulary:hive', sig: 'd'.repeat(64) }))
+    expect(res.ok).toBe(false)
+    expect(res.error).toContain("refuses 'vocabulary:hive'")
+    expect(calls).toHaveLength(5)
+  })
+
   it('refuses files, which would be written before anyone answered', async () => {
     const res = await reply(send({ op: 'submit', text: 'website page x', files: [{ name: 'a.txt', text: 'hello' }] }))
     expect(res.ok).toBe(false)
     expect(res.error).toContain('files are shut off')
-    expect(calls).toHaveLength(3)
+    expect(calls).toHaveLength(5)
   })
 })
