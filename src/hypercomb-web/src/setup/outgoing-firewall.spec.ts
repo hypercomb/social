@@ -130,10 +130,12 @@ describe('frozen network primitives', () => {
     }
     const beacon = function (url: string): boolean { beacons.push(String(url)); return true }
     Object.defineProperty(Navigator.prototype, 'sendBeacon', { configurable: true, writable: true, value: beacon })
-    Object.defineProperty(window, 'RTCPeerConnection', {
-      configurable: true, writable: true,
-      value: function Peer() { return { ice: true } },
-    })
+    // As in Chrome: webkitRTCPeerConnection IS RTCPeerConnection, one
+    // prototype carrying setConfiguration.
+    function Peer() { return { ice: true } }
+    Peer.prototype.setConfiguration = function (): string { return 'set' }
+    Object.defineProperty(window, 'RTCPeerConnection', { configurable: true, writable: true, value: Peer })
+    Object.defineProperty(window, 'webkitRTCPeerConnection', { configurable: true, writable: true, value: Peer })
     class Box {
       register(scriptURL: string): Promise<string> {
         registered.push(String(scriptURL))
@@ -271,6 +273,10 @@ describe('frozen network primitives', () => {
     expect(() => new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })).toThrow(TypeError)
     expect(() => new RTCPeerConnection({ iceServers: [{ urls: 'turn:turn.cloudflare.com:3478', username: 'u', credential: 'c' }] })).toThrow(TypeError)
     expect(() => new RTCPeerConnection({ iceServers: [{ urls: ['stun:stun.cloudflare.com', 'stun:evil.example'] }] })).toThrow(TypeError)
+    expect((window as any).webkitRTCPeerConnection).toBe(RTCPeerConnection)
+    const setConfiguration = RTCPeerConnection.prototype.setConfiguration as unknown as (c: unknown) => unknown
+    expect(setConfiguration.call({}, { iceServers: [{ urls: 'stun:stun.cloudflare.com' }] })).toBe('set')
+    expect(() => setConfiguration.call({}, { iceServers: [{ urls: 'turn:turn.example' }] })).toThrow(TypeError)
   })
 
   it('registers only this origin\'s own worker', async () => {

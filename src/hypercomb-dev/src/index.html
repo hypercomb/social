@@ -246,9 +246,16 @@
         }
         return true;
       }
+      // Chrome's webkitRTCPeerConnection IS RTCPeerConnection: one native, one
+      // prototype. It is guarded once and both names get the same guard, or
+      // pinning setConfiguration a second time throws.
+      var peerGuards = [];
       function guardPeer(name) {
         var NativePeer = window[name];
         if (typeof NativePeer !== 'function') return;
+        for (var k = 0; k < peerGuards.length; k++) {
+          if (peerGuards[k].native === NativePeer) { pin(window, name, peerGuards[k].guard); return; }
+        }
         function FirewallPeer(config) {
           if (!peerConfigSafe(config)) throw new TypeError('outgoing firewall: peer connections may name only Cloudflare STUN');
           return new NativePeer(config);
@@ -261,6 +268,7 @@
             return nativeSet.call(this, config);
           });
         }
+        peerGuards.push({ native: NativePeer, guard: FirewallPeer });
         pin(window, name, FirewallPeer);
       }
       guardPeer('RTCPeerConnection');
