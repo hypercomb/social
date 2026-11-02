@@ -96,8 +96,12 @@ const resolveThumb = async (entry: TrayEntry): Promise<string | null> => {
   } catch { return null }
 }
 
+// Under the header (60000): the shelf is the band below it, and everything
+// that drops from the command line (its suggestions, the indicator menu, both
+// at 60001 inside the header's layer) must fall OVER the shelf, never under.
+// Above the canvas (59989), banners and the participants' hive (59995).
 const STYLE = `
-:host{position:fixed;inset:0;z-index:60001;pointer-events:none;
+:host{position:fixed;inset:0;z-index:59998;pointer-events:none;
   --shelf:73,214,208;
   --shelf-top:calc(var(--hc-header-anchor,0px) + 0.375rem);
   --shelf-left:calc(max(var(--hc-controls-left,0px),var(--hc-inset-left,0px),var(--hc-seam-right,0px)) + 0.5rem);
