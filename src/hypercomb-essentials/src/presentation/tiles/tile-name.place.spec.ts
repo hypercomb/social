@@ -116,13 +116,18 @@ describe('TileNameDrone places only the names that moved', () => {
     expect(root.hidden).toBe(false)
   })
 
-  it('the page names step aside while a dive is painted and return when it clears', () => {
+  it('the page names step aside for a dive, whose own names stand in their layer, and return when it clears', () => {
     EffectBus.emit('render:cell-count', page(5))
     const root = document.querySelector('.hc-tile-names') as HTMLElement
-    EffectBus.emit('render:dive-painted', { count: 4 })
-    expect(root.hidden).toBe(true)
-    EffectBus.emit('render:dive-painted', { count: 0 })
+    EffectBus.emit('render:dive', { cells: [{ q: 0, r: 0, label: 'atom' }, { q: 1, r: 0, label: 'blank', hideText: true }] })
+    EffectBus.emit('render:dive-painted', { count: 2 })
     expect(root.hidden).toBe(false)
+    expect(root.classList.contains('hc-diving')).toBe(true)
+    expect([...root.querySelectorAll('.hc-dive-name')].map(s => s.textContent)).toEqual(['atom'])
+    EffectBus.emit('render:dive', { cells: null })
+    EffectBus.emit('render:dive-painted', { count: 0 })
+    expect(root.classList.contains('hc-diving')).toBe(false)
+    expect(root.querySelectorAll('.hc-dive-name')).toHaveLength(0)
   })
 
   it('a name that was hidden and shows again keeps its place without a write', () => {

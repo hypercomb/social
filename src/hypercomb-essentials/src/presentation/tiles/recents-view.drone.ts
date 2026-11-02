@@ -36,7 +36,7 @@ import type { DiveCell } from './show-cell.drone.js'
 import { takePayload } from './portal-carry.plan.js'
 import { clampPage, filterAtoms, layoutPage, recentsClickPlan, type Axial } from './recents-layout.js'
 
-type ZoomLike = { zoomToFit?(snap?: boolean, source?: 'user' | 'auto-persist' | 'auto', fitAxis?: 'both' | 'x' | 'y', hold?: 'none'): boolean }
+type ZoomLike = { zoomToFit?(snap?: boolean, source?: 'auto', fitAxis?: 'both', hold?: 'none'): boolean }
 type ViewportLike = { lastPan?: { dx?: number; dy?: number } | null; setPan?(dx: number, dy: number, source?: 'auto'): void }
 type HostLike = {
   app?: { stage: { position: { x: number; y: number; set(x: number, y: number): void } } }
