@@ -82,39 +82,3 @@ export class DoctrineQueenBee extends QueenBee {
     toast(t('doctrine.usage', '/doctrine takes list, tiles, back, drop <n> or seed; alone it opens the viewer.'), 'warning')
   }
 }
-
-
-// THE VIEWER ARRIVES WITH ITS FIRST OPEN, not at boot (atomic-modules-plan.md,
-// "adopt the proper load"): nothing needs its code until `/doctrine` asks, so it
-// loads then, once. The view subscribes to `doctrine:open` as it is made and the
-// bus replays the press that loaded it, so the first press opens it like every
-// later one. The key is spelled here: importing even a constant from the view
-// would keep it on boot.
-const DOCTRINE_WINDOW_KEY = '@diamondcoreprocessor.com/DoctrineWindowView'
-let doctrineWindow: Promise<void> | null = null
-let doctrineBuilt = false
-/** Presses heard while the viewer loads. The replay plays only the last, and
- *  every press toggles — so an even count ends closed. */
-let doctrinePresses = 0
-
-EffectBus.on('doctrine:open', () => {
-  if (doctrineBuilt) return
-  doctrinePresses++
-  doctrineWindow ??= import('./doctrine-window.view.js').then(({ DoctrineWindowView }) => {
-    // BUILT ONCE, even when making it throws: it subscribes before its replay
-    // opens it, so a second one would answer every later press twice.
-    doctrineBuilt = true
-    try {
-      const view = new DoctrineWindowView()
-      window.ioc.register(DOCTRINE_WINDOW_KEY, view)
-      if (doctrinePresses % 2 === 0) view.close()
-    } catch (error) {
-      console.error('[doctrine] the viewer could not be made', error)
-    }
-  }, (error: unknown) => {
-    // A failed load says so, and the next press tries again.
-    doctrineWindow = null
-    doctrinePresses = 0
-    EffectBus.emit('activity:log', { message: `Could not load the doctrine viewer: ${error instanceof Error ? error.message : String(error)}` })
-  })
-})
