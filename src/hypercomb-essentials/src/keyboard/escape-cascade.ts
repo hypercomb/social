@@ -1,22 +1,12 @@
 // input/escape-cascade.ts
 import { EffectBus } from '@hypercomb/core'
-import type { BackGesture } from '../navigation/back-gesture.service.js'
 
 // ── reactive state (tracked via effects already emitted by services) ──
 
 let editorActive = false
-let clipboardActive = false
 
 EffectBus.on<{ active: boolean }>('editor:mode', ({ active }) => {
   editorActive = active
-})
-
-// The clipboard side panel announces its open/close state here so RIGHT-CLICK
-// still closes it (the back-gesture entry at the foot of this file). Escape
-// does not read it any more: the panel is a docked window like any other, so
-// the sweep below takes it with everything else.
-EffectBus.on<{ open: boolean }>('clipboard:open', ({ open }) => {
-  clipboardActive = open
 })
 
 // ── ONE PRESS TAKES EVERYTHING, THE NEXT ONE GIVES IT BACK ────────────
@@ -156,8 +146,8 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
   if (windows?.dismissFocused()) return
 
   // Priority 3: THE SWEEP — every showing surface goes, in one press. Panels,
-  // the companion palette, the notes reader, pinned cards, the clipboard
-  // window: all of it is parked, so all of it can come back.
+  // the companion palette, the notes reader, pinned cards: all of it is
+  // parked, so all of it can come back.
   //
   // `closeFocused` is what an older shell around this bundle offers instead —
   // essentials is loaded at runtime from a signed bundle and can be newer than
@@ -221,21 +211,3 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
   // Priority 7: generic fallback for future consumers
   EffectBus.emit('global:escape', undefined)
 })
-
-// ── right-click exits clipboard mode ──────────────────────────────────
-// Same parity as the X button: right-click anywhere closes the clipboard view.
-//
-// Registered as an entry in the ONE thing that decides what the right button
-// means (navigation/back-gesture.service.ts) instead of a listener of its own.
-// Two window listeners for the same gesture is how you get a right-click that
-// both closes the clipboard AND navigates the hive out from under it; the
-// registry orders them instead. Clipboard mode covers the page without being a
-// view, which is exactly what `active` is for.
-
-/** The clipboard-mode entry for the BackGesture registry; keyboard.drone.ts
- *  registers it (atomic-modules-plan.md). */
-export const CLIPBOARD_MODE_BACK_ENTRY = {
-  owner: 'clipboard-mode',
-  active: (): boolean => clipboardActive,
-  back: (): void => EffectBus.emit('clipboard:close', undefined),
-}

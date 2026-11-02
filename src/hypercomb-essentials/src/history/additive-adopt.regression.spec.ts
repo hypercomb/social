@@ -23,7 +23,7 @@
 //   - SwarmAdoptDrone mesh adopt       (tile:action adopt on a held tile)
 //   - SwarmAdoptDrone static sync      (tile:action sync, a public host's offer)
 //   - hive-visit / adopt-branch / example-hives (all end in adoptResolvedBranch)
-//   - clipboard paste of a same-named tile
+//   - a shelf drop of a same-named tile
 //   - image paste / intake onto an existing tile
 //
 // After each: all of her children (a, b) still resolve through the parent
@@ -159,8 +159,7 @@ const { LayerCommitter } = await import('./layer-committer.drone.js')
 const { resolveLayerAt, childLayerOf, childNamesOfStrict } = await import('./layer-placement.js')
 const { writeTilePropertiesAt, readOwnTilePropertiesAt } = await import('../editor/tile-properties.js')
 const { SwarmAdoptDrone } = await import('../sharing/swarm-adopt.drone.js')
-const { ClipboardWorker } = await import('../clipboard/clipboard.worker.js')
-const { ClipboardService } = await import('../clipboard/clipboard.service.js')
+await import('../presentation/tiles/shelf-placement.worker.js')
 const { holdImagesOnTile, replaceWornPicture } = await import('../sharing/tile-image-intake.js')
 
 type History = InstanceType<typeof HistoryService>
@@ -169,8 +168,6 @@ type Layer = { name?: string; children?: string[]; [slot: string]: unknown }
 /** ONE committer for the file (it subscribes to the bus forever). */
 const committer = new LayerCommitter()
 const adoptDrone = services.get('@diamondcoreprocessor.com/SwarmAdoptDrone') as InstanceType<typeof SwarmAdoptDrone>
-const clipboardWorker = services.get('@diamondcoreprocessor.com/ClipboardWorker') as InstanceType<typeof ClipboardWorker>
-void clipboardWorker
 
 type World = { root: MemoryDirectory; history: History; store: Record<string, unknown> }
 
@@ -194,9 +191,8 @@ const world = async (): Promise<World> => {
   localStorage.clear()
   const root = new MemoryDirectory()
   liveRoot = root
-  const clipboardDir = new MemoryDirectory()
   const store: Record<string, unknown> = {
-    hypercombRoot: root, opfsRoot: root, clipboard: clipboardDir,
+    hypercombRoot: root, opfsRoot: root,
     getLayerPoolBytes: async (sig: string) => root.files.get(sig)?.bytes ?? null,
     getResourceLocal: async (sig: string) => root.files.get(sig)?.getFile() ?? null,
     // The real Store follows a meta envelope to its payload (store.ts #getResolvedResource).
@@ -236,7 +232,6 @@ const world = async (): Promise<World> => {
   services.set('@diamondcoreprocessor.com/HistoryCursorService', {
     state: { rewound: false }, onNewLayer: async () => {},
   })
-  services.set('@diamondcoreprocessor.com/ClipboardService', new ClipboardService())
   peers = { current: [], byLoc: new Map(), statics: [] }
   brokerFailed = 0
   services.set('@diamondcoreprocessor.com/ContentBrokerDrone', {
@@ -581,29 +576,30 @@ describe.each(SCENARIOS)('the susan incident - $name', (sc) => {
     expect((await observe(c)).bags, 'second static sync mints no marker').toBe(first.bags)
   })
 
-  it('clipboard paste of a same-named tile onto the one already here', async () => {
+  it('a shelf drop of a same-named tile onto the one already here', async () => {
     const c = await setUp(sc)
-    const svc = services.get('@diamondcoreprocessor.com/ClipboardService') as InstanceType<typeof ClipboardService>
-    const paste = async () => {
-      svc.captureEntries([{ label: 'susan', sourceSegments: ['elsewhere'], sig: c.bSig }])
-      // EffectBus replays the last value to a late subscriber, so a paste-done from
-      // an earlier paste/test would resolve this wait before THIS paste ran. Ignore
-      // the synchronous replay and unsubscribe when done.
+    const drop = async () => {
+      // EffectBus replays the last value to a late subscriber, so a place-done
+      // from an earlier drop/test would resolve this wait before THIS drop ran.
+      // Ignore the synchronous replay and unsubscribe when done.
       let live = false
       let off = () => {}
       const done = new Promise<void>(resolve => {
-        off = EffectBus.on('clipboard:paste-done', () => { if (live) resolve() })
+        off = EffectBus.on('shelf:place-done', () => { if (live) resolve() })
       })
       live = true
-      EffectBus.emit('controls:action', { action: 'paste', targetSegments: [...c.at] })
+      EffectBus.emit('shelf:place', {
+        entries: [{ label: 'susan', sourceSegments: ['elsewhere'], sig: c.bSig }],
+        targetSegments: [...c.at],
+      })
       await done
       off()
       await settleLong()
     }
-    await paste()
-    const first = await assertHers(c, 'clipboard paste', { expectAdds: true })
-    await paste()
-    expect((await observe(c)).bags, 'second paste mints no marker').toBe(first.bags)
+    await drop()
+    const first = await assertHers(c, 'shelf drop', { expectAdds: true })
+    await drop()
+    expect((await observe(c)).bags, 'second drop mints no marker').toBe(first.bags)
   })
 
   it('image intake onto an existing tile: hold keeps her picture, children and note', async () => {

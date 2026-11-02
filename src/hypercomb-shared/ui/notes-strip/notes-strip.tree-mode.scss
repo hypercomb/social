@@ -1,0 +1,282 @@
+// hypercomb-shared/ui/notes-strip/notes-strip.tree-mode.scss
+//
+// THE NOTE TREE, AND NOTHING ELSE. The desk is already the whole screen.
+// This mode drops the navigator, the reading pane, the mark rail and the
+// identity plate, and leaves the tree. The tile you are under is the header.
+// People sit across under it, and the groups at this level sit across under
+// them: drag a person onto a group to add them to it. A person can be in
+// many groups, and the notes stay where they are. The side column of
+// categories stays in the template for the other mode and is
+// hidden here. The command line stays: it is how a category and a note are
+// made. An agent already allowed to read the notes walks the groups, and
+// the group it is looking at stays lit.
+//
+// Last in the component's styleUrls, so it wins over the desk grid.
+
+@use './notes-strip-shared' as *;
+
+:host .notes-strip.is-tree {
+  display: flex;
+  flex-direction: column;
+}
+
+:host .notes-strip.is-tree .cv2-tabs,
+:host .notes-strip.is-tree .cv2-rail,
+:host .notes-strip.is-tree .cv2-plate,
+:host .notes-strip.is-tree .cv2-tilelist,
+:host .notes-strip.is-tree .cv2-reading,
+:host .notes-strip.is-tree .cv2-inline-line,
+:host .notes-strip.is-tree .cv2-foot {
+  display: none;
+}
+
+:host .notes-strip.is-tree .cv2-composer {
+  flex: 0 0 auto;
+}
+
+:host .notes-strip.is-tree .cv2-composer-depth {
+  max-width: 40%;
+  min-width: 0;
+}
+
+:host .notes-strip.is-tree .cv2-composer-place {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:host .notes-strip.is-tree .cv2-dragbar {
+  height: auto;
+  min-height: 3.25rem;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+:host .notes-strip.is-tree .cv2-dragbar-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--hc-notes-face);
+  font-size: scaled(1.45rem);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+:host .notes-strip.is-tree .cv2-dragbar-tile {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.cv2-tilehead-mark {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  background: color-mix(in srgb, var(--md-secondary) 22%, transparent);
+  font-family: var(--hc-mono, system-ui);
+  font-size: scaled(0.85rem);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--hc-window-ink-loud);
+}
+
+:host .notes-strip.is-tree .cv2-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+:host .notes-strip.is-tree .cv2-ledger,
+:host .notes-strip.is-tree .cv2-ledger.has-cats {
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+:host .notes-strip.is-tree .cv2-cats {
+  display: none;
+}
+
+:host .cv2-mini-btn.is-on {
+  color: $steel;
+  background: color-mix(in srgb, #{$steel} 16%, transparent);
+}
+
+.cv2-people {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 2px;
+}
+
+.cv2-person {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--peer, var(--md-on-surface)) 45%, transparent);
+  background: transparent;
+  color: var(--md-on-surface-variant, inherit);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font: inherit;
+  font-size: scaled(12px);
+  cursor: grab;
+  user-select: none;
+
+  &:active { cursor: grabbing; }
+  &.is-on {
+    color: var(--md-on-surface);
+    background: color-mix(in srgb, var(--peer, #{$steel}) 24%, transparent);
+    border-color: color-mix(in srgb, var(--peer, #{$steel}) 70%, transparent);
+  }
+}
+
+.cv2-people .cv2-ask {
+  flex: 1 1 14rem;
+  min-width: 10rem;
+  margin: 0 0 0 auto;
+  padding: 0;
+}
+
+.cv2-ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 8px;
+}
+
+.cv2-ask-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid $guide;
+  background: transparent;
+  color: var(--md-on-surface);
+  font: inherit;
+  font-size: scaled(13px);
+  padding: 6px 2px;
+  outline: none;
+
+  &::placeholder { color: var(--md-on-surface-faint); }
+}
+
+.cv2-ask-status {
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: scaled(12px);
+  color: $steel;
+}
+
+.cv2-ask-go {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: color-mix(in srgb, #{$steel} 16%, transparent);
+  color: var(--md-on-surface);
+  font: inherit;
+  font-size: scaled(12px);
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+
+  .mat-sym { font-size: 16px; }
+  &:disabled { opacity: 0.35; cursor: default; }
+}
+
+.cv2-cat-row.is-exploring .cv2-cat,
+.cv2-cat.is-exploring {
+  background: color-mix(in srgb, #{$steel} 22%, transparent);
+}
+
+.cv2-cat-finding {
+  margin: 0 10px 8px calc(18px + var(--depth, 0) * 14px);
+  font-size: scaled(12px);
+  line-height: 1.35;
+  color: var(--md-on-surface);
+}
+
+.cv2-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 12px 8px;
+}
+
+.cv2-group {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 16rem;
+  border: 1px solid $guide;
+  background: transparent;
+  color: var(--md-on-surface-variant, inherit);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font: inherit;
+  font-size: scaled(13px);
+  cursor: pointer;
+
+  &.is-on {
+    color: var(--md-on-surface);
+    background: color-mix(in srgb, #{$steel} 18%, transparent);
+    border-color: color-mix(in srgb, #{$steel} 70%, transparent);
+  }
+  &.is-over,
+  &.is-exploring {
+    background: color-mix(in srgb, #{$steel} 32%, transparent);
+    border-color: $steel;
+  }
+}
+
+.cv2-group-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cv2-group-who {
+  display: inline-flex;
+  gap: 2px;
+  font-size: scaled(10px);
+  letter-spacing: 0.04em;
+  opacity: 0.8;
+}
+
+.cv2-group-name,
+.cv2-group-rename {
+  width: 9rem;
+  max-width: 40%;
+  border: 0;
+  border-bottom: 1px solid $guide;
+  background: transparent;
+  color: var(--md-on-surface);
+  font: inherit;
+  font-size: scaled(13px);
+  padding: 4px 2px;
+  outline: none;
+
+  &::placeholder { color: var(--md-on-surface-faint); }
+}
+
+.cv2-group-rename {
+  border-bottom-color: color-mix(in srgb, #{$steel} 70%, transparent);
+}
+
+.cv2-group-finding {
+  margin: 0 12px 8px;
+  font-size: scaled(12px);
+  line-height: 1.35;
+  color: var(--md-on-surface);
+}

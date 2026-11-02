@@ -242,22 +242,30 @@ export const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike |
   return [...new Set([...branchZones.map(zoneDoor), ...standing])].filter(Boolean)
 }
 
-/** Walk the doors until one ANSWERS — a verified index or an honest 404. A
- *  branch pointed at a zone whose DNS has not landed yet must still publish:
- *  the write lands in the same shared index through any live door, and the
- *  chosen address starts serving the moment its zone does. Only when NO door
- *  answers does the caller see the last failure. */
-async function resolveIndexDoor(
+/** Walk the doors for the index. A verified index at ANY door wins: a door that
+ *  answers 404 may simply be one that keeps no index (jwize.com's apex), and
+ *  stopping there refused every door switch on a branch it led, while a first
+ *  publish through it would start an empty index beside the real one. An
+ *  honest 404 counts only when no door holds an index. A branch pointed at a
+ *  zone whose DNS has not landed yet must still publish: the write lands in
+ *  the same shared index through any live door, and the chosen address starts
+ *  serving the moment its zone does. Only when NO door answers does the caller
+ *  see the last failure. */
+export async function resolveIndexDoor(
   doors: readonly string[],
   pubkey: string,
+  fetchIndex: typeof fetchHiveIndex = fetchHiveIndex,
 ): Promise<{ host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> }> {
-  let last: { host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> } | null = null
+  type Door = { host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> }
+  let last: Door | null = null
+  let absent: Door | null = null
   for (const host of doors) {
-    const read = await fetchHiveIndex(host, pubkey)
+    const read = await fetchIndex(host, pubkey)
     last = { host, read }
-    if (read.ok || (read.reason === 'http' && read.status === 404)) return last
+    if (read.ok) return last
+    if (read.reason === 'http' && read.status === 404) absent ??= last
   }
-  return last ?? { host: '', read: { ok: false, reason: 'unreachable' } as Awaited<ReturnType<typeof fetchHiveIndex>> }
+  return absent ?? last ?? { host: '', read: { ok: false, reason: 'unreachable' } as Awaited<ReturnType<typeof fetchHiveIndex>> }
 }
 
 /** Publish one branch and record the act. Never throws. */

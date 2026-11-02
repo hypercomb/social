@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { CAVE_COLUMNS, CAVE_ROWS } from './dos-geometry.js'
 import { BUILTIN_LEVELS } from './levels.js'
+import { GROUP_ABOVE, LEVEL_GROUP, levelName } from './level-tiles.js'
 import {
   BUBBLE_DOS_BRANCH, BUBBLE_DOS_SOURCE_SHA256, BubbleTileSurface,
-  type BubbleTileCommitter, type BubbleTileHistory, type BubbleTileLayer,
+  type BubbleLoadingStep, type BubbleTileCommitter, type BubbleTileHistory, type BubbleTileLayer,
 } from './tile-surface.js'
 
 /** Content-addressed child signatures plus mutable location heads reproduce the
@@ -58,7 +59,7 @@ function nativeHive() {
     },
   }
   put([], { name: 'root', children: [] })
-  const surface = () => new BubbleTileSurface({ history, committer, parentSegments: [] })
+  const surface = (onLoading?: (step: BubbleLoadingStep) => void) => new BubbleTileSurface({ history, committer, parentSegments: [], onLoading })
   return { surface, history, pool, heads, put, read, writes: () => writes, setCold: () => { cold = true } }
 }
 
@@ -177,5 +178,69 @@ describe('Bubble Bobble native DOS round surface', () => {
     ])
     expect(first.level).toEqual(second.level)
     expect(hive.writes()).toBe(1)
+  })
+
+  describe('as a level tile', () => {
+    const levelSegments = (index = 0) => [BUBBLE_DOS_BRANCH, LEVEL_GROUP, levelName(index)]
+
+    it('writes one level tile and its enemies beside the cells, and plays from it', async () => {
+      const hive = nativeHive()
+      const seeded = await hive.surface().ensureRound(0)
+      const cellsBefore = hive.read(roundSegments())!.children
+      const upgraded = await hive.surface().upgradeRound(0)
+
+      expect(upgraded.level).toEqual(seeded.level)
+      expect(upgraded.roundSegments).toEqual(levelSegments())
+      // Forward only: the native round and its 800 cells are untouched.
+      expect(hive.read(roundSegments())!.children).toEqual(cellsBefore)
+      const tile = hive.read(levelSegments())!
+      expect(tile.bubbleLevel).toBeDefined()
+      expect(tile.children).toHaveLength(BUILTIN_LEVELS[0].enemies.length)
+      // Play now reads the level tile, not the cells.
+      const reopened = await hive.surface().readRound(0)
+      expect(reopened!.roundSegments).toEqual(levelSegments())
+      expect(reopened!.level).toEqual(seeded.level)
+    })
+
+    it('uses an authored enemy edit on reopen', async () => {
+      const hive = nativeHive()
+      await hive.surface().ensureRound(0)
+      await hive.surface().upgradeRound(0)
+      const names = hive.read(levelSegments())!.children!.map(sig => hive.pool.get(sig)!.name!)
+      const segments = [...levelSegments(), names[0]]
+      const old = hive.read(segments)!
+      hive.put(segments, { ...old, bubbleEnemy: { ...(old.bubbleEnemy as object), enters: 40 } })
+      const reopened = await hive.surface().readRound(0)
+      expect(reopened!.level.enemies.some(enemy => enemy.spawnDelay === 40)).toBe(true)
+    })
+
+    it('upgrading twice writes once', async () => {
+      const hive = nativeHive()
+      await hive.surface().ensureRound(0)
+      await hive.surface().upgradeRound(0)
+      const writes = hive.writes()
+      await hive.surface().upgradeRound(0)
+      expect(hive.writes()).toBe(writes)
+    })
+
+    it('says what it is loading: the level tile first, then each group, then ready', async () => {
+      const hive = nativeHive()
+      // More enemies than a layer should list flat: they are grouped by kind.
+      const seed = BUILTIN_LEVELS[0]
+      const crowd = Array.from({ length: GROUP_ABOVE + 4 }, (_, i) => ({ ...seed.enemies[0], x: seed.enemies[0].x + (i % 4) * 8 }))
+      const crowded = { ...seed, enemies: crowd }
+      await hive.surface().ensureRound(0, crowded)
+      await hive.surface().upgradeRound(0)
+      const tile = hive.read(levelSegments())!
+      expect(tile.children).toHaveLength(1)
+      const steps: BubbleLoadingStep[] = []
+      const loaded = await hive.surface(step => steps.push(step)).readRound(0)
+      expect(loaded!.level.enemies).toEqual(crowd)
+      expect(steps[0]).toMatchObject({ stage: 'level', round: 0 })
+      expect(steps.filter(step => step.stage === 'group')).toEqual([
+        expect.objectContaining({ group: seed.enemies[0].kind, loaded: 0 }),
+      ])
+      expect(steps.at(-1)).toMatchObject({ stage: 'ready', loaded: crowd.length })
+    })
   })
 })

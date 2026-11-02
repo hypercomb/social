@@ -4,7 +4,7 @@ import { Engine, WIDTH, HEIGHT, type Input, type LevelDef } from './engine.js'
 import { DOS_TICK_SECONDS } from './dos-mechanics.js'
 import { Renderer } from './renderer.js'
 import {
-  createBubbleTileSurface, type LoadedBubbleRound,
+  createBubbleTileSurface, type BubbleLoadingStep, type LoadedBubbleRound,
 } from './tile-surface.js'
 import { GameAudio } from '../audio.js'
 
@@ -65,7 +65,7 @@ export class BubbleOverlay {
 
   constructor(
     private readonly onClose: () => void,
-    private readonly roundSourceFactory: LivingRoundSourceFactory = () => createBubbleTileSurface([]),
+    private readonly roundSourceFactory?: LivingRoundSourceFactory,
   ) {
     this.#engine.useLivingLevels()
   }
@@ -243,7 +243,7 @@ export class BubbleOverlay {
     this.#syncCover()
     let result: LoadedBubbleRound | Promise<LoadedBubbleRound>
     try {
-      this.#roundSource ??= this.roundSourceFactory()
+      this.#roundSource ??= (this.roundSourceFactory ?? (() => createBubbleTileSurface([], step => this.#loadingStep(step))))()
       result = this.#roundSource.ensureRound(index)
     } catch (error) {
       this.#roundSource = null
@@ -399,6 +399,15 @@ export class BubbleOverlay {
     this.#soundButton.textContent = this.#audio.muted ? 'Sound off' : 'Sound on'
     this.#soundButton.setAttribute('aria-pressed', String(!this.#audio.muted))
   }
+  /** The loading layer: the round's level tile is up first, then each enemy group as it arrives. */
+  #loadingText = ''
+  #loadingStep(step: BubbleLoadingStep): void {
+    const round = `ROUND ${String(step.round + 1).padStart(2, '0')}`
+    this.#loadingText = step.stage === 'level' ? `${round} · the level tile is up, bringing in its enemies…`
+      : step.stage === 'group' ? `${round} · opening the ${step.group} group (${step.loaded} enemies in)…`
+      : ''
+    if (!this.#livingReady) this.#syncCover()
+  }
   #syncCover(): void {
     if (!this.#cover || !this.#coverTitle || !this.#coverCopy || !this.#coverButton) return
     // Restart is legal exactly when the engine will accept it: once ROUND 01 is
@@ -409,7 +418,7 @@ export class BubbleOverlay {
       this.#coverTitle.textContent = this.#livingError ? 'Living round unavailable' : 'Bubble Bobble'
       this.#coverCopy.textContent = this.#livingError
         ? this.#livingError
-        : `Opening ROUND ${String(this.#wantedRound + 1).padStart(2, '0')} from its hive tiles\u2026`
+        : this.#loadingText || `Opening ROUND ${String(this.#wantedRound + 1).padStart(2, '0')} from its hive tiles\u2026`
       this.#coverButton.textContent = this.#livingError ? 'Try again' : 'Loading\u2026'
       this.#coverButton.disabled = !this.#livingError
       if (this.#pauseButton) this.#pauseButton.disabled = true

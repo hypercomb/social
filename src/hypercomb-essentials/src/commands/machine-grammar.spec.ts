@@ -32,7 +32,6 @@ const { CreateQueenBee } = await import('./create.queen.js')
 const { TitleQueenBee } = await import('./title.queen.js')
 const { UndoQueenBee, RedoQueenBee } = await import('../history/undo.queen.js')
 const { HideQueenBee } = await import('../presentation/tiles/hide.queen.js')
-const { CopyQueenBee, CutQueenBee, PasteQueenBee } = await import('../clipboard/clipboard.queen.js')
 
 const BACKSLASH = String.fromCharCode(92)
 
@@ -171,23 +170,5 @@ describe('the machine grammar the shipped behaviours declare', () => {
     expect(title.machine?.refuse?.('= Something')).toContain('one child tile name')
     expect(title.machine?.refuse?.('child/path = Something')).toContain('one child tile name')
   })
-  it('names its tiles on the clipboard verbs, because a speaker cannot see a selection', () => {
-    for (const queen of [new CopyQueenBee(), new CutQueenBee()]) {
-      wellFormed(queen.machine, queen.command)
-      expect(queen.machine?.refuse?.('drafts')).toBeUndefined()
-      expect(queen.machine?.refuse?.('[drafts, notes]')).toBeUndefined()
-      // The button acts on whatever is picked. That is right for a hand and
-      // useless to a speaker, so the machine seam requires names.
-      expect((queen.machine as { bare?: boolean } | undefined)?.bare).not.toBe(true)
-      expect(queen.machine?.refuse?.('')).toContain('cannot see what is picked')
-      expect(queen.machine?.refuse?.('projects/drafts')).toContain('does not reach through')
-    }
 
-    // Paste is the exception: "place what is held, where I am" is entire.
-    const paste = new PasteQueenBee()
-    wellFormed(paste.machine, 'paste')
-    expect(paste.machine?.bare).toBe(true)
-    expect(paste.machine?.refuse?.('')).toBeUndefined()
-    expect(paste.machine?.refuse?.('drafts')).toContain('takes no argument')
-  })
 })

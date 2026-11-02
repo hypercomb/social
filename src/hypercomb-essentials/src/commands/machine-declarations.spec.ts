@@ -37,7 +37,6 @@ await import('../assistant/find.queen.js')
 await import('../assistant/read.queen.js')
 await import('../assistant/unfile.queen.js')
 await import('../assistant/module.queen.js')
-await import('../clipboard/clipboard.queen.js')
 await import('./create.queen.js')
 await import('./go.queen.js')
 await import('./into.queen.js')
@@ -81,9 +80,6 @@ const declared = new Map(census.filter(entry => entry.machine).map(entry => [ent
 const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   // Held: each traced to its code, unchanged.
   file: ['additive', 'hive'],          // a note on its tile and on the tile's word
-  copy: ['additive', 'hive'],          // stages the clipboard pool (refused over a held cut)
-  cut: ['destructive', 'hive'],        // the tile leaves its page at once
-  paste: ['additive', 'hive'],         // appends only; a name already there is skipped
   create: ['additive', 'page'],        // mints; an existing level is a no-op
   language: ['editing', 'local'],      // a locale preference; offer/sync/missing refused
   keyword: ['editing', 'hive'],        // tile slot + the global tag registry
@@ -286,17 +282,4 @@ describe('what the corrections refuse', () => {
     ioc.register('@hypercomb.social/Lineage', undefined)
   })
 
-  it('/copy is refused over a tile the participant cut and has not placed', () => {
-    const refuse = declared.get('copy')!.refuse!
-    const clipboard = (items: readonly { label: string; cut?: boolean }[]): void =>
-      ioc.register('@diamondcoreprocessor.com/ClipboardService', { items })
-    clipboard([])
-    expect(refuse('drafts')).toBeUndefined()
-    clipboard([{ label: 'notes' }])
-    expect(refuse('drafts')).toBeUndefined()   // a held copy loses nothing when replaced
-    clipboard([{ label: 'notes' }, { label: 'roadmap', cut: true }])
-    expect(refuse('drafts')).toBe('/copy would replace a tile the participant cut and has not placed yet; leave the clipboard to them')
-    // Its own argument rule still answers first.
-    expect(refuse('')).toBe('/copy needs a tile name — a machine cannot see what is picked')
-  })
 })

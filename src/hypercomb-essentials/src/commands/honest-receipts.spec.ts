@@ -28,7 +28,6 @@ const set = (key: string, value: unknown): void => ioc.register(key, value)
 const { removeTilesAt } = await import('./remove-tiles.js')
 const { HideQueenBee } = await import('../presentation/tiles/hide.queen.js')
 const { UndoQueenBee } = await import('../history/undo.queen.js')
-const { CopyQueenBee, CutQueenBee, PasteQueenBee } = await import('../clipboard/clipboard.queen.js')
 const { KeywordQueenBee } = await import('./keyword.queen.js')
 
 describe('/remove', () => {
@@ -92,44 +91,6 @@ describe('/undo', () => {
     set('@diamondcoreprocessor.com/HistoryCursorService', cursor)
     await expect(new UndoQueenBee().invoke('2')).resolves.toBeUndefined()
     expect(cursor.state.position).toBe(1)
-  })
-})
-
-describe('/copy, /cut, /paste', () => {
-  const pageHolds = (...tiles: string[]): void => set('@hypercomb.social/CellSuggestionProvider', { suggestions: () => tiles })
-  const clipboardHolds = (empty: boolean): void => set('@diamondcoreprocessor.com/ClipboardService', { isEmpty: empty, items: [] })
-  set('@diamondcoreprocessor.com/SelectionService', { selected: new Set(), add() {}, clear() {} })
-
-  it('a name the page does not hold is nothing to take', async () => {
-    pageHolds('drafts', 'notes')
-    await expect(new CopyQueenBee().invoke('ghost')).rejects.toThrow('no tile named "ghost" on this page')
-    await expect(new CutQueenBee().invoke('[drafts, ghost]')).rejects.toThrow('no tile named "ghost" on this page')
-  })
-
-  it('an empty clipboard is nothing to place', async () => {
-    clipboardHolds(true)
-    await expect(new PasteQueenBee().invoke('')).rejects.toThrow('the clipboard is holding nothing')
-  })
-
-  it('with no worker listening, nothing will happen — and it says so by failing', async () => {
-    pageHolds('drafts')
-    await expect(new CopyQueenBee().invoke('drafts')).rejects.toThrow('the clipboard is not ready yet')
-  })
-
-  it('a worker that completes with an error fails the word', async () => {
-    clipboardHolds(false)
-    const off = EffectBus.on<{ action?: string; accept?: () => void; complete?: (error?: unknown) => void }>('controls:action', payload => {
-      payload.accept?.(); payload.complete?.(new Error('paste — nothing was placed here'))
-    })
-    try { await expect(new PasteQueenBee().invoke('')).rejects.toThrow('nothing was placed') } finally { off() }
-  })
-
-  it('and resolves when the worker did the work', async () => {
-    pageHolds('drafts')
-    const off = EffectBus.on<{ accept?: () => void; complete?: () => void }>('controls:action', payload => {
-      payload.accept?.(); payload.complete?.()
-    })
-    try { await expect(new CopyQueenBee().invoke('Drafts')).resolves.toBeUndefined() } finally { off() }
   })
 })
 

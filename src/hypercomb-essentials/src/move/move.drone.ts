@@ -728,8 +728,8 @@ export class MoveDrone extends Drone {
    *     between the commits leaves a tile reachable twice, never nowhere. There
    *     is no shared edge for a swap to ride on, and a location resolves from
    *     its OWN bag head (the parent's stored child sig is only a hint), so both
-   *     pages read correctly afterwards — the shape clipboard cut+paste commits
-   *     in (clipboard-sig-native.md).
+   *     pages read correctly afterwards — the shape a shelf move commits in
+   *     (shelf-placement.worker.ts).
    *
    * Everything is checked before anything commits: a tile named twice, a
    * destination that is the source, a moved tile, or inside one, refuses the
@@ -1102,7 +1102,7 @@ export class MoveDrone extends Drone {
 
   /** Resolve the current parent layer robustly — resolveLayerAt walks the parent
    *  chain; the cursor fallback covers a cold currentLayerAt on the location the
-   *  user is viewing (which IS the copy target). Mirrors clipboard's resolution. */
+   *  user is viewing (which IS the copy target). Mirrors the shelf's placement. */
   async #resolveCurrentParent(history: PlacementHistory, lineage: { domain?: unknown }, segs: readonly string[]): Promise<PlacementLayer | null> {
     const viaChain = await resolveLayerAt(history, lineage.domain, segs)
     if (viaChain) return viaChain
@@ -1114,8 +1114,8 @@ export class MoveDrone extends Drone {
 
   /** Build a props resource = the source tile's properties with `index`
    *  overridden, content-addressed the same way writeTilePropertiesAt does
-   *  (sorted keys → JSON). Mirrors ClipboardWorker.#propsWithIndex so the
-   *  copy's spiral slot lands inside the re-home cascade. */
+   *  (sorted keys → JSON), so the copy's spiral slot lands inside the
+   *  re-home cascade. */
   async #propsWithIndex(layer: unknown, index: number): Promise<string | null> {
     const store = window.ioc.get<CopyStoreLike>('@hypercomb.social/Store')
     if (!store?.putResource) return null

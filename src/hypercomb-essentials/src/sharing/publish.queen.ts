@@ -192,8 +192,13 @@ export class PublishQueenBee {
       return
     }
 
-    if (!named.includes(zone)) { say(`"${name}" was not on ${zone}`); return }
-    await setBranchHosts(segments, next)
+    // A domain already gone from the marks may still open the branch: a branch
+    // with no door entry opens everywhere, and a turn-off whose index write
+    // failed has dropped the mark already. Off then closes the doors to the
+    // marks that remain. With no mark left there is nothing to keep, and
+    // withdrawing everywhere is not what "off one domain" says.
+    if (!named.includes(zone) && named.length === 0) { say(`"${name}" was not on ${zone}`); return }
+    if (named.includes(zone)) await setBranchHosts(segments, next)
     const published = (await latestByLineageKey()).has(lineageKey(segments))
     if (!published) { say(`"${name}" is no longer meant for ${zone}`); return }
     const result = next.length === 0 ? await unpublishBranch(segments) : await setBranchDoors(segments, next)

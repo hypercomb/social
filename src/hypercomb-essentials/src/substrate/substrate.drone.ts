@@ -23,7 +23,7 @@ export class SubstrateDrone extends Drone {
   protected override listens = [
     'cell:added', 'cell:removed',
     'substrate:changed', 'substrate:folder-permission',
-    'clipboard:paste-start', 'clipboard:paste-done',
+    'shelf:place-start', 'shelf:place-done',
     'editor:mode', 'render:cell-count',
     'cell:attach-pending',
     'indicator:query', 'indicator:activate',
@@ -55,8 +55,8 @@ export class SubstrateDrone extends Drone {
       })
     }
 
-    this.onEffect('clipboard:paste-start', () => { this.#pastePending = true })
-    this.onEffect('clipboard:paste-done',  () => { this.#pastePending = false })
+    this.onEffect('shelf:place-start', () => { this.#pastePending = true })
+    this.onEffect('shelf:place-done',  () => { this.#pastePending = false })
     this.onEffect<{ active: boolean }>('editor:mode', (p) => { this.#editorActive = p?.active ?? false })
 
     // A user-provided resource is being attached to this cell — lock substrate

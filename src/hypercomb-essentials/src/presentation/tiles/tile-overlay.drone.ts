@@ -302,9 +302,9 @@ const HINT_PILL_RADIUS = 2.5
 // (see #followTextResolution).
 
 // ── The verb cue ──────────────────────────────────────────────────────
-// While a mode owns the tile click — the clipboard window, a bouquet in
-// hand, a staged removal — the hovered tile says what the click will DO to
-// it (see #cueVerbFor for the three vocabularies). The pill floats ABOVE
+// While a mode owns the tile click — a bouquet in hand, a staged removal,
+// the hexagon walk — the hovered tile says what the click will DO to it (see
+// #cueVerbFor for the vocabularies). The pill floats ABOVE
 // the hex so it never collides with the name band, the icon rows, or the
 // action hint below — and it lives in its own container because the ctrl
 // hover path hides #overlay entirely.
@@ -437,10 +437,8 @@ export class TileOverlayDrone extends Drone {
   #pressCapture: { generation: number; axial: Axial; label: string } | null = null
   /** Tracks the pointerId that triggered a pointerdown-navigation, so the trailing pointerup + click can be suppressed. */
   #consumedPointerId: number | null = null
-  /** An armed HOLD-TO-ENTER press on a childless tile — or on ANY tile while
-   *  the clipboard window is open, where the long press IS the walk-in: it
-   *  opens that tile's layer if the pointer stays down and still for
-   *  TILE_ENTER_HOLD_MS.
+  /** An armed HOLD-TO-ENTER press on a childless tile: it opens that tile's
+   *  layer if the pointer stays down and still for TILE_ENTER_HOLD_MS.
    *  `generation` pins the axial map the press was taken against — a render
    *  underneath the pointer invalidates the hold rather than entering a tile
    *  the user is no longer pressing. */
@@ -490,20 +488,10 @@ export class TileOverlayDrone extends Drone {
    *  unstage tiles instead of entering or opening them. Cleared when the
    *  removal commits or is cancelled. */
   #tagRemovalArmed = false
-  /** The clipboard window is open — see the `clipboard:open` listener. */
-  #clipboardArmed = false
   /** `h` is armed: the next step opens as hexagons (view.bee decides it,
    *  this drone only SHOWS it — the frame and the hover's hex-walk rim). */
   #hexWalkArmed = false
   #hexWalkFrame: HTMLElement | null = null
-
-  /** Swap mode proper: the window is open AND the gesture came from a
-   *  POINTER. A finger has no ctrl to walk with, so on touch the clipboard
-   *  window changes nothing about the hive — a tap still walks in, and the
-   *  window's own rows stay the way tiles move there. */
-  get #clipboardSwap(): boolean {
-    return this.#clipboardArmed && !this.#lastPressWasTouch && !this.#mobileMode()
-  }
 
   /** Pointer kind of the most recent press, set before every guard. */
   #lastPressWasTouch = false
@@ -559,9 +547,9 @@ export class TileOverlayDrone extends Drone {
   #hintActionName: string | null = null
   /** The verb pill over the hovered tile (see SWAP_CUE_* consts). */
   #swapCue: Container | null = null
-  /** Last `clipboard:verb` published, so a per-move refresh that resolves to
+  /** Last `overlay:verb` published, so a per-move refresh that resolves to
    *  the same verb costs nothing on the bus. `undefined` = never published. */
-  #swapVerbSent: 'take' | 'copy' | 'enter' | null | undefined = undefined
+  #swapVerbSent: 'enter' | null | undefined = undefined
 
   /** The rendered pill's verb key — the same-state guard (see #cueVerbFor). */
   #swapCueKey: string | null = null
@@ -581,9 +569,6 @@ export class TileOverlayDrone extends Drone {
    *  (`tags:removal-pending`). */
   #removalTag: string | null = null
   #removalStaged = new Set<string>()
-  /** Last known ctrl/meta state, so a cue asked for by a bus event (rather
-   *  than by a pointer or key event) reads the right modifier. */
-  #cueCopyHeld = false
 
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
@@ -607,13 +592,12 @@ export class TileOverlayDrone extends Drone {
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
     'tags:view-state', 'tags:removal-pending', 'tags:apply-pending', 'tags:changed',
-    'clipboard:open',
     'navigation:hexagons-once',
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
     'default-view:indexed',
   ]
-  protected override emits = ['tile:hover', 'caption:show', 'caption:clear', 'tile:action', 'tile:click', 'tile:open', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'clipboard:take-items', 'clipboard:verb', 'swarm:wand', 'editor:switch-request']
+  protected override emits = ['tile:hover', 'caption:show', 'caption:clear', 'tile:action', 'tile:click', 'tile:open', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'overlay:verb', 'swarm:wand', 'editor:switch-request']
 
   #dropDragging = false
   #dropGroupOnly = false
@@ -1206,7 +1190,7 @@ export class TileOverlayDrone extends Drone {
         this.#removalStaged = new Set(Array.isArray(payload?.cells) ? payload!.cells! : [])
         this.#updateVisibility()
         this.#updatePerTileVisibility()
-        this.#refreshSwapCue(false)
+        this.#refreshSwapCue()
       })
 
       // A BOUQUET IN HAND. Two readers of the same state: the press/click
@@ -1221,29 +1205,12 @@ export class TileOverlayDrone extends Drone {
             ? payload!.tags!
             : (payload?.tag ? [payload.tag] : [])
           this.#bouquetTags = armed ? [...new Set(raw.map(tag => String(tag ?? '').trim()).filter(Boolean))] : []
-          this.#refreshSwapCue(false)
+          this.#refreshSwapCue()
         })
 
       // A tile's marks changed under the pointer (a commit landed, an × took
       // one off): the comparison is stale, so re-ask.
-      this.onEffect('tags:changed', () => { this.#refreshSwapCue(false) })
-
-      // ── THE SWAP ────────────────────────────────────────────────────
-      // While the clipboard window is open the hive is in swap mode: a click
-      // on a tile TAKES it into the window (and a click on a row in the
-      // window puts it back on the page), ctrl+click COPIES it in (the tile
-      // stays put), and walking in is the LONG PRESS — hold-to-enter, the
-      // same gesture as everywhere else. The hovered tile announces the
-      // pending verb with the swap cue pill (#refreshSwapCue).
-      //
-      // The window announces itself on `clipboard:open` (last-value replayed,
-      // so a drone that registers late is current at once).
-      this.onEffect<{ open?: boolean }>('clipboard:open', (payload) => {
-        this.#clipboardArmed = payload?.open === true
-        // Opening over a hovered tile marks it at once; closing drops the cue.
-        if (this.#clipboardArmed) this.#refreshSwapCue(false)
-        else this.#hideSwapCue()
-      })
+      this.onEffect('tags:changed', () => { this.#refreshSwapCue() })
 
       // ── THE HEXAGON WALK ────────────────────────────────────────────
       // `h` armed the next step to open as hexagons. Themed like the cut
@@ -1253,7 +1220,7 @@ export class TileOverlayDrone extends Drone {
         this.#hexWalkArmed = payload?.armed === true
         this.#setHexWalkFrame(this.#hexWalkArmed)
         this.#swapCueKey = null
-        this.#refreshSwapCue(false)
+        this.#refreshSwapCue()
       })
 
       // (No `tags:apply-pending` listener: a bouquet in hand no longer takes
@@ -1285,8 +1252,6 @@ export class TileOverlayDrone extends Drone {
     this.#clearHint()
     this.#hideSwapCue()
     this.#setHexWalkFrame(false)
-    document.removeEventListener('keydown', this.#onSwapModifier)
-    document.removeEventListener('keyup', this.#onSwapModifier)
     this.#unregisterBackingWatch?.()
     this.#unregisterBackingWatch = undefined
     if (this.#arrangeMode) this.#exitArrangeMode()
@@ -2505,10 +2470,6 @@ export class TileOverlayDrone extends Drone {
     // longer holding anything.
     document.addEventListener('pointercancel', () => this.#cancelEnterHold())
     window.addEventListener('blur', () => this.#cancelEnterHold())
-    // Swap-mode verb cue: the pill flips take↔copy the moment ctrl goes
-    // down or up, without waiting for the pointer to move.
-    document.addEventListener('keydown', this.#onSwapModifier)
-    document.addEventListener('keyup', this.#onSwapModifier)
     // CAPTURE-phase witness: records every raw click before any handler can
     // stopPropagation it. Read remotely via the bridge's `effect-last` —
     // `diag:click-capture` fired while `diag:click` stayed silent = something
@@ -2668,13 +2629,13 @@ export class TileOverlayDrone extends Drone {
         this.#updateCellLabel(axial.q, axial.r)
         this.#updatePerTileVisibility()
         if (this.#holdBandForCtrl(local, e.buttons)) {
-          this.#refreshSwapCue(false, e.pointerType)
+          this.#refreshSwapCue(e.pointerType)
           this.#updateIconHover(local)
           this.emitEffect('tile:hover', { q: axial.q, r: axial.r, label: entry?.label ?? null, bandRows: entry ? this.#bandRows : 1 })
           return
         }
         this.#overlay.visible = false
-        this.#refreshSwapCue(true, e.pointerType)
+        this.#refreshSwapCue(e.pointerType)
         this.emitEffect('tile:hover', {
           q: axial.q,
           r: axial.r,
@@ -2702,7 +2663,7 @@ export class TileOverlayDrone extends Drone {
     if (e.ctrlKey || e.metaKey) {
       const wasHeldHere = this.#ctrlBandHeld
       if (this.#holdBandForCtrl(local, e.buttons)) {
-        this.#refreshSwapCue(false, e.pointerType)
+        this.#refreshSwapCue(e.pointerType)
         this.#updateIconHover(local)
         // Announce the band once, when it comes up — not on every move.
         if (!wasHeldHere && this.#currentAxial) this.emitEffect('tile:hover', {
@@ -2719,11 +2680,11 @@ export class TileOverlayDrone extends Drone {
         label: this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))?.label ?? null,
         bandRows: 1,
       })
-      this.#refreshSwapCue(true, e.pointerType)
+      this.#refreshSwapCue(e.pointerType)
       return
     }
 
-    this.#refreshSwapCue(false, e.pointerType)
+    this.#refreshSwapCue(e.pointerType)
     this.#updateIconHover(local)
   }
 
@@ -3005,19 +2966,6 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
-    // ── SWAP MODE: the press decides nothing — except arming the hold ───
-    // A mouse press on a branch tile normally walks straight in, right here,
-    // before any click is dispatched. While the clipboard window is open the
-    // decision belongs to the CLICK instead (plain = take it into the window,
-    // ctrl = copy it in), so the press lets go of the instant walk and the
-    // launcher open. Walking in is the LONG PRESS — the same hold-to-enter
-    // gesture as everywhere else on the hive, armed here for branch and leaf
-    // alike (a short release cancels it and falls through to the take).
-    // Placed AFTER the overlay action-button branch so Edit / Note / the
-    // feature row keep working with the window open. Touch is untouched
-    // (see #clipboardSwap).
-    if (this.#clipboardSwap) { this.#beginEnterHold(e, entry.label); return }
-
     // On a launch-group aggregator page EVERY tile is a launcher: a body press
     // OPENS its target directly (no arming, nothing to block). Gate on the
     // LOCATION, which is race-free — the per-cell `launch:target` decoration
@@ -3229,17 +3177,6 @@ export class TileOverlayDrone extends Drone {
         })
         return
       }
-      // Swap mode: ctrl is the COPY. Same take gesture as the plain click,
-      // but the tile STAYS on the page — it lands in the window as a sig
-      // reference without the cut commit (ctrl+drag-copies-in-Explorer
-      // convention). It outranks the selection toggle for as long as the
-      // clipboard window is open. Walking in is the long press, the same
-      // hold-to-enter as everywhere else (armed in #onPointerDown).
-      if (this.#clipboardSwap) {
-        this.#pressCapture = null
-        this.emitEffect('clipboard:take-items', { labels: [entry.label], copy: true })
-        return
-      }
       this.emitEffect('tile:click', {
         q: axial.q,
         r: axial.r,
@@ -3293,11 +3230,10 @@ export class TileOverlayDrone extends Drone {
     // do not reliably send the pointer-move/hover events that maintain
     // #currentAxial, so reusing that state can make a second tap toggle the
     // first tile back off instead of adding the tile under the finger.
-    // A live selection normally turns every click into a selection change.
-    // Swap mode outranks it — the window is open, so a click is a take. An
-    // explicit PICKING mode still wins over both: it is a deliberate
-    // build-a-set session with its own keep verb.
-    if ((this.#hasSelection && !this.#clipboardSwap) || this.#picking) {
+    // A live selection turns every click into a selection change. An explicit
+    // PICKING mode does too: it is a deliberate build-a-set session with its
+    // own keep verb.
+    if (this.#hasSelection || this.#picking) {
       const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
       if (!detector) { diag('selection-no-detector'); return }
       const tapGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
@@ -3380,18 +3316,6 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
-    // ── SWAP MODE: a plain click TAKES the tile ─────────────────────────
-    // The window is open, the overlay's action buttons have had their chance
-    // above, and no modifier is held: this tile leaves the page and lands in
-    // the clipboard window. ClipboardWorker cuts it and APPENDS, so clicking
-    // one tile after another fills the window. (Ctrl already copied, higher
-    // up; the long press walks in.) Branch or leaf makes no difference — a
-    // take carries the subtree.
-    if (this.#clipboardSwap) {
-      this.emitEffect('clipboard:take-items', { labels: [entry.label] })
-      return
-    }
-
     // On a phone the hover band does not exist, so a LEAF tap opens the
     // tile's readable action hub — the same affordances as the desktop band.
     // A BRANCH tap goes inside, exactly as its row does on the list face
@@ -3399,8 +3323,8 @@ export class TileOverlayDrone extends Drone {
     // tap two ways, and a tile page that has to be backed out of before you
     // can go in is a detour. A branch's page is still one hold (the quick
     // menu) or the row's ⋯ away. Launch-group tiles remain direct launchers
-    // because pointerdown consumes them above, and clipboard/selection modes
-    // have already claimed the tap.
+    // because pointerdown consumes them above, and selection modes have
+    // already claimed the tap.
     if (usesTileCloseUp(this.#pressWasTouch, this.#mobileMode())) {
       const enterable = this.#branchLabels.has(entry.label)
         || referenceTargetForLabel(entry.label) !== null
@@ -4152,9 +4076,9 @@ export class TileOverlayDrone extends Drone {
   // The hovered tile says what the click will DO to it, whichever mode has
   // taken the click over. One pill, one place, three vocabularies:
   //
-  //   the clipboard  ✂ take · ⊕ copy      (told apart by ctrl)
   //   a bouquet      ＋ mark · − release · ✓ marked
   //   a removal      − unmark · ↺ keep
+  //   the walk       ⬡ hexagons
   //
   // The bouquet's verb is a COMPARISON, not a fixed word: the marks in hand
   // against the marks the tile already carries. A tile already wearing every
@@ -4165,37 +4089,21 @@ export class TileOverlayDrone extends Drone {
   // dragged pheromone already says what it is with the chip under the
   // cursor, and a second answer beside it is noise.
   //
-  // Called from pointermove (both ctrl branches) and from the Control/Meta
-  // keydown/keyup listener, so the verb flips live while the pointer sits
-  // still. The cheap same-state guard makes per-move calls free.
-  #refreshSwapCue(copy?: boolean, pointerType?: string): void {
-    // Callers that know the modifier state (pointermove, the key listener)
-    // pass it and it is REMEMBERED; a mode change arriving on the bus asks
-    // without one and gets the last known answer, so a bouquet picked up
-    // with ctrl already down does not momentarily lie.
-    const held = copy ?? this.#cueCopyHeld
-    this.#cueCopyHeld = held
+  // Called from pointermove and from every mode change on the bus. The cheap
+  // same-state guard makes per-move calls free.
+  #refreshSwapCue(pointerType?: string): void {
     if (this.#mobileMode() || pointerType === 'touch' || this.#dropDragging
       || !this.#renderContainer || !this.#currentAxial) { this.#hideSwapCue(); return }
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))
     if (!entry?.label) { this.#hideSwapCue(); return }
 
-    const verb = this.#cueVerbFor(entry.label, held)
+    const verb = this.#cueVerbFor(entry.label)
     if (!verb) { this.#hideSwapCue(); return }
 
-    // The tile itself wears the verb too — the cut rim, painted by show-cell
-    // from this one resolution. Only the clipboard's verbs take the hive over
-    // this way; a bouquet already answers on every carrier at once.
+    // The tile itself wears the verb too — the walk's rim, painted by
+    // show-cell from this one resolution. A bouquet already answers on every
+    // carrier at once, so it sends none.
     this.#publishSwapVerb(verb.swap ?? null, verb.color)
-
-    // The native copy cursor rides along (the Explorer ctrl-drag convention).
-    // THROUGH Pixi, not canvas.style: the EventSystem re-applies its own
-    // cursor on every pointer move (default 'inherit'), so a raw style write
-    // is stomped before the participant can see it. Overriding the DEFAULT
-    // style covers subsequent moves; setCursor applies it NOW, for the
-    // ctrl-pressed-while-still case where no move follows.
-    // The copy cursor belongs to the clipboard's copy alone.
-    this.#setSwapCursor(verb.cursorCopy === true)
 
     if (this.#swapCue && this.#swapCueKey === verb.key) {
       this.#positionSwapCue()
@@ -4238,14 +4146,13 @@ export class TileOverlayDrone extends Drone {
    *
    *  `key` is the same-state guard — while it is unchanged the pill is left
    *  exactly as it is, so per-move calls cost one string compare. */
-  #cueVerbFor(label: string, copy: boolean): {
-    key: string; glyph: string; word: string; color: number; cursorCopy?: boolean
-    /** Set by the clipboard's two verbs and the hexagon walk ('enter'). The
-     *  hive's tiles answer this with a rim (see the swap branch in
-     *  hex-sdf.shader.ts) — the pill
+  #cueVerbFor(label: string): {
+    key: string; glyph: string; word: string; color: number
+    /** Set by the hexagon walk ('enter'). The hive's tiles answer this with a
+     *  rim (see the swap branch in hex-sdf.shader.ts) — the pill
      *  says what the click does, the rim says it is going to happen to THIS
      *  tile, and both are resolved here so they can never disagree. */
-    swap?: 'take' | 'copy' | 'enter'
+    swap?: 'enter'
   } | null {
     const i18n = this.#resolveI18n()
     const t = (k: string, fallback: string): string => i18n?.t(k) ?? fallback
@@ -4282,14 +4189,6 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
-    // THE CLIPBOARD. Plain click cuts the tile into the window; ctrl copies
-    // it in and leaves it where it is.
-    if (this.#clipboardArmed) {
-      return copy
-        ? { key: 'copy', glyph: '⊕', word: t('clipboard.cue.copy', 'copy'), color: SWAP_CUE_COPY_COLOR, cursorCopy: true, swap: 'copy' }
-        : { key: 'take', glyph: '✂', word: t('clipboard.cue.take', 'take'), color: SWAP_CUE_TAKE_COLOR, swap: 'take' }
-    }
-
     // THE HEXAGON WALK. The click still walks in — it just lands on the grid,
     // whatever view the place would open as. Last: every mode above takes
     // the click over, and this one only reshapes where it lands.
@@ -4317,17 +4216,16 @@ export class TileOverlayDrone extends Drone {
 
   #hideSwapCue(): void {
     this.#clearSwapCuePill()
-    this.#setSwapCursor(false)
     this.#publishSwapVerb(null)
   }
 
   /** Tell the hive which verb (if any) the hovered tile is under. Idempotent:
    *  a repeat of the same verb never reaches the bus, so this is free to call
    *  from every pointer move. */
-  #publishSwapVerb(verb: 'take' | 'copy' | 'enter' | null, color?: number): void {
+  #publishSwapVerb(verb: 'enter' | null, color?: number): void {
     if (this.#swapVerbSent === verb) return
     this.#swapVerbSent = verb
-    this.emitEffect('clipboard:verb', { verb, color })
+    this.emitEffect('overlay:verb', { verb, color })
   }
 
   /** The screen half of the hexagon walk: a mint frame around the viewport
@@ -4364,29 +4262,6 @@ export class TileOverlayDrone extends Drone {
     frame.appendChild(label)
     document.body.appendChild(frame)
     this.#hexWalkFrame = frame
-  }
-
-  /** Pixi's EventSystem owns the canvas cursor — route the copy cursor
-   *  through its default style rather than fighting it per-move. */
-  #setSwapCursor(copy: boolean): void {
-    const events = (this.#app?.renderer as unknown as {
-      events?: { cursorStyles?: Record<string, string>; setCursor?: (mode: string) => void }
-    } | undefined)?.events
-    if (!events?.cursorStyles) return
-    const current = events.cursorStyles['default']
-    if (copy && current !== 'copy') {
-      events.cursorStyles['default'] = 'copy'
-      events.setCursor?.('copy')
-    } else if (!copy && current === 'copy') {
-      events.cursorStyles['default'] = 'inherit'
-      events.setCursor?.('inherit')
-    }
-  }
-
-  /** Control/Meta pressed or released — flip the cue verb in place. */
-  #onSwapModifier = (e: KeyboardEvent): void => {
-    if (e.key !== 'Control' && e.key !== 'Meta') return
-    this.#refreshSwapCue(e.type === 'keydown' ? true : (e.ctrlKey || e.metaKey))
   }
 
   #positionOverlay(q: number, r: number): void {

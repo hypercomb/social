@@ -4304,6 +4304,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         layer: { name: evt.cell },
       }))
       await committer.importTree(updates)
+      // The tiles now exist in the layer: let the view re-read their pictures
+      // (the fill that followed cell:added ran before this commit).
+      for (const evt of events) EffectBus.emitTransient('cell:committed', evt)
     }
 
     // A dropped resource is the participant's picture for the tile just made.

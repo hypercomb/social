@@ -157,7 +157,6 @@ export class QuickMenuInput {
   #hoverCell: CellAt | null = null
   #activeLabel: string | null = null
   #wand = false
-  #clipboard = false
   #onCtrlIcon = false
   #onTile = false
 
@@ -273,11 +272,6 @@ export class QuickMenuInput {
 
     EffectBus.on<{ active?: boolean }>('wand:armed', (payload) => {
       this.#wand = payload?.active === true
-      this.#syncAltMenu()
-    })
-
-    EffectBus.on<{ open?: boolean }>('clipboard:open', (payload) => {
-      this.#clipboard = payload?.open === true
       this.#syncAltMenu()
     })
 
@@ -397,6 +391,7 @@ export class QuickMenuInput {
       e.preventDefault()
       e.stopPropagation()
       if (e.button === 0) this.#flight.confirm()
+      else if (e.button === 2) this.#flight.back()
       return
     }
     // A click on a selection-menu option. The tile body is not one, so a
@@ -1039,6 +1034,13 @@ export class QuickMenuInput {
   }
 
   #onContextMenu = (e: MouseEvent): void => {
+    // The right button is the way back while the flower is up; the browser's
+    // own menu has no business opening over it.
+    if (this.#flight?.active) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
     if (!this.#armed && !this.#sticky) return
     // The phone's long-press fires while the finger that summoned the ring is
     // still down — that is the ring's own hold, not a cancel.
@@ -1180,7 +1182,6 @@ export class QuickMenuInput {
       overTile: !!this.#hoverCell,
       buttonDown: this.#pointerDown && !this.#slotPress,
       wand: this.#wand,
-      clipboard: this.#clipboard,
       gesture: this.#armed || this.#sticky,
       onCtrlIcon: this.#onCtrlIcon,
       latchedOff: this.#altLatchedOff,

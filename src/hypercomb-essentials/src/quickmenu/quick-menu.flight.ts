@@ -8,7 +8,10 @@
 // camera is then set in stone. The real cursor is put away and a faux one aims.
 // Rolling onto a pathway moves the tile into that cell and a new flower opens
 // round it, rolling onto the way back un-does it, and a leaf waits for Enter, a
-// click or the release of alt. When it ends, the camera flies back to the exact
+// click or the release of alt. A right-click is the way back from anywhere: the
+// pointer stays where it is, the options sleep (the middle blinks, the pointer
+// goes hollow), and coming back to the middle wakes them in a sweep round the
+// ring. A held button aims either way. When it ends, the camera flies back to the exact
 // pan and zoom it left.
 //
 // Nothing here is persisted: the camera is moved directly on the render
@@ -21,6 +24,7 @@ import { viewportIsFramed } from '../sequence/frame-lock.js'
 import type { QuickMenuLayer } from './quick-menu.layer.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { fireQuickMenuSlot } from './quick-menu.fire.js'
+import { aimLive } from './quick-menu.tile-menu.js'
 import { NO_SEATS, applyTileSeats, readTileSeats, seatMenu, type TileSeats } from './quick-menu.traits.js'
 import {
   OPPOSITE_DIRECTION,
@@ -76,6 +80,9 @@ export class QuickMenuFlight {
   #anim = 0
   /** The flower answers the cursor only once the camera has settled. */
   #ready = false
+  /** Right-click took the flower back a ring: the pointer is wherever it was,
+   *  and the options stay asleep until it is in the middle again. */
+  #armed = true
   #lit: QuickMenuDirection | null = null
   #virtual: Pt = { x: 0, y: 0 }
   #last: Pt | null = null
@@ -125,6 +132,7 @@ export class QuickMenuFlight {
     this.#active = true
     this.#subject = subject ?? null
     this.#ready = false
+    this.#armed = true
     this.#lit = null
     this.#last = null
 
@@ -163,6 +171,7 @@ export class QuickMenuFlight {
     this.#seats = NO_SEATS
     this.#active = false
     this.#ready = false
+    this.#armed = true
     this.#lit = null
     this.#levels = []
     this.#layer.hide()
@@ -216,7 +225,33 @@ export class QuickMenuFlight {
       y: Math.min(window.innerHeight, Math.max(0, this.#virtual.y + dy)),
     }
     this.#placeCursor()
-    if (this.#ready) this.#aim(this.#layer.slotAtClient(this.#virtual.x, this.#virtual.y, 'gesture'))
+    if (!this.#ready) return
+    const buttonDown = (e.buttons & 1) !== 0
+    // Asleep after a way back: only the middle wakes it, or a held button.
+    // Outside the flower is simply no option, and costs nothing.
+    if (!this.#armed && this.#layer.onMiddleAtClient(this.#virtual.x, this.#virtual.y)) this.#wake()
+    if (!aimLive(this.#armed, buttonDown)) return
+    this.#aim(this.#layer.slotAtClient(this.#virtual.x, this.#virtual.y, 'gesture'))
+  }
+
+  /** Right-click: one ring back, wherever the pointer is. The pointer is not
+   *  moved to the middle, so it cannot land on an option and fire it — the
+   *  options sleep until it comes back. At the first ring there is no back. */
+  back(): boolean {
+    if (!this.#active || !this.#ready || this.#levels.length <= 1) return false
+    this.#clearHold()
+    this.#levels.pop()
+    this.#step(this.#levels[this.#levels.length - 1], false)
+    this.#armed = false
+    this.#layer.disarm()
+    this.#paintCursor()
+    return true
+  }
+
+  #wake(): void {
+    this.#armed = true
+    this.#layer.rearm()
+    this.#paintCursor()
   }
 
   #aim(slot: QuickMenuDirection | null): void {
@@ -284,12 +319,15 @@ export class QuickMenuFlight {
   /** Shift the flower to a ring's centre. The camera and the tile under it
    *  stay put: the menu itself walks outward as pathways are taken, and
    *  walks back as they are un-taken. */
-  #step(level: Level): void {
+  #step(level: Level, recentre = true): void {
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
     if (!registry) return
     this.#lit = null
+    this.#armed = true
     this.#layer.placeLocal(level.at.x, level.at.y)
     this.#layer.show(level.definition, registry.label, level.back, registry.label({ label: 'back', labelKey: 'quickmenu.back' }))
+    this.#paintCursor()
+    if (!recentre) return
     // The faux cursor is on the option just taken, which is now the middle.
     this.#virtual = this.#layer.clientAtLocal(level.at.x, level.at.y) ?? this.#screenCentreClient()
     this.#placeCursor()
@@ -377,7 +415,17 @@ export class QuickMenuFlight {
       this.#cursor = dot
     }
     if (!this.#cursor.isConnected) document.body.appendChild(this.#cursor)
+    this.#paintCursor()
     this.#placeCursor()
+  }
+
+  /** Awake the pointer is a filled dot; asleep it is a hollow dashed ring. */
+  #paintCursor(): void {
+    const dot = this.#cursor
+    if (!dot) return
+    dot.style.background = this.#armed ? 'rgba(126,182,214,0.35)' : 'transparent'
+    dot.style.borderStyle = this.#armed ? 'solid' : 'dashed'
+    dot.style.opacity = this.#armed ? '1' : '0.7'
   }
 
   #placeCursor(): void {

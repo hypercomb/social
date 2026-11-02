@@ -59,15 +59,28 @@ export function slotUnder(
   return best
 }
 
-/** Alt held over a tile raises the selection menu. A drag, the wand, the
- *  clipboard, a ctrl-icon, or a quick-menu gesture already in progress all
- *  mean something else. */
+/** Is a point, measured from a ring's centre, on the middle cell? The same
+ *  footprint an option has, so coming back to the middle is as easy as
+ *  reaching a neighbour. */
+export function onMiddle(dx: number, dy: number, metrics: MenuMetrics): boolean {
+  return Math.hypot(dx, dy) <= metrics.reach / Math.sqrt(3)
+}
+
+/** Does the pointer move the flower? After a right-click back the options
+ *  sleep until the pointer is in the middle again; a held button is the hand
+ *  saying it means to drag, so it aims either way. */
+export function aimLive(armed: boolean, buttonDown: boolean): boolean {
+  return armed || buttonDown
+}
+
+/** Alt held over a tile raises the selection menu. A drag, the wand, a
+ *  ctrl-icon, or a quick-menu gesture already in progress all mean something
+ *  else. */
 export function selectionMenuWanted(input: {
   alt: boolean
   overTile: boolean
   buttonDown: boolean
   wand: boolean
-  clipboard: boolean
   gesture: boolean
   onCtrlIcon: boolean
   latchedOff: boolean
@@ -76,7 +89,6 @@ export function selectionMenuWanted(input: {
     && input.overTile
     && !input.buttonDown
     && !input.wand
-    && !input.clipboard
     && !input.gesture
     && !input.onCtrlIcon
     && !input.latchedOff

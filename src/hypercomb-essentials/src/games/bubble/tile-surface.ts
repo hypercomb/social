@@ -6,6 +6,10 @@
 import type { EnemySpawn, LevelDef } from './engine.js'
 import { CAVE_COLUMNS, CAVE_LEFT, CAVE_ROWS, TILE } from './dos-geometry.js'
 import { BUILTIN_LEVELS } from './levels.js'
+import {
+  LEVEL_GROUP, LEVEL_VERSION, decodeLevel, encodeLevel, levelName, placeEnemies, terrain, validLevel,
+  type EnemyPlacement, type LevelRecord,
+} from './level-tiles.js'
 
 export const BUBBLE_DOS_BRANCH = 'bubble-bobble-dos-v1'
 export const BUBBLE_DOS_SOURCE_SHA256 = '665bb4b164d710cbfb77c58b97e7b795' + '8668df45b2b1501b2d5af2fa0ce81e64'
@@ -23,6 +27,16 @@ export interface BubbleTileHistory {
   currentLayerAt(sig: string, stats?: { cold: boolean }): Promise<BubbleTileLayer | null>
   getLayerBySig(sig: string): Promise<BubbleTileLayer | null>
   childrenManifestFor?(layer: BubbleTileLayer): Promise<Array<{ sig: string; layer: BubbleTileLayer }> | null>
+}
+
+/** What a level's loading is up to, so a loading layer can show the grouped view as it fills. */
+export interface BubbleLoadingStep {
+  stage: 'level' | 'group' | 'ready'
+  round: number
+  /** The group being opened (an enemy kind), while stage is 'group'. */
+  group?: string
+  /** Enemy tiles read so far. */
+  loaded: number
 }
 
 export interface BubbleTileCommitter {
@@ -89,9 +103,8 @@ const belongs = (cell: { col: number; row: number }): boolean =>
   && cell.col >= 0 && cell.row >= 0 && cell.col < CAVE_COLUMNS && cell.row < CAVE_ROWS
 const at = (a: { col: number; row: number }, b: { col: number; row: number }): boolean =>
   a.col === b.col && a.row === b.row
-const terrain = (rows: readonly (readonly number[])[]): string[] => rows.map(row =>
-  row.slice(0, CAVE_COLUMNS).map((value, col) => value & 1
-    ? (col < 2 || col >= CAVE_COLUMNS - 2 ? '#' : '=') : '.').join(''))
+/** A turn for the hive between one group's tiles and the next, so a level never loads in one gulp. */
+const breathe = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
 const storedEnemy = (spawn: EnemySpawn, order: number): StoredEnemy => ({
   x: spawn.x,
   y: spawn.y,
@@ -110,13 +123,16 @@ export class BubbleTileSurface {
   readonly #committer: BubbleTileCommitter
   readonly #domain: unknown
   #pending: Promise<unknown> = Promise.resolve()
+  readonly #onLoading: ((step: BubbleLoadingStep) => void) | undefined
 
   constructor(options: {
     history: BubbleTileHistory
     committer: BubbleTileCommitter
     parentSegments: readonly string[]
     domain?: unknown
+    onLoading?: (step: BubbleLoadingStep) => void
   }) {
+    this.#onLoading = options.onLoading
     this.baseSegments = [...options.parentSegments, BUBBLE_DOS_BRANCH]
     this.#history = options.history
     this.#committer = options.committer
@@ -204,7 +220,84 @@ export class BubbleTileSurface {
     return loaded
   }
 
+  /** The round as play reads it: its level tile when the hive holds one, else the native cells. */
   async readRound(index: number): Promise<LoadedBubbleRound | null> {
+    if (!validRound(index)) throw new Error('Bubble Bobble round index is outside the DOS campaign')
+    const branch = await this.#resolveAt(this.baseSegments)
+    if (!branch) return null
+    return await this.#readLevel(index) ?? this.#readNative(index)
+  }
+
+  /** Write a round's level tile (map, flow, enemies) beside its native cells, forward only:
+   *  the cells stay untouched so an older client keeps working, and once the level tile
+   *  exists it is the one play reads. Authored cell edits are carried into it. */
+  upgradeRound(index: number): Promise<LoadedBubbleRound> {
+    const run = this.#pending.then(() => this.#upgradeRound(index))
+    this.#pending = run.catch(() => {})
+    return run
+  }
+
+  async #upgradeRound(index: number): Promise<LoadedBubbleRound> {
+    const logical = await this.#readLevel(index)
+    if (logical) return logical
+    const native = await this.#readNative(index)
+    if (!native) throw new Error('Open the round once before turning it into a level tile')
+    const { level, enemies } = encodeLevel(native.level, index, BUBBLE_DOS_SOURCE_SHA256)
+    const levelSegments = [...this.baseSegments, LEVEL_GROUP, levelName(index)]
+    const updates: { segments: readonly string[]; layer: BubbleTileLayer }[] = []
+    if (!await this.#resolveAt([...this.baseSegments, LEVEL_GROUP])) {
+      updates.push({ segments: [...this.baseSegments, LEVEL_GROUP], layer: { name: LEVEL_GROUP, bubbleGroup: { version: LEVEL_VERSION } } })
+    }
+    updates.push({ segments: levelSegments, layer: { name: levelName(index), bubbleLevel: level } })
+    for (const place of placeEnemies(enemies)) updates.push(this.#enemyTile(levelSegments, place))
+    await this.#committer.importTree(updates)
+    const loaded = await this.#readLevel(index)
+    if (!loaded) throw new Error(`Hypercomb did not save ${levelName(index)}`)
+    return loaded
+  }
+
+  #enemyTile(levelSegments: readonly string[], place: EnemyPlacement): { segments: readonly string[]; layer: BubbleTileLayer } {
+    const name = place.path[place.path.length - 1]
+    return {
+      segments: [...levelSegments, ...place.path],
+      layer: place.record ? { name, bubbleEnemy: place.record } : { name, bubbleGroup: { version: LEVEL_VERSION, kind: place.group } },
+    }
+  }
+
+  #loading(step: BubbleLoadingStep): void {
+    try { this.#onLoading?.(step) } catch { /* a loading layer's own failure never stops a load */ }
+  }
+
+  async #readLevel(index: number): Promise<LoadedBubbleRound | null> {
+    const segments = [...this.baseSegments, LEVEL_GROUP, levelName(index)]
+    const layer = await this.#resolveAt(segments)
+    if (!layer) return null
+    const record = layer['bubbleLevel'] as LevelRecord | undefined
+    if (!validLevel(record) || record.index !== index) throw new Error(`The ${levelName(index)} tile is not a compatible Bubble Bobble level`)
+    const found: unknown[] = []
+    this.#loading({ stage: 'level', round: index, loaded: 0 })
+    await this.#gather(segments, layer, found, index)
+    this.#loading({ stage: 'ready', round: index, loaded: found.length })
+    return { index, level: decodeLevel(record, found), roundSegments: segments, tiles: [] }
+  }
+
+  /** The level tile is read first; its enemies follow, one group at a time, a turn apart. */
+  async #gather(segments: readonly string[], layer: BubbleTileLayer, found: unknown[], round: number): Promise<void> {
+    for (const child of await this.#children(layer)) {
+      const path = [...segments, child.name!]
+      // A current location head wins over the signature the parent retained.
+      const live = await this.#direct(path) ?? child
+      if (live['bubbleEnemy']) found.push(live['bubbleEnemy'])
+      else if (live['bubbleGroup']) {
+        this.#loading({ stage: 'group', round, group: child.name, loaded: found.length })
+        await breathe()
+        await this.#gather(path, live, found, round)
+      }
+      else throw new Error(`The ${path.join('/')} tile has invalid game content`)
+    }
+  }
+
+  async #readNative(index: number): Promise<LoadedBubbleRound | null> {
     if (!validRound(index)) throw new Error('Bubble Bobble round index is outside the DOS campaign')
     const branch = await this.#resolveAt(this.baseSegments)
     if (!branch) return null
@@ -365,7 +458,10 @@ export class BubbleTileSurface {
   }
 }
 
-export function createBubbleTileSurface(parentSegments?: readonly string[]): BubbleTileSurface {
+export function createBubbleTileSurface(
+  parentSegments?: readonly string[],
+  onLoading?: (step: BubbleLoadingStep) => void,
+): BubbleTileSurface {
   const ioc = (globalThis as unknown as { window?: { ioc?: { get<T>(key: string): T | undefined } } }).window?.ioc
   const history = ioc?.get<BubbleTileHistory>('@diamondcoreprocessor.com/HistoryService')
   const committer = ioc?.get<BubbleTileCommitter>('@diamondcoreprocessor.com/LayerCommitter')
@@ -375,6 +471,6 @@ export function createBubbleTileSurface(parentSegments?: readonly string[]): Bub
     throw new Error('Hypercomb tiles are not ready yet; reopen Bubble Bobble when the hive has loaded')
   }
   return new BubbleTileSurface({
-    history, committer, parentSegments: parentSegments ?? lineage!.explorerSegments!(), domain: lineage?.domain,
+    history, committer, parentSegments: parentSegments ?? lineage!.explorerSegments!(), domain: lineage?.domain, onLoading,
   })
 }

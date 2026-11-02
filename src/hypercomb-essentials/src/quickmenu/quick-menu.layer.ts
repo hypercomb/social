@@ -14,6 +14,7 @@ import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex
 import {
   cellUnit,
   menuMetrics,
+  onMiddle,
   slotUnder,
   type MenuMetrics,
 } from './quick-menu.tile-menu.js'
@@ -32,6 +33,10 @@ const VEIL_ALPHA = 0.5
 const VEIL_EXTENT = 100000
 const TEXT_ON = '#d8e6ee'
 const TEXT_OFF = '#8aa0ac'
+/** The middle blinks at this rate while the options sleep after a way back. */
+const CUE_PULSE_MS = 420
+/** Coming back to the middle wakes the options one after another, this far apart. */
+const CUE_SWEEP_MS = 55
 
 type LabelOf = (slot: { label: string; labelKey?: string }) => string
 
@@ -113,6 +118,11 @@ export class QuickMenuLayer {
   #lit: QuickMenuDirection | null = null
   /** The last show(), kept so a host that arrives afterwards can still draw. */
   #pending: PendingMenu | null = null
+  /** The sleeping cue: the middle cell blinks lit until the pointer returns. */
+  #cueCentre = false
+  /** The waking cue: the option the sweep has reached. */
+  #cueSweep: QuickMenuDirection | null = null
+  #cueTimer: ReturnType<typeof setInterval> | null = null
 
   constructor() {
     EffectBus.on<HostReady>('render:host-ready', (payload) => {
@@ -202,7 +212,7 @@ export class QuickMenuLayer {
     const cellAt = (x: number, y: number) =>
       pixelToAxial(x - this.#offset.x, y - this.#offset.y, this.#geo.spacing, this.#flat)
     const cells: FlowerCell[] = []
-    if (this.#subject) cells.push({ ...cellAt(at.x, at.y), label: this.#subject, subject: true })
+    if (this.#subject) cells.push({ ...cellAt(at.x, at.y), label: this.#subject, subject: true, lit: this.#cueCentre })
     const { reach, flat } = this.#metrics()
     for (const direction of QUICK_MENU_RING) {
       const slot = this.#byDirection.get(direction)
@@ -212,10 +222,51 @@ export class QuickMenuLayer {
       cells.push({
         ...cellAt(at.x + unit.x * reach, at.y + unit.y * reach),
         label: isBack ? pending.backLabel : pending.labelOf(slot!),
-        lit: direction === this.#lit,
+        lit: direction === (this.#lit ?? this.#cueSweep),
       })
     }
     EffectBus.emit('render:flower', { cells })
+  }
+
+  // ── the way back, shown ─────────────────────────────────────────────
+
+  /** Right-click took the flower back a ring and the options sleep: the middle
+   *  blinks, asking for the pointer. */
+  disarm(): void {
+    this.#stopCue()
+    this.#cueCentre = true
+    this.#repaintFlower()
+    this.#cueTimer = setInterval(() => {
+      this.#cueCentre = !this.#cueCentre
+      this.#repaintFlower()
+    }, CUE_PULSE_MS)
+  }
+
+  /** The pointer is back in the middle: the blink stops and the options wake
+   *  in turn round the ring. */
+  rearm(): void {
+    if (this.#cueTimer === null) return
+    this.#stopCue()
+    const pending = this.#pending
+    const ring = QUICK_MENU_RING.filter(d => this.#byDirection.has(d) || d === pending?.back)
+    let next = 0
+    this.#cueTimer = setInterval(() => {
+      if (next >= ring.length) { this.#stopCue(); this.#repaintFlower(); return }
+      this.#cueSweep = ring[next++]
+      this.#repaintFlower()
+    }, CUE_SWEEP_MS)
+    this.#repaintFlower()
+  }
+
+  #stopCue(): void {
+    if (this.#cueTimer !== null) clearInterval(this.#cueTimer)
+    this.#cueTimer = null
+    this.#cueCentre = false
+    this.#cueSweep = null
+  }
+
+  #repaintFlower(): void {
+    if (this.#bloomed && this.#pending) this.#paintFlower(this.#pending)
   }
 
   /** A point in the render container's space, in client coordinates. */
@@ -257,6 +308,7 @@ export class QuickMenuLayer {
   ): void {
     this.#showing = true
     this.#lit = null
+    this.#stopCue()
     this.#pending = { definition, labelOf, back, backLabel }
     this.#byDirection = slotsByDirection(definition)
     this.#ensureRoot()
@@ -327,6 +379,7 @@ export class QuickMenuLayer {
   hide(): void {
     this.#showing = false
     this.#lit = null
+    this.#stopCue()
     this.#pending = null
     this.#local = null
     this.#subject = null
@@ -348,6 +401,14 @@ export class QuickMenuLayer {
     const here = this.#world(clientX, clientY)
     if (!here) return null
     return slotUnder(here.x - this.#root.position.x, here.y - this.#root.position.y, this.#metrics(), mode)
+  }
+
+  /** Is a viewport point on the middle cell of the menu now showing? */
+  onMiddleAtClient(clientX: number, clientY: number): boolean {
+    if (!this.#showing || !this.#root || !this.#render) return false
+    const here = this.#world(clientX, clientY)
+    if (!here) return false
+    return onMiddle(here.x - this.#root.position.x, here.y - this.#root.position.y, this.#metrics())
   }
 
   #metrics(): MenuMetrics {

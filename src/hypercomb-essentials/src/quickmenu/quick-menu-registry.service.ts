@@ -186,9 +186,8 @@ const SELECTION_EDIT: QuickMenuDefinition = {
   title: 'Edit',
   contexts: [],
   slots: [
-    key('east', 'copy', 'clipboard.copy', 'quickmenu.copy'),
-    key('southeast', 'cut', 'clipboard.cut', 'quickmenu.cut'),
-    key('southwest', 'paste', 'clipboard.paste', 'quickmenu.paste'),
+    // The selection onto the shelf: a reference, never a cut (codex A9).
+    { direction: 'east', label: 'shelf', labelKey: 'quickmenu.shelf', action: { kind: 'effect', effect: 'shelf:take-selection', payload: {} } },
     cmd('northwest', 'remove', 'remove', 'quickmenu.remove'),
     cmd('northeast', 'hide', 'hide'),
   ],
