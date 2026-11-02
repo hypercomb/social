@@ -3749,6 +3749,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#applyPendingChoice(this.shell?.getActiveIndex() ?? 0)
       return
     }
+    // WHAT THE PARTICIPANT SAID, for whoever relays it (a meeting's leader
+    // sends their commands to the people following them,
+    // meeting/hive-meeting.drone.ts). Only this door — the participant's own
+    // Enter — announces: a line from outside or one said for someone else
+    // never does, and a line carrying an access code is never repeated.
+    // Commands only: a bare name in tiles stance stays this hive's own.
+    const said = this.#toRegister(v.trim())
+    if (said.startsWith('/') && !isSensitiveLine(said)) {
+      EffectBus.emitTransient('command-line:said', { text: said })
+    }
     const completed = this.#completeOnEnter(v)
     if (completed === null) return
     // The register line: command stance re-prefixes its slash here, so the

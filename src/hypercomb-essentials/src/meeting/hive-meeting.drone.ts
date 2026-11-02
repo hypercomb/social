@@ -1,10 +1,34 @@
 // meeting/hive-meeting.drone.ts
-// Orchestrates hive meetings — state machine, availability tracking, WebRTC signaling.
-// When all participants in a honeycomb signal availability, the meeting starts
-// and peer-to-peer video connections are established via the Nostr mesh.
+//
+// THE SWARM'S MEETING (jwize, 2026-11-02). One meeting per swarm: its address
+// is sign('meeting \0 ' + room, secret, host) (meeting-seats.ts), so everyone
+// in the swarm who types `meeting` meets here, nobody outside can, and walking
+// around the hive never ends it. It is live the moment someone joins; whoever
+// joins later is connected as they arrive.
+//
+// THE LEADER IS THE MIDDLE, AND PEOPLE FOLLOW. The leader is whoever has been
+// in longest (meeting-seats.ts leaderOf); their face takes the centre hex and
+// the others fill the ring by arrival. Every heartbeat carries the path its
+// sender stands on; when the leader moves, a follower who allowed `go` walks
+// to the same path in their own hive. Small paths, said locally.
+//
+// THE LEADER'S LINES COME THROUGH, AND EACH PERSON ALLOWS THEM. What the
+// leader says on their own command line (`command-line:said`) is sent to the
+// meeting. The room states its BEHAVIOUR REQUIREMENTS — the words it uses,
+// `go` by default, `meeting rules …` to name others — and each person allows
+// or disallows each one in the lobby. On their side a line whose word they
+// allowed runs through the machine door (judged against their grant like any
+// outside line); a word they disallowed is dropped; a word the room never
+// stated waits on their `$` line for Enter or Esc. No code is sent: only
+// directions, each one allowed.
 
-import { Drone } from '@hypercomb/core'
+import {
+  Drone, EffectBus, EXTERNAL_CALL, REMOTE_SUBMIT, canonicalVerbOf, hypercomb, meetingPointKey,
+  type ExternalCallRequest, type RemoteSubmitRequest,
+} from '@hypercomb/core'
 import { bitrateOf, frameRateOf, isQuality, qualityConstraints, videoConstraints, type Quality } from './meeting-quality.js'
+import { followStep, followedBy, isFollowed, leaderOf, meetingAddress, meetingPreimage, originatorOf, pathKey, seatOrder, type Member } from './meeting-seats.js'
+import { isJoinedHere, ownZone } from '../sharing/membership.js'
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
 type MeshSub = { close: () => void }
@@ -12,15 +36,14 @@ type MeshApi = {
   ensureStartedForSig: (sig: string) => void
   subscribe?: (sig: string, cb: (e: MeshEvt) => void) => MeshSub
   publish?: (kind: number, sig: string, payload: any, extraTags?: string[][]) => Promise<boolean>
+  meetingRelay?: () => string
 }
+type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
+type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
 
 export type MeetingState = 'idle' | 'gathering' | 'active' | 'ended'
 
-type PeerAvailability = {
-  publisherId: string
-  lastSeenMs: number
-  cell: string
-}
+type Heard = Member & { lastSeenMs: number; rules?: readonly string[] }
 
 type PeerConnection = {
   publisherId: string
@@ -35,16 +58,34 @@ const RTC_CONFIG: RTCConfiguration = {
   ],
 }
 
+const MEETING_KIND = 29010
 const AVAILABILITY_TTL_MS = 30_000
 const AVAILABILITY_PUBLISH_MS = 5_000
-const DEFAULT_THRESHOLD = 7
+/** The seats the hive draws: the leader and the ring of six. */
+const SEATS = 7
+/** What a room asks for when its leader has named nothing: following. */
+const DEFAULT_RULES: readonly string[] = ['go']
+const INDICATOR = 'meeting'
+/** The mark on the tile the leader stands in. A meeting belongs to no tile
+ *  (jwize, 2026-11-02: "there is no relationship between a tile and a
+ *  meeting"); the mark only says where its leader is right now. */
+const HERE_ACTION = 'meeting-here'
+const HERE_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="10" fill="none" stroke="white" stroke-width="2"/><path d="M8 9.5h6a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1zm7 2 2.5-1.5v4L15 12.5z" fill="white"/></svg>'
+
+const verbOf = (text: string): string =>
+  canonicalVerbOf(text) || (text.trim().split(/\s+/)[0] ?? '').toLowerCase()
+
+const cleanRules = (raw: unknown): string[] =>
+  Array.isArray(raw)
+    ? [...new Set(raw.map(r => String(r ?? '').trim().toLowerCase()).filter(r => /^[a-z][a-z0-9-]*$/.test(r)))].slice(0, 32)
+    : []
 
 export class HiveMeetingDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'meeting'
 
   public override description =
-    'Orchestrates hive meetings — availability tracking, WebRTC signaling, peer connections.'
+    'The swarm\'s meeting: one per swarm, live when someone joins, the longest-present in the middle and everyone following; the leader\'s lines come through and each person allows them.'
   public override effects = ['network'] as const
 
   protected override deps = {
@@ -52,64 +93,154 @@ export class HiveMeetingDrone extends Drone {
   }
 
   protected override listens = [
-    'render:cell-count', 'mesh:ensure-started',
     'meeting:toggle-camera', 'meeting:toggle-available', 'meeting:join', 'meeting:leave',
+    'meeting:rules-set', 'meeting:start', 'meeting:copy-link', 'meeting:lead', 'meeting:follow', 'command-line:said', 'indicator:activate', 'indicator:dismiss', 'indicator:query',
+    'mesh:public-changed', 'mesh:zone', 'mesh:room', 'mesh:secret',
+    'render:host-ready', 'overlay:request-register', 'tile:action',
   ]
-  protected override emits = ['meeting:state', 'meeting:streams', 'meeting:local-camera', 'meeting:presence']
+  protected override emits = [
+    'meeting:state', 'meeting:streams', 'meeting:local-camera', 'meeting:presence',
+    'indicator:set', 'indicator:clear', 'activity:log', 'toast:show', 'mesh:open-modal', 'overlay:register-action',
+    EXTERNAL_CALL, REMOTE_SUBMIT,
+  ]
 
   /** The picture the lobby chose; the camera and every sender follow it. */
   #quality: Quality = 'auto'
-  /** Last presence announced, so the lobby hears a change and not every beat. */
-  #lastHere = -1
 
   #state: MeetingState = 'idle'
-  #threshold = DEFAULT_THRESHOLD
-  #cellCount = 0
+  #preimage = ''
   #currentSig = ''
   #meshSub: MeshSub | null = null
 
-  // own identity
+  // own identity and place in the meeting
   #publisherId = ''
   #localAvailable = false
+  #since = 0
   #lastAvailPublishMs = 0
+  /** The words this person allowed in the lobby. */
+  #allowed = new Set<string>(DEFAULT_RULES)
+  /** The room's requirements, as this person states them if they lead. */
+  #ownRules: string[] = [...DEFAULT_RULES]
+  /** Whom this person handed the lead to — counts only while they are the
+   *  originator. '' keeps it. */
+  #lead = ''
+  /** Whom this person chose to follow; '' follows the leader. */
+  #following = ''
+  #lastTargetId = ''
 
-  // peer availability tracking
-  #availability = new Map<string, PeerAvailability>()
+  // who else is in, and following them
+  #heard = new Map<string, Heard>()
+  #lastLeaderPath: string | null = null
+  #lastLineSeq = new Map<string, number>()
+  #lineSeq = 0
+  #lastPresence = ''
 
   // WebRTC
   #peers = new Map<string, PeerConnection>()
   #localStream: MediaStream | null = null
   #cameraOn = false
 
-  // effect registration guard
   #effectsRegistered = false
-
-  constructor() {
-    super()
-    try {
-      const override = localStorage.getItem('hc:meeting:threshold')
-      if (override) this.#threshold = Math.max(1, parseInt(override, 10) || DEFAULT_THRESHOLD)
-    } catch { /* ignore */ }
-  }
+  /** The meeting's own beat while its room is heard. Its messages are
+   *  ephemeral — a relay keeps none — so a heartbeat waiting on the hive's
+   *  pulse was lost whenever nobody was listening at that moment, and two
+   *  people in one meeting never saw each other. */
+  #beat: ReturnType<typeof setInterval> | null = null
 
   protected override sense = (): boolean => true
 
   protected override heartbeat = async (): Promise<void> => {
     this.#ensureEffects()
     this.#ensureIdentity()
-    this.#pruneExpiredAvailability()
+    await this.#syncRoom()
+    this.#pruneExpired()
     this.#publishAvailability()
-    this.#evaluateState()
     this.#announcePresence()
   }
 
-  /** Who is here, for the lobby: those heard from recently, and yourself once
-   *  you have joined. Said only when it changes. */
+  // ─── who is here, for the lobby and the command line ─────────
+
+  #members = (): Member[] => {
+    const all: Member[] = [...this.#heard.values()]
+    if (this.#localAvailable) all.push({ id: this.#publisherId, since: this.#since, path: this.#here(), lead: this.#lead, follows: this.#following })
+    return all
+  }
+
+  #leader = (): Heard | Member | undefined => leaderOf(this.#members())
+
+  /** Whom this person follows: the one they chose, else the leader. */
+  #target = (): Member | undefined => followedBy(this.#publisherId, this.#members(), this.#following)
+
+  /** The requirements this person meets: those of whom they follow, or their
+   *  own while they follow nobody. */
+  #rules = (): readonly string[] => {
+    const target = this.#target()
+    if (!target) return this.#ownRules
+    return (this.#heard.get(target.id)?.rules) ?? DEFAULT_RULES
+  }
+
+  /** The seat a person names: 1 is the middle. */
+  #seatId = (who: string): string => {
+    const seats = seatOrder(this.#members())
+    const n = Number(who)
+    return Number.isInteger(n) && n >= 1 && n <= seats.length ? seats[n - 1]!.id : ''
+  }
+
   #announcePresence = (): void => {
-    const here = this.#availability.size + (this.#localAvailable ? 1 : 0)
-    if (here === this.#lastHere) return
-    this.#lastHere = here
-    this.emitEffect('meeting:presence', { here, needed: this.#threshold })
+    const members = this.#members()
+    const leader = leaderOf(members)
+    const presence = {
+      swarm: !!this.#currentSig,
+      here: members.length,
+      needed: SEATS,
+      joined: this.#localAvailable,
+      leader: leader?.id ?? '',
+      leaderIsYou: !!leader && leader.id === this.#publisherId,
+      rules: [...this.#rules()],
+      allowed: [...this.#allowed],
+      seats: seatOrder(members).map((m, i) => ({
+        seat: i + 1, id: m.id, you: m.id === this.#publisherId,
+        leads: m.id === leader?.id, originator: m.id === originatorOf(members)?.id,
+      })),
+      following: this.#target()?.id ?? '',
+    }
+    this.#refreshMark()
+    const key = JSON.stringify(presence)
+    if (key === this.#lastPresence) return
+    this.#lastPresence = key
+    this.emitEffect('meeting:presence', presence)
+    this.#paintIndicator(presence)
+  }
+
+  /** The meeting on the command line: in it, or live in the swarm while you
+   *  are not. Nothing when there is no meeting. */
+  #paintIndicator = (p: {
+    here: number; joined: boolean; leaderIsYou: boolean; rules: readonly string[]
+    seats: readonly { seat: number; id: string; you: boolean; leads: boolean; originator: boolean }[]; following: string
+  }): void => {
+    if (!this.#currentSig || (!p.joined && p.here === 0)) {
+      EffectBus.emit('indicator:clear', { key: INDICATOR })
+      return
+    }
+    const leadLine = p.leaderIsYou ? 'you lead: people follow where you go' : 'you follow the leader'
+    const rules = p.rules.map(r => `${r} ${this.#allowed.has(r) ? '✓' : '✗'}`).join(' · ')
+    EffectBus.emit('indicator:set', {
+      key: INDICATOR,
+      icon: 'videocam',
+      label: p.joined ? `meeting · ${p.here}` : `meeting live · ${p.here}`,
+      items: p.joined
+        ? [
+            { text: leadLine },
+            ...p.seats.map(s => ({
+              text: `${s.seat} · ${s.you ? 'you' : s.id.slice(0, 6)}${s.leads ? ' · leads' : ''}${s.originator && !s.leads ? ' · started it' : ''}${s.id === p.following ? ' · you follow' : ''}`,
+            })),
+            { text: rules || 'no behaviours', detail: 'what this room asks of you' },
+            { text: 'meeting follow <seat> · meeting lead <seat>', detail: 'click: copy the link · ×: leave' },
+          ]
+        : [{ text: `${p.here} in the meeting` }, { text: 'click to join' }],
+      actionable: true,
+      dismissable: p.joined,
+    })
   }
 
   // ─── effect subscriptions ────────────────────────────────────
@@ -118,132 +249,324 @@ export class HiveMeetingDrone extends Drone {
     if (this.#effectsRegistered) return
     this.#effectsRegistered = true
 
-    this.onEffect<{ count: number }>('render:cell-count', ({ count }) => {
-      this.#cellCount = count
-    })
+    const resync = (): void => { void this.#syncRoom() }
+    this.onEffect('mesh:public-changed', resync)
+    this.onEffect('mesh:zone', resync)
+    this.onEffect('mesh:room', resync)
+    this.onEffect('mesh:secret', resync)
 
-    this.onEffect<{ signature: string }>('mesh:ensure-started', ({ signature }) => {
-      if (signature === this.#currentSig) return
-      this.#switchSig(signature)
-    })
-
-    const handleToggleAvailable = (preAcquiredStream?: unknown): void => {
-      this.#localAvailable = !this.#localAvailable
-      if (this.#localAvailable) {
-        // joining — use a pre-acquired stream if provided, otherwise request
-        // the camera. The instanceof check is the single chokepoint for both
-        // entry paths: the EffectBus registration passes the PAYLOAD object
-        // (e.g. `{}` from MeetingControlsWorker) as this argument, and the
-        // window-bridge below passes an unchecked `e.detail?.stream` — either
-        // one slipping a non-MediaStream through here ends as
-        // `video.srcObject = {}` (TypeError) in meeting-video's slot sync.
-        if (preAcquiredStream instanceof MediaStream) {
-          this.#acceptStream(preAcquiredStream)
-        } else {
-          void this.#toggleCamera()
-        }
-      } else {
-        this.#endMeeting()
-      }
-      this.#lastAvailPublishMs = 0 // publish immediately
+    const join = (stream: unknown): void => {
+      if (this.#localAvailable) return
+      this.#localAvailable = true
+      this.#since = Date.now()
+      this.#lastLeaderPath = null
+      if (stream instanceof MediaStream) this.#acceptStream(stream)
+      else void this.#toggleCamera()
+      this.#setState('active')
+      this.#connectAll()
+      this.#lastAvailPublishMs = 0
+      this.#publishAvailability()
+      this.#announcePresence()
     }
-
-    const handleToggleCamera = (): void => {
-      // camera toggle allowed whenever locally available (not just when active)
+    const leave = (): void => {
       if (!this.#localAvailable) return
-      void this.#toggleCamera()
+      this.#localAvailable = false
+      this.#endMeeting()
+      this.#setState('ended')
+      this.#setState('idle')
+      this.#announcePresence()
     }
 
-    this.onEffect('meeting:toggle-available', handleToggleAvailable)
-    this.onEffect('meeting:toggle-camera', handleToggleCamera)
+    this.onEffect('meeting:toggle-available', payload => {
+      if (this.#localAvailable) leave()
+      else join((payload as { stream?: unknown } | undefined)?.stream)
+    })
+    this.onEffect('meeting:toggle-camera', () => {
+      if (this.#localAvailable) void this.#toggleCamera()
+    })
 
-    // The lobby's way in and out. A toggle cannot say "join" twice or "leave"
-    // when not here, so these are idempotent: the lobby never has to know which
-    // side of the toggle the meeting is on.
-    this.onEffect<{ stream?: unknown; quality?: unknown }>('meeting:join', payload => {
+    // The lobby's way in and out, idempotent.
+    this.onEffect<{ stream?: unknown; quality?: unknown; allowed?: unknown }>('meeting:join', payload => {
       if (isQuality(payload?.quality)) this.#quality = payload.quality
-      if (!this.#localAvailable) handleToggleAvailable(payload?.stream)
+      if (Array.isArray(payload?.allowed)) this.#allowed = new Set(cleanRules(payload.allowed))
+      join(payload?.stream)
     })
-    this.onEffect('meeting:leave', () => {
-      if (this.#localAvailable) handleToggleAvailable()
+    this.onEffect('meeting:leave', leave)
+
+    // `meeting`: start it, or join it — and the way to bring someone in.
+    // Not in a swarm, there is nowhere to meet yet: the toast's button opens
+    // the swarm selector, one click from connected.
+    this.onEffect('meeting:start', () => { void this.#start(join) })
+    this.onEffect('meeting:copy-link', () => { this.#copyLink() })
+
+    // `meeting lead <seat>` / `meeting lead me`: the originator hands the
+    // lead over, or takes it back. Anyone else is told only they can.
+    this.onEffect<{ who?: string }>('meeting:lead', ({ who }) => {
+      const members = this.#members()
+      if (originatorOf(members)?.id !== this.#publisherId) {
+        EffectBus.emit('activity:log', { message: 'meeting: only whoever started the meeting can hand the lead over', icon: '✗' })
+        return
+      }
+      const id = who === 'me' ? '' : this.#seatId(String(who ?? ''))
+      if (who !== 'me' && !id) { EffectBus.emit('activity:log', { message: `meeting: no one sits in seat ${who}`, icon: '✗' }); return }
+      this.#lead = id === this.#publisherId ? '' : id
+      this.#lastAvailPublishMs = 0
+      this.#publishAvailability()
+      this.#announcePresence()
+      this.#emitStreams()
+    })
+    // `meeting follow <seat>` / `meeting follow leader`.
+    this.onEffect<{ who?: string }>('meeting:follow', ({ who }) => {
+      const id = who === 'leader' ? '' : this.#seatId(String(who ?? ''))
+      if (who !== 'leader' && !id) { EffectBus.emit('activity:log', { message: `meeting: no one sits in seat ${who}`, icon: '✗' }); return }
+      this.#following = id === this.#publisherId ? '' : id
+      this.#lastAvailPublishMs = 0
+      this.#publishAvailability()
+      this.#follow()
+      this.#announcePresence()
     })
 
-    // bridge: listen for window custom events from Angular controls bar
+    // `meeting rules go create trait`: what this room asks, when you lead it.
+    this.onEffect<{ rules?: unknown }>('meeting:rules-set', payload => {
+      const rules = cleanRules(payload?.rules)
+      this.#ownRules = rules.length ? rules : [...DEFAULT_RULES]
+      for (const rule of this.#ownRules) this.#allowed.add(rule)
+      this.#lastAvailPublishMs = 0
+      this.#publishAvailability()
+      this.#announcePresence()
+    })
+
+    // The leader's own lines, from their own Enter.
+    this.onEffect<{ text?: unknown }>('command-line:said', payload => {
+      const text = typeof payload?.text === 'string' ? payload.text.trim() : ''
+      if (text) this.#relay(text)
+    })
+
+    // Walking: the leader says where they are as soon as they move.
+    const lineage = window.ioc?.get<LineageLike>('@hypercomb.social/Lineage')
+    lineage?.addEventListener?.('change', () => {
+      if (!this.#localAvailable) return
+      this.#lastAvailPublishMs = 0
+      this.#publishAvailability()
+    })
+
+    // THE MARK ON THE LEADER'S TILE: seen by everyone in the swarm who is not
+    // the leader, on the tile the leader stands in, at the level that holds
+    // it. A press joins (and walks in), or, already in, walks back to them.
+    this.onEffect('render:host-ready', () => this.#registerHere())
+    this.onEffect('overlay:request-register', () => this.#registerHere())
+    this.onEffect<{ action?: string; label?: string }>('tile:action', payload => {
+      if (payload?.action !== HERE_ACTION) return
+      if (!this.#localAvailable) { void this.#start(join); return }
+      const leader = this.#leader()
+      if (leader?.path) window.ioc?.get<NavigationLike>('@hypercomb.social/Navigation')?.goRaw?.(leader.path)
+    })
+
+    // The command line's meeting chip: in it, copy the link; not yet, join.
+    this.onEffect<{ key?: string }>('indicator:activate', ({ key }) => {
+      if (key !== INDICATOR) return
+      if (this.#localAvailable) this.#copyLink()
+      else void this.#start(join)
+    })
+    this.onEffect<{ key?: string }>('indicator:dismiss', ({ key }) => { if (key === INDICATOR) leave() })
+    this.onEffect('indicator:query', () => { this.#lastPresence = ''; this.#announcePresence() })
+
+    // bridge: window custom events from the Angular controls bar
     window.addEventListener('meeting:toggle-available', ((e: CustomEvent) => {
-      handleToggleAvailable(e.detail?.stream as MediaStream | undefined)
+      if (this.#localAvailable) leave()
+      else join(e.detail?.stream)
     }) as EventListener)
-    window.addEventListener('meeting:toggle-camera', handleToggleCamera)
+    window.addEventListener('meeting:toggle-camera', () => {
+      if (this.#localAvailable) void this.#toggleCamera()
+    })
+  }
+
+  /** The leader's tile, as seen from where this person stands: its name when
+   *  the leader is one level below here, else ''. */
+  #leaderTileHere = (): string => {
+    const leader = this.#leader()
+    if (!leader?.path?.length || leader.id === this.#publisherId) return ''
+    const parent = pathKey(leader.path.slice(0, -1))
+    return parent === pathKey(this.#here()) ? String(leader.path[leader.path.length - 1]) : ''
+  }
+
+  #registerHere = (): void => {
+    const visibleWhen = (ctx: { label: string }): boolean => !!this.#currentSig && ctx.label === this.#leaderTileHere()
+    this.emitEffect('overlay:register-action', (['private', 'public-own', 'public-external'] as const).map(profile => ({
+      name: HERE_ACTION,
+      owner: this.iocKey,
+      svgMarkup: HERE_ICON_SVG,
+      x: 10,
+      y: -10,
+      hoverTint: 0xa8ffd8,
+      profile,
+      visibleWhen,
+    })))
+  }
+
+  /** Redraw the tiles when where the leader stands has changed, so the mark
+   *  moves with them. The processor is the only one that redraws. */
+  #lastLeaderTile = ''
+  #refreshMark = (): void => {
+    const key = `${pathKey(this.#here())}|${this.#leaderTileHere()}`
+    if (key === this.#lastLeaderTile) return
+    this.#lastLeaderTile = key
+    void new hypercomb().act()
+  }
+
+  #copyLink = (): void => {
+    const invite = window.ioc?.get<{ meetingLink?: () => Promise<void> }>('@diamondcoreprocessor.com/InviteQueenBee')
+    void invite?.meetingLink?.()
+  }
+
+  #start = async (join: (stream: unknown) => void): Promise<void> => {
+    await this.#syncRoom()
+    if (!this.#currentSig) {
+      EffectBus.emit('toast:show', {
+        type: 'info', duration: 0, title: 'meeting',
+        message: 'You are not in a swarm yet, so there is nowhere to meet. Start one, then type meeting again.',
+        actionLabel: 'start a swarm', actionEffect: 'mesh:open-modal', actionPayload: { join: true },
+      })
+      return
+    }
+    const others = this.#heard.size
+    join(undefined)
+    // Walk to the leader at once rather than at the next beat.
+    this.#lastLeaderPath = null
+    this.#follow()
+    EffectBus.emit('activity:log', {
+      message: others
+        ? `meeting: you joined ${others} ${others === 1 ? 'person' : 'people'}; you follow the leader`
+        : 'meeting: started; you lead, and whoever joins follows where you go',
+      icon: '🐝',
+    })
+    // The link, straight away: copied (or shared) where the device allows,
+    // else shown to copy — the invite's own delivery.
+    this.#copyLink()
   }
 
   #ensureIdentity = (): void => {
     if (this.#publisherId) return
-    try {
-      this.#publisherId = localStorage.getItem('hc:show-honeycomb:publisher-id') ?? ''
-    } catch { /* ignore */ }
+    try { this.#publisherId = localStorage.getItem('hc:show-honeycomb:publisher-id') ?? '' } catch { /* ignore */ }
+    // A tab that has not yet been given one still meets: an id for this page.
+    if (!this.#publisherId) this.#publisherId = crypto.randomUUID().replace(/-/g, '')
   }
 
-  // ─── mesh subscription ───────────────────────────────────────
+  #here = (): string[] => {
+    const lineage = window.ioc?.get<LineageLike>('@hypercomb.social/Lineage')
+    return (lineage?.explorerSegments?.() ?? []).map(String).filter(Boolean)
+  }
+
+  // ─── the room ────────────────────────────────────────────────
+
+  /** Follow the swarm: the meeting's address is the swarm's, or nothing when
+   *  this tab is in no swarm. A change of swarm ends what was here. */
+  #syncRoom = async (): Promise<void> => {
+    const zone = isJoinedHere() ? ownZone() : null
+    let host = ''
+    try { host = meetingPointKey(this.resolve<MeshApi>('mesh')?.meetingRelay?.() ?? '') } catch { host = '' }
+    const preimage = zone ? meetingPreimage(zone.room, zone.secret, host) : ''
+    if (preimage === this.#preimage) return
+    this.#preimage = preimage
+    const sig = await meetingAddress(preimage)
+    if (preimage !== this.#preimage) return // moved again while signing
+    this.#switchSig(sig)
+  }
 
   #switchSig = (sig: string): void => {
     if (this.#meshSub) {
       try { this.#meshSub.close() } catch { /* ignore */ }
       this.#meshSub = null
     }
-
-    this.#endMeeting()
-    this.#availability.clear()
-    this.#localAvailable = false
+    if (this.#localAvailable) {
+      this.#localAvailable = false
+      this.#endMeeting()
+      this.#setState('ended')
+      this.#setState('idle')
+    }
+    this.#heard.clear()
+    this.#lastLineSeq.clear()
     this.#currentSig = sig
+    this.#lastPresence = ''
     this.#announcePresence()
+    if (this.#beat) { clearInterval(this.#beat); this.#beat = null }
+    if (!sig) return
+    this.#beat = setInterval(() => {
+      this.#pruneExpired()
+      this.#publishAvailability()
+      this.#follow()
+      this.#announcePresence()
+    }, AVAILABILITY_PUBLISH_MS)
 
     const mesh = this.resolve<MeshApi>('mesh')
     if (!mesh || typeof mesh.subscribe !== 'function') return
-
-    this.#meshSub = mesh.subscribe(sig, (evt) => this.#onMeshEvent(evt))
+    try { mesh.ensureStartedForSig(sig) } catch { /* the mesh starts on its own */ }
+    this.#meshSub = mesh.subscribe(sig, evt => this.#onMeshEvent(evt))
   }
 
   #onMeshEvent = (evt: MeshEvt): void => {
     const p = evt.payload
     if (!p || typeof p.type !== 'string') return
-
     switch (p.type) {
-      case 'meeting-availability':
-        this.#handleAvailability(p)
-        break
-      case 'meeting-signal':
-        this.#handleSignal(p)
-        break
+      case 'meeting-availability': this.#handleAvailability(p); break
+      case 'meeting-signal': this.#handleSignal(p); break
+      case 'meeting-line': this.#handleLine(p); break
     }
   }
 
-  // ─── availability ────────────────────────────────────────────
+  // ─── availability, leading and following ─────────────────────
 
   #handleAvailability = (p: any): void => {
-    const id = p.publisherId
-    if (!id || typeof id !== 'string') return
-    if (id === this.#publisherId) return
-
-    this.#availability.set(id, {
-      publisherId: id,
+    const id = typeof p.publisherId === 'string' ? p.publisherId : ''
+    if (!id || id === this.#publisherId) return
+    const isNew = !this.#heard.has(id)
+    const since = Number(p.since)
+    const path = Array.isArray(p.path) ? p.path.map((s: unknown) => String(s ?? '')).filter(Boolean).slice(0, 64) : undefined
+    this.#heard.set(id, {
+      id,
+      since: Number.isFinite(since) && since > 0 ? since : Date.now(),
+      ...(path ? { path } : {}),
+      rules: cleanRules(p.rules),
+      lead: typeof p.lead === 'string' ? p.lead : '',
+      follows: typeof p.follows === 'string' ? p.follows : '',
       lastSeenMs: Date.now(),
-      cell: p.cell ?? p.seed ?? '',
     })
+    if (this.#localAvailable && !this.#peers.has(id)) this.#createPeerConnection(id, true)
+    // Someone new: say who we are at once, rather than at our next beat.
+    if (isNew && this.#localAvailable) { this.#lastAvailPublishMs = 0; this.#publishAvailability() }
+    this.#follow()
     this.#announcePresence()
+    this.#emitStreams()
+  }
+
+  /** When the leader has moved, walk where they went — only for someone who
+   *  allowed `go`, and in their own hive. */
+  #follow = (): void => {
+    if (!this.#localAvailable) return
+    const target = this.#target()
+    // A new person to follow is walked to at once.
+    if ((target?.id ?? '') !== this.#lastTargetId) { this.#lastTargetId = target?.id ?? ''; this.#lastLeaderPath = null }
+    const step = followStep({ selfId: this.#publisherId, leader: target, lastLeaderPath: this.#lastLeaderPath, here: this.#here() })
+    if (target) this.#lastLeaderPath = pathKey(target.path)
+    if (!step || !this.#allowed.has('go')) return
+    window.ioc?.get<NavigationLike>('@hypercomb.social/Navigation')?.goRaw?.(step)
   }
 
   #publishAvailability = (): void => {
     if (!this.#localAvailable || !this.#currentSig || !this.#publisherId) return
-
     const now = Date.now()
     if (now - this.#lastAvailPublishMs < AVAILABILITY_PUBLISH_MS) return
     this.#lastAvailPublishMs = now
-
     const mesh = this.resolve<MeshApi>('mesh')
     if (!mesh || typeof mesh.publish !== 'function') return
-
-    void mesh.publish(29010, this.#currentSig, {
+    void mesh.publish(MEETING_KIND, this.#currentSig, {
       type: 'meeting-availability',
       publisherId: this.#publisherId,
+      since: this.#since,
+      path: this.#here(),
+      rules: this.#ownRules,
+      lead: this.#lead,
+      follows: this.#following,
       ts: now,
     }, [
       ['publisher', this.#publisherId],
@@ -251,72 +574,83 @@ export class HiveMeetingDrone extends Drone {
     ])
   }
 
-  #pruneExpiredAvailability = (): void => {
+  #pruneExpired = (): void => {
     const now = Date.now()
-    for (const [id, entry] of this.#availability) {
+    for (const [id, entry] of this.#heard) {
       if (now - entry.lastSeenMs > AVAILABILITY_TTL_MS) {
-        this.#availability.delete(id)
+        this.#heard.delete(id)
+        this.#removePeer(id)
       }
     }
   }
 
-  // ─── state machine ──────────────────────────────────────────
+  // ─── the leader's lines ──────────────────────────────────────
 
-  #evaluateState = (): void => {
-    const prev = this.#state
+  /** Send a line the leader said to the meeting. `go` travels as the path
+   *  in the heartbeat, and `meeting` lines are the leader's own business. */
+  #relay = (text: string): void => {
+    if (!this.#localAvailable || !this.#currentSig) return
+    // Sent only when someone follows this person: typing in a meeting is
+    // not broadcast to people who are not following you.
+    if (!isFollowed(this.#publisherId, this.#members())) return
+    const verb = verbOf(text)
+    if (!verb || verb === 'go' || verb === 'meeting') return
+    const mesh = this.resolve<MeshApi>('mesh')
+    if (!mesh || typeof mesh.publish !== 'function') return
+    void mesh.publish(MEETING_KIND, this.#currentSig, {
+      type: 'meeting-line',
+      publisherId: this.#publisherId,
+      seq: ++this.#lineSeq,
+      text: text.slice(0, 4000),
+    }, [
+      ['publisher', this.#publisherId],
+      ['mode', 'meeting-line'],
+    ])
+  }
 
-    switch (this.#state) {
-      case 'idle':
-        if (this.#cellCount >= this.#threshold && this.#localAvailable) {
-          this.#setState('gathering')
-        }
-        break
-
-      case 'gathering': {
-        if (!this.#localAvailable) {
-          this.#setState('idle')
-          break
-        }
-        // count available peers + self
-        const total = this.#availability.size + (this.#localAvailable ? 1 : 0)
-        if (total >= this.#threshold) {
-          this.#startMeeting()
-          this.#setState('active')
-        }
-        break
-      }
-
-      case 'active':
-        if (!this.#localAvailable) {
-          this.#endMeeting()
-          this.#setState('ended')
-        }
-        break
-
-      case 'ended':
-        this.#setState('idle')
-        break
+  /** A line from the leader: allowed runs, disallowed is dropped, a word the
+   *  room never stated waits on the `$` line. */
+  #handleLine = (p: any): void => {
+    if (!this.#localAvailable) return
+    const from = typeof p.publisherId === 'string' ? p.publisherId : ''
+    const text = typeof p.text === 'string' ? p.text.trim() : ''
+    const seq = Number(p.seq)
+    const target = this.#target()
+    if (!text || !from || !target || from !== target.id || from === this.#publisherId) return
+    if (Number.isFinite(seq)) {
+      if (seq <= (this.#lastLineSeq.get(from) ?? 0)) return
+      this.#lastLineSeq.set(from, seq)
     }
-
-    if (this.#state !== prev) {
-      this.emitEffect('meeting:state', { state: this.#state, threshold: this.#threshold })
-      window.dispatchEvent(new CustomEvent('meeting:state', { detail: { state: this.#state, threshold: this.#threshold } }))
+    const verb = verbOf(text)
+    const rules = this.#rules()
+    if (this.#allowed.has(verb) && rules.includes(verb)) {
+      EffectBus.emitTransient<RemoteSubmitRequest>(REMOTE_SUBMIT, { text })
+      return
     }
+    if (rules.includes(verb)) {
+      EffectBus.emit('activity:log', { message: `meeting: the leader said "${text}" — you did not allow ${verb}, so it did not run`, icon: '✗' })
+      return
+    }
+    const leads = this.#leader()?.id === from
+    EffectBus.emitTransient<ExternalCallRequest>(EXTERNAL_CALL, { from: leads ? 'the meeting\'s leader' : 'whom you follow', lines: [text] })
   }
 
   #setState = (next: MeetingState): void => {
+    if (this.#state === next) return
     this.#state = next
+    this.emitEffect('meeting:state', { state: next, threshold: 1 })
+    window.dispatchEvent(new CustomEvent('meeting:state', { detail: { state: next, threshold: 1 } }))
   }
 
-  // ─── WebRTC connection management ───────────────────────────
-
-  #startMeeting = (): void => {
-    // establish peer connections to all available peers
-    for (const [id] of this.#availability) {
+  /** Connect to everyone already here. Lower id offers (createPeerConnection). */
+  #connectAll = (): void => {
+    for (const [id] of this.#heard) {
       if (this.#peers.has(id)) continue
       this.#createPeerConnection(id, true)
     }
   }
+
+  // ─── WebRTC connection management ───────────────────────────
 
   #endMeeting = (): void => {
     // close all peer connections
@@ -575,16 +909,20 @@ export class HiveMeetingDrone extends Drone {
     this.#emitStreams()
   }
 
+  /** Every face in seat order: the leader first — the centre hex
+   *  (meeting-video.drone.ts draws index 0 in the middle) — then by arrival. */
   #emitStreams = (): void => {
-    const streams = new Map<string, MediaStream>()
+    const byId = new Map<string, MediaStream>()
     for (const [id, peer] of this.#peers) {
-      if (peer.remoteStream.getTracks().length > 0) {
-        streams.set(id, peer.remoteStream)
-      }
+      if (peer.remoteStream.getTracks().length > 0) byId.set(id, peer.remoteStream)
     }
-    if (this.#localStream && this.#cameraOn) {
-      streams.set(this.#publisherId, this.#localStream)
+    if (this.#localStream && this.#cameraOn) byId.set(this.#publisherId, this.#localStream)
+    const streams = new Map<string, MediaStream>()
+    for (const member of seatOrder(this.#members())) {
+      const stream = byId.get(member.id)
+      if (stream) { streams.set(member.id, stream); byId.delete(member.id) }
     }
+    for (const [id, stream] of byId) streams.set(id, stream)
     this.emitEffect('meeting:streams', { streams })
   }
 
@@ -594,10 +932,12 @@ export class HiveMeetingDrone extends Drone {
   public get localAvailable(): boolean { return this.#localAvailable }
   public get cameraOn(): boolean { return this.#cameraOn }
   public get peerCount(): number { return this.#peers.size }
+  public get meetingSig(): string { return this.#currentSig }
 
   // ─── cleanup ─────────────────────────────────────────────────
 
   protected override dispose = (): void => {
+    if (this.#beat) { clearInterval(this.#beat); this.#beat = null }
     this.#endMeeting()
     if (this.#meshSub) {
       try { this.#meshSub.close() } catch { /* ignore */ }
