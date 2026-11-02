@@ -2164,6 +2164,8 @@
   "website-landing.close": "閉じる",
   "website-landing.empty": "ウェブサイトはまだありません。",
   "website-landing.remove": "ウェブサイト一覧から外す",
+  "recents-landing.title": "最近",
+  "recents-landing.lede": "このハイブが作ったすべてのタイルを、新しい順に。非表示のものは薄く表示され、消えることはありません。",
   "collections-landing.title": "ポータル",
   "collections-landing.lede": "参照セット — 一度集めれば、どこからでも参照できる素材のプール。開くか、下から新しいコレクションを作成しましょう。",
   "collections-landing.new": "新しいコレクション",

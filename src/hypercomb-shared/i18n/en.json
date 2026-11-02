@@ -2574,6 +2574,8 @@
   "website-landing.close": "Close",
   "website-landing.empty": "No websites yet.",
   "website-landing.remove": "Remove from Websites",
+  "recents-landing.title": "Recents",
+  "recents-landing.lede": "Every tile this hive ever made, newest first. Hidden ones are shaded, never gone.",
   "collections-landing.title": "Portals",
   "collections-landing.lede": "Reference sets — pools of material you gather once and point to from anywhere. Open one, or type a name to make it.",
   "collections-landing.new": "New collection",

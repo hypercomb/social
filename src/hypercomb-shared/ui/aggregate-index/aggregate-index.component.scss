@@ -269,6 +269,9 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
     background: rgba(var(--acc), 0.1);
     box-shadow: inset 2px 0 0 var(--accent, #{$steel});
   }
+  // Hidden, never absent: the recents census shades a hidden tile and keeps
+  // it in the list (codex H7). Still a row — still draggable, still openable.
+  &.is-shaded { opacity: 0.45; }
 
   // A tile is riding the pointer (portal-carry drag): every portal row is a
   // drop zone, and the one under the pointer says so louder. Quiet chrome —

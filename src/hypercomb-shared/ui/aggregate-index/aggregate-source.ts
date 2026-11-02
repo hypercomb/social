@@ -42,6 +42,9 @@ export interface AggregateItem {
   /** Content signature behind `image`, when the source has one. Used by
    *  ordinary full-size draft-tile rendering without decoding the object URL. */
   imageSig?: string
+  /** Drawn dimmed — a hidden tile in the recents census, which is shaded and
+   *  further out but never absent (codex H7). Never a filter. */
+  shaded?: boolean
 }
 
 /** One selectable VERSION of a row.

@@ -42,6 +42,10 @@ import { dropReferenceTile, dropTagsOnTile, safeCellName } from './aggregate-dro
 import type { DropTarget } from './aggregate-drop'
 import { onSelection, withSelectionService } from '../../core/selection-context'
 import type { RecentPortalsStore } from '../../core/recent-portals.store'
+// Recents — a hive's atoms by date — registers itself as a source here rather
+// than from the shell-surfaces barrel: that barrel is a ratchet that may only
+// shrink, and a source is data for THIS panel, not chrome of its own.
+import './sources/recents.source'
 
 /** Movement before a press counts as a drag rather than a click — small enough
  *  to feel immediate, large enough that a click that jitters still opens. */

@@ -223,6 +223,7 @@
             <li class="ai-row" [class.is-renaming]="renaming() === item.key"
                 [class.is-linked]="managingPage() && isLinked(item)"
                 [class.is-selected]="isSelected(item)"
+                [class.is-shaded]="item.shaded === true"
                 [class.is-portal-drop]="portalDropView() && portalCarryActive()"
                 [attr.data-portal-drop]="portalDropView() ? item.key : null"
                 [style.--accent]="accent(item.label)">
