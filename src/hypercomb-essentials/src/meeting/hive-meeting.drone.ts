@@ -26,7 +26,7 @@ import {
   Drone, EffectBus, EXTERNAL_CALL, REMOTE_SUBMIT, canonicalVerbOf, hypercomb, meetingPointKey,
   type ExternalCallRequest, type RemoteSubmitRequest,
 } from '@hypercomb/core'
-import { audioConstraints, bitrateOf, frameRateOf, isQuality, videoConstraints, type Quality } from './meeting-quality.js'
+import { audioConstraints, bitrateOf, frameRateOf, isQuality, qualityConstraints, videoConstraints, type Quality } from './meeting-quality.js'
 import { showsPicture } from './meeting-picture.js'
 import { followStep, followedBy, isFollowed, leaderOf, meetingAddress, meetingPreimage, originatorOf, pathKey, seatOrder, type Member } from './meeting-seats.js'
 import { isJoinedHere, ownZone, readTabZone } from '../sharing/membership.js'
@@ -270,10 +270,12 @@ export class HiveMeetingDrone extends Drone {
       this.#localAvailable = true
       this.#since = Date.now()
       this.#lastLeaderPath = null
-      // VIDEO IS OFF BY DEFAULT (jwize, 2026-11-02): a person joins with
-      // their voice only, and turns the camera on themselves.
+      // VIDEO IS OFF BY DEFAULT (jwize, 2026-11-02): a person joins sending
+      // their voice only. Their camera runs for THEM — "even off you need to
+      // see your video on your screen so you can see it works" — and reaches
+      // the others only when they turn it on.
       if (stream instanceof MediaStream) this.#acceptStream(stream)
-      else void this.#joinVoice()
+      else void this.#joinWithDevices()
       this.#setState('active')
       this.#lastAvailPublishMs = 0
       this.#publishAvailability()
@@ -691,11 +693,12 @@ export class HiveMeetingDrone extends Drone {
       for (const track of this.#localStream.getAudioTracks()) {
         transceivers.push(pc.addTransceiver(track, { direction: 'sendonly', streams: [this.#localStream] }))
       }
-      // The camera's slot is published whether the camera is on or not, so
-      // turning it on later is a track swapped into a sender, never a
-      // renegotiation. Off, the slot carries no frames.
+      // The camera's slot is published whether it is shared or not, so
+      // sharing later is a track swapped into a sender, never a
+      // renegotiation. Not shared, the slot carries no frames — the local
+      // preview runs all the same.
       const camera = this.#localStream.getVideoTracks()[0]
-      transceivers.push(camera
+      transceivers.push(camera && this.#cameraOn
         ? pc.addTransceiver(camera, { direction: 'sendonly', streams: [this.#localStream] })
         : pc.addTransceiver('video', { direction: 'sendonly', streams: [this.#localStream] }))
       const offer = await pc.createOffer()
@@ -710,6 +713,13 @@ export class HiveMeetingDrone extends Drone {
       this.#sfu = client
       this.#pc = pc
       this.#published = local
+      // Shared while this was starting: the camera goes into its slot now.
+      if (this.#cameraOn) {
+        const camera = this.#localStream?.getVideoTracks().find(t => t.readyState === 'live')
+        const mid = local.find(p => p.trackName.endsWith('-video'))?.mid
+        const sender = mid ? pc.getTransceivers().find(t => t.mid === mid)?.sender : undefined
+        if (camera && sender && !sender.track) await sender.replaceTrack(camera).catch(() => { /* ignore */ })
+      }
       this.#tuneSenders()
       this.#videoBeat = setInterval(() => {
         void this.#sfu?.beat().catch(() => { /* the next beat tries again */ })
@@ -838,83 +848,87 @@ export class HiveMeetingDrone extends Drone {
 
   // ─── camera ──────────────────────────────────────────────────
 
-  /** Accept a pre-acquired MediaStream (from the lobby's user gesture). The
-   *  voice goes in; the camera does not — video is off by default, and the
-   *  lobby's preview camera is let go here. */
+  /** Accept a pre-acquired MediaStream (from the lobby's user gesture, or
+   *  asked for at join). Its camera stays on as YOUR preview; what the others
+   *  get is the voice until the camera is shared. */
   #acceptStream = (stream: MediaStream): void => {
     if (this.#localStream && this.#localStream !== stream) {
       for (const track of this.#localStream.getTracks()) track.stop()
     }
-    for (const track of stream.getVideoTracks()) { track.stop(); stream.removeTrack(track) }
     this.#localStream = stream
     this.#cameraOn = false
+    const video = videoConstraints(this.#quality)
+    for (const track of stream.getVideoTracks()) void track.applyConstraints(video).catch(() => { /* keep what it has */ })
     this.emitEffect('meeting:local-camera', { on: false })
     window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: false } }))
     this.#emitStreams()
     void this.#startVideo()
   }
 
-  /** Joining without the lobby: the microphone only. No microphone (none, or
-   *  refused) still joins — you hear and see the others. */
-  #joinVoice = async (): Promise<void> => {
+  /** Joining without the lobby: camera and microphone, for the preview and
+   *  the voice. Without a camera, the microphone; without either, nothing —
+   *  you still hear and see the others. */
+  #joinWithDevices = async (): Promise<void> => {
     let stream: MediaStream
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints() })
+      stream = await navigator.mediaDevices.getUserMedia(qualityConstraints(this.#quality))
     } catch {
-      stream = new MediaStream()
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints() })
+      } catch {
+        stream = new MediaStream()
+      }
     }
     if (!this.#localAvailable) { for (const track of stream.getTracks()) track.stop(); return }
     this.#acceptStream(stream)
   }
 
-  /** Camera off: the video sender sends nothing. On: a fresh camera track
-   *  takes its place — no renegotiation, the SFU keeps the same track. */
+  /** Share the camera, or stop sharing it. Off, the video sender sends
+   *  nothing but the camera keeps running for your own preview. On, the
+   *  camera's track goes into the sender — no renegotiation, the SFU keeps
+   *  the same track. */
   #toggleCamera = async (): Promise<void> => {
-    // The video sender by the mid it was published under: with the camera off
-    // its track is null, so asking the track's kind would find nothing — or
-    // the microphone's sender.
+    // The video sender by the mid it was published under: not shared, its
+    // track is null, so asking the track's kind would find nothing — or the
+    // microphone's sender.
     const videoMid = this.#published.find(p => p.trackName.endsWith('-video'))?.mid
     const videoSender = videoMid ? this.#pc?.getTransceivers().find(t => t.mid === videoMid)?.sender : undefined
+    const say = (): void => {
+      this.emitEffect('meeting:local-camera', { on: this.#cameraOn })
+      window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: this.#cameraOn } }))
+      this.#emitStreams()
+    }
+    if (!this.#localStream) return say() // still joining: the devices are being asked for
     if (this.#cameraOn) {
-      for (const track of this.#localStream?.getVideoTracks() ?? []) track.stop()
       if (videoSender) await videoSender.replaceTrack(null).catch(() => { /* ignore */ })
       this.#cameraOn = false
-    } else {
-      let fresh: MediaStream
+      return say()
+    }
+    let track = this.#localStream.getVideoTracks().find(t => t.readyState === 'live')
+    if (!track) {
       try {
-        fresh = await navigator.mediaDevices.getUserMedia({ video: videoConstraints(this.#quality) })
+        const fresh = await navigator.mediaDevices.getUserMedia({ video: videoConstraints(this.#quality) })
+        track = fresh.getVideoTracks()[0]
       } catch (e) {
         console.warn('[hive-meeting] camera access denied:', e)
-        this.emitEffect('meeting:local-camera', { on: false })
-        window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: false } }))
-        return
+        return say()
       }
-      if (!this.#localStream) {
-        // Still joining (the microphone is being asked for): try again then.
-        for (const track of fresh.getTracks()) track.stop()
-        this.emitEffect('meeting:local-camera', { on: false })
-        window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: false } }))
-        return
-      }
-      const track = fresh.getVideoTracks()[0]
-      if (track) {
-        for (const old of this.#localStream.getVideoTracks()) this.#localStream.removeTrack(old)
-        this.#localStream.addTrack(track)
-        if (videoSender) await videoSender.replaceTrack(track).catch(() => { /* ignore */ })
-      }
-      this.#cameraOn = true
-      this.#tuneSenders()
+      if (!track) return say()
+      for (const old of this.#localStream.getVideoTracks()) this.#localStream.removeTrack(old)
+      this.#localStream.addTrack(track)
     }
-    this.emitEffect('meeting:local-camera', { on: this.#cameraOn })
-    window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: this.#cameraOn } }))
-    this.#emitStreams()
+    if (videoSender) await videoSender.replaceTrack(track).catch(() => { /* ignore */ })
+    this.#cameraOn = true
+    this.#tuneSenders()
+    say()
   }
 
   /** Every face in seat order: the leader first — the centre hex — then by
    *  arrival. */
   #emitStreams = (): void => {
     const byId = new Map<string, MediaStream>(this.#remoteStreams)
-    if (this.#localStream && this.#cameraOn && showsPicture(this.#localStream)) byId.set(this.#publisherId, this.#localStream)
+    // Your own face shows on YOUR screen whether it is shared or not.
+    if (this.#localStream && showsPicture(this.#localStream)) byId.set(this.#publisherId, this.#localStream)
     const streams = new Map<string, MediaStream>()
     for (const member of seatOrder(this.#members())) {
       const stream = byId.get(member.id)

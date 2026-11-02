@@ -1,9 +1,9 @@
 // meeting/meeting-picture.ts
 //
 // IS THERE A PICTURE? Video is off by default (jwize, 2026-11-02: "if we are
-// showing video we need it to be off by default"). A person whose camera is
-// off still sends a stream, for their voice, and the SFU still hands every
-// subscriber a video track for them: one that carries no frames, so the
+// showing video we need it to be off by default"). A person who has not shared
+// their video still sends a stream, for their voice, and the SFU still hands
+// every subscriber a video track for them: one that carries no frames, so the
 // browser marks it muted. A face is shown only where a live, unmuted video
 // track is; everywhere else the seat stays, and the sound still plays.
 

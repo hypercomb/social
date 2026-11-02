@@ -5,9 +5,10 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 /**
  * `meeting` — the swarm's meeting (hive-meeting.drone.ts, meeting-lobby.md).
  *
- *   meeting                   start it (or join it), camera OFF, and a
- *                             toast with the link to copy
- *   meeting camera            turn your camera on, or off again
+ *   meeting                   start it (or join it), your video NOT shared
+ *                             (you see it; nobody else does), and a toast
+ *                             with the link to copy
+ *   meeting camera            share your video, or stop sharing it
  *   meeting lobby             check your camera and the room's rules first
  *   meeting leave             leave it
  *   meeting lead 2            hand the lead to seat 2 (whoever started it)
@@ -31,7 +32,7 @@ export class MeetingQueenBee extends QueenBee {
   override examples = [
     { input: '/meeting', result: 'Starts the meeting of your swarm, or joins it, and copies its link' },
     { input: '/meeting lobby', result: 'Check your camera and the rules of the room before joining' },
-    { input: '/meeting camera', result: 'Turns your camera on, or off again (it starts off)' },
+    { input: '/meeting camera', result: 'Shares your video with the meeting, or stops sharing it (it starts unshared)' },
     { input: '/meeting leave', result: 'Leaves the meeting' },
     { input: '/meeting rules go create trait', result: 'The words the people following you allow: go, create, trait' },
   ]

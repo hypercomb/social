@@ -88,6 +88,7 @@ export class MeetingHiveElement extends HTMLElement {
   #stage!: HTMLElement
   #note!: HTMLElement
   #camera!: HTMLButtonElement
+  #shared = false
   #presence: Presence = {}
   #spend: Spend | null = null
   #streams = new Map<string, MediaStream>()
@@ -110,8 +111,9 @@ export class MeetingHiveElement extends HTMLElement {
     foot.className = 'mh-foot'
     this.#note = document.createElement('span')
     this.#note.className = 'mh-note'
-    // Video is off by default: the camera is turned on here, by the person.
-    this.#camera = this.#button(t('meeting.camera-on', 'camera on'), () => EffectBus.emitTransient('meeting:toggle-camera', {}))
+    // Video is off by default: your camera shows on your screen, and reaches
+    // the others when you share it, here.
+    this.#camera = this.#button(t('meeting.camera-share', 'share my video'), () => EffectBus.emitTransient('meeting:toggle-camera', {}))
     const copy = this.#button(t('meeting.copy-link', 'copy link'), () => EffectBus.emitTransient('meeting:copy-link', {}))
     const leave = this.#button(t('meeting.leave', 'leave'), () => EffectBus.emitTransient('meeting:leave', {}))
     const close = this.#button(t('meeting.hive-close', 'back to the hive'), () => EffectBus.emitTransient('meeting:view-toggle', { open: false }))
@@ -122,8 +124,10 @@ export class MeetingHiveElement extends HTMLElement {
       EffectBus.on<Presence>('meeting:presence', p => { this.#presence = p ?? {}; this.#paint() }),
       EffectBus.on<{ on?: boolean }>('meeting:local-camera', p => {
         const on = p?.on === true
-        this.#camera.textContent = on ? t('meeting.camera-off', 'camera off') : t('meeting.camera-on', 'camera on')
+        this.#shared = on
+        this.#camera.textContent = on ? t('meeting.camera-unshare', 'stop sharing my video') : t('meeting.camera-share', 'share my video')
         this.#camera.setAttribute('aria-pressed', String(on))
+        this.#paint()
       }),
       EffectBus.on<{ streams?: Map<string, MediaStream> }>('meeting:streams', p => {
         this.#streams = p?.streams instanceof Map ? p.streams : new Map()
@@ -193,9 +197,11 @@ export class MeetingHiveElement extends HTMLElement {
       hex.style.top = `${box.height / 2 + h * 0.75 * r}px`
       hex.dataset['leads'] = String(seat.leads)
       const who = seat.you ? t('meeting.you', 'you') : seat.id.slice(0, 6)
+      // Your own face is a preview until you share it: say so on it.
+      const unseen = seat.you && !this.#shared ? ` · ${t('meeting.only-you', 'only you see this')}` : ''
       const used = this.#spend?.byMember[seat.id]
       hex.querySelector('.mh-name')!.textContent =
-        `${seat.seat} · ${who}${seat.leads ? ` · ${t('meeting.leads', 'leads')}` : ''}${used === undefined ? '' : ` · ${gbText(used)}`}`
+        `${seat.seat} · ${who}${seat.leads ? ` · ${t('meeting.leads', 'leads')}` : ''}${used === undefined ? '' : ` · ${gbText(used)}`}${unseen}`
       const stream = this.#streams.get(seat.id)
       let video = this.#videos.get(seat.id)
       // A face only where a picture is: a camera that is off still sends a
