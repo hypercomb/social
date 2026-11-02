@@ -61,8 +61,12 @@ The participants' hive is a hive of just the people in the meeting: one
 hexagon each, the leader in the middle and the others around them in seat
 order, each with their video once it arrives (their seat number until then).
 It opens when you join, sits just below the command line (which stays on top
-and usable), and has share my video, copy link, share link, leave, and back
-to the hive.
+and usable), and has share my video, full screen, copy link, share link,
+leave, and back to the hive. Full screen is the whole page, so the command
+line stays on top. There is no screen share, on purpose: following the leader
+IS the shared screen, and it is live — each person's own hive, walked where
+the leader walks (jwize, 2026-11-02: "our screen share instead is totally
+interactive").
 Its videos are muted; the sound plays once, elsewhere.
 
 ## Following
