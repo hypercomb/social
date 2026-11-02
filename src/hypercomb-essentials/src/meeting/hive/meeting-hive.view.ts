@@ -58,6 +58,9 @@ const axialOf = (index: number): { q: number; r: number } => {
   return { q, r }
 }
 
+/** The foot bar's height: also the band the shell's bottom chrome stands on. */
+const FOOT_HEIGHT = '3.4rem'
+
 const STYLES = `
 ${TAG}{position:fixed;left:var(--hc-controls-left,0px);right:var(--hc-inset-right,0px);bottom:0;top:calc(var(--hc-header-bottom,2.75rem) + 0.35rem);
   z-index:59995;display:none;pointer-events:auto;
@@ -65,7 +68,7 @@ ${TAG}{position:fixed;left:var(--hc-controls-left,0px);right:var(--hc-inset-righ
   backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   color:var(--hc-window-ink, #f4f1ea);font:inherit;}
 ${TAG}[data-open="true"]{display:block;}
-${TAG} .mh-stage{position:absolute;inset:0 0 3.4rem 0;overflow:hidden;}
+${TAG} .mh-stage{position:absolute;inset:0 0 ${FOOT_HEIGHT} 0;overflow:hidden;}
 ${TAG} .mh-hex{position:absolute;width:var(--mh-w);height:calc(var(--mh-w) * 1.1547);
   transform:translate(-50%,-50%);clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
   background:color-mix(in srgb, currentColor 10%, transparent);transition:left .35s ease, top .35s ease;}
@@ -75,7 +78,7 @@ ${TAG} .mh-mark{position:absolute;inset:0;display:grid;place-items:center;font-s
 ${TAG} .mh-name{position:absolute;left:50%;bottom:16%;transform:translateX(-50%);white-space:nowrap;
   font-size:.72rem;letter-spacing:.02em;padding:.15em .55em;border-radius:999px;
   background:color-mix(in srgb, #000 55%, transparent);color:#fff;}
-${TAG} .mh-foot{position:absolute;left:0;right:0;bottom:0;height:3.4rem;display:flex;align-items:center;gap:.6rem;
+${TAG} .mh-foot{position:absolute;left:0;right:0;bottom:0;height:${FOOT_HEIGHT};display:flex;align-items:center;gap:.6rem;
   padding:0 1rem;box-shadow:inset 0 1px 0 color-mix(in srgb, currentColor 14%, transparent);}
 ${TAG} .mh-note{flex:1;font-size:.8rem;opacity:.75;}
 ${TAG} .mh-btn{appearance:none;border:0;font:inherit;font-size:.82rem;cursor:pointer;padding:.45em .9em;border-radius:3px;
@@ -114,10 +117,12 @@ export class MeetingHiveElement extends HTMLElement {
     // Video is off by default: your camera shows on your screen, and reaches
     // the others when you share it, here.
     this.#camera = this.#button(t('meeting.camera-share', 'share my video'), () => EffectBus.emitTransient('meeting:toggle-camera', {}))
-    const copy = this.#button(t('meeting.copy-link', 'copy link'), () => EffectBus.emitTransient('meeting:copy-link', {}))
+    const copy = this.#button(t('meeting.copy-link', 'copy link'), () => EffectBus.emitTransient('meeting:copy-link', { how: 'copy' }))
+    // The device's share sheet opens only from here, when pressed.
+    const share = this.#button(t('meeting.share-link', 'share link'), () => EffectBus.emitTransient('meeting:copy-link', { how: 'share' }))
     const leave = this.#button(t('meeting.leave', 'leave'), () => EffectBus.emitTransient('meeting:leave', {}))
     const close = this.#button(t('meeting.hive-close', 'back to the hive'), () => EffectBus.emitTransient('meeting:view-toggle', { open: false }))
-    foot.append(this.#note, this.#camera, copy, leave, close)
+    foot.append(this.#note, this.#camera, copy, share, leave, close)
     this.replaceChildren(this.#stage, foot)
 
     this.#off.push(
@@ -144,11 +149,20 @@ export class MeetingHiveElement extends HTMLElement {
     window.removeEventListener('resize', this.#resize)
     for (const video of this.#videos.values()) video.srcObject = null
     this.#videos.clear()
+    this.#holdBand(false)
   }
 
   set open(on: boolean) {
     this.dataset['open'] = String(on)
+    this.#holdBand(on)
     if (on) this.#paint()
+  }
+
+  /** The foot bar is a band along the bottom edge: while it shows, the shell's
+   *  bottom chrome (the pheromone strip, undo/redo, the pill) stands on it,
+   *  not over it — `--hc-band-bottom`, read by those elements. */
+  #holdBand(on: boolean): void {
+    try { document.documentElement.style.setProperty('--hc-band-bottom', on ? FOOT_HEIGHT : '0px') } catch { /* no document */ }
   }
 
   get open(): boolean { return this.dataset['open'] === 'true' }

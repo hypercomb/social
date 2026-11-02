@@ -38,7 +38,7 @@
 // session and in the link. A code typed after `code` is refused, and named so.
 
 import { EffectBus, get, I18N_IOC_KEY, meetingPointKey, type I18nProvider } from '@hypercomb/core'
-import { deliverLink } from './deliver-link.js'
+import { copyLink, deliverLink } from './deliver-link.js'
 import {
   MEETING_INVITE_KIND,
   MEETING_INVITE_VERSION,
@@ -102,7 +102,9 @@ export class InviteQueenBee {
    *  the room, never about a tile the facilitator happens to have selected;
    *  through invoke('') a selection turned them into the junction-bundle path
    *  (which needs host sync, or refuses). */
-  async meetingLink(): Promise<void> {
+  /** The meeting link, copied — or, only when asked (a Share button the
+   *  person pressed), offered through the device's share sheet. */
+  async meetingLink(how: 'copy' | 'share' = 'copy'): Promise<void> {
     const room = (get<CredStoreLike>(ROOM_KEY)?.value ?? '').trim()
     const secret = (get<CredStoreLike>(SECRET_KEY)?.value ?? '').trim()
     const nav = get<NavLike>(NAV_KEY)
@@ -114,7 +116,7 @@ export class InviteQueenBee {
       this.#toast('tip', 'Invite', 'Set a room and secret (go public) before sharing an invite.')
       return
     }
-    await this.#deliverMeetingLink(room, secret, nav)
+    await this.#deliverMeetingLink(room, secret, nav, how)
   }
 
   async invoke(args: string): Promise<void> {
@@ -273,7 +275,7 @@ export class InviteQueenBee {
   #signedLink = (room: string, secret: string, relay: string, code: string | undefined, page: readonly string[]): Promise<string> =>
     sealedRoomLink(room, secret, relay, code, page)
 
-  #deliverMeetingLink = async (room: string, secret: string, nav: NavLike): Promise<void> => {
+  #deliverMeetingLink = async (room: string, secret: string, nav: NavLike, how: 'copy' | 'share' = 'share'): Promise<void> => {
     let segs: readonly string[] | undefined
     if (isJoinedHere()) {
       try { segs = get<SwarmLike>(SWARM_KEY)?.currentSegments?.() } catch { segs = undefined }
@@ -317,7 +319,7 @@ export class InviteQueenBee {
     const url = signed || `${await landingOrigin(meetingPointKey(relay))}/${fragment}`
     const point = relay.replace(/^wss?:\/\//, '')
 
-    const delivery = await deliverLink(url, 'Hypercomb meeting')
+    const delivery = how === 'copy' ? await copyLink(url) : await deliverLink(url, 'Hypercomb meeting')
     // 'offered' already put the URL on screen behind a fresh-tap button.
     if (delivery !== 'offered') {
       const shared = delivery === 'shared'

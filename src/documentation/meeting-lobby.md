@@ -30,9 +30,13 @@ it — `meeting camera`, or the participants' hive's "share my video". A person
 who has not shared keeps their seat number on everyone else's screen, and
 their voice still plays.
 
-The link is copied for you (or shared, or shown to copy, as your device
-allows) — send it to bring someone in. They open it, join the swarm, and type
-`meeting`. Not in a swarm yet? `meeting` says so and offers to start one.
+The link is copied for you (or, where the browser will not copy without a
+fresh click, shown with a Copy button) — send it to bring someone in. The
+device's share sheet never opens by itself (jwize, 2026-11-02: "don't popup
+the share interface without warning make a button in the view for that"):
+it opens only from the participants' hive's **share link** button. They open
+the link, join the swarm, and type `meeting`. Not in a swarm yet? `meeting`
+says so and offers to start one.
 
 While a meeting is on, a chip sits on the command line: `meeting · 2`. Its
 roll-down lists the seats, who leads, whom you follow and what the room asks.
@@ -57,7 +61,8 @@ The participants' hive is a hive of just the people in the meeting: one
 hexagon each, the leader in the middle and the others around them in seat
 order, each with their video once it arrives (their seat number until then).
 It opens when you join, sits just below the command line (which stays on top
-and usable), and has share my video, copy link, leave, and back to the hive.
+and usable), and has share my video, copy link, share link, leave, and back
+to the hive.
 Its videos are muted; the sound plays once, elsewhere.
 
 ## Following

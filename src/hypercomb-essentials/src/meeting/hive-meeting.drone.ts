@@ -145,6 +145,8 @@ export class HiveMeetingDrone extends Drone {
   #published: { mid: string; trackName: string }[] = []
   /** Whom this person receives, and the mids that carry them. */
   #subscribed = new Map<string, string[]>()
+  #subTracks = new Map<string, { session: string; names: Set<string> }>()
+  #subscribing = new Set<string>()
   #midOwner = new Map<string, string>()
   #remoteStreams = new Map<string, MediaStream>()
   #localStream: MediaStream | null = null
@@ -310,7 +312,7 @@ export class HiveMeetingDrone extends Drone {
     // Not in a swarm, there is nowhere to meet yet: the toast's button opens
     // the swarm selector, one click from connected.
     this.onEffect('meeting:start', () => { void this.#start(join) })
-    this.onEffect('meeting:copy-link', () => { this.#copyLink() })
+    this.onEffect<{ how?: unknown }>('meeting:copy-link', p => { this.#copyLink(p?.how === 'share' ? 'share' : 'copy') })
 
     // `meeting lead <seat>` / `meeting lead me`: the originator hands the
     // lead over, or takes it back. Anyone else is told only they can.
@@ -427,9 +429,10 @@ export class HiveMeetingDrone extends Drone {
     void new hypercomb().act()
   }
 
-  #copyLink = (): void => {
-    const invite = window.ioc?.get<{ meetingLink?: () => Promise<void> }>('@diamondcoreprocessor.com/InviteQueenBee')
-    void invite?.meetingLink?.()
+  /** Copy the link — never the share sheet unless the person pressed Share. */
+  #copyLink = (how: 'copy' | 'share' = 'copy'): void => {
+    const invite = window.ioc?.get<{ meetingLink?: (how?: 'copy' | 'share') => Promise<void> }>('@diamondcoreprocessor.com/InviteQueenBee')
+    void invite?.meetingLink?.(how)
   }
 
   #start = async (join: (stream: unknown) => void): Promise<void> => {
@@ -453,9 +456,11 @@ export class HiveMeetingDrone extends Drone {
         : 'meeting: started; you lead, and whoever joins follows where you go',
       icon: '🐝',
     })
-    // The link, straight away: copied (or shared) where the device allows,
-    // else shown to copy — the invite's own delivery.
-    this.#copyLink()
+    // The link, straight away: COPIED, else shown with a Copy button. Never
+    // the share sheet unannounced (jwize, 2026-11-02: "don't popup the share
+    // interface without warning make a button in the view for that") — the
+    // participants' hive has Share for that.
+    this.#copyLink('copy')
   }
 
   #ensureIdentity = (): void => {
@@ -769,22 +774,32 @@ export class HiveMeetingDrone extends Drone {
     } catch { /* the next beat asks again */ }
   }
 
-  /** Subscribe to one person's published tracks, once. */
+  /** Subscribe to one person's published tracks — each of them once, and
+   *  again on their next heartbeat for any that did not come (a camera slot
+   *  the SFU had nothing on yet). A person who came back with a new session
+   *  is subscribed afresh. */
   async #subscribeTo(id: string): Promise<void> {
     const member = this.#heard.get(id)
     const client = this.#sfu
     const pc = this.#pc
-    if (!client || !pc || !member?.sfu || this.#subscribed.has(id)) return
-    this.#subscribed.set(id, [])
+    if (!client || !pc || !member?.sfu || this.#subscribing.has(id)) return
+    let held = this.#subTracks.get(id)
+    if (held && held.session !== member.sfu.session) { this.#dropMember(id); held = undefined }
+    const wanted = member.sfu.tracks.filter(name => !held?.names.has(name))
+    if (!wanted.length) return
+    this.#subscribing.add(id)
     try {
-      const answer = await client.subscribe(member.sfu.session, member.sfu.tracks)
-      const mids: string[] = []
-      for (const t of answer.tracks) {
-        if (t.error || !t.mid) continue
+      const answer = await client.subscribe(member.sfu.session, wanted)
+      const mids = this.#subscribed.get(id) ?? []
+      const names = held?.names ?? new Set<string>()
+      answer.tracks.forEach((t, i) => {
+        if (t.error || !t.mid) return
         this.#midOwner.set(String(t.mid), id)
         mids.push(String(t.mid))
-      }
+        names.add(String(t.trackName ?? wanted[i] ?? ''))
+      })
       this.#subscribed.set(id, mids)
+      this.#subTracks.set(id, { session: member.sfu.session, names })
       if (answer.offer) {
         await pc.setRemoteDescription({ type: 'offer', sdp: answer.offer })
         const local = await pc.createAnswer()
@@ -792,7 +807,9 @@ export class HiveMeetingDrone extends Drone {
         await client.renegotiate(local.sdp ?? '')
       }
     } catch {
-      this.#subscribed.delete(id) // the next heartbeat tries again
+      // the next heartbeat tries again, for whatever did not come
+    } finally {
+      this.#subscribing.delete(id)
     }
   }
 
@@ -800,6 +817,7 @@ export class HiveMeetingDrone extends Drone {
   #dropMember(id: string): void {
     const mids = this.#subscribed.get(id) ?? []
     this.#subscribed.delete(id)
+    this.#subTracks.delete(id)
     for (const mid of mids) this.#midOwner.delete(mid)
     if (mids.length) void this.#sfu?.close(mids).catch(() => { /* gone already */ })
     if (this.#remoteStreams.delete(id)) this.#emitStreams()
@@ -814,6 +832,8 @@ export class HiveMeetingDrone extends Drone {
     this.#sfu = null
     this.#published = []
     this.#subscribed.clear()
+    this.#subTracks.clear()
+    this.#subscribing.clear()
     this.#midOwner.clear()
     this.#remoteStreams.clear()
 

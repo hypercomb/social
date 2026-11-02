@@ -290,7 +290,10 @@ $actions-corner: 12rem;
 // undo/redo cluster, which is why the box stops a corner's width short of it.
 .tag-float {
   position: fixed;
-  bottom: 0.45rem;
+  // A band an overlay holds along the bottom edge (the meeting's participants'
+  // hive: its foot bar) lifts the strip above it (`--hc-band-bottom`, 0 when
+  // no such band is open).
+  bottom: calc(0.45rem + var(--hc-band-bottom, 0px));
   // BESIDE AN OPEN TOOLWINDOW, NOT UNDER IT. The strip is position:fixed
   // chrome like the breadcrumb and the undo/redo corner, so it reads the
   // reserved edges (core/viewport-inset-vars.ts) rather than the raw
@@ -485,7 +488,7 @@ $actions-corner: 12rem;
 
 .pill-stage {
   position: fixed;
-  bottom: 0.6rem;
+  bottom: calc(0.6rem + var(--hc-band-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 60000;
