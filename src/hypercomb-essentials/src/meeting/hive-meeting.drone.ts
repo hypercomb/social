@@ -28,7 +28,8 @@ import {
 } from '@hypercomb/core'
 import { bitrateOf, frameRateOf, isQuality, qualityConstraints, videoConstraints, type Quality } from './meeting-quality.js'
 import { followStep, followedBy, isFollowed, leaderOf, meetingAddress, meetingPreimage, originatorOf, pathKey, seatOrder, type Member } from './meeting-seats.js'
-import { isJoinedHere, ownZone } from '../sharing/membership.js'
+import { isJoinedHere, ownZone, readTabZone } from '../sharing/membership.js'
+import { SESSION_ID, SfuClient, sfuBase } from './sfu-client.js'
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
 type MeshSub = { close: () => void }
@@ -43,20 +44,18 @@ type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
 
 export type MeetingState = 'idle' | 'gathering' | 'active' | 'ended'
 
-type Heard = Member & { lastSeenMs: number; rules?: readonly string[] }
+type Heard = Member & { lastSeenMs: number; rules?: readonly string[]; sfu?: { session: string; tracks: readonly string[] } }
 
-type PeerConnection = {
-  publisherId: string
-  pc: RTCPeerConnection
-  remoteStream: MediaStream
-}
 
+// The SFU's own address arrives in its answer; Cloudflare's STUN helps the
+// browser find its way out. The only ICE server the shell's outgoing firewall
+// is to allow (documentation/meeting-lobby.md, "Video").
 const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ],
+  iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }],
+  bundlePolicy: 'max-bundle',
 }
+/** How often a session tells the meeting point it is still in use. */
+const VIDEO_BEAT_MS = 30_000
 
 const MEETING_KIND = 29010
 const AVAILABILITY_TTL_MS = 30_000
@@ -135,8 +134,18 @@ export class HiveMeetingDrone extends Drone {
   #lineSeq = 0
   #lastPresence = ''
 
-  // WebRTC
-  #peers = new Map<string, PeerConnection>()
+  // the video (Cloudflare's SFU)
+  #sfu: SfuClient | null = null
+  #pc: RTCPeerConnection | null = null
+  #videoStarting = false
+  #videoSaid = false
+  #videoBeat: ReturnType<typeof setInterval> | null = null
+  /** What this person publishes: mid and track name. */
+  #published: { mid: string; trackName: string }[] = []
+  /** Whom this person receives, and the mids that carry them. */
+  #subscribed = new Map<string, string[]>()
+  #midOwner = new Map<string, string>()
+  #remoteStreams = new Map<string, MediaStream>()
   #localStream: MediaStream | null = null
   #cameraOn = false
 
@@ -263,7 +272,6 @@ export class HiveMeetingDrone extends Drone {
       if (stream instanceof MediaStream) this.#acceptStream(stream)
       else void this.#toggleCamera()
       this.#setState('active')
-      this.#connectAll()
       this.#lastAvailPublishMs = 0
       this.#publishAvailability()
       this.#announcePresence()
@@ -509,7 +517,6 @@ export class HiveMeetingDrone extends Drone {
     if (!p || typeof p.type !== 'string') return
     switch (p.type) {
       case 'meeting-availability': this.#handleAvailability(p); break
-      case 'meeting-signal': this.#handleSignal(p); break
       case 'meeting-line': this.#handleLine(p); break
     }
   }
@@ -520,6 +527,11 @@ export class HiveMeetingDrone extends Drone {
     const id = typeof p.publisherId === 'string' ? p.publisherId : ''
     if (!id || id === this.#publisherId) return
     const isNew = !this.#heard.has(id)
+    const sfuSession = typeof p.sfu?.session === 'string' && SESSION_ID.test(p.sfu.session) ? p.sfu.session : ''
+    const sfuTracks = Array.isArray(p.sfu?.tracks)
+      ? p.sfu.tracks.map((t: unknown) => String(t ?? '')).filter((t: string) => /^[A-Za-z0-9_.:-]{1,96}$/.test(t)).slice(0, 4)
+      : []
+    const sfu = sfuSession && sfuTracks.length ? { session: sfuSession, tracks: sfuTracks } : undefined
     const since = Number(p.since)
     const path = Array.isArray(p.path) ? p.path.map((s: unknown) => String(s ?? '')).filter(Boolean).slice(0, 64) : undefined
     this.#heard.set(id, {
@@ -527,11 +539,12 @@ export class HiveMeetingDrone extends Drone {
       since: Number.isFinite(since) && since > 0 ? since : Date.now(),
       ...(path ? { path } : {}),
       rules: cleanRules(p.rules),
+      ...(sfu ? { sfu } : {}),
       lead: typeof p.lead === 'string' ? p.lead : '',
       follows: typeof p.follows === 'string' ? p.follows : '',
       lastSeenMs: Date.now(),
     })
-    if (this.#localAvailable && !this.#peers.has(id)) this.#createPeerConnection(id, true)
+    if (this.#localAvailable && sfu) void this.#subscribeTo(id)
     // Someone new: say who we are at once, rather than at our next beat.
     if (isNew && this.#localAvailable) { this.#lastAvailPublishMs = 0; this.#publishAvailability() }
     this.#follow()
@@ -567,6 +580,7 @@ export class HiveMeetingDrone extends Drone {
       rules: this.#ownRules,
       lead: this.#lead,
       follows: this.#following,
+      ...(this.#sfu && this.#published.length ? { sfu: { session: this.#sfu.sessionId, tracks: this.#published.map(t => t.trackName) } } : {}),
       ts: now,
     }, [
       ['publisher', this.#publisherId],
@@ -579,7 +593,7 @@ export class HiveMeetingDrone extends Drone {
     for (const [id, entry] of this.#heard) {
       if (now - entry.lastSeenMs > AVAILABILITY_TTL_MS) {
         this.#heard.delete(id)
-        this.#removePeer(id)
+        this.#dropMember(id)
       }
     }
   }
@@ -642,22 +656,114 @@ export class HiveMeetingDrone extends Drone {
     window.dispatchEvent(new CustomEvent('meeting:state', { detail: { state: next, threshold: 1 } }))
   }
 
-  /** Connect to everyone already here. Lower id offers (createPeerConnection). */
-  #connectAll = (): void => {
-    for (const [id] of this.#heard) {
-      if (this.#peers.has(id)) continue
-      this.#createPeerConnection(id, true)
+  // ─── the video, through Cloudflare's SFU (sfu-client.ts) ─────────────
+  //
+  // One peer connection per person, to the SFU at the meeting point: publish
+  // your camera and microphone once, subscribe to everyone else's. Nobody
+  // connects to anybody else, so nobody learns another person's address.
+  // Video that cannot start (not set up, the month's budget used, a firewall)
+  // is said once; the meeting goes on without it.
+
+  async #startVideo(): Promise<void> {
+    if (this.#pc || this.#videoStarting || !this.#localAvailable || !this.#localStream || !this.#currentSig) return
+    this.#videoStarting = true
+    try {
+      let relay = ''
+      try { relay = this.resolve<MeshApi>('mesh')?.meetingRelay?.() ?? '' } catch { relay = '' }
+      const base = sfuBase(relay)
+      if (!base) throw new Error('this swarm meets at no address video can reach')
+      const client = new SfuClient({ base, meeting: this.#currentSig, access: readTabZone()?.code ?? '' })
+      await client.open()
+      const pc = new RTCPeerConnection(RTC_CONFIG)
+      pc.ontrack = (e: RTCTrackEvent) => {
+        const owner = this.#midOwner.get(e.transceiver?.mid ?? '')
+        if (!owner) return
+        let stream = this.#remoteStreams.get(owner)
+        if (!stream) { stream = new MediaStream(); this.#remoteStreams.set(owner, stream) }
+        stream.addTrack(e.track)
+        this.#emitStreams()
+      }
+      const local: { mid: string; trackName: string }[] = []
+      const transceivers: RTCRtpTransceiver[] = []
+      for (const track of this.#localStream.getTracks()) {
+        transceivers.push(pc.addTransceiver(track, { direction: 'sendonly', streams: [this.#localStream] }))
+      }
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      for (const t of transceivers) {
+        if (t.mid && t.sender.track) local.push({ mid: t.mid, trackName: `${this.#publisherId}-${t.sender.track.kind}` })
+      }
+      const answer = await client.publish(offer.sdp ?? '', local)
+      await pc.setRemoteDescription({ type: 'answer', sdp: answer })
+      if (!this.#localAvailable) { pc.close(); return } // left while it started
+      this.#sfu = client
+      this.#pc = pc
+      this.#published = local
+      this.#tuneSenders()
+      this.#videoBeat = setInterval(() => { void this.#sfu?.beat().catch(() => { /* the next beat tries again */ }) }, VIDEO_BEAT_MS)
+      this.#lastAvailPublishMs = 0
+      this.#publishAvailability()
+      for (const id of this.#heard.keys()) void this.#subscribeTo(id)
+    } catch (error) {
+      if (!this.#videoSaid) {
+        this.#videoSaid = true
+        EffectBus.emit('activity:log', {
+          message: `meeting: no video between people — ${String((error as Error)?.message ?? error)}. The meeting goes on without it.`,
+          icon: '📷',
+        })
+      }
+    } finally {
+      this.#videoStarting = false
     }
   }
 
-  // ─── WebRTC connection management ───────────────────────────
+  /** Subscribe to one person's published tracks, once. */
+  async #subscribeTo(id: string): Promise<void> {
+    const member = this.#heard.get(id)
+    const client = this.#sfu
+    const pc = this.#pc
+    if (!client || !pc || !member?.sfu || this.#subscribed.has(id)) return
+    this.#subscribed.set(id, [])
+    try {
+      const answer = await client.subscribe(member.sfu.session, member.sfu.tracks)
+      const mids: string[] = []
+      for (const t of answer.tracks) {
+        if (t.error || !t.mid) continue
+        this.#midOwner.set(String(t.mid), id)
+        mids.push(String(t.mid))
+      }
+      this.#subscribed.set(id, mids)
+      if (answer.offer) {
+        await pc.setRemoteDescription({ type: 'offer', sdp: answer.offer })
+        const local = await pc.createAnswer()
+        await pc.setLocalDescription(local)
+        await client.renegotiate(local.sdp ?? '')
+      }
+    } catch {
+      this.#subscribed.delete(id) // the next heartbeat tries again
+    }
+  }
+
+  /** Someone left: stop receiving them. */
+  #dropMember(id: string): void {
+    const mids = this.#subscribed.get(id) ?? []
+    this.#subscribed.delete(id)
+    for (const mid of mids) this.#midOwner.delete(mid)
+    if (mids.length) void this.#sfu?.close(mids).catch(() => { /* gone already */ })
+    if (this.#remoteStreams.delete(id)) this.#emitStreams()
+  }
 
   #endMeeting = (): void => {
-    // close all peer connections
-    for (const [, peer] of this.#peers) {
-      try { peer.pc.close() } catch { /* ignore */ }
-    }
-    this.#peers.clear()
+    if (this.#videoBeat) { clearInterval(this.#videoBeat); this.#videoBeat = null }
+    const mids = [...this.#published.map(t => t.mid), ...[...this.#subscribed.values()].flat()]
+    if (this.#sfu && mids.length) void this.#sfu.close(mids).catch(() => { /* the session expires anyway */ })
+    try { this.#pc?.close() } catch { /* ignore */ }
+    this.#pc = null
+    this.#sfu = null
+    this.#published = []
+    this.#subscribed.clear()
+    this.#midOwner.clear()
+    this.#remoteStreams.clear()
 
     // stop local media
     if (this.#localStream) {
@@ -671,251 +777,82 @@ export class HiveMeetingDrone extends Drone {
     window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: false } }))
   }
 
-  #createPeerConnection = (remoteId: string, initiator: boolean): void => {
-    const pc = new RTCPeerConnection(RTC_CONFIG)
-    const remoteStream = new MediaStream()
-
-    const entry: PeerConnection = { publisherId: remoteId, pc, remoteStream }
-    this.#peers.set(remoteId, entry)
-
-    // handle incoming tracks
-    pc.ontrack = (e) => {
-      for (const track of e.streams[0]?.getTracks() ?? [e.track]) {
-        remoteStream.addTrack(track)
-      }
-      this.#emitStreams()
-    }
-
-    // send ICE candidates over mesh
-    pc.onicecandidate = (e) => {
-      if (!e.candidate) return
-      this.#sendSignal(remoteId, {
-        subtype: 'ice-candidate',
-        candidate: e.candidate.toJSON(),
-      })
-    }
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        this.#removePeer(remoteId)
-      } else if (pc.connectionState === 'connected') {
-        // the encodings only exist once negotiated, and the share each peer
-        // gets depends on how many are open — retune them all
-        this.#tuneSenders()
-      }
-    }
-
-    // add local tracks if camera is on
-    if (this.#localStream) {
-      for (const track of this.#localStream.getTracks()) {
-        pc.addTrack(track, this.#localStream)
-      }
-    }
-
-    if (initiator) {
-      // deterministic tie-breaking: lower publisherId initiates
-      if (this.#publisherId < remoteId) {
-        void this.#createOffer(remoteId, pc)
-      }
-    }
-  }
-
-  #createOffer = async (remoteId: string, pc: RTCPeerConnection): Promise<void> => {
-    try {
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      this.#sendSignal(remoteId, { subtype: 'offer', sdp: offer.sdp })
-    } catch (e) {
-      console.warn('[hive-meeting] offer error:', e)
-    }
-  }
-
-  #handleSignal = (p: any): void => {
-    const from = p.from as string
-    const to = p.to as string
-    if (!from || !to) return
-    if (to !== this.#publisherId) return // not for us
-    if (from === this.#publisherId) return
-
-    switch (p.subtype) {
-      case 'offer':
-        void this.#handleOffer(from, p.sdp)
-        break
-      case 'answer':
-        void this.#handleAnswer(from, p.sdp)
-        break
-      case 'ice-candidate':
-        void this.#handleIceCandidate(from, p.candidate)
-        break
-    }
-  }
-
-  #handleOffer = async (from: string, sdp: string): Promise<void> => {
-    if (!this.#peers.has(from)) {
-      this.#createPeerConnection(from, false)
-    }
-    const peer = this.#peers.get(from)
-    if (!peer) return
-
-    try {
-      await peer.pc.setRemoteDescription({ type: 'offer', sdp })
-      const answer = await peer.pc.createAnswer()
-      await peer.pc.setLocalDescription(answer)
-      this.#sendSignal(from, { subtype: 'answer', sdp: answer.sdp })
-    } catch (e) {
-      console.warn('[hive-meeting] answer error:', e)
-    }
-  }
-
-  #handleAnswer = async (from: string, sdp: string): Promise<void> => {
-    const peer = this.#peers.get(from)
-    if (!peer) return
-    try {
-      await peer.pc.setRemoteDescription({ type: 'answer', sdp })
-    } catch (e) {
-      console.warn('[hive-meeting] set-answer error:', e)
-    }
-  }
-
-  #handleIceCandidate = async (from: string, candidate: any): Promise<void> => {
-    const peer = this.#peers.get(from)
-    if (!peer) return
-    try {
-      await peer.pc.addIceCandidate(new RTCIceCandidate(candidate))
-    } catch (e) {
-      console.warn('[hive-meeting] ice error:', e)
-    }
-  }
-
-  #sendSignal = (to: string, data: Record<string, any>): void => {
-    const mesh = this.resolve<MeshApi>('mesh')
-    if (!mesh || typeof mesh.publish !== 'function') return
-
-    void mesh.publish(29010, this.#currentSig, {
-      type: 'meeting-signal',
-      from: this.#publisherId,
-      to,
-      ...data,
-    }, [
-      ['publisher', this.#publisherId],
-      ['mode', 'meeting-signal'],
-    ])
-  }
-
-  #removePeer = (id: string): void => {
-    const peer = this.#peers.get(id)
-    if (!peer) return
-    try { peer.pc.close() } catch { /* ignore */ }
-    this.#peers.delete(id)
-    this.#tuneSenders() // one fewer peer: the rest can take a bigger share
-    this.#emitStreams()
-  }
-
-  /** Give every open connection its share of the uplink budget. Best effort —
-   *  a browser that refuses `setParameters` just keeps its own rate control. */
+  /** The picture the lobby chose, on the one sender that carries it. */
   #tuneSenders = (): void => {
-    const maxBitrate = bitrateOf(this.#quality, this.#peers.size)
+    const pc = this.#pc
+    if (!pc) return
+    const maxBitrate = bitrateOf(this.#quality, 1)
     const maxFramerate = frameRateOf(this.#quality)
-    for (const [, peer] of this.#peers) {
-      for (const sender of peer.pc.getSenders()) {
-        if (sender.track?.kind !== 'video') continue
-        const params = sender.getParameters()
-        if (!params.encodings?.length) continue // not negotiated yet
-        params.encodings[0].maxBitrate = maxBitrate
-        params.encodings[0].maxFramerate = maxFramerate
-        sender.setParameters(params).catch(() => { /* best effort */ })
-      }
+    for (const sender of pc.getSenders()) {
+      if (sender.track?.kind !== 'video') continue
+      const params = sender.getParameters()
+      if (!params.encodings?.length) continue
+      params.encodings[0]!.maxBitrate = maxBitrate
+      params.encodings[0]!.maxFramerate = maxFramerate
+      sender.setParameters(params).catch(() => { /* best effort */ })
     }
   }
 
   // ─── camera ──────────────────────────────────────────────────
 
-  /** Accept a pre-acquired MediaStream (from UI user gesture) */
+  /** Accept a pre-acquired MediaStream (from the lobby's user gesture). */
   #acceptStream = (stream: MediaStream): void => {
-    if (this.#localStream) {
+    if (this.#localStream && this.#localStream !== stream) {
       for (const track of this.#localStream.getTracks()) track.stop()
     }
     this.#localStream = stream
     this.#cameraOn = true
-
-    // a stream opened elsewhere may be at the browser's default size — ask its
-    // camera for the picture that was chosen (a no-op when the lobby opened it)
     const video = videoConstraints(this.#quality)
     for (const track of stream.getVideoTracks()) void track.applyConstraints(video).catch(() => { /* keep what it has */ })
-
-    // add tracks to all existing peer connections
-    for (const [, peer] of this.#peers) {
-      for (const track of stream.getTracks()) {
-        peer.pc.addTrack(track, stream)
-      }
-    }
-
-    // renegotiate with all peers
-    for (const [id, peer] of this.#peers) {
-      if (this.#publisherId < id) {
-        void this.#createOffer(id, peer.pc)
-      }
-    }
-
     this.emitEffect('meeting:local-camera', { on: true })
     window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: true } }))
     this.#emitStreams()
+    void this.#startVideo()
   }
 
+  /** Camera off: the video sender sends nothing. On: a fresh camera track
+   *  takes its place — no renegotiation, the SFU keeps the same track. */
   #toggleCamera = async (): Promise<void> => {
+    // The video sender by the mid it was published under: with the camera off
+    // its track is null, so asking the track's kind would find nothing — or
+    // the microphone's sender.
+    const videoMid = this.#published.find(p => p.trackName.endsWith('-video'))?.mid
+    const videoSender = videoMid ? this.#pc?.getTransceivers().find(t => t.mid === videoMid)?.sender : undefined
     if (this.#cameraOn) {
-      // turn off
-      if (this.#localStream) {
-        for (const track of this.#localStream.getTracks()) track.stop()
-        this.#localStream = null
-      }
-      // remove tracks from all peer connections
-      for (const [, peer] of this.#peers) {
-        for (const sender of peer.pc.getSenders()) {
-          if (sender.track) peer.pc.removeTrack(sender)
-        }
-      }
+      for (const track of this.#localStream?.getVideoTracks() ?? []) track.stop()
+      if (videoSender) await videoSender.replaceTrack(null).catch(() => { /* ignore */ })
       this.#cameraOn = false
     } else {
-      // turn on
+      let fresh: MediaStream
       try {
-        this.#localStream = await navigator.mediaDevices.getUserMedia(qualityConstraints(this.#quality))
+        fresh = await navigator.mediaDevices.getUserMedia(qualityConstraints(this.#quality))
       } catch (e) {
         console.warn('[hive-meeting] camera access denied:', e)
-        this.#cameraOn = false
         this.emitEffect('meeting:local-camera', { on: false })
         window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: false } }))
         return
       }
+      if (!this.#localStream) {
+        this.#acceptStream(fresh)
+        return
+      }
+      const track = fresh.getVideoTracks()[0]
+      if (track) {
+        for (const old of this.#localStream.getVideoTracks()) this.#localStream.removeTrack(old)
+        this.#localStream.addTrack(track)
+        if (videoSender) await videoSender.replaceTrack(track).catch(() => { /* ignore */ })
+      }
       this.#cameraOn = true
-
-      // add tracks to all existing peer connections
-      for (const [, peer] of this.#peers) {
-        for (const track of this.#localStream.getTracks()) {
-          peer.pc.addTrack(track, this.#localStream)
-        }
-      }
-
-      // renegotiate with all peers
-      for (const [id, peer] of this.#peers) {
-        if (this.#publisherId < id) {
-          void this.#createOffer(id, peer.pc)
-        }
-      }
     }
-
     this.emitEffect('meeting:local-camera', { on: this.#cameraOn })
     window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: this.#cameraOn } }))
     this.#emitStreams()
   }
 
-  /** Every face in seat order: the leader first — the centre hex
-   *  (meeting-video.drone.ts draws index 0 in the middle) — then by arrival. */
+  /** Every face in seat order: the leader first — the centre hex — then by
+   *  arrival. */
   #emitStreams = (): void => {
-    const byId = new Map<string, MediaStream>()
-    for (const [id, peer] of this.#peers) {
-      if (peer.remoteStream.getTracks().length > 0) byId.set(id, peer.remoteStream)
-    }
+    const byId = new Map<string, MediaStream>(this.#remoteStreams)
     if (this.#localStream && this.#cameraOn) byId.set(this.#publisherId, this.#localStream)
     const streams = new Map<string, MediaStream>()
     for (const member of seatOrder(this.#members())) {
@@ -931,7 +868,7 @@ export class HiveMeetingDrone extends Drone {
   public get meetingState(): MeetingState { return this.#state }
   public get localAvailable(): boolean { return this.#localAvailable }
   public get cameraOn(): boolean { return this.#cameraOn }
-  public get peerCount(): number { return this.#peers.size }
+  public get peerCount(): number { return this.#remoteStreams.size }
   public get meetingSig(): string { return this.#currentSig }
 
   // ─── cleanup ─────────────────────────────────────────────────
