@@ -13,12 +13,12 @@ export class CommunityQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'sharing'
   readonly command = 'community'
-  override description = 'Manage the groups of your showcase — which tiles are on, and for whom'
+  override description = 'Manage the groups of your community — which tiles are on, and for whom'
   override descriptionKey = 'slash.community'
   override options = ['<domain>', 'publish']
   override examples = [
     { input: '/community example.com', result: 'Opens the community of example.com' },
-    { input: '/community publish', result: 'Signs the showcase for visitors' },
+    { input: '/community publish', result: 'Signs the community for visitors' },
   ]
 
   override rawArgs = true

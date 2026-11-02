@@ -68,6 +68,9 @@
               (click)="tab.set('groups')">{{ 'publish.groups' | t }}@if (groupsHere().length > 0) { ({{ groupsHere().length }})}</button>
     </div>
 
+    <!-- THE ONE SCROLLER: header, status and tabs stay put; whichever tab is
+         open scrolls beneath them. -->
+    <div class="publish-scroll">
     @if (tab() === 'list') {
     <!-- THE LAYER YOU ARE ON — like behaviours. The heading is the tile;
          under it, every domain you carry, each one switch: on = this branch
@@ -786,5 +789,6 @@
         </div>
       }
     }
+    </div>
   </aside>
 }

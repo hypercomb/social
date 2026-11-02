@@ -2107,7 +2107,7 @@
   "bridge.unavailable": "Bridge codes are not kept here",
   "bridge.code-on-line": "Not added — a bridge code goes in the prompt, never on the line. The command history keeps only \"bridge add {name}\"; if anyone saw the code, give {name} a new one instead (bridge give {name})",
   "bridge.one-name": "Not given — bridge give takes one word, the name. The command history keeps only \"bridge give {name}\"",
-  "slash.community": "Manage the groups of your showcase - which tiles are on",
+  "slash.community": "Manage the groups of your community - which tiles are on",
   "slash.private": "Seal the page you stand on to the people you name - hosts carry ciphertext only",
   "slash.republish": "Publish again every published page that has changed since it went out",
   "slash.follow": "Follow a domain — read what is published there",

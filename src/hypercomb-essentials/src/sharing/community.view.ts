@@ -73,7 +73,7 @@ export class CommunityView extends EventTarget {
     const pubkey = String(await publisherKeyHex().catch(() => '') ?? '').toLowerCase()
     if (!SIG.test(pubkey)) { say('community needs your publishing key, and this hive has none yet', 'warning'); return }
     const [options, signed] = await Promise.all([candidates(target, pubkey), readSignedShowcase(target).catch(() => {
-      say('The showcase could not be read.', 'warning'); return undefined
+      say('The community could not be read.', 'warning'); return undefined
     })])
     if (signed === undefined) return
     this.#options = options
@@ -108,14 +108,14 @@ export class CommunityView extends EventTarget {
     if (!draft) { say('Open the community first — community <domain>', 'warning'); return }
     const record = draft.current
     const ok = await requestConfirm({
-      title: 'Publish your showcase',
-      message: `Visitors of ${record.zone} will see this showcase: ${record.items.length} tiles, ${(record.communities ?? []).length} groups.`,
+      title: 'Publish your community',
+      message: `Visitors of ${record.zone} will see this community: ${record.items.length} tiles, ${(record.communities ?? []).length} groups.`,
       confirmLabel: 'Publish',
       cancelLabel: 'Cancel',
     })
     if (!ok) return
     const result = await signShowcase(record)
-    say(result.ok ? `Showcase published for ${record.zone}` : `Showcase not published: ${result.reason}`, result.ok ? 'success' : 'error')
+    say(result.ok ? `Community published for ${record.zone}` : `Community not published: ${result.reason}`, result.ok ? 'success' : 'error')
   }
 
   #pages(): string[] { return ['', ...(this.#draft?.current.communities ?? []).map(row => communityKey(row.name))] }
@@ -248,7 +248,7 @@ export class CommunityView extends EventTarget {
     undo.disabled = !draft.canUndo
     const redo = this.#button('↷', () => this.#redo(), 'Redo')
     redo.disabled = !draft.canRedo
-    const publish = this.#button('Publish', () => { void this.publish() }, 'Sign this showcase for visitors')
+    const publish = this.#button('Publish', () => { void this.publish() }, 'Sign this community for visitors')
     publish.classList.add('primary')
     tools.append(undo, redo, publish)
 

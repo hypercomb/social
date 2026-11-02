@@ -1705,7 +1705,7 @@
   "bridge.unavailable": "ここではブリッジコードを保持しません",
   "bridge.code-on-line": "追加しませんでした — ブリッジコードは行ではなくプロンプトに入力します。コマンド履歴には「bridge add {name}」だけが残ります。コードを誰かに見られたなら、代わりに {name} に新しいコードを渡してください (bridge give {name})",
   "bridge.one-name": "渡しませんでした — bridge give が受け取るのは名前の一語だけです。コマンド履歴には「bridge give {name}」だけが残ります",
-  "slash.community": "ショーケースのグループを管理する",
+  "slash.community": "コミュニティのグループを管理する",
   "slash.private": "今いるページを指定した人にだけ開けるように封印する",
   "slash.republish": "変更された公開ページをすべて再公開する",
   "slash.follow": "ドメインをフォローする — そこで公開されているものを読む",
