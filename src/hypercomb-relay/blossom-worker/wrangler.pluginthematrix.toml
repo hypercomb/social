@@ -205,12 +205,16 @@ id = "186c91f7458b421abea02d7647f27821"
 # serves exactly as before (meetingPointFor falls through), so leaving either
 # commented is always safe.
 # MEET_OPEN is LIVE (hypercomb-meet-open deployed 2026-10-11): the open default.
+# MEET is LIVE (hypercomb-meet deployed 2026-11-02 with video, jwize: "make
+# the PR for pluginthematrix"): private meetings at pluginthematrix.com. It
+# opens to nobody until its operator sets the first access code
+# (meet-worker: OPERATOR_KEYS, then `npm run recycle`).
 [[services]]
 binding = "MEET_OPEN"
 service = "hypercomb-meet-open"
-# [[services]]
-# binding = "MEET"
-# service = "hypercomb-meet"
+[[services]]
+binding = "MEET"
+service = "hypercomb-meet"
 
 [vars]
 # WHO SPEAKS FOR A ZONE (worker.js siteOperators): the operator's signed index
@@ -265,7 +269,6 @@ PEOPLE_QUOTA_BYTES = "1073741824"   # 1 GiB for each of the host's people per GR
 # The hosts whose WebSocket dials are a meeting point's (the bindings above),
 # on any path. Comma separated; a host must also be routed to this worker, and
 # a host named in both lists is open (MEET_OPEN) and never the coded script's.
-# Inert while its binding stays commented out.
 #   MEET_OPEN_HOSTS  hypercomb.com — THE SHIPPED DEFAULT (nostr-mesh
 #                    LIVE_RELAY), OPEN. An ORIGIN_HOSTS apex: only the
 #                    upgrade, the NIP-11 answer (Accept:

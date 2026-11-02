@@ -6,6 +6,7 @@ import { Drone } from '@hypercomb/core'
 import { Application, Container, Graphics, Sprite, Texture } from 'pixi.js'
 import type { HexGeometry } from '../presentation/grid/hex-geometry.js'
 import type { MeetingState } from './hive-meeting.drone.js'
+import { showsPicture } from './meeting-picture.js'
 
 type HostReadyPayload = { app: Application; container: Container; canvas: HTMLCanvasElement; renderer: any }
 type CellCountPayload = { count: number; labels: string[] }
@@ -201,9 +202,11 @@ export class MeetingVideoDrone extends Drone {
       // update canvas from video
       this.#updateVideoTexture(slot)
 
-      // fade
-      if (Math.abs(slot.alpha - slot.fadeTarget) > 0.001) {
-        slot.alpha += (slot.fadeTarget - slot.alpha) * FADE_SPEED * 60 * (this.#app!.ticker.deltaMS / 1000)
+      // fade — toward nothing while the camera is off: the slot stays (its
+      // element plays the voice) but no black face is painted
+      const target = showsPicture(slot.video.srcObject as MediaStream | null) ? slot.fadeTarget : 0
+      if (Math.abs(slot.alpha - target) > 0.001) {
+        slot.alpha += (target - slot.alpha) * FADE_SPEED * 60 * (this.#app!.ticker.deltaMS / 1000)
         slot.sprite.alpha = slot.alpha
 
         if (slot.alpha < 0.005 && slot.fadeTarget === 0) {

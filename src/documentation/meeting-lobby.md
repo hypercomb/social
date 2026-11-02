@@ -17,8 +17,16 @@ allows or disallows the words it uses. No code is sent: only directions.
 ## Starting and joining
 
 ```
-meeting                 start the meeting, or join it — on camera at once
+meeting                 start the meeting, or join it — camera off
+meeting camera          turn your camera on, or off again
 ```
+
+**Video is off by default** (jwize, 2026-11-02: "if we are showing video we
+need it to be off by default"). You join with your voice only; nobody sees
+you until you turn the camera on — `meeting camera`, or the participants'
+hive's camera button. The lobby's preview is only a check: joining from it
+lets that camera go. A person with the camera off keeps their seat number in
+the hive, and their voice still plays.
 
 The link is copied for you (or shared, or shown to copy, as your device
 allows) — send it to bring someone in. They open it, join the swarm, and type
@@ -47,8 +55,8 @@ The participants' hive is a hive of just the people in the meeting: one
 hexagon each, the leader in the middle and the others around them in seat
 order, each with their video once it arrives (their seat number until then).
 It opens when you join, sits just below the command line (which stays on top
-and usable), and has copy link, leave, and back to the hive. Its videos are
-muted; the sound plays once, elsewhere.
+and usable), and has camera on/off, copy link, leave, and back to the hive.
+Its videos are muted; the sound plays once, elsewhere.
 
 ## Following
 
