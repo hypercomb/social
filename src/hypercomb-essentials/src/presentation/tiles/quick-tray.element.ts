@@ -107,6 +107,8 @@ const STYLE = `
   border:1px solid transparent;cursor:grab;white-space:nowrap;touch-action:none;}
 .row:hover{border-color:var(--hc-window-accent-quiet,rgba(126,182,214,0.45));background:var(--hc-window-wash,rgba(126,182,214,0.08));}
 .row.lifted{opacity:0.45;}
+@keyframes hc-tray-taken{from{background:var(--hc-window-tint-strong,rgba(126,182,214,0.45));}to{background:transparent;}}
+.taken{animation:hc-tray-taken 700ms ease-out;}
 .thumb{width:1.6rem;height:1.6rem;display:inline-grid;place-items:center;overflow:hidden;}
 .thumb img{width:100%;height:100%;object-fit:contain;display:block;}
 .glyph{width:1.6rem;text-align:center;color:var(--hc-window-accent,rgb(126,182,214));}
@@ -132,7 +134,8 @@ export class QuickTrayElement extends HTMLElement {
   #dragging: TrayEntry | null = null
   #custody = false
   #ghost: HTMLDivElement | null = null
-  #swallowClick = false
+  /** Disarms the guard on a drag's trailing click, when one is armed. */
+  #trailingClickCleanup: (() => void) | null = null
   /** Folded down to the chip. The rows are still held. */
   #folded = false
 
@@ -162,13 +165,12 @@ export class QuickTrayElement extends HTMLElement {
         .map(e => entryKey({ label: e.label, sourceSegments: e.sourceSegments ?? [] }))
       if (landed.length > 0) this.letGo(new Set(landed))
     }))
-    document.addEventListener('click', this.#onClickCapture, true)
     this.#render()
   }
 
   disconnectedCallback(): void {
     for (const off of this.#offs.splice(0)) off()
-    document.removeEventListener('click', this.#onClickCapture, true)
+    this.#trailingClickCleanup?.()
     this.#detachDrag()
     this.#ghost?.remove()
     for (const url of this.#thumbs.values()) URL.revokeObjectURL(url)
@@ -181,6 +183,18 @@ export class QuickTrayElement extends HTMLElement {
     this.#entries = takeEntries(this.#entries, incoming)
     for (const entry of this.#entries) void this.#loadThumb(entry)
     this.#render()
+    this.#answer(incoming)
+  }
+
+  /** A take must answer where it landed. A tile already held changes no row and
+   *  a folded tray shows only a count, so without this the click looks dead. */
+  #answer(incoming: readonly TrayEntry[]): void {
+    const keys = new Set(incoming.map(entryKey))
+    const lit = this.#folded
+      ? [this.#root.querySelector('.fold')]
+      : this.#entries.flatMap((entry, index) =>
+        keys.has(entryKey(entry)) ? [this.#root.querySelector(`.row[data-index="${index}"]`)] : [])
+    for (const element of lit) element?.classList.add('taken')
   }
 
   letGo(keys: ReadonlySet<string>): void {
@@ -324,7 +338,7 @@ export class QuickTrayElement extends HTMLElement {
     const wasDragging = this.#dragging !== null
     this.#endDrag()
     if (!wasDragging || !p) return
-    this.#swallowClick = true
+    this.#suppressTrailingClick()
     this.#drop(p.entry, event)
   }
 
@@ -382,12 +396,29 @@ export class QuickTrayElement extends HTMLElement {
     })
   }
 
-  /** A drag that ended on a row would otherwise land as its click. */
-  #onClickCapture = (e: MouseEvent): void => {
-    if (!this.#swallowClick) return
-    this.#swallowClick = false
-    e.preventDefault()
-    e.stopPropagation()
+  /** A drag may synthesize a click after pointerup, which must not land as a
+   *  press on whatever is under the release. It may also synthesize none: the
+   *  strip re-renders during a drag, and a pressed row that is gone produces no
+   *  click. So the participant's next press disarms the guard, or their own
+   *  next click would be swallowed. Same guard as the aggregate index. */
+  #suppressTrailingClick(): void {
+    this.#trailingClickCleanup?.()
+    let armed = true
+    const cleanup = (): void => {
+      if (!armed) return
+      armed = false
+      window.removeEventListener('click', swallow, true)
+      window.removeEventListener('pointerdown', cleanup, true)
+      if (this.#trailingClickCleanup === cleanup) this.#trailingClickCleanup = null
+    }
+    const swallow = (event: MouseEvent): void => {
+      cleanup()
+      event.stopImmediatePropagation()
+      event.preventDefault()
+    }
+    window.addEventListener('click', swallow, true)
+    window.addEventListener('pointerdown', cleanup, true)
+    this.#trailingClickCleanup = cleanup
   }
 }
 
