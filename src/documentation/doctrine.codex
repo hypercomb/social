@@ -14,13 +14,15 @@ L2<L1: Life Primitive. Every artifact reference is the signature of a meta envel
 L3<L2: meta->layer->meta->layer->...->meta->resource. Alternation is recursion: any referenced feature can root another tree and needs no terminal schema.
 L4<L2: Self-declared only: meta:1 plus one payload key is the whole test. Never sniff bytes. Never wrap an envelope; wrap the terminal artifact.
 L5<L2: root means the canonical grammar word and nothing else.
-@3 History ~history-sigbag-as-root.md hypergraph-molecule-lineage.md hide-first-delete-second.md
+@3 History ~history-sigbag-as-root.md hypergraph-molecule-lineage.md hide-first-delete-second.md recents-and-the-quick-tray.md
 H1<S1: A lineage bag is a directory named by a signature, holding markers 0000, 0001, ... each naming one signature. The highest marker is now. Every marker is a whole state, not a diff: walk by reading markers and inflating; compare documents.
 H2<H1: Nothing is rewritten and nothing is deleted. Change is a forward commit (a new marker); undo advances to an older signature. Data never heals: no migration pass rewrites the past.
 H3<H2: Older versions must keep working. Legacy shapes are healed at read time, additively. A transition writes one atom and advances both old and new pointers to it; hosts serve both forever.
 H4<H2: Hide first, delete second. A list offers only HIDE (reversible). Hidden things collect in a delete area; delete is refused unless already hidden and the owner marked it deletable. Delete means local forget; the bytes elsewhere stay valid.
 H5<H1: Record as you go: each act writes its own marker when it happens. No monitor, no later reconstruction.
 H6<H1: A conversation is a lineage bag, one marker per turn: anatomy signature, context roots, tool calls, answer. You have no memory between calls; history is your memory.
+H7<H4,H5: Recents is a hive's census of every atom it made, by first marker, newest at the centre, once per atom. Hidden is shaded, further out, never absent. Filters light, never remove.
+H8<H1,H7: The root is always a hive; every hive is remembered. An unlisted atom still belongs to its maker hive; promotion to a hive is a deliberate mark.
 @4 Name ~hypergraph-molecule-lineage.md ontology-is-the-name.md
 N1<I1: The tile name is the grammar. A molecule is sign(name), the bare word, plus the atoms gathered under it. Every tile of that name, anywhere, reads and feeds the same molecule. Naming is the only partition.
 N2<N1: A path like /business/people is a route to walk, never an address. Addresses are signatures.
@@ -43,6 +45,9 @@ A3<A1,N5: A relation is a mark each member wears (group = sign('group:'+meaning)
 A4<A3: A fact about the thing goes in its content record; about the relation, in the group mark (order lives here, never on the member); about the set, in the naming artifact.
 A5<A3: Sets nest by enrolling, never containing. A set has no member type. A view renders only the family it owns; a second face is a second view. Family meanings carry a colon.
 A6<I1: Share resources, never copy: same content is one signature, stored once, referenced by many.
+A7<A3,H2: An atom is one-to-many: placing adds an incidence, cut drops one, copy does not exist; none touches bytes. No cut, copy or paste words.
+A8<A4,A7: Appearance belongs to the incidence: a trait group is a signature-addressed properties set worn where the atom is placed; another group is a second incidence.
+A9<A7,H5: The hand is a quick tray atop the screen of signatures; the tile's handle sends a reference there, never a cut. Only the drop writes: appearance (add an incidence) or custody (move it), and picks the trait group.
 @7 Derived ~optimize-phase.md
 D1<I1: A derived record is a pure derivation of signature-addressed inputs, keyed by the input signature, never by name, path or position. Changed source is a new signature and no record yet: derive on miss, never update.
 D2<D1,P6: Derived records live in derived-cache pools. They are recomputable and wipe-safe, never load-bearing: no layer references one, no read path requires one, a cold path gives identical results. Complete or absent, never partial.

@@ -2,6 +2,12 @@
 
 *Status: BUILT 2026-07-09. Replaces the flatten/importTree clipboard pipeline.*
 
+> **Superseded as doctrine (jwize, 2026-11-01).** The mechanics below stay —
+> `removeSig` / `append` through `commitChildrenDeltas` is still how an
+> incidence is dropped or added — but cut / copy / paste as verbs, the
+> clipboard window and the `cut` safety flag give way to the quick tray and
+> the recents view: `recents-and-the-quick-tray.md`.
+
 ## The principle
 
 A layer's signature **is** the collection. Under the merkle model a subtree
