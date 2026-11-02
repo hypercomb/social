@@ -203,7 +203,9 @@ export class SfuDesk {
       if (inMeeting >= PUBLISHERS_PER_MEETING) return reply(429, { error: 'the meeting is full' }, this.#cors)
       const recent = (this.#opened.get(ip) ?? []).filter((at) => now - at < ADDRESS_WINDOW_MS)
       if (recent.length >= SESSIONS_PER_ADDRESS) return reply(429, { error: 'too many sessions from this address' }, this.#cors)
-      const cf = await this.#cloudflare('POST', '/sessions/new', checked.body)
+      // No body at all: Cloudflare reads any body here as a session
+      // description and refuses `{}` ("Body JSON validation error").
+      const cf = await this.#cloudflare('POST', '/sessions/new')
       if (cf.ok && SESSION_ID.test(String(cf.data?.sessionId))) {
         recent.push(now)
         this.#opened.set(ip, recent)
