@@ -2981,5 +2981,8 @@
   "meeting.lobby-error": "카메라를 시작할 수 없습니다.",
   "meeting.lobby-saver": "절약",
   "meeting.lobby-auto": "자동",
-  "meeting.lobby-sharp": "선명"
+  "meeting.lobby-sharp": "선명",
+  "meeting.icon-start": "회의 시작",
+  "meeting.icon-live": "스웜에서 회의가 진행 중입니다: 참여하기",
+  "meeting.icon-in": "회의 보기 또는 숨기기"
 }

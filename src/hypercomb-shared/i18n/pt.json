@@ -2981,5 +2981,8 @@
   "meeting.lobby-error": "Não foi possível iniciar a câmera.",
   "meeting.lobby-saver": "Econômico",
   "meeting.lobby-auto": "Auto",
-  "meeting.lobby-sharp": "Nítida"
+  "meeting.lobby-sharp": "Nítida",
+  "meeting.icon-start": "Iniciar uma reunião",
+  "meeting.icon-live": "Há uma reunião no seu enxame: participe",
+  "meeting.icon-in": "Mostrar ou ocultar a reunião"
 }

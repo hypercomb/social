@@ -2981,5 +2981,8 @@
   "meeting.lobby-error": "Die Kamera konnte nicht gestartet werden.",
   "meeting.lobby-saver": "Sparsam",
   "meeting.lobby-auto": "Auto",
-  "meeting.lobby-sharp": "Scharf"
+  "meeting.lobby-sharp": "Scharf",
+  "meeting.icon-start": "Ein Meeting starten",
+  "meeting.icon-live": "In deinem Schwarm läuft ein Meeting: beitreten",
+  "meeting.icon-in": "Meeting zeigen oder ausblenden"
 }

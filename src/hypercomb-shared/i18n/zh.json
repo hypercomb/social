@@ -2981,5 +2981,8 @@
   "meeting.lobby-error": "摄像头无法启动。",
   "meeting.lobby-saver": "省流",
   "meeting.lobby-auto": "自动",
-  "meeting.lobby-sharp": "清晰"
+  "meeting.lobby-sharp": "清晰",
+  "meeting.icon-start": "开始会议",
+  "meeting.icon-live": "你的蜂群中正在开会：加入",
+  "meeting.icon-in": "显示或隐藏会议"
 }

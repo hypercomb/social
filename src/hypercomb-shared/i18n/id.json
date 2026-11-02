@@ -2981,5 +2981,8 @@
   "meeting.lobby-error": "Kamera tidak dapat dimulai.",
   "meeting.lobby-saver": "Hemat",
   "meeting.lobby-auto": "Otomatis",
-  "meeting.lobby-sharp": "Tajam"
+  "meeting.lobby-sharp": "Tajam",
+  "meeting.icon-start": "Mulai rapat",
+  "meeting.icon-live": "Ada rapat di kawananmu: bergabung",
+  "meeting.icon-in": "Tampilkan atau sembunyikan rapat"
 }

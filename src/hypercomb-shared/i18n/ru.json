@@ -2981,5 +2981,8 @@
   "meeting.lobby-error": "Не удалось запустить камеру.",
   "meeting.lobby-saver": "Экономия",
   "meeting.lobby-auto": "Авто",
-  "meeting.lobby-sharp": "Чёткость"
+  "meeting.lobby-sharp": "Чёткость",
+  "meeting.icon-start": "Начать встречу",
+  "meeting.icon-live": "В вашем рое идёт встреча: присоединиться",
+  "meeting.icon-in": "Показать или скрыть встречу"
 }

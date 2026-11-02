@@ -33,6 +33,23 @@ leader stands.
 `meeting lobby` checks your camera, microphone and picture first, and shows
 the room's rules before you join.
 
+## The meeting icon and the participants' hive
+
+A camera icon sits among the tools at the top right:
+
+- **quiet**: no meeting in your swarm; pressing it starts one;
+- **pulsing very slightly**: a meeting is live in your swarm and you are not
+  in it; pressing it joins;
+- **coloured**: you are in the meeting; pressing it shows or hides the
+  participants' hive.
+
+The participants' hive is a hive of just the people in the meeting: one
+hexagon each, the leader in the middle and the others around them in seat
+order, each with their video once it arrives (their seat number until then).
+It opens when you join, sits just below the command line (which stays on top
+and usable), and has copy link, leave, and back to the hive. Its videos are
+muted; the sound plays once, elsewhere.
+
 ## Following
 
 The leader's every move reaches the people following as a path (`go`), which
@@ -115,6 +132,11 @@ the mesh or a camera, by design. Proposal:
 - `hypercomb-essentials/src/meeting/meeting-seats.ts`: the address, the
   originator and leader, seat order, whom a person follows, when to walk
 - `hypercomb-essentials/src/meeting/meeting.queen.ts`: the `meeting` word
+- `hypercomb-essentials/src/meeting/meeting-hive.drone.ts` and
+  `meeting/hive/meeting-hive.view.ts`: the participants' hive, opened on join
+  and toggled by the meeting icon (`meeting:view-toggle`, `meeting:view`)
+- `hypercomb-shared/ui/command-shell/`: the meeting icon (`meetingState`,
+  `meetingOpen`, `meetingToggle`)
 - `hypercomb-essentials/src/meeting/lobby/meeting-lobby.view.ts`: the lobby —
   camera, microphone, picture, the room's behaviours, copy link, join
 - `hypercomb-shared/ui/command-line/command-line.component.ts`:

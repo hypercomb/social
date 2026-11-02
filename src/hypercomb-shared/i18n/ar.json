@@ -2981,5 +2981,8 @@
   "meeting.lobby-error": "تعذّر تشغيل الكاميرا.",
   "meeting.lobby-saver": "توفير",
   "meeting.lobby-auto": "تلقائي",
-  "meeting.lobby-sharp": "حاد"
+  "meeting.lobby-sharp": "حاد",
+  "meeting.icon-start": "ابدأ اجتماعًا",
+  "meeting.icon-live": "اجتماع جارٍ في سربك: انضم إليه",
+  "meeting.icon-in": "أظهر الاجتماع أو أخفه"
 }

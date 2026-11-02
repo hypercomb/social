@@ -1148,6 +1148,24 @@ $bp-phone-max: 599px;
   }
 }
 
+// THE MEETING. Live and not in it: a very slight pulse, so a meeting in the
+// swarm is noticed without asking for attention. In it: the accent colour.
+// Open (the participants' hive showing): filled, like every window toggle.
+.meeting-toggle-btn {
+  &.live .mat-sym { color: var(--cmd-accent-command); animation: hc-meeting-pulse 2.4s ease-in-out infinite; }
+  &.in .mat-sym { color: var(--cmd-accent-command); }
+  &.on .mat-sym { font-variation-settings: 'FILL' 1; }
+}
+
+@keyframes hc-meeting-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meeting-toggle-btn.live .mat-sym { animation: none; }
+}
+
 // THE ASSISTANT. It takes the rail's own accent and dimensions — it is not
 // a second colour to learn — and says "open" the way a window toggle should:
 // a FILLED bubble. That was the cue it wore on the control bar, and the one
