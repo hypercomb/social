@@ -30,6 +30,7 @@ const KEYS = {
   modes: '@diamondcoreprocessor.com/ModeRegistry',
   back: '@diamondcoreprocessor.com/BackGesture',
   gate: '@diamondcoreprocessor.com/InputGate',
+  invite: '@diamondcoreprocessor.com/InviteQueenBee',
 } as const
 
 /** Narrower than this and the desk is one column. */
@@ -142,6 +143,12 @@ export class MeetingLobbyElement extends HTMLElement {
   #audio: { ctx: AudioContext; raf: number } | null = null
   #here = 0
   #needed = 7
+  /** Whether this tab is in a swarm at all — the meeting is the swarm's. */
+  #inSwarm = true
+  /** The room's behaviour requirements, and which of them this person allows. */
+  #rules: string[] = ['go']
+  #allowed = new Set<string>(['go'])
+  #rulesBox!: HTMLElement
   #parked = false
 
   readonly #session: WindowSession = {
@@ -212,9 +219,16 @@ export class MeetingLobbyElement extends HTMLElement {
     panel.addEventListener('keydown', this.#onKeyDown)
     this.#openCleanup.push(
       () => panel.removeEventListener('keydown', this.#onKeyDown),
-      EffectBus.on<{ here?: number; needed?: number }>('meeting:presence', payload => {
+      EffectBus.on<{ here?: number; needed?: number; swarm?: boolean; rules?: unknown }>('meeting:presence', payload => {
         this.#here = Math.max(0, Number(payload?.here ?? 0))
         this.#needed = Math.max(1, Number(payload?.needed ?? 7))
+        this.#inSwarm = payload?.swarm !== false
+        const rules = Array.isArray(payload?.rules) ? payload.rules.map(String).filter(Boolean) : ['go']
+        // A word the room newly asks for starts allowed; one it stopped asking for is forgotten.
+        for (const rule of rules) if (!this.#rules.includes(rule)) this.#allowed.add(rule)
+        this.#rules = rules
+        for (const rule of [...this.#allowed]) if (!rules.includes(rule)) this.#allowed.delete(rule)
+        this.#paintRules()
         this.#paintPresence()
       }),
     )
@@ -341,12 +355,45 @@ export class MeetingLobbyElement extends HTMLElement {
     const hint = make('p', 'ml-hint')
     this.#hint = hint
 
+    // THE ROOM'S BEHAVIOUR REQUIREMENTS: the words the leader's lines use.
+    // Each one is allowed or not, here, before joining; a line whose word is
+    // allowed runs on its own, one that is not is dropped, and a word the room
+    // never stated waits on your `$` line.
+    const rulesBox = make('div', 'ml-choices ml-rules')
+    rulesBox.setAttribute('role', 'group')
+    rulesBox.setAttribute('aria-label', t('meeting.lobby-rules', 'This room asks'))
+    this.#rulesBox = rulesBox
+    const rulesHint = make('p', 'ml-hint', t('meeting.lobby-rules-hint', 'What the leader says with these words runs for you too. Anything else asks first.'))
+    this.#paintRules()
+
     side.append(
       this.#field(t('meeting.lobby-camera', 'Camera'), 'ml-camera', cameraSelect),
       this.#field(t('meeting.lobby-microphone', 'Microphone'), 'ml-microphone', micSelect, meter),
       this.#field(t('meeting.lobby-picture', 'Picture'), '', group, hint),
+      this.#field(t('meeting.lobby-rules', 'This room asks'), '', rulesBox, rulesHint),
     )
     return side
+  }
+
+  /** One toggle per word the room asks for: on runs it, off drops it. */
+  #paintRules(): void {
+    const box = this.#rulesBox
+    if (!box) return
+    box.replaceChildren()
+    box.style.gridTemplateColumns = `repeat(${Math.min(Math.max(this.#rules.length, 1), 4)},1fr)`
+    for (const rule of this.#rules) {
+      const on = this.#allowed.has(rule)
+      const button = make('button', 'ml-choice', `${rule === 'go' ? t('meeting.lobby-rule-go', 'follow (go)') : rule} ${on ? '✓' : '✗'}`)
+      button.type = 'button'
+      button.setAttribute('aria-pressed', String(on))
+      button.setAttribute('aria-checked', String(on))
+      button.addEventListener('click', () => {
+        if (this.#allowed.has(rule)) this.#allowed.delete(rule)
+        else this.#allowed.add(rule)
+        this.#paintRules()
+      })
+      box.append(button)
+    }
   }
 
   #field(label: string, id: string, ...controls: HTMLElement[]): HTMLElement {
@@ -381,6 +428,15 @@ export class MeetingLobbyElement extends HTMLElement {
     this.#hereCount = count
     this.#hereNote = note
 
+    // THE WAY TO ASK SOMEONE IN: the swarm's meeting link, exactly as `invite`
+    // makes it (signed where the host allows it). Whoever opens it is asked
+    // to join the swarm, and `meeting` there brings them to this meeting.
+    const copy = make('button', 'ml-btn', t('meeting.lobby-copy-link', 'copy link'))
+    copy.type = 'button'
+    copy.addEventListener('click', () => {
+      void ioc<{ meetingLink?: () => Promise<void> }>(KEYS.invite)?.meetingLink?.()
+    })
+
     const cancel = make('button', 'ml-btn', t('meeting.lobby-cancel', 'cancel'))
     cancel.type = 'button'
     cancel.addEventListener('click', () => this.#close())
@@ -391,7 +447,7 @@ export class MeetingLobbyElement extends HTMLElement {
     join.addEventListener('click', () => this.#joinNow())
     this.#join = join
 
-    foot.append(circle, here, make('span', 'ml-grow'), cancel, join)
+    foot.append(circle, here, make('span', 'ml-grow'), copy, cancel, join)
     return foot
   }
 
@@ -552,12 +608,12 @@ export class MeetingLobbyElement extends HTMLElement {
   #paintPresence(): void {
     const taken = seatsTaken(this.#here)
     this.#seats.forEach((seat, index) => seat.setAttribute('data-filled', String(taken[index])))
-    this.#hereCount.textContent = t('meeting.lobby-here', '{here} of {needed} here', { here: this.#here, needed: this.#needed })
-    this.#hereNote.textContent = this.#here === 0
-      ? t('meeting.lobby-first', 'No one else is here yet')
-      : this.#here + 1 >= this.#needed
-        ? t('meeting.lobby-last', 'Your seat completes the circle')
-        : t('meeting.lobby-waiting', 'The meeting starts when {needed} are here', { needed: this.#needed })
+    this.#hereCount.textContent = t('meeting.lobby-here-now', '{here} here', { here: this.#here })
+    this.#hereNote.textContent = !this.#inSwarm
+      ? t('meeting.lobby-no-swarm', 'You are not in a swarm yet. Copy link asks you to go public first.')
+      : this.#here === 0
+        ? t('meeting.lobby-first-lead', 'No one else is here yet. Join, and you lead: the others follow you.')
+        : t('meeting.lobby-follow', 'The first one in leads. You follow where they go.')
   }
 
   // ── leaving ───────────────────────────────────────────────────
@@ -568,7 +624,7 @@ export class MeetingLobbyElement extends HTMLElement {
     const stream = this.#stream
     if (this.#state !== 'live' || !stream) return
     this.#stream = null
-    EffectBus.emitTransient('meeting:join', { stream, quality: this.#quality })
+    EffectBus.emitTransient('meeting:join', { stream, quality: this.#quality, allowed: [...this.#allowed] })
     this.#close()
   }
 

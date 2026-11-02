@@ -1,83 +1,77 @@
 // meeting/meeting.queen.ts
 
-import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
-import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { QueenBee, EffectBus } from '@hypercomb/core'
 
 /**
- * /meeting — tag the selected tile with `cascade` to create a meeting room,
- * or join/leave an existing meeting.
+ * `meeting` — the swarm's meeting (hive-meeting.drone.ts, meeting-lobby.md).
  *
- * Syntax:
- *   /meeting              — tag the selected tile `cascade` if untagged, then open the lobby to join
- *   /meeting join         — the same
- *   /meeting leave        — leave the active meeting
- *   /meeting cascade      — use the default Hypercomb template (1+6)
- *   /meeting cascade:19   — use a 2-ring template (1+6+12)
+ *   meeting                   start it (or join it): on camera at once, and
+ *                             a toast with the link to copy
+ *   meeting lobby             check your camera and the room's rules first
+ *   meeting leave             leave it
+ *   meeting lead 2            hand the lead to seat 2 (whoever started it)
+ *   meeting lead me           take it back
+ *   meeting follow 3          follow seat 3 instead of the leader
+ *   meeting follow leader     follow the leader again
+ *   meeting rules go create   what the room asks of the people in it, while
+ *                             you lead it (`go` alone by default: following)
+ *
+ * One meeting per swarm, so nothing needs selecting: the swarm IS the place.
+ * Not in a swarm yet? The lobby says so, and its copy-link asks you to go
+ * public first.
  */
 export class MeetingQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'meeting'
   readonly command = 'meeting'
-  override description = 'Start or join a video meeting on the selected tile'
+  override description = 'Start or join the meeting of your swarm, and copy its link'
   override descriptionKey = 'slash.meeting'
-  override options = ['join', 'leave', 'cascade', 'cascade:19']
+  override options = ['lobby', 'leave', 'rules', 'lead', 'follow']
   override examples = [
-    { input: '/meeting', result: 'Tags selected tile and joins its meeting' },
-    { input: '/meeting leave', result: 'Leaves the meeting on selected tiles' },
+    { input: '/meeting', result: 'Starts the meeting of your swarm, or joins it, and copies its link' },
+    { input: '/meeting lobby', result: 'Check your camera and the rules of the room before joining' },
+    { input: '/meeting leave', result: 'Leaves the meeting' },
+    { input: '/meeting rules go create trait', result: 'The words the people following you allow: go, create, trait' },
   ]
 
   protected async execute(args: string): Promise<void> {
-    const trimmed = args.trim().toLowerCase()
+    const words = args.trim().split(/\s+/).filter(Boolean)
+    const head = (words[0] ?? '').toLowerCase()
 
-    // get selected tiles
-    const selection = get('@diamondcoreprocessor.com/SelectionService') as
-      { selected: ReadonlySet<string> } | undefined
-    const selectedLabels = selection ? Array.from(selection.selected) : []
-
-    if (trimmed === 'leave') {
-      // You are in one meeting at a time, so leaving needs no tile.
+    if (head === 'leave') {
       EffectBus.emitTransient('meeting:leave', {})
       return
     }
 
-    // determine template keyword
-    const template = trimmed === 'join' || !trimmed ? 'cascade' : trimmed
-
-    if (selectedLabels.length === 0) {
-      console.warn('[/meeting] No tiles selected. Select a tile first.')
+    if (head === 'lead' || head === 'follow') {
+      const who = (words[1] ?? '').toLowerCase()
+      if (!who) {
+        EffectBus.emit('activity:log', { message: head === 'lead' ? 'meeting: say meeting lead <seat>, or meeting lead me' : 'meeting: say meeting follow <seat>, or meeting follow leader', icon: '🐝' })
+        return
+      }
+      EffectBus.emitTransient(head === 'lead' ? 'meeting:lead' : 'meeting:follow', { who })
       return
     }
 
-    // for each selected tile: tag it with the meeting keyword, then trigger join
-    const lineage = get('@hypercomb.social/Lineage') as
-      { explorerSegments?: () => readonly string[] } | undefined
-    const parentSegments = lineage?.explorerSegments?.() ?? []
-
-    for (const label of selectedLabels) {
-      // Read current tags from the tile's layer (canonical) — no OPFS
-      // dir consulted or minted.
-      const props = await readTilePropertiesAt(parentSegments, label)
-      const tags: string[] = Array.isArray(props['tags']) ? [...props['tags'] as string[]] : []
-
-      // check if already has a meeting tag
-      const existing = tags.find(t => t === template || t.startsWith(template + ':'))
-
-      if (!existing) {
-        tags.push(template)
-        await writeTilePropertiesAt(parentSegments, label, { tags })
-      }
-      // Said either way: the room's subscription is made when a tag is HEARD,
-      // and a tile tagged in an earlier session is not heard again by itself.
-      // Hearing it twice is a no-op.
-      EffectBus.emit('tags:changed', { updates: [{ cell: label, tag: existing ?? template }] })
+    if (head === 'rules') {
+      const rules = words.slice(1).map(w => w.toLowerCase())
+      EffectBus.emitTransient('meeting:rules-set', { rules })
+      EffectBus.emit('activity:log', {
+        message: rules.length ? `meeting: this room asks for ${rules.join(', ')}` : 'meeting: this room asks only to follow (go)',
+        icon: '🐝',
+      })
+      return
     }
 
-    // pulse processor to pick up changes
-    void new hypercomb().act()
+    if (head === 'lobby') {
+      const room = window.ioc?.get<{ value?: unknown }>('@hypercomb.social/RoomStore')?.value
+      EffectBus.emitTransient('meeting:lobby-open', { cell: typeof room === 'string' ? room : '' })
+      return
+    }
 
-    // Joining is the lobby's: it opens the camera, lets you check it, and hands
-    // it to the meeting. One lobby, for the first tile when several are selected.
-    EffectBus.emitTransient('meeting:lobby-open', { cell: selectedLabels[0] })
+    // `meeting` STARTS THE MEETING (jwize, 2026-11-02: "meeting starts
+    // meeting", "just make it easy to connect").
+    EffectBus.emitTransient('meeting:start', {})
   }
 }
 
