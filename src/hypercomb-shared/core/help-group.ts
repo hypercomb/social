@@ -58,9 +58,6 @@ const GESTURES: readonly { id: string; label: string }[] = [
  *  so this map IS the keymap roster. */
 const ACTION_LABELS: Record<string, string> = {
   'tile.editHovered': 'Edit',
-  'clipboard.copy': 'Copy',
-  'clipboard.paste': 'Paste',
-  'layout.cutCells': 'Cut',
   'selection.remove': 'Remove',
   'history.undo': 'Undo',
   'history.redo': 'Redo',
@@ -134,9 +131,6 @@ const TIERS: readonly { header: string; keys: readonly string[] }[] = [
     keys: [
       'cli:create',
       'tile.editHovered',
-      'clipboard.copy',
-      'clipboard.paste',
-      'layout.cutCells',
       'selection.remove',
       'history.undo',
       'history.redo',

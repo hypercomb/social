@@ -5,6 +5,7 @@
 // the row's drag found nothing while every entry-level spec stayed green.
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { EffectBus } from '@hypercomb/core'
 import { QuickTrayElement, defineQuickTray } from './quick-tray.element'
 
 const shown = (tray: QuickTrayElement): string[] =>
@@ -12,6 +13,13 @@ const shown = (tray: QuickTrayElement): string[] =>
 
 const click = (tray: QuickTrayElement, selector: string, at = 0): void => {
   (tray.shadowRoot?.querySelectorAll(selector)[at] as HTMLElement).click()
+}
+
+/** What the shelf last said on `shelf:changed` — what the shell's button reads. */
+const said = (): { entries: unknown[]; folded: boolean } => {
+  let last: { entries: unknown[]; folded: boolean } | undefined
+  EffectBus.on<{ entries: unknown[]; folded: boolean }>('shelf:changed', p => { last = p })()
+  return last!
 }
 
 let tray: QuickTrayElement
@@ -90,18 +98,20 @@ describe('a take answers where it landed', () => {
     expect(lit.map(e => e.querySelector('.label')?.textContent)).toEqual(['second'])
   })
 
-  it('lights the chip when the tray is folded', () => {
+  it('tells the shell button when the shelf is folded', () => {
     click(tray, '.fold')
     tray.take([{ label: 'fourth', sourceSegments: [] }])
-    expect(tray.shadowRoot?.querySelector('.fold.taken')).not.toBeNull()
+    expect(said()).toMatchObject({ folded: true })
+    expect(said().entries).toHaveLength(4)
   })
 })
 
-describe('hiding the tray', () => {
-  it('folds to a chip that keeps the count, and lets go of nothing', () => {
+describe('hiding the shelf', () => {
+  it('folds away entirely, says so, and lets go of nothing', () => {
     click(tray, '.fold')
     expect(shown(tray)).toEqual([])
-    expect(tray.shadowRoot?.querySelector('.tray.folded .count')?.textContent).toBe('3')
+    expect(tray.shadowRoot?.querySelector('.shelf, .fold')).toBeNull()
+    expect(said()).toMatchObject({ folded: true })
     expect(tray.entries).toHaveLength(3)
   })
 
@@ -109,12 +119,21 @@ describe('hiding the tray', () => {
     click(tray, '.fold')
     tray.take([{ label: 'fourth', sourceSegments: [] }])
     expect(shown(tray)).toEqual([])
-    expect(tray.shadowRoot?.querySelector('.count')?.textContent).toBe('4')
+    expect(said().entries).toHaveLength(4)
   })
 
-  it('comes back from the chip with every row', () => {
+  it('comes back on shelf:toggle with every row', () => {
     click(tray, '.fold')
-    click(tray, '.fold')
+    EffectBus.emitTransient('shelf:toggle', {})
     expect(shown(tray)).toEqual(['first', 'second', 'third'])
+    expect(said()).toMatchObject({ folded: false })
+  })
+
+  it('shelf:toggle with open says which way, so a repeat is harmless', () => {
+    EffectBus.emitTransient('shelf:toggle', { open: true })
+    expect(shown(tray)).toEqual(['first', 'second', 'third'])
+    EffectBus.emitTransient('shelf:toggle', { open: false })
+    EffectBus.emitTransient('shelf:toggle', { open: false })
+    expect(shown(tray)).toEqual([])
   })
 })

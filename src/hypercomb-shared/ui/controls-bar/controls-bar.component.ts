@@ -180,13 +180,6 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // World-mode bulk privacy (make-public / make-branch-public) is off the bar
   // too — privacy is set on the tile, not from the shell rail. The header's
   // world-mode toggle is untouched.
-  // The clipboard icon opens the window — and the window is a SWAP now (click a
-  // tile on the hive and it lands there), so it is worth opening on an empty
-  // clipboard too. That makes it an ordinary rail icon rather than a
-  // state-gated one: no `clipboardHasItems`, just the enable switch every other
-  // control has. It defaults MUTED (see DEFAULT_ENABLED_MAP) — turn it on in
-  // edit mode if you want it — and carries the held count as its badge.
-  { id: 'clipboard',    label: 'controls.clipboard',    action: 'toggleClipboard',    visibleWhen: 'always' },
   { id: 'voice',        label: 'controls.voice',        action: 'toggleVoice',        visibleWhen: 'voiceSupported' },
   // 'room' (the location icon) is gone from the bar — the location dialog now
   // pops as the JOIN step when the participant flips solo → public (see
@@ -219,10 +212,7 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   // Selection verbs default ON (they only appear while a selection exists;
   // the retired floating menu was the old primary path).
   'promote-to-parent': true,
-  // Clipboard defaults OFF: it is no longer state-gated, so leaving it on would
-  // put a permanent icon on every rail. Enable it in edit mode. Copy/cut still
-  // pop the window open on their own — this icon is the way BACK in.
-  'clipboard': false, 'voice': false, 'bees': false,
+  'voice': false, 'bees': false,
 }
 
 /** Only the entries that DIFFER from the current default. Storing the whole map
@@ -489,7 +479,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // 'browsing' is the only mode left — the retired atomize surface was the
   // second variant, and the template still switches on this signal.
   #mode = signal<'browsing'>('browsing')
-  #clipboardItems = signal<string[]>([])
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
   #agentsVisible = signal(localStorage.getItem('hc:agents-visible') !== 'false')
@@ -558,11 +547,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       localStorage.setItem(key, JSON.stringify([...set]))
     } catch { /* ignore */ }
   }
-  #clipboardAvailable = signal(false)
-  // Whether the side panel is currently open. Mirrors the panel's own
-  // `clipboard:open` state event so the toolbar button can both toggle it
-  // and light up while it's showing.
-  #clipboardPanelOpen = signal(false)
   // Whether the host directory is up. `hosts:render` carries its own `open`
   // flag from the drone's single state chokepoint, so the rail icon lights
   // however the window was opened — the rail, `/hosts`, or Publish.
@@ -851,14 +835,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // own close buttons already own. Opening an open window is a no-op.
     openComfy: () => EffectBus.emit('comfy:open', {}),
     openAliases: () => EffectBus.emit('aliases:open', {}),
-    cut: () => this.cut(),
-    copy: () => this.copy(),
     remove: () => this.remove(),
     moveItem: () => this.moveItem(),
     promoteToParent: () => this.promoteToParent(),
     makePublic: () => this.makePublic(),
     makeBranchPublic: () => this.makeBranchPublic(),
-    toggleClipboard: () => this.toggleClipboard(),
     toggleVoice: () => this.toggleVoice(),
     toggleBees: () => this.toggleBees(),
   }
@@ -869,7 +850,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly isActive = (ctrl: ControlItem): boolean => {
     switch (ctrl.id) {
-      case 'clipboard': return this.#clipboardPanelOpen()
       case 'hosts': return this.#hostsPanelOpen()
       case 'pin': return this.pinnedHere()
       case 'fit': return this.fitLocked()
@@ -928,16 +908,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       // rail icons with the same glyph are two controls nobody can tell apart.
       case 'aliases':      return 'tag'
       case 'promote-to-parent': return 'arrow_upward'
-      case 'clipboard':    return 'content_paste'
       case 'voice':        return 'mic'
       case 'bees':         return 'hub'
       default:             return ''
     }
-  }
-
-  readonly badgeValue = (ctrl: ControlItem): number => {
-    if (ctrl.id === 'clipboard') return this.clipboardCount()
-    return 0
   }
 
   #isControlVisible(ctrl: ControlItem): boolean {
@@ -1277,9 +1251,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   })
   readonly mode = this.#mode.asReadonly()
   readonly utility = this.#utility.asReadonly()
-  readonly clipboardItems = this.#clipboardItems.asReadonly()
-  readonly clipboardCount = computed(() => this.#clipboardItems().length)
-  readonly clipboardAvailable = this.#clipboardAvailable.asReadonly()
   readonly moveMode = this.#moveMode.asReadonly()
   readonly hasSelection = this.#hasSelection.asReadonly()
   readonly textOnly = this.#textOnly.asReadonly()
@@ -1470,6 +1441,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
   readonly agentsVisible = this.#agentsVisible.asReadonly()
+  /** The shelf, as it last said on `shelf:changed`: open or folded, and how
+   *  many it holds. Its button stands beside show / hide agents. */
+  readonly shelfOpen = signal(true)
+  readonly shelfCount = signal(0)
   readonly showHidden = this.#showHidden.asReadonly()
   readonly voiceActive = signal(false)
   readonly voiceSupported = VoiceInputService.supported()
@@ -1479,12 +1454,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #fitLockedUnsub: (() => void) | null = null
   #zoomManualUnsub: (() => void) | null = null
   #zoomFitUnsub: (() => void) | null = null
-  #clipboardUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
   #hoverCrumbUnsub: (() => void) | null = null
   #gatherCrumbUnsub: (() => void) | null = null
   #layoutModeUnsub: (() => void) | null = null
   #beesUnsub: (() => void) | null = null
+  #shelfUnsub: (() => void) | null = null
   #tagsUnsub: (() => void) | null = null
   #tagFilterUnsub: (() => void) | null = null
   #hoverTagsUnsub: (() => void) | null = null
@@ -1492,8 +1467,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #showHiddenUnsub: (() => void) | null = null
   #textOnlyUnsub: (() => void) | null = null
   #imageOnlyUnsub: (() => void) | null = null
-  #clipboardAvailableUnsub: (() => void) | null = null
-  #clipboardOpenUnsub: (() => void) | null = null
   #hostsOpenUnsub: (() => void) | null = null
   #tutorialsOpenUnsub: (() => void) | null = null
   #meshModalUnsub: (() => void) | null = null
@@ -1706,10 +1679,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#markHandFramed(this.#currentPageKey(), false)
     })
 
-    this.#clipboardAvailableUnsub = EffectBus.on<{ available: boolean }>('clipboard:available', (payload) => {
-      this.#clipboardAvailable.set(payload?.available ?? false)
-    })
-
     this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
       this.#hasSelection.set((payload?.selected?.length ?? 0) > 0)
     })
@@ -1736,21 +1705,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.gatherLinks.set({ from: payload?.from ?? [], feeding: payload?.feeding ?? [] })
     })
 
-    // Clipboard contents drive only the toolbar badge count now — the
-    // side panel (hc-clipboard-panel) owns its own open/close lifecycle.
-    this.#clipboardUnsub = EffectBus.on<{ items?: { label: string }[] }>('clipboard:changed', (payload) => {
-      const items = payload?.items ?? []
-      this.#clipboardItems.set(items.map(item => item.label))
-    })
-
-    // Mirror the panel's open state (it emits `clipboard:open` from its
-    // single visibility chokepoint) so the toolbar button toggles correctly
-    // and shows an active highlight while the panel is open. Last-value
-    // replayed, so a late mount reflects the current panel state.
-    this.#clipboardOpenUnsub = EffectBus.on<{ open?: boolean }>('clipboard:open', ({ open }) => {
-      this.#clipboardPanelOpen.set(!!open)
-    })
-
     // Same pair for the host directory — the drone re-emits `hosts:render` on
     // every open/close, and the bus replays the last value, so a late mount
     // reflects whatever is on screen right now.
@@ -1770,6 +1724,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.#beesUnsub = EffectBus.on<{ visible: boolean }>('render:set-bees-visible', ({ visible }) => {
       this.#beesVisible.set(visible)
+    })
+
+    this.#shelfUnsub = EffectBus.on<{ entries?: readonly unknown[]; folded?: boolean }>('shelf:changed', (payload) => {
+      this.shelfCount.set(payload?.entries?.length ?? 0)
+      this.shelfOpen.set(!payload?.folded)
     })
 
     // layout mode is always dense on boot; /swirl re-applies the spiral
@@ -2099,6 +2058,36 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     queueMicrotask(this.#measureTagFloat)
   })
 
+  /** The seam tools (shelf button, show / hide agents) stand at the shelf's
+   *  left end under the header; their right edge, published as
+   *  `--hc-seam-right`, is where the shelf starts. Gone when they move to the
+   *  rail's foot (command line on demand) or are not shown at all. */
+  #seamObserver: ResizeObserver | null = null
+  #seamSync = effect(() => {
+    this.isMobile()
+    this.commandLineOnDemand()
+    this.dockSide()
+    queueMicrotask(this.#measureSeam)
+  })
+
+  #measureSeam = (): void => {
+    this.#seamObserver?.disconnect()
+    this.#seamObserver = null
+    const el = this.#host.nativeElement.querySelector('.seam-tools') as HTMLElement | null
+    if (!el || this.commandLineOnDemand()) {
+      document.documentElement.style.removeProperty('--hc-seam-right')
+      return
+    }
+    const measure = (): void => {
+      const box = el.getBoundingClientRect()
+      if (box.width === 0) document.documentElement.style.removeProperty('--hc-seam-right')
+      else document.documentElement.style.setProperty('--hc-seam-right', `${Math.round(box.right)}px`)
+    }
+    measure()
+    this.#seamObserver = new ResizeObserver(measure)
+    this.#seamObserver.observe(el)
+  }
+
   #measureTagFloat = (): void => {
     this.#tagFloatObserver?.disconnect()
     this.#tagFloatObserver = null
@@ -2228,7 +2217,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#lanesUnsub?.()
     this.#zoomManualUnsub?.()
     this.#zoomFitUnsub?.()
-    this.#clipboardUnsub?.()
     this.#selectionUnsub?.()
     this.#hoverCrumbUnsub?.()
     this.#gatherCrumbUnsub?.()
@@ -2239,12 +2227,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#shellHiddenUnsub?.()
     this.#controlsHiddenUnsub?.()
     this.#beesUnsub?.()
+    this.#shelfUnsub?.()
+    this.#seamObserver?.disconnect()
+    document.documentElement.style.removeProperty('--hc-seam-right')
     this.#voiceActiveUnsub?.()
     this.#showHiddenUnsub?.()
     this.#textOnlyUnsub?.()
     this.#imageOnlyUnsub?.()
-    this.#clipboardAvailableUnsub?.()
-    this.#clipboardOpenUnsub?.()
     this.#hostsOpenUnsub?.()
     this.#tutorialsOpenUnsub?.()
     this.#tagsUnsub?.()
@@ -2986,14 +2975,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ── utility actions (emit effects for drones) ─────────
 
-  readonly cut = (): void => {
-    EffectBus.emit('controls:action', { action: 'cut' })
-  }
-
-  readonly copy = (): void => {
-    EffectBus.emit('controls:action', { action: 'copy' })
-  }
-
   readonly remove = (): void => {
     EffectBus.emit('controls:action', { action: 'remove' })
   }
@@ -3046,29 +3027,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.meshToggled.emit()
   }
 
-  readonly toggleClipboard = async (): Promise<void> => {
-    if (!this.#clipboardAvailable()) return
-
-    // Already open → just close it. No validate/isEmpty dance needed to
-    // hide the panel, and skipping it keeps the close instant.
-    if (this.#clipboardPanelOpen()) {
-      EffectBus.emit('clipboard:panel', { visible: false })
-      return
-    }
-
-    // Opening must NEVER mutate the clipboard — viewing your items can't lose
-    // them. (The old `validate()` ghost-sweep on open could drop live entries
-    // on a cold read; ghost cleanup now happens only on restore.) An EMPTY
-    // clipboard opens too: the window is a swap, so an empty one is where the
-    // next tile you click on the hive will land.
-    //
-    // Open the non-navigating clipboard SIDE PANEL. The current page stays
-    // fully rendered and interactive behind it — no `'clipboard'` mode, no
-    // `clipboard:view` page-replacement, no viewport snapshot/restore dance.
-    // The panel (hc-clipboard-panel) lists the captured tiles and places
-    // them onto THIS page in place.
-    EffectBus.emit('clipboard:panel', { visible: true })
-  }
 
   // ── bees ────────────────────────────────────────────
 
@@ -3077,6 +3035,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#beesVisible.set(next)
     localStorage.setItem('hc:bees-visible', String(next))
     EffectBus.emit('render:set-bees-visible', { visible: next })
+  }
+
+  /** Fold the shelf away or bring it back. Transient: a shelf mounted later
+   *  must not replay an old press. */
+  readonly toggleShelf = (): void => {
+    EffectBus.emitTransient('shelf:toggle', {})
   }
 
   readonly toggleAgents = (): void => {

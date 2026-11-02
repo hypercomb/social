@@ -68,6 +68,14 @@ $steel: rgb(126, 182, 214);
     line-height: 1;
   }
 
+  // An inline glyph sits in the same 1.25rem box a ligature does, a hair
+  // smaller because a filled Material path reads heavier than the outlined font.
+  .ea-svg {
+    width: 1.15rem;
+    height: 1.15rem;
+    display: block;
+  }
+
   &:hover:not(:disabled) { color: var(--hc-chrome-text); }
   &:active:not(:disabled) { transform: scale(0.9); }
   &:focus-visible { outline: 1px solid rgba(var(--hc-chrome-accent), 0.6); outline-offset: 2px; border-radius: var(--hc-radius-control); }

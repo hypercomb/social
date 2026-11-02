@@ -128,7 +128,7 @@ import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directiv
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'
 import { highlightBlocks } from './chat-highlight'
-import { resolveEntryImageUrl } from '../clipboard-thumbs'
+import { resolveEntryImageUrl } from '../shelf-thumbs'
 import { hivePathSegments, renderChatMarkdown, type ChatMarkdownOptions } from './chat-markdown'
 import { hiveSentenceHtml, hiveSentenceParts, sentenceAccent, type SentencePart, type SentenceReader } from '../hive-sentence/hive-sentence'
 import { isHostRunLive, liveHostConvos, liveHostRun, startHostRun, stopHostRun, type HostAsk } from './host-stream'
@@ -1769,7 +1769,7 @@ export class ChatWindowComponent implements OnDestroy {
     // A full-bleed picture is the innermost surface standing.
     if (this.viewing()) { this.closePicture(); return true }
     // The flyout is the smallest thing open over the transcript.
-    if (this.clipboardOpen()) { this.clipboardOpen.set(false); return true }
+    if (this.shelfOpen()) { this.shelfOpen.set(false); return true }
     // Folded away is a smaller commitment than the window itself: Escape
     // brings the conversation back before it takes the window down.
     if (this.peeking()) { this.togglePeek(); return true }
@@ -1935,58 +1935,56 @@ export class ChatWindowComponent implements OnDestroy {
   // One kind of thing — an op-less sig reference — and WHERE IT SITS is
   // what it means:
   //
-  //   on the clipboard   gathered, not committed to anything. Filled from
-  //                      anywhere in the hive (click a tile with the
-  //                      clipboard window open, drag a row off the rail).
-  //   on the SHELF       part of THIS request — what the responder reads.
+  //   on the shelf       gathered, not committed to anything. Filled from
+  //                      anywhere in the hive (a tile's shelf icon, To shelf
+  //                      on a selection, a row picked on the rail).
+  //   in the REQUEST     part of THIS question — what the responder reads.
   //
-  // Moving between them is the whole interface: click a clipboard item to
-  // PASTE it onto the shelf (it leaves the clipboard — one home per item,
-  // and the clipboard empties as you use it), drag it back off the shelf
-  // to RESTORE it, or × to drop it from the request outright.
+  // Moving between them is the whole interface: click a shelf item to put it
+  // in the request (it leaves the shelf — one home per item, and the shelf
+  // empties as you use it), drag it back out of the request to RESTORE it,
+  // or × to drop it from the request outright.
   //
   // There is no references tab and no second pool: a set worth keeping
   // past this conversation is a named context group, not a compartment.
 
-  /** THE SHELF — the references this request carries, in the order they
-   *  were pasted. Chat-local: the clipboard is where things are gathered,
-   *  this is where they are committed to the question. */
+  /** THE REQUEST — the references this question carries, in the order they
+   *  were added. Chat-local: the shelf is where things are gathered, this is
+   *  where they are committed to the question. */
   readonly references = signal<readonly RailPickLike[]>([])
 
-  /** What the clipboard is holding right now — the shelf's source, mirrored
-   *  from `clipboard:changed` (last-value replayed, so the flyout is current
-   *  the moment it opens). Read-only here; the clipboard owns it. */
-  readonly clipboardHeld = signal<readonly RailPickLike[]>([])
+  /** What the shelf is holding right now, mirrored from `shelf:changed`
+   *  (last-value replayed, so the flyout is current the moment it opens).
+   *  Read-only here; the shelf owns it. */
+  readonly shelfHeld = signal<readonly RailPickLike[]>([])
 
-  /** The clipboard flyout is showing. A small icon in the header, because
-   *  what you are pasting FROM should be one press away from the composer
-   *  rather than a docked panel across the screen. */
-  readonly clipboardOpen = signal(false)
+  /** The shelf flyout is showing. A small icon in the header, because what
+   *  you are adding FROM should be one press away from the composer rather
+   *  than a reach to the top of the screen. */
+  readonly shelfOpen = signal(false)
 
-  toggleClipboardShelf(): void { this.clipboardOpen.update(open => !open) }
+  toggleShelf(): void { this.shelfOpen.update(open => !open) }
 
-  /** PASTE AS REFERENCE — one click on a clipboard item puts it on the
-   *  shelf and takes it off the clipboard. Same entry, new place. */
+  /** ADD AS REFERENCE — one click on a shelf item puts it in the request and
+   *  takes it off the shelf. Same entry, new place. */
   pasteReference(pick: RailPickLike): void {
     if (!this.references().some(held => held.key === pick.key)) {
       this.references.set([...this.references(), pick])
       this.#announceSet()
       void this.#refreshContextThumbs()
     }
-    EffectBus.emit('clipboard:discard-items', { labels: [pick.name] })
-    if (this.clipboardHeld().length <= 1) this.clipboardOpen.set(false)
+    EffectBus.emit('shelf:let-go', { entries: [{ label: pick.name, sourceSegments: [...pick.path] }] })
+    if (this.shelfHeld().length <= 1) this.shelfOpen.set(false)
   }
 
-  /** RESTORE — a reference dragged off the shelf goes back to the clipboard.
+  /** RESTORE — a reference dragged out of the request goes back to the shelf.
    *  The drag is the gesture; this is what it lands as. */
-  restoreToClipboard(index: number): void {
+  restoreToShelf(index: number): void {
     const held = this.references()[index]
     if (!held) return
     this.references.set(this.references().filter((_, at) => at !== index))
     this.#announceSet()
-    EffectBus.emit('clipboard:take-entries', {
-      entries: [{ label: held.name, sourceSegments: [...held.path], sig: held.sig || undefined }],
-    })
+    EffectBus.emit('quick-tray:take', { label: held.name, segments: [...held.path], ...(held.sig ? { sig: held.sig } : {}) })
   }
 
   /** What the next question is about, counted for the status row — the SAME
@@ -2006,8 +2004,8 @@ export class ChatWindowComponent implements OnDestroy {
     return pick.path.length ? pick.path.slice(-2).join(' / ') : ''
   }
 
-  /** The full address, for the hover — same ` / ` crumb the clipboard panel
-   *  writes, so one path is spelled one way everywhere. */
+  /** The full address, for the hover — the ` / ` crumb, so one path is
+   *  spelled one way everywhere. */
   pathOf(pick: RailPickLike): string { return pick.path.join(' / ') }
 
   /** Is this reference a picture rather than something in the hive's tree? */
@@ -2038,7 +2036,7 @@ export class ChatWindowComponent implements OnDestroy {
    *  flyout was already showing, and neither list can revoke the other's
    *  object-URLs by being refreshed on its own. */
   async #refreshContextThumbs(): Promise<void> {
-    const entries = [...this.references(), ...this.clipboardHeld()]
+    const entries = [...this.references(), ...this.shelfHeld()]
     const token = ++this.#thumbToken
     const wanted = new Set(entries.map(entry => entry.key))
     for (const key of [...this.#thumbUrls.keys()]) {
@@ -2210,11 +2208,11 @@ export class ChatWindowComponent implements OnDestroy {
   // signatures the moment they land — a name would make the request depend
   // on where the hive stood when it was sent.
   //
-  // THE CONTEXT LIVES ON THE CLIPBOARD. Not a private list: the same
-  // op-less sig entries the clipboard window shows, the hive's swap takes
-  // fill, and the panel's place/discard act on. Pin the chat, open the
-  // clipboard window, walk the hive clicking tiles — they appear here as
-  // they land, and dragging rows out of the sidebar lands in the same set.
+  // THE CONTEXT LIVES ON THE SHELF. Not a private list: the same op-less
+  // sig entries the shelf at the top shows, filled by a tile's shelf icon and
+  // by To shelf on a selection. Pin the chat, walk the hive putting tiles on
+  // the shelf — they appear here as they land, and rows picked on the
+  // sidebar land in the same set.
   // The work branch stays chat-local: it is an ADDRESS for the answer, not
   // a gathered reference.
 
@@ -2225,8 +2223,8 @@ export class ChatWindowComponent implements OnDestroy {
   // to keep in step. What remains is one list of references — everything the
   // request should READ — and the target it is already standing on.
 
-  /** A tile dropped straight onto the shelf — dragged off the sidebar rail,
-   *  never through the clipboard. It lands as a reference directly, because
+  /** A tile dropped straight into the request — dragged off the sidebar
+   *  rail, never through the shelf. It lands as a reference directly, because
    *  a drag that has already crossed the window should not need a second
    *  gesture to finish. */
   addContext(tile: DroppedTile): void {
@@ -2257,7 +2255,7 @@ export class ChatWindowComponent implements OnDestroy {
    *  just started. The shelf is then emptied — a conversation started from an
    *  annotation is about that annotation, and references gathered for some
    *  earlier question would ride along unread. Nothing is lost by it: the
-   *  shelf is filled FROM the clipboard, which this does not touch. */
+   *  request is filled FROM the shelf, which this does not touch. */
   async #attachPicture(payload?: AttachedPicture): Promise<void> {
     const listed: readonly AttachedPicture[] = Array.isArray(payload?.pictures) ? payload!.pictures! : payload ? [payload] : []
     const pictures = listed.filter(picture => /^[0-9a-f]{64}$/.test(String(picture?.sig ?? '')))
@@ -2437,11 +2435,11 @@ export class ChatWindowComponent implements OnDestroy {
     void this.#refreshContextThumbs()
   }
 
-  // ── DRAG IT BACK OFF THE SHELF ─────────────────────────────────────
-  // A reference dragged out of the shelf and released anywhere off it goes
-  // back to the clipboard. The drop is not caught by a target — the shelf
-  // is the only thing that would accept it, so LEAVING the shelf IS the
-  // gesture, and dragend is where "it left" is known.
+  // ── DRAG IT BACK OUT OF THE REQUEST ────────────────────────────────
+  // A reference dragged out of the request and released anywhere off it
+  // goes back to the shelf. The drop is not caught by a target — the request
+  // is the only thing that would accept it, so LEAVING it IS the gesture,
+  // and dragend is where "it left" is known.
 
   /** Which reference is in the air, by index. */
   #draggingRef: number | null = null
@@ -2462,14 +2460,14 @@ export class ChatWindowComponent implements OnDestroy {
     if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
   }
 
-  /** The drag ended. Dropped back on the shelf → nothing happened (the shelf's
+  /** The drag ended. Dropped back on the request → nothing happened (its
    *  own drop handler already cleared the mark). Dropped anywhere else → it
-   *  left the request and goes home to the clipboard. */
+   *  left the request and goes home to the shelf. */
   onReferenceDragEnd(): void {
     const index = this.#draggingRef
     this.#draggingRef = null
     if (index === null || this.dragOverReference()) { this.dragOverReference.set(false); return }
-    this.restoreToClipboard(index)
+    this.restoreToShelf(index)
   }
 
   /** A drop target has to LOOK like one while something is over it. */
@@ -2541,9 +2539,9 @@ export class ChatWindowComponent implements OnDestroy {
     this.subjectThumb.set(url ?? '')
   }
 
-  /** Clear the shelf — the request carries nothing extra again. The tiles
-   *  are untouched and the clipboard is left alone: this empties what THIS
-   *  question would have carried, nothing more. */
+  /** Clear the request — it carries nothing extra again. The tiles are
+   *  untouched and the shelf is left alone: this empties what THIS question
+   *  would have carried, nothing more. */
   clearContext(): void {
     this.#rail?.clearSelection()
     this.references.set([])
@@ -2871,7 +2869,7 @@ export class ChatWindowComponent implements OnDestroy {
   #hiveBound = false
 
   /** The rail picks last reported, keyed by row key — what lets a selection
-   *  change flow into the clipboard as ADDS and REMOVES rather than a
+   *  change flow onto the shelf as ADDS and REMOVES rather than a
    *  wholesale replace that would clobber entries gathered elsewhere. */
   #railSeen = new Map<string, RailPickLike>()
   /** The text last written to the drafts pool for the open conversation —
@@ -4985,7 +4983,7 @@ export class ChatWindowComponent implements OnDestroy {
     // and a full-bleed picture would cover the live hive the fold exists to
     // show. Closed, not merely hidden: an invisible surface still standing is
     // one Escape would unwind before the fold, which reads as a dead key.
-    if (next) { this.clipboardOpen.set(false); this.listOpen.set(false); this.closePicture() }
+    if (next) { this.shelfOpen.set(false); this.listOpen.set(false); this.closePicture() }
     this.#applyFold()
     if (!next) this.#focus()
   }
@@ -5132,27 +5130,21 @@ export class ChatWindowComponent implements OnDestroy {
         this.#rail = factory.create({ title: false })
         this.#rail.onSubjectChanged = subject => { void this.#enterSubject(subject) }
         this.#rail.onLevelChanged = segments => { this.layerHere.set([...(segments ?? [])]) }
-        // Rail picks flow INTO the clipboard as deltas — never a wholesale
-        // replace, because the clipboard also holds what the hive's takes
-        // and the header's drops gathered, and a ctrl-click in the sidebar
-        // must not blow those away.
+        // Rail picks flow ONTO the shelf as deltas — never a wholesale
+        // replace, because the shelf also holds what the hive's takes and the
+        // header's drops gathered, and a ctrl-click in the sidebar must not
+        // blow those away.
         this.#rail.onSelectionChanged = selection => {
           const before = this.#railSeen
           const now = new Map(selection.map(pick => [pick.key, pick]))
           this.#railSeen = now
           const added = selection.filter(pick => !before.has(pick.key))
           const removed = [...before.values()].filter(pick => !now.has(pick.key))
-          if (added.length) {
-            EffectBus.emit('clipboard:take-entries', {
-              entries: added.map(pick => ({
-                label: pick.name,
-                sourceSegments: [...pick.path],
-                sig: pick.sig || undefined,
-              })),
-            })
+          for (const pick of added) {
+            EffectBus.emit('quick-tray:take', { label: pick.name, segments: [...pick.path], ...(pick.sig ? { sig: pick.sig } : {}) })
           }
           if (removed.length) {
-            EffectBus.emit('clipboard:discard-items', { labels: removed.map(pick => pick.name) })
+            EffectBus.emit('shelf:let-go', { entries: removed.map(pick => ({ label: pick.name, sourceSegments: [...pick.path] })) })
           }
         }
         // The host captured here may have been replaced by the time a late
@@ -5318,25 +5310,25 @@ export class ChatWindowComponent implements OnDestroy {
       this.#scheduleRouteRefresh(this.activeId())
     }))
 
-    // ── WHAT THERE IS TO PASTE ───────────────────────────────────────
-    // The clipboard's own contents, for the header's flyout. Last-value
-    // replay means the shelf's source is current the moment the window
-    // opens — including everything gathered before it existed. This is
-    // the ONLY writer of `clipboardHeld`; the clipboard owns the truth,
-    // and the shelf is filled by pasting FROM it, never by mirroring it.
-    this.#cleanups.push(EffectBus.on<{ items?: readonly { label: string; sourceSegments: readonly string[]; sig?: string }[] }>(
-      'clipboard:changed', (payload) => {
-        const items = Array.isArray(payload?.items) ? payload!.items! : []
+    // ── WHAT THERE IS TO ADD ─────────────────────────────────────────
+    // The shelf's own contents, for the header's flyout. Last-value replay
+    // means the flyout is current the moment the window opens — including
+    // everything gathered before it existed. This is the ONLY writer of
+    // `shelfHeld`; the shelf owns the truth, and the request is filled by
+    // taking FROM it, never by mirroring it.
+    this.#cleanups.push(EffectBus.on<{ entries?: readonly { label: string; sourceSegments: readonly string[]; sig?: string }[] }>(
+      'shelf:changed', (payload) => {
+        const items = Array.isArray(payload?.entries) ? payload!.entries! : []
         const picks = items.map(item => ({
           key: '/' + [...item.sourceSegments, item.label].join('/'),
           path: [...item.sourceSegments],
           name: item.label,
           sig: item.sig,
         }))
-        this.clipboardHeld.set(picks)
-        if (!picks.length) this.clipboardOpen.set(false)
-        // Both faces draw from one thumbnail cache: an item pasted onto the
-        // shelf must not have to re-resolve a picture the flyout just had.
+        this.shelfHeld.set(picks)
+        if (!picks.length) this.shelfOpen.set(false)
+        // Both faces draw from one thumbnail cache: an item added to the
+        // request must not have to re-resolve a picture the flyout just had.
         void this.#refreshContextThumbs()
       }))
 
@@ -6172,7 +6164,7 @@ export class ChatWindowComponent implements OnDestroy {
     // The shelf is NOT reset: coming back to a conversation you were part-way
     // through composing must find the references you had put on it. What
     // dies with the window is the flyout and the rail's pick bookkeeping.
-    this.clipboardOpen.set(false)
+    this.shelfOpen.set(false)
     this.#railSeen = new Map()
     EffectBus.emit('chat:window-state', { open: false })
   }

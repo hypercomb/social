@@ -109,12 +109,17 @@ BEGINNER_LESSONS.push({
   },
 })
 
+/** The page the participant is standing on, as the shelf names a source. */
+const standingAt = (): string[] =>
+  ((globalThis as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/Lineage') as
+    { explorerSegments?: () => readonly string[] } | undefined)?.explorerSegments?.()?.map(String) ?? []
+
 BEGINNER_LESSONS.push({
-  id: 'copy-paste',
+  id: 'shelf',
   level: L,
   order: 40,
-  title: 'Copy and paste',
-  summary: 'Ctrl+C carries a tile and its whole branch; Enter drops it where you are standing.',
+  title: 'The shelf',
+  summary: 'To shelf puts a tile on the shelf at the top; drag it off onto any page and it is there too.',
   pheromones: ['tutorial', 'lesson', 'beginner', 'editing'],
   async run(stage) {
     const two = await subjects(stage, 2, names(stage), 5)
@@ -123,24 +128,22 @@ BEGINNER_LESSONS.push({
 
     await stage.flyToCell(source)
     stage.select([source])
-    await stage.say('copy', 'Copy',
-      'Pick a tile and press Ctrl+C. The copy carries everything — its pictures, its notes, its whole branch.')
+    await stage.say('shelf', 'To shelf',
+      'Pick a tile and press To shelf, bottom right. It goes onto the shelf at the top. It is a reference: the tile stays right where it is.')
     stage.highlight(null)
-    stage.invoke('clipboard.copy')
-    await stage.wait(500)
+    const from = standingAt()
+    stage.emit('shelf:take-selection', {})
+    await stage.wait(700)
 
     await stage.enterCell(into)
-    // Enter, not Ctrl+V. `clipboard.paste` is bound to a bare Enter and there
-    // is no `v` chord anywhere in the keymap — the only document-level paste
-    // listener routes OS-clipboard IMAGES into the editor, never hive tiles.
-    await stage.say('paste', 'Paste',
-      'Now press Enter and it drops wherever you are standing. Watch — inside “{cell}”.',
+    await stage.say('shelf-place', 'Off the shelf',
+      'Now drag it off the shelf onto the page and it lands here too. Watch — inside “{cell}”.',
       { params: { cell: into } })
-    stage.invoke('clipboard.paste')
+    stage.emit('shelf:place', { entries: [{ label: source, sourceSegments: from }], targetSegments: standingAt() })
     await stage.wait(1200)
 
-    await stage.say('paste-done', 'Pasted',
-      'Same tile, second home. Cut (Ctrl+X) does the same but takes it with you instead of leaving the original.')
+    await stage.say('shelf-done', 'Placed',
+      'Same tile, second home, carrying its pictures, notes and whole branch. Hold Shift as you let go and it MOVES instead: the page it came from lets it go.')
     stage.clearSelection()
     await stage.leave()
   },

@@ -47,7 +47,7 @@ A5<A3: Sets nest by enrolling, never containing. A set has no member type. A vie
 A6<I1: Share resources, never copy: same content is one signature, stored once, referenced by many.
 A7<A3,H2: An atom is one-to-many: placing adds an incidence, cut drops one, copy does not exist; none touches bytes. No cut, copy or paste words.
 A8<A4,A7: Appearance belongs to the incidence: a trait group is a signature-addressed properties set worn where the atom is placed; another group is a second incidence.
-A9<A7,H5: The hand is a quick tray atop the screen of signatures; the tile's handle sends a reference there, never a cut. Only the drop writes: appearance (add an incidence) or custody (move it), and picks the trait group.
+A9<A7,H5: The hand is the shelf, a quick tray of signatures always in view atop the screen; the tile's handle sends a reference there, never a cut. Only the drop writes: appearance (add an incidence) or custody (move it), and picks the trait group.
 @7 Derived ~optimize-phase.md
 D1<I1: A derived record is a pure derivation of signature-addressed inputs, keyed by the input signature, never by name, path or position. Changed source is a new signature and no record yet: derive on miss, never update.
 D2<D1,P6: Derived records live in derived-cache pools. They are recomputable and wipe-safe, never load-bearing: no layer references one, no read path requires one, a cold path gives identical results. Complete or absent, never partial.

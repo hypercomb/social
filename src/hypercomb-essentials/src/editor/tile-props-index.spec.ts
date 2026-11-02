@@ -56,7 +56,7 @@ describe('the legacy key has ONE reader', () => {
       ['hypercomb-essentials', 'src', 'presentation', 'tiles', 'show-cell.drone.ts'],
       ['hypercomb-essentials', 'src', 'substrate', 'substrate.service.ts'],
       ['hypercomb-essentials', 'src', 'commands', 'translation.service.ts'],
-      ['hypercomb-shared', 'ui', 'clipboard-thumbs.ts'],
+      ['hypercomb-shared', 'ui', 'shelf-thumbs.ts'],
       ['hypercomb-shared', 'ui', 'notes-strip', 'notes-strip.component.ts'],
     ]
     const storageRead = /localStorage\.getItem\(\s*(?:'hc:tile-props-index'|TILE_PROPS_INDEX_KEY|PROPS_INDEX_KEY)/g

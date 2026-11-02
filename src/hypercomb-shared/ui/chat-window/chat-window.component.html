@@ -775,20 +775,20 @@
           (dragover)="onDragOver($event)"
           (dragleave)="onDragLeave()"
           (drop)="onDropReference($event)">
-          <!-- THE WAY IN. The clipboard is where things are gathered from
+          <!-- THE WAY IN. The shelf is where things are gathered from
                anywhere in the hive; this icon is how you reach it without
-               crossing the screen to its panel. One click on an item in the
-               flyout pastes it onto the shelf. -->
+               going up to the top of the screen. One click on an item in the
+               flyout adds it to the request. -->
           <button class="chat-clip" type="button"
-            [class.on]="clipboardOpen()"
-            [class.holding]="clipboardHeld().length"
-            (click)="toggleClipboardShelf()"
-            [title]="'chat.clipboard.show' | t: { count: clipboardHeld().length }"
-            [attr.aria-expanded]="clipboardOpen()"
-            [attr.aria-label]="'chat.clipboard.show' | t: { count: clipboardHeld().length }">
+            [class.on]="shelfOpen()"
+            [class.holding]="shelfHeld().length"
+            (click)="toggleShelf()"
+            [title]="'chat.shelf.show' | t: { count: shelfHeld().length }"
+            [attr.aria-expanded]="shelfOpen()"
+            [attr.aria-label]="'chat.shelf.show' | t: { count: shelfHeld().length }">
             <span class="mat-sym" aria-hidden="true">content_paste</span>
-            @if (clipboardHeld().length) {
-              <span class="chat-clip-count">{{ clipboardHeld().length }}</span>
+            @if (shelfHeld().length) {
+              <span class="chat-clip-count">{{ shelfHeld().length }}</span>
             }
           </button>
 
@@ -798,8 +798,8 @@
                hangs off. A wall of squares answered "how many" and never
                "which", and the whole point of putting references side by side
                is seeing WHAT is being related to what.
-               Draggable: pulling one off the shelf sends it back to the
-               clipboard, and the × drops it from the request outright. -->
+               Draggable: pulling one out of the request sends it back to
+               the shelf, and the × drops it from the request outright. -->
           @for (pick of references(); track pick.key; let i = $index) {
             <span class="chat-box chat-box-context filled"
               draggable="true"
@@ -810,7 +810,7 @@
                    answers WHICH and never WHAT, so pressing it opens the thing
                    full size where it already is. The rest of the box is
                    unchanged: the name still reads, the × still drops it, and
-                   dragging it off still sends it back to the clipboard —
+                   dragging it off still sends it back to the shelf —
                    nothing that already meant something means something else. -->
               @if (contextThumbs()[pick.key]; as url) {
                 <button class="chat-box-look" type="button"
@@ -853,16 +853,16 @@
           }
         </div>
 
-        <!-- THE CLIPBOARD, WHERE THE COMPOSER IS. Not a second clipboard: the
-             same entries the panel lists, shown here so a reference is one
-             click away. Clicking one moves it onto the shelf. -->
-        @if (clipboardOpen()) {
-          <div class="chat-clip-shelf" role="listbox" [attr.aria-label]="'chat.clipboard.title' | t">
-            @for (pick of clipboardHeld(); track pick.key) {
+        <!-- THE SHELF, WHERE THE COMPOSER IS. Not a second shelf: the same
+             entries the shelf at the top holds, shown here so a reference is
+             one click away. Clicking one moves it into the request. -->
+        @if (shelfOpen()) {
+          <div class="chat-clip-shelf" role="listbox" [attr.aria-label]="'chat.shelf.title' | t">
+            @for (pick of shelfHeld(); track pick.key) {
               <button class="chat-clip-item" type="button" role="option"
                 [attr.aria-selected]="false"
                 (click)="pasteReference(pick)"
-                [title]="'chat.clipboard.paste' | t: { tile: pick.name }">
+                [title]="'chat.shelf.add' | t: { tile: pick.name }">
                 @if (contextThumbs()[pick.key]; as url) {
                   <img class="chat-clip-img" [src]="url" alt="">
                 } @else {
@@ -876,7 +876,7 @@
                 </span>
               </button>
             } @empty {
-              <span class="chat-clip-empty">{{ 'chat.clipboard.empty' | t }}</span>
+              <span class="chat-clip-empty">{{ 'chat.shelf.empty' | t }}</span>
             }
           </div>
         }

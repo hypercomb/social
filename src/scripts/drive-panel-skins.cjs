@@ -48,7 +48,6 @@ const PANELS = [
   { id: 'tags', sel: '.tags-panel', effect: 'tags:view-toggle' },
   { id: 'history', sel: '.history-panel', effect: 'history:view-toggle' },
   { id: 'publish', sel: '.publish-panel', effect: 'publish:view-toggle' },
-  { id: 'clipboard', sel: '.clipboard-panel', effect: 'clipboard:view-toggle' },
   { id: 'observe', sel: '.observe-panel', effect: 'observe:view-toggle' },
 ]
 

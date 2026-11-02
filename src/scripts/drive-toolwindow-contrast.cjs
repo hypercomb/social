@@ -52,7 +52,6 @@ const WINDOWS = [
   { id: 'files',      effect: 'files:open',          payload: {},                    sel: '.files-panel' },
   { id: 'tags',       effect: 'tags:view-open',      payload: {},                    sel: '.tags-panel' },
   { id: 'history',    effect: 'history:view-open',   payload: {},                    sel: '.history-viewer' },
-  { id: 'clipboard',  effect: 'clipboard:panel',     payload: { visible: true },     sel: '.clipboard-panel' },
   { id: 'sequence',   effect: 'sequence:view-open',  payload: {},                    sel: '.sequence-panel, .seq-panel' },
   { id: 'workflow',   effect: 'workflow:view-open',  payload: {},                    sel: '.workflow-panel' },
   { id: 'rewind',     effect: 'rewind:open',         payload: {},                    sel: '.rewind-window, .rewind-panel' },

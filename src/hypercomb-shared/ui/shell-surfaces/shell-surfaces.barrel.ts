@@ -49,7 +49,6 @@ import '../observe-viewer/observe-viewer.component'
 // tab. It is the data set that panel's picker draws from, so it has to be
 // readable on its own terms and not as a by-product of a publish sweep.
 import '../publish-panel/publish-panel.component'
-import '../clipboard-panel/clipboard-panel.component'
 import '../contact-card/contact-form.component'
 import '../contact-card/contact-hover.component'
 import '../action-card/action-card.component'

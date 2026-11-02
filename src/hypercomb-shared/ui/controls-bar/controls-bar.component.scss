@@ -33,38 +33,26 @@ $actions-corner: 12rem;
 
 // ── breadcrumb (below header, right-aligned) ────────────
 
-// Agent visibility lives at the seam between the command line and the left
-// control rail: it describes what is painted on the hive, but is useful often
-// enough that it should not be buried in the rail's edit mode. Text makes the
-// state explicit; the compact cold-chrome treatment keeps it subordinate to
-// both pieces of primary chrome.
-.agent-visibility-toggle {
+// The seam tools live at the seam between the command line and the left
+// control rail: show / hide agents describes what is painted on the hive, and
+// the shelf button folds the shelf away or brings it back. Both are useful
+// often enough that they should not be buried in the rail's edit mode; the
+// compact cold-chrome treatment keeps them subordinate to both pieces of
+// primary chrome. Under the header they stand at the shelf's left end, centred
+// on its band (same top, same 2.75rem height), and publish their right edge as
+// `--hc-seam-right` so the shelf starts after them.
+.seam-tools {
   position: fixed;
-  top: max(
-    calc(2.75rem * var(--hc-header-zoom, 1.0)),
-    calc(var(--hc-header-bottom, 0px) + 0.35rem)
-  );
+  top: calc(var(--hc-header-anchor, calc(2.75rem * var(--hc-header-zoom, 1.0))) + 0.375rem);
   left: 0.7rem;
   z-index: 59999;
+  height: 2.75rem;
 
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 0.32rem;
-  padding: 0.22rem 0.42rem;
-  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 55%, transparent);
-  border-radius: var(--hc-radius-floating, 4px);
-  background: color-mix(in srgb, var(--md-surface-c-low) 82%, transparent);
-  color: var(--md-on-surface-faint);
-  font-family: var(--hc-mono);
-  font-size: 0.64rem;
-  line-height: 1;
-  cursor: pointer;
-  backdrop-filter: blur(8px);
+  gap: 0.3rem;
 
   &.rail-left { left: calc(#{$rail-width} + 0.45rem); }
-  .mat-sym { font-size: 0.9rem; }
-  &:hover, &:focus-visible { color: var(--md-on-surface); }
-  &.agents-hidden { color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud)); }
 
   // The on-demand command line collapses the header bar, so a toggle anchored
   // to the header's bottom edge would float in dead space above whatever the
@@ -81,10 +69,71 @@ $actions-corner: 12rem;
   // back to sitting on the bare rail foot.
   &.on-demand {
     top: auto;
+    height: auto;
     bottom: calc(0.7rem + var(--hc-safe-bottom, 0px) + var(--hc-tag-float-top, 0px));
   }
 
   @media (max-width: 599px), (max-height: 449px) { display: none; }
+}
+
+.seam-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 1.5rem;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 55%, transparent);
+  border-radius: var(--hc-radius-floating, 4px);
+  background: color-mix(in srgb, var(--md-surface-c-low) 82%, transparent);
+  color: var(--md-on-surface-faint);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: color 120ms ease;
+
+  &:hover, &:focus-visible { color: var(--md-on-surface); }
+}
+
+// Both seam tools are square icon buttons.
+.agent-visibility-toggle,
+.shelf-toggle {
+  position: relative;
+  justify-content: center;
+  width: 1.5rem;
+  padding: 0;
+}
+
+// Lit and struck through while agents are hidden.
+.agent-visibility-toggle {
+  .mat-sym { font-size: 0.95rem; line-height: 1; }
+  &.agents-hidden {
+    color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud));
+    &::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 1.05rem;
+      height: 1.5px;
+      background: currentColor;
+      transform: translate(-50%, -50%) rotate(-45deg);
+    }
+  }
+}
+
+// Lit while the shelf is folded, with a dot when it is folded over something
+// still held.
+.shelf-toggle {
+  svg { width: 0.95rem; height: 0.95rem; display: block; }
+  &.shut { color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud)); }
+  &.holding::after {
+    content: '';
+    position: absolute;
+    top: 0.15rem;
+    right: 0.15rem;
+    width: 0.32rem;
+    height: 0.32rem;
+    border-radius: 50%;
+    background: currentColor;
+  }
 }
 
 .breadcrumb-top {
@@ -95,9 +144,12 @@ $actions-corner: 12rem;
   // header renders TALLER than the static assumption (high-DPI / narrow devices
   // like the Surface). `max()` can only push down, so well-behaved devices are
   // unchanged and the breadcrumb never rides up under the bar.
+  // A band reserved off the canvas top (the shelf: `--hc-inset-top`) pushes
+  // it down too, so the shelf never covers it.
   top: max(
     calc(2.75rem * var(--hc-header-zoom, 1.0)),
-    calc(var(--hc-header-bottom, 0px) + 0.35rem)
+    calc(var(--hc-header-bottom, 0px) + 0.35rem),
+    calc(var(--hc-inset-top, 0px) + 0.1rem)
   );
   // Sit BESIDE an open right-docked toolwindow (behaviors/features, tags,
   // notes, …) instead of under it. --hc-inset-right is the reserved right-edge
@@ -1135,7 +1187,7 @@ $actions-corner: 12rem;
   // Plain click always performs a zoom-to-fit without changing state.
   &.fit-btn {
     color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain));
-    // Anchors the caret. The badge does the same trick from .clipboard-btn.
+    // Anchors the caret.
     position: relative;
 
     &:hover { color: var(--hc-chrome-text); }
@@ -1237,27 +1289,6 @@ $actions-corner: 12rem;
   100% { transform: scale(1);    text-shadow: none; }
 }
 
-// ── clipboard button with badge ──────────────────────────
-
-.clipboard-btn { position: relative; }
-
-.badge {
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  min-width: 12px;
-  height: 12px;
-  padding: 0 3px;
-  border-radius: 3px;
-  background: #c8975a;
-  color: #1a1a1e;
-  font-size: 0.45rem;
-  font-weight: 700;
-  line-height: 12px;
-  text-align: center;
-  font-family: var(--hc-font);
-}
-
 .mode-label {
   font-weight: 500;
   letter-spacing: 0.3px;
@@ -1343,14 +1374,6 @@ $actions-corner: 12rem;
   .ctl-btn {
     flex-shrink: 0;
   }
-
-  // shared touch-target badge sizing (tablet + phone)
-  .badge {
-    min-width: 14px;
-    height: 14px;
-    font-size: 0.5rem;
-    line-height: 14px;
-  }
 }
 
 // ── tablet portrait (600–1023px) ──────────────────────────
@@ -1378,9 +1401,6 @@ $actions-corner: 12rem;
     .dcp-icon { font-size: 1.2rem; }
   }
 
-  .badge { top: -3px; right: -3px; }
-
-  .clipboard-empty { font-size: 0.68rem; }
   .close-x { font-size: 1.1rem; }
 
   .room-display { font-size: 0.7rem; }
@@ -1568,7 +1588,6 @@ $actions-corner: 12rem;
 // ── phone (≤599px) — non-mobile-pill phone-specific tweaks ───
 @include phone-only {
 
-  .clipboard-empty { font-size: 0.72rem; }
   .close-x { font-size: 1.3rem; }
 
   .tag-strip { font-size: 1rem; }

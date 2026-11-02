@@ -15,7 +15,7 @@ import type { Lineage } from '../../core/lineage'
  *   [+roadmap]            → create roadmap        (per-item `+`, component pre-pass)
  *   [~stale]              → remove stale          (per-item `~`, component pre-pass)
  *   [a, b]:focus          → tag the selection     (trailing `:`, executeSelectCommand)
- *   [a, b]/copy|/move(8)…  → operate on selection  (trailing `/op`)
+ *   [a, b]/shelf|/move(8)… → operate on selection  (trailing `/op`)
  * The `operations` below document that full surface for the /help sheet.
  */
 export class BracketBehavior implements CommandLineBehavior {
@@ -54,9 +54,9 @@ export class BracketBehavior implements CommandLineBehavior {
     {
       trigger: 'Enter',
       pattern: /\]\/\w/,
-      description: 'Operate on the selection: `/copy` `/cut` `/move(n)` `/format` `/keyword` `/o|/s|/h`.',
+      description: 'Operate on the selection: `/shelf` `/move(n)` `/format` `/keyword` `/o|/s|/h`.',
       examples: [
-        { input: '[a, b]/copy', key: 'Enter', result: 'Copy the selection' },
+        { input: '[a, b]/shelf', key: 'Enter', result: 'Put the selection on the shelf' },
         { input: '[a, b]/move(8)', key: 'Enter', result: 'Move the selection to slot 8' },
         { input: '[a, b]/keyword work', key: 'Enter', result: 'Tag the selection "work"' },
       ]

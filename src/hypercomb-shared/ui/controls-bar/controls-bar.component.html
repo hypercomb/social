@@ -77,20 +77,34 @@
 }
 
 <!-- breadcrumb: below header, right-aligned -->
-<!-- No agents on a phone — nothing to show or hide, so no toggle. -->
+<!-- No agents on a phone — nothing to show or hide, so no toggle. Both seam
+     tools are icons only, lit in the state worth noticing: the shelf button
+     while the shelf is folded (with a dot when it is folded over something
+     still held), the agents button while agents are hidden (struck through). -->
 @if (!isMobile()) {
-  <button class="agent-visibility-toggle"
-          [class.rail-left]="dockSide() === 'left'"
-          [class.on-demand]="commandLineOnDemand()"
-          [class.agents-hidden]="!agentsVisible()"
-          type="button"
-          (click)="toggleAgents()"
-          [attr.aria-pressed]="!agentsVisible()"
-          [attr.aria-label]="(agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t"
-          [title]="(agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t">
-    <span class="mat-sym" aria-hidden="true">{{ agentsVisible() ? 'visibility' : 'visibility_off' }}</span>
-    <span>{{ (agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t }}</span>
-  </button>
+  <div class="seam-tools"
+       [class.rail-left]="dockSide() === 'left'"
+       [class.on-demand]="commandLineOnDemand()">
+    <button class="seam-btn shelf-toggle"
+            [class.shut]="!shelfOpen()"
+            [class.holding]="!shelfOpen() && shelfCount() > 0"
+            type="button"
+            (click)="toggleShelf()"
+            [attr.aria-pressed]="shelfOpen()"
+            [attr.aria-label]="(shelfOpen() ? 'quick-tray.hide' : 'quick-tray.show') | t"
+            [title]="(shelfOpen() ? 'quick-tray.hide' : 'quick-tray.show') | t">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.88 2 1.99 2H19c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 12h-4c0 1.66-1.35 3-3 3s-3-1.34-3-3H4.99V5H19v10zm-3-5h-2V7h-4v3H8l4 4 4-4z"/></svg>
+    </button>
+    <button class="seam-btn agent-visibility-toggle"
+            [class.agents-hidden]="!agentsVisible()"
+            type="button"
+            (click)="toggleAgents()"
+            [attr.aria-pressed]="!agentsVisible()"
+            [attr.aria-label]="(agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t"
+            [title]="(agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t">
+      <span class="mat-sym" aria-hidden="true">auto_awesome</span>
+    </button>
+  </div>
 }
 
 <div class="breadcrumb-top" [class.faded]="isMobile()">
@@ -459,7 +473,6 @@
                       [class.text-only-btn]="ctrl.id === 'text-only'"
                       [class.mic-btn]="ctrl.id === 'voice'"
                       [class.bee-btn]="ctrl.id === 'bees'"
-                      [class.clipboard-btn]="ctrl.id === 'clipboard'"
                       [class.fit-btn]="ctrl.id === 'fit'"
                       [class.fit-global]="ctrl.id === 'fit' && fitButtonState() === 'global'"
                       [class.zoom-btn]="ctrl.id === 'zoom-in' || ctrl.id === 'zoom-out'"
@@ -482,9 +495,6 @@
                       [class.filled]="isActive(ctrl) && ctrl.id !== 'fit'">
                   {{ iconSymbol(ctrl) }}
                 </span>
-                @if (ctrl.id === 'clipboard' && badgeValue(ctrl) > 0) {
-                  <span class="badge">{{ badgeValue(ctrl) }}</span>
-                }
                 <!-- The fit button's caret — the only visible sign that the
                      view flyout exists. Right-click still opens it (and is how
                      the keyboard's context-menu key gets in), but nobody

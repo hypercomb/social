@@ -40,7 +40,7 @@ describe('window session', () => {
   it('announces shut while parked, so the Escape cascade and the lights agree', () => {
     const visible = fakeSignal(true)
     const said: boolean[] = []
-    holdWindow('clipboard-panel', signalSession(visible, open => said.push(open)))
+    holdWindow('chat-window', signalSession(visible, open => said.push(open)))
 
     parkWindows()
     unparkWindows()
