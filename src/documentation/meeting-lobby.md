@@ -84,24 +84,59 @@ broadcast to people who are not following you. A line carrying an access code
 is never sent. This is a way to step through sharing: someone shows the way,
 and each person decides what they let run.
 
-## Video: blocked by the outgoing firewall (decision owed)
+## Video: through Cloudflare's SFU
 
-The shell's outgoing firewall (`hypercomb-dev/src/index.html`,
-`hypercomb-web` setup, `outgoing-firewall.spec.ts`) replaces
-`RTCPeerConnection` with a function that throws "peer connections are
-refused". So the faces of other people never connect: each person sees only
-their own face in the middle. Everything above — the swarm meeting, seats,
-following, handing the lead over, relayed lines — works without video, over
-the mesh. To have video, choose one:
+**Built 2026-11-02** (jwize: "lets go on sfu only"). Each person keeps ONE
+peer connection, to Cloudflare's Realtime SFU, through the meeting point the
+swarm already meets at (`hypercomb-relay/meet-worker/sfu.js`): they publish
+their camera and microphone once and subscribe to everyone else's. Nobody
+connects to anybody else, so **no participant learns another's address** —
+only Cloudflare sees it. A 7-person meeting costs each person one upload, not
+six.
 
-1. **Peer connections with no outside ICE server** — the firewall lets
-   `RTCPeerConnection` through, the meeting passes `iceServers: []`. Works on a
-   local network only; no third party is asked anything.
-2. **An owned STUN/TURN** on a host you run (Cloudflare's TURN service, or one
-   beside the relay) — works across the internet, no third party.
-3. **A public STUN server** (the code names Google's today) — works across most
-   networks, but every call asks a third party for your address, which the
-   firewall exists to refuse.
+**Turning it on (the owner, once):**
+
+1. Cloudflare dashboard → Realtime → SFU: create an app; note its App ID and
+   App token.
+2. On each meet worker:
+   ```
+   wrangler secret put SFU_APP_ID    --config wrangler.meet.toml
+   wrangler secret put SFU_APP_TOKEN --config wrangler.meet.toml
+   wrangler secret put SFU_APP_ID    --config wrangler.meet-open.toml
+   wrangler secret put SFU_APP_TOKEN --config wrangler.meet-open.toml
+   ```
+   then deploy both (`npm run deploy`, `npm run deploy:open` in meet-worker).
+3. The shell's outgoing firewall must let a peer connection name Cloudflare's
+   STUN — see below.
+
+Without the secrets the meeting point answers `501` and the meeting goes on
+with no video between people (each person still sees themselves).
+
+**The routes** (under `/.well-known/hc-meet/sfu/`, the path family the front
+worker already forwards to the meeting point): `session`,
+`session/:id/tracks`, `…/renegotiate`, `…/tracks/close`, `…/beat`. Not a
+pass-through: bodies are size-capped and shape-checked; a session names its
+meeting (`X-Hc-Meeting`, the 64-hex address only the swarm can derive) and,
+on a coded host, the access code (`X-Hc-Access`); a remote track must come
+from a session of the same meeting; seven publishers fill a meeting; one
+address may open 20 sessions in ten minutes.
+
+**The budget.** Cloudflare bills what it sends out ($0.05/GB past 1,000 GB a
+month, shared by SFU and TURN). The meeting point estimates it from what each
+session subscribes to (remote video × time × the Auto picture's ~1.55 Mbps)
+and refuses new sessions and subscriptions once its month reaches
+`SFU_MONTHLY_GB` — 500 on each of the two meet scripts, so the account stays
+inside the free 1,000 GB. A session that stops beating for 90 s has its
+subscriptions closed. A 7-person meeting on Auto is ~29 GB an hour; Saver
+~10 GB.
+
+**The firewall (decision owed).** `hypercomb-dev/src/index.html` pins
+`RTCPeerConnection` to a function that always throws, so the browser cannot
+open the SFU connection yet. The change: allow a peer connection only when the
+ICE servers it names are Cloudflare's STUN (`stun:`/`stuns:` on
+`stun.cloudflare.com`) or none, guard `setConfiguration` the same way, refuse
+everything else (any other STUN, any TURN). It loosens a security control, so
+it is the owner's to make or to permit.
 
 ## Subdomains (design, not built)
 
@@ -132,6 +167,10 @@ the mesh or a camera, by design. Proposal:
 - `hypercomb-essentials/src/meeting/meeting-seats.ts`: the address, the
   originator and leader, seat order, whom a person follows, when to walk
 - `hypercomb-essentials/src/meeting/meeting.queen.ts`: the `meeting` word
+- `hypercomb-essentials/src/meeting/sfu-client.ts`: the browser's half of the
+  video — one request at a time
+- `hypercomb-relay/meet-worker/sfu.js`: the meeting point's half — the
+  routes, the app token, the month's budget
 - `hypercomb-essentials/src/meeting/meeting-hive.drone.ts` and
   `meeting/hive/meeting-hive.view.ts`: the participants' hive, opened on join
   and toggled by the meeting icon (`meeting:view-toggle`, `meeting:view`)

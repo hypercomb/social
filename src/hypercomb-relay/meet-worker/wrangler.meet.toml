@@ -44,6 +44,15 @@ tag = "v1"
 new_sqlite_classes = ["MeetingPoint"]
 
 [vars]
+# THE MEETING'S VIDEO (sfu.js): Cloudflare Realtime SFU. Set the app's two
+# secrets once, from the dashboard (Realtime → SFU → your app):
+#   wrangler secret put SFU_APP_ID    --config <this file>
+#   wrangler secret put SFU_APP_TOKEN --config <this file>
+# Without them a meeting has no video between people, and nothing else
+# changes. SFU_MONTHLY_GB is this script's share of the month: the two meet
+# scripts share the account's 1,000 GB free allowance, so 500 each keeps a
+# month inside it. Past it, new video sessions are refused until next month.
+SFU_MONTHLY_GB = "500"
 # Keys (64-hex, comma separated) whose NIP-98 signature may recycle the access
 # code. Public keys only — the matching secret keys never come here.
 #

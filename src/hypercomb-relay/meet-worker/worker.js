@@ -61,6 +61,7 @@
 // no code, so it is closed until its operator sets the first.
 
 import { Meeting, HEX64, sha256Hex } from './meeting.js'
+import { SFU_PREFIX, SfuDesk } from './sfu.js'
 import { ACCESS_REFUSED, BUSY, CODE_PATH, checkRecycle, codeOpens, isOpenHost, offeredAccess, operatorKeys, refuseDial, sameDigest, wellFormedCode } from './access.js'
 
 const RESTARTED = 1012
@@ -83,6 +84,14 @@ const text = (status, body, headers = {}) =>
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS } })
 
+// A browser asks first before a JSON POST or a PUT with our headers.
+const SFU_PREFLIGHT = {
+  ...CORS,
+  'Access-Control-Allow-Methods': 'POST, PUT, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Hc-Meeting, X-Hc-Access',
+  'Access-Control-Max-Age': '600',
+}
+
 const isUpgrade = (request) => String(request.headers.get('upgrade') || '').toLowerCase() === 'websocket'
 const wantsInfo = (request, url) => url.pathname === '/' && /application\/nostr\+json/i.test(request.headers.get('accept') || '')
 
@@ -103,6 +112,7 @@ export class MeetingPoint {
   #clients = new Map()              // socket id (unique across incarnations) → meeting client
   #sweep = null
   #sinceCensus = 0                  // ms of sweeps since the last minute line
+  #sfu                              // the meeting's video, through Cloudflare's SFU (sfu.js)
 
   constructor(state, env) {
     this.#state = state
@@ -112,7 +122,14 @@ export class MeetingPoint {
       // HARNESS ONLY: a shorter will grace for the wrangler dev suite.
       willGraceMs: positive(env?.DIAG_WILL_GRACE_MS, undefined),
     })
+    this.#sfu = new SfuDesk({
+      appId: env?.SFU_APP_ID, token: env?.SFU_APP_TOKEN, monthlyGb: env?.SFU_MONTHLY_GB, cors: CORS,
+    })
     state.blockConcurrencyWhile(async () => {
+      const usage = await state.storage.get('sfu-usage')
+      if (usage) this.#sfu = new SfuDesk({
+        appId: env?.SFU_APP_ID, token: env?.SFU_APP_TOKEN, monthlyGb: env?.SFU_MONTHLY_GB, cors: CORS, usage,
+      })
       const held = await state.storage.get('access')
       if (held && (held.hash === null || HEX64.test(String(held.hash)))) this.#access = { hash: held.hash, at: Number(held.at) || 0 }
       // Constructed while sockets are still open: the runtime woke this
@@ -131,6 +148,7 @@ export class MeetingPoint {
     // closed, never open.
     const open = isOpenHost(this.#env, url.hostname)
     if (isUpgrade(request)) return this.#dial(request, open)
+    if (url.pathname.startsWith(SFU_PREFIX)) return this.#video(request, open)
     if (url.pathname === DOOR_PATH && request.method === 'GET') return json(200, { hash: this.#access.hash })
     if (url.pathname === CODE_PATH) {
       if (open) return text(404, 'not found: an open meeting point has no access code')
@@ -150,6 +168,28 @@ export class MeetingPoint {
       }), { status: 200, headers: { 'Content-Type': 'application/nostr+json', ...CORS } })
     }
     return text(404, 'not found')
+  }
+
+  /** The meeting's video (sfu.js). A coded meeting point asks for the same
+   *  code a dial does, in a header; an open one asks for none. */
+  async #video(request, open) {
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: SFU_PREFLIGHT })
+    if (!open && !codeOpens(request.headers.get('x-hc-access') || '', this.#access.hash)) {
+      return json(403, { error: this.#access.hash ? 'access: code required' : 'access: the meeting point is closed' })
+    }
+    const answer = await this.#sfu.handle(request, {
+      ip: request.headers.get('cf-connecting-ip') || '',
+      meeting: String(request.headers.get('x-hc-meeting') || '').trim().toLowerCase(),
+    })
+    await this.#keepLedger()
+    if (this.#sfu.sessionCount) this.#armSweep()
+    return answer
+  }
+
+  async #keepLedger() {
+    if (!this.#sfu.dirty) return
+    this.#sfu.dirty = false
+    try { await this.#state.storage.put('sfu-usage', this.#sfu.usage) } catch { this.#sfu.dirty = true }
   }
 
   #dial(request, open) {
@@ -189,7 +229,7 @@ export class MeetingPoint {
     try { id = ws.deserializeAttachment()?.id } catch {}
     const client = id === undefined ? undefined : this.#clients.get(id)
     if (client) { this.#clients.delete(id); this.#meeting.disconnect(client) }
-    if (this.#meeting.size === 0) this.#disarmSweep()
+    if (this.#meeting.size === 0 && this.#sfu.sessionCount === 0) this.#disarmSweep()
   }
 
   webSocketMessage(ws, message) {
@@ -232,10 +272,11 @@ export class MeetingPoint {
     const every = positive(this.#env?.DIAG_SWEEP_MS, SWEEP_MS)
     this.#sweep = setInterval(() => {
       this.#meeting.sweep()
+      void this.#sfu.sweep().then(() => this.#keepLedger()).catch(() => {})
       for (const [id, client] of this.#clients) if (client.closed) this.#clients.delete(id)
       this.#sinceCensus += every
       if (this.#sinceCensus >= CENSUS_MS) { this.#sinceCensus = 0; this.#meeting.logCensus() }
-      if (this.#meeting.size === 0) this.#disarmSweep()
+      if (this.#meeting.size === 0 && this.#sfu.sessionCount === 0) this.#disarmSweep()
     }, every)
   }
 
@@ -303,7 +344,7 @@ function hashInForce(stub) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
-    if (!isUpgrade(request) && !wantsInfo(request, url) && url.pathname !== CODE_PATH) return text(404, 'not found')
+    if (!isUpgrade(request) && !wantsInfo(request, url) && url.pathname !== CODE_PATH && !url.pathname.startsWith(SFU_PREFIX)) return text(404, 'not found')
     const open = isOpenHost(env, url.hostname)
     if (open && !isUpgrade(request) && url.pathname === CODE_PATH) return text(404, 'not found: an open meeting point has no access code')
     const hint = String(env.LOCATION_HINT || '').trim()
