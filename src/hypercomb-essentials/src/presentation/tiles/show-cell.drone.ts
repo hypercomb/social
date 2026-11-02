@@ -112,7 +112,7 @@ const previewRgb = (hex: string | null | undefined): [number, number, number] | 
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
-type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean }
+type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean; shaded?: boolean }
 
 /** `tile:preview` — the tile editor's edit in progress (editor/tile-editor.view.ts).
  *  `page` is the page the tile sits on, segments joined with '/'. Pictures are
@@ -145,6 +145,9 @@ export type DiveCell = {
   borderColor?: [number, number, number]
   /** A reference. Paint ignores this: the moving border is hasBranch, on hover. */
   portal: boolean
+  /** Dimmed with the page's own hidden-item grey. The caller decides: a foreign
+   *  cell reads no hide list, so the recents view says which atoms are hidden. */
+  shaded?: boolean
 }
 /** One tile of the quick menu's FLOWER (`render:flower`). The option tiles are
  *  tiles: the page's packer, on the page's shader, in the page's cells. */
@@ -11563,7 +11566,7 @@ export class ShowCellDrone extends Drone {
       let [cr, cg, cb] = labelToRgb(c.label)
       // gray out hidden items when show-hidden is active — and a switched-off
       // launcher member always (it is never filtered, so this is its face)
-      const isHiddenItem = !foreign && ((this.#showHiddenItems && this.#currentHiddenSet.has(c.label)) || this.#dormantLaunchLabels.has(c.label))
+      const isHiddenItem = c.shaded === true || (!foreign && ((this.#showHiddenItems && this.#currentHiddenSet.has(c.label)) || this.#dormantLaunchLabels.has(c.label)))
       if (isHiddenItem) {
         const gray = cr * 0.3 + cg * 0.3 + cb * 0.3
         cr = gray * 0.5; cg = gray * 0.5; cb = gray * 0.5
@@ -11741,7 +11744,7 @@ export class ShowCellDrone extends Drone {
 
     const cells: Cell[] = input.map(d => ({
       q: d.q, r: d.r, label: d.label, external: false, imageSig: d.imageSig,
-      hasBranch: d.hasBranch, hideText: d.hideText, borderColor: d.borderColor, heat: 0,
+      hasBranch: d.hasBranch, hideText: d.hideText, borderColor: d.borderColor, heat: 0, shaded: d.shaded,
     }))
 
     // Pin the UNION of what is on screen and what is about to be: neither the

@@ -1,9 +1,10 @@
 # Recents and the quick tray — every tile you made, and the hand that carries one
 
-> **Direction, jwize 2026-11-01. Step one — the quick tray and the handle
-> that feeds it — landed the same day (`quick-tray.element.ts`,
-> `quick-tray.drone.ts`, `portal-carry.drone.ts`); the rest is not yet
-> built.** This supersedes the model in
+> **Direction, jwize 2026-11-01. Landed the same day: the quick tray and the
+> handle that feeds it, the recents census, the recents source, the
+> full-screen view (the word `recents`) and the bag census. The trait-group
+> pick at the drop and the retirements below are not built.** This supersedes
+> the model in
 > `clipboard-sig-native.md` (cut / copy / paste as verbs, the clipboard window
 > as the holding area). The codex carries the rules (`H7`–`H8`, `A7`–`A9`);
 > this document carries the argument.
@@ -208,10 +209,41 @@ Two consequences, recorded:
    second page is a cache hit and keeps its first appearance — which is the
    doctrine's "once per atom", not a compromise of it.
 2. A hide is session state, not a fact in any layer, so the census carries no
-   `hidden` (the litmus forbids it). The recents source follows the hive's
-   own `tile:hidden` / `tile:unhidden` announcements and shades those rows.
+   `hidden` (the litmus forbids it). The reader reads the session's
+   `hc:hidden-lineages` list at answer time, the list show-cell itself reads.
 
-What this census does **not** yet see: an atom no page lists. It is not
-under the root, so a tree walk never meets it. Those are found by the *bag
-census* — every lineage bag that ever existed (`enumerateBags`), whose head
-is not reachable from the root — the second half of the view, not built.
+## The full-screen view and the bag census
+
+The word `recents` (narrowed with `recents <text>`, or `recents panel` for the
+list) opens `recents-view.drone.ts`. It paints through `render:dive`, the wave
+view's path, so the atoms are drawn by the page's own shader and atlases and
+the page comes back untouched. `recents-layout.ts` is the pure rule: the newest
+at the centre, ring by ring outward, every lit atom before any hidden one.
+
+**The view pages; it does not cap.** A screen holds 127 atoms because the
+atlases pin all of them, and the wheel pages further out. Every atom is
+reachable, so "always able to view every tile" survives a finite screen.
+Hidden atoms come after all lit ones, so on a large hive they are on the
+outer pages.
+
+**The bag census finds what the tree cannot.** A tree walk never meets an atom
+no page lists, but its bag survives (`H2`), so it is found from the other side:
+every lineage with a known head (`HistoryService.knownHeads`, memory only),
+minus what the root reaches. Reached is tested twice, because each test alone
+is wrong: a live tile's head can differ from the sig its parent lists, so sig
+alone reports a live tile; a moved tile leaves its old bag behind, so location
+alone reports that. Pool addresses and husks are skipped. The cost is one bag
+listing and one layer read per unreached head, 300 per idle pass, memoised by
+head. It is session memory and never written: those heads are not inputs of the
+root's bytes, so a record of them would not be a pure derivation of its key
+(`D1`).
+
+Such an atom has no page to walk to, so a click sends it to the tray, marked
+`loose`. A drop then places that exact sig, and only as an appearance, because
+it has no source to release. That is how a cut tile comes back.
+
+**Known limits.** A named head in a bag that was never a tile would show up as
+an unlisted atom; nothing here can tell it from a cut tile except its shape.
+Two loose atoms of one name share a tray row. Two atoms of one name share the
+hover highlight in the view, though clicks stay right because they resolve by
+hex.

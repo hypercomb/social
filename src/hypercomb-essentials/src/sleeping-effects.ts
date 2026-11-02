@@ -57,6 +57,7 @@ export const sleepers: readonly Sleeper[] = [
   { command: "screensaver", description: "Idle screensaver: toggle on/off, pick the look (hexagon, circle, thought…) and the motion (bounce, shooting-stars…)", load: () => import('./presentation/screensaver/screensaver.queen') },
   { wakesOn: ["sprite:boot:wanted"], load: () => import('./presentation/tiles/boot-sprite.drone') },
   { renders: ["launcher"], load: () => import('./presentation/tiles/launcher-view.drone') },
+  { command: "recents", description: "Show every tile this hive made, newest at the centre", load: () => import('./presentation/tiles/recents.queen') },
   { renders: ["slides","lightbox","scroller"], load: () => import('./presentation/tiles/slides-view.drone') },
   { renders: ["square-tile-view"], load: () => import('./presentation/tiles/square-tile-view.drone') },
   { command: "record", description: "Start AI-powered meeting recording with live hierarchy compilation", load: () => import('./recording/recording.queen') },
