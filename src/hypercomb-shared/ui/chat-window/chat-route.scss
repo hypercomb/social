@@ -935,12 +935,12 @@ $jx: calc(#{$pad} + #{$square} / 2);
   --chat-type-label: 0.75rem;
   --chat-type-meta: 0.8125rem;
   // THE ONE COLUMN. The masthead, the thread and the composer all stand on this
-  // measure, so their left edges are one line. A percentage is resolved by the
-  // element using it, and all three span the thread's column. In rem, never
-  // scaled: the column is the same width at every text size (jwize, 2026-11-01),
-  // so a smaller size is more on screen rather than a narrower column.
-  --chat-measure: 46rem;
-  --chat-gutter: max(1.25rem, calc((100% - var(--chat-measure)) / 2));
+  // gutter, so their left edges are one line. The chat takes most of the width,
+  // a padding on the left and right, and each message fits its content (jwize,
+  // 2026-11-02; it was a fixed 46rem measure, centred). A percentage is
+  // resolved by the element using it, and all three span the thread's column.
+  // In rem at the ends, never scaled with the text size.
+  --chat-gutter: clamp(1.25rem, 5%, 5rem);
   --chat-route-done: #{tw.ink(#70d59a)};
   --chat-route-open: #{tw.ink(#e8b04a)};
   --chat-route-decided: #{tw.ink(#7fb4e8)};
