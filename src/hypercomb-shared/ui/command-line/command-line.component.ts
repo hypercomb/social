@@ -214,6 +214,11 @@ const EXTERNAL_ARM_MS = 1000
  *  keystroke, is what deserves one. */
 const FIND_DEBOUNCE_MS = 120
 
+/** The row a find offers when tiles of the name were removed from every page.
+ *  Choosing it opens the recents view on the name, where they can be put back. */
+const removedRow = (count: number): string =>
+  `${count} removed ${count === 1 ? 'tile' : 'tiles'} — open in recents`
+
 /** The reaches, in the order they widen — used to label an answer. */
 const REACH_LABEL: Record<'layer' | 'branch' | 'hive', string> = {
   layer: 'here', branch: 'branch', hive: 'hive',
@@ -1619,7 +1624,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // back — the service ranks and groups; this list only shows.
     if (ctx.mode === 'find') {
       const answer = this.#findAnswer()
-      return answer ? answer.hits.map(h => h.label) : []
+      if (!answer) return []
+      // The last row, when tiles of this name were removed: not a place to
+      // walk to, but where to find them again.
+      return [...answer.hits.map(h => h.label), ...(answer.removed ? [removedRow(answer.removed)] : [])]
     }
     if (ctx.mode === 'slash') {
       // Detect slash command with args: head matches /command followed by space or bracket
@@ -3053,6 +3061,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     hits: readonly { label: string; name: string; path: readonly string[] }[]
     total: number
     partial: boolean
+    /** Tiles of this name that were removed from every page. */
+    removed: number
   } | null>(null)
 
   #findToken = 0
@@ -3063,6 +3073,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       hits: readonly { name: string; path: readonly string[] }[]
       total: number
       partial: boolean
+      removed?: number
     }>
   } | undefined {
     return get('@diamondcoreprocessor.com/HiveSearchService') as never
@@ -3115,6 +3126,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
           })),
           total: answer.total,
           partial: answer.partial,
+          removed: answer.removed ?? 0,
         })
       }).catch(() => { if (token === this.#findToken) this.#findAnswer.set(null) })
     }, FIND_DEBOUNCE_MS)
@@ -3131,7 +3143,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const base = reach === 'hive' ? [] : [...(this.lineage?.explorerSegments?.() ?? [])]
     const answer = await this.searchService?.search(asked, reach).catch(() => null)
     const best = answer?.hits[0]
-    if (!best) return
+    if (!best) {
+      // Nothing on any page by that name, but tiles of it were removed: the
+      // recents view lists them, with the word already typed in.
+      if (answer?.removed) { this.clear(); EffectBus.emitTransient('recents:open', { filter: asked }) }
+      return
+    }
     this.clear()
     this.navigation?.goRaw?.([...base, ...best.path])
   }
@@ -3141,6 +3158,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    *  where you stand. */
   #goToHit(label: string): boolean {
     const answer = this.#findAnswer()
+    if (answer?.removed && label === removedRow(answer.removed)) {
+      this.clear()
+      EffectBus.emitTransient('recents:open', { filter: answer.query })
+      return true
+    }
     const hit = answer?.hits.find(h => h.label === label) ?? answer?.hits[0]
     if (!answer || !hit) return false
     this.clear()
@@ -3296,7 +3318,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.shell?.unsuppress()
       return true
     }
-    void this.#executeReading(reading)
+    void this.#executeReading(reading, typed)
     return true
   }
 
@@ -3310,15 +3332,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    *  this list as its receipt (`RemoteSubmitOutcome`). `ok` means the action
    *  was dispatched and did not throw — never that the hive changed, since
    *  every executor in the tree is `Promise<void> | void`. */
-  async #executeReading(reading: UtteranceReadingLike): Promise<RemoteSubmitAction[]> {
+  async #executeReading(reading: UtteranceReadingLike, restore?: string): Promise<RemoteSubmitAction[]> {
     this.#recordHistory(reading.text)
     this.#pendingChoice.set(null)
     this.#utteranceResolutions.set(new Map())
     this.clear()
+    // The line is already gone; the pill says it is on its way. A line the
+    // participant typed (`restore`) comes back if not one of its words ran.
+    this.#beginRun(false)
     const outcomes: RemoteSubmitAction[] = []
     const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
       { execute?(name: string, args: string): Promise<unknown>; has?(name: string): boolean } | undefined
     if (!drone?.execute) {
+      this.#endRun()
+      if (restore) this.#restoreLine(restore)
       return reading.actions.map(action => ({
         command: action.command, args: action.args, ok: false,
         error: 'no behaviour executor is registered',
@@ -3351,6 +3378,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         })
       }
     }
+    this.#endRun()
+    if (restore && outcomes.length > 0 && !outcomes.some(o => o.ok)) this.#restoreLine(restore)
     this.requestSynchronize()
     return outcomes
   }
@@ -3398,7 +3427,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // would just ask again. 'cancel' leaves the line exactly as typed.
       if (option.label === 'run') {
         const reading = this.#utteranceReader()?.read(lowered(pending.text), this.#utteranceResolutions())
-        if (reading?.actions.length) void this.#executeReading(reading)
+        if (reading?.actions.length) void this.#executeReading(reading, pending.text)
       }
       return
     }
@@ -4473,11 +4502,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         return
       }
       if (this.#stance() === 'command') {
+        // The line stays, as a retired word's does: a word that did not run
+        // is a word to change, not text to lose.
         EffectBus.emit('activity:log', {
           message: `"${commandName}" is not a behaviour — to make a tile say: create ${commandName}`,
           icon: '⬡',
         })
-        this.clear()
         return
       }
       // create-goto reads the shell value — hand it the register line.
@@ -4487,10 +4517,52 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     if (drone?.execute) {
-      try { await drone.execute(commandName, args) }
-      catch (error) { this.#behaviourDidNotRun(commandName, error) }
+      // THE LINE GOES WHEN THE COMMAND STARTS, and comes back if it fails: the
+      // text is gone the moment it is on its way (with a working pill, so a
+      // slow command does not look like nothing happened), and a command that
+      // could not act gives the participant their words back to change.
+      const typed = this.shell?.value() ?? this.value()
+      this.#beginRun(true)
+      try {
+        await drone.execute(commandName, args)
+      } catch (error) {
+        this.#behaviourDidNotRun(commandName, error)
+        this.#endRun()
+        this.#restoreLine(typed)
+        return
+      }
+      this.#endRun()
     }
     this.clear()
+  }
+
+  /** Commands in flight — the working pill shows while > 0. */
+  #runs = 0
+
+  /** The command is on its way: the typed text is gone (`clearLine`, when the
+   *  caller has not already cleared it), and a working pill says so. */
+  #beginRun(clearLine: boolean): void {
+    this.#runs++
+    if (clearLine) this.#setShellValue('', true)
+    this.#indicators.update(m => {
+      const n = new Map(m)
+      n.set('running', { key: 'running', icon: 'sync', label: 'Running…', dismissable: false })
+      return n
+    })
+  }
+
+  #endRun(): void {
+    this.#runs = Math.max(0, this.#runs - 1)
+    if (this.#runs > 0) return
+    this.#indicators.update(m => { const n = new Map(m); n.delete('running'); return n })
+  }
+
+  /** Give the line back after a failure — unless the participant has already
+   *  started typing another, which is never overwritten. */
+  #restoreLine(typed: string): void {
+    if (!typed || (this.shell?.value() ?? this.value())) return
+    this.#setShellValue(typed, true)
+    this.shell?.focus()
   }
 
   /** A BEHAVIOUR THAT COULD NOT ACT says so, and nothing more. A queen throws

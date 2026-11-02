@@ -12,27 +12,153 @@ $types: (
 
 :host { display: contents; }
 
-// ── stack container ────────────────────────────────────
-// Top offset clears the page chrome AND the breadcrumb that docks under
-// it — same anchor calc as `.breadcrumb-top` (controls-bar.component.scss)
-// plus the crumb's own line box, so a toast never lands on the crumb at
-// any header size. Compact column of single-line strips, with a readable
-// gap between rows so each line is its own message.
-.toast-stack {
+// ── the corner ─────────────────────────────────────────
+// A couple of lines at the bottom left, clear of the breadcrumb, the header
+// and everything on the right. Newest nearest the corner; older messages wait
+// in the history, one press away. The left edge follows the rail's measured
+// inner edge (`--hc-controls-left`, as the controls bar does), so a toast
+// never sits under it.
+.toast-corner {
   position: fixed;
-  top: calc(
-    max(
-      calc(2.75rem * var(--hc-header-zoom, 1.0)),
-      calc(var(--hc-header-bottom, 0px) + 0.35rem)
-    ) + 1.5rem
-  );
-  right: 0.75rem;
+  left: calc(max(var(--hc-controls-left, 0px), 3rem) + 0.85rem + var(--hc-inset-left, 0px));
+  bottom: calc(0.75rem + var(--hc-safe-bottom, 0px));
   z-index: 100010;
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  max-width: min(32rem, calc(100vw - 1.5rem));
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 0.35rem;
+  max-width: min(26rem, calc(100vw - 1.5rem));
   pointer-events: none;
+}
+
+.toast-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.4rem;
+  max-width: 100%;
+  pointer-events: none;
+}
+
+// The small way into the history: a count in the corner, nothing louder.
+.toast-history-toggle {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.12rem 0.5rem;
+  background: rgba(var(--hc-panel-pane), 0.85);
+  border: 1px solid var(--hc-window-line);
+  border-radius: 999px;
+  color: var(--hc-window-ink-quiet);
+  font-family: var(--hc-mono);
+  font-size: 0.62rem;
+  line-height: 1.5;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 120ms ease, color 120ms ease;
+
+  &:hover { opacity: 1; color: var(--hc-window-ink-loud); }
+}
+
+// ── the full view: every message, over the whole screen, on a ground ──
+.toast-history-ground {
+  position: fixed;
+  inset: 0;
+  z-index: 100020;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(6px);
+}
+
+.toast-history {
+  position: fixed;
+  inset: 0;
+  z-index: 100021;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem clamp(1rem, 6vw, 5rem);
+  color: var(--hc-window-ink-loud);
+  font-family: var(--hc-mono);
+  pointer-events: none;
+
+  > * { pointer-events: auto; }
+}
+
+.toast-history-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--hc-window-line);
+
+  h3 {
+    margin: 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--hc-window-accent);
+  }
+}
+
+.toast-history-spacer { flex: 1; }
+
+.toast-history-btn {
+  background: var(--hc-window-tint);
+  border: 1px solid var(--hc-window-line);
+  border-radius: 4px;
+  padding: 0.3rem 0.8rem;
+  color: var(--hc-window-ink-plain);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+
+  &:hover { background: var(--hc-window-tint-strong); color: var(--hc-window-ink-loud); }
+}
+
+.toast-history-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0.5rem 0 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.toast-history-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--hc-window-line) 50%, transparent);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.toast-history-time {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: var(--hc-window-ink-quiet);
+}
+
+.toast-history-icon { flex-shrink: 0; }
+
+.toast-history-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--hc-window-ink-plain);
+
+  strong { margin-right: 0.4rem; color: var(--hc-window-ink-loud); }
+}
+
+.toast-history-empty {
+  padding: 1rem 0;
+  color: var(--hc-window-ink-quiet);
+  font-size: 0.85rem;
+}
+
+@each $type, $accent in $types {
+  .toast-history-row[data-type='#{$type}'] .toast-history-icon { color: #{tw.ink($accent)}; }
 }
 
 // ── individual toast — single horizontal line ──────────
@@ -63,7 +189,7 @@ $types: (
 
   &.fading {
     opacity: 0;
-    transform: translateX(0.75rem);
+    transform: translateX(-0.75rem);
   }
 }
 
@@ -189,7 +315,7 @@ $types: (
 }
 
 @keyframes toast-enter {
-  from { opacity: 0; transform: translateX(0.75rem); }
+  from { opacity: 0; transform: translateX(-0.75rem); }
   to   { opacity: 1; transform: translateX(0); }
 }
 
@@ -198,8 +324,7 @@ $types: (
 // ═══════════════════════════════════════════════════════════
 
 @include phone-only {
-  .toast-stack {
-    top: auto;
+  .toast-corner {
     // Above the control bar, by MEASUREMENT: the bar publishes the distance
     // from the viewport's bottom to its own top as `--hc-controls-bottom`
     // (it already contains the safe inset) and lifts `--hc-mobile-row-lift`
@@ -210,6 +335,8 @@ $types: (
     left: 0.5rem;
     max-width: none;
   }
+
+  .toast-history { padding: 0.75rem 0.85rem; }
 
   .toast-item {
     padding: 0.35rem 0.65rem;
@@ -224,8 +351,8 @@ $types: (
 }
 
 @include tablet-only {
-  .toast-stack {
-    max-width: 28rem;
+  .toast-corner {
+    max-width: 24rem;
   }
 
   .toast-dismiss {

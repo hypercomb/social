@@ -101,6 +101,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'system:overrides',
   'system:threads',
   'system:translations',
+  // THE QUESTIONS A PARTICIPANT ASKED NOT TO BE ASKED AGAIN (essentials
+  // commands/remove-confirm.ts): one private document, question → true.
+  // TRUTH POOL — the participant's own preference, never replicated, never
+  // minted from the optimize phase.
+  'confirm:muted',
   // THE FEATURES ONLY A PARTICIPANT USES (essentials
   // sharing/participant-features.ts): members are artifacts named by their
   // own content, each naming a feature by its layer name. `features publish`

@@ -33,6 +33,9 @@ export class ConfirmDialogComponent implements OnInit, OnDestroy {
 
   readonly request = signal<ConfirmRequest | null>(null)
   readonly open = computed(() => this.request() !== null)
+  /** The "don't ask again" box. Counts only on a confirm: a cancel never
+   *  mutes a question, and the box starts clear for every question. */
+  readonly optedOut = signal(false)
 
   ngOnInit(): void {
     this.#unsubRequest = EffectBus.on<ConfirmRequest>('confirm:request', (req) => {
@@ -66,7 +69,10 @@ export class ConfirmDialogComponent implements OnInit, OnDestroy {
     if (!req) return
     if (performance.now() < this.#armedAt) return
     this.#processedIds.add(req.id)
-    EffectBus.emit<ConfirmResponse>('confirm:response', { id: req.id, confirmed })
+    EffectBus.emit<ConfirmResponse>('confirm:response', {
+      id: req.id, confirmed, ...(confirmed && req.optOut && this.optedOut() ? { optedOut: true } : {}),
+    })
+    this.optedOut.set(false)
     // The next one waiting is asked in its turn — every caller gets an answer.
     const next = this.#waiting.shift() ?? null
     if (next) this.#armedAt = performance.now() + ConfirmDialogComponent.ARM_MS

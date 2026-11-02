@@ -15,7 +15,45 @@
 //   • TileActionsDrone.#removeTile  — Delete/Backspace over a hovered tile
 //   • RemoveQueenBee.execute        — vertical selection menu, /remove, etc.
 
-import { CHILD_SLOTS, requestConfirm } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, requestConfirmDetailed } from '@hypercomb/core'
+import { ParticipantDocument } from '../preferences/participant-document.js'
+
+/** The questions this participant asked not to be asked again, by question.
+ *  Their own record, in a document pool of its own — never replicated, kept
+ *  through the store like every other preference. Lazy: reading it is free,
+ *  and a module that never asks never makes the pool. */
+const MUTED_MEANING = 'confirm:muted'
+type Muted = Readonly<Record<string, true>>
+
+const parseMuted = (raw: unknown): Muted | null => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const out: Record<string, true> = {}
+  for (const [question, on] of Object.entries(raw)) if (on === true && /^[a-z][a-z0-9-]{0,31}$/.test(question)) out[question] = true
+  return out
+}
+
+let mutedDocument: ParticipantDocument<Muted> | undefined
+const mutedDoc = (): ParticipantDocument<Muted> => mutedDocument ??= new ParticipantDocument<Muted>({
+  meaning: MUTED_MEANING,
+  empty: {},
+  parse: parseMuted,
+})
+
+/** Has this participant asked not to be asked `question` again? */
+export const isMuted = (question: string): boolean => mutedDoc().value[question] === true
+
+/** Ask again from now on. */
+export const unmute = (question: string): void => {
+  const { [question]: _gone, ...rest } = mutedDoc().value
+  mutedDoc().write(rest)
+}
+
+const mute = (question: string): void => mutedDoc().write({ ...mutedDoc().value, [question]: true })
+
+const REMOVE_QUESTION = 'remove'
+
+// "Ask me again" is one press away on the toast that replaces the question.
+EffectBus.on<{ question?: string }>('confirm:unmute', p => { if (p?.question) unmute(p.question) })
 
 // A resolved child layer carries its `name` (identity) and its own `children`
 // sigs. The PARENT we count under only needs `children` — keeping its type
@@ -87,7 +125,24 @@ export async function confirmRemoval(
   const nested = await countTilesBeneath(history, parentLayer, targetNames)
   if (nested <= 0 && !always) return true
 
-  return requestConfirm({
+  // Asked not to be asked again: no question, only a moment's word in the
+  // corner that says what went and how to bring it back.
+  if (isMuted(REMOVE_QUESTION)) {
+    const name = targetNames.length === 1 ? `"${targetNames[0]}"` : `${targetNames.length} tiles`
+    EffectBus.emit('toast:show', {
+      type: 'info',
+      message: `Deleted ${name}${nested > 0 ? ` and ${nested} nested` : ''}. Nothing is lost.`,
+      key: 'remove-muted',
+      actions: [
+        { label: 'Undo', effect: 'keymap:invoke', payload: { cmd: 'history.undo' }, kind: 'primary' },
+        { label: 'Recents', effect: 'recents:open', payload: { filter: targetNames.length === 1 ? targetNames[0] : '' } },
+        { label: 'Ask again', effect: 'confirm:unmute', payload: { question: REMOVE_QUESTION } },
+      ],
+    })
+    return true
+  }
+
+  const answer = await requestConfirmDetailed({
     title: 'confirm.delete-title',
     // Plural on the number of TILES being deleted (one named tile vs N).
     message: nested > 0 ? 'confirm.remove-message' : 'confirm.delete-message',
@@ -99,6 +154,11 @@ export async function confirmRemoval(
           warningParams: { count: nested },
         }
       : {}),
+    // WHERE IT COMES BACK: a deleted tile is never lost, and the question says where to look.
+    hint: 'confirm.remove-hint',
+    optOut: 'confirm.dont-remind',
     danger: true,
   })
+  if (answer.confirmed && answer.optedOut) mute(REMOVE_QUESTION)
+  return answer.confirmed
 }

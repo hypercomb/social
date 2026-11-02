@@ -154,7 +154,7 @@
                 <span class="indicator-x">×</span>
               </button>
             } @else {
-              <span class="indicator-pill info" [title]="ind.label">
+              <span class="indicator-pill info" [class.working]="ind.key === 'running'" [title]="ind.label">
                 <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
               </span>
             }

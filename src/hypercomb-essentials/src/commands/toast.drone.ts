@@ -69,12 +69,34 @@ const DEFAULT_DURATIONS: Record<ToastType, number> = {
 
 const MAX_VISIBLE = 5
 
+/** One line of what was said, kept after the toast is gone. */
+export interface ToastRecord {
+  id: number
+  type: ToastType
+  title: string
+  message: string
+  at: number
+}
+
+/** How many past messages the history keeps (memory only: a message is a
+ *  passing word, not the participant's data). */
+const MAX_HISTORY = 200
+
 export class ToastDrone extends EventTarget {
   #toasts: Toast[] = []
+  #history: ToastRecord[] = []
   #nextId = 0
   #timers = new Map<number, ReturnType<typeof setTimeout>>()
 
   get toasts(): readonly Toast[] { return this.#toasts }
+
+  /** Everything said this session, newest first. */
+  get history(): readonly ToastRecord[] { return this.#history }
+
+  clearHistory(): void {
+    this.#history = []
+    this.#emit()
+  }
 
   constructor() {
     super()
@@ -115,8 +137,9 @@ export class ToastDrone extends EventTarget {
       key,
     }
 
-    // prepend — newest on top
+    // prepend — newest first
     this.#toasts = [toast, ...this.#toasts].slice(0, MAX_VISIBLE)
+    this.#history = [{ id, type: toast.type, title: toast.title, message: toast.message, at: toast.createdAt }, ...this.#history].slice(0, MAX_HISTORY)
     this.#emit()
 
     // schedule auto-dismiss
