@@ -147,7 +147,7 @@ export const originHost = (raw: string): string => {
 
 /** Where a host's content lives. Loopback keeps http so a participant can
  *  serve their own machine; everything else is https. */
-const originUrl = (host: string): string => {
+export const originUrl = (host: string): string => {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host)
   return `${local ? 'http' : 'https'}://${host}`
 }
