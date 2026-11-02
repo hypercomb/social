@@ -142,7 +142,10 @@ export class SfuDesk {
   usage                   // { month, gb }
   dirty = false
 
-  constructor({ appId, token, monthlyGb, fetchImpl = fetch, now = Date.now, usage, cors = {} }) {
+  // fetch is wrapped, never stored bare: the Workers runtime refuses the
+  // global fetch called with any `this` but the global ("Illegal
+  // invocation"), and this.#fetch(...) would call it with the desk as `this`.
+  constructor({ appId, token, monthlyGb, fetchImpl = (url, init) => fetch(url, init), now = Date.now, usage, cors = {} }) {
     this.#appId = String(appId ?? '').trim()
     this.#token = String(token ?? '').trim()
     const cap = Number(monthlyGb)
