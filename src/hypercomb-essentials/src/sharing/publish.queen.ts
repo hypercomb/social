@@ -201,7 +201,9 @@ export class PublishQueenBee {
     if (named.includes(zone)) await setBranchHosts(segments, next)
     const published = (await latestByLineageKey()).has(lineageKey(segments))
     if (!published) { say(`"${name}" is no longer meant for ${zone}`); return }
-    const result = next.length === 0 ? await unpublishBranch(segments) : await setBranchDoors(segments, next)
+    // The domain turned off is named as left: its mark is gone already, and
+    // it may be the only door that holds the index.
+    const result = next.length === 0 ? await unpublishBranch(segments, [zone]) : await setBranchDoors(segments, next, [zone])
     if (!result.ok) fail(`"${name}" could not be taken off ${zone} (${result.failure}).`)
     say(next.length === 0 ? `"${name}" is withdrawn — ${zone} was its last door` : `"${name}" is off ${zone}`, 'success')
   }

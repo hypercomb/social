@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { HiveIndexResult } from './hive-pointer.js'
-import { resolveIndexDoor } from './publish-branch.js'
+import { indexDoors, resolveIndexDoor } from './publish-branch.js'
 
 const PUBKEY = 'c'.repeat(64)
 const INDEX: HiveIndexResult = { ok: true, manifest: { roots: { susan: 'a'.repeat(64) }, doors: {}, createdAt: 1_700_000_000, pubkey: PUBKEY } }
@@ -31,5 +31,22 @@ describe('resolveIndexDoor', () => {
   it('reports the last failure when no door answers at all', async () => {
     const found = await resolveIndexDoor(['x.example', 'y.example'], PUBKEY, doors({}))
     expect(found).toEqual({ host: 'y.example', read: DOWN })
+  })
+})
+
+// "publish /business-card off hypercomb.com" was refused as index-unsafe while
+// visitors read business-card there: the turn-off drops the domain's mark
+// first, so the walk never asked the one door that held the index.
+describe('indexDoors — a turn-off still reads through the domain it leaves', () => {
+  it('asks the domain being left after the doors that remain', async () => {
+    const walk = indexDoors(['jwize.com'], ['hypercomb.com'])
+    expect(walk).toEqual(['jwize.com', 'hypercomb.com'])
+    const found = await resolveIndexDoor(walk, PUBKEY, doors({ 'jwize.com': ABSENT, 'hypercomb.com': INDEX }))
+    expect(found).toEqual({ host: 'hypercomb.com', read: INDEX })
+  })
+
+  it('names a door once, and nothing is added when nothing is left', () => {
+    expect(indexDoors(['hypercomb.com'], ['HYPERCOMB.COM'])).toEqual(['hypercomb.com'])
+    expect(indexDoors(['a.example'], undefined)).toEqual(['a.example'])
   })
 })
