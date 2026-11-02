@@ -228,9 +228,43 @@
         });
       }
 
-      function refusePeer() { throw new TypeError('outgoing firewall: peer connections are refused'); }
-      if (typeof window.RTCPeerConnection === 'function') pin(window, 'RTCPeerConnection', refusePeer);
-      if (typeof window.webkitRTCPeerConnection === 'function') pin(window, 'webkitRTCPeerConnection', refusePeer);
+      // Peer connections: only the meeting's one connection to Cloudflare's
+      // SFU (documentation/meeting-lobby.md, "Video"). Its ICE servers may be
+      // Cloudflare's STUN or none; any other STUN, and any TURN, is refused.
+      function peerConfigSafe(config) {
+        if (config == null) return true;
+        var servers = config.iceServers;
+        if (servers == null) return true;
+        if (!Array.isArray(servers)) return false;
+        for (var i = 0; i < servers.length; i++) {
+          var urls = servers[i] && servers[i].urls;
+          var list = Array.isArray(urls) ? urls : [urls];
+          if (!list.length) return false;
+          for (var j = 0; j < list.length; j++) {
+            if (!/^stuns?:stun\.cloudflare\.com(:\d+)?$/i.test(String(list[j]))) return false;
+          }
+        }
+        return true;
+      }
+      function guardPeer(name) {
+        var NativePeer = window[name];
+        if (typeof NativePeer !== 'function') return;
+        function FirewallPeer(config) {
+          if (!peerConfigSafe(config)) throw new TypeError('outgoing firewall: peer connections may name only Cloudflare STUN');
+          return new NativePeer(config);
+        }
+        FirewallPeer.prototype = NativePeer.prototype;
+        if (typeof NativePeer.prototype.setConfiguration === 'function') {
+          var nativeSet = NativePeer.prototype.setConfiguration;
+          pin(NativePeer.prototype, 'setConfiguration', function (config) {
+            if (!peerConfigSafe(config)) throw new TypeError('outgoing firewall: peer connections may name only Cloudflare STUN');
+            return nativeSet.call(this, config);
+          });
+        }
+        pin(window, name, FirewallPeer);
+      }
+      guardPeer('RTCPeerConnection');
+      guardPeer('webkitRTCPeerConnection');
       if (typeof window.WebTransport === 'function') {
         var NativeWebTransport = window.WebTransport;
         function FirewallWebTransport(url, options) {
