@@ -166,6 +166,23 @@ describe('external calls', () => {
     expect(c.outcome()?.kind).toBe('ran')
   })
 
+  it('performs an act instead of saying its lines, and records the verdict', async () => {
+    let performed = 0
+    let outcome: ExternalCallOutcome | undefined
+    EffectBus.emitTransient(EXTERNAL_CALL, {
+      from: 'publish:revision', lines: ['stamp install:essentials → abc…'],
+      perform: async () => { performed++; return 'stamped' },
+      complete: (o: ExternalCallOutcome) => { outcome = o },
+    })
+    expect(performed).toBe(0)
+    EffectBus.emitTransient(EXTERNAL_ANSWER, { id: lastAsk()!.id, decision: 'run' })
+    await flush(); await flush()
+    expect(performed).toBe(1)
+    expect(said).toEqual([])
+    expect(outcome).toMatchObject({ kind: 'ran', results: [{ text: 'stamp install:essentials → abc…', verdict: 'stamped' }] })
+    expect(turns[1]?.text).toBe('stamp install:essentials → abc…\n→ stamped')
+  })
+
   it('refuses a call with no lines', () => {
     const c = call('empty', ['  '])
     expect(c.taken()).toBe(false)

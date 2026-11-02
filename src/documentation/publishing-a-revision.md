@@ -42,7 +42,11 @@ attaches (`scripts/bridge/owed-stamps.cjs`).
    Fix what the box names and publish again, or publish without the public
    host for one run: `HYPERCOMB_PUBLIC_INSTALL_HOST=none`.
 4. **Announce** — `stamp-install-channel.ts <name> --require` advances the signed
-   `install:<name>` root through the authoring browser. Followers of that name
+   `install:<name>` root through the authoring browser. While the bridge
+   carries lines only (the default, `claude-bridge-setup.md`), the stamp waits
+   on the hive's command line as `publish:revision: stamp install:<name> → …`:
+   press Enter there (Esc declines; the stamp is then owed). It waits up to
+   fifteen minutes. Followers of that name
    are told; nobody else is. It also writes the publisher record into both
    shells' copies (`hypercomb-essentials/src/sharing/install-publisher.json`
    and `hypercomb-web/src/setup/install-publisher.json`, byte for byte — a spec

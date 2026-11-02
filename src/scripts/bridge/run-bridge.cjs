@@ -205,12 +205,12 @@ async function payOwedStamps() {
       // A hive answers the bridge before its store is open, and a big hive
       // takes a while to open — so a silent renderer is asked again while it
       // is still the same connection, not given up on at the first timeout.
-      const asked = renderer
-      let res = null
-      for (let attempt = 0; attempt < 6 && renderer === asked; attempt++) {
-        res = await askRenderer({ op: 'hive-root-set', key: `install:${channel}`, sig: debt.sig, ...(debt.host ? { host: debt.host } : {}) })
-        if (res?.ok || res?.error !== 'renderer did not answer') break
-      }
+      // While the bridge carries lines only, the hive shows the stamp on its
+      // command line and answers once the participant has (Enter or Esc), so
+      // it is asked ONCE and given time: asking again would queue the same
+      // stamp twice. The long wait also covers a big hive still opening.
+      console.log(`[bridge] owed stamp ${label}: answer it on the hive's command line ($)`)
+      const res = await askRenderer({ op: 'hive-root-set', from: 'owed stamp', key: `install:${channel}`, sig: debt.sig, ...(debt.host ? { host: debt.host } : {}) }, 15 * 60_000)
       if (!res?.ok) { console.warn(`[bridge] owed stamp ${label} still owed: ${res?.error || 'failed'}`); continue }
       const signer = String(res.data?.pubkey || '').toLowerCase()
       if (signer !== followed) { console.warn(`[bridge] owed stamp ${label} left owed — signed by ${signer.slice(0, 12)}…, not the followed publisher`); continue }

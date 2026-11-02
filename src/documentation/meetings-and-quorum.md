@@ -1,5 +1,12 @@
 # Meetings and Quorum
 
+> **Superseded for the `meeting` word (2026-11-02).** A meeting is now the
+> swarm's, not a tile's: `meeting` starts or joins it at once, with no quorum;
+> the originator leads in the middle and the others follow, and the leader's
+> lines come through to be allowed. See [meeting-lobby.md](meeting-lobby.md).
+> What follows describes the tile-tagged cascade and quorum model, kept for the
+> tile meeting icon and as the argument for the 1+6 shape.
+
 How a group of participants gathers on a honeycomb, reaches quorum, and transitions from "a few people standing around a tile" into a live WebRTC video meeting.
 
 This document covers the **why** (the 1+6 Cascade and why it's the default), the **how** (tagging, quorum gathering, state machine, signaling), and the **where** (which drones and files implement each part).

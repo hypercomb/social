@@ -43,9 +43,16 @@ Why every other op is shut: they read, wrote or emitted around the gate.
 `hive-root-set` and `update` wrote straight to the hive; the reads handed your
 tiles out without asking.
 
+**The one op that asks instead of being refused:** `hive-root-set` for an
+`install:<channel>` key, which is `publish:revision`'s last step (the stamp).
+It is a signed write no word says, so it shows on the command line as
+`publish:revision: stamp install:essentials → f3a715e82582…`; Enter performs
+it, Esc declines it (the publish then reports the stamp owed). Any other key
+is refused as before. The broker's payment of an owed stamp, when a hive
+attaches, asks the same way, once.
+
 **What stops working while it is shut:** a parked Claude Code session
 answering chats (`chat-reply`, `thread-read`), the responder's tile writes,
-`publish:revision`'s stamp of `install:essentials` (it uses `hive-root-set`),
 `hive-harness.cjs`, and the `_*.cjs` scripts that use any op but `submit`.
 
 **Opening it again** is yours alone, in the hive tab's console:
