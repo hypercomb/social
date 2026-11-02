@@ -167,9 +167,13 @@ export class SfuDesk {
   }
 
   async #cloudflare(method, path, body) {
+    // A JSON type only with a JSON body: Cloudflare reads a request that says
+    // application/json as one, and refuses an empty one ("Body JSON
+    // validation error: sessionDescription") — as Cloudflare's own examples
+    // open a session: the token and nothing else.
     const res = await this.#fetch(`${API}/${this.#appId}${path}`, {
       method,
-      headers: { Authorization: `Bearer ${this.#token}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${this.#token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     })
     let data = {}
