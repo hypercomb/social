@@ -26,7 +26,8 @@ import {
   Drone, EffectBus, EXTERNAL_CALL, REMOTE_SUBMIT, canonicalVerbOf, hypercomb, meetingPointKey,
   type ExternalCallRequest, type RemoteSubmitRequest,
 } from '@hypercomb/core'
-import { bitrateOf, frameRateOf, isQuality, qualityConstraints, videoConstraints, type Quality } from './meeting-quality.js'
+import { audioConstraints, bitrateOf, frameRateOf, isQuality, videoConstraints, type Quality } from './meeting-quality.js'
+import { showsPicture } from './meeting-picture.js'
 import { followStep, followedBy, isFollowed, leaderOf, meetingAddress, meetingPreimage, originatorOf, pathKey, seatOrder, type Member } from './meeting-seats.js'
 import { isJoinedHere, ownZone, readTabZone } from '../sharing/membership.js'
 import { SESSION_ID, SfuClient, sfuBase } from './sfu-client.js'
@@ -269,8 +270,10 @@ export class HiveMeetingDrone extends Drone {
       this.#localAvailable = true
       this.#since = Date.now()
       this.#lastLeaderPath = null
+      // VIDEO IS OFF BY DEFAULT (jwize, 2026-11-02): a person joins with
+      // their voice only, and turns the camera on themselves.
       if (stream instanceof MediaStream) this.#acceptStream(stream)
-      else void this.#toggleCamera()
+      else void this.#joinVoice()
       this.#setState('active')
       this.#lastAvailPublishMs = 0
       this.#publishAvailability()
@@ -685,13 +688,21 @@ export class HiveMeetingDrone extends Drone {
       }
       const local: { mid: string; trackName: string }[] = []
       const transceivers: RTCRtpTransceiver[] = []
-      for (const track of this.#localStream.getTracks()) {
+      for (const track of this.#localStream.getAudioTracks()) {
         transceivers.push(pc.addTransceiver(track, { direction: 'sendonly', streams: [this.#localStream] }))
       }
+      // The camera's slot is published whether the camera is on or not, so
+      // turning it on later is a track swapped into a sender, never a
+      // renegotiation. Off, the slot carries no frames.
+      const camera = this.#localStream.getVideoTracks()[0]
+      transceivers.push(camera
+        ? pc.addTransceiver(camera, { direction: 'sendonly', streams: [this.#localStream] })
+        : pc.addTransceiver('video', { direction: 'sendonly', streams: [this.#localStream] }))
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       for (const t of transceivers) {
-        if (t.mid && t.sender.track) local.push({ mid: t.mid, trackName: `${this.#publisherId}-${t.sender.track.kind}` })
+        const kind = t.sender.track?.kind ?? t.receiver.track.kind
+        if (t.mid) local.push({ mid: t.mid, trackName: `${this.#publisherId}-${kind}` })
       }
       const answer = await client.publish(offer.sdp ?? '', local)
       await pc.setRemoteDescription({ type: 'answer', sdp: answer })
@@ -795,19 +806,33 @@ export class HiveMeetingDrone extends Drone {
 
   // ─── camera ──────────────────────────────────────────────────
 
-  /** Accept a pre-acquired MediaStream (from the lobby's user gesture). */
+  /** Accept a pre-acquired MediaStream (from the lobby's user gesture). The
+   *  voice goes in; the camera does not — video is off by default, and the
+   *  lobby's preview camera is let go here. */
   #acceptStream = (stream: MediaStream): void => {
     if (this.#localStream && this.#localStream !== stream) {
       for (const track of this.#localStream.getTracks()) track.stop()
     }
+    for (const track of stream.getVideoTracks()) { track.stop(); stream.removeTrack(track) }
     this.#localStream = stream
-    this.#cameraOn = true
-    const video = videoConstraints(this.#quality)
-    for (const track of stream.getVideoTracks()) void track.applyConstraints(video).catch(() => { /* keep what it has */ })
-    this.emitEffect('meeting:local-camera', { on: true })
-    window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: true } }))
+    this.#cameraOn = false
+    this.emitEffect('meeting:local-camera', { on: false })
+    window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: false } }))
     this.#emitStreams()
     void this.#startVideo()
+  }
+
+  /** Joining without the lobby: the microphone only. No microphone (none, or
+   *  refused) still joins — you hear and see the others. */
+  #joinVoice = async (): Promise<void> => {
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints() })
+    } catch {
+      stream = new MediaStream()
+    }
+    if (!this.#localAvailable) { for (const track of stream.getTracks()) track.stop(); return }
+    this.#acceptStream(stream)
   }
 
   /** Camera off: the video sender sends nothing. On: a fresh camera track
@@ -825,7 +850,7 @@ export class HiveMeetingDrone extends Drone {
     } else {
       let fresh: MediaStream
       try {
-        fresh = await navigator.mediaDevices.getUserMedia(qualityConstraints(this.#quality))
+        fresh = await navigator.mediaDevices.getUserMedia({ video: videoConstraints(this.#quality) })
       } catch (e) {
         console.warn('[hive-meeting] camera access denied:', e)
         this.emitEffect('meeting:local-camera', { on: false })
@@ -833,7 +858,10 @@ export class HiveMeetingDrone extends Drone {
         return
       }
       if (!this.#localStream) {
-        this.#acceptStream(fresh)
+        // Still joining (the microphone is being asked for): try again then.
+        for (const track of fresh.getTracks()) track.stop()
+        this.emitEffect('meeting:local-camera', { on: false })
+        window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: false } }))
         return
       }
       const track = fresh.getVideoTracks()[0]
@@ -843,6 +871,7 @@ export class HiveMeetingDrone extends Drone {
         if (videoSender) await videoSender.replaceTrack(track).catch(() => { /* ignore */ })
       }
       this.#cameraOn = true
+      this.#tuneSenders()
     }
     this.emitEffect('meeting:local-camera', { on: this.#cameraOn })
     window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: this.#cameraOn } }))
@@ -853,7 +882,7 @@ export class HiveMeetingDrone extends Drone {
    *  arrival. */
   #emitStreams = (): void => {
     const byId = new Map<string, MediaStream>(this.#remoteStreams)
-    if (this.#localStream && this.#cameraOn) byId.set(this.#publisherId, this.#localStream)
+    if (this.#localStream && this.#cameraOn && showsPicture(this.#localStream)) byId.set(this.#publisherId, this.#localStream)
     const streams = new Map<string, MediaStream>()
     for (const member of seatOrder(this.#members())) {
       const stream = byId.get(member.id)

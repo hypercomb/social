@@ -17,6 +17,7 @@
 // meeting-video.drone.ts, never twice.
 
 import { EffectBus } from '@hypercomb/core'
+import { showsPicture, watchPicture } from '../meeting-picture.js'
 
 type Seat = { seat: number; id: string; you: boolean; leads: boolean; originator?: boolean }
 type Presence = { joined?: boolean; here?: number; seats?: readonly Seat[]; following?: string }
@@ -79,6 +80,7 @@ ${TAG} .mh-btn:hover{background:color-mix(in srgb, currentColor 20%, transparent
 export class MeetingHiveElement extends HTMLElement {
   #stage!: HTMLElement
   #note!: HTMLElement
+  #camera!: HTMLButtonElement
   #presence: Presence = {}
   #streams = new Map<string, MediaStream>()
   #videos = new Map<string, HTMLVideoElement>()
@@ -100,14 +102,21 @@ export class MeetingHiveElement extends HTMLElement {
     foot.className = 'mh-foot'
     this.#note = document.createElement('span')
     this.#note.className = 'mh-note'
+    // Video is off by default: the camera is turned on here, by the person.
+    this.#camera = this.#button(t('meeting.camera-on', 'camera on'), () => EffectBus.emitTransient('meeting:toggle-camera', {}))
     const copy = this.#button(t('meeting.copy-link', 'copy link'), () => EffectBus.emitTransient('meeting:copy-link', {}))
     const leave = this.#button(t('meeting.leave', 'leave'), () => EffectBus.emitTransient('meeting:leave', {}))
     const close = this.#button(t('meeting.hive-close', 'back to the hive'), () => EffectBus.emitTransient('meeting:view-toggle', { open: false }))
-    foot.append(this.#note, copy, leave, close)
+    foot.append(this.#note, this.#camera, copy, leave, close)
     this.replaceChildren(this.#stage, foot)
 
     this.#off.push(
       EffectBus.on<Presence>('meeting:presence', p => { this.#presence = p ?? {}; this.#paint() }),
+      EffectBus.on<{ on?: boolean }>('meeting:local-camera', p => {
+        const on = p?.on === true
+        this.#camera.textContent = on ? t('meeting.camera-off', 'camera off') : t('meeting.camera-on', 'camera on')
+        this.#camera.setAttribute('aria-pressed', String(on))
+      }),
       EffectBus.on<{ streams?: Map<string, MediaStream> }>('meeting:streams', p => {
         this.#streams = p?.streams instanceof Map ? p.streams : new Map()
         this.#paint()
@@ -178,7 +187,10 @@ export class MeetingHiveElement extends HTMLElement {
       hex.querySelector('.mh-name')!.textContent = `${seat.seat} · ${who}${seat.leads ? ` · ${t('meeting.leads', 'leads')}` : ''}`
       const stream = this.#streams.get(seat.id)
       let video = this.#videos.get(seat.id)
-      if (stream) {
+      // A face only where a picture is: a camera that is off still sends a
+      // (muted) video track, and the seat stays until it carries frames.
+      if (stream) watchPicture(stream, this.#resize)
+      if (stream && showsPicture(stream)) {
         if (!video) {
           video = document.createElement('video')
           video.autoplay = true
