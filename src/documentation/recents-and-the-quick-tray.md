@@ -218,7 +218,9 @@ The word `recents` (narrowed with `recents <text>`, or `recents panel` for the
 list) opens `recents-view.drone.ts`. It paints through `render:dive`, the wave
 view's path, so the atoms are drawn by the page's own shader and atlases and
 the page comes back untouched. `recents-layout.ts` is the pure rule: the newest
-at the centre, ring by ring outward, every lit atom before any hidden one.
+at the centre, ring by ring outward, every lit atom before any hidden one. It
+frames itself with an `'auto'` fit, which is in-memory and never committed, and
+puts the page's framing back on close, so a look never moves the saved viewport.
 
 **The view pages; it does not cap.** A screen holds 127 atoms because the
 atlases pin all of them, and the wheel pages further out. Every atom is
@@ -232,7 +234,7 @@ every lineage with a known head (`HistoryService.knownHeads`, memory only),
 minus what the root reaches. Reached is tested twice, because each test alone
 is wrong: a live tile's head can differ from the sig its parent lists, so sig
 alone reports a live tile; a moved tile leaves its old bag behind, so location
-alone reports that. Pool addresses and husks are skipped. The cost is one bag
+alone reports that. Pool addresses are skipped. The cost is one bag
 listing and one layer read per unreached head, 300 per idle pass, memoised by
 head. It is session memory and never written: those heads are not inputs of the
 root's bytes, so a record of them would not be a pure derivation of its key
@@ -241,6 +243,11 @@ root's bytes, so a record of them would not be a pure derivation of its key
 Such an atom has no page to walk to, so a click sends it to the tray, marked
 `loose`. A drop then places that exact sig, and only as an appearance, because
 it has no source to release. That is how a cut tile comes back.
+
+**Husks are kept on purpose.** An auto-minted husk is a bare `{ name }` on one
+marker, and so is a blank tile someone made and cut, so the shape cannot tell
+them apart. A name shown by mistake costs less than a tile gone missing (`H7`).
+On the one hive measured, 158 bags held no phantoms.
 
 **Known limits.** A named head in a bag that was never a tile would show up as
 an unlisted atom; nothing here can tell it from a cut tile except its shape.

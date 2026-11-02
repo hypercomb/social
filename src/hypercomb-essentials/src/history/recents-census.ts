@@ -147,12 +147,6 @@ export interface RecentAtom extends CensusEntry {
   readonly hidden: boolean
 }
 
-/** The bag census's test for a husk: an auto-minted bare `{ name }` layer as a
- *  bag's only marker is never truth, so it is nothing anybody made. A bare head
- *  with real history IS truth: the participant emptied that tile. */
-export const isHusk = (layer: Record<string, unknown>, markers: number): boolean =>
-  markers <= 1 && Object.keys(layer).every(key => key === 'name')
-
 /**
  * Everything the view shows: the tree census and the unlisted atoms, once per
  * atom, newest first. The root is left out, because it is where you stand and

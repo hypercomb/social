@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  MAX_CENSUS_ENTRIES, RECENTS_DERIVATION, composeCensus, gatherAtoms, isHusk, newestFirst, readableCensus,
+  MAX_CENSUS_ENTRIES, RECENTS_DERIVATION, composeCensus, gatherAtoms, newestFirst, readableCensus,
   type CensusRecord,
 } from './recents-census'
 
@@ -125,10 +125,3 @@ describe('gatherAtoms', () => {
   })
 })
 
-describe('isHusk', () => {
-  it('is a bare name on a single marker, and nothing else', () => {
-    expect(isHusk({ name: 'x' }, 1)).toBe(true)
-    expect(isHusk({ name: 'x' }, 2)).toBe(false)
-    expect(isHusk({ name: 'x', children: [] }, 1)).toBe(false)
-  })
-})

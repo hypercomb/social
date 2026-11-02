@@ -8,6 +8,11 @@
 // geometry packer, and the page comes back exactly as it was. There is no
 // second renderer.
 //
+// IT FITS ITSELF, AND LEAVES NO TRACE. The view is framed to fill the screen
+// wherever the page was zoomed, with an 'auto' fit: in-memory, never committed.
+// The framing the page had is held here and put back on close, so a look at
+// recents never moves the saved viewport.
+//
 // Opened by `recents:open`; closed by Escape, a press on empty space, or the
 // explorer moving. While it is up it owns the pointer:
 //   wheel        pages further out and back (recents-layout.ts: a screen is
@@ -31,6 +36,14 @@ import type { DiveCell } from './show-cell.drone.js'
 import { takePayload } from './portal-carry.plan.js'
 import { clampPage, filterAtoms, layoutPage, recentsClickPlan, type Axial } from './recents-layout.js'
 
+type ZoomLike = { zoomToFit?(snap?: boolean, source?: 'user' | 'auto-persist' | 'auto', fitAxis?: 'both' | 'x' | 'y', hold?: 'none'): boolean }
+type ViewportLike = { lastPan?: { dx?: number; dy?: number } | null; setPan?(dx: number, dy: number, source?: 'auto'): void }
+type HostLike = {
+  app?: { stage: { position: { x: number; y: number; set(x: number, y: number): void } } }
+  container?: { scale: { x: number; set(s: number): void }; position: { x: number; y: number; set(x: number, y: number): void } }
+}
+/** The page's framing, to give back on close. */
+type Framing = { scale: number; x: number; y: number; stageX: number; stageY: number; panX: number; panY: number }
 type OverlayLike = { dropTargetAtClient?(x: number, y: number): { q: number; r: number } | null }
 type StoreLike = {
   getLayerBytes?(sig: string): Promise<Uint8Array | null>
@@ -45,7 +58,7 @@ export class RecentsViewDrone extends Drone {
   public override description =
     'The full-screen recents view: every atom this hive made, newest at the centre, hidden ones shaded and further out.'
 
-  protected override listens = ['render:set-orientation', 'render:dive-painted']
+  protected override listens = ['render:host-ready', 'render:set-orientation', 'render:dive-painted']
   protected override emits = ['render:dive', 'render:dive-hover', 'quick-tray:take', 'toast:show']
 
   #open = false
@@ -54,6 +67,8 @@ export class RecentsViewDrone extends Drone {
   #page = 0
   #total = 0
   #flat = false
+  #host: HostLike | null = null
+  #framing: Framing | null = null
   #byAxial = new Map<string, RecentAtom>()
   #hoverLabel: string | null = null
   #buildToken = 0
@@ -63,11 +78,14 @@ export class RecentsViewDrone extends Drone {
 
   constructor() {
     super()
+    this.onEffect<HostLike>('render:host-ready', p => { this.#host = p })
     this.onEffect<{ flat?: boolean }>('render:set-orientation', p => { this.#flat = !!p?.flat })
     // show-cell's word on what is up: a zero while the view believes it is
-    // painted means the surface was taken from under it.
+    // painted means the surface was taken from under it. A count is the moment
+    // the mesh exists to be measured, so the fit waits for it.
     this.onEffect<{ count?: number }>('render:dive-painted', p => {
-      if (this.#painted && (p?.count ?? 0) === 0) this.#close()
+      if ((p?.count ?? 0) > 0) { if (this.#open) this.#fit() }
+      else if (this.#painted) this.#close()
     })
     EffectBus.on<{ filter?: string }>('recents:open', p => { void this.#show(String(p?.filter ?? '')) })
     EffectBus.on('recents:census-changed', () => { if (this.#open) void this.#paint() })
@@ -110,6 +128,36 @@ export class RecentsViewDrone extends Drone {
     window.removeEventListener('pointermove', this.#onPointerMove, true)
     window.removeEventListener('navigate', this.#onNavigate)
     if (wasPainted) this.emitEffect('render:dive', { cells: null })
+    this.#unframe()
+  }
+
+  /** Hold the page's framing once, then fill the screen with what is painted. */
+  #fit(): void {
+    const stage = this.#host?.app?.stage, container = this.#host?.container
+    if (!this.#framing && stage && container) {
+      const pan = this.#viewport()?.lastPan
+      this.#framing = {
+        scale: container.scale.x, x: container.position.x, y: container.position.y,
+        stageX: stage.position.x, stageY: stage.position.y,
+        panX: pan?.dx ?? 0, panY: pan?.dy ?? 0,
+      }
+    }
+    window.ioc.get<ZoomLike>('@diamondcoreprocessor.com/ZoomDrone')?.zoomToFit?.(true, 'auto', 'both', 'none')
+  }
+
+  #unframe(): void {
+    const framing = this.#framing
+    this.#framing = null
+    const stage = this.#host?.app?.stage, container = this.#host?.container
+    if (!framing || !stage || !container) return
+    stage.position.set(framing.stageX, framing.stageY)
+    container.scale.set(framing.scale)
+    container.position.set(framing.x, framing.y)
+    this.#viewport()?.setPan?.(framing.panX, framing.panY, 'auto')
+  }
+
+  #viewport(): ViewportLike | undefined {
+    return window.ioc.get<ViewportLike>('@diamondcoreprocessor.com/ViewportPersistence')
   }
 
   async #paint(): Promise<void> {
@@ -128,7 +176,7 @@ export class RecentsViewDrone extends Drone {
     const cells: DiveCell[] = []
     const byAxial = new Map<string, RecentAtom>()
     for (const { atom, slot } of laid) {
-      const imageSig = await this.#imageOf(atom.sig)
+      const imageSig = await this.#imageOf(atom.sig, atom.label)
       if (token !== this.#buildToken) return
       byAxial.set(axialKey(slot), atom)
       cells.push({
@@ -144,16 +192,11 @@ export class RecentsViewDrone extends Drone {
 
   /** The picture an atom's own layer names, read from this device only. An
    *  atom whose layer holds none falls to the substrate, as a page would. */
-  async #imageOf(sig: string): Promise<string | undefined> {
+  async #imageOf(sig: string, label: string): Promise<string | undefined> {
     if (!this.#images.has(sig)) this.#images.set(sig, await this.#readImage(sig))
     return this.#images.get(sig)
       ?? window.ioc.get<{ pickImageForLabel?: (l: string) => string | null }>('@diamondcoreprocessor.com/SubstrateService')
-        ?.pickImageForLabel?.(this.#labelOf(sig)) ?? undefined
-  }
-
-  #labelOf(sig: string): string {
-    for (const atom of this.#byAxial.values()) if (atom.sig === sig) return atom.label
-    return ''
+        ?.pickImageForLabel?.(label) ?? undefined
   }
 
   async #readImage(sig: string): Promise<string | undefined> {

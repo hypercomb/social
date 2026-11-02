@@ -45,6 +45,8 @@ type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
 type BandRowsPayload = { rows: number; label: string | null }
 type HoverPayload = { label: string | null }
+/** What a dive's name needs (show-cell's DiveCell). */
+type DiveNameCell = { q: number; r: number; label: string; hideText?: boolean }
 type FlowerCell = Axial & { label: string; subject?: boolean; icon?: string; lit?: boolean }
 type ShowCellLike = {
   nameHidden(label: string): boolean
@@ -117,6 +119,7 @@ const STYLE = `
 .hc-tile-name-holders{flex:none;margin-left:.45em;font-size:.5em;letter-spacing:0;color:var(--hc-tile-name-holders-color,${HOLDERS_INK})}
 .hc-tile-name-holders[hidden]{display:none}
 .hc-tile-names.hc-big-head .hc-tile-names-world>span{letter-spacing:${BIG_HEAD_TRACKING}em;text-transform:uppercase}
+.hc-tile-names.hc-diving .hc-tile-names-world>span:not(.hc-dive-name){display:none}
 .hc-tile-names.hc-flower-up .hc-tile-names-world>span{opacity:.5}
 .hc-tile-names.hc-flower-up .hc-tile-names-world>span.hc-flower-name{opacity:1}
 .hc-flower-icon{font-size:2.4em;line-height:1;opacity:.82}
@@ -133,7 +136,7 @@ export class TileNameDrone extends Drone {
   protected override listens: string[] = [
     'render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'render:set-pivot', 'render:set-text-only', 'tile:toggle-text',
-    'tile:hover', 'overlay:band-rows', 'render:big-head-mode', 'render:name-visibility', 'render:set-hive-visible', 'render:dive-painted', 'render:flower',
+    'tile:hover', 'overlay:band-rows', 'render:big-head-mode', 'render:name-visibility', 'render:set-hive-visible', 'render:dive', 'render:dive-painted', 'render:flower',
     TILE_STACK_DEPTHS, 'location:changed',
   ]
   protected override emits: string[] = ['tile-names:dom']
@@ -160,6 +163,8 @@ export class TileNameDrone extends Drone {
   #visible = true
   /** A takeover owns the surface (render:set-hive-visible { visible: false }). */
   #hiveHidden = false
+  /** One name per tile of the dive on screen. */
+  #diveSpans: HTMLSpanElement[] = []
   /** A wave dive is painted over this page (render:dive-painted, count > 0). */
   #diving = false
   #hovered: string | null = null
@@ -197,8 +202,10 @@ export class TileNameDrone extends Drone {
       this.#hiveHidden = !p?.visible
       this.#syncRoot()
     })
-    // A dive paints another layer's tiles in this page's slots with the page's
-    // mesh hidden; the page's names would sit over pictures they do not belong to.
+    // A dive paints other tiles in this page's slots with the page's mesh hidden.
+    // The page's names would sit over pictures they do not belong to, so they
+    // step aside and the dive's own names stand in the same layer.
+    this.onEffect<{ cells?: readonly DiveNameCell[] | null }>('render:dive', (p) => this.#setDive(p?.cells ?? []))
     this.onEffect<{ count?: number }>('render:dive-painted', (p) => {
       this.#diving = (p?.count ?? 0) > 0
       this.#syncRoot()
@@ -248,7 +255,8 @@ export class TileNameDrone extends Drone {
 
     const root = document.createElement('div')
     root.className = this.#bigHead ? 'hc-tile-names hc-big-head' : 'hc-tile-names'
-    root.hidden = !this.#visible || this.#hiveHidden || this.#diving
+    root.hidden = !this.#visible || this.#hiveHidden
+    root.classList.toggle('hc-diving', this.#diving)
     const world = document.createElement('div')
     world.className = 'hc-tile-names-world'
     root.appendChild(world)
@@ -269,7 +277,9 @@ export class TileNameDrone extends Drone {
   }
 
   #syncRoot(): void {
-    if (this.#root) this.#root.hidden = !this.#visible || this.#hiveHidden || this.#diving
+    if (!this.#root) return
+    this.#root.hidden = !this.#visible || this.#hiveHidden
+    this.#root.classList.toggle('hc-diving', this.#diving)
   }
 
   /** The root is the canvas's CSS box, so names past its edge clip exactly
@@ -334,6 +344,28 @@ export class TileNameDrone extends Drone {
       this.#flowerSpans.push(span)
     }
     this.#placeAll()
+  }
+
+  /** A dive's tiles are tiles, so their names are names: the same text in the
+   *  same place. Replaced whole on every paint; a page of a dive is small. */
+  #setDive(cells: readonly DiveNameCell[]): void {
+    for (const span of this.#diveSpans) span.remove()
+    this.#diveSpans = []
+    for (const cell of cells) {
+      if (cell.hideText) continue
+      const span = document.createElement('span')
+      span.className = 'hc-dive-name'
+      const name = document.createElement('span')
+      name.className = 'hc-tile-name-text'
+      name.textContent = cell.label
+      span.appendChild(name)
+      const px = this.#axialToPixel(cell.q, cell.r)
+      const at = this.#placement(px.x + this.#meshOffset.x, px.y + this.#meshOffset.y)
+      span.style.maxWidth = at.maxWidth
+      span.style.transform = at.transform
+      this.#world?.appendChild(span)
+      this.#diveSpans.push(span)
+    }
   }
 
   #spanFor(label: string): HTMLSpanElement | null {

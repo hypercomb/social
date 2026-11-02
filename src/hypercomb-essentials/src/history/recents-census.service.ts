@@ -20,9 +20,9 @@
 // `preloadAllBags` pays once per boot for the LATEST marker — which is why
 // it is budgeted per pass and never repeated for a sig that has a record.
 
-import { isPoolAddress } from '@hypercomb/core'
+import { isMetaEnvelope, isPoolAddress, metaPayloadOf } from '@hypercomb/core'
 import {
-  MAX_CENSUS_DEPTH, RECENTS_CENSUS_MEANING, composeCensus, gatherAtoms, isHusk, readableCensus,
+  MAX_CENSUS_DEPTH, RECENTS_CENSUS_MEANING, composeCensus, gatherAtoms, readableCensus,
   type CensusEntry, type CensusRecord, type RecentAtom,
 } from './recents-census.js'
 import { noteDerivedMint, noteDerivedUse } from './optimization-use.js'
@@ -223,8 +223,10 @@ export class RecentsCensusService {
     return set
   }
 
-  /** The atom a bag's head is, or null when it is nothing anybody made: not
-   *  here, no name, or a husk. */
+  /** The atom a bag's head is, or null when it is not here or has no name.
+   *  A bare `{ name }` on one marker is NOT skipped. An auto-minted husk has
+   *  that shape, but so does a blank tile someone made and cut, and a name
+   *  shown by mistake costs less than a tile gone missing (H7). */
   async #unlistedAt(lineage: string, head: string): Promise<CensusEntry | null> {
     try {
       const store = this.store
@@ -234,7 +236,6 @@ export class RecentsCensusService {
       const label = typeof layer?.name === 'string' ? layer.name.trim() : ''
       if (!label) return null
       const markers = (await this.history?.listLayers(lineage)) ?? []
-      if (isHusk(layer, markers.length)) return null
       return { sig: head, label, path: [], at: earliestOf(markers) ?? 0 }
     } catch { return null }
   }
@@ -256,13 +257,30 @@ export class RecentsCensusService {
     return (await this.history?.childrenManifestFor?.(layer).catch(() => null)) ?? null
   }
 
+  /** A layer as this device holds it. Child slots hold META ENVELOPES (codex
+   *  L2), so a slot's sig is followed to the layer it wraps; never a host fetch. */
   async #layerLocal(layerSig: string): Promise<LayerLike | null> {
-    const bytes = await this.store?.getLayerLocalBytes?.(layerSig).catch(() => null)
+    const store = this.store
+    const read = store?.getLayerBytes ?? store?.getLayerLocalBytes
+    const bytes = await read?.call(store, layerSig).catch(() => null)
     if (!bytes?.byteLength) return null
     try {
       const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown
       return parsed && typeof parsed === 'object' ? parsed as LayerLike : null
     } catch { return null }
+  }
+
+  /** The layer sig a slot names: the envelope's payload, or the sig itself.
+   *  Atoms are compared with bag heads, and a head is always a layer sig, so
+   *  an envelope sig in the census would never match one. */
+  async #atomSigOf(slotSig: string): Promise<string> {
+    try {
+      const bytes = await this.store?.getLayerLocalBytes?.(slotSig)
+      if (!bytes?.byteLength) return slotSig
+      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown
+      const payload = isMetaEnvelope(parsed) ? metaPayloadOf(parsed) : null
+      return payload?.kind === 'layer' ? payload.sig : slotSig
+    } catch { return slotSig }
   }
 
   /**
@@ -283,10 +301,16 @@ export class RecentsCensusService {
     if (depth >= MAX_CENSUS_DEPTH) return null
     if (budget.nodes <= 0) return null
     budget.nodes--
-    const manifest = await this.#manifestOf(layerSig)
-    if (!manifest) return null
     const layer = await this.#layerLocal(layerSig)
-    const label = typeof layer?.name === 'string' ? layer.name : (segments[segments.length - 1] ?? '/')
+    if (!layer) return null
+    // A leaf is complete with nothing under it. Asking for its manifest would
+    // answer null, and a null here means "could not see", which truncates
+    // every ancestor: one leaf would keep the root from ever being written.
+    const slots = layer['children']
+    const hasChildren = Array.isArray(slots) && slots.length > 0
+    const manifest = hasChildren ? await this.#manifestOf(layerSig) : []
+    if (!manifest) return null
+    const label = typeof layer.name === 'string' ? layer.name : (segments[segments.length - 1] ?? '/')
     const at = (await this.firstMarkerAt(segments)) ?? 0
 
     const children: Array<{ name: string; record: CensusRecord | null }> = []
@@ -298,7 +322,7 @@ export class RecentsCensusService {
       children.push({ name, record: child })
       if (child && !cached && !child.truncated) await this.writeRecord(entry.sig, child)
     }
-    return composeCensus({ sig: layerSig, label, at }, children)
+    return composeCensus({ sig: await this.#atomSigOf(layerSig), label, at }, children)
   }
 }
 

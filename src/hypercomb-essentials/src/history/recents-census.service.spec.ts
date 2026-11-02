@@ -1,6 +1,5 @@
 // recents-census.service.spec.ts — the bag census: a cut tile is found from its
-// bag; a live tile is not reported, by sig or by location; pools and husks are
-// skipped; the budget stops cleanly and the next pass finishes; and the reader
+// bag, even a blank one; a live tile is not reported, by sig or by location; the budget stops cleanly and the next pass finishes; and the reader
 // reads the session's hides from the list every hide gesture writes.
 
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -77,11 +76,17 @@ describe('the bag census', () => {
     expect(await gatherUnlisted(service)).toEqual([])
   })
 
-  it('skips a husk and a head with no name', async () => {
+  it('keeps a blank tile that was made and cut: a bare name on one marker', async () => {
     const service = new RecentsCensusService()
-    heads.set('husk-bag', sig('e'))
-    layers.set(sig('e'), { name: 'husk' })
-    markers.set('husk-bag', [{ at: 3 }])
+    heads.set('blank-bag', sig('e'))
+    layers.set(sig('e'), { name: 'blank' })
+    markers.set('blank-bag', [{ at: 3 }])
+    await service.unlistedPass(ROOT, record, { nodes: 10 })
+    expect((await gatherUnlisted(service)).map(a => a.label)).toEqual(['blank'])
+  })
+
+  it('skips a head with no name', async () => {
+    const service = new RecentsCensusService()
     heads.set('nameless-bag', sig('f'))
     layers.set(sig('f'), { turns: [] })
     markers.set('nameless-bag', [{ at: 3 }])
@@ -118,6 +123,53 @@ const gatherUnlisted = async (service: RecentsCensusService) => {
   ;(service as unknown as { census: typeof census }).census = census
   return atoms.filter(a => !a.placed)
 }
+
+describe('derive, on the shape a real hive has', () => {
+  const envelope = (layer: string) => ({ meta: 1, layer, relation: 'child' })
+
+  it('follows the envelope in a child slot, and a leaf does not truncate the root', async () => {
+    const service = new RecentsCensusService()
+    const ioc = (window as unknown as { ioc: { get(k: string): any } }).ioc
+    const leafLayer = sig('1'), leafSlot = sig('2')
+    const branchLayer = sig('3'), branchSlot = sig('4')
+    const stored = new Map<string, unknown>([
+      [ROOT, { name: '/', children: [branchSlot] }],
+      [branchSlot, envelope(branchLayer)],
+      [branchLayer, { name: 'branch', children: [leafSlot] }],
+      [leafSlot, envelope(leafLayer)],
+      [leafLayer, { name: 'leaf' }],
+    ])
+    const follow = (s: string): unknown => {
+      const held = stored.get(s) as { meta?: number; layer?: string } | undefined
+      return held?.meta ? stored.get(held.layer!) : held
+    }
+    const store = ioc.get('x/Store')
+    store.getLayerLocalBytes = async (s: string) => (stored.has(s) ? encode(stored.get(s)) : null)
+    store.getLayerBytes = async (s: string) => (stored.has(s) ? encode(follow(s)) : null)
+    ioc.get('x/HistoryService').childrenManifestFor = async (layer: { children?: string[] }) =>
+      (layer.children ?? []).map(slot => ({ sig: slot, layer: follow(slot) }))
+    markers.set('loc:', [{ at: 1 }])
+    markers.set('loc:branch', [{ at: 2 }])
+    markers.set('loc:branch/leaf', [{ at: 3 }])
+
+    const record = await service.derive(ROOT, [], { nodes: 10 })
+    expect(record?.truncated).toBeUndefined()
+    expect(record?.entries.map(e => [e.sig, e.path, e.at])).toEqual([
+      [ROOT, [], 1],
+      [branchLayer, ['branch'], 2],
+      [leafLayer, ['branch', 'leaf'], 3],
+    ])
+  })
+
+  it('still says truncated when a child truly cannot be seen', async () => {
+    const service = new RecentsCensusService()
+    const ioc = (window as unknown as { ioc: { get(k: string): any } }).ioc
+    const store = ioc.get('x/Store')
+    store.getLayerBytes = async (s: string) => (s === ROOT ? encode({ name: '/', children: [sig('9')] }) : null)
+    ioc.get('x/HistoryService').childrenManifestFor = async () => [{ sig: sig('9'), layer: { name: 'gone' } }]
+    expect((await service.derive(ROOT, [], { nodes: 10 }))?.truncated).toBe(true)
+  })
+})
 
 describe('hides', () => {
   it('reads the session list every hide gesture writes', async () => {
