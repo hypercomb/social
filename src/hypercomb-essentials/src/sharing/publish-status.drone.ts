@@ -50,6 +50,7 @@ import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { publisherKeyHex } from './key-list.client.js'
 import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
+import { promoteBranch, promotedPointer, promotesHead, readPromotionRecord } from './promote.js'
 import {
   PARTICIPANT_FEATURES_POINTER,
   addParticipantFeature,
@@ -226,6 +227,10 @@ export interface PublishRow {
   /** OPTIMIZE — what the published branch's first view loads (IoC keys), from
    *  `plan:<key>` in the signed index; null = the whole package. */
   plan: string[] | null
+  /** PROMOTED — the signed index names a promotion (promote.ts) made for THIS
+   *  head: its arrival plan and minified derivation are on the host. A branch
+   *  published again is not promoted until it is promoted again. */
+  promoted: boolean
   /** zone → the address this creation is shown at there: the zone's root
    *  path (`https://<zone>/<path>`) by default, its own address
    *  (`https://<label>.<zone>`) when the signed index gives it one. */
@@ -345,7 +350,7 @@ export class PublishStatusDrone extends Drone {
     'publish:run', 'publish:run-many', 'publish:run-drifted', 'publish:unpublish', 'publish:make-live', 'publish:inspect', 'publish:copy-link',
     'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
-    'hosts:render', 'publish:arrival', 'publish:participant', 'publish:participant-publish',
+    'hosts:render', 'publish:arrival', 'publish:promote', 'publish:participant', 'publish:participant-publish',
     'publish:entrance', 'publish:entrance-preview', 'publish:entrance-skip', ENTRANCE_UPDATE_EFFECT, 'hidden:render',
     'keymap:invoke',
   ]
@@ -526,6 +531,7 @@ export class PublishStatusDrone extends Drone {
     this.onEffect<{ key?: string; names?: string[] }>('publish:arrival', (p) => {
       void this.#setArrival(String(p?.key ?? ''), Array.isArray(p?.names) ? p.names.map(String) : [])
     })
+    this.onEffect<{ key?: string }>('publish:promote', (p) => { void this.#promote(String(p?.key ?? '')) })
     this.onEffect<{ name?: string; on?: boolean }>('publish:participant', (p) => {
       void this.#setParticipant(String(p?.name ?? ''), p?.on === true)
     })
@@ -845,6 +851,10 @@ export class PublishStatusDrone extends Drone {
         const planDoor = this.#hostByKey.get(row.key) ?? readDoor
         const planSig = indexes.get(planDoor)?.roots[arrivalPointer(row.key)] ?? ''
         row.plan = planSig ? await beforeDeadline(this.#readPlan(planDoor, planSig), null) : null
+        const promotedSig = indexes.get(planDoor)?.roots[promotedPointer(row.key)] ?? ''
+        row.promoted = promotedSig && row.live
+          ? await beforeDeadline(this.#readPromoted(planDoor, promotedSig, row.live), false)
+          : false
         const here = row.segments.length > 0 && history?.sealSubtree
           ? await beforeDeadline(history.sealSubtree(row.segments, undefined, { bypassMissWindow: false }).catch(() => null), null)
           : null
@@ -927,6 +937,7 @@ export class PublishStatusDrone extends Drone {
       opensAs: '',
       versions: [],
       plan: null,
+      promoted: false,
       urls: {},
       ownLabels: {},
       defaultLabel: foldDnsLabel(segments[segments.length - 1] ?? ''),
@@ -1123,6 +1134,36 @@ export class PublishStatusDrone extends Drone {
     const keys = await readArrivalPlan(door, sig)
     if (keys) this.#plans.set(sig, keys)
     return keys
+  }
+
+  readonly #promotions = new Map<string, string | null>()
+
+  /** Does the promotion `sig` name promote `head`? The record is read once per signature. */
+  async #readPromoted(door: string, sig: string, head: string): Promise<boolean> {
+    if (!this.#promotions.has(sig)) this.#promotions.set(sig, await readPromotionRecord(door, sig))
+    const text = this.#promotions.get(sig)
+    return !!text && promotesHead(text, head)
+  }
+
+  /** PROMOTE: the branch's arrival plan and minified head, sent to its host and named in the index. */
+  async #promote(key: string): Promise<void> {
+    const row = this.#rows.find(r => r.key === key)
+    if (!row || !row.live || row.busyPhase) return
+    const door = this.#writeDoorFor(key)
+    if (!door) { this.#refuseNoHost(); return }
+    row.busyPhase = 'optimize'
+    this.#emit()
+    const result = await promoteBranch({ host: door, lineage: key, segments: row.segments, head: row.live, plan: row.plan })
+    row.busyPhase = null
+    if (!result.ok) {
+      this.#toast('error', 'publish.promote.failed', `The branch could not be promoted: ${result.reason}`)
+      this.#emit()
+      return
+    }
+    this.#promotions.delete(result.sig)
+    row.promoted = true
+    if (result.arrival) row.plan = await this.#readPlan(door, result.arrival)
+    this.#emit()
   }
 
   /** Publish (or, with no names, withdraw) a branch's arrival plan. */

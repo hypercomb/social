@@ -91,6 +91,8 @@ interface PublishRow {
   versions: { sig: string; at: number }[]
   /** OPTIMIZE — the published arrival plan (IoC keys); null = whole package. */
   plan: string[] | null
+  /** Minified, with its arrival plan, and available to the community — for THIS head. */
+  promoted: boolean
   /** zone → where this creation is shown there: the zone's root path by
    *  default, its own address when the signed index gives it one. */
   urls: Record<string, string>
@@ -1090,6 +1092,12 @@ export class PublishPanelComponent implements OnDestroy {
     const url = `${this.addressUrl(row, zone)}/?arrival=${encodeURIComponent(names.join(','))}`
     window.open(url, '_blank', 'noopener')
     this.optimizeTried.update(all => ({ ...all, [row.key]: this.address(row, zone) }))
+  }
+
+  /** Promote the branch: minified, with its arrival plan, to the community. */
+  promote(row: PublishRow): void {
+    if (row.busyPhase || !row.live || row.promoted) return
+    EffectBus.emit('publish:promote', { key: row.key })
   }
 
   /** Withdraw the plan: the branch loads its whole package again. */

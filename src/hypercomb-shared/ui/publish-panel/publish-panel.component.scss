@@ -82,6 +82,8 @@ $quiet: #8ea2b0;
   @include tw.header;
 }
 
+.pcur-promoted { color: $mint; }
+
 // The tab content scrolls under the fixed header, status line and tabs.
 .publish-scroll {
   flex: 1 1 auto;

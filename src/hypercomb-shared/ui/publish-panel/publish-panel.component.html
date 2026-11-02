@@ -84,10 +84,13 @@
           [attr.data-tip]="('publish.state.' + row.state) | t"
         ></span>
         <div class="pcur-meta">
-          <span class="pcur-state">{{ (row.busyPhase ? 'publish.state.pending' : 'publish.state.' + row.state) | t }}</span>
+          <span class="pcur-state">{{ (row.busyPhase ? 'publish.state.pending' : 'publish.state.' + row.state) | t }}@if (row.promoted) {<span class="pcur-promoted" [attr.title]="'publish.promoted.tip' | t"> · {{ 'publish.promoted' | t }}</span>}</span>
         </div>
         @if (updateKey(row); as update) {
           <button class="pcur-action" type="button" (click)="run(row)">{{ update | t }}</button>
+        }
+        @if (row.live && !row.promoted) {
+          <button class="pcur-action" type="button" [disabled]="!!row.busyPhase" [attr.title]="'publish.promote.tip' | t" (click)="promote(row)">{{ 'publish.promote' | t }}</button>
         }
       </div>
       @if (whyKey(row)) {

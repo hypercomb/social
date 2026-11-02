@@ -908,6 +908,10 @@ function locationMeta(site, pubkey, head, index) {
   // THE ARRIVAL PLAN, beside the root under the same signature: the bees
   // this branch's first view needs (hypercomb-runtime arrival-plan.ts).
   const plan = signed(`plan:${site.lineage}`)
+  // THE PROMOTION (essentials promote.ts): the record that says this head was
+  // minified and arrives on a plan. Named, never read, here — the ledger checks
+  // it against the head (promotesHead).
+  const promoted = signed(`promoted:${site.lineage}`)
   // THE PUBLISHER'S PARTICIPANT-ONLY FEATURES (essentials
   // participant-features.ts): a snapshot of their `features:participant`
   // pool, named under their key. A read-only reader never loads them.
@@ -920,6 +924,7 @@ function locationMeta(site, pubkey, head, index) {
     // Absent ⇒ the visitor keeps the Hypercomb mark its shell already links.
     ...(site.icon ? { icon: site.icon } : {}),
     ...(plan ? { plan } : {}),
+    ...(promoted ? { promoted } : {}),
     ...(quiet ? { quiet } : {}),
     publishedAt: Number(index?.createdAt || 0),
   }
@@ -961,8 +966,21 @@ async function publishedRoot(env, publisher, lineage, read = indexReader(env), h
     label: publisher.label || publisher.pubkey.slice(0, 12) + '…',
     publishedAt: index.createdAt,
     ...(meta.plan ? { plan: meta.plan } : {}),
+    ...(meta.promoted ? { promoted: meta.promoted } : {}),
     ...(meta.quiet ? { quiet: meta.quiet } : {}),
   }
+}
+
+/** Does the promotion record `sig` promote THIS head? A record made for an
+ *  older head promotes nothing; a branch published again is promoted again. */
+async function promotesHead(env, sig, head) {
+  if (!SIG_RE.test(String(sig || '')) || !SIG_RE.test(String(head || '')) || !env?.CONTENT?.get) return false
+  try {
+    const object = await env.CONTENT.get(sig)
+    if (!object?.arrayBuffer) return false
+    const record = JSON.parse(new TextDecoder().decode(await object.arrayBuffer()))
+    return record?.kind === 'promote' && record.head === head && !!(record.arrival || record.derivation)
+  } catch { return false }
 }
 
 /** One site as the ledger reports it — the same shape for a hand-bound host
@@ -995,6 +1013,7 @@ async function ledgerEntry(env, read, protocol, host, site, address = false) {
         primary: publisher.primary,
         head: publication?.head ?? null,
         publishedAt: publication?.publishedAt ?? null,
+        promoted: publication?.promoted ? await promotesHead(env, publication.promoted, publication.head) : false,
       }
     })),
   }

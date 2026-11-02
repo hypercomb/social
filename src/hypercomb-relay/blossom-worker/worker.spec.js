@@ -434,6 +434,29 @@ test('the door carries the arrival plan the publisher signed beside the root', a
   assert.equal('plan' in plain, false)
 })
 
+test('the ledger reports a branch promoted only while the promotion is for its head', async () => {
+  const promotion = 'f'.repeat(64)
+  const record = (forHead, plan = 'c'.repeat(64)) => new TextEncoder().encode(
+    JSON.stringify({ v: 1, kind: 'promote', head: forHead, arrival: plan, derivation: null }))
+  const ledgerOf = async (env) => {
+    const response = await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)
+    return (await response.json()).sites.find((s) => s.lineage === 'revolucion').publishers[0]
+  }
+  // Named in the index, and the record promotes this head.
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head, 'promoted:revolucion': promotion }))
+  env.CONTENT.held.set(promotion, record(head))
+  assert.equal((await ledgerOf(env)).promoted, true)
+  // The branch was published again: the old promotion promotes nothing.
+  const { env: stale } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head, 'promoted:revolucion': promotion }))
+  stale.CONTENT.held.set(promotion, record('b'.repeat(64)))
+  assert.equal((await ledgerOf(stale)).promoted, false)
+  // Named but not on the host, or not named at all.
+  const { env: missing } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head, 'promoted:revolucion': promotion }))
+  assert.equal((await ledgerOf(missing)).promoted, false)
+  const { env: plain } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head }))
+  assert.equal((await ledgerOf(plain)).promoted, false)
+})
+
 test('the door carries the publisher\'s participant-only features, signed under their key', async () => {
   const quiet = 'e'.repeat(64)
   const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head, 'pool:features:participant': quiet }))
@@ -460,6 +483,7 @@ test('publications.json exposes the verified Core host registry', async () => {
     primary: true,
     head,
     publishedAt: 1_800_000_000,
+    promoted: false,
   })
 })
 
@@ -529,7 +553,7 @@ test('publications.json lists the names publishing brought to life', async () =>
   const dylan = registry.sites.find((s) => s.lineage === 'dylan')
   assert.equal(dylan.url, 'https://dylan.pluginthematrix.com/')
   assert.deepEqual(dylan.publishers, [{
-    pubkey, label: 'Jaime', primary: true, head, publishedAt: 1_800_000_000,
+    pubkey, label: 'Jaime', primary: true, head, publishedAt: 1_800_000_000, promoted: false,
   }])
   // And the address it advertises is one the router actually serves.
   const descriptor = await doorMeta('https://dylan.pluginthematrix.com/', env)

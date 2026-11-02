@@ -78,6 +78,14 @@ async function readLedger() {
 const published = site => (Array.isArray(site?.publishers) ? site.publishers : [])
   .some(p => SIG_RE.test(String(p?.head || '').toLowerCase()))
 
+/** PROMOTED (essentials promote.ts): the signed index names a promotion made for
+ *  this very head — minified, on an arrival plan, and available to the
+ *  community. The ledger reports `promoted` already checked against the head. A
+ *  door on the zone is advertised only for a creation that was promoted; a
+ *  template, a part, or a draft is published but is not what the zone shows. */
+const promoted = site => (Array.isArray(site?.publishers) ? site.publishers : [])
+  .some(p => p?.promoted === true && SIG_RE.test(String(p?.head || '').toLowerCase()))
+
 const byTitle = (a, b) =>
   a.title.toLowerCase().localeCompare(b.title.toLowerCase()) || a.host.localeCompare(b.host)
 
@@ -154,7 +162,16 @@ async function refresh({ write = true, verify = false } = {}) {
   // field, and the addresses have to be worked out here instead — which is the
   // path that goes away, so say so every time it runs.
   const reported = sites.some(site => Array.isArray(site?.hosts))
-  const candidates = reported ? doorsFrom(sites) : derivedDoorsFrom(sites)
+  // PROMOTED ONLY. A ledger that reports `promoted` on its publishers is
+  // believed: the zone advertises what was minified and put on an arrival plan
+  // for the community. One that does not predates the field, so nothing can be
+  // told apart and the list is left as the ledger gave it — said every time.
+  const knowsPromotion = sites.some(site => (Array.isArray(site?.publishers) ? site.publishers : [])
+    .some(p => typeof p?.promoted === 'boolean'))
+  const eligible = knowsPromotion ? sites.filter(promoted) : sites
+  if (!knowsPromotion) console.warn(`  ! ${url} reports no \`promoted\` — listing every published creation (the worker has not shipped it yet)`)
+  else if (!eligible.length) throw new Error(`the ledger at ${url} reports no promoted creation yet — promote one from the Publish window; the committed list is left as it was`)
+  const candidates = reported ? doorsFrom(eligible) : derivedDoorsFrom(eligible)
   if (!reported) console.warn(`  ! ${url} reports no \`hosts\` — deriving and probing (delete derivedDoorsFrom once the worker ships)`)
 
   const live = []
