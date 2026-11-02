@@ -43,6 +43,7 @@ type Pending = {
   readonly from: string
   readonly lines: readonly string[]
   readonly complete?: (outcome: ExternalCallOutcome) => void
+  readonly perform?: () => Promise<string>
 }
 
 const slug = (text: string): string =>
@@ -174,7 +175,8 @@ export class ExternalCallDrone extends Drone {
     if (lines.some(line => line.length > MAX_LINE)) { refuse(`a line may be at most ${MAX_LINE} characters`); return }
     if (this.#queue.length >= MAX_WAITING) { refuse('too many calls are already waiting'); return }
     const from = String(request.from ?? '').replace(/\s+/g, ' ').replace(/^[\s/]+/, '').trim().slice(0, 80) || 'an agent'
-    this.#queue.push({ id: `x${Date.now().toString(36)}-${(++this.#count).toString(36)}`, from, lines, complete })
+    const perform = typeof request.perform === 'function' ? request.perform : undefined
+    this.#queue.push({ id: `x${Date.now().toString(36)}-${(++this.#count).toString(36)}`, from, lines, complete, perform })
     try { request.accept?.() } catch { /* a caller's own failure is not ours */ }
     // Told, not only shown: a window may be covering the command line.
     const i18n = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<I18nProvider>(I18N_IOC_KEY)
@@ -225,6 +227,14 @@ export class ExternalCallDrone extends Drone {
   async #run(call: Pending): Promise<ExternalCallOutcome> {
     const convoId = await this.#record(call)
     EffectBus.emit('chat:open', { convoId })
+    // AN ACT, NOT A SENTENCE: performed once, the lines only describe it.
+    if (call.perform) {
+      const text = call.lines.join(' · ')
+      let verdict: string
+      try { verdict = await call.perform() } catch (error) { verdict = `failed: ${String((error as Error)?.message ?? error)}` }
+      await deliverTurn(convoId, 'assistant', `${text}\n→ ${verdict}`)
+      return { kind: 'ran', convoId, results: [{ text, verdict }] }
+    }
     const results: ExternalLineResult[] = []
     for (const text of call.lines) {
       const walking = verbOf(text) === 'go' ? goReported() : null

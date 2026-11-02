@@ -43,6 +43,12 @@ export type ExternalCallRequest = {
   /** Settled exactly once, when the participant has answered and, on Enter,
    *  every line has been said. Optional: a caller may not wait. */
   readonly complete?: (outcome: ExternalCallOutcome) => void
+  /** An act that is not a sentence (the bridge's install stamp, a signed
+   *  write no word says). When present, Enter PERFORMS it instead of saying
+   *  the lines, which then only describe it, and its answer is the verdict;
+   *  a throw is recorded as `failed: <message>`. Only code in this hive can
+   *  hand one over: a call from outside carries lines, never an act. */
+  readonly perform?: () => Promise<string>
 }
 
 export type ExternalAsk = {

@@ -575,6 +575,12 @@ export class ClaudeBridgeWorker extends Worker {
       return this.#submitExternal(req)
     }
     if (!bridgeOpenToAll()) {
+      // THE INSTALL STAMP ASKS INSTEAD OF BEING REFUSED. `publish:revision`
+      // ends by advancing `install:<channel>`, a signed write no word says.
+      // Shut, it is shown on the command line like any call from outside and
+      // performed only on the participant's Enter; every other key stays
+      // refused (#hiveRootSet keeps its own rule, bridgeMaySetRootKey).
+      if (req.op === 'hive-root-set') return this.#rootSetThroughGate(req)
       if (req.op !== 'submit') {
         return { id: req.id, ok: false, error: `the bridge carries command-line lines only; "${req.op}" is shut off. Say it as a line with op "submit": the participant answers it on the command line.` }
       }
@@ -2408,6 +2414,42 @@ export class ClaudeBridgeWorker extends Worker {
       : outcome.kind === 'declined' ? 'declined by the participant; nothing ran'
       : `refused: ${outcome.reason}`
     return { id: req.id, ok: outcome.kind !== 'refused', data: { outcome, summary }, ...(outcome.kind === 'refused' ? { error: summary } : {}) }
+  }
+
+  /** An install stamp while the bridge carries lines only: one call from
+   *  outside that, on Enter, performs the stamp. Answered with the stamp's
+   *  own response, so publish:revision reads it exactly as before. */
+  async #rootSetThroughGate(req: BridgeRequest): Promise<BridgeResponse> {
+    const key = String(req.key ?? '').trim()
+    const sig = String(req.sig ?? '').trim().toLowerCase()
+    if (!bridgeMaySetRootKey(key)) {
+      return { id: req.id, ok: false, error: `hive-root-set refuses '${key}' — only an install:<channel> stamp is settable over the bridge; everything else is a participant act` }
+    }
+    const host = String(req.host ?? '').trim().toLowerCase()
+    const from = typeof req.from === 'string' && req.from.trim() ? req.from.trim() : 'publish:revision'
+    let stamped: BridgeResponse | null = null
+    let heard = false
+    let settle!: (outcome: ExternalCallOutcome) => void
+    const answered = new Promise<ExternalCallOutcome>(resolve => { settle = resolve })
+    const call: ExternalCallRequest = {
+      from,
+      lines: [`stamp ${key} → ${sig.slice(0, 12)}…${host ? ` on ${host}` : ''}`],
+      accept: () => { heard = true },
+      complete: outcome => { heard = true; settle(outcome) },
+      perform: async () => {
+        stamped = await this.#hiveRootSet(req)
+        if (!stamped.ok) throw new Error(stamped.error ?? 'hive-root-set failed')
+        const data = (stamped.data ?? {}) as { unchanged?: boolean; host?: string }
+        return data.unchanged ? `already ${key} → ${sig.slice(0, 12)}…` : `stamped ${key} → ${sig.slice(0, 12)}… on ${data.host ?? host}`
+      },
+    }
+    EffectBus.emitTransient(EXTERNAL_CALL, call)
+    if (!heard) return { id: req.id, ok: false, error: 'this hive does not take calls from outside' }
+    const outcome = await answered
+    if (outcome.kind === 'declined') return { id: req.id, ok: false, error: 'the participant declined the stamp on the command line' }
+    if (outcome.kind === 'refused') return { id: req.id, ok: false, error: `refused: ${outcome.reason}` }
+    const done = stamped as BridgeResponse | null
+    return done ? { ...done, id: req.id } : { id: req.id, ok: false, error: outcome.results[0]?.verdict ?? 'the stamp did not run' }
   }
 
   async #submitLine(req: BridgeRequest, text: string, deadlineMs = SUBMIT_DEADLINE_MS): Promise<BridgeResponse> {
