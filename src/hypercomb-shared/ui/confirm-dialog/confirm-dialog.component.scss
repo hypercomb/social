@@ -92,6 +92,28 @@
   line-height: 1.4;
 }
 
+// Where the thing can be found again — quiet, below the question.
+.confirm-hint {
+  font-size: 0.72rem;
+  color: var(--hc-window-ink-quiet);
+  margin: 0.5rem 0 0;
+  line-height: 1.45;
+}
+
+// The little "don't remind me" box.
+.confirm-optout {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.65rem 0 0;
+  font-size: 0.7rem;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+  user-select: none;
+
+  input { margin: 0; accent-color: var(--hc-window-accent); cursor: pointer; }
+}
+
 // ── actions ───────────────────────────────────────────
 .confirm-actions {
   display: flex;

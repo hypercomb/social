@@ -16,8 +16,9 @@
 //      counted ZERO nested, so the dialog was skipped precisely when a whole
 //      branch was about to leave the page.
 
-import { describe, expect, it } from 'vitest'
-import { countTilesBeneath } from './remove-confirm.js'
+import { afterEach, describe, expect, it } from 'vitest'
+import { EffectBus } from '@hypercomb/core'
+import { confirmRemoval, countTilesBeneath, isMuted, unmute } from './remove-confirm.js'
 
 /** A tiny content-addressed store: sig → layer. */
 const historyOf = (layers: Record<string, unknown>) => ({
@@ -71,5 +72,72 @@ describe('counting what a removal would take with it', () => {
     const history = historyOf({ 'sig-leaf': { name: 'leaf', children: ['sig-x'] }, 'sig-x': { name: 'x' } })
     expect(await countTilesBeneath(history, { children: ['sig-leaf'] }, ['absent'])).toBe(0)
     expect(await countTilesBeneath(history, null, ['leaf'])).toBe(0)
+  })
+})
+
+describe('the delete question', () => {
+  const tree = historyOf({
+    'sig-drafts': { name: 'drafts', children: ['sig-a'] },
+    'sig-a': { name: 'a' },
+  })
+  const parent = { children: ['sig-drafts'] }
+
+  /** Answer every question asked until the returned stop is called. */
+  const answering = (answer: { confirmed: boolean; optedOut?: boolean }) => {
+    const asked: Record<string, unknown>[] = []
+    const off = EffectBus.on<{ id: string }>('confirm:request', req => {
+      asked.push(req as never)
+      EffectBus.emit('confirm:response', { id: req.id, ...answer })
+    })
+    asked.length = 0 // the bus replays the last request to a new listener
+    return { asked, stop: off }
+  }
+
+  afterEach(() => unmute('remove'))
+
+  it('says where the tiles come back, and offers a box to stop being asked', async () => {
+    const q = answering({ confirmed: true })
+    expect(await confirmRemoval(tree, parent, ['drafts'])).toBe(true)
+    q.stop()
+    expect(q.asked).toHaveLength(1)
+    expect(q.asked[0]).toMatchObject({ hint: 'confirm.remove-hint', optOut: 'confirm.dont-remind', danger: true })
+    expect(isMuted('remove')).toBe(false)
+  })
+
+  it('a cancel never mutes the question, even with the box ticked', async () => {
+    const q = answering({ confirmed: false, optedOut: true })
+    expect(await confirmRemoval(tree, parent, ['drafts'])).toBe(false)
+    q.stop()
+    expect(isMuted('remove')).toBe(false)
+  })
+
+  it('once asked not to ask, it deletes with a word in the corner instead — and Ask again undoes it', async () => {
+    const first = answering({ confirmed: true, optedOut: true })
+    expect(await confirmRemoval(tree, parent, ['drafts'])).toBe(true)
+    first.stop()
+    expect(isMuted('remove')).toBe(true)
+
+    const toasts: { message: string; actions?: { label: string; effect: string }[] }[] = []
+    const offToast = EffectBus.on<{ message: string }>('toast:show', t => { toasts.push(t as never) })
+    toasts.length = 0
+    const second = answering({ confirmed: false })
+    expect(await confirmRemoval(tree, parent, ['drafts'])).toBe(true)
+    second.stop()
+    offToast()
+    expect(second.asked).toHaveLength(0)
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]!.message).toBe('Deleted "drafts" and 1 nested. Nothing is lost.')
+    expect(toasts[0]!.actions!.map(a => a.label)).toEqual(['Undo', 'Recents', 'Ask again'])
+    expect(toasts[0]!.actions!.find(a => a.label === 'Recents')).toMatchObject({ effect: 'recents:open', payload: { filter: 'drafts' } })
+
+    EffectBus.emit('confirm:unmute', { question: 'remove' })
+    expect(isMuted('remove')).toBe(false)
+  })
+
+  it('a leaf with nothing beneath it is still not asked about', async () => {
+    const q = answering({ confirmed: false })
+    expect(await confirmRemoval(historyOf({ 'sig-x': { name: 'x' } }), { children: ['sig-x'] }, ['x'])).toBe(true)
+    q.stop()
+    expect(q.asked).toHaveLength(0)
   })
 })

@@ -12,6 +12,15 @@
       @if (request()!.warning) {
         <p class="confirm-warning">{{ request()!.warning! | t: request()!.warningParams }}</p>
       }
+      @if (request()!.hint) {
+        <p class="confirm-hint">{{ request()!.hint! | t: request()!.hintParams }}</p>
+      }
+      @if (request()!.optOut) {
+        <label class="confirm-optout">
+          <input type="checkbox" [checked]="optedOut()" (change)="optedOut.set($any($event.target).checked)" />
+          <span>{{ request()!.optOut! | t }}</span>
+        </label>
+      }
     </div>
 
     <footer class="confirm-actions">
